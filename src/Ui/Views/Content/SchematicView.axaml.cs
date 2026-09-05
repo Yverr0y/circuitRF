@@ -456,6 +456,13 @@ public partial class SchematicView : UserControl
         SchematicCanvasCtrl.InvalidateVisual();
     }
 
+    /// <summary>
+    /// Canvas context menu ▸ Pop Out — the same one level of hierarchy the toolbar's Pop Out button
+    /// and Ctrl+[ move, through the same <see cref="IHierarchyHost"/> call, so the three surfaces
+    /// cannot disagree about what popping out does.
+    /// </summary>
+    private void OnCtxPopOut(object? sender, RoutedEventArgs e) => OnToolbarPopOut(sender, e);
+
     private void OnToolbarPopOut(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not SchematicDocument doc) return;
@@ -499,9 +506,27 @@ public partial class SchematicView : UserControl
     private void OnContextMenuOpening(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         bool hasTarget = !string.IsNullOrEmpty(SchematicCanvasCtrl.ContextMenuTargetId);
+
+        // One ContextMenu instance serves two menus: the COMPONENT menu (a right-click that hit
+        // something) and the CANVAS menu (one that did not). Every component item is hidden for the
+        // canvas menu by walking the menu itself rather than by a list of names, so an item added
+        // later cannot leak onto the canvas menu by being forgotten here; Pop Out is the inverse.
+        foreach (var entry in ComponentContextMenu.Items)
+        {
+            if (ReferenceEquals(entry, CtxPopOut)) continue;
+            if (entry is Control control) control.IsVisible = hasTarget;
+        }
+        CtxPopOut.IsVisible = !hasTarget;
+
         if (!hasTarget)
         {
-            e.Cancel = true; // don't show menu on empty canvas click
+            // Pop Out is the canvas menu's only item. Disabled with its reason at the top level
+            // rather than hidden — the row is how the action is discoverable at all.
+            bool canPop = (DataContext as SchematicDocument)?.CanPopOut ?? false;
+            CtxPopOut.IsEnabled = canPop;
+            ToolTip.SetTip(CtxPopOut, canPop
+                ? "Pop Out  (Ctrl+[)"
+                : "Already at the top level of this schematic.");
             return;
         }
 

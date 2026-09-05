@@ -20237,3 +20237,48 @@ face on a square pad still draws its mark on one face with its name on another (
 leader), and is picked by the mark. That is the 2026-08-25 pick-region decision — a port is grabbed by
 its arrow, not by its text — and repeated Rotate presses work regardless, since the rotate command
 keeps the selection.
+
+---
+
+## `InputGesture="Ctrl+["` is not a `KeyGesture`, and it takes the whole DocGen run down (2026-09-05)
+
+Adding a **Pop Out** item to the schematic and layout canvas context menus, the obvious way to show
+its accelerator on the row was `InputGesture="Ctrl+["` — the menu's neighbours already carry `"M"`,
+`"Shift+M"` and `"F5"` that way. It compiles, it builds, the app runs, and then:
+
+```
+$ dotnet run --project tools/DocGen -- --out docs/user
+Documentation generation FAILED.
+Requested value '[' was not found.
+```
+
+`KeyGesture.Parse` resolves each token through `Enum.Parse<Key>`, and `[` is `Key.OemOpenBrackets` —
+there is no bracket spelling. The message is the `ArgumentException` from that enum parse, with no
+file, no line and no property name, and it surfaces only when something actually *loads* the AXAML:
+a `dotnet build` compiles the file without ever parsing the attribute value, so the first thing to
+fail is the headless documentation build, ~800 lines away from the change.
+
+**Two things follow, and both are the reason this is written down rather than just fixed:**
+
+- **The symptom appears in a tool, not in the app.** `dotnet build` and `dotnet test` are both green
+  on a file that cannot be loaded. The gate that catches it is running DocGen (or opening the view).
+- **`InputGesture="Ctrl+OemOpenBrackets"` parses, and is the wrong fix** — a `KeyGesture` renders
+  itself by the enum name, so the menu row would read *"Ctrl+OemOpenBrackets"*. The accelerator rides
+  on the **tooltip** in both editors instead (`"Pop Out  (Ctrl+[)"`), which is already how the
+  Push Into Cell / Pop Out toolbar buttons spell it — one spelling, three surfaces.
+
+Held by `tests/Ui.Tests/CanvasContextMenuPopOutTests.cs`, which asserts neither editor reintroduces
+an `InputGesture` for this key.
+
+### The schematic had no canvas context menu at all
+
+Separately worth knowing: before this change a right-click that missed every component **cancelled**
+the schematic's `ContextMenu.Opening` outright (`e.Cancel = true`), so there was no canvas menu to
+add to. One `ContextMenu` instance now serves both menus — component items hidden when the click hit
+nothing, Pop Out hidden when it did. The hiding walks `ComponentContextMenu.Items` rather than naming
+each item, so an item added later cannot leak onto the canvas menu by being forgotten in that handler.
+
+The layout editor needed none of that: its menu is built fresh per opening and already showed on empty
+canvas, so Pop Out is simply contributed in `LayoutEditorView.axaml.cs` beside Re-reference Cell… —
+both are workspace-level operations reached through `LayoutDocument.Hierarchy`, which `LayoutCanvas`
+cannot see.

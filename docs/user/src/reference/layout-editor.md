@@ -173,7 +173,8 @@ adding or mapping — never silently dropped.
 [Hierarchy in the Schematic Editor](schematic-editor.html#hierarchy) once; everything it says about
 making a cell, placing it and pushing into it holds in this view, on the cell's layout instead of its
 schematic. Push in and pop out are the same two toolbar buttons, the same <kbd>⌘]</kbd> /
-<kbd>⌘[</kbd>, and the same clickable breadcrumb.
+<kbd>⌘[</kbd>, and the same clickable breadcrumb. **Pop Out** also leads the canvas context menu,
+greyed out with its reason when you are already at the top level.
 
 Three things are the layout's own:
 

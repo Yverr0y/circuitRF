@@ -1013,10 +1013,29 @@ public partial class LayoutEditorView : UserControl
         // LayoutDocument.Hierarchy, and the canvas knows nothing about either. It leads the menu when
         // it appears at all — the click landed on an instance that cannot resolve, which is the only
         // thing on that row worth doing.
+        // Pop Out leads the canvas's own items, and is contributed HERE for the same reason
+        // Re-reference Cell… is: moving up a level is a workspace-level operation reached through
+        // LayoutDocument.Hierarchy, which LayoutCanvas knows nothing about. Always present, disabled
+        // with its reason at the top level rather than hidden.
+        items = [BuildPopOutItem(), new Separator(), .. items];
+
         if (BuildReReferenceItem() is { } reReference)
             items = [reReference, new Separator(), .. items];
 
         if (sender is ContextMenu menu) menu.ItemsSource = items;
+
+        MenuItem BuildPopOutItem()
+        {
+            var doc  = DataContext as LayoutDocument;
+            bool can = doc is { CanPopOut: true, Hierarchy: not null };
+            // The accelerator rides on the tooltip, not on InputGesture: Ctrl+[ is Key.OemOpenBrackets,
+            // which a KeyGesture renders by that name, and "Ctrl+OemOpenBrackets" is not what the key
+            // says. The toolbar button's own tooltip already spells it this way.
+            var mi = new MenuItem { Header = "Pop Out", IsEnabled = can };
+            ToolTip.SetTip(mi, can ? "Pop Out  (Ctrl+[)" : "Already at the top level of this layout.");
+            if (can) mi.Click += (_, _) => DoPopOut(doc!);
+            return mi;
+        }
 
         MenuItem? BuildReReferenceItem()
         {

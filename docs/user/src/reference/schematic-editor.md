@@ -139,6 +139,11 @@ Two more items appear only on a **cell instance** — **Push In** and **Open Cel
 two are genuinely absent on a resistor rather than greyed, because they are not operations a
 resistor has; [Hierarchy](#hierarchy) below is what they are for.
 
+**Right-clicking empty canvas gives a different, one-item menu: Pop Out.** Nothing on the component
+menu applies when the click hit nothing, so the canvas menu carries only the one thing that always
+does — going back up a level. It is greyed out, with the reason on its tooltip, when you are already
+at the top of the schematic.
+
 ## Hierarchy: putting one schematic inside another {#hierarchy}
 
 **Hierarchy is drawing a circuit once and using it in many places.** A bias network, a matching
@@ -190,7 +195,8 @@ its body opens the parameter editor for that instance.</p></li>
 <li><p><strong>Push in to edit the cell from here.</strong> Click the instance once to select it,
 then use any of:</p>
 <ul>
-<li><strong>Right-click ▸ Push In</strong> — the item appears only on a cell instance.</li>
+<li><strong>Right-click ▸ Push In</strong> — the item appears only on a cell instance.
+Right-clicking <em>empty canvas</em> offers <strong>Pop Out</strong> to come back up.</li>
 <li>Toolbar button <strong>18</strong>, and <strong>19</strong> to come back out
 (<a href="#toolbar">the toolbar</a> below numbers them).</li>
 <li><kbd>⌘]</kbd> / <kbd>Ctrl</kbd>+<kbd>]</kbd> in, <kbd>⌘[</kbd> / <kbd>Ctrl</kbd>+<kbd>[</kbd>
