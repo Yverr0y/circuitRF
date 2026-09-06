@@ -104,6 +104,16 @@ convergence notes still scroll past on screen. Redirect `2&gt;/dev/null` to sile
 
 Frequencies are written as `1GHz`, `100MHz`, or bare Hz (`1e9`) anywhere a frequency is accepted.
 
+<div class="callout">
+<span class="label">An option a verb does not take is refused, never ignored</span>
+<p>Every verb stops with <code>unknown option '…'</code> and exit&nbsp;1 rather than dropping a flag it
+does not recognise. This matters more than it sounds: most verbs find their input file as
+<i>the first argument that is not an option</i>, so a silently dropped flag's <b>value</b> would be
+read as the file name — and a flag that carries an override, like
+<code class="nowrap">--set</code>, would simply not be applied, giving you a run that answers a
+different question with nothing to say so.</p>
+</div>
+
 ---
 
 ## `sparam` — S-parameters {#sparam}

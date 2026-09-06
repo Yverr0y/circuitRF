@@ -18,6 +18,11 @@ internal enum OptKind
     StrList,
     /// <summary>An array emitted as the flag repeated — <c>--set a=1 --set b=2</c>.</summary>
     StrRepeat,
+    /// <summary>A string whose flag takes its value OPTIONALLY: an empty string becomes the bare
+    /// flag. <c>explain --analysis</c> is the case — with a name it asks about one chain, without
+    /// one it asks about all of them, and passing "" as a value asks about a chain called "".
+    /// </summary>
+    StrOptional,
 }
 
 /// <param name="Json">The argument's name in the tool call.</param>
@@ -88,12 +93,41 @@ internal static class ToolCatalog
     private static readonly ToolOption All = new("all", "--all", OptKind.Flag,
         "Return every cube instead of the per-grid-point summary.");
 
+    // Every option here is a flag the VERB'S OWN argument loop reads. That is not a comment, it is
+    // a gate: ServeToolCatalogParityTests scans each verb's parser for the literal and fails on one
+    // that is not there. It exists because an advertised flag a verb does not take does not read as
+    // "unknown option" — the value is taken as the input PATH ("File not found: 3") or, where the
+    // verb reads its path positionally, dropped in silence, which is a run answering a different
+    // question than the one asked (R-aut-1: the adapter offers what the capability has, and nothing
+    // else).
+    private static readonly ToolOption MaxHarm = new("maxharm",  "--maxharm",  OptKind.Integer,
+        "Override MaxHarm.");
+    private static readonly ToolOption Tol     = new("tol",      "--tol",      OptKind.Number,
+        "Override the convergence tolerance.");
+    private static readonly ToolOption MaxIter = new("maxIter",  "--max-iter", OptKind.Integer,
+        "Override the iteration cap.");
+
+    /// <summary>What <c>hb</c> takes. <c>--maxmix</c> is HB's alone — the loadpull verbs' own loop
+    /// does not read it.</summary>
     private static readonly ToolOption[] SolverOptions =
     [
-        new("maxharm",     "--maxharm",     OptKind.Integer, "Override MaxHarm."),
-        new("maxmix",      "--maxmix",      OptKind.Integer, "Override MaxMixOrder (multi-tone)."),
-        new("tol",         "--tol",         OptKind.Number,  "Override the convergence tolerance."),
-        new("maxIter",     "--max-iter",    OptKind.Integer, "Override the iteration cap."),
+        MaxHarm,
+        new("maxmix", "--maxmix", OptKind.Integer, "Override MaxMixOrder (multi-tone)."),
+        Tol,
+        MaxIter,
+    ];
+
+    /// <summary>What <c>lp</c> and <c>lpp</c> take: <see cref="SolverOptions"/> without
+    /// <c>--maxmix</c>.</summary>
+    private static readonly ToolOption[] LoadpullSolverOptions = [MaxHarm, Tol, MaxIter];
+
+    /// <summary>What <c>dc</c> takes. A DC solve has no harmonics and no tolerance override — its
+    /// three knobs are the iteration cap, the bias ramp and the conductance floor.</summary>
+    private static readonly ToolOption[] DcOptions =
+    [
+        MaxIter,
+        new("dcSteps", "--dc-steps", OptKind.Integer, "Override the DC bias ramp step count."),
+        new("gmin",    "--gmin",     OptKind.Number,  "Override the conductance floor."),
     ];
 
     private static readonly ToolOption[] LoadpullOptions =
@@ -113,14 +147,18 @@ internal static class ToolCatalog
             "analysis",
             "Which analysis to run.",
             [
+                // No `-a` and no `--set`: RunSparam's loop reads neither. It takes the first typed
+                // SParameterAnalysis and has no override path — src/Cli/RESOLVED.md records that as
+                // a capability gap in the two oldest verbs rather than one this table may paper over.
                 new("sparam", ["sparam"],
                     [new("path", true, "The .cnl to run.")],
-                    [Analysis, Set, Output, Json, Group,
+                    [Output, Json, Group,
                      new("freq", "--freq", OptKind.Str, "Frequency sweep as start:stop:step (1GHz, 100MHz, 1e9).")],
                     "S-parameters."),
+                // Likewise no `--set`, and DcSettingsFrom's own three knobs rather than HB's.
                 new("dc", ["dc"],
                     [new("path", true, "The .cnl to run.")],
-                    [Set, Json, Group, .. SolverOptions],
+                    [Json, Group, .. DcOptions],
                     "DC operating point."),
                 new("hb", ["hb"],
                     [new("path", true, "The .cnl to run.")],
@@ -128,11 +166,11 @@ internal static class ToolCatalog
                     "Harmonic balance. Runs the parametric sweep when one wraps it."),
                 new("lp", ["lp"],
                     [new("path", true, "The .cnl to run.")],
-                    [Analysis, Set, Output, All, Json, Group, .. SolverOptions, .. LoadpullOptions],
+                    [Analysis, Set, Output, All, Json, Group, .. LoadpullSolverOptions, .. LoadpullOptions],
                     "Loadpull over the directive's Gamma grid. The default result is one row per grid point."),
                 new("lpp", ["lpp"],
                     [new("path", true, "The .cnl to run.")],
-                    [Analysis, Set, Output, All, Json, Group, .. SolverOptions, .. LoadpullOptions],
+                    [Analysis, Set, Output, All, Json, Group, .. LoadpullSolverOptions, .. LoadpullOptions],
                     "Loadpull pursuit: searches for the MXP and MXE terminations."),
                 new("em", ["em"],
                     [new("path", true, "The .cem to run.")],
@@ -165,7 +203,11 @@ internal static class ToolCatalog
                     [
                         Set,
                         new("expr",     "--expr",     OptKind.Str, "Evaluate an expression in the design's own resolved scope."),
-                        new("analysis", "--analysis", OptKind.Str,
+                        // StrOptional, not Str: `explain` reads the name as an OPTIONAL token after
+                        // the flag, so an empty string handed through as a value is a name — and
+                        // `--analysis ""` is refused with "No analysis named ''". The empty string
+                        // has to become the bare flag for the description below to be true.
+                        new("analysis", "--analysis", OptKind.StrOptional,
                             "Report the analysis chains. A name asks about that one; an empty string asks about all of them."),
                         new("ref",      "--ref",      OptKind.Str, "What a relative cell reference resolves to from this document."),
                     ],
@@ -220,6 +262,9 @@ internal static class ToolCatalog
                         new("listCells",  "--list-cells",  OptKind.Flag, "Report what the input holds and write nothing."),
                         new("tech",       "--tech",        OptKind.Path, "The technology to convert against."),
                         new("keepCells",  "--keep-cells",  OptKind.Path, "Keep the cells the import produced, here."),
+                        new("workspace",  "--workspace",   OptKind.Path,
+                            "The .cws the layers graft onto. Without one a .ctech of its own is written."),
+                        new("dbu",        "--dbu",         OptKind.Integer, "Database units per micron. Default 1000."),
                         new("dxfVersion", "--dxf-version", OptKind.Str,  "AC1015, AC1018 or AC1032."),
                         new("dxfUnits",   "--dxf-units",   OptKind.Integer, "The DXF units code."),
                         new("drillUnits", "--drill-units", OptKind.Str,  "mm or inch."),
@@ -360,6 +405,15 @@ internal static class ToolCatalog
                 // Invariant, because the CLI parses it invariantly (cli.md §7A) — a decimal comma
                 // here would be a number the verb cannot read, on one machine only.
                 argv.Add(node.GetValue<JsonElement>().GetRawText());
+                return true;
+            }
+
+            case OptKind.StrOptional:
+            {
+                string? optional = AsString(node, tool, opt.Json, ref refusal);
+                if (optional is null) return false;
+                argv.Add(opt.Cli);
+                if (optional.Length > 0) argv.Add(optional);
                 return true;
             }
 

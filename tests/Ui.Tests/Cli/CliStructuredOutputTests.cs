@@ -77,6 +77,14 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
     [InlineData("hb|no/such/file.cnl",                                1, "failed")]
     [InlineData("hb|testdata/Hero1/hero1.cnl",                        1, "failed")]   // no HB chain
     [InlineData("convert|nope.dxf|-o|<TMP>/x.gds",                    1, "failed")]
+    // The five verbs that produce no DataSet. `convert` above is only its REFUSAL, and a verb whose
+    // document is only ever tested on the failing path is a verb whose successful document is not
+    // tested at all — which is the half of "equal treatment" easiest to leave out.
+    [InlineData("convert|testdata/pcb-samples/nets.kicad_pcb|-o|<TMP>/nets.gds", 0, "ok")]
+    [InlineData("check|testdata/Hero1/hero1.cnl",                     0, "ok")]
+    [InlineData("explain|testdata/Hero1/hero1.cnl",                   0, "ok")]
+    [InlineData("read|testdata/Hero1/potentially_unstable_amp.s2p",   0, "ok")]
+    [InlineData("read|testdata/Hero1/hero1.cnl",                      0, "ok")]
     public void Json_AlwaysParses_AndStatusAgreesWithTheExitCode(string argLine, int expectedExit, string status)
     {
         Directory.CreateDirectory(_tmp);
@@ -317,6 +325,14 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
     [InlineData("cli.args.pin-malformed",               "lp|testdata/Hero3/hero3.cnl|--pin|nonsense")]
     [InlineData("cli.args.grid-not-for-pursuit",        "lpp|testdata/Hero3B/hero3B_at_compression.cnl|--grid|g.gam")]
     [InlineData("cli.args.out-grid-not-for-loadpull",   "lp|testdata/Hero3/hero3.cnl|--out-grid|g.gam")]
+    // The five run verbs refuse an unrecognised option rather than dropping it — and, for the four
+    // that find their input by "the first token that does not start with a dash", rather than taking
+    // its VALUE as the input path (docs/design/cli.md §3.3). Both spellings are covered: the loop
+    // form, and dc's own scan.
+    [InlineData("cli.args.unknown-option",              "lp|testdata/Hero3/hero3.cnl|--maxmix|3")]
+    [InlineData("cli.args.unknown-option",              "sparam|testdata/Hero1/hero1.cnl|-a|AC1")]
+    [InlineData("cli.args.unknown-option",              "dc|testdata/Hero1/hero1.cnl|--set|Vg=1")]
+    [InlineData("cli.args.multiple-inputs",             "dc|testdata/Hero1/hero1.cnl|second.cnl")]
     [InlineData("cli.analysis.not-selected",            "hb|testdata/Hero1/hero1.cnl")]
     [InlineData("convert.input.not-found",              "convert|nope.dxf|-o|out.gds")]
     [InlineData("convert.args.unknown-format",          "convert|x.dxf|--from|wat")]
@@ -419,9 +435,11 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "cli.analysis.not-selected",
         "cli.args.grid-not-for-pursuit",
         "cli.args.input-required",
+        "cli.args.multiple-inputs",
         "cli.args.out-grid-not-for-loadpull",
         "cli.args.pin-malformed",
         "cli.args.set-malformed",
+        "cli.args.unknown-option",
         "cli.em.setup-unreadable",
         "cli.input.not-found",
         "cli.measurement.failed",

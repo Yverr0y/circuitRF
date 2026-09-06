@@ -122,6 +122,35 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
     }
 
     /// <summary>
+    /// <c>explain</c>'s <c>analysis</c> argument, and the one thing about it a type of "string"
+    /// cannot say: <b>the empty string is the BARE flag, not a name.</b>
+    ///
+    /// <para><c>explain --analysis</c> takes its name as an optional following token, so an empty
+    /// value forwarded as a value asked about a chain called <c>""</c> and was refused —
+    /// <c>No analysis named ''</c> — while the argument's own description said it asked about all of
+    /// them. The description was the true half; the translation is what changed
+    /// (<c>OptKind.StrOptional</c>).</para>
+    /// </summary>
+    [Fact]
+    public void ExplainWithAnEmptyAnalysisName_AsksAboutEveryChain_AsItsDescriptionSays()
+    {
+        string cnl = Path.Combine(CopyTestData("Hero3B"), "hero3B_at_compression.cnl");
+
+        using var server = Start(Root);
+        string mine = server.Call("explain", new JsonObject { ["path"] = cnl, ["analysis"] = "" });
+
+        Assert.DoesNotContain("explain.analysis.not-found", Ids(mine));
+        AssertSameDocument(mine, Cli("explain", cnl, "--analysis", "--json"));
+
+        // …and a NAME still asks about that one, so the empty string is the only special value.
+        Assert.Contains("explain.analysis.not-found",
+                        Ids(server.Call("explain", new JsonObject
+                        {
+                            ["path"] = cnl, ["analysis"] = "NoSuchChain",
+                        })));
+    }
+
+    /// <summary>
     /// <c>create</c>, both nouns. The two sides create in DIFFERENT directories because AUT-3's
     /// R-aut3-6 refuses to overwrite an existing workspace — so the destination is substituted out
     /// and everything else, including the copied technology's file name, is compared verbatim.
@@ -429,6 +458,125 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
                     $"{name}.{property.Name}");
         }
     }
+
+    /// <summary>
+    /// R-aut-1 and R-aut-13, at the level the per-tool parity gate above cannot reach: **every
+    /// argument the catalog advertises is a flag the verb behind it actually reads.**
+    ///
+    /// <para><b>Why this is its own gate.</b> The parity tests each make ONE call per tool, so they
+    /// compare the two adapters on the arguments that call happens to pass and say nothing about
+    /// the rest of the table. Three advertised arguments were not flags at all — <c>run</c>'s
+    /// <c>sparam</c> offered <c>-a</c> and <c>--set</c>, its <c>dc</c> offered <c>--set</c>,
+    /// <c>--tol</c>, <c>--maxharm</c> and <c>--maxmix</c>, and both loadpull modes offered
+    /// <c>--maxmix</c> — none of which the verb's own argument loop reads.</para>
+    ///
+    /// <para><b>And the failure was not "unknown option".</b> A run verb finds its input by "the
+    /// first token that does not start with a dash", so a dropped flag's VALUE became the input
+    /// path: <c>lp x.cnl --maxmix 3</c> answered <c>File not found: 3</c>. Where the path was read
+    /// positionally instead, as <c>dc</c> reads it, nothing was reported at all and the run answered
+    /// a different question than the one asked. Both are now refusals
+    /// (<c>CliDiagnostics.RunUnknownOption</c>), which is what lets this test be a behavioural one
+    /// rather than a source scan: it asks the real server for the real schema and calls every
+    /// argument in it.</para>
+    ///
+    /// <para>The path given is deliberately one that does not exist. Every verb's argument loop runs
+    /// to completion before it looks at the file, so nothing is read, run or written — and the
+    /// refusal a missing file produces cannot mask an unknown-option refusal, because both are in
+    /// the same document.</para>
+    /// </summary>
+    [Fact]
+    public void EveryAdvertisedArgument_IsAFlagTheVerbActuallyReads()
+    {
+        // The positionals each mode requires, which a schema advertising the UNION across modes
+        // cannot say. A mode absent from here fails below rather than being skipped: a new mode is
+        // exactly when this gate is worth being reminded of.
+        var positionals = new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            ["run/sparam"]        = ["path"],
+            ["run/dc"]            = ["path"],
+            ["run/hb"]            = ["path"],
+            ["run/lp"]            = ["path"],
+            ["run/lpp"]           = ["path"],
+            ["run/em"]            = ["path"],
+            ["check/"]            = ["path"],
+            ["explain/"]          = ["path"],
+            ["create/workspace"]  = ["path"],
+            ["create/cell"]       = ["workspace", "name"],
+            ["import/part"]       = ["path"],
+            ["import/convert"]    = ["path"],
+            ["read/"]             = ["path"],
+        };
+
+        using var server = Start(Root);
+        var tools = JsonNode.Parse(server.Request("tools/list", null))!["tools"]!.AsArray();
+
+        var covered = new HashSet<string>(StringComparer.Ordinal);
+        int probes = 0;
+
+        foreach (var tool in tools)
+        {
+            string name       = tool!["name"]!.GetValue<string>();
+            var    properties = tool["inputSchema"]!["properties"]!.AsObject();
+
+            // The selector is the one property with an enum — the same shape ToolCatalog builds it.
+            var selector = properties.FirstOrDefault(p => p.Value?["enum"] is JsonArray);
+            string[] modes = selector.Value?["enum"] is JsonArray values
+                ? [.. values.Select(v => v!.GetValue<string>())]
+                : [""];
+
+            foreach (string mode in modes)
+            {
+                string key = $"{name}/{mode}";
+                Assert.True(positionals.TryGetValue(key, out string[]? required),
+                            $"'{key}' is a mode this gate does not know the positionals of. Add it.");
+                covered.Add(key);
+
+                foreach (var (argument, schema) in properties)
+                {
+                    if (argument == selector.Key || required!.Contains(argument)) continue;
+
+                    var arguments = new JsonObject();
+                    if (selector.Key is not null) arguments[selector.Key] = mode;
+                    foreach (string p in required!)
+                        arguments[p] = Path.Combine(Root, $"probe-{probes}-{p}");
+                    arguments[argument] = Plausible(schema!);
+
+                    string document = server.Call(name, arguments);
+                    probes++;
+
+                    var ids = Ids(document);
+
+                    // The argument belongs to another mode of the same tool. That refusal is the
+                    // adapter's own and is correct; there is nothing to check about the verb.
+                    if (ids.Contains("serve.args.not-for-mode")) continue;
+
+                    Assert.DoesNotContain(ids, id => id.EndsWith(".args.unknown-option",
+                                                                 StringComparison.Ordinal));
+
+                    // The other half of the same defect: the value taken as a second input path.
+                    Assert.DoesNotContain("cli.args.multiple-inputs", ids);
+                    Assert.DoesNotContain("convert.args.multiple-inputs", ids);
+                }
+            }
+        }
+
+        Assert.Equal(positionals.Keys.OrderBy(k => k, StringComparer.Ordinal),
+                     covered.OrderBy(k => k, StringComparer.Ordinal));
+
+        // Not vacuous: a loop that advertised nothing would pass every assertion above.
+        Assert.True(probes > 60, $"only {probes} arguments were probed");
+    }
+
+    /// <summary>A syntactically valid value of the schema's own type. It does not have to be
+    /// MEANINGFUL — a refusal about the value is fine and is not what this gate reads.</summary>
+    private static JsonNode Plausible(JsonNode schema) => schema["type"]!.GetValue<string>() switch
+    {
+        "boolean" => JsonValue.Create(true),
+        "integer" => JsonValue.Create(1),
+        "number"  => JsonValue.Create(1.0),
+        "array"   => new JsonArray("x"),
+        _         => JsonValue.Create("x"),
+    };
 
     /// <summary>
     /// A client that goes away with work outstanding. Every pending call is cancelled and the

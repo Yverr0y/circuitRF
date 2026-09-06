@@ -620,3 +620,102 @@ to the stale path.
 already gates (R-aut5-3 needed no new entry). It has no dependency of its own: the JSON-RPC framing
 is hand-rolled over `System.Text.Json`, ~130 lines, because the protocol layer is the disposable one
 by design and a package here would outlive the adapter it serves.
+
+---
+
+## Post-series review — the catalog advertised flags the verbs did not read (2026-09-05)
+
+A review of the whole AUT-1 … AUT-5 series, after it landed. Three defects and one latent one; the
+findings below are what the per-tool parity gate could not see, and why.
+
+### Six advertised arguments were not flags at all
+
+`ServeProtocolAdapterTests`' parity tests make **one call per tool**, so they compare the two
+adapters on the arguments that call happens to pass and say nothing about the rest of the table.
+Read against the verbs' own argument loops, `ToolCatalog` was offering:
+
+| Mode | Advertised | The verb's loop reads |
+|---|---|---|
+| `run/sparam` | `-a`, `--set` | neither — `--freq` and `-o` only |
+| `run/dc` | `--set`, `--tol`, `--maxharm`, `--maxmix` | none of them — `--max-iter`, `--dc-steps`, `--gmin` |
+| `run/lp`, `run/lpp` | `--maxmix` | HB's alone; the loadpull loop has no case for it |
+
+**And the failure was not "unknown option".** Four of the five run verbs find their input by *"the
+first token that does not start with a dash"*, so a dropped flag's **value** became the input path —
+`lp x.cnl --maxmix 3` answered `File not found: 3`, a refusal naming neither the real problem nor the
+file the caller gave. `dc` reads its path positionally instead, so `dc x.cnl --set Vg=1` reported
+nothing at all and ran without the override: a run answering a different question than the one asked.
+
+Fixed in both directions. The catalog now names only flags the verb reads (`SolverOptions` is HB's;
+`LoadpullSolverOptions` and `DcOptions` are the other two), **and all five run verbs now refuse an
+unrecognised option** (`cli.args.unknown-option`), which `convert`, `new`, `import`, `check`,
+`explain` and `read` have done since they were written. `dc` also gained
+`cli.args.multiple-inputs`, since its own scan is the only place a second positional is visible.
+
+**That refusal is what makes the gate behavioural rather than a source scan.** With it,
+`EveryAdvertisedArgument_IsAFlagTheVerbActuallyReads` asks the real server for the real schema, calls
+**every** advertised argument of **every** mode against a path that does not exist — every argument
+loop runs to completion before the file is looked at, so nothing is read, run or written — and fails
+on any `.args.unknown-option`. Verified red by putting `--maxmix` back on `LoadpullSolverOptions`.
+
+### `--analysis ""` was refused by the verb its own description described
+
+`explain --analysis` takes its name as an **optional following token**, so the catalog's `OptKind.Str`
+forwarded an empty string as a value and `explain` looked for a chain called `""` — *"No analysis
+named ''"* — while the argument's description said an empty string asks about all of them. The
+description was the true half. `OptKind.StrOptional` emits the bare flag for an empty string; a name
+still selects one chain.
+
+### `convert` could do two things through the CLI that the protocol could not
+
+`--workspace` and `--dbu` are both real `LayoutConvert` flags and both are documented in
+`docs/user/src/reference/cli.md`; neither was in the catalog. That is R-aut-13's *"or vice versa"*
+half — the direction a per-tool parity test cannot fail on, because it only compares the calls it
+makes. Both added.
+
+### Progress notifications raced the result they were meant to precede
+
+`RunHost.Install` wrapped the observer in `Progress<RunProgress>`, which captures the
+`SynchronizationContext` at construction and, where there is none, posts every observation to the
+thread pool. The tool call runs on `McpServer`'s worker thread, which has none — so notifications
+raced each other and the result frame. A client would see a bar that jumps backwards and observations
+arriving for a call it has already been told finished. Replaced with a synchronous `IProgress<T>`;
+the only observer is a JSON-RPC write, which is serialized and already throttled by
+`RunControl.MinReportIntervalMs`.
+
+### Left standing, and reported rather than absorbed
+
+- **`sparam` and `dc` take no `--set`.** Every other run verb does, `cli.md` §5 describes it as the
+  CLI's override mechanism, and its absence means a bias or frequency global cannot be overridden for
+  the two oldest verbs — headlessly or through the protocol. Adding it is a capability change to
+  verbs this series did not otherwise touch, so it is named here rather than folded into a review.
+- **`sparam` takes no `-a`.** It runs the first typed `SParameterAnalysis`; a netlist declaring two
+  has no way to say which.
+- **`elab` is a verb with no tool.** It is reachable from the command line and not through `serve`,
+  which is the R-aut-13 asymmetry the series otherwise closed. It is a development dump rather than a
+  capability, and `explain` answers most of what it is reached for — but the omission is not recorded
+  anywhere as deliberate, so it is recorded here.
+
+### `convert`'s treatment at each layer, audited
+
+Asked for directly, because the briefs name `convert` only in passing.
+
+- **AUT-1 (`--json`)** — complete. `LayoutConvert` carries 41 `JsonRun` calls: `InputPath`, six
+  `AddOutput` sites (a Gerber file set writes several), and **11 distinct refusal ids plus 12
+  `Note`s**. It is the single most `Diagnostic`-dense verb in the CLI, which is right — it is the one
+  with the most ways to be told no.
+- **AUT-5 (`serve`)** — reachable, as `import { what: "convert" }`, and **parity-tested byte for
+  byte** against `circuitrf convert --json` (`Import_ThroughTheServer_IsTheDocumentTheCliWrites`).
+  Two flags were missing from the catalog and are now added; see above.
+- **The §6.1 human-output golden set is `sparam`, `dc`, `hb`, `lp`, `lpp`, `elab` — and that is not
+  an oversight about `convert`.** Those goldens compare **stdout only**, and `convert`'s entire human
+  report is on **stderr**: its stdout is one line (the written path, or the cell names under
+  `--list-cells`). A stdout golden for it would pin almost nothing, which is why AUT-1 verified it
+  the other way instead — 12 refusal paths and one real DXF→GDSII conversion compared against a
+  `git worktree` of HEAD, stdout, stderr AND exit code. `em` is absent for the same reason, and has
+  `EmCliVerbTests`' byte-for-byte `.sNp` comparison instead.
+- What WAS missing: `Json_AlwaysParses_AndStatusAgreesWithTheExitCode` exercised `convert` only on
+  its **refusal**. A verb whose document is tested only on the failing path is a verb whose
+  successful document is untested. The theory now covers a real conversion, and `check`, `explain`
+  and both halves of `read` alongside it — the five verbs that produce no `DataSet` and whose
+  payload is therefore the one least like every other verb's.

@@ -44,9 +44,25 @@ internal static class RunHost
         Control  = new RunControl
         {
             Token    = ct,
-            Progress = observer is null ? null : new Progress<RunProgress>(observer),
+            Progress = observer is null ? null : new Synchronous(observer),
         };
         return new Scope();
+    }
+
+    /// <summary>
+    /// Delivers the observation on the thread that made it, rather than posting it.
+    ///
+    /// <para><c>Progress&lt;T&gt;</c> captures the <see cref="SynchronizationContext"/> at
+    /// construction and, where there is none, posts every observation to the thread pool. On a
+    /// worker thread there is none — so with it, a progress notification races the result frame it
+    /// is meant to precede, and two observations race each other. A client would see a bar that
+    /// jumps backwards, and observations arriving for a call it has already been told finished.
+    /// Delivering inline costs nothing here: the only observer is a JSON-RPC write, which is
+    /// serialized and already throttled by <see cref="RunControl.MinReportIntervalMs"/>.</para>
+    /// </summary>
+    private sealed class Synchronous(Action<RunProgress> observer) : IProgress<RunProgress>
+    {
+        public void Report(RunProgress value) => observer(value);
     }
 
     private sealed class Scope : IDisposable

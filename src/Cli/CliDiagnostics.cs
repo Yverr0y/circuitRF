@@ -46,6 +46,34 @@ internal static class CliDiagnostics
         ("path", path));
 
     /// <summary><c>--set</c> without an <c>=</c>.</summary>
+    /// <summary>
+    /// An option the run verb does not read.
+    ///
+    /// <para><b>Refused rather than ignored, for the reason every other refusal in this file
+    /// exists.</b> The five run verbs used to drop an unrecognised flag in silence, and the silence
+    /// was not the whole cost: a verb that finds its input by "the first token that does not start
+    /// with a dash" then takes the DROPPED flag's VALUE as its input path, so
+    /// <c>lp x.cnl --maxmix 3</c> answered <c>File not found: 3</c> — a refusal naming neither the
+    /// real problem nor the file the caller actually gave. Where the value was not swallowed, as in
+    /// <c>dc x.cnl --set Vg=1</c>, nothing was reported at all and the run answered a different
+    /// question than the one asked. <c>convert</c>, <c>new</c>, <c>import</c>, <c>check</c>,
+    /// <c>explain</c> and <c>read</c> have refused an unknown option since they were written; this
+    /// is the same rule reaching the verbs that predate it.</para>
+    /// </summary>
+    public static Diagnostic RunUnknownOption(string verb, string option) => Diagnostic.Create(
+        "cli.args.unknown-option",
+        DiagnosticSeverity.Error,
+        "{verb}: unknown option '{option}'.",
+        ("verb", verb), ("option", option));
+
+    /// <summary>A second positional where the verb takes one. <c>convert</c>, <c>check</c>,
+    /// <c>explain</c> and <c>read</c> have said this since they were written.</summary>
+    public static Diagnostic RunMultipleInputs(string verb, string extra) => Diagnostic.Create(
+        "cli.args.multiple-inputs",
+        DiagnosticSeverity.Error,
+        "{verb}: one input file, please — '{extra}' is a second one.",
+        ("verb", verb), ("extra", extra));
+
     public static Diagnostic SetMalformed(string verb, string text) => Diagnostic.Create(
         "cli.args.set-malformed",
         DiagnosticSeverity.Error,

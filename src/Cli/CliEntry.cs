@@ -173,8 +173,11 @@ static int RunSparam(string[] args)
                 output = args[++i];
                 break;
             default:
-                if (!args[i].StartsWith('-'))
-                    input = args[i];
+                // An unrecognised flag is REFUSED, not dropped. See CliDiagnostics.RunUnknownOption:
+                // dropping it also fed its VALUE to the line below as the input path.
+                if (args[i].StartsWith('-'))
+                    return JsonRun.Fail(CliDiagnostics.RunUnknownOption("sparam", args[i]));
+                input = args[i];
                 break;
         }
     }
@@ -246,6 +249,19 @@ static int RunDc(string[] args)
         return JsonRun.Fail(CliDiagnostics.InputRequired("dc", ".cnl"));
 
     var input = args[0];
+
+    // dc reads its path positionally and hands the REST to DcSettingsFrom, which looks only for the
+    // three flags it knows. So an unrecognised flag was neither read nor reported — `dc x.cnl --set
+    // Vg=1` ran without the override and said nothing. Scanned here, where the whole argument list
+    // is still in one piece.
+    for (int i = 1; i < args.Length; i++)
+    {
+        if (!args[i].StartsWith('-')) return JsonRun.Fail(CliDiagnostics.RunMultipleInputs("dc", args[i]));
+        if (args[i] is not ("--max-iter" or "--maxiter" or "--dc-steps" or "--gmin"))
+            return JsonRun.Fail(CliDiagnostics.RunUnknownOption("dc", args[i]));
+        i++;   // its value
+    }
+
     JsonRun.InputPath = input;
     if (!File.Exists(input)) return JsonRun.Fail(CliDiagnostics.FileNotFound(input));
 
@@ -361,7 +377,9 @@ static int RunHb(string[] args)
                 diag = true;
                 break;
             default:
-                if (!args[i].StartsWith('-')) input = args[i];
+                if (args[i].StartsWith('-'))
+                    return JsonRun.Fail(CliDiagnostics.RunUnknownOption("hb", args[i]));
+                input = args[i];
                 break;
         }
     }
@@ -568,7 +586,9 @@ static int RunLoadpull(string[] args, bool pursuit)
                 diag = true;
                 break;
             default:
-                if (!args[i].StartsWith('-')) input = args[i];
+                if (args[i].StartsWith('-'))
+                    return JsonRun.Fail(CliDiagnostics.RunUnknownOption(verb, args[i]));
+                input = args[i];
                 break;
         }
     }
@@ -1049,7 +1069,9 @@ static int RunEm(string[] args)
                 workspace = args[++i];
                 break;
             default:
-                if (!args[i].StartsWith('-')) input = args[i];
+                if (args[i].StartsWith('-'))
+                    return JsonRun.Fail(CliDiagnostics.RunUnknownOption("em", args[i]));
+                input = args[i];
                 break;
         }
     }

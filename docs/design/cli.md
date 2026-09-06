@@ -156,6 +156,28 @@ those instead of cubes — §10.5 and §11.4.)
 and its typed `arguments`. **The id is the contract; the message is not.** A caller matching on the
 sentence is doing the thing the id exists to make unnecessary, and templates are reworded freely.
 
+### 3.3 An unrecognised option is a refusal, on every verb
+
+`convert`, `new`, `import`, `check`, `explain` and `read` have refused an unknown option since they
+were written. The five older run verbs — `sparam`, `dc`, `hb`, `lp`/`lpp`, `em` — dropped one in
+silence until 2026-09-05, and **the silence was not the whole cost**: four of the five find their
+input by *"the first token that does not start with a dash"*, so the dropped flag's **value** became
+the input path. `circuitrf lp x.cnl --maxmix 3` answered `File not found: 3` — a refusal naming
+neither the real problem nor the file the caller gave. `dc`, which reads its path positionally,
+simply ran without the override and said nothing, which is a run answering a different question than
+the one asked.
+
+All five now emit `cli.args.unknown-option` and exit 1. This is the same principle §6.1 already
+applies to `--grid` on `lpp`, reaching the case where the option belongs to no verb at all.
+
+**It is also what makes `serve`'s tool catalog gateable.** `ToolCatalog` names a CLI flag for every
+argument it advertises, and an argument naming a flag the verb does not read is now a loud refusal on
+the first call rather than a swallowed path — which is how
+`ServeProtocolAdapterTests.EveryAdvertisedArgument_IsAFlagTheVerbActuallyReads` can be a behavioural
+gate rather than a source scan. It found three: `sparam` was advertising `-a` and `--set`, `dc` was
+advertising `--set`, `--tol`, `--maxharm` and `--maxmix`, and both loadpull modes were advertising
+`--maxmix`.
+
 ## 4. Chain selection: dispatch at the SWEEP, never at the inner analysis
 
 `SelectTop(tb, requested, isBase, kindLabel, directiveHint, out why)` picks what runs. The rule it
