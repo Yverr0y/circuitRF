@@ -36,6 +36,18 @@ public partial class MessagesTool : Tool, IMessageSink
     }
 
     /// <summary>
+    /// A message with an ACTION link on the end of it — see <see cref="IMessageSink.PostAction"/>.
+    /// Marshalled to the UI thread exactly like <see cref="Post"/>; the action itself is invoked by
+    /// the view, on the UI thread, when the link is tapped.
+    /// </summary>
+    public void PostAction(MessageLevel level, string text, string actionLabel,
+                           System.Func<System.Threading.Tasks.Task> action)
+    {
+        var entry = new MessageEntry(level, text, null, System.DateTime.Now, actionLabel, action);
+        OnUi(() => Messages.Add(entry));
+    }
+
+    /// <summary>
     /// The live-message implementation: one real <see cref="MessageEntry"/> in the list, rewritten in
     /// place. Every mutation is marshalled to the UI thread exactly like <see cref="Post"/>, because
     /// the engine reports progress from the background thread it is running on.

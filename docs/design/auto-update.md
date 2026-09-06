@@ -4,8 +4,7 @@
 (packaging + UI)
 
 How circuitRF, harmonicaRF and wBond update themselves in the background — downloaded while the app
-runs, swapped in at the next launch, with no dialog, no elevation prompt, no Gatekeeper warning and no
-"Relaunch" button anywhere in the UI.
+runs, swapped in at the next launch, with no dialog, no elevation prompt and no Gatekeeper warning.
 
 **Reads with:** `BUILDING.md` (how each installer is produced), `packaging/version.sh` + the repo-root
 `VERSION` file (the single source of the version string), `docs/design/ui-architecture.md` (why none of
@@ -13,7 +12,8 @@ this may leak below `src/Ui`), `src/Ui/AppVersion.cs` (what the running app beli
 
 **Owner intent.** Match what VS Code and Claude.app do: the user never asks for an update, never
 approves one, and never sees an installer. The only thing they ever see is one line in the Message
-Panel telling them a relaunch will pick up the new version. And — non-negotiable — **an unreachable
+Panel telling them a relaunch will pick up the new version, with a button on it that performs that
+relaunch (§10.2.1). And — non-negotiable — **an unreachable
 network must be indistinguishable from a normal session.** circuitRF is used on lab machines, air-gapped
 networks and hotel wifi. Nothing about this feature may ever make the application slower to start, slower
 to simulate, or noisier when offline.
@@ -190,9 +190,10 @@ mechanisms differ: the Windows stub sees its child finish and exits with it, so 
 parentless for that one launch. It is otherwise byte-for-byte the process the stub would have created a
 launch later.
 
-**This is not the "Relaunch" button §10 refuses to grow.** It runs in `Main` before Avalonia, with no
-window open and nothing unsaved — the user asked for this launch, and gets the version they were told
-they would get.
+**This is not the Relaunch button of §10.2.1, and the difference is that this runs in `Main` before
+Avalonia** — no window open, nothing unsaved, so it may exec freely. The button starts from a live GUI
+and therefore leaves by the ordinary Quit instead. Either way the user asked for this launch, and gets the
+version they were told they would get.
 
 **Never swap mid-session.** A self-contained .NET app does not load every assembly eagerly and Avalonia
 resolves some resources lazily; replacing the tree underneath a running process is a class of bug that
@@ -542,12 +543,68 @@ Info level, posted once per staged version, at the moment staging completes:
 
 The application name is the running application's, so harmonicaRF and wBond say their own names.
 
-**There is no "Relaunch circuitRF" button, anywhere.** The app can be holding unsaved workspaces; offering
-a one-click relaunch invites data loss for the sake of saving a keystroke.
-
 If several versions are staged before the user relaunches, each new staging posts its own line, worded from
 the **installed** version to the **newly staged** one — so the last line the user sees is always the true
 end state.
+
+### 10.2.1 The "Relaunch circuitRF" button (2026-09-06)
+
+The line carries a **Relaunch circuitRF** button, hosted inline in an `InlineUIContainer` the same way
+the progress bar on a live message is. A real button rather than an underlined run (owner's choice): the
+file-path link's weight is right for "show me where that file is" and wrong for an action that closes
+the application. It is **absent**, not disabled, on every row without an action, so ordinary messages
+keep the row height they have always had.
+
+**This revises an earlier refusal rather than forgetting it.** Rev 2 of this document said there was no
+Relaunch button anywhere, because the application can be holding unsaved workspaces and a one-click
+relaunch invites data loss for the sake of saving a keystroke. That objection is answered, not
+overruled:
+
+- The button runs **the ordinary Quit** — `App.RelaunchAsync` → `App.Quit` → `QuitAsync`, which
+  already asks *every* workspace window about its unsaved work before closing *any* of them, and
+  abandons the whole shutdown if one prompt is cancelled. The click removes a keystroke; it does not
+  remove a question.
+- **A cancelled prompt calls the relaunch off entirely**, including deleting the hand-off note
+  (`App.AbortQuit`), so a user who backed out is not restarted by their next ordinary quit and does
+  not find these workspaces reopened on a later launch.
+- **The workspaces open at the moment of the click are reopened by the new version**, which is the
+  other half of why it is now worth offering: the disruption an update costs the user is meant to be
+  nothing at all.
+
+**The workspaces travel in a file, not in argv** (`Updates/RelaunchSession`), and every alternative
+fails on at least one platform: macOS ignores `argv` for files (it opens documents by Apple Event, and
+`App` reads `desktop.Args` on Windows and Linux only); an update applied *during* the relaunch hands
+over to a **third** process, so the paths would have to survive two launches; and handing the files to
+Launch Services delivers them to the process that is about to hand over. The note is **consumed once** —
+read-and-deleted — so a crash midway through reopening cannot turn into a launch that reopens the same
+workspaces for ever. It is written **only** by an explicit relaunch: this is not session restore, and an
+ordinary quit still leaves the user's configured launch action in charge.
+
+**The successor waits for its predecessor to exit, and that is a correctness requirement.** Windows holds
+a `Mutex` and Linux a `flock`ed file for the life of the process (`Program.Main`). A successor that
+started while the old session was still shutting down would see itself as a *second* instance, forward
+its arguments to the instance on its way out, and exit without showing a window — the user clicks
+Relaunch and circuitRF simply closes. So the successor is given the predecessor's pid
+(`--relaunch-wait`, stripped in `Program.Main` before anything downstream sees it) and waits for it,
+which is also what lets the old session start it *before* exiting rather than needing a helper to do it
+afterwards. macOS has no such guard but is given the same argument, and is started through Launch
+Services for the reason `AppRelaunch` documents.
+
+**The staged update is applied by the successor**, in its own `Main`, by exactly the code that applies it
+on any other launch (§9) — so nothing in the relaunch path knows about swaps, pointers or bundles.
+
+**Release notes come to the front.** `Show(owner)` keeps a window above its *owner*, not above the
+application's other windows, and a relaunch is the first case where several workspace windows exist at
+launch — each having called `Activate()` at `Background` priority, which runs before the
+`ApplicationIdle` the notes are posted at. Without an explicit `Activate()` the notes for the version the
+user was just moved to would open behind the very windows the relaunch restored.
+
+**A build with no handler installed posts the line with no button**, unchanged. harmonicaRF and wBond
+share this machinery and install none; so does any headless sink. The sentence therefore still has to
+say "Relaunch … to start using the version" on its own — the button is a shortcut for that instruction,
+never a replacement for it.
+
+Gate: `tests/Ui.Tests/Updates/RelaunchTests.cs`.
 
 ### 10.3 Help ▸ Check for Updates…
 

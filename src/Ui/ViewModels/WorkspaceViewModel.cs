@@ -15001,8 +15001,9 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     /// site is read-only, where the notify-only path serves instead. <see cref="CanCheckForUpdates"/>
     /// is what the menu binds its enablement to.</para>
     ///
-    /// <para><b>No "Relaunch" button appears here or anywhere else.</b> The application can be
-    /// holding unsaved workspaces; a one-click relaunch invites data loss to save a keystroke.</para>
+    /// <para><b>This menu item offers no relaunch of its own.</b> The staging announcement carries
+    /// the Relaunch button (auto-update design §10.2.1) and that is the one place it lives — a manual
+    /// check that found nothing has nothing to relaunch into.</para>
     /// </summary>
     /// <summary>
     /// <b>Not gated on <c>CanSelfUpdate</c>.</b> A notify-only install still checks and still posts a

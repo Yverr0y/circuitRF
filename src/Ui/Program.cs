@@ -24,6 +24,21 @@ sealed class Program
         // exception handlers, is the part that catches a simulation death.
         Diagnostics.CrashReporter.Install("circuitRF");
 
+        // BEFORE the single-instance guard below, and before the staged update is applied: a
+        // successor started by the Relaunch action must not exist as a second instance while the
+        // session that started it is still shutting down.
+        //
+        // On Windows that guard is a Mutex and on Linux a flock()ed file, both held for the whole
+        // life of the process — so a successor that raced its predecessor would take the
+        // "not first" branch, forward its arguments to the instance that is on its way out, and
+        // return without ever showing a window. The user clicks Relaunch and circuitRF closes.
+        // macOS has no such guard, but is given the same argument for uniformity.
+        //
+        // Stripped from `args` here, so nothing downstream — the startup file scan, Avalonia itself —
+        // ever sees it. See AppRelaunch.StartSuccessor for the other half.
+        if (Updates.AppRelaunch.TakeWaitForPid(ref args) is { } predecessor)
+            Updates.AppRelaunch.WaitForProcessExit(predecessor);
+
         // BEFORE the line below, which writes state.json on every path that applies an update: settle
         // whether this installation existed at all before this launch. That single fact is what tells
         // a brand new installation (which must never open with release notes) apart from an existing

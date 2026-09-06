@@ -524,20 +524,45 @@ public sealed class UpdateService
     /// from the installed version to the newly staged one — so if several versions stage before the
     /// user relaunches, the last line on screen is always the true end state.
     ///
-    /// <para><b>There is no "Relaunch" button, anywhere, in any form.</b> The app can be holding
-    /// unsaved workspaces; a one-click relaunch invites data loss to save a keystroke.</para>
+    /// <para><b>The line carries a Relaunch button, and the original refusal to have one is answered
+    /// rather than reversed</b> (owner request, 2026-09-06). The refusal was that the app can be
+    /// holding unsaved workspaces, so a one-click relaunch invites data loss to save a keystroke.
+    /// That is still true, and it is the reason the button does not restart anything itself: it runs
+    /// the SAME shutdown the File menu's Quit runs, so every window is asked about its unsaved work
+    /// first and any prompt the user cancels calls the whole relaunch off. What the button removes is
+    /// the keystroke, not the question. The workspaces open at that moment are reopened by the new
+    /// version (<see cref="RelaunchSession"/>), which is the other half of why it is now worth
+    /// offering: the disruption an update costs the user is meant to be nothing at all.</para>
+    ///
+    /// <para><b>The sentence still stands on its own with no button.</b> A build with no handler
+    /// installed — harmonicaRF, wBond, a headless sink — posts exactly the line it always did.</para>
     /// </summary>
     private void Announce(string from, string to)
     {
         UpdateState s = UpdateStateIo.Load();
         if (s.Announced is not null && s.Announced.Contains(to)) return;
 
-        _messages?.Info(
+        PostAnnouncement(_messages, from, to);
+        UpdateStateIo.Update(st => st.Announced_Add(to));
+    }
+
+    /// <summary>
+    /// The announcement itself, separated from the once-per-version bookkeeping around it so the
+    /// wording and the link can be driven directly. Reaching it through <see cref="CheckAsync"/>
+    /// means faking a signed release, a download and an unpack, none of which this decision depends
+    /// on — and a decision only a test can reach is a decision the application does not make.
+    /// </summary>
+    internal static void PostAnnouncement(Messages.IMessageSink? sink, string from, string to)
+    {
+        string line =
             $"{UpdateApp.Name} updated from {from} to {to} in the background. "
             + $"Relaunch {UpdateApp.Name} to start using the version. "
-            + "Automatic updates can be disabled in Settings, under Security & Permissions.");
+            + "Automatic updates can be disabled in Settings, under Security & Permissions.";
 
-        UpdateStateIo.Update(st => st.Announced_Add(to));
+        if (sink is not null && RelaunchRequest.Handler is { } relaunch)
+            sink.PostAction(Messages.MessageLevel.Info, line, $"Relaunch {UpdateApp.Name}", relaunch);
+        else
+            sink?.Info(line);
     }
 
     /// <summary>

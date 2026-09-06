@@ -186,8 +186,10 @@ public static class UpdateStartup
     /// attribution for one session is a bad outcome; not starting at all is a much worse one.</para>
     ///
     /// <para><b>Nothing is at risk in any of them.</b> This runs in <c>Main</c> before Avalonia, so
-    /// there is no window, no open workspace and nothing unsaved — which is why it is not the
-    /// "Relaunch" button §10 refuses to grow, even though it relaunches.</para>
+    /// there is no window, no open workspace and nothing unsaved — which is why it may exec freely,
+    /// unlike the Messages panel's Relaunch button (§10.2.1), which starts from a live GUI with
+    /// windows to ask about and therefore leaves by the ordinary Quit. See
+    /// <see cref="AppRelaunch.StartSuccessor"/> for that route and how the two differ.</para>
     /// </summary>
     private static void HandOverTo(string executable, string[] args)
     {

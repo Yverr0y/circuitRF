@@ -20801,3 +20801,93 @@ Gate: `ReleaseNotesBacklogTests` in `tests/Ui.Tests/Updates/ReleaseNotesTests.cs
 range at both ends, the unknown/newer anchor, the cap and which entries it drops, ordering,
 empty-body and draft skipping, prerelease channel, and that `ReleaseNotesResult.Markdown` is still
 the running version's own body).
+
+## The Messages panel can now relaunch into the installed update (2026-09-06)
+
+An automatic update installs in the background and posts one Info line saying to relaunch. The owner
+asked for a button on that line that does it — quitting this version, starting the new one, and reopening
+the workspaces that were open — so an update costs the user as little of their working state as
+possible.
+
+### It reverses a documented refusal, and the reason it may
+
+`docs/design/auto-update.md` rev 2 said there was **no "Relaunch" button, anywhere, in any form**,
+because the application can be holding unsaved workspaces and a one-click relaunch invites data loss to
+save a keystroke. That reasoning was sound and is unchanged; what changed is that the button is not a
+one-click relaunch. It calls `App.RelaunchAsync`, which sets a flag and then runs **the ordinary
+`Quit`** — `QuitAsync` already asks every workspace window about its unsaved work before closing any of
+them (MW1 R-mw1-18), and already abandons the shutdown when one prompt is cancelled. `AbortQuit` clears
+the flag *and* deletes the hand-off note, so a cancelled prompt leaves nothing behind to surprise the
+user on a later launch. The click removes a keystroke, not a question.
+
+### The workspace list travels in a FILE, and every argv route fails somewhere
+
+`Updates/RelaunchSession` writes the open `.cws` paths under `updates/`, and startup consumes them once.
+Passing them in `argv` looks obvious and cannot work:
+
+- **macOS ignores `argv` for files.** `App.OnFrameworkInitializationCompleted` reads `desktop.Args` on
+  Windows and Linux only; macOS opens documents by Apple Event.
+- **An update applied during the relaunch hands over to a THIRD process.** The successor's own `Main`
+  flips the pointer or exchanges the bundle and re-launches, so the paths would have to survive two
+  launches and, on macOS, an `open --args` in between.
+- **Apple Events race the swap** — they reach the process that is about to hand over, and the one that
+  finally shows a window never hears about them.
+
+The note is **read-and-deleted**, so a crash midway through reopening cannot become a launch that
+reopens the same workspaces for ever. An **empty but present** note is not the same as an absent one: it
+still means "this was a relaunch", which is what suppresses the user's configured launch action for a
+relaunch from a window that had nothing open. It is written only by an explicit relaunch — this is
+deliberately **not** session restore, and an ordinary quit still leaves the launch action in charge.
+
+### The trap: the successor must not start before its predecessor is gone
+
+This is the one that would have shipped as "clicking Relaunch closes circuitRF". Both Windows and Linux
+hold a single-instance guard for the whole life of the process — a `Mutex` and a `flock`ed file
+respectively, in `Program.Main`. A successor started while the old session was still running its save
+prompts takes the **second instance** branch: it forwards its arguments to the instance that is on its
+way out and returns without ever creating a window.
+
+So the successor is handed the predecessor's pid (`AppRelaunch.WaitForPidArgument`) and waits for it at
+the very top of `Main`, **before** the guard and before the staged update is applied. That is also what
+lets the old session start it *before* calling `Environment.Exit` — nothing runs after that call, and
+the alternative is a second program whose only job is to wait. The argument is stripped there, in
+`AppRelaunch.TakeWaitForPid`, rather than relying on the startup file scan's `File.Exists` filter to
+ignore it by luck. Every reason the pid cannot be found — gone, unopenable, reused — means "stop
+waiting", and the timeout exists so a wedged predecessor cannot take the successor with it.
+
+macOS has no such guard, but gets the same argument and goes through Launch Services, for the reason
+`AppRelaunch` already documents at length: an inherited launch-time attribution pointing at a bundle the
+update has replaced is denied `~/Documents` with no prompt.
+
+**Nothing in the relaunch path knows about swaps, pointers or bundles.** The staged update is applied by
+the successor, in its own `Main`, by exactly the code that applies it on any other launch.
+
+### Two smaller things it exposed
+
+- **`Environment.Exit(0)` appeared in three places in `App`.** A fourth added later would silently not
+  have relaunched — the same shape as the `ProcessExit` note at the top of that file. They now funnel
+  through `ExitProcess`.
+- **`Show(owner)` does not raise a window above the application's *other* windows**, only above its
+  owner. That was invisible while one workspace window existed at launch; a relaunch is the first case
+  where there may be several, each having called `Activate()` at `Background` priority — which runs
+  before the `ApplicationIdle` the Release Notes are posted at. So the notes for the version the user
+  had just been moved to opened *behind* the windows the relaunch restored. `ShowReleaseNotesIfDue` now
+  calls `Activate()` (owner request).
+
+### The message row
+
+`MessageEntry` gained an optional `ActionLabel` + `ActionInvoke`, rendered as a real `Button` hosted in
+an `InlineUIContainer` — the same way a live message's progress bar already is. It was first built as an
+underlined accent run matching the file-path link, and the owner asked for a button instead: that link's
+weight is right for "show me where that file is" and wrong for an action that closes the application.
+It is **absent**, not disabled, on rows with no action, so ordinary messages keep their row height.
+`IMessageSink.PostAction` has a **default implementation that drops the action and posts the text**, so
+no existing sink changed and harmonicaRF, wBond and any headless sink still get the line. That is also
+why the sentence still reads "Relaunch … to start using the version" on its own: the button is a
+shortcut for that instruction, never a replacement for it.
+
+`UpdateService.Announce` delegates to an internal `PostAnnouncement` so the wording and the link can be
+driven directly — reaching it through `CheckAsync` means faking a signed release, a download and an
+unpack, none of which the decision depends on.
+
+Gate: `tests/Ui.Tests/Updates/RelaunchTests.cs` (32 tests).

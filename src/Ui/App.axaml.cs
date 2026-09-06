@@ -26,6 +26,11 @@ public partial class App : Application
     private bool _isShuttingDown;
     private bool _launchHandled;
 
+    // Set by RelaunchAsync and read at the very last moment before the process ends. A quit that is
+    // CANCELLED at a save prompt clears it again (AbortQuit), so a user who backed out is not
+    // relaunched the next time they genuinely quit.
+    private bool _relaunchAfterExit;
+
     // macOS: 1×1 transparent background window that keeps the menu bar alive
     // when no workspace window is open (standard macOS behaviour).
     private Window? _bgMenuWindow;
@@ -160,10 +165,46 @@ public partial class App : Application
 
             WireAboutMenuItem();
 
+            // The Messages panel's Relaunch button can now be offered — everything it needs (the
+            // desktop lifetime, the window list, the quit path) exists from here on. Installed
+            // before the update check is scheduled, which is what reads it.
+            Updates.RelaunchRequest.Handler = RelaunchAsync;
+
+            // Workspaces to reopen after a deliberate relaunch, consumed once. Null on an ordinary
+            // launch, which is every launch but the one immediately after the user pressed the button.
+            //
+            // Read BEFORE the startup-file scan and allowed to lose to it: a relaunch and a
+            // double-clicked file cannot both be the reason this process started, but if they
+            // somehow are, what the user just double-clicked is the more recent intent.
+            string[]? restored = Updates.RelaunchSession.Take();
+
             // Startup file handling (Windows/Linux argv; macOS uses Apple Events).
             var startupPaths = OperatingSystem.IsMacOS()
                 ? Array.Empty<string>()
                 : (desktop.Args ?? Array.Empty<string>()).Where(File.Exists).ToArray();
+
+            // A relaunch supplies its own paths, on every platform — which is exactly why they
+            // travel in a file rather than in argv. macOS ignores argv for files (the line above
+            // says so), and an update applied during the relaunch hands over to a THIRD process that
+            // would have to carry them again. See RelaunchSession for the full reasoning.
+            //
+            // It joins the startup-file branch rather than getting one of its own: that branch
+            // already applies the window-shape preferences without running the launch ACTION, which
+            // is precisely right here. Reopening what the user had AND then opening their start-up
+            // workspace over the top of it is not what "carry on where I left off" means.
+            if (startupPaths.Length == 0 && restored is { Length: > 0 })
+                startupPaths = restored;
+
+            // A relaunch from a window with no workspace open: no paths, but the launch action must
+            // still not run, or the user gets their start-up workspace opened for them by a restart
+            // they asked for to change nothing.
+            bool suppressLaunchAction = restored is not null;
+
+            // Claimed here rather than in each branch below. On macOS this flag is what tells a
+            // later Apple Event that the launch is already accounted for, and a relaunch is the one
+            // case where that platform reaches the startup-PATH branch at all — which does not set
+            // it, because until now it could not be reached there.
+            if (suppressLaunchAction) _launchHandled = true;
 
             if (startupPaths.Length > 0)
             {
@@ -182,6 +223,16 @@ public partial class App : Application
                 var startupVm = (WorkspaceViewModel)firstWindow.DataContext!;
                 Avalonia.Threading.Dispatcher.UIThread.Post(
                     () => { ApplyLayoutPreferences(startupVm); OpenFiles(startupVm, startupPaths); },
+                    Avalonia.Threading.DispatcherPriority.Background);
+            }
+            else if (suppressLaunchAction)
+            {
+                // A relaunch that had nothing open. The window gets its SHAPE and nothing else —
+                // same treatment a startup file gets, for the same reason.
+                firstWindow.Show();
+                var restoredVm = (WorkspaceViewModel)firstWindow.DataContext!;
+                Avalonia.Threading.Dispatcher.UIThread.Post(
+                    () => ApplyLayoutPreferences(restoredVm),
                     Avalonia.Threading.DispatcherPriority.Background);
             }
             else if (OperatingSystem.IsMacOS())
@@ -299,6 +350,16 @@ public partial class App : Application
             // working in.
             var dialog = new Views.Dialogs.ReleaseNotesDialog(result);
             dialog.Show(owner);
+
+            // AND BROUGHT TO THE FRONT, which Show(owner) alone does not do (owner request,
+            // 2026-09-06). An owned window is kept above its OWNER; it is not raised above the
+            // application's other windows. That was invisible while there was only ever one
+            // workspace window at launch — and a relaunch is precisely the case where there may be
+            // several, each of which called Activate() as it was created (NewWorkspaceWindow), at
+            // Background priority, which runs BEFORE the ApplicationIdle this method is posted at.
+            // So the notes for the version the user has just been moved to would open behind the
+            // very windows the relaunch restored.
+            dialog.Activate();
         }
         catch (Exception) { /* never the reason a launch is worse than it would have been */ }
     }
@@ -800,8 +861,22 @@ public partial class App : Application
 
     internal bool IsShuttingDown => _isShuttingDown;
 
-    /// <summary>Called by a WorkspaceWindow when a close/quit prompt is cancelled, so a later Quit works.</summary>
-    internal void AbortQuit() => _isShuttingDown = false;
+    /// <summary>
+    /// Called by a WorkspaceWindow when a close/quit prompt is cancelled, so a later Quit works.
+    ///
+    /// <para><b>A cancelled prompt also calls off a relaunch</b>, note and all. The user said no to
+    /// closing a document; carrying on to restart the application would be answering a question they
+    /// were not asked, and a note left on disk would reopen these workspaces on top of whatever they
+    /// do next time they launch.</para>
+    /// </summary>
+    internal void AbortQuit()
+    {
+        _isShuttingDown = false;
+
+        if (!_relaunchAfterExit) return;
+        _relaunchAfterExit = false;
+        Updates.RelaunchSession.Clear();
+    }
 
     internal void Quit()
     {
@@ -809,9 +884,9 @@ public partial class App : Application
         _isShuttingDown = true;
         _bgMenuWindow?.Hide();
 
-        if (_desktop is null) { Environment.Exit(0); return; }
+        if (_desktop is null) { ExitProcess(); return; }
         var windows = _desktop.Windows.OfType<WorkspaceWindow>().ToList();
-        if (windows.Count == 0) { CloseAllFloatingWindows(); Environment.Exit(0); return; }
+        if (windows.Count == 0) { CloseAllFloatingWindows(); ExitProcess(); return; }
 
         _ = QuitAsync(windows);
     }
@@ -872,6 +947,99 @@ public partial class App : Application
         }
     }
 
+    // ---- Relaunch (the Messages panel's "Relaunch circuitRF" link) -------------
+
+    /// <summary>
+    /// Shuts this session down and starts the version that has been installed in the background,
+    /// reopening the workspaces that are open right now.
+    ///
+    /// <para><b>It is the ordinary Quit, with two things added at each end</b>, and that is the
+    /// whole safety argument. <see cref="QuitAsync"/> already asks EVERY workspace window about its
+    /// unsaved work before closing ANY of them, and already abandons the whole shutdown if one
+    /// prompt is cancelled. So the answer to "a one-click relaunch invites data loss" — the reason
+    /// docs/design/auto-update.md §10 refused this button — is that this click is not a shortcut
+    /// past any of those questions. It asks all of them, and a user who cancels one is left exactly
+    /// where they were, on the version they were already running, with the note that would have
+    /// reopened their workspaces deleted.</para>
+    ///
+    /// <para><b>The successor is started BEFORE this process exits, not after</b>, which sounds
+    /// backwards and is the only way it works: nothing runs after <c>Environment.Exit</c>, and
+    /// leaving the job to a detached helper is a second program to get right. The successor is
+    /// handed this process's id and waits for it — see <see cref="Updates.AppRelaunch.StartSuccessor"/>,
+    /// which also explains why it MUST wait rather than merely ought to.</para>
+    ///
+    /// <para><b>The staged update is not applied here.</b> It is applied by the successor, in its own
+    /// <c>Main</c>, by exactly the code that applies it on any other launch
+    /// (<see cref="Updates.UpdateStartup"/>) — which is why this method knows nothing about swaps,
+    /// pointers or bundles and cannot get any of them wrong.</para>
+    /// </summary>
+    internal async Task RelaunchAsync()
+    {
+        // Already on the way out — a second tap on the link, or a Quit in flight. The link stays
+        // live rather than being disabled, so this is the guard that makes that safe.
+        if (_isShuttingDown) return;
+
+        // Written BEFORE the prompts, and deleted again if any of them is cancelled. The alternative
+        // — write it once every window has agreed to close — reads the workspace paths out of view
+        // models that have by then been through their own teardown.
+        Updates.RelaunchSession.Write(OpenWorkspacePaths());
+
+        _relaunchAfterExit = true;
+        Quit();
+
+        // Quit() runs the prompts on the dispatcher and returns immediately; there is nothing here to
+        // await. Yielding keeps the signature honest for a caller that awaits it (the Messages view's
+        // tap handler) without pretending the relaunch has finished.
+        await Task.Yield();
+    }
+
+    /// <summary>
+    /// The <c>.cws</c> of every open workspace window, in window order, skipping windows with no
+    /// workspace open.
+    ///
+    /// <para>A window showing the Welcome screen or an unsaved scratch design contributes nothing —
+    /// there is no path to reopen. Restoring it as an empty window would be guessing at intent, and
+    /// the new session opens one empty window anyway.</para>
+    /// </summary>
+    private IReadOnlyList<string> OpenWorkspacePaths()
+    {
+        if (_desktop is null) return Array.Empty<string>();
+
+        var paths = new List<string>();
+        foreach (var w in _desktop.Windows.OfType<WorkspaceWindow>())
+            if (w.DataContext is WorkspaceViewModel { CurrentWorkspacePath: { } cws } && File.Exists(cws))
+                paths.Add(cws);
+
+        return paths;
+    }
+
+    /// <summary>
+    /// The ONE way this process ends, so the relaunch cannot be missed by one of the exit paths.
+    ///
+    /// <para>There were three bare <c>Environment.Exit(0)</c> calls before this, and a fourth added
+    /// later would silently not have relaunched — the same shape of bug the <c>ProcessExit</c> hooks
+    /// at the top of this file were written to avoid, recorded there in their own note.</para>
+    /// </summary>
+    private void ExitProcess()
+    {
+        if (_relaunchAfterExit)
+        {
+            _relaunchAfterExit = false;
+
+            // The executable this session was launched from — on the versioned layout that is what
+            // the stub started, and it is where UpdateStartup applies whatever is staged.
+            string? exe = Environment.ProcessPath;
+
+            if (exe is null || !Updates.AppRelaunch.StartSuccessor(exe))
+                // Nothing to do but leave the note for the user's own next launch, which is the
+                // behaviour they would have had before this feature existed plus their workspaces
+                // coming back. Saying so is impossible — the windows are gone.
+                { /* the RelaunchSession note stays; the next launch honours it */ }
+        }
+
+        Environment.Exit(0);
+    }
+
     internal void NotifyWindowCountChanged()
     {
         if (_desktop is null) return;
@@ -887,7 +1055,7 @@ public partial class App : Application
             if (!anyOpen)
             {
                 CloseAllFloatingWindows();
-                Environment.Exit(0);
+                ExitProcess();
             }
             return;
         }

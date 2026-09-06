@@ -155,6 +155,27 @@
                                            Foreground="{DynamicResource SystemBaseHighColor}"/>
                             </InlineUIContainer>
 
+                            <!-- The ACTION button — "Relaunch circuitRF" on the update announcement,
+                                 and nothing else at present. A REAL Button, hosted the same way the
+                                 progress bar above is (owner's explicit choice, 2026-09-06): the
+                                 file-path link's underlined run is the right weight for "show me
+                                 where that file is" and the wrong one for an action that closes the
+                                 application, which should look like something you press.
+
+                                 Absent, not disabled, on every row with no action — so an ordinary
+                                 message keeps exactly the row height it has always had, and only
+                                 the one row carrying an action is taller. -->
+                            <InlineUIContainer BaselineAlignment="Center">
+                                <Button Content="{Binding ActionLabel}"
+                                        IsVisible="{Binding HasAction}"
+                                        Click="OnActionButtonClick"
+                                        Padding="8,2"
+                                        Margin="4,0,2,0"
+                                        MinHeight="0"
+                                        FontSize="11"
+                                        VerticalAlignment="Center"/>
+                            </InlineUIContainer>
+
                             <InlineUIContainer BaselineAlignment="TextBottom">
                                 <SelectableTextBlock Text="{Binding FilePath}"
                                                      IsVisible="{Binding FilePath, Converter={StaticResource IsNotNull}}"

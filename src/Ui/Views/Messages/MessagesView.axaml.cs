@@ -66,6 +66,26 @@ public partial class MessagesView : UserControl
             scroll?.ScrollToEnd();
         }, Avalonia.Threading.DispatcherPriority.Loaded);
 
+    /// <summary>
+    /// Runs a row's action button. <c>async void</c> because it is an event handler, and wrapped
+    /// because the one action this exists for — Relaunch — ends in either a process exit or a
+    /// cancelled save prompt, and neither may leave an exception loose on the UI thread.
+    ///
+    /// <para><b>The button is not disabled afterwards and does not need to be.</b> The action is
+    /// idempotent at its own end: a relaunch already in flight ignores a second request
+    /// (<c>App.Quit</c>'s own <c>_isShuttingDown</c> guard), and one that was cancelled at a save
+    /// prompt SHOULD be pressable again — that is the user changing their mind, not a double
+    /// click.</para>
+    /// </summary>
+    private async void OnActionButtonClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control { DataContext: MessageEntry { ActionInvoke: { } action } }) return;
+
+        e.Handled = true;
+        try { await action(); }
+        catch (Exception) { /* the action reports its own failures where the user can see them */ }
+    }
+
     private void OnRevealPathTapped(object? sender, TappedEventArgs e)
     {
         if (sender is Control { DataContext: MessageEntry { FilePath: { } path } }

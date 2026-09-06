@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace CircuitRF.Ui.Messages;
@@ -39,12 +40,15 @@ public sealed partial class MessageEntry : ObservableObject
     private bool         _progressIndeterminate;
     private RunCancellation? _cancellation;
 
-    public MessageEntry(MessageLevel level, string text, string? filePath, DateTime timestamp)
+    public MessageEntry(MessageLevel level, string text, string? filePath, DateTime timestamp,
+                        string? actionLabel = null, Func<Task>? actionInvoke = null)
     {
-        _level    = level;
-        _text     = text;
-        FilePath  = filePath;
-        Timestamp = timestamp;
+        _level       = level;
+        _text        = text;
+        FilePath     = filePath;
+        Timestamp    = timestamp;
+        ActionLabel  = actionLabel;
+        ActionInvoke = actionInvoke;
     }
 
     public MessageLevel Level
@@ -78,6 +82,36 @@ public sealed partial class MessageEntry : ObservableObject
 
     public string?  FilePath  { get; }
     public DateTime Timestamp { get; }
+
+    /// <summary>
+    /// The caption of this row's ACTION button — "Relaunch circuitRF" — or null on the overwhelming
+    /// majority of messages, which have nothing to offer.
+    ///
+    /// <para><b>A real button, not an underlined run</b> (owner's choice, 2026-09-06). The panel
+    /// already hosts a live control per row — the progress bar, in an <c>InlineUIContainer</c> — so
+    /// there is nothing novel about one here. The file-path link's weight is right for "show me
+    /// where that file is" and wrong for an action that closes the application, which should look
+    /// like something you press.</para>
+    ///
+    /// <para><b>Not a command, and not bound.</b> A <see cref="MessageEntry"/> is posted by
+    /// <see cref="IMessageSink"/> from code that must not know what a command is, and the action is
+    /// invoked once by the view's tap handler. Storing the callback rather than an
+    /// <c>ICommand</c> keeps the entry free of any UI-framework type, which is what lets the
+    /// message model stay where it is.</para>
+    /// </summary>
+    public string? ActionLabel { get; }
+
+    /// <summary>
+    /// What <see cref="ActionLabel"/> does. Null whenever the label is.
+    ///
+    /// <para>Returns a Task so the handler can be awaited: the one action this exists for asks every
+    /// open window whether it may close, which is several dialogs long and cannot be done
+    /// synchronously.</para>
+    /// </summary>
+    public Func<Task>? ActionInvoke { get; }
+
+    /// <summary>Whether this row shows an action button at all — the view's only visibility test.</summary>
+    public bool HasAction => ActionLabel is { Length: > 0 } && ActionInvoke is not null;
 
     /// <summary>0–100 while this message is showing progress; null for an ordinary message (and once
     /// a live one completes, so a finished run's line carries no leftover bar).</summary>

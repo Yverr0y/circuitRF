@@ -1,3 +1,6 @@
+using System;
+using System.Threading.Tasks;
+
 namespace CircuitRF.Ui.Messages;
 
 /// <summary>
@@ -21,6 +24,20 @@ public interface IMessageSink
         Post(MessageLevel.Info, text);
         return new PostOnlyProgressMessage(this);
     }
+
+    /// <summary>
+    /// Posts a message carrying a single ACTION the user can invoke from the row — a button after
+    /// the text, hosted inline the same way the progress bar is.
+    ///
+    /// <para><b>The default implementation drops the action and posts the text.</b> Every message
+    /// worded for this must therefore still read correctly with no button on the end: the sink
+    /// behind a console tool or a headless run has no way to offer one, and a sentence that only
+    /// makes sense next to a button would be a sentence those users cannot act on. The one caller —
+    /// the update announcement — says "Relaunch circuitRF to start using it" and then offers the
+    /// button as a shortcut for exactly that, so nothing is lost when it degrades.</para>
+    /// </summary>
+    void PostAction(MessageLevel level, string text, string actionLabel, Func<Task> action)
+        => Post(level, text);
 
     void Info(string text, string? filePath = null)    => Post(MessageLevel.Info, text, filePath);
     void Success(string text, string? filePath = null) => Post(MessageLevel.Success, text, filePath);
