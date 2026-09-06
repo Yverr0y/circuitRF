@@ -123,6 +123,13 @@ public sealed class UndoRedoManager
     {
         if (!CanUndo) return;
         var cmd = _undoStack.Pop();
+        // An undo REWRITES the state every other breadcrumb is describing, and until now it left no
+        // breadcrumb of its own. A user report carried two "addPlot (now 2)" notes six seconds
+        // apart - the same count before both, and no removePlot between them, which made the trail
+        // read as an add that silently failed. An untraced Ctrl+Z explains it exactly, and nothing
+        // in the trail could say so. Ctrl+Z is a discrete keypress with no auto-repeat, so this
+        // meets the same bar as every other note here.
+        Gesture.Note("undo", $"{cmd.GetType().Name} (undo {_undoStack.Count}, redo {_redoStack.Count + 1})");
         cmd.Undo();
         _redoStack.Push(cmd);
         StateChanged?.Invoke(this, EventArgs.Empty);
@@ -136,6 +143,7 @@ public sealed class UndoRedoManager
     {
         if (!CanRedo) return;
         var cmd = _redoStack.Pop();
+        Gesture.Note("redo", $"{cmd.GetType().Name} (undo {_undoStack.Count + 1}, redo {_redoStack.Count})");
         cmd.Execute();
         _undoStack.Push(cmd);
         StateChanged?.Invoke(this, EventArgs.Empty);

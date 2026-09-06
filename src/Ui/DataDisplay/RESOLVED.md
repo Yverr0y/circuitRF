@@ -1942,3 +1942,85 @@ module line both answered here what earlier rounds had to go back to the reporte
 
 The candidate mechanism for the failure having genuinely gone, and the one new environmental fact the
 beta.10 header exposes, are both in `src/RfCore/RESOLVED.md` under round 7.
+
+---
+
+## The trace card's group combo wrote back into the rebuild (2026-09-06)
+
+A user report — a live session trail, no crash, nothing thrown — carried a burst of four
+`dd: row.group — DC1.V -> ''` breadcrumbs after every post-run `library.reloadChanged`, on two
+different designs, on every reload in the session.
+
+**Those notes are the finding, not the noise.** `Gesture.Note("row.group", …)` sits in
+`TraceRowViewModel.OnSelectedGroupChanged` *after* its `if (_suppressDataCallback) return;`, and the
+restore at the end of `RebuildSignals` has always run under that guard — so it prints nothing. A
+`row.group` note during a rebuild can therefore only be an **unsuppressed external write**, and
+`'' ` is what `$"{value}"` renders for **null**, not for an ungrouped signal. Something was pushing
+null into `SelectedGroup` in the middle of the rebuild.
+
+That something is the bound ComboBox. `AvailableGroups` is its `ItemsSource`
+(`PlotInspectorView.axaml`) and `SelectedGroup` is bound `Mode=TwoWay`, and `RebuildSignals` opened
+with three `Clear()` calls *before* raising the guard. A `SelectingItemsControl` whose items vanish
+drops its selection and pushes it back through the binding.
+
+### Which half of the write-back does the damage is not the obvious half
+
+Measured, not reasoned about — a probe standing in for the control and printing the sequence:
+
+- **The null on `Clear()` is inert.** `FilterSignalsToGroup` empties `AvailableSignals` *before* its
+  null check, so the follow-on `SelectedSignal = AvailableSignals.FirstOrDefault()` is null and
+  `OnSelectedSignalChanged`'s own `value == null` guard absorbs it. The trace is untouched. This is
+  the push the trail actually shows, and on its own it costs only a misleading breadcrumb.
+- **The re-select on REFILL is the one that corrupts.** When the list fills again under a null
+  selection the control re-selects row 0 — and by then `_allSignals` is rebuilt, so the same
+  assignment resolves to the **first** item and re-points the trace. The restore that follows still
+  puts the **card** back on the user's pick. End state: `SelectedSignal = DC1.I` while
+  `Trace.CubeName = DC1.V`. The card and the plot disagree, and nothing on screen says so — which is
+  worse than either being wrong alone.
+
+### The fix
+
+`RebuildSignals` is now a save/restore guard around `RebuildSignalsCore` — the same shape
+`RebuildAxisRoles`/`RebuildAxisRolesCore` already used two hundred lines away. The guard covers the
+whole rebuild, which is the **window in which the control can push**, rather than only the restore
+that was already safe. The inner `_suppressDataCallback = true/false` pair around the restore is
+gone; setting it back to `false` there would have re-opened the tail of the method. The hard
+`= false` in `OnSelectedGroupChanged` became a save/restore for the same reason — it is unreachable
+under a guard today and would silently disarm one tomorrow.
+
+**A coercing control's write-back is not an edit.** Same family as the Match designer's slider
+write-back and round 6's blank Group combo; the difference here is that a *collection* mutation, not
+a value assignment, is what provoked it.
+
+### Gate
+
+`tests/Ui.Tests/TraceRowSelectionSurvivesReloadTests.cs` — four tests standing in for the ComboBox in
+both directions and doing nothing else (no Avalonia). Three fail on the pre-fix arrangement and pass
+after; the fourth asserts a genuine user pick still reaches the trace, and must pass either way, so
+the guard cannot be "fixed" by suppressing everything.
+
+### Two smaller things found in the same trail
+
+- **`addPlot … (now 2)` twice, six seconds apart, same count before both, and no `removePlot`
+  between** — which reads as an add that silently failed. It is almost certainly an untraced Ctrl+Z:
+  `UndoRedoManager` rewrites the state every other breadcrumb describes and left none of its own.
+  `Undo`/`Redo` now note the command type and both stack depths, because the ambiguity they settle is
+  a **count**. Ctrl+Z is a discrete keypress with no auto-repeat, so this meets the same bar as every
+  other note in `Gesture`.
+- **`DataDisplayViewModel`'s constructor deselect was not braced.** It sat at the indentation of the
+  `addEmptyPlot` branch and ran either way; harmless only because there is nothing to deselect when
+  no plot was seeded. Braced, and all four combinations pinned in
+  `tests/Ui.Tests/RunTrailAndSeedPlotTests.cs`.
+
+### Read as bugs and were not
+
+- `addPlot — Smith (now 1)` followed 36 ms later by `addTrace — plot=Rect` is the auto-create path
+  reusing the constructor's seeded container and converting it (`WorkspaceViewModel`
+  `AutoOpenOrCreateDataDisplayAsync`), not a trace landing on the wrong plot.
+- `3 cube(s)` on first load and `5` on the next reload is a current probe being added between runs:
+  `DcResultPacker` writes V/Converged/Residual, and I/`__ProbeBranches` only when probes exist.
+  Exactly 3 → 5.
+- `run: at 0 / 1` printing after `run: end` is `Progress<T>` posting to the UI thread. Cosmetic.
+- The source-entry combo takes the same `Clear()` write-back and is **not** vulnerable:
+  `OnSelectedSourceItemChanged` early-returns on a null value, and the refill is assigned explicitly
+  under `_suppressSourceCallback` immediately afterward.

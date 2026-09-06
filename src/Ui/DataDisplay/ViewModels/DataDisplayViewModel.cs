@@ -486,10 +486,15 @@ public partial class DataDisplayViewModel : ViewModelBase, IDisposable
         _plots.CollectionChanged += OnPlotsCollectionChanged;
         UndoRedo.StateChanged    += (_, _) => RaiseContentChanged();
 
+        // Braced deliberately: the deselect used to sit at this indentation WITHOUT braces, so it
+        // ran whether or not a plot had been added. Harmless only because `addEmptyPlot: false`
+        // leaves nothing to deselect — the indentation said one thing and the compiler read another.
         if (addEmptyPlot)
+        {
             AddPlot(PlotType.Smith, FreqUnit.GHz);
             if (!selectEmptyPlot)
                 SelectOnly((PlotContainerViewModel?) null);
+        }
     }
 
     /// <summary>

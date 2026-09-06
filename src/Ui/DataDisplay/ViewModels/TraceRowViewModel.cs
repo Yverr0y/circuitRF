@@ -1255,9 +1255,12 @@ public partial class TraceRowViewModel : ViewModelBase
     {
         if (_suppressDataCallback) return;
         Gesture.Note("row.group", $"{Spec} -> '{value}'");
+        // Save/restore, never a hard false: this runs only when NOT suppressed today, but a hard
+        // clear would silently disarm an enclosing guard the day it is reached from one.
+        bool saved = _suppressDataCallback;
         _suppressDataCallback = true;
         FilterSignalsToGroup(value);
-        _suppressDataCallback = false;
+        _suppressDataCallback = saved;
         SelectedSignal = AvailableSignals.FirstOrDefault();
     }
 
@@ -2553,7 +2556,40 @@ public partial class TraceRowViewModel : ViewModelBase
     private void OnSelectedDataSourceChanged(object? s, EventArgs e)
         => RebuildSignals();
 
+    /// <summary>
+    /// Rebuilds the picker lists and re-points the card at the trace's own binding.
+    ///
+    /// <para><b>The whole rebuild runs suppressed, not just the restore at the end.</b> A user report
+    /// carried a burst of four <c>row.group … -&gt; ''</c> breadcrumbs on every post-run library
+    /// reload — and those cannot come from the restore below, which has always run under the guard
+    /// and would print nothing. They are the bound ComboBox: <see cref="AvailableGroups"/> is its
+    /// ItemsSource and <c>SelectedGroup</c> is bound TwoWay, so the Clear() at the top of the
+    /// rebuild makes the control push its now-invalid selection BACK. Unsuppressed, that write was
+    /// indistinguishable from the user picking a group.</para>
+    ///
+    /// <para><b>Which half of the write-back does the damage is not the obvious half.</b> The null
+    /// the control pushes on Clear() is inert: <see cref="FilterSignalsToGroup"/> empties
+    /// AvailableSignals BEFORE its null check, so the follow-on
+    /// <c>SelectedSignal = AvailableSignals.FirstOrDefault()</c> is null and
+    /// <see cref="OnSelectedSignalChanged"/>'s own null guard absorbs it. The damaging push is the
+    /// one that arrives when the list REFILLS and the control re-selects row 0 under a null
+    /// selection: the signal list is rebuilt by then, so the same assignment resolves to the FIRST
+    /// item and re-points the trace — while the restore below still puts the card back on the
+    /// user's pick. The card and the trace then disagree, which is worse than either being wrong:
+    /// the card reads DC1.I and the plot draws DC1.V. Both halves are covered here because the
+    /// guard's job is the window, not the individual push.</para>
+    ///
+    /// <para><b>A coercing control's write-back is not an edit.</b></para>
+    /// </summary>
     private void RebuildSignals()
+    {
+        bool saved = _suppressDataCallback;
+        _suppressDataCallback = true;
+        try { RebuildSignalsCore(); }
+        finally { _suppressDataCallback = saved; }
+    }
+
+    private void RebuildSignalsCore()
     {
         _allSignals.Clear();
         AvailableGroups.Clear();
@@ -2821,11 +2857,12 @@ public partial class TraceRowViewModel : ViewModelBase
         foreach (var s in _allSignals)
             if (!AvailableGroups.Contains(s.Group)) AvailableGroups.Add(s.Group);
 
-        _suppressDataCallback = true;
+        // Already suppressed for the whole rebuild by RebuildSignals — see its remarks. Setting the
+        // flag back to false HERE (as this used to) would re-open the rest of the method to exactly
+        // the write-back the guard exists to absorb.
         SelectedGroup  = match?.Group ?? AvailableGroups.FirstOrDefault();
         FilterSignalsToGroup(SelectedGroup);
         SelectedSignal = match ?? AvailableSignals.FirstOrDefault();
-        _suppressDataCallback = false;
 
         // Keep per-port Z0 fields fresh when the library changes in place (e.g. auto-refresh) —
         // WITHOUT clearing an override the user set. See RefreshSourceZ0PreservingOverride.

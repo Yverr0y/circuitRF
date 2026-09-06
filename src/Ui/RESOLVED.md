@@ -20954,3 +20954,31 @@ driven directly — reaching it through `CheckAsync` means faking a signed relea
 unpack, none of which the decision depends on.
 
 Gate: `tests/Ui.Tests/Updates/RelaunchTests.cs` (32 tests).
+
+---
+
+## A run could stop and leave nothing in the trail (2026-09-06)
+
+A user report showed `run: 'X' netlist written to …` and then **nothing** — no `planned` line, no
+`begin`, no `left the engine` — with the same design running normally ninety-six seconds later.
+
+That gap is `SchematicRunService.Prepare` returning a non-`Success` plan. The branch reported to the
+Messages panel and returned, and **a crash report does not carry the Messages panel**. So the one
+artifact that gets read when there is no stack could not say why a run stopped, and a refusal was
+indistinguishable from a run that vanished mid-flight.
+
+Every early exit between "netlist written" and "left the engine" now leaves a breadcrumb: a run
+refused because one is already in flight, a netlist write that threw, `Prepare` throwing, `Prepare`
+returning a non-`Success` plan (the silent one), and the engine throwing — that last one added by
+the gate below rather than by reading, because its `finally` still writes `left the engine` on the
+way out, which on its own reads as an ordinary return. The run's **outcome** is now noted too:
+`left the engine` says the engine returned, not what it returned, so a cancelled run and a
+successful one were identical in a trail that stopped there.
+
+Gate: `tests/Ui.Tests/RunTrailAndSeedPlotTests.cs`. The main test is **derived, not listed** — it
+scans the netlist-to-engine window and requires a note above every `return`, so a sixth refusal added
+to that stretch has to make the same decision instead of inheriting the silence. It caught the
+engine-throws path on its first run.
+
+The Data Display half of the same report — a ComboBox writing back into a rebuild, and untraced
+undo/redo — is in `src/Ui/DataDisplay/RESOLVED.md`.

@@ -3338,7 +3338,12 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         // The Analyses panel's own Run button reaches this directly rather than through
         // RunAnalysisCommand, so its CanExecute gate does not cover this path. One run at a time:
         // two concurrent runs would write the same netlist.cnl and the same results file.
-        if (_runCts is not null) { Messages.Warning("Run: a simulation is already running."); return; }
+        if (_runCts is not null)
+        {
+            Messages.Warning("Run: a simulation is already running.");
+            Diagnostics.CrashReporter.Note("run: refused - a simulation is already running");
+            return;
+        }
 
         var testBenchName = activeDoc.Id;
 
@@ -3358,6 +3363,8 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         catch (Exception ex)
         {
             Messages.Error($"Netlist write failed: {ex.Message}");
+            Diagnostics.CrashReporter.Note(
+                $"run: '{testBenchName}' netlist write FAILED - {ex.GetType().Name}: {ex.Message}");
             return;
         }
 
@@ -3377,6 +3384,8 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         catch (Exception ex)
         {
             Messages.Error($"Run failed unexpectedly: {ex.Message}");   // defensive: Prepare never throws
+            Diagnostics.CrashReporter.Note(
+                $"run: '{testBenchName}' prepare THREW - {ex.GetType().Name}: {ex.Message}");
             return;
         }
 
@@ -3384,6 +3393,15 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         {
             if (plan.Status == RunStatus.NoAnalysis) Messages.Info(plan.StatusMessage);
             else                                     Messages.Error(plan.StatusMessage);
+
+            // A user report showed a netlist written and then NOTHING - no plan line, no engine
+            // line - and the same design running fine a minute and a half later. That gap is this
+            // branch: it reported only to the Messages panel, which a crash report does not carry.
+            // Every path between "netlist written" and "left the engine" now says why it stopped,
+            // because the trail is what gets read when there is no stack, and a run that ends with
+            // no note reads as a run that vanished.
+            Diagnostics.CrashReporter.Note(
+                $"run: '{testBenchName}' NOT run - {plan.Status}: {plan.StatusMessage}");
             return;
         }
 
@@ -3430,6 +3448,10 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             {
                 // Defensive — Execute never throws, but guard anyway.
                 live.Complete(MessageLevel.Error, $"Run failed unexpectedly: {ex.Message}");
+                // The finally below still writes "left the engine" on the way out, which on its own
+                // reads as an ordinary return. Say that it threw, and with what.
+                Diagnostics.CrashReporter.Note(
+                    $"run: '{testBenchName}' engine THREW - {ex.GetType().Name}: {ex.Message}");
                 return;
             }
             finally
@@ -3440,6 +3462,11 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
                 Diagnostics.CrashReporter.Note($"run: '{testBenchName}' left the engine");
             }
         }
+
+        // How it ended, on the line after it ended. "left the engine" says the engine returned, not
+        // what it returned - and a cancelled run and a successful one are indistinguishable in a
+        // trail that stops there.
+        Diagnostics.CrashReporter.Note($"run: '{testBenchName}' outcome {result.Status}");
 
         if (result.Status == RunStatus.Cancelled)
         {
