@@ -253,6 +253,12 @@ public static class ComponentHkpReader
         part.Name = number.Value;
         if (number.First("Name") is { } named && named.Value.Length > 0) part.Name = named.Value;
 
+        // `..RefPrefix "U"` — the letter this library numbers its parts from, which is what a placed
+        // instance is called (U1, U2, U3). Carried under PL1 R-PL1-7's own name for it, the one the
+        // other grammars' `PREFIX` / `prefix` fields already land on, so the consumer reads one key.
+        if (number.First("RefPrefix") is { } refPrefix && refPrefix.Value.Length > 0)
+            part.Metadata["Reference"] = refPrefix.Value;
+
         // `..Prop "Key", "Value", "Type"` — carried verbatim (PL1 R-PL1-7).
         foreach (var prop in number.All("Prop"))
         {
@@ -435,6 +441,7 @@ public static class ComponentHkpReader
         var pinPoint = new Dictionary<int, (double X, double Y)>();
         var pinName = new Dictionary<int, string>();
         var pinPad = new Dictionary<int, string>();
+        var pinAlign = new Dictionary<int, KitTextAlign>();
         var order = new List<int>();
 
         // `*UNITS 1000.000000 per_inch` — read, never assumed (§4.2). 1000 per inch is one mil per
@@ -464,7 +471,8 @@ public static class ComponentHkpReader
                 {
                     var pts = f.Where(IsPoint).Select(ParsePoint).ToList();
                     if (pts.Count >= 2)
-                        drawing.Shapes.Add(new KitSymbolLine(pts[0].X, pts[0].Y, pts[1].X, pts[1].Y));
+                        drawing.Shapes.Add(new KitSymbolLine(pts[0].X, pts[0].Y, pts[1].X, pts[1].Y)
+                                           { Width = InchField(f, 2) });
                     break;
                 }
 
@@ -472,7 +480,8 @@ public static class ComponentHkpReader
                 {
                     var pts = f.Where(IsPoint).Select(ParsePoint).ToList();
                     if (pts.Count >= 2)
-                        drawing.Shapes.Add(new KitSymbolRectangle(pts[0].X, pts[0].Y, pts[1].X, pts[1].Y, false));
+                        drawing.Shapes.Add(new KitSymbolRectangle(pts[0].X, pts[0].Y, pts[1].X, pts[1].Y, false)
+                                           { Width = InchField(f, 2) });
                     break;
                 }
 
@@ -487,16 +496,28 @@ public static class ComponentHkpReader
 
                 case "*TEXT":
                 {
-                    // `*TEXT <size> <?> <type> <?> <?> <?> <pinOrdinal> … "<text>"`, where type 3 is
-                    // the pin's name and type 4 its pad identifier. Both are read as STRINGS — a
-                    // thermal pad is named, not numbered (PL1 R-PL1-9).
+                    // `*TEXT <size> <?> <type> <hjust> <vjust> <?> <pinOrdinal> … "<text>"`, where
+                    // type 3 is the pin's name and type 4 its pad identifier. Both are read as
+                    // STRINGS — a thermal pad is named, not numbered (PL1 R-PL1-9).
                     if (f.Count < 8) break;
                     if (!int.TryParse(f[3], out int type)) break;
                     if (!int.TryParse(f[7], out int ordinal) || ordinal == 0) break;
 
                     string value = Unquote(f[^1]);
                     if (value.Length == 0) break;
-                    if (type == 3) pinName[ordinal] = value;
+                    if (type == 3)
+                    {
+                        pinName[ordinal] = value;
+
+                        // R-PL2-20: this grammar STATES the pin name's justification — a signed field,
+                        // -1 left and +1 right — rather than leaving it to be read off the pin's own
+                        // side. Read rather than derived, because a file that says so outright is the
+                        // authority on its own drawing.
+                        if (int.TryParse(f[4], out int hjust))
+                            pinAlign[ordinal] = hjust > 0 ? KitTextAlign.Right
+                                              : hjust < 0 ? KitTextAlign.Left
+                                              : KitTextAlign.Center;
+                    }
                     else if (type == 4) pinPad[ordinal] = value;
                     break;
                 }
@@ -518,7 +539,9 @@ public static class ComponentHkpReader
             drawing.Pins.Add(new ComponentSymbolPin(
                 name, pad,
                 (int)Math.Round(x * scale, MidpointRounding.AwayFromZero),
-                (int)Math.Round(y * scale, MidpointRounding.AwayFromZero)));
+                (int)Math.Round(y * scale, MidpointRounding.AwayFromZero),
+                Bonded: false,
+                NameAlign: pinAlign.TryGetValue(ordinal, out var align) ? align : KitTextAlign.Left));
 
             if (pad is not null) map.Add((name, pad));
         }
@@ -530,6 +553,23 @@ public static class ComponentHkpReader
     // ── Shared scanning ───────────────────────────────────────────────────────────────────────────
 
     private static bool IsPoint(string field) => field.StartsWith('<') && field.EndsWith('>');
+
+    /// <summary>
+    /// A field spelled as an absolute length with its unit glued on (<c>0.008in</c>), in mils.
+    ///
+    /// <para>Unlike this grammar's COORDINATES, which are in whatever <c>*UNITS</c> declared, a
+    /// stroke width states its own unit — so it is converted here and not through that scale. A field
+    /// carrying no <c>in</c> suffix is read as a bare number and left alone, which is the honest
+    /// reading of a file that does not say.</para>
+    /// </summary>
+    private static double InchField(List<string> f, int index)
+    {
+        if (index >= f.Count) return 0;
+        string t = f[index].Trim();
+        bool inches = t.EndsWith("in", StringComparison.OrdinalIgnoreCase);
+        double v = Num(inches ? t[..^2] : t);
+        return v > 0 ? (inches ? v * 1000.0 : v) : 0;
+    }
 
     private static (double X, double Y) ParsePoint(string field)
     {

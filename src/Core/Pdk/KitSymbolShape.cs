@@ -11,7 +11,32 @@ namespace CircuitRF.Core.Pdk;
 /// <para>Coordinates are exactly as the file states them: no scale is applied here, because the
 /// scale is chosen from the whole drawing at once and that is the consumer's job.</para>
 /// </summary>
-public abstract record KitSymbolShape;
+public abstract record KitSymbolShape
+{
+    /// <summary>
+    /// The stroke width the file states for this element, in the same unit as this shape's
+    /// COORDINATES, or 0 when the file states none (several formats spell "the default" as a zero).
+    ///
+    /// <para><b>Why the unit is not pinned down here.</b> circuitRF's symbol model has three stroke
+    /// TIERS, not a width, so what survives the import is the ORDER of the widths within one symbol
+    /// and never their absolute size. Requiring every reader to convert to a common unit would be
+    /// arithmetic that no consumer can observe. See <c>KitTemplateSymbol.StrokeTiers</c> for the
+    /// mapping, which is the only thing that reads this.</para>
+    /// </summary>
+    public double Width { get; init; }
+}
+
+/// <summary>
+/// Which EDGE of a symbol's body a pin sits on, and so which way its name runs from it — inward.
+///
+/// <para><see cref="Top"/> and <see cref="Bottom"/> are the vertical lead's two cases; a name on one
+/// of those runs ALONG the lead, turned a quarter turn, because a horizontal name on an edge whose
+/// pins are one grid apart overlaps its neighbours.</para>
+///
+/// <para>Framework-free like the shapes, and for the same reason: the readers live in the core and
+/// <c>SymbolPinNameAlign</c> lives beside the renderer in <c>src/Ui</c>.</para>
+/// </summary>
+public enum KitTextAlign { Left, Center, Right, Top, Bottom }
 
 /// <summary>A straight segment.</summary>
 public sealed record KitSymbolLine(double X1, double Y1, double X2, double Y2) : KitSymbolShape;

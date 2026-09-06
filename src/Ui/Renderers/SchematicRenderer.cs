@@ -47,6 +47,16 @@ public static class SchematicRenderer
     public  const SKStrokeCap  SymbolStrokeCapStyle  = SKStrokeCap.Round;
 
     private const float DotHalfSize = 5f;
+    /// <summary>
+    /// Cap height, in world units, of a pin NAME drawn beside its pin — smaller than the instance
+    /// labels (<see cref="LabelWorldHeight"/> = 70) on purpose: a part with twenty named pins carries
+    /// twenty of these, and they annotate the body rather than compete with the name of the part.
+    /// </summary>
+    private const double PinNameWorldHeight = 46.0;
+
+    /// <summary>Gap, in world units, between a pin and the first glyph of its name.</summary>
+    private const double PinNameGap = 26.0;
+
     private const float PortBoxHalf = 8f;   // world units; chosen so zoom=1 → 8px (matches prior clamped appearance)
     private const float ConnDotHalf = 4f;
 
@@ -128,6 +138,8 @@ public static class SchematicRenderer
         using var paramNamePaint  = new SKPaint { IsAntialias = true,  Color = theme.ParameterNameText };
         using var netLabelFont    = new SKFont(SkiaFonts.PlexItalic,  Math.Max(4f, (float)(zoom * 65.0)));
         using var netLabelPaint   = new SKPaint { IsAntialias = true,  Color = theme.NetLabelText };
+        using var pinNameFont     = new SKFont(SkiaFonts.PlexRegular, Math.Max(4f, (float)(zoom * PinNameWorldHeight)));
+        using var pinNamePaint    = new SKPaint { IsAntialias = true,  Color = theme.ComponentNameText };
 
         // ── Bitmaps (canvas objects, drawn behind wires and components) ──────────
         if (!isLod && model.Bitmaps.Count > 0)
@@ -340,6 +352,7 @@ public static class SchematicRenderer
             if (!isSimplified)
             {
                 DrawPortMarkers(canvas, c, cx, cy, panX, panY, zoom, unconnPaint, connPinPaint, liveDotKeys, model.GridSize);
+                DrawPinNames(canvas, c, cx, cy, panX, panY, zoom, pinNameFont, pinNamePaint);
                 (double DX, double DY)? lblDrag = null;
                 if (overlay?.LabelDragOffsets is { } ldo && ldo.TryGetValue(c.Id, out var ld))
                     lblDrag = ld;
@@ -915,6 +928,86 @@ public static class SchematicRenderer
 
     /// <summary>Half-width, in WORLD units, of an unconnected port marker — for bounding-box fits.</summary>
     internal static float PortMarkerWorldHalf => PortBoxHalf;
+
+    // ── Pin names ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Each pin whose name the render model marked drawable, beside its pin.
+    ///
+    /// <para>Which pins those are was settled when the model was built — a built-in contributes none,
+    /// because its pin labels are text inside its own artwork. See
+    /// <see cref="SchematicPortDef.ShowName"/>.</para>
+    /// </summary>
+    private static void DrawPinNames(
+        SKCanvas canvas, SchematicComponent c,
+        double compX, double compY,
+        double panX, double panY, double zoom,
+        SKFont font, SKPaint paint)
+    {
+        if (font.Size < 4f) return;
+
+        // The name turns WITH the body, exactly as a pin label baked into a symbol's artwork does —
+        // it belongs to the pin it names, not to the sheet. Upright-always was tried and is worse: at
+        // 90° the names of a part whose pins are one grid apart stack across each other into an
+        // unreadable band, and the pin each one belongs to stops being identifiable at all.
+        double rotDeg = c.Rotation switch
+        {
+            SymbolRotation.R90  =>  90.0,
+            SymbolRotation.R180 => 180.0,
+            SymbolRotation.R270 => 270.0,
+            _                   =>   0.0,
+        };
+
+        font.GetFontMetrics(out var fm);
+        float baselineDy = (-fm.Ascent - fm.Descent) * 0.5f;
+
+        // Clear of the pin's own LEAD, which runs from the pin tip to the body along the very line the
+        // name runs along. Drawn on it, every name reads as struck through.
+        double lift = (-fm.Ascent + fm.Descent) * 0.62 / zoom;
+
+        foreach (var port in c.Ports)
+        {
+            if (!port.ShowName || port.Name.Length == 0) continue;
+
+            // NameAlign names the EDGE of the body this pin is on, in the symbol's own local frame, so
+            // the name runs INWARD from it: a left-edge pin's name runs toward local +x, a top-edge
+            // pin's toward local +y. A vertical one is turned a quarter turn and runs ALONG its lead —
+            // laid out horizontally, the names of a top edge whose pins are one grid apart overlap.
+            //
+            // The label's CENTRE is computed in local coordinates and put through the instance
+            // transform from there, so a mirrored or rotated instance's names follow its body with no
+            // second rule for either.
+            bool vertical = port.NameAlign is SymbolPinNameAlign.Top or SymbolPinNameAlign.Bottom;
+            float half = font.MeasureText(port.Name) * 0.5f;
+            double reach = PinNameGap + half / zoom;
+
+            // The lift goes perpendicular to the name's own run, in the direction the text's ascender
+            // points once the quarter turn is applied: -y for a horizontal name, +x for a vertical one.
+            (double lx, double ly) = port.NameAlign switch
+            {
+                SymbolPinNameAlign.Right  => (port.LocalX - reach,  port.LocalY - lift),
+                SymbolPinNameAlign.Center => (port.LocalX,          port.LocalY - lift),
+                SymbolPinNameAlign.Top    => (port.LocalX + lift,   port.LocalY + reach),
+                SymbolPinNameAlign.Bottom => (port.LocalX + lift,   port.LocalY - reach),
+                _                         => (port.LocalX + reach,  port.LocalY - lift),
+            };
+
+            // ...but never upside-down. The same readability auto-flip the built-in symbols' own
+            // labels take, applied to the NET angle: rotated 180° about the label's own centre, so it
+            // stays beside its pin and merely reads the right way up.
+            double netDeg = rotDeg + (vertical ? 90.0 : 0.0);
+            double n = ((netDeg % 360.0) + 360.0) % 360.0;
+            if (n > 90.0 && n <= 270.0) netDeg += 180.0;
+
+            var (px, py) = LocalToPixel(lx, ly, compX, compY, c.Rotation, c.MirrorX, panX, panY, zoom);
+
+            int save = canvas.Save();
+            canvas.Translate(px, py);
+            canvas.RotateDegrees((float)netDeg);
+            canvas.DrawText(port.Name, 0f, baselineDy, SKTextAlign.Center, font, paint);
+            canvas.RestoreToCount(save);
+        }
+    }
 
     // ── Labels (left-aligned; order: type, name, params) ─────────────────────
     // Label index 0 = component/type name  → ComponentNameText

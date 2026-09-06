@@ -214,17 +214,40 @@ public static class ComponentPlxReader
             if (name.Length == 0)
                 name = pin.First("pinName")?.First("text")?.Atoms.FirstOrDefault(a => a.Length > 0) ?? $"pin{pinNum}";
 
-            drawing.Pins.Add(new ComponentSymbolPin(
-                name, pad,
-                (int)Math.Round(x, MidpointRounding.AwayFromZero),
-                (int)Math.Round(y, MidpointRounding.AwayFromZero)));
+            int px = (int)Math.Round(x, MidpointRounding.AwayFromZero);
+            int py = (int)Math.Round(y, MidpointRounding.AwayFromZero);
+            // R-PL2-20: this grammar STATES the name's justification, on the pinName's own text node,
+            // and only where it is not the default — so an absent `justify` is left-aligned, which is
+            // also what the pin's rotation would say. Read rather than derived: a file that says so
+            // outright is the authority on its own drawing.
+            var align = pin.First("pinName")?.First("text")?.First("justify")?.Atom switch
+            {
+                { } j when j.Equals("right", StringComparison.OrdinalIgnoreCase) => KitTextAlign.Right,
+                { } j when j.Equals("centre", StringComparison.OrdinalIgnoreCase)
+                        || j.Equals("center", StringComparison.OrdinalIgnoreCase) => KitTextAlign.Center,
+                _ => KitTextAlign.Left,
+            };
+
+            drawing.Pins.Add(new ComponentSymbolPin(name, pad, px, py, Bonded: false, NameAlign: align));
+
+            // The lead from that terminal inward to the body. This format states it as a length and a
+            // rotation (`(pinLength 300 mils) (rotation 180)`) rather than drawing it as a `line`, so
+            // reading only `pt` leaves the body with every pin floating clear of it. `NumberOf` takes
+            // the first NUMERIC atom, which is how the trailing unit word is stepped over.
+            int lead = (int)Math.Round(pin.NumberOf("pinLength", 0), MidpointRounding.AwayFromZero);
+            if (lead > 0)
+            {
+                var (dx, dy) = ComponentSymbolLead.Direction(pin.NumberOf("rotation", 0));
+                drawing.Shapes.Add(new KitSymbolLine(px, py, px + (dx * lead), py + (dy * lead)));
+            }
         }
 
         foreach (var line in symbolDef.All("line"))
         {
             var pts = line.All("pt").Select(p => p.Numbers()).Where(n => n.Count >= 2).ToList();
             if (pts.Count >= 2)
-                drawing.Shapes.Add(new KitSymbolLine(pts[0][0], pts[0][1], pts[1][0], pts[1][1]));
+                drawing.Shapes.Add(new KitSymbolLine(pts[0][0], pts[0][1], pts[1][0], pts[1][1])
+                                   { Width = line.NumberOf("width", 0) });
         }
 
         foreach (var poly in symbolDef.All("poly"))
@@ -235,14 +258,17 @@ public static class ComponentPlxReader
                 var n = pt.Numbers();
                 if (n.Count >= 2) { xy.Add(n[0]); xy.Add(n[1]); }
             }
-            if (xy.Count >= 4) drawing.Shapes.Add(new KitSymbolPath(xy, true, false));
+            if (xy.Count >= 4)
+                drawing.Shapes.Add(new KitSymbolPath(xy, true, false) { Width = poly.NumberOf("width", 0) });
         }
 
         foreach (var arc in symbolDef.All("arc"))
         {
             var (cx, cy) = arc.PointOf("pt");
             double r = arc.NumberOf("radius", 0);
-            if (r > 0) drawing.Shapes.Add(new KitSymbolArc(cx, cy, r, arc.NumberOf("startAngle", 0), arc.NumberOf("sweepAngle", 360)));
+            if (r > 0)
+                drawing.Shapes.Add(new KitSymbolArc(cx, cy, r, arc.NumberOf("startAngle", 0), arc.NumberOf("sweepAngle", 360))
+                                   { Width = arc.NumberOf("width", 0) });
         }
 
         return drawing;

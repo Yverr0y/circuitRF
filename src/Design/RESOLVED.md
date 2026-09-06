@@ -1899,3 +1899,111 @@ null. Gate 2 (round trip) runs the real `circuitrf convert` as a separate proces
 `(via …)` lines against the source file's, so a graft that works only in `WorkspaceViewModel` cannot
 pass it. **Verified as a negative control**: neutering `PcbViaSpanMapping.Build` turns 8 of the 10
 red.
+
+## Imported symbols drew no pin leads in four of the eight grammars (2026-09-05)
+
+An imported symbol's body had every pin floating clear of it — no stem from the body edge out to the
+terminal. Reported against several formats at once, and it was one defect with four separate causes,
+because **every format states the lead differently and four of the readers read past whichever way
+theirs states it.** Measured on a nine-pin part whose body is four lines: the working readers produce
+13 shapes, the four broken ones produced 4.
+
+| Grammar | How the lead is stated | Was |
+|---|---|---|
+| `.kicad_sym`, `.lib`, `.lbr` | a length + rotation on the pin | drawn |
+| `.hkp` | ordinary line records, like any other geometry | drawn (free) |
+| `.scr` | a length WORD (`Long`) and an `R<deg>` token in the `Pin` statement | **dropped** |
+| `.PLX` / `.DSL` | `(pinLength 300 mils) (rotation 180)` | **dropped** |
+| `.cxf` | `LENGTH=` and `ROTATION=` fields on the `PIN` record | **dropped** |
+| `.p`/`.d`/`.c` | **a separate PIN DECAL the terminal names** | **dropped** |
+
+Three of the four were a field never read. The fourth is the one worth recording:
+
+- **A `.c` holds more than one decal, and the reader stopped after the first.** Each `T` record ends
+  with the NAME of a pin decal, defined later in the same file by the same grammar, whose own single
+  piece is the lead. Field 4 of the `T` record is the terminal's orientation in quarter turns. So the
+  fix is not a length to multiply out — it is reading every decal in the file and instantiating the
+  one each terminal names, rotated. The reader's own comment already asserted "the stub runs one pin
+  length inward from here" while nothing drew it, which is how the gap survived: the code described
+  the right drawing.
+- **A `T` record cannot be told from a decal header by shape** — both are 11+ whitespace-separated
+  fields beginning with a non-numeric — so the header scan excludes `T` explicitly. Without that,
+  the first terminal is read as a decal and the rest of the file becomes its contents.
+- **A terminal naming a decal the file does not define draws no lead and says so.** The length is the
+  pin decal's own geometry, and inventing one puts the body edge somewhere the file does not say it
+  is.
+- The four named lengths (`point`/`short`/`middle`/`long` = 0/100/200/300 mils) moved to
+  `ComponentSymbolLead`, shared by the two readers of that family that state them as words. **They are
+  absolute lengths in the format's own units and are NOT multiplied by the script interpreter's
+  current grid scale**, which converts stated coordinates and nothing else.
+- The script format also spells a MIRRORED placement (`MR90`, `SR0`). A mirror is not a rotation, and
+  reading one as its bare angle draws the lead on the wrong side of the terminal — a worse drawing
+  than the missing one. So only the plain `R<deg>` spelling is read and anything else leaves the pin a
+  bare point.
+
+**Gate:** `ComponentImportBreadthTests.Gate16` — one theory over all six PL2 grammars, asserting on the
+DRAWING rather than on any format's own spelling (a segment runs from each pin to the body edge beside
+it), plus `Gate16b` for the undefined-pin-decal report. The `.hkp` and `.c` fixtures gained the lead
+records the real files carry; without them the fixture could not show the defect.
+
+**Not fixed, and not a bug in these readers: no symbol FREE TEXT is imported, in any grammar.**
+`KitSymbolShape` has line, rectangle, path and arc and no text case at all, so a designator or value
+placeholder a file draws has nowhere to land and no text alignment to respect. Every one of these
+formats states that text with a justification field. Adding it means a new shape case carrying the
+string, its size, its rotation and its justification, mapped onto `SymbolTextAlign`/`SymbolTextVAlign`
+in `KitTemplateSymbol.Convert`.
+
+## Imported symbols carried neither the line weight nor the pin name's side (2026-09-05)
+
+Both were the same structural gap, one level below the readers: **`KitSymbolShape` had line, rectangle,
+path and arc, and no width field**, and **`SymbolPin` had no text alignment**. Nothing could be read
+into either, so every reader dropped both and `KitTemplateSymbol.Convert` hard-coded
+`SymbolStrokeTier.Normal` on every primitive.
+
+### Line weight — every format states it, and the mapping is RELATIVE
+
+Measured, not assumed: `.lbr` draws 11 wires at 0.1 mm and 5 at 0.254 mm; `.hkp` draws its body at
+0.005 in and its leads at 0.008 in; the `.c` body is 5 mils and its pin decal 10. Also `(width 5)`,
+`WIDTH=127000` (nm), `Wire 6`, `(stroke (width 0.127))` and field 4 of a legacy `P` record.
+
+`KitSymbolShape.Width` is now on the base record, so no positional constructor changed and each reader
+sets it in **its own coordinate unit** — the unit is deliberately not pinned down, because circuitRF has
+three stroke TIERS and only the ORDER of the widths within one symbol can survive.
+`KitTemplateSymbol.StrokeTiers` maps them: nothing stated or one width → all Normal; two distinct →
+Normal/Thick; three or more → thinnest Thin, thickest Thick, everything between Normal. A width of 0
+means "the editor's default" in several of these formats and is filtered out rather than treated as a
+hairline.
+
+**The obvious rule is wrong, and the measurement is what says so.** Anchoring Normal at the most COMMON
+width was the first design. There is one lead per pin and a fixed handful of body pieces, so on
+anything past a few pins the LEADS are the most common width — which put the body one tier below normal
+on essentially every imported symbol and left a whole imported library looking faint beside circuitRF's
+own. The thinnest stated width is the symbol's ordinary line; none of these formats draws a body
+heavier than its detail.
+
+### The pin name's side
+
+Two grammars state it outright: `.hkp`'s `*TEXT` field 4 (a signed justification, −1 left / +1 right)
+and `.PLX`/`.DSL`'s `(justify "right")` on the pinName's text node. The rest fix it through the pin's
+own rotation, because the name always sits on the BODY side of the terminal — so
+`ComponentSymbolLead.NameAlignFor` derives it there. **The two spellings agree, and
+`Gate17` compares them in one assertion over every grammar**, which is what makes the derived answer a
+measurement rather than a guess.
+
+circuitRF had no such property, so one was added: `SymbolPin.NameAlign`, defaulting to `Left` — which is
+"drawn to the RIGHT of the pin", because the alignment describes the TEXT and left-aligned text starting
+at the pin runs rightward. That default is exactly what both renderers already hard-coded, so no
+existing symbol changes. It persists in `.csym` as an additive field **omitted when it is the default**
+(`JsonIgnoreCondition.WhenWritingDefault`), so every existing symbol re-serializes byte for byte and no
+`FormatVersion` bump was needed — the same shape `LayoutFile.Pins` already uses. Gated by
+`ComponentImportTests.ThePinNamesSide_RoundTripsThroughCsym_AndCostsNothingWhenItIsTheDefault`.
+
+Without it, the whole right-hand column of an imported part's names is drawn outward, away from the
+body, into empty space. `ComponentPreviewRenderer`'s fit had the matching assumption and now measures
+the side per pin — reserving room on the right for a name drawn on the left is the same off-centre
+error its per-pin measurement already existed to avoid, made twice.
+
+**Still not imported: symbol FREE TEXT.** A designator or value placeholder a file draws has nowhere to
+land — that needs a new `KitSymbolShape` case carrying the string, its size, its rotation and its own
+justification. The pin-name alignment above is a property of the PIN and is unrelated to it.
+

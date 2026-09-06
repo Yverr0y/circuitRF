@@ -98,7 +98,7 @@ public static class ComponentRecordsReader
         List<string> PinNames, List<string> PadNames, List<string> DecalNames, string? Refusal);
 
     /// <summary>
-    /// <c>NAME DECALS FAMILY TYPE attrCount gateCount …</c>, then <c>attrCount</c> quoted attribute
+    /// <c>NAME DECALS FAMILY PREFIX attrCount gateCount …</c>, then <c>attrCount</c> quoted attribute
     /// lines, then <c>GATE decalCount pinCount swap</c> with its own two counted runs.
     /// </summary>
     private static PartHead ReadPartType(string text, ComponentPart part)
@@ -116,6 +116,12 @@ public static class ComponentRecordsReader
             return new PartHead([], [], [], $"The part-type line states {f.Count} fields; at least 6 are needed.");
 
         part.Name = f[0];
+
+        // Field 3 is the reference-designator prefix — the letter this library numbers its parts
+        // from, which is what a placed instance is called (U1, U2, U3). Field 2 beside it is the
+        // logical family and is not one: the same part exported to the dotted part-file grammar
+        // states this field's value, and not that one, as its own RefPrefix.
+        if (f[3] is { Length: > 0 } prefix && prefix != "*") part.Metadata["Reference"] = prefix;
 
         // R-PL2-5: the alternate decals are colon-separated in this one field. The separator makes a
         // decal name CONTAINING a colon unrepresentable — reported rather than guessed at.
@@ -373,10 +379,26 @@ public static class ComponentRecordsReader
 
     private sealed record SymbolResult(ComponentSymbolDrawing? Drawing, string? Refusal);
 
+    /// <summary>One terminal of a schematic decal: where it sits, which way it faces, and the name of
+    /// the PIN DECAL that draws it.</summary>
+    private sealed record SchTerminal(double X, double Y, int Orientation, string DecalName);
+
+    /// <summary>One decal out of the `.c`. Both kinds share a grammar — the symbol's own body decal and
+    /// the pin decals it refers to are read by the same routine and told apart only by who names
+    /// whom.</summary>
+    private sealed record SchDecal(string Name, ComponentArtwork Art, List<SchTerminal> Terminals);
+
     /// <summary>
     /// The schematic decal. Its terminal records are the symbol's pins <b>in the GATE block's
     /// order</b> — the file states no pin name and no pad identifier of its own, so the join is
     /// positional and the <c>.p</c> is the only thing that carries it.
+    ///
+    /// <para><b>A `.c` holds MORE than the one decal.</b> Each terminal record ends with the name of a
+    /// PIN DECAL, and that decal — defined later in the same file, by the same grammar — is what draws
+    /// the pin's lead from the terminal in to the body edge. The lead is not geometry of the symbol
+    /// decal and it is not a length stated on the terminal, so a reader that stops after the first
+    /// decal draws a body with every pin floating clear of it. So every decal in the file is read, and
+    /// each terminal instantiates the one it names, rotated by the terminal's own orientation.</para>
     /// </summary>
     private static SymbolResult ReadSymbolDecal(
         string text, List<string> pinNames, List<string> padNames, ComponentPart part)
@@ -385,14 +407,106 @@ public static class ComponentRecordsReader
         if (!lines.Any(l => IsBanner(l, SymbolHeader)))
             return new SymbolResult(null, $"This file does not open with a \"*…{SymbolHeader}…*\" banner.");
 
-        var drawing = new ComponentSymbolDrawing { Name = part.Name };
         int i = 0;
         while (i < lines.Count && (lines[i].Length == 0 || lines[i].StartsWith('*'))) i++;
         if (i >= lines.Count) return new SymbolResult(null, "This decal library declares no decal at all.");
 
-        var f = Fields(lines[i]);
-        if (f.Count < 11)
-            return new SymbolResult(null, $"The schematic decal header states {f.Count} fields; 11 are needed.");
+        var first = Fields(lines[i]);
+        if (first.Count < 11)
+            return new SymbolResult(null, $"The schematic decal header states {first.Count} fields; 11 are needed.");
+
+        var decals = new List<SchDecal>();
+        while (i < lines.Count)
+        {
+            var f = Fields(lines[i]);
+            if (!IsSchDecalHeader(f)) { i++; continue; }
+
+            var (decal, refusal) = ReadOneSchDecal(lines, ref i, f);
+            if (refusal is not null) return new SymbolResult(null, refusal);
+            decals.Add(decal!);
+        }
+
+        if (decals.Count == 0) return new SymbolResult(null, "This decal library declares no decal at all.");
+
+        // The first decal is the symbol; every other one is a candidate pin decal. Looked up BY NAME
+        // and never by position, so a decal nothing names simply goes unused rather than being drawn
+        // at some terminal it does not belong to.
+        var symbolDecal = decals[0];
+        var byName = new Dictionary<string, SchDecal>(StringComparer.OrdinalIgnoreCase);
+        foreach (var d in decals.Skip(1)) byName.TryAdd(d.Name, d);
+
+        var drawing = new ComponentSymbolDrawing { Name = part.Name };
+        Emit(drawing, symbolDecal.Art, 0, 0, 0);
+
+        int placed = 0;
+        foreach (var terminal in symbolDecal.Terminals)
+        {
+            string pin = placed < pinNames.Count ? pinNames[placed] : $"pin{placed + 1}";
+            string? pad = placed < padNames.Count ? padNames[placed] : null;
+
+            // `T x y …` — the terminal's point is the pin's FREE END (PL1 R-PL1-19), verified against
+            // the decal's own body outline: the lead its pin decal draws runs from here INWARD.
+            // The pin decal carries the name's justification inside itself, and it ROTATES with the
+            // terminal — which is the same thing as saying the name goes on the body side. Read off
+            // the orientation rather than out of the decal's label records: those state a font and a
+            // size this import does not carry, so the one field that would be used is the one field
+            // the orientation already settles.
+            var (dx, dy) = ComponentSymbolLead.Direction(terminal.Orientation * 90);
+
+            drawing.Pins.Add(new ComponentSymbolPin(
+                pin, pad,
+                (int)Math.Round(terminal.X, MidpointRounding.AwayFromZero),
+                (int)Math.Round(terminal.Y, MidpointRounding.AwayFromZero),
+                Bonded: false,
+                NameAlign: ComponentSymbolLead.NameAlignFor(dx, dy)));
+            placed++;
+
+            // The orientation is stated in quarter turns, which is the only rotation these files use.
+            if (byName.TryGetValue(terminal.DecalName, out var pinDecal))
+                Emit(drawing, pinDecal.Art, terminal.X, terminal.Y, terminal.Orientation * 90);
+        }
+
+        if (placed != pinNames.Count && pinNames.Count > 0)
+            part.Messages.Add(
+                $"The part type states {pinNames.Count} pins and the schematic decal draws {placed}. " +
+                "The pins that could be joined were; the rest are reported here.");
+
+        // A terminal naming a decal the file never defines is a lead that cannot be drawn. Reported by
+        // count rather than filled in with a guessed length: the length is the pin decal's own
+        // geometry, and inventing one puts the body edge somewhere the file does not say it is.
+        var missing = symbolDecal.Terminals
+            .Where(t => t.DecalName.Length > 0 && !byName.ContainsKey(t.DecalName))
+            .Select(t => t.DecalName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (missing.Count > 0)
+            part.Messages.Add(
+                $"The schematic decal draws its pins with {string.Join(", ", missing.Select(m => $"\"{m}\""))}, " +
+                "which this file does not define. Those pins are placed at their stated points with no lead drawn.");
+
+        return new SymbolResult(drawing, null);
+    }
+
+    /// <summary>
+    /// Whether a line opens a decal: at least eleven fields, the first non-numeric.
+    ///
+    /// <para><c>T</c> is excluded explicitly. A terminal record is also fourteen fields beginning with
+    /// a non-numeric, so it is the one record in this grammar that a header test cannot tell apart
+    /// from a header — and mistaking one for a decal would read the rest of the file as that decal's
+    /// contents.</para>
+    /// </summary>
+    private static bool IsSchDecalHeader(List<string> f)
+        => f.Count >= 11
+        && f[0] != "T"
+        && !double.TryParse(f[0], NumberStyles.Float, CultureInfo.InvariantCulture, out _);
+
+    /// <summary>One decal, consumed by its own declared counts (R-PL2-4) from <paramref name="i"/>,
+    /// which is left on the line after it.</summary>
+    private static (SchDecal? Decal, string? Refusal) ReadOneSchDecal(
+        List<string> lines, ref int i, List<string> f)
+    {
+        string name = f[0];
 
         // The same two-run shape as the land-pattern decal: `labels` before the pieces, `texts` after.
         int labels = Int(f[7]), pieces = Int(f[8]), texts = Int(f[9]), terminals = Int(f[10]);
@@ -403,46 +517,65 @@ public static class ComponentRecordsReader
 
         for (int n = 0; n < labels; n++, i += 2)
             if (i + 1 >= lines.Count)
-                return new SymbolResult(null, Underrun("schematic decal", $"{labels} labels", n));
+                return (null, Underrun($"schematic decal \"{name}\"", $"{labels} labels", n));
 
         var art = new ComponentArtwork();
-        if (ReadPieces(lines, ref i, pieces, art, part.Name) is { } refusal)
-            return new SymbolResult(null, refusal);
+        if (ReadPieces(lines, ref i, pieces, art, name) is { } refusal) return (null, refusal);
 
         for (int n = 0; n < texts; n++, i += 2)
             if (i + 1 >= lines.Count)
-                return new SymbolResult(null, Underrun("schematic decal", $"{texts} free-text labels", n));
+                return (null, Underrun($"schematic decal \"{name}\"", $"{texts} free-text labels", n));
 
-        foreach (var path in art.Paths)
-            drawing.Shapes.Add(new KitSymbolPath(path.Xy, path.Closed, false));
-        foreach (var circle in art.Circles)
-            drawing.Shapes.Add(new KitSymbolArc(circle.Cx, circle.Cy, circle.Radius, 0, 360));
-
-        // `T x y …` — the terminal's point is the pin's FREE END (PL1 R-PL1-19), verified against the
-        // decal's own body outline: the stub runs one pin length inward from here.
-        int placed = 0;
+        var read = new List<SchTerminal>();
         for (int n = 0; n < terminals && i < lines.Count; n++)
         {
             while (i < lines.Count && !lines[i].StartsWith("T ", StringComparison.Ordinal)) i++;
             if (i >= lines.Count)
-                return new SymbolResult(null, Underrun("schematic decal", $"{terminals} terminals", n));
+                return (null, Underrun($"schematic decal \"{name}\"", $"{terminals} terminals", n));
 
             var tf = Fields(lines[i]);
             i++;
             if (tf.Count < 3) continue;
 
-            string pin = placed < pinNames.Count ? pinNames[placed] : $"pin{placed + 1}";
-            string? pad = placed < padNames.Count ? padNames[placed] : null;
-            drawing.Pins.Add(new ComponentSymbolPin(pin, pad, (int)Math.Round(Num(tf[1])), (int)Math.Round(Num(tf[2]))));
-            placed++;
+            read.Add(new SchTerminal(
+                Num(tf[1]), Num(tf[2]),
+                tf.Count > 4 ? Int(tf[4]) : 0,
+                tf.Count > 12 ? tf[^1] : ""));
         }
 
-        if (placed != pinNames.Count && pinNames.Count > 0)
-            part.Messages.Add(
-                $"The part type states {pinNames.Count} pins and the schematic decal draws {placed}. " +
-                "The pins that could be joined were; the rest are reported here.");
+        return (new SchDecal(name, art, read), null);
+    }
 
-        return new SymbolResult(drawing, null);
+    /// <summary>
+    /// Appends one decal's drawn pieces to the symbol, rotated by <paramref name="degrees"/> about its
+    /// own origin and translated to (<paramref name="x"/>, <paramref name="y"/>).
+    ///
+    /// <para>The symbol's own body decal comes through here too, at the identity — one path for both,
+    /// so a pin decal cannot pick up a transform rule the body does not have.</para>
+    /// </summary>
+    private static void Emit(
+        ComponentSymbolDrawing drawing, ComponentArtwork art, double x, double y, double degrees)
+    {
+        double rad = degrees * Math.PI / 180.0;
+        double cos = Math.Cos(rad), sin = Math.Sin(rad);
+
+        foreach (var path in art.Paths)
+        {
+            var xy = new List<double>(path.Xy.Count);
+            for (int n = 0; n + 1 < path.Xy.Count; n += 2)
+            {
+                double px = path.Xy[n], py = path.Xy[n + 1];
+                xy.Add(x + (px * cos) - (py * sin));
+                xy.Add(y + (px * sin) + (py * cos));
+            }
+            drawing.Shapes.Add(new KitSymbolPath(xy, path.Closed, false) { Width = path.Width });
+        }
+
+        foreach (var circle in art.Circles)
+            drawing.Shapes.Add(new KitSymbolArc(
+                x + (circle.Cx * cos) - (circle.Cy * sin),
+                y + (circle.Cx * sin) + (circle.Cy * cos),
+                circle.Radius, 0, 360) { Width = circle.Width });
     }
 
     // ── Shared ────────────────────────────────────────────────────────────────────────────────────

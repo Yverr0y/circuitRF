@@ -1,47 +1,264 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mi="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+        xmlns:cc="clr-namespace:CircuitRF.Ui.Controls"
+        xmlns:dlg="clr-namespace:CircuitRF.Ui.Views.Dialogs"
         x:Class="CircuitRF.Ui.Views.Dialogs.ComponentImportChooserDialog"
         Title="Import Component"
-        Width="620"
-        SizeToContent="Height"
-        CanResize="False"
+        Width="1180"
+        Height="620"
+        MinWidth="860"
+        MinHeight="460"
+        CanResize="True"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False">
 
-    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" Margin="20,16,20,16">
+    <Grid RowDefinitions="*,Auto,Auto,Auto" Margin="20,16,20,16">
 
-        <TextBlock Grid.Row="0" x:Name="HeadingText" FontSize="12" TextWrapping="Wrap"/>
+        <!-- The list and what the selected row actually looks like, side by side. The preview is the
+             wider half on purpose: the list rows are text that differs in a few characters, and the
+             pictures are the whole reason this dialog is worth its size. -->
+        <Grid Grid.Row="0" ColumnDefinitions="0.8*,10,2.2*">
 
-        <ListBox Grid.Row="1"
-                 x:Name="CandidateList"
-                 Margin="0,12,0,0"
-                 MaxHeight="240"
-                 FontSize="12"/>
+            <!-- The list, under its own search and filter bar — the Project Tree's arrangement and
+                 its idiom throughout: the magnifier is the affordance and the field only exists while
+                 it is on, closing the field clears the query (a filter still applied with nothing on
+                 screen to say so is the worst state a list can be in), and Escape or the X collapses
+                 it. -->
+            <Grid Grid.Column="0" RowDefinitions="Auto,6,*">
 
-        <TextBlock Grid.Row="2"
+                <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto,Auto">
+
+                    <!-- The folder that was scanned, in the place the Project Tree puts the workspace
+                         name — and for the same reason the field then covers it: this row's width is
+                         needed by the search field when it is open and by the folder name when it is
+                         not, and neither is worth a permanent half. -->
+                    <TextBlock Grid.Column="0" x:Name="ScanRootText"
+                               FontSize="12" FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               Margin="0,0,4,0"/>
+
+                    <!-- Present in the layout at ALL times and hidden by OPACITY, never by
+                         IsVisible (owner, 2026-09-05: the list slid down when the field opened).
+                         A text box is taller than the label it covers, so a field that joins the
+                         layout when it opens grows this row and pushes the whole list down by the
+                         difference. Reserving a fixed height instead would be a number to keep in
+                         step with three platforms' font metrics; leaving the field measured and
+                         merely invisible is the same reservation, made by the control itself. -->
+                    <Grid Grid.Column="0" Opacity="0" IsHitTestVisible="False"
+                          x:Name="SearchFieldHost" Margin="0,0,4,0">
+                        <TextBox x:Name="SearchBox"
+                                 PlaceholderText="Search by name…"
+                                 FontSize="12"
+                                 Padding="6,2,22,2"
+                                 MinHeight="0"
+                                 VerticalContentAlignment="Center"
+                                 TextChanged="OnSearchTextChanged"
+                                 KeyDown="OnSearchKeyDown"/>
+                        <Button HorizontalAlignment="Right" VerticalAlignment="Center"
+                                Margin="2" Padding="2"
+                                Background="Transparent" BorderThickness="0"
+                                x:Name="ClearSearchButton"
+                                IsVisible="False"
+                                Click="OnClearSearchClick"
+                                ToolTip.Tip="Clear search">
+                            <mi:MaterialIcon Kind="Close" Width="10" Height="10"
+                                             Foreground="{DynamicResource SystemBaseMediumColor}"/>
+                        </Button>
+                    </Grid>
+
+                    <!-- Scanning a different folder is a change to the NAME beside it, so the
+                         gesture sits beside the name (owner, 2026-09-05) rather than among the
+                         dialog's commit buttons, where it read as a third thing to decide between
+                         Cancel and Import. The ellipsis is the platform's own word for "choose one",
+                         which is why it needs none of its own. -->
+                    <Button Grid.Column="1"
+                            Click="OnAnotherFolderClick"
+                            ToolTip.Tip="Point at a different folder and scan that one instead."
+                            FontSize="12" Padding="5,0" Margin="0,0,6,0"
+                            Background="Transparent" BorderThickness="0"
+                            Content="…"/>
+
+                    <!-- The count only appears once something is hidden: a list that says "40 of 40"
+                         at rest is noise, and the one moment it matters is when a row the user is
+                         looking for is filtered out. -->
+                    <TextBlock Grid.Column="2" x:Name="FilterCountText"
+                               FontSize="11" Opacity="0.7" VerticalAlignment="Center"
+                               Margin="0,0,6,0"
+                               IsVisible="False"/>
+
+                    <Button Grid.Column="3"
+                            Click="OnToggleSearchClick"
+                            ToolTip.Tip="Search by name"
+                            Padding="3,2" Background="Transparent" BorderThickness="0" Margin="0,0,2,0">
+                        <mi:MaterialIcon Kind="Magnify" Width="14" Height="14"
+                                         Foreground="{DynamicResource SystemBaseMediumColor}"/>
+                    </Button>
+
+                    <Button Grid.Column="4"
+                            x:Name="FilterButton"
+                            ToolTip.Tip="Filter by type"
+                            Padding="3,2" Background="Transparent" BorderThickness="0">
+                        <mi:MaterialIcon Kind="Filter" Width="14" Height="14"
+                                         Foreground="{DynamicResource SystemBaseMediumColor}"/>
+                        <Button.Flyout>
+                            <Flyout Placement="BottomEdgeAlignedLeft">
+                                <!-- Built from what THIS scan holds, not from the full set of formats
+                                     circuitRF can read: a checkbox for a category the folder does not
+                                     contain filters nothing and reads as a promise the list is not
+                                     keeping. -->
+                                <StackPanel x:Name="FilterPanel" Spacing="3" Margin="8" MinWidth="200"/>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
+                </Grid>
+
+            <ListBox Grid.Row="2"
+                     x:Name="CandidateList"
+                     FontSize="12"
+                     SelectionChanged="OnCandidateSelectionChanged">
+                <!-- Alternating row bands (owner, 2026-09-05). Rows here are two lines of text that
+                     differ in a few characters, and a band is what makes each one read as one item
+                     rather than as four lines running together.
+
+                     Targets the ContentPresenter, because that is where this theme's ListBoxItem
+                     actually paints its background — a Background set on the item itself is invisible
+                     (see WBondTouchstoneExportDialog, which clears the same three states). Excluding
+                     :selected and :pointerover is what keeps the band UNDER those rather than over
+                     them: a style declared here outranks the control theme's, so without the
+                     exclusion the even rows would lose their selection highlight.
+
+                     A neutral grey at low alpha rather than a theme brush: it darkens a light theme
+                     and lightens a dark one by the same small amount, with nothing to keep in step.
+                     Deliberately faint (owner, 2026-09-05) — the band only has to separate one row
+                     from the next, and anything heavier competes with the selection it sits under. -->
+                <ListBox.Styles>
+                    <Style Selector="ListBoxItem:nth-child(2n):not(:selected):not(:pointerover) /template/ ContentPresenter">
+                        <Setter Property="Background" Value="#0A808080"/>
+                    </Style>
+                </ListBox.Styles>
+                <!-- Right-click a row to go and look at what it is (owner, 2026-09-05). The label is
+                     FileReveal's, so it says Finder / Explorer / File Manager as the platform
+                     requires; it is set in code because that is where the platform is known. -->
+                <ListBox.ContextMenu>
+                    <ContextMenu Opening="OnRowContextMenuOpening">
+                        <MenuItem x:Name="RevealMenuItem" Click="OnRevealClick"/>
+                    </ContextMenu>
+                </ListBox.ContextMenu>
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="dlg:CandidateRow">
+                        <StackPanel Spacing="1">
+                            <TextBlock Text="{Binding Title}" FontSize="12"
+                                       TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Text="{Binding Location}" FontSize="10" Opacity="0.65"
+                                       TextTrimming="CharacterEllipsis"
+                                       IsVisible="{Binding HasLocation}"/>
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+            </Grid>
+
+            <Border Grid.Column="2"
+                    BorderBrush="{DynamicResource ThemeBorderMidBrush}"
+                    BorderThickness="1"
+                    CornerRadius="3"
+                    Padding="8">
+                <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+                    <!-- Fixed height, like every other non-pane row here: the drawings must be the
+                         same size for every candidate, and a name that wraps would resize them. -->
+                    <StackPanel Grid.Row="0" Height="34" Spacing="1">
+                        <TextBlock x:Name="PreviewNameText" FontSize="13" FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <TextBlock x:Name="PreviewCompositionText" FontSize="10" Opacity="0.7"
+                                   TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+
+                    <Grid Grid.Row="1" ColumnDefinitions="*,10,*" Height="26">
+                        <TextBlock Grid.Column="0" Text="Symbol" FontSize="11"
+                                   FontWeight="SemiBold" Opacity="0.8" VerticalAlignment="Center"/>
+                        <DockPanel Grid.Column="2" LastChildFill="False">
+                            <TextBlock DockPanel.Dock="Left" Text="Footprint" FontSize="11"
+                                       FontWeight="SemiBold" Opacity="0.8" VerticalAlignment="Center"/>
+                            <!-- Only shown for a part carrying density variants (R-PL1-25). One land
+                                 pattern needs no chooser, and an always-present combo holding a
+                                 single unnamed row reads as a setting the user has to make. -->
+                            <ComboBox DockPanel.Dock="Right"
+                                      x:Name="VariantCombo"
+                                      FontSize="11"
+                                      MinWidth="120"
+                                      IsVisible="False"
+                                      SelectionChanged="OnVariantSelectionChanged"
+                                      MinHeight="0"
+                                      Padding="6,2"
+                                      VerticalAlignment="Center"
+                                      VerticalContentAlignment="Center"/>
+                        </DockPanel>
+                    </Grid>
+
+                    <!-- Side by side and SQUARE (owner, 2026-09-05). A square is the shape that
+                         suits neither drawing in particular and both about equally: a symbol is
+                         usually taller than wide and a land pattern wider than tall, so any other
+                         ratio is chosen against one of them. Stacking them needed twice the height
+                         for panes half as tall; side by side the dialog is 180px shorter and each
+                         pane is larger than it was. -->
+                    <Grid Grid.Row="2" ColumnDefinitions="*,10,*" Margin="0,4,0,0">
+                        <cc:AspectRatioPanel Grid.Column="0" Ratio="1">
+                            <Panel x:Name="SymbolPane">
+                                <cc:PreviewImage x:Name="SymbolImage"
+                                                 RenderOptions.BitmapInterpolationMode="HighQuality"/>
+                                <TextBlock x:Name="SymbolPlaceholder"
+                                           FontSize="11" Opacity="0.6" TextWrapping="Wrap"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Panel>
+                        </cc:AspectRatioPanel>
+
+                        <cc:AspectRatioPanel Grid.Column="2" Ratio="1">
+                            <Panel x:Name="FootprintPane">
+                                <cc:PreviewImage x:Name="FootprintImage"
+                                                 RenderOptions.BitmapInterpolationMode="HighQuality"/>
+                                <TextBlock x:Name="FootprintPlaceholder"
+                                           FontSize="11" Opacity="0.6" TextWrapping="Wrap"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Panel>
+                        </cc:AspectRatioPanel>
+                    </Grid>
+
+                    <TextBlock Grid.Row="3"
+                               x:Name="PreviewSummaryText"
+                               Margin="0,10,0,0"
+                               Height="46"
+                               FontSize="11"
+                               Opacity="0.85"
+                               TextWrapping="Wrap"
+                               TextTrimming="CharacterEllipsis"/>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <TextBlock Grid.Row="1"
                    x:Name="SkippedText"
                    Margin="0,12,0,0"
                    FontSize="11"
                    Opacity="0.75"
                    TextWrapping="Wrap"/>
 
-        <TextBlock Grid.Row="3"
+        <TextBlock Grid.Row="2"
                    x:Name="TruncationText"
                    Margin="0,8,0,0"
                    FontSize="11"
                    IsVisible="False"
                    TextWrapping="Wrap"/>
 
-        <StackPanel Grid.Row="4"
+        <StackPanel Grid.Row="3"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Spacing="8"
                     Margin="0,16,0,0">
             <Button Content="Cancel" Width="90" FontSize="12" HorizontalContentAlignment="Center"
                     Click="OnCancelClick"/>
-            <Button Content="Another Folder…" Width="140" FontSize="12" HorizontalContentAlignment="Center"
-                    Click="OnAnotherFolderClick"
-                    ToolTip.Tip="Point at a different folder and scan that one instead."/>
             <Button Content="Import" x:Name="ImportButton" Width="110" IsDefault="True"
                     FontSize="12" HorizontalContentAlignment="Center" Click="OnImportClick"/>
         </StackPanel>

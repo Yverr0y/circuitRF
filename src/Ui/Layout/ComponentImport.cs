@@ -38,20 +38,44 @@ public static class ComponentImport
     public const double SymbolScale = 1.0;
 
     /// <summary>
-    /// Writes <paramref name="part"/> as ONE cell folder under <paramref name="parentDir"/>.
+    /// Everything an import WOULD create, built in memory and written nowhere — the terminal table,
+    /// the symbol, and one <see cref="LayoutView"/> per land pattern, on the layer keys the
+    /// reconciliation settled on.
     /// </summary>
-    /// <param name="resolveLayerMapping">The shared L1g layer-mapping dialog, exactly as
-    /// <c>PcbImport</c>/<c>GdsiiImport</c>/<c>DxfImport</c> take it. Returning null aborts the whole
-    /// import and creates nothing.</param>
-    public static ImportResult Import(
+    /// <param name="LayersToAdd">Layers the destination technology does not define, which the caller
+    /// installs. A PREVIEW never installs them; it renders through a scratch technology carrying them
+    /// (<see cref="ComponentPreview"/>).</param>
+    public sealed record BuiltPart(
+        IReadOnlyList<ComponentTerminal> Terminals,
+        Symbol? Symbol,
+        IReadOnlyList<BuiltLayout> Layouts,
+        IReadOnlyList<LayerDef> LayersToAdd,
+        int PinsWithNoPad,
+        int PadsWithNoPin);
+
+    /// <summary>One land pattern, built. <paramref name="Variant"/> is R-PL1-25's density suffix —
+    /// empty for the nominal pattern, which is the one that becomes <c>PrimaryLayout</c>.</summary>
+    public sealed record BuiltLayout(string Variant, string FootprintName, LayoutView View);
+
+    /// <summary>
+    /// The half of <see cref="Import"/> that touches no filesystem: terminals, layer reconciliation,
+    /// the land patterns and the symbol.
+    ///
+    /// <para><b>The import chooser's preview calls THIS</b>, so what the preview draws is what the
+    /// import would write — not a second conversion free to drift from it. The only thing a preview
+    /// passes differently is a null <paramref name="resolveLayerMapping"/>, which takes the mapping
+    /// dialog's own pre-selected defaults rather than asking; nothing else about the two paths
+    /// differs.</para>
+    /// </summary>
+    /// <returns>Null when <paramref name="resolveLayerMapping"/> declined, which aborts the whole
+    /// import and creates nothing.</returns>
+    public static BuiltPart? Build(
         ComponentPart part,
-        string parentDir,
         Technology? destTech,
         int destDbuPerMicron,
+        List<string> messages,
         Func<IReadOnlyList<LayerMappingRow>, IReadOnlyDictionary<LayerKey, LayoutFragment.LayerReconciliationChoice>?>? resolveLayerMapping = null)
     {
-        var messages = new List<string>(part.Messages);
-
         // ── The map, and the numbering both views share ─────────────────────────────────────────
         var padOrder = part.Footprints.FirstOrDefault()?.PadNames ?? [];
         var terminals = ComponentTerminals.Build(part, padOrder);
@@ -91,21 +115,15 @@ public static class ComponentImport
         if (rows.Count > 0 && LayoutLayerMapping.RequiresConfirmation(rows) && resolveLayerMapping is not null)
         {
             choices = resolveLayerMapping(rows);
-            if (choices is null) return ImportResult.Nothing(messages);
+            if (choices is null) return null;
         }
         choices ??= LayoutLayerMapping.BuildChoices(rows);
         if (rows.Count > 0) messages.Add(LayoutLayerMapping.SummarizeMapping(rows, destTech));
 
-        // ── The cell folder ─────────────────────────────────────────────────────────────────────
-        //
-        // R-PL1-5: named by ImportFolder.UniqueName, the same rule a board import uses — importing the
-        // same part twice yields PartName_2 rather than overwriting.
-        string cellName = ImportFolder.UniqueName(parentDir, part.Name);
-        string cellDir = CellFolder.CreateCellFolder(parentDir, cellName);
-
+        // ── The land patterns ───────────────────────────────────────────────────────────────────
         var layersToAdd = new List<LayerDef>();
         var addedKeys = new HashSet<LayerKey>();
-        string? primaryLayout = null;
+        var layouts = new List<BuiltLayout>(part.Footprints.Count);
 
         foreach (var footprint in part.Footprints)
         {
@@ -118,17 +136,57 @@ public static class ComponentImport
             view.Shapes.AddRange(reconciled.Shapes);
             AddPins(view, footprint, terminals.Terminals, keyByName, choices);
 
+            layouts.Add(new BuiltLayout(footprint.Variant, footprint.Name, view));
+        }
+
+        return new BuiltPart(
+            terminals.Terminals,
+            BuildSymbol(part, terminals.Terminals, messages),
+            layouts,
+            layersToAdd,
+            terminals.PinsWithNoPad,
+            terminals.PadsWithNoPin);
+    }
+
+    /// <summary>
+    /// Writes <paramref name="part"/> as ONE cell folder under <paramref name="parentDir"/>.
+    /// </summary>
+    /// <param name="resolveLayerMapping">The shared L1g layer-mapping dialog, exactly as
+    /// <c>PcbImport</c>/<c>GdsiiImport</c>/<c>DxfImport</c> take it. Returning null aborts the whole
+    /// import and creates nothing.</param>
+    public static ImportResult Import(
+        ComponentPart part,
+        string parentDir,
+        Technology? destTech,
+        int destDbuPerMicron,
+        Func<IReadOnlyList<LayerMappingRow>, IReadOnlyDictionary<LayerKey, LayoutFragment.LayerReconciliationChoice>?>? resolveLayerMapping = null)
+    {
+        var messages = new List<string>(part.Messages);
+
+        var built = Build(part, destTech, destDbuPerMicron, messages, resolveLayerMapping);
+        if (built is null) return ImportResult.Nothing(messages);
+
+        // ── The cell folder ─────────────────────────────────────────────────────────────────────
+        //
+        // R-PL1-5: named by ImportFolder.UniqueName, the same rule a board import uses — importing the
+        // same part twice yields PartName_2 rather than overwriting.
+        string cellName = ImportFolder.UniqueName(parentDir, part.Name);
+        string cellDir = CellFolder.CreateCellFolder(parentDir, cellName);
+
+        string? primaryLayout = null;
+        foreach (var layout in built.Layouts)
+        {
             // R-PL1-25: every density variant is written as a sibling view of ONE cell, with the
             // nominal pattern as the primary. Separate cells would represent them as separate parts.
-            string fileName = cellName + footprint.Variant + ".clay";
+            string fileName = cellName + layout.Variant + ".clay";
             LayoutPersistence.SaveToFile(
-                Path.Combine(CellFolder.SubFolderPath(cellDir, ViewType.Layout), fileName), view);
+                Path.Combine(CellFolder.SubFolderPath(cellDir, ViewType.Layout), fileName), layout.View);
             primaryLayout ??= fileName;
         }
 
         // ── The symbol ──────────────────────────────────────────────────────────────────────────
         string? primarySymbol = null;
-        if (BuildSymbol(part, terminals.Terminals, messages) is { } symbol)
+        if (built.Symbol is { } symbol)
         {
             primarySymbol = cellName + ".csym";
             SymbolPersistence.SaveToFile(
@@ -158,20 +216,20 @@ public static class ComponentImport
         var ccell = CellPersistence.LoadFromFile(ccellPath);
         ccell.PrimarySymbol = primarySymbol;
         ccell.PrimaryLayout = primaryLayout;
-        ccell.NumPorts = terminals.Terminals.Count;
+        ccell.NumPorts = built.Terminals.Count;
         ccell.Parameters = [.. MetadataParameters(part)];
         ccell.ImportedFrom = new CcellImportProvenance
         {
             Source = Path.GetFileName(part.SourceFiles.FirstOrDefault() ?? ""),
             Definition = part.Name,
-            ContentHash = ComponentProvenance.HashOf(part, terminals.Terminals),
+            ContentHash = ComponentProvenance.HashOf(part, built.Terminals),
         };
         CellPersistence.SaveToFile(ccellPath, ccell);
 
         // ── What came in, and what did not ──────────────────────────────────────────────────────
-        Report(part, terminals, copied, messages);
+        Report(part, built, copied, messages);
 
-        return new ImportResult(false, cellDir, layersToAdd, messages);
+        return new ImportResult(false, cellDir, built.LayersToAdd, messages);
     }
 
     // ── Pins ────────────────────────────────────────────────────────────────────────────────────
@@ -257,7 +315,10 @@ public static class ComponentImport
     {
         if (part.Symbol is not { Pins.Count: > 0 } drawing) return null;
 
-        var pins = drawing.Pins.Select(p => new KitSymbolPin(p.Name, p.XMil, -p.YMil)).ToList();
+        // NameAlign names the EDGE of the body a pin sits on, not a screen direction, so it crosses the
+        // Y flip below unchanged: the pin is on the same edge of the same picture in Y-up mils and in
+        // Y-down local units alike. That is the whole reason it is stated as a side.
+        var pins = drawing.Pins.Select(p => new KitSymbolPin(p.Name, p.XMil, -p.YMil, p.NameAlign)).ToList();
         var shapes = drawing.Shapes.Select(FlipY).ToList();
 
         var symbol = KitTemplateSymbol.BuildFromDrawing(pins, shapes, SymbolScale);
@@ -296,12 +357,15 @@ public static class ComponentImport
         return new Symbol(symbol.Primitives, symbol.Pins, terminals.Count);
     }
 
+    /// <summary><c>Width</c> rides along on every arm: it is the file's own stated stroke, it is what
+    /// <c>KitTemplateSymbol.StrokeTiers</c> reads, and dropping it here would put every imported
+    /// symbol back on one tier without anything looking wrong.</summary>
     private static KitSymbolShape FlipY(KitSymbolShape shape) => shape switch
     {
-        KitSymbolLine l => new KitSymbolLine(l.X1, -l.Y1, l.X2, -l.Y2),
-        KitSymbolRectangle r => new KitSymbolRectangle(r.X1, -r.Y1, r.X2, -r.Y2, r.Filled),
-        KitSymbolPath p => new KitSymbolPath(FlipYs(p.Xy), p.Closed, p.Filled),
-        KitSymbolArc a => new KitSymbolArc(a.Cx, -a.Cy, a.Radius, a.StartDeg, a.SweepDeg),
+        KitSymbolLine l => new KitSymbolLine(l.X1, -l.Y1, l.X2, -l.Y2) { Width = l.Width },
+        KitSymbolRectangle r => new KitSymbolRectangle(r.X1, -r.Y1, r.X2, -r.Y2, r.Filled) { Width = r.Width },
+        KitSymbolPath p => new KitSymbolPath(FlipYs(p.Xy), p.Closed, p.Filled) { Width = p.Width },
+        KitSymbolArc a => new KitSymbolArc(a.Cx, -a.Cy, a.Radius, a.StartDeg, a.SweepDeg) { Width = a.Width },
         _ => shape,
     };
 
@@ -353,20 +417,20 @@ public static class ComponentImport
     // ── Reporting ───────────────────────────────────────────────────────────────────────────────
 
     private static void Report(
-        ComponentPart part, ComponentTerminals.Result terminals, IReadOnlyList<string> copied, List<string> messages)
+        ComponentPart part, BuiltPart built, IReadOnlyList<string> copied, List<string> messages)
     {
-        int joined = terminals.Terminals.Count(t => t.PadName is not null && t.PinName is not null);
+        int joined = built.Terminals.Count(t => t.PadName is not null && t.PinName is not null);
         messages.Add(
-            $"Imported {terminals.Terminals.Count:N0} terminal(s) — {joined:N0} joined pin to pad — " +
+            $"Imported {built.Terminals.Count:N0} terminal(s) — {joined:N0} joined pin to pad — " +
             $"across {part.Footprints.Count:N0} land pattern(s)" +
             (part.Symbol is null ? " and no symbol." : " and one symbol."));
 
         // R-PL1-11: both sides in full, joined where they join, and the leftovers named rather than
         // dropped or invented.
-        if (terminals.PinsWithNoPad > 0 || terminals.PadsWithNoPin > 0)
+        if (built.PinsWithNoPad > 0 || built.PadsWithNoPin > 0)
             messages.Add(
-                $"{terminals.PinsWithNoPad:N0} symbol pin(s) reference no pad and " +
-                $"{terminals.PadsWithNoPin:N0} pad(s) are referenced by no symbol pin. Both were imported " +
+                $"{built.PinsWithNoPad:N0} symbol pin(s) reference no pad and " +
+                $"{built.PadsWithNoPin:N0} pad(s) are referenced by no symbol pin. Both were imported " +
                 "in full — a pin bonded to two pads and a mounting or shield pad both look like this.");
 
         foreach (var section in part.UnimportedSections)

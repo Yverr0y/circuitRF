@@ -605,6 +605,22 @@ public sealed class EditableComponent
     /// <summary>Whether to render the instance name (e.g. "R1", "Z1"). Seeded from registry default at placement; overridable per-instance.</summary>
     public bool ShowInstanceName { get; set; } = true;
 
+    /// <summary>
+    /// Whether to draw this instance's PIN names beside its pins. <b>Three-state, and null is the
+    /// ordinary case</b>: null lets the symbol decide — each pin that carries a stated name rather
+    /// than its own ordinal draws it (<see cref="SymbolPinNames"/>) — while true draws every pin's
+    /// name, ordinals included, and false draws none.
+    ///
+    /// <para>Tri-state rather than a plain bool because the default is a property of the SYMBOL, and
+    /// the symbol can change under a placed instance: a librarian who names a cell's pins should see
+    /// the names appear on instances already on the canvas, which a bool captured at placement could
+    /// never do. Only an explicit toggle writes it, and only an explicit toggle is persisted.</para>
+    ///
+    /// <para>Applies to cell-reference instances only. A built-in draws its pin labels as text inside
+    /// its own artwork, so honouring this there would double every one of them.</para>
+    /// </summary>
+    public bool? ShowPinNames { get; set; }
+
     public (double DX, double DY) GetLabelOffset(int index)
         => SchematicComponent.LabelOffsetAt(LabelOffsets, index);
 
@@ -857,10 +873,16 @@ public sealed class EditableComponent
                             ? PortConnectionState.Connected
                             : PortConnectionState.Unconnected;
                     }
+                    // The pin's NAME, drawn on the schematic. Built-in components carry their pin
+                    // labels as text inside their own artwork; a symbol read from a component
+                    // library carries them here instead, and before this they were simply never
+                    // drawn once the part was placed. Decided once, here, rather than per frame.
                     return new SchematicPortDef(
                         pin.Name ?? $"P{pin.PortIndex + 1}",
                         (float)pin.LocalX, (float)pin.LocalY,
-                        state);
+                        state,
+                        pin.NameAlign,
+                        ShowPinNames ?? SymbolPinNames.IsStated(pin.Name));
                 }).ToList();
             }
             else
@@ -1024,6 +1046,7 @@ public sealed class EditableComponent
             X = X, Y = Y, Rotation = Rotation, MirrorX = MirrorX, Disable = Disable,
             ShowTypeLabel    = ShowTypeLabel,
             ShowInstanceName = ShowInstanceName,
+            ShowPinNames     = ShowPinNames,
             CellRef          = CellRef,
             // SL3 R-sl3-10: a clone carries the recorded interface hash, and it must. Copy/paste,
             // Duplicate and every command that rebuilds a component go through here — dropping it

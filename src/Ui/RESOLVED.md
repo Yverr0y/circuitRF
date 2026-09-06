@@ -20282,3 +20282,387 @@ The layout editor needed none of that: its menu is built fresh per opening and a
 canvas, so Pop Out is simply contributed in `LayoutEditorView.axaml.cs` beside Re-reference Cell… —
 both are workspace-level operations reached through `LayoutDocument.Hierarchy`, which `LayoutCanvas`
 cannot see.
+
+## Import Component — the chooser's preview (2026-09-05)
+
+The component import chooser (`ComponentImportChooserDialog`, PL1/PL2) listed candidates as text and
+nothing else, so two rows differing by a few characters could be entirely different parts with no way
+to tell before importing one. It now draws the selected candidate's symbol and footprint beside the
+list. Owner request; the notes below are the parts that were not obvious.
+
+### The preview is the import's own conversion, not a second one
+
+`ComponentImport.Import` was split into **`Build`** (terminals, layer reconciliation, the land
+patterns, the symbol — no filesystem at all) and the write half. The preview calls `Build`, so the
+pictures are what the import would write *by construction*. The only difference between the two paths
+is that a preview passes no `resolveLayerMapping`, which takes the mapping dialog's own pre-selected
+defaults rather than asking.
+
+**This is the property worth gating, and `ComponentPreviewTests` gates it that way**: every test
+compares the preview's `LayoutView`/`Symbol` against what `Import` actually wrote to disk from the
+same fixture, shape for shape and pin for pin. A test that a picture merely *looks* plausible would
+not catch the failure this design exists to prevent — a preview free to drift from the import is
+worse than no preview, because its whole job is to be believed before anything is created.
+
+A preview also must not touch the destination `Technology`: that object is the live one every open
+document renders through, so appending this part's layers to it would repaint the workspace behind
+the dialog with layers nobody has agreed to import. `ComponentPreview` builds a **scratch** technology
+(destination layers + `LayersToAdd`) and renders through that — which is also what makes a pad show
+in the colour it will actually have rather than in the unknown-layer fallback.
+
+### Nothing is rendered on the UI thread
+
+Owner instruction. Both panes are plain `Image`s; `ComponentPreviewRenderer` produces a finished
+`Bitmap` on a worker thread and the UI thread only blits it. A custom-draw control would have put a
+whole component-library read, a layer reconciliation and a spatial-index build on the dialog's own
+render pass, once per arrow-key press.
+
+It is safe because **every object involved is preview-private**: `ComponentPreview.Build` returns a
+freshly built `Symbol` and `LayoutView` reachable from nothing else, so the `SKPath` cache, the
+spatial index and the scratch technology are touched by one thread only. The two static caches the
+renderers share are a `ConditionalWeakTable` and a `ConcurrentDictionary`; `SkiaFonts`' typefaces are
+`Lazy<T>` at its thread-safe default. Staleness is handled by a generation counter — every pass
+re-checks it after each await and drops its result rather than writing it to a control.
+
+### Four UI bugs, all reported from the running app, and what each actually was
+
+- **"Terribly low resolution."** The panes were rasterized at their **logical** pixel size and then
+  stamped with a high-DPI (`96 × RenderScaling`), which tells Avalonia the bitmap is a
+  high-resolution copy of a *smaller* area — so on a 2× display it held a quarter of the pixels the
+  pane has and was scaled up. The size and the DPI have to agree: render at **physical** pixels
+  (`Bounds × RenderScaling`) and the logical size works out to exactly the pane. `StretchDirection`
+  `DownOnly` was removed at the same time — it had been pinning the undersized bitmap at its own
+  size instead of filling the pane.
+- **"The previews flash as I click through."** A "Reading…" state cleared both images on every
+  selection change, so every click cost a blank frame — and most reads finish inside one. The panes
+  are now blanked **only** for a read slower than `ReadPatienceMs` (150 ms), which is raced against
+  the read itself; under that, the previous drawing stays up and is replaced in one assignment. It is
+  left up only that long on purpose: a stale drawing under a new selection is worse than an empty
+  pane once it lasts long enough to be read as an answer.
+- **"The preview box needs to always be the same size."** The two panes are the star rows of the
+  preview grid, so *anything* that changed an `Auto` row resized both of them — and two things did,
+  per candidate: the density-variant combo appearing, and the summary wrapping to a different number
+  of lines. Every non-pane row now has a **fixed height**; the summary trims on screen and keeps its
+  full text on a tooltip.
+- **"The listing is too wordy."** Rows led with the completeness and the format list — the same
+  handful of phrases the whole way down a list, burying the one field that differs. The row now leads
+  with `ComponentCandidate.DisplayName` and carries only the folder under it; `Composition`
+  (completeness + formats) moved to the preview header.
+
+**`DisplayName` is the file's base name, and cannot be the part's declared name.** A scan
+*classifies* files, it does not parse them (R-PL1-28) — labelling a list with declared names would be
+the whole import run once per candidate before the user has chosen anything. It is the same fallback
+`ComponentRead` itself uses when a format states no name, so the two agree rather than being two
+naming rules. That is also why `Location` stays in the row: several files across a library
+legitimately share a base name. When the read *does* reveal a different declared name, the summary
+says so ("Declared as …") rather than rewriting the header the user just clicked.
+
+### What the pictures cannot say, the summary does
+
+A part whose second gate or second package variant is not imported (R-PL1-23) looks complete in a
+picture of its first one. The summary names both — that is exactly the mistaken import the preview
+exists to stop, and it is invisible in any rendering.
+
+### Later the same day: a folder picker, and the list's own search and filter
+
+**Import ▸ Component now opens a FOLDER picker**, not a file picker. Pointing at a file and pointing
+at its folder already led to the same scan — the scan's unit is the folder, and the picker's answer
+was immediately replaced by `Path.GetDirectoryName`. What the file picker *did* change is that
+R-PL1-4's "the file clicked IS the whole of the only candidate" branch skipped the chooser outright,
+which now also means skipping the preview. That branch is **deleted**, not merely unreachable: with
+no clicked file its condition can never hold, and one candidate in a folder now shows a chooser
+holding one row — which is exactly the case where seeing the drawing first is worth most.
+
+**The list carries the Project Tree's search and filter**, same idiom throughout (magnifier is the
+affordance, the field only exists while it is on, closing it *clears* the query, Escape and the X
+both collapse it, keystrokes coalesced by a `Dispatcher.Post` at `Background` priority so the
+character renders first). It lives in code-behind rather than a view model — this dialog has none —
+so `ProjectTreeTool.FilterScheduler` becomes a plain posted callback here.
+
+Two things are deliberately *not* copies of the Project Tree:
+
+- **The filter's categories are built from what the scan holds**, not from the full set of formats
+  circuitRF can read. The tree's categories are fixed and always meaningful; a folder's are not. A
+  checkbox for a format the folder does not contain filters nothing, and a group whose single member
+  is every row cannot narrow anything — so neither is offered, and the button disables when both
+  collapse. Each row carries its count, which is what makes the flyout worth opening before anything
+  has been narrowed.
+- **The search matches the name AND the folder.** The row shows both, and it shows the folder
+  precisely because base names repeat across a library — in the two-part/two-format fixture every row
+  is called `PART` or `PARTLIB`, so the folder is the only thing separating half of them.
+
+### The framing was measured, not reasoned about
+
+Three rounds of "the preview is not scaled/centred" were answered by re-deriving the transform, which
+was correct every time and therefore proved nothing. `ComponentPreviewRenderer` now exposes its Skia
+half (`RasterSymbol`/`RasterFootprint`) separately from the Avalonia wrapper, and
+`ComponentPreviewTests` scans the **pixels**: it takes the bounding box of everything that is not the
+background colour and asserts the midpoint is the pane's midpoint and the fitted axis spans more than
+half the pane. That is the only form of the question that can come back false. Both pass, which is
+what localised the remaining symptom to the bitmap-to-pane mapping rather than the drawing.
+
+### Round three: the framing bug was real, and it was found by measuring
+
+Two fixes for "blurry, off-centre, clipped" had each re-derived the transform, found it correct, and
+changed nothing that mattered. **Re-deriving a transform cannot find this class of bug** — it was
+right every time. What found it was rastering the Widget9 fixture at four pane sizes and printing the
+bounding box of every non-background pixel:
+
+```
+400x240  ink[57,35-293,216]   centre (175,125)  want (200,120)   x-span 59%
+240x400  ink[23,146-175,263]  centre  (99,204)  want (120,200)   x-span 63%
+700x300  ink[175,41-473,270]  centre (324,155)  want (350,150)   x-span 42%
+```
+
+Off-centre by ~25 px at *every* size, and never spanning more than 63% of the pane.
+
+**The cause: the label reserve was the widest name, applied at the right-hand edge.** Pad and port
+labels are drawn in PIXEL space (a fixed size, or one with a pixel floor), so they cannot live in a
+world-space bbox and the fit has to be solved rather than computed. The first attempt reserved
+`max(label width)` on the right — which is correct only when the longest name belongs to the
+rightmost pin. Widget9's pads are `1..8` plus `THERMAL`, and `THERMAL` is not the rightmost, so ~25 px
+of empty margin was added on one side of every drawing. Now each pin's own dot-and-label box is
+measured **at that pin's position** and unioned in, over up to three passes (the zoom shrinks as the
+box grows, and the marks are partly zoom-independent, so it is a small fixed point). Centre is now
+exact to within a pixel and the fitted axis spans the full 80% at every size.
+
+The tolerances in `ComponentPreviewTests.AssertFramed` are 2%, not the 12% they started at: **the
+first version of this test passed with the bug present.** A 6% shift walked straight through 12%
+slack. Reintroducing the widest-label reserve now fails two tests — checked, not assumed.
+
+### And the Image was replaced by an explicit blit
+
+Separately, `Image` + `Stretch` + a DPI-stamped `Bitmap` is a three-way negotiation, and any one of
+the three being off by a factor produces a picture that is blurry, letterboxed AND clipped — which is
+the exact symptom triple that was reported, and the reason it resisted being treated as three faults.
+`Controls/PreviewImage` draws the whole source rect into the whole of `Bounds` and nothing else, and
+the bitmap is now stamped 96 DPI so its reported size IS its pixel count. Sharpness then depends on
+one number the caller chose: the supersample factor, floored at 2 because a window reports
+`RenderScaling` 1.0 until its platform impl attaches and the raster is queued off a layout pass.
+
+### Layout and affordances
+
+Symbol and footprint are **side by side and square** (`AspectRatioPanel Ratio="1"`) rather than
+stacked: a square suits neither drawing in particular and both about equally — a symbol is usually
+taller than wide, a land pattern wider than tall — and side by side each pane is *larger* than when
+stacked while the dialog is 180 px shorter.
+
+A row's context menu offers `FileReveal.Label` (Finder / Explorer / File Manager, platform-correct).
+Two things it needs that are easy to miss: a right-click does not select in Avalonia, so the press is
+handled on the **tunnel** to select the row under the pointer before the menu opens — otherwise
+Reveal opens wherever the previously-selected row lives. And the target is the candidate's **first
+read file**, not its folder, because `FileReveal` highlights the file it is given and a group is
+routinely several files in one directory.
+
+### The scanned folder's name, and rounded corners
+
+The folder that was scanned is named in the bar above the list, in the place the Project Tree puts
+the workspace name — and the search field covers it when open, for the same reason it covers that
+one: the row's width is wanted by the field when it is open and by the name when it is not, and
+neither is worth a permanent half. Its full path is on the tooltip. "Another Folder…" changes it
+mid-dialog, which is most of why it is worth showing at all.
+
+The preview panes are clipped to a 3-radius rounded rect — the radius the dialog's own buttons use
+(`CircuitRfStyles.axaml`, `Button.seg-btn`). Applied as a CLIP in `PreviewImage`, not by rounding the
+raster: the renderers draw a rectangle because that is what a viewport is, and the shape it is
+presented in belongs to the control that presents it.
+
+### A flake I caused, and the collection that already existed for it
+
+Adding `ComponentPreviewTests` turned `SharedLibraryConcurrencyTests`' exact-count assertion red
+("expected 40, actual 42") in a full-solution run while passing in isolation. `CellStat.Calls` is a
+process-global counter and `ComponentImport.Import` routes its filesystem calls through `CellFolder`,
+which counts — so a new class doing imports in parallel with the one class that asserts an exact count
+inflates it. The remedy already existed and is documented in `CellStatGlobalsCollection`'s own note
+("adding two more classes to the assembly was enough to make it happen"): the new class joins that
+collection. Full `Ui.Tests` is 11,908 green after it.
+
+It then fired again on a DIFFERENT method of the same class
+(`TheOnFocusRefresh_DoesNotReadTheReferencedLibrary_ButTheButtonDoes`), which also passed in
+isolation — so `ComponentImportTests` and `ComponentImportBreadthTests`, which make the same counted
+calls, joined the collection too.
+
+**What is actually fragile here is the asserting class, and that is a repo question rather than a
+question about this work.** The collection serialises its MEMBERS against each other; it does not stop
+a non-member from making a counted call beside them. `SharedLibraryConcurrencyTests` pins exact counts
+against a process-global counter, so it is broken by any concurrent class that touches
+`CellFolder` — the membership list is a list of the classes that have happened to collide with it so
+far, not a boundary anyone can rely on. A complete fix is either serialising the counting class
+against the whole assembly or making the counter per-test-context; both are changes to a test that
+predates this work, so they are the owner's call rather than something to do in passing.
+
+## Import chooser: the declared name in the list, and the preview flash (2026-09-05)
+
+### The row now says both names
+
+A row was named after the FILE the candidate begins at, because a scan classifies files and parses
+none of them (R-PL1-28). For a format written as a fixed triple of files that means every part in
+every library is called the same thing — a whole list of rows reading `Pads`, none of which says which
+part it is.
+
+`CandidateRow` (an observable wrapper in the dialog, one per candidate, built once and re-FILTERED
+rather than rebuilt) carries the declared name when a read produces one and renders
+`<declared> • <file>`. **Neither name replaces the other**: the declared name identifies the part; the
+file's name is what separates the several rows that hold the SAME part in different formats, which is
+the choice the list exists to offer. Where the two agree the row says it once — a name repeated with a
+separator between reads as two parts. The same title is the header above the preview, and the
+`Declared as "…"` sentence that used to carry it under the drawings is gone rather than duplicated.
+
+The names come from a background sweep (`StartNameSweep`): one worker, in list order, `ComponentRead`
+per candidate, cancelled when the window closes. **It is a sweep and not part of the scan on purpose**
+— reading every library before the user has chosen anything is the import run over again, several
+dozen times. The list opens named after its files, exactly as it did, and rows are renamed as they are
+read; whichever of the sweep and the preview's own read gets there first wins, and a row that never
+gets a name keeps the file's, which is the answer the scan itself falls back to. The search matches the
+declared name too, because it is on screen.
+
+### The preview flashed on every filter pass
+
+Pressing Search blanked both preview panes for a moment. The field and the row count share a cell, so
+opening the field re-filters — and `ApplyFilter` assigned `ItemsSource`, which makes the `ListBox` drop
+its selection and then take the restored one. **Two `SelectionChanged` events for a filter pass that
+changed nothing**: a null one, which blanks both panes on the spot, and a real one, which rebuilds them
+out of the model cache a frame later. Every keystroke of a search did it too.
+
+The fix is the idiom `SyncVariants` already used for the variant combo: the swap is silent
+(`_suppressSelectionEvent`), and the preview is scheduled once afterwards and only when the selected
+row actually changed. Not "skip the reassignment when the set is unchanged" — that fixes the reported
+gesture and leaves the flash on every filter pass that genuinely narrows the list while keeping the
+selected row, which is the ordinary case while typing.
+
+### Three more from the same session (2026-09-05)
+
+- **Choosing another folder moved to the `…` beside the folder's name.** It was a third button in the
+  commit row, between Cancel and Import, where it read as a third decision rather than as what it is —
+  a change to the name it now sits next to.
+
+- **The list slid down when the search field opened.** The field and the folder name share one cell
+  and a text box is taller than a label, so a field that joined the layout when it opened grew the
+  header row and pushed the whole list down by the difference. The field is now hidden by OPACITY and
+  is measured at all times (`ShowSearchField`), with `IsTabStop` cleared so an invisible box does not
+  take Tab. Reserving a fixed height instead would be a number to keep in step with three platforms'
+  font metrics; leaving the control measured is the same reservation made by the control itself.
+
+- **The density-variant combo's text sat high in its box.** It stretched to the 26-px row while the
+  template's presenter stayed at the theme's own padding. `MinHeight="0" Padding="6,2"
+  VerticalAlignment="Center" VerticalContentAlignment="Center"` — the idiom `LayerMappingDialog`
+  already uses for the same shape.
+
+### And three more (2026-09-05)
+
+- **Cancelling the folder picker abandoned the whole import.** The `…` closes the chooser and hands
+  control back so the picker can open — and a cancelled picker then `return`ed. The scan is now held
+  across the loop and cleared only when the folder actually changes, so a cancelled picker brings the
+  chooser back on the list it was already showing, with no re-walk.
+
+- **Alternating row bands in the candidate list.** On the item's ContentPresenter, because that is where
+  this theme's `ListBoxItem` paints its background — a `Background` set on the item itself is invisible
+  (`WBondTouchstoneExportDialog` clears the same three states for the same reason). `:not(:selected)
+  :not(:pointerover)` is load-bearing: a style declared on the control outranks the control theme's, so
+  without it the even rows would lose their selection highlight.
+
+- The folder picker's title says which folder it is asking for.
+
+The Symbol Editor's Properties inspector exposes the new field as **Align** in the pin section, under
+the **Name** it aligns — the same LABEL and the same `AlignOptions` a text primitive's own Align row
+uses, because it is the same choice over the same enum, and a second word for it is one more thing to
+learn (owner, 2026-09-05). One list for one three-value choice, rather than two that can drift. It is undoable through `SetSymbolPrimitiveFieldCommand<T>`, whose name is about
+where it is usually used and not about what it can do: it holds a symbol, two values and a setter, and a
+pin's field is exactly that.
+
+**And it turned up that a pin could not be RENAMED anywhere in the symbol editor at all** — no command,
+no dialog, no inspector field. A pin's name could only ever be set by a generator or by a component
+import, so a pin placed by hand was stuck drawing its port number. The inspector now carries a **Name**
+box above the alignment.
+
+- **Committed on LOST FOCUS, not per keystroke.** Either reason alone settles it: `SetPinView` runs on
+  every `RenderSymbol` notification, which a live edit raises, so a per-keystroke binding rewrites the
+  box the user is typing into mid-word; and it would put one undo entry on the stack per CHARACTER,
+  which is the shape of a complaint this repo has already had about the Match designer. (The
+  `TextContent` field beside it still binds per keystroke — pre-existing, not touched here.)
+- **A blank field stores NULL, not `""`.** The renderer's fallback to `P<n>` keys on the empty case and
+  `.csym` omits a null, so clearing a name leaves exactly the file a never-named pin produces.
+
+Gated by three tests in `SymbolPinPortEditTests`: the rename and its undo, the blank-stores-null rule,
+and the alignment's own edit and undo.
+
+## An imported part is U1, and its pins say what they are (2026-09-05)
+
+Two things a component from an imported library did not get when it was placed, both owner-reported.
+
+### The instance NAME comes from the library's own stated prefix
+
+Every one of these grammars states the letter its parts are numbered from, and the import already
+carried it onto the cell as a read-only `Reference` parameter (PL1 R-PL1-7). Nothing then read it: a
+cell instance was `X1`, `X2`, `X3` whatever the library said. `CellReferenceDesignator` is the one
+place that letter becomes a name, read by placement, by retype-into-a-cell, and by paste.
+
+- **The stated value is a PREFIX, not a designator.** The formats spell it three ways — `U`, `U?`,
+  and occasionally an already-numbered `U1` — and all three mean the same thing. Trailing placeholder
+  and digits are stripped, or the second would number itself `U?1` and the third `U11`.
+- **It arrives as the parameter's DEFAULT EXPRESSION, which the import QUOTES**, because a declared
+  default is evaluated as an expression and a bare `U` resolves as a variable reference. The quotes
+  come off in the one place that reads it.
+- Paste reads the prefix off the pasted instance's OWN seeded parameters rather than off the cell on
+  disk, so a copied `U1` becomes `U2` with nothing resolvable in reach.
+
+**Two readers were dropping a prefix their files state plainly** — so the same part imported from two
+folders of one download got two different names. The dotted part-file grammar states `..RefPrefix "U"`
+and it was simply not read; the counted part-type record states it as field 3 of its header line, which
+the reader's own comment called TYPE. Field 2 beside it is the logical family and is not it — the same
+part exported to the dotted grammar states field 3's value, and not field 2's, as its `RefPrefix`.
+All five families now land on one metadata key, gated by `ComponentImportBreadthTests
+.EveryGrammarReadsTheSameStatedPrefix`.
+
+### Pin NAMES render on the schematic
+
+A built-in component's pin labels are TEXT baked into its artwork, so the schematic renderer never drew
+a pin name of its own. A symbol read from a component library carries them as pin NAMES instead — which
+is the right place for them, one source of truth for the symbol editor, the import preview and the
+schematic alike — and the consequence was that a placed imported part showed a body with unlabelled
+pins.
+
+- **The decision is baked into the render model, not taken per frame**: `SchematicPortDef.ShowName`,
+  settled in `EditableComponent.ToRenderComponent`.
+- **The default is the SYMBOL's to make.** `SymbolPinNames.IsStated` — a name that is nothing but the
+  pin's own ordinal (`1`, `12`, `P3`) is what circuitRF itself invents when a file names nothing
+  (`KitTemplateSymbol.PlacePins`, `AutoSymbolGenerator`), and an auto-generated symbol has already
+  drawn that number inside its own body. The test is LEXICAL on purpose: the two generators disagree
+  about whether `PortIndex` is 0- or 1-based, so an index-based test would be right for one of them.
+- **`EditableComponent.ShowPinNames` is a `bool?`, and null is the ordinary case** — "follow the
+  symbol", not any particular answer. A plain bool captured at placement could never let a librarian's
+  later renaming of a cell's pins appear on instances already on the canvas. Only an explicit toggle
+  writes it and only an explicit toggle is persisted, so a schematic that never touches it is
+  byte-identical. Undo therefore has to restore *null*, which is why `SetPinNameVisibilityCommand` is
+  separate from `SetLabelVisibilityCommand`.
+- **Cell-reference instances only.** Honouring the flag on a built-in would draw a second copy of every
+  label its artwork already carries, so the context-menu row (Labels ▸ Show Pin Names) is hidden rather
+  than greyed for one — the same treatment Re-reference and Flatten already get.
+
+### Which way a name runs is the EDGE the pin is on
+
+`SymbolPin.NameAlign` was a `SymbolTextAlign` — three values, all horizontal — so a vertical lead got
+`Center`, straddling its own pin, and a generated symbol left every pin on the default `Left` and ran
+its whole right-hand column of names outward into empty space (owner-reported). It is now
+`SymbolPinNameAlign` = Left/Center/Right/**Top/Bottom**.
+
+- **Stated as a SIDE, not as a screen direction.** That is what makes it survive the Y flip between a
+  source file's Y-up symbol coordinates and circuitRF's Y-down local ones with nothing to remember:
+  the pin is on the same edge of the same picture either way. `ComponentSymbolLead.NameAlignFor` is
+  handed a Y-UP `dy`, so a lead running +y runs upward, the body is above the pin, and the pin is on
+  the BOTTOM edge.
+- **A vertical name is turned a quarter turn and runs ALONG its lead.** Laid out horizontally instead,
+  the names of a top edge whose pins are one grid apart overlap into an unreadable band.
+- **A pin name turns WITH the body**, as a label baked into artwork does — it belongs to the pin, not
+  to the sheet — with the same readability auto-flip the built-in labels take, applied about the
+  label's own centre so it stays beside its pin. Upright-always was tried and is worse for exactly the
+  reason above.
+- **Lifted clear of the pin's own LEAD**, which runs from the pin tip to the body along the very line
+  the name runs along. Drawn on it, every name reads as struck through.
+- `SymbolPinSides` is the ONE geometric derivation, used by every generator (`AutoSymbolGenerator`,
+  `BuiltInSymbols`, `WBondSymbolGenerator`): the dominant axis wins, so a corner pin is assigned to
+  the edge it is furthest along rather than to both, and a pin at the centre is `Center` because there
+  is no side for it to be on. Measured against the pin cloud's BOUNDING-BOX centre rather than its
+  mean, so one crowded edge does not drag the reference point onto itself and flip the sparse edge's
+  names outward. Built-ins take it too even though nothing renders their pin names — the pins reach the
+  symbol editor, and one derivation is one fewer place for the rule to be missing.

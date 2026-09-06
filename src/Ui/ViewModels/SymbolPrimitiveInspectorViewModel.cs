@@ -22,6 +22,10 @@ public sealed partial class SymbolPrimitiveInspectorViewModel : ObservableObject
     public static SymbolStrokeTier[] StrokeTierOptions  { get; } = Enum.GetValues<SymbolStrokeTier>();
     public static SineAxis[]         AxisOptions        { get; } = Enum.GetValues<SineAxis>();
     public static SymbolTextAlign[]  AlignOptions       { get; } = Enum.GetValues<SymbolTextAlign>();
+
+    /// <summary>A PIN's name alignment is a five-value choice, not a text primitive's three: it names
+    /// the edge of the body the pin is on, and a vertical lead has two of its own.</summary>
+    public static SymbolPinNameAlign[] PinAlignOptions  { get; } = Enum.GetValues<SymbolPinNameAlign>();
     public static SymbolFontStyle[]  FontStyleOptions   { get; } = Enum.GetValues<SymbolFontStyle>();
     public static SymbolTextVAlign[] VAlignOptions      { get; } = Enum.GetValues<SymbolTextVAlign>();
     public static SymbolRotation[]   RotationOptions    { get; } = Enum.GetValues<SymbolRotation>();
@@ -392,6 +396,40 @@ public sealed partial class SymbolPrimitiveInspectorViewModel : ObservableObject
     [ObservableProperty] private double _pinY;
     [ObservableProperty] private int    _pinPortIndex;
 
+    /// <summary>
+    /// The pin's own name — the label drawn beside it, and what a schematic shows for the terminal.
+    ///
+    /// <para><b>Bound on LOST FOCUS, not per keystroke</b> (see the view). Two reasons, and either
+    /// alone would settle it: a per-keystroke binding puts one undo entry on the stack per CHARACTER,
+    /// and <see cref="SetPinView"/> runs on every <c>RenderSymbol</c> notification — which a
+    /// per-keystroke edit raises — so the box the user is typing into would be rewritten mid-word.
+    /// </para>
+    /// </summary>
+    [ObservableProperty] private string _pinName = "";
+
+    /// <summary>Which edge of the body this pin sits on, and so which way its NAME runs — see
+    /// <see cref="SymbolPin.NameAlign"/>. Offered through <see cref="PinAlignOptions"/>: five values,
+    /// one per edge plus Center, rather than a text primitive's own three.</summary>
+    [ObservableProperty] private SymbolPinNameAlign _pinNameAlign;
+
+    partial void OnPinNameChanged(string? oldValue, string newValue)
+    {
+        if (_isRefreshing || _vm is null) return;
+        int pi = _vm.Overlay.SelectedPinIndex;
+        if (pi < 0 || pi >= _vm.EditableSymbol.Pins.Count) return;
+        var pin = _vm.EditableSymbol.Pins[pi];
+
+        // Blank is stored as NULL, not as "": the renderer's own fallback to "P<n>" keys on the empty
+        // case, and .csym drops a null rather than writing an empty string — so clearing the field
+        // leaves exactly the file an unnamed pin has always produced.
+        string? settled = string.IsNullOrWhiteSpace(newValue) ? null : newValue.Trim();
+        if (settled == pin.Name) return;
+
+        string? before = pin.Name;
+        _vm.Execute(new SetSymbolPrimitiveFieldCommand<string?>(
+            _vm.EditableSymbol, "Rename Pin", before, settled, v => pin.Name = v));
+    }
+
     partial void OnPinXChanged(double oldValue, double newValue)
     {
         if (_isRefreshing || _vm is null) return;
@@ -412,6 +450,23 @@ public sealed partial class SymbolPrimitiveInspectorViewModel : ObservableObject
         double snap = Math.Round(newValue / PinGrid) * PinGrid;
         if (Math.Abs(snap - pin.LocalY) < 0.001) return;
         _vm.Execute(new MoveSymbolPinCommand(_vm.EditableSymbol, pin, pin.LocalX, snap));
+    }
+
+    /// <summary>
+    /// Undoable through <see cref="SetSymbolPrimitiveFieldCommand{T}"/>, whose name is about where it
+    /// is usually used and not about what it can do: it holds a symbol, two values and a setter, and a
+    /// pin's field is exactly that. A second command type differing only in the word "Pin" would be
+    /// two undo paths to keep in step for one behaviour.
+    /// </summary>
+    partial void OnPinNameAlignChanged(SymbolPinNameAlign oldValue, SymbolPinNameAlign newValue)
+    {
+        if (_isRefreshing || _vm is null || oldValue == newValue) return;
+        int pi = _vm.Overlay.SelectedPinIndex;
+        if (pi < 0 || pi >= _vm.EditableSymbol.Pins.Count) return;
+        var pin = _vm.EditableSymbol.Pins[pi];
+        if (pin.NameAlign == newValue) return;
+        _vm.Execute(new SetSymbolPrimitiveFieldCommand<SymbolPinNameAlign>(
+            _vm.EditableSymbol, "Pin Name Align", oldValue, newValue, v => pin.NameAlign = v));
     }
 
     partial void OnPinPortIndexChanged(int oldValue, int newValue)
@@ -541,6 +596,8 @@ public sealed partial class SymbolPrimitiveInspectorViewModel : ObservableObject
         PinX          = pin.LocalX + offsetX;
         PinY          = pin.LocalY + offsetY;
         PinPortIndex  = pin.PortIndex + 1;
+        PinName       = pin.Name ?? "";
+        PinNameAlign  = pin.NameAlign;
         PolylineCoords.Clear();
         _isRefreshing = false;
     }

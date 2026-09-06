@@ -543,6 +543,12 @@
                             <MenuItem x:Name="CtxShowInstanceName"
                                       Header="Show Name"
                                       Click="OnCtxShowInstanceName"/>
+                            <!-- A cell instance only. A built-in draws its pin labels as text inside
+                                 its own artwork, so there is nothing here for this to turn off. -->
+                            <MenuItem x:Name="CtxShowPinNames"
+                                      Header="Show Pin Names"
+                                      IsVisible="False"
+                                      Click="OnCtxShowPinNames"/>
                         </MenuItem>
 
                         <Separator x:Name="CtxSep2"/>

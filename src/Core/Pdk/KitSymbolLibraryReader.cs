@@ -7,7 +7,12 @@ namespace CircuitRF.Core.Pdk;
 /// <param name="Name">The kit's own name for the pin — often just its index. Never invented here.</param>
 /// <param name="X">Horizontal position, in the library's own units.</param>
 /// <param name="Y">Vertical position, in the library's own units.</param>
-public sealed record KitSymbolPin(string Name, int X, int Y);
+/// <param name="NameAlign">Which way this pin's NAME runs from its terminal. The formats that state
+/// it put the name on the BODY side of the terminal — so a pin on the left of a body carries a
+/// left-aligned name drawn to its right, and one on the right carries a right-aligned name drawn to
+/// its left. <see cref="KitTextAlign.Left"/> is the default and is what every symbol drew before any
+/// format said otherwise.</param>
+public sealed record KitSymbolPin(string Name, int X, int Y, KitTextAlign NameAlign = KitTextAlign.Left);
 
 /// <summary>One symbol a library declares, and the terminals it carries.</summary>
 /// <param name="Name">The symbol's own name — what a part's catalog entry references it by.</param>

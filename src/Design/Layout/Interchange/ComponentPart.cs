@@ -33,7 +33,16 @@ namespace CircuitRF.Design.Layout.Interchange;
 /// share a name are one terminal; two that merely share a name are two. Only the format's suffix
 /// separates those, and it is stripped from <paramref name="Name"/>, so it is recorded here instead.
 /// </param>
-public sealed record ComponentSymbolPin(string Name, string? PadName, int XMil, int YMil, bool Bonded = false);
+/// <param name="NameAlign">
+/// Which way this pin's NAME runs from its terminal (R-PL2-20). Two of the grammars state it
+/// outright — one as a signed justification field, one as a <c>justify</c> word — and the rest state
+/// it implicitly, by putting the name on the BODY side of the terminal, which is a fixed consequence
+/// of the pin's own rotation. Both spellings agree, so a reader that has no explicit field derives it
+/// from the lead direction rather than leaving every pin's name running outward into space.
+/// </param>
+public sealed record ComponentSymbolPin(
+    string Name, string? PadName, int XMil, int YMil, bool Bonded = false,
+    KitTextAlign NameAlign = KitTextAlign.Left);
 
 /// <summary>One symbol section — a whole symbol for a single-section part, one gate of a multi-section
 /// one (R-PL1-23).</summary>

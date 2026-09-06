@@ -98,9 +98,41 @@ public sealed record ComponentCandidate(
     public IReadOnlyList<ComponentFile> FootprintFiles =>
         [.. Files.Where(f => f.Kind == ComponentFileKind.FootprintSexpr)];
 
+    /// <summary>
+    /// <b>The name the chooser leads its row with</b> — the base name of the file this candidate
+    /// begins at: its symbol file when it has one, else its first footprint.
+    ///
+    /// <para>Not the part's own declared name, and it cannot be: a scan CLASSIFIES files, it does not
+    /// parse them (R-PL1-28), and reading every candidate in a folder to label a list would be the
+    /// whole import run several dozen times over before the user has chosen anything. The file's base
+    /// name is what <see cref="ComponentRead"/> itself falls back to when a format states no name, so
+    /// this is the same answer from the same source rather than a second naming rule.</para>
+    ///
+    /// <para>Which is exactly why <see cref="Location"/> still rides beside it in the row: several
+    /// files across a library legitimately share a base name, and the folder is what separates
+    /// them.</para>
+    /// </summary>
+    public string DisplayName
+    {
+        get
+        {
+            var file = SymbolFile ?? FootprintFiles.FirstOrDefault() ?? Files.FirstOrDefault();
+            return file is null ? Description : Path.GetFileNameWithoutExtension(file.Path);
+        }
+    }
+
+    /// <summary>Whether the row has a folder to show under its name. A bound bool, not a length: an
+    /// int is not a visibility, and the conversion is not one to leave to a binding.</summary>
+    public bool HasLocation => Location.Length > 0;
+
+    /// <summary>What this candidate is made of, in one phrase: how complete it is, and out of what.
+    /// Shown BESIDE the drawings rather than in the row — it is the same handful of phrases repeated
+    /// down the whole list, so as row text it crowds out the one thing that differs.</summary>
+    public string Composition => $"{Description}  ({FormatSummary})";
+
     public override string ToString() => Location.Length == 0
-        ? $"{Description}   ({FormatSummary})"
-        : $"{Description}   ({FormatSummary})   in {Location}";
+        ? DisplayName
+        : $"{DisplayName}   in {Location}";
 }
 
 /// <summary>What the scan found, ready to be shown.</summary>

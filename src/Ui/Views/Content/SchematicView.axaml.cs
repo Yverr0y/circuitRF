@@ -592,6 +592,15 @@ public partial class SchematicView : UserControl
         bool instanceNameVisible = comp?.ShowInstanceName ?? true;
         CtxShowTypeLabel.Icon    = MakeEyeIcon(typeLabelVisible);
         CtxShowInstanceName.Icon = MakeEyeIcon(instanceNameVisible);
+
+        // Pin names — a resolved cell instance only. Hidden rather than greyed for the same reason
+        // Re-reference and Flatten are: it is not an action that exists for a resistor, whose pin
+        // labels are drawn as part of its artwork.
+        string? ctxId = SchematicCanvasCtrl.ContextMenuTargetId;
+        bool canPinNames = ctxId is not null && (Vm?.CanTogglePinNames(ctxId) ?? false);
+        CtxShowPinNames.IsVisible = canPinNames;
+        if (canPinNames)
+            CtxShowPinNames.Icon = MakeEyeIcon(Vm!.PinNamesVisible(ctxId!));
     }
 
     private static Material.Icons.Avalonia.MaterialIcon MakeEyeIcon(bool visible) =>
@@ -708,6 +717,12 @@ public partial class SchematicView : UserControl
     {
         var id = SchematicCanvasCtrl.ContextMenuTargetId;
         if (id is not null) Vm?.ToggleLabelVisibility(id, isTypeLabel: false);
+    }
+
+    private void OnCtxShowPinNames(object? sender, RoutedEventArgs e)
+    {
+        var id = SchematicCanvasCtrl.ContextMenuTargetId;
+        if (id is not null) Vm?.TogglePinNames(id);
     }
 
     // ── Clipboard (Ctrl+C / Ctrl+X / Ctrl+V) ─────────────────────────────────

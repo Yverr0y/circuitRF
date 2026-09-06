@@ -45,7 +45,7 @@ public static class ComponentCxfReader
         var artwork = new ComponentArtwork();
         var drawing = new ComponentSymbolDrawing();
 
-        var symbolPins = new List<(string Pad, double X, double Y)>();
+        var symbolPins = new List<(string Pad, double X, double Y, double Length, double Rotation)>();
         var pinNameLabels = new List<(string Text, double X, double Y)>();
         var unknownForms = new Dictionary<int, int>();
 
@@ -120,14 +120,21 @@ public static class ComponentCxfReader
                 }
 
                 case "PIN":
-                    symbolPins.Add((f.Text("PADNAME"), f.Number("X1", 0), f.Number("Y1", 0)));
+                    // LENGTH and ROTATION are the lead this format states instead of drawing: the
+                    // stems around a symbol body are not LINE records here, so a reader that keeps only
+                    // X1/Y1 draws a body with its pins floating clear of it.
+                    symbolPins.Add((
+                        f.Text("PADNAME"), f.Number("X1", 0), f.Number("Y1", 0),
+                        f.Number("LENGTH", 0), f.Number("ROTATION", 0)));
                     break;
 
                 case "LINE":
                 {
                     int layer = (int)f.Number("LAYER", 0);
                     double[] xy = [f.Number("X1", 0), f.Number("Y1", 0), f.Number("X2", 0), f.Number("Y2", 0)];
-                    if (inSymbol) drawing.Shapes.Add(new KitSymbolLine(Mil(xy[0]), Mil(xy[1]), Mil(xy[2]), Mil(xy[3])));
+                    if (inSymbol)
+                        drawing.Shapes.Add(new KitSymbolLine(Mil(xy[0]), Mil(xy[1]), Mil(xy[2]), Mil(xy[3]))
+                                           { Width = Mil(f.Number("WIDTH", 0)) });
                     else AddPath(artwork, xy, f.Number("WIDTH", 0), layer, false);
                     break;
                 }
@@ -138,7 +145,8 @@ public static class ComponentCxfReader
                     double x1 = f.Number("X1", 0), y1 = f.Number("Y1", 0);
                     double x2 = f.Number("X2", 0), y2 = f.Number("Y2", 0);
                     if (inSymbol)
-                        drawing.Shapes.Add(new KitSymbolRectangle(Mil(x1), Mil(y1), Mil(x2), Mil(y2), false));
+                        drawing.Shapes.Add(new KitSymbolRectangle(Mil(x1), Mil(y1), Mil(x2), Mil(y2), false)
+                                           { Width = Mil(f.Number("WIDTH", 0)) });
                     else
                         AddPath(artwork, [x1, y1, x2, y1, x2, y2, x1, y2], f.Number("WIDTH", 0), layer, true);
                     break;
@@ -150,7 +158,8 @@ public static class ComponentCxfReader
                     double cx = f.Number("XM", 0), cy = f.Number("YM", 0), r = f.Number("RADIUS", 0);
                     double start = f.Number("START", 0), end = f.Number("END", 360);
                     if (inSymbol)
-                        drawing.Shapes.Add(new KitSymbolArc(Mil(cx), Mil(cy), Mil(r), start, end - start));
+                        drawing.Shapes.Add(new KitSymbolArc(Mil(cx), Mil(cy), Mil(r), start, end - start)
+                                           { Width = Mil(f.Number("WIDTH", 0)) });
                     else
                     {
                         var role = RoleOf(layer);
@@ -173,7 +182,9 @@ public static class ComponentCxfReader
                     }
                     if (xy.Count < 4) break;
 
-                    if (inSymbol) drawing.Shapes.Add(new KitSymbolPath([.. xy.Select(Mil)], true, false));
+                    if (inSymbol)
+                        drawing.Shapes.Add(new KitSymbolPath([.. xy.Select(Mil)], true, false)
+                                           { Width = Mil(f.Number("WIDTH", 0)) });
                     else AddPath(artwork, [.. xy], f.Number("WIDTH", 0), layer, true);
                     break;
                 }
@@ -235,7 +246,7 @@ public static class ComponentCxfReader
     /// </summary>
     private static void JoinSymbolPins(
         ComponentSymbolDrawing drawing,
-        List<(string Pad, double X, double Y)> pins,
+        List<(string Pad, double X, double Y, double Length, double Rotation)> pins,
         List<(string Text, double X, double Y)> labels,
         ComponentPart part)
     {
@@ -265,12 +276,23 @@ public static class ComponentCxfReader
 
         for (int i = 0; i < pins.Count; i++)
         {
-            var (pad, x, y) = pins[i];
+            var (pad, x, y, length, rotation) = pins[i];
             string name = paired ? labels[i].Text : pad;
+            int px = (int)Math.Round(Mil(x), MidpointRounding.AwayFromZero);
+            int py = (int)Math.Round(Mil(y), MidpointRounding.AwayFromZero);
+            // The lead inward to the body, one stated LENGTH along the stated ROTATION — and with it
+            // which side the name goes on. This grammar states no justification of its own; it puts
+            // the name on the body side and pre-computes the anchor, so the rotation is what says it.
+            var (dx, dy) = ComponentSymbolLead.Direction(rotation);
+
             drawing.Pins.Add(new ComponentSymbolPin(
-                name, pad.Length > 0 ? pad : null,
-                (int)Math.Round(Mil(x), MidpointRounding.AwayFromZero),
-                (int)Math.Round(Mil(y), MidpointRounding.AwayFromZero)));
+                name, pad.Length > 0 ? pad : null, px, py,
+                Bonded: false, NameAlign: ComponentSymbolLead.NameAlignFor(dx, dy)));
+
+            // Nanometres like every other coordinate here, so it converts through the same Mil().
+            int lead = (int)Math.Round(Mil(length), MidpointRounding.AwayFromZero);
+            if (lead > 0)
+                drawing.Shapes.Add(new KitSymbolLine(px, py, px + (dx * lead), py + (dy * lead)));
         }
 
         if (!paired && pins.Count > 0)

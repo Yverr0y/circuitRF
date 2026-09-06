@@ -15,6 +15,23 @@ public enum SymbolFontStyle  { Regular, Bold, Italic, Condensed }
 public enum SymbolStrokeTier { Normal, Thin, Thick }
 public enum SineAxis         { Horizontal, Vertical }
 public enum SymbolTextAlign  { Left, Center, Right }
+
+/// <summary>
+/// Which EDGE of a symbol's body a pin sits on, which is the same thing as which way its name runs:
+/// inward, toward the body it names a terminal of.
+///
+/// <para><see cref="Left"/> — a pin on the LEFT edge — draws its name to the RIGHT of the pin, and is
+/// the default and the no-change case. <see cref="Right"/> ends the name at the pin and runs it
+/// leftward, which is what a right-edge pin needs; drawing it rightward instead runs the whole
+/// right-hand column of names outward into empty space. <see cref="Top"/> and <see cref="Bottom"/> are
+/// the same statement about a vertical lead, and their names are drawn ALONG it, turned a quarter
+/// turn — a horizontal name on a top edge whose pins are one grid apart overlaps its neighbours.</para>
+///
+/// <para><b>Stated as a SIDE, not as a screen direction</b>, which is what makes it survive the Y flip
+/// between a source file's Y-up symbol coordinates and circuitRF's Y-down local ones: the pin is on
+/// the same edge of the same picture either way, so nothing has to remember to swap it.</para>
+/// </summary>
+public enum SymbolPinNameAlign { Left, Center, Right, Top, Bottom }
 public enum SymbolTextVAlign { Baseline, Top, Middle, Bottom }
 
 /// <summary>Tri-state snap mode for symbol-editor art.  Pins ALWAYS snap to P=100 regardless.</summary>
@@ -326,6 +343,18 @@ public sealed class SymbolPin
     public double  LocalY     { get; set; }
     public int     PortIndex  { get; set; }
     public string? Name       { get; set; }
+
+    /// <summary>
+    /// Which edge of the body this pin sits on, and so which way its NAME runs — see
+    /// <see cref="SymbolPinNameAlign"/>.
+    ///
+    /// <para>Set by every path that produces a pin: a component IMPORT takes it from the source file,
+    /// which either states the justification outright or fixes it through the pin's own rotation; a
+    /// GENERATED symbol derives it from where the pin sits relative to the rest of them
+    /// (<see cref="SymbolPinNameAlign"/>, <c>SymbolPinSides</c>). Left is the default, and is what
+    /// every symbol did before this field existed.</para>
+    /// </summary>
+    public SymbolPinNameAlign NameAlign { get; set; } = SymbolPinNameAlign.Left;
 
     public SymbolPin() { }
     public SymbolPin(double localX, double localY, int portIndex, string? name = null)

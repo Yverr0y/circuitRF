@@ -160,8 +160,12 @@ internal static class WBondSymbolGenerator
 
             // Pin NUMBERS are 1-based and follow the model's terminal order exactly — the stamp reads
             // Nodes[2k] and Nodes[2k+1], so this ordering is not presentation, it is the wiring.
-            pins.Add(new SymbolPin(inX, y, 2 * k + 1, PlusPin(name)));
-            pins.Add(new SymbolPin(outX, y, 2 * k + 2, MinusPin(name)));
+            // Each row's names run inward, as SymbolPinSides would derive them — stated here because
+            // this generator already knows which side it put each pin on.
+            pins.Add(new SymbolPin(inX, y, 2 * k + 1, PlusPin(name))
+            { NameAlign = SymbolPinNameAlign.Left });
+            pins.Add(new SymbolPin(outX, y, 2 * k + 2, MinusPin(name))
+            { NameAlign = SymbolPinNameAlign.Right });
 
             primitives.Add(new LinePrimitive(SymbolColorRole.SymbolLine, SymbolStrokeTier.Thin,
                                             inX, y, -halfWidth, y));
@@ -184,7 +188,8 @@ internal static class WBondSymbolGenerator
         if (referencePin)
         {
             double refY = DsnSymbolReader.SnapToPinGrid(halfHeight + LeadLength);
-            pins.Add(new SymbolPin(0, refY, 2 * m + 1, "REF"));
+            pins.Add(new SymbolPin(0, refY, 2 * m + 1, "REF")
+            { NameAlign = SymbolPinNameAlign.Bottom });   // hangs BELOW the body; its name runs up into it
             primitives.Add(new LinePrimitive(SymbolColorRole.SymbolLine, SymbolStrokeTier.Thin,
                                             0, halfHeight, 0, refY));
             primitives.Add(Text("REF", 0, halfHeight - PolarityInset, SymbolTextAlign.Center));

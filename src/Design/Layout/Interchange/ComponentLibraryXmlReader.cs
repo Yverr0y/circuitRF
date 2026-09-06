@@ -37,17 +37,6 @@ public static class ComponentLibraryXmlReader
 {
     public sealed record ReadResult(ComponentPart? Part, string? Refusal);
 
-    /// <summary>The format's four named pin lengths, in mils. Words, not numbers — see convention 2
-    /// above.</summary>
-    internal static readonly IReadOnlyDictionary<string, int> NamedPinLengths =
-        new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["point"] = 0,
-            ["short"] = 100,
-            ["middle"] = 200,
-            ["long"] = 300,
-        };
-
     /// <summary>Millimetres per mil, for the symbol side. The package side stays in millimetres all
     /// the way to DBU.</summary>
     private const double MillimetresPerMil = ComponentSymbolSexprReader.MillimetresPerMil;
@@ -459,11 +448,12 @@ public static class ComponentLibraryXmlReader
                     {
                         var pts = new List<double>();
                         foreach (var (px, py) in FlattenBulge(x1, y1, x2, y2, curve)) { pts.Add(Mil(px)); pts.Add(Mil(py)); }
-                        drawing.Shapes.Add(new KitSymbolPath(pts, false, false));
+                        drawing.Shapes.Add(new KitSymbolPath(pts, false, false) { Width = StrokeWidth(e) });
                     }
                     else
                     {
-                        drawing.Shapes.Add(new KitSymbolLine(Mil(x1), Mil(y1), Mil(x2), Mil(y2)));
+                        drawing.Shapes.Add(new KitSymbolLine(Mil(x1), Mil(y1), Mil(x2), Mil(y2))
+                                           { Width = StrokeWidth(e) });
                     }
                     break;
                 }
@@ -472,14 +462,15 @@ public static class ComponentLibraryXmlReader
                 {
                     if (!Num(e, "x1", out double x1) || !Num(e, "y1", out double y1) ||
                         !Num(e, "x2", out double x2) || !Num(e, "y2", out double y2)) break;
-                    drawing.Shapes.Add(new KitSymbolRectangle(Mil(x1), Mil(y1), Mil(x2), Mil(y2), true));
+                    drawing.Shapes.Add(new KitSymbolRectangle(Mil(x1), Mil(y1), Mil(x2), Mil(y2), true)
+                                       { Width = StrokeWidth(e) });
                     break;
                 }
 
                 case "circle":
                 {
                     if (!Num(e, "x", out double x) || !Num(e, "y", out double y) || !Num(e, "radius", out double r)) break;
-                    drawing.Shapes.Add(new KitSymbolArc(Mil(x), Mil(y), Mil(r), 0, 360));
+                    drawing.Shapes.Add(new KitSymbolArc(Mil(x), Mil(y), Mil(r), 0, 360) { Width = StrokeWidth(e) });
                     break;
                 }
 
@@ -488,7 +479,8 @@ public static class ComponentLibraryXmlReader
                     var pts = new List<double>();
                     foreach (var v in e.Elements("vertex"))
                         if (Num(v, "x", out double x) && Num(v, "y", out double y)) { pts.Add(Mil(x)); pts.Add(Mil(y)); }
-                    if (pts.Count >= 6) drawing.Shapes.Add(new KitSymbolPath(pts, true, true));
+                    if (pts.Count >= 6)
+                        drawing.Shapes.Add(new KitSymbolPath(pts, true, true) { Width = StrokeWidth(e) });
                     break;
                 }
 
@@ -507,22 +499,29 @@ public static class ComponentLibraryXmlReader
         string name = StripBondSuffix(statedName);
         bool bonded = name.Length != statedName.Length;
         string lengthWord = Attr(e, "length") ?? "long";
-        if (!NamedPinLengths.TryGetValue(lengthWord, out int lengthMil))
+        if (!ComponentSymbolLead.TryNamedLength(lengthWord, out int lengthMil))
         {
-            lengthMil = NamedPinLengths["long"];
+            lengthMil = ComponentSymbolLead.LongestNamedLength;
             part.Messages.Add($"Pin \"{name}\" states an unknown length \"{lengthWord}\" — drawn at the format's longest.");
         }
 
         int px = (int)Math.Round(Mil(x), MidpointRounding.AwayFromZero);
         int py = (int)Math.Round(Mil(y), MidpointRounding.AwayFromZero);
-        drawing.Pins.Add(new ComponentSymbolPin(name, null, px, py, bonded));
 
-        // The lead from the terminal to the body. This is the only place the named length is used; a
-        // numeric parse yields 0 for all four names and collapses every lead to nothing.
+        // The lead from the terminal to the body — and, with it, which side of the terminal the name
+        // goes on. This is the only place the named length is used; a numeric parse yields 0 for all
+        // four names and collapses every lead to nothing.
         var (dx, dy) = ComponentSymbolLead.Direction(RotationOf(e));
+
+        drawing.Pins.Add(new ComponentSymbolPin(
+            name, null, px, py, bonded, ComponentSymbolLead.NameAlignFor(dx, dy)));
+
         if (lengthMil > 0)
             drawing.Shapes.Add(new KitSymbolLine(px, py, px + dx * lengthMil, py + dy * lengthMil));
     }
+
+    /// <summary>The <c>width</c> this element states, in mils — 0 when it states none.</summary>
+    private static double StrokeWidth(XElement e) => Num(e, "width", out double w) && w > 0 ? Mil(w) : 0;
 
     // ── Text, geometry and attribute helpers ────────────────────────────────────────────────────
 
@@ -680,6 +679,25 @@ public static class ComponentSymbolLead
         };
     }
 
+    /// <summary>
+    /// Which edge of the body a pin sits on, given the direction its lead runs in.
+    ///
+    /// <para>The name sits on the BODY side of the terminal — that is what every one of these formats
+    /// draws, and what the two that state a justification field outright both say. So a lead running
+    /// +x (body to the right) means a pin on the LEFT edge, whose name is drawn to its right.</para>
+    ///
+    /// <para><b><paramref name="dy"/> is Y-UP</b>, as these formats state their symbol coordinates: a
+    /// lead running +y runs UPWARD, so the body is above the pin and the pin is on the BOTTOM edge.
+    /// The answer is a side rather than a screen direction, so it survives the Y flip the consumer
+    /// applies with nothing to remember.</para>
+    /// </summary>
+    public static KitTextAlign NameAlignFor(int dx, int dy)
+        => dx > 0 ? KitTextAlign.Left
+         : dx < 0 ? KitTextAlign.Right
+         : dy > 0 ? KitTextAlign.Bottom
+         : dy < 0 ? KitTextAlign.Top
+         : KitTextAlign.Center;
+
     /// <summary>The same direction for the older text format's orientation letter.</summary>
     public static (int Dx, int Dy) FromLetter(string orientation) => orientation switch
     {
@@ -688,4 +706,29 @@ public static class ComponentSymbolLead
         "D" => (0, -1),
         _ => (1, 0),
     };
+
+    /// <summary>
+    /// The four NAMED lead lengths, in mils.
+    ///
+    /// <para>Two formats of one family state the length as a word rather than a number — the XML
+    /// library in an attribute, the command script as a bare token in the <c>Pin</c> statement — and a
+    /// numeric parse yields zero for all four, which collapses every lead onto the body edge. They are
+    /// absolute lengths in the format's own units, so they are NOT scaled by whatever grid unit the
+    /// script happens to be in.</para>
+    /// </summary>
+    private static readonly Dictionary<string, int> NamedLengths =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["point"] = 0,
+            ["short"] = 100,
+            ["middle"] = 200,
+            ["long"] = 300,
+        };
+
+    /// <summary>Whether <paramref name="word"/> is one of the four names, and its length in mils.</summary>
+    public static bool TryNamedLength(string word, out int mils) => NamedLengths.TryGetValue(word, out mils);
+
+    /// <summary>The longest of the four — what a reader falls back to when the stated word is not one
+    /// of them, so an unrecognised name draws a lead of the ordinary length rather than none.</summary>
+    public static int LongestNamedLength => NamedLengths["long"];
 }

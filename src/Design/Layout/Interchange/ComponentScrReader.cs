@@ -159,7 +159,7 @@ public static class ComponentScrReader
                     {
                         drawing.Shapes.Add(new KitSymbolLine(
                             points[0].X * unitScale, points[0].Y * unitScale,
-                            points[1].X * unitScale, points[1].Y * unitScale));
+                            points[1].X * unitScale, points[1].Y * unitScale) { Width = width });
                         break;
                     }
 
@@ -194,10 +194,29 @@ public static class ComponentScrReader
                     var point = LastPoint(statement);
                     if (point is null) break;
 
+                    int px = (int)Math.Round(point.Value.X * unitScale, MidpointRounding.AwayFromZero);
+                    int py = (int)Math.Round(point.Value.Y * unitScale, MidpointRounding.AwayFromZero);
+
+                    // The lead from that free end inward to the body, and which side the name sits on.
+                    // This format draws the lead from a stated LENGTH WORD and an `R<deg>` rotation
+                    // rather than as geometry of its own, so a reader that keeps only the point
+                    // produces a body with its pins floating clear of it — the drawing every other
+                    // format in this folder gets right.
+                    //
+                    // Both tokens are found by SHAPE, not by position: the pin's own name is the only
+                    // quoted word and `Words` keeps its quotes, so no name can be mistaken for either.
+                    var rotation = LeadRotation(words);
+                    var (dx, dy) = ComponentSymbolLead.Direction(rotation ?? 0);
+
                     drawing.Pins.Add(new ComponentSymbolPin(
-                        Unquote(words[1]), null,
-                        (int)Math.Round(point.Value.X * unitScale, MidpointRounding.AwayFromZero),
-                        (int)Math.Round(point.Value.Y * unitScale, MidpointRounding.AwayFromZero)));
+                        Unquote(words[1]), null, px, py,
+                        Bonded: false,
+                        NameAlign: rotation is null
+                            ? KitTextAlign.Left
+                            : ComponentSymbolLead.NameAlignFor(dx, dy)));
+
+                    if (NamedLead(words) is { } lengthMil && lengthMil > 0 && rotation is not null)
+                        drawing.Shapes.Add(new KitSymbolLine(px, py, px + (dx * lengthMil), py + (dy * lengthMil)));
                     break;
                 }
 
@@ -307,6 +326,39 @@ public static class ComponentScrReader
                 if (statement.Length > 0) yield return (statement, i + 1);
             }
         }
+    }
+
+    /// <summary>
+    /// The <c>Pin</c> statement's lead length in mils, or null when it states none.
+    ///
+    /// <para>The length is one of four WORDS (<c>Point</c>/<c>Short</c>/<c>Middle</c>/<c>Long</c>), and
+    /// it is an absolute length in the format's own units — so it is deliberately NOT multiplied by the
+    /// interpreter's current grid scale, which converts stated COORDINATES and not this.</para>
+    /// </summary>
+    private static int? NamedLead(List<string> words)
+    {
+        for (int i = 2; i < words.Count; i++)
+            if (ComponentSymbolLead.TryNamedLength(words[i], out int mils))
+                return mils;
+        return null;
+    }
+
+    /// <summary>
+    /// The <c>R&lt;deg&gt;</c> token's angle, degrees counter-clockwise — <b>null when the statement
+    /// carries no such token</b>, which is what suppresses the lead rather than defaulting it.
+    ///
+    /// <para>This format also spells a MIRRORED placement (<c>MR90</c>, <c>SR0</c>), and a mirror is
+    /// not a rotation: reading one as its bare angle draws the lead on the wrong side of the terminal,
+    /// which is a worse drawing than the missing lead this exists to fix. So only the plain spelling is
+    /// read, and anything else leaves the pin drawn as a bare point.</para>
+    /// </summary>
+    private static double? LeadRotation(List<string> words)
+    {
+        for (int i = 2; i < words.Count; i++)
+            if (words[i].Length > 1 && (words[i][0] == 'R' || words[i][0] == 'r') &&
+                double.TryParse(words[i][1..], NumberStyles.Float, CultureInfo.InvariantCulture, out double deg))
+                return deg;
+        return null;
     }
 
     /// <summary>Whitespace-separated words, with quoted strings kept whole and parenthesised point

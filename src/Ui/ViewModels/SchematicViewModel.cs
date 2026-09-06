@@ -3555,9 +3555,16 @@ public sealed partial class SchematicViewModel : ObservableObject
         double sx = EditModel.SnapToGrid(wx);
         double sy = EditModel.SnapToGrid(wy);
 
+        // Resolved BEFORE the instance is built, because the cell's published interface decides two
+        // things about it and not just one: the parameters it is seeded with, and — through the
+        // library's own stated Reference prefix — what it is CALLED. A cell declaring U is placed as
+        // U1, U2, U3; one that declares nothing keeps the generic X.
+        var declaringCcell = CellSymbolResolver.ResolveCcell(cellRef, EditModel.SchematicDirectory ?? "");
+
         var comp = new EditableComponent
         {
-            InstanceName = SchematicEditModel.NextAvailableName(EditModel.Components, "X"),
+            InstanceName = SchematicEditModel.NextAvailableName(
+                EditModel.Components, CellReferenceDesignator.PrefixFor(declaringCcell)),
             Symbol       = SymbolKind.Generic, // placeholder; rendering uses CellRef when set
             CellRef      = cellRef,
             // SL3 R-sl3-4/-6: the interface this component is being placed against. Recorded here,
@@ -3574,7 +3581,7 @@ public sealed partial class SchematicViewModel : ObservableObject
         // Seed parameters from the cell's published interface — resolved through the one accessor,
         // so a kit part (held in memory) and a cell folder (on disk) seed identically. A corrupt or
         // absent one yields null and the instance is placed without parameters, as before.
-        if (CellSymbolResolver.ResolveCcell(cellRef, EditModel.SchematicDirectory ?? "") is { } ccell)
+        if (declaringCcell is { } ccell)
             foreach (var cp in ccell.Parameters)
                 comp.Parameters.Add(new EditableParameter
                 {
@@ -3700,9 +3707,17 @@ public sealed partial class SchematicViewModel : ObservableObject
         if (!CheckNotCyclic(cellRef)) return true;
 
         var remaining = EditModel.Components.Where(c => c.Id != comp.Id);
+
+        // As placement does, and for the same reason: the cell's stated Reference prefix names the
+        // instance. Resolved once, read twice — the name below and the seeded parameters further down.
+        CcellFile? declaringCcell;
+        try { declaringCcell = CellSymbolResolver.ResolveCcell(cellRef, EditModel.SchematicDirectory ?? ""); }
+        catch { declaringCcell = null; }   // corrupt .ccell — retype without parameters, as before
+
         var newComp = new EditableComponent
         {
-            InstanceName     = SchematicEditModel.NextAvailableName(remaining, "X"),
+            InstanceName     = SchematicEditModel.NextAvailableName(
+                remaining, CellReferenceDesignator.PrefixFor(declaringCcell)),
             Symbol           = SymbolKind.Generic,   // placeholder; rendering uses CellRef
             CellRef          = cellRef,
             // Retyping into a cell instance IS a placement (R-sl3-6) — the user chose this cell now,
@@ -3717,22 +3732,15 @@ public sealed partial class SchematicViewModel : ObservableObject
 
         // Seed from the cell's own published interface, exactly as placement does — through the one
         // resolver, so a kit part in memory and a cell on disk are seeded the same way.
-        {
-            try
+        foreach (var cp in declaringCcell?.Parameters ?? [])
+            newComp.Parameters.Add(new EditableParameter
             {
-                var declaring = CellSymbolResolver.ResolveCcell(cellRef, EditModel.SchematicDirectory ?? "");
-                foreach (var cp in declaring?.Parameters ?? [])
-                    newComp.Parameters.Add(new EditableParameter
-                    {
-                        Name            = cp.Name,
-                        Expression      = cp.DefaultExpression,
-                        Unit            = cp.Unit,
-                        Dimension       = cp.Dimension,
-                        ShowOnSchematic = cp.ShowOnSchematic,
-                    });
-            }
-            catch { /* corrupt .ccell — swap in without parameters, same as placement */ }
-        }
+                Name            = cp.Name,
+                Expression      = cp.DefaultExpression,
+                Unit            = cp.Unit,
+                Dimension       = cp.Dimension,
+                ShowOnSchematic = cp.ShowOnSchematic,
+            });
 
         Execute(new ChangeComponentTypeCommand(EditModel, comp, newComp));
         return true;
@@ -4057,6 +4065,44 @@ public sealed partial class SchematicViewModel : ObservableObject
         if (comp is null) return;
         bool current = isTypeLabel ? comp.ShowTypeLabel : comp.ShowInstanceName;
         Execute(new SetLabelVisibilityCommand(EditModel, comp, isTypeLabel, !current));
+    }
+
+    /// <summary>
+    /// Whether pin names are on screen for this instance RIGHT NOW — the answer the context menu's
+    /// eye icon shows and the toggle flips.
+    ///
+    /// <para>Read off the render model rather than recomputed, so it is the same answer the renderer
+    /// acted on: an instance with no explicit override follows its symbol, and only the render model
+    /// has already asked the symbol.</para>
+    /// </summary>
+    public bool PinNamesVisible(string compId)
+    {
+        var comp = EditModel.FindComponent(compId);
+        if (comp is null) return false;
+        if (comp.ShowPinNames is bool explicitly) return explicitly;
+        var rc = RenderModel?.Components.FirstOrDefault(c => c.Id == compId);
+        return rc is not null && rc.Ports.Any(p => p.ShowName);
+    }
+
+    /// <summary>
+    /// Whether this instance HAS pin names to show — true for a cell reference that resolves to a
+    /// symbol with pins, false for a built-in, whose pin labels are text inside its own artwork and
+    /// so are not this toggle's to hide.
+    /// </summary>
+    public bool CanTogglePinNames(string compId)
+    {
+        var comp = EditModel.FindComponent(compId);
+        if (comp?.CellRef is not { Length: > 0 }) return false;
+        var rc = RenderModel?.Components.FirstOrDefault(c => c.Id == compId);
+        return rc is { CellRefState: CellSymbolState.Resolved, Ports.Count: > 0 };
+    }
+
+    /// <summary>Toggles pin-name visibility on a single component (undoable).</summary>
+    public void TogglePinNames(string compId)
+    {
+        var comp = EditModel.FindComponent(compId);
+        if (comp is null) return;
+        Execute(new SetPinNameVisibilityCommand(EditModel, comp, !PinNamesVisible(compId)));
     }
 
     // ── Inline editing ────────────────────────────────────────────────────────

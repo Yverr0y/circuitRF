@@ -167,7 +167,8 @@ public static class ComponentSymbolSexprReader
                 var s = Xy(node.Child("start"));
                 var e = Xy(node.Child("end"));
                 if (s is null || e is null) break;
-                drawing.Shapes.Add(new KitSymbolRectangle(s.Value.X, s.Value.Y, e.Value.X, e.Value.Y, FilledOf(node)));
+                drawing.Shapes.Add(new KitSymbolRectangle(s.Value.X, s.Value.Y, e.Value.X, e.Value.Y, FilledOf(node))
+                                   { Width = StrokeWidth(node) });
                 break;
             }
 
@@ -178,7 +179,7 @@ public static class ComponentSymbolSexprReader
                 bool closed = pts.Count >= 6
                     && Math.Abs(pts[0] - pts[^2]) < 1e-9 && Math.Abs(pts[1] - pts[^1]) < 1e-9;
                 if (closed) pts.RemoveRange(pts.Count - 2, 2);
-                drawing.Shapes.Add(new KitSymbolPath(pts, closed, FilledOf(node)));
+                drawing.Shapes.Add(new KitSymbolPath(pts, closed, FilledOf(node)) { Width = StrokeWidth(node) });
                 break;
             }
 
@@ -189,7 +190,7 @@ public static class ComponentSymbolSexprReader
                 if (c is null || r <= 0) break;
                 // KitSymbolShape has no circle of its own; a full-sweep arc is the same curve, and the
                 // consumer's arc conversion renders it as one.
-                drawing.Shapes.Add(new KitSymbolArc(c.Value.X, c.Value.Y, r, 0, 360));
+                drawing.Shapes.Add(new KitSymbolArc(c.Value.X, c.Value.Y, r, 0, 360) { Width = StrokeWidth(node) });
                 break;
             }
 
@@ -199,7 +200,8 @@ public static class ComponentSymbolSexprReader
                 var m = Xy(node.Child("mid"));
                 var e = Xy(node.Child("end"));
                 if (s is null || m is null || e is null) break;
-                if (ArcThroughThreePoints(s.Value, m.Value, e.Value) is { } arc) drawing.Shapes.Add(arc);
+                if (ArcThroughThreePoints(s.Value, m.Value, e.Value) is { } arc)
+                    drawing.Shapes.Add(arc with { Width = StrokeWidth(node) });
                 else part.Messages.Add("An arc whose three points are colinear was skipped — it states no circle.");
                 break;
             }
@@ -234,25 +236,33 @@ public static class ComponentSymbolSexprReader
         // the thermal pad — the one terminal on an RF part whose grounding decides the answer.
         string number = node.Child("number")?.Atom(0) ?? "";
 
+        // This format states no justification on a pin's name: the authoring editor puts it on the
+        // body side, and the pin's own angle is what says which side that is.
+        var (dx, dy) = ComponentSymbolLead.Direction(at.Num(2) ?? 0);
+
         drawing.Pins.Add(new ComponentSymbolPin(
             name.Length > 0 ? name : number,
             number.Length > 0 ? number : null,
-            x, y));
+            x, y, Bonded: false,
+            NameAlign: ComponentSymbolLead.NameAlignFor(dx, dy)));
 
         // The lead the format draws from the terminal INWARD to the body. Emitted rather than left
         // implicit: the file states a length and an angle, the authoring editor draws that line, and a
         // symbol imported without it has its pins floating off its own box.
         int length = (int)Math.Round(Mils(node.ChildNum("length") ?? 0), MidpointRounding.AwayFromZero);
         if (length > 0)
-        {
-            var (dx, dy) = ComponentSymbolLead.Direction(at.Num(2) ?? 0);
             drawing.Shapes.Add(new KitSymbolLine(x, y, x + dx * length, y + dy * length));
-        }
     }
 
     // ── Geometry helpers ────────────────────────────────────────────────────────────────────────
 
     internal static double Mils(double millimetres) => millimetres / MillimetresPerMil;
+
+    /// <summary>The <c>(stroke (width …))</c> this element carries, in mils. This format spells "the
+    /// editor's default" as a zero, which is the same thing <see cref="KitSymbolShape.Width"/> means by
+    /// it, so it passes through untouched.</summary>
+    private static double StrokeWidth(PcbNode node)
+        => Mils(node.Child("stroke")?.ChildNum("width") ?? 0);
 
     private static (double X, double Y)? Xy(PcbNode? node)
         => node?.Num(0) is { } x && node.Num(1) is { } y ? (Mils(x), Mils(y)) : null;

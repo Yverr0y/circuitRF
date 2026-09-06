@@ -76,8 +76,15 @@ internal static class AutoSymbolGenerator
                 SymbolColorRole.SymbolLine, SymbolStrokeTier.Normal,
                 outerX, portY, pinTipX, portY));
 
-            // Pin at tip (portIndex is 0-based)
-            pins.Add(new SymbolPin(pinTipX, portY, portNum - 1, portNum.ToString()));
+            // Pin at tip (portIndex is 0-based). Its NAME runs inward, toward the body, which for
+            // this layout is a plain consequence of the side the port was put on — a left-hand pin's
+            // name to its right, a right-hand pin's to its left. Stated from the layout rather than
+            // re-derived from the coordinates: the generator already knows the answer, and a pin
+            // renamed in the symbol editor would otherwise run its name outward into empty space.
+            pins.Add(new SymbolPin(pinTipX, portY, portNum - 1, portNum.ToString())
+            {
+                NameAlign = isLeft ? SymbolPinNameAlign.Left : SymbolPinNameAlign.Right,
+            });
 
             // Port-number text inside the inner rect, near the stub.
             double textX = isLeft

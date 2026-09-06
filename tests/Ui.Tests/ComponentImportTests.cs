@@ -14,6 +14,13 @@ namespace CircuitRF.Ui.Tests;
 /// <para>Counters only, never wall clock (gate 19; root <c>CLAUDE.md</c>,
 /// <c>feedback-no-new-timing-benchmark-tests</c>).</para>
 /// </summary>
+// In CellStatGlobalsCollection: these tests call ComponentImport.Import, and CellFolder routes every
+// filesystem call it makes through CellStat's PROCESS-GLOBAL counter. They assert nothing about that
+// counter — but SharedLibraryConcurrencyTests asserts EXACT counts, and any class making counted calls
+// beside it turns those assertions red with a statement about the scheduler rather than about the
+// code. See CellStatGlobalsCollection's own note: adding classes to this assembly is exactly what has
+// made this surface before, and it surfaced again when the preview tests were added.
+[Collection(CellStatGlobalsCollection.Name)]
 public class ComponentImportTests : IDisposable
 {
     private readonly string _dir = Directory.CreateTempSubdirectory("component-import-test-").FullName;
@@ -928,4 +935,38 @@ public class ComponentImportTests : IDisposable
     [InlineData("@1", "@1")]
     public void BondSuffixStripping(string stated, string expected)
         => Assert.Equal(expected, ComponentLibraryXmlReader.StripBondSuffix(stated));
+
+    // ── The pin name's side survives .csym ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <c>SymbolPin.NameAlign</c> round-trips, and a symbol that never left the default writes
+    /// <b>byte for byte what it always wrote</b>.
+    ///
+    /// <para>That second half is the reason the field needed no format-version bump: every existing
+    /// <c>.csym</c> in every workspace re-serializes unchanged, and a build that predates the field
+    /// reads a file that carries it and draws what it always drew. A field written unconditionally
+    /// would have rewritten every symbol in the repo on its next save.</para>
+    /// </summary>
+    [Fact]
+    public void ThePinNamesSide_RoundTripsThroughCsym_AndCostsNothingWhenItIsTheDefault()
+    {
+        var plain = new Symbol(
+            [new LinePrimitive(SymbolColorRole.SymbolLine, SymbolStrokeTier.Normal, 0, 0, 100, 0)],
+            [new SymbolPin(0, 0, 1, "A"), new SymbolPin(100, 0, 2, "B")]);
+
+        string before = SymbolPersistence.Serialize(plain);
+        Assert.DoesNotContain("NameAlign", before, StringComparison.Ordinal);
+
+        plain.Pins[1].NameAlign = SymbolPinNameAlign.Right;
+        string after = SymbolPersistence.Serialize(plain);
+        Assert.Contains("NameAlign", after, StringComparison.Ordinal);
+
+        var back = SymbolPersistence.Deserialize(after);
+        Assert.Equal(SymbolPinNameAlign.Left, back.Pins[0].NameAlign);
+        Assert.Equal(SymbolPinNameAlign.Right, back.Pins[1].NameAlign);
+
+        // And back to the default writes the original bytes again.
+        back.Pins[1].NameAlign = SymbolPinNameAlign.Left;
+        Assert.Equal(before, SymbolPersistence.Serialize(back));
+    }
 }

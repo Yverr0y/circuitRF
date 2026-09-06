@@ -132,7 +132,11 @@ internal sealed class SchematicPasteCommand : IUiCommand
                 taken.Add(comp.InstanceName);
                 continue;
             }
-            string prefix = ComponentTypeRegistry.InstancePrefix(comp.Symbol);
+            // A cell instance is numbered from the library's own stated Reference prefix, exactly as
+            // placing one is — a pasted U1 becomes U2, not the generic X2.
+            string prefix = comp.CellRef is { Length: > 0 }
+                ? CellReferenceDesignator.PrefixFor(comp)
+                : ComponentTypeRegistry.InstancePrefix(comp.Symbol);
             comp.InstanceName = SchematicEditModel.NextAvailableName(taken, prefix);
             taken.Add(comp.InstanceName);
         }

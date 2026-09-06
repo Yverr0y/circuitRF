@@ -362,6 +362,10 @@ public static class BuiltInSymbols
         var pins = portDefs
             .Select((d, i) => new SymbolPin(d.LocalX, d.LocalY, i, d.Name))
             .ToList();
+        // A built-in draws its pin labels as text inside its own artwork, so nothing renders these —
+        // but the pins are real pins, they reach the symbol editor, and a side derived once here is
+        // one fewer place for the rule to be missing. See SymbolPinSides.
+        SymbolPinSides.Assign(pins);
         return new Symbol(prims, pins);
     }
 
@@ -1143,6 +1147,7 @@ public static class BuiltInSymbols
         }
 
         var pins = ports.Select((d, i) => new SymbolPin(d.LocalX, d.LocalY, i, d.Name)).ToList();
+        SymbolPinSides.Assign(pins);
         return new Symbol(prims, pins);
 
         static double ClampInsideBody(double y, double top, double bot)

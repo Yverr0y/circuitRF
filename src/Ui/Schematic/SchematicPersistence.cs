@@ -81,6 +81,14 @@ public sealed class CschComponent
     public bool? ShowInstanceName { get; set; }
 
     /// <summary>
+    /// An explicit per-instance override of pin-name visibility, or null — which is BOTH the file's
+    /// default and the model's, and means "let the symbol decide" rather than any particular answer.
+    /// Written only when the user has toggled it, so a schematic that never touches it stays
+    /// byte-identical and keeps following its symbol's own pin names.
+    /// </summary>
+    public bool? ShowPinNames { get; set; }
+
+    /// <summary>
     /// Relative path from the schematic directory to the referenced cell folder.
     /// Null for built-in components. Omitted from file when null (WhenWritingNull).
     /// </summary>
@@ -445,6 +453,9 @@ public static class SchematicPersistence
             // Omit when true (the default) to keep files compact.
             if (!c.ShowTypeLabel)    cc.ShowTypeLabel    = false;
             if (!c.ShowInstanceName) cc.ShowInstanceName = false;
+            // Null is the default AND a meaningful state ("follow the symbol"), so this one is
+            // written whenever it is set — either way round.
+            if (c.ShowPinNames is bool spn) cc.ShowPinNames = spn;
             if (c.CellRef is not null) cc.CellRef = c.CellRef;
             // SL3 R-sl3-10: SAVE never records, refreshes or clears this — it writes back exactly
             // what was loaded. The recorded hash is the only evidence that the design was authored
@@ -531,6 +542,7 @@ public static class SchematicPersistence
             // Null means "not written" → use the persisted default (true).
             if (cc.ShowTypeLabel    is bool stl) c.ShowTypeLabel    = stl;
             if (cc.ShowInstanceName is bool sin) c.ShowInstanceName = sin;
+            c.ShowPinNames = cc.ShowPinNames;
             if (cc.CellRef is not null) c.CellRef = cc.CellRef;
             if (cc.CellInterfaceHash is not null) c.CellInterfaceHash = cc.CellInterfaceHash;
             if (cc.DetachedPorts is not null)

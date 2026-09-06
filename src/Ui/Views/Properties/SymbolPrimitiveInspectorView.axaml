@@ -500,6 +500,31 @@
                                        FormatString="0" FontSize="11" Padding="4,2"/>
                     </Grid>
 
+                    <!-- The pin's own name. Committed on LOST FOCUS rather than per keystroke: this
+                         panel refreshes on every RenderSymbol notification, which a live edit raises,
+                         so a per-keystroke binding rewrites the box mid-word — and it would put one
+                         undo entry on the stack per character. -->
+                    <Grid ColumnDefinitions="56,*">
+                        <TextBlock Grid.Column="0" Text="Name" VerticalAlignment="Center" FontSize="11"
+                                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                   ToolTip.Tip="The pin's name, drawn beside it. Leave it blank to fall back to the port number."/>
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding PinName, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                                 FontSize="11" Padding="4,2" MinHeight="0"
+                                 VerticalContentAlignment="Center"/>
+                    </Grid>
+
+                    <Grid ColumnDefinitions="56,*">
+                        <TextBlock Grid.Column="0" Text="Align" VerticalAlignment="Center" FontSize="11"
+                                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                   ToolTip.Tip="Which edge of the body this pin is on, which is which way its name runs — inward. Left draws the name to the RIGHT of the pin (the default); Right draws it to the LEFT. Top and Bottom turn it a quarter turn and run it along the lead."/>
+                        <ComboBox Grid.Column="1"
+                                  ItemsSource="{x:Static vm:SymbolPrimitiveInspectorViewModel.PinAlignOptions}"
+                                  SelectedItem="{Binding PinNameAlign, Mode=TwoWay}"
+                                  HorizontalAlignment="Stretch"
+                                  FontSize="11" Padding="4,2"/>
+                    </Grid>
+
                 </StackPanel>
 
                 <!-- ── Polyline / Polygon coord list (virtualized) ─────────────────── -->

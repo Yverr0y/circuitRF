@@ -1,6 +1,8 @@
 using System.Text.RegularExpressions;
+using CircuitRF.Core.Pdk;
 using CircuitRF.Design.Layout.Interchange;
 using CircuitRF.Ui.Layout;
+using CircuitRF.Ui.Schematic;
 
 namespace CircuitRF.Ui.Tests;
 
@@ -19,6 +21,13 @@ namespace CircuitRF.Ui.Tests;
 ///
 /// <para>Counters only, never wall clock (gate 14).</para>
 /// </summary>
+// In CellStatGlobalsCollection: these tests call ComponentImport.Import, and CellFolder routes every
+// filesystem call it makes through CellStat's PROCESS-GLOBAL counter. They assert nothing about that
+// counter — but SharedLibraryConcurrencyTests asserts EXACT counts, and any class making counted calls
+// beside it turns those assertions red with a statement about the scheduler rather than about the
+// code. See CellStatGlobalsCollection's own note: adding classes to this assembly is exactly what has
+// made this surface before, and it surfaced again when the preview tests were added.
+[Collection(CellStatGlobalsCollection.Name)]
 public class ComponentImportBreadthTests
 {
     private const int Dbu = LayoutUnits.DefaultDbuPerMicron;
@@ -173,6 +182,32 @@ public class ComponentImportBreadthTests
         var fourth = symbol.Pins[3];
         Assert.Equal(1800, fourth.XMil);
         Assert.Equal(-300, fourth.YMil);
+    }
+
+    // ── The library's stated reference-designator prefix, in every grammar ────────────────────────
+
+    /// <summary>
+    /// Every one of these grammars states the letter its parts are numbered from, and each spells it
+    /// differently — a <c>PREFIX</c> field, a <c>Prefix</c> attribute, a <c>RefPrefix</c> line, an
+    /// unlabelled column of the part-type record. They all land on the one metadata key, which
+    /// <c>ComponentImport</c> carries onto the cell as a read-only <c>Reference</c> parameter and the
+    /// schematic reads to name a placed instance <c>U1</c> rather than <c>X1</c>.
+    ///
+    /// <para>Two of these read nothing at all before this test existed, on files that stated it
+    /// plainly — the same part imported from two folders of one download got two different names.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(ComponentFormatFamily.Records, "records")]
+    [InlineData(ComponentFormatFamily.Hkp, "hkp")]
+    [InlineData(ComponentFormatFamily.Plx, "plx")]
+    [InlineData(ComponentFormatFamily.Cxf, "cxf")]
+    [InlineData(ComponentFormatFamily.Script, "scr")]
+    public void EveryGrammarReadsTheSameStatedPrefix(ComponentFormatFamily family, string folder)
+    {
+        var part = Read(family, folder);
+        Assert.True(part.Metadata.TryGetValue("Reference", out string? prefix),
+            $"{family} read no Reference, though its fixture states one.");
+        Assert.Equal("U", prefix);
     }
 
     // ── Gate 4: count-driven records (R-PL2-4) ────────────────────────────────────────────────────
@@ -570,4 +605,209 @@ public class ComponentImportBreadthTests
             Enum.GetNames<ComponentFormatFamily>());
     }
 
+
+    // ── Gate 16: the pin's LEAD is drawn, in every grammar ────────────────────────────────────────
+
+    /// <summary>
+    /// <b>Every one of these formats states the stem from a pin's terminal in to the body, and every
+    /// one states it differently</b> — as geometry of its own, as a length and a rotation on the pin,
+    /// as a length WORD, or as a separate pin decal the terminal names. A reader that keeps only the
+    /// terminal's point produces a symbol whose body has all its pins floating clear of it: not a
+    /// refusal, not a warning, just a wrong drawing that looks deliberate.
+    ///
+    /// <para>So the gate is stated on the DRAWING and not on any format's own spelling: for each pin,
+    /// a segment runs from that pin's point to the body edge beside it. GIZMO4's body is x = 300 to
+    /// 1500 with pins at x = 0 and x = 1800, so the lead is 300 mils long in either direction and its
+    /// far end is on the body.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(ComponentFormatFamily.Records, "records")]
+    [InlineData(ComponentFormatFamily.Hkp, "hkp")]
+    [InlineData(ComponentFormatFamily.Plx, "plx")]
+    [InlineData(ComponentFormatFamily.Plx, "dsl")]
+    [InlineData(ComponentFormatFamily.Cxf, "cxf")]
+    [InlineData(ComponentFormatFamily.Script, "scr")]
+    public void Gate16_EveryGrammarDrawsEachPinsLeadInToTheBody(ComponentFormatFamily family, string folder)
+    {
+        var drawing = Read(family, folder).Symbol;
+        Assert.NotNull(drawing);
+        Assert.Equal(5, drawing.Pins.Count);
+
+        foreach (var pin in drawing.Pins)
+        {
+            double bodyEdge = pin.XMil < 900 ? 300 : 1500;
+            Assert.True(
+                drawing.Shapes.Any(sh => IsSegment(sh, pin.XMil, pin.YMil, bodyEdge, pin.YMil)),
+                $"{folder}: pin \"{pin.Name}\" at ({pin.XMil},{pin.YMil}) has no lead drawn to the body " +
+                $"edge at x={bodyEdge}. The file states one; nothing in the drawing carries it.");
+        }
+    }
+
+    /// <summary>
+    /// The one grammar whose lead is not on the pin at all: its terminal names a PIN DECAL defined
+    /// elsewhere in the same file, and that decal's own geometry is the lead. Removing the definition
+    /// leaves the pins where the file puts them, draws no lead, and SAYS so — a length is never
+    /// invented, because the lead's length is what says where the body edge is.
+    /// </summary>
+    [Fact]
+    public void Gate16b_ARecordsTerminalNamingAnUndefinedPinDecalIsReportedRatherThanGuessed()
+    {
+        string symbolText = File.ReadAllText(Dir("records", "PARTLIB.c"));
+        int at = symbolText.IndexOf("PINDECAL 0", StringComparison.Ordinal);
+        Assert.True(at > 0, "The fixture must define the pin decal for this test to remove it.");
+
+        var result = ComponentRecordsReader.Read(
+            File.ReadAllText(Dir("records", "PARTLIB.p")),
+            File.ReadAllText(Dir("records", "PARTLIB.d")),
+            symbolText[..at],
+            Dbu);
+
+        Assert.Null(result.Refusal);
+        var drawing = result.Part!.Symbol!;
+
+        Assert.Equal(5, drawing.Pins.Count);
+        Assert.DoesNotContain(drawing.Shapes, sh => IsSegment(sh, 0, 0, 300, 0));
+        Assert.Contains(result.Part.Messages, m => m.Contains("PINDECAL", StringComparison.Ordinal));
+    }
+
+
+    // ── Gate 17: the pin NAME's side, and the stroke widths (R-PL2-20, R-PL2-21) ─────────────────
+
+    /// <summary>
+    /// <b>Every grammar puts a pin's name on the BODY side of its terminal, and they must all agree
+    /// about which side that is.</b> Two of them state the justification outright — one as a signed
+    /// field, one as a <c>justify</c> word — and the rest fix it through the pin's own rotation. That
+    /// makes this a real cross-check rather than a restatement: the derived answer is compared against
+    /// the same part's stated answer, in the same assertion, over every grammar at once.
+    ///
+    /// <para>Getting it wrong is not subtle once seen and completely invisible until then: the whole
+    /// right-hand column of names is drawn outward, away from the body, into empty space.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(ComponentFormatFamily.Records, "records")]
+    [InlineData(ComponentFormatFamily.Hkp, "hkp")]
+    [InlineData(ComponentFormatFamily.Plx, "plx")]
+    [InlineData(ComponentFormatFamily.Plx, "dsl")]
+    [InlineData(ComponentFormatFamily.Cxf, "cxf")]
+    [InlineData(ComponentFormatFamily.Script, "scr")]
+    public void Gate17_EveryGrammarPutsAPinsNameOnItsBodySide(ComponentFormatFamily family, string folder)
+    {
+        var drawing = Read(family, folder).Symbol;
+        Assert.NotNull(drawing);
+
+        // GIZMO4's body spans x = 300..1500 with pins at x = 0 and x = 1800.
+        Assert.Equal(
+            drawing.Pins.Select(p => p.XMil < 900 ? KitTextAlign.Left : KitTextAlign.Right),
+            drawing.Pins.Select(p => p.NameAlign));
+    }
+
+    /// <summary>
+    /// And it survives the conversion into circuitRF's own symbol, which is where it has to be true —
+    /// a reader that reads the field correctly and a builder that drops it look identical from the
+    /// reader's side.
+    /// </summary>
+    [Theory]
+    [InlineData(ComponentFormatFamily.Hkp, "hkp")]
+    [InlineData(ComponentFormatFamily.Plx, "plx")]
+    [InlineData(ComponentFormatFamily.Script, "scr")]
+    public void Gate17b_TheNamesSideReachesTheBuiltSymbol(ComponentFormatFamily family, string folder)
+    {
+        var part = Read(family, folder);
+        var built = ComponentImport.Build(part, null, Dbu, []);
+        Assert.NotNull(built?.Symbol);
+
+        // Compared pin for pin against the DRAWING's own answer, in declaration order — the build
+        // scales and snaps the coordinates, so a side re-derived from the built LocalX would be
+        // testing this test's arithmetic rather than the import's.
+        Assert.Contains(built.Symbol.Pins, p => p.NameAlign == SymbolPinNameAlign.Right);
+        Assert.Equal(
+            part.Symbol!.Pins.Select(p => p.NameAlign switch
+            {
+                KitTextAlign.Right  => SymbolPinNameAlign.Right,
+                KitTextAlign.Center => SymbolPinNameAlign.Center,
+                KitTextAlign.Top    => SymbolPinNameAlign.Top,
+                KitTextAlign.Bottom => SymbolPinNameAlign.Bottom,
+                _ => SymbolPinNameAlign.Left,
+            }),
+            built.Symbol.Pins.Select(p => p.NameAlign));
+    }
+
+    /// <summary>
+    /// The stated stroke WIDTHS reach the drawing, and the two grammars that state a heavier lead than
+    /// body produce exactly that contrast.
+    ///
+    /// <para>Asserted as an ORDER and never as a number: circuitRF has three stroke tiers and these
+    /// files state a continuous width, in a different unit and at a different absolute scale per
+    /// format, so the only thing that crosses the gap is which line the author drew heavier.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(ComponentFormatFamily.Records, "records")]
+    [InlineData(ComponentFormatFamily.Hkp, "hkp")]
+    public void Gate17c_ALeadDrawnHeavierThanItsBodyStaysHeavier(ComponentFormatFamily family, string folder)
+    {
+        var drawing = Read(family, folder).Symbol;
+        Assert.NotNull(drawing);
+
+        var leads = drawing.Shapes.Where(s => TouchesAPin(s, drawing)).Select(s => s.Width).ToList();
+        var body = drawing.Shapes.Where(s => !TouchesAPin(s, drawing)).Select(s => s.Width).ToList();
+
+        Assert.NotEmpty(leads);
+        Assert.NotEmpty(body);
+        Assert.All(body, w => Assert.True(w > 0, $"{folder}: a body piece states no width."));
+        Assert.True(leads.Min() > body.Max(),
+            $"{folder}: the file draws its leads at {leads.Min()} and its body at {body.Max()}; the " +
+            "contrast the author drew did not survive the read.");
+
+        var built = ComponentImport.Build(Read(family, folder), null, Dbu, []);
+        var tiers = built!.Symbol!.Primitives.Select(TierOf).Distinct().ToList();
+        Assert.Contains(SymbolStrokeTier.Normal, tiers);
+        Assert.Contains(SymbolStrokeTier.Thick, tiers);
+    }
+
+    /// <summary>
+    /// A grammar that states ONE width throughout draws one tier. Not a lesser case of the above — it
+    /// is the common one, and a mapping that reached for a second tier here would put a contrast on
+    /// screen that the file does not contain.
+    /// </summary>
+    [Theory]
+    [InlineData(ComponentFormatFamily.Plx, "plx")]
+    [InlineData(ComponentFormatFamily.Cxf, "cxf")]
+    [InlineData(ComponentFormatFamily.Script, "scr")]
+    public void Gate17d_OneStatedWidthIsOneTier(ComponentFormatFamily family, string folder)
+    {
+        var built = ComponentImport.Build(Read(family, folder), null, Dbu, []);
+        Assert.NotNull(built?.Symbol);
+        Assert.Equal([SymbolStrokeTier.Normal], built.Symbol.Primitives.Select(TierOf).Distinct());
+    }
+
+    private static bool TouchesAPin(KitSymbolShape shape, ComponentSymbolDrawing drawing)
+        => drawing.Pins.Any(p => IsSegment(shape, p.XMil, p.YMil, p.XMil < 900 ? 300 : 1500, p.YMil));
+
+    private static SymbolStrokeTier TierOf(SymbolPrimitive p) => p switch
+    {
+        LinePrimitive x => x.StrokeTier,
+        PolylinePrimitive x => x.StrokeTier,
+        PolygonPrimitive x => x.StrokeTier,
+        RectPrimitive x => x.StrokeTier,
+        ArcPrimitive x => x.StrokeTier,
+        _ => SymbolStrokeTier.Normal,
+    };
+
+    /// <summary>Whether a shape is the two-point segment between those ends, either way round. The
+    /// grammars land on <see cref="KitSymbolLine"/> or on a two-vertex <see cref="KitSymbolPath"/>
+    /// depending on how the file spells a line, and which one is not what this gate is about.</summary>
+    private static bool IsSegment(KitSymbolShape shape, double x1, double y1, double x2, double y2)
+    {
+        var (ax, ay, bx, by) = shape switch
+        {
+            KitSymbolLine l => (l.X1, l.Y1, l.X2, l.Y2),
+            KitSymbolPath { Xy.Count: 4 } p => (p.Xy[0], p.Xy[1], p.Xy[2], p.Xy[3]),
+            _ => (double.NaN, double.NaN, double.NaN, double.NaN),
+        };
+
+        return (Near(ax, x1) && Near(ay, y1) && Near(bx, x2) && Near(by, y2))
+            || (Near(ax, x2) && Near(ay, y2) && Near(bx, x1) && Near(by, y1));
+
+        static bool Near(double a, double b) => Math.Abs(a - b) < 0.5;
+    }
 }

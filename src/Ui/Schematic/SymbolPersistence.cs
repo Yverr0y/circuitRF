@@ -45,6 +45,16 @@ public sealed class CsymPin
     public double  LocalY    { get; set; }
     public int     PortIndex { get; set; }
     public string? Name      { get; set; }
+
+    /// <summary>
+    /// See <see cref="SymbolPin.NameAlign"/>. <b>Additive, and omitted when it is the default</b>, so
+    /// every symbol that has never had a right- or centre-aligned pin name re-serializes byte for byte
+    /// and needs no <see cref="SymbolPersistence.CurrentFormatVersion"/> bump — the same shape
+    /// <c>LayoutFile.Pins</c> already uses. A build that predates the field ignores it and draws what
+    /// it always drew.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public SymbolPinNameAlign NameAlign { get; set; } = SymbolPinNameAlign.Left;
 }
 
 // ── Serializer ────────────────────────────────────────────────────────────────
@@ -140,6 +150,7 @@ public static class SymbolPersistence
                 LocalY    = pin.LocalY,
                 PortIndex = pin.PortIndex,
                 Name      = pin.Name,
+                NameAlign = pin.NameAlign,
             });
 
         return file;
@@ -148,7 +159,7 @@ public static class SymbolPersistence
     private static Symbol FromFileModel(CsymFile file)
     {
         var pins = file.Pins
-            .Select(p => new SymbolPin(p.LocalX, p.LocalY, p.PortIndex, p.Name))
+            .Select(p => new SymbolPin(p.LocalX, p.LocalY, p.PortIndex, p.Name) { NameAlign = p.NameAlign })
             .ToList();
         return new Symbol(file.Primitives, pins, file.PortCount);
     }

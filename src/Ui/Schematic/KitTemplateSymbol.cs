@@ -68,9 +68,10 @@ internal static class KitTemplateSymbol
             follow[(pins[i].X, pins[i].Y)] = (placed[i].LocalX, placed[i].LocalY);
 
         var attached = new HashSet<(double X, double Y)>();
+        var tiers = StrokeTiers(body);
         var drawn = new List<SymbolPrimitive>();
         foreach (var shape in body ?? [])
-            if (Convert(shape, scale, follow, attached) is { } prim) drawn.Add(prim);
+            if (Convert(shape, scale, follow, attached, tiers(shape.Width)) is { } prim) drawn.Add(prim);
 
         if (drawn.Count == 0) return new Symbol(BoxBodyFor(placed), placed);
 
@@ -276,6 +277,52 @@ internal static class KitTemplateSymbol
         }
     }
 
+    /// <summary>
+    /// The width → tier mapping for ONE symbol.
+    ///
+    /// <para><b>Relative, never absolute.</b> circuitRF's symbol model has three stroke tiers and the
+    /// files state a continuous width, in a different unit per format and at a different absolute
+    /// scale per library. What carries meaning across that gap is the CONTRAST the author drew, so the
+    /// mapping is over the DISTINCT widths this one symbol states and nothing else. A file that draws
+    /// everything at one width — most of them — gets one tier, which is what it asked for.</para>
+    ///
+    /// <para><b>Why two distinct widths map to Normal/Thick rather than Thin/Normal.</b> An earlier
+    /// attempt anchored Normal at the most COMMON width. On a real part the pin leads are drawn a
+    /// little heavier than the body and there is one lead per pin, so the leads are the most common
+    /// width on anything past a handful of pins — which put the body one tier BELOW normal on
+    /// essentially every imported symbol, and left a whole imported library looking faint beside
+    /// circuitRF's own. The thinnest stated width is the symbol's ordinary line; nothing here draws a
+    /// body heavier than its detail.</para>
+    /// </summary>
+    private static Func<double, SymbolStrokeTier> StrokeTiers(IReadOnlyList<KitSymbolShape>? body)
+    {
+        var widths = (body ?? [])
+            .Select(s => s.Width)
+            .Where(w => w > 0)
+            .Select(w => Math.Round(w, 4))
+            .Distinct()
+            .Order()
+            .ToList();
+
+        // Nothing stated, or one width throughout: there is no contrast to express.
+        if (widths.Count < 2) return _ => SymbolStrokeTier.Normal;
+
+        double thinnest = widths[0], thickest = widths[^1];
+        if (widths.Count == 2)
+            return w => Math.Round(w, 4) >= thickest ? SymbolStrokeTier.Thick : SymbolStrokeTier.Normal;
+
+        // Three or more: the extremes take the outer tiers and everything between is the ordinary
+        // line, so the order the author drew survives with the detail circuitRF can carry.
+        return w =>
+        {
+            double r = Math.Round(w, 4);
+            if (r <= 0) return SymbolStrokeTier.Normal;
+            return r <= thinnest ? SymbolStrokeTier.Thin
+                 : r >= thickest ? SymbolStrokeTier.Thick
+                 : SymbolStrokeTier.Normal;
+        };
+    }
+
     private static List<SymbolPin> PlacePins(IReadOnlyList<KitSymbolPin> pins, double scale, bool flipY)
     {
         var placed = new List<SymbolPin>(pins.Count);
@@ -286,7 +333,17 @@ internal static class KitTemplateSymbol
                 DsnSymbolReader.SnapToPinGrid(pins[i].X * scale),
                 DsnSymbolReader.SnapToPinGrid(y),
                 i + 1,
-                string.IsNullOrWhiteSpace(pins[i].Name) ? (i + 1).ToString() : pins[i].Name));
+                string.IsNullOrWhiteSpace(pins[i].Name) ? (i + 1).ToString() : pins[i].Name)
+            {
+                NameAlign = pins[i].NameAlign switch
+                {
+                    KitTextAlign.Right  => SymbolPinNameAlign.Right,
+                    KitTextAlign.Center => SymbolPinNameAlign.Center,
+                    KitTextAlign.Top    => SymbolPinNameAlign.Top,
+                    KitTextAlign.Bottom => SymbolPinNameAlign.Bottom,
+                    _                   => SymbolPinNameAlign.Left,
+                },
+            });
         }
         return placed;
     }
@@ -346,14 +403,15 @@ internal static class KitTemplateSymbol
     private static SymbolPrimitive? Convert(
         KitSymbolShape shape, double s,
         IReadOnlyDictionary<(double X, double Y), (double X, double Y)> follow,
-        HashSet<(double X, double Y)> attached) => shape switch
+        HashSet<(double X, double Y)> attached,
+        SymbolStrokeTier tier) => shape switch
     {
-        KitSymbolLine l => LineWithPinFollow(l, s, follow, attached),
+        KitSymbolLine l => LineWithPinFollow(l, s, follow, attached, tier),
 
         KitSymbolRectangle r => new RectPrimitive
         {
             ColorRole  = SymbolColorRole.SymbolLine,
-            StrokeTier = SymbolStrokeTier.Normal,
+            StrokeTier = tier,
             Filled     = r.Filled,
             Cx = (r.X1 + r.X2) / 2 * s,
             Cy = (r.Y1 + r.Y2) / 2 * s,
@@ -364,7 +422,7 @@ internal static class KitTemplateSymbol
         KitSymbolPath { Closed: true } p => new PolygonPrimitive
         {
             ColorRole  = SymbolColorRole.SymbolLine,
-            StrokeTier = SymbolStrokeTier.Normal,
+            StrokeTier = tier,
             Filled     = p.Filled,
             Points     = ScalePoints(p.Xy, s, follow, attached),
         },
@@ -372,7 +430,7 @@ internal static class KitTemplateSymbol
         KitSymbolPath p => new PolylinePrimitive
         {
             ColorRole  = SymbolColorRole.SymbolLine,
-            StrokeTier = SymbolStrokeTier.Normal,
+            StrokeTier = tier,
             Points     = ScalePoints(p.Xy, s, follow, attached),
         },
 
@@ -383,7 +441,7 @@ internal static class KitTemplateSymbol
         KitSymbolArc a => new ArcPrimitive
         {
             ColorRole  = SymbolColorRole.SymbolLine,
-            StrokeTier = SymbolStrokeTier.Normal,
+            StrokeTier = tier,
             Cx = a.Cx * s,
             Cy = a.Cy * s,
             R  = a.Radius * s,
@@ -397,11 +455,12 @@ internal static class KitTemplateSymbol
     private static LinePrimitive LineWithPinFollow(
         KitSymbolLine l, double s,
         IReadOnlyDictionary<(double X, double Y), (double X, double Y)> follow,
-        HashSet<(double X, double Y)> attached)
+        HashSet<(double X, double Y)> attached,
+        SymbolStrokeTier tier)
     {
         var (x1, y1) = PinFollow(l.X1, l.Y1, s, follow, attached);
         var (x2, y2) = PinFollow(l.X2, l.Y2, s, follow, attached);
-        return new LinePrimitive(SymbolColorRole.SymbolLine, SymbolStrokeTier.Normal, x1, y1, x2, y2);
+        return new LinePrimitive(SymbolColorRole.SymbolLine, tier, x1, y1, x2, y2);
     }
 
     private static List<double[]> ScalePoints(

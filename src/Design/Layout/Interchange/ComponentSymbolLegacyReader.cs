@@ -150,16 +150,20 @@ public static class ComponentSymbolLegacyReader
 
         int px = (int)Math.Round(x, MidpointRounding.AwayFromZero);
         int py = (int)Math.Round(y, MidpointRounding.AwayFromZero);
+
+        // This format states no justification of its own: the name goes on the body side, and the
+        // orientation letter is what says which side that is.
+        var (dx, dy) = f.Count > 6 ? ComponentSymbolLead.FromLetter(f[6]) : (1, 0);
         drawing.Pins.Add(new ComponentSymbolPin(
             name.Length > 0 && name != "~" ? name : pad,
             pad.Length > 0 && pad != "~" ? pad : null,
-            px, py));
+            px, py, Bonded: false,
+            NameAlign: ComponentSymbolLead.NameAlignFor(dx, dy)));
 
         // The lead from the terminal inward to the body, as the format draws it — one length along the
         // orientation LETTER, which is this format's spelling of the newer one's angle.
         if (f.Count > 6 && Num(f[5], out double length) && length > 0)
         {
-            var (dx, dy) = ComponentSymbolLead.FromLetter(f[6]);
             int len = (int)Math.Round(length, MidpointRounding.AwayFromZero);
             drawing.Shapes.Add(new KitSymbolLine(px, py, px + dx * len, py + dy * len));
         }
@@ -172,7 +176,8 @@ public static class ComponentSymbolLegacyReader
         if (f.Count < 5) return;
         if (!Num(f[1], out double x1) || !Num(f[2], out double y1) ||
             !Num(f[3], out double x2) || !Num(f[4], out double y2)) return;
-        drawing.Shapes.Add(new KitSymbolRectangle(x1, y1, x2, y2, IsFilled(f.ElementAtOrDefault(8))));
+        drawing.Shapes.Add(new KitSymbolRectangle(x1, y1, x2, y2, IsFilled(f.ElementAtOrDefault(8)))
+        { Width = Thickness(f, 7) });
     }
 
     /// <summary><c>P count unit convert thickness x1 y1 … cc</c>.</summary>
@@ -194,7 +199,8 @@ public static class ComponentSymbolLegacyReader
         bool closed = pts.Count >= 6
             && Math.Abs(pts[0] - pts[^2]) < 1e-9 && Math.Abs(pts[1] - pts[^1]) < 1e-9;
         if (closed) pts.RemoveRange(pts.Count - 2, 2);
-        drawing.Shapes.Add(new KitSymbolPath(pts, closed || IsFilled(fill), IsFilled(fill)));
+        drawing.Shapes.Add(new KitSymbolPath(pts, closed || IsFilled(fill), IsFilled(fill))
+        { Width = Thickness(f, 4) });
     }
 
     /// <summary>
@@ -219,7 +225,7 @@ public static class ComponentSymbolLegacyReader
         double sweep = end - start;
         while (sweep < -180) sweep += 360;
         while (sweep > 180) sweep -= 360;
-        drawing.Shapes.Add(new KitSymbolArc(cx, cy, r, start, sweep));
+        drawing.Shapes.Add(new KitSymbolArc(cx, cy, r, start, sweep) { Width = Thickness(f, 8) });
     }
 
     /// <summary><c>C posx posy radius unit convert thickness cc</c>.</summary>
@@ -228,8 +234,13 @@ public static class ComponentSymbolLegacyReader
         var f = Fields(line);
         if (f.Count < 4) return;
         if (!Num(f[1], out double cx) || !Num(f[2], out double cy) || !Num(f[3], out double r)) return;
-        drawing.Shapes.Add(new KitSymbolArc(cx, cy, r, 0, 360));
+        drawing.Shapes.Add(new KitSymbolArc(cx, cy, r, 0, 360) { Width = Thickness(f, 6) });
     }
+
+    /// <summary>The stated stroke thickness at <paramref name="index"/>, in mils like every other
+    /// length here, or 0 when the record is short or spells the default as a zero.</summary>
+    private static double Thickness(List<string> f, int index)
+        => index < f.Count && Num(f[index], out double w) && w > 0 ? w : 0;
 
     // ── Line splitting ──────────────────────────────────────────────────────────────────────────
 

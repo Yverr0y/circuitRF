@@ -246,8 +246,7 @@ internal static class SymbolEditorRenderer
 
             // Port label: pin name if set, else "P<portIndex+1>".
             string lbl = pin.Name is { Length: > 0 } n ? n : $"P{pin.PortIndex + 1}";
-            canvas.DrawText(lbl, sx + r + 2, sy + fontSize * 0.35f,
-                            SKTextAlign.Left, labelFont, textPaint);
+            DrawPinLabel(canvas, lbl, pin.NameAlign, sx, sy, r, fontSize, labelFont, textPaint);
         }
 
         // Ghost circle at drag destination for each selected pin being dragged.
@@ -300,8 +299,52 @@ internal static class SymbolEditorRenderer
             canvas.DrawCircle(sx, sy, r, fill);
             canvas.DrawCircle(sx, sy, r, stroke);
             string lbl = pin.Name is { Length: > 0 } n ? n : $"P{pin.PortIndex + 1}";
-            canvas.DrawText(lbl, sx + r + 2, sy + fontSize * 0.35f, SKTextAlign.Left, labelFont, textPaint);
+            DrawPinLabel(canvas, lbl, pin.NameAlign, sx, sy, r, fontSize, labelFont, textPaint);
         }
+    }
+
+    /// <summary>
+    /// One pin's name, on the side <see cref="SymbolPin.NameAlign"/> says.
+    ///
+    /// <para><b>Left means the name is drawn to the RIGHT of the pin</b> — the alignment describes the
+    /// TEXT, not the side, and left-aligned text starting at the pin runs rightward. That is what every
+    /// symbol did before the field existed, so <c>Left</c> is both the default and the no-change case.
+    /// A right-aligned name ends at the pin and runs leftward, which is what a pin on the right-hand
+    /// side of a body needs; drawing it rightward instead runs the whole right-hand column of names
+    /// outward into empty space.</para>
+    ///
+    /// <para>Shared by the editor's own pass and the export's, so an exported image matches what was
+    /// on screen — the same reason <see cref="DrawPinMarkersPlain"/> exists at all.</para>
+    /// </summary>
+    private static void DrawPinLabel(
+        SKCanvas canvas, string label, SymbolPinNameAlign align,
+        float sx, float sy, float r, float fontSize, SKFont font, SKPaint paint)
+    {
+        // A vertical lead's name runs ALONG it, turned a quarter turn — as the schematic draws it, and
+        // for the same reason: a horizontal name on a top edge whose pins are one grid apart overlaps
+        // its neighbours. Rotated about the pin, so the anchor is the pin either way.
+        if (align is SymbolPinNameAlign.Top or SymbolPinNameAlign.Bottom)
+        {
+            int save = canvas.Save();
+            canvas.Translate(sx, sy);
+            canvas.RotateDegrees(90f);
+            canvas.DrawText(label,
+                align == SymbolPinNameAlign.Top ? r + 2 : -r - 2,
+                fontSize * 0.35f,
+                align == SymbolPinNameAlign.Top ? SKTextAlign.Left : SKTextAlign.Right,
+                font, paint);
+            canvas.RestoreToCount(save);
+            return;
+        }
+
+        float baseline = sy + (fontSize * 0.35f);
+        var (x, skAlign) = align switch
+        {
+            SymbolPinNameAlign.Right  => (sx - r - 2, SKTextAlign.Right),
+            SymbolPinNameAlign.Center => (sx, SKTextAlign.Center),
+            _                         => (sx + r + 2, SKTextAlign.Left),
+        };
+        canvas.DrawText(label, x, baseline, skAlign, font, paint);
     }
 
     // ── Unmapped port info panel ──────────────────────────────────────────────

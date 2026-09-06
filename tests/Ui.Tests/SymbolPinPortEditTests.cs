@@ -257,4 +257,67 @@ public sealed class SymbolPinPortEditTests
         Assert.Null(SymbolPinPortInput.Validate("2", declaredPortCount: 2).Note);
         Assert.Null(SymbolPinPortInput.Validate("5", declaredPortCount: null).Note);
     }
+
+    // ── The pin's NAME and the side its name runs (owner, 2026-09-05) ─────────────────────────────
+
+    /// <summary>
+    /// <b>Renaming a pin was not possible anywhere in the symbol editor.</b> No command, no dialog, no
+    /// inspector field — the name could only ever be set by a generator or by a component import, and
+    /// a pin placed by hand was stuck showing its port number. The inspector's own field is the fix,
+    /// and it is undoable like every other field beside it.
+    /// </summary>
+    [Fact]
+    public void APinCanBeRenamed_AndTheRenameUndoes()
+    {
+        var vm = MakeVm(out var sym);
+        vm.OnPointerPressed(100, 0, KeyModifiers.None, clickCount: 1);
+
+        var inspector = new SymbolPrimitiveInspectorViewModel();
+        inspector.SetContext(vm);
+        Assert.True(inspector.IsPinSelected);
+
+        inspector.PinName = "DRAIN";
+        Assert.Equal("DRAIN", sym.Pins[1].Name);
+
+        vm.UndoCommand.Execute(null);
+        Assert.Null(sym.Pins[1].Name);
+    }
+
+    /// <summary>
+    /// Clearing the field stores NULL rather than an empty string, which is the state an unnamed pin
+    /// has always been in: the renderer's fallback to <c>P&lt;n&gt;</c> keys on it and <c>.csym</c>
+    /// omits a null, so a cleared name leaves exactly the file a never-named pin produces.
+    /// </summary>
+    [Fact]
+    public void ClearingAPinsName_StoresNullRatherThanEmpty()
+    {
+        var vm = MakeVm(out var sym);
+        sym.Pins[1].Name = "DRAIN";
+        vm.OnPointerPressed(100, 0, KeyModifiers.None, clickCount: 1);
+
+        var inspector = new SymbolPrimitiveInspectorViewModel();
+        inspector.SetContext(vm);
+
+        inspector.PinName = "   ";
+        Assert.Null(sym.Pins[1].Name);
+    }
+
+    /// <summary>The side the name runs is editable and undoable too — it is imported from files that
+    /// state it, so a symbol the user then edits by hand must be able to say the same thing.</summary>
+    [Fact]
+    public void ThePinNamesSide_IsEditableAndUndoable()
+    {
+        var vm = MakeVm(out var sym);
+        vm.OnPointerPressed(100, 0, KeyModifiers.None, clickCount: 1);
+
+        var inspector = new SymbolPrimitiveInspectorViewModel();
+        inspector.SetContext(vm);
+
+        Assert.Equal(SymbolPinNameAlign.Left, inspector.PinNameAlign);   // the default, and the old behaviour
+        inspector.PinNameAlign = SymbolPinNameAlign.Right;
+        Assert.Equal(SymbolPinNameAlign.Right, sym.Pins[1].NameAlign);
+
+        vm.UndoCommand.Execute(null);
+        Assert.Equal(SymbolPinNameAlign.Left, sym.Pins[1].NameAlign);
+    }
 }

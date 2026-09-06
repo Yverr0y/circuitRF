@@ -4353,7 +4353,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     // FILE PICKER FIRST, as R-L4h-5 settled for Gerber: Avalonia's StorageProvider exposes
     // OpenFilePickerAsync and OpenFolderPickerAsync as separate calls and one dialog cannot return
     // both. The scan then runs over the chosen file's ENCLOSING folder, and the chooser carries an
-    // "Another Folder…" button that opens the folder picker.
+    // "…" button beside the scanned folder's name that opens the folder picker.
     //
     // The chooser is skipped only when the file the user pointed AT is itself the whole of the only
     // candidate — R-PL1-4's "pointed at a single file, skip the chooser and import it", read
@@ -4377,72 +4377,76 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         var window = ResolveOwner(owner);
         if (window is null) return;
 
-        var files = await window.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title          = "Import Component",
-            AllowMultiple  = false,
-            FileTypeFilter =
-            [
-                new FilePickerFileType("Component symbol / footprint / library")
-                {
-                    Patterns = ["*.kicad_sym", "*.kicad_mod", "*.lib", "*.lbr"],
-                },
-                new FilePickerFileType("All Files") { Patterns = ["*.*"] },
-            ],
-        });
-        if (files.Count == 0) return;
+        // A FOLDER, not a file (owner, 2026-09-05). Pointing at one file and pointing at its folder
+        // led to the same scan anyway — the scan's unit is the folder, and the file picker's own
+        // answer was immediately replaced by its directory. What the file picker DID change is that
+        // clicking a file which was the whole of the only candidate skipped the chooser entirely,
+        // which now also means skipping the preview. Choosing a folder is the same gesture with one
+        // fewer outcome: the chooser, and its drawings, are always shown.
+        var folders = await window.StorageProvider.OpenFolderPickerAsync(
+            new FolderPickerOpenOptions { Title = "Import Component - Select Folder", AllowMultiple = false });
+        if (folders.Count == 0) return;
 
-        string? chosenPath = files[0].Path.LocalPath;
-        string? scanRoot = Path.GetDirectoryName(chosenPath) ?? chosenPath;
+        string? scanRoot = folders[0].Path.LocalPath;
+
+        // Resolved ONCE, before the chooser rather than after it, because the chooser's preview draws
+        // through it — a pad is shown in the colour the import will actually give it. Once, not twice:
+        // ResolveTechFor posts its own diagnostics, and a second call would repeat every one of them.
+        var techRes = ResolveTechFor(null, null);   // the workspace's own default technology
 
         CircuitRF.Design.Layout.Interchange.ComponentCandidate? candidate = null;
+
+        // Held across the loop so that a folder picker the user CANCELS costs nothing: the chooser
+        // comes back on the list it was already showing rather than the whole gesture being abandoned
+        // (owner, 2026-09-05). Cleared only when the folder actually changes, which is the one case
+        // that needs a new walk.
+        CircuitRF.Design.Layout.Interchange.ComponentScanResult? scan = null;
+
         while (candidate is null)
         {
             if (scanRoot is null) return;
 
-            var scan = await ScanForComponentsAsync(scanRoot);
-            if (scan is null) return;                       // cancelled, and it said so on its own row
-
-            if (scan.TruncationNote is { } note) Messages.Warning(note);
-
-            // R-PL1-4, read literally: the chooser is skipped only when the file that was clicked IS
-            // the whole of the only candidate.
-            if (scan.Candidates.Count == 1
-                && scan.Candidates[0].Files.Count == 1
-                && chosenPath is not null
-                && string.Equals(scan.Candidates[0].Files[0].Path, chosenPath, StringComparison.Ordinal))
+            if (scan is null)
             {
-                candidate = scan.Candidates[0];
-                break;
+                scan = await ScanForComponentsAsync(scanRoot);
+                if (scan is null) return;                   // cancelled, and it said so on its own row
+
+                if (scan.TruncationNote is { } note) Messages.Warning(note);
+
+                // R-PL1-4's "skip the chooser when the file clicked IS the whole of the only
+                // candidate" is gone with the file picker it depended on: there is no clicked file any
+                // more, so the condition could never hold. One candidate in the folder now shows a
+                // chooser holding one row — which is what makes its symbol and footprint visible
+                // before anything is created.
+                if (scan.Candidates.Count == 0)
+                {
+                    // R-PL1-29: name the formats circuitRF does read, plus the categories the scan
+                    // found.
+                    var reasons = scan.SkippedSummary.Count > 0
+                        ? " This folder also holds " + string.Join(", ", scan.SkippedSummary) + "."
+                        : "";
+                    Messages.Error(
+                        CircuitRF.Design.Layout.Interchange.ComponentRead.Refusal(Path.GetFileName(scanRoot))
+                        + reasons);
+                    return;
+                }
             }
 
-            if (scan.Candidates.Count == 0)
-            {
-                // R-PL1-29: name the formats circuitRF does read, plus the categories the scan found.
-                var reasons = scan.SkippedSummary.Count > 0
-                    ? " This folder also holds " + string.Join(", ", scan.SkippedSummary) + "."
-                    : "";
-                Messages.Error(
-                    CircuitRF.Design.Layout.Interchange.ComponentRead.Refusal(Path.GetFileName(scanRoot))
-                    + reasons);
-                return;
-            }
-
-            var dialog = new CircuitRF.Ui.Views.Dialogs.ComponentImportChooserDialog(scan);
+            var dialog = new CircuitRF.Ui.Views.Dialogs.ComponentImportChooserDialog(
+                scan, scanRoot, techRes.Tech, LayoutUnits.DefaultDbuPerMicron);
             candidate = await dialog.ShowDialog<CircuitRF.Design.Layout.Interchange.ComponentCandidate?>(window);
             if (candidate is null)
             {
                 if (!dialog.ChooseAnotherFolder) return;
-                var folders = await window.StorageProvider.OpenFolderPickerAsync(
-                    new FolderPickerOpenOptions { Title = "Import Component — Folder", AllowMultiple = false });
-                if (folders.Count == 0) return;
-                scanRoot = folders[0].Path.LocalPath;
-                chosenPath = null;                          // nothing was clicked in the new folder
+                var again = await window.StorageProvider.OpenFolderPickerAsync(
+                    new FolderPickerOpenOptions { Title = "Import Component - Select Folder", AllowMultiple = false });
+                if (again.Count == 0) continue;             // picker cancelled: same folder, same list
+                scanRoot = again[0].Path.LocalPath;
+                scan = null;                                // a different folder needs a new walk
             }
         }
 
         var workspaceDir = Path.GetDirectoryName(CurrentWorkspacePath)!;
-        var techRes = ResolveTechFor(null, null);   // the workspace's own default technology
 
         CircuitRF.Ui.Layout.ComponentImport.ImportResult result;
         try

@@ -455,7 +455,19 @@ public enum PortConnectionState { Unconnected, Connected }
 public enum SymbolRotation { R0 = 0, R90 = 90, R180 = 180, R270 = 270 }
 
 /// <summary>Port descriptor in component-LOCAL coordinates (before rotation/translation).</summary>
-public sealed record SchematicPortDef(string Name, float LocalX, float LocalY, PortConnectionState State);
+/// <summary>
+/// One drawn pin of a placed component.
+/// </summary>
+/// <param name="Name">The label for this pin — the symbol's own pin name, or the <c>P&lt;n&gt;</c>
+/// stand-in when it names none.</param>
+/// <param name="NameAlign">Which way <paramref name="Name"/> runs from the pin, in the symbol's own
+/// LOCAL frame; the renderer maps it through the instance's rotation and mirror.</param>
+/// <param name="ShowName">Whether to draw <paramref name="Name"/> beside the pin. Decided once, when
+/// the render model is built, from the symbol's pin names and the instance's own override — never
+/// per frame. False for every built-in, whose pin labels are text inside its artwork already.</param>
+public sealed record SchematicPortDef(
+    string Name, float LocalX, float LocalY, PortConnectionState State,
+    SymbolPinNameAlign NameAlign = SymbolPinNameAlign.Left, bool ShowName = false);
 
 /// <summary>A placed component instance with pre-computed world bounding boxes.</summary>
 public sealed class SchematicComponent
