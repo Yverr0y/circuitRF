@@ -1303,6 +1303,8 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         var workspaceDir = Path.Combine(result.ParentDir, result.Name);
 
         // Race guard: re-check that the target folder still doesn't exist at create time.
+        // WorkspaceCreate.Create refuses this too (R-aut3-6, so no route into creation can skip it);
+        // checking here is what turns the refusal into a Messages row rather than an exception.
         if (Directory.Exists(workspaceDir))
         {
             Messages.Error($"A folder named '{result.Name}' already exists at that location.");
@@ -1310,39 +1312,27 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         }
 
         // SL2 R-sl2-13: refuse HERE, naming the directory, rather than part-way through creating the
-        // workspace. The steps below create the folder, then a tech/ folder, then the .ctech, then
-        // the .cws — so discovering the parent is unwritable at any of them leaves a half-made
+        // workspace. WorkspaceCreate.Create makes the folder, then a tech/ folder, then the .ctech,
+        // then the .cws — so discovering the parent is unwritable at any of them leaves a half-made
         // workspace to clean up, and reports it as a file error about whichever step happened to be
-        // first to fail.
+        // first to fail. The sentence is the capability's own, so the verb refuses in the same words.
         if (UnwritableParentRefusal(result.ParentDir, "The workspace was not created") is { } refusal)
         {
             Messages.Error(refusal);
             return;
         }
 
-        var cwsPath = Path.Combine(workspaceDir, ".cws");
+        string cwsPath;
 
         try
         {
-            Directory.CreateDirectory(workspaceDir);
-
-            // Technology choice (R-misc-8/11/12): the chosen SHIPPED technology's own bytes are
-            // written verbatim into tech/<id>.ctech + a .cws default ref — a real, independently-
-            // editable file, never a reference back to the embedded copy (R-misc-8's "a workspace
-            // must stay self-contained"). None writes neither — a perfectly valid workspace that
-            // resolves to the fallback palette (pcell-contract.md §5's own supported no-technology
-            // state).
-            var cws = new CwsFile();
-            if (result.TechnologyId is { Length: > 0 } techId)
-            {
-                var entry = ShippedTechnologies.All.First(e => e.Id == techId);
-                var techDir = Path.Combine(workspaceDir, "tech");
-                Directory.CreateDirectory(techDir);
-                var techPath = Path.Combine(techDir, entry.Id + ".ctech");
-                File.WriteAllText(techPath, ShippedTechnologies.LoadRawJson(entry));
-                cws.DefaultTechRef = Path.GetRelativePath(workspaceDir, techPath);
-            }
-            WorkspacePersistence.SaveToFileAtomic(cwsPath, cws);
+            // R-aut3-1/R-aut3-2: the four operations that MAKE a workspace — the directory, the
+            // CwsFile, the shipped-technology copy (R-misc-8/11/12: the chosen entry's own bytes,
+            // verbatim, never a reference back to the embedded copy), and the atomic .cws save —
+            // are WorkspaceCreate's, and `circuitrf new workspace` calls the same function. What
+            // stays here is the dialog above and the shell work below: cache resets, the dock
+            // layout, the tree, the launch action.
+            cwsPath = WorkspaceCreate.Create(result.ParentDir, result.Name, result.TechnologyId).CwsPath;
 
             // Update tracked location to the chosen parent (seeds the next New Workspace dialog).
             _lastWorkspaceParentDir = result.ParentDir;
@@ -4448,7 +4438,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
 
         var workspaceDir = Path.GetDirectoryName(CurrentWorkspacePath)!;
 
-        CircuitRF.Ui.Layout.ComponentImport.ImportResult result;
+        CircuitRF.Design.Layout.ComponentImport.ImportResult result;
         try
         {
             result = await Task.Run(() =>
@@ -4456,9 +4446,9 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
                 var read = CircuitRF.Design.Layout.Interchange.ComponentRead.Read(
                     candidate, LayoutUnits.DefaultDbuPerMicron);
                 if (read.Refusal is { } refusal)
-                    return CircuitRF.Ui.Layout.ComponentImport.ImportResult.Nothing([refusal]);
+                    return CircuitRF.Design.Layout.ComponentImport.ImportResult.Nothing([refusal]);
 
-                return CircuitRF.Ui.Layout.ComponentImport.Import(
+                return CircuitRF.Design.Layout.ComponentImport.Import(
                     read.Part!, workspaceDir, techRes.Tech, LayoutUnits.DefaultDbuPerMicron,
                     resolveLayerMapping: rows =>
                     {
@@ -11918,12 +11908,9 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
 
         try
         {
-            // Write an empty .csym so the file exists on disk (Refresh picks it up).
-            var emptySymbol = new Symbol(
-                System.Array.AsReadOnly(System.Array.Empty<SymbolPrimitive>()),
-                System.Array.AsReadOnly(System.Array.Empty<SymbolPin>()),
-                portCount: 0);
-            SymbolPersistence.SaveToFile(filePath, emptySymbol);
+            // Write an empty .csym so the file exists on disk (Refresh picks it up). R-aut3-1: the
+            // write is CellCreate's, shared with `circuitrf new cell --views symbol`.
+            CellCreate.WriteSymbolView(cellDir, name);
 
             _factory.ProjectTreeTool?.Refresh();
 
@@ -12019,7 +12006,9 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
                     Messages.Warning($"Template '{template.DisplayName}' could not be read ({ex.Message}) — created an empty schematic instead.");
                 }
             }
-            SchematicPersistence.SaveToFile(filePath, model, cellName: cellName);
+            // R-aut3-1: the WRITE is CellCreate's, shared with `circuitrf new cell`. Everything
+            // around it here — the template choice, the tree refresh, opening the tab — is shell.
+            CellCreate.WriteSchematicView(cellDir, cellName, fileNameWithoutExt, model);
 
             _factory.ProjectTreeTool?.Refresh();
 
@@ -12080,17 +12069,12 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
 
         try
         {
+            // R-aut3-1: the write is CellCreate's, shared with `circuitrf new cell --views layout`.
+            // Resolving WHICH technology its display unit and snap come from stays here — that is
+            // the GUI's own walk, with its session overrides and its orphan prompt.
             var resolution = ResolveTechFor(techRef: null, clayPath: filePath);
-            var tech = resolution.Tech;
-            var model = new LayoutView
-            {
-                DbuPerMicron = LayoutUnits.DefaultDbuPerMicron,
-                DisplayUnit  = tech?.DefaultDisplayUnit ?? LayoutUnit.Um,
-                SnapDbu      = tech?.DefaultSnapDbu ?? 1000,
-                AngleMode    = AngleMode.AnyAngle,
-                TechRef      = null,
-            };
-            LayoutPersistence.SaveToFile(filePath, model);
+            var model = CellCreate.NewLayoutView(resolution.Tech);
+            CellCreate.WriteLayoutView(cellDir, name, model);
 
             _factory.ProjectTreeTool?.Refresh();
 

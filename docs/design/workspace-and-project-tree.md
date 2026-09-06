@@ -51,6 +51,37 @@ MyWorkspace/                     ← workspace name = folder name
        midnight.ccolor
 ```
 
+#### 1.1b Who creates a workspace, and who creates a cell *(AUT-3, 2026-09-05)*
+**One function each, below the UI firewall, and File ▸ New Workspace / New Cell call the same one the
+CLI does** (`brief-automation-3-authoring-verbs.md` R-aut3-1; an operation that exists only inside a
+view model is not a capability).
+
+| What | Where | Callers |
+|---|---|---|
+| the workspace directory, the `CwsFile`, the shipped-technology copy, the atomic `.cws` save | `WorkspaceCreate.Create` (`src/Design/Workspace`) | `circuitrf new workspace`, `WorkspaceViewModel.NewWorkspace` |
+| one empty-but-valid `.csch` / `.csym` / `.clay` inside a cell folder | `CellCreate.WriteSchematicView` / `WriteSymbolView` / `WriteLayoutView` (`src/Design/Cells`) | `circuitrf new cell`, the GUI's New Cell / New Schematic / New Symbol / New Layout |
+| the whole cell folder in one call | `CellCreate.Create` — the composition of `CellFolder.CreateCellFolder` and those writers | `circuitrf new cell` |
+
+What stays in the view model is everything a shell owns: the dialog, the dirty-work prompt, and — after
+the save — the cache resets, the dock layout, the tree refresh and the launch action. The GUI does not
+create a cell in one call and is not made to: R-cc-1 says a schematic that fails to write must never
+roll back the cell that already exists, so New Cell reports the folder and only then writes the
+schematic. What the two paths genuinely share is the WRITE, which is why that is the unit extracted.
+
+Three rules follow, and each is gated:
+- **The technology copy is the shipped entry's own raw bytes**, never a re-serialization through
+  `TechPersistence` (R-misc-8). `ShippedTechnologies` therefore lives in `src/Design/Layout` now, with
+  its `EmbeddedResource` items — a class that reads resources out of its own assembly enumerates
+  nothing when only the class moves.
+- **Creating over an existing workspace is refused by the capability**, not only by each caller's
+  pre-flight, so no route into creation can skip it (`WorkspaceLock`'s header says what is at stake).
+- **Names go through `NameValidator` and nothing else**, so a headless caller cannot create a name the
+  GUI rejects.
+
+A cell created this way satisfies §2's primacy rules by construction: every view written is the SOLE
+file in its sub-folder, which is the implicit-primary branch, with nothing named in `.ccell` to
+contradict it — so `MissingNamedPrimary` is unreachable from this path.
+
 #### 1.1a Where an import's cells land *(added 2026-08-25)*
 A board import can create **dozens** of cells in one action — one per distinct footprint definition plus the
 board's own — and dropped at the workspace root they bury everything the user authored. **An import therefore

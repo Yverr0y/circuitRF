@@ -606,3 +606,23 @@ src/Design/Schematic/SubcircuitCellBuilder.cs|Nothing was chosen to import.
 src/Design/Schematic/SubcircuitCellBuilder.cs|Two of the subcircuits this import needs would both be called '{name}'. 
 src/Design/Symbol/SymbolPersistence.cs|.csym format_version {file.FormatVersion} is newer than 
 src/Design/Symbol/SymbolPersistence.cs|Failed to deserialize .csym file.
+
+# The workspace-creation capability came below the firewall so `circuitrf new workspace` and File ▸
+# New Workspace could be one function (brief-automation-3-authoring-verbs.md R-aut3-1/R-aut3-4).
+#
+# ShippedTechnologies' two sentences are unchanged text that crossed the wall with its code — it was
+# in src/Ui, where this gate does not scan, and it moved so the class could still read the .ctech
+# resources embedded beside it.
+#
+# WorkspaceCreate's two are NEW, and they are deliberate plain exceptions rather than diagnostics for
+# one reason each: both callers refuse FIRST, in their own words, on the path a user can actually
+# reach. The GUI checks the directory and posts Messages.Error; the CLI checks it and fails through
+# CliDiagnostics.NewRefused / NewUnknownTechnology, which ARE coded diagnostics with ids. What is left
+# here is the guard inside the capability itself — the one that makes it impossible for a THIRD route
+# into creation to skip R-aut3-6 — and no user reaches it without a caller having already said the
+# same thing better.
+# ── Guards behind a caller's own refusal (2026-09-05) ────────────────────────────────
+src/Design/Layout/ShippedTechnologies.cs|Embedded technology resource \"{entry.ResourceName}\" not found.
+src/Design/Layout/ShippedTechnologies.cs|No shipped technology named \"{id}\".
+src/Design/Workspace/WorkspaceCreate.cs|A folder named '{name}' already exists at that location.
+src/Design/Workspace/WorkspaceCreate.cs|No shipped technology named '{id}'. The shipped technologies are: 

@@ -313,4 +313,149 @@ internal static class CliDiagnostics
     public static Diagnostic ConvertTargetUnsupported(string format) => Diagnostic.Create(
         "convert.target.unsupported", DiagnosticSeverity.Error,
         "Cannot write {format}.", ("format", format));
+
+    // ── new / import part (brief-automation-3-authoring-verbs.md) ─────────────
+    //
+    // The authoring verbs' whole contract is "it was created, or it was refused and the sentence says
+    // what would fix it" (§7.5), so every refusal here NAMES the flag or the value that answers it.
+    // Ids are `new.` and `import.`, and permanent like every other one.
+
+    public static Diagnostic NewNounRequired() => new(
+        "new.args.noun-required", DiagnosticSeverity.Error,
+        "new: say what to create — 'new workspace' or 'new cell'.");
+
+    public static Diagnostic NewUnknownNoun(string noun) => Diagnostic.Create(
+        "new.args.unknown-noun", DiagnosticSeverity.Error,
+        "new: there is nothing called '{noun}' to create. Known: workspace, cell.", ("noun", noun));
+
+    public static Diagnostic NewUnknownOption(string option) => Diagnostic.Create(
+        "new.args.unknown-option", DiagnosticSeverity.Error,
+        "new: unknown option '{option}'.", ("option", option));
+
+    public static Diagnostic NewMultipleDirectories() => new(
+        "new.args.multiple-directories", DiagnosticSeverity.Error,
+        "new workspace: one directory, please — use --name to give the workspace a name inside it.");
+
+    public static Diagnostic NewWorkspaceDirRequired() => new(
+        "new.args.directory-required", DiagnosticSeverity.Error,
+        "new workspace: a directory is required.");
+
+    public static Diagnostic NewCellArgsRequired() => new(
+        "new.args.cell-args-required", DiagnosticSeverity.Error,
+        "new cell: a workspace (or a folder inside one) and a cell name are required.");
+
+    public static Diagnostic NewCellExtraArgument(string arg) => Diagnostic.Create(
+        "new.args.cell-extra-argument", DiagnosticSeverity.Error,
+        "new cell: unexpected argument '{arg}' — it takes a workspace and one cell name.", ("arg", arg));
+
+    /// <summary>R-aut3-9: NameValidator's reason, never a second rule set — a headless caller must
+    /// not be able to create a name the GUI would reject.</summary>
+    public static Diagnostic NewInvalidName(string kind, string name, string reason) => Diagnostic.Create(
+        "new.name.invalid", DiagnosticSeverity.Error,
+        "Invalid {kind} name '{name}': {reason}", ("kind", kind), ("name", name), ("reason", reason));
+
+    /// <summary>R-aut3-5: an unknown shipped-technology id lists the ones that exist. Not a fallback
+    /// to the default — a caller that asked for a specific process and silently got another has a
+    /// wrong design and no way to know.</summary>
+    public static Diagnostic NewUnknownTechnology(string id, string known) => Diagnostic.Create(
+        "new.tech.unknown", DiagnosticSeverity.Error,
+        "No shipped technology named '{id}'. The shipped technologies are: {known}. "
+        + "Use --tech none for a workspace with no technology.", ("id", id), ("known", known));
+
+    public static Diagnostic NewParentNotFound(string path) => Diagnostic.Create(
+        "new.parent.not-found", DiagnosticSeverity.Error,
+        "No such directory: {path}", ("path", path));
+
+    /// <summary>R-aut3-6, and the read-only-parent refusal: the capability's own sentence, forwarded
+    /// rather than re-worded, so the GUI and the verb refuse in the same words.</summary>
+    public static Diagnostic NewRefused(string reason) => Diagnostic.Create(
+        "new.refused", DiagnosticSeverity.Error, "{reason}", ("reason", reason));
+
+    public static Diagnostic NewCellExists(string name) => Diagnostic.Create(
+        "new.cell.exists", DiagnosticSeverity.Error,
+        "A cell named '{name}' already exists there. Nothing was created.", ("name", name));
+
+    public static Diagnostic NewUnknownView(string view) => Diagnostic.Create(
+        "new.views.unknown", DiagnosticSeverity.Error,
+        "--views: '{view}' is not a view. Known: schematic, symbol, layout.", ("view", view));
+
+    public static Diagnostic ImportNounRequired() => new(
+        "import.args.noun-required", DiagnosticSeverity.Error,
+        "import: say what to import — 'import part'.");
+
+    public static Diagnostic ImportUnknownNoun(string noun) => Diagnostic.Create(
+        "import.args.unknown-noun", DiagnosticSeverity.Error,
+        "import: there is nothing called '{noun}' to import. Known: part. "
+        + "For layout interchange (GDSII, DXF, Gerber, boards) use `convert`.", ("noun", noun));
+
+    public static Diagnostic ImportUnknownOption(string option) => Diagnostic.Create(
+        "import.args.unknown-option", DiagnosticSeverity.Error,
+        "import part: unknown option '{option}'.", ("option", option));
+
+    public static Diagnostic ImportMultipleSources() => new(
+        "import.args.multiple-sources", DiagnosticSeverity.Error,
+        "import part: one file or folder, please.");
+
+    public static Diagnostic ImportSourceRequired() => new(
+        "import.args.source-required", DiagnosticSeverity.Error,
+        "import part: a component file or folder is required.");
+
+    public static Diagnostic ImportIntoRequired() => new(
+        "import.args.into-required", DiagnosticSeverity.Error,
+        "import part: --into <workspace-or-dir> says where the cell is created.");
+
+    public static Diagnostic ImportSourceNotFound(string path) => Diagnostic.Create(
+        "import.source.not-found", DiagnosticSeverity.Error,
+        "No such file or folder: {path}", ("path", path));
+
+    /// <summary>A reader's or a scan's own refusal, forwarded whole.</summary>
+    public static Diagnostic ImportRefused(string reason) => Diagnostic.Create(
+        "import.refused", DiagnosticSeverity.Error, "{reason}", ("reason", reason));
+
+    /// <summary>R-aut3-12: one import message, on stderr and in the document. They are how a caller
+    /// learns a pin was inferred, a layer was dropped or a variant was skipped.</summary>
+    public static Diagnostic ImportMessage(string text) => Diagnostic.Create(
+        "import.note", DiagnosticSeverity.Info, "{text}", ("text", text));
+
+    /// <summary>R-aut3-11: the chooser dialog's question, refused rather than guessed at.</summary>
+    public static Diagnostic ImportAmbiguous(int count, string listing) => Diagnostic.Create(
+        "import.part.ambiguous", DiagnosticSeverity.Error,
+        "{count} parts here, and nothing said which. Name one with --cell (and --variant when two "
+        + "share a name), or run with --list-parts:\n{listing}", ("count", count), ("listing", listing));
+
+    public static Diagnostic ImportPartNotFound(string wanted, string held) => Diagnostic.Create(
+        "import.part.not-found", DiagnosticSeverity.Error,
+        "No part named '{wanted}' here. This holds: {held}.", ("wanted", wanted), ("held", held));
+
+    public static Diagnostic ImportVariantNotFound(string variant) => Diagnostic.Create(
+        "import.variant.not-found", DiagnosticSeverity.Error,
+        "No part variant '{variant}' here — --variant takes the key in --list-parts' second column.",
+        ("variant", variant));
+
+    public static Diagnostic ImportNothingCreated() => new(
+        "import.nothing-created", DiagnosticSeverity.Error,
+        "The part was read but no cell was created.");
+
+    /// <summary>The layers a part needs that its technology does not define. Reported ALWAYS, and
+    /// written only when --add-layers says so — the GUI's own install is session-only and says in as
+    /// many words that nothing was written to disk.</summary>
+    public static Diagnostic ImportLayersNotInstalled(int count, string names) => Diagnostic.Create(
+        "import.layers.not-installed", DiagnosticSeverity.Warning,
+        "{count} layer(s) this part uses are not in the technology: {names}. The cell was created "
+        + "with them; the technology was not changed. Pass --add-layers to write them into it.",
+        ("count", count), ("names", names));
+
+    /// <summary>No destination technology resolved at all. The reconciliation has nothing to compare
+    /// the part's layers against, so it reports none as new and they land with numeric keys and no
+    /// names — the same state the GUI is in with a technology-less workspace, said out loud rather
+    /// than left to be discovered when the layout opens grey.</summary>
+    public static Diagnostic ImportNoTechnology() => new(
+        "import.no-technology", DiagnosticSeverity.Warning,
+        "No technology resolved for this destination, so the part's layers arrive unnamed and none "
+        + "is reported as new. Name one with --tech, or set the workspace's default technology.");
+
+    public static Diagnostic ImportNoTechnologyToAddTo(string names) => Diagnostic.Create(
+        "import.layers.no-technology", DiagnosticSeverity.Error,
+        "--add-layers was given but no technology file resolved, so there is nowhere to put "
+        + "{names}. Name one with --tech.", ("names", names));
 }

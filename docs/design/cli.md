@@ -37,8 +37,30 @@ and it is gated by the same firewall test. That is what the `em` verb (§8) runs
 | `em` | `.cem` | `EmSetupResolver` + `EmRunService` (kernel chosen by `EmKernelRegistry`) | Touchstone `.sNp` + grouped `.npy` at the path Simulate writes; `-o` moves the Touchstone |
 | `elab` | `.cnl` | elaboration only | the elaborated netlist, for development |
 
-`convert` is the eighth verb and is documented in the repo-root `CLAUDE.md` rather than here: it
-runs no analysis, so none of §3-§7 applies to it.
+Three verbs run no analysis, so none of §3-§6 applies to them and §7's exit codes reduce to 0-or-1:
+
+| Verb | Input | Does | Writes |
+|---|---|---|---|
+| `convert` | any interchange format | one import, one export | the target format; documented in the repo-root `CLAUDE.md` |
+| `new workspace` | a directory | `WorkspaceCreate.Create` | a `.cws` and, unless `--tech none`, a copied `.ctech` |
+| `new cell` | a workspace + a name | `CellCreate.Create` | a cell folder and one empty-but-valid file per `--views` |
+| `import part` | a component file or folder | `ComponentRead` + `ComponentImport.Import` | a cell folder holding the land patterns and the symbol |
+
+**`new` is one verb with a noun, not three** (`brief-automation-3-authoring-verbs.md` R-aut3-13): the
+surface has a standing cost, and adding `new schematic` later is a noun rather than a fourth
+top-level verb. The three authoring verbs share one rule that decides every default they have —
+**whatever the GUI's dialog pre-selects, the verb selects with no flag, and anything the dialog would
+have ASKED is a refusal that names the flag answering it.** So `--tech` defaults to the New Workspace
+dialog's own pre-selected technology and an unknown id lists the real ones rather than falling back;
+`--views` defaults to `schematic`, which is what the GUI's New Cell creates; and a source folder
+holding several parts is refused with `--cell` / `--variant` / `--list-parts` named, never
+resolved by taking the first. They add no import or creation logic of their own: each calls the same
+function the GUI's own command calls, which is what
+`tests/Ui.Tests/AuthoringCliVerbTests` gates, byte for byte and by scanning the view model's source.
+
+The paths created ARE the result and go to stdout, because a caller's next step is almost always to
+read or rewrite one of them — the documents are the interface (`automation-architecture.md` §4), and
+there are deliberately no per-primitive edit verbs.
 
 Three flags are pulled out of the argument list before dispatch, so **every** verb takes them and no
 verb's own argument loop has to learn about any of them:
@@ -380,3 +402,12 @@ stderr to fill that pipe's buffer and deadlock a sequential reader.
 `em` follows 1, 4, 5 and 6 and is deliberately outside 2 and 3: it does not read a `.cnl`, so there is
 no chain to select and no directive to override. Its analogue of §5's rule is §8.2's — the one
 override it takes lands in the `EmSetup`, not at the run service, for the same reason.
+
+`convert`, `new` and `import part` follow 1, 4, 6 and 7 and are outside 2, 3 and 5 for the same
+reason: they run no analysis. Their §5 analogue is stronger and is the whole of
+`brief-automation-3-authoring-verbs.md` R-aut3-1: **an authoring verb calls the capability the GUI's
+own command calls, and adds nothing of its own.** A verb that re-implements what a view model does
+will diverge from it silently, and the first symptom is a document created headlessly that the
+application treats as subtly malformed — so step 2, for these, is "find the function the GUI calls,
+and if it is trapped inside a view model, extract it and change the view model to call it too". That
+extraction is not optional and it is not a follow-up.

@@ -9,7 +9,7 @@ namespace CircuitRF.Ui.Schematic;
 /// <see cref="SchematicPersistence.Deserialize"/> reader a user's own <c>.csch</c> goes through.
 /// Never transcribed into C#: a second representation of the same authored content would drift from
 /// it, and a template that the schematic editor could not itself open would be worse than no
-/// template at all. This mirrors <c>CircuitRF.Ui.Layout.ShippedTechnologies</c> exactly — read that
+/// template at all. This mirrors <c>CircuitRF.Design.Layout.ShippedTechnologies</c> exactly — read that
 /// class first if this one needs changing.
 ///
 /// Embedding (rather than a folder beside the executable) is also what makes templates present in a

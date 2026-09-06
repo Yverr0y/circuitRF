@@ -1,19 +1,24 @@
 using System.Linq;
 using System.Reflection;
 
-namespace CircuitRF.Ui.Layout;
+namespace CircuitRF.Design.Layout;
 
 /// <summary>
 /// docs/sonnet-briefs/brief-misc-termg-units-technologies.md §3 (R-misc-6/7/8/9): the four
 /// technologies circuitRF ships out of the box — real, authored <c>.ctech</c> files (see
-/// <c>src/Ui/resources/technologies/</c>), embedded into the assembly as plain .NET
+/// <c>src/Design/resources/technologies/</c>), embedded into the assembly as plain .NET
 /// <c>EmbeddedResource</c> assets and parsed at runtime through the SAME <see cref="TechPersistence"/>
 /// reader a user's own <c>.ctech</c> files go through — never transcribed into C# object
 /// initializers, which would create a second representation of the same authored content that
 /// would inevitably drift from it (R-misc-6's own reasoning). A workspace never references the
-/// embedded copy at runtime — <c>WorkspaceViewModel.NewWorkspace</c> writes the chosen entry's own
-/// bytes into the new workspace's own <c>tech/</c> folder as a real, independently-editable file
-/// (R-misc-8); this class is read ONLY at workspace-creation time (and by the "ship" gate test).
+/// embedded copy at runtime — <see cref="CircuitRF.Design.Workspace.WorkspaceCreate"/> writes the chosen entry's own bytes into
+/// the new workspace's own <c>tech/</c> folder as a real, independently-editable file (R-misc-8);
+/// this class is read ONLY at workspace-creation time (and by the "ship" gate test).
+///
+/// It lives in <c>src/Design</c>, with its <c>EmbeddedResource</c> items, because
+/// <c>circuitrf new workspace</c> creates a workspace with no display attached
+/// (brief-automation-3-authoring-verbs.md R-aut3-4). Moving the class without its resources would
+/// have left it compiling, enumerating nothing, and reporting nothing.
 ///
 /// Deliberately plain .NET <c>EmbeddedResource</c>, not Avalonia's <c>AvaloniaResource</c>/
 /// <c>AssetLoader</c> — this whole namespace is framework-free by design (no Avalonia reference),
@@ -59,7 +64,7 @@ public static class ShippedTechnologies
     }
 
     /// <summary>Raw, still-authored JSON bytes for one entry — what
-    /// <c>WorkspaceViewModel.NewWorkspace</c> writes verbatim into the new workspace's own
+    /// <see cref="CircuitRF.Design.Workspace.WorkspaceCreate"/> writes verbatim into the new workspace's own
     /// <c>tech/</c> folder (R-misc-8: "a real file," not a re-serialization through
     /// <see cref="TechPersistence.Serialize"/>, which would be a harmless but pointless
     /// round-trip — the shipped bytes ARE already exactly what should land on disk).</summary>

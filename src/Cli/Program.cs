@@ -63,6 +63,10 @@ return JsonRun.Finish(JsonRun.Verb switch
                                 => RunLoadpull(args[1..], pursuit: true),
     "em"     => RunEm(args[1..]),
     "convert" => CircuitRF.Cli.LayoutConvert.Run(args[1..]),
+    // R-aut3-13: `new` is ONE verb with a noun, not three — the surface has a standing cost, and
+    // adding `new schematic` later is a noun rather than a fourth top-level verb.
+    "new"    => CircuitRF.Cli.Authoring.RunNew(args[1..]),
+    "import" => CircuitRF.Cli.Authoring.RunImport(args[1..]),
     "elab"   => RunElab(args[1..]),
     _        => UnknownVerb(args[0])
 });
@@ -1674,6 +1678,9 @@ static int PrintHelp()
     Console.WriteLine("  em     <file.cem>   (electromagnetic extraction of the layout it names)");
     Console.WriteLine("  elab   <file.cnl>   (dump elaborated netlist)");
     Console.WriteLine("  convert <in> -o <out>  (layout interchange: any format to any other)");
+    Console.WriteLine("  new workspace <dir>    (a workspace, with a shipped technology copied in)");
+    Console.WriteLine("  new cell <ws> <name>   (a cell folder with its view files)");
+    Console.WriteLine("  import part <file>     (a footprint and its symbol, as a cell)");
     Console.WriteLine();
     Console.WriteLine("hb options:");
     Console.WriteLine("  -a, --analysis <name>   which analysis to run (default: the only HB chain)");
@@ -1713,6 +1720,20 @@ static int PrintHelp()
     Console.WriteLine("  --drill-zeros leading|trailing");
     Console.WriteLine("  --accept-inferred-drill-format   proceed on a guessed Excellon format");
     Console.WriteLine();
+    Console.WriteLine("new / import options:");
+    Console.WriteLine("  new workspace <dir> [--name N] [--tech <id>|none]");
+    Console.WriteLine("                          <dir> IS the workspace, or is its parent when");
+    Console.WriteLine("                          --name is given. --tech defaults to the same entry");
+    Console.WriteLine("                          the New Workspace dialog pre-selects.");
+    Console.WriteLine("  new cell <workspace-or-dir> <cellName> [--views schematic,symbol,layout]");
+    Console.WriteLine("                          --views defaults to schematic, which is what the");
+    Console.WriteLine("                          GUI's own New Cell creates.");
+    Console.WriteLine("  import part <file-or-folder> --into <workspace-or-dir>");
+    Console.WriteLine("  --cell N, --variant V    which part, when the source holds several");
+    Console.WriteLine("  --list-parts            report what the source holds, create nothing");
+    Console.WriteLine("  --tech <file.ctech>     the technology the layers reconcile against");
+    Console.WriteLine("  --add-layers            write the part's new layers into that technology");
+    Console.WriteLine();
     Console.WriteLine("Options (any command):");
     Console.WriteLine("  --kits <dir>        folder of installed kits, for externally-provided");
     Console.WriteLine("                      devices (ExtDevice Provider=...). Repeatable.");
@@ -1730,5 +1751,8 @@ static int PrintHelp()
     Console.WriteLine("Example: circuitrf em  Amp.cem -o /tmp/amp.s2p");
     Console.WriteLine("Example: circuitrf convert Filter.dxf -o gerbers/");
     Console.WriteLine("Example: circuitrf convert fab/ -o board.kicad_pcb");
+    Console.WriteLine("Example: circuitrf new workspace ~/designs/Amp --tech pcb-4layer_FR-4_62mil_1oz");
+    Console.WriteLine("Example: circuitrf new cell ~/designs/Amp Stage1 --views schematic,symbol");
+    Console.WriteLine("Example: circuitrf import part parts/ --into ~/designs/Amp --cell SOT-23");
     return 0;
 }

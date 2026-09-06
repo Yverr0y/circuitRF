@@ -4,17 +4,24 @@
 // Messages — every reader under src/Design/Layout/Interchange stays pure bytes-and-geometry, exactly
 // the split PcbImport and PcbReader already draw.
 //
-// This half lives in src/Ui because a `.csym` is written by SymbolPersistence and a Symbol is built
-// from SymbolPrimitive, both of which sit beside the renderer here (R-PL1-16). The readers stay on the
-// far side of the firewall in src/Design; the neutral symbol model between them is Core's
-// KitSymbolPin/KitSymbolShape, and the conversion is KitTemplateSymbol.BuildFromDrawing, used unchanged.
+// It lived in src/Ui while `.csym` writing did (R-PL1-16), and moved here with it: AUT-2 put
+// SymbolPersistence, SymbolPrimitive and KitTemplateSymbol below the UI firewall, and
+// brief-automation-3-authoring-verbs.md R-aut3-10 needs `circuitrf import part` to call THIS rather
+// than grow a second import. The neutral symbol model between the readers and the symbol is Core's
+// KitSymbolPin/KitSymbolShape, and the conversion is KitTemplateSymbol.BuildFromDrawing, unchanged.
+//
+// The layer-mapping DIALOG stayed in src/Ui, as a `resolveLayerMapping` callback — headless it is
+// null, which takes the mapping dialog's own pre-selected defaults (R-aut3-11).
 //
 // Import only (§13). There is no writer of any of these formats.
 
 using CircuitRF.Core.Pdk;
-using CircuitRF.Ui.Schematic;
+using CircuitRF.Design.Cells;
+using CircuitRF.Design.Layout.Interchange;
+using CircuitRF.Design.Schematic;
+using CircuitRF.Design.Symbol;
 
-namespace CircuitRF.Ui.Layout;
+namespace CircuitRF.Design.Layout;
 
 public static class ComponentImport
 {
@@ -45,9 +52,13 @@ public static class ComponentImport
     /// <param name="LayersToAdd">Layers the destination technology does not define, which the caller
     /// installs. A PREVIEW never installs them; it renders through a scratch technology carrying them
     /// (<see cref="ComponentPreview"/>).</param>
+    // `Symbol` names BOTH a namespace under CircuitRF.Design and a type inside it. In a
+    // namespace-or-type position the namespace wins from every other namespace in this assembly (a
+    // using-alias does not override that; it is consulted after the enclosing namespaces), so the
+    // type is spelled in full here and at BuildSymbol. `new Symbol(...)` in an expression is fine.
     public sealed record BuiltPart(
         IReadOnlyList<ComponentTerminal> Terminals,
-        Symbol? Symbol,
+        CircuitRF.Design.Symbol.Symbol? Symbol,
         IReadOnlyList<BuiltLayout> Layouts,
         IReadOnlyList<LayerDef> LayersToAdd,
         int PinsWithNoPad,
@@ -310,7 +321,7 @@ public static class ComponentImport
     /// <c>KitTemplateSymbol.Convert</c> flips both fields — which is already the sign change negating Y
     /// calls for. Flipping them here as well would cancel it out.</para>
     /// </summary>
-    private static Symbol? BuildSymbol(
+    private static CircuitRF.Design.Symbol.Symbol? BuildSymbol(
         ComponentPart part, IReadOnlyList<ComponentTerminal> terminals, List<string> messages)
     {
         if (part.Symbol is not { Pins.Count: > 0 } drawing) return null;
@@ -354,7 +365,7 @@ public static class ComponentImport
                 $"{moved} of {pins.Count} symbol pin(s) were not on circuitRF's 100-mil connection grid " +
                 "and were snapped onto it. A lead was drawn from each back to where the file put it.");
 
-        return new Symbol(symbol.Primitives, symbol.Pins, terminals.Count);
+        return new CircuitRF.Design.Symbol.Symbol(symbol.Primitives, symbol.Pins, terminals.Count);
     }
 
     /// <summary><c>Width</c> rides along on every arm: it is the file's own stated stroke, it is what

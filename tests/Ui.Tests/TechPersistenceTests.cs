@@ -250,7 +250,9 @@ public class TechPersistenceTests
             .Where(l => l.Interchange?.PcbLayerName is not null)
             .ToDictionary(l => l.Name, l => l.Interchange!.PcbLayerName!);
 
-        var dir = Path.Combine(RepoRoot(), "src", "Ui", "resources", "technologies");
+        // The files moved to src/Design with ShippedTechnologies at AUT-3 (R-aut3-4) — a class that
+        // reads resources out of its own assembly enumerates nothing when only the class moves.
+        var dir = Path.Combine(RepoRoot(), "src", "Design", "resources", "technologies");
         var files = Directory.GetFiles(dir, "pcb-*.ctech");
         Assert.NotEmpty(files);
 

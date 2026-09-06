@@ -74,11 +74,17 @@ public sealed class NewWorkspaceTechnologyPickerTests
         Assert.DoesNotContain("TechNoneRadio", axaml);
     }
 
-    // R-misc-8: WorkspaceViewModel.NewWorkspace writes the shipped entry's OWN raw bytes into
-    // tech/<id>.ctech — never re-serializes through TechPersistence.Serialize (which would be a
-    // harmless but pointless round trip) and never StarterTechnologies.
+    // R-misc-8: a new workspace gets the shipped entry's OWN raw bytes in tech/<id>.ctech — never a
+    // re-serialization through TechPersistence.Serialize (a harmless but pointless round trip that
+    // would produce a different file) and never StarterTechnologies.
+    //
+    // The WRITE itself moved to WorkspaceCreate.Create with AUT-3
+    // (brief-automation-3-authoring-verbs.md R-aut3-1/R-aut3-4) and is asserted there, byte for byte,
+    // by AuthoringCliVerbTests.NewWorkspace_CopiesTheShippedTechnologysOwnBytes. What stays checkable
+    // here is the half that is still the view model's: it hands the DIALOG's technology choice to
+    // that one function, and reaches for no other source of a starter technology.
     [Fact]
-    public void WorkspaceViewModel_NewWorkspace_WritesShippedRawJson_NeverStarterTechnologies()
+    public void WorkspaceViewModel_NewWorkspace_RoutesTheDialogsChoiceToTheOneCreationCapability()
     {
         string src = ReadRepoFile(Path.Combine("src", "Ui", "ViewModels", "WorkspaceViewModel.cs"));
 
@@ -88,8 +94,7 @@ public sealed class NewWorkspaceTechnologyPickerTests
         Assert.True(methodEnd > methodStart, "could not find the end of NewWorkspace");
         string body = src[methodStart..methodEnd];
 
-        Assert.Contains("ShippedTechnologies.LoadRawJson", body);
-        Assert.Contains("result.TechnologyId", body);
+        Assert.Contains("WorkspaceCreate.Create(result.ParentDir, result.Name, result.TechnologyId)", body);
         Assert.DoesNotContain("StarterTechnologies", body);
         Assert.DoesNotContain("NewWorkspaceTechChoice", body);
     }

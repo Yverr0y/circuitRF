@@ -148,10 +148,13 @@ public partial class WorkspaceViewModel
     /// that cannot be carried out AND a half-made workspace on disk to clean up. The directory is
     /// named because "somewhere you picked" is not something a user can act on.</para>
     /// </summary>
+    /// <remarks>
+    /// The sentence itself is <see cref="WorkspaceCreate.UnwritableParentRefusal"/>'s, below the UI
+    /// firewall, because <c>circuitrf new workspace</c> refuses on the same rule and two copies of a
+    /// refusal are two refusals that drift (brief-automation-3-authoring-verbs.md R-aut3-1).
+    /// </remarks>
     internal static string? UnwritableParentRefusal(string? parentDir, string whatWasBeingCreated)
-        => WorkspaceWritability.IsReadOnly(parentDir)
-            ? $"{whatWasBeingCreated} — '{parentDir}' is read-only on this machine. Choose a location you can write to."
-            : null;
+        => WorkspaceCreate.UnwritableParentRefusal(parentDir, whatWasBeingCreated);
 
     /// <summary>
     /// R-sl2-7/-8: says why a Save became a Save As (or, in a sweep, why it did not happen at all).

@@ -153,3 +153,70 @@ as a process, not linked, so its types cannot be bound against. The regex anchor
 `No such command: 'file.cnl'` before the cause was obvious. A `params` overload whose extra leading
 parameter is also a string is not an overload; it is a trap. The culture variant is named
 `Launch(culture, …)` now.
+
+---
+
+## AUT-3 — `new workspace`, `new cell`, `import part` (2026-09-05)
+
+`brief-automation-3-authoring-verbs.md`. Three verbs that create a correct INITIAL document with no
+display attached, plus the extraction that lets them exist. The contract is `docs/design/cli.md` §2
+and §9; the capabilities themselves are recorded in `src/Design/RESOLVED.md`.
+
+`src/Cli/Authoring.cs` is ~590 lines and none of them create anything. That is the point: every verb
+calls the function the GUI's own command calls, so what is left in the CLI is argument parsing,
+refusals and reporting. The gate is `tests/Ui.Tests/AuthoringCliVerbTests` (25 tests, ~2 s), written
+the way `EmCliVerbTests` is — the real CLI as a process, compared byte for byte against the
+in-process call.
+
+### The brief's stated `--views` default contradicts its own reason, and the reason won
+
+R-aut3-8 says the default is "symbol and schematic, matching the GUI's own New Cell". **The GUI's New
+Cell creates a schematic and nothing else** — `NewCellAsync` calls `CellFolder.CreateCellFolder` and
+then `CreateAndOpenSchematicFileAsync`; the symbol and layout sub-folders are made and left empty
+(R-cc-1: "a New Cell always creates that cell's primary schematic", singular). So the stated value
+and the stated reason disagree, and the reason is the rule the whole brief runs on — R-aut3-3's "a
+headless default that differs from the dialog's is a second product". **`--views` defaults to
+`schematic`.** `--views symbol,schematic` is one flag away for a caller that wants both.
+
+### `import part` has no session, so the layer install cannot be copied — only reported or written
+
+The GUI's `ApplyImportToTechnology` installs the part's new layers into the SESSION's live technology
+and says in as many words that **nothing was written to disk**; the user keeps them by opening the
+technology and saving it. Headless there is no session, so "do what the GUI does" is not available:
+the honest options are to report them or to write them, and which one a caller wants is not
+something to guess. So they are **always reported**, and `--add-layers` writes them into the
+resolved `.ctech`. Reporting is not optional — a layer silently dropped is the trap
+`src/Design/RESOLVED.md` already records for `convert`.
+
+**A null destination technology reports NO layers as new**, which is the same trap from the other
+side: with nothing to reconcile against, `LayersToAdd` comes back empty and the part's layers land
+with numeric keys and no names. The GUI is in exactly that state with a technology-less workspace, so
+the verb matches it and says so (`import.no-technology`) rather than inventing a technology the GUI
+would not have had.
+
+### `--variant` cannot be the candidate's Location, which is what the chooser shows
+
+The brief's `--cell N` / `--variant V` map onto the chooser dialog's two distinguishing columns, and
+the obvious reading of `--variant` is `ComponentCandidate.Location` — the folder a candidate came
+from, which is what separates "one part written out once per target format". **That reading is inert
+on the ordinary case.** `testdata/component-samples/widget9` holds one part as three candidates in
+ONE folder — a `.kicad_sym` symbol, a `.lib` symbol, and the bare land pattern — so all three share a
+name, a Location of `""` and a family. Neither flag could name one.
+
+`--variant` therefore takes the Location when there is one and otherwise the **extension of the file
+the candidate begins at** (its symbol file, else its first footprint) — which is the same file
+`DisplayName` is taken from, so nothing new is invented. `--list-parts` prints exactly that key in
+its second column, and the ambiguity refusal prints the whole listing.
+
+### Two things the argument shape had to settle
+
+- **`new workspace <dir>` with no `--name` treats `<dir>` as the workspace itself**, and with
+  `--name` as its parent. Both are how a person types it and the flag says which was meant.
+- **`--tech none` is how a caller asks for the dialog's own "None" row.** An absent `--tech` cannot
+  mean "none": R-aut3-3 binds it to what the combobox opens on, which is a real technology.
+
+### 29 new diagnostic ids
+
+`new.*` (14) and `import.*` (15), all recorded in `CliStructuredOutputTests`' committed list. That
+list is asserted in **ordinal order over the whole set**, so a new group cannot simply be appended —
+the first attempt appended `import.*` after `lp.export.no-surface` and failed on position 49.

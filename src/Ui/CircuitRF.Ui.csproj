@@ -191,16 +191,11 @@
     <AvaloniaResource Include="Assets\**" />
   </ItemGroup>
 
-  <!-- Shipped default technologies (docs/sonnet-briefs/brief-misc-termg-units-technologies.md §3,
-       R-misc-6) — real .ctech files, embedded as plain-text .NET resources (NOT AvaloniaResource:
-       ShippedTechnologies.cs is framework-free and must be readable via Assembly.
-       GetManifestResourceStream in headless tests, which have no live Avalonia platform for
-       AssetLoader to run against — see SkiaFonts.cs's own note on exactly that constraint). Read at
-       runtime through the SAME TechPersistence reader user files use (R-misc-7) — never
-       hand-transcribed into C#. -->
-  <ItemGroup>
-    <EmbeddedResource Include="resources\technologies\*.ctech" />
-  </ItemGroup>
+  <!-- The shipped default technologies moved to src/Design with ShippedTechnologies.cs
+       (brief-automation-3-authoring-verbs.md R-aut3-4) — `circuitrf new workspace` copies one in, and
+       a class whose resources are embedded in THIS assembly enumerates nothing from over there.
+       Their .csproj carries the item now; the reasons for embedding them at all are unchanged and
+       are stated there. -->
 
   <!-- Shipped schematic templates — real, authored .csch files (resources\schematic-templates\),
        embedded the same way and for the same reasons as the technologies above: read at runtime

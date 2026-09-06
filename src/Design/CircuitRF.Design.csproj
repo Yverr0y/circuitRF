@@ -50,6 +50,21 @@
     <PackageReference Include="SkiaSharp" Version="3.119.4" />
   </ItemGroup>
 
+  <!-- Shipped default technologies (docs/sonnet-briefs/brief-misc-termg-units-technologies.md §3,
+       R-misc-6) — real .ctech files, embedded as plain-text .NET resources (NOT AvaloniaResource:
+       ShippedTechnologies.cs is framework-free and must be readable via Assembly.
+       GetManifestResourceStream in headless tests, which have no live Avalonia platform for
+       AssetLoader to run against). Read at runtime through the SAME TechPersistence reader user files
+       use (R-misc-7) — never hand-transcribed into C#.
+
+       They live HERE rather than in src/Ui because `circuitrf new workspace` copies one into the
+       workspace it creates, and the class that reads them reads them out of its OWN assembly
+       (brief-automation-3-authoring-verbs.md R-aut3-4: move the resources with the class, or the
+       class compiles, enumerates nothing, and reports nothing). -->
+  <ItemGroup>
+    <EmbeddedResource Include="resources\technologies\*.ctech" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- Same grant src/Ui carries, and for the same reason: the layout/EM tests live in
          tests/Ui.Tests and reach internal members of the code that used to be there. -->

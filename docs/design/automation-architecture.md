@@ -98,6 +98,28 @@ existing boundary is not weakened by R-aut-3. What moves is the document model, 
 the pure functions over it. What does not move is the canvas, the edit session, undo, hit-testing,
 drag-follow, the palette, or anything that observes a viewport.
 
+### 3.1 Creating the first correct document
+
+Reading and writing the formats was never the whole gap. **Making the first correct one was**, and
+until AUT-3 the three operations that do it lived inside a view model, where R-aut-2 says a capability
+cannot live. **Closed by AUT-3 on 2026-09-05** (`brief-automation-3-authoring-verbs.md`):
+
+| Capability | Lives in | Called by |
+|---|---|---|
+| Create a workspace | `WorkspaceCreate` (`src/Design/Workspace`) | `circuitrf new workspace` **and** `WorkspaceViewModel.NewWorkspace` |
+| Write a cell's view files | `CellCreate` (`src/Design/Cells`) | `circuitrf new cell` **and** the GUI's New Cell / New Schematic / New Symbol / New Layout |
+| Import a part | `ComponentImport` (`src/Design/Layout`) | `circuitrf import part` **and** the GUI's Import Component |
+
+Each has exactly one implementation and the GUI calls it — which is not something a byte comparison
+can prove (two copies agree right up until one is edited), so
+`tests/Ui.Tests/AuthoringCliVerbTests` scans the view model's own source for the calls, with comments
+stripped first. `ShippedTechnologies` moved to `src/Design/Layout` with its `EmbeddedResource` items,
+because a class that reads resources out of its own assembly enumerates nothing when only the class
+moves.
+
+These are **scaffolding, not an editing API** (R-aut0-5): they produce a correct INITIAL document, and
+the answer to "how do I add an instance" stays §4's — write the document.
+
 ---
 
 ## 4. Documents are the interface — declarative, not imperative

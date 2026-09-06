@@ -2135,3 +2135,64 @@ error its per-pin measurement already existed to avoid, made twice.
 land — that needs a new `KitSymbolShape` case carrying the string, its size, its rotation and its own
 justification. The pin-name alignment above is a property of the PIN and is unrelated to it.
 
+
+---
+
+## AUT-3 — the creation capabilities come below the firewall (2026-09-05)
+
+`brief-automation-3-authoring-verbs.md`. Three operations that only a view model could perform are
+now functions here, and the GUI calls them: `WorkspaceCreate.Create` (`Workspace/`), `CellCreate`
+(`Cells/`), and `ComponentImport` — which moved from `src/Ui/Layout` unchanged. The verb side is
+`src/Cli/RESOLVED.md`.
+
+### `ShippedTechnologies` had to bring its resources, and the failure mode is silence
+
+The class was already framework-free by explicit design (plain .NET `EmbeddedResource` rather than
+Avalonia's `AssetLoader`, because `AssetLoader.Open` throws with no live platform). What was not
+portable is that it reads `Assembly.GetManifestResourceStream` **on its own assembly**: moving the
+class alone leaves it compiling, enumerating nothing, and reporting nothing — no exception, no
+warning, and a `new workspace` that quietly creates a technology-less workspace.
+
+So `src/Ui/resources/technologies/*.ctech` moved to `src/Design/resources/technologies/` with the
+`EmbeddedResource` item. The manifest names change with the root namespace, which `Discover`'s "the
+segment between the last dot and `.ctech` is the file stem" rule survives unchanged. Two tests read
+the old path and were pointed at the new one; `ShippedTechnologiesTests` is the one that would have
+caught a silent miss, and it passes on the new assembly.
+
+### A namespace and a type both named `Symbol`, and a `using` alias does not fix it
+
+`ComponentImport` compiled in `CircuitRF.Ui.Layout` and stopped compiling in `CircuitRF.Design.Layout`
+with `CS0118: 'Symbol' is a namespace but is used like a type` — because `CircuitRF.Design.Symbol` is
+a namespace *and* holds a type of the same name, and from any other namespace in this assembly the
+enclosing-namespace member is found first.
+
+**`using Symbol = CircuitRF.Design.Symbol.Symbol;` does not help**, and the reason is worth
+remembering: a namespace-or-type-name is resolved by walking the enclosing namespaces first and
+consulting the compilation unit's using-aliases only after, so the namespace wins over the alias. The
+tell is that only the TYPE positions fail — `new Symbol(...)` in an expression is fine, because that
+is simple-name resolution and prefers a type. Two positions are spelled in full, with a note beside
+them.
+
+### The GUI's own New Cell is not one call, and forcing it to be one would break R-cc-1
+
+New Cell creates the folder, refreshes the tree, reports "Created", and only then writes the
+schematic — deliberately, because a schematic that fails to write must never roll back the cell that
+already exists. New Schematic writes a second view into a cell that already exists, under a file name
+that need not be the cell's. So what the GUI and `circuitrf new cell` genuinely share is the WRITE,
+and that is the unit extracted: `CellCreate.WriteSchematicView` / `WriteSymbolView` /
+`WriteLayoutView`, with `CellCreate.Create` as the headless composition of them. The byte-identity
+gate compares the two compositions; a source scan (comments stripped) proves the view model calls the
+same writers rather than keeping a copy.
+
+`NewLayoutView(tech)` is separate from `WriteLayoutView(model)` for one concrete reason: the GUI opens
+an editor session on the very model it saved, and reading the file back to get one would be a second
+object and a second chance to differ.
+
+### Two GUI checks that could not be left in the shell
+
+`WorkspaceCreate.Create` refuses over an existing directory itself, not only in each caller's
+pre-flight — otherwise a second route into creation (a future verb, a future command) skips the rule
+`WorkspaceLock`'s header exists to protect. And the read-only-parent refusal SENTENCE moved here as
+`WorkspaceCreate.UnwritableParentRefusal`, with `WorkspaceViewModel`'s own helper forwarding to it:
+three GUI sites and the verb refuse in one wording, and two copies of a refusal are two refusals that
+drift.
