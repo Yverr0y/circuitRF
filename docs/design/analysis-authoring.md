@@ -244,7 +244,7 @@ to the analysis bytes; it guarantees copy/paste, save-as-template, and persisten
 2. **`.csch` persistence + the one serialization** (§3/§5.4): analyses + measurements serialized (polymorphic)
    as the **single shared encoder** reused later for clipboard + template; `SchematicHasAnalyses` hook returns
    real; round-trip tests; IsTestBench flips on save. **DONE (2026-06-10).**
-   - `src/Ui/Schematic/AnalysisSerialization.cs` — `CschAnalysis`/`CschFrequencySpec`/`CschMeasurement` DTOs
+   - `src/Design/Schematic/AnalysisSerialization.cs` — `CschAnalysis`/`CschFrequencySpec`/`CschMeasurement` DTOs
      + `AnalysisSerialization` (the ONE encoder: `Serialize`/`Deserialize` for clipboard/`.canl` + `ToDto`/
      `FromDto` helpers used by `.csch`). Type discriminator: `"dc"` / `"sp"` / `"hb"`; unknown tags skipped.
    - `SchematicEditModel` gains `Analyses: List<Analysis>` + `Measurements: List<Measurement>`.
@@ -261,7 +261,7 @@ to the analysis bytes; it guarantees copy/paste, save-as-template, and persisten
 5. **Reuse** (§5): copy/paste (clipboard, multi-select + Copy All, name-collision + unresolved-ref surfacing);
    then templates — `.canl` save/insert, the **Save-as-Template dialog** (name + description + preview list,
    atomic write), the template picker (+ minimal Manage). Reuses the §5.4 serialization. **DONE (2026-06-10).**
-   - `src/Ui/Schematic/AnalysisSerialization.cs` — `SerializeCanl`/`DeserializeCanl` + `CanlFile` DTO (§5.4 one
+   - `src/Design/Schematic/AnalysisSerialization.cs` — `SerializeCanl`/`DeserializeCanl` + `CanlFile` DTO (§5.4 one
      serialization: same DTOs as `.csch` + clipboard; name + optional description wrapper).
    - `src/Ui/Schematic/TemplateManager.cs` — `AnalysisTemplate` record + `TemplateManager` (load all from
      resolution chain workspace→user, atomic `SaveTemplate`, `TemplateExists`, `DeleteTemplate`).

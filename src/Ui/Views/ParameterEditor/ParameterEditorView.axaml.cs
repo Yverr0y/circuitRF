@@ -53,7 +53,7 @@ public partial class ParameterEditorView : UserControl
     /// Opens the Match Designer for the selected instance. Only the view knows which window owns this
     /// panel, which is why the view-model raises an event rather than opening one itself.
     /// </summary>
-    private void OnOpenMatchDesigner(CircuitRF.Ui.Schematic.EditableComponent comp)
+    private void OnOpenMatchDesigner(CircuitRF.Design.Schematic.EditableComponent comp)
     {
         if (Vm?.SchematicVm is not { } schematicVm) return;
         Views.Match.MatchDesignerWindow.Show(schematicVm, comp, TopLevel.GetTopLevel(this) as Window);
@@ -114,7 +114,7 @@ public partial class ParameterEditorView : UserControl
         if (topLevel is null) return null;
 
         var patterns = new List<string>();
-        foreach (var ext in CircuitRF.Ui.Schematic.SpiceModelPeek.FileExtensions)
+        foreach (var ext in CircuitRF.Design.Schematic.SpiceModelPeek.FileExtensions)
         {
             patterns.Add("*" + ext);
             patterns.Add("*" + ext.ToUpperInvariant());
@@ -313,14 +313,14 @@ public partial class ParameterEditorView : UserControl
     }
 
     /// <summary>Shows the model's own declared parameters and returns the chosen one, or null.</summary>
-    private async Task<CircuitRF.Ui.Schematic.VerilogAParameterInfo?> PickModelParameterAsync(
+    private async Task<CircuitRF.Design.Schematic.VerilogAParameterInfo?> PickModelParameterAsync(
         string modelName,
-        IReadOnlyList<CircuitRF.Ui.Schematic.VerilogAParameterInfo> declared,
+        IReadOnlyList<CircuitRF.Design.Schematic.VerilogAParameterInfo> declared,
         IReadOnlyCollection<string> alreadyPresent)
     {
         if (TopLevel.GetTopLevel(this) is not Window owner) return null;
         var dlg = new ModelParameterPickerDialog(modelName, declared, alreadyPresent);
-        return await dlg.ShowDialog<CircuitRF.Ui.Schematic.VerilogAParameterInfo?>(owner);
+        return await dlg.ShowDialog<CircuitRF.Design.Schematic.VerilogAParameterInfo?>(owner);
     }
 
     /// <summary>

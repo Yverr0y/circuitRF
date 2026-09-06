@@ -139,7 +139,7 @@ public static class ToolbarCatalog
 
     /// <summary>
     /// What the button shows. Material.Icons exposes its kind as an enum property; our own palette
-    /// glyphs name a <see cref="Schematic.SymbolKind"/>; anything else is vector artwork.
+    /// glyphs name a <see cref="SymbolKind"/>; anything else is vector artwork.
     /// </summary>
     private static string IconOf(Control c)
     {

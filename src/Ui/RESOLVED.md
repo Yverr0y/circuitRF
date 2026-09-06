@@ -1,5 +1,80 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## AUT-2 — what stayed in `src/Ui/Schematic`, and the four places src/Ui had to change (2026-09-05)
+
+`brief-automation-2-schematic-below-the-firewall.md` moved 41 of the folder's 105 files below the UI
+firewall. **The findings from the move itself are in `src/Design/RESOLVED.md`** — the `Symbol`
+namespace/type collision, `PdkPartInstaller` crossing against R-aut2-2, the two dependency inversions,
+and Roslyn's declaration-phase bailout. This entry is the `src/Ui` side.
+
+### What stayed, and why the line fell where it did
+
+64 files. The set was not chosen — the compiler closed the dependency graph from
+`SchematicPersistence.LoadFromFile`, `SchematicEditModel`, `NetExtractor.Extract` and
+`SymbolPersistence`, and what it never asked for stayed. The categories, after the fact:
+
+| Stayed | Examples |
+|---|---|
+| Canvas, overlay, hit-test | `SchematicHitTest`, `SchematicOverlay`, `SymbolEditorOverlay`, `SchematicSelection` |
+| Edit session, undo, documents | `SchematicSessionRegistry`, `SchematicDocument`, `SymbolEditorDocument`, `CellParameterEditorDocument`, `RecoveryManager`, `TemplateManager` |
+| Drag payloads and drop intent | `CellDragPayload`, `FolderDragPayload`, `PaletteDragPayload`, `WorkspaceFileDragPayload`, `TreeDropIntent` |
+| View-model services | `PlacementService` (the folder's only `ObservableObject`), `PendingPlacement` |
+| Installation UX | `VerilogACompilerInstaller` |
+| Run orchestration and reporting | `SchematicRunService`, `RunResultsWriter` (an `IMessageSink`), `LoadpullRunSummary` |
+| Project tree, workspace scan, save plan | `ProjectTreeNode`, `WorkspaceScanner`, `SavePlan`, `SavePlanExecutor`, `TreeMove` |
+| Embedded-resource holders | `ShippedSchematicTemplates` |
+
+**Two of these are worth naming because they look like they should have moved and did not.**
+`EditableSymbol` is the symbol EDITOR's mutable working copy, and nothing in the read/extract chain
+touches it — so the `.csym` model went down and its edit model stayed, which is exactly the R-aut-4
+line. `ShippedSchematicTemplates` was never reached either, so R-aut2-8's `EmbeddedResource` trap
+never fired: **no moved file reads an embedded resource**, and `ShippedTechnologies` is likewise
+untouched and left for AUT-3, as the brief directs.
+
+### The `using` churn: two lines, said twice
+
+`src/Ui/GlobalUsings.cs` gained `CircuitRF.Design.Schematic` and `CircuitRF.Design.Symbol`, and
+`tests/Ui.Tests/GlobalUsings.cs` — which documents itself as the mirror, and as the reason the layout
+tests could pass unchanged in 2026-08 — gained the same two. That is what kept ~170 files and
+12,000-odd tests from needing an edit.
+
+**It did not cover fully-qualified spellings**, and there were three shapes of those: absolute
+(`CircuitRF.Ui.Schematic.ICellResolver`), namespace-relative from inside `CircuitRF.Ui`
+(`Schematic.VerilogAModelIntrospection`, `PCells.PCellLayerSelection`), and one disambiguation that
+had to be re-pointed rather than dropped — `SystemBlockElaborationTests` writes
+`CirculatorDirection` fully qualified because `CircuitRF.Core.Devices` declares one too, and the
+global using turned the short name into a genuine `CS0104`.
+
+### Two `[ModuleInitializer]`s, because `src/Ui` has three `Main`s
+
+`UiWBondDefaultsInstaller` (`src/Ui/WBond/`) and `UiVerilogACacheInstaller` (`src/Ui/Schematic/`) hand
+the moved code the two values it could not bring: the new-wire foot z (a preference) and the per-user
+cache directory (`AppDataRoot`). Both are module initializers rather than calls from
+`App.Initialize`, for the reason `UiTypefaceInstaller` already records — circuitRF, harmonicaRF and
+wBond are the same assembly with a different `Main` (R-aut2-9), so an installer wired into one is an
+installer the other two silently do without. `tests/Ui.Tests`'
+`TheHooksSrcUiInstallsIntoTheMovedCode_AreActuallyInstalled` asserts both are live in a running
+process; unset, both fall back to something reasonable and say nothing, which is the failure this
+guards.
+
+### Exactly two tests needed changing, and both were source scanners
+
+12,027 `Ui.Tests` tests; 2 failed, both because they read a source file BY PATH rather than calling
+anything.
+
+- `MultiWorkspaceShellTests.TheKitRegistriesExposeNoProcessWideClear` reads `PdkKitRegistry.cs` and
+  asserts it exposes no process-wide `Clear()`. Path re-pointed to `src/Design/Schematic/`; the
+  assertion is untouched.
+- `WBondRound6Tests.EveryCreationPath_ReadsTheSetting` asserts every path that creates a wire contains
+  the literal `WBondDefaults.FootZNm`. The schematic-placement entry now names
+  `UiWBondDefaultsInstaller.cs` instead of `WBondPlacement.cs` — **that file is where the setting is
+  read now**, one indirection further along, and the test's own purpose (the setting means *all* new
+  wires, not some of them) is preserved: delete the installer and it goes red, which is precisely the
+  silent revert-to-4-mil it exists to catch.
+
+**A source-scanning test is a path dependency the compiler cannot see.** Both were found by running
+the suite, not by building — worth remembering before the next move of this shape.
+
 ## An undocked document's tab ✕ closed the tab and left its window on screen (2026-09-05)
 
 **Reported as:** an undocked `.csym` document was closed with the ✕ on its tab item; the tab closed

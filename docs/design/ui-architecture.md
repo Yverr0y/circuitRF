@@ -30,7 +30,8 @@ circuitRF is built in layers with a **strict one-way dependency direction** (roo
         ▲      NO UI.
   src/Design  (design-layer DOCUMENT artifacts): the layout model and `.clay` reader, the
         ▲      technology model and `.ctech` reader, the `.ccell` cell-folder format, the `.cem`
-        ▲      EM setup and the extractors that turn geometry + stackup into an EmProblem.
+        ▲      EM setup and the extractors that turn geometry + stackup into an EmProblem, and
+        ▲      the `.csch`/`.csym` schematic and symbol model with net extraction.
         ▲      NO UI — it draws nothing, docks nothing and observes no canvas.
   src/Ui      (Presentation layer): Avalonia + SkiaSharp. Depends on Core, Engine, Design, RfCore.
         ▲      NOTHING depends on src/Ui.
@@ -42,6 +43,21 @@ circuitRF is built in layers with a **strict one-way dependency direction** (roo
 framework-free by rule since L6/L7 and simply lived in the wrong assembly. The layout EDITOR, the DRC
 engine, the PCell generators and the `.cem` editor all stayed in `src/Ui`; what crossed is the model,
 the readers, and the extractors.
+
+**The schematic side crossed the same way on 2026-09-05**
+(`docs/sonnet-briefs/brief-automation-2-schematic-below-the-firewall.md`), for the same reason: a
+schematic could not be read, or a netlist produced from one, without Avalonia on the path. 41 files
+moved to `src/Design/Schematic` and `src/Design/Symbol` — the `.csch` and `.csym` document model,
+their persistence, their geometry, the built-in and generated symbol artwork, the SPICE/kit importers
+that write cells, and `NetExtractor`. 64 stayed: every canvas, overlay, hit-test, drag payload, undo
+stack, edit session, `*Document` and installer. The set was not hand-picked — the compiler was let to
+close it, which is why `PdkPartInstaller` came across (see `src/Design/RESOLVED.md`) and
+`EditableSymbol` did not.
+
+**The boundary is now stated by two tests rather than by this paragraph.**
+`tests/Firewall.Tests/SchematicChainBelowTheFirewallTests` assembles `.csch → NetExtractor →
+CnlWriter` in a project whose references cannot reach `src/Ui`, and its `Ui.Tests` companion asserts
+the GUI's own chain writes the same `.cnl` bytes.
 
 **The rule:** dependencies point **up the stack only** (UI → Engine → Core → RfCore). Nothing below `src/Ui`
 may reference `src/Ui`, and **nothing below `src/Ui` may reference any UI framework** (Avalonia, and any

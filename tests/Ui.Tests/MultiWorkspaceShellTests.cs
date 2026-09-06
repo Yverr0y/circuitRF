@@ -185,7 +185,7 @@ public sealed class MultiWorkspaceShellTests
     [Fact]
     public void TheKitRegistriesExposeNoProcessWideClear()
     {
-        string kits = Strip(Read("src", "Ui", "Schematic", "PdkKitRegistry.cs"));
+        string kits = Strip(Read("src", "Design", "Schematic", "PdkKitRegistry.cs"));
         string gens = Strip(Read("src", "Ui", "Schematic", "KitLayoutGenerators.cs"));
 
         foreach (string source in new[] { kits, gens })

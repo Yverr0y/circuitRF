@@ -1,5 +1,133 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## AUT-2 — the schematic and symbol model moved below the UI firewall (2026-09-05)
+
+`brief-automation-2-schematic-below-the-firewall.md`. 41 files left `src/Ui/Schematic` for
+`src/Design/Schematic` (36) and `src/Design/Symbol` (5); 64 stayed. No behaviour change, no refactor:
+whole files, namespace renamed, `using` churn absorbed in `src/Ui/GlobalUsings.cs` and its
+`tests/Ui.Tests` mirror. The chain `.csch → SchematicEditModel → NetExtractor.Extract → CnlWriter` now
+runs in a project that references no UI framework, gated by
+`tests/Firewall.Tests/SchematicChainBelowTheFirewallTests` against a golden the GUI's own path writes.
+
+### 1. `CircuitRF.Design.Symbol` is both a namespace and a type, and no `using` can fix it
+
+`SymbolModel.cs` declares `public sealed class Symbol`. Putting it in namespace
+`CircuitRF.Design.Symbol` — which R-aut2-5 prescribes, and which is the only spelling consistent with
+the folder — makes bare `Symbol` **CS0118 from every sibling `CircuitRF.Design.*` namespace**. It bit
+8 files, 280 occurrences, `BuiltInSymbols.cs` alone accounting for 266.
+
+**A compilation-unit `using`-alias does not help, and the reason is worth knowing.** C# name lookup
+(spec 7.8.1) walks enclosing namespaces from the inside out and, at each one, asks *"is `I` the name
+of a namespace in `N`?"* **before** it looks at any alias. Reaching `N = CircuitRF.Design`, the
+namespace `Symbol` wins, and the alias sitting at the top of the file is never consulted — it is
+attached to the compilation unit, which is only reached last.
+
+**What does work is an alias placed AFTER the file-scoped namespace declaration**, which makes it a
+member of *that* namespace declaration and therefore consulted while `N` is still
+`CircuitRF.Design.Schematic`:
+
+```csharp
+namespace CircuitRF.Design.Schematic;
+using Symbol = global::CircuitRF.Design.Symbol.Symbol;
+```
+
+Verified against the compiler on a two-file scratch project before being applied, not reasoned from
+the spec alone. It is one line per file and carries a comment pointing here. **A new file in
+`CircuitRF.Design.Schematic` that names `Symbol` will need it too** — that is the standing cost, and
+the alternative considered and rejected was naming the namespace `Symbols`, which would have removed
+the trap at the price of contradicting an explicit requirement over one character.
+
+### 2. `PdkPartInstaller` moved although R-aut2-2 forbade it — reported, not absorbed
+
+**The dependency is three references to one string constant.** `NetExtractor.cs:505`, `:527` and
+`:809` read `PdkPartInstaller.ModelLibraryParameter` — the literal `"ModelLibrary"`, circuitRF's own
+name for "evaluate this instance with a different model library" — to keep it out of the parameters
+forwarded to a provider. Nothing else in the closure touches the type.
+
+R-aut2-2 groups it with `VerilogACompilerInstaller` under *"Installation UX"*. On reading, the two
+have nothing in common: `VerilogACompilerInstaller` downloads a compiler and reads `AppPreferencesIo`
+and `AppDataRoot`, whereas `PdkPartInstaller` is 1,526 lines whose every `using` is
+`CircuitRF.Core.*`, with no reference to any `CircuitRF.Ui.*` namespace at all. It turns the parts a
+kit reports into ordinary cells — a document-layer operation. The classification looks like it was
+made from the name.
+
+Both alternatives were worse than moving it. Leaving it above the wall leaves `NetExtractor`
+uncompilable, and the brief's own §6 asks for *"anything R-aut2-2 forbade moving that the closure
+nonetheless required, with the exact dependency"* — which presumes it moved. Inverting for a string
+constant is the shim R-aut2-7 says not to write. **It moved; this is the report.** If the owner wants
+it back above the wall, the constant is the whole coupling and R-aut2-7 resolution 2 on that one
+declaration is the cheapest way there.
+
+### 3. Two dependency inversions, and why each type could not simply stay above the wall
+
+Both follow `LayoutTextOutline.TypefaceSource`: a settable static in `src/Design`, a
+`[ModuleInitializer]` in `src/Ui`, and an unset fallback that is exactly what a headless process
+should get.
+
+**`WBondPlacement.NewWireFootZNm`** (`Func<long?>`, default `() => null`). `WBondPlacement` is reached
+by both `NetExtractor` and `ComponentTypeRegistry`, so it had to move; the one thing it could not
+bring is `WBondDefaults.FootZNm`, which is
+`AppPreferencesIo.Load().WBondWireFootZNm ?? ShippedFootZNm` — a per-installation preference, and
+`WBondDefaults` itself reads `CircuitRF.Ui.Theming`. `null` already meant "the shipped 4 mil" to
+`WBondEmbedding.DefaultDesign`, so the unset hook changes nothing about what a headless placement
+produces. Installed by `src/Ui/WBond/UiWBondDefaultsInstaller.cs`.
+
+**`VerilogAModelIntrospection.CacheDirectory`** (`Func<string?>`, default `() => null`). Pulled in by
+`EditableSchematic`, which asks it for a component's terminal labels. Its one coupling was
+`AppDataRoot.SubDir("cache")`. Moving `AppDataRoot` instead was considered and rejected: it has 43
+call sites across the updater, the crash reporter, preferences and `tools/DocGen`, and it exists
+precisely to be the *single* lever the docs factory redirects — so recomputing
+`LocalApplicationData/circuitRF` below the wall would recreate the two-independent-callers problem it
+was written to solve. Unset, every read is a cache miss and every write is dropped, which is already
+what an unreadable cache directory has always meant there. Installed by
+`src/Ui/Schematic/UiVerilogACacheInstaller.cs`, reading `AppDataRoot` lazily so a later redirect still
+takes effect.
+
+**This is a deliberate exception to this project's own "a preference is an ARGUMENT" rule.** That rule
+(see `src/Design/CLAUDE.md`) says a preference should be a parameter, as `EmRunService.Run`'s core cap
+is. Here it could not be: R-aut2-3 forbids reshaping a moved file, and both values are read from deep
+inside call chains whose signatures the brief does not permit changing. A settable hook with a safe
+default was the narrowest thing that preserves behaviour. `tests/Ui.Tests`'
+`TheHooksSrcUiInstallsIntoTheMovedCode_AreActuallyInstalled` asserts both are wired in a running
+process, because an uninstalled hook fails silently by construction.
+
+### 4. `PCellContract.cs` and `SubstrateResolver.cs` came with it, and cost nothing
+
+`MicrostripSubstrateInjection` — which `NetExtractor` calls to inject H/T/Er/Sigma/TanD from the
+stackup — needed `PCellLayerSelection` and `SubstrateResolver`, both still in
+`CircuitRF.Ui.Layout.PCells`. This is R-aut2-7 resolution 2 in its purest form: they are design-layer
+artifacts (a technology-stackup resolver and a layer-choice record), and `CircuitRF.Design.Layout.PCells`
+already existed as their destination and was already in both `GlobalUsings` files. The seven PCell
+generators, `PCellRegistry`, `GeneratedCellStore` and the handle solver all implement or use the
+contract and all stayed in `src/Ui` — they saw the new namespace through the global using and needed
+no edit. Only three fully-qualified `CircuitRF.Ui.Layout.PCells.…` spellings had to change.
+
+### 5. Two `using CircuitRF.Ui.Layout;` lines were already dead
+
+`NetExtractor.cs` and `WBondSymbolGenerator.cs` each carried one, and neither referenced a single type
+from that namespace — the types they once reached had moved to `CircuitRF.Design.Layout` in the 2026-08
+carve-out, where `src/Ui/GlobalUsings.cs` had been supplying them ever since. Deleted. R-aut2-7's own
+advice — *"check before assuming a real dependency"* — earned its place: `NetExtractor` was named in
+the brief as the file to look at first for a genuine cross-namespace coupling, and it had none.
+
+### 6. A gate tripped on 15 sentences nobody wrote
+
+`UserFacingTextGateTests` fails on any user-facing exception text below the firewall that is not
+allow-listed, and 15 pre-existing sentences became "below the firewall" purely by moving. Converting
+them to `Diagnostic`s is a behaviour change and out of scope, so they were added to
+`tests/Firewall.Tests/user-facing-text-allowlist.txt` under a *"Moved, not authored"* heading — the
+same treatment, and the same wording, the 2026-09-02 interchange move used. The allowlist's own header
+calls this a deliberate choice, and it is: the backlog grew by 15 without any new prose being written.
+
+### 7. Methodology: Roslyn stops binding bodies once a `using` fails to resolve
+
+Worth recording because it wasted a real detour. A single `CS0234` on a `using` directive is a
+DECLARATION-phase error, and the compiler then **skips the method-body pass entirely** — so
+`dotnet build` reported one error and stayed silent about the ~280 unresolved names behind it. It
+looked exactly like a reference that was somehow resolving. It is not: fix the `using`, and the rest
+appears. When driving a move by "let the compiler decide the boundary", clear every `using`-directive
+error before believing any error count.
+
 ## Phases PL1/PL2 — post-implementation review (2026-09-05)
 
 Both phases re-read against their briefs, and the whole path exercised on library folders shaped the

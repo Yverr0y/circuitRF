@@ -2216,7 +2216,13 @@ public class WBondRound6Tests
         // the parameter dialog, and the two overlays whose layout-view draw tool needs a z.
         foreach (var (file, parts) in new (string, string[])[]
         {
-            ("schematic placement", ["src", "Ui", "Schematic", "WBondPlacement.cs"]),
+            // WBondPlacement moved below the UI firewall with the schematic document model
+            // (brief-automation-2), where AppPreferencesIo is unreachable. It takes the z from
+            // WBondPlacement.NewWireFootZNm instead, and THIS is the file that points that hook at
+            // the setting — so this is still the schematic-placement path reading it, one indirection
+            // further along. If this installer is ever deleted, a placed wBond silently reverts to
+            // the shipped 4 mil, which is exactly the drift this test exists to catch.
+            ("schematic placement", ["src", "Ui", "WBond", "UiWBondDefaultsInstaller.cs"]),
             ("palette drop",        ["src", "Ui", "Layout", "LayoutEditorViewModel.WBondDrop.cs"]),
             ("array editor",        ["src", "Ui", "ViewModels", "ParameterEditorViewModel.WBond.cs"]),
             ("layout host overlay", ["src", "Ui", "Layout", "LayoutEditorViewModel.Wires.cs"]),

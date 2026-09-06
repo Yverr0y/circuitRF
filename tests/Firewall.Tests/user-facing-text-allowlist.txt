@@ -583,3 +583,26 @@ src/WBond/WireTableCsv.cs|Line {lineNumber}: the wire's two feet are at the same
 src/WBond/WireTableCsv.cs|Line {lineNumber}: the wirebond table header is missing required column(s) 
 src/WBond/WireTableCsv.cs|Line {lineNumber}: wire diameter must be positive, got {diameter} nm.
 src/WBond/WireTableCsv.cs|The wirebond table has no header row. Expected a line naming at least: 
+
+# The schematic and symbol document model moved from src/Ui to src/Design so a `.csch` can be read
+# and turned into a netlist with no Avalonia on the path
+# (brief-automation-2-schematic-below-the-firewall.md). Every sentence below is unchanged text that
+# has been in the tree since the schematic editor was written — it crossed the wall with its code
+# rather than being added to it. They are format invariants and import refusals, which is the
+# deliberate plain-exception choice this file's own header describes.
+# ── Moved, not authored (2026-09-05) ────────────────────────────────────────────────
+src/Design/Schematic/BuiltInSymbols.cs|TranslateLines only supports {nameof(LinePrimitive)} (Ground glyph is line-only); got {p.GetType().Name}.
+src/Design/Schematic/ModelCardCellBuilder.cs|'{translation.Card.Name}' was refused; nothing to write.
+src/Design/Schematic/ModelCardCellBuilder.cs|A cell named '{cellName}' already exists here. Choose another name — importing a 
+src/Design/Schematic/ModelCardCellBuilder.cs|A refused card has no component to build a schematic from.
+src/Design/Schematic/ModelCardCellBuilder.cs|No palette component implements '{binding.EngineReference}'.
+src/Design/Schematic/SchematicPersistence.cs|.csch format_version {file.FormatVersion} does not match 
+src/Design/Schematic/SchematicPersistence.cs|Failed to deserialize .csch file.
+src/Design/Schematic/SpiceCellImport.cs|'{c.Name}' names neither a card nor a subcircuit.
+src/Design/Schematic/SpiceCellImport.cs|Nothing was chosen to import.
+src/Design/Schematic/SubcircuitCellBuilder.cs|'{dep}' is called but was not translated.
+src/Design/Schematic/SubcircuitCellBuilder.cs|'{t.Name}' was refused; nothing to write. {refusal}
+src/Design/Schematic/SubcircuitCellBuilder.cs|Nothing was chosen to import.
+src/Design/Schematic/SubcircuitCellBuilder.cs|Two of the subcircuits this import needs would both be called '{name}'. 
+src/Design/Symbol/SymbolPersistence.cs|.csym format_version {file.FormatVersion} is newer than 
+src/Design/Symbol/SymbolPersistence.cs|Failed to deserialize .csym file.

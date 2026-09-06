@@ -7,6 +7,16 @@ Consolidates the **net-extraction + run** spec (previously scattered across `gri
 lays out the build order. This is the phase that makes a drawn schematic **actually simulate end-to-end**:
 `.csch` → extract nets → emit `netlist.cnl` → the existing engine chain → `DataSet` → results.
 
+> **Where this code lives (2026-09-05).** `NetExtractor.cs`, `EditableSchematic.cs`,
+> `SchematicPersistence.cs` and the rest of the extraction chain moved to **`src/Design/Schematic`**,
+> namespace `CircuitRF.Design.Schematic`
+> (`docs/sonnet-briefs/brief-automation-2-schematic-below-the-firewall.md`), so
+> `.csch → extract → netlist.cnl` runs with no Avalonia on the path. `SchematicRunService.cs` and
+> `RunResultsWriter.cs` stayed in `src/Ui` — the first orchestrates a run against the GUI's own
+> cancellation and progress, the second posts to an `IMessageSink`. Type names are unchanged, and the
+> one-line contract above is now gated byte-for-byte by
+> `tests/Firewall.Tests/SchematicChainBelowTheFirewallTests`.
+
 **The one-line contract:** *extraction produces the same design model a hand-authored `.cnl` produces.* That
 equality is the correctness oracle for the whole phase.
 
@@ -38,7 +48,7 @@ The engine side is **done** and unchanged by 6e:
 **6e adds exactly one new thing on the engine path: a net extractor** that turns a `SchematicEditModel` into
 that `.cnl` text (or directly into the Design model). Everything downstream is reused.
 
-**The connectivity geometry already exists** in `src/Ui/Schematic/EditableSchematic.cs`
+**The connectivity geometry already exists** in `src/Design/Schematic/EditableSchematic.cs`
 (`ComputeConnectivityGeometry`): on-`P` vertex hashing, T-junction detection, dot-gated 4-way crossings,
 port-position emission (built-in via `SymbolPortDefs`, cell-ref via resolved `.csym` pins). 6e **consumes**
 this — it does not re-derive connectivity. The embedded "6e extraction note" comments in that file are the
@@ -189,7 +199,7 @@ This oracle is a **permanent test**, not a one-time check — it guards every fu
 1. **The extractor core (headless):** `SchematicEditModel → Design model`, reusing
    `ComputeConnectivityGeometry` for union-find; net naming (ground/label/port/auto-stable); terminal-order
    emission. Framework-free, unit-testable with hand-built edit models. **No file IO, no engine, no UI yet.**
-   **DONE (Phase 6e Step 1, 2026-06-09)** — `src/Ui/Schematic/NetExtractor.cs`;
+   **DONE (Phase 6e Step 1, 2026-06-09)** — `src/Design/Schematic/NetExtractor.cs`;
    19 gate tests in `tests/Ui.Tests/NetExtractorLayer{1,2,3}Tests.cs`; all 829 tests green.
 2. **`.cnl` emission + the oracle:** emit `.cnl` text; build the **extraction oracle** (hero `.csch` →
    extract → equivalent to authored `.cnl`; topology + terminal-order + DataSet equivalence). This is the

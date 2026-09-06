@@ -68,7 +68,7 @@ public sealed class SchematicToLayoutOverwriteReportTests : IDisposable
         var origin20 = CellLayoutResolver.Resolve(target.Instances[0].CellRef, layoutDir).View!.PCellOrigin!;
         var params20 = new Dictionary<string, PCellValue>(origin20.Parameters) { ["W"] = 20 * 1e-3 }; // 20 mm in SI metres
         string cell20 = CircuitRF.Ui.Layout.PCells.GeneratedCellStore.GetOrCreate(
-            _root, "MLIN", params20, null, null, CircuitRF.Ui.Layout.PCells.PCellLayerSelection.Default);
+            _root, "MLIN", params20, null, null, CircuitRF.Design.Layout.PCells.PCellLayerSelection.Default);
         target.Instances[0].CellRef = Path.GetRelativePath(layoutDir, cell20);
 
         // Re-run: schematic still says 10 mm (unchanged) — the layout's 20 mm edit is overwritten.

@@ -522,8 +522,8 @@ public class DocsFactoryTests
     /// the hand edit the interface declines to offer (owner, 2026-08-20).
     /// </summary>
     [Theory]
-    [InlineData(CircuitRF.Ui.Schematic.SymbolKind.Match)]
-    [InlineData(CircuitRF.Ui.Schematic.SymbolKind.WBond)]
+    [InlineData(CircuitRF.Design.Schematic.SymbolKind.Match)]
+    [InlineData(CircuitRF.Design.Schematic.SymbolKind.WBond)]
     public void TheOpaqueDesignPayloadIsNotListedAsAParameter(SymbolKind kind)
     {
         Assert.Contains(ComponentTypeRegistry.DefaultParameters(kind, 2), p => p.Name == "Design");

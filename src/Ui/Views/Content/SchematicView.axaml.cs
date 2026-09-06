@@ -553,8 +553,8 @@ public partial class SchematicView : UserControl
         CtxReReference.IsVisible =
             comp?.CellRef is { Length: > 0 } cellRef
             && Schematic.CellReferenceRepair.IsRepairable(cellRef)
-            && Schematic.CellSymbolResolver.Resolve(cellRef, Vm?.EditModel.SchematicDirectory).State
-                   == Schematic.CellSymbolState.NotFound;
+            && CellSymbolResolver.Resolve(cellRef, Vm?.EditModel.SchematicDirectory).State
+                   == CellSymbolState.NotFound;
 
         // Flatten to Cell — a Match and nothing else. Shown only for one, and DISABLED with the
         // reason as its tooltip when the design refuses, the schematic is unsaved or there is no

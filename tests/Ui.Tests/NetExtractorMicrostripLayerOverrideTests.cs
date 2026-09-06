@@ -103,8 +103,8 @@ public class NetExtractorMicrostripLayerOverrideTests : IDisposable
 
         // Cross-check directly against SubstrateResolver's own default resolution.
         var tech = StarterTechnologies.MmicGaAs();
-        var (substrate, failure, _) = CircuitRF.Ui.Layout.PCells.SubstrateResolver.ResolveElectrical(
-            tech, CircuitRF.Ui.Layout.PCells.PCellLayerSelection.Default);
+        var (substrate, failure, _) = CircuitRF.Design.Layout.PCells.SubstrateResolver.ResolveElectrical(
+            tech, CircuitRF.Design.Layout.PCells.PCellLayerSelection.Default);
         Assert.Null(failure);
         Assert.Equal(substrate!.HeightMeters, hDefault, 9);
     }
@@ -121,15 +121,15 @@ public class NetExtractorMicrostripLayerOverrideTests : IDisposable
         double hOverridden = OverrideValue(inst, "H");
 
         var tech = StarterTechnologies.MmicGaAs();
-        var selection = new CircuitRF.Ui.Layout.PCells.PCellLayerSelection("Metal1", null);
-        var (substrate, failure, _) = CircuitRF.Ui.Layout.PCells.SubstrateResolver.ResolveElectrical(tech, selection);
+        var selection = new CircuitRF.Design.Layout.PCells.PCellLayerSelection("Metal1", null);
+        var (substrate, failure, _) = CircuitRF.Design.Layout.PCells.SubstrateResolver.ResolveElectrical(tech, selection);
         Assert.Null(failure);
         Assert.Equal(substrate!.HeightMeters, hOverridden, 9);
 
         // And it genuinely differs from the default (topmost = Metal2) resolution — gate 8's
         // "changes the resolved h ... in the expected direction."
-        var defaultResult = CircuitRF.Ui.Layout.PCells.SubstrateResolver.ResolveElectrical(
-            tech, CircuitRF.Ui.Layout.PCells.PCellLayerSelection.Default);
+        var defaultResult = CircuitRF.Design.Layout.PCells.SubstrateResolver.ResolveElectrical(
+            tech, CircuitRF.Design.Layout.PCells.PCellLayerSelection.Default);
         Assert.NotEqual(defaultResult.Substrate!.HeightMeters, hOverridden);
     }
 

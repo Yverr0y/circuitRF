@@ -109,7 +109,7 @@ public class SystemBlockElaborationTests
 
         // and the ARROW the tile draws agrees with the direction the stamp turns — the picture and
         // the matrix read the same parameter, which is the whole point of Direction being one.
-        Assert.Equal(Ui.Schematic.CirculatorDirection.CW, ReadGlyphDirection());
+        Assert.Equal(Design.Symbol.CirculatorDirection.CW, ReadGlyphDirection());
     }
 
     [Fact]
@@ -263,12 +263,12 @@ public class SystemBlockElaborationTests
         Assert.Equal(+1.0, m.Rx.PrototypeOmega(2 * System.Math.PI * 1.20e9), 12);
     }
 
-    private static Ui.Schematic.CirculatorDirection ReadGlyphDirection()
+    private static Design.Symbol.CirculatorDirection ReadGlyphDirection()
     {
         var comp = Placed(SymbolKind.Circulator);
         var sym  = comp.ToRenderComponent().InstanceSymbol;
-        return ReferenceEquals(sym, BuiltInSymbols.PrimitivesForCirculator(Ui.Schematic.CirculatorDirection.CW))
-             ? Ui.Schematic.CirculatorDirection.CW : Ui.Schematic.CirculatorDirection.CCW;
+        return ReferenceEquals(sym, BuiltInSymbols.PrimitivesForCirculator(Design.Symbol.CirculatorDirection.CW))
+             ? Design.Symbol.CirculatorDirection.CW : Design.Symbol.CirculatorDirection.CCW;
     }
 
     [Theory]

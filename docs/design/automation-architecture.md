@@ -71,16 +71,22 @@ the firewall its reader and writer sit on.
 | `.cnl` netlist | `CnlReader` / `CnlWriter` | `src/Core/Netlist` | yes |
 | GDSII, DXF, Gerber, Excellon, `.kicad_pcb` | `src/Design/Layout/Interchange` | `src/Design` | yes |
 | Touchstone, `.npy`, `.mat`, `.spl`, `.lpcwave` | `src/RfCore/Export`, `src/RfCore/Loadpull` | `src/RfCore` | yes |
-| **`.csch` schematic** | `SchematicPersistence` | **`src/Ui/Schematic`** | **no** |
-| **`.csym` symbol** | `SymbolPersistence` | **`src/Ui/Schematic`** | **no** |
+| `.csch` schematic | `SchematicPersistence` | `src/Design/Schematic` | yes |
+| `.csym` symbol | `SymbolPersistence` | `src/Design/Symbol` | yes |
 
-**The last two rows are the whole gap, and they are a packaging accident rather than a coupling.**
-Of the 105 files in `src/Ui/Schematic`, 104 declare `namespace CircuitRF.Ui.Schematic` and exactly
-one — `PlacementService.cs`, which is a view-model service and belongs where it is — references a UI
-framework package at all. **None references Avalonia.** `SchematicPersistence.cs`,
-`SymbolPersistence.cs`, `SchematicDocument.cs`, `SymbolModel.cs`, `SymbolGeometry.cs` and
-`NetExtractor.cs` are already framework-free and say so in their own headers. They sit in the
+**The last two rows were the whole gap, and they were a packaging accident rather than a coupling.**
+Of the 105 files then in `src/Ui/Schematic`, 104 declared `namespace CircuitRF.Ui.Schematic` and
+exactly one — `PlacementService.cs`, which is a view-model service and belongs where it is —
+referenced a UI framework package at all. **None referenced Avalonia.** They sat in the
 `CircuitRF.Ui` assembly for historical reasons only.
+
+**Closed by AUT-2 on 2026-09-05** (`brief-automation-2-schematic-below-the-firewall.md`): 41 of those
+files moved to `src/Design/Schematic` and `src/Design/Symbol` — the closure of the chain above, let
+out by the compiler rather than hand-picked — and 64 editor, shell and session files stayed. The
+chain is gated end to end by
+`tests/Firewall.Tests/SchematicChainBelowTheFirewallTests`, which assembles it in a project that
+cannot reference `src/Ui`, and by its `Ui.Tests` companion, which asserts the GUI's own chain writes
+the same `.cnl` bytes. Findings are in `src/Design/RESOLVED.md` and `src/Ui/RESOLVED.md`.
 
 **R-aut-3. The schematic and symbol model, their persistence, and net extraction belong below the
 firewall.** This is the same carve-out `src/Design` performed for the layout side in 2026-08, for the

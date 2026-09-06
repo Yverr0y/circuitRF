@@ -13,3 +13,5 @@ global using CircuitRF.Design.Layout.PCells;
 global using CircuitRF.Design.Results;
 global using CircuitRF.Design.Theming;
 global using CircuitRF.Design.Workspace;
+global using CircuitRF.Design.Schematic;
+global using CircuitRF.Design.Symbol;

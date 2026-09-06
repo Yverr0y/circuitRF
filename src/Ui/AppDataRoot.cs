@@ -49,7 +49,7 @@ public static class AppDataRoot
         // Same reasoning for the remembered VerilogA terminal names: they are read from, and written
         // to, a file under this directory, so a redirected process must not answer from the real
         // user's store or add to it.
-        Schematic.VerilogAModelIntrospection.RefreshLabelStore();
+        VerilogAModelIntrospection.RefreshLabelStore();
     }
 
     /// <summary>True when <see cref="RedirectTo"/> has moved the state directory somewhere else.</summary>

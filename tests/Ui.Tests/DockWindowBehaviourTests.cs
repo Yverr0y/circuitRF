@@ -558,7 +558,7 @@ public sealed class DockWindowBehaviourTests
     }
 
     private static CircuitRF.Ui.ViewModels.SchematicViewModel NewSchematicViewModel() =>
-        new(new CircuitRF.Ui.Schematic.SchematicEditModel());
+        new(new CircuitRF.Design.Schematic.SchematicEditModel());
 
     // ── Reported bug: a floating TOOL window ignored its own close box ────────
 

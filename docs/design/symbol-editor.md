@@ -10,6 +10,15 @@ library** symbol set (translating the provided Core Graphics art into circuitRF'
 roles, not literal colors), `ui-design.md` §5A (symbol editor), §5B (component-type registry),
 `src/Ui/CLAUDE.md` (command-pattern undo, design bar), the `frontend-design` skill.
 
+> **Where this code lives (2026-09-05).** The `.csym` model, its persistence and its geometry —
+> `SymbolModel.cs`, `SymbolPersistence.cs`, `SymbolGeometry.cs`, `SymbolPinNames.cs`,
+> `SymbolPinSides.cs` — moved to **`src/Design/Symbol`**, namespace `CircuitRF.Design.Symbol`, when the
+> schematic document model crossed the UI firewall
+> (`docs/sonnet-briefs/brief-automation-2-schematic-below-the-firewall.md`). The **editor** did not:
+> `EditableSymbol`, `SymbolEditorDocument`, `SymbolEditorOverlay`, the canvas, the commands and the
+> inspector view-models are all still in `src/Ui`. `AutoSymbolGenerator` and `BuiltInSymbols` went with
+> the model, to `src/Design/Schematic`. Type names are unchanged throughout.
+
 **Owner decisions locked for this design:**
 - **Pin-move reconnection = Option A (positional) for v1, with a hard commitment to migrate to Option B
   (logical pin binding).** See §6 — the Option B commitment is explicit and strong, not aspirational.

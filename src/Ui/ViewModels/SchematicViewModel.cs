@@ -108,10 +108,10 @@ public sealed partial class SchematicViewModel : ObservableObject
     /// Match Designer is handed a <see cref="SchematicViewModel"/> and nothing else, and MN-4's probe
     /// has to see the same circuit a Run would.</para>
     /// </summary>
-    public Func<CircuitRF.Ui.Schematic.ICellResolver?>? CellResolverProvider { get; set; }
+    public Func<CircuitRF.Design.Schematic.ICellResolver?>? CellResolverProvider { get; set; }
 
     /// <summary>The workspace's cell resolver, or null.</summary>
-    public CircuitRF.Ui.Schematic.ICellResolver? CellResolver => CellResolverProvider?.Invoke();
+    public CircuitRF.Design.Schematic.ICellResolver? CellResolver => CellResolverProvider?.Invoke();
 
     /// <summary>
     /// Runs <b>Update Layout</b> for one wBond component and nothing else — the button on the wBond

@@ -612,7 +612,7 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     /// </summary>
     private ViewModels.FrequencySpecViewModel NewFrequencyVm()
     {
-        var vm = new ViewModels.FrequencySpecViewModel(new Schematic.SchematicEditModel(), Working.Frequency)
+        var vm = new ViewModels.FrequencySpecViewModel(new SchematicEditModel(), Working.Frequency)
         {
             CanRemoveSelf = false,
         };

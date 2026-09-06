@@ -1,0 +1,8 @@
+; generated for the user documentation from Example_SParam_LC
+
+Port:Term1  n1  0  Num=1  Z=50 Ohm
+L:L1  n1  n2  L=2 nH
+C:C1  n2  0  C=0.8 pF
+Port:Term2  n2  0  Num=2  Z=50 Ohm
+
+analysis SP1 type=sparam start="1" startUnit=GHz stop="5" stopUnit=GHz npts=201

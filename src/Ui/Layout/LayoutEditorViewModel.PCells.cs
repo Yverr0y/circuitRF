@@ -150,7 +150,7 @@ public sealed partial class LayoutEditorViewModel
         try
         {
             newCellDir = PCells.GeneratedCellStore.GetOrCreate(
-                workspaceRoot, origin.GeneratorId, merged, Technology, ResolvedTechPath, PCells.PCellLayerSelection.Default, out editDiagnostics);
+                workspaceRoot, origin.GeneratorId, merged, Technology, ResolvedTechPath, PCellLayerSelection.Default, out editDiagnostics);
         }
         catch (Exception ex)
         {
@@ -162,7 +162,7 @@ public sealed partial class LayoutEditorViewModel
         }
 
         PCells.GeneratedCellStore.RecordSnapshot(
-            Model, newCellDir, origin.GeneratorId, merged, ResolvedTechPath, PCells.PCellLayerSelection.Default);
+            Model, newCellDir, origin.GeneratorId, merged, ResolvedTechPath, PCellLayerSelection.Default);
         if (editDiagnostics is { Count: > 0 })
             foreach (var d in editDiagnostics) _messageSink?.Warning(d);
 

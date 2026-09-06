@@ -21,3 +21,11 @@ global using CircuitRF.Design.Layout.PCells;
 global using CircuitRF.Design.Results;
 global using CircuitRF.Design.Theming;
 global using CircuitRF.Design.Workspace;
+
+// The schematic and symbol DOCUMENT model, which crossed the same wall for the same reason
+// (brief-automation-2-schematic-below-the-firewall.md R-aut2-5/R-aut2-6). The editors, canvases and
+// sessions stayed here; what moved is the `.csch`/`.csym` model, their persistence, their geometry
+// and net extraction — so `src/Cli` can read a schematic and produce a netlist with no Avalonia on
+// the path.
+global using CircuitRF.Design.Schematic;
+global using CircuitRF.Design.Symbol;

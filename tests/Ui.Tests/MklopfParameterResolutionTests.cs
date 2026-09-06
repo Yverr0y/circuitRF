@@ -36,7 +36,7 @@ public sealed class MklopfParameterResolutionTests : IDisposable
     /// <summary>Mirrors SchematicViewModel.CommitPlacement's exact seeding — Expression = dp.Expression
     /// verbatim, Unit = dp.Unit verbatim (the editor GLYPH, "Ω", not the ASCII engine spelling) — so
     /// this test exercises literally what a freshly-placed component looks like, not an idealized one.</summary>
-    private static EditableComponent PlaceFresh(string instanceName, CircuitRF.Ui.Schematic.SymbolKind kind, int portCount = 0)
+    private static EditableComponent PlaceFresh(string instanceName, CircuitRF.Design.Schematic.SymbolKind kind, int portCount = 0)
     {
         var comp = new EditableComponent { InstanceName = instanceName, Symbol = kind, X = 0, Y = 0 };
         foreach (var dp in ComponentTypeRegistry.DefaultParameters(kind, portCount))
@@ -49,13 +49,13 @@ public sealed class MklopfParameterResolutionTests : IDisposable
     }
 
     [Theory]
-    [InlineData(CircuitRF.Ui.Schematic.SymbolKind.Mklopf)]
-    [InlineData(CircuitRF.Ui.Schematic.SymbolKind.Mlin)]
-    [InlineData(CircuitRF.Ui.Schematic.SymbolKind.MBend)]
-    [InlineData(CircuitRF.Ui.Schematic.SymbolKind.MTee)]
-    [InlineData(CircuitRF.Ui.Schematic.SymbolKind.MCross)]
-    [InlineData(CircuitRF.Ui.Schematic.SymbolKind.Mtaper)]
-    public void FreshlyPlaced_UntouchedDefaults_ResolvesAndPlaces_Gate2(CircuitRF.Ui.Schematic.SymbolKind kind)
+    [InlineData(CircuitRF.Design.Schematic.SymbolKind.Mklopf)]
+    [InlineData(CircuitRF.Design.Schematic.SymbolKind.Mlin)]
+    [InlineData(CircuitRF.Design.Schematic.SymbolKind.MBend)]
+    [InlineData(CircuitRF.Design.Schematic.SymbolKind.MTee)]
+    [InlineData(CircuitRF.Design.Schematic.SymbolKind.MCross)]
+    [InlineData(CircuitRF.Design.Schematic.SymbolKind.Mtaper)]
+    public void FreshlyPlaced_UntouchedDefaults_ResolvesAndPlaces_Gate2(CircuitRF.Design.Schematic.SymbolKind kind)
     {
         var (schematicDir, layoutDir) = MakeCell("Cell_" + kind);
         var model = new SchematicEditModel { SchematicDirectory = schematicDir };
@@ -74,7 +74,7 @@ public sealed class MklopfParameterResolutionTests : IDisposable
     {
         var (schematicDir, layoutDir) = MakeCell("Amp");
         var model = new SchematicEditModel { SchematicDirectory = schematicDir };
-        var comp = PlaceFresh("MKF1", CircuitRF.Ui.Schematic.SymbolKind.Mklopf);
+        var comp = PlaceFresh("MKF1", CircuitRF.Design.Schematic.SymbolKind.Mklopf);
 
         // Mirror ParameterEditorViewModel.ToggleMklopfImpedanceEntry: remove Z1/Z2, add W1/W2.
         comp.Parameters.RemoveAll(p => p.Name is "Z1" or "Z2");
@@ -103,7 +103,7 @@ public sealed class MklopfParameterResolutionTests : IDisposable
     {
         var (schematicDir, layoutDir) = MakeCell("Amp2");
         var model = new SchematicEditModel { SchematicDirectory = schematicDir };
-        var comp = PlaceFresh("MKF1", CircuitRF.Ui.Schematic.SymbolKind.Mklopf);
+        var comp = PlaceFresh("MKF1", CircuitRF.Design.Schematic.SymbolKind.Mklopf);
 
         comp.Parameters.RemoveAll(p => p.Name == "L");
         comp.Parameters.Add(new EditableParameter { Name = "F3db", Expression = "2", Unit = "GHz", ShowOnSchematic = true });
@@ -127,7 +127,7 @@ public sealed class MklopfParameterResolutionTests : IDisposable
     {
         var (schematicDir, layoutDir) = MakeCell("Amp3");
         var model = new SchematicEditModel { SchematicDirectory = schematicDir };
-        var comp = PlaceFresh("ML1", CircuitRF.Ui.Schematic.SymbolKind.Mlin);
+        var comp = PlaceFresh("ML1", CircuitRF.Design.Schematic.SymbolKind.Mlin);
         comp.Parameters.First(p => p.Name == "W").Expression = "NotANumber + )";
         model.Components.Add(comp);
 

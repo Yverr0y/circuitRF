@@ -42,7 +42,7 @@ public sealed class PCellPushInDisabledTests : IDisposable
     public void PCellInstance_PushInRefused_WithStatedReason()
     {
         var vm = MakeVmAt("Doc");
-        var defaults = SchematicToLayoutGenerator.ResolveDefaultParameters(CircuitRF.Ui.Schematic.SymbolKind.Mlin, 0);
+        var defaults = SchematicToLayoutGenerator.ResolveDefaultParameters(CircuitRF.Design.Schematic.SymbolKind.Mlin, 0);
         string cellDir = GeneratedCellStore.GetOrCreate(_root, "MLIN", defaults, null, null, PCellLayerSelection.Default);
         var inst = new LayoutInstance { CellRef = Path.GetRelativePath(vm.InstanceBaseDir, cellDir), X = 0, Y = 0, Mag = 1.0 };
 

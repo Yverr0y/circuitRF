@@ -272,6 +272,6 @@ path and can be retired or left inert.
   `At(axisName, index)` and the name-based broadcast (`ElementWise`/`UnionAxes`) it relies on.
 - `src/Core/Netlist/CnlWriter.cs` / `CnlReader.cs` — `measure` line round-trip.
 - `src/Ui/Schematic/SchematicRunService.cs` — run wiring: grouped-DataSet assembly + `measurements` group.
-- `src/Ui/Schematic/NetExtractor.cs` — (planned) MEAS-component row collection into `tb.Measurements`,
+- `src/Design/Schematic/NetExtractor.cs` — (planned) MEAS-component row collection into `tb.Measurements`,
   mirroring the VAR → `GlobalVariables` path.
 - `src/Ui/Schematic/RunResultsWriter.cs` — writes the run's one grouped `run.npy` (measurements group included).

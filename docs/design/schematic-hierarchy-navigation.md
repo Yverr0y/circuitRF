@@ -8,6 +8,15 @@ Tab** as a side-by-side alternative. Covers the editing-session model that makes
 multiple views of one cell, the dirty/save integration, and the resolution rule the (future)
 hierarchical net extractor must follow so simulation is WYSIWYG.
 
+> **Where this code lives (2026-09-05).** The resolution half of the model below —
+> `SchematicPersistence`, `CellSymbolResolver`, `ICellResolver`, `NetExtractor` — moved to
+> **`src/Design/Schematic`**, namespace `CircuitRF.Design.Schematic`
+> (`docs/sonnet-briefs/brief-automation-2-schematic-below-the-firewall.md`). Everything this document
+> is actually ABOUT stayed in `src/Ui`: `SchematicDocument`, `SchematicSessionRegistry`,
+> `HierarchyResolver`, `IHierarchyHost`, `SchematicViewModel` and the views. `CellFolder.cs` is in
+> `src/Design/Cells`, and has been since the 2026-08 layout carve-out — the path given in §6 predates
+> both moves. Type names are unchanged.
+
 Companions: `workspace-and-project-tree.md` (cells, `.ccell` primacy, `CellFolder.ResolvePrimary`,
 the cell-reference model, project tree), `scratch-and-save-lifecycle.md` (dirty tracking, Save All
 plan dialog, close/quit prompts, `SchematicDocument`), `net-extraction-and-run.md` (extraction is

@@ -14,7 +14,7 @@ namespace CircuitRF.Ui.Tests;
 /// one test installed is read by another's import and its osx entry grows a share it never asked for.
 /// The failure is intermittent and reads as a flake rather than as shared state.</para>
 ///
-/// <para><b>It now covers a second process-wide static, <see cref="CircuitRF.Ui.Schematic.PdkKitRegistry"/>.</b>
+/// <para><b>It now covers a second process-wide static, <see cref="CircuitRF.Design.Schematic.PdkKitRegistry"/>.</b>
 /// An imported kit's parts live there rather than on disk, keyed by kit name — and every fixture here
 /// imports a kit called the same thing, so two classes overlapping would each be reading the other's
 /// parts. Same mechanism, same reason; one collection covers both rather than two that can interleave.</para>

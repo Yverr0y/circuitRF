@@ -314,10 +314,10 @@ public sealed class AnalysesListViewModelTests
     public void Enabled_False_RoundTripsViaSerialization()
     {
         var a = new DcAnalysis("DC1") { Enabled = false };
-        var dto = Schematic.AnalysisSerialization.ToDto(a);
+        var dto = AnalysisSerialization.ToDto(a);
         Assert.False(dto.Enabled);
 
-        var restored = Schematic.AnalysisSerialization.FromDto(dto);
+        var restored = AnalysisSerialization.FromDto(dto);
         Assert.NotNull(restored);
         Assert.False(restored!.Enabled);
     }

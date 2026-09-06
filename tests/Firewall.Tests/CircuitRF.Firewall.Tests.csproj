@@ -21,9 +21,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Project references cause the DLLs to be copied to the test output — that's the
-         only reason for these references. The test inspects the DLL metadata; it does not
-         call into the assemblies. -->
+    <!-- Project references cause the DLLs to be copied to the test output, which is what the
+         reference-inspecting tests read. Since brief-automation-2 one test also CALLS into
+         CircuitRF.Design (SchematicChainBelowTheFirewallTests runs the .csch → .cnl chain here
+         precisely because this project cannot reach src/Ui) — so this list is now load-bearing in
+         two ways, and src/Ui must never appear in it. -->
     <ProjectReference Include="../../src/Diagnostics/CircuitRF.Diagnostics.csproj" />
     <ProjectReference Include="../../src/RfCore/RfCore.csproj" />
     <ProjectReference Include="../../src/Core/CircuitRF.Core.csproj" />
