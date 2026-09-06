@@ -2268,3 +2268,93 @@ and `check` needs it. `HierarchyResolver`, listed beside it in the brief's table
 should not: it takes `EditableComponent` and `SchematicEditModel`, which are edit-session types.
 `check` resolves cell references through `CellSymbolResolver` instead, which is what the editor draws
 with.
+
+---
+
+## AUT-6 — the component catalogue, and the reference pages embedded (2026-09-05)
+
+`brief-automation-6-reference-and-components.md`. Two additions to this project, both read-only.
+`src/Cli/RESOLVED.md` carries the verb's own findings; what follows is what belongs to the code that
+lives here.
+
+### `ComponentCatalog` — one computation, two renderings
+
+`Schematic/ComponentCatalog.cs`. The data half of `DocTables.ComponentParameters` was extracted here,
+beside the registry it reads, and `DocTables` now renders *from* it. That is R-aut1-1's rule one level
+up: **the documentation table and the machine answer must be one computation, or they will disagree
+the first time one is changed.** `DocTables` stays in `src/Ui` — it also reads `ToolbarCatalog`, which
+is UI — and nothing else moved.
+
+The opaque-payload filter moved with the data half. Match's and wBond's `Design` is base64 of a whole
+design's JSON; the parameter panel already declines to show it as a row, and a catalogue listing it
+would invite exactly the hand edit that produces a component refused at elaboration. One filter, one
+place, so the page and the machine answer omit the same row.
+
+### `ComponentModel.PortCount` is NOT the net count, and that changed the design
+
+The brief asked for the port count "from the model". **The model cannot give it.** `PortCount` is the
+model's own port count in the MNA sense:
+
+| | `PortCount` | nets its `.cnl` line takes |
+|---|---|---|
+| `ResistorModel` | 2 | 2 |
+| `IProbeModel` | **1** | **2** (`np`, `nm`) |
+| `FetModelBase` | **2** | **3** (g, d, s) |
+| `SddModel`, 2-port | **2** | **4** (`SDD:M1 Vin 0 Vout 0`) |
+
+The commonest components agree by coincidence, which is what makes this the quiet kind of wrong: a
+catalogue published on `PortCount` would have been right for R, L and C and wrong for a third of
+everything else, with nothing reporting it. So the catalogue reads **`SymbolPortDefs`** — the same
+walk `NetExtractor` emits nets by — and constructs **no model at all**, not even a parameterless one.
+
+The consequence is stated rather than hidden: a factory token with no `SymbolKind` (`Chain`,
+`ExtDevice`, `I_nTone`, `SemiC`, `Short`, `Term`, `V_nTone`) has no net count anywhere below the UI
+firewall, and the catalogue reports that instead of a number.
+
+### `ComponentTypeRegistry.PortCountParameter` — a new fact, gated by measurement
+
+A variadic component must report what SETS its count rather than a plausible default (R-aut6-9), and
+no registry held that. Added here as a pure lookup beside `OwnsUniquePortNum`:
+`Snp`/`ZPort`/`Sdd` → `NumPorts`, `VerilogA` → `Pins`, `Switch`/`SwitchD` → `Throws`, `WBond` →
+`Arrays`.
+
+**It is not trusted on its word.** `ReferenceCliVerbTests` measures variadicity — a kind whose
+`SymbolPortDefs.For(k, 2).Length` differs from its `For(k, 3).Length` is variadic, whatever anyone
+declared — and fails any such kind that the catalogue reports as fixed. So a future variadic component
+added without an arm fails by name rather than publishing a specific wrong number.
+
+**A token can be variadic where its symbols are not.** `Switch` and `SwitchD` are two tiles over one
+engine component whose port count is `1 + Throws`; each tile draws a fixed pin set and seeds its own
+`Throws`. The catalogue reports the tiles as fixed and the token as `Throws`-determined, which is what
+is true of each.
+
+### `LibraryCatalog.InternalOnlyKinds` is public now
+
+`Generic` and `Unknown`. The catalogue has to answer the same "can anyone place this" question, and a
+second copy of that list is a list that will disagree with the first — which is the failure
+`OwnsUniquePortNum`'s own remarks record from three hand-maintained `SymbolKind` lists that had
+already diverged within a week.
+
+### The reference pages, embedded
+
+`Reference/ReferenceLibrary.cs` plus eight `<EmbeddedResource>` items in the `.csproj`.
+`ShippedTechnologies` is the precedent and the trap is the same one, already paid for once: **a class
+shipped without its resources compiles, enumerates nothing and reports nothing.** The items and the
+class are in one commit and `ReferenceCliVerbTests.EveryTopic_IsEmbedded_AndItsBytesAreTheAuthoredFile`
+is what turns a future omission into a failing test.
+
+Three decisions worth keeping:
+
+- **Plain .NET `EmbeddedResource`, read through `Assembly.GetManifestResourceStream`** — never
+  Avalonia's `AssetLoader`, whose `Open` throws with no live platform. This whole project is
+  framework-free by design and the CLI has no platform at all.
+- **The files are referenced IN PLACE from `docs/user/src/reference/`, not copied in.** A copy is a
+  file that will be edited on one side only and nothing will report the drift. The front matter and
+  the docs factory's `{{…}}` placeholders are therefore stripped **at read**, not at build, which is
+  what leaves the embedded bytes byte-identical to the authored ones for the gate to compare.
+- **The `LogicalName` is explicit**, because these items live outside the project's own cone where
+  MSBuild's default manifest name is derived from a relative path nobody should have to predict.
+
+**145,410 bytes** across 8 topics, in this assembly — so in the GUI's binary as well as the CLI's.
+Reported by the gate's test output rather than asserted against a threshold, so the number stays
+current in the TRX with nothing to maintain.

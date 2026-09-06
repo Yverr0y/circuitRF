@@ -25,6 +25,7 @@ lede: circuitRF runs without the GUI — not just its engines, but authoring, va
 <li><a href="#check"><code>check</code> — is it sound?</a></li>
 <li><a href="#explain"><code>explain</code> — what did it resolve to?</a></li>
 <li><a href="#read"><code>read</code> — a result or a document, back</a></li>
+<li><a href="#reference"><code>reference</code> — what may I write?</a></li>
 <li><a href="#elab"><code>elab</code> — the elaborated netlist</a></li>
 <li><a href="#json"><code>--json</code> — one machine-readable document</a></li>
 <li><a href="#serve"><code>serve</code> — a protocol server</a></li>
@@ -74,6 +75,7 @@ convention behind both.</p>
 | `check` | a workspace, a cell folder, or one document | Every validator the application already uses | **Nothing** — findings to stdout |
 | `explain` | the same | Resolution only — no analysis | **Nothing** — the walk and the answer, to stdout |
 | `read` | a result file, or one of circuitRF's own documents | The same loaders the Data Display reads a file with | **Nothing** — what the file holds, to stdout |
+| `reference` | **nothing** | Nothing — it reads no file | **Nothing** — the reference pages, and every netlist primitive with its terminals and parameters |
 | `elab` | `.cnl` | Elaboration only, no analysis | The elaborated netlist, to stdout |
 | `serve` | `--root <dir>` | A protocol server for an external client | Whatever the tool it is asked for writes |
 
@@ -841,6 +843,110 @@ With `--json`, `--only` and `--group` narrow what comes back — which matters, 
 
 ---
 
+## `reference` — what may I write? {#reference}
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference
+<span class="prompt">$ </span>circuitrf reference netlist
+<span class="prompt">$ </span>circuitrf reference components
+<span class="prompt">$ </span>circuitrf reference components MLIN</code></pre>
+
+They are, in order: the list of topics with what each costs; one page as text; every netlist
+primitive; and just that one.
+
+`check` tells you that what you wrote is wrong. `explain` tells you what circuitRF made of it.
+This one tells you what you are **allowed** to write in the first place — the primitive type names,
+how many nets each takes and in what order, what its parameters are called and what they default to.
+
+It reads no file, runs nothing and writes nothing. There is no path argument: it answers about no
+particular design, which is exactly why it is useful before one exists.
+
+<div class="callout">
+<span class="label">Why this matters more for a script than for you</span>
+<p>A netlist naming a type that does not exist fails at elaboration and says so. A component given a
+<i>plausible but wrong</i> parameter name does not: the name is ignored, the parameter takes its
+default, and the run converges and produces a complete-looking answer to a different circuit. Getting
+the spelling from here rather than from memory is what avoids that.</p>
+</div>
+
+### The topics {#reference-topics}
+
+With no arguments you get the list, with each topic's size — because reading is the expensive
+direction and a 4 kB page and an 84 kB one should not look alike:
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference
+<span class="output">Reference topics — circuitrf reference &lt;topic&gt;
+
+  netlist            12.1 kB  The Netlist (.cnl) Format
+  expressions         9.1 kB  Expressions
+  units              10.9 kB  Units
+  measurements        5.8 kB  Measurements
+  pins-ports-terms    4.3 kB  Pins, Ports &amp; Terms
+  sdd                12.2 kB  The SDD (Symbolically-Defined Device)
+  file-formats        9.5 kB  File Formats
+  component-notes    71.3 kB  Components
+  components         84.1 kB  Component types
+
+  circuitrf reference components &lt;TYPE&gt;   one primitive</span></code></pre>
+
+These are the same pages you are reading now, shipped inside the program so they are there on a
+machine that has no copy of this site. `components` is the **generated catalogue** — read from the
+live component registry every time you ask, so it cannot go stale — while `component-notes` is this
+site's [Components](components.html) page, which explains what each part is *for*. The catalogue
+answers "what may I write"; the page answers "what does it mean". Ask for both if you want both.
+
+Asking for a topic prints it as its own Markdown, so it redirects cleanly:
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference netlist &gt; netlist.md</code></pre>
+
+### The component catalogue {#reference-components}
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference components MLIN
+<span class="output">MLIN
+  nets: 2  1 2
+  Mlin (MLIN) — Microstrip   search: MLIN, microstrip, microstrip line, line, hammerstad
+    nets: 2  1 2
+    W                  2.9              mm     shown
+    L                  10               mm     shown
+    SignalLayer        -                -      -
+    GroundReference    -                -      -</span></code></pre>
+
+The columns are the parameter's **name**, its **default expression**, its **unit**, whether it shows
+on the schematic by default, and — where the registry has one — what it means.
+
+`nets` is the part you cannot get from a picture: **how many nets the instance line takes, and in what
+order.** That order is a contract the models themselves read, and it is not always the one you would
+guess — a MESFET is gate, drain, source while a JFET is drain, gate, source; a diode is anode then
+cathode; a 2-port SDD takes four nets, as ± pairs.
+
+<div class="callout note">
+<span class="label">Some port counts are not fixed, and they say so</span>
+<p>An SDD, a <code>Z_Port</code> and an <code>SnP</code> take as many ports as <code>NumPorts</code>
+says; a Verilog-A model takes as many as <code>Pins</code> says; an ideal switch takes
+<code>1 + Throws</code>. Those report <b>what sets the count</b> rather than a number, and any
+terminals they list are labelled with the count they were listed at:</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference components SDD
+<span class="output">SDD
+  nets: set by NumPorts — at NumPorts=2: 1+ 1- 2+ 2-</span></code></pre>
+<p>A number printed where the honest answer is "it depends" is worse than no number at all.</p>
+</div>
+
+A few entries carry a **note** instead of a clean answer, and the note is the useful part. `GND`,
+`VAR`, `MEAS` and `Pin` are schematic elements the netlist extractor consumes rather than components
+you can place in a `.cnl`. `Chain`, `ExtDevice`, `SemiC`, `Short`, `Term`, `V_nTone` and `I_nTone` are
+the other way round — writable in a `.cnl`, with no palette tile and so no declared defaults.
+
+Unknown names are refused with the real list, never guessed at:
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference components MLINE
+<span class="output">No primitive type 'MLINE'. Types: Amp, Atten, BJT_NPN, BJT_PNP, Balun, Bead, C, Chain, …</span></code></pre>
+
+With `--json` the whole catalogue comes back structured — type token, terminals, and every
+parameter with its default, unit, dimension and visibility:
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference components --json | jq -r '.result.reference.components[].type'</code></pre>
+
+---
+
 ## `elab` — the elaborated netlist {#elab}
 
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf elab &lt;file.cnl&gt;</code></pre>
@@ -882,7 +988,7 @@ One schema serves every verb:
   reworded freely, and the sentence is always English and culture-invariant.
 - **`result` holds cubes** (`groups`) for a run, a **summary** for `lp`/`lpp` — the same one-row-per-Γ-
   point projection the table prints, and `--all` adds the cubes — a **check** or **explain** report for
-  those two verbs, and a **document** for `read`.
+  those two verbs, a **document** for `read`, and a **reference** report for `reference`.
 - Numbers are raw, invariant and unrounded. `NaN` and infinity are written as JSON's named literals,
   because a loadpull grid genuinely contains NaN wherever a point never converged.
 
@@ -896,7 +1002,7 @@ Speaks a JSON-RPC tool protocol over stdin and stdout, so an external program �
 automation harness, a design agent — can discover what circuitRF can do and ask it to do it. It is
 started by that program, not by you, and it ends when that program disconnects.
 
-**Six tools, and each is a verb you already have:**
+**Seven tools, and each is a verb you already have:**
 
 | Tool | Runs |
 |---|---|
@@ -906,6 +1012,7 @@ started by that program, not by you, and it ends when that program disconnects.
 | `create` | `new workspace` or `new cell` |
 | `import` | `import part` or `convert` |
 | `read` | `read` |
+| `reference` | `reference` |
 
 **Every tool returns exactly the document `--json` writes**, byte for byte, because the server calls
 the verb rather than re-implementing it. Nothing is reachable through the server that is not
@@ -923,6 +1030,13 @@ other end to confirm with, so the answer is no. A client that wants a file gone 
 they always did; nothing new becomes launchable because something asked.</li>
 </ul>
 </div>
+
+**The reference surface is also published as protocol *resources*** — one per topic, at
+`circuitrf://reference/<topic>`, each advertising its size so a client can decide what to spend. That
+is the cheaper channel: a resource costs a URI and a title until something reads it, where a tool
+description is carried for the whole session whether or not it is used. The `reference` tool exists
+alongside it because not every client shows resources to the model at all, and both return the same
+bytes.
 
 **A long run reports progress and can be cancelled** — a client that asks for progress is sent it as
 the run moves, and a cancellation stops the run at a work boundary and returns exit code 130 having

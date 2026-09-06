@@ -24,35 +24,31 @@ namespace CircuitRF.Ui.Diagnostics;
 public static class DocTables
 {
     /// <summary>
-    /// A parameter a reader must never be offered as a row, because it is not a value: it is a
-    /// machine-written payload that CARRIES the component.
+    /// A component's parameter table, rendered from <see cref="ComponentCatalog"/>.
     ///
-    /// <para>Match's and wBond's <c>Design</c> are base64 of the whole design's JSON. The parameter
-    /// panel already refuses to show either as a text row (<c>IsMatchPanelParameter</c>,
-    /// <c>IsWBondPanelParameter</c>) for the same reason: nobody can read it, act on it, or safely
-    /// edit it, and hand-editing it is the one way to produce a component that refuses at
-    /// elaboration. A documentation table listing it is the same mistake with a wider audience —
-    /// it invites exactly the edit the interface declines to offer (owner, 2026-08-20).</para>
+    /// <para><b>The rows are not read from the registry here.</b> They come from the catalogue —
+    /// the same computation <c>circuitrf reference components</c> answers with — because the
+    /// documentation table and the machine answer must be ONE computation or they will disagree the
+    /// first time one is changed (brief-automation-6-reference-and-components.md R-aut6-11). What
+    /// stays in this file is the rendering: the HTML, the em-dashes for an absent value, and the
+    /// decision to show a Meaning column only when there is something to put in it.</para>
+    ///
+    /// <para>The opaque-payload filter — Match's and wBond's base64 <c>Design</c> — moved to the
+    /// catalogue with the rest of the data half, so the page and the machine answer omit the same
+    /// row rather than each deciding for itself.</para>
     /// </summary>
-    private static bool IsOpaquePayload(SymbolKind kind, string name)
-        => (kind == SymbolKind.Match || kind == SymbolKind.WBond)
-        && string.Equals(name, "Design", StringComparison.Ordinal);
-
-    /// <summary>A component's parameter table, read from <see cref="ComponentTypeRegistry"/>.</summary>
     public static string ComponentParameters(SymbolKind kind, int ports)
     {
-        var rows = ComponentTypeRegistry.DefaultParameters(kind, ports)
-                                        .Where(p => !IsOpaquePayload(kind, p.Name))
-                                        .ToList();
+        var rows = ComponentCatalog.Parameters(kind, ports);
         if (rows.Count == 0)
             return "<p class=\"small\">No fixed parameters — this component's rows are authored by the user.</p>";
 
-        // The MEANING column appears only when the registry has meanings to put in it. Today only
-        // VerilogA does. That is a real limit of what can be generated and it is better stated than
-        // papered over: the registry knows a parameter's name, default, unit and visibility — the
-        // facts that drift — but not what it is FOR. Those words belong in the Markdown beside the
-        // table, because the alternative is prose in a C# string literal.
-        bool anyMeaning = rows.Any(p => ComponentTypeRegistry.ParameterDescription(kind, p.Name).Length > 0);
+        // The MEANING column appears only when the catalogue has meanings to put in it. That is a
+        // real limit of what can be generated and it is better stated than papered over: the registry
+        // knows a parameter's name, default, unit and visibility — the facts that drift — but not
+        // what it is FOR. Those words belong in the Markdown beside the table, because the
+        // alternative is prose in a C# string literal.
+        bool anyMeaning = rows.Any(p => p.Meaning.Length > 0);
 
         var sb = new StringBuilder();
         sb.AppendLine("<table class=\"param-table\">");
@@ -68,13 +64,51 @@ public static class DocTables
               .Append($"<td>{(p.Unit.Length == 0 ? "&mdash;" : E(p.Unit))}</td>")
               .Append($"<td>{(p.ShowOnSchematic ? "shown" : "&mdash;")}</td>");
             if (anyMeaning)
-            {
-                string meaning = ComponentTypeRegistry.ParameterDescription(kind, p.Name);
-                sb.Append($"<td>{(meaning.Length == 0 ? "&mdash;" : E(meaning))}</td>");
-            }
+                sb.Append($"<td>{(p.Meaning.Length == 0 ? "&mdash;" : E(p.Meaning))}</td>");
             sb.AppendLine("</tr>");
         }
         sb.AppendLine("</tbody></table>");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// A component's TERMINALS: how many nets its netlist line takes, what each one is called, and
+    /// the order they are written in.
+    ///
+    /// <para><b>Why this is worth a table of its own.</b> The figure shows the pins and the prose
+    /// names some of them, but neither says the ORDER — and the order is a contract the models
+    /// themselves read: <c>[0] = anode, [1] = cathode</c> for a diode, gate/drain/source for a
+    /// MESFET but drain/gate/source for a JFET, and 2N ± pairs for an N-port SDD. Someone writing a
+    /// <c>.cnl</c> by hand, or reading one, cannot get that from a picture, and a wrong order is a
+    /// different circuit that still simulates.</para>
+    ///
+    /// <para>Read from <see cref="ComponentCatalog"/> — the same computation
+    /// <c>circuitrf reference components</c> answers with, and the same
+    /// <see cref="SymbolPortDefs"/> walk <c>NetExtractor</c> emits nets by, so the page cannot claim
+    /// an order the extractor does not use.</para>
+    /// </summary>
+    public static string ComponentPins(SymbolKind kind, int ports)
+    {
+        var p = ComponentCatalog.PortsOf(kind);
+
+        if (p.Names.Count == 0)
+            return p.DeterminedBy is { } none
+                ? $"<p class=\"small\">Terminals are set by <code>{E(none)}</code>; this component has no " +
+                   "fixed pin geometry of its own.</p>"
+                : "<p class=\"small\">No terminals — this component connects to nothing on the canvas.</p>";
+
+        var sb = new StringBuilder();
+        sb.AppendLine("<table class=\"param-table\">");
+        sb.AppendLine("<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>");
+        for (int i = 0; i < p.Names.Count; i++)
+            sb.AppendLine($"<tr><td>{i + 1}</td><td>{E(p.Names[i])}</td></tr>");
+        sb.AppendLine("</tbody></table>");
+
+        sb.Append("<p class=\"small\">The nets of an instance line, in this order.");
+        sb.AppendLine(p.DeterminedBy is { } by
+            ? $" How many there are is set by <code>{E(by)}</code>; the table shows " +
+              $"<code>{E(by)}&nbsp;=&nbsp;{p.ListedAt}</code>.</p>"
+            : "</p>");
         return sb.ToString();
     }
 

@@ -12,8 +12,12 @@ tables are read from the component registry, so the defaults, units and on-schem
 are the as-placed values by construction rather than by transcription.
 
 <div class="callout note">
-<span class="label">Reading the parameter tables</span>
-<p><strong>Name</strong> is the parameter key, as it appears in the editor and in the netlist.
+<span class="label">Reading the tables</span>
+<p>The first table is the component's <strong>terminals</strong>: the nets its netlist line takes, in
+the order it takes them. That order is what the models themselves read — a diode's anode before its
+cathode, a MESFET's gate before its drain — so it is worth checking before hand-writing a
+<code>.cnl</code> line; the figure above it shows where those pins sit, not which is which.</p>
+<p>In the parameter table below it, <strong>Name</strong> is the parameter key, as it appears in the editor and in the netlist.
 <strong>Default</strong> and <strong>Unit</strong> are the as-placed value. A parameter marked
 <em>shown</em> appears as a label on the schematic by default; the rest are available in the parameter
 editor. Units accept SI prefixes (<code>pF</code>, <code>nH</code>, <code>GHz</code>,

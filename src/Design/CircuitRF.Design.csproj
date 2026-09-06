@@ -65,6 +65,41 @@
     <EmbeddedResource Include="resources\technologies\*.ctech" />
   </ItemGroup>
 
+  <!-- The reference pages `circuitrf reference` serves
+       (docs/sonnet-briefs/brief-automation-6-reference-and-components.md R-aut6-5/R-aut6-6).
+
+       Referenced IN PLACE from docs/user/src/reference/ rather than copied into this project: a copy
+       is a file that will be edited on one side only, and nothing would report the drift. The
+       authored bytes are what is embedded — the YAML front matter and the docs factory's {{…}}
+       placeholders are stripped at READ, in ReferenceLibrary, so the two sides stay byte-identical
+       and ReferenceLibraryTests can compare them.
+
+       The LogicalName is explicit because these files live outside this project's own cone, where
+       MSBuild's default manifest name is derived from a relative path nobody should have to predict.
+
+       They live HERE and not in src/Cli for ShippedTechnologies' reason: this is where the
+       framework-free readers of shipped content live, and Assembly.GetManifestResourceStream works
+       with no live platform where Avalonia's AssetLoader throws. ADD A TOPIC AND ITS ITEM TOGETHER —
+       a class shipped without its resources compiles, enumerates nothing and reports nothing. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\docs\user\src\reference\netlist.md"
+                      LogicalName="CircuitRF.Design.Reference.netlist.md" />
+    <EmbeddedResource Include="..\..\docs\user\src\reference\expressions.md"
+                      LogicalName="CircuitRF.Design.Reference.expressions.md" />
+    <EmbeddedResource Include="..\..\docs\user\src\reference\units.md"
+                      LogicalName="CircuitRF.Design.Reference.units.md" />
+    <EmbeddedResource Include="..\..\docs\user\src\reference\measurements.md"
+                      LogicalName="CircuitRF.Design.Reference.measurements.md" />
+    <EmbeddedResource Include="..\..\docs\user\src\reference\pins-ports-terms.md"
+                      LogicalName="CircuitRF.Design.Reference.pins-ports-terms.md" />
+    <EmbeddedResource Include="..\..\docs\user\src\reference\sdd.md"
+                      LogicalName="CircuitRF.Design.Reference.sdd.md" />
+    <EmbeddedResource Include="..\..\docs\user\src\reference\file-formats.md"
+                      LogicalName="CircuitRF.Design.Reference.file-formats.md" />
+    <EmbeddedResource Include="..\..\docs\user\src\reference\components.md"
+                      LogicalName="CircuitRF.Design.Reference.components.md" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- Same grant src/Ui carries, and for the same reason: the layout/EM tests live in
          tests/Ui.Tests and reach internal members of the code that used to be there. -->

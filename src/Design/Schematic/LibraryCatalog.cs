@@ -221,7 +221,17 @@ public static class LibraryCatalog
     /// load-time-only sentinel for an unrecognized `.csch` component type (R-hk-19a). Neither is
     /// ever something a user picks from the palette to place fresh.
     /// </summary>
-    private static readonly HashSet<SymbolKind> InternalOnlyKinds = [SymbolKind.Generic, SymbolKind.Unknown];
+    /// <summary>
+    /// The kinds nobody can place: <see cref="SymbolKind.Generic"/> is an internal fallback glyph and
+    /// <see cref="SymbolKind.Unknown"/> is what a newer file's unrecognised component loads as.
+    ///
+    /// <para>Public because <see cref="ComponentCatalog"/> has to answer the same question and a
+    /// second copy of this list is a list that will disagree with this one — which is the failure
+    /// <c>OwnsUniquePortNum</c>'s own remarks record from three hand-maintained SymbolKind lists that
+    /// had already diverged.</para>
+    /// </summary>
+    public static readonly IReadOnlySet<SymbolKind> InternalOnlyKinds =
+        new HashSet<SymbolKind> { SymbolKind.Generic, SymbolKind.Unknown };
 
     /// <summary>
     /// Dynamic types whose PLAIN (PortCount == 0) tile is suppressed because it is redundant with

@@ -71,6 +71,11 @@ internal static class JsonRun
     /// rather than a result.</summary>
     public static DocumentJson? Document;
 
+    /// <summary>What <c>reference</c> was asked — the topic list, one topic, or the component
+    /// catalogue. About no document at all, which is why it is its own payload
+    /// (brief-automation-6-reference-and-components.md §5).</summary>
+    public static ReferenceReportJson? Reference;
+
     /// <summary>
     /// Where <see cref="Finish"/> writes, instead of stdout. Set by <c>serve</c> only.
     ///
@@ -104,6 +109,7 @@ internal static class JsonRun
         Check               = null;
         Explain             = null;
         Document            = null;
+        Reference           = null;
         Outputs.Clear();
         Diagnostics.Clear();
     }
@@ -223,11 +229,12 @@ internal static class JsonRun
 
     private static ResultPayload? BuildPayload()
     {
-        // check, explain and a read-back document carry no DataSet — the first two run nothing
-        // (R-aut4-1) and the third is a file, not a result — so they are answered before the cube
-        // machinery, not folded into it.
-        if (Check is not null || Explain is not null || Document is not null)
-            return new ResultPayload(null, null, Check, Explain, Document);
+        // check, explain, a read-back document and the reference surface carry no DataSet — the
+        // first two run nothing (R-aut4-1), the third is a file rather than a result, and the fourth
+        // is about no document at all — so they are answered before the cube machinery, not folded
+        // into it.
+        if (Check is not null || Explain is not null || Document is not null || Reference is not null)
+            return new ResultPayload(null, null, Check, Explain, Document, Reference);
 
         if (Data is not { } ds) return null;
 

@@ -839,6 +839,50 @@ internal static class CliDiagnostics
         "circuitRF's own documents.",
         ("path", path), ("format", format));
 
+    // ── reference (brief-automation-6-reference-and-components.md) ───────────
+
+    /// <summary>An unknown topic, LISTING the real ones — <c>--tech</c>'s precedent (AUT-3): never
+    /// a fallback, because a fallback answers a different question than the one asked and says
+    /// nothing about it.</summary>
+    public static Diagnostic ReferenceUnknownTopic(string topic, string known) => Diagnostic.Create(
+        "reference.topic.unknown", DiagnosticSeverity.Error,
+        "No reference topic '{topic}'. Topics: {known}", ("topic", topic), ("known", known));
+
+    /// <summary>A primitive nobody has heard of. The list is the whole catalogue, which is exactly
+    /// the thing the caller was missing.</summary>
+    public static Diagnostic ReferenceUnknownComponent(string type, string known) => Diagnostic.Create(
+        "reference.component.unknown", DiagnosticSeverity.Error,
+        "No primitive type '{type}'. Types: {known}", ("type", type), ("known", known));
+
+    /// <summary>A second argument on a topic that does not have items. Only <c>components</c>
+    /// does.</summary>
+    public static Diagnostic ReferenceItemNotForTopic(string topic) => Diagnostic.Create(
+        "reference.args.item-not-for-topic", DiagnosticSeverity.Error,
+        "reference: '{topic}' is one page and names nothing inside it. Only 'components' takes a type.",
+        ("topic", topic));
+
+    /// <summary>A type named with no topic. Reachable from a tool call, where the two arguments are
+    /// named rather than positional — refused rather than silently promoted to a topic, which would
+    /// run a different query than the one asked.</summary>
+    public static Diagnostic ReferenceItemWithoutTopic() => new(
+        "reference.args.item-without-topic", DiagnosticSeverity.Error,
+        "reference: a type was named with no topic. Ask for 'components' and the type.");
+
+    public static Diagnostic ReferenceTooManyArguments() => new(
+        "reference.args.too-many", DiagnosticSeverity.Error,
+        "reference: at most a topic and one name. Usage: circuitrf reference [topic] [type]");
+
+    /// <summary>A <c>resources/read</c> for a URI this server does not publish. Answered with a
+    /// document naming the ones it does, not a protocol error frame — an unknown resource is the same
+    /// mistake as an unknown topic and gets the same answer (R-aut-7).</summary>
+    public static Diagnostic ReferenceUnknownResource(string uri, string known) => Diagnostic.Create(
+        "reference.resource.unknown", DiagnosticSeverity.Error,
+        "No reference resource '{uri}'. Resources: {known}", ("uri", uri), ("known", known));
+
+    public static Diagnostic ReferenceUnknownOption(string option) => Diagnostic.Create(
+        "reference.args.unknown-option", DiagnosticSeverity.Error,
+        "reference: unknown option '{option}'", ("option", option));
+
     // ── serve (brief-automation-5-protocol-adapter.md) ───────────────────────
 
     /// <summary>No <c>--root</c>. Required at startup rather than defaulted: the server runs with

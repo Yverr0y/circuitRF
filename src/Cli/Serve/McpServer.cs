@@ -114,6 +114,20 @@ internal sealed class McpServer
                 Enqueue(id, message["params"] as JsonObject);
                 return;
 
+            case "resources/list":
+                _rpc.Result(id, new JsonObject { ["resources"] = ReferenceResources.Advertise() });
+                return;
+
+            case "resources/templates/list":
+                // None. Every reference resource is a fixed URI and there is nothing to template
+                // over; answering with an empty list is what stops a client asking again.
+                _rpc.Result(id, new JsonObject { ["resourceTemplates"] = new JsonArray() });
+                return;
+
+            case "resources/read":
+                EnqueueResource(id, message["params"] as JsonObject);
+                return;
+
             case "notifications/cancelled":
                 Cancel(message["params"] as JsonObject);
                 return;
@@ -135,15 +149,25 @@ internal sealed class McpServer
             ["protocolVersion"] = asked is not null && KnownProtocolVersions.Contains(asked)
                 ? asked
                 : KnownProtocolVersions[0],
-            ["capabilities"] = new JsonObject { ["tools"] = new JsonObject { ["listChanged"] = false } },
+            ["capabilities"] = new JsonObject
+            {
+                ["tools"] = new JsonObject { ["listChanged"] = false },
+                // The reference surface, on its cheaper channel: a resource costs a URI and a title
+                // until it is read, where a tool description is a standing per-session cost
+                // (R-aut-9, R-aut6-4). The `reference` TOOL offers the same bytes for the clients
+                // that do not surface resources to the model at all.
+                ["resources"] = new JsonObject { ["listChanged"] = false, ["subscribe"] = false },
+            },
             ["serverInfo"]   = new JsonObject { ["name"] = "circuitrf", ["version"] = Version() },
             // Terse, English, invariant (R-aut5-7). It says the three things a client cannot learn
             // from a tool schema.
             ["instructions"] =
                 "circuitRF is driven by writing its documents and then running, checking or " +
                 "explaining them; the file formats are the interface and there are no per-primitive " +
-                "edit tools. Every path resolves under this server's root, and a path outside it is " +
-                "refused. Nothing here deletes or overwrites an existing workspace.",
+                "edit tools. What may be written is in the reference resources, and in the " +
+                "'reference' tool for the same bytes. Every path resolves under this server's root, " +
+                "and a path outside it is refused. Nothing here deletes or overwrites an existing " +
+                "workspace.",
         };
     }
 
@@ -174,47 +198,72 @@ internal sealed class McpServer
         });
     }
 
+    /// <summary>
+    /// <c>resources/read</c>. Queued onto the same worker as a tool call, because it reaches the same
+    /// verb through the same process-wide state.
+    ///
+    /// <para><b>It returns the bytes the tool returns</b> (R-aut-13, gate 2): both translate to
+    /// <c>reference &lt;topic&gt; --json</c> and hand back what came out, so a resource and a tool
+    /// call for one topic cannot disagree — they are one code path with two envelopes.</para>
+    /// </summary>
+    private void EnqueueResource(JsonNode? id, JsonObject? parameters)
+    {
+        string? uri = parameters?["uri"]?.GetValue<JsonElement>().ValueKind == JsonValueKind.String
+            ? parameters["uri"]!.GetValue<string>()
+            : null;
+
+        if (uri is null)
+        {
+            _rpc.Error(id, JsonRpc.InvalidParams, "resources/read needs a uri.");
+            return;
+        }
+
+        if (ReferenceResources.TopicOf(uri) is not { } topic)
+        {
+            // Not an error frame: an unknown resource is answered the way an unknown topic is
+            // answered on the command line — a document naming the ones that exist (R-aut-7).
+            _work.Add(() => _rpc.Result(id, ResourceEnvelope(
+                uri, RefusalDocument("reference", CliDiagnostics.ReferenceUnknownResource(
+                    uri, string.Join(", ", ReferenceResources.Uris()))))));
+            return;
+        }
+
+        string key = KeyOf(id);
+        var    cts = new CancellationTokenSource();
+        _inFlight[key] = cts;
+
+        _work.Add(() =>
+        {
+            try
+            {
+                // `--json` here for the reason ToArgv appends it there: a document is what a read
+                // returns, always (R-aut5-5), and it is what makes these bytes the tool's bytes.
+                _rpc.Result(id, ResourceEnvelope(uri, RunVerb(["reference", topic, "--json"], null,
+                                                             cts.Token, out _, "reference")));
+            }
+            finally { _inFlight.TryRemove(key, out _); cts.Dispose(); }
+        });
+    }
+
+    /// <summary>The protocol's own envelope for a resource, around the document unchanged.</summary>
+    private static JsonObject ResourceEnvelope(string uri, string document) => new()
+    {
+        ["contents"] = new JsonArray(new JsonObject
+        {
+            ["uri"]      = uri,
+            ["mimeType"] = "application/json",
+            ["text"]     = document,
+        }),
+    };
+
     private void Invoke(JsonNode? id, string tool, JsonObject? arguments, JsonNode? progressToken,
                         CancellationToken ct)
     {
-        // Every collector, cleared. Without this a document would carry the previous call's
-        // diagnostics and outputs — a stale success a caller cannot tell from a real one.
-        JsonRun.Reset();
+        var argv = ToolCatalog.ToArgv(tool, arguments, _root, out var refusal);
 
-        var document = new StringWriter();
-        JsonRun.Sink = document;
-
-        int exitCode;
-        try
-        {
-            var argv = ToolCatalog.ToArgv(tool, arguments, _root, out var refusal);
-            if (argv is null)
-            {
-                exitCode = Refuse(tool, refusal!, document);
-            }
-            else
-            {
-                using var _ = RunHost.Install(ct, progressToken is null ? null : p => Report(progressToken, p));
-                exitCode = CliEntry.Run(argv);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // 130, which is the code `em` already returns for a run stopped at a work boundary
-            // (cli.md §7). The adapter picks no new number.
-            exitCode = Refuse(tool, CliDiagnostics.ServeCancelled(tool), document, 130);
-        }
-        catch (Exception ex)
-        {
-            // A server survives a verb that throws and reports it. The alternative is a connection
-            // that simply ends, which tells the client nothing at all.
-            exitCode = Refuse(tool, CliDiagnostics.ServeToolFailed(tool, ex.Message), document);
-        }
-        finally
-        {
-            JsonRun.Sink = null;
-            JsonRun.Reset();
-        }
+        string document = argv is null
+            ? RefusalDocument(tool, refusal!, out int refusedCode)
+            : RunVerb(argv, progressToken, ct, out refusedCode, tool);
 
         // The document, unchanged (R-aut5-5). The text block is the protocol's own envelope, not a
         // reshaping of the payload: these bytes are the CLI's `--json` bytes.
@@ -223,19 +272,77 @@ internal sealed class McpServer
             ["content"] = new JsonArray(new JsonObject
             {
                 ["type"] = "text",
-                ["text"] = document.ToString().TrimEnd('\n'),
+                ["text"] = document,
             }),
             // The CLI's own 0-or-not split (cli.md §7), forwarded. The document carries the truth —
             // including the deliberate difference between "did not converge" and "could not run".
-            ["isError"] = exitCode != 0,
+            ["isError"] = refusedCode != 0,
         });
     }
 
     /// <summary>
-    /// Emits a refusal the way a verb would: the sentence on stderr, the diagnostic in the document.
-    /// The adapter's own refusals are the same shape as everyone else's (R-aut-7).
+    /// Runs one argument vector and returns the document it wrote.
+    ///
+    /// <para><b>One runner for both channels.</b> A tool call and a <c>resources/read</c> reach the
+    /// same verb through the same process-wide state, so they share this rather than each setting
+    /// that state up for itself — which is also what makes the parity gate a property of the code:
+    /// the bytes a resource returns came out of the same function a tool call's did (R-aut-13).</para>
     /// </summary>
-    private static int Refuse(string tool, Diagnostic d, StringWriter document, int exitCode = 1)
+    private string RunVerb(string[] argv, JsonNode? progressToken, CancellationToken ct,
+                           out int exitCode, string tool)
+    {
+        // Every collector, cleared. Without this a document would carry the previous call's
+        // diagnostics and outputs — a stale success a caller cannot tell from a real one.
+        JsonRun.Reset();
+
+        var document = new StringWriter();
+        JsonRun.Sink = document;
+
+        try
+        {
+            using var _ = RunHost.Install(ct, progressToken is null ? null : p => Report(progressToken, p));
+            exitCode = CliEntry.Run(argv);
+        }
+        catch (OperationCanceledException)
+        {
+            // 130, which is the code `em` already returns for a run stopped at a work boundary
+            // (cli.md §7). The adapter picks no new number.
+            exitCode = Refuse(tool, CliDiagnostics.ServeCancelled(tool), 130);
+        }
+        catch (Exception ex)
+        {
+            // A server survives a verb that throws and reports it. The alternative is a connection
+            // that simply ends, which tells the client nothing at all.
+            exitCode = Refuse(tool, CliDiagnostics.ServeToolFailed(tool, ex.Message));
+        }
+        finally
+        {
+            JsonRun.Sink = null;
+            JsonRun.Reset();
+        }
+
+        return document.ToString().TrimEnd('\n');
+    }
+
+    /// <summary>
+    /// The adapter's own refusal, as a document. Same shape as everyone else's (R-aut-7): the
+    /// sentence on stderr, the diagnostic in the document.
+    /// </summary>
+    private static string RefusalDocument(string tool, Diagnostic d, out int exitCode)
+    {
+        JsonRun.Reset();
+        var document = new StringWriter();
+        JsonRun.Sink = document;
+        try     { exitCode = Refuse(tool, d); }
+        finally { JsonRun.Sink = null; JsonRun.Reset(); }
+        return document.ToString().TrimEnd('\n');
+    }
+
+    private static string RefusalDocument(string tool, Diagnostic d)
+        => RefusalDocument(tool, d, out _);
+
+    /// <summary>Emits a refusal the way a verb would, into whatever sink is installed.</summary>
+    private static int Refuse(string tool, Diagnostic d, int exitCode = 1)
     {
         JsonRun.Verb = tool;
         JsonRun.TakeFlags(["--json"]);

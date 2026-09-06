@@ -719,3 +719,149 @@ Asked for directly, because the briefs name `convert` only in passing.
   successful document is untested. The theory now covers a real conversion, and `check`, `explain`
   and both halves of `read` alongside it — the five verbs that produce no `DataSet` and whose
   payload is therefore the one least like every other verb's.
+
+---
+
+## AUT-6 — `circuitrf reference`, and the component catalogue (2026-09-05)
+
+`brief-automation-6-reference-and-components.md`. One read-only verb and one MCP resource surface,
+answering the question the rest of the series left open: **what may a caller write, before it writes
+it.** No new document, no new analysis, no change to any existing verb.
+
+### Did the seventh tool earn its place?
+
+**Yes, and the margin is not large.** Measured against what a resource-only surface would have cost:
+
+- **Resources are genuinely cheaper.** `resources/list` publishes nine entries of a URI, a title, a
+  one-line description and a size. The `reference` tool costs a name, a three-line description and a
+  two-property schema, carried for the whole session whether or not anything calls it. If every
+  client surfaced resources to the model, the tool would be pure overhead and should not exist.
+- **They do not.** Resource support is optional in the protocol and a client that implements it may
+  still not put resources in front of the model — and a capability the model cannot reach is not a
+  capability. That is the whole of the argument, and it is enough.
+- **The cost is bounded because the surface is not per-topic.** One tool with a topic argument, not
+  nine. `tools/list` grew by ~330 bytes.
+
+**The thing that made this cheap is that both channels call the same verb.** `resources/read` and
+`tools/call` both translate to `reference <topic> --json` and hand back `CliEntry.Run`'s bytes, so
+the second channel is an envelope rather than a second implementation, and
+`EveryResource_ReturnsTheBytesTheCliWritesForItsTopic` compares them against the CLI byte for byte.
+Had the resource returned Markdown and the tool returned JSON, this would have been two surfaces that
+drift, and the honest answer would have been to ship one.
+
+**If it turns out not to pay, removing it is one `ToolSpec` and two test lines.** Adding it later,
+after clients have been written against a resource-only surface, would have been worse.
+
+### The brief's own naming collision, resolved
+
+R-aut6-1 spells the generated catalogue `circuitrf reference components`; R-aut6-2 and R-aut6-8 spell
+the PROSE page `components` as well. They cannot both be, and the brief did not notice.
+
+**The catalogue keeps `components`** — it is the machine-facing answer the whole brief exists for, and
+`reference components MLIN` only reads correctly that way. **The page ships as `component-notes`.**
+Nothing was dropped: R-aut6-8's own words are that the catalogue answers "what may I write" and the
+page answers "what does it mean", and a client that wants both asks for both. Each says so in its own
+listing line.
+
+Of R-aut6-8's two offered routes — strip the placeholders and serve the page, or exclude it — the
+**first** was taken. Read without its tables the page is still 71 kB of prose that nothing else in the
+program carries: what a ferrite bead is *not*, why an SRLC is the shape a real capacitor takes above a
+few hundred megahertz, which of two FET laws to reach for. The 70 `{{symbol:}}` placeholders were
+figures a text client could not use anyway, and the 67 `{{table:}}` placeholders are exactly the
+generated half the catalogue serves better. Removing a placeholder that is alone on its line takes the
+line with it, so the result reads as prose rather than as a page with holes in it.
+
+### Both §2.3 lists, re-measured on the day it was built
+
+Unchanged from the brief's own measurement. Asserted by token in
+`ReferenceCliVerbTests`, and derived from the registries in the test rather than typed, so a change
+in either direction fails by name:
+
+- **5 `EngineReference` targets no factory entry answers to**: `GND`, `MEAS`, `Pin`, `SpiceModel`,
+  `VAR`. Four of those are not components at all — schematic elements the extractor consumes — which
+  is itself the answer for them, and the catalogue says so.
+- **7 factory types no `EngineReference` maps to**: `Chain`, `ExtDevice`, `I_nTone`, `SemiC`,
+  `Short`, `Term`, `V_nTone`. Writable in a `.cnl`, drawn by nothing, and therefore carrying no
+  declared parameters.
+
+The catalogue is **73 entries over 68 factory tokens** — the 68 plus those 5.
+
+### What the registries could not answer
+
+Two gaps, and the second is the more valuable one.
+
+**1. Nothing states which parameter sets a variadic component's port count.** R-aut6-9 requires the
+catalogue to report "it depends, and here is what on", and no registry held that fact —
+`LibraryCatalog` knows Snp/ZPort/Sdd are dynamic for the palette's sake, `IsRemovableParameter` knows
+ZPort's `NumPorts` is structural, and neither is an answer to the question. Per R-aut-1 the fix went
+into the CAPABILITY layer rather than into the adapter: `ComponentTypeRegistry.PortCountParameter`, a
+pure lookup beside `OwnsUniquePortNum`. It is not a transcription because the gate does not trust it —
+`AKindWhosePinsDependOnN_ReportsThatAndNamesTheParameter` MEASURES variadicity (`SymbolPortDefs.For(k,
+2).Length != SymbolPortDefs.For(k, 3).Length`) and fails any kind that answers differently at 2 and 3
+without naming its parameter. A future variadic component added without an arm fails there.
+
+**2. `ComponentModel.PortCount` is not the number of nets an instance line writes, and nothing below
+the firewall states that number for a type with no symbol.**
+
+This is the finding worth keeping. The brief says to take the port count "from the model", and the
+model cannot give it: `PortCount` is the model's own port count in the MNA sense. `IProbeModel`
+reports **1** and takes two nets. `FetModelBase` reports **2** and takes three. A 2-port `SddModel`
+reports **2** and takes four (`SDD:M1 Vin 0 Vout 0`). `ResistorModel` reports 2 and takes two, which
+is why the discrepancy is easy to miss — the commonest components agree by coincidence.
+
+So the catalogue reads `SymbolPortDefs`, which IS the contract `NetExtractor` emits nets by, and
+constructs no model at all — not even a parameterless one, where R-aut6-9 would have allowed it. The
+consequence is the gap: for the seven factory-only tokens above there is no symbol, so **nothing below
+the UI firewall states how many nets they take**, and the catalogue says exactly that rather than
+guessing. `ExtDevice` is the honest case (its node count is the provider's descriptor's, known only at
+elaboration); `Short` and `Term` are the ones a declarative fact could close, and closing it is a
+registry question rather than one this brief may answer by inventing a number.
+
+### R-aut6-12's four unarmed kinds
+
+`DefaultParameters` has an explicit arm for 71 of 75 `SymbolKind`s. The four without one, split as the
+brief asks:
+
+| Kind | Which it is |
+|---|---|
+| `Ground` | **genuinely parameterless** — a ground symbol has no values to carry |
+| `IProbe` | **genuinely parameterless** — `IProbeModel` reads no parameters at all; it stamps a 0 V branch |
+| `Generic` | **the question does not arise** — an internal fallback glyph, in `LibraryCatalog.InternalOnlyKinds`, not user-placeable |
+| `Unknown` | **likewise** — the sentinel a newer file's unrecognised component loads as |
+
+So there is no undescribed component among them, and **no arm was added**. Two other kinds return an
+empty list from an arm that means it — `Var` and `Meas` author their own rows — and `Mutual` returns
+none because it references instances by name rather than connecting to nets.
+
+### The total embedded size
+
+**145,410 bytes** of reference text, across 8 topics, in `CircuitRF.Design` — so in every binary on
+every platform, the GUI included. `component-notes` is half of it at 73 kB. It is reported by
+`EveryTopic_IsEmbedded_AndItsBytesAreTheAuthoredFile`'s test output rather than asserted, so the
+number is always current in the TRX without a threshold anyone has to maintain.
+
+### Two things found on the way that were not this brief's
+
+- **`tools/DocGen` had not compiled since AUT-2.** `Placeholders.cs` uses `ComponentTypeRegistry` and
+  `SymbolKind`, which moved to `CircuitRF.Design.Schematic`; `src/Ui` absorbed that with its own
+  `GlobalUsings.cs`, but global usings are per-project and **DocGen is not in `circuitRF.slnx`**, so a
+  plain `dotnet build` never noticed. One `using` line. The lesson is the one the missing-resource
+  trap teaches in a different key: a project outside the solution is a project nothing tells you
+  about.
+- **`docs/user`'s generated HTML was already stale before this change** — `cli.html` by ~315 lines,
+  from AUT-5's edit to `cli.md`. See "The docs check" below.
+
+### The docs check
+
+`tools/DocGen/check-docs-current.sh` **fails**, and it regenerates as its mechanism, so the run was
+reverted afterwards and only the Markdown sources under `docs/user/src/` are changed here. What it
+reported, classified:
+
+| Page | Why |
+|---|---|
+| `reference/components.html` | **this change** — 67 new terminal tables, one per component section |
+| `reference/cli.html` | partly this change (the new `reference` section), partly AUT-5's already-pending edit |
+| `reference/{layout-editor,schematic-editor,veriloga,wbond}.html`, `assets/js/search-index.js` | already pending before this change |
+| `assets/figures/workspace-{overview,regions}*.svg`, `workspace.html`, `quick-start/`, `new-user-guide/` | the known non-deterministic figure families — a live capture, not a content change |
+
+Regenerating is one deliberate pass and belongs to whoever is ready to review 2,200 lines of it.

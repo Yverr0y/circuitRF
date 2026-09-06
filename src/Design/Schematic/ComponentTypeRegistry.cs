@@ -692,6 +692,43 @@ public static class ComponentTypeRegistry
         kind is SymbolKind.Term or SymbolKind.TermG or SymbolKind.P1Tone;
 
     /// <summary>
+    /// The parameter that DECIDES how many terminals a placed component has, or null when the count
+    /// is fixed by the type.
+    ///
+    /// <para><b>Why this is a fact and not a description.</b> A reference catalogue that printed a
+    /// port count for one of these would print a number that is plausible, specific and wrong — the
+    /// failure class <c>sweep-unit-scale-and-mark</c> records, where a mark read without its scale
+    /// produced a run at 2 Hz that looked entirely normal. The honest answer is "it depends, and
+    /// here is what on", and this is the one place that can give it
+    /// (brief-automation-6-reference-and-components.md R-aut6-9).</para>
+    ///
+    /// <para><b>It answers for the SYMBOL, and a token can be variadic where its symbols are not.</b>
+    /// <see cref="SymbolKind.Switch"/> and <see cref="SymbolKind.SwitchD"/> are two tiles over one
+    /// engine component whose port count is <c>1 + Throws</c>: each tile draws a fixed pin set and
+    /// seeds its own <c>Throws</c>, so the tile is fixed and the component is not. Naming the
+    /// parameter here is true of both readings — it is what an edit would change.</para>
+    ///
+    /// <para><b>Not a substitute for asking the model.</b> Where a primitive is parameterless the
+    /// model itself answers, and that is what a caller should read; this is for the ones nobody may
+    /// construct without inventing values first.</para>
+    /// </summary>
+    public static string? PortCountParameter(SymbolKind kind) => kind switch
+    {
+        // The three variadic boxes. Their pin geometry is generated from N — SymbolPortDefs.For
+        // takes the count — and PortCountParameterIsExercisedTests holds that agreement.
+        SymbolKind.Snp or SymbolKind.ZPort or SymbolKind.Sdd => "NumPorts",
+        // A Verilog-A model's terminal count is the MODEL's, filled in from the file it names.
+        SymbolKind.VerilogA                                  => "Pins",
+        // 1 common port plus `Throws` throws. See the remarks above for why both tiles answer.
+        SymbolKind.Switch or SymbolKind.SwitchD              => "Throws",
+        // A wBond's terminals are 2 per wire array it places, plus the reference pin when RefPin is
+        // on — so the count follows the arrays selected out of the design it carries or links to,
+        // and there is no fixed answer at all until one is chosen.
+        SymbolKind.WBond                                     => "Arrays",
+        _                                                    => null,
+    };
+
+    /// <summary>
     /// Engine type-reference string for a given SymbolKind — what goes in the .cnl Reference field
     /// and into <see cref="Instance.Reference"/>. Differs from <see cref="DisplayName(SymbolKind)"/>
     /// for ZPort ("Z" vs "Z_Port"), ToneSource ("VTone" vs "V_1Tone"), CurrentToneSource

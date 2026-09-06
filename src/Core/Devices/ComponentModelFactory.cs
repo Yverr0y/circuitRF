@@ -202,6 +202,35 @@ public static class ComponentModelFactory
     public static bool IsPrimitive(string typeName)
         => _registry.ContainsKey(typeName) || _parameterizedTypes.Contains(typeName);
 
+    /// <summary>
+    /// Every primitive type name a <c>.cnl</c> may write, in a stable ordinal order — the two tables
+    /// above, read out rather than re-typed.
+    ///
+    /// <para>It exists because a client that cannot spell <c>MLIN</c> is blocked before <c>check</c>
+    /// can help it (brief-automation-6-reference-and-components.md §1), and the only place that
+    /// knows the spellings is this file. A second list of them somewhere else would be a copy that
+    /// goes stale silently: a netlist naming a type that does not exist fails at elaboration with a
+    /// sentence about an unresolved name, and a catalogue omitting one simply never mentions it.
+    /// </para>
+    ///
+    /// <para>Types registered at runtime through <see cref="Register"/> are included, because they
+    /// are primitives by the time anyone asks.</para>
+    /// </summary>
+    public static IReadOnlyList<string> PrimitiveTypeNames
+        => [.. _registry.Keys.Concat(_parameterizedTypes).OrderBy(n => n, StringComparer.Ordinal)];
+
+    /// <summary>
+    /// True when this primitive is built from resolved parameters rather than from the parameterless
+    /// registry — i.e. <see cref="TryCreate(string)"/> returns null for it and only the four-argument
+    /// overload can make one.
+    ///
+    /// <para>Asked by the reference catalogue, which may not invent parameters to find out
+    /// (R-aut6-9): a port count read off a model constructed from made-up values is a number that is
+    /// plausible, specific and wrong.</para>
+    /// </summary>
+    public static bool TakesParameters(string typeName)
+        => _parameterizedTypes.Contains(typeName) && !_registry.ContainsKey(typeName);
+
     /// <summary>Register additional parameterless primitive types.</summary>
     public static void Register(string typeName, Func<ComponentModel> factory)
         => _registry[typeName] = factory;

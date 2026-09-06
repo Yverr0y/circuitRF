@@ -120,6 +120,31 @@ moves.
 These are **scaffolding, not an editing API** (R-aut0-5): they produce a correct INITIAL document, and
 the answer to "how do I add an instance" stays §4's — write the document.
 
+### 3.2 Saying what may be written
+
+The gap that remains once a document can be authored, validated and explained is the one BEFORE any of
+that: **a client that cannot spell `MLIN` is blocked before `check` can help it.** Making the formats
+the interface (R-aut-5) puts the burden of knowing them on the caller, and until AUT-6 that knowledge
+existed only in `docs/user/` — repository content, absent from an installed tree — and in the reader
+source. An automated client either guessed or had been trained on this repository.
+
+**Closed by AUT-6 on 2026-09-05** (`brief-automation-6-reference-and-components.md`), in two halves
+that are different in kind:
+
+| Half | Source | How it stays true |
+|---|---|---|
+| The reference pages | the authored `docs/user/src/reference/` pages, embedded in `CircuitRF.Design` | referenced in place from the `.csproj`, so the embedded bytes ARE the authored bytes; a test compares them |
+| The component catalogue | `ComponentModelFactory`, `ComponentTypeRegistry`, `SymbolPortDefs` | generated at every call; `DocTables` renders the documentation tables from the same `ComponentCatalog` |
+
+**There is no third thing** — no grammar, no schema, no BNF. A hand-written grammar in an adapter is a
+second description of `CnlReader` that drifts from it silently, which is the failure this whole series
+exists to prevent. The prose is authored and maintained; the code facts are generated; and where a
+registry knows a parameter's name, default, unit and visibility but not what it is FOR, the catalogue
+says nothing rather than inventing a meaning.
+
+`cli.md` §12 has the detail, including why a port count that is not fixed is reported as not fixed and
+why the two keyings' mismatch is part of the answer rather than filtered out of it.
+
 ---
 
 ## 4. Documents are the interface — declarative, not imperative
@@ -160,6 +185,7 @@ building the first adapter found that nothing could hand a file back (§8.1).
 | `check <path>` | is it well formed, does it resolve, is it sound? | `cli.md` §10.2 |
 | `explain <path>` | what did circuitRF DECIDE — which technology, which chain, what value, which cell? | `cli.md` §10.4 |
 | `read <path>` | what is IN this file — a result as cubes, a document as its own bytes | `cli.md` §11.4 |
+| `reference [topic] [type]` | what MAY be written — the reference pages, and every primitive with its terminals and parameters | `cli.md` §12 |
 
 Three properties of that pair are what make it an architectural answer rather than two more verbs:
 
@@ -232,13 +258,26 @@ becomes more important, not less, as the callers stop being human.
 
 For a protocol adapter this is not a style preference. A client that discovers tools up front carries
 every tool's description for the whole session, so the surface is a standing cost paid on every
-interaction, whether or not the tool is used. Forty single-purpose verbs are worse than six
+interaction, whether or not the tool is used. Forty single-purpose verbs are worse than seven
 well-chosen ones even when the forty are individually simpler.
 
 **R-aut-10. Reading is the expensive direction, and should be designed first.** Authoring a document
 is one write. Understanding a result is the part that is unbounded — which is why R-aut-6's
 projection, and the ability to ask for a subset of it, do more for a client's cost than any authoring
 convenience.
+
+**And R-aut-9 has a second channel to weigh against it now.** MCP **resources** cost a URI, a title
+and a size until they are read, where a tool description is paid every session whether or not
+anything calls it — so a capability that is a body of TEXT belongs on the resource channel, and the
+reference surface is published there (`cli.md` §11.3a). What that does not settle is reachability:
+**not every client surfaces resources to the model, and a capability the model cannot reach is not a
+capability.** So the reference surface is also the seventh tool, and the two return the same bytes
+because both translate to the same verb — which is R-aut-13 applied to a channel rather than to an
+adapter.
+
+The seventh tool is the one place in this series where a standing per-session cost was accepted
+knowingly. It earns it by being the thing that unblocks writing a document at all: every other tool
+assumes the caller already knows what to put in the file.
 
 ---
 

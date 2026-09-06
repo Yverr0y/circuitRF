@@ -41,6 +41,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CircuitRF.Design.Layout;
+using CircuitRF.Design.Reference;
 using CircuitRF.Design.Layout.Em;
 using CircuitRF.Design.Workspace;
 using CircuitRF.Core.Design;
@@ -265,6 +266,113 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
         Assert.Contains("cli.args.grid-not-for-pursuit", Ids(mine));
     }
 
+    /// <summary>
+    /// <c>reference</c>, in all three of its forms — the topic list, one prose page, and one
+    /// primitive out of the generated catalogue.
+    ///
+    /// <para>A reference read is a LARGE write, which is exactly the shape that finds a framing bug;
+    /// the byte comparison here is what makes it worth running three times.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(null,         null)]
+    [InlineData("netlist",    null)]
+    [InlineData("components", "MLIN")]
+    public void Reference_ThroughTheServer_IsTheDocumentTheCliWrites(string? topic, string? type)
+    {
+        var arguments = new JsonObject();
+        if (topic is not null) arguments["topic"] = topic;
+        if (type  is not null) arguments["type"]  = type;
+
+        using var server = Start(Root);
+        string mine = server.Call("reference", arguments);
+
+        string[] argv = [.. new[] { "reference", topic, type }.Where(a => a is not null).Select(a => a!), "--json"];
+        AssertSameDocument(mine, Cli(argv));
+    }
+
+    /// <summary>
+    /// R-aut-13 for the OTHER channel. Every advertised resource returns the bytes
+    /// <c>circuitrf reference &lt;topic&gt; --json</c> writes — a topic reachable one way and not the
+    /// other fails here, and so does one whose two channels answer differently.
+    ///
+    /// <para>They are one code path with two envelopes, which is what makes the property structural
+    /// rather than merely tested for; this is the test that says so out loud.</para>
+    /// </summary>
+    [Fact]
+    public void EveryResource_ReturnsTheBytesTheCliWritesForItsTopic()
+    {
+        using var server = Start(Root);
+
+        var resources = JsonNode.Parse(server.Request("resources/list", null))!["resources"]!.AsArray();
+        Assert.NotEmpty(resources);
+
+        foreach (var resource in resources)
+        {
+            string uri   = resource!["uri"]!.GetValue<string>();
+            string topic = resource["name"]!.GetValue<string>();
+
+            Assert.StartsWith("circuitrf://reference/", uri, StringComparison.Ordinal);
+            Assert.EndsWith("/" + topic, uri, StringComparison.Ordinal);
+            // The cost, published up front, for the same reason the CLI's topic list publishes it.
+            Assert.True(resource["size"]!.GetValue<int>() > 0, $"{uri} advertised no size.");
+
+            var read = JsonNode.Parse(server.Request("resources/read", new JsonObject { ["uri"] = uri }))!;
+            var one  = read["contents"]!.AsArray().Single()!;
+
+            Assert.Equal(uri, one["uri"]!.GetValue<string>());
+            Assert.Equal("application/json", one["mimeType"]!.GetValue<string>());
+
+            AssertSameDocument(one["text"]!.GetValue<string>(), Cli("reference", topic, "--json"));
+        }
+    }
+
+    /// <summary>The tool and the resource are the same bytes for the same topic — asserted directly,
+    /// so a client that reaches the surface through either gets one answer.</summary>
+    [Fact]
+    public void TheReferenceToolAndTheResource_AgreeOnTheSameTopic()
+    {
+        using var server = Start(Root);
+
+        string viaTool = server.Call("reference", new JsonObject { ["topic"] = "units" });
+        string viaResource = JsonNode.Parse(server.Request("resources/read", new JsonObject
+        {
+            ["uri"] = "circuitrf://reference/units",
+        }))!["contents"]![0]!["text"]!.GetValue<string>();
+
+        Assert.Equal(viaTool.Trim(), viaResource.Trim());
+    }
+
+    /// <summary>An unknown resource is answered with a DOCUMENT naming the ones that exist, not with
+    /// a protocol error frame — the same shape an unknown topic gets on the command line
+    /// (R-aut-7).</summary>
+    [Fact]
+    public void AnUnknownResource_IsRefusedWithADocumentNamingTheRealOnes()
+    {
+        using var server = Start(Root);
+
+        var read = JsonNode.Parse(server.Request("resources/read", new JsonObject
+        {
+            ["uri"] = "circuitrf://reference/nosuchthing",
+        }))!;
+
+        Assert.Null(read["error"]);
+        string document = read["contents"]![0]!["text"]!.GetValue<string>();
+        Assert.Contains("reference.resource.unknown", Ids(document));
+        Assert.Contains("circuitrf://reference/netlist", document, StringComparison.Ordinal);
+    }
+
+    /// <summary>The capability is DECLARED. A resource surface a client is never told about is a
+    /// resource surface nothing reads.</summary>
+    [Fact]
+    public void Initialize_DeclaresResources_AndSaysWhereTheReferenceIs()
+    {
+        using var server = Start(Root);
+        var result = JsonNode.Parse(server.Request("initialize", new JsonObject()))!;
+
+        Assert.NotNull(result["capabilities"]!["resources"]);
+        Assert.Contains("reference", result["instructions"]!.GetValue<string>(), StringComparison.Ordinal);
+    }
+
     // ══ §5.2 — stdout purity ═════════════════════════════════════════════════════════════════════
 
     /// <summary>
@@ -298,6 +406,13 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
                 ["what"] = "convert", ["path"] = clay, ["output"] = Path.Combine(Dir("more"), "line.gds"),
             });
             server.Call("read",    new JsonObject { ["path"] = csch });
+            // The largest single write this surface makes, on both of its channels. A reference read
+            // is exactly the shape that finds a framing bug (§6.7).
+            server.Call("reference", new JsonObject());
+            server.Call("reference", new JsonObject { ["topic"] = ReferenceLibrary.ComponentNotesTopic });
+            server.Call("reference", new JsonObject { ["topic"] = "components" });
+            server.Request("resources/list", null);
+            server.Request("resources/read", new JsonObject { ["uri"] = "circuitrf://reference/netlist" });
 
             // Every line, including the notifications, and nothing else.
             foreach (string line in server.StdoutLines)
@@ -310,7 +425,7 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
             }
 
             // …and the audit must actually have had something to audit.
-            Assert.True(server.StdoutLines.Count >= 7,
+            Assert.True(server.StdoutLines.Count >= 12,
                 $"expected a frame per call; got {server.StdoutLines.Count}");
 
             // The proof the loud paths really were loud, and that all of it went to stderr where
@@ -429,9 +544,11 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
             .GetProperty("tools").EnumerateArray()
             .Select(t => t.GetProperty("name").GetString()).ToArray();
 
-        // R-aut5-4: small and broad. Six, and the count is asserted because the surface is a
-        // standing cost paid on every interaction whether or not a tool is called.
-        Assert.Equal(["run", "check", "explain", "create", "import", "read"], tools);
+        // R-aut5-4: small and broad. Seven, and the count is asserted because the surface is a
+        // standing cost paid on every interaction whether or not a tool is called. `reference` is
+        // the seventh and it earns its place by being reachable at all in a client that does not
+        // surface RESOURCES to the model — which is where the same bytes are cheaper (R-aut6-4).
+        Assert.Equal(["run", "check", "explain", "create", "import", "read", "reference"], tools);
 
         Assert.Equal(0, server.Close());
     }
@@ -505,6 +622,10 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
             ["import/part"]       = ["path"],
             ["import/convert"]    = ["path"],
             ["read/"]             = ["path"],
+            // `reference` has no REQUIRED positional at all: its no-argument form is the topic list,
+            // which is a real answer rather than a usage error. Both of its positionals are therefore
+            // probed as arguments below, which is what this gate is for.
+            ["reference/"]        = [],
         };
 
         using var server = Start(Root);
@@ -939,7 +1060,13 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
             // choice. Reading stdout only when an answer is wanted deadlocks the moment the server
             // has more to say than the pipe will buffer — a result document for a 400-point sweep is
             // comfortably past that — and the symptom is a server that appears to hang on shutdown.
-            _outPump = Task.Run(() =>
+            //
+            // LongRunning, so each pump gets a DEDICATED thread rather than a thread-pool slot. Under
+            // a full-solution run the pool is saturated and a pooled pump can sit queued for the
+            // whole session — which is not a hang (the other pump keeps the process moving) but a
+            // silent empty capture: the stdout audit passed while `StdErr` read "" and the assertion
+            // that the loud paths really were loud failed with nothing to look at.
+            _outPump = Task.Factory.StartNew(() =>
             {
                 string? line;
                 while ((line = _proc.StandardOutput.ReadLine()) is not null)
@@ -948,14 +1075,14 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
                     _frames.Add(line);
                 }
                 _frames.CompleteAdding();
-            });
+            }, TaskCreationOptions.LongRunning);
 
-            _errPump = Task.Run(() =>
+            _errPump = Task.Factory.StartNew(() =>
             {
                 string? line;
                 while ((line = _proc.StandardError.ReadLine()) is not null)
                     lock (_stderr) _stderr.AppendLine(line);
-            });
+            }, TaskCreationOptions.LongRunning);
         }
 
         /// <summary>Every line stdout carried, in order — the §5.2 audit reads this.</summary>

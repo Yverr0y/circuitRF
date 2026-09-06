@@ -96,6 +96,12 @@ namespace RfCore.Export
     /// What <c>read</c> handed back when the path named one of circuitRF's own documents rather than
     /// a result file. See <see cref="DocumentJson"/>.
     /// </param>
+    /// <param name="Reference">
+    /// What <c>reference</c> was asked: the topic list, one topic's text, or the component
+    /// catalogue. It is about no document at all, which is why it is its own payload and not a mode
+    /// of <c>explain</c> — every <c>explain</c> answer is anchored to a path
+    /// (brief-automation-6-reference-and-components.md §5).
+    /// </param>
     public sealed record ResultPayload(
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         LoadpullSummaryJson? Summary,
@@ -106,7 +112,9 @@ namespace RfCore.Export
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         ExplainReportJson? Explain = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        DocumentJson? Document = null);
+        DocumentJson? Document = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        ReferenceReportJson? Reference = null);
 
     /// <summary>
     /// One of circuitRF's own documents, read back verbatim.
@@ -256,6 +264,103 @@ namespace RfCore.Export
         ExplainExpressionJson?              Expression,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         ExplainReferenceJson?               Reference);
+
+    // ── reference, on the wire (brief-automation-6-reference-and-components.md) ──
+
+    /// <param name="Topic">The name a caller asks for, which is also the resource URI's last
+    /// segment.</param>
+    /// <param name="Bytes">
+    /// How large the topic's text is, in UTF-8 bytes, AS SERVED — after the front matter and the
+    /// documentation generator's placeholders are removed, not the authored file's size.
+    ///
+    /// <para>Carried because reading is the expensive direction and a client pays for every byte
+    /// (<c>automation-architecture.md</c> R-aut-10). A list that hides the cost makes the cheap
+    /// topics and the expensive ones look alike, and the spread here is roughly fifteen-fold
+    /// (R-aut6-3).</para>
+    /// </param>
+    /// <param name="Text">The topic itself. Absent in a LISTING, present when one topic was
+    /// asked for — so a list costs a line per topic rather than the whole library.</param>
+    public sealed record ReferenceTopicJson(
+        string  Topic,
+        string  Title,
+        string  Summary,
+        int     Bytes,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Text = null);
+
+    /// <param name="Expression">The default as an EXPRESSION — the string a freshly-placed component
+    /// carries, not an evaluated number.</param>
+    /// <param name="Meaning">What the parameter is for, where the registry knows. Absent where it
+    /// does not: an invented meaning is worse than none (R-aut6-8).</param>
+    public sealed record ReferenceParameterJson(
+        string  Name,
+        string  Expression,
+        string  Unit,
+        string  Dimension,
+        bool    ShowOnSchematic,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Meaning);
+
+    /// <summary>
+    /// How many nets an instance line writes, and — where that is not fixed — what decides it.
+    ///
+    /// <para><b><paramref name="Count"/> and <paramref name="DeterminedBy"/> are mutually
+    /// exclusive, and BOTH may be absent.</b> A number printed where the truth is "it depends" is
+    /// the failure class <c>sweep-unit-scale-and-mark</c> records — plausible, specific and wrong,
+    /// with nothing reporting it (R-aut6-9).</para>
+    /// </summary>
+    /// <param name="Names">The terminals, in the order a <c>.cnl</c> line writes their nets.</param>
+    /// <param name="ListedAt">The port count <paramref name="Names"/> was listed at, when the count
+    /// is parameter-determined — so an example cannot be read as an answer.</param>
+    public sealed record ReferencePortsJson(
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        int?                  Count,
+        IReadOnlyList<string> Names,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string?               DeterminedBy,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        int?                  ListedAt);
+
+    /// <param name="Kind">The palette entry's own name — what the editor and the <c>.csch</c> call
+    /// it, which is not always what the <c>.cnl</c> calls it.</param>
+    /// <param name="SearchTerms">How a person goes looking for this part, so a client can find "the
+    /// thing that does X" without reading the whole catalogue.</param>
+    public sealed record ReferenceSymbolJson(
+        string                                  Kind,
+        string                                  DisplayName,
+        string                                  Category,
+        IReadOnlyList<string>                   SearchTerms,
+        ReferencePortsJson                      Ports,
+        IReadOnlyList<ReferenceParameterJson>   Parameters);
+
+    /// <param name="Type">The token a <c>.cnl</c> writes — the thing a caller cannot guess and is
+    /// blocked without.</param>
+    /// <param name="Simulatable">False for a token the palette draws and the engine cannot build.</param>
+    /// <param name="Placeable">False for a token a <c>.cnl</c> may write that nothing draws.</param>
+    /// <param name="Note">Why the two disagree, when they do. The mismatch is part of the answer and
+    /// is never filtered out (R-aut6-10).</param>
+    public sealed record ReferenceComponentJson(
+        string                               Type,
+        bool                                 Simulatable,
+        bool                                 Placeable,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string?                              Note,
+        ReferencePortsJson                   Ports,
+        IReadOnlyList<ReferenceSymbolJson>   Symbols);
+
+    /// <summary>
+    /// What <c>reference</c> answered. Exactly one of the three is present.
+    /// </summary>
+    /// <param name="Topics">The topic list, with each topic's served size.</param>
+    /// <param name="Topic">One topic, with its text.</param>
+    /// <param name="Components">The generated catalogue, or the one primitive that was asked for.</param>
+    public sealed record ReferenceReportJson(
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<ReferenceTopicJson>?     Topics,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        ReferenceTopicJson?                    Topic,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<ReferenceComponentJson>? Components);
 
     // ── the loadpull summary, on the wire ────────────────────────────────────
 

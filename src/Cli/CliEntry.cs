@@ -128,6 +128,10 @@ return JsonRun.Finish(JsonRun.Verb switch
     // The inverse of a run verb: the DataSet a run wrote, loaded back through the same two readers
     // the GUI's own source library uses (brief-automation-5-protocol-adapter.md §3's `read`).
     "read"    => CircuitRF.Cli.ReadBack.Run(args[1..]),
+    // What a client may WRITE, before it writes it (brief-automation-6-reference-and-components.md).
+    // The one verb here that takes no path at all: a catalogue is about no document, which is also
+    // why it is not a mode of `explain`.
+    "reference" => CircuitRF.Cli.Reference.Run(args[1..]),
     // The protocol adapter. A VERB, not a second executable — R-aut5-1: a second apphost means a
     // second CrfRenameApphost, a second set of literals across five packaging files, and a second
     // thing a platform script can silently omit.
@@ -1730,6 +1734,8 @@ static int PrintHelp()
     Console.WriteLine("  check   <path>         (is it well formed, does it resolve, is it sound)");
     Console.WriteLine("  explain <path>         (what did circuitRF resolve it to, and by which walk)");
     Console.WriteLine("  read    <path>         (a result file as cubes, or a document as its own text)");
+    Console.WriteLine("  reference [topic] [type]  (what a caller may WRITE: the prose pages, and the");
+    Console.WriteLine("                          generated component catalogue. Takes no path.)");
     Console.WriteLine("  serve   --root <dir>   (a protocol server on stdin/stdout, for an external client)");
     Console.WriteLine();
     Console.WriteLine("hb options:");
@@ -1806,6 +1812,14 @@ static int PrintHelp()
     Console.WriteLine("                          one of circuitRF's own documents, returned verbatim.");
     Console.WriteLine("                          --only / --group narrow a result. Writes nothing.");
     Console.WriteLine();
+    Console.WriteLine("reference options:");
+    Console.WriteLine("  <no arguments>          the topic list, with each topic's size in bytes");
+    Console.WriteLine("  <topic>                 that page, as its own text");
+    Console.WriteLine("  components              the catalogue: every .cnl type token, its nets and");
+    Console.WriteLine("                          its parameters, generated from the live registries");
+    Console.WriteLine("  components <TYPE>       just that primitive");
+    Console.WriteLine("                          Reads no file, runs nothing and writes nothing.");
+    Console.WriteLine();
     Console.WriteLine("serve options:");
     Console.WriteLine("  --root <dir>            REQUIRED. Every path a client names resolves under");
     Console.WriteLine("                          it; one that escapes is refused, never clamped.");
@@ -1830,6 +1844,8 @@ static int PrintHelp()
     Console.WriteLine("Example: circuitrf em  Amp.cem -o /tmp/amp.s2p");
     Console.WriteLine("Example: circuitrf convert Filter.dxf -o gerbers/");
     Console.WriteLine("Example: circuitrf convert fab/ -o board.kicad_pcb");
+    Console.WriteLine("Example: circuitrf reference netlist");
+    Console.WriteLine("Example: circuitrf reference components MLIN --json");
     Console.WriteLine("Example: circuitrf new workspace ~/designs/Amp --tech pcb-4layer_FR-4_62mil_1oz");
     Console.WriteLine("Example: circuitrf new cell ~/designs/Amp Stage1 --views schematic,symbol");
     Console.WriteLine("Example: circuitrf import part parts/ --into ~/designs/Amp --cell SOT-23");

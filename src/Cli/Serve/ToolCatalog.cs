@@ -31,7 +31,17 @@ internal sealed record ToolOption(string Json, string Cli, OptKind Kind, string 
 
 /// <param name="Json">The argument's name in the tool call.</param>
 /// <param name="IsPath">Whether it is confined to the root.</param>
-internal sealed record ToolPositional(string Json, bool IsPath, string Description);
+/// <param name="Required">
+/// Whether the verb refuses without it. Every positional was required until <c>reference</c>, whose
+/// no-argument form is the topic LIST — a real answer, not a usage error — and whose second
+/// positional only means anything after the first.
+///
+/// <para>An optional positional is emitted only while the ones before it were given: argv is
+/// positional, so passing a second argument with the first absent would silently make it the FIRST,
+/// which is a different query answered with nothing said about it. That case is a refusal naming the
+/// argument the caller left out.</para>
+/// </param>
+internal sealed record ToolPositional(string Json, bool IsPath, string Description, bool Required = true);
 
 /// <param name="Verb">The argv prefix — <c>["hb"]</c>, <c>["new","workspace"]</c>.</param>
 internal sealed record ToolMode(
@@ -52,7 +62,7 @@ internal sealed record ToolSpec(
 /// <summary>
 /// The tool surface, and the ONLY thing that translates a tool call into a command line.
 ///
-/// <para><b>Small and broad (R-aut5-4, R-aut-9).</b> Six tools, not one per verb. A client that
+/// <para><b>Small and broad (R-aut5-4, R-aut-9).</b> Seven tools, not one per verb. A client that
 /// discovers tools up front carries every description for the whole session whether or not it calls
 /// one, so the surface is a standing cost paid on every interaction. <c>run</c> selects its analysis
 /// with an argument rather than being six tools; <c>create</c> and <c>import</c> each carry the
@@ -138,7 +148,7 @@ internal static class ToolCatalog
         new("outGrid",     "--out-grid",    OptKind.Path,    "lpp only: where found terminations are written."),
     ];
 
-    // ── the six tools ────────────────────────────────────────────────────────
+    // ── the seven tools ──────────────────────────────────────────────────────
 
     public static readonly ToolSpec[] Tools =
     [
@@ -285,6 +295,31 @@ internal static class ToolCatalog
                     [Json, Group],
                     ""),
             ]),
+
+        // The seventh, and the only one that names no file. It is also reachable as MCP RESOURCES,
+        // which is the cheaper channel — a resource costs a URI and a title until it is read, where
+        // this description is a standing per-session cost. It exists anyway because not every client
+        // surfaces resources to the model, and a capability the model cannot reach is not a
+        // capability (R-aut6-4). Two lines, and it earns them by being the thing that unblocks
+        // writing a document at all.
+        new("reference",
+            "What may be written in circuitRF's documents: the reference pages, and the generated " +
+            "catalogue of every netlist primitive with its terminals and parameters. " +
+            "No arguments lists the topics and their sizes. Reads no file and writes nothing.",
+            null, null,
+            [
+                new("", [ "reference" ],
+                    [
+                        new("topic", false,
+                            "Which topic. Omit for the list. 'components' is the generated catalogue.",
+                            Required: false),
+                        new("type",  false,
+                            "With topic 'components', one primitive's .cnl type token — MLIN, SDD, FET_Statz.",
+                            Required: false),
+                    ],
+                    [],
+                    ""),
+            ]),
     ];
 
     // ── translation ──────────────────────────────────────────────────────────
@@ -332,13 +367,29 @@ internal static class ToolCatalog
         var argv = new List<string>(mode.Verb);
 
         // Positionals first, in declaration order — the verbs take them that way.
+        //
+        // An OPTIONAL one that is absent stops the run: everything after it is positional too, so
+        // emitting a later argument into an earlier slot would answer a different question in
+        // silence. That is refused by name instead.
+        bool stopped = false;
         foreach (var p in mode.Positionals)
         {
             if (arguments[p.Json] is not { } node)
             {
-                refusal = CliDiagnostics.ServeArgumentRequired(tool, p.Json);
+                if (p.Required)
+                {
+                    refusal = CliDiagnostics.ServeArgumentRequired(tool, p.Json);
+                    return null;
+                }
+                stopped = true;
+                continue;
+            }
+            if (stopped)
+            {
+                refusal = CliDiagnostics.ServeArgumentRequired(tool, LastMissingBefore(mode, p));
                 return null;
             }
+
             string? text = AsString(node, tool, p.Json, ref refusal);
             if (text is null) return null;
 
@@ -377,6 +428,11 @@ internal static class ToolCatalog
         argv.Add("--json");
         return [.. argv];
     }
+
+    /// <summary>The positional the caller left out — named, so the refusal says what to add rather
+    /// than what to remove.</summary>
+    private static string LastMissingBefore(ToolMode mode, ToolPositional given)
+        => mode.Positionals.TakeWhile(p => p.Json != given.Json).Last().Json;
 
     private static bool Emit(List<string> argv, ToolOption opt, JsonNode node, string tool,
                              PathRoot root, ref Diagnostic? refusal)
@@ -512,7 +568,7 @@ internal static class ToolCatalog
             }
 
             if (spec.SelectorName is null)
-                foreach (var p in spec.Modes[0].Positionals) required.Add(p.Json);
+                foreach (var p in spec.Modes[0].Positionals.Where(p => p.Required)) required.Add(p.Json);
 
             tools.Add(new JsonObject
             {

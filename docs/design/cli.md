@@ -37,7 +37,7 @@ and it is gated by the same firewall test. That is what the `em` verb (§8) runs
 | `em` | `.cem` | `EmSetupResolver` + `EmRunService` (kernel chosen by `EmKernelRegistry`) | Touchstone `.sNp` + grouped `.npy` at the path Simulate writes; `-o` moves the Touchstone |
 | `elab` | `.cnl` | elaboration only | the elaborated netlist, for development |
 
-Six verbs run no analysis, so none of §3-§6 applies to them and §7's exit codes reduce to 0-or-1:
+Nine verbs run no analysis, so none of §3-§6 applies to them and §7's exit codes reduce to 0-or-1:
 
 | Verb | Input | Does | Writes |
 |---|---|---|---|
@@ -49,6 +49,7 @@ Six verbs run no analysis, so none of §3-§6 applies to them and §7's exit cod
 | `explain` | the same, plus `--expr` / `--analysis` / `--ref` | reports what resolution DECIDED | **nothing** — §10 |
 | `read` | a result file, or one of circuitRF's own documents | loads it back through the readers the GUI reads through | **nothing** — §11.4 |
 | `serve` | `--root <dir>` | a protocol server on stdin/stdout — §11 | whatever the tool it was asked for writes |
+| `reference` | **nothing at all** | reports what a caller may WRITE: the shipped reference pages, and the component catalogue generated from the live registries | **nothing** — §12 |
 
 **`new` is one verb with a noun, not three** (`brief-automation-3-authoring-verbs.md` R-aut3-13): the
 surface has a standing cost, and adding `new schematic` later is a noun rather than a fourth
@@ -443,6 +444,11 @@ override it takes lands in the `EmSetup`, not at the run service, for the same r
 `check`, `explain` and `read` follow 1, 4, 6 and 7, and their §5 analogue is §10's — they run
 nothing and they write nothing.
 
+`reference` follows 1, 4, 6 and 7 and is outside everything else, because it reads no file either
+(§12). Its §5 analogue is R-aut6-7: **it transcribes nothing.** The prose half is the authored page,
+embedded; the component half is generated from the live registries at every call. A fact typed into
+that verb is a fact that will disagree with the code the first time either changes.
+
 `serve` follows 1 and 7 and is outside all the rest, because it is not a verb that does work: it is
 the one adapter that dispatches to the others (§11). Its §4 analogue is the inversion of §3.1 —
 stdout is the protocol and the result goes into a frame — and its §5 analogue is R-aut-1: it owns
@@ -641,7 +647,7 @@ was checked rather than assumed.
 
 ### 11.3 The tool surface
 
-**Six tools, and the count is the point** (R-aut-9). A client that discovers tools up front carries
+**Seven tools, and the count is the point** (R-aut-9). A client that discovers tools up front carries
 every description for the whole session whether or not it calls one, so the surface is a standing
 cost paid on every interaction.
 
@@ -653,6 +659,7 @@ cost paid on every interaction.
 | `create` | `new workspace` / `new cell` |
 | `import` | `import part` / `convert` |
 | `read` | `read` |
+| `reference` | `reference` — the same bytes the resources below serve, for a client that does not surface resources to the model |
 
 `ToolCatalog` is one table, and **the JSON schema is generated from the same rows that build the
 command line**. A description that says an argument exists and a translation that drops it cannot
@@ -668,6 +675,32 @@ failure mode this whole series is about.
 `run` resolves an externally-supplied device model with it. It is deliberately not a tool argument: a
 kit folder is installed software rather than design data, it lives outside the root by nature, and
 letting a client name one would be the server pointing at an arbitrary directory on its say-so.
+
+**Both of `reference`'s arguments are OPTIONAL positionals**, which no other tool has. Its
+no-argument form is the topic LIST, which is a real answer rather than a usage error — so `topic` is
+absent from the schema's `required`. Because argv is positional, an argument given with an earlier
+one missing is REFUSED rather than promoted into the empty slot: `{"type": "MLIN"}` with no topic
+would otherwise have asked for a topic called `MLIN`, which is a different question answered in
+silence.
+
+### 11.3a Resources — the cheaper channel for the same bytes
+
+The server also declares MCP **resources**, one per reference topic, at
+`circuitrf://reference/<topic>`. This is the correct channel for the reference surface: a resource
+costs a URI, a title and a size until it is read, where a tool description is a standing per-session
+cost. Each entry advertises its `size` in bytes for the reason the CLI's own topic list prints one —
+a list that hides the cost makes the cheap topics and the expensive ones look alike.
+
+**Both channels return the same bytes**, because both translate to `reference <topic> --json` and
+hand back what came out of `CliEntry.Run`. The `mimeType` is `application/json` rather than
+`text/markdown` for exactly that reason: the payload is the verb's own document with the page inside
+it, not a second encoding of the page. `ServeProtocolAdapterTests` compares a resource read against
+the CLI's document byte for byte, which is R-aut-13 applied to the resource half.
+
+`circuitrf read` is deliberately NOT the vehicle. Its `path` is confined to `--root` (§11.5) and a
+reference topic is not a file in the client's tree; overloading it would put a non-path through a
+path-confinement check, which is the kind of exception that makes a security boundary stop meaning
+one thing.
 
 ### 11.4 `read` — the verb the tool table needed
 
@@ -729,3 +762,99 @@ are normalized and nothing else: the adapter RESOLVES paths, so the CLI side is 
 path; and a verb that CREATES something cannot create it twice, so those two calls are given
 different destinations and the destination is substituted out. The stdout audit, the three
 root-escapes, the lifecycle and the cancellation are in the same file.
+
+## 12. `reference` — what a caller may write, before it writes it
+
+`check` tells a caller that what it wrote is wrong. `explain` tells it what circuitRF made of what it
+wrote. Neither tells it what it is **allowed** to write — the primitive type names, how many nets each
+takes, what its parameters are called, what a unit suffix means, where a `define … end` block goes.
+A client that cannot spell `MLIN` is blocked before `check` can help it.
+
+**And the failure is quiet.** A netlist naming a type that does not exist fails at elaboration with a
+sentence about an unresolved name; a component given a plausible-but-wrong parameter name resolves to
+that parameter's default and simulates, producing a converged, complete-looking, wrong answer. That
+second one is the same class of failure `explain --analysis` was built for.
+
+```
+circuitrf reference                     # the topic list, with each topic's size in bytes
+circuitrf reference netlist             # one topic, as its own text
+circuitrf reference components          # the catalogue
+circuitrf reference components MLIN     # one primitive
+```
+
+It takes no path, reads no file and writes nothing — the only verb here about no document at all,
+which is also why it is not a mode of `explain`: every `explain` answer is anchored to a path.
+
+### 12.1 Two halves, and they are different in kind
+
+**The prose topics are AUTHORED.** They are the pages under `docs/user/src/reference/`, embedded in
+`CircuitRF.Design` as plain .NET `EmbeddedResource` items and read through
+`Assembly.GetManifestResourceStream` — never Avalonia's `AssetLoader`, which throws with no live
+platform. `ShippedTechnologies` is the precedent and its header names the trap this follows: **the
+`<EmbeddedResource>` item and the class ship in the same commit**, because a class shipped without its
+resources compiles, enumerates nothing and reports nothing.
+
+The `.csproj` references the authored files **in place** rather than copying them into the project — a
+copy is a file that will be edited on one side only and nothing will report it — so the embedded bytes
+are the authored bytes, and `ReferenceCliVerbTests` compares them. The YAML front matter and the docs
+factory's `{{…}}` placeholders are stripped **at read**, not at build, which is what keeps that
+comparison possible.
+
+**The component catalogue is GENERATED**, at every call, from `ComponentModelFactory` (the `.cnl`
+tokens), `ComponentTypeRegistry` (parameters, defaults, units, visibility, meanings, category, search
+terms) and `SymbolPortDefs` (the terminals, in the order a netlist line writes their nets). It
+transcribes nothing. `DocTables` renders the documentation tables *from the same `ComponentCatalog`*,
+because the page and the machine answer must be one computation or they will disagree the first time
+one is changed.
+
+**There is no third thing.** No grammar, no schema, no BNF: a hand-written grammar in the adapter
+would be a second description of `CnlReader` that drifts from it silently, which is the exact failure
+this whole series exists to prevent.
+
+### 12.2 The topic set is curated
+
+Reading is the expensive direction (`automation-architecture.md` R-aut-10) and a client pays for every
+byte, so what ships is the authoring critical path: `netlist`, `expressions`, `units`,
+`measurements`, `pins-ports-terms`, `sdd`, `file-formats`, and `component-notes`. **`cli.md` is
+excluded deliberately** — at 54 kB it is the largest page of them all, and a protocol client already
+has every verb's schema from `tools/list`, so it is the one page it needs least.
+
+The topic list carries each topic's size **as served**, in bytes, so a client choosing between a
+4.4 kB page and an 84 kB one can choose.
+
+**`components` is the catalogue; the prose page about components is `component-notes`.** The two
+answer different questions — the catalogue says what may be WRITTEN, the page says what it MEANS —
+and they cannot both hold the same name. The machine answer keeps the plain one.
+
+### 12.3 A port count that is not fixed is reported as not fixed
+
+Several primitives are variadic: an SDD's and a `Z_Port`'s and an `SnP`'s port count follow
+`NumPorts`, a Verilog-A model's follows `Pins`, the ideal switch's follows `Throws`, a wBond's follows
+the arrays it places. Printing a *default* where the answer is *"it depends, and here is what on"* is
+the `sweep-unit-scale-and-mark` failure class — a number that is plausible, specific and wrong, with
+nothing reporting it. So those report `determinedBy` and no count, and the terminals they do carry are
+labelled with the port count they were listed at.
+
+**Nothing constructs a parameterized model to ask it.** And nothing reads
+`ComponentModel.PortCount` either: that is the model's port count in the MNA sense and is not the
+number of nets an instance line writes — a current probe reports 1 and takes two nets, a FET reports 2
+and takes three, a 2-port SDD reports 2 and takes four. `SymbolPortDefs` is the contract
+`NetExtractor` emits nets by, so it is the one that answers the question a caller is actually asking.
+
+### 12.4 The mismatch is part of the answer
+
+`ComponentModelFactory` keys on the `.cnl` token; `ComponentTypeRegistry` keys on `SymbolKind`; and
+`EngineReference` bridges them without being total in either direction. **Five** `EngineReference`
+targets have no factory entry (`GND`, `MEAS`, `Pin`, `SpiceModel`, `VAR` — three of them are not
+components at all, which is the answer for them) and **seven** factory types no `EngineReference` maps
+to (`Chain`, `ExtDevice`, `I_nTone`, `SemiC`, `Short`, `Term`, `V_nTone`). A type in the second list is
+placeable in a `.cnl` and has no palette metadata; one in the first is drawable and will not
+elaborate. Both are things a client needs told, so the catalogue emits both with a note, never the
+intersection.
+
+### 12.5 The gate
+
+`tests/Ui.Tests/ReferenceCliVerbTests.cs` for the verb, the embedded set and the catalogue;
+`tests/Ui.Tests/ServeProtocolAdapterTests.cs` for both protocol channels. Every catalogue assertion is
+made against the live registry rather than a committed list — a golden of all 68 primitives would pass
+forever after somebody froze it.

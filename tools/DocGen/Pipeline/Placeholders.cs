@@ -6,6 +6,11 @@ using System.Net;
 using System.Text.RegularExpressions;
 using CircuitRF.Ui.Diagnostics;
 using CircuitRF.Ui.Schematic;
+// ComponentTypeRegistry and SymbolKind moved to src/Design in AUT-2. src/Ui absorbed that move with
+// its own GlobalUsings.cs — but global usings are per-project and DocGen is not in circuitRF.slnx,
+// so a plain `dotnet build` never noticed this file had stopped compiling. Detail in
+// src/Cli/RESOLVED.md.
+using CircuitRF.Design.Schematic;
 
 namespace CircuitRF.DocGen.Pipeline;
 
@@ -198,7 +203,11 @@ public sealed class Placeholders
 
         var row = SymbolArtworkGenerator.Catalog.FirstOrDefault(r => r.Kind == kind);
         int ports = row.File is null ? 2 : row.Ports;
-        return DocTables.ComponentParameters(kind, ports);
+        // Terminals first, then values. The reader has just looked at the figure and the next
+        // question is which lead is which — an order the picture cannot say and the models read as a
+        // contract (DocTables.ComponentPins). Emitted here rather than as a second placeholder so
+        // every component section gains it with no edit to the page.
+        return DocTables.ComponentPins(kind, ports) + DocTables.ComponentParameters(kind, ports);
     }
 
     // ── {{anchor: page#id}} ───────────────────────────────────────────────────

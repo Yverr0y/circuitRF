@@ -627,6 +627,15 @@ src/Design/Layout/ShippedTechnologies.cs|No shipped technology named \"{id}\".
 src/Design/Workspace/WorkspaceCreate.cs|A folder named '{name}' already exists at that location.
 src/Design/Workspace/WorkspaceCreate.cs|No shipped technology named '{id}'. The shipped technologies are: 
 
+# ReferenceLibrary's one sentence is the SAME case as ShippedTechnologies' first, one brief later
+# (brief-automation-6-reference-and-components.md R-aut6-5): a missing embedded stream means the
+# `<EmbeddedResource>` item and the class shipped apart, which is a BUILD defect nobody using
+# circuitRF can act on — and `ReferenceCliVerbTests.EveryTopic_IsEmbedded_AndItsBytesAreTheAuthoredFile`
+# is what turns it into a failing test rather than something a user ever reads. The refusals a caller
+# can actually reach — an unknown topic, an unknown primitive — are coded diagnostics with ids in
+# CliDiagnostics.
+src/Design/Reference/ReferenceLibrary.cs|Embedded reference resource \"{topic.ResourceName}\" not found.
+
 # -- The DRC engine and the `.wasm` rule-file model moved from src/Ui to src/Design so
 #    `circuitrf check` could run design rules with no display
 #    (brief-automation-4-check-and-explain.md R-aut4-3, 2026-09-05).
