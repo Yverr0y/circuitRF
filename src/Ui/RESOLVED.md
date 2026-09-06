@@ -20982,3 +20982,66 @@ engine-throws path on its first run.
 
 The Data Display half of the same report — a ComboBox writing back into a rebuild, and untraced
 undo/redo — is in `src/Ui/DataDisplay/RESOLVED.md`.
+
+## "DC Block" read as a series block in the through path (2026-09-06)
+
+**Reported by a new user, who was not wrong about what the words say.** Two complaints, one root.
+The first: the Designer looked broken, because pressing the block toggle added capacitors in shunt
+arms running to ground rather than in the signal path. The second: a matching tool should get from a
+target impedance to 50 Ω in a given number of parts, and this one behaves like a filter designer.
+
+Both are expectation gaps against a single-frequency L/π/T matching tool, and neither is a defect:
+
+- **`DC Block` is the label of a control that does the opposite of what the phrase means everywhere
+  else.** In a legacy matching tool "DC block" is a capacitor in the THROUGH path, in series with the
+  signal. Match never inserts one of those. Its toggle protects the bias FROM the network, by putting
+  a capacitor in series with each SHUNT inductor that would otherwise short the supply to ground — so
+  the new capacitors appear in the arms that run to ground, stacked under the inductor they block.
+  Pressed by someone reading the label the ordinary way, the feature looks exactly like a
+  mis-synthesis, which is what was reported.
+- **"Parts between gnd" is a ladder having shunt arms.** Nothing to fix; nothing on screen said so.
+- **The part count is genuinely higher than a two-element L-match** — order 2 is four elements in
+  every form (§16.2) — and the reason is a theorem, not a preference: a network that matches over a
+  band is a filter. The counter is absorption: the terminations supply one or two of those elements
+  and they are not parts anyone buys. Neither half was stated before the reader met the order picker.
+
+**What changed.** No synthesis change, no behaviour change.
+
+1. **The toggle is now `Shunt DC Block`.** "Shunt" is the word that kills the misreading, "DC" is the
+   word that keeps the control findable; the owner asked for both, so the label carries both.
+2. **Every enabled tooltip opens with the general rule and with what the control is NOT** — that it
+   puts a DC-blocking capacitor in series with every shunt inductor needed to stop this termination's
+   bias from being shorted to ground, and that it is not a series DC block in the through path,
+   which Match never inserts — before it goes on to name which inductors they are on this network.
+   The lead deliberately states **every** shunt inductor rather than one named part, at the owner's
+   direction, because the Norton-π case really does block two and a lead naming `L1` would be wrong
+   there. The disabled reasons now open by saying nothing at this end can short the bias to ground,
+   and keep their specific reason after it.
+3. **The reference chapter opens with an orientation section** — what Match is not (an L/π/T tuner,
+   a Smith-chart walker), why the vocabulary is filter vocabulary, the part count and absorption, and
+   a forward pointer to the block. The DC Block section leads with a callout correcting the misread
+   before any of the compensation arithmetic. The New User's Guide gained a §12 carrying the short
+   form, because the reader who most needs it is the one who does not open the reference.
+
+**The trap worth recording is the width, not the wording.** The termination card's header row is
+`Auto,*,Auto,Auto` inside a **285 px** pane, which leaves the card **237 px** of content (less the
+pane's 4 px margin, 1 px border and 10 px padding each side, less the card's own 1 px border and 8 px
+padding). At FontSize 10 the candidates measure: `DC Block` 43.3, `Shunt DC Block` 73.6,
+`DC Block Shunt L` 82.1. With `Termination 1` at 73.4 (FontSize 11 SemiBold), Probe's box at 46 and
+the ⚑ refusal flag at 12, **`DC Block Shunt L` cannot fit and `Shunt DC Block` only fits once the
+three controls give up six pixels of padding and margin** — at the original spacings the row wanted
+249 px of 237 and clipped the toggle's last glyph, but ONLY on a card carrying the flag, which is the
+state nobody looks at while designing a label. The flag's `Auto` column collapses to zero when it is
+hidden, so the ordinary case has 20 px of slack and hides the problem completely.
+
+**How it was checked, and the cheap way to check the next one.** Text advances were measured with
+SkiaSharp against the platform UI font rather than estimated from a characters-per-pixel guess, and
+the final fit was read off the **regenerated `match-designer.svg`**, whose glyph `x` list and clip
+rect are the real Avalonia layout: the label's clip is 74 px wide and its last glyph starts at 68.1.
+`tools/DocGen` carries `Avalonia.Headless`, so a figure that contains the control is a free layout
+oracle — no screenshot, no running app.
+
+**Unrelated churn that came with the docs run, both classified rather than reverted or ignored:**
+`analysis-editor-hb-dark.svg` is the known nondeterministic 7.2° chevron rotation and was reverted;
+`docs/user/reference/data-display.html` picked up the decibel-floor section whose `.md` had landed in
+c1a413bb without the HTML being regenerated — kept, because it is a real gap being closed.

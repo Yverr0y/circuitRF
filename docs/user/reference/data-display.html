@@ -479,6 +479,24 @@ loaded file.</p>
 assigned to a <strong>secondary (right-hand) Y axis</strong> on a rectangular plot, which is how gain in dB and
 efficiency in per cent share one frame legibly. Autoscale is on until you set a limit; setting one turns
 it off for that axis, so a figure you have framed deliberately does not re-frame itself on the next run.</p>
+<h2 id="db-floor">The decibel floor</h2>
+<p><strong>A decibel trace bottoms out at −250 dB.</strong> Below that the curve is drawn flat at −250, and a readout
+says so with the inequality rather than a bare number — a marker info box reads <code>dB(S(1,1)) ≤ -250.00</code>,
+a table cell <code>≤ -250.00</code>.</p>
+<p>This matters more often than it sounds, because a quantity that is <em>analytically zero</em> does not come
+back as zero. An ideal 50 Ω line terminated in 50 Ω has S(1,1) ≡ 0, and what the solver returns is
+double-precision roundoff: magnitudes scattered over a few orders of magnitude with the occasional exact
+zero mixed in. Converted to dB with no floor, that is a trace flickering across a 59 dB band with spikes
+to −∞ — and autoscale then sizes the axis to the flicker, so anything real sharing the plot is squashed
+into a line. The floor turns the noise into a flat line at the bottom of the frame and lets the rest of
+the plot keep its scale.</p>
+<p>−250 dB was chosen to sit below anything a result can physically mean and above anything roundoff can
+produce: thermal noise power in a 1 Hz bandwidth is −204 dB(W), while roundoff on a quantity of order
+one reaches −285 dB. <code>dB</code>, <code>dB10</code> and <code>dB20</code> all share the one floor.</p>
+<p><strong>The floor is applied to the picture only.</strong> A measurement expression, and any value you export to
+<code>.npy</code>, <code>.mat</code> or Touchstone, carries the unclamped number — so <code>dB(S(1,1))</code> written as a measurement
+can report a value below −250 dB even while the plot of the same quantity shows the floor. A number's
+value never depends on whether it happened to be drawn.</p>
 <h2 id="markers">Markers</h2>
 <p>Drop a marker on a trace to read its value. Markers are per-trace, they persist in the saved <code>.cdd</code>, and
 on a load-pull contour they read the interpolated <strong>surface</strong> rather than the nearest grid point — which

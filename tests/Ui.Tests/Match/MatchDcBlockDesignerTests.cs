@@ -731,7 +731,7 @@ public sealed class MatchDcBlockDesignerTests(ITestOutputHelper output)
         Assert.True(header > 0, "the termination card's header row should still be Auto,*,Auto,Auto");
 
         int probe = axaml.IndexOf("Content=\"Probe\"", header, StringComparison.Ordinal);
-        int toggle = axaml.IndexOf("<ToggleButton Grid.Column=\"1\" Content=\"DC Block\"", header,
+        int toggle = axaml.IndexOf("<ToggleButton Grid.Column=\"1\" Content=\"Shunt DC Block\"", header,
                                    StringComparison.Ordinal);
         Assert.True(toggle > header && toggle < probe,
                     "the Block toggle belongs in column 1, between the heading and Probe");

@@ -59,27 +59,41 @@ public sealed partial class MatchDesignerViewModel
     /// <summary>True when a real shunt inductor lies on this end's DC path in the network as it now stands.</summary>
     public bool CanDcBlock(int end) => DcBlockHost(end) is not null;
 
-    /// <summary>What the <c>DC Block</c> toggle offers, or the one thing standing in its way.</summary>
+    /// <summary>What the <c>Shunt DC Block</c> toggle offers, or the one thing standing in its way.</summary>
     /// <remarks>
     /// <b>The sentence "this end's arm is a series arm — its capacitor already blocks DC" is gone,
     /// because it was false</b> (owner, 2026-08-28): a series-RC termination's capacitor is the
     /// device's own, absorbed and not on the board, and a Norton T's series arm has no capacitor at
     /// all. What isolates an end is a REAL series capacitor, and that is the one case named here.
+    ///
+    /// <para><b>Every enabled tooltip opens with what the control is and what it is NOT</b> (owner,
+    /// 2026-09-06). A new user read the former <c>DC Block</c> label as the through-path series
+    /// blocking capacitor every legacy matching tool offers, clicked it, and saw capacitors appear in
+    /// the shunt arms — which read as a defect rather than as the feature. The label now says
+    /// <c>Block Shunt L</c> and the lead sentence states the general rule — <b>every</b> shunt
+    /// inductor that would otherwise short the bias, not one named part — before the text goes on to
+    /// name which ones they are on this network. The disabled reasons open the same way, saying that
+    /// nothing here would short the bias rather than only that no host was found. The label reads
+    /// <c>Shunt DC Block</c> because "shunt" is the word that kills the misreading and "DC" is the
+    /// word that keeps the control findable; <c>MatchDesignerWindow.axaml</c> carries the width
+    /// arithmetic that decided the two of them fit and <c>DC Block Shunt L</c> does not.</para>
     /// </remarks>
     public string DcBlockTooltip(int end)
     {
         if (DcBlockResolution(end) is not { } host)
-            return "No shunt inductor lies on this end's DC path.";
+            return NoShuntInductor;
 
         if (host.Hosts.Count == 1)
         {
             if (host.Path.Count == 0)
-                return "Insert a DC-blocking capacitor in series with this end's shunt inductor. The "
+                return Lead
+                     + "Here that is one capacitor, in series with this end's shunt inductor. The "
                      + "inductor is enlarged so the branch's reactance at the band centre is unchanged. "
                      + "Edit the value in the network pane.";
 
             string name = _rebuild!.Network!.Elements[host.Index].Name;
-            return $"Insert a DC-blocking capacitor in series with {name}, the first shunt inductor on "
+            return Lead
+                 + $"Here that is one capacitor, in series with {name}, the first shunt inductor on "
                  + $"this end's DC path ({Through(host.Path)}). {name} is enlarged so the branch's "
                  + "reactance at the band centre is unchanged. Edit the value in the network pane.";
         }
@@ -93,25 +107,42 @@ public sealed partial class MatchDesignerViewModel
             var parts = host.Hosts.Select(h =>
                 h.Path.Count == 0 ? net.Elements[h.Index].Name
                                   : $"{net.Elements[h.Index].Name} ({Through(h.Path)})").ToList();
-            return $"Insert a DC-blocking capacitor in series with each of {Join(parts)} — every shunt "
+            return Lead
+                 + $"Here that is one capacitor in series with each of {Join(parts)} — every shunt "
                  + "inductor on this end's DC path up to the next series capacitor. Each inductor is "
                  + "enlarged so its branch's reactance at the band centre is unchanged. Edit the value "
                  + "in the network pane.";
         }
 
         if (host.Stop == DcBlockStop.SeriesCapacitor)
-            return $"{host.StopElementName} is a real capacitor in this end's through path and already "
+            return "Nothing here can short this termination's bias to ground, so no block is needed. "
+                 + $"{host.StopElementName} is a real capacitor in this end's through path and already "
                  + "isolates it from DC. A block beyond it would not protect this termination — feed "
                  + $"its bias on the termination's side of {host.StopElementName}.";
 
         // The lowpass form has no shunt inductor ANYWHERE — it passes DC end to end — so the reason
         // is about the form and not about this end's path. See match.md §22.1.
         if (_design.Form == NetworkForm.Lowpass)
-            return "A lowpass ladder passes DC end to end; a series block in the through path is not "
+            return "Nothing here can short this termination's bias to ground, so no block is needed. "
+                 + "A lowpass ladder passes DC end to end; a series block in the through path is not "
                  + "a shunt-inductor block and is not offered here.";
 
-        return "No shunt inductor lies on this end's DC path.";
+        return NoShuntInductor;
     }
+
+    /// <summary>
+    /// The opening sentence of every ENABLED tooltip: what the control does, stated as the general
+    /// rule, and what it is not. See this class's own note on why the second half is there.
+    /// </summary>
+    private const string Lead =
+        "Puts a DC-blocking capacitor in series with every shunt inductor needed to stop this "
+        + "termination's bias from being shorted to ground. It is NOT a series DC block in the "
+        + "through path — Match never inserts one of those. ";
+
+    /// <summary>The disabled reason when the walk finds no host and no named obstacle.</summary>
+    private const string NoShuntInductor =
+        "Nothing here can short this termination's bias to ground, so no block is needed — no shunt "
+        + "inductor lies on this end's DC path.";
 
     /// <summary>"reached through L4 — a series inductor passes DC" / "… L4 and L6 — series inductors pass DC".</summary>
     private static string Through(IReadOnlyList<string> path) => path.Count == 1

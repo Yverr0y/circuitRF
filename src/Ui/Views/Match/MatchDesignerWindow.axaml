@@ -113,19 +113,38 @@
                          series capacitor in the through path — a highpass pole, a different
                          compensation, and deliberately not offered). Saying so beats offering nothing
                          silently. -->
-                    <ToggleButton Grid.Column="1" Content="DC Block" FontSize="10"
-                                  Padding="8,1" MinHeight="0" Margin="8,0,0,2"
+                    <!-- "Shunt DC Block", NOT "DC Block" (owner, 2026-09-06). A new user read the
+                         old label as the through-path series blocking capacitor every single-frequency
+                         matching tool offers, clicked it, and saw capacitors appear in the SHUNT arms
+                         instead - which reads as a defect rather than as the feature. "Shunt" is the
+                         word that kills that reading and "DC" is the word that keeps the control
+                         findable, so the label carries both.
+
+                         THE ROW HAS 237 px AND THE LABEL IS 73.6 px WIDE AT FontSize 10, so the six
+                         pixels the toggle and its neighbours give up here are what stop it clipping.
+                         The card's content width is 237 (the 285 px pane, less its 4 px margin, 1 px
+                         border and 10 px padding on each side, less the card's own 1 px border and
+                         8 px padding); at the original spacings the row wanted 73.4 ("Termination 1"
+                         at FontSize 11 SemiBold) + 8 + 97.6 (label + 16 padding + 2 border) + 8 +
+                         46 (Probe) + 16 (the flag and its margin) = 249, which is 12 over and clips
+                         the toggle's last glyph whenever a refusal puts the flag on this card.
+                         Padding 5,1 here and Margin 6 / 6 / 2 across the three controls bring it to
+                         73.4 + 6 + 85.6 + 6 + 46 + 14 = 231, with 6 px to spare. Every trim is
+                         horizontal, so the two buttons still share a height, and the flag column
+                         collapses to nothing when it is hidden, which is the ordinary case. -->
+                    <ToggleButton Grid.Column="1" Content="Shunt DC Block" FontSize="10"
+                                  Padding="5,1" MinHeight="0" Margin="6,0,0,2"
                                   HorizontalAlignment="Right" VerticalAlignment="Center"
                                   IsChecked="{Binding HasDcBlock, Mode=TwoWay}"
                                   IsEnabled="{Binding DcBlockEnabled}"
                                   ToolTip.Tip="{Binding DcBlockTooltip}"/>
                     <Button Grid.Column="2" Content="Probe" FontSize="10"
-                            Padding="8,1" MinHeight="0" Margin="8,0,0,2"
+                            Padding="8,1" MinHeight="0" Margin="6,0,0,2"
                             VerticalAlignment="Center"
                             Command="{Binding ProbeCommand}"
                             IsEnabled="{Binding CanProbe}"
                             ToolTip.Tip="{Binding ProbeTooltip}"/>
-                    <TextBlock Grid.Column="3" Text="⚑" FontSize="12" Margin="4,0,0,0"
+                    <TextBlock Grid.Column="3" Text="⚑" FontSize="12" Margin="2,0,0,0"
                                Foreground="{DynamicResource CrfWarningBrush}"
                                IsVisible="{Binding IsFlagged}"
                                ToolTip.Tip="A refusal names this termination — see the status strip"/>

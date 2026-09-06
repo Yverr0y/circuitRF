@@ -20,6 +20,7 @@ lede: Never used a circuit simulator before? Perfect — this guide starts from 
       <li><a href="#display">The Data Display &amp; plot types</a></li>
       <li><a href="#examples">Two worked examples</a></li>
       <li><a href="#loadpull">Loadpull, contours &amp; Pursuit</a></li>
+      <li><a href="#match">Matching networks: the Match component</a></li>
     </ol>
   </nav>
 
@@ -260,6 +261,36 @@ Two things make this delightful in circuitRF:
 - **Loadpull Pursuit saves you time.** Instead of you choosing the grid and hunting for the
   optimum by eye, Pursuit *automatically searches* for the terminations that maximize your chosen
   metric (peak power, peak efficiency), homing in on the useful region of the Smith chart for you.
+
+## 12 · Matching networks: the Match component {#match}
+
+Sooner or later you will want to get from the impedance your transistor presents to the 50 Ω the rest
+of the world runs at. circuitRF has a component that designs the network for you: place a **Match**,
+double-click it, and the **Match Designer** opens.
+
+One thing to know before you open it, because it is the thing every experienced RF engineer trips over:
+
+<div class="callout warn">
+<span class="label">Match is a matching tool, but it works over a band</span>
+<p>If you have used a single-frequency matching tool — the kind where you give it a target impedance
+and it hands back two parts — Match will look unfamiliar. It asks for a <b>band</b>, an <b>order</b>
+and a <b>ripple</b>, which is filter vocabulary. That is not a detour: a network that matches over a
+band <em>is</em> a filter, so those three words are simply how you say <em>how wide</em> and
+<em>how well</em>. You are still designing a match.</p>
+<p>Two things follow. <b>You get more parts than a two-element L-match</b> — but some of them are your
+device's own capacitance, absorbed into the network rather than bought. And <b>parts that run to
+ground are normal</b>: a ladder alternates series arms and shunt arms, and a shunt arm goes to ground
+by definition.</p>
+</div>
+
+There is also one button worth reading about before you press it. **Shunt DC Block** is *not* the
+series blocking capacitor you may be expecting in the signal path — it stops a shunt inductor from
+shorting your bias supply to ground, so the capacitors it adds appear in the arms that run to ground.
+The <a href="../reference/match.html#dcblock">reference chapter</a> explains it, and the tooltip on
+the button says the same thing in two sentences.
+
+<p class="small">The full story — what absorption buys you, how to read the solutions list, and the two
+worked amplifier examples — is in <a href="../reference/match.html">The Match Component</a>.</p>
 
 ---
 

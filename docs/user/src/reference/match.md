@@ -9,12 +9,13 @@ lede: Direct synthesis of a bandpass matching network that absorbs both terminat
 <nav class="toc">
 <h2>On this page</h2>
 <ol>
+<li><a href="#orientation">If you have used a single-frequency matching tool</a></li>
 <li><a href="#what">What Match is</a></li>
 <li><a href="#absorption">Absorption, and why it is the whole point</a></li>
 <li><a href="#designer">The Match Designer</a></li>
 <li><a href="#spec">The specification pane</a></li>
 <li><a href="#probe">Probe: reading the terminations off your own circuit</a></li>
-<li><a href="#dcblock">DC Block: a DC-blocking capacitor on a biased end</a></li>
+<li><a href="#dcblock">Shunt DC Block: why the capacitor lands in a shunt arm</a></li>
 <li><a href="#transforms">Norton transforms: moving values without moving the response</a></li>
 <li><a href="#solutions">The solutions list</a></li>
 <li><a href="#feasibility">Feasibility: what is possible before you synthesise anything</a></li>
@@ -24,6 +25,45 @@ lede: Direct synthesis of a bandpass matching network that absorbs both terminat
 <li><a href="#refs">References</a></li>
 </ol>
 </nav>
+
+## If you have used a single-frequency matching tool {#orientation}
+
+Read this first if your instinct is *"give me a target impedance, 50 Ω, and a part count."* Match does
+exactly that job — it just does it **over a band**, and that changes what comes out in three ways that
+surprise people.
+
+<div class="callout warn">
+<span class="label">The one sentence</span>
+<p><b>A network that matches over a band <em>is</em> a filter</b> — that is a theorem, not a design
+choice — so Match asks for a band and an order the way a filter designer does. It is still a matching
+tool. You are not being asked to design a filter, and there is no filter specification hiding
+underneath: <b>order</b> and <b>ripple</b> are how you say <em>how wide</em> and <em>how well</em>.</p>
+</div>
+
+**What Match is not.** It is not an L / π / T tuner that transforms one impedance at one frequency, and
+it is not a Smith-chart tool that walks you round constant-R and constant-G circles element by element.
+Those give you the smallest network that is exact at a point and falls apart either side of it. Match
+gives you the widest band the load's Q allows, which is a different network with a different part
+count. If a single frequency is genuinely all you need, place the L and C yourself — Match is the tool
+for the case where a point match is not enough.
+
+Three things that follow, and that the rest of this page assumes you have read:
+
+- **The part count is higher than a two-element L-match, and some of the parts are already on your
+  board.** The smallest network Match offers is order 2, which is four elements in every form (see
+  [Bandpass, lowpass and highpass](#forms)); an L-match is two. But **the ones the terminations supply
+  are not parts you buy** — a transistor's C<sub>gs</sub> or C<sub>ds</sub> is *absorbed* and becomes an
+  element of the ladder, drawn at the end that supplies it. Read the count off the ladder, not off the
+  order. See [Absorption](#absorption) for why that is the whole point of the component.
+
+- **Elements to ground are normal, and they are half of every ladder.** A matching ladder alternates
+  series arms and shunt arms; the shunt arms go to ground because that is what a shunt arm is. Seeing
+  capacitors and inductors between a node and ground is the network working, not a bug.
+
+- **Shunt DC Block does not put a capacitor in the through path.** If you came here expecting the
+  series blocking capacitor a legacy tool drops into the signal line, see
+  [Shunt DC Block](#dcblock) — the button solves a different problem, and Match never inserts a
+  through-path block. This is the single most-misread control in the Designer.
 
 ## What Match is {#what}
 
@@ -155,7 +195,7 @@ ordinary circuitRF value-and-unit pair, so [unit entry](units.html) works exactl
 |---|---|
 | **Topology** | Series or parallel. This is a physical statement about the network you are matching, and it changes which order parities are available. |
 | **R**, **X kind**, **Value** | The termination. `X = –` means purely resistive. |
-| **DC Block** | Inserts a DC-blocking capacitor in series with the first shunt inductor on this end's DC path, and enlarges the inductor to compensate — see [DC Block](#dcblock). Available whenever there is such an inductor; greyed out, with the reason, otherwise. |
+| **Shunt DC Block** | **Not** a series blocking capacitor in the through path — Match never inserts one of those. It puts a DC-blocking capacitor in series with every *shunt* inductor that would otherwise short this end's bias to ground, and enlarges each inductor to compensate — see [Shunt DC Block](#dcblock). Available whenever such an inductor exists; greyed out, with the reason, otherwise. |
 | **Conjugate** | Targets Z* instead of Z — which flips the reactance sign, and so turns a measured parallel R‖C into a parallel R‖L target. |
 | **Bands** | Single, Dual or Tri. Dual and Tri match two or three bands at once — see [Multiband](#dualband). |
 | **Band f1, f2** | The passband. Everything is computed at ω₀ = √(ω₁ω₂) with fractional bandwidth *w*. |
@@ -207,12 +247,23 @@ The button is greyed out, with a reason, when the pin is unconnected, when its n
 it, when the schematic has unresolved errors, or when the `Match` is inside a cell rather than in a
 test bench — there is no external network to look at from inside a definition.
 
-## DC Block: a DC-blocking capacitor on a biased end {#dcblock}
+## Shunt DC Block: why the capacitor lands in a shunt arm {#dcblock}
+
+<div class="callout warn">
+<span class="label">This is not the series DC block you are thinking of</span>
+<p>In most matching tools "DC block" means <b>a capacitor in the through path</b>, in series with the
+signal, put there so the stage either side can sit at its own bias. <b>Match never inserts one of
+those</b> — if you want one, place it in the schematic outside the Match component, where it belongs.</p>
+<p>What this button does is the opposite direction: it protects the bias <b>from the network</b>, by
+putting a capacitor in series with each <b>shunt</b> inductor — the arms that run to ground. So the new
+capacitors appear <em>in the shunt arms</em>, stacked under the inductor they block. That is the
+feature, not a mis-synthesis.</p>
+</div>
 
 **A shunt inductor at a biased node is a short across the supply.** If the end of your ladder is a shunt
 inductor and the termination behind it carries DC — a drain, a gate — the network as synthesised puts
-your supply on ground. The **DC Block** toggle on that termination's card fixes it, and fixes the thing
-people normally get wrong afterwards.
+your supply on ground. The **Shunt DC Block** toggle on that termination's card fixes it, and fixes the
+thing people normally get wrong afterwards.
 
 Click it and two things happen:
 
