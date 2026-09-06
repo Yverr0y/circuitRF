@@ -44,7 +44,7 @@ using System.Globalization;
 using System.Text;
 using CircuitRF.WBond;
 
-namespace CircuitRF.Ui.Layout.Drc;
+namespace CircuitRF.Design.Layout.Drc;
 
 /// <summary>Parses and formats the `.wasm` predicate language.</summary>
 public static class DrcPredicateParser

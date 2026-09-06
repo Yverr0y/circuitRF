@@ -58,6 +58,13 @@ internal static class JsonRun
     /// verb hands them to the exporter.</summary>
     public static DataSet? Data;
 
+    /// <summary>What <c>check</c> found, in counts (R-aut4-10). The findings themselves travel as
+    /// diagnostics; this is the tally that tells "checked nothing" from "checked everything".</summary>
+    public static CheckReportJson? Check;
+
+    /// <summary>What <c>explain</c> resolved, and the walk it performed (R-aut4-7).</summary>
+    public static ExplainReportJson? Explain;
+
     private static readonly List<ResultOutput>   Outputs     = [];
     private static readonly List<DiagnosticJson> Diagnostics = [];
 
@@ -170,6 +177,11 @@ internal static class JsonRun
 
     private static ResultPayload? BuildPayload()
     {
+        // check and explain carry no DataSet — they run nothing (R-aut4-1) — so they are answered
+        // before the cube machinery, not folded into it.
+        if (Check is not null || Explain is not null)
+            return new ResultPayload(null, null, Check, Explain);
+
         if (Data is not { } ds) return null;
 
         var summary = ResultDocumentWriter.SummarizeLoadpull(ds);

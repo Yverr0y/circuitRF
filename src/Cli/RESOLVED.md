@@ -220,3 +220,198 @@ its second column, and the ambiguity refusal prints the whole listing.
 `new.*` (14) and `import.*` (15), all recorded in `CliStructuredOutputTests`' committed list. That
 list is asserted in **ordinal order over the whole set**, so a new group cannot simply be appended —
 the first attempt appended `import.*` after `lp.export.no-surface` and failed on position 49.
+
+---
+
+## AUT-4 — `check` and `explain`, and the DRC engine below the firewall (2026-09-05)
+
+`brief-automation-4-check-and-explain.md`. Two read-only verbs that close a headless client's loop.
+The contract is `docs/design/cli.md` §10; this records what turned out to be true while building it.
+
+### The finding that changed the design: a `.csch` goes through the `.cnl`
+
+**The first `check` reported four errors the application does not have**, on four schematics in the
+owner's own workspace: *"elaboration failed — Unresolved name 'on' in scope 'global'"*.
+
+The cause is an asymmetry between two readers that was already documented in two places, each
+contradicting the other. A Tuner's `BiasTee` parameter is stored bare (`on` / `off`), and:
+
+- `ComponentTypeRegistry`'s `BiasTeeOptions` says the value is committed bare because "`CnlReader` is
+  what quotes it on the way to the elaborator";
+- `HarmonicaSchematicExport` writes `"\"off\""` QUOTED, with a comment saying a bare `off` "resolves
+  as a variable name and elaboration fails with Unresolved name 'off'".
+
+Both are right, about different paths. `CnlReader` quotes a bare word; `NetExtractor` does not
+(`AsLiteralExpression` exists and is applied only to a KIT's fixed parameters). And the GUI's Simulate
+does not hand extraction straight to the elaborator — `WorkspaceViewModel.WriteNetlist` writes a
+`.cnl` and `SchematicRunService.Prepare` reads it back, so every schematic parameter is laundered
+through `CnlReader` on the way. Verified in both directions: `testdata/Hero3/hero3.cnl` carries
+`BiasTee=on` and `circuitrf elab` resolves it without complaint.
+
+**So the round trip is load-bearing, and `src/Cli/CircuitSource.cs` performs it — in memory, since
+R-aut4-6 forbids writing.** This is R-aut4-2's rule in the mirror: a rule that lives only in `check`
+is a rule the GUI does not enforce, and a rule `check` applies that the GUI does not is just as bad.
+With the round trip, those four schematics check clean.
+
+**Not fixed here, and worth deciding separately:** the two comments above still contradict each
+other, and a `.csch` handed directly to `Elaborator` by any future caller will hit the same wall.
+Either `NetExtractor` should apply `AsLiteralExpression` to a Tuner's string-valued parameters as it
+does to a kit's, or `ComponentTypeRegistry` should commit them quoted as `HarmonicaSchematicExport`
+already does. Both change what new schematics write, and neither repairs an existing file, which is
+why this brief left it alone.
+
+### R-aut4-3: the DRC engine moved, and the closure really was free
+
+`src/Ui/Layout/Drc` → `src/Design/Layout/Drc`, plus `src/Ui/Layout/Assembly` (the `.wasm` rule-file
+model) → `src/Design/Layout/Assembly`. **The whole move produced five compiler errors**, and none of
+them was a coupling: a stale `using CircuitRF.Ui.Schematic` in `WasmPersistence`, an `AtomicFile`
+that resolves to `CircuitRF.Design.Cells`' one anyway, and three fully-qualified `Ui.WBond.WBondSnap`
+calls. `tests/Ui.Tests` passed **unchanged**, 12,053 of them.
+
+**Two files stayed, on purpose, and neither is the engine:**
+
+- `DrcRunReport` — posts a run's verdict to the Messages panel. It takes an `IMessageSink`; that is a
+  UI surface, not a design rule.
+- `WBondWireClearance` — reads the built-in wire clearance from the per-USER preferences file. The
+  engine already takes the number as `DrcRunSettings.WireClearanceNm`, so the preference is the
+  GUI's to read and the default (circuitRF's own half a mil) is the right answer for a caller with no
+  user to ask.
+
+**One thing had to move that the brief did not list**: `WBondClearance` converts a layout into
+nanometres through `WBondSnap.ToNm`, and `WBondSnap` cannot cross — it needs `LayoutSnapQuery` and
+`SnapFeatureKind`, which ARE the layout editor. The two-line integer pair moved to
+`LayoutUnits.NmToDbu`/`DbuToNm` instead and `WBondSnap` forwards to them, so there is still exactly
+one implementation — the property `WBondClearance`'s own header depends on, having shipped broken
+twice already from a second copy. **The arithmetic is unchanged, `double` and all.** Re-deriving it
+in `decimal` beside `LayoutUnits`' other pair would be more exact past 2^53 and would also change
+measured clearances, which is a numeric change smuggled in under a file move.
+
+**26 allow-list entries, moved not authored.** `UserFacingTextGateTests` fires on user-facing text
+below the firewall, and the `.wasm` predicate parser's messages are user-facing text: they are what a
+person who wrote a bad rule expression reads. They are listed in
+`tests/Firewall.Tests/user-facing-text-allowlist.txt` under a dated "moved, not authored" heading
+rather than converted, because R-aut4-3 moves whole files without reshaping them and converting 26
+parser messages under cover of a file move is the change nobody could review. They are also the one
+family where a plain sentence is nearly defensible — a parse error already carries the offending TEXT
+and a character POSITION, which is the typed half a `Diagnostic` would have added.
+
+### `SelectTop` had to become a function that returns a decision
+
+`explain --analysis` reports what chain selection would do WITHOUT doing it, and the old `SelectTop`
+had no account of itself beyond two `Console.Error.WriteLine` calls. It is now
+`ChainSelector.Select`, returning `Selected` / `Candidates` / `Requested` / `PromotedFrom` / `Why`,
+and the CALLER writes the sentence — the run verbs write exactly the two they always wrote (R-aut0-3
+holds: stderr is unchanged character for character), `explain` writes none and renders the same facts.
+
+**One honesty problem surfaced immediately.** `SelectTop` ends `return owner ?? named`, so
+`lp -a HB1` hands back HB1 — an HB, to the loadpull verb. The first `explain` reported that as "lp
+dispatches HB1", which describes a run that cannot happen. It now counts a selection only when the
+chain it picked bottoms out in that verb's own base analysis. The behaviour of the RUN verbs is
+untouched; what changed is what `explain` claims about them.
+
+### What `check` needed and no existing validator provided — three gaps
+
+R-aut4-2 says a finding with no validator behind it is the most valuable thing this brief can turn
+up. Three:
+
+1. **"Does this document declare a runnable analysis at all?"** exists exactly once, as a private
+   pair inside `SchematicRunService.Prepare` (`src/Ui`, above the firewall): a typed analysis, OR a
+   RAW `analysis … type=sparam` directive, which never becomes a typed one. `check` could not call it
+   and `CircuitSource.DeclaresARunnableAnalysis` restates it. **It is worth pulling down beside the
+   netlist model** — it is the GUI's own `RunStatus.NoAnalysis` test and nothing about it is a UI
+   concern. Asking `ChainSelector` instead is NOT equivalent and the first attempt proved it: chain
+   selection is per KIND, so a bench declaring only an S-parameter sweep has no HB chain and every
+   S-parameter and DC document in the tree was warned about.
+2. **A `.cws`'s own reference lists.** `LibraryRefs`, `KnownFiles` and `DefaultTechRef` are shown as
+   warning nodes by the project tree, but that rule lives in the tree's view models rather than in a
+   validator, so `check` tests existence itself. A `WorkspaceValidation.Analyze` returning typed
+   problems the way `TechValidation` does would serve both.
+3. **Unconnected nets have no validator anywhere.** The brief's §1 lists them among the soundness
+   questions and nothing in the tree answers one: elaboration numbers nodes and `NetExtractor`
+   treats an unconnected pin as ground "for safety" (`NetExtractor.cs:1730`). `check` reports
+   nothing about them, deliberately — inventing the rule here would have been the thing R-aut4-2
+   forbids.
+
+### §5.2 — the shipped documents, in full
+
+| Tree | Result |
+|---|---|
+| `src/Ui/resources/schematic-templates` (4 `.csch`) | **clean** — 0 errors, 0 warnings |
+| `src/Ui/resources/doc-schematics` (4 `.csch`) | 0 errors; **1 warning**, `Inline_Value_Editor.csch` declares no analysis — which is correct, it is a documentation figure |
+| `src/Design/resources/technologies` (5 `.ctech`) | **clean at `--severity warning`** |
+
+Both schematic trees are asserted in `CheckAndExplainCliVerbTests.ShippedSchematics_CheckClean`, so
+nobody has to remember to look.
+
+The repository ships no example WORKSPACE — `circuitRF_demo/` is the owner's own tree and is not
+committed — so it was checked as evidence rather than as a gate: **30 documents, 0 errors, 2
+warnings.** Both warnings are real states the application would also show (one cell declares no
+analysis; one cell's symbol sub-folder holds two files with no primary chosen).
+
+### §5.7 — the measurement, and where the time actually goes
+
+Debug build, warm, wall clock including the ~35 ms process start.
+
+| Input | Time |
+|---|---|
+| 30-document workspace, layouts empty | **0.20 s** |
+| 4 documents, one 5,000-shape layout, spacing rule, no violations | **0.45 s** |
+| the same 5,000 shapes with 19,577 violations | **0.95 s** |
+| 20,000 shapes with 79,154 violations | **4.9 s** |
+
+**Fast enough to call after every edit, and the cost is DRC, not the walk.** Reading and elaborating
+30 documents is a fifth of a second; a single layout with real geometry is more than all of them
+together, and the violation COUNT costs as much as the shape count because every violation is
+rendered and recorded. A design with thousands of outstanding violations is not the case to optimise
+for — it is the case to fix — but a caller checking a large board on every edit should point `check`
+at the document it is editing rather than at the workspace.
+
+No timing test was added (`feedback-no-new-timing-benchmark-tests`): a wall-clock assertion measures
+the machine and flakes.
+
+### `convert`'s carry-through, which was asked for and turned up three real gaps
+
+`convert` answered `--json` from AUT-1, but three things a caller needs reached only the terminal.
+Each was found by RUNNING the verb, not by reading it:
+
+1. **`--list-cells` produced an empty document.** The listing goes to stdout, which `--json`
+   replaces — so the one invocation whose entire result is a list answered with `"diagnostics": []`.
+   Now `convert.cell.listed`, one per cell.
+2. **The import's own notes were not in `diagnostics`.** "1 × unfilled zone … not imported", "F.Cu→
+   added", "the technology's stackup was left EMPTY" — these are how a caller learns what a
+   conversion DROPPED, and a `--json` consumer was reading a report that omitted the losses. Now
+   `convert.note`, forwarded argument-free like the other engine-authored sentences.
+3. **The minted `.ctech` was not in `outputs`.** Headless there is no workspace to graft layers onto,
+   so an import writes a technology of its own — and the cells it produced reference it by RELATIVE
+   PATH, so a caller that took the cells and not that file has a design whose layers resolve to
+   nothing. It is now reported **exactly when it survives**: the target was `clay`, or `--keep-cells`
+   named somewhere. Reporting a path that is about to be deleted with the scratch directory would be
+   worse than reporting nothing, which is why `MintTechnology` records it and `Run` decides.
+
+The fourth carry-through is in the other direction and is in `check`/`explain`: an interchange file
+is classified through **`convert`'s own `DetectSource`** — including its content sniff, the only thing
+that can name a Gerber or Excellon file — rather than through a second table. A GDSII file `convert`
+can read is reported as interchange, never as something circuitRF does not handle.
+
+### Smaller things worth keeping
+
+- **`check`'s findings go to stderr, not stdout.** They are not a RESULT (`cli.md` §3.1); stdout
+  carries the one-line tally the way every other verb's stdout carries its table. That is also what
+  lets `check … --json` put the findings in `diagnostics` with nothing else in the way.
+- **A waived DRC violation is reported as a NOTE, not at the rule's own severity.** §9A.1 requires
+  waiving to be "persisted, and visible", and counting a waived violation against the exit code would
+  make a fully-waived design fail CI forever.
+- **`explain`'s three questions are refused together rather than ordered.** `--expr`, `--analysis`
+  and `--ref` ask different things and a document answering two would need a precedence nobody stated.
+- **`--severity` decides only the exit code.** Warnings are always reported. R-aut4-5 is explicit
+  about why: a check that hid warnings to keep the exit code clean makes the exit code useless.
+- **`NameValidator`'s finding is unreachable on Windows and the test says so.** Every name it rejects
+  is a name Windows itself refuses — that is why the rule exists — so the broken fixture cannot be
+  created there. `NonWindowsFactAttribute` skips WITH A REASON rather than asserting something weaker.
+- **A kit part that does not resolve is a WARNING naming the registry, not a missing-cell error.**
+  A `pdk://` reference lives in a registry the GUI populates when it opens a workspace and nothing
+  populates headlessly; `check.ref.kit-not-loaded` says that. Reporting every part in a PDK design as
+  a missing cell folder names the wrong repair and is exactly the noise that stops a check being run.
+- **43 new diagnostic ids** — `check.*` (28), `explain.*` (13) and `convert.note` /
+  `convert.cell.listed` — bringing `CliStructuredOutputTests`' committed list to 122. That list is
+  asserted in ordinal order over the whole set, so a new group cannot be appended.

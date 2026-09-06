@@ -14,6 +14,11 @@
 
 global using CircuitRF.Design.Cells;
 global using CircuitRF.Design.Layout;
+// The `.wasm` assembly rule-file model and the DRC ENGINE that reads it, which crossed the wall in
+// AUT-4 (brief-automation-4-check-and-explain.md R-aut4-3) so `circuitrf check` can run design rules
+// with no display. What stayed in src/Ui is the two files that are not the engine: `DrcRunReport`
+// (posts a run to the Messages panel) and `WBondWireClearance` (reads a per-USER preference).
+global using CircuitRF.Design.Layout.Assembly;
 global using CircuitRF.Design.Layout.Drc;
 global using CircuitRF.Design.Layout.Interchange;
 global using CircuitRF.Design.Layout.Em;

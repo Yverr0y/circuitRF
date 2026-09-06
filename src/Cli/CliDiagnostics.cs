@@ -314,6 +314,27 @@ internal static class CliDiagnostics
         "convert.target.unsupported", DiagnosticSeverity.Error,
         "Cannot write {format}.", ("format", format));
 
+    /// <summary>
+    /// One of the import's own messages — a layer that was mapped, a zone that was not imported, a
+    /// stackup section the file did not carry. On stderr since the verb was written, and in the
+    /// document since AUT-4: they are how a caller learns what was DROPPED, and a `--json` caller
+    /// that could not read them would be reading a conversion report that omits the losses.
+    ///
+    /// <para>Argument-free by the same rule the forwarded block above follows: an importer hands over
+    /// a finished English sentence and has no typed values to give, so the id says where it came from
+    /// and nothing is invented by parsing the prose apart.</para>
+    /// </summary>
+    public static Diagnostic ConvertNote(string text) => Diagnostic.Create(
+        "convert.note", DiagnosticSeverity.Info, "{text}", ("text", text));
+
+    /// <summary>
+    /// What <c>--list-cells</c> found. The listing is the RESULT of that invocation — the whole
+    /// answer to "what does this file hold?" — so under `--json` it belongs in the document rather
+    /// than only on the stdout the flag replaces (R-aut1-3).
+    /// </summary>
+    public static Diagnostic ConvertCellListed(string cell) => Diagnostic.Create(
+        "convert.cell.listed", DiagnosticSeverity.Info, "{cell}", ("cell", cell));
+
     // ── new / import part (brief-automation-3-authoring-verbs.md) ─────────────
     //
     // The authoring verbs' whole contract is "it was created, or it was refused and the sentence says
@@ -458,4 +479,291 @@ internal static class CliDiagnostics
         "import.layers.no-technology", DiagnosticSeverity.Error,
         "--add-layers was given but no technology file resolved, so there is nowhere to put "
         + "{names}. Name one with --tech.", ("names", names));
+
+    // ── check (brief-automation-4-check-and-explain.md) ───────────────────────
+    //
+    // R-aut4-2: `check` writes no validation logic of its own. Every id below names an EXISTING
+    // validator's finding, and the typed arguments are that validator's own values, not a sentence
+    // parsed back apart (R-aut4-4). Where a validator hands over only prose — the `.wasm` predicate
+    // parser, the technology resolver, the EM setup resolver — the sentence is forwarded whole under
+    // an honest id, exactly as the forwarded block above does for the engines.
+    //
+    // Two of these are deliberately NOT errors. A cell sub-folder holding several views and no named
+    // primary is `PrimaryState.NoPrimary`, which that enum's own remarks call "not an error"; a
+    // technology that resolves to nothing is `TechResolutionSource.None`, which layout-view.md §2.4
+    // calls a normal, fully-supported state. Reporting either as an error would make `check` refuse
+    // designs the application opens happily, which is the one thing it must never do.
+
+    public static Diagnostic CheckPathRequired() => new(
+        "check.args.path-required", DiagnosticSeverity.Error,
+        "check: a path is required — a workspace, a cell folder, or one document.");
+
+    public static Diagnostic CheckUnknownOption(string option) => Diagnostic.Create(
+        "check.args.unknown-option", DiagnosticSeverity.Error,
+        "check: unknown option '{option}'.", ("option", option));
+
+    public static Diagnostic CheckMultiplePaths() => new(
+        "check.args.multiple-paths", DiagnosticSeverity.Error,
+        "check: one path, please.");
+
+    public static Diagnostic CheckUnknownSeverity(string text) => Diagnostic.Create(
+        "check.args.unknown-severity", DiagnosticSeverity.Error,
+        "check: --severity takes warning or error, got '{text}'.", ("text", text));
+
+    public static Diagnostic CheckPathNotFound(string path) => Diagnostic.Create(
+        "check.path.not-found", DiagnosticSeverity.Error,
+        "No such file or folder: {path}", ("path", path));
+
+    /// <summary>A path circuitRF has no reader for. Not silence: a caller that pointed `check` at
+    /// the wrong file learns that here rather than from a clean exit that checked nothing.</summary>
+    public static Diagnostic CheckUnknownKind(string path) => Diagnostic.Create(
+        "check.path.unknown-kind", DiagnosticSeverity.Error,
+        "Nothing circuitRF reads is named '{path}' — check takes a workspace, a cell folder, or a "
+        + ".csch, .csym, .clay, .ctech, .cem, .cnl or .wasm.", ("path", path));
+
+    /// <summary>An interchange file. Reported rather than checked, because there is nothing to check
+    /// it AGAINST: a GDSII or Gerber file is not a circuitRF document and has no primacy, no
+    /// technology reference and no analysis chain. `convert` is what reads it.</summary>
+    public static Diagnostic CheckInterchangeNotADocument(string path, string format) => Diagnostic.Create(
+        "check.path.interchange", DiagnosticSeverity.Info,
+        "'{path}' is {format} interchange, not a circuitRF document — there is nothing to validate "
+        + "until it is imported. Read it with `circuitrf convert`.", ("path", path), ("format", format));
+
+    /// <summary><c>CellViewFileValidator.DescribeDefect</c>'s own sentence, which is written to be
+    /// shown verbatim.</summary>
+    public static Diagnostic CheckViewDefect(string path, string view, string defect) => Diagnostic.Create(
+        "check.view.defect", DiagnosticSeverity.Error,
+        "{path}: {defect}", ("path", path), ("view", view), ("defect", defect));
+
+    public static Diagnostic CheckUnreadable(string path, string message) => Diagnostic.Create(
+        "check.file.unreadable", DiagnosticSeverity.Error,
+        "{path}: could not be read ({message}).", ("path", path), ("message", message));
+
+    /// <summary>R-aut4-2's <c>MissingNamedPrimary</c> — the `.ccell` names a primary that is not
+    /// there. <c>PrimaryState</c>'s own remarks say do not collapse this into NoPrimary.</summary>
+    public static Diagnostic CheckPrimaryMissing(string cellDir, string view, string named) => Diagnostic.Create(
+        "check.cell.primary-missing", DiagnosticSeverity.Error,
+        "{cellDir}: the {view} view names '{named}' as primary and that file is not there.",
+        ("cellDir", cellDir), ("view", view), ("named", named));
+
+    public static Diagnostic CheckNoPrimary(string cellDir, string view, int count) => Diagnostic.Create(
+        "check.cell.no-primary", DiagnosticSeverity.Warning,
+        "{cellDir}: the {view} view holds {count} files and none is primary, so nothing resolves it.",
+        ("cellDir", cellDir), ("view", view), ("count", count));
+
+    /// <summary>R-aut3-9's rule, read the other way: a name the GUI would reject must not be
+    /// reported clean here either. <c>NameValidator</c>'s own reason, never a second rule set.</summary>
+    public static Diagnostic CheckInvalidName(string path, string kind, string name, string reason) =>
+        Diagnostic.Create(
+            "check.name.invalid", DiagnosticSeverity.Error,
+            "{path}: invalid {kind} name '{name}' — {reason}",
+            ("path", path), ("kind", kind), ("name", name), ("reason", reason));
+
+    /// <summary><c>TechValidation.Analyze</c>'s finding, with its <c>TechProblemArea</c> kept as an
+    /// argument rather than flattened into the sentence (R-aut4-4).</summary>
+    public static Diagnostic CheckTechProblem(string path, string area, string message) => Diagnostic.Create(
+        "check.tech.problem", DiagnosticSeverity.Warning,
+        "{path}: {message}", ("path", path), ("area", area), ("message", message));
+
+    /// <summary>Whatever <c>TechnologyResolver</c> or <c>EmSetupResolver</c> had to say. Both return
+    /// diagnostics as strings and neither has typed values to hand, so the sentence is forwarded.</summary>
+    public static Diagnostic CheckResolverNote(string path, string text) => Diagnostic.Create(
+        "check.resolver.note", DiagnosticSeverity.Warning,
+        "{path}: {text}", ("path", path), ("text", text));
+
+    /// <summary>A layout that resolves no technology at all. A WARNING, not an error — see this
+    /// region's own header for why.</summary>
+    public static Diagnostic CheckNoTechnology(string path) => Diagnostic.Create(
+        "check.technology.none", DiagnosticSeverity.Warning,
+        "{path}: no technology resolves for this layout — its own reference names none and the "
+        + "workspace states no default, so its layers have no names and no rules to check against.",
+        ("path", path));
+
+    /// <summary>A <c>.cem</c> that resolves no layout: <c>EmSetupResolver</c> returned no source.</summary>
+    public static Diagnostic CheckEmUnresolved(string path, string reason) => Diagnostic.Create(
+        "check.em.unresolved", DiagnosticSeverity.Error,
+        "{path}: {reason}", ("path", path), ("reason", reason));
+
+    /// <summary>A cell reference on a schematic that resolves to nothing. The three states
+    /// <c>CellSymbolResolver</c> keeps distinct stay distinct: this is <c>NotFound</c>.</summary>
+    public static Diagnostic CheckRefNotFound(string path, string component, string cellRef) =>
+        Diagnostic.Create(
+            "check.ref.not-found", DiagnosticSeverity.Error,
+            "{path}: '{component}' references '{cellRef}', which resolves to no cell folder.",
+            ("path", path), ("component", component), ("cellRef", cellRef));
+
+    /// <summary><c>CellSymbolResolver</c>'s <c>PrimaryMissing</c> — the cell is there, its symbol is
+    /// not.</summary>
+    public static Diagnostic CheckRefPrimaryMissing(string path, string component, string cellRef) =>
+        Diagnostic.Create(
+            "check.ref.primary-missing", DiagnosticSeverity.Error,
+            "{path}: '{component}' references '{cellRef}', which resolves to a cell with no primary symbol.",
+            ("path", path), ("component", component), ("cellRef", cellRef));
+
+    /// <summary>
+    /// A kit part reference that did not resolve, which headlessly is usually not a broken reference
+    /// at all: a kit lives in a REGISTRY the GUI populates when it opens a workspace, and nothing
+    /// populates it here. Reported as a warning naming that, rather than as the missing-cell-folder
+    /// error a path reference gets — the two have completely different repairs, and calling every
+    /// kit part in a PDK design a missing cell is exactly the noise that makes a check stop being run.
+    /// </summary>
+    public static Diagnostic CheckKitRefUnresolved(string path, string component, string cellRef) =>
+        Diagnostic.Create(
+            "check.ref.kit-not-loaded", DiagnosticSeverity.Warning,
+            "{path}: '{component}' references the kit part '{cellRef}', and no kit registry is "
+            + "loaded headlessly — the reference was not checked.",
+            ("path", path), ("component", component), ("cellRef", cellRef));
+
+    /// <summary>A reference that only resolved through the workspace's own move record. Not a
+    /// failure — the cell was found — but the stored spelling is stale and will not survive the
+    /// record being pruned.</summary>
+    public static Diagnostic CheckRefRedirected(string path, string cellRef, string movedTo) =>
+        Diagnostic.Create(
+            "check.ref.redirected", DiagnosticSeverity.Warning,
+            "{path}: '{cellRef}' resolved only through a recorded move, to '{movedTo}'. "
+            + "Re-save the document to write the current path.",
+            ("path", path), ("cellRef", cellRef), ("movedTo", movedTo));
+
+    /// <summary><c>NetExtractor</c>'s own non-fatal naming conflicts.</summary>
+    public static Diagnostic CheckExtractionConflict(string path, string text) => Diagnostic.Create(
+        "check.schematic.conflict", DiagnosticSeverity.Warning,
+        "{path}: {text}", ("path", path), ("text", text));
+
+    /// <summary>Elaboration threw. This is the one that answers "does it resolve?" for parameters,
+    /// expressions and cycles — all three arrive here as the expression engine's own message.</summary>
+    public static Diagnostic CheckElaborationFailed(string path, string message) => Diagnostic.Create(
+        "check.elaboration.failed", DiagnosticSeverity.Error,
+        "{path}: elaboration failed — {message}", ("path", path), ("message", message));
+
+    public static Diagnostic CheckElaborationWarning(string path, string text) => Diagnostic.Create(
+        "check.elaboration.warning", DiagnosticSeverity.Warning,
+        "{path}: {text}", ("path", path), ("text", text));
+
+    public static Diagnostic CheckElaborationNote(string path, string text) => Diagnostic.Create(
+        "check.elaboration.note", DiagnosticSeverity.Info,
+        "{path}: {text}", ("path", path), ("text", text));
+
+    /// <summary>
+    /// No analysis of any kind will dispatch. <c>SelectTop</c>'s own sentence per kind, forwarded.
+    /// A WARNING: a cell's schematic is not supposed to declare an analysis, and a `.cnl` written to
+    /// be included by another is not either.
+    /// </summary>
+    public static Diagnostic CheckNoRunnableAnalysis(string path, string reasons) => Diagnostic.Create(
+        "check.analysis.none", DiagnosticSeverity.Warning,
+        "{path}: no analysis will dispatch. {reasons}", ("path", path), ("reasons", reasons));
+
+    /// <summary>One DRC violation, at the severity the RULE states. The rule's own name, layer and
+    /// measurement travel as arguments — a caller filtering on "every clearance violation" reads
+    /// them, never the sentence.</summary>
+    public static Diagnostic CheckDrcViolation(
+        string path, string rule, string kind, DiagnosticSeverity severity,
+        string? layer, string? measured, bool waived) => Diagnostic.Create(
+        "check.drc.violation", severity,
+        "{path}: {rule} ({kind}){onLayer}{measurement}{waiver}",
+        ("path", path), ("rule", rule), ("kind", kind),
+        ("layer", layer), ("measured", measured), ("waived", waived),
+        // The three rendered fragments are separate arguments from the three TYPED ones above, and
+        // named differently: a consumer reads `layer`, a reader reads `onLayer`. Reusing one name
+        // for both would mean the typed value could not be read back without re-parsing the prose,
+        // which is the exact thing R-aut4-4 exists to prevent.
+        ("onLayer",     layer    is { Length: > 0 } ? $" on {layer}" : ""),
+        ("measurement", measured is { Length: > 0 } ? $" — {measured}" : ""),
+        ("waiver",      waived ? " (waived)" : ""));
+
+    /// <summary>Anything the DRC run could not do — an unresolved instance, an unmapped
+    /// cross-technology sub-cell, the flatten ceiling. Stated rather than dropped.</summary>
+    public static Diagnostic CheckDrcNote(string path, string text) => Diagnostic.Create(
+        "check.drc.note", DiagnosticSeverity.Warning,
+        "{path}: {text}", ("path", path), ("text", text));
+
+    /// <summary>A `.cws` entry — a library, a bookmarked file, the default technology — that names
+    /// nothing. The GUI shows these as warning nodes in the project tree; this is the same finding.</summary>
+    public static Diagnostic CheckWorkspaceRefUnresolved(string path, string what, string reference) =>
+        Diagnostic.Create(
+            "check.workspace.ref-unresolved", DiagnosticSeverity.Warning,
+            "{path}: its {what} '{reference}' does not resolve.",
+            ("path", path), ("what", what), ("reference", reference));
+
+    /// <summary>The `.wasm` rule file would not read, or holds a rule its own parser rejects.</summary>
+    public static Diagnostic CheckAssemblyRuleInvalid(string path, string rule, string message) =>
+        Diagnostic.Create(
+            "check.wasm.rule-invalid", DiagnosticSeverity.Error,
+            "{path}: rule '{rule}' does not parse — {message}",
+            ("path", path), ("rule", rule), ("message", message));
+
+    // ── explain ──────────────────────────────────────────────────────────────
+    //
+    // R-aut4-8: `explain` never guesses and never falls back silently. Where resolution failed, the
+    // failure IS the answer, and it names what was looked for and where it was looked — which is the
+    // whole reason a caller reaches for this verb.
+
+    public static Diagnostic ExplainPathRequired() => new(
+        "explain.args.path-required", DiagnosticSeverity.Error,
+        "explain: a path is required — a document, a cell folder or a workspace.");
+
+    public static Diagnostic ExplainUnknownOption(string option) => Diagnostic.Create(
+        "explain.args.unknown-option", DiagnosticSeverity.Error,
+        "explain: unknown option '{option}'.", ("option", option));
+
+    public static Diagnostic ExplainMultiplePaths() => new(
+        "explain.args.multiple-paths", DiagnosticSeverity.Error,
+        "explain: one path, please.");
+
+    /// <summary>More than one of <c>--expr</c>, <c>--analysis</c> and <c>--ref</c>. Refused rather
+    /// than ordered: each asks a different question and a document answering two of them at once
+    /// would have to invent a precedence nobody stated.</summary>
+    public static Diagnostic ExplainOneQuestion() => new(
+        "explain.args.one-question", DiagnosticSeverity.Error,
+        "explain: --expr, --analysis and --ref ask different questions — pass one.");
+
+    public static Diagnostic ExplainPathNotFound(string path) => Diagnostic.Create(
+        "explain.path.not-found", DiagnosticSeverity.Error,
+        "No such file or folder: {path}", ("path", path));
+
+    public static Diagnostic ExplainUnknownKind(string path) => Diagnostic.Create(
+        "explain.path.unknown-kind", DiagnosticSeverity.Error,
+        "Nothing circuitRF reads is named '{path}'.", ("path", path));
+
+    public static Diagnostic ExplainUnreadable(string path, string message) => Diagnostic.Create(
+        "explain.file.unreadable", DiagnosticSeverity.Error,
+        "Could not read '{path}': {message}", ("path", path), ("message", message));
+
+    /// <summary>The question needs a netlist or a schematic and this document is neither. Named
+    /// rather than answered emptily.</summary>
+    public static Diagnostic ExplainNotApplicable(string option, string kind) => Diagnostic.Create(
+        "explain.option.not-applicable", DiagnosticSeverity.Error,
+        "{option} asks about analyses and expressions, which a {kind} does not hold.",
+        ("option", option), ("kind", kind));
+
+    /// <summary>The expression would not evaluate. The engine's own message — an unresolved name, a
+    /// cycle, a parse error — which is the whole content of the answer.</summary>
+    public static Diagnostic ExplainExpressionFailed(string expression, string message) =>
+        Diagnostic.Create(
+            "explain.expr.failed", DiagnosticSeverity.Error,
+            "'{expression}' does not evaluate here: {message}",
+            ("expression", expression), ("message", message));
+
+    /// <summary>A relative reference that resolved to nothing. Names what was looked for and the
+    /// directory it was looked in (R-aut4-8).</summary>
+    public static Diagnostic ExplainRefNotFound(string reference, string from) => Diagnostic.Create(
+        "explain.ref.not-found", DiagnosticSeverity.Error,
+        "'{reference}' resolves to no cell folder from '{from}'.",
+        ("reference", reference), ("from", from));
+
+    public static Diagnostic ExplainRefPrimaryMissing(string reference, string resolved) =>
+        Diagnostic.Create(
+            "explain.ref.primary-missing", DiagnosticSeverity.Error,
+            "'{reference}' resolves to '{resolved}', which has no primary symbol.",
+            ("reference", reference), ("resolved", resolved));
+
+    /// <summary>The netlist declares nothing this verb would dispatch. <c>SelectTop</c>'s own
+    /// sentences, one per analysis kind, forwarded rather than re-authored.</summary>
+    public static Diagnostic ExplainNoRunnableAnalysis(string reasons) => Diagnostic.Create(
+        "explain.analysis.none", DiagnosticSeverity.Warning,
+        "No analysis will dispatch. {reasons}", ("reasons", reasons));
+
+    /// <summary>A named analysis that is not declared at all.</summary>
+    public static Diagnostic ExplainAnalysisNotFound(string name, string declared) => Diagnostic.Create(
+        "explain.analysis.not-found", DiagnosticSeverity.Error,
+        "No analysis named '{name}'. Declared: {declared}", ("name", name), ("declared", declared));
 }

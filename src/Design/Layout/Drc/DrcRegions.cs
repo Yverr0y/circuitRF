@@ -5,7 +5,7 @@
 
 using Clipper2Lib;
 
-namespace CircuitRF.Ui.Layout.Drc;
+namespace CircuitRF.Design.Layout.Drc;
 
 /// <summary>
 /// A conductor: one electrically-distinct region of metal on one layer, as the SPACING check must

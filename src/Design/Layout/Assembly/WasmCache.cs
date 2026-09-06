@@ -1,4 +1,4 @@
-namespace CircuitRF.Ui.Layout.Assembly;
+namespace CircuitRF.Design.Layout.Assembly;
 
 /// <summary>
 /// One-load-per-file cache for `.wasm` assembly rule files, keyed by absolute path — a direct mirror

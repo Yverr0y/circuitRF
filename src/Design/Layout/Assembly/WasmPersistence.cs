@@ -1,8 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using CircuitRF.Ui.Schematic;
+using CircuitRF.Design.Cells;
 
-namespace CircuitRF.Ui.Layout.Assembly;
+namespace CircuitRF.Design.Layout.Assembly;
 
 // ──────────────────────────────────────────────────────────────────────────────
 //  .wasm file format — rev 1 (alpha, no back-compat per policy).

@@ -12,7 +12,7 @@
 // <b>This file converts at exactly one crossing, and it converts the LAYOUT INTO NANOMETRES</b>
 // rather than the wires into DBU. Wires are the only 3D thing here and the wire side is where the
 // precision matters: a wire's z has no DBU equivalent at all, so pushing everything into DBU would
-// need a second, invented convention for the vertical axis. `WBondSnap.ToNm` is the one function that
+// need a second, invented convention for the vertical axis. `LayoutUnits.DbuToNm` is the one function
 // does it, reused rather than re-derived.
 //
 // Every test of anything in this file runs at a NON-DEFAULT DbuPerMicron. A suite built only on the
@@ -28,10 +28,10 @@
 // wire model's own z origin is the ground plane.
 
 using Clipper2Lib;
-using CircuitRF.Ui.WBond;
+
 using CircuitRF.WBond;
 
-namespace CircuitRF.Ui.Layout.Drc;
+namespace CircuitRF.Design.Layout.Drc;
 
 /// <summary>
 /// The height, in nanometres above the wire model's own z origin, of each drawing layer's artwork.
@@ -192,8 +192,8 @@ public sealed class PlanarEdgeIndex
                 var a = path[i];
                 var b = path[(i + 1) % path.Count];      // implicitly closed, like every ring here
 
-                long ax = WBondSnap.ToNm(a.X, dbuPerMicron), ay = WBondSnap.ToNm(a.Y, dbuPerMicron);
-                long bx = WBondSnap.ToNm(b.X, dbuPerMicron), by = WBondSnap.ToNm(b.Y, dbuPerMicron);
+                long ax = LayoutUnits.DbuToNm(a.X, dbuPerMicron), ay = LayoutUnits.DbuToNm(a.Y, dbuPerMicron);
+                long bx = LayoutUnits.DbuToNm(b.X, dbuPerMicron), by = LayoutUnits.DbuToNm(b.Y, dbuPerMicron);
 
                 raw.Add(new Edge(ax, ay, bx, by));
                 minX = Math.Min(minX, Math.Min(ax, bx));

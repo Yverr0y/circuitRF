@@ -147,6 +147,32 @@ What follows from R-aut-5:
 - **A partial or malformed document must be diagnosable, not merely rejected.** A client's only
   repair mechanism is the sentence it gets back.
 
+### 4.1 The two verbs that close the loop
+
+**Closed by AUT-4 on 2026-09-05** (`brief-automation-4-check-and-explain.md`). Of the four verbs
+R-aut-5 predicted would matter most, **validate** and **explain** now exist as `circuitrf check` and
+`circuitrf explain`; `run` already did; **diff** does not and is not scheduled — the documents are
+JSON, and an ordinary text diff on them is already useful.
+
+| Verb | Answers | Detail |
+|---|---|---|
+| `check <path>` | is it well formed, does it resolve, is it sound? | `cli.md` §10.2 |
+| `explain <path>` | what did circuitRF DECIDE — which technology, which chain, what value, which cell? | `cli.md` §10.4 |
+
+Three properties of that pair are what make it an architectural answer rather than two more verbs:
+
+- **`check` writes no validation logic** (R-aut4-2). Every finding comes from a validator that
+  already exists and that the GUI already uses. A rule living only in `check` would be a rule the
+  application does not enforce, and a design would pass headlessly and be refused when opened.
+- **Neither runs an analysis and neither writes** (R-aut4-1, R-aut4-6). That is what makes `check`
+  callable after every edit, on a read-only tree, and on a workspace another process has open.
+- **`explain` reports the WALK, not just the answer** (R-aut4-7). Resolution in circuitRF is a series
+  of walk-ups — a document's ancestor workspace, a layout's technology, a `.cem`'s two independent
+  walks — and which one produced an answer is exactly what a caller cannot see from the file.
+
+The DRC engine crossed the UI firewall to make the third question answerable headlessly (R-aut4-3);
+`src/Design/RESOLVED.md` records what moved and what deliberately did not.
+
 ---
 
 ## 5. The output contract

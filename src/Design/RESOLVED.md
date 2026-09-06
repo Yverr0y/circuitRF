@@ -2196,3 +2196,75 @@ pre-flight — otherwise a second route into creation (a future verb, a future c
 `WorkspaceCreate.UnwritableParentRefusal`, with `WorkspaceViewModel`'s own helper forwarding to it:
 three GUI sites and the verb refuse in one wording, and two copies of a refusal are two refusals that
 drift.
+
+---
+
+## The DRC engine and the `.wasm` rule model come below the firewall (2026-09-05)
+
+`brief-automation-4-check-and-explain.md` R-aut4-3, so `circuitrf check` can run design rules with no
+display. Nine files from `src/Ui/Layout/Drc` and all seven from `src/Ui/Layout/Assembly` moved here;
+namespaces became `CircuitRF.Design.Layout.Drc` (joining `DrcLayerExpr`, `DrcLayerExprParser` and
+`DrcWaiver`, which crossed with the `.clay` format in 2026-08) and `CircuitRF.Design.Layout.Assembly`.
+
+**The closure was free, and it was MEASURED rather than assumed.** The whole move produced five
+compiler errors, none of them a coupling:
+
+- a stale `using CircuitRF.Ui.Schematic` in `WasmPersistence` that nothing needed;
+- `AtomicFile`, which was already resolving to `CircuitRF.Design.Cells`' one through `src/Ui`'s
+  `GlobalUsings` rather than to `CircuitRF.Ui.Updates`' same-named class;
+- three fully-qualified `Ui.WBond.WBondSnap.ToDbu` calls in `DrcWireCheck`.
+
+`tests/Ui.Tests` then passed **unchanged** — 12,053 tests — which is the same evidence Gate 2 of
+`brief-cli-em-verb.md` asked for when the layout model crossed.
+
+### What did NOT move, and why each is not the engine
+
+- **`DrcRunReport`** stays in `src/Ui/Layout/Drc`. It takes an `IMessageSink` and posts a run's
+  verdict to the Messages panel; that is a UI surface, not a design rule.
+- **`WBondWireClearance`** stays for the same reason one level down: it reads the built-in wire
+  clearance out of the per-USER preferences file. The engine already takes the number as
+  `DrcRunSettings.WireClearanceNm` (an init-only member, added exactly so a caller can state it), so
+  the preference belongs to the GUI and the engine's own default — circuitRF's half a mil — is the
+  right answer for a caller with no user to ask.
+- **The wire half of a check needs a `WBondCheckContext`**, which carries the wBond design the layout
+  editor's document installs at runtime. Which wires ride over a layout is a property of what is
+  OPEN, not of the artwork, so a headless check of a `.clay` alone has no wires and checks none.
+
+### `WBondSnap.ToNm` had to move even though `WBondSnap` cannot
+
+`WBondClearance` is the R-wbd-1 crossing — it converts a LAYOUT into nanometres so a 3D wire point can
+be measured against it — and it converts through `WBondSnap.ToNm`. `WBondSnap` itself cannot cross:
+it needs `LayoutSnapQuery` and `SnapFeatureKind`, which ARE the layout editor.
+
+The integer pair moved to **`LayoutUnits.NmToDbu` / `LayoutUnits.DbuToNm`** and `WBondSnap.ToDbu` /
+`ToNm` forward to them, so every existing call site keeps its spelling and there is still exactly ONE
+implementation. That property is not cosmetic: `WBondClearance`'s own header records this conversion
+shipping broken twice from a second copy, invisibly, because at the default 1,000 DBU/µm nm and DBU
+coincide exactly.
+
+**The arithmetic is unchanged — `double`, `MidpointRounding.AwayFromZero` — and deliberately not the
+`decimal` pair beside it.** `LayoutUnits`' documented exactness rule is about a user-entered quantity
+in a named unit; this converts a whole coordinate, it was written in `double`, and every clearance
+circuitRF has ever reported came out of it. A `decimal` re-derivation would be more exact past 2^53
+and would also change measured results — a numeric change smuggled in under a file move.
+
+### The `.wasm` parser's messages are on the allow list, moved not authored
+
+`UserFacingTextGateTests` fires on user-facing text below the firewall, and 26 of these are:
+`DrcPredicateParser`'s parse errors and `WasmPersistence`'s two format refusals. They are listed in
+`tests/Firewall.Tests/user-facing-text-allowlist.txt` under a dated heading rather than converted to
+`Diagnostic`s — R-aut4-3 moves whole files without reshaping them, and converting 26 parser messages
+under cover of a file move is the change nobody could review. They are also the family where a plain
+sentence is closest to defensible: a parse error already carries the offending TEXT and a character
+POSITION, which is the typed half a `Diagnostic` would have added, and its reader is the person who
+wrote the expression. Converting them is still worth doing, on its own, later.
+
+### `CellViewFileValidator` moved too
+
+`src/Ui/Schematic` → `src/Design/Cells`. It answers "would this file survive being adopted as a
+cell's schematic / symbol / layout view?", every type it touches (`SchematicPersistence`,
+`SymbolPersistence`, `LayoutPersistence`, `CellFolder`, `GzipTextFile`) was already here after AUT-2,
+and `check` needs it. `HierarchyResolver`, listed beside it in the brief's table, did NOT move and
+should not: it takes `EditableComponent` and `SchematicEditModel`, which are edit-session types.
+`check` resolves cell references through `CellSymbolResolver` instead, which is what the editor draws
+with.

@@ -1,4 +1,4 @@
-namespace CircuitRF.Ui.Layout.Assembly;
+namespace CircuitRF.Design.Layout.Assembly;
 
 /// <summary>Where a resolved <see cref="WasmFile"/> came from, or that none was found.</summary>
 public enum WasmResolutionSource

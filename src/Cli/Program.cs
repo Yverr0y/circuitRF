@@ -67,6 +67,11 @@ return JsonRun.Finish(JsonRun.Verb switch
     // adding `new schematic` later is a noun rather than a fourth top-level verb.
     "new"    => CircuitRF.Cli.Authoring.RunNew(args[1..]),
     "import" => CircuitRF.Cli.Authoring.RunImport(args[1..]),
+    // R-aut4-1/R-aut4-6: neither runs an analysis and neither writes. They are what closes a
+    // headless client's loop — it writes a document, asks whether the document is sound, and asks
+    // what circuitRF made of it, without paying for a run.
+    "check"   => CircuitRF.Cli.Check.Run(args[1..]),
+    "explain" => CircuitRF.Cli.Explain.Run(args[1..]),
     "elab"   => RunElab(args[1..]),
     _        => UnknownVerb(args[0])
 });
@@ -1235,77 +1240,24 @@ static void PrintWorkerOutput()
 static Analysis? SelectTop(TestBench tb, string? requested, Func<Analysis, bool> isBase,
                            string kindLabel, string directiveHint, out string? why)
 {
-    why = null;
+    // The rule itself lives in ChainSelector (src/Cli/ChainSelection.cs), because
+    // `explain --analysis` has to report the same decision without making it. What stays here is
+    // the two sentences a RUN writes to stderr — unchanged, character for character, because a
+    // script watching stderr must not be able to tell this moved (R-aut0-3).
+    var sel = ChainSelector.Select(tb, requested, isBase, kindLabel, directiveHint);
+    why = sel.Why;
 
-    // Names referenced as somebody's inner are not chain roots.
-    var inner = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-    foreach (var a in tb.Analyses)
-        if (a is ParametricSweepAnalysis ps && !string.IsNullOrEmpty(ps.InnerAnalysisName))
-            inner.Add(ps.InnerAnalysisName);
+    if (sel.PromotedFrom is { } from && sel.Selected is { } owner)
+        Console.Error.WriteLine($"[circuitRF] {ChainSelector.PromotionNote(from, owner)}");
+    else if (requested is null && sel.Candidates.Count > 1)
+        Console.Error.WriteLine($"[circuitRF] {ChainSelector.AmbiguityNote(sel, kindLabel)}");
 
-    // Roots whose chain bottoms out in an HB and actually runs.
-    var candidates = new List<Analysis>();
-    foreach (var root in tb.Analyses)
-    {
-        if (inner.Contains(root.Name)) continue;
-        var top = AnalysisChain.ResolveEffectiveTop(root, tb);
-        if (top is null || !top.Enabled) continue;
-        if (!AnalysisChain.IsChainRunnable(top, tb)) continue;
-        if (BaseOfChain(top, tb) is { } base_ && isBase(base_)) candidates.Add(top);
-    }
-
-    if (requested is not null)
-    {
-        var named = tb.Analyses.FirstOrDefault(a => a.Name.Equals(requested, StringComparison.OrdinalIgnoreCase));
-        if (named is null)
-        {
-            why = $"no analysis named '{requested}'. Declared: " +
-                  (tb.Analyses.Count > 0 ? string.Join(", ", tb.Analyses.Select(a => a.Name)) : "(none)");
-            return null;
-        }
-        // Promote to the outermost chain that contains it, so -a HB1 still runs SW1's sweep.
-        var owner = candidates.FirstOrDefault(c => ChainContains(c, named.Name, tb));
-        if (owner is not null && !ReferenceEquals(owner, named))
-            Console.Error.WriteLine(
-                $"[circuitRF] '{named.Name}' is the inner analysis of '{owner.Name}' — running '{owner.Name}' " +
-                $"so the sweep axis is not lost.");
-        return owner ?? named;
-    }
-
-    if (candidates.Count == 0)
-    {
-        why = tb.Analyses.Any(isBase)
-            ? $"the netlist declares a {kindLabel} analysis but its chain is disabled."
-            : $"the netlist declares no {kindLabel} analysis ({directiveHint}).";
-        return null;
-    }
-    if (candidates.Count > 1)
-        Console.Error.WriteLine(
-            $"[circuitRF] {candidates.Count} {kindLabel} chains declared ({string.Join(", ", candidates.Select(c => c.Name))}); " +
-            $"running '{candidates[0].Name}'. Use -a <name> to pick another.");
-    return candidates[0];
+    return sel.Selected;
 }
 
 /// The base (non-sweep) analysis a chain bottoms out in.
-static Analysis? BaseOfChain(Analysis top, TestBench tb)
-{
-    Analysis? a = top;
-    for (int guard = 0; a is ParametricSweepAnalysis ps && guard < 64; guard++)
-        a = AnalysisChain.ResolveEffectiveInner(ps.InnerAnalysisName, tb);
-    return a;
-}
+static Analysis? BaseOfChain(Analysis top, TestBench tb) => ChainSelector.BaseOfChain(top, tb);
 
-static bool ChainContains(Analysis top, string name, TestBench tb)
-{
-    Analysis? a = top;
-    for (int guard = 0; a is not null && guard < 64; guard++)
-    {
-        if (a.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) return true;
-        if (a is not ParametricSweepAnalysis ps) return false;
-        a = AnalysisChain.ResolveEffectiveInner(ps.InnerAnalysisName, tb);
-    }
-    return false;
-}
 
 /// <summary>
 /// Applies command-line HB overrides by REPLACING each HB directive in the TestBench — the directive
@@ -1681,6 +1633,8 @@ static int PrintHelp()
     Console.WriteLine("  new workspace <dir>    (a workspace, with a shipped technology copied in)");
     Console.WriteLine("  new cell <ws> <name>   (a cell folder with its view files)");
     Console.WriteLine("  import part <file>     (a footprint and its symbol, as a cell)");
+    Console.WriteLine("  check   <path>         (is it well formed, does it resolve, is it sound)");
+    Console.WriteLine("  explain <path>         (what did circuitRF resolve it to, and by which walk)");
     Console.WriteLine();
     Console.WriteLine("hb options:");
     Console.WriteLine("  -a, --analysis <name>   which analysis to run (default: the only HB chain)");
@@ -1733,6 +1687,23 @@ static int PrintHelp()
     Console.WriteLine("  --list-parts            report what the source holds, create nothing");
     Console.WriteLine("  --tech <file.ctech>     the technology the layers reconcile against");
     Console.WriteLine("  --add-layers            write the part's new layers into that technology");
+    Console.WriteLine();
+    Console.WriteLine("check options:");
+    Console.WriteLine("  <path>                  a workspace, a cell folder, or one .csch .csym");
+    Console.WriteLine("                          .clay .ctech .cem .cnl .wasm — the kind is inferred");
+    Console.WriteLine("  --recursive, -r         descend a plain folder (a workspace always does)");
+    Console.WriteLine("  --severity warning|error  what decides the exit code. Default: error —");
+    Console.WriteLine("                          warnings are still reported and still exit 0.");
+    Console.WriteLine("                          Runs no analysis and writes nothing.");
+    Console.WriteLine();
+    Console.WriteLine("explain options:");
+    Console.WriteLine("  --expr \"<expression>\"   evaluate it in the design's own resolved scope");
+    Console.WriteLine("  --set <var=expr>        override a global first, exactly as a run verb does");
+    Console.WriteLine("  --analysis [<name>]     every runnable chain, which one dispatches, and");
+    Console.WriteLine("                          whether a named inner analysis would be promoted");
+    Console.WriteLine("  --ref <relative-ref>    what that reference resolves to from this document");
+    Console.WriteLine("                          With none of the three: the document's own walks —");
+    Console.WriteLine("                          its workspace, its layout, its technology.");
     Console.WriteLine();
     Console.WriteLine("Options (any command):");
     Console.WriteLine("  --kits <dir>        folder of installed kits, for externally-provided");

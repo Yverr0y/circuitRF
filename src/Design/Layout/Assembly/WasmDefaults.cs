@@ -1,6 +1,6 @@
 using CircuitRF.WBond;
 
-namespace CircuitRF.Ui.Layout.Assembly;
+namespace CircuitRF.Design.Layout.Assembly;
 
 /// <summary>
 /// The starter assembly rule set — what "create one for me" writes.

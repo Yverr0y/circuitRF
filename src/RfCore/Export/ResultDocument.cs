@@ -81,11 +81,158 @@ namespace RfCore.Export
     /// for the same reason the console prints it rather than the cubes: it is the useful projection,
     /// not a terminal compromise (R-aut1-5).
     /// </param>
+    /// <param name="Check">
+    /// What <c>check</c> looked at and what it found, in counts. The findings themselves are
+    /// <c>diagnostics</c> — this is the tally, so a caller can tell "checked nothing" from
+    /// "checked everything and it was clean" without counting an array
+    /// (brief-automation-4-check-and-explain.md R-aut4-10).
+    /// </param>
+    /// <param name="Explain">
+    /// What <c>explain</c> resolved, and the WALK it performed to get there. The walk is not
+    /// decoration: two of these start from different files and can legitimately land on different
+    /// workspaces (<c>cli.md</c> §8.1), and that is exactly the thing a caller cannot otherwise see.
+    /// </param>
     public sealed record ResultPayload(
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         LoadpullSummaryJson? Summary,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        IReadOnlyDictionary<string, IReadOnlyDictionary<string, CubeJson>>? Groups);
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, CubeJson>>? Groups,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        CheckReportJson? Check = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        ExplainReportJson? Explain = null);
+
+    // ── check and explain, on the wire (R-aut4-10) ───────────────────────────
+
+    /// <param name="Kind">
+    /// What the path was taken to BE — <c>workspace</c>, <c>cell</c>, <c>schematic</c>,
+    /// <c>symbol</c>, <c>layout</c>, <c>technology</c>, <c>em-setup</c>, <c>netlist</c>,
+    /// <c>assembly-rules</c>, <c>folder</c>. Inferred from the path exactly as <c>convert</c> infers
+    /// a format (R-aut4-11): by extension, and for a directory by what it contains.
+    /// </param>
+    public sealed record CheckedDocumentJson(string Path, string Kind, int Errors, int Warnings);
+
+    /// <param name="Severity">
+    /// The threshold the exit code was decided at — <c>warning</c> or <c>error</c>. Carried because
+    /// a document holding warnings and <c>exitCode: 0</c> is only readable next to the threshold
+    /// that made it so (R-aut4-5).
+    /// </param>
+    public sealed record CheckReportJson(
+        string                             Root,
+        string                             Severity,
+        int                                DocumentsChecked,
+        int                                Errors,
+        int                                Warnings,
+        int                                Notes,
+        IReadOnlyList<CheckedDocumentJson> Documents);
+
+    /// <summary>
+    /// One step of a resolution walk: what was being resolved, what it started from, what it landed
+    /// on, and by which rule. <paramref name="Resolved"/> is null when the step found nothing —
+    /// which is an answer, not an omission (R-aut4-8).
+    /// </summary>
+    public sealed record ResolutionStepJson(
+        string  Step,
+        string? From,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Resolved,
+        string  How);
+
+    /// <param name="Scale">
+    /// What the stated unit's coefficients were multiplied by to reach base SI. Reported ALONGSIDE
+    /// <paramref name="StatedUnit"/> and the base-SI numbers, because reading a unit's mark without
+    /// its scale has already produced a sweep that ran at 2 Hz and looked entirely normal (R-aut4-9).
+    /// </param>
+    /// <param name="Step">
+    /// The step SIZE in base SI for a step-size sweep; null for a point-count or explicit-list sweep,
+    /// where there is no step to state and a computed one would be an invention.
+    /// </param>
+    public sealed record ExplainSweepJson(
+        string  Variable,
+        int     Points,
+        double  Start,
+        double  Stop,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        double? Step,
+        string  BaseUnit,
+        string  StatedUnit,
+        double  Scale,
+        string  Kind);
+
+    /// <param name="Chain">The chain from this root inward, outermost first.</param>
+    /// <param name="Dispatched">
+    /// True for the one chain <c>SelectTop</c> would run. False on every other, INCLUDING a runnable
+    /// one that simply is not first — which is what makes the ambiguity visible without a run.
+    /// </param>
+    /// <param name="DispatchedBy">
+    /// WHICH verb would run it — <c>hb</c>, <c>lp</c> or <c>lpp</c>. Chain selection is per KIND, so
+    /// one netlist can declare an HB chain and a loadpull chain and each verb dispatches its own;
+    /// a single "dispatched" flag with no verb beside it would read as a claim that only one runs.
+    /// </param>
+    /// <param name="PromotedFrom">
+    /// The inner analysis whose name would have been promoted to this chain. Non-null only when the
+    /// caller named one, and the whole reason this option exists (<c>cli.md</c> §4).
+    /// </param>
+    public sealed record ExplainAnalysisJson(
+        string                Name,
+        string                Kind,
+        bool                  Enabled,
+        bool                  Runnable,
+        bool                  IsRoot,
+        IReadOnlyList<string> Chain,
+        bool                  Dispatched,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string?               DispatchedBy,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string?               PromotedFrom,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        ExplainSweepJson?     Sweep);
+
+    /// <param name="Kind">The <c>ValueKind</c> — <c>real</c>, <c>complex</c>, <c>bool</c>, or
+    /// whatever else the engine produced. Reported rather than coerced: a Bool forced to a number is
+    /// a different answer.</param>
+    /// <param name="Text">The engine's own rendering, so a caller sees what an expression that is
+    /// not a number at all evaluated to.</param>
+    public sealed record ExplainExpressionJson(
+        string    Expression,
+        string    Kind,
+        string    Text,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        double?   Real,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        double[]? Complex,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        bool?     Boolean);
+
+    /// <param name="State">
+    /// <c>resolved</c>, <c>not-found</c>, or <c>primary-missing</c> — the three states
+    /// <c>CellSymbolResolver</c> already keeps distinct, forwarded rather than collapsed.
+    /// </param>
+    /// <param name="OutsideWorkspace">
+    /// True when the reference resolves to somewhere outside the referring document's own workspace.
+    /// Null when there is no workspace to be outside of.
+    /// </param>
+    public sealed record ExplainReferenceJson(
+        string  Ref,
+        string  From,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? ResolvedPath,
+        string  State,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        bool?   OutsideWorkspace,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Redirect);
+
+    public sealed record ExplainReportJson(
+        string                              Path,
+        string                              Kind,
+        IReadOnlyList<ResolutionStepJson>   Walks,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<ExplainAnalysisJson>? Analyses,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        ExplainExpressionJson?              Expression,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        ExplainReferenceJson?               Reference);
 
     // ── the loadpull summary, on the wire ────────────────────────────────────
 

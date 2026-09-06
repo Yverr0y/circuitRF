@@ -48,6 +48,29 @@ public static class LayoutUnits
         return dbu * 1000m / (NmPerUnit(unit) * dbuPerMicron);
     }
 
+    // ── the integer nm ⇄ DBU pair ────────────────────────────────────────────
+    //
+    // Moved down from `WBondSnap` (src/Ui/WBond) when the DRC engine crossed the UI firewall
+    // (brief-automation-4-check-and-explain.md R-aut4-3): `WBondClearance` is the one crossing that
+    // converts a LAYOUT into nanometres so a 3D wire point can be measured against it, and the
+    // engine could not come down here while the function it converts with stayed up there.
+    // `WBondSnap.ToDbu`/`ToNm` now forward to these, so there is still exactly ONE implementation —
+    // which is the property that file's own header depends on, and the one a second copy would end.
+    //
+    // **The arithmetic is `double`, deliberately, and is NOT the decimal pair above.** These convert
+    // a whole coordinate rather than a user-entered quantity, they were written in double, and every
+    // clearance number circuitRF has ever reported came out of them. Re-deriving them in decimal
+    // would be more exact past 2^53 and would also change measured results on a document nobody has
+    // — a numeric change smuggled in under a file move, which is precisely what R-aut0-4 forbids.
+
+    /// <summary>Nanometres to a layout's own DBU. 1 µm = 1,000 nm = <paramref name="dbuPerMicron"/> DBU.</summary>
+    public static long NmToDbu(long nm, int dbuPerMicron) =>
+        dbuPerMicron <= 0 ? nm : (long)Math.Round(nm * (double)dbuPerMicron / 1000.0, MidpointRounding.AwayFromZero);
+
+    /// <summary>A layout's own DBU back to nanometres.</summary>
+    public static long DbuToNm(long dbu, int dbuPerMicron) =>
+        dbuPerMicron <= 0 ? dbu : (long)Math.Round(dbu * 1000.0 / dbuPerMicron, MidpointRounding.AwayFromZero);
+
     /// <summary>
     /// Parses a bare number (interpreted in <paramref name="fallbackUnit"/>) or a number with a
     /// unit suffix (nm, u/um/µm, mm, mil, in/inch). Case-insensitive, whitespace-tolerant,

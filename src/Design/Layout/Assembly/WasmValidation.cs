@@ -1,6 +1,6 @@
-using CircuitRF.Ui.Layout.Drc;
+using CircuitRF.Design.Layout.Drc;
 
-namespace CircuitRF.Ui.Layout.Assembly;
+namespace CircuitRF.Design.Layout.Assembly;
 
 /// <summary>
 /// Structural checks on a `.wasm`, mirroring <see cref="TechValidation"/>: it never throws, it never

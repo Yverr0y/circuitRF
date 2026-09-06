@@ -6,7 +6,7 @@
 
 using Clipper2Lib;
 
-namespace CircuitRF.Ui.Layout.Drc;
+namespace CircuitRF.Design.Layout.Drc;
 
 /// <summary>
 /// Evaluates <see cref="DrcLayerExpr"/> against the per-layer regions a run has already built.

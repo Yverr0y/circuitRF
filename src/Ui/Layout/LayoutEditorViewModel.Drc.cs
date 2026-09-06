@@ -8,7 +8,6 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using CircuitRF.Ui.Layout.Assembly;
 using CircuitRF.Ui.Layout.Drc;
 using CircuitRF.WBond;
 

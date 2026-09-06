@@ -34,7 +34,7 @@
 
 using CircuitRF.WBond;
 
-namespace CircuitRF.Ui.Layout.Assembly;
+namespace CircuitRF.Design.Layout.Assembly;
 
 /// <summary>One rule circuitRF supplies itself.</summary>
 /// <param name="Name">What a violation traces back to — also its waiver identity.</param>

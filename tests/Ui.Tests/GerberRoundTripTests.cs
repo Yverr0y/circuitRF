@@ -248,7 +248,7 @@ public class GerberRoundTripTests : IDisposable
         var byName = new Dictionary<string, Paths64>(StringComparer.Ordinal);
 
         foreach (var shape in view.Shapes)
-            CircuitRF.Ui.Layout.Drc.DrcRegions.Expand(
+            DrcRegions.Expand(
                 shape, tech, _ => XorTolDbu,
                 (key, _, paths) =>
                 {

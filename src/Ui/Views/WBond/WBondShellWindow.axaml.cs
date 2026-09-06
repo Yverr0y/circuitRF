@@ -5,7 +5,6 @@ using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Platform.Storage;
-using CircuitRF.Ui.Layout.Assembly;
 using CircuitRF.Ui.Schematic;
 using CircuitRF.Ui.ViewModels.Dock;
 using CircuitRF.Ui.Views.Dialogs;

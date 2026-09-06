@@ -18,6 +18,7 @@
 // ================================================================
 
 using System.Diagnostics;
+using System.Text.Json;
 using CircuitRF.Design.Cells;
 using CircuitRF.Design.Layout;
 using CircuitRF.Design.Layout.Interchange;
@@ -241,6 +242,82 @@ public sealed class ConvertCliVerbTests(ITestOutputHelper output) : IDisposable
         Assert.Equal(0, code);
         Assert.NotEmpty(stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries));
         Assert.False(File.Exists(before));
+    }
+
+    // ── The `--json` carry-through (brief-automation-4-check-and-explain.md's convert half) ───────
+    //
+    // `convert` answered `--json` from AUT-1, but three things a caller needs were still reaching
+    // only the terminal. Each is asserted here because each was found by running the verb rather
+    // than by reading it.
+
+    /// <summary>
+    /// The import's own notes — a layer mapped, a zone not imported, a stackup the file did not
+    /// carry — reach the document, not only stderr. They are how a caller learns what a conversion
+    /// DROPPED, and a `--json` consumer that could not read them would be reading a report that
+    /// omits the losses.
+    /// </summary>
+    [Fact]
+    public void Json_CarriesTheImportsOwnNotes()
+    {
+        var (code, stdout, _) = RunCli("convert", SourceIn("gdsii"),
+                                       "-o", Path.Combine(_root, "noted.dxf"), "--json");
+        Assert.Equal(0, code);
+
+        using var doc = JsonDocument.Parse(stdout);
+        Assert.Contains("convert.note",
+            doc.RootElement.GetProperty("diagnostics").EnumerateArray()
+               .Select(d => d.GetProperty("id").GetString()));
+    }
+
+    /// <summary>
+    /// <c>--list-cells</c> answers `--json`. Its listing IS the result of that invocation — the whole
+    /// answer to "what does this file hold?" — and `--json` replaces the stdout it was printed on, so
+    /// without this the flag produced an empty document (R-aut1-3: a caller must never have to tell
+    /// "no output" from "output I could not parse").
+    /// </summary>
+    [Fact]
+    public void Json_ListCells_AnswersInTheDocument()
+    {
+        var (code, stdout, _) = RunCli("convert", SourceIn("gdsii"), "--list-cells", "--json");
+        Assert.Equal(0, code);
+
+        using var doc = JsonDocument.Parse(stdout);
+        var listed = doc.RootElement.GetProperty("diagnostics").EnumerateArray()
+                        .Where(d => d.GetProperty("id").GetString() == "convert.cell.listed")
+                        .Select(d => d.GetProperty("arguments").GetProperty("cell").GetString())
+                        .ToArray();
+        Assert.NotEmpty(listed);
+
+        // And it still wrote nothing: --list-cells imports into a scratch directory it deletes, so
+        // the technology it minted on the way is NOT reported as an output.
+        Assert.Empty(doc.RootElement.GetProperty("outputs").EnumerateArray());
+    }
+
+    /// <summary>
+    /// The minted `.ctech` is an output when it survives, and is not when it does not. It is not
+    /// optional context: the cells reference it by relative path, so a caller that took the cells and
+    /// not this has a design whose layers resolve to nothing.
+    /// </summary>
+    [Fact]
+    public void Json_TheMintedTechnology_IsAnOutputExactlyWhenItSurvives()
+    {
+        string kept = Path.Combine(_root, "kept-json");
+        var (keepCode, keepOut, _) = RunCli("convert", SourceIn("gdsii"),
+                                            "-o", Path.Combine(_root, "kj.dxf"),
+                                            "--keep-cells", kept, "--json");
+        Assert.Equal(0, keepCode);
+        using (var doc = JsonDocument.Parse(keepOut))
+            Assert.Contains("ctech", Kinds(doc));
+
+        var (code, stdout, _) = RunCli("convert", SourceIn("gdsii"),
+                                       "-o", Path.Combine(_root, "scratch.dxf"), "--json");
+        Assert.Equal(0, code);
+        using (var doc = JsonDocument.Parse(stdout))
+            Assert.DoesNotContain("ctech", Kinds(doc));
+
+        static string?[] Kinds(JsonDocument doc) =>
+            [.. doc.RootElement.GetProperty("outputs").EnumerateArray()
+                  .Select(o => o.GetProperty("kind").GetString())];
     }
 
     /// <summary>--keep-cells is the way to see what a conversion actually understood, so it has to

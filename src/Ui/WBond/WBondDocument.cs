@@ -2,7 +2,6 @@ using System;
 using System.Globalization;
 using System.IO;
 using CircuitRF.Ui.Layout;
-using CircuitRF.Ui.Layout.Assembly;
 using CircuitRF.WBond;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;

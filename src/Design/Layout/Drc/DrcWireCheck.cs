@@ -34,10 +34,10 @@
 // rather than being quietly slow.
 
 using Clipper2Lib;
-using CircuitRF.Ui.Layout.Assembly;
+using CircuitRF.Design.Layout.Assembly;
 using CircuitRF.WBond;
 
-namespace CircuitRF.Ui.Layout.Drc;
+namespace CircuitRF.Design.Layout.Drc;
 
 /// <summary>Everything the wire check needs from outside the wBond design itself.</summary>
 /// <param name="Design">The wires.</param>
@@ -499,8 +499,8 @@ public static class DrcWireCheck
 
     /// <summary>The R-wbd-1 crossing, in the one direction this file needs it.</summary>
     private static Bbox ToDbu(long minXNm, long minYNm, long maxXNm, long maxYNm, int dbuPerMicron) => new(
-        Ui.WBond.WBondSnap.ToDbu(minXNm, dbuPerMicron), Ui.WBond.WBondSnap.ToDbu(minYNm, dbuPerMicron),
-        Ui.WBond.WBondSnap.ToDbu(maxXNm, dbuPerMicron), Ui.WBond.WBondSnap.ToDbu(maxYNm, dbuPerMicron));
+        LayoutUnits.NmToDbu(minXNm, dbuPerMicron), LayoutUnits.NmToDbu(minYNm, dbuPerMicron),
+        LayoutUnits.NmToDbu(maxXNm, dbuPerMicron), LayoutUnits.NmToDbu(maxYNm, dbuPerMicron));
 
     /// <summary>
     /// Lengths in a wire violation are reported in MIL, not the layout's own display unit. A `.wasm`

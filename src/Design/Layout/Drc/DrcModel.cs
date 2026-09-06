@@ -7,7 +7,7 @@
 // DBU, in the same world coordinates as the artwork, and the renderer draws them without knowing
 // anything about rules.
 
-namespace CircuitRF.Ui.Layout.Drc;
+namespace CircuitRF.Design.Layout.Drc;
 
 /// <summary>
 /// One design-rule violation: which rule, how bad, and — the part that makes it usable — WHERE.

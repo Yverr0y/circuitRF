@@ -50,6 +50,37 @@ public sealed class Elaborator
     public Elaborator(params Library[] libraries)
         => _libraries = libraries;
 
+    /// <summary>
+    /// The global scope this elaboration built and resolved through, or null before
+    /// <see cref="Elaborate"/> has run.
+    ///
+    /// <para>Held so a caller can ask what an expression means IN THE DESIGN'S OWN SCOPE without
+    /// running an analysis — which is what <c>circuitrf explain --expr</c> is
+    /// (brief-automation-4-check-and-explain.md R-aut4-7). It is the scope itself rather than a copy:
+    /// the ambient binding this method adds when the design states none, the units on each variable,
+    /// and every <c>--set</c> override that replaced a variable before elaboration are all already
+    /// in it, and a second scope assembled from <c>TestBench.GlobalVariables</c> would be missing the
+    /// first and would drift from the third.</para>
+    /// </summary>
+    public Scope? GlobalScope { get; private set; }
+
+    /// <summary>
+    /// Evaluates <paramref name="expression"/> in <see cref="GlobalScope"/>, through the same
+    /// <see cref="Evaluator"/> the elaboration used — so its memo cache, its registered user
+    /// functions and its cycle detection all apply, and the answer is the one the design's own
+    /// expressions would get. Never string substitution (<c>docs/design/expressions.md</c>).
+    ///
+    /// <para>Throws whatever the expression engine throws — an unresolved name, a cycle, a parse
+    /// error. The caller reports it; this does not soften it into a null.</para>
+    /// </summary>
+    /// <exception cref="InvalidOperationException"><see cref="Elaborate"/> has not run.</exception>
+    public Value EvaluateInGlobalScope(string expression)
+    {
+        var scope = GlobalScope
+            ?? throw new InvalidOperationException("Elaborate() has not run, so there is no global scope yet.");
+        return _evaluator.Eval(expression, scope);
+    }
+
     public ElaboratedNetlist Elaborate(TestBench tb)
     {
         // User-defined expression functions must exist before any expression is resolved —
@@ -62,6 +93,7 @@ public sealed class Elaborator
 
         var netlist     = new ElaboratedNetlist();
         var globalScope = BuildGlobalScope(tb);
+        GlobalScope     = globalScope;
 
         // Ambient must be known BEFORE flattening: models are constructed during the walk, and a
         // temperature-aware one bakes its temperature in at construction.

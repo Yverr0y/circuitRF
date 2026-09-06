@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using CircuitRF.Ui.Layout;
-using CircuitRF.Ui.Layout.Assembly;
 using CircuitRF.Ui.Layout.Drc;
 using CircuitRF.Ui.Messages;
 using CircuitRF.Ui.Theming;

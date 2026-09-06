@@ -23,7 +23,7 @@
 
 using CircuitRF.WBond;
 
-namespace CircuitRF.Ui.Layout.Assembly;
+namespace CircuitRF.Design.Layout.Assembly;
 
 /// <summary>
 /// Which of WB32's three sections a rule came from.

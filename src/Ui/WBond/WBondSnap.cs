@@ -33,13 +33,17 @@ public static class WBondSnap
         public static Result Miss(long xNm, long yNm) => new(false, xNm, yNm, SnapFeatureKind.Nearest);
     }
 
+    // The pair itself now lives in `LayoutUnits`, below the UI firewall, because `WBondClearance`
+    // converts with it and the DRC engine crossed the wall in AUT-4 (R-aut4-3). These stay as the
+    // spelling every snap call site already uses — forwarding, never a second copy: the whole point
+    // of "one function that does it" is that there is one, and a re-derived twin here would be the
+    // exact failure this file's own header describes having shipped twice.
+
     /// <summary>Nanometres to a layout's own DBU. 1 µm = 1,000 nm = <c>DbuPerMicron</c> DBU.</summary>
-    public static long ToDbu(long nm, int dbuPerMicron) =>
-        dbuPerMicron <= 0 ? nm : (long)Math.Round(nm * (double)dbuPerMicron / 1000.0, MidpointRounding.AwayFromZero);
+    public static long ToDbu(long nm, int dbuPerMicron) => LayoutUnits.NmToDbu(nm, dbuPerMicron);
 
     /// <summary>A layout's own DBU back to nanometres.</summary>
-    public static long ToNm(long dbu, int dbuPerMicron) =>
-        dbuPerMicron <= 0 ? dbu : (long)Math.Round(dbu * 1000.0 / dbuPerMicron, MidpointRounding.AwayFromZero);
+    public static long ToNm(long dbu, int dbuPerMicron) => LayoutUnits.DbuToNm(dbu, dbuPerMicron);
 
     /// <summary>
     /// Finds the highest-priority snap feature within <paramref name="toleranceNm"/> of a wire point.

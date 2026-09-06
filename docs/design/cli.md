@@ -37,7 +37,7 @@ and it is gated by the same firewall test. That is what the `em` verb (§8) runs
 | `em` | `.cem` | `EmSetupResolver` + `EmRunService` (kernel chosen by `EmKernelRegistry`) | Touchstone `.sNp` + grouped `.npy` at the path Simulate writes; `-o` moves the Touchstone |
 | `elab` | `.cnl` | elaboration only | the elaborated netlist, for development |
 
-Three verbs run no analysis, so none of §3-§6 applies to them and §7's exit codes reduce to 0-or-1:
+Six verbs run no analysis, so none of §3-§6 applies to them and §7's exit codes reduce to 0-or-1:
 
 | Verb | Input | Does | Writes |
 |---|---|---|---|
@@ -45,6 +45,8 @@ Three verbs run no analysis, so none of §3-§6 applies to them and §7's exit c
 | `new workspace` | a directory | `WorkspaceCreate.Create` | a `.cws` and, unless `--tech none`, a copied `.ctech` |
 | `new cell` | a workspace + a name | `CellCreate.Create` | a cell folder and one empty-but-valid file per `--views` |
 | `import part` | a component file or folder | `ComponentRead` + `ComponentImport.Import` | a cell folder holding the land patterns and the symbol |
+| `check` | a workspace, a cell folder, or one document | the validators that already exist | **nothing** — §10 |
+| `explain` | the same, plus `--expr` / `--analysis` / `--ref` | reports what resolution DECIDED | **nothing** — §10 |
 
 **`new` is one verb with a noun, not three** (`brief-automation-3-authoring-verbs.md` R-aut3-13): the
 surface has a standing cost, and adding `new schematic` later is a noun rather than a fourth
@@ -403,6 +405,9 @@ stderr to fill that pipe's buffer and deadlock a sequential reader.
 no chain to select and no directive to override. Its analogue of §5's rule is §8.2's — the one
 override it takes lands in the `EmSetup`, not at the run service, for the same reason.
 
+`check` and `explain` follow 1, 4, 6 and 7, and their §5 analogue is §10's — they run nothing and
+they write nothing.
+
 `convert`, `new` and `import part` follow 1, 4, 6 and 7 and are outside 2, 3 and 5 for the same
 reason: they run no analysis. Their §5 analogue is stronger and is the whole of
 `brief-automation-3-authoring-verbs.md` R-aut3-1: **an authoring verb calls the capability the GUI's
@@ -411,3 +416,132 @@ will diverge from it silently, and the first symptom is a document created headl
 application treats as subtly malformed — so step 2, for these, is "find the function the GUI calls,
 and if it is trapped inside a view model, extract it and change the view model to call it too". That
 extraction is not optional and it is not a follow-up.
+
+## 10. `check` and `explain`
+
+`brief-automation-4-check-and-explain.md`. These are the two verbs that close a headless client's
+loop: it writes a document, asks whether the document is sound, and asks what circuitRF made of it —
+without paying for a run.
+
+```
+circuitrf check   <path> [--recursive] [--severity warning|error]
+circuitrf explain <path> [--expr "<expression>"] [--set var=expr]
+                         [--analysis [<name>]] [--ref <relative-ref>]
+```
+
+### 10.1 Neither runs an analysis, and neither writes
+
+**R-aut4-1.** `check` on a large design has to be cheap enough to call after every edit, so it stops
+at elaboration — which is what answers "do the parameters, expressions and cycles resolve?" — and
+nothing here solves a matrix. A check that needs a solve to answer belongs in the run verbs' own
+warnings.
+
+**R-aut4-6.** Not a repair, not a re-save, not a cache file. A caller must be able to run either verb
+on a read-only tree and on a workspace another process has open. The technology cache is per
+invocation and in memory; DRC waivers are read from the `.clay` and never written back;
+a `.csch`'s `.cnl` round trip (§10.3) happens as a string.
+
+### 10.2 `check` calls the validators that already exist
+
+**R-aut4-2, and it is the whole design.** The repo is full of validators and they are scattered
+rather than missing; what `src/Cli/Check.cs` adds is the WALK and the reporting, never a rule.
+
+| Validator | Where | What it answers |
+|---|---|---|
+| `CellViewFileValidator.DescribeDefect` | `src/Design/Cells` | is the file the view its extension claims? |
+| `CellFolder.ResolvePrimary` | `src/Design/Cells` | primacy — a named primary that is missing, or none chosen |
+| `NameValidator` | `src/Design/Cells` | a cell name the GUI would reject |
+| `TechValidation.Analyze` | `src/Design/Layout` | a `.ctech`'s problems, already typed as `TechProblem` |
+| `TechnologyResolver.ResolveForDocument` | `src/Design/Layout` | the technology walk-up |
+| `EmSetupResolver.Resolve` | `src/Design/Layout/Em` | a `.cem`'s layout and technology, and its refusals |
+| `CellSymbolResolver` | `src/Design/Schematic` | every cell reference on a schematic |
+| `NetExtractor` | `src/Design/Schematic` | naming conflicts — two labels on one physical net |
+| `Elaborator.Elaborate` | `src/Core/Elaboration` | parameters, expressions, cycles, node numbering |
+| `ChainSelector` | `src/Cli/ChainSelection.cs` | whether a declared analysis chain will dispatch |
+| `DrcPredicateParser` | `src/Design/Layout/Drc` | a `.wasm` rule that will not parse |
+| `DrcEngine` | `src/Design/Layout/Drc` | layout design rules |
+
+**A rule that exists only in `check` is a rule the GUI does not enforce** — a design would pass here
+and be refused when someone opened it. The converse matters just as much and cost a round to find:
+see §10.3.
+
+**Every finding is a `Diagnostic`** with a stable `check.` id and the producing validator's own typed
+values (R-aut4-4) — `TechProblem`'s `Area`, a DRC violation's rule name, layer and measurement. The
+id is the contract; the sentence is not.
+
+**Exit code (R-aut4-5): 0 if nothing at or above `--severity` was found, 1 otherwise.** Default
+severity is `error`. There is no `2` — nothing here converges. A check that found warnings and no
+errors **exits 0 and still reports them**, because the alternative makes the exit code useless in CI.
+Two states are deliberately warnings rather than errors: a cell sub-folder holding several views and
+no named primary (`PrimaryState.NoPrimary`, which that enum's own remarks call "not an error"), and a
+layout that resolves no technology (`layout-view.md` §2.4's normal, fully-supported state).
+
+**One verb over every document type** (R-aut4-11, R-aut-9). The kind comes from the path — by
+extension, and for a directory by what it contains — and an extension circuitRF does not own is
+offered to **`convert`'s own classifier**, which reads content, before being called unknown. A GDSII
+or Gerber file is reported as interchange rather than as something circuitRF cannot read; it is not
+VALIDATED, because there is nothing to validate it against.
+
+### 10.3 A `.csch` goes through the `.cnl` on its way to the elaborator
+
+The GUI's Simulate is `NetExtractor.Extract → CnlWriter.Write → CnlReader.Read → Elaborator`
+(`WorkspaceViewModel.WriteNetlist`, then `SchematicRunService.Prepare`), and the round trip is
+load-bearing: a schematic parameter is an EXPRESSION, so `BiasTee=on` read straight out of extraction
+fails elaboration with "Unresolved name 'on'", while the same value written to a `.cnl` and read back
+is quoted by `CnlReader` and elaborates.
+
+`check` and `explain` therefore both read a schematic through `src/Cli/CircuitSource.cs`, which
+performs that round trip in memory. Skipping it made `check` report errors the application does not
+have — the mirror image of R-aut4-2's rule, and just as bad.
+
+### 10.4 `explain` reports resolution, and shows the walk
+
+**R-aut4-7.** The value is as much in the path taken as in the answer, so every resolution comes back
+as a step: what was being resolved, from where, to what, and by which rule.
+
+- **A `.cem` or `.clay`** — the workspace found by walking up, the layout it resolved to, the
+  technology and *which* workspace resolved it. The two walks start from different files and can land
+  on different workspaces; that is deliberate (§8.1) and is exactly the thing a caller cannot
+  otherwise see.
+- **`--analysis`** — every declared chain, whether it is runnable, which one would dispatch and for
+  which verb, and whether a named inner analysis would be **promoted** to its wrapper (§4). Chain
+  selection goes through `ChainSelector`, the same function the run verbs select with, so the report
+  and the run cannot part company. A named analysis that comes back from selection but is not of that
+  verb's kind is **not** reported as dispatched: `SelectTop` hands back `owner ?? named`, so
+  `lp -a HB1` returns HB1, and calling that "lp dispatches HB1" would describe a run that cannot happen.
+- **`--expr`** — evaluated in the design's own resolved scope, through the one expression engine
+  (`Elaborator.EvaluateInGlobalScope`), never by substitution. The kind is reported, never coerced.
+  `--set` applies first, exactly as it does for a run verb (§5).
+- **`--ref`** — what a relative cell reference resolves to from that document's directory, its
+  three-state result (`resolved` / `not-found` / `primary-missing`), whether it leaves the workspace,
+  and whether it only resolved through a recorded move.
+
+The three questions are **refused together rather than ordered** — each asks something different, and
+a precedence nobody stated would be an invention.
+
+**R-aut4-8: `explain` never guesses and never falls back silently.** Where resolution fails, that is
+the answer — a diagnostic naming what was looked for and where it was looked, because a caller uses
+this verb precisely when something did not resolve.
+
+**R-aut4-9: sweep units are reported with their scale.** `--analysis` prints a sweep's resolved
+start, stop and step in **base SI**, with the unit it was stated in AND the scale that got it there.
+Reading a mark without its scale has already produced a run at 2 Hz that looked entirely normal.
+
+### 10.5 `--json`
+
+Per §3.2, with `diagnostics` carrying the findings and `result` carrying the report:
+
+```
+"result": { "check":   { "root","severity","documentsChecked","errors","warnings","notes",
+                         "documents":[{"path","kind","errors","warnings"}] } }
+
+"result": { "explain": { "path","kind",
+                         "walks":[{"step","from","resolved","how"}],
+                         "analyses":[{"name","kind","enabled","runnable","isRoot","chain",
+                                      "dispatched","promotedFrom","sweep"}],
+                         "expression":{"expression","kind","text","real","complex","boolean"},
+                         "reference":{"ref","from","resolvedPath","state","outsideWorkspace","redirect"} } }
+```
+
+`outputs` is empty for both — neither verb writes a file, and a caller looking for one must not find
+one invented.

@@ -43,7 +43,7 @@
 
 using Clipper2Lib;
 
-namespace CircuitRF.Ui.Layout.Drc;
+namespace CircuitRF.Design.Layout.Drc;
 
 public static class DrcEngine
 {

@@ -12,7 +12,8 @@ run an EM setup. Detail of that move is in `src/Ui/Layout/Em/RESOLVED.md`.
 |---|---|
 | `Layout/` | the layout model + `.clay` reader, geometry/units/angles, flatten, booleans, the spatial index, the cell-layout resolver, and the technology model + `.ctech` reader/validator |
 | `Layout/Em/` | the `.cem` model + reader, the cross-section and planar extractors, port extraction, `EmRunService`, `EmSetupResolver`, SnP provenance |
-| `Layout/Drc/` | only what the `.clay`/`.ctech` FORMAT names — the waiver record and the layer-expression parser. The DRC engine is not here |
+| `Layout/Drc/` | the whole design-rule check — the engine, the region and predicate evaluators, the wire-to-artwork check, and the `.clay`/`.ctech` format's own waiver record and layer-expression parser. It crossed in AUT-4 so `circuitrf check` runs design rules with no display; `DrcRunReport` and `WBondWireClearance` stayed in `src/Ui` |
+| `Layout/Assembly/` | the `.wasm` assembly rule-file model, its reader, its resolver and the built-in rule set the DRC engine falls back to when a design references no `.wasm` (AUT-4) |
 | `Layout/PCells/` | only `PCellValue` and how it serialises. No generators, no handle solver, no Python |
 | `Cells/` | the `.ccell` cell-folder format, the atomic write behind every save, and `CellCreate` — the writer of an empty `.csch`/`.csym`/`.clay`, which the GUI's New Cell / New Schematic / New Symbol / New Layout call |
 | `Workspace/` | the `.cws` reader, R-fgn-3's ancestor-workspace walk, and `WorkspaceCreate` — the four operations File ▸ New Workspace performs after its dialog returns |
@@ -30,10 +31,12 @@ gate is what keeps `circuitrf em` buildable at the later date when someone reach
 in the layout reader.
 
 Things that deliberately stayed in `src/Ui` and should not follow: `LayoutEditorViewModel` and its
-sixteen partials, `DrcEngine` and the wBond assembly rules, all seven PCell generators and
-`GeneratedCellStore`, `EmSetupEditorViewModel`, `EmBackAnnotation`, `TechEditorViewModel`, the
-technology importers, and `AppPreferences`. Flattening a placed generated cell reads the `.clay` the
-generator already wrote, which is why a headless EM run needs no generator and no Python.
+sixteen partials, the DRC engine's two UI-side companions — `DrcRunReport`, which posts a run to
+the Messages panel, and `WBondWireClearance`, which reads a per-USER preference — all seven PCell
+generators and `GeneratedCellStore`, `EmSetupEditorViewModel`, `EmBackAnnotation`,
+`TechEditorViewModel`, the technology importers, and `AppPreferences`. Flattening a placed
+generated cell reads the `.clay` the generator already wrote, which is why a headless EM run needs
+no generator and no Python.
 
 ## Two rules that are easy to break by accident
 

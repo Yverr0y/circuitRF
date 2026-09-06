@@ -12,7 +12,6 @@
 // second set of bugs, to express something the format already expresses. "Export my rules" writes a
 // `.ctech`; "import just the rules" reads one and takes one section.
 
-using CircuitRF.Ui.Layout.Assembly;
 
 namespace CircuitRF.Ui.Layout;
 
@@ -478,7 +477,7 @@ public static class TechnologyMerge
 
         var known = target.Envelopes.Select(e => e.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         int dangling = target.AllRules().Count(t =>
-            Drc.DrcPredicateParser.TryParse(t.Rule.Expression, out var p, out _) && p is not null &&
+            DrcPredicateParser.TryParse(t.Rule.Expression, out var p, out _) && p is not null &&
             p.ReferencedEnvelopes().Any(n => !known.Contains(n)));
 
         if (dangling > 0)

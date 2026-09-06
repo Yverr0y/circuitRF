@@ -12,7 +12,6 @@
 // silently loosen a check you rely on. A design that genuinely needs a different number needs a
 // `.wasm`, which is the answer the panel points at.
 
-using CircuitRF.Ui.Layout.Assembly;
 using CircuitRF.Ui.Theming;
 using CircuitRF.WBond;
 

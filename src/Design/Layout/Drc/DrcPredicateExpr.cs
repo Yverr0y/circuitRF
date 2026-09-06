@@ -27,9 +27,9 @@
 // is decided by the functions the predicate uses (see <see cref="WasmDomain"/>), never guessed per
 // evaluation, so a rule cannot mean different things on two different designs.
 
-using CircuitRF.Ui.Layout.Assembly;
+using CircuitRF.Design.Layout.Assembly;
 
-namespace CircuitRF.Ui.Layout.Drc;
+namespace CircuitRF.Design.Layout.Drc;
 
 /// <summary>
 /// What a value is measured in. Carried so a comparison between two different kinds of quantity is

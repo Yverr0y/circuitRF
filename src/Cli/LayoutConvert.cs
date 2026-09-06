@@ -25,7 +25,13 @@ namespace CircuitRF.Cli;
 
 public static class LayoutConvert
 {
-    private enum Fmt { Clay, Gdsii, Dxf, Gerber, Board }
+    /// <summary>
+    /// The five interchange formats. <c>internal</c> rather than private because <c>check</c> and
+    /// <c>explain</c> classify a path the same way this verb does (R-aut4-11) and must not grow a
+    /// second rule for it — an interchange file they could not name would read as a file circuitRF
+    /// does not handle, when in fact `convert` handles it.
+    /// </summary>
+    internal enum Fmt { Clay, Gdsii, Dxf, Gerber, Board }
 
     private sealed class Options
     {
@@ -151,6 +157,13 @@ public static class LayoutConvert
         {
             var src = LoadSource(o, from, to.Value, ref scratch);
             if (src is null) return 1;
+
+            // The minted technology, when it is somewhere the caller will still find it. It is not
+            // optional context: the cells the import produced reference it by relative path, so a
+            // caller that took the cells and not this has a design whose layers resolve to nothing.
+            // `em` reports BOTH its files for the same reason (cli.md §8.2).
+            if (scratch is null && _mintedTechPath is { } minted)
+                JsonRun.AddOutput("ctech", minted);
 
             // --to clay: the import IS the conversion. The cells and the technology are already on
             // disk, in the folder the user named, and there is nothing left to write.
@@ -400,6 +413,10 @@ public static class LayoutConvert
     /// the whole stackup below was refused. Additive, unlike a stackup: a via entry declares a drill
     /// and cannot invalidate a substrate, so the rule protecting a declared stackup does not reach it.
     /// This is what makes an imported via's span survive the round trip out again.</param>
+    /// <summary>The `.ctech` the last import minted, or null. See <see cref="MintTechnology"/> for
+    /// why it is held rather than reported at the point it is written.</summary>
+    private static string? _mintedTechPath;
+
     private static Technology MintTechnology(
         string staging, string name, Technology? destTech,
         IReadOnlyList<LayerDef> layersToAdd, Stackup? stackup, IReadOnlyList<string> cellDirs,
@@ -426,6 +443,12 @@ public static class LayoutConvert
         string techPath = Path.Combine(staging, name + ".ctech");
         TechPersistence.SaveToFile(techPath, tech);
         Console.Error.WriteLine($"[circuitRF] technology: {techPath} ({tech.Layers.Count} layer(s))");
+
+        // Recorded rather than reported here: whether this file SURVIVES is the caller's question,
+        // and only Run knows the answer (it is deleted with the scratch directory unless the target
+        // was clay or --keep-cells named somewhere). Reporting a path that is about to be removed
+        // would be worse than reporting nothing.
+        _mintedTechPath = techPath;
 
         foreach (var cellDir in cellDirs)
         {
@@ -601,7 +624,11 @@ public static class LayoutConvert
             string? scratch = staging;
             var src = LoadSource(o, from, Fmt.Gdsii /* anything but Clay: import into scratch */, ref scratch);
             if (src is null) return 1;
-            foreach (var d in src.CreatedCellDirs) Console.WriteLine(Path.GetFileName(d));
+            foreach (var d in src.CreatedCellDirs)
+            {
+                Console.WriteLine(Path.GetFileName(d));
+                JsonRun.Note(CliDiagnostics.ConvertCellListed(Path.GetFileName(d)));
+            }
             return 0;
         }
         finally
@@ -636,14 +663,27 @@ public static class LayoutConvert
         return null;
     }
 
+    /// <summary>
+    /// The import's own messages. On stderr with the `note: ` prefix they have always had — the
+    /// prefix is a channel convention rather than part of the message — and in the `--json` document
+    /// as coded diagnostics, because they are how a caller learns what a conversion DROPPED
+    /// (brief-automation-4-check-and-explain.md's convert carry-through).
+    /// </summary>
     private static void Report(IReadOnlyList<string> messages)
     {
-        foreach (var m in messages) Console.Error.WriteLine($"note: {m}");
+        foreach (var m in messages)
+        {
+            Console.Error.WriteLine($"note: {m}");
+            JsonRun.Note(CliDiagnostics.ConvertNote(m));
+        }
     }
 
     private static void Note(int n, string noun, string what)
     {
-        if (n > 0) Console.Error.WriteLine($"note: {n} {noun}{(n == 1 ? "" : "s")} {what}.");
+        if (n <= 0) return;
+        string text = $"{n} {noun}{(n == 1 ? "" : "s")} {what}.";
+        Console.Error.WriteLine($"note: {text}");
+        JsonRun.Note(CliDiagnostics.ConvertNote(text));
     }
 
     private static string ImportName(string input) =>
@@ -663,13 +703,13 @@ public static class LayoutConvert
 
     private static int BadFormat(string s) => JsonRun.Fail(CliDiagnostics.ConvertUnknownFormat(s));
 
-    private static string Name(Fmt f) => f switch
+    internal static string Name(Fmt f) => f switch
     {
         Fmt.Clay => "clay", Fmt.Gdsii => "GDSII", Fmt.Dxf => "DXF",
         Fmt.Gerber => "Gerber", _ => "board",
     };
 
-    private static Fmt? DetectSource(string path)
+    internal static Fmt? DetectSource(string path)
     {
         if (Directory.Exists(path)) return Fmt.Gerber;
         if (ByExtension(path) is { } byExt) return byExt;

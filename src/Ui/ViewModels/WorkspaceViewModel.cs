@@ -35,7 +35,6 @@ using CircuitRF.Ui.Harmonica;
 using CircuitRF.Ui.WBond;
 using CircuitRF.WBond;
 using CircuitRF.Ui.Layout;
-using CircuitRF.Ui.Layout.Assembly;
 using CircuitRF.Ui.Layout.Em;
 using CircuitRF.Ui.Layout.PCells;
 using CircuitRF.Ui.Layout.TechImport;

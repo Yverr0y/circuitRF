@@ -626,3 +626,47 @@ src/Design/Layout/ShippedTechnologies.cs|Embedded technology resource \"{entry.R
 src/Design/Layout/ShippedTechnologies.cs|No shipped technology named \"{id}\".
 src/Design/Workspace/WorkspaceCreate.cs|A folder named '{name}' already exists at that location.
 src/Design/Workspace/WorkspaceCreate.cs|No shipped technology named '{id}'. The shipped technologies are: 
+
+# -- The DRC engine and the `.wasm` rule-file model moved from src/Ui to src/Design so
+#    `circuitrf check` could run design rules with no display
+#    (brief-automation-4-check-and-explain.md R-aut4-3, 2026-09-05).
+#
+#    Moved, not authored. Every sentence below has been in the tree since the `.wasm` predicate
+#    language was written, and R-aut4-3 moves whole files without reshaping them -- converting
+#    26 parser messages to coded diagnostics under cover of a file move is exactly the change
+#    nobody could review. They are the one family where a plain sentence is close to defensible:
+#    a parse error already carries the offending TEXT and a character POSITION, which is the
+#    typed half a Diagnostic would have added, and the reader is the person who wrote the
+#    expression. Converting them is still worth doing, on its own, later.
+src/Design/Layout/Assembly/WasmPersistence.cs|.wasm format_version {file.FormatVersion} is newer than 
+src/Design/Layout/Assembly/WasmPersistence.cs|Failed to deserialize .wasm file.
+src/Design/Layout/Drc/DrcPredicateParser.cs|'envelope''s second argument is not a value: {err} (at position {pos})
+src/Design/Layout/Drc/DrcPredicateParser.cs|'wire_to_layer''s second argument is not a layer region: {err} (at position {pos})
+src/Design/Layout/Drc/DrcPredicateParser.cs|'{fn}' is missing a {what} (at position {pos}).
+src/Design/Layout/Drc/DrcPredicateParser.cs|'{name}' is not a value on its own — a wire set only appears inside a function, 
+src/Design/Layout/Drc/DrcPredicateParser.cs|'{p.Text[start..p.Index]}' is not a number (at position {start}).
+src/Design/Layout/Drc/DrcPredicateParser.cs|'{text}' is not a valid {what} for '{fn}' — names are letters, digits and 
+src/Design/Layout/Drc/DrcPredicateParser.cs|A length has to be compared against a length with a stated unit — write '4mil' or 
+src/Design/Layout/Drc/DrcPredicateParser.cs|Cannot compare a {qa.ToString().ToLowerInvariant()} with a 
+src/Design/Layout/Drc/DrcPredicateParser.cs|Expected '{c}' at position {Index}.
+src/Design/Layout/Drc/DrcPredicateParser.cs|Expected a comparison (<, <=, >, >=, ==, !=) at position {p.Index}. 
+src/Design/Layout/Drc/DrcPredicateParser.cs|Expected a comparison.
+src/Design/Layout/Drc/DrcPredicateParser.cs|Expected a value at position {p.Index}.
+src/Design/Layout/Drc/DrcPredicateParser.cs|Expected a value.
+src/Design/Layout/Drc/DrcPredicateParser.cs|Unhandled comparison {op}.
+src/Design/Layout/Drc/DrcPredicateParser.cs|Unhandled pair function {fn}.
+src/Design/Layout/Drc/DrcPredicateParser.cs|Unhandled predicate node {p.GetType().Name}.
+src/Design/Layout/Drc/DrcPredicateParser.cs|Unhandled value node {v.GetType().Name}.
+src/Design/Layout/Drc/DrcPredicateParser.cs|Unhandled wire function {fn}.
+src/Design/Layout/Drc/DrcPredicateParser.cs|Unknown function '{name}' (at position {pos}). 
+src/Design/Layout/Drc/DrcPredicateParser.cs|Unknown unit '{suffix}' (at position {numEnd}). Lengths take nm, um, mm, mil or in; 
+src/Design/Layout/Drc/DrcPredicateParser.cs|Unterminated '{fnName}(' — expected ')'.
+src/Design/Layout/Drc/DrcPredicateParser.cs|{message} (at position {pos})
+src/Design/Layout/Drc/DrcRegionEval.cs|Unhandled expression node {expr.GetType().Name}.
+src/Design/Layout/Drc/DrcRegionEval.cs|Unhandled select op {op}.
+
+# An INTERNAL invariant, which is the case this file's own header calls a deliberate plain-exception
+# choice: `Elaborator.EvaluateInGlobalScope` is reachable only from code that has already elaborated
+# (brief-automation-4-check-and-explain.md R-aut4-7), so a caller seeing this has a programming error
+# rather than a design problem, and there is no user-facing action to attach to it.
+src/Core/Elaboration/Elaborator.cs|Elaborate() has not run, so there is no global scope yet.

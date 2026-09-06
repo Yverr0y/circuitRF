@@ -14,7 +14,7 @@
 
 using Clipper2Lib;
 
-namespace CircuitRF.Ui.Layout.Drc;
+namespace CircuitRF.Design.Layout.Drc;
 
 /// <summary>
 /// One electrically-connected piece of metal: a region, the layer it sits on, and the net it

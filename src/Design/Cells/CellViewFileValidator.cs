@@ -2,8 +2,11 @@ using System;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using CircuitRF.Design.Layout;
+using CircuitRF.Design.Schematic;
+using CircuitRF.Design.Symbol;
 
-namespace CircuitRF.Ui.Schematic;
+namespace CircuitRF.Design.Cells;
 
 /// <summary>
 /// Answers "would this file survive being adopted as a cell's schematic / symbol / layout view?"
