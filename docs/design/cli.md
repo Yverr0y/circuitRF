@@ -37,9 +37,17 @@ and it is gated by the same firewall test. That is what the `em` verb (§8) runs
 | `em` | `.cem` | `EmSetupResolver` + `EmRunService` (kernel chosen by `EmKernelRegistry`) | Touchstone `.sNp` + grouped `.npy` at the path Simulate writes; `-o` moves the Touchstone |
 | `elab` | `.cnl` | elaboration only | the elaborated netlist, for development |
 
-`--kits <dir>` is pulled out of the argument list before dispatch, so **every** verb takes it: it is
-what makes an externally-supplied device model resolve headlessly, the way opening a workspace does
-in the GUI.
+`convert` is the eighth verb and is documented in the repo-root `CLAUDE.md` rather than here: it
+runs no analysis, so none of §3-§7 applies to it.
+
+Three flags are pulled out of the argument list before dispatch, so **every** verb takes them and no
+verb's own argument loop has to learn about any of them:
+
+| Flag | What it does |
+|---|---|
+| `--kits <dir>` | makes an externally-supplied device model resolve headlessly, the way opening a workspace does in the GUI. Repeatable. |
+| `--json` | one JSON document on stdout and nothing else — §3.2 |
+| `--only`, `--group` | narrow that document's `result` — §3.2 |
 
 ## 3. The anatomy of a run verb
 
@@ -61,6 +69,55 @@ in the GUI.
 engine chatter, `[circuitRF]` notes, elaboration and engine warnings, device-worker logs. The split
 is what makes `circuitrf lp x.cnl > table.txt` produce a table and still show progress, and it is
 why the engines' own `Console.Error` progress lines need no CLI plumbing at all.
+
+### 3.2 `--json`: the third channel rule, not a per-verb feature
+
+`--json` is available on **every** verb, spelled that way everywhere — not `--format json`, not a
+per-verb variant. It changes one thing: **stdout carries a single JSON document and nothing else.**
+stderr is untouched, so progress, `[circuitRF]` notes, warnings and refusal sentences all stream
+exactly as they did, and a script watching stderr cannot tell whether the flag was passed.
+
+That guarantee is structural rather than a rule each printer has to remember: the moment the flag is
+parsed, `Console.Out` is replaced with a null writer and the real stdout is held until the document
+is written to it (`src/Cli/JsonRun.cs`). A verb prints its table exactly as before, into a sink.
+
+| | Without `--json` | With `--json` |
+|---|---|---|
+| stdout | the human table | one JSON document |
+| stderr | unchanged | unchanged |
+| exit code | §7's per-verb rules | **the same**, and echoed in the document |
+
+**A failed run still emits a document.** The failure is the payload, so a caller never has to tell
+"no output" apart from "output I could not parse". `status` is `ok` / `not-converged` / `failed` and
+always agrees with `exitCode`, which still follows §7 — including the deliberate difference between
+`hb`'s convergence test and `lp`'s.
+
+The shape is one schema across every verb (`RfCore.Export.ResultDocument`):
+
+```
+{ "circuitrf": {"version","verb"}, "input": {"path","analysis"},
+  "status", "exitCode",
+  "outputs":     [ {"kind","path"}, … ],      // every file written — for em, BOTH the .sNp and the .npy
+  "diagnostics": [ {"id","severity","message","arguments"}, … ],
+  "result":      { "summary": …, "groups": { "<group>": { "<cube>": {"kind","axes","values"} } } } }
+```
+
+- **`input.analysis` is the chain that ACTUALLY ran**, after §4's promotion — not what was requested.
+- **`result.groups` mirrors the `DataSet`**; a cube's `kind` decides whether `values` holds numbers
+  or `[re, im]` pairs. Numbers are raw, invariant and unrounded: the dB/percent presentation and the
+  column widths are terminal concerns and none of them is encoded in the document. NaN and infinity
+  are written as JSON's named literals (`"NaN"`), because a loadpull grid genuinely contains NaN
+  wherever a point never converged and substituting a zero would turn "no measurement" into one.
+- **`result.summary`** is `lp`/`lpp`'s one-row-per-grid-point projection — the same one §6.3 prints,
+  from the same code (`RfCore.Loadpull.LoadpullResultSummary`), so the table and the document cannot
+  disagree. For those two verbs it is the DEFAULT and the cubes are omitted; `--all` adds them.
+- **`--only <cube>,…` and `--group <name>,…`** narrow `result` and nothing else. An unknown name is
+  skipped silently, matching `DataSetSubset.SelectGroups`.
+
+**§7A applies inside the document.** Every diagnostic carries `message` — always
+`Diagnostic.Render()`, always English, always culture-invariant — alongside its stable dotted `id`
+and its typed `arguments`. **The id is the contract; the message is not.** A caller matching on the
+sentence is doing the thing the id exists to make unnecessary, and templates are reworded freely.
 
 ## 4. Chain selection: dispatch at the SWEEP, never at the inner analysis
 
@@ -313,7 +370,12 @@ stderr to fill that pipe's buffer and deadlock a sequential reader.
 3. Put overrides in the directive (§5), not at the engine.
 4. Results to stdout, everything else to stderr (§3.1).
 5. Pick the exit-code rule that is honest for that analysis (§7) — do not copy `hb`'s by reflex.
-6. Update this file and the verb list in the repo-root `CLAUDE.md`.
+6. **Give the structured document its three lines** (§3.2): set `JsonRun.InputPath` when the input is
+   known, `JsonRun.Analysis` to the chain that actually ran, and `JsonRun.Data` to the same `DataSet`
+   the export writes. Call `JsonRun.AddOutput` beside every "Wrote …", and refuse through
+   `JsonRun.Fail(CliDiagnostics.…)` rather than `Console.Error.WriteLine` + `return 1` — a refusal
+   that is only prose is a refusal a caller has to parse back apart.
+7. Update this file and the verb list in the repo-root `CLAUDE.md`.
 
 `em` follows 1, 4, 5 and 6 and is deliberately outside 2 and 3: it does not read a `.cnl`, so there is
 no chain to select and no directive to override. Its analogue of §5's rule is §8.2's — the one

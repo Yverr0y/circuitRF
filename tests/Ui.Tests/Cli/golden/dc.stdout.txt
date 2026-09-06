@@ -1,0 +1,9 @@
+Node voltages:
+  0                                         0
+  n_src                                     0
+  n_zs                                      0
+  n_gate                                -3.05
+  n_gbias                               -3.05
+  n_drain                                  48
+  n_zl                                      0
+  n_dbias                                  48

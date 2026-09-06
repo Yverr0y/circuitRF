@@ -246,4 +246,81 @@ public sealed class EmCliVerbTests(ITestOutputHelper output) : IDisposable
         // The run service's own sentence, not a re-wording of it.
         Assert.Contains("nope.clay", stderr, StringComparison.Ordinal);
     }
+
+    // ── --json (brief-automation-1-structured-output.md §6.2) ─────────────────
+    //
+    // `em`'s share of the structured-output gates lives here rather than beside the other verbs'
+    // because the workspace this file already knows how to build is what the verb needs, and a
+    // second copy of BuildWorkspace would be a second thing to keep in step.
+
+    /// <summary>
+    /// Both files, and both kinds. <c>cli.md</c> §8.2: the <c>.sNp</c> and the <c>_em.npy</c> are not
+    /// redundant — the Touchstone is the network, the <c>.npy</c> carries the diagnostics group that
+    /// makes a wrong answer diagnosable — so a document listing only one of them would be telling a
+    /// caller the run produced half of what it produced.
+    /// </summary>
+    [Fact]
+    public void CircuitrfEm_Json_ListsBothFilesAndCarriesTheResult()
+    {
+        string repo = RepoRoot();
+        var (cemPath, _) = BuildWorkspace();
+
+        var (exitCode, stdout, stderr) = RunCli(repo, "em", cemPath, "--json");
+        output.WriteLine("stderr:\n" + (stderr.Length > 4000 ? stderr[..4000] + " …" : stderr));
+
+        Assert.Equal(0, exitCode);
+
+        var doc = System.Text.Json.JsonDocument.Parse(stdout).RootElement;
+        Assert.Equal("ok", doc.GetProperty("status").GetString());
+        Assert.Equal("em", doc.GetProperty("circuitrf").GetProperty("verb").GetString());
+
+        var outputs = doc.GetProperty("outputs").EnumerateArray()
+            .Select(o => (Kind: o.GetProperty("kind").GetString(), Path: o.GetProperty("path").GetString()))
+            .ToArray();
+        Assert.Contains(outputs, o => o.Kind == "touchstone" && File.Exists(o.Path!));
+        Assert.Contains(outputs, o => o.Kind == "npy" && File.Exists(o.Path!));
+
+        // An EM DataSet carries S alongside a diagnostics group, and both must survive into the
+        // document — the diagnostics group is the half that explains the other half.
+        var groups = doc.GetProperty("result").GetProperty("groups");
+        Assert.Contains("S", groups.GetProperty("").EnumerateObject().Select(p => p.Name));
+        Assert.True(groups.EnumerateObject().Count() > 1, "the diagnostics group did not reach the document");
+
+        // §6.2.2 — the document and nothing else. `em` is the chattiest verb there is, and every one
+        // of those lines belongs on stderr.
+        Assert.Equal('{', stdout.TrimStart()[0]);
+        Assert.DoesNotContain("Wrote ", stdout, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A refusal is the payload. R-aut1-3 — a failed run still emits a document — and R-aut1-6: the
+    /// refusal arrives with the id <c>EmRunService</c> has carried alongside the string since
+    /// brief-localization-groundwork's R-loc-5, which the CLI used to discard.
+    /// </summary>
+    [Fact]
+    public void CircuitrfEm_Json_CarriesTheRefusalAsAStructuredDiagnostic()
+    {
+        string repo = RepoRoot();
+        Directory.CreateDirectory(_root);
+
+        string cemPath = Path.Combine(_root, "orphan.cem");
+        EmSetupPersistence.SaveToFile(cemPath, new EmSetup { Name = "orphan", LayoutRef = "nope.clay" });
+
+        var (exitCode, stdout, stderr) = RunCli(repo, "em", cemPath, "--json");
+        output.WriteLine("stderr:\n" + stderr);
+
+        Assert.Equal(1, exitCode);
+
+        var doc = System.Text.Json.JsonDocument.Parse(stdout).RootElement;
+        Assert.Equal("failed", doc.GetProperty("status").GetString());
+        Assert.Equal(1, doc.GetProperty("exitCode").GetInt32());
+
+        var refusal = doc.GetProperty("diagnostics").EnumerateArray()
+            .Single(d => d.GetProperty("id").GetString() == "em.layout.not-found");
+        Assert.Equal("error", refusal.GetProperty("severity").GetString());
+        // The typed half: the layout reference, read rather than parsed back out of the sentence.
+        Assert.Equal("nope.clay", refusal.GetProperty("arguments").GetProperty("layoutRef").GetString());
+        // …and stderr still says exactly what it said before, which is the contract cli.md §8 keeps.
+        Assert.Contains("nope.clay", stderr, StringComparison.Ordinal);
+    }
 }

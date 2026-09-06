@@ -77,8 +77,7 @@ public static class LayoutConvert
                         case "AC1018" or "R2004": o.AcadVersion = DxfAcadVersion.R2004; break;
                         case "AC1032" or "R2018": o.AcadVersion = DxfAcadVersion.R2018; break;
                         default:
-                            Console.Error.WriteLine($"Unknown DXF version '{args[i]}'. Known: AC1015, AC1018, AC1032.");
-                            return 1;
+                            return JsonRun.Fail(CliDiagnostics.ConvertUnknownDxfVersion(args[i]));
                     }
                     break;
                 case "--dxf-units" when i + 1 < args.Length && int.TryParse(args[i + 1], out int iu):
@@ -89,7 +88,7 @@ public static class LayoutConvert
                     {
                         case "mm" or "metric" or "millimetres" or "millimeters": o.DrillUnit = GerberUnit.Millimetres; break;
                         case "in" or "inch" or "inches": o.DrillUnit = GerberUnit.Inches; break;
-                        default: Console.Error.WriteLine($"Unknown drill unit '{args[i]}'. Known: mm, inch."); return 1;
+                        default: return JsonRun.Fail(CliDiagnostics.ConvertUnknownDrillUnit(args[i]));
                     }
                     break;
                 case "--drill-zeros" when i + 1 < args.Length:
@@ -97,35 +96,30 @@ public static class LayoutConvert
                     {
                         case "leading": o.DrillZeros = GerberZeroOmission.Leading; break;
                         case "trailing": o.DrillZeros = GerberZeroOmission.Trailing; break;
-                        default: Console.Error.WriteLine($"Unknown zero suppression '{args[i]}'. Known: leading, trailing."); return 1;
+                        default: return JsonRun.Fail(CliDiagnostics.ConvertUnknownDrillZeros(args[i]));
                     }
                     break;
                 case "--drill-format" when i + 1 < args.Length:
                 {
                     var parts = args[++i].Split(':');
                     if (parts.Length != 2 || !int.TryParse(parts[0], out int id) || !int.TryParse(parts[1], out int dd))
-                    {
-                        Console.Error.WriteLine($"--drill-format wants integer:decimal digits, e.g. 2:4 — got '{args[i]}'.");
-                        return 1;
-                    }
+                        return JsonRun.Fail(CliDiagnostics.ConvertBadDrillFormat(args[i]));
                     o.DrillIntegerDigits = id; o.DrillDecimalDigits = dd; break;
                 }
                 case "--accept-inferred-drill-format": o.AcceptInferredDrillFormat = true; break;
 
                 default:
-                    if (a.StartsWith('-')) { Console.Error.WriteLine($"Unknown option: {a}"); return Usage(); }
-                    if (o.Input is not null) { Console.Error.WriteLine("convert takes one input."); return Usage(); }
+                    if (a.StartsWith('-')) { JsonRun.Report(CliDiagnostics.ConvertUnknownOption(a)); return Usage(); }
+                    if (o.Input is not null) { JsonRun.Report(CliDiagnostics.ConvertMultipleInputs()); return Usage(); }
                     o.Input = a;
                     break;
             }
         }
 
         if (o.Input is null) return Usage();
+        JsonRun.InputPath = o.Input;
         if (!File.Exists(o.Input) && !Directory.Exists(o.Input))
-        {
-            Console.Error.WriteLine($"Input not found: {o.Input}");
-            return 1;
-        }
+            return JsonRun.Fail(CliDiagnostics.ConvertInputNotFound(o.Input));
 
         // The source format is inferable from what the path IS — a folder is a Gerber file set, and a
         // file with no telling extension is classified by CONTENT through the same classifier the
@@ -133,35 +127,22 @@ public static class LayoutConvert
         // is. --from overrides all of it.
         Fmt from = o.From ?? DetectSource(o.Input) ?? Fmt.Clay;
         if (o.From is null && DetectSource(o.Input) is null)
-        {
-            Console.Error.WriteLine(
-                $"Could not tell what '{Path.GetFileName(o.Input)}' is from its name or its content. " +
-                "Name it with --from clay|gdsii|dxf|gerber|board.");
-            return 1;
-        }
+            return JsonRun.Fail(CliDiagnostics.ConvertSourceUnrecognised(Path.GetFileName(o.Input)));
 
         if (o.ListCells) return ListCells(o, from);
 
         if (o.Output is null)
         {
-            Console.Error.WriteLine("convert needs an output: -o <path>.");
+            JsonRun.Report(CliDiagnostics.ConvertOutputRequired());
             return Usage();
         }
 
         Fmt? to = o.To ?? DetectTarget(o.Output);
         if (to is null)
-        {
-            Console.Error.WriteLine(
-                $"'{o.Output}' does not name a format. Give it a known extension " +
-                "(.clay, .gds, .dxf, .kicad_pcb) or say --to clay|gdsii|dxf|gerber|board.");
-            return 1;
-        }
+            return JsonRun.Fail(CliDiagnostics.ConvertTargetUnrecognised(o.Output));
 
         if (from == Fmt.Clay && to == Fmt.Clay)
-        {
-            Console.Error.WriteLine("clay to clay is a file copy, not a conversion — nothing to do.");
-            return 1;
-        }
+            return JsonRun.Fail(CliDiagnostics.ConvertClayToClay());
 
         Console.Error.WriteLine($"[circuitRF] {Name(from)} -> {Name(to.Value)}");
 
@@ -176,7 +157,7 @@ public static class LayoutConvert
             if (to == Fmt.Clay)
             {
                 Console.Error.WriteLine($"[circuitRF] wrote {src.CreatedCellDirs.Count} cell(s) and a technology to {o.Output}");
-                foreach (var d in src.CreatedCellDirs) Console.WriteLine(d);
+                foreach (var d in src.CreatedCellDirs) { Console.WriteLine(d); JsonRun.AddOutput("cell", d); }
                 return 0;
             }
 
@@ -185,6 +166,7 @@ public static class LayoutConvert
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             Console.Error.WriteLine($"error: {ex.Message}");
+            JsonRun.Note(CliDiagnostics.ConvertFailed(ex.Message));
             return 1;
         }
         finally
@@ -227,7 +209,7 @@ public static class LayoutConvert
             try { destTech = TechPersistence.LoadFromFile(tp); }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Could not read technology '{tp}': {ex.Message}");
+                JsonRun.Report(CliDiagnostics.ConvertTechnologyUnreadable(tp, ex.Message));
                 return null;
             }
         }
@@ -259,7 +241,7 @@ public static class LayoutConvert
         try { view = LayoutPersistence.LoadFromFile(clay); }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Could not read layout '{clay}': {ex.Message}");
+            JsonRun.Report(CliDiagnostics.ConvertLayoutUnreadable(clay, ex.Message));
             return null;
         }
 
@@ -272,7 +254,7 @@ public static class LayoutConvert
         if (o.TechPath is { } tp)
         {
             try { tech = TechPersistence.LoadFromFile(tp); }
-            catch (Exception ex) { Console.Error.WriteLine($"Could not read technology '{tp}': {ex.Message}"); return null; }
+            catch (Exception ex) { JsonRun.Report(CliDiagnostics.ConvertTechnologyUnreadable(tp, ex.Message)); return null; }
         }
         else
         {
@@ -280,7 +262,8 @@ public static class LayoutConvert
             // then the nearest ancestor workspace's default. --workspace overrides the walk.
             string? cws = o.Cws is { } w ? Path.GetFullPath(w) : null;
             var (res, own) = TechnologyResolver.ResolveForDocument(view.TechRef, clay, cws, new TechnologyCache());
-            foreach (var d in res.Diagnostics) Console.Error.WriteLine($"warning: {d}");
+            foreach (var d in res.Diagnostics)
+            { Console.Error.WriteLine($"warning: {d}"); JsonRun.Note(CliDiagnostics.EmSetupWarning(d)); }
             if (res.ResolvedPath is { } rp) Console.Error.WriteLine($"[circuitRF] technology: {rp}");
             else Console.Error.WriteLine(
                 "[circuitRF] no technology resolved — layer names, Gerber suffixes and the stackup " +
@@ -367,7 +350,7 @@ public static class LayoutConvert
             resolveDrillFormat: (fileName, inferred, crossCheck, _) => ResolveDrillFormat(o, fileName, inferred, crossCheck));
         Report(r.Messages);
         if (r.Cancelled) return Refused();
-        if (r.CellDir is null) { Console.Error.WriteLine("The Gerber import produced no cell."); return null; }
+        if (r.CellDir is null) { JsonRun.Report(CliDiagnostics.ConvertNoCell()); return null; }
 
         // Gerber import mints its own .ctech and points the .clay at it (R-L4g-8), so there is nothing
         // for MintTechnology to do here — this is the one importer that already did it.
@@ -393,6 +376,7 @@ public static class LayoutConvert
         if (o.AcceptInferredDrillFormat) return new GerberImport.DrillFormatChoice(null, ApplyToAll: true);
 
         Console.Error.WriteLine($"error: {fileName} does not state its coordinate format, and the inference had to guess.");
+        JsonRun.Note(CliDiagnostics.ConvertDrillFormatUnstated(fileName, inferred.ToString() ?? ""));
         Console.Error.WriteLine($"       Inferred: {inferred}");
         foreach (var e in inferred.Evidence) Console.Error.WriteLine($"       {e}");
         if (!crossCheck.Agrees) Console.Error.WriteLine($"       {crossCheck.Report}");
@@ -462,7 +446,7 @@ public static class LayoutConvert
         var primary = CellFolder.ResolvePrimary(cellDir, ViewType.Layout);
         if (primary.ResolvedName is not { } file)
         {
-            Console.Error.WriteLine($"'{Path.GetFileName(cellDir)}' holds no layout view to convert.");
+            JsonRun.Report(CliDiagnostics.ConvertCellHasNoLayout(Path.GetFileName(cellDir)));
             return null;
         }
 
@@ -493,10 +477,12 @@ public static class LayoutConvert
                 if (!plan.CanWrite)
                 {
                     Console.Error.WriteLine("error: coordinates overflow GDSII's 32-bit integer range — nothing written.");
+                    JsonRun.Note(CliDiagnostics.ConvertGdsiiCoordinateOverflow());
                     foreach (var c in plan.CoordinateOverflowOffenders) Console.Error.WriteLine($"       {c}");
                     return 1;
                 }
                 GdsiiExport.Write(output, plan);
+                JsonRun.AddOutput("gdsii", output);
                 Note(plan.CurvedShapesFlattened, "curved shape", "flattened to polygons");
                 Note(plan.HolesKeyholed, "hole", "keyholed");
                 Note(plan.BitmapsSkipped, "bitmap", "skipped — GDSII carries no raster");
@@ -516,6 +502,7 @@ public static class LayoutConvert
                     InsUnits: o.InsUnits ?? DxfUnits.DefaultPromptUnits,
                     AcadVersion: o.AcadVersion);
                 var summary = DxfExport.Write(output, plan, opts);
+                JsonRun.AddOutput("dxf", output);
                 foreach (var d in summary.Diagnostics) Console.Error.WriteLine($"note: {d}");
                 Note(summary.BitmapsSkipped, "bitmap", "skipped — DXF carries no raster");
                 Note(summary.MixedArcCubicApproximated, "mixed arc/cubic edge", "approximated");
@@ -532,9 +519,11 @@ public static class LayoutConvert
                 if (!plan.CanWrite)
                 {
                     Console.Error.WriteLine($"error: {plan.Refusal}");
+                    JsonRun.Note(CliDiagnostics.ConvertBoardRefused(plan.Refusal ?? ""));
                     return 1;
                 }
                 var summary = PcbExport.Write(output, plan);
+                JsonRun.AddOutput("board", output);
                 foreach (var n in summary.Notes) Console.Error.WriteLine($"note: {n}");
                 foreach (var l in summary.UnmappedLayerNames)
                     Console.Error.WriteLine($"warning: layer '{l}' has no board-layer mapping — written to a general drawing layer.");
@@ -552,8 +541,14 @@ public static class LayoutConvert
                     resolveTechAt: (techRef, cellLayoutDir) =>
                         TechnologyResolver.ResolveForDocument(techRef, cellLayoutDir, o.Cws, cache).Resolution);
 
-                foreach (var d in plan.Diagnostics) Console.Error.WriteLine($"error: {d}");
-                if (plan.ExceedsHierarchyCeiling) return 1;
+                foreach (var d in plan.Diagnostics)
+                { Console.Error.WriteLine($"error: {d}"); JsonRun.Note(CliDiagnostics.ConvertGerberDiagnostic(d)); }
+                if (plan.ExceedsHierarchyCeiling)
+                {
+                    // Recorded only: plan.Diagnostics above already said what is wrong, on stderr.
+                    JsonRun.Note(CliDiagnostics.ConvertGerberHierarchyCeiling());
+                    return 1;
+                }
 
                 if (plan.RequiresMappingConfirmation)
                 {
@@ -564,6 +559,7 @@ public static class LayoutConvert
                     Console.Error.WriteLine(
                         "error: this design instantiates cells from another technology, and the layer mapping " +
                         "has to be confirmed. Open it in circuitRF and export once, or flatten the design first.");
+                    JsonRun.Note(CliDiagnostics.ConvertGerberCrossTechnology());
                     foreach (var k in plan.PendingCrossTechMappings.Keys) Console.Error.WriteLine($"       {k}");
                     return 1;
                 }
@@ -581,13 +577,12 @@ public static class LayoutConvert
                 Console.Error.WriteLine(
                     $"[circuitRF] {result.FilesWritten.Count} file(s), " +
                     $"{result.DrillToolsDefined} drill tool(s), {result.DrillHitsWritten} hit(s)");
-                foreach (var f in result.FilesWritten) Console.WriteLine(f);
+                foreach (var f in result.FilesWritten) { Console.WriteLine(f); JsonRun.AddOutput("gerber", f); }
                 return 0;
             }
 
             default:
-                Console.Error.WriteLine($"Cannot write {Name(to)}.");
-                return 1;
+                return JsonRun.Fail(CliDiagnostics.ConvertTargetUnsupported(Name(to)));
         }
     }
 
@@ -597,8 +592,7 @@ public static class LayoutConvert
     {
         if (from == Fmt.Clay)
         {
-            Console.Error.WriteLine("A .clay names one cell — --list-cells applies to a file that can hold several.");
-            return 1;
+            return JsonRun.Fail(CliDiagnostics.ConvertListCellsNotApplicable());
         }
 
         string staging = Path.Combine(Path.GetTempPath(), "circuitrf-list-" + Guid.NewGuid().ToString("N")[..12]);
@@ -624,22 +618,21 @@ public static class LayoutConvert
         {
             var hit = created.FirstOrDefault(d => string.Equals(Path.GetFileName(d), wanted, StringComparison.OrdinalIgnoreCase));
             if (hit is not null) return hit;
-            Console.Error.WriteLine($"No cell named '{wanted}' in this file. It holds: {string.Join(", ", created.Select(Path.GetFileName))}");
+            JsonRun.Report(CliDiagnostics.ConvertCellNotFound(
+                wanted, string.Join(", ", created.Select(Path.GetFileName))));
             return null;
         }
 
         if (preferred is not null) return preferred;
         if (created.Count == 1) return created[0];
 
-        Console.Error.WriteLine(
-            $"This file holds {created.Count} cells and none of them is an unambiguous top ({what} definitions " +
-            "are all referenced by something else). Name one with --cell, or list them with --list-cells.");
+        JsonRun.Report(CliDiagnostics.ConvertCellAmbiguous(created.Count, what));
         return null;
     }
 
     private static Source? Refused()
     {
-        Console.Error.WriteLine("Nothing was converted.");
+        JsonRun.Report(CliDiagnostics.ConvertNothingConverted());
         return null;
     }
 
@@ -668,11 +661,7 @@ public static class LayoutConvert
         _ => null,
     };
 
-    private static int BadFormat(string s)
-    {
-        Console.Error.WriteLine($"Unknown format '{s}'. Known: clay, gdsii, dxf, gerber, board.");
-        return 1;
-    }
+    private static int BadFormat(string s) => JsonRun.Fail(CliDiagnostics.ConvertUnknownFormat(s));
 
     private static string Name(Fmt f) => f switch
     {
@@ -712,6 +701,7 @@ public static class LayoutConvert
     {
         Console.Error.WriteLine("Usage: circuitrf convert <input> -o <output> [--from f] [--to f] [--cell name]");
         Console.Error.WriteLine("       formats: clay | gdsii | dxf | gerber | board");
+        JsonRun.Note(CliDiagnostics.ConvertUsage());
         return 1;
     }
 }

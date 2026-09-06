@@ -1,0 +1,15 @@
+14 component(s), 7 node(s)
+  Term1                    Port   [1(p1),0(0)] Num=1 Z=50
+  Term2                    Port   [2(p2),0(0)] Num=2 Z=50
+  Term3                    Port   [3(p3),0(0)] Num=3 Z=50
+  Term4                    Port   [4(p4),0(0)] Num=4 Z=50
+  L1                       L      [1(p1),5(a1)] L=3.3E-09
+  C1                       C      [5(a1),0(0)] C=1.5E-12
+  X1                       SnP    [5(a1),6(a2)] NumPorts=2 File=<ROOT>/testdata/Hero1/potentially_unstable_amp.s2p Type=touchstone InterpMode=linear InterpDomain=RI ExtrapMode=clamp
+  L2                       L      [6(a2),2(p2)] L=2.7E-09
+  C2                       C      [2(p2),0(0)] C=1E-12
+  C3                       C      [3(p3),5(a1)] C=1.5E-12
+  R3                       R      [3(p3),0(0)] R=200
+  L4                       L      [4(p4),6(a2)] L=1.8000000000000002E-09
+  R4                       R      [4(p4),0(0)] R=150
+  C5                       C      [5(a1),6(a2)] C=2E-13

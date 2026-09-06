@@ -1,0 +1,227 @@
+# circuitRF — automation architecture: headless capabilities, adapters, and clients
+
+**Status:** current · **Covers:** the boundary between what circuitRF can do without a GUI, how that
+is exposed, and who calls it · **Related:** `cli.md`, `ui-architecture.md`, `project-file-formats.md`,
+`workspace-and-project-tree.md`
+
+---
+
+## 1. What this note decides
+
+circuitRF is increasingly driven by something other than a person at a keyboard: continuous
+integration, batch characterisation, the project's own documentation factory, and — the case that
+motivates writing this down — automated design agents that author, run and read back a design without
+a human in the loop.
+
+Every one of those wants the same thing, and it is not a scripting language and not a remote-control
+protocol. It is **a complete, headless, machine-legible capability surface**. This note fixes where
+that surface lives, what shape it takes, and what is deliberately excluded from it.
+
+The constraint that decides everything below is the same one that shapes `cli.md` — the **UI
+firewall** (`ui-architecture.md` §3):
+
+```
+adapters ──► src/Design ──► src/Core ──► src/Engine ──► src/RfCore ──► src/Diagnostics
+                              NO Avalonia anywhere on this path
+```
+
+`tests/Firewall.Tests/UiFirewallTests.cs` fails the build if that is violated. An automation surface
+is therefore not something bolted on beside the application: it is **whatever fraction of the
+application already sits below that line**, plus verbs.
+
+---
+
+## 2. Three layers, and only the middle one is a long-term asset
+
+**R-aut-1. Automation is layered as capabilities → adapters → clients, and an adapter owns no
+logic.**
+
+| Layer | What it is | Lifetime |
+|---|---|---|
+| **Capabilities** | Headless operations below the firewall: create a workspace, create a cell, import a footprint, author a layout, extract a netlist, elaborate, run, export, validate | Years. This is the product. |
+| **Adapters** | The CLI verbs; a protocol server; anything else that translates an external request into a capability call | Disposable by design — a few hundred lines each |
+| **Clients** | A shell script, CI, a documentation build, an automated design agent | Churns continuously and is not ours |
+
+The rule that keeps this honest is already stated for one verb in `cli.md` §8: *the verb owns no EM
+logic.* Generalised, it is R-aut-1 — and it is what makes a second or third adapter nearly free to
+add and free to delete. The client layer will be re-implemented against whatever conventions prevail
+at the time; the capability layer must not notice.
+
+**R-aut-2. A capability that exists only inside a UI event handler is not a capability.** If an
+operation can be performed only by a view model reacting to a click, it is invisible to every client
+in the table above, and no adapter can reach it without duplicating it. The remedy is always the
+same — move the operation below the firewall and have the view model call it too — never to
+re-implement it in the adapter.
+
+---
+
+## 3. Where the capability surface actually stands
+
+Measured against the tree rather than assumed. Every document format circuitRF owns is
+already plain, human-readable JSON (`project-file-formats.md`); the question is only which side of
+the firewall its reader and writer sit on.
+
+| Format | Persistence type | Project | Reachable headlessly today |
+|---|---|---|---|
+| `.cws` workspace | `WorkspacePersistence` | `src/Design/Workspace` | yes |
+| `.ccell` cell folder | `CellPersistence` | `src/Design/Cells` | yes |
+| `.clay` layout | `LayoutPersistence` | `src/Design/Layout` | yes |
+| `.ctech` technology | `TechPersistence` | `src/Design/Layout` | yes |
+| `.cem` EM setup | `EmSetupResolver` | `src/Design/Layout/Em` | yes |
+| `.cnl` netlist | `CnlReader` / `CnlWriter` | `src/Core/Netlist` | yes |
+| GDSII, DXF, Gerber, Excellon, `.kicad_pcb` | `src/Design/Layout/Interchange` | `src/Design` | yes |
+| Touchstone, `.npy`, `.mat`, `.spl`, `.lpcwave` | `src/RfCore/Export`, `src/RfCore/Loadpull` | `src/RfCore` | yes |
+| **`.csch` schematic** | `SchematicPersistence` | **`src/Ui/Schematic`** | **no** |
+| **`.csym` symbol** | `SymbolPersistence` | **`src/Ui/Schematic`** | **no** |
+
+**The last two rows are the whole gap, and they are a packaging accident rather than a coupling.**
+Of the 105 files in `src/Ui/Schematic`, 104 declare `namespace CircuitRF.Ui.Schematic` and exactly
+one — `PlacementService.cs`, which is a view-model service and belongs where it is — references a UI
+framework package at all. **None references Avalonia.** `SchematicPersistence.cs`,
+`SymbolPersistence.cs`, `SchematicDocument.cs`, `SymbolModel.cs`, `SymbolGeometry.cs` and
+`NetExtractor.cs` are already framework-free and say so in their own headers. They sit in the
+`CircuitRF.Ui` assembly for historical reasons only.
+
+**R-aut-3. The schematic and symbol model, their persistence, and net extraction belong below the
+firewall.** This is the same carve-out `src/Design` performed for the layout side in 2026-08, for the
+same reason and by the same route, and it is worth doing on its own merits: it is what makes "author
+a cell, place instances, extract a netlist, simulate it" expressible without a display.
+
+**R-aut-4. `src/Design` stays the design-layer artifact project; the editors stay in `src/Ui`.** The
+existing boundary is not weakened by R-aut-3. What moves is the document model, its serializer and
+the pure functions over it. What does not move is the canvas, the edit session, undo, hit-testing,
+drag-follow, the palette, or anything that observes a viewport.
+
+---
+
+## 4. Documents are the interface — declarative, not imperative
+
+**R-aut-5. Authoring is expressed by writing a document, not by replaying a sequence of edit
+commands.**
+
+An imperative surface — `place_instance`, `add_wire`, `set_parameter`, one call at a time — is the
+obvious design and the wrong one. It makes every client pay a round trip per primitive, it multiplies
+the number of ways a request can fail, and it obliges the adapter to model editor state that only the
+editor should own. A file that is already JSON does not need a second, worse API in front of it.
+
+What follows from R-aut-5:
+
+- **The format is the contract.** A client that can write `.clay` or `.cnl` can author artwork or a
+  circuit today, with no verb at all. This is only true because the formats are readable, versioned
+  and culture-invariant, which they are (`FormatCultureInvarianceTests`).
+- **The interesting verbs are not authoring verbs.** They are **validate**, **explain**, **run** and
+  **diff** — the ones that close the loop for a client that just wrote a file and needs to know
+  whether it is well formed, what it resolved to, and what it produced.
+- **Convenience authoring verbs are still worth having**, but as scaffolding for the cases where the
+  right initial document is non-obvious — a workspace skeleton, an empty cell with the correct
+  sub-folder structure and primacy files, a footprint plus symbol imported as a part. Not as a
+  general-purpose editing API.
+- **A partial or malformed document must be diagnosable, not merely rejected.** A client's only
+  repair mechanism is the sentence it gets back.
+
+---
+
+## 5. The output contract
+
+`cli.md` §3.1 already fixes the channel split — stdout is the result, stderr is everything else — and
+§7A already fixes the language: **the CLI is English permanently, and culture-invariant**, because a
+localized diagnostic on stderr silently breaks every grep, scraper and CI matcher on machines in one
+country. Both rules carry over to every adapter unchanged.
+
+Two additions, both aimed at making output cheap to consume rather than merely possible to consume.
+
+**R-aut-6. Every verb that produces a result offers a structured form of it, and the structured form
+is a projection of the same data the human form prints — never a second computation.** The human
+table and the machine document must not be able to disagree; if they are computed twice they
+eventually will.
+
+This matters most where the human form is already a deliberate summary. A loadpull's cubes are
+`[gridPoint x pinStep]`, and `lp` prints one row per grid point precisely because eight full cubes
+would scroll a terminal without answering the question (`cli.md` §6.3). A client wanting one number
+should be able to ask for that number rather than parse a table or dump every cube with `--all`.
+
+**Status, 2026-09-05 — R-aut-6 and R-aut-7 are implemented** (`brief-automation-1-structured-output.md`).
+`--json` is on every verb, spelled once; the document's shape is `RfCore.Export.ResultDocument` and the
+contract is `cli.md` §3.2. The loadpull summary R-aut-6 is about is now
+`RfCore.Loadpull.LoadpullResultSummary`, which the console table and the document BOTH read through —
+the human printers no longer make any of those selections themselves, which is what makes "never a
+second computation" a property of the code rather than a rule to remember.
+
+**R-aut-7. A failure is emitted as structure, not only as prose.** `src/Diagnostics` already defines
+exactly the right shape — `Diagnostic` carries a stable dotted id, typed arguments and an English
+default template, and the project is itself firewall-gated so every layer can author one. Its own
+header lists filtering, grouping, deduplication and robust assertion as the reasons, all of which a
+client needs at least as much as the Messages window does.
+
+Adoption was thin when this note was written — six construction sites across two files
+(`EmDiagnostics`, `FileAccessDiagnostics`) — and the CLI called `Render()` and discarded the
+structure. **Widening that adoption is the single highest-value output change**, and it is additive:
+the English template is carried alongside, permanently, so nothing that reads stderr today changes.
+
+**Status, 2026-09-05:** the CLI's own refusals are converted — 50 ids in `src/Cli/CliDiagnostics.cs`,
+covering every argument error and refusal in `Program.cs` and `LayoutConvert.cs`, plus the EM
+refusal `EmRunService` had always carried and the CLI had always discarded. Stderr came out
+byte-identical, which is the proof the diagnostics carry everything the strings did. The counts left
+and the reason for the line are in `src/Cli/RESOLVED.md`.
+
+**R-aut-8. Exit codes stay honest per analysis.** `cli.md` §7's rule — that `2` means "ran, did not
+converge", and that its test is chosen per verb rather than copied — is a machine-facing contract and
+becomes more important, not less, as the callers stop being human.
+
+---
+
+## 6. Economy: the interface has a size, and the size is a cost
+
+**R-aut-9. Prefer few broad verbs over many narrow ones.**
+
+For a protocol adapter this is not a style preference. A client that discovers tools up front carries
+every tool's description for the whole session, so the surface is a standing cost paid on every
+interaction, whether or not the tool is used. Forty single-purpose verbs are worse than six
+well-chosen ones even when the forty are individually simpler.
+
+**R-aut-10. Reading is the expensive direction, and should be designed first.** Authoring a document
+is one write. Understanding a result is the part that is unbounded — which is why R-aut-6's
+projection, and the ability to ask for a subset of it, do more for a client's cost than any authoring
+convenience.
+
+---
+
+## 7. What is deliberately excluded
+
+**R-aut-11. The running GUI is not remote-controlled.** No command channel into a live
+`WorkspaceWindow`. It would couple external callers to the least testable state in the product, and
+it duplicates a path that is already proven headlessly — the documentation factory
+(`user-docs-factory.md`) and `tests/Ui.Tests/Em/EmCliVerbTests.cs` both drive real work through the
+headless path today, the latter comparing its output byte for byte against what the Simulate button
+writes.
+
+The legitimate need behind the idea — a person wanting to watch, inspect or take over work that a
+client is doing — is served **one-way** instead: a client writes files; the GUI observes them. The
+project tree already re-scans on window focus and on an explicit Refresh, deliberately without a
+`FileSystemWatcher` (`ProjectTreeTool.cs:16`, `:431`; the same decision is recorded in
+`TechnologyCache` and `CellLayoutResolver`). That is the mechanism, and tightening it — if it ever
+needs tightening — is a project-tree question, not an automation one.
+
+**R-aut-12. circuitRF does not host a scripting language.** Embedding an interpreter inverts the
+dependency: the application becomes a runtime for someone else's program, and every capability then
+needs a second, language-shaped binding maintained in parallel with the first. The existing
+out-of-process Python dependency for PCell generation is the cautionary precedent, and its failure
+modes were packaging ones (`packaging-installed-app-no-pcell-artwork`). Clients script circuitRF from
+outside, in whatever language they already use.
+
+**R-aut-13. No adapter is a privileged one.** Nothing may be reachable through a protocol server that
+is not reachable through the CLI, and vice versa. The moment one adapter can do something the others
+cannot, the logic has leaked out of the capability layer and R-aut-1 is broken.
+
+---
+
+## 8. Adding an adapter
+
+1. Establish that every operation it needs already exists below the firewall. If one does not, that
+   is a capability change and belongs in the capability layer first (R-aut-2).
+2. Translate, dispatch, report. No decisions, no defaults the capability layer does not already
+   have, no logic (R-aut-1).
+3. Results structured (R-aut-6); failures as diagnostics (R-aut-7); English and invariant
+   (`cli.md` §7A).
+4. Keep the verb count small and the verbs broad (R-aut-9).
+5. Confirm parity with the CLI, as a test (R-aut-13).

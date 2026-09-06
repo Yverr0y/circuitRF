@@ -1,5 +1,6 @@
 using System.Linq;
 using System.Numerics;
+using CircuitRF.Cli;
 using CircuitRF.Core.Design;
 using CircuitRF.Core.Devices.External;
 using CircuitRF.Core.Elaboration;
@@ -14,19 +15,30 @@ using CircuitRF.Design.Workspace;
 using RfCore;
 using RfCore.Data;
 using RfCore.Export;
+using RfCore.Loadpull;
 
 // ── command dispatch ──────────────────────────────────────────────────────────
 
-if (args.Length == 0)
-{
-    PrintHelp();
-    return 1;
-}
+// --json, --only and --group are taken FIRST, and before the empty-argument check, so that
+// `circuitrf --json` with no verb still produces a document rather than a bare exit code — a caller
+// must never have to tell "no output" apart from "output I could not parse" (R-aut1-3). Taking them
+// here also means no verb's own argument loop has to learn about them, and `convert`'s
+// unknown-option refusal cannot trip over one.
+args = JsonRun.TakeFlags(args);
 
 // --kits <dir> makes externally-provided devices work headlessly, the same way opening a workspace
 // does in the GUI: point at a folder of installed kits and a netlist naming one resolves it. Taken
 // out of the argument list here so every command gets it without repeating the parsing.
 args = TakeKitFolders(args, out var kitFolders);
+
+if (args.Length == 0)
+{
+    PrintHelp();
+    // Recorded, NOT written to stderr: nothing is written there today for a bare invocation, and
+    // R-aut0-3 says a script watching stderr must not notice this brief landing.
+    JsonRun.Note(CliDiagnostics.NoCommand());
+    return JsonRun.Finish(1);
+}
 
 if (kitFolders.Count > 0)
     ExternalDeviceRegistry.AddResolver(new DeviceWorkerProviderResolver(kitFolders));
@@ -39,7 +51,9 @@ if (kitFolders.Count > 0)
 ProcessDeviceWorkerTransport.Logged += log => Console.Error.WriteLine(
     string.IsNullOrWhiteSpace(log.Provider) ? $"worker: {log.Line}" : $"worker '{log.Provider}': {log.Line}");
 
-return args[0].ToLowerInvariant() switch
+JsonRun.Verb = args[0].ToLowerInvariant();
+
+return JsonRun.Finish(JsonRun.Verb switch
 {
     "sparam" => RunSparam(args[1..]),
     "dc"     => RunDc(args[1..]),
@@ -50,8 +64,17 @@ return args[0].ToLowerInvariant() switch
     "em"     => RunEm(args[1..]),
     "convert" => CircuitRF.Cli.LayoutConvert.Run(args[1..]),
     "elab"   => RunElab(args[1..]),
-    _        => PrintHelp()
-};
+    _        => UnknownVerb(args[0])
+});
+
+// Recorded rather than printed, and the exit code is left alone: an unrecognised verb prints help on
+// stdout and exits 0 today, and changing either of those is a behaviour change this brief does not
+// get to make (R-aut0-3).
+static int UnknownVerb(string verb)
+{
+    JsonRun.Note(CliDiagnostics.UnknownVerb(verb));
+    return PrintHelp();
+}
 
 // ── S-parameter analysis ──────────────────────────────────────────────────────
 
@@ -87,15 +110,13 @@ static int RunSparam(string[] args)
 
     if (input is null)
     {
-        Console.Error.WriteLine("sparam: input .cnl file required");
+        int code = JsonRun.Fail(CliDiagnostics.InputRequired("sparam", ".cnl"));
         Console.Error.WriteLine("Usage: circuitrf sparam <file.cnl> [--freq start:stop:step] [-o out.sNp]");
-        return 1;
+        return code;
     }
+    JsonRun.InputPath = input;
     if (!File.Exists(input))
-    {
-        Console.Error.WriteLine($"File not found: {input}");
-        return 1;
-    }
+        return JsonRun.Fail(CliDiagnostics.FileNotFound(input));
 
     try
     {
@@ -108,6 +129,7 @@ static int RunSparam(string[] args)
         var spa = tb.Analyses.OfType<SParameterAnalysis>().FirstOrDefault();
         if (spa is not null && !freqExplicit)
         {
+            JsonRun.Analysis = spa.Name;
             freqs = spa.Expand(nl.ResolvedGlobals);
             Console.Error.WriteLine(
                 $"S-parameter analysis '{spa.Name}': {freqs.Length} points, " +
@@ -129,17 +151,19 @@ static int RunSparam(string[] args)
         // nobody, which is exactly how a singular-matrix report went unseen here.
         PrintWarnings(nl, shown);
 
+        JsonRun.Data = ds;
+
         var snp = RfCore.Data.DataSetBuilder.ToSnp(ds);
 
         var outPath = output ?? Path.ChangeExtension(input, $".s{snp.Ports}p");
         TouchstoneIO.WriteFile(snp, outPath);
         Console.WriteLine($"Wrote {outPath}");
+        JsonRun.AddOutput("touchstone", outPath);
         return 0;
     }
     catch (Exception ex)
     {
-        Console.Error.WriteLine($"Error: {ex.Message}");
-        return 1;
+        return JsonRun.Fail(CliDiagnostics.RunFailed(ex.Message));
     }
 }
 
@@ -148,12 +172,11 @@ static int RunSparam(string[] args)
 static int RunDc(string[] args)
 {
     if (args.Length == 0 || args[0].StartsWith('-'))
-    {
-        Console.Error.WriteLine("dc: input .cnl file required");
-        return 1;
-    }
+        return JsonRun.Fail(CliDiagnostics.InputRequired("dc", ".cnl"));
+
     var input = args[0];
-    if (!File.Exists(input)) { Console.Error.WriteLine($"File not found: {input}"); return 1; }
+    JsonRun.InputPath = input;
+    if (!File.Exists(input)) return JsonRun.Fail(CliDiagnostics.FileNotFound(input));
 
     var settings = DcSettingsFrom(args);
 
@@ -164,6 +187,13 @@ static int RunDc(string[] args)
         var shown = PrintWarnings(nl);
 
         var result = NonlinearDcEngine.Run(nl, settings);
+
+        // The document's `result` is DcResultPacker's DataSet of THIS DcResult — the same packer the
+        // GUI and the sweep engine use, so a `dc` cube read headlessly is the cube read anywhere
+        // else. Both it and the table below read the one DcResult, so they cannot disagree about a
+        // number; what they cannot share is a selection step, because the table has none (it prints
+        // every node and every probe).
+        JsonRun.Data = DcResultPacker.Pack(result, nl);
 
         // AGAIN, AFTER THE RUN. Elaboration is not the only thing that has something to say: the DC
         // engine reports what it finds while building the system — a thermal node with no thermal
@@ -192,7 +222,7 @@ static int RunDc(string[] args)
 
         return result.Converged ? 0 : 2;
     }
-    catch (Exception ex) { Console.Error.WriteLine($"Error: {ex.Message}"); return 1; }
+    catch (Exception ex) { return JsonRun.Fail(CliDiagnostics.RunFailed(ex.Message)); }
 }
 
 // ── Harmonic balance ──────────────────────────────────────────────────────────
@@ -234,10 +264,7 @@ static int RunHb(string[] args)
                 var kvText = args[++i];
                 int eq = kvText.IndexOf('=');
                 if (eq <= 0)
-                {
-                    Console.Error.WriteLine($"hb: --set expects name=expr, got '{kvText}'");
-                    return 1;
-                }
+                    return JsonRun.Fail(CliDiagnostics.SetMalformed("hb", kvText));
                 sets.Add((kvText[..eq].Trim(), kvText[(eq + 1)..].Trim()));
                 break;
             }
@@ -270,14 +297,15 @@ static int RunHb(string[] args)
 
     if (input is null)
     {
-        Console.Error.WriteLine("hb: input .cnl file required");
+        int code = JsonRun.Fail(CliDiagnostics.InputRequired("hb", ".cnl"));
         Console.Error.WriteLine(
             "Usage: circuitrf hb <file.cnl> [-a name] [--set var=expr] [--maxharm K] [--maxmix M]");
         Console.Error.WriteLine(
             "                    [--tol t] [--max-iter N] [--rows N] [--all] [--diag] [-o out.{mat,npy,txt}]");
-        return 1;
+        return code;
     }
-    if (!File.Exists(input)) { Console.Error.WriteLine($"File not found: {input}"); return 1; }
+    JsonRun.InputPath = input;
+    if (!File.Exists(input)) return JsonRun.Fail(CliDiagnostics.FileNotFound(input));
 
     try
     {
@@ -302,10 +330,7 @@ static int RunHb(string[] args)
         var top = SelectTop(tb, analysisName, a => a is HarmonicBalanceAnalysis,
                             "HB", "analysis <name> type=hb ...", out string? why);
         if (top is null)
-        {
-            Console.Error.WriteLine($"hb: {why}");
-            return 1;
-        }
+            return JsonRun.Fail(CliDiagnostics.NoAnalysis("hb", why!));
 
         var settings = SolverSettingsFrom(maxIter, diag);
         top = ApplyHbOverrides(tb, top, maxHarm, maxMixOrder, tol, maxIter);
@@ -345,6 +370,16 @@ static int RunHb(string[] args)
         var resultName = BaseOfChain(top, tb)?.Name ?? top.Name;
         var measDs     = EvaluateMeasurements(tb, nl, resultName, ds, run);
 
+        // The chain that ACTUALLY ran, after SelectTop's promotion — a caller that asked for an
+        // inner analysis and got its wrapper can see that from the document alone, which matters
+        // because the difference between the two is a whole sweep axis (cli.md §4).
+        JsonRun.Analysis = top.Name;
+
+        // ONE merged DataSet, used by both the export and the document, so a `.npy` written here and
+        // the JSON printed beside it can never disagree about which cubes the run produced.
+        var fullDs = measDs is { Cubes.Count: > 0 } ? MergeForExport(ds, measDs) : ds;
+        JsonRun.Data = fullDs;
+
         Console.WriteLine($"Analysis: {top.Name}   ({input})");
         PrintHbDataSet(ds, maxRows, allPoints);
         if (measDs is { Cubes.Count: > 0 })
@@ -357,16 +392,16 @@ static int RunHb(string[] args)
 
         if (exportPath is not null)
         {
-            var exportDs = measDs is { Cubes.Count: > 0 } ? MergeForExport(ds, measDs) : ds;
-            var format   = FormatFromExtension(exportPath);
-            DataSetExporter.Export(exportDs, exportPath, format,
+            var format = FormatFromExtension(exportPath);
+            DataSetExporter.Export(fullDs, exportPath, format,
                 new ExportOptions(Format: format), run?.LinearPayload);
             Console.WriteLine($"Wrote {exportPath}");
+            JsonRun.AddOutput(JsonRun.KindOf(exportPath), exportPath);
         }
 
         return Converged(ds) ? 0 : 2;
     }
-    catch (Exception ex) { Console.Error.WriteLine($"Error: {ex.Message}"); return 1; }
+    catch (Exception ex) { return JsonRun.Fail(CliDiagnostics.RunFailed(ex.Message)); }
 }
 
 // ── Loadpull / loadpull-pursuit ───────────────────────────────────────────────
@@ -424,10 +459,7 @@ static int RunLoadpull(string[] args, bool pursuit)
                 var kvText = args[++i];
                 int eq = kvText.IndexOf('=');
                 if (eq <= 0)
-                {
-                    Console.Error.WriteLine($"{verb}: --set expects name=expr, got '{kvText}'");
-                    return 1;
-                }
+                    return JsonRun.Fail(CliDiagnostics.SetMalformed(verb, kvText));
                 sets.Add((kvText[..eq].Trim(), kvText[(eq + 1)..].Trim()));
                 break;
             }
@@ -438,10 +470,7 @@ static int RunLoadpull(string[] args, bool pursuit)
                     !TryParseDouble(f[0], out double p0) ||
                     !TryParseDouble(f[1], out double p1) ||
                     !TryParseDouble(f[2], out double p2))
-                {
-                    Console.Error.WriteLine($"{verb}: --pin expects start:step:max in dBm, got '{args[i]}'");
-                    return 1;
-                }
+                    return JsonRun.Fail(CliDiagnostics.PinMalformed(verb, args[i]));
                 (pinStart, pinStep, pinMax) = (p0, p1, p2);
                 break;
             }
@@ -475,21 +504,13 @@ static int RunLoadpull(string[] args, bool pursuit)
     // Refused rather than ignored: a Γ grid silently not applied is a run that answers a different
     // question and reports nothing about it.
     if (pursuit && gridPath is not null)
-    {
-        Console.Error.WriteLine(
-            "lpp: --grid does not apply to a pursuit — a pursuit SEARCHES for its terminations rather " +
-            "than reading a grid. Use --out-grid to say where the terminations it finds are written.");
-        return 1;
-    }
+        return JsonRun.Fail(CliDiagnostics.GridNotForPursuit());
     if (!pursuit && outGridPath is not null)
-    {
-        Console.Error.WriteLine("lp: --out-grid applies to lpp (the pursuit writes a grid; a loadpull reads one).");
-        return 1;
-    }
+        return JsonRun.Fail(CliDiagnostics.OutGridNotForLoadpull());
 
     if (input is null)
     {
-        Console.Error.WriteLine($"{verb}: input .cnl file required");
+        int code = JsonRun.Fail(CliDiagnostics.InputRequired(verb, ".cnl"));
         Console.Error.WriteLine(
             $"Usage: circuitrf {verb} <file.cnl> [-a name] [--set var=expr] " +
             (pursuit ? "[--out-grid out.gam] " : "[--grid grid.gam] ") +
@@ -499,9 +520,10 @@ static int RunLoadpull(string[] args, bool pursuit)
             "[--rows N] [--all] [--diag]");
         Console.Error.WriteLine(
             "                     [-o out.{mat,npy,txt" + (pursuit ? "" : ",spl,lpcwave") + "}]");
-        return 1;
+        return code;
     }
-    if (!File.Exists(input)) { Console.Error.WriteLine($"File not found: {input}"); return 1; }
+    JsonRun.InputPath = input;
+    if (!File.Exists(input)) return JsonRun.Fail(CliDiagnostics.FileNotFound(input));
 
     try
     {
@@ -526,10 +548,7 @@ static int RunLoadpull(string[] args, bool pursuit)
             pursuit ? "analysis <name> type=loadpull_pursuit ..." : "analysis <name> type=loadpull ...",
             out string? why);
         if (top is null)
-        {
-            Console.Error.WriteLine($"{verb}: {why}");
-            return 1;
-        }
+            return JsonRun.Fail(CliDiagnostics.NoAnalysis(verb, why!));
 
         top = ApplyLoadpullOverrides(tb, top, gridPath, outGridPath, maxHarm, tol, maxIter,
                                      compression, pinStart, pinStep, pinMax);
@@ -577,6 +596,18 @@ static int RunLoadpull(string[] args, bool pursuit)
         var resultName = BaseOfChain(top, tb)?.Name ?? top.Name;
         var measDs     = EvaluateMeasurements(tb, nl, resultName, ds, null);
 
+        JsonRun.Analysis = top.Name;
+
+        // R-aut1-5 — under --json a loadpull's DEFAULT document is the same one-row-per-grid-point
+        // summary the terminal prints, and --all still means every cube. The cubes are
+        // [gridPoint x pinStep] and there are eight of them; the summary is the useful projection,
+        // not a terminal compromise.
+        JsonRun.SummaryIsTheDefault = true;
+        JsonRun.AllCubes            = allPoints;
+
+        var fullDs   = measDs is { Cubes.Count: > 0 } ? MergeForExport(ds, measDs) : ds;
+        JsonRun.Data = fullDs;
+
         Console.WriteLine($"Analysis: {top.Name}   ({input})");
         PrintLoadpullDataSet(ds, maxRows, allPoints);
         if (measDs is { Cubes.Count: > 0 })
@@ -589,14 +620,19 @@ static int RunLoadpull(string[] args, bool pursuit)
 
         if (exportPath is not null)
         {
-            var exportDs = measDs is { Cubes.Count: > 0 } ? MergeForExport(ds, measDs) : ds;
-            if (!ExportLoadpull(exportDs, exportPath)) return 1;
+            if (!ExportLoadpull(fullDs, exportPath)) return 1;
             Console.WriteLine($"Wrote {exportPath}");
+            JsonRun.AddOutput(JsonRun.KindOf(exportPath), exportPath);
         }
+
+        // The pursuit's own follow-on grid, when it wrote one. It is a file the run produced, so it
+        // belongs in `outputs` beside the export rather than being findable only from the directive.
+        if (outGridPath is not null && File.Exists(outGridPath))
+            JsonRun.AddOutput("gamma-grid", outGridPath);
 
         return LoadpullExitCode(ds);
     }
-    catch (Exception ex) { Console.Error.WriteLine($"Error: {ex.Message}"); return 1; }
+    catch (Exception ex) { return JsonRun.Fail(CliDiagnostics.RunFailed(ex.Message)); }
 }
 
 /// <summary>
@@ -625,10 +661,7 @@ static bool ExportLoadpull(DataSet ds, string path)
 
     if (group is null)
     {
-        Console.Error.WriteLine(
-            $"Cannot write {ext}: this result carries no loadpull surface (no GammaLoad cube). " +
-            "A pursuit that found no optimum has no follow-on grid to export — use .npy/.mat to " +
-            "keep what it did produce.");
+        JsonRun.Report(CliDiagnostics.NoLoadpullSurface(ext));
         return false;
     }
 
@@ -786,11 +819,15 @@ static void PrintLoadpullDataSet(DataSet ds, int maxRows, bool allPoints)
         if (ds.Groups.Count > 1 || group != DataSet.DefaultGroup)
             Console.WriteLine($"[{(group == DataSet.DefaultGroup ? "(default)" : group)}]");
 
-        if (cubes.ContainsKey("MXP_Converged") || cubes.ContainsKey("MXE_Converged"))
-            PrintPursuitOptima(cubes);
+        // R-aut1-1 — BOTH of these read through LoadpullResultSummary, which is also what the
+        // --json document reads. The selections below (which drive step, which cube spelling, what
+        // scale) are load-bearing and used to live only in these printers; sharing them is what
+        // stops the table and the document from being able to disagree.
+        if (LoadpullResultSummary.SummarizePursuit(cubes) is { } optima)
+            PrintPursuitOptima(optima);
 
-        if (cubes.ContainsKey("StopCode"))
-            PrintLoadpullGrid(cubes, maxRows, allPoints);
+        if (LoadpullResultSummary.SummarizeGrid(cubes) is { } grid)
+            PrintLoadpullGrid(grid, maxRows, allPoints);
 
         if (!allPoints) continue;
 
@@ -808,172 +845,101 @@ static void PrintLoadpullDataSet(DataSet ds, int maxRows, bool allPoints)
 /// the last termination it looked at, and a blank line there reads as "the search found nothing" when
 /// what happened is "nothing it tried reached compression".
 /// </summary>
-static void PrintPursuitOptima(IReadOnlyDictionary<string, DataCube> cubes)
+static void PrintPursuitOptima(LoadpullPursuitSummary s)
 {
-    double S(string name) => cubes.TryGetValue(name, out var c) && c.DataKind == DataKind.Real && c.RealValues.Length > 0
-        ? c.RealValues[0] : double.NaN;
-
-    void One(string tag, string title, string valueLabel, string valueUnit)
+    // MXE's criterion is published as a FRACTION (the engine's internal DE/PAE unit) while the
+    // follow-on grid's own Efficiency/PAE columns are percent, so the summary carries the ×100 as
+    // ValueScale and it is applied HERE, on the way to the screen. A document emits the raw number
+    // and the scale beside it (R-aut1-2).
+    // The Zload of a NON-converged optimum is still the last termination the search looked at, and
+    // worth printing. Its criterion is not: the engine publishes 0 there, and "Pout=0 dBm" next to
+    // "DID NOT converge" reads as a measured zero rather than as an absent number.
+    void One(PursuitOptimum o, string title, string valueLabel)
     {
-        bool converged = S($"{tag}_Converged") != 0.0;
-        double z_re = S($"{tag}_ZRe"), z_im = S($"{tag}_ZIm");
-        // MXE_Eff is published as a FRACTION (the engine's internal DE/PAE unit); the follow-on grid's
-        // own Efficiency/PAE columns are percent, so printing the optimum unscaled next to them reads
-        // as a 0.7 % efficiency beside a 70 % grid.
-        // The Zload of a NON-converged optimum is still the last termination the search looked at, and
-        // worth printing. Its criterion is not: the engine publishes 0 there, and "Pout=0 dBm" next to
-        // "DID NOT converge" reads as a measured zero rather than as an absent number.
-        double value = tag == "MXP" ? S("MXP_PoutDbm") : S("MXE_Eff") * 100.0;
-        string shown = converged ? $"{value:G5} {valueUnit}" : "—";
+        string shown = o.Converged ? $"{o.Value * o.ValueScale:G5} {o.ValueUnit}" : "—";
         Console.WriteLine(
-            $"  {title,-26} {(converged ? "converged" : "DID NOT converge")}   " +
+            $"  {title,-26} {(o.Converged ? "converged" : "DID NOT converge")}   " +
             $"{valueLabel}={shown}   " +
-            $"Zload={FormatOhms(z_re, z_im)}" +
-            (S($"{tag}_HasZsource") != 0.0
-                ? $"   Zsource={FormatOhms(S($"{tag}_ZsourceRe"), S($"{tag}_ZsourceIm"))}"
-                : ""));
+            $"Zload={FormatOhms(o.ZRe, o.ZIm)}" +
+            (o.HasZsource ? $"   Zsource={FormatOhms(o.ZsourceRe, o.ZsourceIm)}" : ""));
     }
 
     Console.WriteLine("  Pursuit optima:");
-    One("MXP", "MXP (max power)",      "Pout", "dBm");
-    One("MXE", "MXE (max efficiency)", "Eff",  "%");
+    One(s.Mxp, "MXP (max power)",      "Pout");
+    One(s.Mxe, "MXE (max efficiency)", "Eff");
 
-    double queried = S("CacheCount"), unscorable = S("UnscorableCount"), recomm = S("RecommTermCount");
-    if (!double.IsNaN(queried))
+    if (!double.IsNaN(s.Queried))
         Console.WriteLine(
-            $"  {(int)queried} termination(s) queried" +
-            (unscorable > 0 ? $", {(int)unscorable} could not be scored (never reached compression)" : "") +
-            (recomm    > 0 ? $", {(int)recomm} recommended termination(s)" : ""));
+            $"  {(int)s.Queried} termination(s) queried" +
+            (s.Unscorable  > 0 ? $", {(int)s.Unscorable} could not be scored (never reached compression)" : "") +
+            (s.Recommended > 0 ? $", {(int)s.Recommended} recommended termination(s)" : ""));
     Console.WriteLine();
 }
 
 /// <summary>
-/// One row per Γ grid point: where it was, how it stopped, and its FOMs at the LAST converged,
-/// non-tickle drive step — which is the compression point when the point compressed, and the highest
-/// drive it managed otherwise. Reading a fixed drive index instead would report the FOMs of whatever
-/// rung happened to sit there, mixing compressed and uncompressed points in one column.
+/// Formats the grid summary: one row per Γ grid point, showing where it was, how it stopped, and its
+/// FOMs at the drive step the summary chose.
+///
+/// <para><b>The choosing is no longer done here.</b> Which drive step each point is read at, which
+/// of two cube spellings a column comes from and whether efficiency arrives as a fraction or a
+/// percent are all <see cref="LoadpullResultSummary.SummarizeGrid"/>'s answers now, because
+/// <c>--json</c> has to give the same ones (R-aut1-1). What is left in this function is the part
+/// that is genuinely about a terminal: column widths, the em dash, and how many rows fit.</para>
 /// </summary>
-static void PrintLoadpullGrid(IReadOnlyDictionary<string, DataCube> cubes, int maxRows, bool allPoints)
+static void PrintLoadpullGrid(LoadpullGridSummary s, int maxRows, bool allPoints)
 {
-    // The engine's own StopCode encoding (LoadpullEngine.BuildLoadpullDataSet), mirrored here for the
-    // same reason LoadpullRunSummary mirrors it: it is a wire value in a published DataCube, and a
-    // shared enum could renumber it under a .npy written by an older build.
-    static string StopName(double c) => c switch
-    {
-        1 => "compressed",
-        2 => "no converge",
-        3 => "no seed",
-        _ => "max drive",
-    };
-
-    var stop = cubes["StopCode"];
-    if (stop.DataKind != DataKind.Real) return;
-
-    // A SWEPT loadpull prepends one axis per nesting level, so the grid axis is not necessarily the
-    // first — and the whole result is not one grid. Found by NAME rather than by position: taking the
-    // last axis would silently read a two-frequency run as one grid of twice the size, whose rows are
-    // labelled with the wrong terminations for half of it.
-    int gridDim = -1;
-    for (int d = 0; d < stop.Axes.Count; d++)
-        if (stop.Axes[d].Name == "gridPoint") { gridDim = d; break; }
-    if (gridDim < 0) gridDim = stop.Axes.Count - 1;
-    if (gridDim < 0) return;
-
-    int  nGrid = stop.Axes[gridDim].Length;
-    long outer = 1;
-    for (int d = 0; d < gridDim; d++) outer *= stop.Axes[d].Length;
-    var outerAxes = stop.Axes.Take(gridDim).ToList();
-
-    var codes = stop.RealValues;
-    bool haveGamma = cubes.TryGetValue("GammaLoad", out var gammaCube) && gammaCube.DataKind == DataKind.Complex;
-    bool haveZ     = cubes.TryGetValue("ZLoad",     out var zCube)     && zCube.DataKind     == DataKind.Complex;
-
-    // Every FOM is [outer… x gridPoint x pinStep]; the pin axis length comes from whichever is present.
-    var conv = Get("Converged");
-    if (conv is null) return;
-    int nPin = conv.Axes.Count > 0 ? conv.Axes[^1].Length : 1;
-    if (nPin <= 0 || conv.RealValues.Length < outer * nGrid * nPin) return;
-
-    // Both spellings, because both reach here: a plain loadpull is Enriched (Pout_dBm / Gt_dB /
-    // Efficiency-in-%) while a PURSUIT's follow-on grid is not, and carries the engine's raw names
-    // with DE and PAE still as fractions. Reading only one set prints a table of em-dashes for the
-    // other — which looks like a run that produced no figures of merit rather than like a naming
-    // mismatch.
-    var    tickle   = Get("IsTickle");
-    var    pavl     = Get("PavlDbm");
-    var    pout     = Get("Pout_dBm")   ?? Get("Pout");
-    var    gt       = Get("Gt_dB")      ?? Get("Gt");
-    var    de       = Get("Efficiency") ?? Get("DE");
-    var    pae      = Get("PAE");
-    double effScale = cubes.ContainsKey("Efficiency") ? 1.0 : 100.0;
-
-    int compressed = codes.Count(c => c == 1), notConv = codes.Count(c => c is 2 or 3);
-    int maxDrive   = codes.Length - compressed - notConv;
-
     Console.WriteLine(
-        $"  Grid: {nGrid} point(s)" + (outer > 1 ? $" x {outer} sweep point(s)" : "") +
-        $" — {compressed} reached compression" +
-        (maxDrive > 0 ? $", {maxDrive} stopped at max drive" : "") +
-        (notConv  > 0 ? $", {notConv} did not converge" : ""));
-    if (compressed == 0)
+        $"  Grid: {s.GridPoints} point(s)" + (s.OuterPoints > 1 ? $" x {s.OuterPoints} sweep point(s)" : "") +
+        $" — {s.Compressed} reached compression" +
+        (s.MaxDrive     > 0 ? $", {s.MaxDrive} stopped at max drive" : "") +
+        (s.NotConverged > 0 ? $", {s.NotConverged} did not converge" : ""));
+    if (s.Compressed == 0)
         Console.WriteLine("  Nothing reached compression — raise --pin's max (or the directive's PinMax).");
 
-    for (long o = 0; o < outer; o++)
+    for (long o = 0; o < s.OuterPoints; o++)
     {
         Console.WriteLine();
-        if (outerAxes.Count > 0)
-            Console.WriteLine($"  [{RowLabel(OuterAxesPlusOne(outerAxes), o)}]");
+        if (s.OuterAxes.Count > 0)
+            Console.WriteLine($"  [{RowLabel(OuterAxesPlusOne(s.OuterAxes), o)}]");
 
         Console.WriteLine($"    {"#",3}  {"GammaLoad",-20}{"ZLoad (ohm)",-22}{"stop",-13}" +
                           $"{"Pavl",9}{"Pout",9}{"Gt",8}{"DE%",8}{"PAE%",8}");
 
-        int shown = allPoints ? nGrid : Math.Min(nGrid, maxRows);
+        int shown = allPoints ? s.GridPoints : Math.Min(s.GridPoints, maxRows);
         for (int g = 0; g < shown; g++)
         {
-            long flat = o * nGrid + g;                 // index into the [outer x grid] cubes
-            long fomBase = flat * nPin;                // index into the [outer x grid x pin] cubes
+            var row = s.Rows[(int)(o * s.GridPoints + g)];
 
-            // The last converged, non-tickle drive step for this point.
-            int at = -1;
-            for (int k = nPin - 1; k >= 0; k--)
-            {
-                long idx = fomBase + k;
-                if (conv.RealValues[idx] == 0.0) continue;
-                if (tickle is not null && tickle.RealValues[idx] != 0.0) continue;
-                at = k;
-                break;
-            }
-
-            string gam = haveGamma && flat < gammaCube!.ComplexValues.Length
-                ? FormatGamma(gammaCube.ComplexValues[flat]) : "";
-            string z = haveZ && flat < zCube!.ComplexValues.Length
-                ? FormatOhms(zCube.ComplexValues[flat].Real, zCube.ComplexValues[flat].Imaginary) : "";
+            string gam = row.GammaLoad is { } gl ? FormatGamma(gl) : "";
+            string z   = row.ZLoad     is { } zl ? FormatOhms(zl.Real, zl.Imaginary) : "";
 
             Console.WriteLine(
-                $"    {g,3}  {gam,-20}{z,-22}{StopName(codes[flat]),-13}" +
-                $"{Cell(pavl, fomBase, at),9}{Cell(pout, fomBase, at),9}{Cell(gt, fomBase, at),8}" +
-                $"{Cell(de, fomBase, at, effScale),8}{Cell(pae, fomBase, at, effScale),8}");
+                $"    {g,3}  {gam,-20}{z,-22}{LoadpullResultSummary.StopName(row.StopCode),-13}" +
+                $"{Cell(row, s, "Pavl"),9}{Cell(row, s, "Pout"),9}{Cell(row, s, "Gt"),8}" +
+                $"{Cell(row, s, "Efficiency"),8}{Cell(row, s, "PAE"),8}");
         }
-        if (shown < nGrid)
-            Console.WriteLine($"    … {nGrid - shown} more point(s) — use --all or --rows N");
+        if (shown < s.GridPoints)
+            Console.WriteLine($"    … {s.GridPoints - shown} more point(s) — use --all or --rows N");
     }
     Console.WriteLine();
 
-    DataCube? Get(string name)
-        => cubes.TryGetValue(name, out var c) && c.DataKind == DataKind.Real ? c : null;
-
     // RowLabel labels every axis BUT the last, so the outer axes are handed to it with one throwaway
     // axis appended rather than being re-implemented here.
-    static IReadOnlyList<Axis> OuterAxesPlusOne(List<Axis> outerAxes)
+    static IReadOnlyList<Axis> OuterAxesPlusOne(IReadOnlyList<Axis> outerAxes)
         => [.. outerAxes, new Axis("_", [0.0])];
 
-    static string Cell(DataCube? cube, long fomBase, int at, double scale = 1.0)
+    // The scale is the SUMMARY's, applied here on the way to a column headed "DE%" — the value in
+    // the row is the engine's own. An absent cube, an absent drive step and a NaN measurement are
+    // all one em dash, which is what they all are: not a number.
+    static string Cell(LoadpullGridRow row, LoadpullGridSummary s, string column)
     {
-        if (cube is null || at < 0) return "—";
-        long idx = fomBase + at;
-        if (idx >= cube.RealValues.Length) return "—";
-        double v = cube.RealValues[idx] * scale;
-        return double.IsNaN(v) ? "—" : v.ToString("F2");
+        for (int i = 0; i < s.Columns.Count; i++)
+        {
+            if (s.Columns[i].Column != column) continue;
+            double v = row.Fom[i] * s.Columns[i].Scale;
+            return double.IsNaN(v) ? "—" : v.ToString("F2");
+        }
+        return "—";
     }
 }
 
@@ -1017,15 +983,13 @@ static int RunEm(string[] args)
 
     if (input is null)
     {
-        Console.Error.WriteLine("em: input .cem file required");
+        int code = JsonRun.Fail(CliDiagnostics.InputRequired("em", ".cem"));
         Console.Error.WriteLine("Usage: circuitrf em <setup.cem> [-o out.sNp] [--workspace <file.cws>]");
-        return 1;
+        return code;
     }
+    JsonRun.InputPath = input;
     if (!File.Exists(input))
-    {
-        Console.Error.WriteLine($"File not found: {input}");
-        return 1;
-    }
+        return JsonRun.Fail(CliDiagnostics.FileNotFound(input));
 
     string cemPath = Path.GetFullPath(input);
 
@@ -1036,8 +1000,7 @@ static int RunEm(string[] args)
     }
     catch (Exception ex)
     {
-        Console.Error.WriteLine($"Could not read '{cemPath}': {ex.Message}");
-        return 1;
+        return JsonRun.Fail(CliDiagnostics.SetupUnreadable(cemPath, ex.Message));
     }
 
     // R-emcli-5 — a WALK-UP, not a flag. The .cem's own ancestor .cws is what LayoutRef is relative
@@ -1049,10 +1012,7 @@ static int RunEm(string[] args)
         : Path.GetFullPath(workspace);
 
     if (workspace is not null && !File.Exists(cwsPath!))
-    {
-        Console.Error.WriteLine($"Workspace file not found: {cwsPath}");
-        return 1;
-    }
+        return JsonRun.Fail(CliDiagnostics.WorkspaceNotFound(cwsPath!));
 
     Console.Error.WriteLine(cwsPath is null
         ? $"[circuitRF] no workspace above '{Path.GetFileName(cemPath)}' — references resolve " +
@@ -1065,7 +1025,10 @@ static int RunEm(string[] args)
     // out before anything long starts — "the technology did not resolve" is the sentence that
     // explains a refusal three lines later.
     foreach (var d in resolution.Diagnostics)
+    {
         Console.Error.WriteLine($"warning: {d}");
+        JsonRun.Note(CliDiagnostics.EmSetupWarning(d));
+    }
 
     if (resolution.LayoutPath is { } lp) Console.Error.WriteLine($"[circuitRF] layout: {lp}");
     if (resolution.TechnologyPath is { } tp) Console.Error.WriteLine($"[circuitRF] technology: {tp}");
@@ -1091,17 +1054,22 @@ static int RunEm(string[] args)
     }
     catch (Exception ex)
     {
-        Console.Error.WriteLine($"Error: {ex.Message}");
-        return 1;
+        return JsonRun.Fail(CliDiagnostics.RunFailed(ex.Message));
     }
 
     // R-emcli-6 — THREE lists, kept apart, because they ask three different things of the reader.
     // Notes are the run explaining itself, warnings are things to act on, errors are things the user
     // asked for and did not get. Flattening them into one list is the exact defect the split was
     // introduced to fix, and it is just as wrong on a terminal as it was in the Messages region.
-    foreach (var n in result.Notes ?? []) Console.Error.WriteLine($"note: {n}");
-    foreach (var w in result.Warnings)     Console.Error.WriteLine($"warning: {w}");
-    foreach (var e in result.Errors ?? []) Console.Error.WriteLine($"error: {e}");
+    // The three lists carry STRINGS, not diagnostics — only the top-level refusal has a coded form
+    // (EmRunResult.Diagnostic). Each is wrapped with an id naming which of the three it came from,
+    // rather than having arguments invented by parsing the sentence back apart (R-aut1-7).
+    foreach (var n in result.Notes ?? [])
+    { Console.Error.WriteLine($"note: {n}");    JsonRun.Note(CliDiagnostics.EmRunNote(n)); }
+    foreach (var w in result.Warnings)
+    { Console.Error.WriteLine($"warning: {w}"); JsonRun.Note(CliDiagnostics.EmRunWarning(w)); }
+    foreach (var e in result.Errors ?? [])
+    { Console.Error.WriteLine($"error: {e}");   JsonRun.Note(CliDiagnostics.EmRunError(e)); }
 
     // R-emcli-8 — a refusal stays a refusal. Each status carries a written explanation of what is
     // wrong with THIS setup; collapsing them into "EM failed" throws away the only part a user can
@@ -1109,11 +1077,17 @@ static int RunEm(string[] args)
     if (result.Status != EmRunStatus.Ok)
     {
         Console.Error.WriteLine($"{DescribeEmStatus(result.Status)}: {result.Error}");
+        // The refusal's own coded form, which EmRunService has carried alongside the string since
+        // brief-localization-groundwork's R-loc-5 and which the CLI has until now discarded. The
+        // string stays exactly as it was: it is the contract cli.md §8 promises.
+        if (result.Diagnostic is { } refusal) JsonRun.Note(refusal);
         return result.Status == EmRunStatus.Cancelled ? 130 : 1;
     }
 
     Console.WriteLine($"EM setup:  {(setup.Name.Length > 0 ? setup.Name : Path.GetFileNameWithoutExtension(cemPath))}");
     Console.WriteLine($"Kernel:    {result.KernelName} ({result.Kind})");
+
+    JsonRun.Data = result.Data;
 
     if (result.Data is { } ds)
     {
@@ -1127,8 +1101,10 @@ static int RunEm(string[] args)
             Console.WriteLine($"Points:    {freqAxis.Length}");
     }
 
-    if (result.SnpPath is { } snp) Console.WriteLine($"Wrote {snp}");
-    if (result.NpyPath is { } npy) Console.WriteLine($"Wrote {npy}");
+    // BOTH files, because they are not redundant (cli.md §8.2): the Touchstone is the network and
+    // the .npy carries the diagnostics group that makes a wrong answer diagnosable.
+    if (result.SnpPath is { } snp) { Console.WriteLine($"Wrote {snp}"); JsonRun.AddOutput("touchstone", snp); }
+    if (result.NpyPath is { } npy) { Console.WriteLine($"Wrote {npy}"); JsonRun.AddOutput("npy", npy); }
 
     return 0;
 }
@@ -1168,11 +1144,13 @@ static string DescribeEmStatus(EmRunStatus status) => status switch
 
 static int RunElab(string[] args)
 {
+    if (args.Length > 0) JsonRun.InputPath = args[0];
+
+    // One condition and one sentence, as before: `elab` has always said "input required" for a
+    // missing file too. Splitting that into a not-found refusal would be a better message and a
+    // change to stderr, which this brief does not get to make (R-aut0-3).
     if (args.Length == 0 || !File.Exists(args[0]))
-    {
-        Console.Error.WriteLine("elab: input .cnl file required");
-        return 1;
-    }
+        return JsonRun.Fail(CliDiagnostics.InputRequired("elab", ".cnl"));
     try
     {
         var (lib, tb) = CnlReader.ReadFile(args[0]);
@@ -1187,7 +1165,7 @@ static int RunElab(string[] args)
         }
         return 0;
     }
-    catch (Exception ex) { Console.Error.WriteLine($"Error: {ex.Message}"); return 1; }
+    catch (Exception ex) { return JsonRun.Fail(CliDiagnostics.RunFailed(ex.Message)); }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1221,6 +1199,7 @@ static void PrintWorkerOutput()
 
         Console.Error.WriteLine($"--- worker output ({name}) ---");
         Console.Error.WriteLine(log);
+        JsonRun.Note(CliDiagnostics.WorkerOutput(name, log));
 
         // A headless run reaches here without ever throwing, so the exception paths' explanation
         // would never be printed. The one failure worth translating looks, in raw dyld text, exactly
@@ -1406,7 +1385,11 @@ static DataSet? EvaluateMeasurements(TestBench tb, ElaboratedNetlist nl, string 
 
     var measDs = new DataSet();
     var errors = new MeasurementEvaluator(tb, nl, results, solvers).EvaluateInto(measDs);
-    foreach (var e in errors) Console.Error.WriteLine($"[circuitRF] measurement: {e}");
+    foreach (var e in errors)
+    {
+        Console.Error.WriteLine($"[circuitRF] measurement: {e}");
+        JsonRun.Note(CliDiagnostics.MeasurementFailed(e));
+    }
     return measDs;
 }
 
@@ -1640,10 +1623,16 @@ static string[] TakeKitFolders(string[] args, out List<string> folders)
 static (int Notes, int Warnings) PrintWarnings(ElaboratedNetlist nl, (int Notes, int Warnings) from = default)
 {
     for (; from.Notes < nl.Notes.Count; from.Notes++)
+    {
         Console.Error.WriteLine($"[circuitRF] {nl.Notes[from.Notes]}");
+        JsonRun.Note(CliDiagnostics.ElaborationNote(nl.Notes[from.Notes]));
+    }
 
     for (; from.Warnings < nl.Warnings.Count; from.Warnings++)
+    {
         Console.Error.WriteLine($"[circuitRF] {nl.Warnings[from.Warnings]}");
+        JsonRun.Note(CliDiagnostics.ElaborationWarning(nl.Warnings[from.Warnings]));
+    }
 
     return from;
 }
@@ -1727,6 +1716,11 @@ static int PrintHelp()
     Console.WriteLine("Options (any command):");
     Console.WriteLine("  --kits <dir>        folder of installed kits, for externally-provided");
     Console.WriteLine("                      devices (ExtDevice Provider=...). Repeatable.");
+    Console.WriteLine("  --json              one JSON document on stdout and nothing else; progress,");
+    Console.WriteLine("                      notes and errors stay on stderr. A failed run still");
+    Console.WriteLine("                      emits a document — the failure is the payload.");
+    Console.WriteLine("  --only a,b          narrow the document's cubes to these");
+    Console.WriteLine("  --group g,h         narrow the document's groups to these");
     Console.WriteLine();
     Console.WriteLine("Frequency format: 1GHz, 100MHz, 1e9 (Hz bare)");
     Console.WriteLine("Example: circuitrf sparam hero1.cnl --freq 1GHz:3GHz:50MHz -o hero1.s4p");
