@@ -4,6 +4,7 @@ slug: reference/schematic-editor.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > Schematic editor
 lede: Where a circuit is drawn: placing components from the Library Palette, wiring them, editing their values, and setting up the analysis that simulates the result.
+keywords: schematic, draw, wire, place, net, instance, hierarchy, test bench, testbench
 ---
 
 The schematic is the **electrical** view of a cell — what the circuit *is*, as opposed to what it

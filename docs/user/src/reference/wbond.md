@@ -4,6 +4,7 @@ slug: reference/wbond.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > wBond
 lede: Bondwire arrays: geometry, inductance, the 3D kernel, and S-parameters out.
+keywords: bondwire, bond wire, wirebond, wire bond, ribbon, die attach, package
 ---
 
 <nav class="toc">

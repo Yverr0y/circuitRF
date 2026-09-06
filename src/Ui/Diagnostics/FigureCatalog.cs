@@ -371,6 +371,11 @@ public static class FigureCatalog
             null,
             "The Plot Inspector: a trace card reading S(2,1) from a swept S-parameter run."),
 
+        new("plot-inspector-passive", DocDataDisplayFixtures.InspectorPassiveReadout, 440, 376,
+            null,
+            "A trace card reading ESR from a two-port part file, with the Fixture control that "
+          + "decides how the two-terminal impedance is recovered."),
+
         new("plot-inspector-smith", DocDataDisplayFixtures.InspectorSmith, 440, 376,
             null,
             "The trace card behind the Smith figure: the same run, the same S(1,1), on a Smith chart."),

@@ -1613,7 +1613,10 @@ public partial class TraceRowViewModel : ViewModelBase
     /// any N. Hidden at exactly 2 ports, where input=1/output=2 is the only sensible choice.
     /// </summary>
     public bool ShowPortSelectors =>
-        IsNetworkMetricTrace && _trace.Derived.NeedsPortPair() && SourcePortCount > 2;
+        IsNetworkMetricTrace && SourcePortCount > 2
+        && (_trace.Derived.NeedsPortPair()
+            || (_trace.Derived.IsPassiveMetric()
+                && RfCore.Data.PassiveMetrics.NeedsPortPair(_trace.EffectivePassiveExtraction)));
 
     public int SelectedInputPort
     {
@@ -1654,6 +1657,21 @@ public partial class TraceRowViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// The two-terminal passive readouts, offered from N ≥ 1 — a 1-port file is read as a
+    /// reflection measurement, a 2-port one as a through fixture (the trace card chooses which).
+    /// Named once so the Touchstone path and the simulated-S path below cannot drift apart.
+    /// </summary>
+    private static readonly DerivedParameters[] PassiveReadouts =
+    [
+        DerivedParameters.MagZ,
+        DerivedParameters.Esr,
+        DerivedParameters.Reactance,
+        DerivedParameters.Ceff,
+        DerivedParameters.Leff,
+        DerivedParameters.QFactor,
+    ];
+
     private int FirstPortOtherThan(int p)
     {
         for (int i = 1; i <= Math.Max(2, SourcePortCount); i++) if (i != p) return i;
@@ -1679,6 +1697,108 @@ public partial class TraceRowViewModel : ViewModelBase
     public bool ShowPassivityScope =>
         IsNetworkMetricTrace && _trace.Derived == DerivedParameters.Passivity && SourcePortCount > 2;
 
+    // ── passive readouts: which fixture the DUT impedance comes out of ──────────────────────────
+    //
+    //  Offered as an explicit choice rather than inferred, because nothing in a Touchstone file
+    //  records the fixture and the wrong reading fails silently: a 2-port shunt-through capacitor
+    //  file read as a 1-port reflection returns exactly Z ∥ Z0 — close to right wherever |Z| ≪ Z0,
+    //  and saturating at Z0 everywhere else, with no NaN and no discontinuity to notice.
+
+    /// <summary>
+    /// One fixture offered on the card. The NAME is what the row shows; the closed form is carried
+    /// beside it and reached only on hover.
+    ///
+    /// <para><b>The equation is not in the row text, and that is deliberate.</b> Spelling it inline
+    /// made the combo box three times the width of every other control on the card and pushed the
+    /// card's own layout out of alignment — for a string that answers a question the reader asks
+    /// once. A tooltip per row answers it for every option before one is chosen, which is more than
+    /// the inline text did.</para>
+    /// </summary>
+    public sealed class PassiveFixtureItem
+    {
+        public required RfCore.Data.PassiveExtraction Mode { get; init; }
+
+        /// <summary>The row text — a name, nothing else.</summary>
+        public required string Label { get; init; }
+
+        /// <summary>The closed form, shown on hover.</summary>
+        public required string Equation { get; init; }
+
+        /// <summary>What the DUT physically is under this fixture, for the card's own tooltip.</summary>
+        public required string Arrangement { get; init; }
+
+        public override string ToString() => Label;
+    }
+
+    /// <summary>The three fixtures, in the order the card lists them. One shared set of instances,
+    /// because <c>SelectedItem</c> matches by reference.</summary>
+    public static IReadOnlyList<PassiveFixtureItem> PassiveExtractionItems { get; } =
+    [
+        new() { Mode = RfCore.Data.PassiveExtraction.ShuntThrough,
+                Label = "Shunt-through", Equation = "Z = (Z0/2)·S21/(1 − S21)",
+                Arrangement = "SHUNT across a through line" },
+        new() { Mode = RfCore.Data.PassiveExtraction.SeriesThrough,
+                Label = "Series-through", Equation = "Z = 2·Z0·(1 − S21)/S21",
+                Arrangement = "in SERIES with a through line" },
+        new() { Mode = RfCore.Data.PassiveExtraction.OnePort,
+                Label = "1-port", Equation = "Z = Z0·(1 + S11)/(1 − S11)",
+                Arrangement = "a 1-port reflection" },
+    ];
+
+    /// <summary>Bound to the combo box. Reads the EFFECTIVE fixture, so a 1-port source shows the
+    /// only reading it can have while the stored preference is left alone.</summary>
+    public PassiveFixtureItem? SelectedPassiveFixture
+    {
+        get
+        {
+            var mode = _trace.EffectivePassiveExtraction;
+            foreach (var i in PassiveExtractionItems) if (i.Mode == mode) return i;
+            return null;
+        }
+        set
+        {
+            if (value is null || value.Mode == _trace.PassiveExtraction) return;
+            _trace.PassiveExtraction = value.Mode;
+            OnPropertyChanged(nameof(SelectedPassiveFixture));
+            OnPropertyChanged(nameof(PassiveFixtureTooltip));
+            OnPropertyChanged(nameof(ShowPortSelectors));
+            _parent.RebuildAndNotify();
+            _parent.NotifyStructureChanged();
+        }
+    }
+
+    /// <summary>
+    /// Everything about the choice that is not the name: the closed form, the assumption it rests
+    /// on, and where the self-resonance actually landed.
+    ///
+    /// <para><b>A tooltip rather than a line on the card.</b> The text is four sentences and the
+    /// card is a narrow panel with a dozen other controls in it; printing it took more vertical
+    /// space than the whole rest of the trace card. It is still worth saying — the fixture is an
+    /// assumption the data does not record — so it stays exactly one hover away.</para>
+    /// </summary>
+    public string PassiveFixtureTooltip
+    {
+        get
+        {
+            var item = SelectedPassiveFixture;
+            if (item is null) return "";
+
+            string srf = SelfResonanceText() is { } t ? $"\n\nSelf-resonance: {t}." : "";
+            return $"{item.Equation}\n\n"
+                 + $"Reads the two-terminal impedance of a DUT measured {item.Arrangement}. "
+                 + "Nothing in the file records the fixture — if that is not how this part was "
+                 + "measured, the curve is wrong everywhere and will still look plausible."
+                 + srf;
+        }
+    }
+
+    /// <summary>
+    /// Offered only for a passive readout, and only when there is a choice to make — a source with
+    /// fewer than two ports can only be read as a 1-port, so the control would be a decoration.
+    /// </summary>
+    public bool ShowPassiveExtraction =>
+        IsNetworkMetricTrace && _trace.Derived.IsPassiveMetric() && SourcePortCount >= 2;
+
     /// <summary>
     /// R-stb-4: extracting a 2-port sub-matrix from an N-port is valid ONLY because the other ports
     /// are assumed terminated in the reference impedance. That is standard and correct, but someone
@@ -1692,6 +1812,11 @@ public partial class TraceRowViewModel : ViewModelBase
         {
             if (!IsNetworkMetricTrace) return null;
             int n = SourcePortCount;
+
+            // A passive readout says all of this in the Fixture control's own tooltip
+            // (PassiveFixtureTooltip) rather than on the card. It is four sentences, the card is a
+            // narrow panel, and printing it cost more height than every other control together.
+            if (_trace.Derived.IsPassiveMetric()) return null;
 
             if (_trace.Derived == DerivedParameters.Passivity)
                 return PassivityWholeNetwork || n <= 2
@@ -1710,6 +1835,30 @@ public partial class TraceRowViewModel : ViewModelBase
 
     public bool ShowTerminationNote => TerminationNote is not null;
 
+    /// <summary>
+    /// The self-resonance of the extracted impedance, formatted with an SI prefix, or null when
+    /// this sweep contains no capacitive-to-inductive crossing. Null is the honest answer there:
+    /// clamping to a band edge would be read as a measurement.
+    /// </summary>
+    private string? SelfResonanceText()
+    {
+        if (_trace.Data is not { IsEmpty: false } d) return null;
+        double? f;
+        try
+        {
+            f = RfCore.Data.PassiveMetrics.SelfResonance(
+                d.Matrices, _trace.SourceZ0PerPortResolved(d.Ports), d.Frequencies,
+                _trace.EffectivePassiveExtraction, _trace.InputPort, _trace.OutputPort);
+        }
+        catch (ArgumentException) { return null; }
+        if (f is not { } hz || !double.IsFinite(hz)) return null;
+
+        return hz >= 1e9 ? $"{hz / 1e9:0.###} GHz"
+             : hz >= 1e6 ? $"{hz / 1e6:0.###} MHz"
+             : hz >= 1e3 ? $"{hz / 1e3:0.###} kHz"
+             :             $"{hz:0.###} Hz";
+    }
+
     private void RebuildPortOptions()
     {
         int n = SourcePortCount;
@@ -1726,6 +1875,9 @@ public partial class TraceRowViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowPortSelectors));
         OnPropertyChanged(nameof(ShowPassivityScope));
         OnPropertyChanged(nameof(PassivityWholeNetwork));
+        OnPropertyChanged(nameof(ShowPassiveExtraction));
+        OnPropertyChanged(nameof(SelectedPassiveFixture));
+        OnPropertyChanged(nameof(PassiveFixtureTooltip));
         OnPropertyChanged(nameof(SelectedInputPort));
         OnPropertyChanged(nameof(SelectedOutputPort));
         OnPropertyChanged(nameof(TerminationNote));
@@ -2660,7 +2812,11 @@ public partial class TraceRowViewModel : ViewModelBase
                     _allSignals.Add(new TraceDataItem(entry, d, _parent.PlotType, omitFilePrefix: true) { Group = netGroup });
             }
             if (ports >= 1)
+            {
                 _allSignals.Add(new TraceDataItem(entry, DerivedParameters.Passivity, _parent.PlotType, omitFilePrefix: true) { Group = netGroup });
+                foreach (var d in PassiveReadouts)
+                    _allSignals.Add(new TraceDataItem(entry, d, _parent.PlotType, omitFilePrefix: true) { Group = netGroup });
+            }
         }
 
         // ---- Cube-bound signals (Phase 7.3a: one item per cube, axis roles via editor) ------
@@ -2774,8 +2930,13 @@ public partial class TraceRowViewModel : ViewModelBase
                                     { Group = metricGroup });
             }
             if (mPorts >= 1)
+            {
                 _allSignals.Add(new TraceDataItem(entry, DerivedParameters.Passivity, _parent.PlotType, omitFilePrefix: true)
                                 { Group = metricGroup });
+                foreach (var d in PassiveReadouts)
+                    _allSignals.Add(new TraceDataItem(entry, d, _parent.PlotType, omitFilePrefix: true)
+                                    { Group = metricGroup });
+            }
         }
 
         // ---- Ensure each analysis group offers both V and I (absent placeholder when cube missing) ----

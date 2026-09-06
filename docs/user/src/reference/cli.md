@@ -3,7 +3,8 @@ title: The Command Line
 slug: reference/cli.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > The command line
-lede: circuitRF runs without the GUI — not just its engines, but authoring, validation and resolution too. One executable, fourteen verbs — S-parameters, DC, harmonic balance, loadpull, loadpull pursuit, electromagnetic extraction, layout interchange, creating a workspace or a cell, importing a part, checking a design, explaining what it resolved to, reading a result back, an elaborated-netlist dump, and a protocol server. Every one of them answers --json. This chapter is the operational reference for all of them, including a worked EM run from an empty folder.
+lede: circuitRF runs without the GUI — not just its engines, but authoring, validation and resolution too. One executable, fourteen verbs — S-parameters, DC, harmonic balance, loadpull, loadpull pursuit, electromagnetic extraction, layout interchange, creating a workspace or a cell, importing a part, checking a design, explaining what it resolved to, reading a result back, an elaborated-netlist dump, and an MCP server. Every one of them answers --json. This chapter is the operational reference for all of them, including a worked EM run from an empty folder.
+keywords: CLI, command line, command-line, terminal, shell, console, headless, batch, script, scripting, automation, verbs, exit code, stdout, circuitrf, MCP, Model Context Protocol, agent, AI, LLM, JSON-RPC, stdio, tool server, integration
 ---
 
 <nav class="toc">
@@ -28,7 +29,7 @@ lede: circuitRF runs without the GUI — not just its engines, but authoring, va
 <li><a href="#reference"><code>reference</code> — what may I write?</a></li>
 <li><a href="#elab"><code>elab</code> — the elaborated netlist</a></li>
 <li><a href="#json"><code>--json</code> — one machine-readable document</a></li>
-<li><a href="#serve"><code>serve</code> — a protocol server</a></li>
+<li><a href="#serve"><code>serve</code> — the MCP server</a></li>
 <li><a href="#exit">Exit codes</a></li>
 <li><a href="#scripting">Scripting patterns</a></li>
 </ol>
@@ -77,7 +78,7 @@ convention behind both.</p>
 | `read` | a result file, or one of circuitRF's own documents | The same loaders the Data Display reads a file with | **Nothing** — what the file holds, to stdout |
 | `reference` | **nothing** | Nothing — it reads no file | **Nothing** — the reference pages, and every netlist primitive with its terminals and parameters |
 | `elab` | `.cnl` | Elaboration only, no analysis | The elaborated netlist, to stdout |
-| `serve` | `--root <dir>` | A protocol server for an external client | Whatever the tool it is asked for writes |
+| `serve` | `--root <dir>` | An MCP server for an external client | Whatever the tool it is asked for writes |
 
 `hb`, `lp` and `lpp` all run **the whole parametric sweep** when one wraps the analysis — see
 [naming the wrapper](#wrapper).
@@ -762,6 +763,27 @@ The kind of document is inferred from the path, exactly as `convert` infers a fo
 Gerber file is **named as interchange** rather than called unreadable — it is simply not validated,
 because there is nothing to validate it against.
 
+<h3 id="check-touchstone">Checking a Touchstone file</h3>
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf check part.s2p
+<span class="output">note: part.s2p: 2-port, 401 points, 1 MHz to 1 GHz, reference 50 Ω.
+note: part.s2p: causality not evaluated — the frequency grid is not uniformly spaced.
+1 document(s) checked: 0 error(s), 0 warning(s), 2 note(s).</span></code></pre>
+
+An `.sNp` is data rather than a design, and that changes the severity rule in one place. **Passivity,
+reciprocity and causality are warnings and never errors**, each carrying the measured number and the
+frequency it occurred at: nothing in a Touchstone file says what the part is, so an amplifier is
+*supposed* to have gain and a circulator is *supposed* to be non-reciprocal. Only the unambiguous
+defects — unreadable, a port count that contradicts the file's own name, a frequency axis that is not
+sorted, a reference impedance no renormalisation can use — are errors.
+
+A **folder walk deliberately skips Touchstone files.** A kit directory holds hundreds of them, and
+measuring passivity and causality across all of them would bury a workspace's own findings under notes
+about parts you did not author. Naming the file is what checks it.
+
+What each finding means, and the limits of the causality measurement, are on the
+[Derived Metrics](derived-metrics.html#headless) page.
+
 ---
 
 ## `explain` — what did circuitRF decide? {#explain}
@@ -797,6 +819,27 @@ HB1      hb                 enabled  runnable         → promoted to SWEEP1</sp
 
 A sweep is reported in **base SI with its unit and its scale**. Reading a mark without its scale has
 already produced a run at 2 Hz that looked entirely normal.
+
+<h3 id="explain-touchstone">`explain` on a Touchstone file — what IS this part?</h3>
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain part.s2p
+<span class="output">part.s2p  (touchstone)
+  ports        2
+  sweep        401 points, 1 MHz to 1 GHz, non-uniform
+  reference impedance 50 Ω
+  SRF (shunt-through)     22.507906 MHz
+  |Z| min (shunt-through) |Z| = 5.057 mΩ at 22.387211 MHz, ESR 5 mΩ
+  SRF (series-through)    (nothing)
+  |Z| min (series-through) |Z| = 796.177 Ω at 1 GHz, ESR 1.268 Ω</span></code></pre>
+
+The self-resonance and the impedance floor are what a decoupling capacitor is chosen on, and before
+this verb the only way to see them was to build a schematic around the file and plot it.
+
+**Every applicable fixture is reported side by side rather than one being chosen.** Nothing in the file
+records how the part was measured, and seeing all the readings is the fastest way to identify an
+unlabelled one — above, the series reading finds no resonance at all and puts the floor five orders of
+magnitude out, so the part is plainly a shunt-mounted capacitor. The equations behind each reading are
+on the [Derived Metrics](derived-metrics.html#fixture) page.
 
 <h3 id="explain-expr">`--expr` — evaluate in the design's own scope</h3>
 
@@ -994,13 +1037,27 @@ One schema serves every verb:
 
 ---
 
-## `serve` — a protocol server {#serve}
+## `serve` — the MCP server {#serve}
 
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf serve --root &lt;dir&gt; [--kits &lt;dir&gt;]</code></pre>
 
-Speaks a JSON-RPC tool protocol over stdin and stdout, so an external program — a CI job, an
-automation harness, a design agent — can discover what circuitRF can do and ask it to do it. It is
+**This is circuitRF as an MCP server.** It speaks the **Model Context Protocol** over its standard
+input and output — the stdio transport, newline-delimited JSON-RPC 2.0, with `initialize`,
+`tools/list` and `tools/call` — so any MCP client can discover what circuitRF can do and ask it to
+do it. Protocol versions `2025-06-18`, `2025-03-26` and `2024-11-05` are accepted.
+
+In practice that means an assistant, a design agent, a CI job or an automation harness can run a
+simulation, check a design, create a workspace or import a part without a human at a terminal. It is
 started by that program, not by you, and it ends when that program disconnects.
+
+<div class="callout note">
+<span class="label">Point an MCP client at it</span>
+<p>A client is configured with a command and its arguments. The command is the circuitRF executable,
+the arguments are <code>serve --root &lt;dir&gt;</code>, and <code>--root</code> is the only directory
+tree the server will read or write, and a path escaping it is refused rather than clamped (see
+<em>What it will not do</em> below). Nothing else about the host matters, because the transport is
+the process's own stdin and stdout.</p>
+</div>
 
 **Seven tools, and each is a verb you already have:**
 

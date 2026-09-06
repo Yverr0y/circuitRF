@@ -4,6 +4,7 @@ slug: reference/netlist.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > The netlist (.cnl) format
 lede: A circuitRF netlist is a human-readable text description of a circuit and what to simulate. It's the same thing the schematic editor produces internally, and it's what the engine actually runs.
+keywords: netlist, cnl, elaborated netlist, flat netlist, node numbering
 ---
 
 <nav class="toc">

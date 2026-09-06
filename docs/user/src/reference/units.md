@@ -4,6 +4,7 @@ slug: reference/units.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > Units
 lede: Database units, display units, the snap grid, and what circuitRF accepts when you type a value into a field.
+keywords: SI prefix, DBU, database unit, grid, snap, mil, mm, micron, engineering notation
 ---
 
 circuitRF keeps three things apart that other tools tend to conflate: **how a number is stored**, **how

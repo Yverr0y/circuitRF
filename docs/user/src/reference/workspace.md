@@ -4,6 +4,7 @@ slug: reference/workspace.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > The Workspace
 lede: The window everything else happens in — documents in the middle, tool panels around them, and a folder on disk behind it all.
+keywords: project, folder, library, docking, panels, window, tree
 ---
 
 Every other chapter in this guide describes something you do *inside* one window. This chapter is

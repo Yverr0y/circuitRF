@@ -1540,6 +1540,7 @@ public partial class DataDisplayViewModel : ViewModelBase, IDisposable
             trace.InputPort             = traceConfig.InputPort;
             trace.OutputPort            = traceConfig.OutputPort;
             trace.PassivityWholeNetwork = traceConfig.PassivityWholeNetwork;
+            trace.PassiveExtraction     = traceConfig.PassiveExtraction;
 
             trace.SourceRef             = sref;
             trace.SourcePath            = resolvedPath;
@@ -1721,6 +1722,7 @@ public partial class DataDisplayViewModel : ViewModelBase, IDisposable
             InputPort             = t.InputPort,
             OutputPort            = t.OutputPort,
             PassivityWholeNetwork = t.PassivityWholeNetwork,
+            PassiveExtraction     = t.PassiveExtraction,
             YAxis                 = t.YAxis,
             UseSecondaryAxis      = t.UseSecondaryAxis,
             Z0                    = ComplexStringHelper.Format(t.Z0),

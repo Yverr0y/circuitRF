@@ -4,6 +4,7 @@ slug: reference/plot-types.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > Plot types
 lede: The Data Display offers four plot types. Which one you can use depends on whether the data is real (scalar) or complex — that's the single most important rule below.
+keywords: rectangular, Smith chart, polar, table, log axis, plot kind
 ---
 
 <div class="callout note">

@@ -1,5 +1,6 @@
 using CircuitRF.Design.Cells;
 using CircuitRF.Design.Workspace;
+using RfCore;
 
 namespace CircuitRF.Cli;
 
@@ -16,6 +17,7 @@ internal enum DocumentKind
     EmSetup,
     Netlist,
     AssemblyRules,
+    Touchstone,
     Interchange,
     Unknown,
 }
@@ -46,6 +48,7 @@ internal static class DocumentKinds
         DocumentKind.EmSetup       => "em-setup",
         DocumentKind.Netlist       => "netlist",
         DocumentKind.AssemblyRules => "assembly-rules",
+        DocumentKind.Touchstone    => "touchstone",
         DocumentKind.Interchange   => "interchange",
         _                          => "unknown",
     };
@@ -93,6 +96,11 @@ internal static class DocumentKinds
         };
 
         if (byExtension != DocumentKind.Unknown) return byExtension;
+
+        // Touchstone is `.sNp` for any N, so it cannot be a row in the table above. The port count
+        // in the extension IS the classification — a file named `.s2p` claims to be a 2-port and is
+        // checked against that claim, which is one of the findings.
+        if (TouchstoneIO.ParsePortsFromExtension(path) is > 0) return DocumentKind.Touchstone;
 
         // Not one of ours by name. Ask the verb that owns the foreign formats, rather than repeating
         // its table here — including its content sniff, which is the only thing that can name a

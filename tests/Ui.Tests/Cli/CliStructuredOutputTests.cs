@@ -429,6 +429,18 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "check.schematic.conflict",
         "check.tech.problem",
         "check.technology.none",
+        // Touchstone file health (2026-09-06). Data rather than a design, which is why passivity,
+        // reciprocity and causality are warnings carrying a measured number rather than errors:
+        // nothing in an `.sNp` says whether the part is meant to be passive or reciprocal.
+        "check.touchstone.bad-z0",
+        "check.touchstone.causality-skipped",
+        "check.touchstone.frequency-order",
+        "check.touchstone.not-causal",
+        "check.touchstone.not-passive",
+        "check.touchstone.not-reciprocal",
+        "check.touchstone.port-mismatch",
+        "check.touchstone.summary",
+        "check.touchstone.z0-not-50",
         "check.view.defect",
         "check.wasm.rule-invalid",
         "check.workspace.ref-unresolved",

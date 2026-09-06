@@ -4,6 +4,7 @@ slug: reference/layout-editor.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > Layout editor
 lede: Drawing artwork: the technology, the tools, snapping, and the schematic it belongs to.
+keywords: layout, artwork, PCB, copper, drawing, DRC, polygon, trace, via
 ---
 
 The layout view holds a cell's **physical geometry** — the shapes that get manufactured. It serves two

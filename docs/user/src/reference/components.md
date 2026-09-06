@@ -4,6 +4,7 @@ slug: reference/components.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > Components
 lede: Every component in the standard library — its symbol, what it does, and its parameters.
+keywords: resistor, capacitor, inductor, transmission line, microstrip, MLIN, part, symbol, library, bead, ferrite
 ---
 
 Symbols are rendered from the live drawing engine, with their connection leads and their pins shown

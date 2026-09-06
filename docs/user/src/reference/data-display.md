@@ -4,6 +4,7 @@ slug: reference/data-display.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > Data Display
 lede: Plots and tables, trace cards, axes, markers — and how a run's cubes become curves.
+keywords: plot, graph, chart, curve, trace, marker, Smith chart, axes, legend, cdd, results viewer
 ---
 
 The Data Display is where results are looked at. It is a **document**, like a schematic or a layout: it
@@ -116,6 +117,13 @@ and branch rows. A net label and a VProbe both count as naming a node, so both a
 **Spec** — the transform, and the shorthand text box (below).
 
 **Style** — line, symbol, per-port Z0 for a network trace, and the number format on a Table.
+
+**Derived metrics.** Beneath the matrix elements the item selector also offers quantities *computed*
+from the S-matrix rather than read out of it — stability factors, maximum gain, passivity, group delay,
+and the ESR / C / L / Q readouts a passive part is specified in. Selecting one reveals its own controls:
+the ordered port pair, and for a passive readout the **Fixture** that decides how the two-terminal
+impedance is recovered. Every equation is written out in
+[Derived Metrics](derived-metrics.html).
 
 ### Against a harmonic-balance result
 

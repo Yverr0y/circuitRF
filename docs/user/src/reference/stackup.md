@@ -4,6 +4,7 @@ slug: reference/stackup.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > Stackup
 lede: The layers your board is actually made of — and, because it decides the ground plane, where the negative terminal of every EM port is.
+keywords: dielectric, substrate, layers, board, PCB, Er, epsilon r, permittivity, loss tangent, tan delta, copper thickness, prepreg, technology, ctech
 ---
 
 Your layout is a set of flat shapes. The **stackup** is what turns those shapes into a physical

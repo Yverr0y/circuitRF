@@ -4,6 +4,7 @@ slug: reference/veriloga.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > Verilog-A
 lede: Running a compact model you supply — a published physics-based transistor model, or one you wrote — from Verilog-A source or from a compiled artefact, with no kit and nothing to install inside circuitRF.
+keywords: Verilog-A, VerilogA, OSDI, compact model, compiled model, vendor model, va
 ---
 
 <nav class="toc">

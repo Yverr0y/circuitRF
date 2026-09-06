@@ -40,15 +40,39 @@ namespace CircuitRF.Ui.DataDisplay
     //  PrecisionFormat
     // ============================================================
 
-    public enum PrecisionFormat { G, F, E }
+    /// <summary>
+    /// How a number is written in a table cell or a marker readout.
+    ///
+    /// <para><c>S</c> is APPENDED — the member name is what a `.cdd` persists, so the three that
+    /// were here keep their spelling and a file written before it existed still loads.</para>
+    /// </summary>
+    public enum PrecisionFormat { G, F, E, S }
 
     public static class PrecisionFormatExtensions
     {
+        /// <summary>
+        /// Format <paramref name="value"/> in this precision.
+        ///
+        /// <para><b>Every consumer must come through here.</b> The three original members happen to
+        /// be .NET standard numeric format specifiers, so the display built the format string by
+        /// concatenation — <c>$"{FormatString}{MaximumFractionDigits}"</c> — in eight places.
+        /// <c>S</c> is not a standard specifier: <c>ToString("S3")</c> throws
+        /// <see cref="FormatException"/>, so every one of those eight sites would have crashed on a
+        /// marker or a table cell the moment Engineering was selected. Concatenating a format string
+        /// from an enum only ever worked by coincidence; this is the seam that makes it safe.</para>
+        /// </summary>
+        public static string Format(this PrecisionFormat f, double value, int digits) =>
+            f == PrecisionFormat.S
+                ? EngineeringFormat.Value(value, digits)
+                : value.ToString($"{f}{digits}");
+
         public static string Description(this PrecisionFormat f) => f switch
         {
             PrecisionFormat.G => "Auto",
             PrecisionFormat.F => "Fixed",
             PrecisionFormat.E => "Scientific",
+            // The only format that can write a capacitance. "0.000" is what Fixed makes of 100 pF.
+            PrecisionFormat.S => "Engineering",
             _                 => f.ToString()
         };
     }

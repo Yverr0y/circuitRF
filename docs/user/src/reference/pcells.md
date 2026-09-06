@@ -4,6 +4,7 @@ slug: reference/pcells.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > PCells
 lede: Parameterised cells: what they are, placing one, driving it, and editing it by its handles.
+keywords: PCell, parameterised cell, parametric cell, generator, python cell
 ---
 
 ## What a PCell is {#what}

@@ -50,6 +50,23 @@ public sealed class DocPage
     /// <summary>Optional one-line lede rendered under the H1.</summary>
     public string Lede { get; init; } = "";
 
+    /// <summary>
+    /// Comma-separated search terms for this page. <b>Not rendered anywhere</b> — they exist only in
+    /// the search index, weighted above the title.
+    ///
+    /// <para><b>Why a page needs them at all.</b> A reader searches for what they call the thing,
+    /// and that is often not what the chapter is called. "The Command Line" is not findable by
+    /// "CLI"; "Results &amp; Data Export" is not findable by "Touchstone" or "s2p"; "The Stackup" is
+    /// not findable by "dielectric". Every one of those is a reader typing the correct word for the
+    /// subject and being sent somewhere else, and no amount of ranking arithmetic can invent a
+    /// synonym the corpus does not contain.</para>
+    ///
+    /// <para>Keep them to the words a reader would actually type — abbreviations, the plural or
+    /// singular the title does not use, the file extension, the industry term. Repeating words
+    /// already in the title buys nothing.</para>
+    /// </summary>
+    public string Keywords { get; init; } = "";
+
     /// <summary>The Markdown body, front-matter removed.</summary>
     public required string Body { get; init; }
 
@@ -57,7 +74,7 @@ public sealed class DocPage
     public required string SourcePath { get; init; }
 
     private static readonly string[] KnownKeys =
-        ["title", "kind", "deck", "breadcrumb", "slug", "doc-kind", "lede"];
+        ["title", "kind", "deck", "breadcrumb", "slug", "doc-kind", "lede", "keywords"];
 
     /// <summary>Read and parse one <c>.md</c> source page.</summary>
     public static DocPage Load(string path)
@@ -104,6 +121,7 @@ public sealed class DocPage
             Slug       = Get("slug"),
             DocKind    = Get("doc-kind"),
             Lede       = Get("lede"),
+            Keywords   = Get("keywords"),
             Breadcrumb = Get("breadcrumb").Split('>', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
             Body       = body,
             SourcePath = path,

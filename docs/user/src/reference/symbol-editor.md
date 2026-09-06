@@ -4,6 +4,7 @@ slug: reference/symbol-editor.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > Symbol Editor
 lede: The Symbol Editor draws the glyph a cell shows on a schematic — its body art plus the pins that connect it. It is a focused drawing tool, not a cell editor: it never changes a cell's port count or parameters, only how the cell looks.
+keywords: symbol, csym, pin placement, artwork, glyph
 ---
 
 <nav class="toc">

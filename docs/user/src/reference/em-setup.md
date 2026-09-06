@@ -4,6 +4,7 @@ slug: reference/em-setup.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > EM setup
 lede: The EM Setup panel, control by control, and where the results land.
+keywords: EM, electromagnetic, cem, ports, mesh, extraction, simulate layout, substrate
 ---
 
 <nav class="toc">

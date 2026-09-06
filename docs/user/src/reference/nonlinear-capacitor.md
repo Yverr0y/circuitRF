@@ -4,6 +4,7 @@ slug: reference/nonlinear-capacitor.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > Nonlinear Capacitor
 lede: A capacitor whose value depends on the voltage across it — a varactor/varicap, or the junction capacitance of a device. circuitRF models C(V) as a polynomial (Taylor) series, and the C–V Editor fits that polynomial to a curve for you.
+keywords: CV, C-V, varactor, Taylor series, nonlinear capacitance, junction capacitance
 ---
 
 <nav class="toc">

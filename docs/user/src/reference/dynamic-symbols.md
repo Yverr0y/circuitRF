@@ -4,6 +4,7 @@ slug: reference/dynamic-symbols.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > Dynamic symbols
 lede: Most components have a fixed glyph. Some do not — their symbol is generated from a parameter rather than drawn once. For three of them the pin count itself follows the port count; for others the picture changes while the pins stay put. This chapter explains how those symbols are built and how to control them.
+keywords: SnP, Touchstone component, ZPort, s2p component, data file component
 ---
 
 <nav class="toc">

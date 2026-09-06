@@ -7,6 +7,9 @@ using CircuitRF.Design.Layout;
 using CircuitRF.Design.Layout.Em;
 using CircuitRF.Design.Schematic;
 using CircuitRF.Design.Workspace;
+using System.Numerics;
+using RfCore;
+using RfCore.Data;
 using RfCore.Export;
 
 namespace CircuitRF.Cli;
@@ -139,6 +142,9 @@ internal static class Explain
                     "format", path, DocumentKinds.InterchangeFormat(path),
                     "content and extension, through `convert`'s own classifier"));
                 break;
+            case DocumentKind.Touchstone:
+                exit |= ExplainTouchstone(path, walks);
+                break;
             default:
                 return JsonRun.Fail(CliDiagnostics.ExplainUnknownKind(path));
         }
@@ -192,6 +198,108 @@ internal static class Explain
         Console.Error.WriteLine("                            [--analysis [<name>]] [--ref <relative-ref>]");
         return 1;
     }
+
+    // ── a Touchstone file ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <c>explain part.s2p</c> — what IS this part?
+    ///
+    /// <para><b>Why this belongs to <c>explain</c> and not to <c>check</c>.</b> The two verbs split
+    /// on soundness versus decision, and "is this file passive, sorted and causal" is soundness
+    /// while "what is its self-resonance and how many milliohms is it there" is not a defect at
+    /// all — it is what the file SAYS. A designer holding a vendor's part file wants the second
+    /// question answered far more often than the first, and before this there was no way to ask it
+    /// but to build a schematic around the file and plot it.</para>
+    ///
+    /// <para><b>Every applicable fixture is reported, side by side, rather than one being picked.</b>
+    /// Nothing in Touchstone records how the part was measured, and the readings differ by orders of
+    /// magnitude — so choosing one silently would be exactly the failure this feature exists to
+    /// prevent. Seeing all of them is also the fastest way to identify an unlabelled file: only the
+    /// physical reading gives a sensible self-resonance and a milliohm-scale ESR, and the others are
+    /// obviously nonsense next to it.</para>
+    /// </summary>
+    private static int ExplainTouchstone(string path, List<ResolutionStepJson> walks)
+    {
+        SNP snp;
+        try { snp = TouchstoneIO.ReadFile(path, readComments: false); }
+        catch (Exception ex) { return JsonRun.Fail(CliDiagnostics.CheckUnreadable(path, ex.Message)); }
+
+        var h = TouchstoneHealth.Analyze(snp);
+
+        walks.Add(new ResolutionStepJson("ports", path, h.Ports.ToString(),
+            "the `.sNp` extension, cross-checked against the data block"));
+        walks.Add(new ResolutionStepJson("sweep", path,
+            h.FrequencyCount == 0 ? null : $"{h.FrequencyCount} points, {Check.Hz(h.FirstFrequencyHz)} to {Check.Hz(h.LastFrequencyHz)}"
+            + (h.GridUniform ? ", uniform" : ", non-uniform"),
+            "the file's own frequency column, in the unit its option line declares"));
+        walks.Add(new ResolutionStepJson("reference impedance", path, Check.Ohms(h.Z0),
+            "the `R` field of the option line"));
+
+        if (h.FrequencyCount == 0 || h.Ports == 0) return 0;
+
+        var z0   = Enumerable.Repeat(snp.Z0, snp.Ports).ToArray();
+        var mats = snp.Matrices;
+
+        var fixtures = h.Ports >= 2
+            ? new[] { PassiveExtraction.ShuntThrough, PassiveExtraction.SeriesThrough }
+            : [PassiveExtraction.OnePort];
+
+        foreach (var mode in fixtures)
+        {
+            Complex[] z;
+            try { z = PassiveMetrics.Impedance(mats, z0, mode, 1, Math.Min(2, h.Ports)); }
+            catch (ArgumentException) { continue; }
+
+            string how = mode switch
+            {
+                PassiveExtraction.ShuntThrough  => "the SHUNT-through reading, Z = (Z0/2)·S21/(1−S21)",
+                PassiveExtraction.SeriesThrough => "the SERIES-through reading, Z = 2·Z0·(1−S21)/S21",
+                _                               => "the 1-port reflection reading, Z = Z0·(1+S11)/(1−S11)",
+            };
+            string label = mode switch
+            {
+                PassiveExtraction.ShuntThrough  => "shunt-through",
+                PassiveExtraction.SeriesThrough => "series-through",
+                _                               => "1-port",
+            };
+
+            // The self-resonance and the impedance floor beside it: the two numbers a decoupling
+            // capacitor is chosen on, and the pair that says at a glance whether this fixture is
+            // the physical reading of the file.
+            var srf = PassiveMetrics.SelfResonance(snp.Frequencies, z);
+            walks.Add(new ResolutionStepJson(
+                $"SRF ({label})", path,
+                srf is { } f ? Check.Hz(f) : null,
+                srf is null
+                    ? how + " — no capacitive-to-inductive reactance crossing inside this sweep"
+                    : how + ", lowest capacitive-to-inductive reactance crossing"));
+
+            int iMin = -1;
+            double best = double.PositiveInfinity;
+            for (int i = 0; i < z.Length; i++)
+            {
+                double m = z[i].Magnitude;
+                if (double.IsFinite(m) && m < best) { best = m; iMin = i; }
+            }
+            if (iMin >= 0)
+                walks.Add(new ResolutionStepJson(
+                    $"|Z| min ({label})", path,
+                    $"|Z| = {Ohm(best)} at {Check.Hz(snp.Frequencies[iMin])}, ESR {Ohm(z[iMin].Real)}",
+                    how + " — the sweep's minimum |Z| and the resistance there"));
+        }
+
+        return 0;
+    }
+
+    /// <summary>An impedance with an SI prefix, because a decoupling capacitor's floor is
+    /// milliohms and a series capacitor's is megohms, in the same report.</summary>
+    private static string Ohm(double r) =>
+        !double.IsFinite(r)       ? "?"
+        : Math.Abs(r) >= 1e6      ? $"{r / 1e6:0.###} MΩ"
+        : Math.Abs(r) >= 1e3      ? $"{r / 1e3:0.###} kΩ"
+        : Math.Abs(r) >= 1        ? $"{r:0.###} Ω"
+        : Math.Abs(r) >= 1e-3     ? $"{r * 1e3:0.###} mΩ"
+        :                           $"{r * 1e6:0.###} µΩ";
 
     // ── the walks ────────────────────────────────────────────────────────────
 

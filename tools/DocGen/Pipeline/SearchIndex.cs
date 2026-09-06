@@ -33,6 +33,7 @@ public sealed class SearchIndex
     private const int MaxSectionChars = 4000;
 
     private sealed record Entry(int Rank, string Slug, string Title, string DocKind, string Lede,
+                                string Keywords,
                                 List<(string Anchor, string Heading, string Text)> Sections);
 
     private readonly List<Entry> _entries = [];
@@ -78,7 +79,8 @@ public sealed class SearchIndex
             sections.Add((anchor, heading, Truncate(full)));
         }
 
-        _entries.Add(new Entry(rank, page.Slug, page.Title, page.DocKind, page.Lede, sections));
+        _entries.Add(new Entry(rank, page.Slug, page.Title, page.DocKind, page.Lede,
+                               page.Keywords, sections));
     }
 
     /// <summary>The generated <c>assets/js/search-index.js</c>.</summary>
@@ -93,7 +95,10 @@ public sealed class SearchIndex
         for (int i = 0; i < ordered.Count; i++)
         {
             var e = ordered[i];
-            pages.Add([e.Slug, e.Title, e.DocKind, e.Lede]);
+            // Keywords ride on the PAGE record, not the section: they describe what the page is
+            // about, and copying them onto every section would multiply the largest chapters'
+            // keyword text by their section count for no gain in what can be matched.
+            pages.Add([e.Slug, e.Title, e.DocKind, e.Lede, e.Keywords]);
             foreach (var (anchor, heading, text) in e.Sections)
                 sections.Add([i, anchor, heading, text]);
         }

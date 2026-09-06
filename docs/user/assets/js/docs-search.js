@@ -22,8 +22,27 @@
        rather than one that silently eats what you type.
 
    Ranking, in one sentence: every query word must appear somewhere in a section,
-   and a word is worth most in the page title, less in the heading, least in the
-   body — with a bonus when the whole query appears as a phrase.
+   and a word is worth most in the page's declared keywords, then its title, then
+   the heading, least in the body — with a bonus when the whole query appears as a
+   phrase, and with WHERE IN A WORD the match landed counting as much as which
+   field it landed in.
+
+   That last clause is the part worth explaining, because it is what three real
+   reported failures had in common:
+
+     * "CLI" returned sections about CLICKS. A bare indexOf makes every three-letter
+       query a substring query, and short strings are inside long words everywhere.
+     * "command line" returned the Quick Start's "Headless / command line" heading
+       instead of the chapter literally titled "The Command Line" — the exact-title
+       bonus was a string EQUALITY that a leading "The" defeated, and a phrase in a
+       heading outscored a phrase in a page title.
+     * "CL" returned nothing useful, because no title or heading contains it and
+       body matching for a two-letter term is noise by definition.
+
+   So a match is classified as WHOLE-word, word-PREFIX or INSIDE-a-word, and a term
+   shorter than four characters scores only against names — keywords, title,
+   heading — never against prose. A short query is an acronym or something half
+   typed; against forty pages of prose it can only ever be noise.
    ============================================================================ */
 (function () {
   'use strict';
@@ -43,7 +62,7 @@
   var DATA = window.CRF_DOCS_SEARCH;
   if (!DATA || !DATA.s || !DATA.p) return;   /* boxes stay hidden */
 
-  /* p: [slug, title, docKind, lede]      s: [pageIndex, anchor, heading, text]
+  /* p: [slug, title, docKind, lede, keywords]   s: [pageIndex, anchor, heading, text]
 
      DATA.p is in READING ORDER — the order src/_nav.txt declares, which the
      generator sorted it into — so a page's index in it IS how early the docs
@@ -62,9 +81,20 @@
       heading:  row[2],
       text:     row[3],
       /* Lowercased once, here, rather than per keystroke per section. */
-      lcTitle:   page[1].toLowerCase(),
-      lcHeading: row[2].toLowerCase(),
-      lcText:    row[3].toLowerCase()
+      lcTitle:    page[1].toLowerCase(),
+      lcHeading:  row[2].toLowerCase(),
+      lcText:     row[3].toLowerCase(),
+      /* Written in the page's front matter, rendered nowhere, weighted above the
+         title. It is the only place a synonym the chapter never uses can live. */
+      lcKeywords: (page[4] || '').toLowerCase(),
+      /* "The Command Line" and a query of "command line" name the same thing. */
+      nameTitle:   bareName(page[1]),
+      nameHeading: bareName(row[2]),
+      /* The initials of the page title and of every multi-word keyword phrase, so a
+         reader who types the abbreviation they use out loud finds the chapter: "CL"
+         and "DD" are how people refer to the command line and the Data Display, and
+         neither string occurs anywhere in either chapter. */
+      acronyms: initials(page[1]) + ' ' + (page[4] || '').split(',').map(initials).join(' ')
     };
   });
 
@@ -84,52 +114,122 @@
     return long.length > 0 ? long : all;
   }
 
-  /* A match that starts a word beats one buried mid-word: searching "port" should
-     rank "Ports" above "Import". Both still count — substring matching is what
-     makes a search for "param" find "parameters" — the boundary one just scores
-     higher. */
-  function isWordStart(hay, at) {
-    return at === 0 || /[^a-z0-9]/.test(hay.charAt(at - 1));
-  }
+  /* Where in a word a match landed. This is the whole substance of the ranking
+     change: `indexOf` alone cannot tell "CLI" the acronym from "CLI" the first
+     three letters of "clicks", and against forty pages of prose the second is
+     everywhere. */
+  var WHOLE = 3, PREFIX = 2, INSIDE = 1, NONE = 0;
 
-  function countHits(hay, term) {
-    var n = 0, boundary = 0, at = hay.indexOf(term);
+  function isBoundary(ch) { return ch === '' || /[^a-z0-9]/.test(ch); }
+
+  /* The best match kind for `term` in `hay`, and how many times it occurred. */
+  function findTerm(hay, term) {
+    var best = NONE, n = 0, at = hay.indexOf(term);
     while (at !== -1) {
       n++;
-      if (isWordStart(hay, at)) boundary++;
-      at = hay.indexOf(term, at + term.length);
+      var startsWord = isBoundary(at === 0 ? '' : hay.charAt(at - 1));
+      var endsWord   = isBoundary(hay.charAt(at + term.length) || '');
+      var kind = !startsWord ? INSIDE : (endsWord ? WHOLE : PREFIX);
+      if (kind > best) best = kind;
+      at = hay.indexOf(term, at + 1);
     }
+    return { kind: best, n: n };
+  }
 
-    return { n: n, boundary: boundary };
+  /* A name with its leading article and punctuation removed, for comparing a query
+     against a title. "The Command Line" and "command line" name the same chapter,
+     and an equality test says they do not — which is exactly how the chapter called
+     "The Command Line" lost a search for "command line" to a heading elsewhere. */
+  function bareName(s) {
+    return String(s).toLowerCase()
+      .replace(/^(the|a|an)\s+/, '')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+  }
+
+  /* The initials of a multi-word name: "The Command Line" → "cl". A single word has
+     no acronym worth matching — "clay" would become "c", which every query of one
+     letter would then hit — so those return nothing. */
+  function initials(s) {
+    var words = bareName(s).split(' ').filter(function (w) { return w.length > 0; });
+    return words.length > 1 ? words.map(function (w) { return w.charAt(0); }).join('') : '';
+  }
+
+  /* A term shorter than this scores only against NAMES — keywords, page title,
+     section heading — and never against body prose. Four is where it stops being a
+     guess: "ESR", "DRC", "SDD", "CLI", "DBU", "npy" are all three, and every one of
+     them appears inside unrelated longer words somewhere in forty pages of text. */
+  var SHORT_TERM = 4;
+
+  /* Field weight × match kind. Keywords lead because they are curated: a page's
+     front matter lists the words a reader actually types for it, so a hit there is
+     a deliberate answer where a hit in prose is a coincidence. */
+  function fieldScore(kind, whole, prefix, inside) {
+    return kind === WHOLE ? whole : kind === PREFIX ? prefix : kind === INSIDE ? inside : 0;
   }
 
   function score(section, ts, phrase) {
     var total = 0;
 
     for (var i = 0; i < ts.length; i++) {
-      var t = ts[i];
-      var inTitle   = countHits(section.lcTitle,   t);
-      var inHeading = countHits(section.lcHeading, t);
-      var inText    = countHits(section.lcText,    t);
+      var t     = ts[i];
+      var short = t.length < SHORT_TERM;
+
+      var k = findTerm(section.lcKeywords, t);
+      var h = findTerm(section.lcHeading,  t);
+      var d = findTerm(section.lcTitle,    t);
+      var x = short ? { kind: NONE, n: 0 } : findTerm(section.lcText, t);
+      /* Acronyms are a short-query affair only. Matching a long term against
+         initials would let any word starting with the right letters claim a page. */
+      var a = short ? findTerm(section.acronyms, t) : { kind: NONE, n: 0 };
+
+      /* A short term found only mid-word is not found. Dropping it here rather than
+         scoring it zero is what makes "CLI" fail to match a section about clicks at
+         all, instead of matching it weakly and still filling the panel. */
+      if (short) {
+        if (k.kind === INSIDE) k = { kind: NONE, n: 0 };
+        if (h.kind === INSIDE) h = { kind: NONE, n: 0 };
+        if (d.kind === INSIDE) d = { kind: NONE, n: 0 };
+        if (a.kind === INSIDE) a = { kind: NONE, n: 0 };
+      }
 
       /* Every term must appear somewhere. An OR search over a 40-page manual
          returns the whole manual. */
-      if (inTitle.n + inHeading.n + inText.n === 0) return 0;
+      if (k.kind + h.kind + d.kind + x.kind + a.kind === 0) return 0;
 
-      total += inTitle.n   ? 12 + (inTitle.boundary   ? 6 : 0) : 0;
-      total += inHeading.n ?  8 + (inHeading.boundary ? 5 : 0) : 0;
-      total += Math.min(inText.n, 5) * 2 + (inText.boundary ? 3 : 0);
+      total += fieldScore(k.kind, 30, 20, 0);
+      total += fieldScore(d.kind, 18, 12, 4);
+      total += fieldScore(h.kind, 13,  8, 3);
+      total += fieldScore(x.kind,  5,  3, 1) * Math.min(x.n, 4);
+      /* Below an explicit keyword, above a title prefix: an acronym the reader had
+         to know is a strong signal, but a page that DECLARED the term still wins. */
+      total += fieldScore(a.kind, 26, 12, 0);
     }
 
-    /* The whole query, in order, is a much stronger signal than its words apart. */
+    /* The whole query, in order, is a much stronger signal than its words apart —
+       but only where it lands on a word boundary, and for a short query only where
+       it is a whole word. Without that, a three-letter phrase collected the full
+       heading bonus from any longer word that happened to start with it. */
     if (phrase.length > 2) {
-      if (section.lcHeading.indexOf(phrase) !== -1) total += 40;
-      else if (section.lcTitle.indexOf(phrase) !== -1) total += 25;
-      else if (section.lcText.indexOf(phrase) !== -1) total += 12;
+      var need = phrase.length < SHORT_TERM ? WHOLE : PREFIX;
+      var pk = findTerm(section.lcKeywords, phrase).kind;
+      var ph = findTerm(section.lcHeading,  phrase).kind;
+      var pd = findTerm(section.lcTitle,    phrase).kind;
+      var px = phrase.length < SHORT_TERM ? NONE : findTerm(section.lcText, phrase).kind;
+
+      if      (pk >= need) total += 45;
+      else if (ph >= need) total += 40;
+      /* Equal to the heading bonus, not below it. A query that names a whole chapter
+         is asking for the chapter, and ranking a section heading above the page
+         title is what sent "command line" to a Quick Start subsection. */
+      else if (pd >= need) total += 40;
+      else if (px >= need) total += 12;
     }
 
-    /* A heading that IS the query is the answer, not a hit inside a longer one. */
-    if (section.lcHeading === phrase || section.lcTitle === phrase) total += 60;
+    /* A name that IS the query is the answer, not a hit inside a longer one.
+       Compared with articles and punctuation stripped from both sides. */
+    var bare = bareName(phrase);
+    if (bare.length > 0 && (section.nameHeading === bare || section.nameTitle === bare)) total += 60;
 
     /* Reading order as a tie-break with a soft edge. Two sections genuinely can
        answer a query equally well — "Hierarchy" heads a section in both editors —
@@ -162,6 +262,18 @@
     }
     return out;
   }
+
+  /* The ranking, exposed so it can be GATED. tests/Ui.Tests/DocsSearchRankingTests.cs
+     drives this exact function against the shipped index — the alternative was a
+     second implementation of the scoring in C#, which would only ever prove that the
+     copy agrees with itself. One property on window, written once, read by nothing
+     else in the page. */
+  window.CRF_DOCS_SEARCH_RANK = function (query) {
+    return search(query).map(function (h) {
+      return { slug: h.section.slug, anchor: h.section.anchor,
+               heading: h.section.heading, title: h.section.pageTitle, score: h.score };
+    });
+  };
 
   /* ------------------------------------------------------------- snippets --- */
 

@@ -713,13 +713,42 @@ namespace CircuitRF.Ui.DataDisplay
         private static Rect InflateRect(Rect r, double dx, double dy) =>
             new Rect(r.X - dx, r.Y - dy, r.Width + dx * 2, r.Height + dy * 2);
 
+        /// <summary>
+        /// Give a degenerate box enough extent to be mapped to pixels at all.
+        ///
+        /// <para><b>Both halves of this used to be ABSOLUTE, and that is what made an effective
+        /// capacitance unplottable.</b> A 100 nF part's C_eff runs from about 1.00e-7 to 1.02e-7
+        /// farads — a real 2 % variation — and a height of 2e-9 is below the old <c>1e-6</c>
+        /// threshold, so it was classified as having no extent at all. The window was then replaced
+        /// with a FIXED half-unit centred on the data: an axis from −0.25 to +0.25 farads with the
+        /// trace as a flat line through the middle. That is exactly the reported symptom, and no
+        /// amount of tick formatting could have rescued it.</para>
+        ///
+        /// <para><b>The degeneracy test is now relative</b>, so real variation at any scale is kept
+        /// and padded normally. <b>The fallback extent stays the absolute half-unit</b> wherever
+        /// that is a sensible window — which is every quantity the display drew before the passive
+        /// readouts existed, so a genuinely flat decibel or magnitude trace frames exactly as it
+        /// always did. Only outside the range plain notation can write at all (the same bound
+        /// <see cref="EngineeringFormat.ShouldPrefix"/> uses) does it scale to the data, because
+        /// ±0.25 F around a picofarad is not a window, it is a blank plot.</para>
+        /// </summary>
         private static Rect EnsureMinExtent(Rect r)
         {
-            double w = r.Width  < 1e-6 ? 0.5 : r.Width;
-            double h = r.Height < 1e-6 ? 0.5 : r.Height;
-            double x = r.Width  < 1e-6 ? r.X - 0.25 : r.X;
-            double y = r.Height < 1e-6 ? r.Y - 0.25 : r.Y;
+            var (w, x) = Extent(r.Width,  r.X, r.Right);
+            var (h, y) = Extent(r.Height, r.Y, r.Bottom);
             return new Rect(x, y, w, h);
+
+            static (double Size, double Origin) Extent(double size, double lo, double hi)
+            {
+                double scale = EngineeringFormat.AxisMagnitude(lo, hi);
+
+                // Relative: 2 % of a hundred nanofarads is variation, not degeneracy.
+                double epsilon = scale > 0 ? scale * 1e-9 : 1e-12;
+                if (size > epsilon) return (size, lo);
+
+                double fallback = EngineeringFormat.ShouldPrefix(scale) ? scale * 0.5 : 0.5;
+                return (fallback, lo - fallback / 2.0);
+            }
         }
 
         /// <summary>

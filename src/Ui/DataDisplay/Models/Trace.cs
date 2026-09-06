@@ -59,6 +59,11 @@ namespace CircuitRF.Ui.DataDisplay
         // 2026-08-19 — group delay, −dφ/dω on the unwrapped S21 phase. APPENDED, like everything
         // else here: the ordinal is persisted in `.cdd`.
         GroupDelay,
+        // 2026-09-06 — the two-terminal passive readouts (PassiveMetrics). APPENDED, same rule.
+        // These are the numbers a capacitor, inductor or bead is actually specified in, and they
+        // are what a vendor's Touchstone file has to be read AS before it can be compared with the
+        // model shipped beside it.
+        MagZ, Esr, Reactance, Ceff, Leff, QFactor,
     }
 
     public static class DerivedParametersExtensions
@@ -74,6 +79,12 @@ namespace CircuitRF.Ui.DataDisplay
             DerivedParameters.DeltaMag              => "|Δ|",
             DerivedParameters.Passivity             => "Passivity, σmax",
             DerivedParameters.GroupDelay            => "Group Delay (ns)",
+            DerivedParameters.MagZ                  => "|Z| (Ω)",
+            DerivedParameters.Esr                   => "ESR (Ω)",
+            DerivedParameters.Reactance             => "Reactance X (Ω)",
+            DerivedParameters.Ceff                  => "C effective (F)",
+            DerivedParameters.Leff                  => "L effective (H)",
+            DerivedParameters.QFactor               => "Q",
             _                                       => ""
         };
 
@@ -85,7 +96,50 @@ namespace CircuitRF.Ui.DataDisplay
         public static bool IsScalarVsFrequency(this DerivedParameters d) =>
             d is DerivedParameters.Mu or DerivedParameters.MuPrime or DerivedParameters.K
               or DerivedParameters.DeltaMag or DerivedParameters.MaxGain
-              or DerivedParameters.Passivity or DerivedParameters.GroupDelay;
+              or DerivedParameters.Passivity or DerivedParameters.GroupDelay
+              || d.IsPassiveMetric();
+
+        /// <summary>
+        /// True for the two-terminal passive readouts — |Z|, ESR, X, C_eff, L_eff and Q.
+        ///
+        /// <para><b>They are a separate family from the stability metrics, structurally.</b> Every
+        /// member of <c>NetworkMetric</c> is a function of one S-matrix alone. These are functions
+        /// of an IMPEDANCE, and which impedance depends on the fixture the part was measured in —
+        /// a choice carried on the trace as <see cref="Trace.PassiveExtraction"/> and not derivable
+        /// from the file. Group delay set the precedent for a derived quantity that routes past
+        /// <c>ToNetworkMetric</c> to its own entry point; this is the second.</para>
+        /// </summary>
+        /// <summary>
+        /// True for a readout that is UNBOUNDED at the self-resonance by construction.
+        ///
+        /// <para>C_eff = −1/(ωX) and L_eff = X/ω both divide by a reactance that passes through
+        /// zero, so both run to infinity as the sweep approaches resonance. That is a property of
+        /// the DEFINITION rather than a feature of the part — a 100 nF capacitor's C_eff reads
+        /// 100 nF across its whole useful band and 9 µF in the last few points before resonance —
+        /// and it is expected: an engineer reading a C_eff curve knows the part stops being a
+        /// capacitor at its own resonance and reads the excursion as the resonance. Nothing here
+        /// hides it — the autoscale frames the real extremes, so the curve goes where the data
+        /// goes. Nothing else on this list has that shape: |Z| and ESR are bounded, and Q goes to
+        /// zero at resonance rather than to infinity.</para>
+        /// </summary>
+        public static bool DivergesAtResonance(this DerivedParameters d) =>
+            d is DerivedParameters.Ceff or DerivedParameters.Leff;
+
+        public static bool IsPassiveMetric(this DerivedParameters d) =>
+            d is DerivedParameters.MagZ or DerivedParameters.Esr or DerivedParameters.Reactance
+              or DerivedParameters.Ceff or DerivedParameters.Leff or DerivedParameters.QFactor;
+
+        /// <summary>Maps to the RfCore passive-metric enum; throws for anything else.</summary>
+        public static RfCore.Data.PassiveMetric ToPassiveMetric(this DerivedParameters d) => d switch
+        {
+            DerivedParameters.MagZ      => RfCore.Data.PassiveMetric.MagZ,
+            DerivedParameters.Esr       => RfCore.Data.PassiveMetric.Esr,
+            DerivedParameters.Reactance => RfCore.Data.PassiveMetric.Reactance,
+            DerivedParameters.Ceff      => RfCore.Data.PassiveMetric.Ceff,
+            DerivedParameters.Leff      => RfCore.Data.PassiveMetric.Leff,
+            DerivedParameters.QFactor   => RfCore.Data.PassiveMetric.Q,
+            _ => throw new ArgumentOutOfRangeException(nameof(d), $"{d} is not a passive metric."),
+        };
 
         /// <summary>True for the Γ-plane loci (Smith/Polar only).</summary>
         public static bool IsCircleLocus(this DerivedParameters d) =>
@@ -95,8 +149,14 @@ namespace CircuitRF.Ui.DataDisplay
         /// True when the metric is a 2-port formula and therefore needs an ordered port pair.
         /// Passivity is defined for any N and defaults to the whole network (R-stb-6).
         /// </summary>
+        /// <remarks>
+        /// The passive readouts are excluded because the answer is not a property of the METRIC: a
+        /// shunt- or series-through extraction reads S21 and needs an ordered pair, a 1-port
+        /// extraction reads S11 and does not. The card asks
+        /// <c>PassiveMetrics.NeedsPortPair(extraction)</c> instead.
+        /// </remarks>
         public static bool NeedsPortPair(this DerivedParameters d) =>
-            d != DerivedParameters.None && d != DerivedParameters.Passivity;
+            d != DerivedParameters.None && d != DerivedParameters.Passivity && !d.IsPassiveMetric();
 
         /// <summary>
         /// True when the metric is a derivative along the SWEEP rather than a function of one matrix
@@ -300,6 +360,14 @@ namespace CircuitRF.Ui.DataDisplay
                     : value == DerivedParameters.MaxGain
                         ? DependentVarFormat.Db
                         : DependentVarFormat.Mag;
+
+                // The passive readouts are the only quantities here that are not of order one — an
+                // effective capacitance is 1e-12 to 1e-3 farads — and the display's default "F3"
+                // renders every one of them as "0.000". Engineering notation is set WITH the metric,
+                // beside the Y-axis format that is chosen the same way and for the same reason: the
+                // sensible default depends on the quantity, and a user who wants Fixed can still
+                // pick it. Nothing else changes format, so no existing plot moves.
+                if (value.IsPassiveMetric()) FormatString = PrecisionFormat.S;
                 if (StabilityCircleCentres.Count == 0 && Markers.Count > 0) BuildDerivedPath(PlotType.Smith, FreqUnit.GHz);
                 foreach (var m in Markers)
                 {
@@ -453,6 +521,30 @@ namespace CircuitRF.Ui.DataDisplay
         /// sub-matrix can test passive while the full network is not.
         /// </summary>
         public bool PassivityWholeNetwork { get; set; } = true;
+
+        /// <summary>
+        /// For the passive readouts only: the fixture the two-terminal DUT was measured in, which
+        /// is what decides how its impedance comes out of the S-parameters.
+        ///
+        /// <para><b>The default is shunt-through, and that is a deliberate bet on the case this
+        /// feature exists for.</b> A vendor's 2-port decoupling-capacitor or inductor file is
+        /// measured shunt-through — it is the only fixture with usable dynamic range on a part that
+        /// is milliohms at resonance — so reading one as a 1-port reflection gives a curve that is
+        /// wrong everywhere and looks fine. A 1-port file has no S21 to read and forces
+        /// <see cref="EffectivePassiveExtraction"/> back to <c>OnePort</c> regardless of what is
+        /// stored here, so the default costs nothing there.</para>
+        /// </summary>
+        public RfCore.Data.PassiveExtraction PassiveExtraction { get; set; }
+            = RfCore.Data.PassiveExtraction.ShuntThrough;
+
+        /// <summary>
+        /// The extraction actually used: <see cref="PassiveExtraction"/>, except that a source with
+        /// fewer than two ports can only be read as a 1-port. Silently correcting it here rather
+        /// than at load time keeps a stored preference intact when the same plot is later pointed at
+        /// a 2-port file.
+        /// </summary>
+        public RfCore.Data.PassiveExtraction EffectivePassiveExtraction =>
+            Data.Ports < 2 ? RfCore.Data.PassiveExtraction.OnePort : PassiveExtraction;
 
         public bool IsStabilityCircle =>
             Derived == DerivedParameters.LoadStabilityCircle ||
@@ -1707,6 +1799,7 @@ namespace CircuitRF.Ui.DataDisplay
         private int _derivedMetricCacheOutPort;
         private bool _derivedMetricCachePassivityScope;
         private bool _derivedMetricCacheMaxGainLog;
+        private RfCore.Data.PassiveExtraction _derivedMetricCacheExtraction;
         private Mat<Complex>[]? _derivedMetricCacheMats;
 
         /// <summary>
@@ -1738,6 +1831,16 @@ namespace CircuitRF.Ui.DataDisplay
                 return tau;
             }
 
+            // The passive readouts are left in base SI — ohms, farads, henries — where group delay
+            // above is scaled to nanoseconds. The difference is not an inconsistency: every delay
+            // anyone reads is in nanoseconds, whereas the capacitors in one plot can run from
+            // picofarads to millifarads, so there is no scale to pick that would not be wrong for
+            // half the traces. The unit is in the trace's own label.
+            if (Derived.IsPassiveMetric())
+                return RfCore.Data.PassiveMetrics.Evaluate(
+                    Data.Matrices, z0PerPort, Data.Frequencies,
+                    EffectivePassiveExtraction, Derived.ToPassiveMetric(), InputPort, OutputPort);
+
             // Max Gain is the one metric with two display forms. Both come from RFNetwork, chosen
             // here rather than by the UI taking 10^(dB/10) of the other, so there is still exactly
             // one implementation of MAG/MSG (R-stb-1).
@@ -1757,6 +1860,7 @@ namespace CircuitRF.Ui.DataDisplay
                 && _derivedMetricCacheOutPort == OutputPort
                 && _derivedMetricCachePassivityScope == PassivityWholeNetwork
                 && _derivedMetricCacheMaxGainLog == MaxGainIsLog
+                && _derivedMetricCacheExtraction == EffectivePassiveExtraction
                 && ReferenceEquals(_derivedMetricCacheMats, Data.Matrices))
             {
                 return _derivedMetricCache;
@@ -1773,6 +1877,7 @@ namespace CircuitRF.Ui.DataDisplay
             _derivedMetricCacheOutPort = OutputPort;
             _derivedMetricCachePassivityScope = PassivityWholeNetwork;
             _derivedMetricCacheMaxGainLog = MaxGainIsLog;
+            _derivedMetricCacheExtraction = EffectivePassiveExtraction;
             _derivedMetricCacheMats = Data.Matrices;
             return values;
         }
@@ -2236,7 +2341,7 @@ namespace CircuitRF.Ui.DataDisplay
                     {
                         string axisVal = !string.IsNullOrEmpty(fc.AxisLabel)
                             ? fc.AxisLabel
-                            : fc.AxisValue.ToString($"{m.FormatString}{m.MaximumFractionDigits}");
+                            : m.FormatString.Format(fc.AxisValue, m.MaximumFractionDigits);
                         string unit = string.IsNullOrEmpty(FamilyAxisUnit) ? "" : $" {FamilyAxisUnit}";
                         lines.Add(($"{axisName}={axisVal}{unit}", false));
                     }
@@ -2373,7 +2478,7 @@ namespace CircuitRF.Ui.DataDisplay
                 double own   = CubeScalarAt(xIdx);
                 double oth   = compatible ? other.CubeScalarAt(xIdx) : double.NaN;
                 double delta = oth - own;
-                string valStr = double.IsFinite(delta) ? delta.ToString($"{m.FormatString}{m.MaximumFractionDigits}") : "NaN";
+                string valStr = double.IsFinite(delta) ? m.FormatString.Format(delta, m.MaximumFractionDigits) : "NaN";
                 return "  " + DbFloor.Label($"Δ{other.ReadoutDescription(false)}", valStr);
             }
 
@@ -2463,8 +2568,7 @@ namespace CircuitRF.Ui.DataDisplay
             if (ContourData is not { } cd) return "";
             double val    = cd.EvaluateMetric?.Invoke(coord, m.ContourSnapped) ?? double.NaN;
             string metric = string.IsNullOrEmpty(cd.MetricName) ? "value" : cd.MetricName;
-            string fmt    = $"{m.FormatString}{m.MaximumFractionDigits}";
-            string valStr = double.IsFinite(val) ? val.ToString(fmt) : "NaN";
+            string valStr = double.IsFinite(val) ? m.FormatString.Format(val, m.MaximumFractionDigits) : "NaN";
             string unit   = string.IsNullOrEmpty(cd.MetricUnitString) ? "" : $" {cd.MetricUnitString}";
             return DbFloor.Label(metric, valStr) + unit;
         }
@@ -2578,12 +2682,12 @@ namespace CircuitRF.Ui.DataDisplay
         public string FormatScalarValue(double val, Marker m)
         {
             if (!double.IsFinite(val)) return "NaN";
-            string fmt = $"{m.FormatString}{m.MaximumFractionDigits}";
+            string txt = m.FormatString.Format(val, m.MaximumFractionDigits);
             return YAxis switch
             {
-                DependentVarFormat.Db    => $"{val.ToString(fmt)} dB",
-                DependentVarFormat.Phase => $"{val.ToString(fmt)}°",
-                _                        => val.ToString(fmt),
+                DependentVarFormat.Db    => $"{txt} dB",
+                DependentVarFormat.Phase => $"{txt}°",
+                _                        => txt,
             };
         }
 
@@ -2598,7 +2702,8 @@ namespace CircuitRF.Ui.DataDisplay
             if (InvalidSpecText is not null) return "";
             if (!IsCubeBound || _cubeXValues is null || i < 0 || i >= CubeSampleCount)
                 return "NaN";
-            string f = $"{fmt}{fracDigits}";
+            string f = fmt == PrecisionFormat.S ? "G6" : $"{fmt}{fracDigits}";
+            string Num(double v) => fmt.Format(v, fracDigits);
 
             if (_cubeComplexValues is not null)
             {
@@ -2611,11 +2716,11 @@ namespace CircuitRF.Ui.DataDisplay
                     CubeTransform.dB20  => DbFloor.Format(DbFloor.Db20(z.Magnitude), f),
                     CubeTransform.dB10 or CubeTransform.dB
                                         => DbFloor.Format(DbFloor.Db10(z.Magnitude), f),
-                    CubeTransform.Mag   => z.Magnitude.ToString(f),
-                    CubeTransform.Phase => (z.Phase * 180.0 / Math.PI).ToString(f),
-                    CubeTransform.Real  => z.Real.ToString(f),
-                    CubeTransform.Imag  => z.Imaginary.ToString(f),
-                    _                   => z.Magnitude.ToString(f),
+                    CubeTransform.Mag   => Num(z.Magnitude),
+                    CubeTransform.Phase => Num(z.Phase * 180.0 / Math.PI),
+                    CubeTransform.Real  => Num(z.Real),
+                    CubeTransform.Imag  => Num(z.Imaginary),
+                    _                   => Num(z.Magnitude),
                 };
             }
 
@@ -2631,7 +2736,7 @@ namespace CircuitRF.Ui.DataDisplay
                     CubeTransform.Mag  => Math.Abs(v),
                     _                  => v,
                 };
-                return y.ToString(f);
+                return Num(y);
             }
 
             return "NaN";

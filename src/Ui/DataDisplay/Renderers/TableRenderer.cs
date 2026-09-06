@@ -762,10 +762,9 @@ namespace CircuitRF.Ui.DataDisplay
             {
                 if (col.IsNodeAxis)
                     return ((long)Math.Round(xVal)).ToString(System.Globalization.CultureInfo.InvariantCulture);
-                string fmt = $"{plot.FormatString}{plot.MaximumFractionDigits}";
                 return col.IsFreqUnit
-                    ? (xVal * plot.FreqUnits.Scale()).ToString(fmt)
-                    : xVal.ToString(fmt);
+                    ? plot.FormatString.Format(xVal * plot.FreqUnits.Scale(), plot.MaximumFractionDigits)
+                    : plot.FormatString.Format(xVal, plot.MaximumFractionDigits);
             }
 
             // TraceValue: check for summary column before the standard cube/network paths.
@@ -1058,13 +1057,12 @@ namespace CircuitRF.Ui.DataDisplay
                 return trace.StabilityCircleStableInside[fi] ? "Inside" : "Outside";
             }
 
-            // Derived scalar (Mu, MuPrime, MaxGain) — no units in cell
+            // Derived scalar (Mu, MuPrime, MaxGain, the passive readouts) — no units in cell
             if (trace.IsDerived)
             {
                 double v = trace.DataPointScalar(freq);
                 if (!double.IsFinite(v)) return "NaN";
-                string fmt = $"{trace.FormatString}{trace.MaximumFractionDigits}";
-                return v.ToString(fmt);
+                return Scalar(trace, v);
             }
 
             // Complex matrix element
@@ -1072,7 +1070,12 @@ namespace CircuitRF.Ui.DataDisplay
             {
                 var raw = trace.DataPoint(freq);
                 if (!double.IsFinite(raw.Real) || !double.IsFinite(raw.Imaginary)) return "NaN";
-                string fmt = $"{trace.FormatString}{trace.MaximumFractionDigits}";
+                // A complex element has no single magnitude to prefix, so Engineering falls back
+                // to a general format rather than throwing on an "S3" specifier that .NET does not
+                // have. Engineering is only ever the DEFAULT on a real scalar readout.
+                string fmt = trace.FormatString == PrecisionFormat.S
+                    ? $"G{Math.Max(trace.MaximumFractionDigits, 4)}"
+                    : $"{trace.FormatString}{trace.MaximumFractionDigits}";
                 return trace.MatrixFormat switch
                 {
                     MatrixFormat.RI => FormatRI(raw, fmt),
@@ -1086,10 +1089,19 @@ namespace CircuitRF.Ui.DataDisplay
             {
                 double scalar = trace.DataPointScalar(freq);
                 if (!double.IsFinite(scalar)) return "NaN";
-                string fmt = $"{trace.FormatString}{trace.MaximumFractionDigits}";
-                return scalar.ToString(fmt);
+                return Scalar(trace, scalar);
             }
         }
+
+        /// <summary>
+        /// One scalar cell in the trace's own number format. Engineering is routed to
+        /// <see cref="EngineeringFormat"/>; the other three are the <c>ToString</c> they always
+        /// were, so no existing table changes.
+        /// </summary>
+        private static string Scalar(Trace trace, double v) =>
+            trace.FormatString == PrecisionFormat.S
+                ? EngineeringFormat.Value(v, trace.MaximumFractionDigits)
+                : v.ToString($"{trace.FormatString}{trace.MaximumFractionDigits}");
 
         private static bool IsFreqUnit(string? unit) =>
             unit is "Hz" or "kHz" or "MHz" or "GHz";

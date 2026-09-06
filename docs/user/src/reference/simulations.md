@@ -4,6 +4,7 @@ slug: reference/simulations.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > Simulations
 lede: Every analysis circuitRF runs, what it computes, a short overview of the method, and the full set of settings. Algorithm details are deferred to the design notes / white papers; this chapter is the operational reference.
+keywords: analysis, sweep, DC, S-parameters, harmonic balance, HB, loadpull, load pull, parametric sweep, run, simulate
 ---
 
 <nav class="toc">

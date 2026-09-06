@@ -218,6 +218,16 @@ public sealed class TraceConfig
     public int  OutputPort            { get; set; } = 2;
     public bool PassivityWholeNetwork { get; set; } = true;
 
+    /// <summary>
+    /// The fixture a passive-readout trace reads its DUT impedance out of. Defaults to
+    /// shunt-through, matching <c>Trace</c>'s own default — a `.cdd` written before this existed
+    /// loads as shunt-through, which is the reading a 2-port vendor part file wants and the only
+    /// possible reading of a 1-port one.
+    /// </summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public RfCore.Data.PassiveExtraction PassiveExtraction { get; set; }
+        = RfCore.Data.PassiveExtraction.ShuntThrough;
+
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public DependentVarFormat YAxis  { get; set; } = DependentVarFormat.Db;
 

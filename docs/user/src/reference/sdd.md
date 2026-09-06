@@ -4,6 +4,7 @@ slug: reference/sdd.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > SDD
 lede: circuitRF's user-authored nonlinear device. You write each port's current (and charge) as an equation in the port voltages; the engine differentiates it automatically and balances it like any built-in device. It is how the FET models in the examples are defined, and the extension point for any nonlinearity the built-in parts don't cover.
+keywords: symbolically defined device, equation defined device, EDD, nonlinear model, behavioural model, custom device
 ---
 
 <figure class="symbol"><span class="frame">

@@ -239,6 +239,21 @@ public static class DocDataDisplayFixtures
     }
 
     /// <summary>
+    /// The trace card reading a PASSIVE metric, so the Fixture control is on screen.
+    ///
+    /// <para>It is the one card control whose meaning cannot be guessed from its name: the fixture
+    /// is an assumption about how the part was measured that nothing in the data records, and the
+    /// wrong choice returns a smooth, plausible, wrong curve. A picture of where it lives is worth
+    /// more than another paragraph saying so.</para>
+    /// </summary>
+    public static FigureScene InspectorPassiveReadout()
+    {
+        var (_, plot) = Plotted(DocRunData.SParameters(), PlotType.Rect);
+        PickSignal(plot.Inspector.Traces[0], DerivedParameters.Esr.Description());
+        return new FigureScene(new PlotInspectorView { DataContext = plot.Inspector });
+    }
+
+    /// <summary>
     /// The Plot Inspector for the SAME trace the Smith figure draws — S(1,1) on a Smith chart.
     ///
     /// <para>Deliberately not <see cref="InspectorTraceCard"/>, which reads S(2,1) on a rectangular

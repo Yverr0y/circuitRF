@@ -4,6 +4,7 @@ slug: reference/pdk-authoring.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > PDK authoring
 lede: Building a kit: the OpenPDK layout, Python PCells, models, technology and artwork.
+keywords: PDK, process design kit, kit authoring, OpenPDK, PCell python, kit
 ---
 
 This chapter is about **producing** a kit. If you are consuming one, read

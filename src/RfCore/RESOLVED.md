@@ -342,3 +342,81 @@ compare against, and it is the reason the environment header stays.
 **Unchanged, and still the shortest route:** the reporter's `Sparam1.npy`. The trail names the
 workspace folder and every run rewrites the file in it, so it can be produced on demand. With the
 file this is a repro that runs here instead of a wait for the next trail.
+
+---
+
+# Passive readouts and Touchstone health (2026-09-06)
+
+`PassiveMetrics` and `TouchstoneHealth`, added so a vendor's part file can be read as the part —
+ESR, C_eff, L_eff, Q, self-resonance — and so an `.sNp` can be checked before it is trusted. Three
+findings here were arrived at by measurement after a first answer that was wrong, and each one is a
+trap that would otherwise be re-entered.
+
+## 1. The 1-port misread of a shunt-through file is exactly `Z ∥ Z0`
+
+The feature exists because nothing in a Touchstone file records the fixture. The obvious
+justification — *"at a few milliohms against 50 Ω, S11 is pinned at −1 and carries no information"* —
+is the **numerical** argument, about a network analyser's directivity floor. It is true, and it is
+not the systematic error, and writing it as if it were sent the first test looking in the wrong
+place.
+
+Working the algebra: for a shunt DUT, `S11 = −Z0/(2Z+Z0)`, so the 1-port relation returns
+
+    Z0·(1+S11)/(1−S11)  =  Z ∥ Z0
+
+exactly. The consequences are the opposite of intuition:
+
+- The misread is **most accurate at the self-resonance**, where `|Z| ≪ Z0` — the one place a careless
+  check would look, and the reason the first version of `FixtureMatters_…` failed with the two
+  values agreeing to four digits.
+- It **saturates at Z0** everywhere else. A bulk decoupling capacitor is under an ohm across most of
+  its band and survives the mistake at the 1 % level; a 10 pF part, an inductor or a bead comes back
+  as ≈ 50 Ω, and its capacitance with it.
+
+**So the test fixture has to be a part that actually reaches saturation.** The second attempt used
+the same 100 nF part as everything else and failed on its own premise assertion: 100 nF at 2.25 MHz
+is 0.7 Ω of reactance, not 707 Ω. A test built around the obvious part would have measured a 1 %
+error and concluded the fixture barely matters. `PassiveMetricsTests` now pins the parallel form over
+the whole sweep and demonstrates saturation on a 10 pF part.
+
+## 2. The causality pre-cursor test: subtract the REAL asymptote, never the complex one
+
+The measurement transforms each S element to an impulse response and reports the fraction of energy
+landing before t = 0. The raw form flags causal files: a shunt capacitor measured **28.9 %** and a
+plain through **10.9 %**, because the sweep stops at f_max where the response is still large, and
+zero-padding above it is a step whose sinc ringing is symmetric about t = 0.
+
+Subtracting a constant across frequency removes a scaled `δ(t)`, which is causal and therefore cannot
+change the verdict in principle. **Only the real part may be subtracted.** Subtracting a complex
+constant `c` removes `c_re·δ(t)` *plus a Hilbert kernel* `c_im/(πt)`, which is spread over all time
+including negative time — it injects the very thing being measured. That was tried first and made
+every case worse (the capacitor went 0.289 → 0.317), which is how the asymmetry was found.
+
+With `Re(H(f_max))` subtracted per element: shunt capacitor 4.9 %, plain through 0 %, RC low-pass
+0.06 %, delay line 4.9 %; a right-half-plane pole 98 %, a delay run backwards 56 %.
+
+## 3. A high pre-cursor ratio has two causes and the measurement cannot separate them
+
+**This is why the finding is worded as a measurement with two readings and never as "not causal".**
+
+A ferrite bead with a 95 MHz impedance corner, sampled on a 25 MHz uniform grid to 10 GHz, is
+perfectly causal and measures **37 %** — the same side of the line as a delay running backwards.
+Refining the step to 1 MHz takes the same network to **0.02 %**. The cause is not aliasing of a
+resonance (refining the capacitor's grid did *not* help, which ruled that out) but the sweep failing
+to resolve the response's own low-frequency behaviour. A uniform grid fine enough to resolve a
+hundred-megahertz corner up to ten gigahertz needs tens of thousands of points, which nobody ships.
+
+Both readings matter to anyone using the file in the time domain, so the finding is worth making —
+but claiming acausality would be a claim the number does not support. The threshold (25 %) is
+empirical and `TouchstoneHealthTests` asserts a **2× margin on each side** rather than only the side
+of the line, so narrowing the separation fails loudly instead of quietly.
+
+## 4. Two smaller notes
+
+- **The test runs only on a uniform grid reaching DC in one step**, and says so otherwise. Most
+  vendor passive files are log-swept, so *"not evaluated"* is the common answer and is correct:
+  resampling a log sweep needs an interpolation that is itself a low-pass and would manufacture the
+  smoothness being tested for.
+- **`SNP` cannot be constructed empty** — both constructors refuse — so `TouchstoneHealth.Analyze`'s
+  zero-point branch is defensive and deliberately ungated. A test for it would have to defeat SNP's
+  own guard to build the input.

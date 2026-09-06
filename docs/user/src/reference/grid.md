@@ -4,6 +4,7 @@ slug: reference/grid.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > Grid &amp; Connectivity
 lede: Connecting components must be easy, and connections must be unambiguous: "do these two pins touch?" has to have exactly one answer. circuitRF achieves both with **two grids** — a coarse connection grid that all electrical points snap to, and a fine authoring grid for everything cosmetic.
+keywords: connectivity, net, wire, junction, snap, node
 ---
 
 <nav class="toc">

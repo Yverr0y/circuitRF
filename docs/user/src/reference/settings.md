@@ -4,6 +4,7 @@ slug: reference/settings.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > Settings
 lede: Every tab of the circuitRF Settings dialog, control by control — what each one changes, when it takes effect, and which of them are shared with harmonicaRF and wBond.
+keywords: preferences, options, configuration, theme, dark mode, colours, colors
 ---
 
 <nav class="toc">

@@ -4,6 +4,7 @@ slug: reference/spice-import.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > SPICE import
 lede: What circuitRF carries across from a .model card or a .subckt, what it leaves behind, and why — including where to read the list of parameters that did not come with it.
+keywords: SPICE, model card, subckt, subcircuit, netlist import, lib, BJT model, diode model, transistor model
 ---
 
 <nav class="toc">

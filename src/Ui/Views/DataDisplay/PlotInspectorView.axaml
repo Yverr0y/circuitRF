@@ -511,6 +511,56 @@
                                                       ToolTip.Tip="Unchecked: passivity of the extracted input/output 2-port only."/>
                                         </Grid>
 
+                                        <!-- The passive readouts need the FIXTURE, which nothing in
+                                             the data records. Explicit, never inferred: the wrong
+                                             reading is plausible-looking and wrong everywhere.
+
+                                             The columns are the IDENTITY ROW's, copied exactly —
+                                             including the spacer standing in for the matrix-type
+                                             button — so this combo box lines up with the item combo
+                                             directly above it instead of starting at its own
+                                             indent and running the full width of the card. -->
+                                        <Grid IsVisible="{Binding ShowPassiveExtraction}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"    MinWidth="60"/>
+                                                <ColumnDefinition Width="*"    MinWidth="60"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="26"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <TextBlock Grid.Column="0" Text="Fixture" Classes="label"
+                                                       VerticalAlignment="Center"/>
+
+                                            <ComboBox Grid.Column="1"
+                                                      ItemsSource="{Binding PassiveExtractionItems}"
+                                                      SelectedItem="{Binding SelectedPassiveFixture, Mode=TwoWay}"
+                                                      Margin="0,0,3,0"
+                                                      MinWidth="20"
+                                                      HorizontalAlignment="Stretch"
+                                                      HorizontalContentAlignment="Stretch"
+                                                      ToolTip.Tip="{Binding PassiveFixtureTooltip}">
+                                                <ComboBox.ItemTemplate>
+                                                    <DataTemplate x:DataType="vm:TraceRowViewModel+PassiveFixtureItem">
+                                                        <!-- The NAME only. The closed form is a
+                                                             tooltip per row, so every option can be
+                                                             read before one is chosen without the
+                                                             control being three times as wide. -->
+                                                        <TextBlock Text="{Binding Label}"
+                                                                   FontSize="{StaticResource FontSize}"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   ToolTip.Tip="{Binding Equation}"/>
+                                                    </DataTemplate>
+                                                </ComboBox.ItemTemplate>
+                                            </ComboBox>
+
+                                            <!-- Stands in for the identity row's matrix-type button
+                                                 so column 1 is the same width in both rows. Same
+                                                 footprint, same visibility, no content. -->
+                                            <Panel Grid.Column="2" Width="34" Margin="0,0,3,0"
+                                                   IsHitTestVisible="False"
+                                                   IsVisible="{Binding ShowMatrixTypeCombo}"/>
+                                        </Grid>
+
                                         <!-- R-stb-4 / R-stb-6: state the termination assumption. -->
                                         <TextBlock Text="{Binding TerminationNote}"
                                                    IsVisible="{Binding ShowTerminationNote}"

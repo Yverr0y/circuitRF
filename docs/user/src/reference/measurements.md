@@ -4,6 +4,7 @@ slug: reference/measurements.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > Measurements
 lede: A measurement is a named figure of merit computed from a run's results — Gain, PAE, Pout, whatever you can write as an equation over the analysis output. It draws no current and stamps nothing; it is cube algebra evaluated after the analyses finish, and its result plots like any other trace.
+keywords: measure, post-processing, expression, equation, derived result, post process
 ---
 
 <figure class="symbol"><span class="frame">

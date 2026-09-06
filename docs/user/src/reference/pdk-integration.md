@@ -4,6 +4,7 @@ slug: reference/pdk-integration.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > PDK integration
 lede: Importing a process design kit and simulating the parts it supplies.
+keywords: PDK, process design kit, foundry kit, vendor kit, library import, design kit
 ---
 
 A **kit** is a read-only tree supplied by a foundry or a device maker. It typically holds symbol

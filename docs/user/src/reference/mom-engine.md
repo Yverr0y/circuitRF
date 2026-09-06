@@ -4,6 +4,7 @@ slug: reference/mom-engine.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > MoM engine
 lede: The planar method-of-moments solver: what it does, what it will not do, and how it works.
+keywords: EM, electromagnetic, method of moments, MoM, planar solver, full wave, extraction, Green's function, mesh
 ---
 
 <nav class="toc">

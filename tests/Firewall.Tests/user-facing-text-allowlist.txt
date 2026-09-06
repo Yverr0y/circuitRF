@@ -693,3 +693,9 @@ src/Core/Elaboration/Elaborator.cs|VProbe '{path}' has the same name as a net in
 # An INTERNAL invariant, like the Elaborate()-has-not-run line above: the elaborator checks for the
 # collision itself and refuses in English first, so a caller reaching this has a programming error.
 src/Core/Elaboration/NodeMap.cs|'{alias}' is already a net name, so it cannot also be an alias.
+
+# PassiveMetrics hands back one number per frequency point, so an impedance array of a different
+# length than the frequency axis is a caller-contract violation — a programming error on a path no
+# user reaches, not a condition anyone is meant to read. Every user-facing refusal in this area is a
+# `check.touchstone.*` Diagnostic instead.
+src/RfCore/Data/PassiveMetrics.cs|Frequency axis ({freqs.Length}) and impedance array ({z.Length}) differ in length.

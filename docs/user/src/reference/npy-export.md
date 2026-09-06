@@ -4,6 +4,7 @@ slug: reference/npy-export.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > Results &amp; Data Export
 lede: Every run's results are written to disk as a self-describing NumPy `.npy` file you can read from Python, MATLAB, or any tool that speaks NumPy — no re-running the simulation. This chapter covers where results live, how to export them in other formats, and how to read the `.npy` in a few lines of Python.
+keywords: Touchstone, s2p, snp, sNp, export, npy, numpy, MATLAB, mat, CSV, save results, data out, python
 ---
 
 <nav class="toc">

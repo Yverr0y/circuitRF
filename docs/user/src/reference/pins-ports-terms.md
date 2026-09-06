@@ -4,6 +4,7 @@ slug: reference/pins-ports-terms.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > Pins, Ports &amp; Terms
 lede: Three concepts that sound interchangeable but aren't. Getting them right is the difference between a circuit that simulates what you intended and one that doesn't.
+keywords: pin, port, term, termination, excitation, source impedance, reference plane
 ---
 
 ## The one-paragraph version {#summary}

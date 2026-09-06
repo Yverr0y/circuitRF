@@ -4,6 +4,7 @@ slug: reference/system-components.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > System components
 lede: The ideal blocks a system diagram is drawn out of — circulator, coupler, hybrid, balun, switch, amplifier, attenuator, filter, duplexer and mixer. What each one is for, what "ideal" costs you, and where passive intermodulation comes from.
+keywords: mixer, amplifier, filter, attenuator, behavioural block, system level, intermod, IP3
 ---
 
 <nav class="toc">

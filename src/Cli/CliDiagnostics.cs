@@ -547,7 +547,7 @@ internal static class CliDiagnostics
     public static Diagnostic CheckUnknownKind(string path) => Diagnostic.Create(
         "check.path.unknown-kind", DiagnosticSeverity.Error,
         "Nothing circuitRF reads is named '{path}' — check takes a workspace, a cell folder, or a "
-        + ".csch, .csym, .clay, .ctech, .cem, .cnl or .wasm.", ("path", path));
+        + ".csch, .csym, .clay, .ctech, .cem, .cnl, .wasm or a Touchstone .sNp.", ("path", path));
 
     /// <summary>An interchange file. Reported rather than checked, because there is nothing to check
     /// it AGAINST: a GDSII or Gerber file is not a circuitRF document and has no primacy, no
@@ -556,6 +556,105 @@ internal static class CliDiagnostics
         "check.path.interchange", DiagnosticSeverity.Info,
         "'{path}' is {format} interchange, not a circuitRF document — there is nothing to validate "
         + "until it is imported. Read it with `circuitrf convert`.", ("path", path), ("format", format));
+
+    // ── Touchstone (`.sNp`) ──────────────────────────────────────────────────
+    //
+    //  Every finding here carries the NUMBER it measured and the frequency it measured it at. That
+    //  is the whole point of checking a data file rather than a design: "not passive" is not
+    //  actionable, "σmax = 1.04 at 6.2 GHz" sends someone to a plot. The measurements themselves are
+    //  `RfCore.Data.TouchstoneHealth`'s — nothing is computed in the CLI.
+
+    /// <summary>The facts, always reported, so a clean file still tells the caller what it read.</summary>
+    public static Diagnostic CheckTouchstoneSummary(
+        string path, int ports, int points, string band, string z0) => Diagnostic.Create(
+        "check.touchstone.summary", DiagnosticSeverity.Info,
+        "{path}: {ports}-port, {points} points, {band}, reference {z0}.",
+        ("path", path), ("ports", ports), ("points", points), ("band", band), ("z0", z0));
+
+    /// <summary>The extension claims one port count and the data holds another.</summary>
+    public static Diagnostic CheckTouchstonePortMismatch(string path, int declared, int actual) =>
+        Diagnostic.Create(
+            "check.touchstone.port-mismatch", DiagnosticSeverity.Error,
+            "{path}: the extension declares {declared} ports and the data holds {actual}.",
+            ("path", path), ("declared", declared), ("actual", actual));
+
+    /// <summary>
+    /// A repeated or out-of-order frequency. An unambiguous defect and an error: every interpolator
+    /// in circuitRF assumes a sorted axis, and on one that is not sorted each returns a plausible
+    /// wrong number rather than refusing.
+    /// </summary>
+    public static Diagnostic CheckTouchstoneFrequencyOrder(string path, int index, string freq) =>
+        Diagnostic.Create(
+            "check.touchstone.frequency-order", DiagnosticSeverity.Error,
+            "{path}: the frequency axis is not strictly increasing — point {index} is {freq}.",
+            ("path", path), ("index", index), ("freq", freq));
+
+    /// <summary>Re(Z0) ≤ 0. The power-wave renormalisation divides by √Re(Z0).</summary>
+    public static Diagnostic CheckTouchstoneBadZ0(string path, string z0) => Diagnostic.Create(
+        "check.touchstone.bad-z0", DiagnosticSeverity.Error,
+        "{path}: reference impedance {z0} has Re(Z0) ≤ 0, which no renormalisation can use.",
+        ("path", path), ("z0", z0));
+
+    /// <summary>
+    /// A reference impedance other than 50 Ω. Not a defect — 75 Ω parts exist — but reported
+    /// because it is the assumption most often carried silently into a comparison against a 50 Ω
+    /// model, where it shifts every curve and looks like a modelling error.
+    /// </summary>
+    public static Diagnostic CheckTouchstoneNonStandardZ0(string path, string z0) => Diagnostic.Create(
+        "check.touchstone.z0-not-50", DiagnosticSeverity.Info,
+        "{path}: the reference impedance is {z0}, not 50 Ω — anything compared against this "
+        + "file must be renormalised to match.", ("path", path), ("z0", z0));
+
+    /// <summary>
+    /// σ_max(S) &gt; 1: the network has gain. A WARNING and never an error, because nothing in a
+    /// Touchstone file says whether the part is meant to be passive — an amplifier's file is
+    /// supposed to look like this. For a capacitor or a de-embedded fixture it is a defect.
+    /// </summary>
+    public static Diagnostic CheckTouchstoneNotPassive(string path, string sigma, string freq) =>
+        Diagnostic.Create(
+            "check.touchstone.not-passive", DiagnosticSeverity.Warning,
+            "{path}: σmax = {sigma} at {freq} — this network has gain. Expected for an active "
+            + "device; a defect in anything that should be passive.",
+            ("path", path), ("sigma", sigma), ("freq", freq));
+
+    /// <summary>
+    /// A non-reciprocal file. Same framing as passivity: a circulator or an isolator is supposed to
+    /// look like this, a two-terminal part is not.
+    /// </summary>
+    public static Diagnostic CheckTouchstoneNotReciprocal(string path, string err, string freq) =>
+        Diagnostic.Create(
+            "check.touchstone.not-reciprocal", DiagnosticSeverity.Warning,
+            "{path}: max |Sij − Sji| = {err} at {freq} — this network is not reciprocal. Expected "
+            + "for a ferrite part or an active one; a defect in a passive two-terminal component.",
+            ("path", path), ("err", err), ("freq", freq));
+
+    /// <summary>
+    /// Pre-cursor energy well above the band-truncation floor.
+    ///
+    /// <para><b>Reports the measurement and both of its readings, and does not pick one.</b> A file
+    /// fitted without a causality constraint and a file whose uniform sweep is too coarse to
+    /// resolve its own response produce the same number, and nothing available here separates them
+    /// — a ferrite bead sampled on a grid too coarse for its own corner reads 37 %, on the same
+    /// side of the line as a delay running backwards at 56 %. Both readings matter to anyone using the file in the time domain,
+    /// so the finding is worth making; asserting the first would be a claim the number does not
+    /// support.</para>
+    /// </summary>
+    public static Diagnostic CheckTouchstoneNotCausal(string path, string ratio) => Diagnostic.Create(
+        "check.touchstone.not-causal", DiagnosticSeverity.Warning,
+        "{path}: {ratio} of the impulse-response energy lands before t = 0. Either this file is not "
+        + "causal — the usual cause is a model fitted without a causality constraint — or this "
+        + "sweep is too coarse to resolve its own low-frequency behaviour. Either way it will "
+        + "misbehave in time-domain use.", ("path", path), ("ratio", ratio));
+
+    /// <summary>
+    /// The causality test did not run, and why. Reported rather than skipped in silence: "could not
+    /// be checked" and "was checked and is fine" are different answers, and the common reason — a
+    /// log-spaced sweep, which is what most vendor passive files are — is not a defect.
+    /// </summary>
+    public static Diagnostic CheckTouchstoneCausalitySkipped(string path, string reason) =>
+        Diagnostic.Create(
+            "check.touchstone.causality-skipped", DiagnosticSeverity.Info,
+            "{path}: causality not evaluated — {reason}.", ("path", path), ("reason", reason));
 
     /// <summary><c>CellViewFileValidator.DescribeDefect</c>'s own sentence, which is written to be
     /// shown verbatim.</summary>

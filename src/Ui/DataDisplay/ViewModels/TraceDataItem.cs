@@ -122,6 +122,12 @@ public sealed class TraceDataItem
             DerivedParameters.DeltaMag              => "|Δ|",
             DerivedParameters.Passivity             => "Passivity σmax",
             DerivedParameters.GroupDelay            => "Group Delay (ns)",
+            DerivedParameters.MagZ                  => "|Z| (Ω)",
+            DerivedParameters.Esr                   => "ESR (Ω)",
+            DerivedParameters.Reactance             => "Reactance X (Ω)",
+            DerivedParameters.Ceff                  => "C effective (F)",
+            DerivedParameters.Leff                  => "L effective (H)",
+            DerivedParameters.QFactor               => "Q",
             _                                       => "?",
         };
         IsEnabled = enabled;

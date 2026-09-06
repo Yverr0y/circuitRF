@@ -9,6 +9,8 @@ using CircuitRF.Design.Layout.Em;
 using CircuitRF.Design.Schematic;
 using CircuitRF.Design.Workspace;
 using CircuitRF.Diagnostics;
+using RfCore;
+using RfCore.Data;
 using RfCore.Export;
 
 namespace CircuitRF.Cli;
@@ -189,6 +191,7 @@ internal static class Check
             case DocumentKind.Netlist:    Scoped(path, kind, f, () => CheckNetlist(path, f)); break;
             case DocumentKind.AssemblyRules:
                                           Scoped(path, kind, f, () => CheckAssemblyRules(path, f)); break;
+            case DocumentKind.Touchstone: Scoped(path, kind, f, () => CheckTouchstone(path, f)); break;
 
             case DocumentKind.Interchange:
                 f.Begin(path, kind);
@@ -264,7 +267,12 @@ internal static class Check
             // A folder walk reports what it RECOGNISES. Anything else is somebody's `.md`, `.s2p` or
             // `.DS_Store`, and a walk that called each of those an unknown kind would drown its own
             // findings — which is exactly the failure mode that makes a check stop being run.
-            if (kind is DocumentKind.Unknown or DocumentKind.Interchange or DocumentKind.Workspace) continue;
+            // Touchstone joins the skip list for the reason the comment above gives, sharpened: a
+            // kit directory holds hundreds of `.sNp` files, and measuring passivity and causality
+            // across all of them would bury a workspace's real findings under data-file notes about
+            // parts the user did not author. A file is checked when it is NAMED.
+            if (kind is DocumentKind.Unknown or DocumentKind.Interchange or DocumentKind.Workspace
+                     or DocumentKind.Touchstone) continue;
             CheckPath(file, kind, f, cache, recursive);
         }
 
@@ -547,6 +555,93 @@ internal static class Check
             if (!DrcPredicateParser.TryParse(rule.Expression, out _, out var error))
                 f.Add(CliDiagnostics.CheckAssemblyRuleInvalid(path, rule.Name, error ?? "unparseable"));
     }
+
+    // ── one Touchstone file ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// <c>check part.s2p</c> — is this S-parameter file sound?
+    ///
+    /// <para><b>What is being checked is DATA, not a design</b>, and that changes the severity rule
+    /// in one place worth stating. Passivity, reciprocity and causality are properties a file is
+    /// normally ASSUMED to have, but nothing in Touchstone says what the part is: an amplifier has
+    /// gain, a circulator is not reciprocal, and neither is a defect. So those three are warnings
+    /// carrying the measured number and the frequency, and the caller decides what they mean for
+    /// the part it thinks it has. Only the unambiguous defects — unreadable, a port count that
+    /// contradicts the file's own name, a frequency axis that is not sorted, a reference impedance
+    /// no renormalisation can use — are errors.</para>
+    ///
+    /// <para><b>Every measurement is <c>RfCore.Data.TouchstoneHealth</c>'s.</b> Nothing here
+    /// computes; the same reason every other arm of this verb defers to the validator the
+    /// application itself uses. A rule living only in the CLI is one the plot would not enforce.
+    /// </para>
+    /// </summary>
+    private static void CheckTouchstone(string path, Findings f)
+    {
+        SNP snp;
+        try { snp = TouchstoneIO.ReadFile(path, readComments: false); }
+        catch (Exception ex) { f.Add(CliDiagnostics.CheckUnreadable(path, ex.Message)); return; }
+
+        var h = TouchstoneHealth.Analyze(snp);
+
+        f.Add(CliDiagnostics.CheckTouchstoneSummary(
+            path, h.Ports, h.FrequencyCount,
+            h.FrequencyCount == 0 ? "no points" : $"{Hz(h.FirstFrequencyHz)} to {Hz(h.LastFrequencyHz)}",
+            Ohms(h.Z0)));
+
+        if (h.FrequencyCount == 0)
+        {
+            f.Add(CliDiagnostics.CheckUnreadable(path, "the file carries no frequency points"));
+            return;
+        }
+
+        // The name is a claim about the contents, and the reader will honour the extension over the
+        // data for N > 2 (whose rows span several physical lines). A mismatch is therefore not
+        // cosmetic: it means the matrices were assembled the wrong shape.
+        if (TouchstoneIO.ParsePortsFromExtension(path) is { } declared && declared != h.Ports)
+            f.Add(CliDiagnostics.CheckTouchstonePortMismatch(path, declared, h.Ports));
+
+        if (h.FirstNonIncreasingIndex >= 0)
+            f.Add(CliDiagnostics.CheckTouchstoneFrequencyOrder(
+                path, h.FirstNonIncreasingIndex, Hz(snp.Frequencies[h.FirstNonIncreasingIndex])));
+
+        if (h.Z0.Real <= 0.0)
+            f.Add(CliDiagnostics.CheckTouchstoneBadZ0(path, Ohms(h.Z0)));
+        else if (Math.Abs(h.Z0.Real - 50.0) > 1e-9 || Math.Abs(h.Z0.Imaginary) > 1e-9)
+            f.Add(CliDiagnostics.CheckTouchstoneNonStandardZ0(path, Ohms(h.Z0)));
+
+        if (h.WorstSigmaMax > 1.0 + TouchstoneHealth.PassivityTolerance)
+            f.Add(CliDiagnostics.CheckTouchstoneNotPassive(
+                path, h.WorstSigmaMax.ToString("0.######"), Hz(h.WorstSigmaMaxFrequencyHz)));
+
+        if (h.WorstReciprocityError > TouchstoneHealth.ReciprocityTolerance)
+            f.Add(CliDiagnostics.CheckTouchstoneNotReciprocal(
+                path, h.WorstReciprocityError.ToString("0.######"), Hz(h.WorstReciprocityFrequencyHz)));
+
+        switch (h.Causality)
+        {
+            case CausalityVerdict.PrecursorEnergyHigh:
+                f.Add(CliDiagnostics.CheckTouchstoneNotCausal(
+                    path, h.CausalityPrecursorRatio.ToString("P1")));
+                break;
+            case CausalityVerdict.NotEvaluated:
+                f.Add(CliDiagnostics.CheckTouchstoneCausalitySkipped(
+                    path, h.CausalitySkipReason ?? "the test does not apply to this sweep"));
+                break;
+        }
+    }
+
+    /// <summary>A frequency with an SI prefix. Shared by `check` and `explain` so one file cannot
+    /// report a band the other spells differently.</summary>
+    internal static string Hz(double hz) =>
+        !double.IsFinite(hz) ? "?"
+        : Math.Abs(hz) >= 1e9 ? $"{hz / 1e9:0.######} GHz"
+        : Math.Abs(hz) >= 1e6 ? $"{hz / 1e6:0.######} MHz"
+        : Math.Abs(hz) >= 1e3 ? $"{hz / 1e3:0.######} kHz"
+        :                       $"{hz:0.######} Hz";
+
+    /// <summary>A reference impedance. Complex only when it genuinely is.</summary>
+    internal static string Ohms(System.Numerics.Complex z) =>
+        Math.Abs(z.Imaginary) < 1e-12 ? $"{z.Real:0.###} Ω" : $"{z.Real:0.###}{z.Imaginary:+0.###;-0.###}j Ω";
 
     private static void CheckNetlist(string path, Findings f)
     {

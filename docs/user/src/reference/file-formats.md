@@ -4,6 +4,7 @@ slug: reference/file-formats.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > File Formats
 lede: circuitRF stores a project as a folder of small, human-readable, text files — diffable and version-control friendly. The core idea: the **schematic** (what you draw) is the source of truth; the **netlist** (what the engine runs) is derived from it.
+keywords: file extension, cws, csch, csym, clay, ctech, cem, cnl, ccell, cdd, format, on disk
 ---
 
 <nav class="toc">

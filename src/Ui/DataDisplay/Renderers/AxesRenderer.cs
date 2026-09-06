@@ -52,6 +52,15 @@ namespace CircuitRF.Ui.DataDisplay
             using var majorGridPath  = new SKPath();
             using var majorTickPath  = new SKPath();
 
+            // One SI prefix per AXIS, chosen from its own window, never per tick: picking per value
+            // puts "900p" and "1n" on adjacent gridlines and reads as a jump in the data.
+            int xGroup  = EngineeringFormat.GroupFor(
+                EngineeringFormat.AxisMagnitude(axes.Window.Left, axes.Window.Right));
+            int yGroup  = EngineeringFormat.GroupFor(
+                EngineeringFormat.AxisMagnitude(axes.Window.Top, axes.Window.Bottom));
+            int y2Group = EngineeringFormat.GroupFor(
+                EngineeringFormat.AxisMagnitude(axes.WindowSecondary.Top, axes.WindowSecondary.Bottom));
+
             foreach (var tx in ticks.MajorX)
             {
                 var top = tf.PrimaryToCanvas(tx, axes.Window.Top);
@@ -64,8 +73,8 @@ namespace CircuitRF.Ui.DataDisplay
 
                 if (labels)
                 {
-                    double v     = Math.Abs(tx) < 1e-12 ? 0 : tx;
-                    string label = v.ToString($"G{axes.NumDigitsXAxis}");
+                    double v     = EngineeringFormat.SnapNearZero(tx, axes.XTick);
+                    string label = EngineeringFormat.Tick(v, xGroup, axes.NumDigitsXAxis);
                     float  tw    = textFont.MeasureText(label);
                     canvas.DrawText(label,
                         tickBase.X - tw / 2f,
@@ -93,8 +102,8 @@ namespace CircuitRF.Ui.DataDisplay
 
                 if (labels)
                 {
-                    double v     = Math.Abs(yPrimary) < 1e-12 ? 0 : yPrimary;
-                    string label = v.ToString($"G{axes.NumDigitsLeftY}");
+                    double v     = EngineeringFormat.SnapNearZero(yPrimary, axes.YTick);
+                    string label = EngineeringFormat.Tick(v, yGroup, axes.NumDigitsLeftY);
                     float  tw    = textFont.MeasureText(label);
                     canvas.DrawText(label,
                         tl0.X - tw - lw * 4f,
@@ -123,8 +132,8 @@ namespace CircuitRF.Ui.DataDisplay
 
                     if (labels && double.IsFinite(ySecondary))
                     {
-                        double v2     = Math.Abs(ySecondary) < 1e-12 ? 0 : ySecondary;
-                        string label2 = v2.ToString($"G{axes.NumDigitsRightY}");
+                        double v2     = EngineeringFormat.SnapNearZero(ySecondary, axes.Y2Tick);
+                        string label2 = EngineeringFormat.Tick(v2, y2Group, axes.NumDigitsRightY);
                         var    rPt    = tf.SecondaryToCanvas(axes.WindowSecondary.Right, ySecondary);
                         canvas.DrawText(label2,
                             rPt.X + lw * 4f,
@@ -908,6 +917,14 @@ namespace CircuitRF.Ui.DataDisplay
             var ticks  = axes.Ticks(minorTicks: false);
             int digits = secondary ? axes.NumDigitsRightY : axes.NumDigitsLeftY;
 
+            // The SAME group, tick step and snap the draw loop uses. An SI prefix is a whole
+            // character wide, so measuring without it puts the rotated axis label on top of the
+            // numbers — which is the failure this method's own remarks were written about.
+            var    window   = secondary ? axes.WindowSecondary : axes.Window;
+            double tickStep = secondary ? axes.Y2Tick : axes.YTick;
+            int    group    = EngineeringFormat.GroupFor(
+                EngineeringFormat.AxisMagnitude(window.Top, window.Bottom));
+
             float max = 0f;
             foreach (var (primary, secondaryValue) in ticks.MajorY)
             {
@@ -919,14 +936,13 @@ namespace CircuitRF.Ui.DataDisplay
                 double raw = secondary ? secondaryValue : primary;
                 if (!double.IsFinite(raw)) continue;
 
-                double v = Math.Abs(raw) < 1e-12 ? 0 : raw;
-                max = Math.Max(max, font.MeasureText(v.ToString($"G{digits}")));
+                double v = EngineeringFormat.SnapNearZero(raw, tickStep);
+                max = Math.Max(max, font.MeasureText(EngineeringFormat.Tick(v, group, digits)));
             }
             if (max > 0f) return max;
 
-            var win = secondary ? axes.WindowSecondary : axes.Window;
-            return Math.Max(font.MeasureText(win.Top   .ToString($"G{digits}")),
-                            font.MeasureText(win.Bottom.ToString($"G{digits}")));
+            return Math.Max(font.MeasureText(EngineeringFormat.Tick(window.Top,    group, digits)),
+                            font.MeasureText(EngineeringFormat.Tick(window.Bottom, group, digits)));
         }
 
         /// <summary>
