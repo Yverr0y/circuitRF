@@ -148,6 +148,7 @@ public static class SchematicRenderer
         // ── Wires ─────────────────────────────────────────────────────────────
         float unconnEndHalf = (float)Math.Max(3.0, zoom * PortBoxHalf);
         var wireDragPts = overlay?.WireDragPoints;
+        var liveEndConn = overlay?.LiveWireEndpointConnected;
 
         // Reused path object — Rewind() resets it without reallocation.
         using var wirePath = new SKPath();
@@ -181,17 +182,22 @@ public static class SchematicRenderer
                 canvas.DrawPath(wirePath, wirePaint);
             }
 
-            // Unconnected endpoint squares — use model connectivity (deferred to drag-end).
+            // Unconnected endpoint squares. The model's own flags are computed at drag-END, which
+            // is the right answer for every drag that carries its wires — but not for one that puts
+            // an endpoint down in empty space, so a live test (recomputed from the moving geometry)
+            // is asked first when the overlay supplies one. See SchematicOverlay.LivePortConnected.
             // Guard on pts.Count >= 2 symmetrically for both endpoints.
             if (!isSimplified && !isLod && pts.Count >= 2)
             {
-                if (!w.StartConnected)
+                bool startConn = liveEndConn is null ? w.StartConnected : liveEndConn(pts[0].X,  pts[0].Y);
+                bool endConn   = liveEndConn is null ? w.EndConnected   : liveEndConn(pts[^1].X, pts[^1].Y);
+                if (!startConn)
                 {
                     var (ex, ey) = ToPixel(pts[0].X, pts[0].Y, panX, panY, zoom);
                     canvas.DrawRect(SKRect.Create(ex - unconnEndHalf, ey - unconnEndHalf,
                         unconnEndHalf * 2, unconnEndHalf * 2), unconnPaint);
                 }
-                if (!w.EndConnected)
+                if (!endConn)
                 {
                     var (ex, ey) = ToPixel(pts[^1].X, pts[^1].Y, panX, panY, zoom);
                     canvas.DrawRect(SKRect.Create(ex - unconnEndHalf, ey - unconnEndHalf,
@@ -227,6 +233,7 @@ public static class SchematicRenderer
         // position coincides with a junction dot during a drag renders as connected (no red box),
         // even though the stale render model may still show it as Unconnected.
         // Uses model dots at rest (they agree with the model port states, so no visual change).
+        var livePortConn = overlay?.LivePortConnected;
         var liveDotSrc = overlay?.ConnectionDotsOverride ?? model.ConnectionDots;
         HashSet<(long, long)>? liveDotKeys = null;
         if (liveDotSrc.Count > 0)
@@ -351,7 +358,7 @@ public static class SchematicRenderer
 
             if (!isSimplified)
             {
-                DrawPortMarkers(canvas, c, cx, cy, panX, panY, zoom, unconnPaint, connPinPaint, liveDotKeys, model.GridSize);
+                DrawPortMarkers(canvas, c, cx, cy, panX, panY, zoom, unconnPaint, connPinPaint, liveDotKeys, model.GridSize, livePortConn);
                 DrawPinNames(canvas, c, cx, cy, panX, panY, zoom, pinNameFont, pinNamePaint);
                 (double DX, double DY)? lblDrag = null;
                 if (overlay?.LabelDragOffsets is { } ldo && ldo.TryGetValue(c.Id, out var ld))
@@ -884,7 +891,8 @@ public static class SchematicRenderer
         double compX, double compY,          // explicit world position (may differ during drag)
         double panX, double panY, double zoom,
         SKPaint unconnPaint, SKPaint connPaint,
-        HashSet<(long, long)>? liveDotKeys = null, double gridSize = 100.0)
+        HashSet<(long, long)>? liveDotKeys = null, double gridSize = 100.0,
+        Func<double, double, bool>? livePortConnected = null)
     {
         float boxHalf  = (float)Math.Max(3.0, zoom * PortBoxHalf);
         float connHalf = (float)Math.Max(2.0, zoom * ConnDotHalf);
@@ -894,6 +902,23 @@ public static class SchematicRenderer
             var (px, py) = LocalToPixel(port.LocalX, port.LocalY, compX, compY, c.Rotation, c.MirrorX, panX, panY, zoom);
 
             bool isConnected = port.State == PortConnectionState.Connected;
+
+            // Mid-drag: a port the model calls connected may have come OFF since the drag started,
+            // and the model's own answer is not recomputed until the user lets go. Ask the moving
+            // geometry instead. See SchematicOverlay.LivePortConnected.
+            //
+            // ONE DIRECTION ONLY, and deliberately: a port the model calls unconnected may be
+            // unconnected because the user DETACHED it, which is a decree rather than a geometry,
+            // and nothing in the render model distinguishes the two. Turning that one green because
+            // a wire happens to pass under it would undo an explicit disconnect on screen. The other
+            // direction is the liveDotKeys rule below, which has always been there.
+            if (isConnected && livePortConnected is not null)
+            {
+                var (wx, wy) = SchematicGeometry.LocalToWorld(
+                    port.LocalX, port.LocalY, compX, compY, c.Rotation, c.MirrorX);
+                isConnected = livePortConnected(wx, wy);
+            }
+
             // Live override: if a junction dot exists at this port's current world position
             // (e.g. pin-on-pin or pin-on-wire during a drag), treat the port as connected so
             // no red unconnected box appears where a dot is already drawn.

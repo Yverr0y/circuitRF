@@ -542,7 +542,10 @@ public class WBondRound5Tests
 
         int at = code.IndexOf("private static bool IsPhysical", StringComparison.Ordinal);
         Assert.True(at >= 0);
-        Assert.Contains("SymbolKind.WBond", code[at..(at + 900)], StringComparison.Ordinal);
+        // A window rather than the whole file, so a stray mention elsewhere cannot satisfy it.
+        // Widened from 900 when VProbe joined the sentinel list ahead of WBond — the rule under
+        // test is that WBond is IN this predicate, not how many characters precede it.
+        Assert.Contains("SymbolKind.WBond", code[at..(at + 1100)], StringComparison.Ordinal);
     }
 
     /// <summary>

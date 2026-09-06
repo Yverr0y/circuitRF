@@ -202,6 +202,14 @@ default).</p>
 <li><p><code>IProbe:Iout Vout n6</code> — a 0 V series <strong>current probe</strong> (ammeter). Its instance name
 (<code>Iout</code>, <code>Iin</code>, <code>IDC</code>) is how measurements read its branch current, e.g. <code>I(&quot;Iout&quot;, 1)</code> below.</p>
 </li>
+<li><p><code>VProbe:Vg n3</code> — a one-terminal <strong>voltage probe</strong>. It stamps nothing: the elaborator reads the one
+net it names and publishes that net's voltage under the probe's own instance name, so <code>V(&quot;Vg&quot;)</code>
+reads it and the trace picker lists it. On a net the schematic never named, extraction has already
+written the probe's name as the NET's name — you will see <code>VProbe:Vg Vg</code> — and there is one row in
+the results; on a net a label already named, the probe's name is a second name for it and both
+appear. Its name must not collide with a net name or with another VProbe: either refuses the run. A
+VProbe naming a net nothing else reaches reports nothing and says so.</p>
+</li>
 </ul>
 <h3 id="w-analyses">5 · Analyses (HB + parametric sweeps)</h3>
 <pre><code class="language-netlist">analysis HB1 type=hb Tone=&quot;RFfreq&quot; ToneUnit=MHz MaxHarm=5 FFTOverSample=1 Tol=1e-6 DriveStepping=IfNecessary GuardHarmonic=0 Lambda=1 MaxIter=100

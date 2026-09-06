@@ -70,7 +70,8 @@ A run produces one **DataSet**: an ordered map of **groups** to named **DataCube
 
 A **DataCube** is an N-dimensional array, real or complex throughout, with **named axes**. Each axis has
 numeric values, a unit, and sometimes string labels — the node axis of `V` is labelled with your net
-names, and the branch axis of `I` with your IProbe names.
+names (and with the name of any [VProbe](components.html#vprobe) you placed, which adds a row for the
+net it taps), and the branch axis of `I` with your IProbe names.
 
 | Cube | Axes, from single-point to fully swept | Kind |
 |---|---|---|
@@ -110,7 +111,7 @@ what a [Table](plot-types.html#table) is for.
 
 The **eye** on the label-axis row reveals the entries that are normally hidden: every node beyond the
 ones you named, and every device-port branch beyond your IProbes. It is one control shared by the node
-and branch rows.
+and branch rows. A net label and a VProbe both count as naming a node, so both are visible without it.
 
 **Spec** — the transform, and the shorthand text box (below).
 

@@ -310,12 +310,22 @@ public static class ComponentCatalog
             return "No palette entry: this type can be written in a .cnl and has no symbol, so " +
                    "nothing places it, no default parameters are declared for it, and nothing " +
                    "below the UI firewall states how many nets its instance line takes.";
-        // The four sentinels among the five. They are named rather than described as broken,
-        // because "not a component" is the answer for them and it is a complete one.
-        return token is "GND" or "VAR" or "MEAS" or "Pin"
-            ? "Not a component: a schematic element the extractor consumes, never an instance in a " +
-              ".cnl. Nothing elaborates it."
-            : "Not simulatable under this name: the symbol resolves to something else before the " +
-              "engine sees it, so no primitive of this name exists.";
+        // The sentinels. They are named rather than described as broken, because "not a component"
+        // is the answer for them and it is a complete one.
+        if (token is "GND" or "VAR" or "MEAS" or "Pin")
+            return "Not a component: a schematic element the extractor consumes, never an instance " +
+                   "in a .cnl. Nothing elaborates it.";
+
+        // VProbe is the one sentinel that DOES reach a .cnl and the elaborator. It is still not a
+        // component: the elaborator reads the net its single terminal names, publishes that net's
+        // voltage under the instance's own name, and builds no model -- which is exactly what makes
+        // placing one unable to change the circuit.
+        if (token is "VProbe")
+            return "Not a component: an instance line the elaborator turns into a NET-NAME ALIAS. " +
+                   "The net its one terminal touches is reported under this instance's name as well " +
+                   "as its own, and nothing is stamped.";
+
+        return "Not simulatable under this name: the symbol resolves to something else before the " +
+               "engine sees it, so no primitive of this name exists.";
     }
 }

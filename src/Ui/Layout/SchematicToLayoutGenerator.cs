@@ -486,6 +486,7 @@ public static class SchematicToLayoutGenerator
     private static bool IsPhysical(EditableComponent comp) =>
         comp.Disable is not (DisableState.Open or DisableState.Short)
         && comp.Symbol is not (SymbolKind.Ground or SymbolKind.Pin or SymbolKind.Var or SymbolKind.Meas
+                            or SymbolKind.VProbe   // a name, not a part: no artwork to place
                             // wbond.md §9.5/WB41: a wBond is emitted as the CELL's own `.wBond`
                             // sidecar (WBondCellSeeding), not as a placed instance — WB23 is explicit
                             // that no wire ever enters a `.clay`. Left in this set it resolved no

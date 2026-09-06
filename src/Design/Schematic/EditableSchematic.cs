@@ -84,6 +84,9 @@ public static class SymbolPortDefs
             // IProbe: two terminals at the bottom, 100 apart, both at y=100.
             // Current flows pin1 (left, np) → pin2 (right, nm).
             case SymbolKind.IProbe:  return [("np", 0f, 100f), ("nm", 100f, 100f)];
+            // VProbe: ONE terminal, at the tip of the arrow that points down-left out of the dial.
+            // On grid (a multiple of 100 from the body centre) so it lands on wire vertices.
+            case SymbolKind.VProbe:  return [("v", -100f, 100f)];
             // TLIN: horizontal 2-port — port 1 left, port 2 right. Both ground-referenced
             // (the reference net is implicit; only these two signal nets are netlisted).
             case SymbolKind.Tline:   return [("1", -200f, 0f), ("2", 200f, 0f)];
@@ -1306,36 +1309,11 @@ public sealed class SchematicEditModel
         // a shared helper so the live dot preview during drags reuses the identical logic.
         var cg = ComputeConnectivityGeometry(cellRefResolutions);
 
-        // IsConnected for a port: O(1) hash check against conPointCounts.
-        // A port is connected when at least one OTHER endpoint (another port or a wire vertex)
-        // shares its P-cell (count >= 2 — the port itself contributes 1, so >=2 means something
-        // else is there). Fallback handles port on a wire body interior (not at any endpoint).
-        bool IsConnected(double wx, double wy)
-        {
-            var key = QuantKey(wx, wy);
-            if (cg.ConPointCounts.TryGetValue(key, out int cnt) && cnt >= 2) return true;
-            // A net label sitting on the pin IS the connection — see FreeNetLabelKeys.
-            if (cg.FreeNetLabelKeys.Contains(key)) return true;
-            // Fallback: port on wire body interior (not at any vertex/endpoint).
-            foreach (var w in Wires)
-            {
-                var pts = w.Points;
-                for (int i = 0; i < pts.Count - 1; i++)
-                    if (SchematicGeometry.PointOnSegment(wx, wy, pts[i].X, pts[i].Y,
-                                                          pts[i + 1].X, pts[i + 1].Y, ConnectTolerance)) return true;
-            }
-            return false;
-        }
+        var portTest     = PortConnectionTest(cg);
+        var endpointTest = EndpointConnectionTest(cg);
 
-        // IsEndpointConnected: O(1) lookup — an endpoint is connected if another vertex sits there
-        // (count > 1, a shared vertex / corner) OR it is part of an auto-junction (e.g. it lands on
-        // another wire's body — a T). Either way no false "unconnected" indicator shows.
-        bool IsEndpointConnected(EditableWire _, double wx, double wy)
-        {
-            var key = QuantKey(wx, wy);
-            if (cg.ConPointCounts.TryGetValue(key, out int cnt) && cnt > 1) return true;
-            return cg.AutoDotKeys.Contains(key);
-        }
+        bool IsConnected(double wx, double wy) => portTest(wx, wy);
+        bool IsEndpointConnected(EditableWire _, double wx, double wy) => endpointTest(wx, wy);
 
         var comps = Components.Select(c =>
         {
@@ -1531,6 +1509,76 @@ public sealed class SchematicEditModel
     /// Exact P-multiples map to their integer index; float-dust rounds to the same cell.</summary>
     private (long, long) QuantKey(double x, double y)
         => ((long)Math.Round(x / GridSize), (long)Math.Round(y / GridSize));
+
+    /// <summary>
+    /// Is there anything at (x, y) for a PORT to be connected to?
+    ///
+    /// <para>O(1) against <c>ConPointCounts</c>: the port itself contributes 1, so a count of 2 or
+    /// more means something else — another port, or a wire vertex — shares its cell. The linear
+    /// fallback catches the one case a vertex hash cannot, a port sitting on a wire's BODY.</para>
+    ///
+    /// <para>Handed out as a closure so the live drag preview can ask the SAME question of the SAME
+    /// pass that <see cref="BuildRenderModel"/> asks — the two used to be one local function here,
+    /// and a second copy for the drag is exactly how a pin comes to render connected while the model
+    /// says otherwise.</para>
+    /// </summary>
+    private Func<double, double, bool> PortConnectionTest(ConnectivityGeometry cg) => (wx, wy) =>
+    {
+        var key = QuantKey(wx, wy);
+        if (cg.ConPointCounts.TryGetValue(key, out int cnt) && cnt >= 2) return true;
+        // A net label sitting on the pin IS the connection — see FreeNetLabelKeys.
+        if (cg.FreeNetLabelKeys.Contains(key)) return true;
+        // Fallback: port on wire body interior (not at any vertex/endpoint).
+        foreach (var w in Wires)
+        {
+            var pts = w.Points;
+            for (int i = 0; i < pts.Count - 1; i++)
+                if (SchematicGeometry.PointOnSegment(wx, wy, pts[i].X, pts[i].Y,
+                                                      pts[i + 1].X, pts[i + 1].Y, ConnectTolerance)) return true;
+        }
+        return false;
+    };
+
+    /// <summary>
+    /// Is a WIRE ENDPOINT at (x, y) holding on to anything? O(1): another vertex sits there (a
+    /// shared corner) or it is an auto-junction (it lands on another wire's body — a T).
+    /// The companion to <see cref="PortConnectionTest"/>, and shared for the same reason.
+    /// </summary>
+    private Func<double, double, bool> EndpointConnectionTest(ConnectivityGeometry cg) => (wx, wy) =>
+    {
+        var key = QuantKey(wx, wy);
+        if (cg.ConPointCounts.TryGetValue(key, out int cnt) && cnt > 1) return true;
+        return cg.AutoDotKeys.Contains(key);
+    };
+
+    /// <summary>
+    /// The junction dots AND the two connection tests, from ONE connectivity pass — what a live drag
+    /// needs to draw a frame that tells the truth about what is attached to what.
+    ///
+    /// <para>Connectivity here is deferred to drag-end for everything else, and that is right for
+    /// everything else: a component takes its wires with it, so a pin that was connected when the
+    /// drag started is still connected at every frame in between, and the stale answer is the
+    /// correct one. It stops being true the moment something can come OFF mid-drag — a
+    /// <see cref="SymbolKind.VProbe"/>, which is the one kind that does — and a pin that reads
+    /// "connected" while it visibly sits in empty space is the sort of thing a user believes.</para>
+    ///
+    /// <para>One pass rather than three: the dots and both tests are all derived from the same
+    /// <c>ConnectivityGeometry</c>, so a frame cannot draw a junction dot where its own port test
+    /// says nothing is attached.</para>
+    /// </summary>
+    public readonly record struct LiveConnectivity(
+        IReadOnlyList<SchematicDot>  Dots,
+        Func<double, double, bool>   IsPortConnected,
+        Func<double, double, bool>   IsWireEndpointConnected);
+
+    /// <summary>Computes <see cref="LiveConnectivity"/> from the geometry as it stands right now.
+    /// O(N), like the full connectivity pass — the caller decides how big is too big.</summary>
+    public LiveConnectivity ComputeLiveConnectivity()
+    {
+        var cg = ComputeConnectivityGeometry();
+        return new LiveConnectivity(
+            AssembleConnectionDots(cg), PortConnectionTest(cg), EndpointConnectionTest(cg));
+    }
 
     /// <summary>Geometry derived for the connectivity pass: vertex hashes, auto-junction points
     /// (3+ segment meetings with a vertex), and a crossing predicate. Shared so the render model,

@@ -383,6 +383,45 @@ measurements reference that current: `I("Iout", 1)`. No parameters.
 
 {{table: components/IProbe}}
 
+### Voltage Probe (VProbe) {#vprobe}
+
+{{symbol: vprobe}}
+
+A one-terminal voltage probe. Drop it anywhere on a wire and that net is reported under the probe's
+instance name — `Vout`, say. That name is what the trace picker lists and what a measurement
+expression reads: `V("Vout")`.
+
+It is a label, not a part. It has one terminal, so it cannot bridge two nets; the elaborator builds no
+model for it, so it stamps nothing; and a design simulates identically with every VProbe deleted.
+Placing one can never change an answer — it can only add a name to it.
+
+**On an unnamed wire the probe's name becomes the net's name.** There is one row in the results, called
+`Vout`, and no `n7` beside it — the automatic name was never a name anyone chose, and two rows for one
+point in the circuit is one row too many.
+
+**On a wire you have already labelled, both names appear.** The label is not overwritten: a wire
+labelled `n_drain` with a `Vout` probe on it shows up twice — as `n_drain` and as `Vout` — carrying the
+same voltage. The probe is an *alias* there, and either name plots and measures the same node.
+
+Two rules keep the names unambiguous, and breaking either refuses the run rather than reporting:
+
+- Two VProbes may not share a name.
+- A VProbe may not share a name with a net.
+
+A VProbe that touches nothing is reported in the Messages panel and drops out of the results, rather
+than reporting a plausible number for a point you never probed. So is one placed on ground, which is
+0 V by definition.
+
+**It is the one component you can drag off a wire.** Every other symbol takes its wires with it when
+you move it, because moving the picture must never re-wire the circuit. A probe has nothing to
+re-wire, so dragging it leaves the drawing exactly as it was and puts the probe wherever you dropped
+it — pick it up, look somewhere else, run again, with no repair work in between. Rotating it behaves
+the same way, and a wire dragged out from under a probe simply leaves it behind.
+
+Select the probe **and** its wire together and they move as one, so the probe stays on the net.
+
+{{table: components/VProbe}}
+
 ### Tuner / SourceTuner / LoadTuner {#tuner}
 
 <div class="symbol-row">

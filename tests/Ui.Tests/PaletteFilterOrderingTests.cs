@@ -21,7 +21,7 @@ public class PaletteFilterOrderingTests
         string[] expected =
         [
             "R", "GND", "L", "M", "C", "NonlinearC",
-            "Term", "TermG", "VAR", "MEAS", "Vdc", "IProbe",
+            "Term", "TermG", "VAR", "MEAS", "Vdc", "IProbe", "VProbe",
             "P1Tone", "VTone", "ITone",
             "S2P", "S3P", "SPICE", "TLIN", "MLIN",
             "SourceTuner", "LoadTuner", "Z1P", "wBond",
@@ -44,11 +44,12 @@ public class PaletteFilterOrderingTests
     [Fact]
     public void AllItemsPinnedOrder_EverythingAfterThePinnedRows_KeepsAllItemsOwnRelativeOrder()
     {
-        // 25 = the length of LibraryCatalog's own AllFilterPinnedOrder. Bump this when a row is
-        // pinned or unpinned; Match was the 23rd (2026-08-19), ITone the 24th (2026-08-29), and
+        // 26 = the length of LibraryCatalog's own AllFilterPinnedOrder. Bump this when a row is
+        // pinned or unpinned; Match was the 23rd (2026-08-19), ITone the 24th (2026-08-29),
         // SpiceModel the 25th (2026-09-01), pinned next to SnP because it is the same gesture —
-        // placing a file the user already has.
-        const int PinnedRows = 25;
+        // placing a file the user already has — and VProbe the 26th, pinned next to IProbe for the
+        // same reason.
+        const int PinnedRows = 26;
         var pinned      = LibraryCatalog.AllItemsPinnedOrder();
         var pinnedSet   = pinned.Take(PinnedRows).Select(i => (i.Kind, i.PortCount)).ToHashSet();
         var restActual  = pinned.Skip(PinnedRows).Select(i => (i.Kind, i.PortCount)).ToList();

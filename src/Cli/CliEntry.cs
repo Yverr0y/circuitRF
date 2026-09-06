@@ -299,8 +299,11 @@ static int RunDc(string[] args)
         // set of node voltages rather than one with a hole where node 0 should be.
         Console.WriteLine("Node voltages:");
         Console.WriteLine($"  {"0",-28} {0.0,14:G6}");
-        for (int i = 1; i < nl.Nodes.Count; i++)
-            Console.WriteLine($"  {nl.Nodes.NameOf(i),-28} {result.NodeVoltages[i - 1],14:G6}");
+        // Through ResultRows, so a VProbe's own name is listed here exactly as it is in the
+        // exported cube — a probe that reports in the GUI and not headlessly is worse than none.
+        var (dcRows, dcNames) = nl.Nodes.ResultRows(excludeInternal: false);
+        for (int i = 0; i < dcRows.Length; i++)
+            Console.WriteLine($"  {dcNames[i],-28} {result.NodeVoltages[dcRows[i] - 1],14:G6}");
 
         PrintWorkerOutput();
 

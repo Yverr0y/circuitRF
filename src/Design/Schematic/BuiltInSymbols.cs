@@ -69,6 +69,7 @@ public static class BuiltInSymbols
     private static readonly Symbol _term         = BuildTerm();
     private static readonly Symbol _pin          = BuildPin();
     private static readonly Symbol _iprobe       = BuildIProbe();
+    private static readonly Symbol _vprobe       = BuildVProbe();
     private static readonly Symbol _var          = BuildVar();
     private static readonly Symbol _meas         = BuildMeas();
     private static readonly Symbol _generic      = BuildGeneric();
@@ -219,6 +220,7 @@ public static class BuiltInSymbols
             case SymbolKind.Term:       return _term;
             case SymbolKind.Pin:        return _pin;
             case SymbolKind.IProbe:     return _iprobe;
+            case SymbolKind.VProbe:     return _vprobe;
             case SymbolKind.Var:        return _var;
             case SymbolKind.Meas:       return _meas;
             case SymbolKind.P1Tone:     return _p1Tone;
@@ -283,9 +285,10 @@ public static class BuiltInSymbols
                    Cx = cx, Cy = cy, R = r,
                    StartDeg = startDeg, SweepDeg = sweepDeg };
 
-    private static CirclePrimitive Circ(double cx, double cy, double r, bool filled = false)
+    private static CirclePrimitive Circ(double cx, double cy, double r, bool filled = false,
+                                        SymbolStrokeTier tier = SymbolStrokeTier.Normal)
         => new() { ColorRole  = SymbolColorRole.SymbolLine,
-                   StrokeTier = SymbolStrokeTier.Normal,
+                   StrokeTier = tier,
                    Cx = cx, Cy = cy, R = r, Filled = filled };
 
     private static QuadCurvePrimitive QC(double p0x, double p0y,
@@ -910,6 +913,17 @@ public static class BuiltInSymbols
         L(50, 0,  100, 0),               // stem: hex right vertex (50,0) → port tip (100,0)
     ], SymbolKind.Pin);
 
+    /// <summary>
+    /// The size of the letter inside a probe's display — the <c>I</c> in the IProbe's ammeter window
+    /// and the <c>V</c> in the VProbe's dial.
+    ///
+    /// <para>ONE constant, because the two are read side by side on the same schematic and a letter
+    /// that is a little bigger on one of them reads as a mistake rather than as a distinction (owner,
+    /// 2026-09-06). It is bounded by the SMALLER of the two frames, which is the ammeter window's
+    /// ~36-unit clear height, not the VProbe's 52-unit inner ring.</para>
+    /// </summary>
+    private const double ProbeGlyphTextSize = 26;
+
     // ── IProbe — current probe / ammeter ─────────────────────────────────────
     // 2-terminal series ammeter. Pins at the BOTTOM (0,100)/(100,100), 100 apart.
     // Stems rise to a horizontal connector at y=0 carrying a right-pointing current
@@ -925,8 +939,42 @@ public static class BuiltInSymbols
         QC(25, -52, 50, -58, 75, -52),         // window top edge (longer, bows up)
         L(35, -22, 25, -52),                   // window left side (angled out toward top)
         L(65, -22, 75, -52),                   // window right side (angled out toward top)
+        // The quantity it reports, in the middle of its own display — the same size as the VProbe's
+        // "V", so the pair reads as a pair (owner, 2026-09-06). The window's clear span at its
+        // centre is ~36 tall by ~40 wide (the two edges bow apart to y = -19 and y = -55), against
+        // a cap height near 19 here, so the letter sits with roughly a third of the window as air
+        // above and below it and no shrinking was needed. ProbeGlyphTextSize is what keeps the two
+        // symbols in step; changing it changes both.
+        Txt("I", 50, -37, fontSize: ProbeGlyphTextSize),
         RRect(50, -24, 80, 84, 10),            // enclosing rounded rect (window + arrow)
     ], SymbolKind.IProbe);
+
+    // -- VProbe -- voltage probe / net-name tap -------------------------------
+    // ONE terminal, at the tip of an arrow that points down and to the LEFT, so the glyph reads as
+    // "this dial is reading THAT point". Deliberately smaller than the IProbe: a VProbe hangs off a
+    // wire the design is already dense around, and it is an annotation rather than a device.
+    //
+    // Two concentric circles rather than one, with the weights the other way round from a body
+    // outline: the OUTER ring is heavy and the inner one hairline, which is how a meter face is
+    // drawn and is what keeps it from reading as the mixer's or the SDD's plain circle at a glance.
+    //
+    // THE DIAL SITS HALF A GRID LEFT OF THE ORIGIN, at (-50, 0), so the "V" lands in the middle of a
+    // grid square rather than on the corner where the origin is (owner, 2026-09-06). A probe is
+    // dropped onto a wire in the middle of a design that is already dense, and centred on the origin
+    // it overlapped whatever was placed on the next node up.
+    //
+    // The pin, and therefore the arrow's tip, does NOT move with it — the tip is the thing the user
+    // aims at a wire. So the shaft and the arrowhead are re-aimed along the line from the new dial
+    // centre to that same tip: the shaft starts exactly on the outer ring (centre + 34 along the
+    // unit vector to the tip) and the head is the last 24 of it. Keeping the old 135-degree head
+    // while the shaft came in at 116.6 would draw a bent arrow.
+    private static Symbol BuildVProbe() => Sym([
+        Circ(-50, 0, 34, filled: false, tier: SymbolStrokeTier.Thick),  // outer ring (heavy)
+        Circ(-50, 0, 26, filled: false, tier: SymbolStrokeTier.Thin),   // inner ring (hairline)
+        Txt("V", -50, 0, fontSize: ProbeGlyphTextSize),                 // the quantity it reports
+        L(-65, 30, -89, 79),                                            // shaft: ring edge -> head
+        Poly(true, -100, 100, -96, 75, -82, 82),                        // arrowhead, tip AT the pin
+    ], SymbolKind.VProbe);
 
     // ── Ground — stem + filled downward triangle (Core Graphics style) ────────
     // Pins: (0,0) — the connection point at the top of the symbol.

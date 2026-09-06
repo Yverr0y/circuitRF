@@ -216,6 +216,23 @@ public static class NetExtractor
             }
         }
 
+        // A VProbe attaches the way a NET LABEL does, not the way a device pin does. A device pin
+        // unions only where a wire actually has a vertex — right for a device, since a pin sitting
+        // mid-span would silently tap a run the user drew straight past it — and wrong for a probe,
+        // whose entire gesture is being dropped onto the middle of a wire. So it gets the label's
+        // own segment scan. Placed after the geometric unions so the run it lands on is already one
+        // class; before naming, so the probe's net is the run's net.
+        foreach (var comp in model.Components)
+        {
+            if (comp.Symbol != SymbolKind.VProbe) continue;
+            if (comp.Disable is DisableState.Open or DisableState.Short) continue;
+            var vdefs = GetEffectivePortDefs(model, comp, cellRefResolutions);
+            if (vdefs.Count == 0 || comp.IsPortDetached(vdefs[0].PortIndex)) continue;
+            var (vpx, vpy) = model.PortWorldOf(comp, vdefs[0]);
+            if (FindWireSpanKey(model, QK, gs, vpx, vpy) is { } wireKey)
+                uf.Union(QK(vpx, vpy), wireKey);
+        }
+
         // Same-name net label union (§2.1.6): labels with identical names make one net,
         // even across physically-disjoint wires.
         var labelNetKeys = new Dictionary<EditableNetLabel, (long, long)?>();
@@ -275,6 +292,17 @@ public static class NetExtractor
             if (comp.Symbol == SymbolKind.Pin)    continue;
             if (comp.Symbol == SymbolKind.Var)    continue;  // VAR rows routed to Variables, not instances
             if (comp.Symbol == SymbolKind.Meas)   continue;  // MEAS rows routed to Measurements, not instances
+
+            // A VProbe touching nothing would otherwise be emitted against its own auto-named net —
+            // a row in the results that reads a plausible number for a point in the circuit the user
+            // never actually probed. Say so and emit nothing instead.
+            if (comp.Symbol == SymbolKind.VProbe &&
+                !IsVProbeConnected(model, comp, uf, QK, cellRefResolutions))
+            {
+                conflicts.Add(
+                    $"VProbe {comp.InstanceName} is not connected and will not report any results.");
+                continue;
+            }
 
             // A SpiceModel is not a cell reference and not a primitive: it is a file, and what it
             // emits — a device or a subcircuit — is a property of that file. Checked before both,
@@ -1604,6 +1632,77 @@ public static class NetExtractor
     }
 
     /// <summary>
+    /// The union-find key of the wire run passing through (x, y), or null when no wire does — the
+    /// segment-scan half of <see cref="FindLabelNetKey"/>, without its "already a key" shortcut.
+    ///
+    /// <para>The shortcut is what makes it a separate function rather than a call. Every component
+    /// pin is seeded into the union-find before this runs, so a probe asking about its OWN pin
+    /// position would be answered with its own pin — which is exactly the question it is trying to
+    /// avoid asking.</para>
+    /// </summary>
+    private static (long, long)? FindWireSpanKey(
+        SchematicEditModel model, Func<double, double, (long, long)> QK,
+        double gs, double x, double y)
+    {
+        double tol = gs / 2.0;
+        foreach (var wire in model.Wires)
+        {
+            var pts = wire.Points;
+            for (int i = 0; i < pts.Count - 1; i++)
+                if (SchematicGeometry.PointOnSegment(
+                        x, y, pts[i].X, pts[i].Y, pts[i + 1].X, pts[i + 1].Y, tol))
+                    return QK(pts[i].X, pts[i].Y);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="probe"/>'s single terminal reaches anything at all — a wire, or
+    /// another component's pin.
+    ///
+    /// <para>Asked of the union-find CLASS rather than of geometry, so every way two things can
+    /// share a net counts the same: a shared vertex, a T-junction, a dotted crossing, a same-name
+    /// label pair on two disjoint runs. What it deliberately does not count is another VProbe — two
+    /// probes touching each other and nothing else are still reading nothing, and reporting one of
+    /// them as connected would be worse than reporting neither.</para>
+    /// </summary>
+    private static bool IsVProbeConnected(
+        SchematicEditModel model, EditableComponent probe,
+        UnionFind uf, Func<double, double, (long, long)> QK,
+        Dictionary<string, CellSymbolResolution>? cellRefResolutions)
+    {
+        var defs = GetEffectivePortDefs(model, probe, cellRefResolutions);
+        if (defs.Count == 0 || probe.IsPortDetached(defs[0].PortIndex)) return false;
+
+        var (px, py) = model.PortWorldOf(probe, defs[0]);
+        var key = QK(px, py);
+        if (!uf.Contains(key)) return false;
+        var root = uf.Find(key);
+
+        foreach (var wire in model.Wires)
+            foreach (var pt in wire.Points)
+            {
+                var wk = QK(pt.X, pt.Y);
+                if (uf.Contains(wk) && uf.Find(wk) == root) return true;
+            }
+
+        foreach (var other in model.Components)
+        {
+            if (ReferenceEquals(other, probe))     continue;
+            if (other.Symbol == SymbolKind.VProbe) continue;
+            if (other.Disable is DisableState.Open) continue;
+            foreach (var d in GetEffectivePortDefs(model, other, cellRefResolutions))
+            {
+                if (other.IsPortDetached(d.PortIndex)) continue;
+                var (ox, oy) = model.PortWorldOf(other, d);
+                var ok = QK(ox, oy);
+                if (uf.Contains(ok) && uf.Find(ok) == root) return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Assigns a stable name to each union-find root.
     /// Priority: ground → "0"; net-label name; auto-stable n1/n2/…
     /// </summary>
@@ -1645,6 +1744,54 @@ public static class NetExtractor
             }
             else
                 rootToName[root] = lbl.Name;
+        }
+
+        // VProbe names — the same statement a net label makes, one priority step BELOW a label.
+        //
+        // A probe on an UNNAMED net becomes that net's name outright, rather than a second name for
+        // it: naming it `n7` as well would put two rows in every result for one point in the
+        // circuit, and the auto-name is not a name anybody chose (owner, 2026-09-06). A probe on a
+        // net that already carries a user's own label leaves the label standing and is emitted as an
+        // instance, which the elaborator turns into an ALIAS — both names, one node.
+        //
+        // A name already spoken for is refused rather than reused: two roots carrying one name merge
+        // into ONE node at elaboration, which is a probe changing the circuit — the one thing it may
+        // never do.
+        {
+            var takenNames = new HashSet<string>(rootToName.Values, StringComparer.Ordinal);
+            if (pinNetNameMap is not null)
+                foreach (var portName in pinNetNameMap.Values) takenNames.Add(portName);
+
+            foreach (var comp in model.Components)
+            {
+                if (comp.Symbol != SymbolKind.VProbe) continue;
+                if (comp.Disable is DisableState.Open or DisableState.Short) continue;
+
+                var vdefs = GetEffectivePortDefs(model, comp, cellRefResolutions);
+                if (vdefs.Count == 0 || comp.IsPortDetached(vdefs[0].PortIndex)) continue;
+                var (vpx, vpy) = model.PortWorldOf(comp, vdefs[0]);
+                var vkey = QK(vpx, vpy);
+                if (!uf.Contains(vkey)) continue;
+
+                var vroot = uf.Find(vkey);
+                if (rootToName.ContainsKey(vroot)) continue;   // ground, or a label the user gave
+
+                // A probe touching nothing must not name its OWN floating pin: the emission loop
+                // drops it and reports it, and a net name left behind here would put it in the
+                // picker with nothing behind it.
+                if (!IsVProbeConnected(model, comp, uf, QK, cellRefResolutions)) continue;
+
+                var name = comp.InstanceName;
+                if (string.IsNullOrWhiteSpace(name) || !takenNames.Add(name))
+                {
+                    if (!string.IsNullOrWhiteSpace(name))
+                        conflicts.Add($"VProbe {name} has the same name as a net in this design; " +
+                                      $"its own net keeps its automatic name.");
+                    continue;
+                }
+                rootToName[vroot] = name;
+                labeledNetNames?.Add(name);
+            }
         }
 
         // Pin port names — a Pin OWNS its net's name (beats a coincident label); ground still wins.
@@ -1704,9 +1851,17 @@ public static class NetExtractor
             }
         }
 
+        // Skip an auto-name a user name has already taken. Two roots sharing one name merge into ONE
+        // node at elaboration — silently, and as a different circuit — so `n2` must not be handed out
+        // when something on the drawing is already called `n2`.
+        var assigned = new HashSet<string>(rootToName.Values, StringComparer.Ordinal);
         int idx = 1;
         foreach (var root in orderedRoots)
-            rootToName[root] = $"n{idx++}";
+        {
+            string auto;
+            do { auto = $"n{idx++}"; } while (!assigned.Add(auto));
+            rootToName[root] = auto;
+        }
 
         // Collect net names whose final assigned name still comes from a user-placed label.
         // A Pin-overridden label (rootToName[root] != lbl.Name) is excluded; ground "0" is also excluded.

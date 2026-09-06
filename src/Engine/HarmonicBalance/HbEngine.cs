@@ -605,9 +605,10 @@ public sealed class HbEngine
         // Expand V/INl to all user-facing non-ground nodes (brief hb-linear-nodes-in-cube).
         // Interface nodes use the converged Newton solution directly; linear-only nodes
         // are recovered via HbLinearBackSolver.  __-prefixed internal mint nodes are excluded.
-        var fullNodeIds = Enumerable.Range(1, _netlist.Nodes.Count - 1)
-            .Where(c => !_netlist.Nodes.NameOf(c).StartsWith("__", StringComparison.Ordinal))
-            .ToArray();
+        // Every user-facing non-ground node under its own name, then one extra row per VProbe
+        // alias carrying the SAME node's spectrum under the probe's name. One call rather than the
+        // loop this used to be, so DC and HB cannot disagree about which rows a probe adds.
+        var (fullNodeIds, namesFull) = _netlist.Nodes.ResultRows(excludeInternal: true);
 
         var ifNodeToIdx = new Dictionary<int, int>(N);
         for (int n = 0; n < N; n++)
@@ -616,12 +617,10 @@ public sealed class HbEngine
         int     Nfull     = fullNodeIds.Length;
         var     Vfull     = new Complex[Nfull, K + 1];
         var     INlfull   = new Complex[Nfull, K + 1];
-        var     namesFull = new string[Nfull];
 
         for (int fi = 0; fi < Nfull; fi++)
         {
             int c = fullNodeIds[fi];
-            namesFull[fi] = _netlist.Nodes.NameOf(c);
             if (ifNodeToIdx.TryGetValue(c, out int ifIdx))
             {
                 for (int k = 0; k <= K; k++)
@@ -942,20 +941,19 @@ public sealed class HbEngine
 
         // Expand V/INl to all non-ground, non-internal user nodes (interface from the Newton solution;
         // linear-only nodes from the back-solve). __-prefixed mint nodes are excluded.
-        var fullNodeIds = Enumerable.Range(1, _netlist.Nodes.Count - 1)
-            .Where(c => !_netlist.Nodes.NameOf(c).StartsWith("__", StringComparison.Ordinal))
-            .ToArray();
+        // Every user-facing non-ground node under its own name, then one extra row per VProbe
+        // alias carrying the SAME node's spectrum under the probe's name. One call rather than the
+        // loop this used to be, so DC and HB cannot disagree about which rows a probe adds.
+        var (fullNodeIds, namesFull) = _netlist.Nodes.ResultRows(excludeInternal: true);
         var ifNodeToIdx = new Dictionary<int, int>(N);
         for (int n = 0; n < N; n++) ifNodeToIdx[ifNodes[n]] = n;
 
         int Nfull   = fullNodeIds.Length;
         var Vfull   = new Complex[Nfull, M];
         var INlfull = new Complex[Nfull, M];
-        var namesFull = new string[Nfull];
         for (int fi = 0; fi < Nfull; fi++)
         {
             int c = fullNodeIds[fi];
-            namesFull[fi] = _netlist.Nodes.NameOf(c);
             if (ifNodeToIdx.TryGetValue(c, out int ifIdx))
                 for (int m = 0; m < M; m++) { Vfull[fi, m] = V[ifIdx, m]; INlfull[fi, m] = solveResult.INl[ifIdx, m]; }
             else
@@ -1213,20 +1211,19 @@ public sealed class HbEngine
         var xMix = new Complex[M][];
         for (int m = 0; m < M; m++) xMix[m] = SolveMixFull(m);
 
-        var fullNodeIds = Enumerable.Range(1, _netlist.Nodes.Count - 1)
-            .Where(c => !_netlist.Nodes.NameOf(c).StartsWith("__", StringComparison.Ordinal))
-            .ToArray();
+        // Every user-facing non-ground node under its own name, then one extra row per VProbe
+        // alias carrying the SAME node's spectrum under the probe's name. One call rather than the
+        // loop this used to be, so DC and HB cannot disagree about which rows a probe adds.
+        var (fullNodeIds, namesFull) = _netlist.Nodes.ResultRows(excludeInternal: true);
         var ifNodeToIdx = new Dictionary<int, int>(N);
         for (int n = 0; n < N; n++) ifNodeToIdx[ifNodes[n]] = n;
 
         int Nfull   = fullNodeIds.Length;
         var Vfull   = new Complex[Nfull, M];
         var INlfull = new Complex[Nfull, M];
-        var namesFull = new string[Nfull];
         for (int fi = 0; fi < Nfull; fi++)
         {
             int c = fullNodeIds[fi];
-            namesFull[fi] = _netlist.Nodes.NameOf(c);
             if (ifNodeToIdx.TryGetValue(c, out int ifIdx))
                 for (int m = 0; m < M; m++) { Vfull[fi, m] = V[ifIdx, m]; INlfull[fi, m] = solveResult.INl[ifIdx, m]; }
             else

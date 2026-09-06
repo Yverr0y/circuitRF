@@ -196,6 +196,14 @@ the component's pins connect to (order = the component's pin order); the `key=va
 - `IProbe:Iout Vout n6` — a 0&nbsp;V series **current probe** (ammeter). Its instance name
   (`Iout`, `Iin`, `IDC`) is how measurements read its branch current, e.g. `I("Iout", 1)` below.
 
+- `VProbe:Vg n3` — a one-terminal **voltage probe**. It stamps nothing: the elaborator reads the one
+  net it names and publishes that net's voltage under the probe's own instance name, so `V("Vg")`
+  reads it and the trace picker lists it. On a net the schematic never named, extraction has already
+  written the probe's name as the NET's name — you will see `VProbe:Vg Vg` — and there is one row in
+  the results; on a net a label already named, the probe's name is a second name for it and both
+  appear. Its name must not collide with a net name or with another VProbe: either refuses the run. A
+  VProbe naming a net nothing else reaches reports nothing and says so.
+
 ### 5 · Analyses (HB + parametric sweeps) {#w-analyses}
 
 ```netlist

@@ -29,18 +29,23 @@ public static class DcResultPacker
 {
     public static DataSet Pack(NonlinearDcEngine.DcResult dc, ElaboratedNetlist nl)
     {
-        int n = dc.NodeVoltages.Length;
-        var nodeVals  = new double[n];
-        var nodeNames = new string[n];
+        // Every non-ground node under its own name, then one extra row per VProbe alias carrying
+        // the SAME node's voltage under the probe's name (NodeMap.ResultRows). A design with no
+        // VProbe gets exactly the rows it always did.
+        var (rowNodes, nodeNames) = nl.Nodes.ResultRows(excludeInternal: false);
+        int n = rowNodes.Length;
+        var nodeVals = new double[n];
+        var nodeV    = new double[n];
         for (int k = 0; k < n; k++)
         {
-            nodeVals[k]  = k;
-            nodeNames[k] = nl.Nodes.NameOf(k + 1);
+            nodeVals[k] = k;
+            int idx     = rowNodes[k] - 1;   // NodeVoltages[i] is node i+1
+            nodeV[k]    = idx >= 0 && idx < dc.NodeVoltages.Length ? dc.NodeVoltages[idx] : 0.0;
         }
         var nodeAxis = new Axis("node", nodeVals, "V", nodeNames);
 
         var ds = new DataSet();
-        ds.Add("V",         new DataCube([nodeAxis], (double[])dc.NodeVoltages.Clone()));
+        ds.Add("V",         new DataCube([nodeAxis], nodeV));
         ds.Add("Converged", DataCube.Scalar(dc.Converged ? 1.0 : 0.0));
         ds.Add("Residual",  DataCube.Scalar(dc.FinalResidual));
 

@@ -1,5 +1,123 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## VProbe — a probe that names a net, and the two ways it could have changed the circuit (2026-09-06)
+
+The voltage probe is a one-terminal component that stamps nothing: extraction emits a `VProbe:` line,
+the elaborator reads the one net it names, publishes that net under the probe's own instance name and
+builds no model. Deleting every VProbe from a design must leave the answer bit-identical, and two
+things found while building it would have broken that quietly.
+
+### 1. Two roots under one name MERGE into one node, silently, as a different circuit
+
+`Elaborator` resolves a net by NAME (`NodeMap.GetOrAssign`), so two distinct union-find roots that
+`AssignNetNames` happens to give the same name become **one** node — one matrix row where the drawing
+has two. Nothing reports it; the run converges and answers the wrong question. A probe is the easiest
+way to reach that state, because its name is typed by hand into an instance field rather than onto a
+wire, so three things guard it:
+
+- extraction refuses to hand a probe's name to a net when a label or a Pin port already owns it, and
+  reports it (the probe's net keeps its automatic name and the probe becomes an alias instead);
+- the elaborator REFUSES THE RUN when a probe's name is any other net's name, and when two probes
+  share a name — a warning is the wrong answer for something that makes one name mean two traces;
+- **the auto-namer now skips a name already taken.** This was a pre-existing hazard with nothing to do
+  with probes: a user net LABELLED `n2` and an auto-named net that reaches `n2` merged, and had done
+  since auto-naming was written. `AssignNetNames` now advances past any `nK` already spoken for.
+
+### 2. A probe must never MINT the net it points at
+
+`_voltageProbes` is collected during the flatten and resolved afterwards, deliberately. Resolving
+inline would call `GetOrAssign` on the named net, and for a name nothing else reaches that ADDS a node
+— a matrix row nothing touches, which is a singular solve. After the walk, a name that is still absent
+is genuinely absent and is reported as such. The late pass also gets to see every net that exists,
+which is what makes the collision check above complete.
+
+### 3. A probe attaches the way a LABEL does, not the way a pin does
+
+`AddGeometricUnions` unions a component pin only where a wire has a VERTEX. That is right for a device
+— a pin sitting mid-span would silently tap a run the user drew straight past it — and wrong for a
+probe, whose whole gesture is being dropped onto the middle of a wire. `FindWireSpanKey` is the
+segment scan `FindLabelNetKey` already had, minus its "the point is already a key" shortcut: every
+component pin is seeded into the union-find before it runs, so a probe asking about its own pin
+position would otherwise be answered with its own pin.
+
+### 4. Rename or alias, decided by whether the user had already named the net
+
+Owner, 2026-09-06: a probe on an UNNAMED net becomes that net's name outright rather than adding a
+second row, because `n7` was never a name anybody chose and two rows for one point in the circuit is
+one row too many. A probe on a LABELLED net leaves the label standing and aliases it, so both names
+appear. Extraction decides this (it is the half that knows where a name came from — label, Pin, or
+auto); the elaborator treats "the alias IS this net's name" as nothing to do rather than as a
+collision, which is what lets the two halves agree without a second flag in the `.cnl`.
+
+An alias carries NO matrix row: `NodeMap.Aliases` is a name pointing at an existing node, and
+`NodeMap.ResultRows` is the one place that turns it into an extra row on a result's node axis — used
+by `DcResultPacker`, all three `HbEngine` packers and the CLI's own `dc` listing, so a probe cannot
+report under one engine and vanish under another.
+
+### 5. It is the one component that comes OFF a wire when dragged (2026-09-06)
+
+`ComponentTypeRegistry.DetachesFreely` is true for `VProbe` and nothing else. The editor's standing
+guarantee — moving the picture never re-wires the circuit — is enforced in **six** separate places,
+and a probe has to be excluded from every one of them or the exemption is only half true and the two
+halves disagree on screen:
+
+| Where | What it does for every other kind | Why a probe is out |
+|---|---|---|
+| `UpdateConnectedWireEndpointsLive`'s port map | drags wire endpoints live | the preview must show what the commit will do |
+| `BuildPortMoves` (commit) | same, at commit | the other half of the same map |
+| `BuildTapStubs` (via both maps) | grows a stub back to a wire a pin has left | a probe leaves nothing behind |
+| `_dragPinOnPinContacts`, **both directions** | auto-wires a separating pin-on-pin contact | a probe coming off a lead, and a lead coming off a probe |
+| `IsPointHeldByStationaryPin` | a shared point stays with the STATIONARY pin | a probe on a lead would otherwise freeze every later drag of the part it watches |
+| `ComputeWireSlideClamp` (b) | bounds a wire's slide so a body tap stays on it | a wire the user grabbed would refuse to move, with no visible reason |
+| `PinFollowReroute.Build`'s `moves` | re-routes a wire onto a rotated/mirrored pin | rotating a probe must not redraw the schematic |
+
+**`PinFollowReroute` excludes it from `moves` and NOT from `pinPoints`.** A probe drags nothing, but a
+re-route laid across a probe's pin would silently CONNECT it — the one remaining way this could
+surprise somebody — so it stays in the obstacle scan.
+
+**Nothing is needed for the together case.** Select the probe and its wire and both move by the same
+delta, so the pin is still on the wire when the gesture ends; the exclusion governs only the case
+where the two move by different amounts. `VProbeDragDetachTests` pins both halves, and 7 of its 9
+tests were confirmed to fail with `DetachesFreely` forced to `false`.
+
+### 6. Detaching mid-drag is the first thing that made DEFERRED connectivity wrong (2026-09-06)
+
+A drag never rebuilt the render model — connectivity is O(N) and the drag runs per frame — so port
+markers and wire-endpoint squares showed the state as it was when the gesture began. That was
+*correct*, not merely cheap: every component takes its wires with it, so a pin connected at drag start
+is connected at every frame in between, and the only live override needed was one that turns a marker
+GREEN (`liveDotKeys`, for a pin that has just met a junction dot).
+
+A probe breaks the premise. It comes off, so does the wire endpoint it was holding, and both kept
+drawing as attached until the user let go — at exactly the moment the user is deciding where to drop
+it (owner report).
+
+- `SchematicEditModel.ComputeLiveConnectivity` returns the dots **and** both connection tests from
+  ONE `ComputeConnectivityGeometry` pass, so a frame cannot draw a junction dot where its own port
+  test says nothing is attached. `BuildRenderModel` now calls the same two closures
+  (`PortConnectionTest` / `EndpointConnectionTest`) it used to declare as local functions — a second
+  copy for the drag is precisely how a pin comes to render connected while the model says otherwise.
+- Bounded by the SAME `LiveDotMaxObjects` (1,500) the live dots already used; past it all three come
+  back null and the renderer falls back to the deferred answer, exactly as before.
+- **The port override runs in one direction only — Connected → Unconnected.** A port the model calls
+  unconnected may be unconnected because the user DETACHED it, and `SchematicPortDef` carries no flag
+  separating that from "nothing is there": turning it green because a wire passes under it would undo
+  an explicit disconnect on screen. The green direction stays with `liveDotKeys`, where it was.
+- **A preview route counts as a connection.** A separating pin-on-pin pair and a mid-span tap's stub
+  are wires the COMMIT will create; they are not in the model yet, so a naive live test calls both
+  ends loose and every such drag flashes red for its whole length. `LiveConnectivity(previewWires)`
+  folds their points in. `MidDrag_ASeparatingPinOnPinPair_DoesNotFlashUnconnected` fails without it.
+
+### 7. Both probes name their quantity, at ONE size
+
+`BuiltInSymbols.ProbeGlyphTextSize` is the `I` in the ammeter window and the `V` in the dial. One
+constant because the two are read side by side and a letter a little bigger on one reads as a mistake
+rather than a distinction (owner). **The binding frame is the ammeter window, not the dial** — its
+clear height is ~36 units (the bowed edges reach y = -19 and y = -55) against the dial's 52 — so if
+the window is ever redrawn smaller, both letters shrink together. `BothProbesNameTheirQuantity_…`
+measures that headroom rather than pinning the number.
+
+
 ## AUT-2 — the schematic and symbol model moved below the UI firewall (2026-09-05)
 
 `brief-automation-2-schematic-below-the-firewall.md`. 41 files left `src/Ui/Schematic` for

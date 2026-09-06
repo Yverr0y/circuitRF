@@ -68,6 +68,7 @@ Generated from the catalog, in catalog order.
 | TermG | `termg` |
 | Pin | `pin` |
 | IProbe | `iprobe` |
+| VProbe | `vprobe` |
 | Tline | `tline` |
 | Mutual | `mutual` |
 | Snp | `snp` |

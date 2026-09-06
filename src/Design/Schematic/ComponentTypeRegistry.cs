@@ -328,6 +328,13 @@ public static class ComponentTypeRegistry
             Category: ComponentCategory.Terminals,
             SearchTerms: ["IProbe", "I", "ammeter", "current", "probe", "meter"],
             IsCommon: true),
+        // VProbe: a one-pin voltage probe. Its instance name (VP1, VP2, ...) becomes an ALIAS for
+        // the net it touches, so the results carry that net under the user's own name as well as
+        // under the net's. It stamps nothing -- see SymbolKind.VProbe.
+        [SymbolKind.VProbe]        = new("VProbe", "VP",
+            Category: ComponentCategory.Terminals,
+            SearchTerms: ["VProbe", "V", "voltmeter", "voltage", "probe", "meter", "net name", "label"],
+            IsCommon: true),
         [SymbolKind.Sdd]           = new("SDD",   "X",
             Category: ComponentCategory.Other,
             SearchTerms: ["SDD", "Sdd", "nonlinear", "behavioral"],
@@ -674,6 +681,31 @@ public static class ComponentTypeRegistry
     public static string InstancePrefix(SymbolKind kind) => Get(kind).InstancePrefix;
 
     /// <summary>
+    /// Whether an edit gesture may leave this component's pin BEHIND — carrying no wire with it when
+    /// it moves, and holding no wire back when a wire moves out from under it.
+    ///
+    /// <para><b>True for exactly one kind, and the answer is what that kind is FOR.</b> Every other
+    /// component in this editor owes the user one guarantee: moving the picture never re-wires the
+    /// circuit. Connectivity here is geometric — a port and a wire vertex at the same point ARE one
+    /// node — so a symbol that moved without taking its wires would silently produce a different
+    /// netlist while still looking wired up. That is why a drag drags the wires, a rotate re-routes
+    /// them, and a wire cannot slide out from under a pin.</para>
+    ///
+    /// <para>A <see cref="SymbolKind.VProbe"/> has nothing to re-wire. It stamps nothing, so moving
+    /// it cannot change the circuit — only which point of the circuit is being reported, which is the
+    /// whole reason to pick one up. Made to drag its wire along, it would deform the schematic every
+    /// time somebody moved it to look somewhere else, and the user would have to repair the drawing
+    /// after every look (owner, 2026-09-06). So it comes off, the wire stays exactly where it was
+    /// drawn, and a probe that ends up on nothing is REPORTED at extraction rather than silently
+    /// reading a floating point.</para>
+    ///
+    /// <para><b>Selecting the probe together with its wire still keeps them together</b>, and needs
+    /// nothing from this: the two move by the same delta, so the pin is still on the wire when the
+    /// gesture ends. This governs only the case where they move by DIFFERENT amounts.</para>
+    /// </summary>
+    public static bool DetachesFreely(SymbolKind kind) => kind is SymbolKind.VProbe;
+
+    /// <summary>
     /// True when this component type owns a "Num" parameter that must be unique across the WHOLE
     /// design — the s-parameter port-numbering pool (Term, TermG, P1Tone all share ONE numbering
     /// space today; Pin has its own separate pool, <c>NextFreePinNum</c> in
@@ -821,6 +853,11 @@ public static class ComponentTypeRegistry
             "A 0 V ammeter: the current it reports flows np to nm. Swapping the two negates every "
           + "measurement that reads it.",
 
+        SymbolKind.VProbe =>
+            "One terminal, at the arrow's tip. It taps the net it touches and names it after the "
+          + "instance; there is no second terminal to get the wrong way round, and nothing it can "
+          + "short together.",
+
         _ => "",
     };
 
@@ -862,6 +899,10 @@ public static class ComponentTypeRegistry
         SymbolKind.TermG         => "Port",  // SAME engine component as Term — R-hk-6, no parallel model
         SymbolKind.Pin           => "Pin",   // sentinel — IsPrimitive("Pin")==false; elaborator skips it
         SymbolKind.IProbe        => "IProbe",
+        // Sentinel, like Var and Meas: no ComponentModelFactory entry exists and none can. A VProbe
+        // line DOES reach the .cnl and the elaborator -- unlike VAR/MEAS -- but the elaborator turns
+        // it into a net-name alias and builds no model, which is what makes it free of the circuit.
+        SymbolKind.VProbe        => "VProbe",
         SymbolKind.Sdd           => "SDD",
         SymbolKind.ZPort         => "Z_Port",
         SymbolKind.Ground        => "GND",
@@ -2531,6 +2572,8 @@ public static class ComponentTypeRegistry
             case "PIN":    kind = SymbolKind.Pin;           return true;
             case "IPROBE":
             case "IP":     kind = SymbolKind.IProbe;        return true;
+            case "VPROBE":
+            case "VP":     kind = SymbolKind.VProbe;        return true;
             case "VAR":    kind = SymbolKind.Var;           return true;
             case "MEAS":   kind = SymbolKind.Meas;          return true;
             case "P1TONE": kind = SymbolKind.P1Tone;        return true;

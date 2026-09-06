@@ -1295,6 +1295,9 @@ public sealed partial class SchematicViewModel : ObservableObject
             {
                 var selComp = EditModel.FindComponent(selId);
                 if (selComp is null) continue;
+                // A probe leaving a pin it was resting on grows no wire back to it: it is coming
+                // off on purpose. Same rule from the other side below, for a probe being left.
+                if (ComponentTypeRegistry.DetachesFreely(selComp.Symbol)) continue;
                 var selDefs = _dragPortDefs[selId];
                 for (int pi = 0; pi < selDefs.Count; pi++)
                 {
@@ -1327,6 +1330,7 @@ public sealed partial class SchematicViewModel : ObservableObject
                     foreach (var other in EditModel.Components)
                     {
                         if (Selection.IsSelected(other.Id)) continue;
+                        if (ComponentTypeRegistry.DetachesFreely(other.Symbol)) continue;
                         var otherDefs = _dragPortDefs[other.Id];
                         for (int opi = 0; opi < otherDefs.Count; opi++)
                         {
@@ -1491,6 +1495,9 @@ public sealed partial class SchematicViewModel : ObservableObject
         foreach (var comp in EditModel.Components)
         {
             if (Selection.IsSelected(comp.Id)) continue;
+            // A probe HOLDS nothing. Left in, a stationary probe on a shared point would win it from
+            // the moving pin, and the wire the user was dragging would stay behind with the probe.
+            if (ComponentTypeRegistry.DetachesFreely(comp.Symbol)) continue;
             var defs = _dragPortDefs is not null && _dragPortDefs.TryGetValue(comp.Id, out var snapped)
                 ? snapped
                 : EditModel.PortDefsOf(comp);
@@ -1741,6 +1748,10 @@ public sealed partial class SchematicViewModel : ObservableObject
         {
             var comp = EditModel.FindComponent(id);
             if (comp is null) continue;
+            // A probe carries nothing with it — see ComponentTypeRegistry.DetachesFreely. Excluding
+            // it HERE, from the one map every follow rule reads, is what makes the live preview and
+            // the commit agree: the wire the user watches stay put is the wire they get.
+            if (ComponentTypeRegistry.DetachesFreely(comp.Symbol)) continue;
             var defs = _dragPortDefs is not null && _dragPortDefs.TryGetValue(id, out var snapped)
                 ? snapped
                 : EditModel.PortDefsOf(comp);
@@ -1966,6 +1977,8 @@ public sealed partial class SchematicViewModel : ObservableObject
         var moves = new List<(double, double, double, double)>();
         foreach (var cs in compSnaps)
         {
+            // The commit's half of the same exclusion the live pass makes above.
+            if (ComponentTypeRegistry.DetachesFreely(cs.Component.Symbol)) continue;
             foreach (var def in EditModel.PortDefsOf(cs.Component))
             {
                 if (cs.Component.IsPortDetached(def.PortIndex)) continue;
@@ -2205,6 +2218,10 @@ public sealed partial class SchematicViewModel : ObservableObject
 
         var (dupGhosts, dupGhostWires, dupGhostRects) = BuildDuplicateGhosts();
 
+        // Computed AFTER popPreviews, because a route the commit is about to create counts as a
+        // connection for this frame — see LiveConnectivity.
+        var liveConn = LiveConnectivity(popPreviews);
+
         // Push overlay update — canvas watches Overlay property change → InvalidateVisual().
         // No BuildRenderModel() call.
         Overlay = new SchematicOverlay
@@ -2217,7 +2234,9 @@ public sealed partial class SchematicViewModel : ObservableObject
             WireDragPoints           = wireOverrides,
             NetLabelDragPositions    = BuildNetLabelDragPositions(wireOverrides),
             PinOnPinPreviewWires     = popPreviews,
-            ConnectionDotsOverride   = LiveConnectionDots(),
+            ConnectionDotsOverride   = liveConn.Dots,
+            LivePortConnected        = liveConn.Port,
+            LiveWireEndpointConnected = liveConn.Endpoint,
             CanvasObjectDragPositions = objOverrides,
             DuplicateGhosts           = dupGhosts,
             DuplicateGhostWires       = dupGhostWires,
@@ -2294,6 +2313,45 @@ public sealed partial class SchematicViewModel : ObservableObject
         => (EditModel.Wires.Count + EditModel.Components.Count) <= LiveDotMaxObjects
             ? EditModel.ComputeConnectionDots()
             : null;
+
+    /// <summary>
+    /// The junction dots AND the two live connection tests for this frame of a drag — one pass, so
+    /// the dots a frame draws and the port markers it draws cannot disagree.
+    ///
+    /// <para><paramref name="previewWires"/> are the routes the COMMIT is going to create — a
+    /// separating pin-on-pin contact's auto-wire, a mid-span tap's stub. They are not in the model
+    /// yet, so a live test would call both of their ends unconnected and every such drag would flash
+    /// red for its whole length and go green the instant the user let go. Their points count as
+    /// connections here, which is what they are about to be.</para>
+    ///
+    /// <para>All three come back null past <see cref="LiveDotMaxObjects"/>, and the renderer falls
+    /// back to the render model's own (deferred) answer — the behaviour every drag had before.</para>
+    /// </summary>
+    private (IReadOnlyList<SchematicDot>? Dots,
+             Func<double, double, bool>? Port,
+             Func<double, double, bool>? Endpoint)
+        LiveConnectivity(IReadOnlyList<IReadOnlyList<(double X, double Y)>>? previewWires = null)
+    {
+        if (EditModel.Wires.Count + EditModel.Components.Count > LiveDotMaxObjects)
+            return (null, null, null);
+
+        var live = EditModel.ComputeLiveConnectivity();
+        if (previewWires is null || previewWires.Count == 0)
+            return (live.Dots, live.IsPortConnected, live.IsWireEndpointConnected);
+
+        double gs  = EditModel.GridSize;
+        var    key = new HashSet<(long, long)>();
+        foreach (var pts in previewWires)
+            foreach (var (x, y) in pts)
+                key.Add(((long)Math.Round(x / gs), (long)Math.Round(y / gs)));
+
+        bool OnPreview(double x, double y)
+            => key.Contains(((long)Math.Round(x / gs), (long)Math.Round(y / gs)));
+
+        return (live.Dots,
+                (x, y) => live.IsPortConnected(x, y)         || OnPreview(x, y),
+                (x, y) => live.IsWireEndpointConnected(x, y) || OnPreview(x, y));
+    }
 
     /// <summary>
     /// Live draw positions for anchored net labels whose owner wire is among <paramref name="livePts"/>
@@ -2401,6 +2459,10 @@ public sealed partial class SchematicViewModel : ObservableObject
             foreach (var comp in EditModel.Components)
             {
                 if (Selection.IsSelected(comp.Id)) continue;
+                // A probe resting on the wire does not bound its slide: pulling a wire out from
+                // under a probe is the same gesture as pulling the probe off the wire, and clamping
+                // it would make a wire the user grabbed refuse to move for no visible reason.
+                if (ComponentTypeRegistry.DetachesFreely(comp.Symbol)) continue;
                 foreach (var def in EditModel.PortDefsOf(comp))
                 {
                     if (comp.IsPortDetached(def.PortIndex)) continue;
@@ -2427,6 +2489,28 @@ public sealed partial class SchematicViewModel : ObservableObject
         CommitDragAsCommand(dx, dy, KeyModifiers.None);
         ClearDragState();
     }
+
+    /// <summary>
+    /// Headless oracle entry point: runs the drag's snapshot and one MOVE tick, and leaves the
+    /// gesture OPEN — so a test can read the <see cref="Overlay"/> a real drag is showing partway
+    /// through, which is where the live connection state lives. Call
+    /// <see cref="SimulateDragAbandon"/> when done.
+    ///
+    /// <para>It goes through <c>HandleSelectDrag</c> rather than reproducing it, for the same reason
+    /// <see cref="SimulateDragCommit"/> goes through the commit: an oracle that re-implements the
+    /// path it is testing measures the copy.</para>
+    /// </summary>
+    internal void SimulateDragTo(double dx, double dy)
+    {
+        _dragStartWorldX = 0;
+        _dragStartWorldY = 0;
+        SnapshotDragStartPositions();
+        HandleSelectDrag(dx, dy, KeyModifiers.None);
+    }
+
+    /// <summary>Drops an open <see cref="SimulateDragTo"/> without committing it. The model keeps
+    /// whatever the live tick moved — which is what a test inspecting mid-drag state wants.</summary>
+    internal void SimulateDragAbandon() => ClearDragState();
 
     // ── Per-segment wire drag (B2–B5) ─────────────────────────────────────────
 
@@ -2559,6 +2643,12 @@ public sealed partial class SchematicViewModel : ObservableObject
                 dot.Y = sy + dy;
             }
 
+        // Preview the auto-wire stub(s) to any interior pin the segment has moved off of (the real
+        // wire is created at commit; this mirrors the pin-on-pin preview, Case 2). Hoisted out of the
+        // initializer so the live connection tests can count those stubs as connections.
+        var segStubs = BuildInteriorPortStubs(wire.Points);
+        var segConn  = LiveConnectivity(segStubs);
+
         // Fast overlay update — no full BuildRenderModel() per tick (B4 perf).
         Overlay = new SchematicOverlay
         {
@@ -2570,8 +2660,10 @@ public sealed partial class SchematicViewModel : ObservableObject
             NetLabelDragPositions = BuildNetLabelDragPositions(wireDragPoints),
             // Preview the auto-wire stub(s) to any interior pin the segment has moved off of (the
             // real wire is created at commit; this mirrors the pin-on-pin preview, Case 2).
-            PinOnPinPreviewWires = BuildInteriorPortStubs(wire.Points),
-            ConnectionDotsOverride = LiveConnectionDots(),
+            PinOnPinPreviewWires = segStubs,
+            ConnectionDotsOverride = segConn.Dots,
+            LivePortConnected      = segConn.Port,
+            LiveWireEndpointConnected = segConn.Endpoint,
         };
     }
 

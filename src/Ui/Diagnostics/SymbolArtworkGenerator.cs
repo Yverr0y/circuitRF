@@ -71,6 +71,7 @@ public static class SymbolArtworkGenerator
         (SymbolKind.TermG,           "termg",             1),
         (SymbolKind.Pin,             "pin",               1),
         (SymbolKind.IProbe,          "iprobe",            2),
+        (SymbolKind.VProbe,          "vprobe",            1),
         (SymbolKind.Tline,           "tline",             2),
         (SymbolKind.Mutual,          "mutual",            2),
         (SymbolKind.Snp,             "snp",               2),

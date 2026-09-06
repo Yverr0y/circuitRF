@@ -349,17 +349,20 @@ public sealed class ReferenceCliVerbTests(ITestOutputHelper output)
     // ══ §6.6 — R-aut6-10, the two §2.3 lists ═════════════════════════════════════════════════════
 
     /// <summary>
-    /// The five <c>EngineReference</c> targets no factory entry answers to. They are IN the
+    /// The <c>EngineReference</c> targets no factory entry answers to. They are IN the
     /// catalogue, marked not simulatable, with a note — not quietly filtered into an intersection.
     ///
-    /// <para>Measured on 2026-09-05 and unchanged when this was built. A difference is a change in
-    /// what circuitRF can draw versus what it can place, which is worth knowing on its own — so this
-    /// asserts both the membership AND that the measured list is still exactly these five.</para>
+    /// <para>Measured on 2026-09-05 and unchanged when this was built, except for VProbe, which was
+    /// added afterwards and belongs here for a reason of its own: unlike the other sentinels a
+    /// VProbe line really does reach a <c>.cnl</c> and the elaborator, which turns it into a
+    /// net-name alias and builds nothing. A difference is a change in what circuitRF can draw versus
+    /// what it can place, which is worth knowing on its own — so this asserts both the membership
+    /// AND that the measured list is still exactly these.</para>
     /// </summary>
     [Fact]
     public void EveryDrawnTypeTheEngineCannotBuild_IsReportedAsSuch()
     {
-        string[] expected = ["GND", "MEAS", "Pin", "SpiceModel", "VAR"];
+        string[] expected = ["GND", "MEAS", "Pin", "SpiceModel", "VAR", "VProbe"];
 
         var measured = Enum.GetValues<SymbolKind>()
             .Where(k => !LibraryCatalog.InternalOnlyKinds.Contains(k))

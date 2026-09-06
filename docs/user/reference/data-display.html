@@ -167,7 +167,8 @@ An analysis cube must stay qualified — a bare <code>V</code> would find the wr
 </ul>
 <p>A <strong>DataCube</strong> is an N-dimensional array, real or complex throughout, with <strong>named axes</strong>. Each axis has
 numeric values, a unit, and sometimes string labels — the node axis of <code>V</code> is labelled with your net
-names, and the branch axis of <code>I</code> with your IProbe names.</p>
+names (and with the name of any <a href="components.html#vprobe">VProbe</a> you placed, which adds a row for the
+net it taps), and the branch axis of <code>I</code> with your IProbe names.</p>
 <table>
 <thead>
 <tr>
@@ -322,7 +323,7 @@ non-label axis at all — a DC operating point with no sweep — has no X and re
 what a <a href="plot-types.html#table">Table</a> is for.</p>
 <p>The <strong>eye</strong> on the label-axis row reveals the entries that are normally hidden: every node beyond the
 ones you named, and every device-port branch beyond your IProbes. It is one control shared by the node
-and branch rows.</p>
+and branch rows. A net label and a VProbe both count as naming a node, so both are visible without it.</p>
 <p><strong>Spec</strong> — the transform, and the shorthand text box (below).</p>
 <p><strong>Style</strong> — line, symbol, per-port Z0 for a network trace, and the number format on a Table.</p>
 <h3 id="against-a-harmonic-balance-result">Against a harmonic-balance result</h3>

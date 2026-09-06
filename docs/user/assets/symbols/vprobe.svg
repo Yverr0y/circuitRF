@@ -1,0 +1,9 @@
+<!-- GENERATED FILE - do not edit. Regenerate every component symbol with:
+     dotnet run ––project src/Ui –– ––generate-symbols docs/user/assets/symbols
+     (the flags above are ordinary double hyphens; XML comments cannot contain them.)
+     Source: src/Ui/Diagnostics/SymbolArtworkGenerator.cs -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="240" height="186" viewBox="0 0 240 186"><ellipse fill="none" stroke="#2D14C3" stroke-width="3.59" stroke-linecap="round" stroke-linejoin="round" cx="128.62" cy="48.42" rx="24.42" ry="24.42" /><ellipse fill="none" stroke="#2D14C3" stroke-width="1.08" stroke-linecap="round" stroke-linejoin="round" cx="128.62" cy="48.42" rx="18.68" ry="18.68" /><text fill="#2D14C3" transform="translate(128.62 48.42)" font-size="18.68" font-family="IBM Plex Sans" x="-5.69" y="7">
+			V
+	</text><path fill="none" stroke="#2D14C3" stroke-width="2.15" stroke-linecap="round" stroke-linejoin="round" d="M117.85 69.97L100.61 105.17" /><path fill="#2D14C3" d="M92.7 120.25L95.58 102.3L105.63 107.32L92.7 120.25Z" /><rect fill="none" stroke="#CE4A24" stroke-width="1.44" stroke-miterlimit="4" x="86.96" y="114.51" width="11.49" height="11.49" /><text fill="#6A8EF6" font-size="15" font-weight="600" font-family="IBM Plex Sans" x="94.55, 104.12, 113.74, 119.63, 128.08, 137.08" y="172.32">
+			VProbe
+	</text></svg>

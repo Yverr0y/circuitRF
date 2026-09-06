@@ -79,6 +79,10 @@ internal static class PinFollowReroute
         var moves = new List<PinMove>();
         foreach (var (comp, newX, newY, newRot, newMirror) in transformed)
         {
+            // A probe drags nothing behind it — ComponentTypeRegistry.DetachesFreely, and the same
+            // exclusion the drag path makes. It stays in the obstacle scan below, though: a re-route
+            // laid across a probe would CONNECT it, which is the one silent thing left to avoid.
+            if (ComponentTypeRegistry.DetachesFreely(comp.Symbol)) continue;
             foreach (var def in model.PortDefsOf(comp))
             {
                 if (comp.IsPortDetached(def.PortIndex)) continue;

@@ -26,6 +26,26 @@ public enum SymbolKind
     Term,
     Pin,
     IProbe,
+
+    /// <summary>
+    /// Voltage probe — a one-pin NET LABEL that reports, and stamps nothing (engine "VProbe",
+    /// a sentinel like <see cref="Var"/> and <see cref="Meas"/>: no
+    /// <c>ComponentModelFactory</c> entry exists and none can).
+    ///
+    /// <para>Its instance name is what the net its single pin touches REPORTS under. On a net the
+    /// schematic never named, that name becomes the net's own name outright — one row in the
+    /// results, and not an <c>n7</c> beside it. On a net a user's label already named, the label
+    /// stands and the probe's name is an ALIAS for the same node, so both appear in the trace picker
+    /// and both resolve in a measurement expression.</para>
+    ///
+    /// <para><b>It never changes the circuit.</b> One pin means it cannot bridge two nets, and the
+    /// elaborator emits no component for it — a design simulates identically with every VProbe
+    /// deleted. A VProbe that touches nothing is reported and dropped rather than silently naming
+    /// its own floating pin; a name that collides with a net name or with another VProbe refuses the
+    /// run, because either would make one name mean two things in the results.</para>
+    /// </summary>
+    VProbe,
+
     Sdd,
     ZPort,
     Generic,

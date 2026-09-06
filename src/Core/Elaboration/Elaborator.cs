@@ -35,6 +35,19 @@ public sealed class Elaborator
     private readonly FreqDeferral _freq = new();
 
     /// <summary>
+    /// Every placed <c>VProbe</c>, as (its own instance path, the net its one terminal names) —
+    /// collected during the flatten and RESOLVED afterwards, in <see cref="RegisterVoltageProbes"/>.
+    ///
+    /// <para>Afterwards, deliberately. A probe must never mint the net it points at: minting one
+    /// would add a matrix row that nothing else touches and turn a stray reference into a singular
+    /// solve, which is the one way a probe could change the answer. Resolving after the walk means
+    /// every net that exists is known, so a name that is still absent is genuinely absent and is
+    /// reported as such. It also means the collision check can see EVERY net name, including the
+    /// ones minted later in the same walk.</para>
+    /// </summary>
+    private readonly List<(string Path, string Net)> _voltageProbes = [];
+
+    /// <summary>
     /// The netlist's user-defined expression functions, kept for models that evaluate at stamp time.
     /// Held per-Elaborator rather than globally so two designs open at once cannot see each other's.
     /// </summary>
@@ -90,6 +103,7 @@ public sealed class Elaborator
         _functions = tb.Functions.ToArray();
         foreach (var fn in _functions)
             _evaluator.RegisterFunction(fn);
+        _voltageProbes.Clear();
 
         var netlist     = new ElaboratedNetlist();
         var globalScope = BuildGlobalScope(tb);
@@ -135,6 +149,9 @@ public sealed class Elaborator
         // Propagate label provenance from TestBench (top-level names only; no path prefix needed).
         foreach (var name in tb.LabeledNets)
             netlist.Nodes.LabeledNames.Add(name);
+
+        // Voltage probes, now that every net that exists has a name and an index.
+        RegisterVoltageProbes(netlist);
 
         // Populate ResolvedGlobals — used by the HB engine to resolve analysis directives
         // and re-evaluate sweep-dependent expressions at each sweep step.
@@ -771,6 +788,19 @@ public sealed class Elaborator
                     netlist.AddWarning(
                         $"Pin '{childPath}' is at the testbench top level and has no effect; " +
                         $"Pins belong inside cell schematics to realize interface ports.");
+                continue;
+            }
+
+            // VProbe is a NAME, not a component. It is recorded here and resolved after the whole
+            // walk (see _voltageProbes) — nothing is stamped, no node is assigned, and no model is
+            // built, which is what makes placing one unable to move a single number in the answer.
+            if (inst.Reference.Equals("VProbe", StringComparison.OrdinalIgnoreCase))
+            {
+                if (inst.NetBindings.Count == 0)
+                    netlist.AddWarning(
+                        $"VProbe '{childPath}' names no net and will not report any results.");
+                else
+                    _voltageProbes.Add((childPath, ResolveNet(inst.NetBindings[0])));
                 continue;
             }
 
@@ -2187,6 +2217,78 @@ public sealed class Elaborator
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Turns every collected <c>VProbe</c> into a net-name ALIAS on the node map, or refuses the run.
+    ///
+    /// <para><b>An alias, but only where one is needed.</b> A probe on a net the user has ALREADY
+    /// named — their own schematic label — becomes a second name for it, and the results carry that
+    /// node twice, once under each name. The label is never overwritten: a wire the user named keeps
+    /// the name they gave it. A probe on an UNNAMED net does not get an alias at all, because
+    /// extraction has already made the probe's name that net's own name — publishing <c>n7</c> beside
+    /// it would put two rows in every result for one point in the circuit and only one of them would
+    /// be a name anybody chose. Either way the probe's name joins
+    /// <see cref="NodeMap.LabeledNames"/>, for the same reason a label does: a name the user picked
+    /// is exactly what the trace picker's own filter is for.</para>
+    ///
+    /// <para><b>Two failures REFUSE the run rather than reporting.</b> Two probes sharing a name, and
+    /// a probe sharing a name with a net, both end with one name meaning two different things in the
+    /// results — and a plot picked by name would then be silently the wrong trace. That is not
+    /// something to warn about and continue past. Everything else is a warning: a probe naming a net
+    /// that does not exist, or naming ground, reports nothing and stops there.</para>
+    ///
+    /// <para>The duplicate check runs BEFORE the net lookup, so two probes named the same thing are
+    /// reported as duplicates whether or not either is connected.</para>
+    /// </summary>
+    private void RegisterVoltageProbes(ElaboratedNetlist netlist)
+    {
+        if (_voltageProbes.Count == 0) return;
+
+        var seen = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (path, _) in _voltageProbes)
+        {
+            if (seen.TryGetValue(path, out _))
+                throw new InvalidOperationException(
+                    $"Two voltage probes are both named '{path}'. A VProbe's instance name is the " +
+                    $"name its net reports under, so two of them would make one name mean two " +
+                    $"different traces; rename one.");
+            seen[path] = path;
+        }
+
+        foreach (var (path, net) in _voltageProbes)
+        {
+            // The net may already BE the probe's name — an unnamed net takes it outright rather than
+            // carrying two names for one point (NetExtractor.AssignNetNames). That is not a
+            // collision; it is the same probe, and there is nothing left to alias.
+            bool namesItsOwnNet = string.Equals(path, net, StringComparison.Ordinal);
+
+            if (!namesItsOwnNet && netlist.Nodes.TryGetIndex(path, out _))
+                throw new InvalidOperationException(
+                    $"VProbe '{path}' has the same name as a net in this design. A VProbe reports " +
+                    $"its net under its own name, so the two would collide in the results; rename " +
+                    $"the probe or the net.");
+
+            if (!netlist.Nodes.TryGetIndex(net, out int node))
+            {
+                netlist.AddWarning(
+                    $"VProbe '{path}' names net '{net}', which nothing else in the design reaches, " +
+                    $"so it will not report any results.");
+                continue;
+            }
+
+            if (node == 0)
+            {
+                netlist.AddWarning(
+                    $"VProbe '{path}' is on the ground net, which is 0 V by definition, so it will " +
+                    $"not report any results.");
+                continue;
+            }
+
+            netlist.Nodes.LabeledNames.Add(path);
+            if (namesItsOwnNet) continue;
+            netlist.Nodes.AddAlias(path, node);
+        }
     }
 
     /// <summary>

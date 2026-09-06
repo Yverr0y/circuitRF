@@ -48,7 +48,7 @@ and source stepping for convergence robustness.
     </tbody>
   </table>
 
-<p class="small">Read currents directly with an <a href="components.html#iprobe">IProbe</a> in series.</p>
+<p class="small">Read currents directly with an <a href="components.html#iprobe">IProbe</a> in series, and name a voltage with a <a href="components.html#vprobe">VProbe</a> on the wire.</p>
 
 ## S-Parameters {#s-parameters}
 

@@ -679,3 +679,17 @@ src/Design/Layout/Drc/DrcRegionEval.cs|Unhandled select op {op}.
 # (brief-automation-4-check-and-explain.md R-aut4-7), so a caller seeing this has a programming error
 # rather than a design problem, and there is no user-facing action to attach to it.
 src/Core/Elaboration/Elaborator.cs|Elaborate() has not run, so there is no global scope yet.
+
+# ── VProbe's two refusals, and one invariant (2026-09-06) ────────────────────────────────────────
+# The two Elaborator lines are REFUSALS a user reads: a voltage probe whose name is also a net's, or
+# two probes sharing one name, would make one name mean two traces, so the run stops. They are plain
+# exceptions rather than diagnostics because that is what every other refusal in the same method and
+# the same file is: an elaboration failure crosses the firewall through `ex.Message` and there is no
+# diagnostic-carrying exception below the wall to put them in. Building one is worth doing — for all
+# ~30 of the Elaborator's refusals at once, not for two of them, which would leave the same file
+# speaking two dialects. Convert them with the rest.
+src/Core/Elaboration/Elaborator.cs|Two voltage probes are both named '{path}'. A VProbe's instance name is the 
+src/Core/Elaboration/Elaborator.cs|VProbe '{path}' has the same name as a net in this design. A VProbe reports 
+# An INTERNAL invariant, like the Elaborate()-has-not-run line above: the elaborator checks for the
+# collision itself and refuses in English first, so a caller reaching this has a programming error.
+src/Core/Elaboration/NodeMap.cs|'{alias}' is already a net name, so it cannot also be an alias.

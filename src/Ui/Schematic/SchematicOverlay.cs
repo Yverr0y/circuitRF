@@ -81,6 +81,27 @@ public sealed record class SchematicOverlay
     /// </summary>
     public IReadOnlyList<SchematicDot>? ConnectionDotsOverride { get; init; }
 
+    /// <summary>
+    /// Live "is anything attached here?" tests during an active drag, recomputed from the moving
+    /// geometry alongside <see cref="ConnectionDotsOverride"/> and from the same pass. When non-null
+    /// the renderer asks THESE instead of trusting the render model's port states and wire-endpoint
+    /// flags, which were computed before the drag began.
+    ///
+    /// <para><b>Why the stale answer is usually right, and when it is not.</b> Every component but
+    /// one takes its wires with it, so a pin connected at drag start is connected at every frame in
+    /// between and the deferred answer costs nothing. A <see cref="SymbolKind.VProbe"/> comes OFF —
+    /// that is what it is for — and so does the wire endpoint it was holding. Left to the stale
+    /// model both keep drawing as connected until the user lets go, which reads as "still attached"
+    /// at exactly the moment the user is deciding where to drop it (owner, 2026-09-06).</para>
+    ///
+    /// <para>Null when not dragging, and null when the schematic is too large to recompute per tick
+    /// — the same bound the dots use, and the renderer falls back to the model in both cases.</para>
+    /// </summary>
+    public Func<double, double, bool>? LivePortConnected { get; init; }
+
+    /// <inheritdoc cref="LivePortConnected"/>
+    public Func<double, double, bool>? LiveWireEndpointConnected { get; init; }
+
     // ── Move-Labels drag ──────────────────────────────────────────────────────
 
     /// <summary>

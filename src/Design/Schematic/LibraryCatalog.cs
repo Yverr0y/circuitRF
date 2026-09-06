@@ -129,6 +129,7 @@ public static class LibraryCatalog
         (SymbolKind.Meas,        0),
         (SymbolKind.Vdc,         0),
         (SymbolKind.IProbe,      0),
+        (SymbolKind.VProbe,      0),
         (SymbolKind.P1Tone,      0),
         (SymbolKind.ToneSource,  0),   // "V1Tone" — the single-tone voltage source, displayed as VTone.
         (SymbolKind.CurrentToneSource, 0), // "I_1Tone" — its current-source dual, displayed as ITone.
