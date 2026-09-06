@@ -21045,3 +21045,176 @@ oracle — no screenshot, no running app.
 `analysis-editor-hb-dark.svg` is the known nondeterministic 7.2° chevron rotation and was reverted;
 `docs/user/reference/data-display.html` picked up the decibel-floor section whose `.md` had landed in
 c1a413bb without the HTML being regenerated — kept, because it is a real gap being closed.
+
+---
+
+## Removing a technology, seeing a microstrip's technology, renaming a workspace (2026-09-06)
+
+Three items from one round of relayed user feedback: a technology could only be deleted with the
+file manager; a user could not tell which technology an MLIN was using; and the owner asked for a
+"Rename Workspace…" item so that too need not be done in the file manager.
+
+### The remove hole was five document kinds wide, not one
+
+`ProjectTreeNodeViewModel.IsRemovableFile` listed the three view extensions plus `OtherFile` and
+`UserFolder`. **`.ctech`, `.cem`, `.charm`, `.wBond` and `.ccolor` had no in-app delete at all** —
+`.cdd` had its own separate item, and nothing covered the rest. They now share ONE item whose header
+names the document type (`RemoveHeader`), and `RemoveDataDisplay` was folded into it: two commands,
+two dialog titles and two `ITreeActions` members for the same act.
+
+**`.ctech` deliberately did NOT join them.** Removing a technology changes what other documents MEAN,
+so it has its own command, its own confirmation and its own `.cws` write.
+
+### The separator the owner saw above "Reveal in Finder" was a structural bug, not a stray line
+
+Each kind carried its own `<Separator IsVisible="{Binding IsSomeKind}"/>` placed just after that
+kind's items. **A separator does not know what follows it**: on a `.ctech`, every item between its
+separator and "Reveal in Finder" was hidden, so the rule was drawn directly above Reveal with nothing
+in between. Replaced by ONE separator riding `HasRemoveAction` — the union of everything below it —
+with all remove actions gathered into one group at the bottom. `HasRemoveAction` is computed from
+what is actually visible under it, which is the only version that cannot repeat the fault.
+
+### A removed view file may be its cell's PRIMARY (owner's own catch)
+
+Removing a `.csch`/`.csym`/`.clay` used to be a file delete and nothing else, leaving the `.ccell`
+naming a file in the Trash — `PrimaryState.MissingNamedPrimary`, which `CellFolder`'s own comment
+calls "a blatant contradiction" and which the tree renders as a warning triangle. The user's own
+tidying gesture produced it, with nothing said.
+
+`src/Design/Cells/PrimaryViewRepair.cs` plans the repair BEFORE the removal (it has to read the
+sub-folder while the file is still in it) and applies it after:
+
+| survivors | outcome |
+|---|---|
+| 0 | entry cleared → `NoView` |
+| 1 | that file is written as primary → `SoleFile` would have implied it anyway, but the file must not go on naming something else |
+| 2+ | entry cleared → `NoPrimary` ("not chosen yet", **not** an error), and the user is told to pick |
+
+Two traps worth keeping: **the sole file of its type is primary IMPLICITLY** (`PrimaryState.SoleFile`
+ignores the `.ccell` entirely), so a name-only check misses the commonest case; and a **primary
+SYMBOL** additionally needs `CellSymbolResolver.Invalidate` + `RebuildOpenSchematics`, the same pair
+`MakePrimary` does, or cell-ref components keep drawing the symbol that is gone.
+
+### A `.ctech` has THREE referrers and only two of them are visible
+
+`DocumentRemovalImpact.ForTechnology` counts all three. The third is the one nothing else would ever
+report: **every microstrip component in the workspace resolves its substrate from the workspace
+default and from nowhere else** (`MicrostripSubstrateInjection` — a schematic has no technology
+reference of its own). Remove the default and the schematics still open, the widths are unchanged,
+and the electrical model silently reverts to `ComponentModelFactory`'s hardcoded defaults. The first
+symptom is a simulation that moved.
+
+When the removed file IS the default, the `.cws` is re-pointed or cleared in the same operation —
+otherwise a workspace is left naming a file in the Trash. With exactly one other technology present
+the dialog offers "Remove and Use '<other>'" as its primary button, because the reported gesture was
+*change* the technology, not delete one; several candidates are not guessed between.
+
+### Schematic and layout can be on DIFFERENT technologies, and it was silent
+
+The owner predicted this before it was looked for, and it is already live:
+
+- a **schematic**'s microstrip substrate ← the workspace default, always;
+- a **layout** ← its own `TechRef` first, the workspace default only as fallback;
+- **Update Layout from Schematic** passes `layoutVm.Technology` — the LAYOUT's.
+
+So the moment a `.clay` carries its own `TechRef`, the artwork is drawn on one substrate and the
+model computed on another. Now reported (not refused — a `TechRef` is a deliberate act) at both
+points: at `Update Layout from Schematic`, and at the layout's own **Change Technology…**, which is
+where the divergence is CREATED and therefore the cheaper place to say it. Both are silent when the
+cell has no microstrip component, since then the two technologies only mean layers.
+
+### The microstrip Technology picker writes the WORKSPACE DEFAULT, because nothing narrower exists
+
+A microstrip's H/T/Er/Sigma/TanD are injected at extraction time and deliberately are not declared
+parameters — correct for the parameter LIST, and it left them with no surface anywhere, which is
+exactly what the user reported.
+
+**Final shape, after three rounds of owner direction:** one row, placed BELOW the generic parameter
+rows so it sits under `SignalLayer` and `GroundReference` (the three together are "which conductors,
+on which stackup"). A **combo box** listing the workspace's technologies **by Name alone** — an
+option label carrying the path had too many characters — with the file in the tooltips instead: a
+dynamic one on the selection, and a per-row one, which is what still tells two same-named
+technologies apart (copying a process keeps its `Name`). Beside it an **Edit…** button opening the
+selected `.ctech` through `WorkspaceViewModel.OpenTechnologyDocument`, the same thing a double-click
+in the Project Tree does.
+
+**The substrate values are NOT shown**, and neither is a "From" line. Both were there and both came
+out: the values belong to the technology, and Edit… is one click from all of them. The only line left
+is the one that appears when a substrate fails to resolve — that says the simulated component is not
+the one the workspace describes, and nothing else in the application says so until a run.
+
+**Making the combo the same width as the layer-choice combos took a real fix, and a measurement.**
+The Technology row declares the same six columns (`ParamName` / `*` / `ParamUnit` / …) as the generic
+parameter rows and joins the same shared-size scope, which now lives on the enclosing StackPanel.
+**`Grid.IsSharedSizeScope` must be removed from the rows' own `ItemsControl` for that to work** — a
+scope declared there SHADOWS the outer one for its rows, so the sibling grid sizes independently and
+nothing errors; it simply sits a few pixels off. Left in place by accident on the first pass and
+measured at **x=69 / w=287 against the rows' x=106 / w=207**; after removing it, both read
+**x=106 / w=207**.
+
+The measurement is worth keeping as a technique. A scratch headless harness referencing `src/Ui`
+(Avalonia.Headless + the app's own `CircuitRfStyles.axaml`) builds the real `ParameterEditorView`,
+pumps `Dispatcher.UIThread.RunJobs()` + `UpdateLayout()` a few times, and prints
+`TranslatePoint`/`Bounds` per ComboBox. **Two false negatives came out of the harness before any real
+finding did**: without a theme an `ItemsControl` has no control template, realises no containers and
+reports `Bounds 420x0` with zero visual descendants — which reads exactly like "not aligned". A null
+is not a measurement. `CircuitRfStyles.axaml` already carries `<FluentTheme>`, so merging the app's
+own styles is enough.
+
+There is exactly one place a schematic's technology is recorded — `.cws` `DefaultTechRef` — so a
+picker on a component cannot mean anything narrower than the workspace. It routes through
+`WorkspaceViewModel.ChangeWorkspaceDefaultTechnologyAsync`, which runs the SAME "N layouts follow this
+default" confirmation the Project Tree's own item runs, and **the selection snaps back when that is
+declined** — a combo left showing a technology the workspace is not on would be a wrong readout
+produced by the act of reading it.
+
+Two Avalonia combo traps already paid for elsewhere in this repo and re-applied here: the options
+list instance is replaced only when its CONTENT differs (`ParameterRowViewModel` records that
+swapping `ItemsSource` mid-selection makes a choice intermittently fail to stick), and the selection
+is assigned AFTER the items (this file's own `NativeMenu`/ComboBox note: Avalonia silently clears a
+`SelectedItem` its items do not contain).
+
+The view resolves the workspace from the **schematic's own ancestor `.cws`**, not from
+`WorkspaceLocator.For(this)`: this panel is routinely hosted in a plain non-modal dialog, which is
+neither a `WorkspaceWindow` nor a `CrfHostWindow`, so the locator's window walk falls through to "any
+workspace" — MW1 R-mw1-14's exact failure mode with two windows open.
+
+### `SaveChangesDialog` grew to the longest LINE, not the longest paragraph
+
+Owner, 2026-09-06: "the Rename Workspace dialog is crazy wide." `SizeToContent="WidthAndHeight"`
+measures the message against infinite width, so `TextWrapping="Wrap"` never fires and the window
+widens to the longest line. Invisible while every message this dialog carried was one short sentence
+— the blast-radius confirmations added in this round are paragraphs. Capped with `MaxWidth` on the
+TextBlock rather than on the Window, so a short message still sizes down to `MinWidth` on its own.
+The button row was flush against the text and now carries a top margin. Both apply to every caller.
+
+### Renaming a workspace is `Directory.Move`, and the alias survives it
+
+A workspace's name IS its folder name: `.cws` is a fixed filename and `CwsFile` has no name field.
+Nothing inside is affected — every intra-workspace reference is relative by design. What breaks is a
+reference from OUTSIDE, and all four live in the OTHER workspace's `.cws`:
+`ReferencedWorkspaces[].Path`, `LibraryRefs[]`, `KnownFiles[]`, `PdkRefs[].Path`.
+
+**`CwsWorkspaceRef.Alias` does not break**, which is the part worth knowing: it merely *defaults* to
+the folder name when the reference is created and is independent of it after. So every `ws://alias/…`
+reference in that workspace's DOCUMENTS keeps resolving once the one `Path` line is repaired — which
+is exactly what `CwsFile.ReferencedWorkspaces`' own comment promises.
+
+Sequence: prompt-save → `WriteWorkspaceFile` → **release the lock** → `Directory.Move` → repoint →
+`SwitchToWorkspaceReporting(new)`. Close-move-reopen rather than repointing the live session, because
+`SwitchToWorkspace` already rebuilds every absolute path from the `.cws` (whose document paths are
+workspace-relative) and rewriting them in place would be a second, partial copy of that restore. The
+lock is released BEFORE the move so no `.crf-open.json` travels into the renamed folder. A failed
+move re-takes it.
+
+Writing another OPEN workspace's `.cws` from this process is safe: `WriteWorkspaceFile` re-reads the
+file before every save — its own comment says so ("Load existing .cws to preserve KnownFiles +
+LibraryRefs (authoritative on disk)"). A workspace **nobody has open cannot be reached at all**, and
+the confirmation says so rather than implying a clean rename.
+
+*Measured while writing the tests:* the application stores a SIBLING workspace reference as an
+**absolute** path, not `../Sibling/.cws` — `WorkspaceRefs.ToStoredRef` returns relative only for a
+target INSIDE the referencing workspace. The repoint re-decides the stored form through that same
+rule, so assert on resolution, never on spelling. A `${NAME}`-tokenised ref (SL1 R-sl1-6) is neither
+counted nor rewritten: substituting an absolute path for a token repairs this machine and silently
+un-shares the reference on every other one.

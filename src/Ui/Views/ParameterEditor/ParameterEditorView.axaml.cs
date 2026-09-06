@@ -46,6 +46,8 @@ public partial class ParameterEditorView : UserControl
             vm.PickSddEquationAsync   = PickSddEquationAsync;
             vm.RevealFileAsync        = RevealFileAsync;
             vm.OpenCvEditorDialogAsync = OpenCvEditorDialogAsync;
+            vm.ChangeWorkspaceTechnologyAsync = ChangeWorkspaceTechnologyAsync;
+            vm.OpenTechnologyFile             = OpenTechnologyFile;
         }
     }
 
@@ -181,6 +183,38 @@ public partial class ParameterEditorView : UserControl
         });
 
         return files.Count == 1 ? files[0].TryGetLocalPath() : null;
+    }
+
+    /// <summary>
+    /// The microstrip Technology picker's write path. Only the VIEW can reach the workspace, and it
+    /// resolves it from the SCHEMATIC's own ancestor <c>.cws</c> rather than from whichever window is
+    /// in front: this panel is routinely hosted in a non-modal dialog, which is not a WorkspaceWindow,
+    /// so <c>WorkspaceLocator</c>'s window walk would fall through to "any workspace" — and with two
+    /// open that is the wrong project (MW1 R-mw1-14's own failure mode).
+    /// </summary>
+    private async Task<bool> ChangeWorkspaceTechnologyAsync(string techPath)
+    {
+        var workspace = WorkspaceForSchematic() ?? Views.WorkspaceLocator.For(this);
+        if (workspace is null) return false;
+        return await workspace.ChangeWorkspaceDefaultTechnologyAsync(techPath);
+    }
+
+    /// <summary>Edit… — opens the selected <c>.ctech</c> as a document, exactly as double-clicking it
+    /// in the Project Tree does. Same workspace resolution as the picker's write path.</summary>
+    private void OpenTechnologyFile(string techPath)
+        => (WorkspaceForSchematic() ?? Views.WorkspaceLocator.For(this))?.OpenTechnologyDocument(techPath);
+
+    private ViewModels.WorkspaceViewModel? WorkspaceForSchematic()
+    {
+        var dir = Vm?.SchematicVm?.EditModel.SchematicDirectory;
+        var cws = CircuitRF.Design.Workspace.WorkspaceRootFinder.FindAncestorCws(dir);
+        if (cws is null) return null;
+
+        return Views.WorkspaceLocator.AllWindows()
+            .Select(w => w.DataContext as ViewModels.WorkspaceViewModel)
+            .FirstOrDefault(vm => vm?.CurrentWorkspacePath is { } p
+                               && string.Equals(Path.GetFullPath(p), Path.GetFullPath(cws),
+                                                StringComparison.OrdinalIgnoreCase));
     }
 
     private Task RevealFileAsync(string path)

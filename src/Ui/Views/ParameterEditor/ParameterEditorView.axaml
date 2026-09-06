@@ -124,7 +124,12 @@
                  painted straight over them: the owner's "the Add button and some other text render
                  overtop of the parameters fields". Hidden children take no space in a StackPanel, so
                  SnP's replace-the-rows arrangement is unchanged. -->
-            <StackPanel>
+            <!-- Grid.IsSharedSizeScope lives HERE rather than on the rows' ItemsControl (2026-09-06)
+                 so a custom panel that wants to line up with the generic rows can: the microstrip
+                 Technology row declares the same six columns and lands in the same shared scope, which
+                 is the only way its combo box is the same width as the layer-choice combos above it
+                 rather than merely a similar one. -->
+            <StackPanel Grid.IsSharedSizeScope="True">
                 <!-- ══ wBond custom panel ═══════════════════════════════════════════════════
                      Above the generic rows, deliberately — see their own note below.
 
@@ -480,9 +485,12 @@
                      is what the component IS — its wires, its arrays, its artwork — and these two are
                      ordinary engine values that belong under it rather than in front of it. Nothing
                      changes for any type with no custom panel of its own, which is all the rest. -->
+                <!-- The shared-size scope is on the StackPanel above, NOT here. A scope declared on
+                     this ItemsControl shadows the outer one for its own rows, so a sibling panel that
+                     declares the same column groups sizes independently and lands a few px off —
+                     measured, at x=69/w=287 against these rows' x=106/w=207. -->
                 <ItemsControl ItemsSource="{Binding Rows}"
                               IsVisible="{Binding !IsSnp}"
-                              Grid.IsSharedSizeScope="True"
                               Margin="4,0">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:ParameterRowViewModel">
@@ -620,6 +628,91 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
+
+                <!-- ══ Microstrip technology ═════════════════════════════════════════════
+                     BELOW the generic rows (owner, 2026-09-06), so it sits under SignalLayer and
+                     GroundReference — the three together are "which conductors, on which stackup",
+                     and the technology is the one that decides what the other two are choosing from.
+
+                     Owner-reported user feedback: a user could not see which technology an MLIN was
+                     using. Nothing showed it — H/T/Er/Sigma/TanD are injected at extraction time and
+                     are deliberately NOT declared parameters, so the schematic showed a width and a
+                     length and said nothing about the line they describe.
+
+                     A PICKER, never a text field: nobody can be expected to type a .ctech file name.
+                     It lists the workspace's own technologies BY NAME, and selecting one re-points the
+                     WORKSPACE DEFAULT — a schematic has no technology reference of its own, so there
+                     is nothing narrower for the choice to mean. The same confirmation the Project
+                     Tree's "Set as Workspace Default" raises runs here, and declining snaps the
+                     selection back.
+
+                     The VALUES are deliberately not shown: they belong to the technology, and Edit…
+                     opens it. Only a FAILURE to resolve one gets a line of its own, because that says
+                     the simulated component is not the one the workspace describes and nothing else
+                     says so until a run. -->
+                <!-- The SAME six columns the generic rows declare, in the SAME shared-size scope, so
+                     column 0 is exactly the name column's width and column 1 is exactly the value
+                     column's — the combo lines up with the SignalLayer / GroundReference combos above
+                     it and measures the same, rather than being eyeballed to a fixed 80 px label.
+                     Margin 4,2 reproduces the rows' own inset (ItemsControl 4,0 + row Grid 0,2). -->
+                <Grid IsVisible="{Binding IsMicrostripTarget}" Margin="4,2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition SharedSizeGroup="ParamName"    Width="Auto" MinWidth="40"/>
+                        <ColumnDefinition Width="*"                                   MinWidth="50"/>
+                        <ColumnDefinition SharedSizeGroup="ParamUnit"    Width="Auto" MinWidth="60"/>
+                        <ColumnDefinition SharedSizeGroup="ParamPreview" Width="Auto"/>
+                        <ColumnDefinition SharedSizeGroup="ParamDisplay" Width="Auto"/>
+                        <ColumnDefinition SharedSizeGroup="ParamRemove"  Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- A label, not a TextBox: "Technology" is not an editable parameter NAME. The
+                         right margin is the name boxes' own, so the text starts where they do. -->
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Technology" FontSize="11"
+                               Margin="0,0,4,0" VerticalAlignment="Center"/>
+
+                    <!-- Item text is the technology's NAME alone. Two files CAN answer to one name —
+                         copying a process keeps it — so the path rides in the tooltips instead of
+                         being crammed into every row's label. -->
+                    <ComboBox Grid.Row="0" Grid.Column="1"
+                              FontSize="11" Padding="4,3"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Center"
+                              ItemsSource="{Binding MicrostripTechnologyOptions}"
+                              SelectedItem="{Binding SelectedMicrostripTechnology, Mode=TwoWay}"
+                              IsEnabled="{Binding CanChangeMicrostripTechnology}"
+                              PlaceholderText="{Binding MicrostripTechnologyText}"
+                              ToolTip.Tip="{Binding MicrostripTechnologyTooltip}">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ParameterEditorViewModel+MicrostripTechnologyOption">
+                                <TextBlock Text="{Binding Display}" FontSize="11"
+                                           ToolTip.Tip="{Binding RelativePath}"/>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+
+                    <!-- In the UNIT column, where every parameter row already has a control, so the
+                         combo keeps the value column to itself and ends where the others end. Its own
+                         width is well under that column's 60 px minimum, so it does not widen the
+                         shared group. The substrate values are edited where they live; this is also
+                         how a user reaches everything the removed readout used to print. -->
+                    <Button Grid.Row="0" Grid.Column="2"
+                            Content="Edit…"
+                            FontSize="11" Padding="6,2" Margin="4,0,0,0"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Center"
+                            Command="{Binding EditMicrostripTechnologyCommand}"
+                            ToolTip.Tip="Open this technology — its stackup is where H, Er, T, TanD and Sigma are set."/>
+
+                    <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="5"
+                               Text="{Binding MicrostripSubstrateWarning}"
+                               IsVisible="{Binding !MicrostripSubstrateResolved}"
+                               FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"
+                               Foreground="{DynamicResource CrfWarningBrush}"/>
+                </Grid>
 
                 <!-- SpiceModel custom panel: which FILE, which DEFINITION in it, and — for a
                      .subckt only — how its box is laid out. The generic rows above are the chosen

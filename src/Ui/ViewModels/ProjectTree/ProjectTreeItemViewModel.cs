@@ -185,15 +185,62 @@ public sealed class ProjectTreeNodeViewModel : ObservableObject
     public bool IsWorkspaceDefaultTech => _actions?.IsWorkspaceDefaultTech(this) ?? false;
 
     /// <summary>
-    /// True for nodes that can be removed via Trash: .csch/.csym view files, results directories
-    /// (UserFolder), and .npy/other files under results dirs (OtherFile).
-    /// NOTE: results dirs and .npy files are classified as UserFolder/OtherFile (no dedicated NodeKind).
+    /// True for nodes the one "Remove" item covers — everything that goes to the Trash and needs no
+    /// scan of its own beyond the confirmation.
+    ///
+    /// <para><b>Five document kinds were missing and had no in-app delete at all</b> (owner report,
+    /// 2026-09-06: a technology could only be removed with the file manager). <c>.cem</c>,
+    /// <c>.charm</c>, <c>.wBond</c> and <c>.ccolor</c> join <c>.cdd</c> here; <c>.ctech</c>
+    /// deliberately does NOT, because removing one changes what other documents MEAN and it has its
+    /// own command and its own confirmation (<see cref="RemoveTechnologyCommand"/>).</para>
+    ///
+    /// <para>NOTE: results dirs and .npy files are classified as UserFolder/OtherFile (no dedicated
+    /// NodeKind).</para>
     /// </summary>
     public bool IsRemovableFile =>
         (Kind == NodeKind.ViewFile &&
             Path.GetExtension(AbsolutePath).ToLowerInvariant() is ".csch" or ".csym" or ".clay")
-        || Kind == NodeKind.OtherFile
-        || Kind == NodeKind.UserFolder;
+        || Kind is NodeKind.OtherFile
+                or NodeKind.UserFolder
+                or NodeKind.DataDisplayFile
+                or NodeKind.EmSetupFile
+                or NodeKind.HarmonicaFile
+                or NodeKind.WBondFile
+                or NodeKind.ColorThemeFile;
+
+    /// <summary>
+    /// The Remove item's label — the document type by name, because "Remove" alone on a menu that a
+    /// right-click opened over one row says nothing about which row, and these five kinds sit beside
+    /// each other in the tree.
+    /// </summary>
+    public string RemoveHeader => Kind switch
+    {
+        NodeKind.DataDisplayFile => "Remove Data Display",
+        NodeKind.EmSetupFile     => "Remove EM Setup",
+        NodeKind.HarmonicaFile   => "Remove harmonicaRF Document",
+        NodeKind.WBondFile       => "Remove Wirebond Design",
+        NodeKind.ColorThemeFile  => "Remove Color Theme",
+        NodeKind.ViewFile        => Path.GetExtension(AbsolutePath).ToLowerInvariant() switch
+        {
+            ".csch" => "Remove Schematic",
+            ".csym" => "Remove Symbol",
+            ".clay" => "Remove Layout",
+            _       => "Remove",
+        },
+        _                        => "Remove",
+    };
+
+    /// <summary>
+    /// True when this node offers ANY remove action — the single separator above the remove group at
+    /// the bottom of the context menu rides this.
+    ///
+    /// <para>One separator, computed from what is actually visible below it, rather than one
+    /// per-kind separator each hoping nothing else is showing: the per-kind ones drew a rule at the
+    /// top of a menu on kinds where everything between them and the next item was hidden, which is
+    /// exactly what the owner saw above "Reveal in Finder" on a technology.</para>
+    /// </summary>
+    public bool HasRemoveAction =>
+        IsRemovableFile || IsTechFile || IsReferencedWorkspace || IsReferencedCell || IsOwnCell;
 
     /// <summary>True for openable leaf files (.csch / .csym / .clay / .cdd / .charm / .ctech) — drives
     /// the "Open" context item.</summary>
@@ -385,11 +432,12 @@ public sealed class ProjectTreeNodeViewModel : ObservableObject
     /// <summary>New Layout — prompts for a name, creates .clay in this cell's layout/ folder, opens it.</summary>
     public IAsyncRelayCommand NewLayoutCommand { get; }
 
-    /// <summary>Remove this .cdd Data Display file (moves to Trash). Visible only for DataDisplayFile nodes.</summary>
-    public IRelayCommand RemoveDataDisplayCommand { get; }
-
     /// <summary>Remove this file or directory (moves to Trash). Visible only for removable file/dir nodes.</summary>
     public IRelayCommand RemoveFileCommand { get; }
+
+    /// <summary>Remove this .ctech (moves to Trash), after counting what still resolves to it and
+    /// settling what the workspace default becomes. Visible only for TechFile nodes.</summary>
+    public IAsyncRelayCommand RemoveTechnologyCommand { get; }
 
     /// <summary>Remove this cell folder (moves to Trash). Visible only for Cell nodes.</summary>
     public IAsyncRelayCommand RemoveCellCommand { get; }
@@ -635,13 +683,13 @@ public sealed class ProjectTreeNodeViewModel : ObservableObject
             () => _actions?.OpenCellLayout(this),
             () => _actions is not null && IsCell && CanOpenLayout);
 
-        RemoveDataDisplayCommand = new RelayCommand(
-            () => _actions?.RemoveDataDisplay(this),
-            () => _actions is not null && IsDataDisplayFile);
-
         RemoveFileCommand = new RelayCommand(
             () => _actions?.RemoveFile(this),
             () => _actions is not null && IsRemovableFile);
+
+        RemoveTechnologyCommand = new AsyncRelayCommand(
+            () => _actions?.RemoveTechnologyAsync(this) ?? Task.CompletedTask,
+            () => _actions is not null && IsTechFile);
 
         RemoveCellCommand = new AsyncRelayCommand(
             () => _actions?.RemoveCellAsync(this) ?? Task.CompletedTask,

@@ -206,6 +206,12 @@ public partial class ProjectTreeTool : Tool, IActivatableTool
     [RelayCommand]
     private Task ArchiveWorkspace() => _actions?.ArchiveWorkspaceFromTreeAsync() ?? Task.CompletedTask;
 
+    /// <summary>Rename the workspace — its FOLDER, which is the whole of a workspace's name. On the
+    /// header rather than on a tree row because the workspace root row is not rendered at all: the
+    /// header is what names the workspace here.</summary>
+    [RelayCommand]
+    private Task RenameWorkspace() => _actions?.RenameWorkspaceAsync() ?? Task.CompletedTask;
+
     [RelayCommand]
     private Task OpenWorkspace() => _actions?.OpenWorkspaceFromTreeAsync() ?? Task.CompletedTask;
 

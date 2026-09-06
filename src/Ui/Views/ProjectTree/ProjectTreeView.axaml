@@ -71,6 +71,14 @@
                                   IsVisible="{Binding HasWorkspace}">
                             <MenuItem.Icon><mi:MaterialIcon Kind="FolderSearchOutline" Width="14" Height="14"/></MenuItem.Icon>
                         </MenuItem>
+                        <!-- The workspace's name IS its folder name — a .cws has a fixed filename and
+                             carries no name field — so this renames the folder. Here rather than in the
+                             file manager only; it is no less disruptive than doing it there, and the
+                             confirmation says exactly what it cannot repair. -->
+                        <MenuItem Header="Rename Workspace…" Command="{Binding RenameWorkspaceCommand}"
+                                  IsVisible="{Binding HasWorkspace}">
+                            <MenuItem.Icon><mi:MaterialIcon Kind="FormTextbox" Width="14" Height="14"/></MenuItem.Icon>
+                        </MenuItem>
                         <MenuItem Header="Archive Workspace…" Command="{Binding ArchiveWorkspaceCommand}"
                                   IsVisible="{Binding HasWorkspace}">
                             <MenuItem.Icon><mi:MaterialIcon Kind="ZipBox" Width="14" Height="14"/></MenuItem.Icon>
@@ -441,7 +449,6 @@
                                                   IsVisible="{Binding IsTechFile}">
                                             <MenuItem.Icon><mi:MaterialIcon Kind="Refresh" Width="14" Height="14"/></MenuItem.Icon>
                                         </MenuItem>
-                                        <Separator IsVisible="{Binding IsTechFile}"/>
 
                                         <!-- wBond (.wBond) node actions — wbond.md §9.2 routes 2 and 3.
                                              Route 1 (open it standalone) is the double-click. -->
@@ -557,21 +564,61 @@
                                         </MenuItem>
                                         <Separator IsVisible="{Binding IsCell}"/>
 
-                                        <!-- Remove to Trash -->
-                                        <MenuItem Header="Remove Data Display"
-                                                  Command="{Binding RemoveDataDisplayCommand}"
-                                                  IsVisible="{Binding IsDataDisplayFile}">
-                                            <MenuItem.Icon><mi:MaterialIcon Kind="TrashCanOutline" Width="14" Height="14"/></MenuItem.Icon>
+                                        <!-- A cell that lives in ANOTHER workspace, and the Referenced
+                                             Workspace row itself — directly above Reveal, since the two
+                                             answer the same question ("where does this actually come
+                                             from?") and this one answers it in the app. -->
+                                        <MenuItem Header="Open Referenced Workspace in New Window"
+                                                  Command="{Binding OpenReferencedWorkspaceCommand}"
+                                                  IsVisible="{Binding CanOpenReferencedWorkspace}">
+                                            <MenuItem.Icon><mi:MaterialIcon Kind="FolderNetworkOutline" Width="14" Height="14"/></MenuItem.Icon>
                                         </MenuItem>
-                                        <MenuItem Header="Remove"
+
+                                        <!-- All revealable nodes — the last item that is not a remove. -->
+                                        <MenuItem Header="{Binding RevealLabel}"
+                                                  Command="{Binding RevealCommand}"
+                                                  IsVisible="{Binding CanReveal}">
+                                            <MenuItem.Icon><mi:MaterialIcon Kind="FolderSearchOutline" Width="14" Height="14"/></MenuItem.Icon>
+                                        </MenuItem>
+
+                                        <!-- ── Removes ─────────────────────────────────────────────
+                                             ONE group, at the bottom, behind ONE separator that rides
+                                             HasRemoveAction — the union of everything below it.
+
+                                             Owner, 2026-09-06: a technology's menu showed a separator
+                                             directly above "Reveal in Finder" and nothing between
+                                             them. That is what a per-kind separator does on every kind
+                                             whose following items are all hidden — it draws a rule
+                                             against the next visible item, wherever that turns out to
+                                             be. Computing the one separator from what is actually
+                                             visible under it is the only version that cannot do
+                                             that. -->
+                                        <Separator IsVisible="{Binding HasRemoveAction}"/>
+
+                                        <!-- Header names the document type ("Remove Layout", "Remove EM
+                                             Setup"): one item now covers .cdd, .cem, .charm, .wBond,
+                                             .ccolor and the three view files, four of which had no
+                                             remove at all before. -->
+                                        <MenuItem Header="{Binding RemoveHeader}"
                                                   Command="{Binding RemoveFileCommand}"
                                                   IsVisible="{Binding IsRemovableFile}">
                                             <MenuItem.Icon><mi:MaterialIcon Kind="TrashCanOutline" Width="14" Height="14"/></MenuItem.Icon>
                                         </MenuItem>
 
-                                        <!-- The way out of File ▸ Reference Workspace… — grouped with the
-                                             other removes, and reference-only like the Known File one:
-                                             nothing is deleted in either workspace. -->
+                                        <!-- Its own item, not the one above: removing a technology
+                                             changes what other documents MEAN, so it counts them
+                                             first and settles the workspace default in the same
+                                             operation. -->
+                                        <MenuItem Header="Remove Technology"
+                                                  Command="{Binding RemoveTechnologyCommand}"
+                                                  IsVisible="{Binding IsTechFile}"
+                                                  ToolTip.Tip="Move this technology to the Trash. Layouts that use it, and microstrip components that take their substrate from it, are counted first.">
+                                            <MenuItem.Icon><mi:MaterialIcon Kind="TrashCanOutline" Width="14" Height="14"/></MenuItem.Icon>
+                                        </MenuItem>
+
+                                        <!-- The way out of File ▸ Reference Workspace… — reference-only
+                                             like the Known File one: nothing is deleted in either
+                                             workspace. -->
                                         <MenuItem Header="Remove Workspace Reference"
                                                   Command="{Binding RemoveWorkspaceReferenceCommand}"
                                                   IsVisible="{Binding IsReferencedWorkspace}">
@@ -587,24 +634,6 @@
                                             <MenuItem.Icon><mi:MaterialIcon Kind="LinkVariantOff" Width="14" Height="14"/></MenuItem.Icon>
                                         </MenuItem>
 
-                                        <!-- A cell that lives in ANOTHER workspace, and the Referenced
-                                             Workspace row itself — directly above Reveal, since the two
-                                             answer the same question ("where does this actually come
-                                             from?") and this one answers it in the app. -->
-                                        <MenuItem Header="Open Referenced Workspace in New Window"
-                                                  Command="{Binding OpenReferencedWorkspaceCommand}"
-                                                  IsVisible="{Binding CanOpenReferencedWorkspace}">
-                                            <MenuItem.Icon><mi:MaterialIcon Kind="FolderNetworkOutline" Width="14" Height="14"/></MenuItem.Icon>
-                                        </MenuItem>
-
-                                        <!-- All revealable nodes — above Remove Cell so it groups with the other removes -->
-                                        <MenuItem Header="{Binding RevealLabel}"
-                                                  Command="{Binding RevealCommand}"
-                                                  IsVisible="{Binding CanReveal}">
-                                            <MenuItem.Icon><mi:MaterialIcon Kind="FolderSearchOutline" Width="14" Height="14"/></MenuItem.Icon>
-                                        </MenuItem>
-
-                                        <Separator IsVisible="{Binding IsOwnCell}"/>
                                         <MenuItem Header="Remove Cell"
                                                   Command="{Binding RemoveCellCommand}"
                                                   IsVisible="{Binding IsOwnCell}">

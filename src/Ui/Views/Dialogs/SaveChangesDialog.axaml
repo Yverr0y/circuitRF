@@ -10,15 +10,24 @@
 
     <Grid RowDefinitions="*,Auto" Margin="20" MinHeight="100">
 
+        <!-- MaxWidth is what makes TextWrapping mean anything here (owner, 2026-09-06: "the Rename
+             Workspace dialog is crazy wide"). SizeToContent="WidthAndHeight" measures the text
+             against infinite width, so Wrap never fires and the window grows to the longest LINE —
+             invisible while every message was one short sentence, and the blast-radius confirmations
+             this dialog now carries are paragraphs. Capped here rather than on the Window so a short
+             message still sizes down to MinWidth on its own. -->
         <TextBlock Grid.Row="0"
                    x:Name="MessageText"
                    TextWrapping="Wrap"
+                   MaxWidth="460"
                    VerticalAlignment="Center"
                    FontSize="13"/>
 
+        <!-- The message ran straight into the buttons' outlines with the two rows flush. -->
         <StackPanel Grid.Row="1"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
+                    Margin="0,18,0,0"
                     Spacing="8">
 
             <Button x:Name="CancelButton"

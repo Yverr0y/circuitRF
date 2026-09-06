@@ -1740,7 +1740,43 @@ public partial class LayoutEditorView : UserControl
             $"Retargeted to {summary.TechName ?? "(no technology)"} · {summary.ShapeCount} shape(s) · " +
             LayoutLayerMapping.SummarizeMapping(summary.Rows, target.Tech));
 
+        WarnIfSchematicKeepsWorkspaceDefault(vm, choice.AbsoluteTechPath);
+
         LayoutCanvasCtrl.InvalidateVisual();
+    }
+
+    /// <summary>
+    /// This gesture is the one that CREATES the divergence, so it is the cheapest place to name it.
+    ///
+    /// <para>Pointing a layout at its own technology moves the ARTWORK only. The cell's schematic goes
+    /// on taking its microstrip substrate from the workspace default, because a schematic has no
+    /// technology reference of its own (<c>MicrostripSubstrateInjection</c> R-pc-8: "add a
+    /// per-schematic override only if a need appears"). Update Layout from Schematic warns about it
+    /// too, but that is later, on a different gesture, and possibly on a different day.</para>
+    ///
+    /// <para>Silent unless the cell actually has microstrip components — for everything else the two
+    /// technologies mean layers, and a layout deliberately drawn with a different layer table is
+    /// exactly what this dialog is for.</para>
+    /// </summary>
+    private static void WarnIfSchematicKeepsWorkspaceDefault(LayoutEditorViewModel vm, string? newTechPath)
+    {
+        if (newTechPath is null) return;                       // back to the default: nothing diverges
+        if (vm.CurrentLayoutPath is not { Length: > 0 } clayPath) return;
+
+        string? cellDir = Path.GetDirectoryName(Path.GetDirectoryName(clayPath));
+        if (cellDir is null || !CircuitRF.Ui.Schematic.DocumentRemovalImpact.CellHasMicrostrip(cellDir)) return;
+
+        string? defaultPath = vm.ResolveWorkspaceDefaultTech?.Invoke()?.ResolvedPath;
+        if (defaultPath is not null
+            && string.Equals(Path.GetFullPath(defaultPath), Path.GetFullPath(newTechPath),
+                             StringComparison.OrdinalIgnoreCase))
+            return;
+
+        vm.ReportMessage(
+            "This cell's schematic still takes its microstrip substrate from the workspace default "
+          + (defaultPath is null ? "(none is set)" : $"('{Path.GetFileNameWithoutExtension(defaultPath)}')")
+          + " — a schematic has no technology of its own. The artwork now uses "
+          + $"'{Path.GetFileNameWithoutExtension(newTechPath)}'; the simulated line does not.");
     }
 
     /// <summary>A retargeted <c>TechRef</c> always resolves relative to the .clay file's own

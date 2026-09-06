@@ -23,6 +23,61 @@ namespace CircuitRF.Ui.ViewModels;
 /// </summary>
 public partial class WorkspaceViewModel
 {
+    /// <summary>
+    /// Says so when the artwork about to be generated and the electrical model already being
+    /// simulated are on two different technologies.
+    ///
+    /// <para><b>This divergence is real, live, and was silent.</b> The generator is handed
+    /// <c>layoutVm.Technology</c> — the LAYOUT's resolution, which is its own <c>TechRef</c> first and
+    /// the workspace default only as a fallback. A microstrip component's substrate comes from
+    /// <c>MicrostripSubstrateInjection</c>, which resolves the WORKSPACE DEFAULT and nothing else,
+    /// because a schematic has no technology reference of its own. So the moment a layout carries its
+    /// own <c>TechRef</c>, the line is drawn on one substrate and computed on another: the widths look
+    /// right, the artwork looks right, and only a simulation shows it.</para>
+    ///
+    /// <para><b>Reported, not refused.</b> A layout with its own <c>TechRef</c> is a deliberate act
+    /// (<c>TechnologyResolver</c>'s own header: "a .clay only stores a TechRef when it deliberately
+    /// deviates"), so the answer is to name both technologies and what differs — not to block a
+    /// gesture the user meant. Silent when the schematic has no microstrip component in it, because
+    /// then the difference has no electrical consequence to warn about.</para>
+    /// </summary>
+    private void ReportTechnologyDivergence(
+        SchematicEditModel schematic, string schematicDir, LayoutEditorViewModel layoutVm)
+    {
+        if (!schematic.Components.Any(c => MicrostripSubstrateInjection.IsMicrostripKind(c.Symbol)))
+            return;
+
+        string? schematicTech = MicrostripSubstrateInjection.ResolveWorkspaceTechnologyPath(schematicDir);
+        string? layoutTech    = layoutVm.ResolvedTechPath;
+
+        // Same file — the ordinary case, and nothing to say.
+        if (schematicTech is not null && layoutTech is not null
+            && string.Equals(Path.GetFullPath(schematicTech), Path.GetFullPath(layoutTech),
+                             StringComparison.OrdinalIgnoreCase))
+            return;
+
+        // Two copies of one table are the same technology (R47a's own rule), so comparing the TABLES
+        // rather than the paths is what keeps this from firing on a workspace that simply holds the
+        // process twice.
+        string? difference = ExternalWorkspaceGate.CompareTechnologies(schematicTech, layoutTech);
+        if (difference is null && schematicTech is not null && layoutTech is not null) return;
+
+        string schematicName = schematicTech is null
+            ? "no technology (the workspace has no default)"
+            : $"'{Path.GetFileNameWithoutExtension(schematicTech)}'";
+        string layoutName = layoutTech is null
+            ? "no technology"
+            : $"'{Path.GetFileNameWithoutExtension(layoutTech)}'";
+
+        Messages.Warning(
+            $"This cell's microstrip components are simulated on {schematicName} — a schematic always "
+          + $"takes its substrate from the workspace default — while this layout is drawn with "
+          + $"{layoutName}. The artwork and the electrical model do not agree."
+          + (difference is null ? "" : $" {difference}")
+          + " Set the workspace default to the layout's technology, or point the layout back at the "
+          + "default with Change Technology….");
+    }
+
     // ── Update Layout from Schematic (§2/§2.1) ───────────────────────────────────────────────────
 
     [RelayCommand(CanExecute = nameof(IsSchematicDocumentActive))]
@@ -112,6 +167,10 @@ public partial class WorkspaceViewModel
                 Messages.Error("Update Layout from Schematic: no workspace is open — generated PCell cells need a workspace to live in.");
                 return;
             }
+
+            // The two halves of one cell can be on DIFFERENT technologies, and until now nothing said
+            // so — see ReportTechnologyDivergence.
+            ReportTechnologyDivergence(doc.ViewModel.EditModel, schematicDir, layoutVm);
 
             var result = SchematicToLayoutGenerator.Run(
                 doc.ViewModel.EditModel, layoutVm.Model, schematicDir, workspaceRoot, layoutDir,

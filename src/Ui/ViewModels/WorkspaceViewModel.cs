@@ -10992,6 +10992,139 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     /// <inheritdoc/>
     public Task UnarchiveWorkspaceFromTreeAsync() => UnarchiveWorkspaceCommand.ExecuteAsync(null);
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para><b>The rename is <c>Directory.Move</c> and nothing else.</b> A workspace's name IS its
+    /// folder name — <c>.cws</c> is a fixed filename and <c>CwsFile</c> has no name field — so there
+    /// is no second place to keep in step.</para>
+    ///
+    /// <para><b>Nothing INSIDE the workspace is touched, and that is not an optimisation.</b> A
+    /// CellRef, a layout's TechRef, a <c>.ccell</c>'s primaries and the <c>.cws</c>'s own
+    /// OpenDocuments are all relative by design, so they travel with the folder. What breaks is a
+    /// reference from OUTSIDE, and <see cref="WorkspaceRenameRepoint"/>'s own header lists the four
+    /// fields that can hold one.</para>
+    ///
+    /// <para><b>Close, move, reopen — rather than repointing the live session.</b> This window holds
+    /// dozens of absolute paths (open-document keys, edit sessions, the layout registry) and
+    /// <see cref="SwitchToWorkspace"/> already rebuilds every one of them from the <c>.cws</c>, whose
+    /// document paths are workspace-relative. Rewriting them in place would be a second, partial copy
+    /// of that restore. It also gets the advisory lock right for free: the file is released BEFORE the
+    /// move, so no <c>.crf-open.json</c> travels into the renamed folder for the reopen to trip
+    /// over.</para>
+    /// </remarks>
+    public async Task RenameWorkspaceAsync()
+    {
+        if (CurrentWorkspacePath is null) return;
+        var window = ResolveOwner(null);
+        if (window is null) return;
+
+        string oldRoot   = Path.GetDirectoryName(CurrentWorkspacePath)!;
+        string parentDir = Path.GetDirectoryName(oldRoot) ?? oldRoot;
+        string oldName   = Path.GetFileName(oldRoot.TrimEnd(
+            Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+        var newName = await new Views.Dialogs.InputNameDialog(
+            "Rename Workspace", "New workspace name:", oldName).ShowDialog<string?>(window);
+        if (newName is null) return;
+        if (string.Equals(newName, oldName, StringComparison.Ordinal))
+        {
+            Messages.Info("Name unchanged.");
+            return;
+        }
+
+        string newRoot = Path.Combine(parentDir, newName);
+        if (Directory.Exists(newRoot) || File.Exists(newRoot))
+        {
+            Messages.Error($"A folder named '{newName}' already exists at that location.");
+            return;
+        }
+
+        // SL2 R-sl2-13: named, and refused before anything moves.
+        if (UnwritableParentRefusal(parentDir, "The workspace was not renamed") is { } refusal)
+        {
+            Messages.Error(refusal);
+            return;
+        }
+
+        // Which OTHER open workspaces point at this one. Only these can be repaired; the sentence
+        // below says so rather than implying the rename is clean.
+        var referrers = OtherOpenWorkspaceRoots()
+            .Where(r => WorkspaceRenameRepoint.References(r, oldRoot))
+            .ToList();
+
+        var msg = new System.Text.StringBuilder();
+        msg.Append($"Rename workspace '{oldName}' to '{newName}'?\n\n")
+           .Append("The folder is renamed. Everything inside it refers to its own contents by "
+                 + "relative path, so no cell, layout, technology or open tab is affected — this "
+                 + "window closes the workspace and reopens it under the new name.");
+
+        if (referrers.Count > 0)
+            msg.Append($"\n\n{referrers.Count} other open workspace")
+               .Append(referrers.Count == 1 ? " references" : "s reference")
+               .Append(" this one and will be repointed:\n")
+               .Append(NameList([.. referrers], parentDir));
+
+        msg.Append("\n\n⚠ A workspace that is not open cannot be repointed. If another project "
+                 + "references this one, open it and use File ▸ Reference Workspace… to point at the "
+                 + "new location — the alias itself keeps working, so nothing placed through it has "
+                 + "to be replaced.");
+
+        var confirm = await new Views.Dialogs.SaveChangesDialog(
+            msg.ToString(), saveLabel: "Rename", dontSaveLabel: null, cancelLabel: "Cancel",
+            title: "Rename Workspace").ShowDialog<SaveChangesResult>(window);
+        if (confirm != SaveChangesResult.Save) return;
+
+        // Unsaved work is offered up first: the reopen below reads what is on DISK, so anything not
+        // saved would be silently dropped by a gesture that reads like a rename.
+        if (HasAnyDirtyWork(includeFloated: false) &&
+            !await PromptSaveBeforeClose(window, $"renaming '{oldName}'", includeFloated: false))
+            return;
+
+        // The dock arrangement and open-document list reach disk only from here, and they are what
+        // the workspace will come back up in.
+        WriteWorkspaceFile(CurrentWorkspacePath, silent: true);
+        ReleaseWorkspaceLock();
+
+        try { Directory.Move(oldRoot, newRoot); }
+        catch (Exception ex)
+        {
+            // The lock was dropped a moment ago on the assumption the move would happen; put it back
+            // rather than leaving this window holding an unlocked workspace it still has open.
+            WorkspaceLock.Take(oldRoot);
+            if (FileAccessDiagnostics.TryDescribe(oldRoot, ex, FileAccessOperation.Saving) is { } diagnostic)
+                Messages.PostDiagnostic(diagnostic, oldRoot);
+            else
+                Messages.Error($"The workspace was not renamed — {ex.Message}");
+            return;
+        }
+
+        Messages.Info($"Renamed workspace to '{newName}'.");
+
+        foreach (var referrer in referrers)
+        {
+            var repointed = WorkspaceRenameRepoint.Repoint(referrer, oldRoot, newRoot);
+            string referrerName = Path.GetFileName(referrer.TrimEnd(
+                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (repointed.Total > 0)
+                Messages.Info($"Repointed {repointed.Total} reference(s) in '{referrerName}'.");
+            else
+                Messages.Warning(
+                    $"'{referrerName}' references this workspace but could not be repointed — "
+                  + "check its Referenced Workspaces and Known Files.");
+        }
+
+        // The recent list holds the path that no longer exists; the workspace is about to be pushed
+        // back onto it under the new one by SwitchToWorkspace's own PushRecent.
+        ((ITreeActions)this).RemoveRecentWorkspace(CurrentWorkspacePath);
+
+        await SwitchToWorkspaceReporting(Path.Combine(newRoot, ".cws"));
+
+        // Every other window's tree may now hold a stale sub-tree for the renamed workspace.
+        foreach (var other in Views.WorkspaceLocator.AllWindows())
+            if (other.DataContext is WorkspaceViewModel vm && !ReferenceEquals(vm, this))
+                vm._factory.ProjectTreeTool?.Refresh();
+    }
+
     // ── ITreeActions: selection change hook (Item 5) ──────────────────────────
 
     /// <inheritdoc/>
@@ -11436,15 +11569,32 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     // ── Technology (.ctech) node actions (L0c) ────────────────────────────────
 
     /// <inheritdoc/>
-    public async Task SetAsWorkspaceDefaultAsync(ProjectTreeNodeViewModel node)
+    public Task SetAsWorkspaceDefaultAsync(ProjectTreeNodeViewModel node)
+        => ChangeWorkspaceDefaultTechnologyAsync(node.AbsolutePath);
+
+    /// <summary>
+    /// The Project Tree's "Set as Workspace Default", addressed by PATH so a second surface can use
+    /// it — the microstrip parameter editor's Technology picker (owner, 2026-09-06: it has to be a
+    /// combo box, since nobody can be expected to type a <c>.ctech</c> file name).
+    ///
+    /// <para><b>There is exactly one place a schematic's technology is recorded</b>, and this is it:
+    /// <c>.cws</c> <c>DefaultTechRef</c>. A schematic carries no technology reference of its own, so a
+    /// picker on a component cannot mean anything narrower — which is precisely why it goes through
+    /// the SAME confirmation the tree's own item does. Re-pointing the default re-points every layout
+    /// that follows it, and that sentence is owed to the user wherever the gesture is made.</para>
+    /// </summary>
+    /// <returns>True when the default was changed; false when the user cancelled or there was nothing
+    /// to change.</returns>
+    public async Task<bool> ChangeWorkspaceDefaultTechnologyAsync(string techPath)
     {
-        if (CurrentWorkspacePath is null) return;
+        if (CurrentWorkspacePath is null) return false;
         var workspaceDir = Path.GetDirectoryName(CurrentWorkspacePath)!;
 
-        if (!await ConfirmWorkspaceDefaultTechChangeAsync(workspaceDir, node.AbsolutePath)) return;
+        if (!await ConfirmWorkspaceDefaultTechChangeAsync(workspaceDir, techPath)) return false;
 
-        ApplyWorkspaceDefaultTech(workspaceDir, node.AbsolutePath);
-        Messages.Success("Set as workspace default technology", node.AbsolutePath);
+        ApplyWorkspaceDefaultTech(workspaceDir, techPath);
+        Messages.Success("Set as workspace default technology", techPath);
+        return true;
     }
 
     /// <summary>
@@ -11504,13 +11654,20 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         return choice == SaveChangesResult.Save;
     }
 
-    /// <summary>The write itself — shared by <see cref="SetAsWorkspaceDefaultAsync"/> and R47e's
-    /// "use it for this whole workspace" remedy, so both go through one invalidate-and-refresh.</summary>
-    private void ApplyWorkspaceDefaultTech(string workspaceDir, string techPath)
+    /// <summary>The write itself — shared by <see cref="SetAsWorkspaceDefaultAsync"/>, R47e's
+    /// "use it for this whole workspace" remedy and <see cref="RemoveTechnologyAsync"/>, so all three
+    /// go through one invalidate-and-refresh.</summary>
+    /// <param name="techPath">The new default, or null to CLEAR it — which is what removing the
+    /// current default has to do, since a <c>.cws</c> naming a file in the Trash resolves to nothing
+    /// and says so nowhere.</param>
+    private void ApplyWorkspaceDefaultTech(string workspaceDir, string? techPath)
     {
-        string relPath;
-        try   { relPath = Path.GetRelativePath(workspaceDir, techPath); }
-        catch { relPath = techPath; }
+        string? relPath = null;
+        if (techPath is not null)
+        {
+            try   { relPath = Path.GetRelativePath(workspaceDir, techPath); }
+            catch { relPath = techPath; }
+        }
 
         CwsFile cws;
         try   { cws = WorkspacePersistence.LoadFromFile(CurrentWorkspacePath!); }
@@ -11521,8 +11678,123 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
 
         // The new default's cached entry (if any) may be stale relative to what's on disk now;
         // Invalidate forces a fresh load, then every open layout re-resolves against it.
-        _techCache.Invalidate(techPath);
+        if (techPath is not null) _techCache.Invalidate(techPath);
         RefreshAllOpenLayoutTech();
+        _factory.ProjectTreeTool?.Refresh();
+    }
+
+    /// <inheritdoc/>
+    public async Task RemoveTechnologyAsync(ProjectTreeNodeViewModel node)
+    {
+        if (CurrentWorkspacePath is null) return;
+        var workspaceDir = Path.GetDirectoryName(CurrentWorkspacePath)!;
+
+        var window = ResolveOwner(null);
+        if (window is null) return;
+
+        var impact = DocumentRemovalImpact.ForTechnology(
+            workspaceDir, node.AbsolutePath, OtherOpenWorkspaceRoots());
+
+        // Exactly one other technology in the workspace is the case worth offering a choice for: the
+        // reported gesture is "change the stackup and tech to another", and a removal that leaves the
+        // workspace with one technology and no default has done half of it. Several candidates are
+        // not guessed between — the user picks afterwards with Set as Workspace Default.
+        string? replacement = impact.IsWorkspaceDefault && impact.OtherTechnologies.Count == 1
+            ? impact.OtherTechnologies[0]
+            : null;
+
+        var msg = new System.Text.StringBuilder();
+        msg.Append($"Remove technology '{node.Name}'?\n\n")
+           .Append("This moves the file to the Trash/Recycle Bin. There is no in-app undo.");
+
+        if (impact.IsWorkspaceDefault)
+        {
+            msg.Append("\n\n⚠ This is the workspace default technology.");
+
+            if (impact.LayoutsFollowingDefault.Count > 0)
+                msg.Append($"\n\n{impact.LayoutsFollowingDefault.Count} layout")
+                   .Append(impact.LayoutsFollowingDefault.Count == 1 ? " follows" : "s follow")
+                   .Append(" it and would be drawn with the fallback palette:\n")
+                   .Append(NameList(impact.LayoutsFollowingDefault, workspaceDir));
+
+            // The half nothing else reports. A microstrip component resolves H/T/Er/Sigma/TanD from
+            // the workspace default and from nowhere else (there is no per-schematic technology), so
+            // its ELECTRICAL model silently reverts to the component defaults — the schematic still
+            // opens, the widths are unchanged, and the first sign is a simulation that moved.
+            if (impact.MicrostripCells.Count > 0)
+                msg.Append($"\n\n{impact.MicrostripCells.Count} cell")
+                   .Append(impact.MicrostripCells.Count == 1 ? " has" : "s have")
+                   .Append(" microstrip components, which take their substrate (H, Er, T, TanD) from "
+                         + "the workspace default:\n")
+                   .Append(NameList(impact.MicrostripCells, workspaceDir))
+                   .Append("\nWithout a default they fall back to the model's own defaults.");
+
+            msg.Append(replacement is not null
+                ? $"\n\nThe workspace's only other technology is '{Path.GetFileNameWithoutExtension(replacement)}'."
+                : "\n\nThe workspace will have no default technology.");
+        }
+
+        if (impact.LayoutsPointingHere.Count > 0)
+            msg.Append($"\n\n⚠ {impact.LayoutsPointingHere.Count} layout")
+               .Append(impact.LayoutsPointingHere.Count == 1 ? " points" : "s point")
+               .Append(" at this technology directly:\n")
+               .Append(NameList(impact.LayoutsPointingHere, workspaceDir))
+               .Append("\nThey fall back to the workspace default.");
+
+        // MW2 R-mw2-14's rule, applied here: a workspace nobody has open cannot be scanned, so the
+        // claim has to be scoped to what was actually looked at rather than reading as "nothing uses
+        // this".
+        if (impact.LayoutsPointingHere.Count == 0 && !impact.IsWorkspaceDefault)
+            msg.Append("\n\nNothing in this workspace, or in any other open workspace, resolves to it.");
+
+        var dlg = new Views.Dialogs.SaveChangesDialog(
+            msg.ToString(),
+            saveLabel:     replacement is not null
+                             ? $"Remove and Use '{Path.GetFileNameWithoutExtension(replacement)}'"
+                             : "Remove Technology",
+            dontSaveLabel: replacement is not null ? "Remove Only" : null,
+            cancelLabel:   "Cancel",
+            title:         "Remove Technology");
+        await dlg.ShowDialog(window);
+        if (dlg.Result == SaveChangesResult.Cancel) return;
+
+        bool promote = replacement is not null && dlg.Result == SaveChangesResult.Save;
+
+        // Close any tab holding it, and drop the cached (possibly unsaved-override) copy — otherwise a
+        // later resolution would still hand out a technology whose file is gone.
+        foreach (var (key, dockable) in _openDocsByPath
+                     .Where(kvp => IsPathOrUnder(kvp.Key, node.AbsolutePath))
+                     .Select(kvp => (kvp.Key, kvp.Value))
+                     .ToList())
+        {
+            _factory.ForceCloseDockable(dockable);
+            _ = key;
+        }
+        _techCache.Invalidate(node.AbsolutePath);
+
+        if (!SystemTrash.TryMoveToTrash(node.AbsolutePath, out var err))
+        {
+            Messages.Error($"Remove technology failed: {err}");
+            return;
+        }
+
+        Messages.Info($"Removed technology (moved to Trash): {node.AbsolutePath}");
+
+        // The .cws is re-pointed AFTER the file is gone and only when it named this one, so a failed
+        // trash operation above never leaves a workspace pointing somewhere new.
+        if (impact.IsWorkspaceDefault)
+        {
+            ApplyWorkspaceDefaultTech(workspaceDir, promote ? replacement : null);
+            Messages.Info(promote
+                ? $"Workspace default technology is now '{Path.GetFileNameWithoutExtension(replacement!)}'."
+                : "This workspace has no default technology now — layouts and microstrip components "
+                + "fall back to their own defaults until one is set.");
+        }
+        else
+        {
+            RefreshAllOpenLayoutTech();
+        }
+
         _factory.ProjectTreeTool?.Refresh();
     }
 
@@ -11653,22 +11925,95 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     }
 
     /// <inheritdoc/>
-    public void RemoveDataDisplay(ProjectTreeNodeViewModel node)
-    {
-        var name = Path.GetFileNameWithoutExtension(node.AbsolutePath);
-        var msg  = $"Remove Data Display '{name}'?\n\nThis moves the file to the Trash/Recycle Bin. There is no in-app undo.";
-        _ = RemoveNodeToTrashAsync(node, msg, "Remove Data Display");
-    }
-
-    /// <inheritdoc/>
     public void RemoveFile(ProjectTreeNodeViewModel node)
     {
-        var name = node.Name;
-        var msg  = $"Remove '{name}'?\n\nThis moves it to the Trash/Recycle Bin. There is no in-app undo.";
-        _ = RemoveNodeToTrashAsync(node, msg, "Remove");
+        var msg = $"{node.RemoveHeader} '{node.Name}'?"
+                + "\n\nThis moves it to the Trash/Recycle Bin. There is no in-app undo.";
+
+        // Everything this removal breaks, stated BEFORE it happens. Each block is silent when it has
+        // nothing to say, so the ordinary case is still the one-line confirmation it was.
+        var plan = node.Kind == NodeKind.ViewFile
+            ? PrimaryViewRepair.Plan(node.AbsolutePath)
+            : default;
+
+        if (plan.WasPrimary)
+            msg += "\n\n" + PrimaryRemovalWarning(plan, node);
+
+        if (node.Kind == NodeKind.WBondFile && CurrentWorkspacePath is not null)
+        {
+            var linked = DocumentRemovalImpact.SchematicsLinkingWBond(
+                Path.GetDirectoryName(CurrentWorkspacePath)!, node.AbsolutePath);
+            if (linked.Count > 0)
+                msg += $"\n\n⚠ {linked.Count} schematic{(linked.Count == 1 ? "" : "s")} "
+                     + $"link{(linked.Count == 1 ? "s" : "")} this design:\n"
+                     + NameList(linked, Path.GetDirectoryName(CurrentWorkspacePath)!)
+                     + "\nThe wirebond component stays where it is; its File parameter stops resolving.";
+        }
+
+        if (node.Kind == NodeKind.ColorThemeFile && CurrentWorkspacePath is not null
+            && DocumentRemovalImpact.IsWorkspaceColorScheme(
+                   Path.GetDirectoryName(CurrentWorkspacePath)!, node.AbsolutePath))
+            msg += "\n\n⚠ This is the color theme this workspace activates when it opens. "
+                 + "Removing it falls back to the application preference.";
+
+        _ = RemoveNodeToTrashAsync(node, msg, node.RemoveHeader, plan);
     }
 
-    private async Task RemoveNodeToTrashAsync(ProjectTreeNodeViewModel node, string dialogMessage, string dialogTitle)
+    /// <summary>
+    /// The sentence a primary removal earns. Two facts, and the second is the one a user cannot see
+    /// for themselves: what the cell's primary becomes.
+    ///
+    /// <para>A cell whose primary schematic or symbol goes away is also a cell that other cells may
+    /// PLACE, so the referrer count is asked for here as well — it is the same question
+    /// <c>RemoveCellAsync</c> asks, scoped to the view that actually resolves a reference.</para>
+    /// </summary>
+    private string PrimaryRemovalWarning(PrimaryRepairPlan plan, ProjectTreeNodeViewModel node)
+    {
+        string viewNoun = plan.ViewType.ToString().ToLowerInvariant();
+        string cellName = Path.GetFileName(plan.CellDir!.TrimEnd(
+            Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+        string outcome = plan.Survivors.Count switch
+        {
+            0 => $"Cell '{cellName}' will have no {viewNoun} view.",
+            1 => $"'{plan.Survivors[0]}' becomes the primary {viewNoun} of '{cellName}'.",
+            _ => $"'{cellName}' has {plan.Survivors.Count} other {viewNoun}s and none of them will be "
+               + "primary until you choose one (right-click ▸ Make Primary).",
+        };
+
+        string referrers = "";
+        if (plan.ViewType is ViewType.Schematic or ViewType.Symbol && CurrentWorkspacePath is not null)
+        {
+            var usage = CellUsageScanner.CountReferencingCells(
+                Path.GetDirectoryName(CurrentWorkspacePath)!, plan.CellDir!, OtherOpenWorkspaceRoots());
+            if (usage.Count > 0 && plan.Survivors.Count == 0)
+                referrers = $" {usage.Count} cell{(usage.Count == 1 ? "" : "s")} "
+                          + $"place{(usage.Count == 1 ? "s" : "")} '{cellName}'.";
+        }
+
+        return $"⚠ This is the primary {viewNoun} of '{cellName}'. {outcome}{referrers}";
+    }
+
+    /// <summary>Up to five paths, workspace-relative and indented, then a count of the rest — the shape
+    /// every blast-radius message in this file uses, so they read alike.</summary>
+    private static string NameList(IReadOnlyList<string> paths, string relativeTo)
+    {
+        string names = string.Join("\n    ", paths.Take(5).Select(p =>
+        {
+            try   { return Path.GetRelativePath(relativeTo, p).Replace('\\', '/'); }
+            catch { return p; }
+        }));
+        string more = paths.Count > 5 ? $"\n    …and {paths.Count - 5} more" : "";
+        return "    " + names + more;
+    }
+
+    /// <param name="primaryPlan">The primacy repair to apply once the file is gone — default (and
+    /// therefore <see cref="PrimaryRepairPlan.WasPrimary"/> false) for everything that is not a view
+    /// file. Planned by the CALLER, before the removal, because it has to read the sub-folder while
+    /// the file is still in it.</param>
+    private async Task RemoveNodeToTrashAsync(
+        ProjectTreeNodeViewModel node, string dialogMessage, string dialogTitle,
+        PrimaryRepairPlan primaryPlan = default)
     {
         var window = ResolveOwner(null);
         if (window is null) return;
@@ -11705,7 +12050,57 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         }
 
         Messages.Info($"Removed (moved to Trash): {path}");
+
+        // The .ccell named a file that is now in the Trash — repair it in the SAME operation, or the
+        // cell renders with a warning triangle for a state the user's own gesture created and did not
+        // ask for. Reported, because "which schematic is primary now" is not visible in the tree.
+        ApplyPrimaryRepair(primaryPlan);
+
         _factory.ProjectTreeTool?.Refresh();
+    }
+
+    /// <summary>
+    /// Writes the primacy repair and says what it did. A primary SYMBOL also invalidates the cell
+    /// symbol resolver and rebuilds open schematics — the same pair <see cref="MakePrimary"/> does,
+    /// and for the same reason: every cell-ref component drawn with that symbol must re-resolve.
+    /// </summary>
+    private void ApplyPrimaryRepair(PrimaryRepairPlan plan)
+    {
+        if (!plan.WasPrimary || plan.CellDir is null) return;
+
+        PrimaryRepairAction action;
+        string? promoted;
+        try { action = PrimaryViewRepair.Apply(plan, out promoted); }
+        catch (Exception ex)
+        {
+            Messages.Warning($"The cell's .ccell still names the removed {plan.ViewType.ToString().ToLowerInvariant()}: {ex.Message}");
+            return;
+        }
+
+        string cellName = Path.GetFileName(plan.CellDir.TrimEnd(
+            Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        string viewNoun = plan.ViewType.ToString().ToLowerInvariant();
+
+        switch (action)
+        {
+            case PrimaryRepairAction.PromotedSurvivor:
+                Messages.Info($"'{promoted}' is now the primary {viewNoun} of '{cellName}'.");
+                break;
+            case PrimaryRepairAction.ClearedForChoice:
+                Messages.Warning(
+                    $"'{cellName}' has no primary {viewNoun} now — right-click one and choose "
+                  + "“Make Primary”.");
+                break;
+            case PrimaryRepairAction.NoViewsLeft:
+                Messages.Info($"'{cellName}' has no {viewNoun} view now.");
+                break;
+        }
+
+        if (plan.ViewType == ViewType.Symbol)
+        {
+            CellSymbolResolver.Invalidate(plan.CellDir);
+            RebuildOpenSchematics();
+        }
     }
 
     // True when candidate is exactly path, or is a file under the directory path.

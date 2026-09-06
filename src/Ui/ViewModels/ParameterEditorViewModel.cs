@@ -72,6 +72,10 @@ public sealed partial class ParameterEditorViewModel : ObservableObject
         ShowSpiceModelFileCommand = new AsyncRelayCommand(RevealSpiceModelFileAsync,
             () => !string.IsNullOrWhiteSpace(SpiceModelFilePath));
 
+        EditMicrostripTechnologyCommand = new RelayCommand(
+            () => { if (SelectedMicrostripTechnology is { } t) OpenTechnologyFile?.Invoke(t.Path); },
+            () => CanEditMicrostripTechnology);
+
         ToggleMklopfImpedanceEntryCommand = new RelayCommand(ToggleMklopfImpedanceEntry, () => IsMklopfTarget);
         ToggleMklopfLengthEntryCommand    = new RelayCommand(ToggleMklopfLengthEntry,    () => IsMklopfTarget);
     }
@@ -539,6 +543,7 @@ public sealed partial class ParameterEditorViewModel : ObservableObject
             OnPropertyChanged(nameof(AllowsAddParameter));
             OnPropertyChanged(nameof(ShowAddSddEquation));
             NotifyMklopfState();
+            RefreshMicrostripSubstrate();
             UpdateCanRemoveTopGroup();
             return;
         }
@@ -648,6 +653,7 @@ public sealed partial class ParameterEditorViewModel : ObservableObject
         OnPropertyChanged(nameof(AllowsAddParameter));
         OnPropertyChanged(nameof(ShowAddSddEquation));
         NotifyMklopfState();
+        RefreshMicrostripSubstrate();
         UpdateCanRemoveTopGroup();
         if (comp.Symbol == SymbolKind.Snp) RefreshSnpProperties();
         if (comp.Symbol == SymbolKind.SpiceModel) RefreshSpiceModelProperties();
@@ -1518,6 +1524,10 @@ public sealed partial class ParameterEditorViewModel : ObservableObject
         // change or an undo of a File change — nothing looks different and nothing rebuilds.
         // Without this the panel goes on describing the file that was chosen before.
         if (_target.Symbol == SymbolKind.SpiceModel) RefreshSpiceModelProperties();
+        // A READOUT of the technology, so it follows the model for the same reason the Match panel
+        // does — including a SignalLayer/GroundReference change on this very instance, which moves
+        // which conductors the substrate is measured between.
+        if (IsMicrostripTarget) RefreshMicrostripSubstrate();
     }
 
     // ── Cleanup ───────────────────────────────────────────────────────────────

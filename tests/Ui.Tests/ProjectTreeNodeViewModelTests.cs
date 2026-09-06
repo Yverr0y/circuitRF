@@ -264,10 +264,17 @@ public class ProjectTreeNodeViewModelTests : IDisposable
     [InlineData(NodeKind.ViewFile,        "/tmp/x/Amp.csch",   true)]
     [InlineData(NodeKind.ViewFile,        "/tmp/x/Amp.csym",   true)]
     [InlineData(NodeKind.ViewFile,        "/tmp/x/Amp.clay",   true)]
-    [InlineData(NodeKind.DataDisplayFile, "/tmp/x/disp.cdd",   false)]
+    // The five document kinds that had NO in-app remove at all until 2026-09-06 (owner report: a
+    // technology could only be deleted with the file manager). .ctech is deliberately absent — it
+    // has its own command, because removing one changes what other documents mean.
+    [InlineData(NodeKind.DataDisplayFile, "/tmp/x/disp.cdd",   true)]
+    [InlineData(NodeKind.EmSetupFile,     "/tmp/x/em.cem",     true)]
+    [InlineData(NodeKind.HarmonicaFile,   "/tmp/x/tune.charm", true)]
+    [InlineData(NodeKind.WBondFile,       "/tmp/x/w.wBond",    true)]
+    [InlineData(NodeKind.ColorThemeFile,  "/tmp/x/dark.ccolor",true)]
+    [InlineData(NodeKind.TechFile,        "/tmp/x/pcb.ctech",  false)]
     [InlineData(NodeKind.Cell,            "/tmp/x/Amp",        false)]
     [InlineData(NodeKind.KnownFile,       "/tmp/x/data.snp",   false)]
-    [InlineData(NodeKind.ColorThemeFile,  "/tmp/x/dark.ccolor",false)]
     public void IsRemovableFile_CorrectForKindAndExtension(NodeKind kind, string absPath, bool expected)
     {
         var vm = MakeVm(kind, absPath);
@@ -341,6 +348,38 @@ public class ProjectTreeNodeViewModelTests : IDisposable
         filter.TechFiles = false;
         Assert.DoesNotContain(folder.FilteredChildren, c => c.Kind == NodeKind.TechFile);
     }
+
+    // ── Remove group: one label per document type, one separator ─────────────
+
+    [Theory]
+    [InlineData(NodeKind.DataDisplayFile, "/tmp/x/disp.cdd",    "Remove Data Display")]
+    [InlineData(NodeKind.EmSetupFile,     "/tmp/x/em.cem",      "Remove EM Setup")]
+    [InlineData(NodeKind.WBondFile,       "/tmp/x/w.wBond",     "Remove Wirebond Design")]
+    [InlineData(NodeKind.ColorThemeFile,  "/tmp/x/dark.ccolor", "Remove Color Theme")]
+    [InlineData(NodeKind.ViewFile,        "/tmp/x/Amp.csch",    "Remove Schematic")]
+    [InlineData(NodeKind.ViewFile,        "/tmp/x/Amp.csym",    "Remove Symbol")]
+    [InlineData(NodeKind.ViewFile,        "/tmp/x/Amp.clay",    "Remove Layout")]
+    [InlineData(NodeKind.OtherFile,       "/tmp/x/foo.npy",     "Remove")]
+    public void RemoveHeader_NamesTheDocumentType(NodeKind kind, string absPath, string expected)
+        => Assert.Equal(expected, MakeVm(kind, absPath).RemoveHeader);
+
+    /// <summary>
+    /// The owner's actual report: a technology's menu drew a separator directly above "Reveal in
+    /// Finder" with nothing between them. That is what a per-kind separator does when every item it
+    /// was meant to introduce is hidden. The one separator now rides HasRemoveAction, so it is
+    /// visible exactly when something below it is.
+    /// </summary>
+    [Theory]
+    [InlineData(NodeKind.TechFile,        "/tmp/x/pcb.ctech",   true)]
+    [InlineData(NodeKind.ViewFile,        "/tmp/x/Amp.csch",    true)]
+    [InlineData(NodeKind.EmSetupFile,     "/tmp/x/em.cem",      true)]
+    [InlineData(NodeKind.CellViewFolder,  "/tmp/x/Amp/layout",  false)]
+    [InlineData(NodeKind.LibrariesGroup,  "/tmp/x",             false)]
+    [InlineData(NodeKind.Workspace,       "/tmp/x",             false)]
+    public void HasRemoveAction_MatchesWhatIsShownBelowTheSeparator(
+        NodeKind kind, string absPath, bool expected)
+        => Assert.Equal(expected, MakeVm(kind, absPath).HasRemoveAction);
+
 }
 
 // ── L0b gate 6: "Open Layout" enabled when a primary layout resolves ───────────

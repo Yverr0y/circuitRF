@@ -88,11 +88,30 @@ public interface ITreeActions
     /// <summary>Open (or activate) the cell's primary layout in a Content tab.</summary>
     void OpenCellLayout(ProjectTreeNodeViewModel cellNode);
 
-    /// <summary>Remove a .cdd Data Display file (moves to Trash). Confirms; no usage check.</summary>
-    void RemoveDataDisplay(ProjectTreeNodeViewModel node);
-
-    /// <summary>Remove a removable file/dir (.csch, .csym, results dir/subdir, .npy) — moves to Trash. Confirms.</summary>
+    /// <summary>
+    /// Remove a removable file or directory — a view file, a results dir, a <c>.cdd</c>, <c>.cem</c>,
+    /// <c>.charm</c>, <c>.wBond</c> or <c>.ccolor</c> — to the Trash. Confirms first.
+    ///
+    /// <para>The confirmation is not the whole of it for two kinds. A view file may be its cell's
+    /// PRIMARY, in which case the <c>.ccell</c> naming it is wrong the moment the file is gone and is
+    /// repaired in the same operation (<c>PrimaryViewRepair</c>); a <c>.wBond</c> may be linked from
+    /// schematics, which are counted and named. Both are stated BEFORE the file moves, because
+    /// there is no in-app undo.</para>
+    /// </summary>
     void RemoveFile(ProjectTreeNodeViewModel node);
+
+    /// <summary>
+    /// Remove a <c>.ctech</c> to the Trash — the way out of a technology, which until now existed
+    /// only in the file manager (owner report, 2026-09-06).
+    ///
+    /// <para>Separate from <see cref="RemoveFile"/> because a technology is not merely a file this
+    /// workspace holds: it is what other documents are INTERPRETED through. The confirmation counts
+    /// the layouts that point at it, the layouts that follow it as the workspace default, and the
+    /// cells whose microstrip components resolve their substrate from it — and when the removed file
+    /// IS the default, the <c>.cws</c> is re-pointed or cleared in the same operation, so no
+    /// workspace is left naming a file in the Trash.</para>
+    /// </summary>
+    Task RemoveTechnologyAsync(ProjectTreeNodeViewModel node);
 
     /// <summary>Remove a cell folder (moves to Trash). Big warning incl. workspace usage count; no in-app undo.</summary>
     Task RemoveCellAsync(ProjectTreeNodeViewModel cellNode);
@@ -185,6 +204,19 @@ public interface ITreeActions
 
     /// <summary>Unarchive a workspace archive and open it — the same command the File menu offers.</summary>
     Task UnarchiveWorkspaceFromTreeAsync();
+
+    /// <summary>
+    /// Rename the open workspace — which is to say rename its FOLDER, since that is the whole of a
+    /// workspace's name (<c>.cws</c> is a fixed filename and carries no name field of its own).
+    ///
+    /// <para>Offered so this does not have to be done in the file manager. It is exactly as
+    /// disruptive as doing it there and no more: everything INSIDE a workspace refers to its
+    /// contents relatively and is unaffected, while a reference from OUTSIDE names a path that has
+    /// moved. Those are repaired in every other workspace open in this process and cannot be
+    /// repaired in one nobody has open — which the confirmation says rather than implying a clean
+    /// rename.</para>
+    /// </summary>
+    Task RenameWorkspaceAsync();
 
     // ── Selection change hook (Item 5) ────────────────────────────────────────
 

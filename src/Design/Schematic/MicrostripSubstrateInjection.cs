@@ -64,6 +64,33 @@ public static class MicrostripSubstrateInjection
     }
 
     /// <summary>
+    /// The <c>.ctech</c> PATH <see cref="ResolveWorkspaceTechnology"/> would load, without loading it
+    /// — the same walk, answered as a location.
+    ///
+    /// <para>Wanted by anything that has to COMPARE this resolution with another, rather than use it:
+    /// a layout resolves its own <c>TechRef</c> first and only then the workspace default, so the two
+    /// halves of one cell can legitimately be on different technologies and only the paths say
+    /// so.</para>
+    /// </summary>
+    public static string? ResolveWorkspaceTechnologyPath(string? schematicDirectory)
+    {
+        var cwsPath = WorkspaceRootFinder.FindAncestorCws(schematicDirectory);
+        if (cwsPath is null) return null;
+
+        CwsFile cws;
+        try { cws = WorkspacePersistence.LoadFromFile(cwsPath); }
+        catch { return null; }
+
+        if (cws.DefaultTechRef is not { Length: > 0 } techRef) return null;
+
+        var workspaceDir = Path.GetDirectoryName(cwsPath);
+        if (workspaceDir is null) return null;
+
+        try   { return Path.GetFullPath(Path.Combine(workspaceDir, techRef)); }
+        catch { return null; }
+    }
+
+    /// <summary>
     /// Builds the H/T/Er/Sigma/TanD overrides for one microstrip instance. Values are emitted as
     /// bare numbers (no <see cref="ParameterAssignment"/> unit) since they are already resolved SI
     /// values — applying a unit on top would double-scale them.
