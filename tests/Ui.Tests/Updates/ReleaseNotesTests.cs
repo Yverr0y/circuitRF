@@ -344,6 +344,184 @@ public class ReleaseNotesFetcherTests
                GitHubReleasesFeed.ParseReleases("""[{"tag_name":"v1.0.0","assets":[]}]""")).Body);
 }
 
+/// <summary>
+/// The versions a user SKIPPED. Automatic updates only ever offer the newest release, so a machine
+/// that was not launched while two releases went out jumps straight over the middle one — and its
+/// notes are published nowhere the application itself would ever show them.
+/// </summary>
+public class ReleaseNotesBacklogTests
+{
+    private const string Browse = "https://github.com/x/y/releases";
+
+    private static ReleaseInfo Release(string tag, string body, bool draft = false)
+    {
+        Assert.True(SemanticVersion.TryParse(tag, out SemanticVersion? v));
+        return new ReleaseInfo(tag, v!, v!.IsPreRelease, draft, [], body);
+    }
+
+    /// <summary>A feed newest-first, as GitHub actually answers.</summary>
+    private static ReleaseInfo[] Betas(int newest, int oldest = 1)
+    {
+        var list = new List<ReleaseInfo>();
+        for (int n = newest; n >= oldest; n--)
+            list.Add(Release($"v1.0.0-beta.{n}", $"notes {n}"));
+        return [.. list];
+    }
+
+    private static string[] Versions(ReleaseNotesResult r)
+        => [.. r.Sections.Select(x => x.Version)];
+
+    /// <summary>The whole point: three releases went out, one launch, all three sets of notes.</summary>
+    [Fact]
+    public void SkippedVersions_AreShownBeneathTheRunningOne()
+    {
+        ReleaseNotesResult r = ReleaseNotesFetcher.Select(
+            Betas(12), "1.0.0-beta.12", Browse, since: "1.0.0-beta.9");
+
+        Assert.Equal(ReleaseNotesOutcome.Found, r.Outcome);
+        Assert.Equal(["1.0.0-beta.12", "1.0.0-beta.11", "1.0.0-beta.10"], Versions(r));
+        Assert.Equal(["notes 12", "notes 11", "notes 10"],
+                     r.Sections.Select(x => x.Markdown).ToArray());
+    }
+
+    /// <summary>
+    /// The range is half-open at BOTH ends for different reasons: the version already shown has been
+    /// read, and a version newer than the running one has not been installed and describes an
+    /// application this user is not running.
+    /// </summary>
+    [Fact]
+    public void TheRangeExcludesWhatWasReadAndWhatIsNotInstalled()
+    {
+        ReleaseInfo[] feed = [Release("v2.0.0", "future"), .. Betas(12)];
+
+        Assert.Equal(["1.0.0-beta.11", "1.0.0-beta.10"],
+                     Versions(ReleaseNotesFetcher.Select(feed, "1.0.0-beta.11", Browse,
+                                                         since: "1.0.0-beta.9")));
+    }
+
+    /// <summary>Consecutive versions — nothing was skipped — is exactly one section, as before.</summary>
+    [Fact]
+    public void NothingSkipped_IsOneSection()
+        => Assert.Equal(["1.0.0-beta.12"],
+                        Versions(ReleaseNotesFetcher.Select(Betas(12), "1.0.0-beta.12", Browse,
+                                                            since: "1.0.0-beta.11")));
+
+    /// <summary>
+    /// Nothing recorded is not evidence of a backlog. A wiped state directory would otherwise open a
+    /// ten-release document in front of someone who has read all of it.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not a version")]
+    public void AnUnknownAnchor_ShowsOnlyTheRunningVersion(string? since)
+        => Assert.Equal(["1.0.0-beta.12"],
+                        Versions(ReleaseNotesFetcher.Select(Betas(12), "1.0.0-beta.12", Browse, since)));
+
+    /// <summary>A recorded version at or above the running one is a downgrade or a replay; neither is a backlog.</summary>
+    [Theory]
+    [InlineData("1.0.0-beta.12")]
+    [InlineData("2.0.0")]
+    public void AnAnchorThatIsNotOlder_ShowsOnlyTheRunningVersion(string since)
+        => Assert.Equal(["1.0.0-beta.12"],
+                        Versions(ReleaseNotesFetcher.Select(Betas(12), "1.0.0-beta.12", Browse, since)));
+
+    /// <summary>
+    /// The owner's cap. An installation left unused for a year must not open with a document nobody
+    /// reads — and the entries that go are the OLDEST, which is why the list is sorted rather than
+    /// taken in feed order.
+    /// </summary>
+    [Fact]
+    public void AtMostTenReleases_AndItIsTheOldestThatAreDropped()
+    {
+        ReleaseNotesResult r = ReleaseNotesFetcher.Select(
+            Betas(40), "1.0.0-beta.40", Browse, since: "1.0.0-beta.1");
+
+        Assert.Equal(ReleaseNotesFetcher.MaxSections, r.Sections.Count);
+        Assert.Equal("1.0.0-beta.40", r.Sections[0].Version);
+        Assert.Equal("1.0.0-beta.31", r.Sections[^1].Version);
+    }
+
+    /// <summary>Newest first whatever order the host answered in — the cap depends on it.</summary>
+    [Fact]
+    public void OrderIsByVersion_NotByFeedOrder()
+    {
+        ReleaseInfo[] shuffled =
+        [
+            Release("v1.0.0-beta.10", "notes 10"),
+            Release("v1.0.0-beta.12", "notes 12"),
+            Release("v1.0.0-beta.11", "notes 11"),
+        ];
+
+        Assert.Equal(["1.0.0-beta.12", "1.0.0-beta.11", "1.0.0-beta.10"],
+                     Versions(ReleaseNotesFetcher.Select(shuffled, "1.0.0-beta.12", Browse,
+                                                         since: "1.0.0-beta.9")));
+    }
+
+    /// <summary>A skipped release with no body, or a draft, contributes no section rather than a blank one.</summary>
+    [Fact]
+    public void EmptyBodiesAndDrafts_AreNotSections()
+    {
+        ReleaseInfo[] feed =
+        [
+            Release("v1.0.0-beta.12", "notes 12"),
+            Release("v1.0.0-beta.11", "   "),
+            Release("v1.0.0-beta.10", "hidden", draft: true),
+            Release("v1.0.0-beta.9",  "notes 9"),
+        ];
+
+        Assert.Equal(["1.0.0-beta.12", "1.0.0-beta.9"],
+                     Versions(ReleaseNotesFetcher.Select(feed, "1.0.0-beta.12", Browse,
+                                                         since: "1.0.0-beta.8")));
+    }
+
+    /// <summary>
+    /// The outcome still comes from the RUNNING version alone. A feed carrying the previous release's
+    /// body but not this one's must not quietly answer with the previous one's notes.
+    /// </summary>
+    [Fact]
+    public void OlderBodiesDoNotRescueAMissingRunningVersion()
+    {
+        ReleaseNotesResult r = ReleaseNotesFetcher.Select(
+            Betas(11), "1.0.0-beta.12", Browse, since: "1.0.0-beta.9");
+
+        Assert.Equal(ReleaseNotesOutcome.NotPublished, r.Outcome);
+        Assert.Empty(r.Sections);
+    }
+
+    /// <summary>
+    /// A stable build never installed the betas that led to it, so their notes describe work its user
+    /// saw arrive in one piece. A beta user is on that channel by definition and gets every one.
+    /// </summary>
+    [Fact]
+    public void PreReleases_AreOfferedOnlyToAPreRelease()
+    {
+        ReleaseInfo[] feed =
+        [
+            Release("v1.1.0",        "the release"),
+            Release("v1.1.0-beta.2", "beta two"),
+            Release("v1.1.0-beta.1", "beta one"),
+            Release("v1.0.0",        "the last one"),
+        ];
+
+        Assert.Equal(["1.1.0"],
+                     Versions(ReleaseNotesFetcher.Select(feed, "1.1.0", Browse, since: "1.0.0")));
+
+        Assert.Equal(["1.1.0-beta.2", "1.1.0-beta.1"],
+                     Versions(ReleaseNotesFetcher.Select(feed, "1.1.0-beta.2", Browse, since: "1.0.0")));
+    }
+
+    /// <summary>
+    /// <c>Markdown</c> stays the running version's own body, so the single-release call sites that
+    /// read it are unchanged by any of this.
+    /// </summary>
+    [Fact]
+    public void MarkdownIsStillTheRunningVersionsOwnBody()
+        => Assert.Equal("notes 12",
+                        ReleaseNotesFetcher.Select(Betas(12), "1.0.0-beta.12", Browse,
+                                                   since: "1.0.0-beta.9").Markdown);
+}
+
 /// <summary>The four constructs the parser supports, and the ways real release bodies break a naive one.</summary>
 public class ReleaseNotesMarkdownTests
 {
@@ -677,11 +855,31 @@ public class ReleaseNotesWiringTests
     [Fact]
     public void TheNotesAreASingleSelectableBlockInsideAScrollViewer()
     {
-        string xaml = Read("src", "Ui", "Views", "Dialogs", "ReleaseNotesDialog.axaml");
+        // The MARKUP, not the file: the comment above that markup names the controls this rule
+        // forbids, precisely so the next reader knows why — and a scan that read it would fail on
+        // its own explanation.
+        string xaml = StripXmlComments(Read("src", "Ui", "Views", "Dialogs", "ReleaseNotesDialog.axaml"));
 
         Assert.Equal(1, xaml.Split("<SelectableTextBlock").Length - 1);
         Assert.Contains("ScrollViewer", xaml);
         Assert.DoesNotContain("ItemsControl", xaml);
         Assert.DoesNotContain("ListBox", xaml);
+    }
+
+    private static string StripXmlComments(string xaml)
+    {
+        var sb = new System.Text.StringBuilder(xaml.Length);
+        int i = 0;
+        while (i < xaml.Length)
+        {
+            int open = xaml.IndexOf("<!--", i, StringComparison.Ordinal);
+            if (open < 0) { sb.Append(xaml, i, xaml.Length - i); break; }
+
+            sb.Append(xaml, i, open - i);
+            int close = xaml.IndexOf("-->", open + 4, StringComparison.Ordinal);
+            if (close < 0) break;
+            i = close + 3;
+        }
+        return sb.ToString();
     }
 }

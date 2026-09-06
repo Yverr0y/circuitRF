@@ -275,6 +275,12 @@ do nothing — there is no aging analysis and no stress history to drive one.</l
 builds the file, circuitRF will run it.</li>
 </ul>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order. How many there are is set by <code>Pins</code>; the table shows <code>Pins&nbsp;=&nbsp;2</code>.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th><th>Meaning</th></tr></thead>
 <tbody>
 <tr><td>File</td><td>&mdash;</td><td>&mdash;</td><td>shown</td><td>The model to load: a compiled model (.osdi), or Verilog-A source (.va, .vams) which circuitRF builds once with the compiler installed on this machine and reuses until the source changes. Choosing one fills in Model and Pins below.</td></tr>

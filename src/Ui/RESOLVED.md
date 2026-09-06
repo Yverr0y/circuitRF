@@ -20741,3 +20741,63 @@ its whole right-hand column of names outward into empty space (owner-reported). 
   mean, so one crowded edge does not drag the reference point onto itself and flip the sparse edge's
   names outward. Built-ins take it too even though nothing renders their pin names — the pins reach the
   symbol editor, and one derivation is one fewer place for the rule to be missing.
+
+## Release Notes now cover the versions a user skipped (2026-09-05)
+
+Automatic updates only ever offer the NEWEST release, so a machine that was not launched while two
+releases went out jumps straight from the first to the third — and the middle one's notes were
+published nowhere the application itself would ever show them. The dialog now renders the running
+version's notes plus every release between the two, newest at the top, capped at ten
+(`ReleaseNotesFetcher.MaxSections`, the owner's number).
+
+### The anchor is what was SHOWN, not what was installed
+
+`UpdateState.ReleaseNotesShownFor` — read in `App.ShowReleaseNotesIfDue` **before** `MarkShown`
+overwrites it, and exposed as `ReleaseNotesGate.LastShownVersion`. The range is
+`(anchor, running version]`.
+
+`UpdateState.PreviousVersion` looks like the obvious anchor and is unusable for this: it is rollback
+insurance, `UpdateStartup.ReleasePreviousVersion` nulls it as soon as the new version reaches a
+window — at the same `ApplicationIdle` priority the notes are posted at, so reading it would be a
+race — and a manual install never sets it at all.
+
+The shown-for anchor also inherits the gate's existing correctness for free. A version installed
+while the dialog was switched off was `RecordSilently`-recorded, so turning it back on still does not
+replay a backlog; a version that was skipped was never recorded, so it is in the range.
+
+### Three judgement calls, all in `ReleaseNotesFetcher.Select`
+
+- **A null or unparseable anchor shows ONE release, not all of them.** It means a wiped state
+  directory or an installation predating the record — no evidence about what the user has read.
+  Guessing "everything" opens a ten-release document in front of someone who may have read all of it.
+- **The outcome is still decided by the running version alone.** A feed carrying older bodies but not
+  this one's is `NotPublished`. Answering with the previous release's notes instead would be worse
+  than saying nothing, since the dialog's question is "what changed in the version you are running".
+- **A prerelease section is offered only to a prerelease.** A user on a stable build never installed
+  the betas that led to it. The RUNNING version decides, being the only evidence here of which
+  channel the machine follows.
+
+The list is **sorted** by version rather than trusted in feed order — the cap has to drop the oldest
+entries, not whichever ones the host happened to return last.
+
+### Selectable text was already right, and it constrains the shape
+
+The notes were already one `SelectableTextBlock` with real inline styling, because a selection cannot
+cross two controls. That is why several releases go into that **same** `Inlines` collection under
+per-version banners (`AppendSections`), rather than into an `ItemsControl` of one block per release —
+which would look identical and silently break the drag. The banner is 16, above any heading a release
+body can produce (15) and below the window's own title (18), and appears only when there is more than
+one section: with a single release it would restate the window heading immediately beneath itself.
+
+### A source-scan test that failed on its own explanation
+
+`TheNotesAreASingleSelectableBlockInsideAScrollViewer` asserts the XAML contains no `ItemsControl` or
+`ListBox`. Documenting that rule in the XAML comment — naming the controls it forbids, so the next
+reader knows why — turned the test red. It now strips XML comments first, which is the same rule
+`UpdateInstallSiteTests.StripComments` already applies to C# scans: a scan of the MARKUP must not read
+the prose about the markup.
+
+Gate: `ReleaseNotesBacklogTests` in `tests/Ui.Tests/Updates/ReleaseNotesTests.cs` (14 tests — the
+range at both ends, the unknown/newer anchor, the cap and which entries it drops, ordering,
+empty-body and draft skipping, prerelease channel, and that `ReleaseNotesResult.Markdown` is still
+the running version's own body).

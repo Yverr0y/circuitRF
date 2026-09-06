@@ -45,6 +45,13 @@ public partial class ReleaseNotesDialog : Window
     /// </summary>
     private static double HeadingFontSize(int level) => level <= 2 ? 15 : 14;
 
+    /// <summary>
+    /// The per-release banner, above every section when there is more than one — larger than any
+    /// heading a release body can contain (15), smaller than the window's own title (18), so the
+    /// boundary between two releases never reads as a section inside one of them.
+    /// </summary>
+    private const double BannerFontSize = 16;
+
     private string _browseUrl = "";
 
     /// <summary>
@@ -55,7 +62,7 @@ public partial class ReleaseNotesDialog : Window
     private bool _loading;
 
     public ReleaseNotesDialog() : this(new ReleaseNotesResult(
-        ReleaseNotesOutcome.Unavailable, AppVersion.Display, "",
+        ReleaseNotesOutcome.Unavailable, AppVersion.Display, [],
         ReleaseNotesFetcher.BrowseUrl(GitHubReleasesFeed.DefaultApiUrl)))
     {
         // Parameterless for the XAML previewer only; nothing in the application uses it.
@@ -82,7 +89,7 @@ public partial class ReleaseNotesDialog : Window
         switch (result.Outcome)
         {
             case ReleaseNotesOutcome.Found:
-                AppendLines(ReleaseNotesMarkdown.Parse(result.Markdown));
+                AppendSections(result.Sections);
                 break;
 
             case ReleaseNotesOutcome.NotPublished:
@@ -99,6 +106,49 @@ public partial class ReleaseNotesDialog : Window
                     + "The repository may be unreachable from this network.",
                     result.BrowseUrl);
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Renders every release the user has not been shown, newest at the top, into the one selectable
+    /// block — which is why they are appended to a single <c>Inlines</c> collection rather than
+    /// stacked as one control per release: a selection cannot cross two controls, and the owner's
+    /// requirement is that the whole thing drags and copies in one go.
+    ///
+    /// <para><b>The version banner appears only when there is more than one section.</b> With a single
+    /// release it would restate the window heading immediately beneath itself; with several it is the
+    /// only thing separating one release's notes from the next, since a body's own headings render at
+    /// the same weight whichever release they came from.</para>
+    /// </summary>
+    private void AppendSections(IReadOnlyList<ReleaseNoteSection> sections)
+    {
+        InlineCollection? inlines = NotesText.Inlines;
+        if (inlines is null) return;
+
+        bool banners = sections.Count > 1;
+
+        for (int i = 0; i < sections.Count; i++)
+        {
+            if (i > 0)
+            {
+                // Two breaks, not one: a blank row between releases, matching the gap the parser
+                // already puts between paragraphs.
+                inlines.Add(new LineBreak());
+                inlines.Add(new LineBreak());
+            }
+
+            if (banners)
+            {
+                inlines.Add(new Run($"{UpdateApp.Name} {sections[i].Version}")
+                {
+                    FontSize   = BannerFontSize,
+                    FontWeight = FontWeight.Bold,
+                });
+                inlines.Add(new LineBreak());
+                inlines.Add(new LineBreak());
+            }
+
+            AppendLines(ReleaseNotesMarkdown.Parse(sections[i].Markdown));
         }
     }
 

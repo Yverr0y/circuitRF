@@ -19,13 +19,39 @@ public enum ReleaseNotesOutcome
     Unavailable,
 }
 
+/// <summary>
+/// One release's notes, as one titled block of the dialog.
+/// </summary>
+/// <param name="Version">The version this block's notes belong to — its own banner, since a dialog
+/// showing several of them cannot be labelled by the window heading alone.</param>
+/// <param name="Markdown">That release's body, exactly as published. Never blank: a release with an
+/// empty body is not a section at all (<see cref="ReleaseNotesFetcher.Select"/>).</param>
+public sealed record ReleaseNoteSection(string Version, string Markdown);
+
 /// <summary>What the dialog was handed.</summary>
 /// <param name="Outcome">Which of the three forms to render.</param>
 /// <param name="Version">The version the notes were asked for — shown in every form.</param>
-/// <param name="Markdown">The release body, empty unless <see cref="ReleaseNotesOutcome.Found"/>.</param>
+/// <param name="Sections">
+/// The running version's notes FIRST, then every skipped version's beneath it, newest to oldest.
+/// Empty unless <see cref="ReleaseNotesOutcome.Found"/>.
+///
+/// <para><b>A list rather than one string, because the versions have to stay distinguishable.</b>
+/// Concatenating the bodies would produce a document whose sections are separated only by whatever
+/// headings their authors happened to type — and a release body's own <c>## Fixed</c> renders
+/// identically to a synthesised version heading, so the reader could not tell where one release
+/// ended and the previous one began.</para>
+/// </param>
 /// <param name="BrowseUrl">The repository's releases page, for the user to check themselves.</param>
 public sealed record ReleaseNotesResult(
-    ReleaseNotesOutcome Outcome, string Version, string Markdown, string BrowseUrl);
+    ReleaseNotesOutcome Outcome, string Version, IReadOnlyList<ReleaseNoteSection> Sections,
+    string BrowseUrl)
+{
+    /// <summary>
+    /// The version the dialog opened FOR — the newest section's body. Convenience for the common
+    /// single-release case; nothing that renders may use it, since it hides every older section.
+    /// </summary>
+    public string Markdown => Sections.Count > 0 ? Sections[0].Markdown : "";
+}
 
 /// <summary>
 /// Fetches the running version's release notes from the same feed the updater already reads.
@@ -39,6 +65,12 @@ public sealed record ReleaseNotesResult(
 /// this build has just been installed, so the notes that matter are its own; the newest release on the
 /// feed may be one the user has not been offered yet, and showing its notes would describe an
 /// application they are not running.</para>
+///
+/// <para><b>...and every version the user skipped between the two.</b> Automatic updates only offer
+/// the newest release, so a machine that was off — or simply not launched — while two releases went
+/// out jumps straight from the first to the third, and the middle one's notes would never be shown
+/// anywhere. The range is therefore <c>(last version whose notes were shown, running version]</c>,
+/// newest first, capped at <see cref="MaxSections"/>.</para>
 /// </summary>
 public static class ReleaseNotesFetcher
 {
@@ -87,11 +119,29 @@ public static class ReleaseNotesFetcher
     }
 
     /// <summary>
-    /// Asks the feed for <paramref name="version"/>'s notes. Never throws: every failure is an
+    /// How many releases' notes the dialog will ever show at once — the owner's cap.
+    ///
+    /// <para>An installation that sat unused for a year would otherwise open with a document nobody
+    /// reads, and the oldest entries in it describe an application several versions removed from the
+    /// one being launched. Ten is enough to cover any realistic gap; past it the releases page has
+    /// the rest.</para>
+    /// </summary>
+    public const int MaxSections = 10;
+
+    /// <summary>
+    /// Asks the feed for <paramref name="version"/>'s notes, together with those of every version
+    /// released after <paramref name="since"/>. Never throws: every failure is an
     /// <see cref="ReleaseNotesOutcome.Unavailable"/> result the dialog can render, because the only
     /// alternative on this path is an unhandled exception on a background task during launch.
     /// </summary>
-    public static async Task<ReleaseNotesResult> FetchAsync(string version, CancellationToken ct = default)
+    /// <param name="version">The running version — the newest notes shown, and the top of the range.</param>
+    /// <param name="since">
+    /// The newest version whose notes this user has already been shown, EXCLUSIVE. Null shows
+    /// <paramref name="version"/>'s notes alone — see <see cref="Select"/> for why that is the safe
+    /// answer rather than "everything".
+    /// </param>
+    public static async Task<ReleaseNotesResult> FetchAsync(string version, string? since = null,
+                                                            CancellationToken ct = default)
     {
         string feedUrl = UpdateScheduler.FeedUrl();
         string browse  = BrowseUrl(feedUrl);
@@ -102,14 +152,14 @@ public static class ReleaseNotesFetcher
             var feed = new GitHubReleasesFeed(http, Paged(feedUrl));
 
             IReadOnlyList<ReleaseInfo> releases = await feed.ListReleasesAsync(ct).ConfigureAwait(false);
-            return Select(releases, version, browse);
+            return Select(releases, version, browse, since);
         }
         catch (Exception)
         {
             // Offline, DNS failure, rate limit, a body over the size cap, a feed that answered with
             // something that is not a release list. All one thing to the user: we could not fetch it,
             // here is where to look.
-            return new ReleaseNotesResult(ReleaseNotesOutcome.Unavailable, version, "", browse);
+            return new ReleaseNotesResult(ReleaseNotesOutcome.Unavailable, version, [], browse);
         }
     }
 
@@ -124,21 +174,63 @@ public static class ReleaseNotesFetcher
     /// <para>A draft is skipped: it is visible only to the publisher, so matching one would show notes
     /// nobody else can see. A prerelease is NOT skipped — every beta is one, and its own notes are
     /// exactly what its users need.</para>
+    ///
+    /// <para><b>The result is the running version's notes plus every skipped version's, newest
+    /// first</b>, over the half-open range <c>(<paramref name="since"/>, <paramref name="version"/>]</c>.
+    /// The outcome is decided by the running version alone: a feed that carries older bodies but not
+    /// this one is still <see cref="ReleaseNotesOutcome.NotPublished"/>, because the dialog's own
+    /// question is "what changed in the version you are now running" and a list that silently answered
+    /// with the previous one instead would be worse than saying nothing.</para>
+    ///
+    /// <para><b>Null <paramref name="since"/> shows one release, not all of them.</b> It means nothing
+    /// has been recorded — a state directory that was wiped, or an installation that predates the
+    /// record — and there is no evidence about what the user has read. Guessing "everything" opens a
+    /// ten-release document in front of someone who may have read all of it; guessing "one" costs
+    /// nothing that the releases page does not already offer.</para>
+    ///
+    /// <para><b>A prerelease is offered only to a prerelease.</b> A user running a stable build never
+    /// installed the betas that led to it, so their notes describe work they saw arrive in one piece;
+    /// a user running a beta is on that channel by definition and wants every one. The RUNNING version
+    /// decides, since it is the only evidence here of which channel this machine follows.</para>
     /// </summary>
-    public static ReleaseNotesResult Select(IReadOnlyList<ReleaseInfo> releases, string version, string browseUrl)
+    public static ReleaseNotesResult Select(IReadOnlyList<ReleaseInfo> releases, string version,
+                                            string browseUrl, string? since = null)
     {
         if (!SemanticVersion.TryParse(version, out SemanticVersion? running) || running is null)
-            return new ReleaseNotesResult(ReleaseNotesOutcome.NotPublished, version, "", browseUrl);
+            return new ReleaseNotesResult(ReleaseNotesOutcome.NotPublished, version, [], browseUrl);
 
+        ReleaseInfo? current = null;
         foreach (ReleaseInfo r in releases)
-        {
-            if (r.IsDraft || !r.Version.Equals(running)) continue;
+            if (!r.IsDraft && r.Version.Equals(running)) { current = r; break; }
 
-            return string.IsNullOrWhiteSpace(r.Body)
-                ? new ReleaseNotesResult(ReleaseNotesOutcome.NotPublished, version, "", browseUrl)
-                : new ReleaseNotesResult(ReleaseNotesOutcome.Found, version, r.Body, browseUrl);
+        if (current is null || string.IsNullOrWhiteSpace(current.Body))
+            return new ReleaseNotesResult(ReleaseNotesOutcome.NotPublished, version, [], browseUrl);
+
+        var sections = new List<ReleaseNoteSection> { new(current.VersionText, current.Body) };
+
+        if (SemanticVersion.TryParse(since, out SemanticVersion? read) && read is not null && read < running)
+        {
+            var skipped = new List<ReleaseInfo>();
+            foreach (ReleaseInfo r in releases)
+            {
+                if (r.IsDraft || string.IsNullOrWhiteSpace(r.Body)) continue;
+                if (r.Version <= read || r.Version >= running) continue;
+                if (r.Version.IsPreRelease && !running.IsPreRelease) continue;
+                skipped.Add(r);
+            }
+
+            // Newest first, and sorted rather than trusted: the feed's order is the host's business,
+            // and the cap below has to drop the OLDEST entries rather than whichever ones happened to
+            // arrive last.
+            skipped.Sort(static (a, b) => b.Version.CompareTo(a.Version));
+
+            foreach (ReleaseInfo r in skipped)
+            {
+                if (sections.Count >= MaxSections) break;
+                sections.Add(new ReleaseNoteSection(r.VersionText, r.Body));
+            }
         }
 
-        return new ReleaseNotesResult(ReleaseNotesOutcome.NotPublished, version, "", browseUrl);
+        return new ReleaseNotesResult(ReleaseNotesOutcome.Found, version, sections, browseUrl);
     }
 }

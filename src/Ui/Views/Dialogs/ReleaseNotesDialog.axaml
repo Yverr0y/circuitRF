@@ -19,6 +19,10 @@
     cross two controls. Bold, italics, bullets and indentation are therefore inlines within it
     (ReleaseNotesMarkdown produces the runs; the code-behind turns them into Inlines), and the
     indentation is non-breaking spaces for the same reason — there is nowhere else to put a margin.
+
+    That rule is what decides the SHAPE of the skipped-versions list too: several releases' notes go
+    into this one block, newest at the top and each under its own version banner, rather than into an
+    ItemsControl of one block per release — which would look identical and break the drag.
   -->
 
   <Grid RowDefinitions="Auto,*,Auto" Margin="16,14,16,12">

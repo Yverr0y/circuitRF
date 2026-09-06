@@ -38,8 +38,12 @@ unconnected — the component as you meet it in the palette, before anything is 
 tables are read from the component registry, so the defaults, units and on-schematic visibility below
 are the as-placed values by construction rather than by transcription.</p>
 <div class="callout note">
-<span class="label">Reading the parameter tables</span>
-<p><strong>Name</strong> is the parameter key, as it appears in the editor and in the netlist.
+<span class="label">Reading the tables</span>
+<p>The first table is the component's <strong>terminals</strong>: the nets its netlist line takes, in
+the order it takes them. That order is what the models themselves read — a diode's anode before its
+cathode, a MESFET's gate before its drain — so it is worth checking before hand-writing a
+<code>.cnl</code> line; the figure above it shows where those pins sit, not which is which.</p>
+<p>In the parameter table below it, <strong>Name</strong> is the parameter key, as it appears in the editor and in the netlist.
 <strong>Default</strong> and <strong>Unit</strong> are the as-placed value. A parameter marked
 <em>shown</em> appears as a label on the schematic by default; the rest are available in the parameter
 editor. Units accept SI prefixes (<code>pF</code>, <code>nH</code>, <code>GHz</code>,
@@ -57,6 +61,12 @@ editor. Units accept SI prefixes (<code>pF</code>, <code>nH</code>, <code>GHz</c
 </span><figcaption>R</figcaption></figure>
 <p>An ideal, frequency-independent resistor. <code>R</code> is the resistance.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>R</td><td><code>1</code></td><td>Ω</td><td>shown</td></tr>
@@ -71,6 +81,12 @@ editor. Units accept SI prefixes (<code>pF</code>, <code>nH</code>, <code>GHz</c
 	</text></svg></span>
 </span><figcaption>L</figcaption></figure>
 <p>An ideal inductor. <code>L</code> is the inductance. Couple two inductors with a <a href="#mutual">Mutual</a> element.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -87,6 +103,12 @@ editor. Units accept SI prefixes (<code>pF</code>, <code>nH</code>, <code>GHz</c
 </span><figcaption>C</figcaption></figure>
 <p>An ideal, linear capacitor. <code>C</code> is the capacitance. For a voltage-dependent capacitance, see
 <a href="#nonlinearc">NonlinearC</a>.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -112,6 +134,12 @@ branch an open circuit.</p>
 swap one in for another without moving any wires. Its inductance can be coupled with a
 <a href="#mutual">Mutual</a>, which names the SRLC instance in place of an inductor.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>R</td><td><code>1</code></td><td>Ω</td><td>shown</td></tr>
@@ -133,6 +161,12 @@ giving an admittance of <code>1/R + jωC + 1/(jωL)</code>.</p>
 at <code>R</code>, which is what makes it the natural way to enter a measured resonance: <code>R</code> sets the peak
 impedance, <code>L</code> and <code>C</code> set where it sits and how sharp it is. At DC the ideal inductor shorts it out.</p>
 <p>Pin positions and <a href="#mutual">Mutual</a> coupling work exactly as they do for the SRLC above.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -197,6 +231,12 @@ which is why a bead chosen from a small-signal impedance curve can behave quite 
 rail it was chosen for.</p>
 </div>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>Rdc</td><td><code>0.01</code></td><td>Ω</td><td>shown</td></tr>
@@ -218,6 +258,12 @@ Enter the coefficients directly, or generate them from a C–V curve with the C�
 constant term; <code>C1</code>, <code>C2</code>, … are the higher-order coefficients, added in the editor or generated by
 the C–V Editor. Full treatment:
 <a href="nonlinear-capacitor.html">The Nonlinear Capacitor &amp; the C–V Editor</a>.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -242,7 +288,7 @@ instance names of the two coupled inductors and <code>M</code> is the mutual ind
 <p>Either name may be an <a href="#inductor">L</a>, an <a href="#srlc">SRLC</a> or a <a href="#prlc">PRLC</a> — all three carry an
 inductor the coupling can act on, and all three spell its value <code>L</code>. Naming anything else is
 reported as an error when the design is elaborated.</p>
-<table class="param-table">
+<p class="small">No terminals — this component connects to nothing on the canvas.</p><table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>Inductor1</td><td><code>&quot;L1&quot;</code></td><td>&mdash;</td><td>shown</td></tr>
@@ -269,6 +315,12 @@ Edit it in the Match Designer.</p>
 two-stage interstage example are all in <b><a href="match.html">The Match Component</a></b>. Read that
 before placing one — this entry is only the component's parameter table.</p>
 </div>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -305,6 +357,12 @@ before placing one — this entry is only the component's parameter table.</p>
 </span><figcaption>Vdc</figcaption></figure>
 <p>A fixed DC voltage — gate and drain bias supplies. <code>Vdc</code> is the voltage.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>Vdc</td><td><code>0</code></td><td>V</td><td>shown</td></tr>
@@ -328,6 +386,12 @@ before placing one — this entry is only the component's parameter table.</p>
 </span><figcaption>VTone</figcaption></figure>
 <p>A single-tone (sinusoidal) voltage source for harmonic balance, with an optional DC offset. <code>V</code> is the
 tone amplitude, <code>Freq</code> the tone frequency, and <code>Vdc</code> a DC offset.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -365,6 +429,12 @@ that is the physics of the element, not a defect. Give the node a resistor, a te
 path and it solves.</p>
 </div>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>I</td><td><code>1</code></td><td>mA</td><td>shown</td></tr>
@@ -392,6 +462,12 @@ accepts per-harmonic source terminations <code>Z[k]</code> for harmonic source-p
 on. Added in the parameter editor.</li>
 </ul>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>Num</td><td><code>1</code></td><td>&mdash;</td><td>shown</td></tr>
@@ -418,6 +494,12 @@ freshly placed PnTone is already a <strong>two-tone source</strong> (tones 1 and
 <p>Unlike P1Tone, PnTone is <em>not</em> an S-parameter port — it has no <code>Num</code>. The tones a PnTone drives must
 match the tones declared on the <a href="simulations.html#two-tone">Harmonic Balance analysis</a>: the analysis
 owns the mixing grid, and the source just supplies power at those frequencies.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -525,6 +607,14 @@ For a gain that varies with frequency, drive or bias, the device you want is an
 nothing else attached to it has no DC path to ground and the matrix is singular. Load it.</p>
 </div>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>out+</td></tr>
+<tr><td>2</td><td>out-</td></tr>
+<tr><td>3</td><td>ctrl+</td></tr>
+<tr><td>4</td><td>ctrl-</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>G</td><td><code>10</code></td><td>mS</td><td>shown</td></tr>
@@ -561,6 +651,12 @@ nothing else attached to it has no DC path to ground and the matrix is singular.
 measures. <code>Num</code> is the port index, auto-assigned at placement; <code>Z</code> is the reference impedance. See
 <a href="pins-ports-terms.html">Pins, Ports &amp; Terms</a> for how it differs from a Pin.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>+</td></tr>
+<tr><td>2</td><td>−</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>Num</td><td><code>1</code></td><td>&mdash;</td><td>shown</td></tr>
@@ -588,6 +684,11 @@ convenience rather than a parallel model: it uses Term's own engine component an
 the ground symbol drawn at Term's port-2 location, so a schematic that swaps Term + GND for a TermG is
 electrically identical.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>+</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>Num</td><td><code>1</code></td><td>&mdash;</td><td>shown</td></tr>
@@ -606,6 +707,11 @@ electrically identical.</p>
 the cell connects to the parent that instances it. <code>Num</code> is the interface port index, auto-assigned;
 <code>Name</code> is an optional label, and extraction uses <code>P{Num}</code> when it is blank. An optional <code>Polarity</code> of
 <code>Plus</code> or <code>Minus</code>, set in the editor, forms a differential pair sharing one <code>Num</code>.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -666,6 +772,11 @@ through it to the reference node.</li>
 <li><code>ShowBias</code> — <code>true</code> or <code>false</code>, chosen from a picker. Display only: it draws the bias-tee on the
 glyph and never reaches the engine, so the extracted netlist is identical either way.</li>
 </ul>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -741,6 +852,12 @@ harmonic-balance testbench and it behaves as a passive termination like the othe
 <p>An ideal, lossless transmission line specified by characteristic impedance <code>Z</code> and electrical length
 <code>E</code> at a reference frequency <code>F</code>.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>Z</td><td><code>50</code></td><td>Ω</td><td>shown</td></tr>
@@ -759,6 +876,12 @@ harmonic-balance testbench and it behaves as a passive termination like the othe
 <p>A physical microstrip line on the current technology's substrate: <code>W</code> is the conductor width and <code>L</code>
 the length. Unlike TLIN, its impedance and loss follow from the geometry and the substrate rather than
 being stated.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -779,6 +902,12 @@ being stated.</p>
 <p>A right-angle microstrip bend of width <code>W</code>, optionally mitred, modelled with its discontinuity rather
 than as an ideal corner.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>W</td><td><code>2.9</code></td><td>mm</td><td>shown</td></tr>
@@ -797,6 +926,13 @@ than as an ideal corner.</p>
 	</text></svg></span>
 </span><figcaption>MTEE</figcaption></figure>
 <p>A three-port microstrip T-junction. <code>W1</code>, <code>W2</code> and <code>W3</code> are the widths of the three arms.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+<tr><td>3</td><td>3</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -819,6 +955,14 @@ than as an ideal corner.</p>
 	</text></svg></span>
 </span><figcaption>MCROSS</figcaption></figure>
 <p>A four-port microstrip cross-junction, with a width per arm.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+<tr><td>3</td><td>3</td></tr>
+<tr><td>4</td><td>4</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -844,6 +988,12 @@ than as an ideal corner.</p>
 </span><figcaption>MTAPER</figcaption></figure>
 <p>A linearly tapered microstrip line running from width <code>W1</code> to width <code>W2</code> over length <code>L</code>.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>W1</td><td><code>2.9</code></td><td>mm</td><td>shown</td></tr>
@@ -864,6 +1014,12 @@ than as an ideal corner.</p>
 <p>A Klopfenstein-taper microstrip line — the taper profile that gives the shortest line for a stated
 in-band ripple. Specify the two impedances (or the two widths), the maximum reflection <code>GammaMax</code>, and
 either a length or a 3 dB corner frequency.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -907,7 +1063,7 @@ not here.</p>
 interchange and Touchstone export are in <b><a href="wbond.html">wBond</a></b>. The two parameters
 most often left wrong — <code>IncludeCapacitance</code> and <code>er</code> — are explained there.</p>
 </div>
-<table class="param-table">
+<p class="small">Terminals are set by <code>Arrays</code>; this component has no fixed pin geometry of its own.</p><table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>Arrays</td><td><code>G1</code></td><td>&mdash;</td><td>&mdash;</td></tr>
@@ -954,6 +1110,12 @@ which domain, and what happens beyond its frequency range.</li>
 </ul>
 <p>The symbol is dynamic; the pin arrangement, the pitch and the floating-reference option are covered in
 <a href="dynamic-symbols.html#snp">Dynamic symbols</a>.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order. How many there are is set by <code>NumPorts</code>; the table shows <code>NumPorts&nbsp;=&nbsp;2</code>.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -1010,6 +1172,12 @@ is the authority and must stay so. Because there is no <code>.csch</code> behind
 has no pop-in: there is nothing to push into.</p>
 </div>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>File</td><td>&mdash;</td><td>&mdash;</td><td>shown</td></tr>
@@ -1046,6 +1214,14 @@ has no pop-in: there is nothing to push into.</p>
 <p>An N-port defined by its impedance matrix <code>Z[p,q]</code>. <code>NumPorts</code> is the port count, hidden, and it
 drives the symbol and pin count. The symbol grows with the port count — see
 <a href="dynamic-symbols.html#zport">Dynamic symbols</a>.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1+</td></tr>
+<tr><td>2</td><td>1-</td></tr>
+<tr><td>3</td><td>2+</td></tr>
+<tr><td>4</td><td>2-</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order. How many there are is set by <code>NumPorts</code>; the table shows <code>NumPorts&nbsp;=&nbsp;2</code>.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -1092,6 +1268,14 @@ itself.</li>
 <li><code>C[n]</code> / <code>Cport[n]</code> — bind a control current <code>_cn</code> to another device's current.</li>
 </ul>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1+</td></tr>
+<tr><td>2</td><td>1-</td></tr>
+<tr><td>3</td><td>2+</td></tr>
+<tr><td>4</td><td>2-</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order. How many there are is set by <code>NumPorts</code>; the table shows <code>NumPorts&nbsp;=&nbsp;2</code>.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>NumPorts</td><td><code>2</code></td><td>&mdash;</td><td>&mdash;</td></tr>
@@ -1116,6 +1300,12 @@ itself.</li>
 <p>A junction diode: anode at the top, cathode at the bottom. <code>Rs</code> is a <strong>model parameter, not a
 separate placed resistor</strong> — when it is non-zero the elaborator mints the internal node itself, so the
 schematic shows one device either way.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>a</td></tr>
+<tr><td>2</td><td>c</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -1242,6 +1432,13 @@ is why <code>Cgd</code> dominates the input match of a device long before <code>
 </span><figcaption>Curtice</figcaption></figure>
 <p>The Curtice quadratic law: <code>Vto</code>, <code>Beta</code>, <code>Alpha</code> and <code>Lambda</code>.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>g</td></tr>
+<tr><td>2</td><td>d</td></tr>
+<tr><td>3</td><td>s</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>Vto</td><td><code>-2</code></td><td>V</td><td>shown</td></tr>
@@ -1274,6 +1471,13 @@ is why <code>Cgd</code> dominates the input match of a device long before <code>
 	</text></svg></span>
 </span><figcaption>CurticeCubic</figcaption></figure>
 <p>The Curtice–Ettenberg cubic law: <code>A0</code>–<code>A3</code>, <code>Gamma</code>, <code>Beta</code> and <code>Vds0</code>.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>g</td></tr>
+<tr><td>2</td><td>d</td></tr>
+<tr><td>3</td><td>s</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -1309,6 +1513,13 @@ is why <code>Cgd</code> dominates the input match of a device long before <code>
 </span><figcaption>Statz</figcaption></figure>
 <p>The Statz law: <code>Vto</code>, <code>Beta</code>, <code>B</code>, <code>Alpha</code> and <code>Lambda</code>.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>g</td></tr>
+<tr><td>2</td><td>d</td></tr>
+<tr><td>3</td><td>s</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>Vto</td><td><code>-2</code></td><td>V</td><td>shown</td></tr>
@@ -1343,6 +1554,13 @@ is why <code>Cgd</code> dominates the input match of a device long before <code>
 </span><figcaption>Materka</figcaption></figure>
 <p>The Materka–Kacprzak law: <code>Idss</code>, <code>Vp0</code>, <code>Gamma</code> and <code>Alpha</code>.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>g</td></tr>
+<tr><td>2</td><td>d</td></tr>
+<tr><td>3</td><td>s</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>Idss</td><td><code>0.1</code></td><td>A</td><td>shown</td></tr>
@@ -1375,6 +1593,13 @@ is why <code>Cgd</code> dominates the input match of a device long before <code>
 	</text></svg></span>
 </span><figcaption>Angelov</figcaption></figure>
 <p>The Angelov (Chalmers) law: <code>Ipk</code>, <code>Vpk</code>, <code>P1</code>–<code>P3</code>, <code>Alpha</code> and <code>Lambda</code>.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>g</td></tr>
+<tr><td>2</td><td>d</td></tr>
+<tr><td>3</td><td>s</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -1427,6 +1652,13 @@ a p-channel model card is read as the quadratic law or Statz, never as either of
 	</text></svg></span>
 </span><figcaption>Curtice-P</figcaption></figure>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>g</td></tr>
+<tr><td>2</td><td>d</td></tr>
+<tr><td>3</td><td>s</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>Vto</td><td><code>2</code></td><td>V</td><td>shown</td></tr>
@@ -1450,6 +1682,13 @@ a p-channel model card is read as the quadratic law or Statz, never as either of
 <tr><td>Vtotc</td><td><code>0</code></td><td>&mdash;</td><td>&mdash;</td></tr>
 </tbody></table>
 <h5 id="pfetstatz">Statz-P (PFET_Statz)</h5>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>g</td></tr>
+<tr><td>2</td><td>d</td></tr>
+<tr><td>3</td><td>s</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -1475,6 +1714,13 @@ a p-channel model card is read as the quadratic law or Statz, never as either of
 <tr><td>Vtotc</td><td><code>0</code></td><td>&mdash;</td><td>&mdash;</td></tr>
 </tbody></table>
 <h5 id="pfetmaterka">Materka-P (PFET_Materka)</h5>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>g</td></tr>
+<tr><td>2</td><td>d</td></tr>
+<tr><td>3</td><td>s</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -1549,6 +1795,13 @@ noise</strong>; and <strong>self-heating</strong>.</p>
 <p>The gate arrow points <strong>into</strong> the channel. The channel bar is unbroken — a <strong>depletion</strong> device,
 conducting at zero gate bias, which is the opposite of the MOS glyph's three segments.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>d</td></tr>
+<tr><td>2</td><td>g</td></tr>
+<tr><td>3</td><td>s</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>Vto</td><td><code>-2</code></td><td>V</td><td>shown</td></tr>
@@ -1584,6 +1837,13 @@ conducting at zero gate bias, which is the opposite of the MOS glyph's three seg
 </span><figcaption>PJFET</figcaption></figure>
 <p>The gate arrow points <strong>out of</strong> the channel. Same equations, every sign reversed — so <code>Vto</code> is
 positive, as a p-channel card states it.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>d</td></tr>
+<tr><td>2</td><td>g</td></tr>
+<tr><td>3</td><td>s</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -1690,6 +1950,13 @@ replaced with the ones for the transistor you actually have.</p>
 </span><figcaption>NPN</figcaption></figure>
 <p>The emitter arrow points <strong>out of</strong> the base — conventional current leaving the emitter.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>c</td></tr>
+<tr><td>2</td><td>b</td></tr>
+<tr><td>3</td><td>e</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>Is</td><td><code>9.57e-17</code></td><td>A</td><td>shown</td></tr>
@@ -1741,6 +2008,13 @@ replaced with the ones for the transistor you actually have.</p>
 </span><figcaption>PNP</figcaption></figure>
 <p>The emitter arrow points <strong>into</strong> the base. Same equations, same parameter names, every voltage and
 current negated — so a parameter set written for one polarity is used unchanged for the other.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>c</td></tr>
+<tr><td>2</td><td>b</td></tr>
+<tr><td>3</td><td>e</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -1880,6 +2154,14 @@ without ever noticing you had not supplied a model.</p>
 bar is drawn in three segments, the standard mark for an <strong>enhancement</strong> device: there is no channel
 until the gate makes one, so the part is off at zero gate bias.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>d</td></tr>
+<tr><td>2</td><td>g</td></tr>
+<tr><td>3</td><td>s</td></tr>
+<tr><td>4</td><td>b</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>Vto</td><td><code>1</code></td><td>V</td><td>shown</td></tr>
@@ -1933,6 +2215,14 @@ until the gate makes one, so the part is off at zero gate bias.</p>
 <p>The bulk arrow points <strong>out of</strong> the channel. Same equations, same parameter names, every voltage,
 current and charge negated — so <code>Vto</code> is stated as the card states it, negative for an ordinary
 p-channel enhancement device, and circuitRF applies the sign itself.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>d</td></tr>
+<tr><td>2</td><td>g</td></tr>
+<tr><td>3</td><td>s</td></tr>
+<tr><td>4</td><td>b</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -2043,6 +2333,14 @@ The current goes to zero at threshold in both.</p>
 	</text></svg></span>
 </span><figcaption>NMOS3</figcaption></figure>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>d</td></tr>
+<tr><td>2</td><td>g</td></tr>
+<tr><td>3</td><td>s</td></tr>
+<tr><td>4</td><td>b</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>Vto</td><td><code>1</code></td><td>V</td><td>shown</td></tr>
@@ -2090,6 +2388,14 @@ The current goes to zero at threshold in both.</p>
 <tr><td>Tnom</td><td><code>26.85</code></td><td>&mdash;</td><td>&mdash;</td></tr>
 </tbody></table>
 <h5 id="mos3p">p-channel (MOS3_P)</h5>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>d</td></tr>
+<tr><td>2</td><td>g</td></tr>
+<tr><td>3</td><td>s</td></tr>
+<tr><td>4</td><td>b</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -2185,6 +2491,13 @@ than in it.</p>
 source-to-body short — and the body diode is drawn explicitly on the right, conducting from source to
 drain.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>d</td></tr>
+<tr><td>2</td><td>g</td></tr>
+<tr><td>3</td><td>s</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>Vto</td><td><code>3</code></td><td>V</td><td>shown</td></tr>
@@ -2224,6 +2537,13 @@ drain.</p>
 			PVDMOS
 	</text></svg></span>
 </span><figcaption>PVDMOS</figcaption></figure>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>d</td></tr>
+<tr><td>2</td><td>g</td></tr>
+<tr><td>3</td><td>s</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -2305,6 +2625,13 @@ Enter the data sheet's numbers here, or run the card's own model through
 output side carries the <strong>bipolar's</strong> emitter arrow. The arrow is not decoration: it is what stops a
 reader taking this for a power MOSFET and expecting a body diode that is not there.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>c</td></tr>
+<tr><td>2</td><td>g</td></tr>
+<tr><td>3</td><td>e</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
 <tr><td>Vto</td><td><code>5</code></td><td>V</td><td>shown</td></tr>
@@ -2346,6 +2673,13 @@ reader taking this for a power MOSFET and expecting a body diode that is not the
 			PIGBT
 	</text></svg></span>
 </span><figcaption>PIGBT</figcaption></figure>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>c</td></tr>
+<tr><td>2</td><td>g</td></tr>
+<tr><td>3</td><td>e</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th></tr></thead>
 <tbody>
@@ -2477,6 +2811,13 @@ of the RF frequency — that is the swept measurement an S-parameter run cannot 
 system diagram can and cannot answer — is covered in
 <a href="system-components.html">System Components</a>.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>RF</td></tr>
+<tr><td>2</td><td>LO</td></tr>
+<tr><td>3</td><td>IF</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th><th>Meaning</th></tr></thead>
 <tbody>
 <tr><td>ConvGain</td><td><code>-7</code></td><td>dB</td><td>shown</td><td>Single-sideband power conversion gain, RF port to IF port, at the LO drive Plo names. Negative is a loss. Both sidebands are produced at this level.</td></tr>
@@ -2543,6 +2884,16 @@ wrong — so read the marks.</p>
 <p>The box body is not a second opinion about what a mixer looks like: six leads cannot land on a
 circle's edge on the connection grid. The ✕ is kept, and it is the whole of the family resemblance.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>rf+</td></tr>
+<tr><td>2</td><td>rf-</td></tr>
+<tr><td>3</td><td>lo+</td></tr>
+<tr><td>4</td><td>lo-</td></tr>
+<tr><td>5</td><td>if+</td></tr>
+<tr><td>6</td><td>if-</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th><th>Meaning</th></tr></thead>
 <tbody>
 <tr><td>ConvGain</td><td><code>-7</code></td><td>dB</td><td>shown</td><td>Single-sideband power conversion gain, RF port to IF port, at the LO drive Plo names. Negative is a loss. Both sidebands are produced at this level.</td></tr>
@@ -2590,6 +2941,12 @@ rebuilds, are in <b><a href="veriloga.html">Compiled Verilog-A Models</a></b>. T
 glyph, the pins and the parameter table.</p>
 </div>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order. How many there are is set by <code>Pins</code>; the table shows <code>Pins&nbsp;=&nbsp;2</code>.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th><th>Meaning</th></tr></thead>
 <tbody>
 <tr><td>File</td><td>&mdash;</td><td>&mdash;</td><td>shown</td><td>The model to load: a compiled model (.osdi), or Verilog-A source (.va, .vams) which circuitRF builds once with the compiler installed on this machine and reuses until the source changes. Choosing one fills in Model and Pins below.</td></tr>
@@ -2634,6 +2991,13 @@ the balanced signal, which is a circuit that still solves. <code>Zbal</code> is 
 balanced port to ground, so the differential impedance across the pair is twice it.</p>
 <p>In depth: <a href="system-components.html#balun">System Components › Balun</a>.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>UNB</td></tr>
+<tr><td>2</td><td>BAL+</td></tr>
+<tr><td>3</td><td>BAL-</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th><th>Meaning</th></tr></thead>
 <tbody>
 <tr><td>Zunb</td><td><code>50</code></td><td>Ω</td><td>&mdash;</td><td>Reference impedance of the unbalanced port.</td></tr>
@@ -2670,6 +3034,13 @@ a circulator turns is read off the schematic rather than out of a dialog. Termin
 and it is an isolator. It can carry a passive-intermod specification.</p>
 <p>In depth: <a href="system-components.html#circulator">System Components › Circulator</a>.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+<tr><td>3</td><td>3</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th><th>Meaning</th></tr></thead>
 <tbody>
 <tr><td>Direction</td><td><code>CW</code></td><td>&mdash;</td><td>&mdash;</td><td>Which way the circulator turns: CW circulates port 1 to 2 to 3 to 1, CCW reverses it. The arrow drawn inside the symbol follows this.</td></tr>
@@ -2699,6 +3070,12 @@ and it is an isolator. It can carry a passive-intermod specification.</p>
 position <code>State</code> sets</strong> — lifted at <code>0</code>, closed at <code>1</code> — which is what makes a swept <code>State</code>
 readable on the page.</p>
 <p>In depth: <a href="system-components.html#switch">System Components › Switch</a>.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th><th>Meaning</th></tr></thead>
 <tbody>
@@ -2732,6 +3109,13 @@ readable on the page.</p>
 the <code>SW</code> instance prefix, so swapping one for the other does not renumber a schematic.</p>
 <p>In depth: <a href="system-components.html#switchd">System Components › Transfer Switch</a>.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>COM</td></tr>
+<tr><td>2</td><td>T1</td></tr>
+<tr><td>3</td><td>T2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th><th>Meaning</th></tr></thead>
 <tbody>
 <tr><td>State</td><td><code>1</code></td><td>&mdash;</td><td>&mdash;</td><td>Which throw the common port is connected to — 1 or 2, or 0 for both open. The blade in the symbol points at it.</td></tr>
@@ -2756,6 +3140,12 @@ because the gain belongs where a reader looks for a number — the label beside 
 bias pins and consumes no DC power, and one third-order intercept sets its intermodulation and its
 compression together.</p>
 <p>In depth: <a href="system-components.html#amp">System Components › Amplifier</a>.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>IN</td></tr>
+<tr><td>2</td><td>OUT</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th><th>Meaning</th></tr></thead>
 <tbody>
@@ -2799,6 +3189,14 @@ that happen to be close to one another. The arrow does real work: it is the whol
 the coupled port from the isolated one, and a coupler drawn without it is ambiguous in exactly the
 way that produces a silently wrong circuit.</p>
 <p>In depth: <a href="system-components.html#coupler">System Components › Directional Coupler</a>.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+<tr><td>3</td><td>3</td></tr>
+<tr><td>4</td><td>4</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th><th>Meaning</th></tr></thead>
 <tbody>
@@ -2845,6 +3243,14 @@ same pins, same arrow; the phase written inside the frame is the difference, bec
 the difference.</p>
 <p>In depth: <a href="system-components.html#hybrid90">System Components › 90° Hybrid</a>.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+<tr><td>3</td><td>3</td></tr>
+<tr><td>4</td><td>4</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th><th>Meaning</th></tr></thead>
 <tbody>
 <tr><td>Coupling</td><td><code>3.0103</code></td><td>dB</td><td>&mdash;</td><td>How far below the input the coupled port sits, in dB. This alone sets the split — the through port gets whatever is left, so a 20 dB coupler already loses 0.04 dB through its main arm. 3.0103 dB is the equal split that makes a hybrid.</td></tr>
@@ -2889,6 +3295,14 @@ the difference.</p>
 and a difference port. Both hybrids share the <code>HYB</code> instance prefix with each other, and all three
 tiles share one engine component.</p>
 <p>In depth: <a href="system-components.html#hybrid180">System Components › 180° Hybrid</a>.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+<tr><td>3</td><td>3</td></tr>
+<tr><td>4</td><td>4</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th><th>Meaning</th></tr></thead>
 <tbody>
@@ -2947,6 +3361,12 @@ highest at the top, and a slash is struck through every wave the network blocks,
 <strong>prototype</strong> order, so a 3rd-order bandpass is a 6th-degree network.</p>
 <p>In depth: <a href="system-components.html#filter">System Components › Filter</a>.</p>
 <table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
+<table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th><th>Meaning</th></tr></thead>
 <tbody>
 <tr><td>Response</td><td><code>Chebyshev</code></td><td>&mdash;</td><td>&mdash;</td><td>Which prototype family the response comes from: Butterworth (maximally flat magnitude), Chebyshev (equiripple passband, reads Ripple), InvChebyshev (flat passband and an equiripple stopband floor, reads Astop), Bessel (maximally flat GROUP DELAY — chosen for its phase, not its shape) or Elliptic (equiripple in both bands, reads Ripple and Astop). A parameter the family does not read is ignored, so you never have to clear a field to change family.</td></tr>
@@ -2974,6 +3394,12 @@ highest at the top, and a slash is struck through every wave the network blocks,
 as &quot;signal made smaller&quot;. The loss shows as the label beside the symbol. With a small loss and a
 passive-intermod specification it is a <strong>PIM generator</strong> you can place in front of anything.</p>
 <p>In depth: <a href="system-components.html#atten">System Components › Attenuator</a>.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>1</td></tr>
+<tr><td>2</td><td>2</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th><th>Meaning</th></tr></thead>
 <tbody>
@@ -3006,6 +3432,13 @@ labelled with the arm it belongs to. <code>ANT</code> is on the left, <code>TX</
 complete filter specification per arm, and its isolation is a consequence of the two responses
 meeting at one node rather than a parameter.</p>
 <p>In depth: <a href="system-components.html#duplexer">System Components › Duplexer</a>.</p>
+<table class="param-table">
+<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>
+<tr><td>1</td><td>ANT</td></tr>
+<tr><td>2</td><td>TX</td></tr>
+<tr><td>3</td><td>RX</td></tr>
+</tbody></table>
+<p class="small">The nets of an instance line, in this order.</p>
 <table class="param-table">
 <thead><tr><th>Name</th><th>Default</th><th>Unit</th><th>On schematic</th><th>Meaning</th></tr></thead>
 <tbody>

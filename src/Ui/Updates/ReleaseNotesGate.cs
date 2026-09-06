@@ -98,6 +98,19 @@ public static class ReleaseNotesGate
     /// </summary>
     public static bool NetworkPermitted => !UpdatePolicy.Current.IsOverridden;
 
+    /// <summary>
+    /// The newest version whose notes have already been put in front of this user, or null if none
+    /// have. <b>Read before <see cref="MarkShown"/> runs</b>, since that call overwrites it with the
+    /// running version — this is the anchor the "and everything you skipped" range starts from.
+    ///
+    /// <para>It is the right anchor precisely because it records what was SHOWN rather than what was
+    /// installed: a version the user skipped was never shown, and a version installed while the
+    /// dialog was switched off was recorded silently, so turning it back on still does not replay a
+    /// backlog. <c>UpdateState.PreviousVersion</c> is not usable for this — it is rollback insurance,
+    /// cleared as soon as the new version starts cleanly, and never set at all on a manual install.</para>
+    /// </summary>
+    public static string? LastShownVersion => UpdateStateIo.Load().ReleaseNotesShownFor;
+
     /// <summary>The real decision, against the live state file, preferences and running version.</summary>
     public static ReleaseNotesDecision Resolve()
     {

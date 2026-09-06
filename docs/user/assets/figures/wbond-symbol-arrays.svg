@@ -32,7 +32,23 @@
 								−
 						</text><text fill="#2D14C3" transform="translate(310 331.55)" font-size="5.84" font-family="IBM Plex Sans" x="-3.71, 0.2073" y="2.19">
 								D2
-						</text><rect fill="none" stroke="#CE4A24" stroke-width="1" stroke-miterlimit="4" transform="translate(0 63)" x="185.32" y="119.54" width="6" height="6" /><rect fill="none" stroke="#CE4A24" stroke-width="1" stroke-miterlimit="4" transform="translate(0 63)" x="428.68" y="119.54" width="6" height="6" /><rect fill="none" stroke="#CE4A24" stroke-width="1" stroke-miterlimit="4" transform="translate(0 63)" x="185.32" y="168.21" width="6" height="6" /><rect fill="none" stroke="#CE4A24" stroke-width="1" stroke-miterlimit="4" transform="translate(0 63)" x="428.68" y="168.21" width="6" height="6" /><rect fill="none" stroke="#CE4A24" stroke-width="1" stroke-miterlimit="4" transform="translate(0 63)" x="185.32" y="216.88" width="6" height="6" /><rect fill="none" stroke="#CE4A24" stroke-width="1" stroke-miterlimit="4" transform="translate(0 63)" x="428.68" y="216.88" width="6" height="6" /><rect fill="none" stroke="#CE4A24" stroke-width="1" stroke-miterlimit="4" transform="translate(0 63)" x="185.32" y="265.55" width="6" height="6" /><rect fill="none" stroke="#CE4A24" stroke-width="1" stroke-miterlimit="4" transform="translate(0 63)" x="428.68" y="265.55" width="6" height="6" /><text fill="#6A8EF6" transform="translate(0 63)" font-size="17.03" font-family="IBM Plex Sans" x="272.28, 285.36, 296.49, 306.03, 315.7" y="338.39">
+						</text><rect fill="none" stroke="#CE4A24" stroke-width="1" stroke-miterlimit="4" transform="translate(0 63)" x="185.32" y="119.54" width="6" height="6" /><rect fill="none" stroke="#CE4A24" stroke-width="1" stroke-miterlimit="4" transform="translate(0 63)" x="428.68" y="119.54" width="6" height="6" /><rect fill="none" stroke="#CE4A24" stroke-width="1" stroke-miterlimit="4" transform="translate(0 63)" x="185.32" y="168.21" width="6" height="6" /><rect fill="none" stroke="#CE4A24" stroke-width="1" stroke-miterlimit="4" transform="translate(0 63)" x="428.68" y="168.21" width="6" height="6" /><rect fill="none" stroke="#CE4A24" stroke-width="1" stroke-miterlimit="4" transform="translate(0 63)" x="185.32" y="216.88" width="6" height="6" /><rect fill="none" stroke="#CE4A24" stroke-width="1" stroke-miterlimit="4" transform="translate(0 63)" x="428.68" y="216.88" width="6" height="6" /><rect fill="none" stroke="#CE4A24" stroke-width="1" stroke-miterlimit="4" transform="translate(0 63)" x="185.32" y="265.55" width="6" height="6" /><rect fill="none" stroke="#CE4A24" stroke-width="1" stroke-miterlimit="4" transform="translate(0 63)" x="428.68" y="265.55" width="6" height="6" /><text fill="#6A8EF6" transform="translate(204.82 176.52)" font-size="11.19" font-family="IBM Plex Sans" x="-10.17, -2.39, 4.33, 7.37" y="4.2">
+								G1.i
+						</text><text fill="#6A8EF6" transform="translate(413.44 176.52)" font-size="11.19" font-family="IBM Plex Sans" x="-11.9, -4.13, 2.59, 5.64" y="4.2">
+								G1.o
+						</text><text fill="#6A8EF6" transform="translate(204.82 225.19)" font-size="11.19" font-family="IBM Plex Sans" x="-10.17, -2.39, 4.33, 7.37" y="4.2">
+								G2.i
+						</text><text fill="#6A8EF6" transform="translate(413.44 225.19)" font-size="11.19" font-family="IBM Plex Sans" x="-11.9, -4.13, 2.59, 5.64" y="4.2">
+								G2.o
+						</text><text fill="#6A8EF6" transform="translate(204.69 273.86)" font-size="11.19" font-family="IBM Plex Sans" x="-10.04, -2.52, 4.19, 7.24" y="4.2">
+								D1.i
+						</text><text fill="#6A8EF6" transform="translate(413.58 273.86)" font-size="11.19" font-family="IBM Plex Sans" x="-11.77, -4.26, 2.46, 5.5" y="4.2">
+								D1.o
+						</text><text fill="#6A8EF6" transform="translate(204.69 322.53)" font-size="11.19" font-family="IBM Plex Sans" x="-10.04, -2.52, 4.19, 7.24" y="4.2">
+								D2.i
+						</text><text fill="#6A8EF6" transform="translate(413.58 322.53)" font-size="11.19" font-family="IBM Plex Sans" x="-11.77, -4.26, 2.46, 5.5" y="4.2">
+								D2.o
+						</text><text fill="#6A8EF6" transform="translate(0 63)" font-size="17.03" font-family="IBM Plex Sans" x="272.28, 285.36, 296.49, 306.03, 315.7" y="338.39">
 								wBond
 						</text><text fill="#3B1CF3" transform="translate(0 63)" font-size="17.03" font-family="IBM Plex Sans" x="272.28, 287.46" y="355.91">
 								W1

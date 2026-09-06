@@ -31,7 +31,7 @@
   <p class="breadcrumb"><a href="../index.html">Docs</a> › <a href="index.html">Reference</a> › The command line</p>
 
   <h1>The Command Line</h1>
-  <p class="lede">Every engine circuitRF has runs without the GUI. One executable, eight verbs — S-parameters, DC, harmonic balance, loadpull, loadpull pursuit, electromagnetic extraction, layout interchange conversion, and an elaborated-netlist dump. This chapter is the operational reference for all of them, including a worked EM run from an empty folder.</p>
+  <p class="lede">circuitRF runs without the GUI — not just its engines, but authoring, validation and resolution too. One executable, fourteen verbs — S-parameters, DC, harmonic balance, loadpull, loadpull pursuit, electromagnetic extraction, layout interchange, creating a workspace or a cell, importing a part, checking a design, explaining what it resolved to, reading a result back, an elaborated-netlist dump, and a protocol server. Every one of them answers --json. This chapter is the operational reference for all of them, including a worked EM run from an empty folder.</p>
 
 <nav class="toc">
 <h2>On this page</h2>
@@ -47,7 +47,15 @@
 <li><a href="#lpp"><code>lpp</code> — loadpull pursuit</a></li>
 <li><a href="#em"><code>em</code> — electromagnetic extraction</a></li>
 <li><a href="#convert"><code>convert</code> — layout interchange</a></li>
+<li><a href="#new"><code>new</code> — a workspace or a cell</a></li>
+<li><a href="#import"><code>import part</code> — a footprint and its symbol</a></li>
+<li><a href="#check"><code>check</code> — is it sound?</a></li>
+<li><a href="#explain"><code>explain</code> — what did it resolve to?</a></li>
+<li><a href="#read"><code>read</code> — a result or a document, back</a></li>
+<li><a href="#reference"><code>reference</code> — what may I write?</a></li>
 <li><a href="#elab"><code>elab</code> — the elaborated netlist</a></li>
+<li><a href="#json"><code>--json</code> — one machine-readable document</a></li>
+<li><a href="#serve"><code>serve</code> — a protocol server</a></li>
 <li><a href="#exit">Exit codes</a></li>
 <li><a href="#scripting">Scripting patterns</a></li>
 </ol>
@@ -123,10 +131,58 @@ convention behind both.</p>
 <td>The layout in the format you asked for</td>
 </tr>
 <tr>
+<td><code>new workspace</code></td>
+<td>a directory</td>
+<td>The same code <strong>File ▸ New Workspace</strong> runs</td>
+<td>A <code>.cws</code> and, unless you say otherwise, a copied technology</td>
+</tr>
+<tr>
+<td><code>new cell</code></td>
+<td>a workspace + a name</td>
+<td>The same code <strong>New Cell</strong> runs</td>
+<td>A cell folder and one empty-but-valid file per view</td>
+</tr>
+<tr>
+<td><code>import part</code></td>
+<td>a component file or folder</td>
+<td>The same code <strong>Import Component</strong> runs</td>
+<td>A cell folder holding the land patterns and the symbol</td>
+</tr>
+<tr>
+<td><code>check</code></td>
+<td>a workspace, a cell folder, or one document</td>
+<td>Every validator the application already uses</td>
+<td><strong>Nothing</strong> — findings to stdout</td>
+</tr>
+<tr>
+<td><code>explain</code></td>
+<td>the same</td>
+<td>Resolution only — no analysis</td>
+<td><strong>Nothing</strong> — the walk and the answer, to stdout</td>
+</tr>
+<tr>
+<td><code>read</code></td>
+<td>a result file, or one of circuitRF's own documents</td>
+<td>The same loaders the Data Display reads a file with</td>
+<td><strong>Nothing</strong> — what the file holds, to stdout</td>
+</tr>
+<tr>
+<td><code>reference</code></td>
+<td><strong>nothing</strong></td>
+<td>Nothing — it reads no file</td>
+<td><strong>Nothing</strong> — the reference pages, and every netlist primitive with its terminals and parameters</td>
+</tr>
+<tr>
 <td><code>elab</code></td>
 <td><code>.cnl</code></td>
 <td>Elaboration only, no analysis</td>
 <td>The elaborated netlist, to stdout</td>
+</tr>
+<tr>
+<td><code>serve</code></td>
+<td><code>--root &lt;dir&gt;</code></td>
+<td>A protocol server for an external client</td>
+<td>Whatever the tool it is asked for writes</td>
 </tr>
 </tbody>
 </table>
@@ -153,9 +209,30 @@ convergence notes still scroll past on screen. Redirect <code>2&amp;gt;/dev/null
 <td><code>--kits &lt;dir&gt;</code></td>
 <td>A folder of installed kits, so an externally-supplied device model (<code>ExtDevice Provider=…</code>) resolves headlessly the way opening a workspace resolves it in the GUI. Repeatable.</td>
 </tr>
+<tr>
+<td><code>--json</code></td>
+<td>Put <strong>one JSON document</strong> on stdout and nothing else — <a href="#json">see below</a>. stderr is untouched.</td>
+</tr>
+<tr>
+<td><code>--only a,b</code></td>
+<td>Narrow that document's result to these cubes.</td>
+</tr>
+<tr>
+<td><code>--group g,h</code></td>
+<td>Narrow that document's result to these groups.</td>
+</tr>
 </tbody>
 </table>
 <p>Frequencies are written as <code>1GHz</code>, <code>100MHz</code>, or bare Hz (<code>1e9</code>) anywhere a frequency is accepted.</p>
+<div class="callout">
+<span class="label">An option a verb does not take is refused, never ignored</span>
+<p>Every verb stops with <code>unknown option '…'</code> and exit&nbsp;1 rather than dropping a flag it
+does not recognise. This matters more than it sounds: most verbs find their input file as
+<i>the first argument that is not an option</i>, so a silently dropped flag's <b>value</b> would be
+read as the file name — and a flag that carries an override, like
+<code class="nowrap">--set</code>, would simply not be applied, giving you a run that answers a
+different question with nothing to say so.</p>
+</div>
 <hr />
 <h2 id="sparam"><code>sparam</code> — S-parameters</h2>
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf sparam &lt;file.cnl&gt; [--freq start:stop:step] [-o out.sNp]</code></pre>
@@ -824,6 +901,221 @@ geometry, curves turned into polygons, holes keyholed, bitmaps dropped, unresolv
 references, layers with no mapping in the target format. stdout carries only the paths written, one
 per line, so a script can consume them directly:</p>
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf convert board.kicad_pcb -o fab/ --to gerber 2&gt; convert.log | zip -j fab.zip -@</code></pre>
+<h2 id="new"><code>new</code> — a workspace or a cell</h2>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf new workspace &lt;dir&gt; [--name N] [--tech &lt;id&gt;|none]
+<span class="prompt">$ </span>circuitrf new cell &lt;workspace&gt; &lt;cellName&gt; [--views schematic,symbol,layout]</code></pre>
+<p>These create the <strong>first correct document</strong> — the thing that is awkward to write by hand because the
+folder structure and the primacy files have to be right before anything will open it.</p>
+<p>They are not a second implementation. <code>new workspace</code> calls the same function <strong>File ▸ New
+Workspace</strong> calls, and <code>new cell</code> the same one <strong>New Cell</strong> calls, so a tree created here is a tree
+the application created.</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf new workspace ~/designs/Amp --tech pcb-4layer_FR-4_62mil_1oz
+<span class="output">/home/you/designs/Amp
+/home/you/designs/Amp/.cws
+/home/you/designs/Amp/tech/pcb-4layer_FR-4_62mil_1oz.ctech</span>
+
+<span class="prompt">$ </span>circuitrf new cell ~/designs/Amp Stage1 --views schematic,symbol
+<span class="output">/home/you/designs/Amp/Stage1
+/home/you/designs/Amp/Stage1/schematic/Stage1.csch
+/home/you/designs/Amp/Stage1/symbol/Stage1.csym</span></code></pre>
+<p><strong>The paths it creates are the result</strong>, on stdout, because what you do next is almost always read or
+rewrite one of them.</p>
+<div class="callout note">
+<span class="label">Every default is the dialog's</span>
+<p>Whatever the GUI's dialog pre-selects, the verb selects with no flag: <code>--tech</code> opens on
+the same technology the <b>New Workspace</b> combo box opens on (<code>--tech none</code> is its
+"None" row), and <code>--views</code> defaults to <code>schematic</code>, which is what <b>New
+Cell</b> creates. Anything the dialog would have <em>asked</em> is a refusal that names the flag
+answering it — never a guess.</p>
+</div>
+<p><strong>There are deliberately no per-primitive edit verbs.</strong> There is no <code>place-instance</code> and no
+<code>set-parameter</code>: once a document exists, the way to change it is to <strong>write</strong> it. Every format
+circuitRF owns is readable, versioned JSON — see <a href="file-formats.html">File formats</a> — and that file
+<em>is</em> the interface.</p>
+<h3 id="new-add">`new` is one verb with a noun</h3>
+<p><code>new workspace</code> and <code>new cell</code> are two nouns of one verb, not two verbs. It reads better and, more to
+the point, the number of top-level verbs is a cost every reader of <code>--help</code> pays.</p>
+<hr />
+<h2 id="import"><code>import part</code> — a footprint and its symbol</h2>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf import part &lt;file-or-folder&gt; --into &lt;workspace&gt; [--cell N] [--variant V]
+                                            [--list-parts] [--tech f.ctech] [--add-layers]</code></pre>
+<p>The same code <strong>Import Component</strong> runs: it reads a downloaded component — a land pattern, a symbol,
+and the pin-to-pad map that joins them — and writes it into your workspace as one cell.</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf import part downloads/SOT-23.zip --into ~/designs/Amp --list-parts
+<span class="output">SOT-23-3
+SOT-23-5</span>
+
+<span class="prompt">$ </span>circuitrf import part downloads/SOT-23.zip --into ~/designs/Amp --cell SOT-23-3
+<span class="output">/home/you/designs/Amp/SOT-23-3
+/home/you/designs/Amp/SOT-23-3/layout/SOT-23-3.clay
+/home/you/designs/Amp/SOT-23-3/symbol/SOT-23-3.csym</span></code></pre>
+<p>A source holding several parts is <strong>refused with them listed</strong>, never resolved by taking the first.</p>
+<p><strong>Layers the technology does not have are reported, and nothing is written</strong>, unless you pass
+<code>--add-layers</code>. The GUI's own install is session-only and writes nothing to disk either, so this is
+the same behaviour and not a headless restriction.</p>
+<hr />
+<h2 id="check"><code>check</code> — is it well formed, does it resolve, is it sound?</h2>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf check &lt;path&gt; [--recursive] [--severity warning|error]</code></pre>
+<p>Point it at a workspace, a cell folder, or one document. <strong>It runs no analysis and it writes
+nothing</strong>, which is what makes it cheap enough to call after every edit — and safe to run on a
+read-only tree, or on a workspace you have open in the GUI at the same time.</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf check ~/designs/Amp
+<span class="output">Amp/Stage1/schematic/Stage1.csch
+  error   two labels name one physical net: 'vout' and 'out'
+Amp/Stage1/layout/Stage1.clay
+  warning no technology resolves for this layout
+5 document(s): 1 error, 1 warning</span></code></pre>
+<p><strong>Every finding comes from a validator the application already uses</strong> — the same view-file check, the
+same primacy rule, the same technology walk-up, the same net extractor, the same elaborator, the same
+DRC engine. A rule that lived only in <code>check</code> would be a rule the application does not enforce, and a
+design would pass here and be refused the moment somebody opened it.</p>
+<div class="callout note">
+<span class="label">Warnings are reported and still exit 0</span>
+<p><code>--severity</code> decides the exit code, and it defaults to <code>error</code>. Warnings are
+<em>always</em> printed — a check that hid them to keep the exit code clean would make the exit code
+useless. Two states are warnings on purpose: a cell folder holding several views with none named
+primary, and a layout that resolves no technology. Both are normal.</p>
+</div>
+<p>The kind of document is inferred from the path, exactly as <code>convert</code> infers a format. A GDSII or
+Gerber file is <strong>named as interchange</strong> rather than called unreadable — it is simply not validated,
+because there is nothing to validate it against.</p>
+<hr />
+<h2 id="explain"><code>explain</code> — what did circuitRF decide?</h2>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain &lt;path&gt; [--expr "&lt;expression&gt;"] [--set var=expr]
+                            [--analysis [&lt;name&gt;]] [--ref &lt;relative-ref&gt;]</code></pre>
+<p><code>check</code> answers &quot;is something wrong&quot;. <code>explain</code> answers the question that is <strong>not</strong> a failure: which
+technology did this layout get, which analysis would actually run, what does this expression evaluate
+to here, and what does this cell reference point at?</p>
+<p>It reports <strong>the walk as well as the answer</strong>, and that is the useful half. Resolution in circuitRF is
+a series of walk-ups — a document's ancestor workspace, a layout's technology, a <code>.cem</code>'s two
+independent references — and which one produced an answer is exactly what you cannot see from the
+file.</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain Amp.cem
+<span class="output">workspace   from Amp.cem            → /home/you/designs/Amp/.cws        (nearest ancestor .cws)
+layout      from Amp.cem            → Amp/Line/layout/Line.clay         (workspace-relative)
+workspace   from Line.clay          → /home/you/parts/.cws              (nearest ancestor .cws)
+technology  from /home/you/parts    → parts/tech/pcb-2layer.ctech       (the .cws DefaultTechRef)</span></code></pre>
+<p>Two different workspaces there, and that is legitimate: a <code>.cem</code> in one workspace may point at a
+layout in another, and that layout's layers must be read by <em>its</em> technology.</p>
+<h3 id="explain-analysis">`--analysis` — which chain would run</h3>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain pa.cnl --analysis
+<span class="output">SWEEP1   parametric_sweep   enabled  runnable  root   → dispatched by hb
+  chain: SWEEP1 → HB1
+  sweep: Pavl over 1.0000e+09 … 3.0000e+09 step 5.0000e+08 Hz  (stated GHz, scale 1e9)
+HB1      hb                 enabled  runnable         → promoted to SWEEP1</span></code></pre>
+<p>A sweep is reported in <strong>base SI with its unit and its scale</strong>. Reading a mark without its scale has
+already produced a run at 2 Hz that looked entirely normal.</p>
+<h3 id="explain-expr">`--expr` — evaluate in the design's own scope</h3>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain pa.cnl --expr "Zopt*2" --set Zopt=12.5
+<span class="output">Zopt*2 = 25   (real)</span></code></pre>
+<p>Through the one expression engine, in the design's own resolved scope — never by substitution — with
+<code>--set</code> applied first exactly as a run verb applies it. The kind is reported, never coerced.</p>
+<h3 id="explain-ref">`--ref` — where does this reference land</h3>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain Stage1.csch --ref ../parts/SOT-23-3
+<span class="output">../parts/SOT-23-3 → /home/you/designs/parts/SOT-23-3   resolved
+                     outside this workspace: no</span></code></pre>
+<p>Where resolution fails, <strong>that is the answer</strong> — a sentence naming what was looked for and where it
+was looked. You are usually running this verb precisely because something did not resolve.</p>
+<hr />
+<h2 id="read"><code>read</code> — a result, or a document, back</h2>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf read &lt;path&gt; [--only a,b] [--group g] [--json]</code></pre>
+<p>The inverse of a run verb. A <code>.npy</code> or a Touchstone file is loaded back into cubes — through the same
+two loaders the Data Display's source library reads a file with — and one of circuitRF's own
+documents comes back as <strong>its own bytes</strong>, unchanged.</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf read results/Amp_em.npy
+<span class="output">results/Amp_em.npy  (npy)
+  group (default):
+    S                        Complex  freq[201] Hz x i[2] port x j[2] port
+    Z0                       Complex  port[2] port
+  group planar:
+    MeshCells                Real     cell[1544]</span></code></pre>
+<p>It writes nothing, and it takes one file at a time. For &quot;what is in this workspace&quot;, use <code>check</code> or
+<code>explain</code>; for a GDSII or a Gerber set, use <code>convert</code>.</p>
+<p>With <code>--json</code>, <code>--only</code> and <code>--group</code> narrow what comes back — which matters, because reading a
+20,000-point swept loadpull in full is the expensive direction:</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf read hero3.npy --only Pout_dBm --json</code></pre>
+<hr />
+<h2 id="reference"><code>reference</code> — what may I write?</h2>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference
+<span class="prompt">$ </span>circuitrf reference netlist
+<span class="prompt">$ </span>circuitrf reference components
+<span class="prompt">$ </span>circuitrf reference components MLIN</code></pre>
+<p>They are, in order: the list of topics with what each costs; one page as text; every netlist
+primitive; and just that one.</p>
+<p><code>check</code> tells you that what you wrote is wrong. <code>explain</code> tells you what circuitRF made of it.
+This one tells you what you are <strong>allowed</strong> to write in the first place — the primitive type names,
+how many nets each takes and in what order, what its parameters are called and what they default to.</p>
+<p>It reads no file, runs nothing and writes nothing. There is no path argument: it answers about no
+particular design, which is exactly why it is useful before one exists.</p>
+<div class="callout">
+<span class="label">Why this matters more for a script than for you</span>
+<p>A netlist naming a type that does not exist fails at elaboration and says so. A component given a
+<i>plausible but wrong</i> parameter name does not: the name is ignored, the parameter takes its
+default, and the run converges and produces a complete-looking answer to a different circuit. Getting
+the spelling from here rather than from memory is what avoids that.</p>
+</div>
+<h3 id="reference-topics">The topics</h3>
+<p>With no arguments you get the list, with each topic's size — because reading is the expensive
+direction and a 4 kB page and an 84 kB one should not look alike:</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference
+<span class="output">Reference topics — circuitrf reference &lt;topic&gt;
+
+  netlist            12.1 kB  The Netlist (.cnl) Format
+  expressions         9.1 kB  Expressions
+  units              10.9 kB  Units
+  measurements        5.8 kB  Measurements
+  pins-ports-terms    4.3 kB  Pins, Ports &amp; Terms
+  sdd                12.2 kB  The SDD (Symbolically-Defined Device)
+  file-formats        9.5 kB  File Formats
+  component-notes    71.3 kB  Components
+  components         84.1 kB  Component types
+
+  circuitrf reference components &lt;TYPE&gt;   one primitive</span></code></pre>
+<p>These are the same pages you are reading now, shipped inside the program so they are there on a
+machine that has no copy of this site. <code>components</code> is the <strong>generated catalogue</strong> — read from the
+live component registry every time you ask, so it cannot go stale — while <code>component-notes</code> is this
+site's <a href="components.html">Components</a> page, which explains what each part is <em>for</em>. The catalogue
+answers &quot;what may I write&quot;; the page answers &quot;what does it mean&quot;. Ask for both if you want both.</p>
+<p>Asking for a topic prints it as its own Markdown, so it redirects cleanly:</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference netlist &gt; netlist.md</code></pre>
+<h3 id="reference-components">The component catalogue</h3>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference components MLIN
+<span class="output">MLIN
+  nets: 2  1 2
+  Mlin (MLIN) — Microstrip   search: MLIN, microstrip, microstrip line, line, hammerstad
+    nets: 2  1 2
+    W                  2.9              mm     shown
+    L                  10               mm     shown
+    SignalLayer        -                -      -
+    GroundReference    -                -      -</span></code></pre>
+<p>The columns are the parameter's <strong>name</strong>, its <strong>default expression</strong>, its <strong>unit</strong>, whether it shows
+on the schematic by default, and — where the registry has one — what it means.</p>
+<p><code>nets</code> is the part you cannot get from a picture: <strong>how many nets the instance line takes, and in what
+order.</strong> That order is a contract the models themselves read, and it is not always the one you would
+guess — a MESFET is gate, drain, source while a JFET is drain, gate, source; a diode is anode then
+cathode; a 2-port SDD takes four nets, as ± pairs.</p>
+<div class="callout note">
+<span class="label">Some port counts are not fixed, and they say so</span>
+<p>An SDD, a <code>Z_Port</code> and an <code>SnP</code> take as many ports as <code>NumPorts</code>
+says; a Verilog-A model takes as many as <code>Pins</code> says; an ideal switch takes
+<code>1 + Throws</code>. Those report <b>what sets the count</b> rather than a number, and any
+terminals they list are labelled with the count they were listed at:</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference components SDD
+<span class="output">SDD
+  nets: set by NumPorts — at NumPorts=2: 1+ 1- 2+ 2-</span></code></pre>
+<p>A number printed where the honest answer is "it depends" is worse than no number at all.</p>
+</div>
+<p>A few entries carry a <strong>note</strong> instead of a clean answer, and the note is the useful part. <code>GND</code>,
+<code>VAR</code>, <code>MEAS</code> and <code>Pin</code> are schematic elements the netlist extractor consumes rather than components
+you can place in a <code>.cnl</code>. <code>Chain</code>, <code>ExtDevice</code>, <code>SemiC</code>, <code>Short</code>, <code>Term</code>, <code>V_nTone</code> and <code>I_nTone</code> are
+the other way round — writable in a <code>.cnl</code>, with no palette tile and so no declared defaults.</p>
+<p>Unknown names are refused with the real list, never guessed at:</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference components MLINE
+<span class="output">No primitive type 'MLINE'. Types: Amp, Atten, BJT_NPN, BJT_PNP, Balun, Bead, C, Chain, …</span></code></pre>
+<p>With <code>--json</code> the whole catalogue comes back structured — type token, terminals, and every
+parameter with its default, unit, dimension and visibility:</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference components --json | jq -r '.result.reference.components[].type'</code></pre>
+<hr />
 <h2 id="elab"><code>elab</code> — the elaborated netlist</h2>
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf elab &lt;file.cnl&gt;</code></pre>
 <p>Elaborates and stops: flattens the hierarchy, resolves every parameter and expression top-down, and
@@ -832,6 +1124,109 @@ consume. No analysis runs.</p>
 <p>This is the debugging verb. When a value is not what you expected, <code>elab</code> is where you find out
 whether the expression resolved to something different from what you meant, or resolved correctly and
 the analysis is doing something else.</p>
+<h2 id="json"><code>--json</code> — one machine-readable document</h2>
+<p>Every verb takes <code>--json</code>, spelled that way everywhere. It changes exactly one thing: <strong>stdout carries
+a single JSON document and nothing else.</strong></p>
+<p>stderr is untouched — progress, <code>[circuitRF]</code> notes, warnings and refusal sentences stream exactly as
+they always did — so a script watching stderr cannot tell whether the flag was passed.</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf sparam amp.cnl --json | jq '.outputs[].path'
+<span class="output">"amp.s2p"</span></code></pre>
+<p>One schema serves every verb:</p>
+<pre><code>{ "circuitrf": { "version": …, "verb": … },
+  "input":     { "path": …, "analysis": … },
+  "status":    "ok" | "not-converged" | "failed",
+  "exitCode":  0 | 1 | 2 | 130,
+  "outputs":     [ { "kind": …, "path": … }, … ],
+  "diagnostics": [ { "id": …, "severity": …, "message": …, "arguments": { … } }, … ],
+  "result":      { … } }</code></pre>
+<ul>
+<li><strong><code>input.analysis</code> is the chain that actually ran</strong>, after promotion — not what you asked for. The
+difference is a whole sweep axis, so you must be able to see it from the document alone.</li>
+<li><strong>A failed run still emits a document.</strong> The failure <em>is</em> the payload, so you never have to tell
+&quot;no output&quot; apart from &quot;output I could not parse&quot;.</li>
+<li><strong>The diagnostic <code>id</code> is the contract; the <code>message</code> is not.</strong> Match on <code>id</code>. Templates are
+reworded freely, and the sentence is always English and culture-invariant.</li>
+<li><strong><code>result</code> holds cubes</strong> (<code>groups</code>) for a run, a <strong>summary</strong> for <code>lp</code>/<code>lpp</code> — the same one-row-per-Γ-
+point projection the table prints, and <code>--all</code> adds the cubes — a <strong>check</strong> or <strong>explain</strong> report for
+those two verbs, a <strong>document</strong> for <code>read</code>, and a <strong>reference</strong> report for <code>reference</code>.</li>
+<li>Numbers are raw, invariant and unrounded. <code>NaN</code> and infinity are written as JSON's named literals,
+because a loadpull grid genuinely contains NaN wherever a point never converged.</li>
+</ul>
+<hr />
+<h2 id="serve"><code>serve</code> — a protocol server</h2>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf serve --root &lt;dir&gt; [--kits &lt;dir&gt;]</code></pre>
+<p>Speaks a JSON-RPC tool protocol over stdin and stdout, so an external program — a CI job, an
+automation harness, a design agent — can discover what circuitRF can do and ask it to do it. It is
+started by that program, not by you, and it ends when that program disconnects.</p>
+<p><strong>Seven tools, and each is a verb you already have:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Runs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>run</code></td>
+<td><code>sparam</code>, <code>dc</code>, <code>hb</code>, <code>lp</code>, <code>lpp</code> or <code>em</code>, chosen by an argument</td>
+</tr>
+<tr>
+<td><code>check</code></td>
+<td><code>check</code></td>
+</tr>
+<tr>
+<td><code>explain</code></td>
+<td><code>explain</code></td>
+</tr>
+<tr>
+<td><code>create</code></td>
+<td><code>new workspace</code> or <code>new cell</code></td>
+</tr>
+<tr>
+<td><code>import</code></td>
+<td><code>import part</code> or <code>convert</code></td>
+</tr>
+<tr>
+<td><code>read</code></td>
+<td><code>read</code></td>
+</tr>
+<tr>
+<td><code>reference</code></td>
+<td><code>reference</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Every tool returns exactly the document <code>--json</code> writes</strong>, byte for byte, because the server calls
+the verb rather than re-implementing it. Nothing is reachable through the server that is not
+reachable from your own shell, and nothing is reachable from your shell that the server cannot do.</p>
+<div class="callout note">
+<span class="label">What it will not do</span>
+<ul>
+<li><b><code>--root</code> is required</b>, and every path a client names resolves under it. A path
+that escapes — through <code>../</code>, through an absolute path, or through a symbolic link — is
+<b>refused, naming the root</b>. It is never quietly clamped to something inside.</li>
+<li><b>Nothing deletes, and nothing overwrites an existing workspace.</b> There is no person at the
+other end to confirm with, so the answer is no. A client that wants a file gone deletes it itself.</li>
+<li><b>No shell, and no program a client names.</b> Device workers and PCell generators still run as
+they always did; nothing new becomes launchable because something asked.</li>
+</ul>
+</div>
+<p><strong>The reference surface is also published as protocol <em>resources</em></strong> — one per topic, at
+<code>circuitrf://reference/&lt;topic&gt;</code>, each advertising its size so a client can decide what to spend. That
+is the cheaper channel: a resource costs a URI and a title until something reads it, where a tool
+description is carried for the whole session whether or not it is used. The <code>reference</code> tool exists
+alongside it because not every client shows resources to the model at all, and both return the same
+bytes.</p>
+<p><strong>A long run reports progress and can be cancelled</strong> — a client that asks for progress is sent it as
+the run moves, and a cancellation stops the run at a work boundary and returns exit code 130 having
+written nothing.</p>
+<p><code>serve</code> is the one verb whose stdout is not the result: it carries the protocol, so everything else —
+progress, notes, warnings, device-worker logs — goes to stderr, where the program that started it
+picks it up. For that reason it takes no <code>--json</code> of its own; every call through it already returns
+one.</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf serve --root ~/designs 2&gt; serve.log</code></pre>
+<hr />
 <h2 id="exit">Exit codes</h2>
 <table>
 <thead>
@@ -855,7 +1250,7 @@ the analysis is doing something else.</p>
 </tr>
 <tr>
 <td><strong>130</strong></td>
-<td>Stopped — <code>em</code> only, and only when the run was cancelled at a work boundary</td>
+<td>Stopped — a run cancelled at a work boundary, by <code>em</code>'s own stop or by a <code>serve</code> client's cancellation</td>
 </tr>
 </tbody>
 </table>
@@ -871,6 +1266,20 @@ on one bad point would make the exit code useless in a script.</p>
 <pre><code class="cmd"><span class="prompt">$ </span>for p in -10 -5 0 5; do circuitrf hb pa.cnl --set Pavl_dbm=$p -o pa_$p.npy; done</code></pre>
 <p><strong>Fail a build on a regression</strong>, using the exit code:</p>
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf hb pa.cnl -o out.npy || echo "PA did not converge" &gt;&amp;2</code></pre>
+<p><strong>Validate a whole workspace in CI</strong>, before anything is run:</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf check ~/designs/Amp --severity error || exit 1</code></pre>
+<p><strong>Author, validate and simulate with no display at any step</strong> — the whole loop:</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf new workspace build/Amp
+<span class="prompt">$ </span>circuitrf new cell build/Amp Stage1
+<span class="prompt">$ </span>cat &gt; build/Amp/Stage1/Stage1.cnl &lt;&lt;'EOF'
+<span class="prompt">  </span>… your netlist …
+<span class="prompt">$ </span>EOF
+<span class="prompt">$ </span>circuitrf check build/Amp || exit 1
+<span class="prompt">$ </span>circuitrf hb build/Amp/Stage1/Stage1.cnl -o out.npy</code></pre>
+<p><strong>Pull one number out of a result</strong>, without parsing a table:</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf read out.npy --only Pout_dBm --json | jq '.result.groups[""].Pout_dBm.values[-1]'</code></pre>
+<p><strong>Ask why a file resolved the way it did</strong>, when a run used a technology you did not expect:</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain Amp.cem</code></pre>
 <p><strong>Re-extract every EM setup in a workspace</strong> after a technology edit — the layout and stackup
 references resolve themselves, so the loop needs nothing but the file names:</p>
 <pre><code class="cmd"><span class="prompt">$ </span>for f in em/*.cem; do circuitrf em "$f" || exit 1; done</code></pre>

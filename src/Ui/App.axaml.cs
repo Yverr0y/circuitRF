@@ -247,6 +247,11 @@ public partial class App : Application
     /// fetch: a launch the user quits during those few seconds has been shown nothing, and should be
     /// offered the notes again next time.</para>
     ///
+    /// <para><b>What was previously recorded is the range's other end.</b> An installation that
+    /// jumped several releases at once — the machine was off, or simply not launched, while two went
+    /// out — gets those versions' notes beneath the running one's, so the middle of the range is not
+    /// silently lost.</para>
+    ///
     /// <para><c>async void</c> because it is a dispatcher callback, and every path inside it is
     /// wrapped: release notes are the least important thing happening at startup and must never be
     /// the reason anything else fails.</para>
@@ -278,8 +283,14 @@ public partial class App : Application
                 }
             }
 
+            // Read BEFORE MarkShown overwrites it: this is the version whose notes were last shown,
+            // and everything released between it and the running version is a release this user
+            // skipped and would otherwise never see the notes for.
+            string? since = Updates.ReleaseNotesGate.LastShownVersion;
+
             Updates.ReleaseNotesResult result =
-                await Updates.ReleaseNotesFetcher.FetchAsync(AppVersion.Display).ConfigureAwait(true);
+                await Updates.ReleaseNotesFetcher.FetchAsync(AppVersion.Display, since)
+                                                 .ConfigureAwait(true);
 
             if (!preview) Updates.ReleaseNotesGate.MarkShown(AppVersion.Display);
 
