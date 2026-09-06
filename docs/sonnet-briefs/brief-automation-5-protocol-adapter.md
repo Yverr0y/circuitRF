@@ -176,6 +176,10 @@ Also update the CLI section under `## Running circuitRF` (from ~line 427) with t
 `BUILDING.md` if AUT-5 landed as its own project rather than a verb — the repo-root `CLAUDE.md`
 requires `README.md` and `BUILDING.md` to be kept in step.
 
+Finally, update the user docs `/docs/user/src/reference/cli.md` to reflect all the new verbs,
+structured results and structured failures, and check / explain.  Provide examples of each.
+Do not regenerate the user docs.
+
 **Gate: a source-scan test asserting every `src/…` path named in `README.md`'s source-layout tree
 actually exists.** The three lists have drifted before and nothing catches it; a path that no longer
 exists is the cheapest possible signal that the annotation beside it is also stale.

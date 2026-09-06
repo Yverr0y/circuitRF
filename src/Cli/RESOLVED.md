@@ -415,3 +415,208 @@ can read is reported as interchange, never as something circuitRF does not handl
 - **43 new diagnostic ids** — `check.*` (28), `explain.*` (13) and `convert.note` /
   `convert.cell.listed` — bringing `CliStructuredOutputTests`' committed list to 122. That list is
   asserted in ordinal order over the whole set, so a new group cannot be appended.
+
+---
+
+## AUT-5 — `circuitrf serve`, and `circuitrf read` (2026-09-05)
+
+`brief-automation-5-protocol-adapter.md`. One protocol adapter, a parity gate, and the one capability
+gap building it exposed. `docs/design/cli.md` §11 is the design; this is what turned out to be true.
+
+### The adapter calls the verb, and that decided the shape of the whole change
+
+R-aut-13 says nothing may be reachable through the server that is not reachable through the CLI, and
+vice versa. There are two ways to satisfy it: build a second caller of the capability layer and write
+a test that compares the two, or **make them one caller**. The second is strictly better here,
+because the first is a second copy of the wiring — which agrees with the original right up until one
+of them is edited, and the test then tells you a year later.
+
+So a tool call becomes an **argument vector** and is handed to `CliEntry.Run`, the same function
+`Program.cs` hands the real command line to. The parity gate then compares two documents that came
+out of one function, and a drift between the adapters is not a thing that can happen.
+
+**What that cost: `Program.cs`'s top-level statements and its 40-odd static local functions moved
+wholesale into `CliEntry`.** A local function of a top-level program is a member of `<Main>$` and is
+private to it; `public partial class Program` makes the generated CLASS accessible but not those. The
+move is mechanical — the functions were already `static`, so they became static methods unchanged —
+and `Program.cs` is now three lines.
+
+### Three pieces of state outlived the single invocation the CLI was written for
+
+Calling `Run` twice in one process is not what any of this was built for, and each of the three was
+found by running the server rather than by reading the code:
+
+- **`JsonRun`'s collectors.** A second document carried the first call's diagnostics and outputs — a
+  stale success a caller cannot tell from a real one. `JsonRun.Reset()` now runs before every call.
+- **The device-worker log subscription is an EVENT.** A second `Run` subscribed a second handler and
+  every worker line printed twice, which reads as the worker having said it twice. Hooked once.
+- **`ExternalDeviceRegistry.AddResolver` has no remove.** The same `--kits` folder set would stack an
+  identical resolver per call; the folder sets already added are remembered.
+
+None of the three is observable from a command line, and all three would have been observable to a
+client as something wrong with circuitRF rather than with its adapter.
+
+### The capability gap: nothing could hand a file back
+
+**Reported as the brief asks, because by R-aut-1 it is a capability gap and should have been caught
+in an earlier brief.** The tool surface §3 specifies has a `read` in it — "read a document or a
+result file back" — and there was no verb behind it. A tool with no verb is exactly the privileged
+adapter R-aut-13 forbids, and the parity gate for it could not have been written at all.
+
+It is now `circuitrf read`, exposed on **both** adapters in the same commit. It adds no logic: a
+`.npy` goes through `DataSetImporter`, a Touchstone through `TouchstoneIO` + `DataSetBuilder.FromSnp`
+— the same pair `DataSourceEntryViewModel` uses to put a file into the Data Display's source library
+— and one of circuitRF's own documents comes back as its own bytes. `ResultPayload` gained one field,
+`document`.
+
+**Verbatim, not re-serialized**, and that is a decision worth recording: the formats ARE the
+interface, so a client that just wrote a `.csch` needs the file back, not a round trip through a
+reader and a writer that would differ from disk wherever the reader is lossy — invisibly.
+
+Two things `read` refuses rather than guessing at: a **directory** (what a workspace holds is what
+`check` and `explain` answer, and walking one returns an unbounded document nobody asked for), and an
+**interchange file**, which is refused *naming `convert`* — half those formats are binary, and
+handing back a GDSII stream as a JSON string is an encoding decision this verb has no business
+making.
+
+### Every stdout leak §5.2 found: none — and why that is not luck
+
+The audit runs every tool the server exposes, including a real EM run and a DC run whose device model
+lives in a second process, with stdout captured, and asserts every line of it is a protocol frame.
+**Nothing leaked.**
+
+That is structural rather than fortunate. `JsonRun` already replaced `Console.Out` with a sink the
+moment `--json` was parsed — for its own reason, R-aut1-3 — and `serve` replaces it again at startup
+before a single capability runs, so a stray `Console.WriteLine` on a path nobody thought about has
+nowhere to land. The three chatterers the brief names (`PrintWorkerOutput`, the
+`ProcessDeviceWorkerTransport.Logged` hook, `EmProgressToStderr`) were already on stderr and are
+untouched.
+
+**The one thing a `Console.Out` redirect cannot cover is a CHILD process inheriting the real stdout
+handle**, and that was checked rather than assumed: every process this program starts — the device
+worker, the PCell host, the Python interpreter probe, the updater — sets
+`RedirectStandardOutput = true`. Four call sites, all of them. A future one that does not would leak
+into the protocol stream, and the §5.2 audit only catches it if the new launcher is on a path the
+audit exercises.
+
+`--json` on `serve` itself is **refused**, not silently ignored: it would have captured the very
+stream the framing needs, and two writers on one stream is precisely R-aut5-2's failure. It is
+refused **after** the argument and root checks, not before — so `serve --root <missing> --json` still
+answers with a document carrying `serve.root.not-found`, the way every other verb's refusals do
+(R-aut-7). Only the case where the server would actually start has no document to give, because from
+that point stdout belongs to the protocol.
+
+### Root confinement: the escape a string comparison cannot see
+
+`../` and an absolute path outside the root are both easy. The third is not, and the first
+implementation had it wrong: **`ResolveLinkTarget` answers about the item you call it on**, so asking
+it about `<root>/link/file.cnl` reports "not a link" — the *file* is not one, the *directory* above it
+is — and the escape goes straight through a comparison of resolved strings. The path is now walked
+from its root downward with every component resolved in turn. The test that caught it is the symlink
+case in `APathLeavingTheRoot_IsRefused_NamingTheRoot`, which failed on the first run.
+
+Both sides are resolved, not just the candidate: on macOS `/tmp` is itself a link to `/private/tmp`,
+so resolving only one side refuses perfectly legitimate paths.
+
+A non-existent path — an output file — resolves its deepest existing ancestor and re-appends the
+tail, which is the only thing that can be done and is what the check has to mean anyway: a file is
+created inside the directory it lands in.
+
+### Where the parity test could not be written exactly as specified
+
+**Two normalizations, and both are properties of the operation rather than of the adapter.** The
+brief allows "only what is legitimately variable (a write timestamp, as `EmCliVerbTests` already
+exempts for provenance)"; these are the analogues.
+
+1. **The adapter resolves paths** — that IS R-aut5-8's confinement — so the document records an
+   absolute path where a CLI invoked with a relative one records the relative one. The CLI side of
+   each comparison is therefore given the resolved path: the same path, spelled the way the server
+   had to spell it.
+2. **A verb that CREATES something cannot create it twice.** AUT-3's R-aut3-6 refuses to overwrite an
+   existing workspace, correctly, so `create` and `import` run into two different destinations and
+   the destination string is substituted out of both documents. Everything else — including the
+   copied technology's file name and the full outputs list — is compared verbatim.
+
+Nothing else is exempted. For `run`, `check`, `explain` and `read` the documents are byte-identical
+with no substitution at all.
+
+**`--kits` is not a tool argument, deliberately, and it is not a parity hole.** It is one of the flags
+taken before dispatch, so `serve --root <dir> --kits <dir>` registers the resolver for the whole
+server and every `run` through it resolves an external device model. Making it a tool argument would
+let a client point the server at an arbitrary directory on its say-so, and a kit folder is installed
+software that lives outside the design root by nature. The parity test passes `--kits` to both sides
+equally.
+
+### Cancellation is pinned through the queue, not through a stopwatch
+
+R-aut5-8 wants a long run cancellable. Wiring it was small — `RunHost` carries the host's
+`RunControl`, the same one `em` already used, into the sparam, sweep, loadpull and pursuit call sites,
+and is null on a command line so nothing there changed.
+
+**Gating it honestly was the harder half, and the finding is that there is no long run in the default
+test tier.** Measured: the `em` fixture at 3 frequency points is 180 ms; at 400 points it is still
+under a second; `lp` on Hero3 is 0.20 s; a 10,001-point `sparam` on Hero1 is 0.17 s. The one thing
+that genuinely takes minutes is a de-embedded full-wave point, which is `Category=Benchmark`
+territory and cannot live in the routine gate. A sleep-then-cancel test would therefore be measuring
+the machine, which is exactly what this repo says not to write.
+
+So what is pinned is the **mechanism**: capability calls are serialized, so of two calls sent
+together the second is queued while the first runs, and cancelling *that* one is deterministic. The
+token still reaches the run, the run still refuses to produce a result, and 130 still comes back — the
+code `cli.md` §7 already gives a run stopped at a work boundary. The in-flight case is the same code
+path with the token cancelled a moment later.
+
+**Progress is gated on a 4,000-point EM sweep** (~0.3 s), which is enough for the throttle to deliver
+several observations and for the assertion "it advanced" to mean something. A single observation
+repeated is a bar that never moves, which is what a client with no progress already has.
+
+### A client that disconnects: the deadlock was in the TEST, and the fix belongs in both
+
+The first version of the disconnect gate took 30 seconds and passed. The server's shutdown joins its
+worker for 30 s, and the worker was blocked **writing a result document to a pipe nobody was
+reading** — the test had closed stdin but still held the stdout handle open, so there was no `EPIPE`,
+just a full buffer.
+
+Two changes came out of it, and only one is a test change:
+
+- the session drains **both** pipes continuously on their own threads. A result document for a
+  400-point sweep is comfortably past a pipe's buffer, so reading stdout only when an answer is
+  wanted deadlocks — the same trap `EmCliVerbTests` already records for stderr, on the other stream.
+- `JsonRpc.Send` treats a broken pipe as **the far end being gone** and stops writing. A real client
+  that exits closes its read end, and every subsequent frame would otherwise throw on a worker thread
+  for a frame nobody will read.
+
+### The tool schema is generated from the translation table
+
+`ToolCatalog` is one list of rows, and both the advertised JSON schema and the argument vector are
+built from it. This is not tidiness: an advertised argument that the translation drops is a client
+paying for a description of something that does not work, and it is the single most likely way this
+file rots. Adding a flag is one row.
+
+An argument that belongs to another mode of the same tool is refused **naming that** — "`grid` does
+not apply to lpp" rather than "unknown option `grid`" — because the two sentences send a reader to
+different places.
+
+### The README's three source-tree lists had drifted, and now have a gate
+
+§7 asked for the annotations this series falsified to be corrected. Read against the tree rather than
+assumed, the corrections were: `src/Design` gained `Schematic/`, `Symbol/`, `Layout/Assembly/`,
+`Layout/Interchange/`, `Theming/` and `resources/`; the `Drc/` annotation was **inverted** (the engine
+moved in AUT-4, so "the DRC engine stays in src/Ui" was exactly backwards, and what is left in
+`src/Ui/Layout/Drc` is the Messages report and a per-user preference); `src/Ui/Layout/Interchange/`
+does not exist any more; `src/Ui/Schematic/` is the editor half only; and the firewall paragraph said
+**seven** assemblies while the gate lists **eight** — `src/Diagnostics` was missing from all three
+lists and from the source-layout tree entirely.
+
+`tests/Ui.Tests/ReadmeSourceLayoutTests` now holds it: every `src/…` folder the tree draws must exist,
+every project under `src/` must be drawn, and the firewall paragraph must name every project
+`UiFirewallTests.NonUiAssemblies` gates — including the count, spelled out. It cannot check prose, and
+does not pretend to; what it does is fail at the moment somebody is already reading the sentence next
+to the stale path.
+
+### Firewall
+
+`serve` lives in `src/Cli/Serve/`, so it is inside a project `UiFirewallTests.NonUiAssemblies`
+already gates (R-aut5-3 needed no new entry). It has no dependency of its own: the JSON-RPC framing
+is hand-rolled over `System.Text.Json`, ~130 lines, because the protocol layer is the disposable one
+by design and a package here would outlive the adapter it serves.

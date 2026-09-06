@@ -766,4 +766,122 @@ internal static class CliDiagnostics
     public static Diagnostic ExplainAnalysisNotFound(string name, string declared) => Diagnostic.Create(
         "explain.analysis.not-found", DiagnosticSeverity.Error,
         "No analysis named '{name}'. Declared: {declared}", ("name", name), ("declared", declared));
+
+    // ── read (brief-automation-5-protocol-adapter.md §3) ─────────────────────
+
+    public static Diagnostic ReadPathRequired() => new(
+        "read.args.path-required", DiagnosticSeverity.Error,
+        "read: a file is required. Give a result file (.npy or a Touchstone .sNp) or one of " +
+        "circuitRF's own documents (.cws .csch .csym .clay .ctech .cem .cnl).");
+
+    public static Diagnostic ReadUnknownOption(string option) => Diagnostic.Create(
+        "read.args.unknown-option", DiagnosticSeverity.Error,
+        "read: unknown option '{option}'", ("option", option));
+
+    public static Diagnostic ReadMultiplePaths() => new(
+        "read.args.multiple-paths", DiagnosticSeverity.Error,
+        "read: one file at a time.");
+
+    public static Diagnostic ReadPathNotFound(string path) => Diagnostic.Create(
+        "read.path.not-found", DiagnosticSeverity.Error,
+        "File not found: {path}", ("path", path));
+
+    /// <summary>A directory. Refused rather than walked — what a workspace holds is what `check`
+    /// and `explain` answer, and walking one here would return an unbounded document.</summary>
+    public static Diagnostic ReadPathIsAFolder(string path) => Diagnostic.Create(
+        "read.path.is-a-folder", DiagnosticSeverity.Error,
+        "read: '{path}' is a folder. read takes one file; use check or explain for a workspace or a cell.",
+        ("path", path));
+
+    public static Diagnostic ReadFileUnreadable(string path, string message) => Diagnostic.Create(
+        "read.file.unreadable", DiagnosticSeverity.Error,
+        "Cannot read '{path}': {message}", ("path", path), ("message", message));
+
+    public static Diagnostic ReadUnsupported(string path, string extension) => Diagnostic.Create(
+        "read.file.unsupported", DiagnosticSeverity.Error,
+        "read: nothing in circuitRF reads '{extension}' ({path}).",
+        ("path", path), ("extension", extension.Length == 0 ? "(no extension)" : extension));
+
+    /// <summary>An interchange file. Named rather than refused blankly, and pointed at the verb that
+    /// does read it: half of these formats are binary, and handing back a GDSII stream as a JSON
+    /// string would be an encoding decision this verb has no business making.</summary>
+    public static Diagnostic ReadInterchange(string path, string format) => Diagnostic.Create(
+        "read.file.interchange", DiagnosticSeverity.Error,
+        "read: '{path}' is {format}, which convert reads. read takes a result file or one of " +
+        "circuitRF's own documents.",
+        ("path", path), ("format", format));
+
+    // ── serve (brief-automation-5-protocol-adapter.md) ───────────────────────
+
+    /// <summary>No <c>--root</c>. Required at startup rather than defaulted: the server runs with
+    /// the invoking user's authority, and a default of "the current directory" would be a policy
+    /// nobody stated (R-aut5-8).</summary>
+    public static Diagnostic ServeRootRequired() => new(
+        "serve.args.root-required", DiagnosticSeverity.Error,
+        "serve: --root <dir> is required. Every path a client names resolves under it, and there " +
+        "is no default.");
+
+    /// <summary><c>--json</c> on <c>serve</c>. It would take the stdout the protocol framing needs,
+    /// and every tool call already returns a document.</summary>
+    public static Diagnostic ServeJsonNotApplicable() => new(
+        "serve.args.json-not-applicable", DiagnosticSeverity.Error,
+        "serve: --json does not apply — stdout carries the protocol, and every tool call returns a " +
+        "document of its own.");
+
+    public static Diagnostic ServeRootNotFound(string path) => Diagnostic.Create(
+        "serve.root.not-found", DiagnosticSeverity.Error,
+        "serve: --root '{path}' is not a directory.", ("path", path));
+
+    public static Diagnostic ServeUnknownOption(string option) => Diagnostic.Create(
+        "serve.args.unknown-option", DiagnosticSeverity.Error,
+        "serve: unknown option '{option}'", ("option", option));
+
+    /// <summary>A path that leaves the root. Names the root, because that is the fact the caller is
+    /// missing — and it is a refusal rather than a silent clamp, which would run a different
+    /// operation than the one asked for and say nothing about it.</summary>
+    public static Diagnostic ServePathOutsideRoot(string path, string root) => Diagnostic.Create(
+        "serve.path.outside-root", DiagnosticSeverity.Error,
+        "'{path}' is outside the server root '{root}'.", ("path", path), ("root", root));
+
+    public static Diagnostic ServeUnknownTool(string tool, string known) => Diagnostic.Create(
+        "serve.tool.unknown", DiagnosticSeverity.Error,
+        "No tool named '{tool}'. Tools: {known}", ("tool", tool), ("known", known));
+
+    /// <summary>A required tool argument that was not given. The adapter refuses rather than
+    /// choosing for the client (R-aut-1).</summary>
+    public static Diagnostic ServeArgumentRequired(string tool, string argument) => Diagnostic.Create(
+        "serve.args.required", DiagnosticSeverity.Error,
+        "{tool}: '{argument}' is required.", ("tool", tool), ("argument", argument));
+
+    public static Diagnostic ServeArgumentUnknownValue(string tool, string argument, string value, string allowed) =>
+        Diagnostic.Create(
+            "serve.args.unknown-value", DiagnosticSeverity.Error,
+            "{tool}: '{argument}' does not take '{value}'. One of: {allowed}",
+            ("tool", tool), ("argument", argument), ("value", value), ("allowed", allowed));
+
+    /// <summary>An argument that belongs to another mode of the same tool. Named as such, because
+    /// "unknown option grid" is a worse answer than "grid is lp's, not lpp's".</summary>
+    public static Diagnostic ServeArgumentNotForMode(string tool, string argument, string mode) =>
+        Diagnostic.Create(
+            "serve.args.not-for-mode", DiagnosticSeverity.Error,
+            "{tool}: '{argument}' does not apply to {mode}.",
+            ("tool", tool), ("argument", argument), ("mode", mode));
+
+    public static Diagnostic ServeArgumentWrongType(string tool, string argument, string expected) =>
+        Diagnostic.Create(
+            "serve.args.wrong-type", DiagnosticSeverity.Error,
+            "{tool}: '{argument}' expects {expected}.",
+            ("tool", tool), ("argument", argument), ("expected", expected));
+
+    /// <summary>The invocation threw. A server survives it and reports it; the alternative is a
+    /// client whose connection simply ends.</summary>
+    public static Diagnostic ServeToolFailed(string tool, string message) => Diagnostic.Create(
+        "serve.tool.failed", DiagnosticSeverity.Error,
+        "{tool} failed: {message}", ("tool", tool), ("message", message));
+
+    /// <summary>The client cancelled. Its own exit code is 130, the one `em` already uses for a run
+    /// stopped at a work boundary (cli.md §7).</summary>
+    public static Diagnostic ServeCancelled(string tool) => Diagnostic.Create(
+        "serve.tool.cancelled", DiagnosticSeverity.Error,
+        "{tool} was cancelled.", ("tool", tool));
 }

@@ -150,13 +150,19 @@ product) independent of any GUI framework. Full detail:
         ▲        and the planar method-of-moments EM kernel.  Consumes the elaborated
         │        netlist, produces a DataSet.  No UI.
         │
-  src/Design    Design-layer DOCUMENTS for artwork: the layout model and .clay reader, the
-        ▲        technology/stackup model and .ctech reader, the .ccell cell folder, the
-        │        .cem EM setup, and the extractors that turn geometry + stackup into an
-        │        EmProblem.  No UI — it draws nothing and docks nothing.
+  src/Design    Design-layer DOCUMENTS: the layout model and .clay reader, the technology/
+        ▲        stackup model and .ctech reader, the .ccell cell folder, the .cem EM setup and
+        │        its extractors, the interchange readers/writers, the DRC engine, and — since
+        │        2026-09 — the .csch/.csym schematic and symbol model with net extraction, plus
+        │        the functions that CREATE a workspace, a cell and an imported part.  No UI:
+        │        it draws nothing and docks nothing; the EDITORS all stay in src/Ui.
         │
   src/Ui        Presentation: Avalonia 12 + SkiaSharp. Schematic/symbol/layout editors,
                  Data Display, workspace. Depends on everything above. Nothing depends on it.
+
+  src/Diagnostics  The coded-diagnostic leaf: an id, typed arguments and an English template.
+                 Referenced by every layer that authors user-facing text, including RfCore and
+                 WBond, which have no common ancestor.  No UI.
 
   src/Harmonica  harmonicaRF's framework-free half — interactive harmonic loadpull on one
   src/WBond      wBond's framework-free half — bondwire geometry + its own 3D MoM kernel
@@ -164,7 +170,8 @@ product) independent of any GUI framework. Full detail:
 
   src/Cli       Headless driver — depends on Core/Engine/RfCore/Design, NOT on src/Ui. Proof
                  the engines are fully usable with no GUI; the engines' primary test harness.
-                 Verbs: sparam, dc, hb, lp, lpp, em, elab.  See docs/user/reference/cli.html.
+                 Verbs: sparam, dc, hb, lp, lpp, em, elab, convert, new, import, check,
+                 explain, read, serve.  See docs/user/reference/cli.html.
 ```
 
 ### The three layers (design → elaboration → numeric)
@@ -226,15 +233,24 @@ just a host.
 
 The circuitRF *engines* must be skinnable by any new
 UI with as little trouble as possible — so **`RfCore`, `src/Core`, `src/Engine`, `src/Design`, `src/Cli`,
-`src/Harmonica` and `src/WBond` reference no UI framework at all** (no Avalonia). This is **not** a hope;
-it's an **enforced invariant** — [`tests/Firewall.Tests`](tests/Firewall.Tests) loads each of those seven
-assemblies and fails the build if any references `Avalonia*`.
+`src/Diagnostics`, `src/Harmonica` and `src/WBond` reference no UI framework at all** (no Avalonia). This
+is **not** a hope; it's an **enforced invariant** — [`tests/Firewall.Tests`](tests/Firewall.Tests) loads
+each of those eight assemblies and fails the build if any references `Avalonia*`.
 
 That firewall is why `circuitrf em` exists at all. The half of the EM path that turns a `.cem` plus a
 `.clay` into an `EmProblem` used to sit in the `CircuitRF.Ui` assembly; it was carved out into
 **`src/Design`** so the CLI could reach it without dragging Avalonia across the line — one
 implementation of the layout reader, the stackup resolver and the run service, driven by both the
 Simulate button and the command line.
+
+**The same operation was performed a second time in 2026-09, for the schematic.** The `.csch`/`.csym`
+document model, its persistence and `NetExtractor` moved to `src/Design/Schematic` and
+`src/Design/Symbol` — 41 files, chosen as the closure of what the compiler needed rather than by hand —
+so a design can be authored, extracted, elaborated and run with no display. The 64 editor, shell and
+session files stayed exactly where they were: the canvas, the edit session, undo, hit-testing,
+drag-follow, the palette and `PlacementService` are presentation and belong to `src/Ui`. The DRC engine
+and the interchange readers and writers crossed on the same terms and for the same reason — `circuitrf
+check` and `circuitrf convert` need them, and `src/Cli` cannot reference `src/Ui`.
 
 The entire engine↔UI contract is two shapes: **design model down, `DataSet` up.** A replacement UI
 re-implements only the *presentation* of those two shapes; the engine, elaboration, analyses, result model,
@@ -271,28 +287,42 @@ circuitRF/
 │  │  ├─ Match/            termination probe for the Match component's direct synthesis
 │  │  └─ Mom/              the EM kernels: quasi-static cross-section + full-wave planar MoM,
 │  │                       layered Green's function, mesher, ports, de-embedding, AIM accelerator
-│  ├─ Design/          Design-layer DOCUMENTS for artwork — the artefacts an EM problem is built
-│  │  │                from, and the code that turns them into one (no UI: draws nothing, docks
-│  │  │                nothing). Referenced by BOTH src/Ui and src/Cli, so there is exactly one
-│  │  │                layout reader and one stackup resolver. See src/Design/CLAUDE.md.
+│  ├─ Design/          Design-layer DOCUMENTS — the artefacts a design is made of, and the code
+│  │  │                that reads, writes, validates and CREATES them (no UI: draws nothing,
+│  │  │                docks nothing). Referenced by BOTH src/Ui and src/Cli, so there is exactly
+│  │  │                one layout reader, one stackup resolver and one net extractor.
+│  │  │                See src/Design/CLAUDE.md.
 │  │  ├─ Layout/         layout model + .clay reader, integer-DBU geometry, flatten/booleans,
-│  │  │  │               spatial index, technology/stackup model + .ctech reader
+│  │  │  │               spatial index, technology/stackup model + .ctech reader, ComponentImport
 │  │  │  ├─ Em/            the .cem EM setup, its reader, the cross-section and planar extractors,
 │  │  │  │                 EmRunService (what the Simulate button and `circuitrf em` both call)
-│  │  │  ├─ Drc/           the .ctech DRC layer-expression format (the DRC engine stays in src/Ui)
+│  │  │  ├─ Drc/           the DRC ENGINE and the .ctech layer-expression format — it draws
+│  │  │  │                 nothing, and `circuitrf check` runs design rules with no display
+│  │  │  ├─ Assembly/      the .wasm assembly rule model, its reader and its validation
+│  │  │  ├─ Interchange/   GDSII, DXF, Gerber, Excellon and .kicad_pcb readers AND writers —
+│  │  │  │                 `circuitrf convert` is both directions (the font SOURCE stays in src/Ui)
 │  │  │  └─ PCells/        PCell parameter VALUE types (the generators stay in src/Ui)
-│  │  ├─ Cells/          the .ccell cell-folder format and its atomic writer
-│  │  ├─ Workspace/      the .cws reader and the workspace-root walk-up
+│  │  ├─ Schematic/      the .csch document model, SchematicPersistence, CellSymbolResolver and
+│  │  │                  NetExtractor  (the EDITOR, the canvas and the edit session stay in src/Ui)
+│  │  ├─ Symbol/         the .csym symbol model, its persistence and its geometry
+│  │  ├─ Cells/          the .ccell cell-folder format, its atomic writer, CellCreate, the view
+│  │  │                  and name validators
+│  │  ├─ Workspace/      the .cws reader, the workspace-root walk-up, WorkspaceCreate
+│  │  ├─ Theming/        the framework-free colour value the document formats store
+│  │  ├─ resources/      the shipped .ctech technologies, as embedded resources
 │  │  └─ Results/        the results-folder convention: <base>/results/<key>.npy
+│  ├─ Diagnostics/     the coded-diagnostic leaf: id, typed arguments, English template (no UI)
 │  ├─ Harmonica/       harmonicaRF's framework-free half — interactive harmonic loadpull (no UI)
 │  ├─ WBond/           wBond's framework-free half — bondwire geometry + its own 3D MoM (no UI)
 │  ├─ Ui/              Avalonia 12 + SkiaSharp — the only place UI-framework code lives
-│  │  ├─ Schematic/      net extractor, editable model, library palette, placement
-│  │  ├─ Layout/         layout EDITOR: commands, snapping, handles, DRC engine, schematic↔layout
-│  │  │  │                generation, the .ctech editor  (the MODEL is in src/Design)
+│  │  ├─ Schematic/      the schematic EDITOR: canvas, edit session, undo, hit-testing, the
+│  │  │                  library palette, PlacementService  (the MODEL is in src/Design)
+│  │  ├─ Layout/         layout EDITOR: commands, snapping, handles, schematic↔layout generation,
+│  │  │  │                the .ctech editor  (the MODEL and the DRC ENGINE are in src/Design)
 │  │  │  ├─ PCells/        parametric-cell generators — geometry from component parameters
 │  │  │  ├─ Em/            the .cem editor panel and back-annotation  (the RUN is in src/Design)
-│  │  │  └─ Interchange/   GDSII, DXF and Gerber/Excellon readers and writers
+│  │  │  ├─ Drc/           the DRC run's Messages report and the per-user wBond clearance setting
+│  │  │  └─ TechImport/    importing a technology from a foreign stackup
 │  │  ├─ Renderers/      pure SkiaSharp renderers (schematic, symbols, layout) — no Avalonia types
 │  │  ├─ Controls/       Avalonia custom controls hosting Skia surfaces + input
 │  │  ├─ DataDisplay/    DataCube-native plots (Smith/polar/rect/table), loadpull surface, contours
@@ -301,7 +331,11 @@ circuitRF/
 │  │  ├─ Updates/        the in-app updater
 │  │  └─ ViewModels/  Views/  Commands/  Theming/  Docking/  …   the MVVM shell
 │  └─ Cli/             Headless driver + the engines' test harness (no UI)
-│                        verbs: sparam, dc, hb, lp, lpp, em, elab — docs/design/cli.md
+│     │                  verbs: sparam, dc, hb, lp, lpp, em, elab, convert, new, import, check,
+│     │                  explain, read, serve — docs/design/cli.md
+│     └─ Serve/          the protocol adapter: it translates a request into a verb's argument
+│                        vector and hands back that verb's own document. Owns no logic, and is
+│                        meant to be deletable in one commit.
 ├─ tools/             programs that are not part of the application (none in circuitRF.slnx)
 │  ├─ DocGen/           the user-docs factory: regenerates docs/user/ + docs/slides/ from the app
 │  ├─ IconGen/          rasterises the brand SVGs into .icns/.ico/.png — run by every packaging script
@@ -461,8 +495,29 @@ dotnet run --project src/Cli -- lpp hero3B.cnl --out-grid found.gam -o hero3B.np
 # Electromagnetic extraction of the layout a .cem names — no other arguments needed
 dotnet run --project src/Cli -- em Amp.cem
 
+# Author a correct initial document: a workspace, then a cell inside it
+dotnet run --project src/Cli -- new workspace ~/designs/Amp --tech pcb-4layer_FR-4_62mil_1oz
+dotnet run --project src/Cli -- new cell ~/designs/Amp Stage1 --views schematic,symbol
+
+# Bring artwork or a component in: one interchange format to another, or a part as a cell
+dotnet run --project src/Cli -- convert Filter.dxf -o gerbers/
+dotnet run --project src/Cli -- import part parts/ --into ~/designs/Amp --cell SOT-23
+
+# Is it well formed, does it resolve, is it sound? Runs no analysis and writes nothing
+dotnet run --project src/Cli -- check ~/designs/Amp
+
+# What did circuitRF DECIDE — which technology, which chain, what value?
+dotnet run --project src/Cli -- explain Amp.cem
+dotnet run --project src/Cli -- explain Stage1.csch --expr "Zopt*2"
+
+# Read a result back, or a document, as one JSON document
+dotnet run --project src/Cli -- read results/Amp_em.npy --only S --json
+
 # Dump the elaborated netlist (flattened + parameters resolved) - great for debugging
 dotnet run --project src/Cli -- elab mycircuit.cnl
+
+# Speak a protocol to an external client over stdin/stdout, confined to one directory
+dotnet run --project src/Cli -- serve --root ~/designs
 
 # Help
 dotnet run --project src/Cli
@@ -470,6 +525,12 @@ dotnet run --project src/Cli
 
 Frequencies accept `1GHz`, `100MHz`, or bare Hz (`1e9`). **Results go to stdout, everything else to
 stderr**, so `... lp x.cnl > table.txt` gives you a table and still shows progress on the terminal.
+
+**Every verb also takes `--json`**, which puts one machine-readable document on stdout and nothing
+else — the same schema for every verb, with the failure as the payload when a run fails, so a caller
+never has to tell "no output" apart from "output I could not parse". `--only` and `--group` narrow it.
+`serve` is the one exception to the channel split: its stdout carries a protocol and nothing may be
+written there, so it takes no `--json` of its own — every call through it returns the same document.
 
 The CLI evaluates a test bench's `measure` lines through the same evaluator the GUI does, so **a `.cnl`
 that works headless works when opened**. Full documentation: the

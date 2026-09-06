@@ -152,12 +152,14 @@ What follows from R-aut-5:
 **Closed by AUT-4 on 2026-09-05** (`brief-automation-4-check-and-explain.md`). Of the four verbs
 R-aut-5 predicted would matter most, **validate** and **explain** now exist as `circuitrf check` and
 `circuitrf explain`; `run` already did; **diff** does not and is not scheduled — the documents are
-JSON, and an ordinary text diff on them is already useful.
+JSON, and an ordinary text diff on them is already useful. **`read` joined them on 2026-09-05**, when
+building the first adapter found that nothing could hand a file back (§8.1).
 
 | Verb | Answers | Detail |
 |---|---|---|
 | `check <path>` | is it well formed, does it resolve, is it sound? | `cli.md` §10.2 |
 | `explain <path>` | what did circuitRF DECIDE — which technology, which chain, what value, which cell? | `cli.md` §10.4 |
+| `read <path>` | what is IN this file — a result as cubes, a document as its own bytes | `cli.md` §11.4 |
 
 Three properties of that pair are what make it an architectural answer rather than two more verbs:
 
@@ -279,3 +281,34 @@ cannot, the logic has leaked out of the capability layer and R-aut-1 is broken.
    (`cli.md` §7A).
 4. Keep the verb count small and the verbs broad (R-aut-9).
 5. Confirm parity with the CLI, as a test (R-aut-13).
+
+### 8.1 The first one: `circuitrf serve`
+
+**Landed 2026-09-05** (`brief-automation-5-protocol-adapter.md`), as a **verb on the existing
+binary** rather than a second executable — packaging is the constraint, not style: what ships is
+named after the application rather than the assembly, that name is a literal in five packaging files,
+and a second executable is a second thing a platform script can silently omit. `src/Cli/Serve/`,
+five files, and `cli.md` §11 is the detail.
+
+**Step 2 turned out to be a stronger rule than it reads.** The adapter does not translate a request
+into a capability CALL; it translates it into the **argument vector the CLI would have been given**
+and hands that to `CliEntry.Run` — the same function the process entry point calls. R-aut-13 is then
+not something a test hopes to catch: the two adapters are one code path, and the parity gate compares
+two documents that came out of one function. What that cost was moving `Program.cs`'s dispatch into a
+callable class, because a local function of a top-level program is private to `<Main>$`.
+
+**Step 1 found one gap, and it is worth naming.** The tool surface needs to hand a file back — a
+result the client just produced, or the document it just wrote — and no verb did that. It was added
+as `circuitrf read` in the same commit, on BOTH adapters, because a tool with no verb behind it is
+precisely the privileged adapter R-aut-13 forbids. It reads through the two loaders the GUI's own
+source library already uses and adds none of its own.
+
+**Two things the CLI gained by being hosted, both null-by-default on a command line:**
+`RunHost` carries the host's `RunControl` — the same one the `em` verb already used — into the
+sparam, sweep, loadpull and pursuit call sites, so a long run is cancellable and reports progress to
+whoever is driving it; and `JsonRun` gained a reset and a sink, because one process now produces more
+than one document.
+
+**What the adapter added that the capability layer did not have, and could not:** a root directory,
+under which every path a client names must resolve (R-aut5-8). That is not a decision about a design
+— it is the boundary of the process's own authority, and it belongs where the process is.

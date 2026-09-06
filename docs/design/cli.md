@@ -47,6 +47,8 @@ Six verbs run no analysis, so none of §3-§6 applies to them and §7's exit cod
 | `import part` | a component file or folder | `ComponentRead` + `ComponentImport.Import` | a cell folder holding the land patterns and the symbol |
 | `check` | a workspace, a cell folder, or one document | the validators that already exist | **nothing** — §10 |
 | `explain` | the same, plus `--expr` / `--analysis` / `--ref` | reports what resolution DECIDED | **nothing** — §10 |
+| `read` | a result file, or one of circuitRF's own documents | loads it back through the readers the GUI reads through | **nothing** — §11.4 |
+| `serve` | `--root <dir>` | a protocol server on stdin/stdout — §11 | whatever the tool it was asked for writes |
 
 **`new` is one verb with a noun, not three** (`brief-automation-3-authoring-verbs.md` R-aut3-13): the
 surface has a standing cost, and adding `new schematic` later is a noun rather than a fourth
@@ -94,6 +96,14 @@ engine chatter, `[circuitRF]` notes, elaboration and engine warnings, device-wor
 is what makes `circuitrf lp x.cnl > table.txt` produce a table and still show progress, and it is
 why the engines' own `Console.Error` progress lines need no CLI plumbing at all.
 
+**`serve` is exempt, and only `serve`** (R-aut5-2). Its stdout carries the protocol framing, so
+nothing else may be written there — ever. The stderr half is unchanged: every engine progress line,
+`[circuitRF]` note and worker log still goes there, which is where a client's own logging picks it
+up. The guarantee is structural rather than a rule each printer has to remember — `Console.Out` is
+replaced with a sink before a single capability runs, and each verb's document is written to a
+string (§11.2) — and it is audited rather than assumed, by exercising every exposed capability with
+stdout captured and asserting that every byte of it is a protocol frame.
+
 ### 3.2 `--json`: the third channel rule, not a per-verb feature
 
 `--json` is available on **every** verb, spelled that way everywhere — not `--format json`, not a
@@ -125,6 +135,9 @@ The shape is one schema across every verb (`RfCore.Export.ResultDocument`):
   "diagnostics": [ {"id","severity","message","arguments"}, … ],
   "result":      { "summary": …, "groups": { "<group>": { "<cube>": {"kind","axes","values"} } } } }
 ```
+
+(`result` also carries `check`, `explain` and `document` for the three verbs that produce one of
+those instead of cubes — §10.5 and §11.4.)
 
 - **`input.analysis` is the chain that ACTUALLY ran**, after §4's promotion — not what was requested.
 - **`result.groups` mirrors the `DataSet`**; a cube's `kind` decides whether `values` holds numbers
@@ -405,8 +418,13 @@ stderr to fill that pipe's buffer and deadlock a sequential reader.
 no chain to select and no directive to override. Its analogue of §5's rule is §8.2's — the one
 override it takes lands in the `EmSetup`, not at the run service, for the same reason.
 
-`check` and `explain` follow 1, 4, 6 and 7, and their §5 analogue is §10's — they run nothing and
-they write nothing.
+`check`, `explain` and `read` follow 1, 4, 6 and 7, and their §5 analogue is §10's — they run
+nothing and they write nothing.
+
+`serve` follows 1 and 7 and is outside all the rest, because it is not a verb that does work: it is
+the one adapter that dispatches to the others (§11). Its §4 analogue is the inversion of §3.1 —
+stdout is the protocol and the result goes into a frame — and its §5 analogue is R-aut-1: it owns
+no logic at all, so there is nothing for an override to land in.
 
 `convert`, `new` and `import part` follow 1, 4, 6 and 7 and are outside 2, 3 and 5 for the same
 reason: they run no analysis. Their §5 analogue is stronger and is the whole of
@@ -543,5 +561,149 @@ Per §3.2, with `diagnostics` carrying the findings and `result` carrying the re
                          "reference":{"ref","from","resolvedPath","state","outsideWorkspace","redirect"} } }
 ```
 
+`read` uses the same two halves the run verbs do — `result.groups` for a result file it loaded back —
+plus one field of its own for a document returned verbatim:
+
+```
+"result": { "document": { "path","kind","text" } }
+```
+
 `outputs` is empty for both — neither verb writes a file, and a caller looking for one must not find
 one invented.
+
+---
+
+## 11. `serve` — the protocol adapter
+
+`brief-automation-5-protocol-adapter.md`. A **stdio protocol server** that advertises circuitRF's
+capabilities to an external client and invokes them on request. The concrete target is the Model
+Context Protocol — a JSON-RPC convention in which a server advertises tools over stdin/stdout and a
+client discovers and calls them — but the protocol is the first adapter, not the architecture
+(`automation-architecture.md` R-aut-13).
+
+```
+circuitrf serve --root <dir> [--kits <dir>]
+```
+
+**This is the disposable layer, and it is written to be deleted.** Everything durable was built in
+AUT-1 through AUT-4; `src/Cli/Serve/` is five files that translate, dispatch and report, and
+removing them takes nothing with it.
+
+### 11.1 It calls the verb — it does not re-implement it
+
+**R-aut-1, and it is the whole design.** A tool call becomes an argument vector and is handed to
+`CliEntry.Run`, which is the same function `Program.cs` hands the real command line to. So R-aut-13
+— nothing reachable here that is not reachable from the command line, and vice versa — is a
+property of the code rather than a rule to remember, and the parity gate compares two documents that
+came out of one function.
+
+That is why `Program.cs` is now three lines and `CliEntry.cs` holds the dispatch: a local function of
+a top-level program is private to `<Main>$` and callable by nobody. Nothing about the verbs changed.
+
+**The adapter refuses only what it alone can see** — a tool that does not exist, an argument that
+belongs to another mode of the same tool, an argument of the wrong JSON type, and a path outside the
+root. Everything else is the verb's own refusal, arriving unchanged: `--grid` handed to a pursuit, an
+unstated Excellon coordinate format, a source folder holding several parts.
+
+### 11.2 stdout is the protocol, and nothing else may reach it
+
+§3.1's exemption. The real stdout is taken at startup and held for the framing alone; `Console.Out`
+is replaced with a sink before any capability runs, and each verb's document is written to a string
+through `JsonRun.Sink`. `--json` on `serve` itself is **refused** rather than silently one-or-the-
+other: it would have captured the stream the framing needs, and every tool call already returns a
+document.
+
+Nothing this program launches can leak there either — every child process it starts (the device
+worker, the PCell host, the interpreter probe, the updater) redirects its own stdout to a pipe, which
+was checked rather than assumed.
+
+### 11.3 The tool surface
+
+**Six tools, and the count is the point** (R-aut-9). A client that discovers tools up front carries
+every description for the whole session whether or not it calls one, so the surface is a standing
+cost paid on every interaction.
+
+| Tool | Becomes |
+|---|---|
+| `run` | `sparam` / `dc` / `hb` / `lp` / `lpp` / `em`, selected by an argument — one tool, not six |
+| `check` | `check` |
+| `explain` | `explain` |
+| `create` | `new workspace` / `new cell` |
+| `import` | `import part` / `convert` |
+| `read` | `read` |
+
+`ToolCatalog` is one table, and **the JSON schema is generated from the same rows that build the
+command line**. A description that says an argument exists and a translation that drops it cannot
+happen, because there is one list; adding a flag is one row. Every argument is named after the CLI
+flag it becomes.
+
+`--only` and `--group` are reachable as tool arguments (R-aut5-6) — reading is the expensive
+direction, and a client that receives eight full loadpull cubes when it wanted one number is the
+failure mode this whole series is about.
+
+**`--kits` is the operator's, not the client's.** It is one of the flags taken before dispatch, so
+`circuitrf serve --root <dir> --kits <dir>` registers the resolver for the whole server and every
+`run` resolves an externally-supplied device model with it. It is deliberately not a tool argument: a
+kit folder is installed software rather than design data, it lives outside the root by nature, and
+letting a client name one would be the server pointing at an arbitrary directory on its say-so.
+
+### 11.4 `read` — the verb the tool table needed
+
+`read` is the inverse of a run verb: a `.npy` through `DataSetImporter`, a Touchstone through
+`TouchstoneIO` plus `DataSetBuilder.FromSnp` — **the same pair the GUI's own source library reads a
+file with** — and one of circuitRF's own documents returned as its own bytes, because the formats
+ARE the interface (`automation-architecture.md` §4) and a round trip through a reader and a writer
+would hand back something that differs from disk wherever the reader is lossy.
+
+It was added because R-aut-13 required it: the tool table has a `read` in it, and a tool with no verb
+behind it is exactly the privileged adapter that rule forbids. It writes nothing, for `check`'s
+reason (§10.1). A directory is refused rather than walked — what a workspace holds is what `check`
+and `explain` answer — and an interchange file is refused NAMING `convert`, since half those formats
+are binary and handing back a GDSII stream as a JSON string would be an encoding decision this verb
+has no business making.
+
+### 11.5 What it refuses
+
+**R-aut5-8. The server runs with the invoking user's authority, and it constrains itself in one
+place.**
+
+- **A root is required at startup**, and every path a client names resolves under it — a relative one
+  against the root, since the client cannot see the server's working directory. A path that escapes
+  is a **refusal naming the root, never a silent clamp**: clamping runs a different operation than
+  the one asked for and says nothing about it. Symlinks are resolved on both sides and at **every
+  level of the path**, not just its last component — `ResolveLinkTarget` answers about the item it is
+  called on, so asking it about `<root>/link/file` reports "not a link" and the escape goes straight
+  through.
+- **No shell and no arbitrary process launch.** The device-worker and PCell paths still start their
+  own; nothing new becomes launchable because a client asked.
+- **Destructive operations are refusals, not confirmations** — and by omission rather than by a
+  filter: there is no tool that deletes, and no capability below writes outside the paths it chooses
+  itself. There is no user at the other end to confirm with. A client that wants a file gone deletes
+  it itself.
+
+### 11.6 Progress, cancellation, and one call at a time
+
+Capability calls are **serialized** — the verbs use process-wide state (`JsonRun`, `Console.Out`), so
+two cannot be in flight together — but **the reader loop never blocks on one**. That split is the
+whole reason it exists: `notifications/cancelled` and `ping` have to be answerable while a run is
+going, and a run that cannot be cancelled is one a client times out on and retries, doubling the cost
+of the run it gave up on.
+
+Cancellation and progress both go through **the same `RunControl` the `em` verb already uses**
+(`RunHost`), so cancellation lands at a work boundary and progress counts leaf units exactly as that
+type's contract describes. A client that sends a progress token is sent `notifications/progress`; one
+that does not is not sent notifications it never asked for. A cancelled run answers with **130**, the
+code §7 already gives a run stopped at a work boundary, and it writes nothing — a cancelled run
+abandons its result rather than publishing a partial one.
+
+With no host installed, `RunHost.Control` is null and every engine takes the same optional argument
+it always took, so a command line behaves exactly as it did.
+
+### 11.7 The gate
+
+`tests/Ui.Tests/ServeProtocolAdapterTests.cs`. For every tool, the document that comes back through
+the server is compared **byte for byte** against the one `circuitrf <verb> --json` writes. Two things
+are normalized and nothing else: the adapter RESOLVES paths, so the CLI side is given the resolved
+path; and a verb that CREATES something cannot create it twice, so those two calls are given
+different destinations and the destination is substituted out. The stdout audit, the three
+root-escapes, the lifecycle and the cancellation are in the same file.

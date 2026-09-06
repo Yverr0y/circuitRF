@@ -92,6 +92,10 @@ namespace RfCore.Export
     /// decoration: two of these start from different files and can legitimately land on different
     /// workspaces (<c>cli.md</c> §8.1), and that is exactly the thing a caller cannot otherwise see.
     /// </param>
+    /// <param name="Document">
+    /// What <c>read</c> handed back when the path named one of circuitRF's own documents rather than
+    /// a result file. See <see cref="DocumentJson"/>.
+    /// </param>
     public sealed record ResultPayload(
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         LoadpullSummaryJson? Summary,
@@ -100,7 +104,26 @@ namespace RfCore.Export
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         CheckReportJson? Check = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        ExplainReportJson? Explain = null);
+        ExplainReportJson? Explain = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        DocumentJson? Document = null);
+
+    /// <summary>
+    /// One of circuitRF's own documents, read back verbatim.
+    ///
+    /// <para><b>Verbatim is the whole point.</b> The formats are the interface
+    /// (<c>automation-architecture.md</c> §4) — a client authors a design by WRITING one of these
+    /// files — so what it needs back is the file, not a re-serialization of a model parsed out of
+    /// it. A round trip through a reader and a writer would hand back something that differs from
+    /// what is on disk wherever the reader is lossy, and the difference would be invisible.</para>
+    ///
+    /// <para>A result file does not come back this way: it becomes <see cref="Groups"/>, through the
+    /// same readers the GUI's own source library uses, because a <c>.npy</c> or a Touchstone answers
+    /// a question about numbers rather than about text.</para>
+    /// </summary>
+    /// <param name="Kind">What the path was taken to be, spelled as <c>check</c> spells it.</param>
+    /// <param name="Text">The file's content, exactly as it is on disk.</param>
+    public sealed record DocumentJson(string Path, string Kind, string Text);
 
     // ── check and explain, on the wire (R-aut4-10) ───────────────────────────
 

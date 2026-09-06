@@ -1,0 +1,147 @@
+using CircuitRF.Diagnostics;
+using RfCore;
+using RfCore.Data;
+using RfCore.Export;
+
+namespace CircuitRF.Cli;
+
+/// <summary>
+/// <c>circuitrf read &lt;path&gt;</c> — the inverse of a run verb, and the only verb in this program
+/// whose whole job is the direction <c>automation-architecture.md</c> R-aut-10 calls the expensive
+/// one.
+///
+/// <para><b>Why it exists, and why it exists as a VERB.</b> The protocol adapter's tool table has a
+/// <c>read</c> in it (brief-automation-5-protocol-adapter.md §3), and R-aut-13 says nothing may be
+/// reachable through one adapter and not the other. A tool with no verb behind it would have broken
+/// that on the day it landed, and the parity gate could not have been written for it at all — so the
+/// capability is exposed on BOTH adapters in the same commit. That this was not already here is a
+/// gap in the capability surface, not something <c>serve</c> invented; <c>src/Cli/RESOLVED.md</c>
+/// records it as one.</para>
+///
+/// <para><b>It reads through the readers the GUI already reads through</b> — R-aut4-2's rule, applied
+/// to loading rather than to validating. A <c>.npy</c> goes through <see cref="DataSetImporter"/> and
+/// a Touchstone through <see cref="TouchstoneIO"/> plus <see cref="DataSetBuilder.FromSnp"/>, which
+/// is exactly the pair <c>DataSourceEntryViewModel</c> uses to put a file in the Data Display's
+/// source library. A second loader here would be a file the CLI and the GUI could disagree about.
+/// </para>
+///
+/// <para><b>A design document comes back as its own bytes</b>, not as a re-serialization. The formats
+/// ARE the interface (R-aut-5): a client authors by writing one of these files, so what it needs back
+/// is the file. See <see cref="DocumentJson"/>.</para>
+///
+/// <para><b>It writes nothing</b>, for <c>check</c>'s reason (R-aut4-6): it must run on a read-only
+/// tree and on a workspace another process has open.</para>
+/// </summary>
+internal static class ReadBack
+{
+    public static int Run(string[] args)
+    {
+        string? path = null;
+
+        foreach (string a in args)
+        {
+            if (a.StartsWith('-')) return JsonRun.Fail(CliDiagnostics.ReadUnknownOption(a));
+            if (path is not null)  return JsonRun.Fail(CliDiagnostics.ReadMultiplePaths());
+            path = a;
+        }
+
+        if (path is null)
+        {
+            int code = JsonRun.Fail(CliDiagnostics.ReadPathRequired());
+            Console.Error.WriteLine("Usage: circuitrf read <file> [--only a,b] [--group g]");
+            return code;
+        }
+
+        JsonRun.InputPath = path;
+
+        // A directory is refused rather than walked. `read` answers "what is IN this file"; what is
+        // in a workspace is a question `check` and `explain` already answer, and walking one here
+        // would hand a caller an unbounded document it did not ask for (R-aut-10).
+        if (Directory.Exists(path)) return JsonRun.Fail(CliDiagnostics.ReadPathIsAFolder(path));
+        if (!File.Exists(path))     return JsonRun.Fail(CliDiagnostics.ReadPathNotFound(path));
+
+        // A result file first, because the extensions do not overlap and a result is what a caller
+        // most often has just written.
+        string ext = Path.GetExtension(path).ToLowerInvariant();
+
+        if (ext == ".npy")                                    return ReadNpy(path);
+        if (TouchstoneIO.ParsePortsFromExtension(path) is not null) return ReadTouchstone(path);
+
+        var kind = DocumentKinds.Classify(path);
+        return kind switch
+        {
+            DocumentKind.Unknown     => JsonRun.Fail(CliDiagnostics.ReadUnsupported(path, ext)),
+            // An interchange file is BINARY as often as not (GDSII), and handing back a GDSII stream
+            // as a JSON string would be an encoding decision this verb has no business making.
+            // `convert` is the verb that reads those, and it is named rather than guessed at.
+            DocumentKind.Interchange => JsonRun.Fail(
+                CliDiagnostics.ReadInterchange(path, DocumentKinds.InterchangeFormat(path) ?? "interchange")),
+            _                        => ReadDocument(path, kind),
+        };
+    }
+
+    // ── result files ─────────────────────────────────────────────────────────
+
+    private static int ReadNpy(string path)
+    {
+        try
+        {
+            var (ds, _) = DataSetImporter.Import(path);
+            return Publish(ds, path, "npy");
+        }
+        catch (Exception ex) { return JsonRun.Fail(CliDiagnostics.ReadFileUnreadable(path, ex.Message)); }
+    }
+
+    private static int ReadTouchstone(string path)
+    {
+        try
+        {
+            var snp = TouchstoneIO.ReadFile(path);
+            if (snp.IsEmpty) return JsonRun.Fail(CliDiagnostics.ReadFileUnreadable(path, "no frequency points"));
+            return Publish(DataSetBuilder.FromSnp(snp), path, "touchstone");
+        }
+        catch (Exception ex) { return JsonRun.Fail(CliDiagnostics.ReadFileUnreadable(path, ex.Message)); }
+    }
+
+    /// <summary>
+    /// Hands the loaded set to the document, and prints the human form: what the file holds, one
+    /// line per cube. Deliberately NOT the numbers — a swept loadpull <c>.npy</c> is megabytes of
+    /// them, and <c>--json</c> with <c>--only</c> is how a caller asks for the ones it wants
+    /// (R-aut5-6). The two forms read the same <see cref="DataSet"/>, so they cannot disagree.
+    /// </summary>
+    private static int Publish(DataSet ds, string path, string kind)
+    {
+        JsonRun.Data = ds;
+
+        Console.WriteLine($"{path}  ({kind})");
+        foreach (string group in ds.Groups)
+        {
+            var cubes = ds.CubesIn(group);
+            if (cubes.Count == 0) continue;
+            Console.WriteLine($"  group {(group.Length == 0 ? "(default)" : group)}:");
+            foreach (var (name, cube) in cubes.OrderBy(c => c.Key, StringComparer.Ordinal))
+            {
+                string axes = string.Join(" x ", cube.Axes.Select(a =>
+                    $"{a.Name}[{a.Length}]{(string.IsNullOrEmpty(a.Unit) ? "" : $" {a.Unit}")}"));
+                Console.WriteLine($"    {name,-24} {cube.DataKind,-8} {axes}");
+            }
+        }
+        return 0;
+    }
+
+    // ── circuitRF's own documents ────────────────────────────────────────────
+
+    private static int ReadDocument(string path, DocumentKind kind)
+    {
+        string text;
+        try { text = File.ReadAllText(path); }
+        catch (Exception ex) { return JsonRun.Fail(CliDiagnostics.ReadFileUnreadable(path, ex.Message)); }
+
+        JsonRun.Document = new DocumentJson(path, DocumentKinds.Name(kind), text);
+
+        // Verbatim on stdout too — Write, not WriteLine, so `circuitrf read x.csch > y.csch` is a
+        // copy and not a copy with a newline added to it.
+        Console.Out.Write(text);
+        return 0;
+    }
+}

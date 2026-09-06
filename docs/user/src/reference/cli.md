@@ -3,7 +3,7 @@ title: The Command Line
 slug: reference/cli.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > The command line
-lede: Every engine circuitRF has runs without the GUI. One executable, eight verbs — S-parameters, DC, harmonic balance, loadpull, loadpull pursuit, electromagnetic extraction, layout interchange conversion, and an elaborated-netlist dump. This chapter is the operational reference for all of them, including a worked EM run from an empty folder.
+lede: circuitRF runs without the GUI — not just its engines, but authoring, validation and resolution too. One executable, fourteen verbs — S-parameters, DC, harmonic balance, loadpull, loadpull pursuit, electromagnetic extraction, layout interchange, creating a workspace or a cell, importing a part, checking a design, explaining what it resolved to, reading a result back, an elaborated-netlist dump, and a protocol server. Every one of them answers --json. This chapter is the operational reference for all of them, including a worked EM run from an empty folder.
 ---
 
 <nav class="toc">
@@ -20,7 +20,14 @@ lede: Every engine circuitRF has runs without the GUI. One executable, eight ver
 <li><a href="#lpp"><code>lpp</code> — loadpull pursuit</a></li>
 <li><a href="#em"><code>em</code> — electromagnetic extraction</a></li>
 <li><a href="#convert"><code>convert</code> — layout interchange</a></li>
+<li><a href="#new"><code>new</code> — a workspace or a cell</a></li>
+<li><a href="#import"><code>import part</code> — a footprint and its symbol</a></li>
+<li><a href="#check"><code>check</code> — is it sound?</a></li>
+<li><a href="#explain"><code>explain</code> — what did it resolve to?</a></li>
+<li><a href="#read"><code>read</code> — a result or a document, back</a></li>
 <li><a href="#elab"><code>elab</code> — the elaborated netlist</a></li>
+<li><a href="#json"><code>--json</code> — one machine-readable document</a></li>
+<li><a href="#serve"><code>serve</code> — a protocol server</a></li>
 <li><a href="#exit">Exit codes</a></li>
 <li><a href="#scripting">Scripting patterns</a></li>
 </ol>
@@ -61,7 +68,14 @@ convention behind both.</p>
 | `lpp` | `.cnl` | Loadpull **pursuit** — searches for the optima | Optima + the follow-on grid; `-o` as `hb`; `--out-grid` writes a `.gam` |
 | `em` | `.cem` | The EM kernel the setup resolves to | A Touchstone `.sNp` **and** a grouped `.npy`, where **Simulate** writes them |
 | `convert` | any layout format | The same importer and exporter **File ▸ Import/Export** runs | The layout in the format you asked for |
+| `new workspace` | a directory | The same code **File ▸ New Workspace** runs | A `.cws` and, unless you say otherwise, a copied technology |
+| `new cell` | a workspace + a name | The same code **New Cell** runs | A cell folder and one empty-but-valid file per view |
+| `import part` | a component file or folder | The same code **Import Component** runs | A cell folder holding the land patterns and the symbol |
+| `check` | a workspace, a cell folder, or one document | Every validator the application already uses | **Nothing** — findings to stdout |
+| `explain` | the same | Resolution only — no analysis | **Nothing** — the walk and the answer, to stdout |
+| `read` | a result file, or one of circuitRF's own documents | The same loaders the Data Display reads a file with | **Nothing** — what the file holds, to stdout |
 | `elab` | `.cnl` | Elaboration only, no analysis | The elaborated netlist, to stdout |
+| `serve` | `--root <dir>` | A protocol server for an external client | Whatever the tool it is asked for writes |
 
 `hb`, `lp` and `lpp` all run **the whole parametric sweep** when one wraps the analysis — see
 [naming the wrapper](#wrapper).
@@ -84,6 +98,9 @@ convergence notes still scroll past on screen. Redirect `2&gt;/dev/null` to sile
 | Option | What it does |
 |---|---|
 | `--kits <dir>` | A folder of installed kits, so an externally-supplied device model (`ExtDevice Provider=…`) resolves headlessly the way opening a workspace resolves it in the GUI. Repeatable. |
+| `--json` | Put **one JSON document** on stdout and nothing else — [see below](#json). stderr is untouched. |
+| `--only a,b` | Narrow that document's result to these cubes. |
+| `--group g,h` | Narrow that document's result to these groups. |
 
 Frequencies are written as `1GHz`, `100MHz`, or bare Hz (`1e9`) anywhere a frequency is accepted.
 
@@ -630,6 +647,190 @@ per line, so a script can consume them directly:
 
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf convert board.kicad_pcb -o fab/ --to gerber 2&gt; convert.log | zip -j fab.zip -@</code></pre>
 
+## `new` — a workspace or a cell {#new}
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf new workspace &lt;dir&gt; [--name N] [--tech &lt;id&gt;|none]
+<span class="prompt">$ </span>circuitrf new cell &lt;workspace&gt; &lt;cellName&gt; [--views schematic,symbol,layout]</code></pre>
+
+These create the **first correct document** — the thing that is awkward to write by hand because the
+folder structure and the primacy files have to be right before anything will open it.
+
+They are not a second implementation. `new workspace` calls the same function **File ▸ New
+Workspace** calls, and `new cell` the same one **New Cell** calls, so a tree created here is a tree
+the application created.
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf new workspace ~/designs/Amp --tech pcb-4layer_FR-4_62mil_1oz
+<span class="output">/home/you/designs/Amp
+/home/you/designs/Amp/.cws
+/home/you/designs/Amp/tech/pcb-4layer_FR-4_62mil_1oz.ctech</span>
+
+<span class="prompt">$ </span>circuitrf new cell ~/designs/Amp Stage1 --views schematic,symbol
+<span class="output">/home/you/designs/Amp/Stage1
+/home/you/designs/Amp/Stage1/schematic/Stage1.csch
+/home/you/designs/Amp/Stage1/symbol/Stage1.csym</span></code></pre>
+
+**The paths it creates are the result**, on stdout, because what you do next is almost always read or
+rewrite one of them.
+
+<div class="callout note">
+<span class="label">Every default is the dialog's</span>
+<p>Whatever the GUI's dialog pre-selects, the verb selects with no flag: <code>--tech</code> opens on
+the same technology the <b>New Workspace</b> combo box opens on (<code>--tech none</code> is its
+"None" row), and <code>--views</code> defaults to <code>schematic</code>, which is what <b>New
+Cell</b> creates. Anything the dialog would have <em>asked</em> is a refusal that names the flag
+answering it — never a guess.</p>
+</div>
+
+**There are deliberately no per-primitive edit verbs.** There is no `place-instance` and no
+`set-parameter`: once a document exists, the way to change it is to **write** it. Every format
+circuitRF owns is readable, versioned JSON — see [File formats](file-formats.html) — and that file
+*is* the interface.
+
+<h3 id="new-add">`new` is one verb with a noun</h3>
+
+`new workspace` and `new cell` are two nouns of one verb, not two verbs. It reads better and, more to
+the point, the number of top-level verbs is a cost every reader of `--help` pays.
+
+---
+
+## `import part` — a footprint and its symbol {#import}
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf import part &lt;file-or-folder&gt; --into &lt;workspace&gt; [--cell N] [--variant V]
+                                            [--list-parts] [--tech f.ctech] [--add-layers]</code></pre>
+
+The same code **Import Component** runs: it reads a downloaded component — a land pattern, a symbol,
+and the pin-to-pad map that joins them — and writes it into your workspace as one cell.
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf import part downloads/SOT-23.zip --into ~/designs/Amp --list-parts
+<span class="output">SOT-23-3
+SOT-23-5</span>
+
+<span class="prompt">$ </span>circuitrf import part downloads/SOT-23.zip --into ~/designs/Amp --cell SOT-23-3
+<span class="output">/home/you/designs/Amp/SOT-23-3
+/home/you/designs/Amp/SOT-23-3/layout/SOT-23-3.clay
+/home/you/designs/Amp/SOT-23-3/symbol/SOT-23-3.csym</span></code></pre>
+
+A source holding several parts is **refused with them listed**, never resolved by taking the first.
+
+**Layers the technology does not have are reported, and nothing is written**, unless you pass
+`--add-layers`. The GUI's own install is session-only and writes nothing to disk either, so this is
+the same behaviour and not a headless restriction.
+
+---
+
+## `check` — is it well formed, does it resolve, is it sound? {#check}
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf check &lt;path&gt; [--recursive] [--severity warning|error]</code></pre>
+
+Point it at a workspace, a cell folder, or one document. **It runs no analysis and it writes
+nothing**, which is what makes it cheap enough to call after every edit — and safe to run on a
+read-only tree, or on a workspace you have open in the GUI at the same time.
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf check ~/designs/Amp
+<span class="output">Amp/Stage1/schematic/Stage1.csch
+  error   two labels name one physical net: 'vout' and 'out'
+Amp/Stage1/layout/Stage1.clay
+  warning no technology resolves for this layout
+5 document(s): 1 error, 1 warning</span></code></pre>
+
+**Every finding comes from a validator the application already uses** — the same view-file check, the
+same primacy rule, the same technology walk-up, the same net extractor, the same elaborator, the same
+DRC engine. A rule that lived only in `check` would be a rule the application does not enforce, and a
+design would pass here and be refused the moment somebody opened it.
+
+<div class="callout note">
+<span class="label">Warnings are reported and still exit 0</span>
+<p><code>--severity</code> decides the exit code, and it defaults to <code>error</code>. Warnings are
+<em>always</em> printed — a check that hid them to keep the exit code clean would make the exit code
+useless. Two states are warnings on purpose: a cell folder holding several views with none named
+primary, and a layout that resolves no technology. Both are normal.</p>
+</div>
+
+The kind of document is inferred from the path, exactly as `convert` infers a format. A GDSII or
+Gerber file is **named as interchange** rather than called unreadable — it is simply not validated,
+because there is nothing to validate it against.
+
+---
+
+## `explain` — what did circuitRF decide? {#explain}
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain &lt;path&gt; [--expr "&lt;expression&gt;"] [--set var=expr]
+                            [--analysis [&lt;name&gt;]] [--ref &lt;relative-ref&gt;]</code></pre>
+
+`check` answers "is something wrong". `explain` answers the question that is **not** a failure: which
+technology did this layout get, which analysis would actually run, what does this expression evaluate
+to here, and what does this cell reference point at?
+
+It reports **the walk as well as the answer**, and that is the useful half. Resolution in circuitRF is
+a series of walk-ups — a document's ancestor workspace, a layout's technology, a `.cem`'s two
+independent references — and which one produced an answer is exactly what you cannot see from the
+file.
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain Amp.cem
+<span class="output">workspace   from Amp.cem            → /home/you/designs/Amp/.cws        (nearest ancestor .cws)
+layout      from Amp.cem            → Amp/Line/layout/Line.clay         (workspace-relative)
+workspace   from Line.clay          → /home/you/parts/.cws              (nearest ancestor .cws)
+technology  from /home/you/parts    → parts/tech/pcb-2layer.ctech       (the .cws DefaultTechRef)</span></code></pre>
+
+Two different workspaces there, and that is legitimate: a `.cem` in one workspace may point at a
+layout in another, and that layout's layers must be read by *its* technology.
+
+<h3 id="explain-analysis">`--analysis` — which chain would run</h3>
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain pa.cnl --analysis
+<span class="output">SWEEP1   parametric_sweep   enabled  runnable  root   → dispatched by hb
+  chain: SWEEP1 → HB1
+  sweep: Pavl over 1.0000e+09 … 3.0000e+09 step 5.0000e+08 Hz  (stated GHz, scale 1e9)
+HB1      hb                 enabled  runnable         → promoted to SWEEP1</span></code></pre>
+
+A sweep is reported in **base SI with its unit and its scale**. Reading a mark without its scale has
+already produced a run at 2 Hz that looked entirely normal.
+
+<h3 id="explain-expr">`--expr` — evaluate in the design's own scope</h3>
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain pa.cnl --expr "Zopt*2" --set Zopt=12.5
+<span class="output">Zopt*2 = 25   (real)</span></code></pre>
+
+Through the one expression engine, in the design's own resolved scope — never by substitution — with
+`--set` applied first exactly as a run verb applies it. The kind is reported, never coerced.
+
+<h3 id="explain-ref">`--ref` — where does this reference land</h3>
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain Stage1.csch --ref ../parts/SOT-23-3
+<span class="output">../parts/SOT-23-3 → /home/you/designs/parts/SOT-23-3   resolved
+                     outside this workspace: no</span></code></pre>
+
+Where resolution fails, **that is the answer** — a sentence naming what was looked for and where it
+was looked. You are usually running this verb precisely because something did not resolve.
+
+---
+
+## `read` — a result, or a document, back {#read}
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf read &lt;path&gt; [--only a,b] [--group g] [--json]</code></pre>
+
+The inverse of a run verb. A `.npy` or a Touchstone file is loaded back into cubes — through the same
+two loaders the Data Display's source library reads a file with — and one of circuitRF's own
+documents comes back as **its own bytes**, unchanged.
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf read results/Amp_em.npy
+<span class="output">results/Amp_em.npy  (npy)
+  group (default):
+    S                        Complex  freq[201] Hz x i[2] port x j[2] port
+    Z0                       Complex  port[2] port
+  group planar:
+    MeshCells                Real     cell[1544]</span></code></pre>
+
+It writes nothing, and it takes one file at a time. For "what is in this workspace", use `check` or
+`explain`; for a GDSII or a Gerber set, use `convert`.
+
+With `--json`, `--only` and `--group` narrow what comes back — which matters, because reading a
+20,000-point swept loadpull in full is the expensive direction:
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf read hero3.npy --only Pout_dBm --json</code></pre>
+
+---
+
 ## `elab` — the elaborated netlist {#elab}
 
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf elab &lt;file.cnl&gt;</code></pre>
@@ -642,6 +843,90 @@ This is the debugging verb. When a value is not what you expected, `elab` is whe
 whether the expression resolved to something different from what you meant, or resolved correctly and
 the analysis is doing something else.
 
+## `--json` — one machine-readable document {#json}
+
+Every verb takes `--json`, spelled that way everywhere. It changes exactly one thing: **stdout carries
+a single JSON document and nothing else.**
+
+stderr is untouched — progress, `[circuitRF]` notes, warnings and refusal sentences stream exactly as
+they always did — so a script watching stderr cannot tell whether the flag was passed.
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf sparam amp.cnl --json | jq '.outputs[].path'
+<span class="output">"amp.s2p"</span></code></pre>
+
+One schema serves every verb:
+
+<pre><code>{ "circuitrf": { "version": …, "verb": … },
+  "input":     { "path": …, "analysis": … },
+  "status":    "ok" | "not-converged" | "failed",
+  "exitCode":  0 | 1 | 2 | 130,
+  "outputs":     [ { "kind": …, "path": … }, … ],
+  "diagnostics": [ { "id": …, "severity": …, "message": …, "arguments": { … } }, … ],
+  "result":      { … } }</code></pre>
+
+- **`input.analysis` is the chain that actually ran**, after promotion — not what you asked for. The
+  difference is a whole sweep axis, so you must be able to see it from the document alone.
+- **A failed run still emits a document.** The failure *is* the payload, so you never have to tell
+  "no output" apart from "output I could not parse".
+- **The diagnostic `id` is the contract; the `message` is not.** Match on `id`. Templates are
+  reworded freely, and the sentence is always English and culture-invariant.
+- **`result` holds cubes** (`groups`) for a run, a **summary** for `lp`/`lpp` — the same one-row-per-Γ-
+  point projection the table prints, and `--all` adds the cubes — a **check** or **explain** report for
+  those two verbs, and a **document** for `read`.
+- Numbers are raw, invariant and unrounded. `NaN` and infinity are written as JSON's named literals,
+  because a loadpull grid genuinely contains NaN wherever a point never converged.
+
+---
+
+## `serve` — a protocol server {#serve}
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf serve --root &lt;dir&gt; [--kits &lt;dir&gt;]</code></pre>
+
+Speaks a JSON-RPC tool protocol over stdin and stdout, so an external program — a CI job, an
+automation harness, a design agent — can discover what circuitRF can do and ask it to do it. It is
+started by that program, not by you, and it ends when that program disconnects.
+
+**Six tools, and each is a verb you already have:**
+
+| Tool | Runs |
+|---|---|
+| `run` | `sparam`, `dc`, `hb`, `lp`, `lpp` or `em`, chosen by an argument |
+| `check` | `check` |
+| `explain` | `explain` |
+| `create` | `new workspace` or `new cell` |
+| `import` | `import part` or `convert` |
+| `read` | `read` |
+
+**Every tool returns exactly the document `--json` writes**, byte for byte, because the server calls
+the verb rather than re-implementing it. Nothing is reachable through the server that is not
+reachable from your own shell, and nothing is reachable from your shell that the server cannot do.
+
+<div class="callout note">
+<span class="label">What it will not do</span>
+<ul>
+<li><b><code>--root</code> is required</b>, and every path a client names resolves under it. A path
+that escapes — through <code>../</code>, through an absolute path, or through a symbolic link — is
+<b>refused, naming the root</b>. It is never quietly clamped to something inside.</li>
+<li><b>Nothing deletes, and nothing overwrites an existing workspace.</b> There is no person at the
+other end to confirm with, so the answer is no. A client that wants a file gone deletes it itself.</li>
+<li><b>No shell, and no program a client names.</b> Device workers and PCell generators still run as
+they always did; nothing new becomes launchable because something asked.</li>
+</ul>
+</div>
+
+**A long run reports progress and can be cancelled** — a client that asks for progress is sent it as
+the run moves, and a cancellation stops the run at a work boundary and returns exit code 130 having
+written nothing.
+
+`serve` is the one verb whose stdout is not the result: it carries the protocol, so everything else —
+progress, notes, warnings, device-worker logs — goes to stderr, where the program that started it
+picks it up. For that reason it takes no `--json` of its own; every call through it already returns
+one.
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf serve --root ~/designs 2&gt; serve.log</code></pre>
+
+---
+
 ## Exit codes {#exit}
 
 | Code | Meaning |
@@ -649,7 +934,7 @@ the analysis is doing something else.
 | **0** | Ran, and produced something usable |
 | **1** | Could not run — bad arguments, a missing file, no matching analysis, a refusal, an exception |
 | **2** | Ran, but did not converge |
-| **130** | Stopped — `em` only, and only when the run was cancelled at a work boundary |
+| **130** | Stopped — a run cancelled at a work boundary, by `em`'s own stop or by a `serve` client's cancellation |
 
 **`2` is deliberately not the same test for every verb.** `hb` and `dc` fail on any non-converged
 solve. A loadpull grid in which some points do not converge is a normal and useful result — the edge
@@ -670,6 +955,28 @@ on one bad point would make the exit code useless in a script.
 **Fail a build on a regression**, using the exit code:
 
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf hb pa.cnl -o out.npy || echo "PA did not converge" &gt;&amp;2</code></pre>
+
+**Validate a whole workspace in CI**, before anything is run:
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf check ~/designs/Amp --severity error || exit 1</code></pre>
+
+**Author, validate and simulate with no display at any step** — the whole loop:
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf new workspace build/Amp
+<span class="prompt">$ </span>circuitrf new cell build/Amp Stage1
+<span class="prompt">$ </span>cat &gt; build/Amp/Stage1/Stage1.cnl &lt;&lt;'EOF'
+<span class="prompt">  </span>… your netlist …
+<span class="prompt">$ </span>EOF
+<span class="prompt">$ </span>circuitrf check build/Amp || exit 1
+<span class="prompt">$ </span>circuitrf hb build/Amp/Stage1/Stage1.cnl -o out.npy</code></pre>
+
+**Pull one number out of a result**, without parsing a table:
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf read out.npy --only Pout_dBm --json | jq '.result.groups[""].Pout_dBm.values[-1]'</code></pre>
+
+**Ask why a file resolved the way it did**, when a run used a technology you did not expect:
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain Amp.cem</code></pre>
 
 **Re-extract every EM setup in a workspace** after a technology edit — the layout and stackup
 references resolve themselves, so the loop needs nothing but the file names:

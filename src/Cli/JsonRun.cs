@@ -22,10 +22,12 @@ namespace CircuitRF.Cli;
 /// <c>Console.WriteLine</c> to leak into a caller's parser. stderr is untouched, so progress, notes
 /// and warnings still stream while a long run is going.</para>
 ///
-/// <para><b>Why static mutable state.</b> <c>Program.cs</c> is top-level statements dispatching to
-/// static local functions, and threading a context object through every one of them would be the
-/// refactor R-aut0-4's spirit says not to bundle into this change. One process, one invocation, one
-/// document.</para>
+/// <para><b>Why static mutable state.</b> <c>CliEntry</c> dispatches to static functions, and
+/// threading a context object through every one of them would be the refactor R-aut0-4's spirit says
+/// not to bundle into this change. One command line is one invocation and one document. The one
+/// caller that invokes more than once per process — <c>serve</c> — calls <see cref="Reset"/> between
+/// them and runs its calls one at a time, which is what this state costs and why the adapter is
+/// serialized rather than concurrent.</para>
 /// </summary>
 internal static class JsonRun
 {
@@ -65,6 +67,47 @@ internal static class JsonRun
     /// <summary>What <c>explain</c> resolved, and the walk it performed (R-aut4-7).</summary>
     public static ExplainReportJson? Explain;
 
+    /// <summary>The document <c>read</c> handed back, when the file was one of circuitRF's own
+    /// rather than a result.</summary>
+    public static DocumentJson? Document;
+
+    /// <summary>
+    /// Where <see cref="Finish"/> writes, instead of stdout. Set by <c>serve</c> only.
+    ///
+    /// <para>It exists because that adapter's stdout is the protocol stream: a document written to
+    /// it directly would land in the middle of a JSON-RPC frame and the client would see a parse
+    /// error with no indication of the cause (R-aut5-2).</para>
+    /// </summary>
+    public static TextWriter? Sink;
+
+    /// <summary>
+    /// Clears every collector so the next <see cref="CliEntry.Run"/> in this process starts from
+    /// nothing.
+    ///
+    /// <para>A command line never calls this — one process, one invocation, one document, which is
+    /// what the class was written for. <c>serve</c> calls it before every tool call, because the
+    /// alternative is a document carrying the previous call's diagnostics and outputs: a stale
+    /// success that a caller has no way to tell from a real one.</para>
+    /// </summary>
+    public static void Reset()
+    {
+        Enabled             = false;
+        _stdout             = null;
+        _onlyCubes          = null;
+        _onlyGroups         = null;
+        AllCubes            = false;
+        SummaryIsTheDefault = false;
+        Verb                = "";
+        InputPath           = null;
+        Analysis            = null;
+        Data                = null;
+        Check               = null;
+        Explain             = null;
+        Document            = null;
+        Outputs.Clear();
+        Diagnostics.Clear();
+    }
+
     private static readonly List<ResultOutput>   Outputs     = [];
     private static readonly List<DiagnosticJson> Diagnostics = [];
 
@@ -98,7 +141,10 @@ internal static class JsonRun
 
         if (Enabled)
         {
-            _stdout = Console.Out;
+            // Sink is set by `serve`, which owns the real stdout for the protocol framing and must
+            // never let a document reach it directly (R-aut5-2). Console.Out is redirected either
+            // way, so the "nothing else on stdout" guarantee is the same one on both paths.
+            _stdout = Sink ?? Console.Out;
             Console.SetOut(TextWriter.Null);
         }
 
@@ -177,10 +223,11 @@ internal static class JsonRun
 
     private static ResultPayload? BuildPayload()
     {
-        // check and explain carry no DataSet — they run nothing (R-aut4-1) — so they are answered
-        // before the cube machinery, not folded into it.
-        if (Check is not null || Explain is not null)
-            return new ResultPayload(null, null, Check, Explain);
+        // check, explain and a read-back document carry no DataSet — the first two run nothing
+        // (R-aut4-1) and the third is a file, not a result — so they are answered before the cube
+        // machinery, not folded into it.
+        if (Check is not null || Explain is not null || Document is not null)
+            return new ResultPayload(null, null, Check, Explain, Document);
 
         if (Data is not { } ds) return null;
 

@@ -57,6 +57,24 @@
     </AssemblyAttribute>
   </ItemGroup>
 
+  <!--
+    The reference device worker, built alongside these tests and launched as a real child process -
+    the same arrangement Core.Tests already has, for a different reason. `circuitrf serve` may write
+    NOTHING to stdout but its own protocol framing (brief-automation-5-protocol-adapter.md R-aut5-2),
+    and a device worker is the loudest thing this program runs: it is a second process, it logs, and
+    its output is forwarded. Auditing that with a fake would audit the fake.
+
+    ReferenceOutputAssembly is false because nothing here links against it - it is only ever started.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\tools\DeviceWorkerExample\DeviceWorkerExample.csproj"
+                      ReferenceOutputAssembly="false" />
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>DeviceWorkerExampleDir</_Parameter1>
+      <_Parameter2>$(MSBuildThisFileDirectory)..\..\tools\DeviceWorkerExample\bin\$(Configuration)\net10.0</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <!-- Copy Default.ccolor preset so ColorThemeTests can load it from AppContext.BaseDirectory. -->
   <ItemGroup>
     <Content Include="..\..\src\Ui\Assets\Color\Default.ccolor" CopyToOutputDirectory="PreserveNewest">
