@@ -1146,9 +1146,9 @@ namespace CircuitRF.Ui.DataDisplay
 
         private static string FormatDB(System.Numerics.Complex c, string fmt)
         {
-            double db    = 20.0 * Math.Log10(Math.Max(c.Magnitude, 1e-300));
+            double db    = DbFloor.Db20(c.Magnitude);
             double angle = c.Phase * 180.0 / Math.PI;
-            return $"{db.ToString(fmt)}∠{angle:F1}°";
+            return $"{DbFloor.Format(db, fmt)}∠{angle:F1}°";
         }
 
         // ============================================================

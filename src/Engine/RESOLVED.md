@@ -1551,3 +1551,47 @@ to be guessed about.
 A device multiplier scales what the netlist stamps, not what the model computed. A `gm` read back
 from a part placed with `m=4` is one finger's, because that is the number the model wrote and
 circuitRF has no basis for deciding which of a model's own quantities are extensive.
+
+## A throwaway stamp pass was warning about a frequency nobody swept (2026-09-06)
+
+Every S-parameter run of a netlist containing an ideal line printed:
+
+```
+[circuitRF] TLIN:TL1: sin(θ)≈0 at f=0.159155 Hz (θ=1.43239E-08°, a quarter-wave
+open/short resonance); clamping |sinh γl| to a floor and proceeding.
+```
+
+on a sweep of 1–10 GHz. 0.159155 Hz is 1/2π — i.e. ω = 1 rad/s.
+
+### The pass reads topology, but Stamp does more than build a matrix
+
+`SParameterEngine.CollectPortsAndBranchLabels` exists to capture port branch indices and a
+branch→component-name map. That is topology, which is invariant across ω, so it stamped at a
+placeholder ω=1 into a temp `MnaSystem` it then threw away. The matrix genuinely did not matter — but
+a model also **warns** from inside `Stamp`, and a warning names the frequency it was handed. A
+`TLIN`'s electrical length is proportional to frequency, so at 0.159 Hz θ≈0 for any sane reference
+frequency and the degeneracy check fired unconditionally.
+
+### The louder symptom was the quieter bug
+
+The false message was cosmetic. The real damage is that `TLineModel`'s warning is latched **once per
+instance** (`_warnedDegenerate`), so the phantom report CONSUMED the latch before the sweep began —
+and a genuine resonance at a real swept frequency was then never reported at all. Verified directly:
+after the fix, a 1–10 GHz sweep of a 90°-at-1 GHz line now reports `sin(θ)≈0 at f=1E+10 Hz (θ=900°)`,
+which is a true half-wave degeneracy at the last sweep point and which the old code never printed.
+
+### The fix, and why it is not a new mechanism
+
+The pass now stamps at `freqsHz[0]` (falling back to 1.0 on an empty grid) — which is exactly the form
+the sibling throwaway pass in `ResolveSParamControlBranches`, a few hundred lines down the same file,
+was already using. A warning raised by the preliminary pass is now one the per-frequency loop would
+raise anyway, and `AddWarningOnce` dedups it.
+
+S-parameters are byte-identical across the change, checked on a written Touchstone.
+
+**Considered and not done:** routing `TLineModel` through `IReportsWarnings` instead of
+`Console.Error`. It is the better channel and eleven models under `src/Core/Devices` still write
+directly, but that is a sweep of its own and would not have fixed this — a warning on the right
+channel naming 0.159 Hz is still wrong.
+
+Gate: `tests/Engine.Tests/Devices/TLineResonanceWarningTests.cs`.

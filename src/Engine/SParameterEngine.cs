@@ -244,7 +244,7 @@ public static class SParameterEngine
     {
         // ── Identify ports + build branch-label map ───────────────────────────
         int nonGroundNodes = netlist.Nodes.Count - 1;
-        var (ports, branchLabels) = CollectPortsAndBranchLabels(netlist, nonGroundNodes);
+        var (ports, branchLabels) = CollectPortsAndBranchLabels(netlist, nonGroundNodes, freqsHz);
         if (ports.Count == 0)
             throw new InvalidOperationException(
                 "S-parameter analysis requires at least one Port, Term, or P1Tone component at the testbench top level. " +
@@ -778,15 +778,29 @@ public static class SParameterEngine
     private record struct PortEntry(int PortNum, Complex Z0, int BranchIndex, int Node0, int Node1);
 
     /// <summary>
-    /// Preliminary stamp pass (ω=1) to capture port branch indices and build a
+    /// Preliminary stamp pass to capture port branch indices and build a
     /// branch-index→component-name map for singularity diagnostics.
     /// Two-phase: non-mutual first so LastBranchIndex is stable when mutuals stamp.
+    ///
+    /// <para><b>Stamped at the sweep's FIRST frequency, not at a placeholder ω.</b> What this pass
+    /// reads off is topology, which is invariant across ω, so any ω would do for its own purpose —
+    /// but the matrix is not the only thing a <c>Stamp</c> produces. A model also warns from in
+    /// there, and a warning names the frequency it was given. This pass used to pass ω=1, i.e.
+    /// 0.159 Hz, which is not a point in any sweep: a <c>TLIN</c> whose θ ∝ f then sees θ≈0, reports
+    /// a resonance at a frequency the user never asked for, and — because that warning is latched
+    /// once per instance — consumes the report a GENUINE resonance later in the sweep would have
+    /// made. Every netlist containing an ideal line hit this, on every run. Using freqsHz[0] makes
+    /// the pass indistinguishable from the first real frequency, so a warning raised here is one the
+    /// per-frequency loop would raise anyway and <c>AddWarningOnce</c> dedups. This is the same
+    /// (frequency, 1.0-fallback) form the sibling throwaway pass in
+    /// <see cref="ResolveSParamControlBranches"/> already used.</para>
     /// </summary>
     private static (List<PortEntry> Ports, Dictionary<int, string> BranchLabels)
-        CollectPortsAndBranchLabels(ElaboratedNetlist netlist, int nonGroundNodes)
+        CollectPortsAndBranchLabels(ElaboratedNetlist netlist, int nonGroundNodes, double[] freqsHz)
     {
         var tempMna      = new MnaSystem(nonGroundNodes);
         var branchLabels = new Dictionary<int, string>();
+        double omega     = freqsHz.Length > 0 ? 2.0 * Math.PI * freqsHz[0] : 1.0;
 
         foreach (var ec in netlist.Components)
         {
@@ -799,7 +813,7 @@ public static class SParameterEngine
             if (ec.Model is P1ToneModel p1)
                 p1.StampAsSParamPort(tempMna, ec);
             else
-                ec.Stamp(tempMna, 1.0);
+                ec.Stamp(tempMna, omega);
             netlist.DrainModelWarnings(ec.Model);
             for (int b = before; b < tempMna.BranchCount; b++)
                 branchLabels[tempMna.NodeCount + b] = $"{ec.ComponentType}:{ec.InstancePath}";
@@ -808,7 +822,7 @@ public static class SParameterEngine
         foreach (var ec in netlist.Components)
             if (ec.Model is MutualInductanceModel)
             {
-                ec.Stamp(tempMna, 1.0);
+                ec.Stamp(tempMna, omega);
                 netlist.DrainModelWarnings(ec.Model);
             }
 

@@ -2024,3 +2024,71 @@ the guard cannot be "fixed" by suppressing everything.
 - The source-entry combo takes the same `Clear()` write-back and is **not** vulnerable:
   `OnSelectedSourceItemChanged` early-returns on a null value, and the refill is assigned explicitly
   under `_suppressSourceCallback` immediately afterward.
+
+## The decibel floor (2026-09-06)
+
+Reported as a plot that "looks jarring": S(1,1) of an ideal matched line rendered on a dB20 rect plot
+swung from −324 dB to −6000 dB over frequency.
+
+### Both halves of it were the epsilon, and neither was noise in the circuit
+
+The trace was two different artefacts wearing one costume. Measured on the reporter's own file
+(`TLIN`, 50 Ω quarter-wave into two 50 Ω terms, 1–10 GHz, 101 points), where S(1,1) is analytically
+**exactly zero** so every plotted number is roundoff:
+
+- **8 of 101 points computed to exactly `0+0j`.** The old code floored the LINEAR magnitude at
+  `1e-300`, and `20·log10(1e-300)` is −6000 exactly. That is the whole of the −6000.
+- **The other 93 spanned −344.3 dB to −285.1 dB** — a 59 dB band of pure double-precision roundoff.
+  So removing the −6000 cliff alone would have fixed nothing visible; the jitter was the larger half.
+
+Autoscale then sized the axis to a 5,700 dB range, which is why a plot sharing the frame with a real
+trace lost all its scale.
+
+### Clamping in linear gave dB10 and dB20 different bottoms
+
+`1e-300` as a linear floor puts `20·log10` on a cliff at −6000 dB and `10·log10` on a different one at
+−3000 dB — one dataset, two floors, differing only by the factor in front of the log. `DbFloor` clamps
+**after** the log, so every transform shares one bottom.
+
+### −300 dB was measured and rejected; so was −200
+
+The value is not a round number picked for looks. It has to sit in the band between the smallest
+result that can mean anything and the largest number roundoff can produce, and that band is narrow:
+
+| floor | roundoff points still above it (of 101) | visible jitter left |
+|---|---|---|
+| −300 dB | 4 | 14.9 dB |
+| −250 dB | 0 | flat |
+| −200 dB | 0 | flat |
+
+−300 dB fails on the reporting file itself. −200 dB works but clips physics: a `dB10` of an absolute
+power in WATTS reaches it legitimately — kTB at 1 Hz is −204 dB(W), and this application's own
+"PIM off" default of −200 dBm is −230 dB(W). −250 dB clears the roundoff band by ~35 dB and sits
+~46 dB below thermal noise in watts.
+
+**The −200 that was already in the tree is unrelated.** It is the `PIM` parameter default on the
+system components (`ComponentTypeRegistry`, `ComponentModelFactory`) and means "PIM off" — not a
+display floor. Anyone reaching for it as precedent here is matching a number, not a meaning.
+
+### Display only, deliberately
+
+Nothing was applied to `DataCube.DB10/DB20/Log10`, `RFNetwork` or `LoadpullDerivedFields`. Those
+numbers are exported (`.npy`/`.mat`/Touchstone) and read back by measurement expressions, so clamping
+them would make a value depend on whether it happened to pass through a plot. The visible consequence
+is intended and is documented in the user manual: `dB(S(1,1))` as a MEASUREMENT can report below
+−250 dB while the plot of the same quantity shows the floor.
+
+### A floored readout says so
+
+A marker or table cell renders `≤ -250`, not `-250.00`, via `DbFloor.Format`. A column of identical
+`-250.00` reads as a suspiciously repeatable measurement; the mark is the only thing that tells the
+reader it is a floor. `Marker.cs` was additionally on a different path from the trace it marks — it
+used an ADDITIVE `+ 1e-300` where the trace used `Math.Max` — and now shares one.
+
+**The mark REPLACES the equals sign; it does not follow it.** The info box composes its rows as
+`"{desc}={value}"`, so the first cut rendered `dB(S(1,1))=≤ -250.00` — which reads as a typo, not as an
+inequality. `≤` is itself the relation, so `DbFloor.Label` joins on the value's own operator and the row
+reads `dB(S(1,1)) ≤ -250.00`. Sixteen `$"{name}={value}"` sites in `Trace.cs` route through it; a value
+that carries no operator still gets the `=`, so every non-floored row is unchanged.
+
+Gate: `tests/Ui.Tests/DbFloorTests.cs`, whose fixture is the reporter's own |S11| samples verbatim.

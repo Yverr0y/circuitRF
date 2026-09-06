@@ -1283,8 +1283,8 @@ namespace CircuitRF.Ui.DataDisplay
             {
                 double y = Transform switch
                 {
-                    CubeTransform.dB20  => 20.0 * Math.Log10(Math.Max(z.Magnitude, 1e-300)),
-                    CubeTransform.dB10 or CubeTransform.dB => 10.0 * Math.Log10(Math.Max(z.Magnitude, 1e-300)),
+                    CubeTransform.dB20  => DbFloor.Db20(z.Magnitude),
+                    CubeTransform.dB10 or CubeTransform.dB => DbFloor.Db10(z.Magnitude),
                     CubeTransform.Mag   => z.Magnitude,
                     CubeTransform.Phase => z.Phase * 180.0 / Math.PI,
                     CubeTransform.Real  => z.Real,
@@ -1297,8 +1297,8 @@ namespace CircuitRF.Ui.DataDisplay
             // Expression-baked real value: the transform is already in the expression text — render as-is.
             double yr = _transformBaked ? v : Transform switch
             {
-                CubeTransform.dB20 => 20.0 * Math.Log10(Math.Max(Math.Abs(v), 1e-300)),
-                CubeTransform.dB10 or CubeTransform.dB => 10.0 * Math.Log10(Math.Max(Math.Abs(v), 1e-300)),
+                CubeTransform.dB20 => DbFloor.Db20(Math.Abs(v)),
+                CubeTransform.dB10 or CubeTransform.dB => DbFloor.Db10(Math.Abs(v)),
                 CubeTransform.Mag  => Math.Abs(v),
                 _                  => v,
             };
@@ -1448,9 +1448,9 @@ namespace CircuitRF.Ui.DataDisplay
                     var z = _cubeComplexValues![i];
                     y = Transform switch
                     {
-                        CubeTransform.dB20  => 20.0 * Math.Log10(Math.Max(z.Magnitude, 1e-300)),
-                        CubeTransform.dB10  => 10.0 * Math.Log10(Math.Max(z.Magnitude, 1e-300)),
-                        CubeTransform.dB    => 10.0 * Math.Log10(Math.Max(z.Magnitude, 1e-300)),
+                        CubeTransform.dB20  => DbFloor.Db20(z.Magnitude),
+                        CubeTransform.dB10  => DbFloor.Db10(z.Magnitude),
+                        CubeTransform.dB    => DbFloor.Db10(z.Magnitude),
                         CubeTransform.Mag   => z.Magnitude,
                         CubeTransform.Phase => z.Phase * 180.0 / Math.PI,
                         CubeTransform.Real  => z.Real,
@@ -1464,9 +1464,9 @@ namespace CircuitRF.Ui.DataDisplay
                     // Expression-baked real value: transform is already in the expression — render as-is.
                     y = _transformBaked ? v : Transform switch
                     {
-                        CubeTransform.dB20 => 20.0 * Math.Log10(Math.Max(Math.Abs(v), 1e-300)),
-                        CubeTransform.dB10 => 10.0 * Math.Log10(Math.Max(Math.Abs(v), 1e-300)),
-                        CubeTransform.dB   => 10.0 * Math.Log10(Math.Max(Math.Abs(v), 1e-300)),
+                        CubeTransform.dB20 => DbFloor.Db20(Math.Abs(v)),
+                        CubeTransform.dB10 => DbFloor.Db10(Math.Abs(v)),
+                        CubeTransform.dB   => DbFloor.Db10(Math.Abs(v)),
                         CubeTransform.Mag  => Math.Abs(v),
                         _                  => v,
                     };
@@ -1522,7 +1522,7 @@ namespace CircuitRF.Ui.DataDisplay
                             DependentVarFormat.Phase     => raw.Phase * 180.0 / Math.PI,
                             DependentVarFormat.Real      => raw.Real,
                             DependentVarFormat.Imaginary => raw.Imaginary,
-                            DependentVarFormat.Db        => 20.0 * Math.Log10(Math.Max(raw.Magnitude, 1e-300)),
+                            DependentVarFormat.Db        => DbFloor.Db20(raw.Magnitude),
                             _                            => raw.Magnitude
                         });
                     }
@@ -1573,7 +1573,7 @@ namespace CircuitRF.Ui.DataDisplay
                         DependentVarFormat.Phase     => raw.Phase * 180.0 / Math.PI,
                         DependentVarFormat.Real      => raw.Real,
                         DependentVarFormat.Imaginary => raw.Imaginary,
-                        DependentVarFormat.Db        => 20.0 * Math.Log10(Math.Max(raw.Magnitude, 1e-300)),
+                        DependentVarFormat.Db        => DbFloor.Db20(raw.Magnitude),
                         _                            => raw.Magnitude
                     });
                 }
@@ -1836,7 +1836,7 @@ namespace CircuitRF.Ui.DataDisplay
             if (IsDerived) return d.Real;
             return YAxis switch
             {
-                DependentVarFormat.Db        => 20.0 * Math.Log10(Math.Max(d.Magnitude, 1e-300)),
+                DependentVarFormat.Db        => DbFloor.Db20(d.Magnitude),
                 DependentVarFormat.Imaginary => d.Imaginary,
                 DependentVarFormat.Mag       => d.Magnitude,
                 DependentVarFormat.Phase     => d.Phase * 180.0 / Math.PI,
@@ -2305,7 +2305,7 @@ namespace CircuitRF.Ui.DataDisplay
                 ? FormatFamilyCellForMarker(curve, xIdx, m)
                 : FormatCubeCellForMarker(xIdx, m);
             if (string.IsNullOrEmpty(val)) val = "NaN";
-            lines.Add(($"{desc}={val}", false));
+            lines.Add((DbFloor.Label(desc, val), false));
 
             if (MarkerShowsImpedance(m))
                 lines.Add((GetMarkerImpedanceString(m), false));
@@ -2331,9 +2331,9 @@ namespace CircuitRF.Ui.DataDisplay
                 var z = _cubeComplexValues[i];
                 return Transform switch
                 {
-                    CubeTransform.dB20  => 20.0 * Math.Log10(Math.Max(z.Magnitude, 1e-300)),
+                    CubeTransform.dB20  => DbFloor.Db20(z.Magnitude),
                     CubeTransform.dB10 or CubeTransform.dB
-                                        => 10.0 * Math.Log10(Math.Max(z.Magnitude, 1e-300)),
+                                        => DbFloor.Db10(z.Magnitude),
                     CubeTransform.Mag   => z.Magnitude,
                     CubeTransform.Phase => z.Phase * 180.0 / Math.PI,
                     CubeTransform.Real  => z.Real,
@@ -2346,9 +2346,9 @@ namespace CircuitRF.Ui.DataDisplay
                 double v = _cubeRealValues[i];
                 return Transform switch
                 {
-                    CubeTransform.dB20 => 20.0 * Math.Log10(Math.Max(Math.Abs(v), 1e-300)),
+                    CubeTransform.dB20 => DbFloor.Db20(Math.Abs(v)),
                     CubeTransform.dB10 or CubeTransform.dB
-                                       => 10.0 * Math.Log10(Math.Max(Math.Abs(v), 1e-300)),
+                                       => DbFloor.Db10(Math.Abs(v)),
                     CubeTransform.Mag  => Math.Abs(v),
                     _                  => v,
                 };
@@ -2374,14 +2374,14 @@ namespace CircuitRF.Ui.DataDisplay
                 double oth   = compatible ? other.CubeScalarAt(xIdx) : double.NaN;
                 double delta = oth - own;
                 string valStr = double.IsFinite(delta) ? delta.ToString($"{m.FormatString}{m.MaximumFractionDigits}") : "NaN";
-                return $"  Δ{other.ReadoutDescription(false)}={valStr}";
+                return "  " + DbFloor.Label($"Δ{other.ReadoutDescription(false)}", valStr);
             }
 
             string val = compatible
                 ? other.FormatCubeCell(xIdx, m.FormatString, m.MaximumFractionDigits)
                 : "NaN";
             if (string.IsNullOrEmpty(val)) val = "NaN";
-            return $"{other.ReadoutDescription(false)}={val}";
+            return DbFloor.Label(other.ReadoutDescription(false), val);
         }
 
         private Vector2 StemPointFor(Marker m)
@@ -2449,7 +2449,7 @@ namespace CircuitRF.Ui.DataDisplay
             if (CubeXValues is null || CubeXValues.Count == 0 || Points.Count == 0) return $"{desc}=NaN";
             int    idx = FindStemIndex(m);
             string val = FormatCubeCell(idx, m.FormatString, m.MaximumFractionDigits);
-            return $"{desc}={val}";
+            return DbFloor.Label(desc, val);
         }
 
         /// <summary>
@@ -2466,7 +2466,7 @@ namespace CircuitRF.Ui.DataDisplay
             string fmt    = $"{m.FormatString}{m.MaximumFractionDigits}";
             string valStr = double.IsFinite(val) ? val.ToString(fmt) : "NaN";
             string unit   = string.IsNullOrEmpty(cd.MetricUnitString) ? "" : $" {cd.MetricUnitString}";
-            return $"{metric}={valStr}{unit}";
+            return DbFloor.Label(metric, valStr) + unit;
         }
 
         /// <summary>
@@ -2506,7 +2506,7 @@ namespace CircuitRF.Ui.DataDisplay
                     ? FormatFamilyCellForMarker(CubeMarkerCurveIndex(m), xIdx, m)
                     : FormatCubeCellForMarker(xIdx, m);
                 if (string.IsNullOrEmpty(val)) val = "NaN";
-                return $"{desc}={val}";
+                return DbFloor.Label(desc, val);
             }
             return GetMarkerValString(m, showFilePrefix);
         }
@@ -2608,9 +2608,9 @@ namespace CircuitRF.Ui.DataDisplay
                     // No scalar transform → complex value shown in the user's Number Format (MA/RI/DB).
                     CubeTransform.None  => FormatCubeComplex(z, f),
                     CubeTransform.Conj  => FormatCubeComplex(Complex.Conjugate(z), f),
-                    CubeTransform.dB20  => (20.0 * Math.Log10(Math.Max(z.Magnitude, 1e-300))).ToString(f),
+                    CubeTransform.dB20  => DbFloor.Format(DbFloor.Db20(z.Magnitude), f),
                     CubeTransform.dB10 or CubeTransform.dB
-                                        => (10.0 * Math.Log10(Math.Max(z.Magnitude, 1e-300))).ToString(f),
+                                        => DbFloor.Format(DbFloor.Db10(z.Magnitude), f),
                     CubeTransform.Mag   => z.Magnitude.ToString(f),
                     CubeTransform.Phase => (z.Phase * 180.0 / Math.PI).ToString(f),
                     CubeTransform.Real  => z.Real.ToString(f),
@@ -2625,9 +2625,9 @@ namespace CircuitRF.Ui.DataDisplay
                 // Expression-baked real value: transform is already in the expression — show as-is.
                 double y = _transformBaked ? v : Transform switch
                 {
-                    CubeTransform.dB20 => 20.0 * Math.Log10(Math.Max(Math.Abs(v), 1e-300)),
+                    CubeTransform.dB20 => DbFloor.Db20(Math.Abs(v)),
                     CubeTransform.dB10 or CubeTransform.dB
-                                       => 10.0 * Math.Log10(Math.Max(Math.Abs(v), 1e-300)),
+                                       => DbFloor.Db10(Math.Abs(v)),
                     CubeTransform.Mag  => Math.Abs(v),
                     _                  => v,
                 };
@@ -2657,9 +2657,9 @@ namespace CircuitRF.Ui.DataDisplay
                     // No scalar transform → complex value shown in the user's Number Format (MA/RI/DB).
                     CubeTransform.None  => FormatCubeComplex(z, f),
                     CubeTransform.Conj  => FormatCubeComplex(Complex.Conjugate(z), f),
-                    CubeTransform.dB20  => (20.0 * Math.Log10(Math.Max(z.Magnitude, 1e-300))).ToString(f),
+                    CubeTransform.dB20  => DbFloor.Format(DbFloor.Db20(z.Magnitude), f),
                     CubeTransform.dB10 or CubeTransform.dB
-                                        => (10.0 * Math.Log10(Math.Max(z.Magnitude, 1e-300))).ToString(f),
+                                        => DbFloor.Format(DbFloor.Db10(z.Magnitude), f),
                     CubeTransform.Mag   => z.Magnitude.ToString(f),
                     CubeTransform.Phase => (z.Phase * 180.0 / Math.PI).ToString(f),
                     CubeTransform.Real  => z.Real.ToString(f),
@@ -2674,9 +2674,9 @@ namespace CircuitRF.Ui.DataDisplay
                 double v = rv[xIndex];
                 double y = Transform switch
                 {
-                    CubeTransform.dB20 => 20.0 * Math.Log10(Math.Max(Math.Abs(v), 1e-300)),
+                    CubeTransform.dB20 => DbFloor.Db20(Math.Abs(v)),
                     CubeTransform.dB10 or CubeTransform.dB
-                                       => 10.0 * Math.Log10(Math.Max(Math.Abs(v), 1e-300)),
+                                       => DbFloor.Db10(Math.Abs(v)),
                     CubeTransform.Mag  => Math.Abs(v),
                     _                  => v,
                 };
@@ -2693,7 +2693,7 @@ namespace CircuitRF.Ui.DataDisplay
             => $"{c.Real.ToString(fmt)}{(c.Imaginary >= 0 ? "+" : "-")}j{Math.Abs(c.Imaginary).ToString(fmt)}";
 
         private static string FormatCubeDB(Complex c, string fmt)
-            => $"{(20.0 * Math.Log10(Math.Max(c.Magnitude, 1e-300))).ToString(fmt)}∠{(c.Phase * 180.0 / Math.PI):F1}°";
+            => $"{DbFloor.Format(DbFloor.Db20(c.Magnitude), fmt)}∠{(c.Phase * 180.0 / Math.PI):F1}°";
 
         /// <summary>Formats a complex cube value in the trace's Number Format (<see cref="MatrixFormat"/>):
         /// MA (Mag∠Angle), RI (Real±jImag), or DB (dB∠Angle). Used for Table cells with no scalar transform.</summary>
@@ -2752,10 +2752,10 @@ namespace CircuitRF.Ui.DataDisplay
             string desc   = ReadoutDescription(showFilePrefix);
 
             if (YAxisIsComplexValue)
-                return $"{desc}{suffix}={m.FormatComplex(GetMarkerDataPoint(m))}";
+                return DbFloor.Label($"{desc}{suffix}", m.FormatComplex(GetMarkerDataPoint(m)));
 
             double scalar = DataPointScalar(m.Freq);
-            return $"{desc}={FormatScalarValue(scalar, m)}";
+            return DbFloor.Label(desc, FormatScalarValue(scalar, m));
         }
 
         public string GetMultiMarkerLine(Marker m, Trace other)
@@ -2772,18 +2772,18 @@ namespace CircuitRF.Ui.DataDisplay
                 string valStr   = double.IsFinite(delta)
                     ? other.FormatScalarValue(delta, m)
                     : "NaN";
-                return $"  Δ{other.ReadoutDescription(false)}={valStr}";
+                return "  " + DbFloor.Label($"Δ{other.ReadoutDescription(false)}", valStr);
             }
 
             if (other.YAxisIsComplexValue)
             {
                 var    dp     = other.GetMarkerDataPoint(m);
                 string valStr = double.IsNaN(dp.Real) ? "NaN" : m.FormatComplex(dp);
-                return $"{other.ReadoutDescription(false)}={valStr}";
+                return DbFloor.Label(other.ReadoutDescription(false), valStr);
             }
 
             double scalar = other.DataPointScalar(m.Freq);
-            return $"{other.ReadoutDescription(false)}={other.FormatScalarValue(scalar, m)}";
+            return DbFloor.Label(other.ReadoutDescription(false), other.FormatScalarValue(scalar, m));
         }
 
         public string MuString(Marker m)
@@ -2833,7 +2833,7 @@ namespace CircuitRF.Ui.DataDisplay
             var Zn = Z / z0;
             return m.UseNormalizedImpedance
                 ? $"impedance=Z0*({m.FormatComplex(Zn)})"
-                : $"impedance={m.FormatComplex(Z)} Ω";
+                : DbFloor.Label("impedance", m.FormatComplex(Z)) + " Ω";
         }
 
         /// <summary>The 0-based port index a cube-bound reflection element (S(i,i)) reads; -1 when
@@ -2947,9 +2947,9 @@ namespace CircuitRF.Ui.DataDisplay
                 // goes into a matching network. Γ follows it only on a Γ plane (Smith/Polar), where it
                 // is a second reading of the same point; on a Rect contour the coordinate IS the
                 // impedance and a Γ row would just repeat the row above.
-                lines.Add(($"Z={m.FormatImpedanceComplex(ContourImpedance(coord))} Ω", false));
+                lines.Add((DbFloor.Label("Z", m.FormatImpedanceComplex(ContourImpedance(coord))) + " Ω", false));
                 if (cd.GammaPlane)
-                    lines.Add(($"Γ={m.FormatComplex(coord)}", false));
+                    lines.Add((DbFloor.Label("Γ", m.FormatComplex(coord)), false));
                 return lines;
             }
 

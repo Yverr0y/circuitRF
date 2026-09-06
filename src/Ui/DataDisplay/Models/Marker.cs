@@ -171,7 +171,7 @@ namespace CircuitRF.Ui.DataDisplay
                 MatrixFormat.MA =>
                     $"{c.Magnitude.ToString(fmt)}∠{(c.Phase * 180 / Math.PI).ToString(fmt)}°",
                 MatrixFormat.DB =>
-                    $"{(20 * Math.Log10(c.Magnitude + 1e-300)).ToString(fmt)} dB ∠{(c.Phase * 180 / Math.PI).ToString(fmt)}°",
+                    $"{DbFloor.Format(DbFloor.Db20(c.Magnitude), fmt)} dB ∠{(c.Phase * 180 / Math.PI).ToString(fmt)}°",
                 _ => FormatRI(c, fmt)
             };
         }
@@ -191,7 +191,7 @@ namespace CircuitRF.Ui.DataDisplay
                 MatrixFormat.MA =>
                     $"{c.Magnitude.ToString(fmt)}∠{(c.Phase * 180 / Math.PI).ToString(fmt)}°",
                 MatrixFormat.DB =>
-                    $"{(20 * Math.Log10(c.Magnitude + 1e-300)).ToString(fmt)} dB ∠{(c.Phase * 180 / Math.PI).ToString(fmt)}°",
+                    $"{DbFloor.Format(DbFloor.Db20(c.Magnitude), fmt)} dB ∠{(c.Phase * 180 / Math.PI).ToString(fmt)}°",
                 _ => FormatRI(c, fmt)
             };
         }

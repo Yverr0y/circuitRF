@@ -247,9 +247,9 @@ internal static class VersusResolver
             var raw = sliced.RealValues;
             values = transform switch
             {
-                CubeTransform.dB20 => raw.Select(v => 20.0 * Math.Log10(Math.Max(Math.Abs(v), 1e-300))).ToArray(),
+                CubeTransform.dB20 => raw.Select(v => DbFloor.Db20(Math.Abs(v))).ToArray(),
                 CubeTransform.dB10 or CubeTransform.dB
-                                   => raw.Select(v => 10.0 * Math.Log10(Math.Max(Math.Abs(v), 1e-300))).ToArray(),
+                                   => raw.Select(v => DbFloor.Db10(Math.Abs(v))).ToArray(),
                 CubeTransform.Mag  => raw.Select(Math.Abs).ToArray(),
                 CubeTransform.Real => raw,
                 CubeTransform.Imag => raw.Select(_ => 0.0).ToArray(),
@@ -262,10 +262,10 @@ internal static class VersusResolver
         switch (transform)
         {
             case CubeTransform.dB20:
-                values = cz.Select(z => 20.0 * Math.Log10(Math.Max(z.Magnitude, 1e-300))).ToArray(); return true;
+                values = cz.Select(z => DbFloor.Db20(z.Magnitude)).ToArray(); return true;
             case CubeTransform.dB10:
             case CubeTransform.dB:
-                values = cz.Select(z => 10.0 * Math.Log10(Math.Max(z.Magnitude, 1e-300))).ToArray(); return true;
+                values = cz.Select(z => DbFloor.Db10(z.Magnitude)).ToArray(); return true;
             case CubeTransform.Mag:
                 values = cz.Select(z => z.Magnitude).ToArray(); return true;
             case CubeTransform.Phase:

@@ -207,6 +207,29 @@ assigned to a **secondary (right-hand) Y axis** on a rectangular plot, which is 
 efficiency in per cent share one frame legibly. Autoscale is on until you set a limit; setting one turns
 it off for that axis, so a figure you have framed deliberately does not re-frame itself on the next run.
 
+## The decibel floor {#db-floor}
+
+**A decibel trace bottoms out at −250 dB.** Below that the curve is drawn flat at −250, and a readout
+says so with the inequality rather than a bare number — a marker info box reads `dB(S(1,1)) ≤ -250.00`,
+a table cell `≤ -250.00`.
+
+This matters more often than it sounds, because a quantity that is *analytically zero* does not come
+back as zero. An ideal 50 Ω line terminated in 50 Ω has S(1,1) ≡ 0, and what the solver returns is
+double-precision roundoff: magnitudes scattered over a few orders of magnitude with the occasional exact
+zero mixed in. Converted to dB with no floor, that is a trace flickering across a 59 dB band with spikes
+to −∞ — and autoscale then sizes the axis to the flicker, so anything real sharing the plot is squashed
+into a line. The floor turns the noise into a flat line at the bottom of the frame and lets the rest of
+the plot keep its scale.
+
+−250 dB was chosen to sit below anything a result can physically mean and above anything roundoff can
+produce: thermal noise power in a 1 Hz bandwidth is −204 dB(W), while roundoff on a quantity of order
+one reaches −285 dB. `dB`, `dB10` and `dB20` all share the one floor.
+
+**The floor is applied to the picture only.** A measurement expression, and any value you export to
+`.npy`, `.mat` or Touchstone, carries the unclamped number — so `dB(S(1,1))` written as a measurement
+can report a value below −250 dB even while the plot of the same quantity shows the floor. A number's
+value never depends on whether it happened to be drawn.
+
 ## Markers {#markers}
 
 Drop a marker on a trace to read its value. Markers are per-trace, they persist in the saved `.cdd`, and
