@@ -169,6 +169,19 @@ public sealed partial class SchematicViewModel : ObservableObject
     private int            _placementPortCount;
     private PlacementService? _placementService;
 
+    /// <summary>
+    /// Where the placement ghost currently sits (snapped world coords), or null when the pointer has
+    /// not been over the canvas since the tool was armed — in which case there is no ghost to draw.
+    ///
+    /// <para><b>This has to be remembered, not recomputed.</b> The overlay is rebuilt for reasons that
+    /// have nothing to do with the pointer — a selection change, most of all — and
+    /// <see cref="RebuildOverlay"/> has no pointer position to rebuild the ghost from. It used to
+    /// pass (0,0), which teleported the ghost to the world origin on every rebuild and left it there
+    /// until the next mouse move. Placing a component ends with <c>Selection.SelectOne</c>, so that
+    /// fired on EVERY placement: the ghost jumped away the instant the part landed.</para>
+    /// </summary>
+    private (double X, double Y)? _placeGhostPos;
+
     /// <summary>Fired after each successful component placement via the Place tool.</summary>
     public event Action<SymbolKind>? ComponentPlaced;
 
@@ -543,8 +556,8 @@ public sealed partial class SchematicViewModel : ObservableObject
             SelectedCanvasObjIds    = selObjs,
             SelectedWireSegments    = selSegs,
             WirePreview             = _wirePoints.Count > 0 ? _wirePoints.ToList() : null,
-            Ghost                   = ActiveTool == Tool.Place
-                ? BuildPlacementGhost(0, 0)
+            Ghost                   = ActiveTool == Tool.Place && _placeGhostPos is { } gp
+                ? BuildPlacementGhost(gp.X, gp.Y)
                 : null,
             RubberBand              = _isRubberBanding ? Overlay.RubberBand : null,
             LabelDragOffsets        = ActiveTool == Tool.MoveLabels && _moveLabelPhase == MoveLabelPhase.Moving
@@ -3231,6 +3244,10 @@ public sealed partial class SchematicViewModel : ObservableObject
 
     private void HandlePlacePress(double wx, double wy)
     {
+        // The press is a pointer position like any other: record it so the overlay rebuild this
+        // placement triggers redraws the ghost under the cursor rather than losing track of it.
+        _placeGhostPos = (EditModel.SnapToGrid(wx), EditModel.SnapToGrid(wy));
+
         // A part armed from an imported kit is placed as a cell reference — its symbol was installed
         // as a real cell at import time, so this reuses the ordinary cell-placement path rather than
         // introducing a second component species with its own render/pin/hit-test rules. A cell armed
@@ -3318,7 +3335,17 @@ public sealed partial class SchematicViewModel : ObservableObject
                 numParam.Expression = NextFreePinNum(EditModel).ToString();
         }
 
-        Execute(new PlaceComponentCommand(EditModel, comp));
+        // An IProbe dropped onto a wire is shorted out by that wire and reads nothing until the
+        // user deletes the stretch between its two pins — so do it for them, as part of the SAME
+        // undoable placement. Only ever here: this is the placement path, so a later drag of the
+        // probe cannot reach it, and the span is cleared only when SeriesProbeInsertion has proved
+        // the cut carries no junction and therefore changes no circuit. See that class.
+        IUiCommand place = new PlaceComponentCommand(EditModel, comp);
+        if (kind == SymbolKind.IProbe &&
+            SeriesProbeInsertion.FindShortedSpan(EditModel, comp) is { } shorted)
+            place = new CompositeCommand(new CutWireSpanCommand(EditModel, shorted), place);
+
+        Execute(place);
         Selection.SelectOne(comp.Id);
         ComponentPlaced?.Invoke(kind);
     }
@@ -3750,6 +3777,7 @@ public sealed partial class SchematicViewModel : ObservableObject
     {
         double sx = EditModel.SnapToGrid(wx);
         double sy = EditModel.SnapToGrid(wy);
+        _placeGhostPos = (sx, sy);
         Overlay = Overlay with
         {
             Ghost = BuildPlacementGhost(sx, sy),
@@ -4617,6 +4645,10 @@ public sealed partial class SchematicViewModel : ObservableObject
         CancelInlineEdit();
         _moveLabelComps = [];
         _moveLabelPhase = MoveLabelPhase.Picking;
+        // Arming a tool waits for the first mouse move before showing a ghost — so the remembered
+        // position goes with the ghost itself, or a newly-armed part would appear at wherever the
+        // pointer last happened to be, which may not even be over this canvas.
+        _placeGhostPos = null;
         // Clear drag overrides and segment highlight so the renderer falls back to model positions.
         Overlay = Overlay with { RubberBand = null, WirePreview = null, Ghost = null,
                                  ComponentDragPositions = null, WireDragPoints = null,

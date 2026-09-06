@@ -1,5 +1,7 @@
+using Avalonia.Input;
 using CircuitRF.Core.Design;
 using CircuitRF.Ui.Schematic;
+using CircuitRF.Ui.ViewModels;
 using Xunit;
 
 namespace CircuitRF.Ui.Tests;
@@ -11,6 +13,89 @@ namespace CircuitRF.Ui.Tests;
 /// </summary>
 public class PalettePlacementGhostTests
 {
+    // ── The ghost's POSITION: it must survive an overlay rebuild ────────────────────────────
+
+    private static (SchematicEditModel Model, SchematicViewModel Vm) MakeVm()
+    {
+        var model = new SchematicEditModel();
+        return (model, new SchematicViewModel(model));
+    }
+
+    /// <summary>
+    /// Reported by the owner while placing a current probe: the ghost jumps somewhere odd the moment
+    /// the part lands, and only comes back on the next mouse move.
+    ///
+    /// <para>It was never about the probe. <c>CommitPlacement</c> ends by selecting what it placed,
+    /// a selection change rebuilds the overlay, and the rebuild had no pointer position to work
+    /// from — so it rebuilt the ghost at world (0,0). Every armed placement of every component type
+    /// did this. The view model now remembers where the ghost is.</para>
+    /// </summary>
+    [Fact]
+    public void PlacingAPart_LeavesTheGhostUnderTheCursor_NotAtTheWorldOrigin()
+    {
+        var (model, vm) = MakeVm();
+        vm.BeginPlacement(SymbolKind.Resistor);
+        vm.OnPointerMoved(700, 300, leftDown: false);
+
+        vm.OnPointerPressed(700, 300, KeyModifiers.None);
+
+        Assert.Single(model.Components);
+        var ghost = vm.Overlay.Ghost;
+        Assert.NotNull(ghost);
+        Assert.Equal(700.0, ghost!.X);
+        Assert.Equal(300.0, ghost.Y);
+    }
+
+    /// <summary>The same for an IProbe, whose placement also CUTS a wire — a second model change,
+    /// and so a second chance to lose the ghost. This is the gesture that was reported.</summary>
+    [Fact]
+    public void PlacingAnIProbeOnAWire_LeavesTheGhostUnderTheCursor()
+    {
+        var (model, vm) = MakeVm();
+        var wire = new EditableWire();
+        wire.Points.AddRange([(0, 400), (900, 400)]);
+        model.Wires.Add(wire);
+
+        vm.BeginPlacement(SymbolKind.IProbe);
+        // R0 puts the probe's pins 100 below its origin, i.e. on the wire at y = 400.
+        vm.OnPointerMoved(500, 300, leftDown: false);
+        vm.OnPointerPressed(500, 300, KeyModifiers.None);
+
+        Assert.Equal(2, model.Wires.Count);          // the span between the pins really was cut
+        var ghost = vm.Overlay.Ghost;
+        Assert.NotNull(ghost);
+        Assert.Equal(500.0, ghost!.X);
+        Assert.Equal(300.0, ghost.Y);
+    }
+
+    /// <summary>The control, and the reason the remembered position is nullable: an armed tool shows
+    /// no ghost at all until the pointer has been over the canvas. A ghost parked at the origin is
+    /// exactly what the bug looked like.</summary>
+    [Fact]
+    public void ArmingAPlacement_ShowsNoGhostUntilThePointerMoves()
+    {
+        var (_, vm) = MakeVm();
+
+        vm.BeginPlacement(SymbolKind.Resistor);
+
+        Assert.Null(vm.Overlay.Ghost);
+    }
+
+    /// <summary>Arming a DIFFERENT part forgets the old position too — the pointer may have gone to
+    /// the palette to arm it, and a ghost left behind on the canvas would be stale.</summary>
+    [Fact]
+    public void ArmingASecondPart_ForgetsTheFirstsGhostPosition()
+    {
+        var (_, vm) = MakeVm();
+        vm.BeginPlacement(SymbolKind.Resistor);
+        vm.OnPointerMoved(700, 300, leftDown: false);
+        Assert.NotNull(vm.Overlay.Ghost);
+
+        vm.BeginPlacement(SymbolKind.Capacitor);
+
+        Assert.Null(vm.Overlay.Ghost);
+    }
+
     // ── The ghost: a kit reference must not be split by hand ────────────────────────────────
 
     [Fact]

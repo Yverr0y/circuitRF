@@ -1,5 +1,68 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## An IProbe placed on a wire clears the wire it shorts (2026-09-06)
+
+An IProbe is a 0 V series ammeter, so it is only useful IN a wire — and the gesture that puts it
+there (drop it on the wire whose current you want) lands both pins on that wire and shorts the probe
+with the very run it was meant to break into. Every user then made the same second gesture: delete
+the stretch between the two pins. `SeriesProbeInsertion` + `CutWireSpanCommand` do it for them, as
+part of the same undoable placement.
+
+**The once-only rule needed no flag on the component.** The removal lives in
+`SchematicViewModel.CommitPlacement`, which is documented as the single commit path for the
+click-arm and drag-and-drop placements. A later drag is a `MoveCommand` and a paste is
+`SchematicPasteCommand` — neither passes through it, so "only when first placed" falls out of
+where the code sits rather than out of state that has to be persisted, migrated and kept honest.
+A `bool HasClearedItsWire` on `EditableComponent` would have been a new field in the `.csch` format
+answering a question the call graph already answers.
+
+**Three non-obvious things about the guard.**
+
+- **The pins are exactly one connection pitch apart.** `SymbolPortDefs` puts IProbe's terminals at
+  local x = 0 and 100, and `SchematicEditModel.GridSize` defaults to 100. So on the shipped grid
+  there is no grid coordinate strictly BETWEEN the two pins, and the "refuse if a junction is in the
+  span" rule can essentially never fire. It is still the right rule and is still implemented in full
+  — the grid size is a per-document setting and `GridSnap` can be off — but a test written on the
+  default grid cannot exercise a single one of the refusals. `IProbePlacementClearsWireTests` turns
+  snap OFF for that reason and carries one grid-on test to prove the real gesture still works.
+- **A junction AT a pin is not a junction IN the span, and must not be treated as one.** A stub
+  tapping the wire exactly where the probe's second pin lands stays connected to that pin after the
+  cut — topology unchanged. `SchematicGeometry.PointOnSegmentInterior` is what draws that line, and
+  using `PointOnSegment` instead would refuse the most ordinary placement there is: a probe dropped
+  against the pin of the part whose current is wanted.
+- **A collinear duplicate wire is invisible to both of the obvious tests.**
+  `SegmentsIntersectInterior` rejects parallels by construction, and a duplicate run that outreaches
+  the span at both ends has no vertex inside it either. Without the explicit overlap check
+  (`RunsAlongSpan`) the cut would remove one wire and leave the probe still shorted by the other —
+  silently, since the schematic would look exactly right. A duplicate covering the WHOLE span is
+  caught earlier and differently, as a second candidate segment in `FindShortedSpan`.
+
+### The placement ghost jumped to the world origin on every placement
+
+Reported against the probe, but it was never about the probe. `RebuildOverlay` rebuilt the armed
+tool's ghost with `BuildPlacementGhost(0, 0)` — the overlay is rebuilt for reasons that have nothing
+to do with the pointer, and it had no pointer position to rebuild from. `CommitPlacement` ends with
+`Selection.SelectOne`, a selection change rebuilds the overlay, so **every armed placement of every
+component type** teleported the ghost to world (0,0) until the next mouse move put it back. It dates
+to well before this work; the probe just made it easy to notice, because the natural gesture is to
+drop a probe and then look at the wire rather than keep moving the mouse.
+
+The position is now remembered (`_placeGhostPos`), recorded by both `HandlePlaceMove` and
+`HandlePlacePress`. It is deliberately NULLABLE rather than defaulted: an armed tool shows no ghost
+until the pointer has been over the canvas — which is what `OnSvcPropertyChanged`'s own comment
+already promised ("ghost appears on first mouse move") and what `(0,0)` was quietly breaking. It is
+cleared in `CancelCurrentOp`, beside the existing `Ghost = null`, so arming a different part forgets
+the old position instead of parking a stale ghost where the pointer last happened to be — which may
+not even be over this canvas, since arming happens in the palette.
+
+**Net labels and junction dots need no special handling on the surviving pieces.** The cut replaces
+one `EditableWire` with two NEW objects, so every label anchored to the old wire is orphaned by id —
+but `SchematicViewModel.Execute` already wraps every command in `DotRevalidationCommand`, whose
+`RevalidateNetLabels` re-homes a label to whatever wire is under its foot and drops the dot whose
+crossing dissolved, all inside the same undo entry. A label whose foot is INSIDE the span would be
+removed rather than re-homed, which is why a label anchored there is one of the refusals.
+
+
 ## AUT-2 — what stayed in `src/Ui/Schematic`, and the four places src/Ui had to change (2026-09-05)
 
 `brief-automation-2-schematic-below-the-firewall.md` moved 41 of the folder's 105 files below the UI
