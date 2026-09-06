@@ -50,7 +50,7 @@ Instead, briefly paraphrase owner/user messages. Pre-existing quotes are ok.
 - Build:   `dotnet build`
 - Test:    `dotnet test`
 - Run CLI: `dotnet run --project src/Cli -- <args>`
-  Verbs: `sparam`, `dc`, **`hb`**, **`lp`**, **`lpp`**, **`em`**, **`convert`**, `elab`. **The CLI has its own design doc —
+  Verbs: `sparam`, `dc`, **`hb`**, **`lp`**, **`lpp`**, **`em`**, **`convert`**, **`new`**, **`import`**, `elab`. **The CLI has its own design doc —
   `docs/design/cli.md`** — covering the five-step anatomy of a run verb, the stdout/stderr split, and
   the rules below; read it before adding a verb. `hb`/`lp`/`lpp` run the netlist's harmonic-balance,
   loadpull and loadpull-pursuit analyses, and each runs the whole sweep when a `parametric_sweep`
@@ -84,6 +84,28 @@ Instead, briefly paraphrase owner/user messages. Pre-existing quotes are ok.
   silently drops every layer** — `src/Design/RESOLVED.md` records why. Gate:
   `tests/Ui.Tests/ConvertCliVerbTests.cs` (all 24 pairs, plus byte identity against the in-process
   `GdsiiExport`/`GerberExport` the GUI's own File ▸ Export calls).
+  **`new workspace <dir>`, `new cell <ws> <name>` and `import part <file> --into <dir>` create a
+  correct INITIAL document headlessly** (2026-09-05) — and **none of them contains any creation
+  logic**: each calls the one function the GUI's own command calls (`WorkspaceCreate.Create`,
+  `CellCreate`, `ComponentImport.Import`, all in `src/Design`). An operation that lives only in a
+  view model is not a capability, and a verb that re-implements one diverges from it silently — so
+  the extraction is the feature and `src/Cli/Authoring.cs` is only argument parsing, refusals and
+  reporting. `new` is ONE verb with a noun, not three; `new schematic` would be a fourth noun, never
+  a fourth verb. **There are deliberately no per-primitive edit verbs** — no `place-instance`, no
+  `set-parameter`: once a document exists, the way to change it is to WRITE it, because the format
+  is the contract. **Every default is the GUI dialog's** — `--tech` opens on what the New Workspace
+  combobox opens on (`--tech none` is its "None" row, and an unknown id is a refusal listing the
+  real ones, never a fallback), `--views` defaults to `schematic` because that is what New Cell
+  creates, and the layer mapping takes the same default `convert`'s does. Anything the dialog would
+  have ASKED is a refusal naming the flag that answers it: a source holding several parts prints
+  them and stops (`--cell` / `--variant` / `--list-parts`). `import part` **reports the layers its
+  technology lacks and writes none** unless `--add-layers` says so — the GUI's own install is
+  session-only and writes nothing to disk either. The paths created ARE the result, on stdout and in
+  `--json`. Gate: `tests/Ui.Tests/AuthoringCliVerbTests.cs` — the CLI as a process, byte for byte
+  against the in-process call, a comment-stripped source scan proving the view model kept no second
+  copy, and the end-to-end that authors a design and simulates it with no display at any step.
+  `ShippedTechnologies` and its `.ctech` resources moved to `src/Design` for this; moving such a
+  class without its `EmbeddedResource` items leaves it enumerating nothing, silently.
 - Package: **exactly one script per platform, and each builds everything that platform ships** —
   `packaging/windows/build-windows.ps1` (9 files: `.msi` x64/arm64/x86 in both install scopes, plus
   the `.zip` the updater fetches), `packaging/macos/build-macos.sh` (2 `.dmg`s, both architectures;
@@ -304,8 +326,10 @@ Source map: `src/Core` (layers 1–2 + the expression engine), `src/Engine` (lay
 `src/RfCore` (Touchstone I/O, network params, `DataSet`/`DataCube`, `.npy` export), `src/Design`
 (the design-layer DOCUMENT artifacts — the layout model and `.clay` reader, the technology model and
 `.ctech` reader, the `.ccell` cell-folder format, the `.cem` EM setup and the extractors that turn
-geometry + stackup into an `EmProblem`, **and `Layout/Interchange/` — every GDSII, DXF, Gerber,
-Excellon and `.kicad_pcb` reader and writer**), `src/Ui` (Avalonia), `src/Cli` (headless driver +
+geometry + stackup into an `EmProblem`, **`Layout/Interchange/` — every GDSII, DXF, Gerber, Excellon
+and `.kicad_pcb` reader and writer**, and **the functions that CREATE those artifacts** —
+`WorkspaceCreate`, `CellCreate`, `ComponentImport` — which the GUI's own New Workspace / New Cell /
+Import Component call, not a headless copy of them), `src/Ui` (Avalonia), `src/Cli` (headless driver +
 test harness). `RfCore` is an ordinary first-party project alongside the rest — see §Stack for why it is
 no longer at the repo root, and why that changed nothing architecturally.
 

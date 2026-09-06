@@ -6,7 +6,7 @@ run an EM setup. Detail of that move is in `src/Ui/Layout/Em/RESOLVED.md`.
 
 ## What this project is
 
-**The files a layout and an EM setup are stored in, and the code that reads them.** Concretely:
+**The files a design is stored in, and the code that reads, writes and CREATES them.** Concretely:
 
 | Folder | Holds |
 |---|---|
@@ -14,8 +14,10 @@ run an EM setup. Detail of that move is in `src/Ui/Layout/Em/RESOLVED.md`.
 | `Layout/Em/` | the `.cem` model + reader, the cross-section and planar extractors, port extraction, `EmRunService`, `EmSetupResolver`, SnP provenance |
 | `Layout/Drc/` | only what the `.clay`/`.ctech` FORMAT names — the waiver record and the layer-expression parser. The DRC engine is not here |
 | `Layout/PCells/` | only `PCellValue` and how it serialises. No generators, no handle solver, no Python |
-| `Cells/` | the `.ccell` cell-folder format and the atomic write behind every save |
-| `Workspace/` | the `.cws` reader and R-fgn-3's ancestor-workspace walk |
+| `Cells/` | the `.ccell` cell-folder format, the atomic write behind every save, and `CellCreate` — the writer of an empty `.csch`/`.csym`/`.clay`, which the GUI's New Cell / New Schematic / New Symbol / New Layout call |
+| `Workspace/` | the `.cws` reader, R-fgn-3's ancestor-workspace walk, and `WorkspaceCreate` — the four operations File ▸ New Workspace performs after its dialog returns |
+| `Schematic/` | the `.csch` model + persistence, schematic geometry, net extraction, the cell/kit resolvers and the SPICE-import builders — the editors and sessions stayed in `src/Ui` (AUT-2) |
+| `Symbol/` | the `.csym` model + persistence, symbol geometry, pin names and sides (AUT-2) |
 | `Theming/` | `Rgba`, because a technology's layers carry colours |
 | `Results/` | where a run's grouped `.npy` lands and what it is called |
 
@@ -49,6 +51,15 @@ same applies to anything else the GUI stores per-machine.
 `src/Ui` and `src/Cli`, one way only. `src/Ui/GlobalUsings.cs` lists every namespace that moved here,
 in one place, rather than in ~300 `using` lines — that file is the map when a type seems to appear
 from nowhere in `src/Ui`.
+
+**And that direction is now load-bearing for CREATION, not just for reading.** `circuitrf new
+workspace` / `new cell` / `import part` exist because `WorkspaceCreate`, `CellCreate` and
+`ComponentImport` are here and the GUI calls them — an operation that lives only in a view model is
+not a capability, and a verb that re-implements one diverges from it silently
+(`brief-automation-3-authoring-verbs.md`). So a new "make an artifact" operation belongs HERE with a
+shell wrapper in `src/Ui`, never in a view model with a copy in `src/Cli`.
+`tests/Ui.Tests/AuthoringCliVerbTests` holds that shut both ways: byte identity against the
+in-process call, and a comment-stripped source scan proving the view model kept no second copy.
 
 ## Gate
 
