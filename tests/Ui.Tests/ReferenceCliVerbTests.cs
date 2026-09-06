@@ -29,8 +29,10 @@
 // ================================================================
 
 using System.Diagnostics;
+using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using CircuitRF.Design.Reference;
 using CircuitRF.Design.Schematic;
 using CircuitRF.Core.Devices;
@@ -206,7 +208,14 @@ public sealed class ReferenceCliVerbTests(ITestOutputHelper output)
 
             if (rows.Count == 0)
             {
-                Assert.Contains("No fixed parameters", html, StringComparison.Ordinal);
+                // Two different sentences, because an empty list has two meanings: an SDD's rows are
+                // the user's to author, an IProbe simply has none. The registry's own indexed-
+                // parameter template is what separates them.
+                Assert.Contains(
+                    ComponentTypeRegistry.UserParamTemplate(kind) is not null
+                        ? "No fixed parameters"
+                        : "No parameters.",
+                    html, StringComparison.Ordinal);
                 checkedKinds++;
                 continue;
             }
@@ -239,6 +248,15 @@ public sealed class ReferenceCliVerbTests(ITestOutputHelper output)
             var    p    = ComponentCatalog.PortsOf(kind);
 
             if (p.Names.Count == 0) continue;
+
+            if (p.Names.Count == 1)
+            {
+                // A single terminal is a sentence, not a two-column table with one row in it — see
+                // AOneTerminalComponentGetsASentence_NotATable. The name still has to appear.
+                Assert.Contains(System.Net.WebUtility.HtmlEncode(p.Names[0]), html, StringComparison.Ordinal);
+                withPins++;
+                continue;
+            }
 
             int at = 0;
             foreach (string name in p.Names)
@@ -540,6 +558,169 @@ public sealed class ReferenceCliVerbTests(ITestOutputHelper output)
         => [.. JsonDocument.Parse(stdout).RootElement.GetProperty("diagnostics").EnumerateArray()];
 
     private readonly record struct CliRun(int ExitCode, string StdOut, string StdErr);
+
+
+    // ══ The page's own tables sit in the page's own sections ═════════════════════════════════════
+
+    /// <summary>
+    /// Every <c>{{table: components/X}}</c> in <c>components.md</c> is in the section whose
+    /// <c>{{symbol: y}}</c> names the same component.
+    ///
+    /// <para><b>Why this is a test and not a review note.</b> It is a bug that already shipped. The
+    /// VCCS section's table was authored beneath the VCCS's own prose, and the VCVS section was
+    /// later inserted ABOVE it — which left the VCCS with no table at all and printed the VCCS's
+    /// <c>G</c> under the VCVS's heading, where the parameter is <c>E</c>. Nothing failed: both
+    /// halves render, the numbers are real, and the only way to see it is to know what a VCVS's
+    /// parameter is called. An inserted section pushing the previous one's placeholder down is the
+    /// generic shape of that mistake, so the generic shape is what is gated (owner, 2026-09-05).</para>
+    ///
+    /// <para><b>It does not require a table.</b> Ground is one terminal on net <c>0</c> with no
+    /// parameters and wants no table; several sections cover a family and legitimately carry
+    /// several. What is asserted is that a table which IS present belongs to the section it is in —
+    /// the only part a reader cannot check for themselves.</para>
+    /// </summary>
+    [Fact]
+    public void EveryComponentTableIsInTheSectionForItsOwnComponent()
+    {
+        string page = File.ReadAllText(
+            Path.Combine(RepoRoot(), "docs", "user", "src", "reference", "components.md"));
+
+        // file stem (what {{symbol: …}} names) → SymbolKind, from the figure catalogue the page's
+        // own figures come from. Nothing here transcribes that mapping.
+        var kindOfStem = SymbolArtworkGenerator.Catalog.ToDictionary(r => r.File, r => r.Kind,
+                                                                    StringComparer.Ordinal);
+
+        var symbolRef = new Regex(@"\{\{symbol:\s*([a-z0-9-]+)\s*\}\}", RegexOptions.Compiled);
+        var tableRef  = new Regex(@"\{\{table:\s*components/(\w+)\s*\}\}", RegexOptions.Compiled);
+
+        // Split on ### headings — the level a component section is written at.
+        // Every heading level from ### down: the FET and MOS families are one ### section with a
+        // #### (and #####) sub-section per law, and each of those carries its own table. Splitting
+        // only on ### would lump eight tables under six figures and report a false mismatch.
+        var sections = Regex.Split(page, @"^(?=#{3,6}\s)", RegexOptions.Multiline);
+
+        var problems = new List<string>();
+        int checkedTables = 0;
+
+        foreach (string section in sections)
+        {
+            string heading = section.StartsWith('#')
+                ? section[..section.IndexOf('\n')].Trim()
+                : "(preamble)";
+
+            var drawn = symbolRef.Matches(section)
+                                 .Select(m => m.Groups[1].Value)
+                                 .Where(kindOfStem.ContainsKey)
+                                 .Select(stem => kindOfStem[stem])
+                                 .ToHashSet();
+
+            foreach (System.Text.RegularExpressions.Match m in tableRef.Matches(section))
+            {
+                checkedTables++;
+                Assert.True(Enum.TryParse<SymbolKind>(m.Groups[1].Value, ignoreCase: true, out var tabled),
+                            $"{heading}: '{m.Groups[1].Value}' is not a SymbolKind.");
+
+                if (drawn.Count == 0 || drawn.Contains(tabled)) continue;
+
+                problems.Add(
+                    $"{heading}\n" +
+                    $"      shows the figure(s) for : {string.Join(", ", drawn.OrderBy(k => k.ToString(), StringComparer.Ordinal))}\n" +
+                    $"      but tabulates           : {tabled}");
+            }
+        }
+
+        Assert.True(checkedTables > 50, $"only {checkedTables} component tables found — the scan is not reading the page");
+        Assert.True(problems.Count == 0,
+            "A component table is in a section that draws a different component. That reads as the\n" +
+            "section's own table and is wrong in the quietest possible way — the numbers are real,\n" +
+            "they are just another part's. Usually a section was inserted above an existing table.\n\n" +
+            string.Join("\n", problems));
+    }
+
+    /// <summary>
+    /// A component whose terminal ORDER carries meaning says so, in one place, and both renderings
+    /// read it from there.
+    ///
+    /// <para>The catalogue's terminal table can only ever print what <see cref="SymbolPortDefs"/>
+    /// names. For the two-terminal library it names nothing — the pins are "1" and "2" — so the
+    /// table said "net 1 is terminal 1" and carried no information at all (owner, 2026-09-05). What
+    /// it needed was the fact a pin name cannot hold: whether the ends may be swapped. This asserts
+    /// the note reaches BOTH renderings from
+    /// <see cref="ComponentTypeRegistry.TerminalNote"/> rather than being written twice.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(SymbolKind.Resistor)]     // symmetric, and saying so is the whole answer
+    [InlineData(SymbolKind.Inductor)]     // symmetric alone, not once a Mutual couples it
+    [InlineData(SymbolKind.Srlc)]
+    [InlineData(SymbolKind.Prlc)]
+    [InlineData(SymbolKind.Mtaper)]       // asymmetric, told apart by a parameter
+    [InlineData(SymbolKind.Match)]
+    [InlineData(SymbolKind.NonlinearC)]
+    [InlineData(SymbolKind.IProbe)]
+    public void ATerminalOrderNoteIsStatedOnce_AndReachesBothRenderings(SymbolKind kind)
+    {
+        string declared = ComponentTypeRegistry.TerminalNote(kind);
+        Assert.NotEqual("", declared);
+
+        // The catalogue carries it …
+        Assert.Equal(declared, ComponentCatalog.PortsOf(kind).OrderNote);
+
+        // … the documentation table renders it …
+        string html = DocTables.ComponentPins(kind, 2);
+        Assert.Contains(WebUtility.HtmlEncode(declared), html, StringComparison.Ordinal);
+
+        // … and so does the machine answer, which is the same computation reaching a caller that
+        // never opens the page.
+        var run = RunCli("reference", "components", ComponentTypeRegistry.EngineReference(kind));
+        Assert.Equal(0, run.ExitCode);
+        Assert.Contains(declared, run.StdOut, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The five two-terminal SOURCES name their terminals, because polarity is what tells them
+    /// apart and the netlist order is the only place a caller can read it.
+    ///
+    /// <para>Pin ORDER is unchanged by that naming and is still the engine contract, so this asserts
+    /// the position of each pin as well as its name: a rename that moved a pin would be a different
+    /// circuit.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(SymbolKind.Vdc)]
+    [InlineData(SymbolKind.ToneSource)]
+    [InlineData(SymbolKind.CurrentToneSource)]
+    [InlineData(SymbolKind.P1Tone)]
+    [InlineData(SymbolKind.PnTone)]
+    public void ATwoTerminalSourceNamesItsPolarity_AndKeepsItsGeometry(SymbolKind kind)
+    {
+        var pins = SymbolPortDefs.For(kind);
+
+        Assert.Equal(["+", "−"], pins.Select(p => p.Name).ToArray());
+
+        // The default two-terminal geometry, unchanged: + on top, − at the bottom.
+        Assert.Equal((0f, -200f), (pins[0].LocalX, pins[0].LocalY));
+        Assert.Equal((0f, +200f), (pins[1].LocalX, pins[1].LocalY));
+
+        // And the symbol the renderer draws agrees, since those are two code paths.
+        Assert.Equal(["+", "−"], BuiltInSymbols.Primitives(kind).Pins.Select(p => p.Name).ToArray());
+    }
+
+    /// <summary>
+    /// A one-terminal component is described in a sentence rather than in a two-column table with a
+    /// single row in it — which is the "net 1 is terminal 1" shape this whole surface exists to
+    /// avoid (owner, 2026-09-05).
+    /// </summary>
+    [Theory]
+    [InlineData(SymbolKind.TermG)]
+    [InlineData(SymbolKind.Pin)]
+    [InlineData(SymbolKind.Tuner)]
+    public void AOneTerminalComponentGetsASentence_NotATable(SymbolKind kind)
+    {
+        Assert.Single(ComponentCatalog.PortsOf(kind).Names);
+
+        string html = DocTables.ComponentPins(kind, 1);
+        Assert.DoesNotContain("<table", html, StringComparison.Ordinal);
+        Assert.Contains("One terminal", html, StringComparison.Ordinal);
+    }
 
     private static CliRun RunCli(params string[] args) => RunCliIn(RepoRoot(), args);
 

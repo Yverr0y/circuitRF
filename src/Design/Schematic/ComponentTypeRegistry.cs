@@ -729,6 +729,102 @@ public static class ComponentTypeRegistry
     };
 
     /// <summary>
+    /// What the terminal ORDER means for this kind — the fact a pin name cannot carry and no figure
+    /// can show.
+    ///
+    /// <para><b>Why this exists.</b> <see cref="SymbolPortDefs"/> names a terminal wherever the
+    /// terminal HAS a name (<c>g d s</c>, <c>a c</c>, <c>out+ out- ctrl+ ctrl-</c>), and for those
+    /// the name is the whole answer. But most two-terminal parts have no names to give, so the
+    /// catalogue could only ever say "net 1 is terminal 1" — a table that restates the row number
+    /// and carries nothing (owner, 2026-09-05). What a caller actually needs to know about those is
+    /// whether the order MATTERS, and if so what distinguishes the ends. That is a fact about the
+    /// component, not about a pin, so it is stated once here.</para>
+    ///
+    /// <para><b>"They are interchangeable" is an answer, not a blank.</b> A reader who is told a
+    /// resistor's ends may be swapped is finished; a reader shown a numbered table has to go and
+    /// find out. The two are the same length on the page and only one of them is information.</para>
+    ///
+    /// <para><b>Empty is still the honest default.</b> A kind nobody has written a note for gets
+    /// nothing rather than a guess — the rule <see cref="ParameterDescription"/> already follows,
+    /// and for the same reason: an invented claim about terminal order is exactly the
+    /// plausible-specific-and-wrong failure the reference surface exists to prevent. A file-backed
+    /// component (<see cref="SymbolKind.SpiceModel"/>, <see cref="SymbolKind.VerilogA"/>) is left
+    /// deliberately empty — its terminals come from the file it names, so no note written here could
+    /// be true of a placed one.</para>
+    /// </summary>
+    public static string TerminalNote(SymbolKind kind) => kind switch
+    {
+        // ── Symmetric, and saying so is the point ────────────────────────────
+        SymbolKind.Resistor or SymbolKind.Capacitor or SymbolKind.Bead =>
+            "The two terminals are interchangeable — swapping them gives the same circuit.",
+
+        SymbolKind.Tline or SymbolKind.Mlin =>
+            "The two terminals are interchangeable: the line is uniform, so neither end is the input.",
+
+        SymbolKind.Atten or SymbolKind.Filter =>
+            "The two terminals are interchangeable — this block is symmetric, and its parameters "
+          + "describe both ports at once.",
+
+        SymbolKind.MBend =>
+            "The two terminals are interchangeable. One width and one angle describe the whole bend, "
+          + "so the pins differ only in which way it turns on the canvas.",
+
+        // ── Symmetric ALONE, and not once coupled ────────────────────────────
+        // The dot convention, which is a property of the pair rather than of either inductor. It is
+        // stated on all three because all three implement IInductiveBranch and any of them may be
+        // either end of a Mutual (owner, 2026-09-05).
+        SymbolKind.Inductor or SymbolKind.Srlc or SymbolKind.Prlc =>
+            "Interchangeable on its own — but NOT once coupled. A Mutual (M) couples the two "
+          + "elements' branch currents, and each branch current runs from that element's own "
+          + "terminal 1 to its terminal 2, so swapping one of them reverses the sign of the "
+          + "coupling. Terminal 1 is the dotted end.",
+
+        // ── Asymmetric, and the ends are told apart by a parameter ───────────
+        SymbolKind.Mtaper =>
+            "Not interchangeable: terminal 1 is the W1 end and terminal 2 the W2 end.",
+
+        SymbolKind.Mklopf =>
+            "Not interchangeable: terminal 1 is the Z1 end and terminal 2 the Z2 end.",
+
+        SymbolKind.Match =>
+            "Not interchangeable: terminal 1 is the R1 side and terminal 2 the R2 side. The "
+          + "synthesised ladder is stored R1-first, so swapping the two reverses every asymmetric "
+          + "match.",
+
+        SymbolKind.NonlinearC =>
+            "C(V) is evaluated at V(terminal 1) − V(terminal 2), so any odd coefficient (C1, C3, …) "
+          + "makes the two terminals distinct. With C0 alone the capacitor is linear and they are "
+          + "interchangeable.",
+
+        // ── Sources: the polarity the pin names carry, and what it is FOR ────
+        SymbolKind.Vdc =>
+            "Vdc is the voltage at + relative to −.",
+
+        SymbolKind.ToneSource =>
+            "V and Vdc are the voltage at + relative to −, and Phase is referred to the same pair.",
+
+        SymbolKind.CurrentToneSource =>
+            "A positive I is delivered INTO the + terminal and drawn out of the −, which is what the "
+          + "arrow on the + lead points at. Note this is the opposite sense to the VCCS's arrow, "
+          + "which is a controlled source and is drawn the way controlled sources are.",
+
+        SymbolKind.P1Tone or SymbolKind.PnTone =>
+            "+ is the RF output and − the reference, normally ground — Term's own convention, since "
+          + "this is a source with Term's internal resistance in front of it. The source's internal "
+          + "impedance Z is in series with +.",
+
+        // ── Named terminals whose names are abbreviations ────────────────────
+        SymbolKind.Diode =>
+            "a is the anode and c the cathode; forward current flows a to c.",
+
+        SymbolKind.IProbe =>
+            "A 0 V ammeter: the current it reports flows np to nm. Swapping the two negates every "
+          + "measurement that reads it.",
+
+        _ => "",
+    };
+
+    /// <summary>
     /// Engine type-reference string for a given SymbolKind — what goes in the .cnl Reference field
     /// and into <see cref="Instance.Reference"/>. Differs from <see cref="DisplayName(SymbolKind)"/>
     /// for ZPort ("Z" vs "Z_Port"), ToneSource ("VTone" vs "V_1Tone"), CurrentToneSource

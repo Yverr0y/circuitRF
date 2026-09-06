@@ -28,11 +28,17 @@ public sealed record CatalogParameter(
 /// <param name="Names">The terminals in the order a <c>.cnl</c> line writes their nets.</param>
 /// <param name="ListedAt">The port count <paramref name="Names"/> was listed at, when the count is
 /// parameter-determined — so a reader can tell an example from an answer.</param>
+/// <param name="OrderNote">What the ORDER means — whether the terminals may be swapped, and what
+/// tells them apart when they may not. From <see cref="ComponentTypeRegistry.TerminalNote"/>; empty
+/// where nobody has stated it, which is the honest answer and never a placeholder. Most
+/// two-terminal parts have no pin names to give, so without this the table could only restate its
+/// own row numbers (owner, 2026-09-05).</param>
 public sealed record CatalogPorts(
     int?                  Count,
     IReadOnlyList<string> Names,
     string?               DeterminedBy,
-    int?                  ListedAt);
+    int?                  ListedAt,
+    string                OrderNote = "");
 
 /// <summary>One palette entry that places this primitive: what it is called, where it is found, and
 /// the parameters a freshly-placed one carries.</summary>
@@ -221,15 +227,18 @@ public static class ComponentCatalog
         string? by     = ComponentTypeRegistry.PortCountParameter(kind);
         var     listed = SymbolPortDefs.For(kind, ListedPortCount);
         var     names  = listed.Select(p => p.Name).ToArray();
+        // What the order MEANS, which is the half a pin name cannot carry. It travels even where
+        // the terminals are unnamed — for R, L and C it is the ONLY thing the table has to say.
+        string  note   = ComponentTypeRegistry.TerminalNote(kind);
 
         if (listed.Length != SymbolPortDefs.For(kind, ListedPortCount + 1).Length)
             // Named, not counted. The terminals still travel — a caller writing a 2-port one needs
             // their order — labelled with the count they were listed at.
-            return new CatalogPorts(null, names, by, ListedPortCount);
+            return new CatalogPorts(null, names, by, ListedPortCount, note);
 
-        if (names.Length == 0 && by is not null) return new CatalogPorts(null, [], by, null);
+        if (names.Length == 0 && by is not null) return new CatalogPorts(null, [], by, null, note);
 
-        return new CatalogPorts(names.Length, names, null, null);
+        return new CatalogPorts(names.Length, names, null, null, note);
     }
 
     /// <summary>
@@ -266,17 +275,30 @@ public static class ComponentCatalog
 
         bool agreed = ports.All(p => Same(p, ports[0]));
 
+        // The order note is a fact about the TYPE, so it survives tiles that disagree about pins —
+        // but only if they agree about IT. Two tiles telling a caller different things about their
+        // shared token is not something to pick a winner from, and each symbol below carries its own.
+        string note = ports.All(p => string.Equals(p.OrderNote, ports[0].OrderNote, StringComparison.Ordinal))
+            ? ports[0].OrderNote
+            : "";
+
         if (by is not null)
             // One symbol, or several agreeing: keep its example. Several that disagree — the two
             // switch tiles — give up the example rather than averaging two pin sets into one that is
             // true of neither; each symbol below still carries its own.
-            return agreed ? ports[0] with { Count = null, DeterminedBy = by } : new CatalogPorts(null, [], by, null);
+            return agreed
+                ? ports[0] with { Count = null, DeterminedBy = by, OrderNote = note }
+                : new CatalogPorts(null, [], by, null, note);
 
         return agreed && ports[0].Count is { } n
-            ? new CatalogPorts(n, ports[0].Names, null, null)
-            : new CatalogPorts(null, [], null, null);
+            ? new CatalogPorts(n, ports[0].Names, null, null, note)
+            : new CatalogPorts(null, [], null, null, note);
     }
 
+    /// <summary>Whether two symbols' PIN facts agree. Deliberately not the record's own equality:
+    /// <see cref="CatalogPorts.OrderNote"/> is prose about the type and is reconciled separately in
+    /// <see cref="TokenPorts"/>, so a differing note must not suppress a pin count the tiles do
+    /// agree on.</summary>
     private static bool Same(CatalogPorts a, CatalogPorts b)
         => a.Count == b.Count && a.DeterminedBy == b.DeterminedBy && a.ListedAt == b.ListedAt
         && a.Names.SequenceEqual(b.Names, StringComparer.Ordinal);

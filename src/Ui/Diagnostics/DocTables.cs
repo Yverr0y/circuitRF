@@ -40,8 +40,14 @@ public static class DocTables
     public static string ComponentParameters(SymbolKind kind, int ports)
     {
         var rows = ComponentCatalog.Parameters(kind, ports);
+        // An empty parameter list has TWO meanings and the old single sentence asserted the wrong
+        // one for most of them: an IProbe or a Ground has no parameters at all, while an SDD's rows
+        // really are the user's to author. The registry already separates the two — a kind with an
+        // indexed-parameter template is one whose rows a user adds — so ask it rather than claim.
         if (rows.Count == 0)
-            return "<p class=\"small\">No fixed parameters — this component's rows are authored by the user.</p>";
+            return ComponentTypeRegistry.UserParamTemplate(kind) is not null
+                ? "<p class=\"small\">No fixed parameters — this component's rows are authored by the user.</p>"
+                : "<p class=\"small\">No parameters.</p>";
 
         // The MEANING column appears only when the catalogue has meanings to put in it. That is a
         // real limit of what can be generated and it is better stated than papered over: the registry
@@ -98,6 +104,18 @@ public static class DocTables
                 : "<p class=\"small\">No terminals — this component connects to nothing on the canvas.</p>";
 
         var sb = new StringBuilder();
+
+        // A ONE-terminal component gets a sentence, not a table. Two columns and a single row of
+        // "1 → 1" is the shape this whole table exists to avoid, and the reader can see the single
+        // lead in the figure directly above it (owner, 2026-09-05).
+        if (p.Names.Count == 1)
+        {
+            sb.Append($"<p class=\"small\">One terminal, <code>{E(p.Names[0])}</code> — an instance line writes " +
+                      "a single net.");
+            sb.AppendLine(p.OrderNote.Length == 0 ? "</p>" : $" {E(p.OrderNote)}</p>");
+            return sb.ToString();
+        }
+
         sb.AppendLine("<table class=\"param-table\">");
         sb.AppendLine("<thead><tr><th>Net</th><th>Terminal</th></tr></thead><tbody>");
         for (int i = 0; i < p.Names.Count; i++)
@@ -105,10 +123,14 @@ public static class DocTables
         sb.AppendLine("</tbody></table>");
 
         sb.Append("<p class=\"small\">The nets of an instance line, in this order.");
-        sb.AppendLine(p.DeterminedBy is { } by
-            ? $" How many there are is set by <code>{E(by)}</code>; the table shows " +
-              $"<code>{E(by)}&nbsp;=&nbsp;{p.ListedAt}</code>.</p>"
-            : "</p>");
+        if (p.DeterminedBy is { } by)
+            sb.Append($" How many there are is set by <code>{E(by)}</code>; the table shows " +
+                      $"<code>{E(by)}&nbsp;=&nbsp;{p.ListedAt}</code>.");
+        // What the order MEANS. For every part whose terminals carry no names — R, L, C and the rest
+        // of the two-terminal library — this sentence is the entire content of the table above it,
+        // which without it says only that net 1 is terminal 1.
+        if (p.OrderNote.Length > 0) sb.Append(' ').Append(E(p.OrderNote));
+        sb.AppendLine("</p>");
         return sb.ToString();
     }
 

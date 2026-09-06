@@ -312,6 +312,11 @@ namespace RfCore.Export
     /// <param name="Names">The terminals, in the order a <c>.cnl</c> line writes their nets.</param>
     /// <param name="ListedAt">The port count <paramref name="Names"/> was listed at, when the count
     /// is parameter-determined — so an example cannot be read as an answer.</param>
+    /// <param name="OrderNote">What the terminal ORDER means: whether the two ends may be swapped,
+    /// and what tells them apart when they may not. Absent where nobody has stated it. Most
+    /// two-terminal parts have no terminal NAMES to give, so this is the only thing
+    /// <paramref name="Names"/> could not already say — without it the terminal listing for an R, an
+    /// L or a C restates its own index and nothing else.</param>
     public sealed record ReferencePortsJson(
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         int?                  Count,
@@ -319,7 +324,9 @@ namespace RfCore.Export
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string?               DeterminedBy,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        int?                  ListedAt);
+        int?                  ListedAt,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string?               OrderNote = null);
 
     /// <param name="Kind">The palette entry's own name — what the editor and the <c>.csch</c> call
     /// it, which is not always what the <c>.cnl</c> calls it.</param>

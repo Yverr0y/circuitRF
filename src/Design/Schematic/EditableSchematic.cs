@@ -267,6 +267,32 @@ public static class SymbolPortDefs
             // external-symbol-reference path — so this serves the palette tile and the ghost only.
             case SymbolKind.SpiceModel:
                 return GenerateSnpPorts(2, refNode: false, cfg: SnpPinConfig.Standard, pitch: SnpPitch.Loose);
+            // The two-terminal SOURCES, whose terminals are told apart by polarity and not by
+            // position. They fell through to the numbered default below until 2026-09-05, which made
+            // the reference catalogue's terminal table say "net 1 is terminal 1" for every one of
+            // them — a row that restates its own row number (owner). The names are Term's own "+"
+            // and "−", because Term already names them that way and P1Tone is literally Term with a
+            // source behind its resistance; the geometry is the default's, unchanged, so nothing
+            // moves on any schematic.
+            //
+            // Pin ORDER is unchanged and is still the engine contract — [0] = +, [1] = − — so this
+            // renames what the terminals are CALLED and nothing else. Names reach the symbol editor
+            // and the reference surface; connectivity is by coordinate and port index
+            // (SchematicEditModel.PortDefsOf carries no name at all), so nothing extracts differently.
+            case SymbolKind.Vdc:
+            case SymbolKind.ToneSource:
+            // ITone's "+" is the pin its arrowhead points at — the engine's "a current source
+            // injects into its first node" convention, which BuildCurrentToneSource draws.
+            case SymbolKind.CurrentToneSource:
+            case SymbolKind.P1Tone:
+            case SymbolKind.PnTone:
+                return [("+", 0f, -200f), ("−", 0f, +200f)];
+            // The vertical two-terminal fallback. What lands here is every part whose two ends are
+            // told apart by NOTHING — R, L, C, SRLC, PRLC, Bead, NonlinearC — plus the file-backed
+            // kinds whose real terminals come from the file they name and not from this table.
+            // Numbers are the honest name for a pin with no identity; what the ORDER means, where it
+            // means anything (an inductor's dot, a NonlinearC's C(V)), is stated once in
+            // ComponentTypeRegistry.TerminalNote rather than smuggled into a pin name.
             default:
                 return [("1", 0f, -200f), ("2", 0f, 200f)];
         }

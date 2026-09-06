@@ -2358,3 +2358,81 @@ Three decisions worth keeping:
 **145,410 bytes** across 8 topics, in this assembly — so in the GUI's binary as well as the CLI's.
 Reported by the gate's test output rather than asserted against a threshold, so the number stays
 current in the TRX with nothing to maintain.
+
+## The terminal table said "net 1 is terminal 1" for a third of the library (2026-09-05)
+
+AUT-6 gave every component section a generated terminal table. The owner read it and asked what the
+point was: for R, L, C, SRLC, PRLC, Bead, NonlinearC, the sources, TLIN, MLIN, the tapers, the bend
+and Match it printed two columns saying net 1 is terminal 1 and net 2 is terminal 2. It restated its
+own row numbers.
+
+**The cause is one `default:` arm.** `SymbolPortDefs.For` has an explicit case for every kind whose
+terminals have names — `g d s`, `a c`, `c b e`, `out+ out- ctrl+ ctrl-`, `RF LO IF`, `np nm` — and a
+catch-all returning `("1", 0, -200), ("2", 0, +200)` for the vertical two-terminal parts. Those
+names were never meant to be READ; they existed so a pin had a string. The moment a table rendered
+them, the catch-all became a claim, and the claim was empty.
+
+**The half the owner expected was real and was in the ARTWORK, not the data.** Vdc and VTone draw
+`+` and `−` as text primitives at fixed coordinates in `BuiltInSymbols`, and Term names its pins
+that way in the port table. P1Tone — which is Term with a source behind its resistance — did
+neither, so its polarity existed only in a code comment. The five two-terminal sources (Vdc,
+ToneSource, CurrentToneSource, P1Tone, PnTone) now name their terminals `+` and `−` in
+`SymbolPortDefs`.
+
+**That rename was safe for a reason worth writing down: nothing connects by pin NAME.**
+`SchematicEditModel.PortDefsOf` returns `(LocalX, LocalY, PortIndex)` and carries no name at all, so
+net extraction, hit-testing, wire snapping and pin-follow are all coordinate-and-index. A pin name
+reaches only the symbol editor, `SpiceModelPeek`'s terminal listing and this catalogue. The geometry
+is unchanged and `ATwoTerminalSourceNamesItsPolarity_AndKeepsItsGeometry` asserts the coordinates
+alongside the names, because a rename that moved a pin would be a different circuit.
+
+**P1Tone and PnTone still draw no polarity mark on their glyphs.** The table now names their
+terminals and the symbol does not show them; adding two `Txt` primitives to each is the obvious
+follow-up and was deliberately not taken here, because changing artwork regenerates figures and that
+churn belongs in its own change.
+
+**What a pin name cannot carry is whether the order MATTERS**, so that is stated separately, in
+`ComponentTypeRegistry.TerminalNote` — the exact analogue of `ParameterDescription`, keyed on kind,
+empty by default. It reaches `CatalogPorts.OrderNote` and from there both renderings. Three things
+it records that nothing else in the codebase said out loud:
+
+- **An inductor's terminals are not interchangeable once a `Mutual` couples it** (owner). A mutual
+  stamps `−jωM` across two inductor branch rows, and each branch current runs from that element's
+  own terminal 1 to its terminal 2 — so swapping one element's ends reverses the coupling. That is
+  the dot convention, and terminal 1 is the dotted end. It applies to SRLC and PRLC too, because all
+  three implement `IInductiveBranch` and any of them may be either end of a mutual.
+- **MTAPER, MKLOPF and Match are asymmetric** and their ends are told apart by a parameter — the W1
+  end, the Z1 end, the R1 side. Match's own port-def comment already warned that a swap "silently
+  reverses every asymmetric match"; the warning had never reached a reader.
+- **"They are interchangeable" is an answer, not a blank.** A reader told a resistor's ends may be
+  swapped is finished. A reader shown a numbered table has to go and find out. The two occupy the
+  same space on the page and only one is information.
+
+**A file-backed kind gets no note and keeps its numbered pins** (`SpiceModel`, `VerilogA`) — its real
+terminals come from the file it names, so nothing written here could be true of a placed one (owner).
+
+### The VCCS's table had been rendering under the VCVS's heading
+
+Separately, and not caused by AUT-6 — only made visible by it. `{{table: components/Vccs}}` was
+authored at the end of the VCCS section; the VCVS section was later inserted ABOVE it (`5c9df273`)
+and pushed it down. The result: the VCCS section had no table at all, and the VCVS section printed
+`G = 10 mS` under its own heading, where the parameter is `E`. Nothing failed — both halves render,
+the numbers are real, and the only way to notice is to already know what a VCVS's parameter is
+called.
+
+`EveryComponentTableIsInTheSectionForItsOwnComponent` gates the generic shape: a
+`{{table: components/X}}` must sit in a section whose `{{symbol: y}}` names the same component. Two
+things the scan has to get right — split on `#{3,6}` and not `###`, since the FET and MOS families
+are one `###` section with a `####` (and `#####`) sub-section per law; and do not REQUIRE a table,
+because Ground is one terminal on net `0` and wants none (owner), and the p-channel Statz and
+Materka sub-sections legitimately share Curtice-P's figure.
+
+Two smaller repairs came out of the same read. `IProbe` had no table at all, which is the worst
+omission of the set — `np → nm` is the direction every `I("Iout", 1)` measurement is signed against.
+And `DocTables.ComponentParameters` answered an empty parameter list with "this component's rows are
+authored by the user", which is true of an SDD and false of an IProbe, a Ground or a Mutual;
+`ComponentTypeRegistry.UserParamTemplate(kind) is not null` separates the two, so the ones with none
+now say "No parameters."
+
+A one-terminal component is rendered as a sentence rather than as a two-column table with a single
+row in it — that being the same "net 1 is terminal 1" shape, at N = 1.

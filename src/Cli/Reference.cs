@@ -158,7 +158,8 @@ internal static class Reference
                 p.Meaning.Length == 0 ? null : p.Meaning))]))]);
 
     private static ReferencePortsJson ToJson(CatalogPorts p)
-        => new(p.Count, p.Names, p.DeterminedBy, p.ListedAt);
+        => new(p.Count, p.Names, p.DeterminedBy, p.ListedAt,
+               p.OrderNote.Length == 0 ? null : p.OrderNote);
 
     /// <summary>The catalogue's own text, rendered without running the verb — what the topic list
     /// and the resource listing measure to state a size. Pure: it touches neither
@@ -180,6 +181,9 @@ internal static class Reference
             sb.AppendLine();
 
             sb.Append("  nets: ").AppendLine(Ports(e.Ports));
+            // The ORDER note comes before the type note: it is about the thing the caller is holding
+            // (which net goes where), while the type note is about the catalogue's own bookkeeping.
+            if (e.Ports.OrderNote.Length > 0) sb.Append("  order: ").AppendLine(e.Ports.OrderNote);
             if (e.Note.Length > 0) sb.Append("  note: ").AppendLine(e.Note);
 
             foreach (var s in e.Symbols)
@@ -188,6 +192,9 @@ internal static class Reference
                 if (s.SearchTerms.Count > 0) sb.Append("   search: ").Append(string.Join(", ", s.SearchTerms));
                 sb.AppendLine();
                 sb.Append("    nets: ").AppendLine(Ports(s.Ports));
+                // Repeated per symbol rather than only at the token, because a token whose tiles
+                // disagree drops it above and the tile is then the only place it is stated.
+                if (s.Ports.OrderNote.Length > 0) sb.Append("    order: ").AppendLine(s.Ports.OrderNote);
 
                 if (s.Parameters.Count == 0)
                 {

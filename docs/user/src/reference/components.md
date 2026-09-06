@@ -17,6 +17,11 @@ are the as-placed values by construction rather than by transcription.
 the order it takes them. That order is what the models themselves read — a diode's anode before its
 cathode, a MESFET's gate before its drain — so it is worth checking before hand-writing a
 <code>.cnl</code> line; the figure above it shows where those pins sit, not which is which.</p>
+<p>Where a terminal has a name it carries it, and where it does not the sentence under the table says
+whether the order <em>matters</em> — most two-terminal parts may be wired either way round, and a few
+that look symmetric may not. Read that sentence rather than the numbers: a resistor's ends are
+interchangeable, an inductor's stop being interchangeable the moment a
+<a href="#mutual">Mutual</a> couples it to another, and a taper's two ends are its two widths.</p>
 <p>In the parameter table below it, <strong>Name</strong> is the parameter key, as it appears in the editor and in the netlist.
 <strong>Default</strong> and <strong>Unit</strong> are the as-placed value. A parameter marked
 <em>shown</em> appears as a label on the schematic by default; the rest are available in the parameter
@@ -287,6 +292,8 @@ need any of those, the device you want is an <a href="sdd.html">SDD</a>, whose e
 them. The same is true of <a href="#currenttonesource">ITone</a>.</p>
 </div>
 
+{{table: components/Vccs}}
+
 ### Voltage-Controlled Voltage Source (VCVS) {#vcvs}
 
 {{symbol: vcvs}}
@@ -325,7 +332,7 @@ For a gain that varies with frequency, drive or bias, the device you want is an
 nothing else attached to it has no DC path to ground and the matrix is singular. Load it.</p>
 </div>
 
-{{table: components/Vccs}}
+{{table: components/Vcvs}}
 
 ## Terminals & ports
 
@@ -373,6 +380,8 @@ the cell connects to the parent that instances it. `Num` is the interface port i
 
 A 0 V series ammeter placed in a branch to read its current. Its instance name — `Iout`, say — is how
 measurements reference that current: `I("Iout", 1)`. No parameters.
+
+{{table: components/IProbe}}
 
 ### Tuner / SourceTuner / LoadTuner {#tuner}
 
