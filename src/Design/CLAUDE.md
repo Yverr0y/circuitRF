@@ -15,7 +15,7 @@ run an EM setup. Detail of that move is in `src/Ui/Layout/Em/RESOLVED.md`.
 | `Layout/Drc/` | the whole design-rule check — the engine, the region and predicate evaluators, the wire-to-artwork check, and the `.clay`/`.ctech` format's own waiver record and layer-expression parser. It crossed in AUT-4 so `circuitrf check` runs design rules with no display; `DrcRunReport` and `WBondWireClearance` stayed in `src/Ui` |
 | `Layout/Assembly/` | the `.wasm` assembly rule-file model, its reader, its resolver and the built-in rule set the DRC engine falls back to when a design references no `.wasm` (AUT-4) |
 | `Layout/PCells/` | only `PCellValue` and how it serialises. No generators, no handle solver, no Python |
-| `Cells/` | the `.ccell` cell-folder format, the atomic write behind every save, and `CellCreate` — the writer of an empty `.csch`/`.csym`/`.clay`, which the GUI's New Cell / New Schematic / New Symbol / New Layout call |
+| `Cells/` | the `.ccell` cell-folder format, the atomic write behind every save, `CellCreate` — the writer of an empty `.csch`/`.csym`/`.clay`, which the GUI's New Cell / New Schematic / New Symbol / New Layout call — and `CellViewFileValidator`, which answers whether a file would survive being adopted as a view (AUT-4) |
 | `Workspace/` | the `.cws` reader, R-fgn-3's ancestor-workspace walk, and `WorkspaceCreate` — the four operations File ▸ New Workspace performs after its dialog returns |
 | `Schematic/` | the `.csch` model + persistence, schematic geometry, net extraction, the cell/kit resolvers and the SPICE-import builders — the editors and sessions stayed in `src/Ui` (AUT-2) |
 | `Symbol/` | the `.csym` model + persistence, symbol geometry, pin names and sides (AUT-2) |

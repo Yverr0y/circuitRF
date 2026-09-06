@@ -50,7 +50,8 @@ Instead, briefly paraphrase owner/user messages. Pre-existing quotes are ok.
 - Build:   `dotnet build`
 - Test:    `dotnet test`
 - Run CLI: `dotnet run --project src/Cli -- <args>`
-  Verbs: `sparam`, `dc`, **`hb`**, **`lp`**, **`lpp`**, **`em`**, **`convert`**, **`new`**, **`import`**, `elab`. **The CLI has its own design doc —
+  Verbs: `sparam`, `dc`, **`hb`**, **`lp`**, **`lpp`**, **`em`**, **`convert`**, **`new`**,
+  **`import`**, **`check`**, **`explain`**, `elab`. **The CLI has its own design doc —
   `docs/design/cli.md`** — covering the five-step anatomy of a run verb, the stdout/stderr split, and
   the rules below; read it before adding a verb. `hb`/`lp`/`lpp` run the netlist's harmonic-balance,
   loadpull and loadpull-pursuit analyses, and each runs the whole sweep when a `parametric_sweep`
@@ -106,6 +107,34 @@ Instead, briefly paraphrase owner/user messages. Pre-existing quotes are ok.
   copy, and the end-to-end that authors a design and simulates it with no display at any step.
   `ShippedTechnologies` and its `.ctech` resources moved to `src/Design` for this; moving such a
   class without its `EmbeddedResource` items leaves it enumerating nothing, silently.
+  **`check <path>` and `explain <path>` are read-only, and neither runs an analysis**
+  (2026-09-05). `check` answers "is it well formed, does it resolve, is it sound" over a
+  workspace, a cell folder or one document — the kind inferred from the path exactly as `convert`
+  infers a format, and a foreign file classified through `convert`'s OWN classifier so a GDSII or
+  Gerber file is named rather than called unreadable. **It writes NO validation logic of its
+  own**: every finding comes from a validator the GUI already uses (`CellViewFileValidator`,
+  `CellFolder.ResolvePrimary`, `NameValidator`, `TechValidation`, `TechnologyResolver`,
+  `EmSetupResolver`, `CellSymbolResolver`, `NetExtractor`, `Elaborator`, `ChainSelector`,
+  `DrcPredicateParser`, `DrcEngine`) — a rule living only in `check` is a rule the application
+  does not enforce, so a design would pass headlessly and be refused when someone opened it. Exit
+  0 unless something at or above `--severity` (default `error`) was found; warnings are ALWAYS
+  reported and still exit 0, because a check that hid them to keep the exit code clean makes the
+  exit code useless. **It writes nothing at all**, so it runs on a read-only tree and on a
+  workspace another process has open. `explain` answers the question that is not a failure — *what
+  did circuitRF decide* — and reports the WALK as well as the answer, because resolution here is a
+  series of walk-ups and which one produced an answer is the part a caller cannot otherwise see (a
+  `.cem`'s layout and technology walks start from different files and can land on different
+  workspaces). `--expr` evaluates in the design's own resolved scope through the one expression
+  engine, with `--set` applied first exactly as a run verb applies it; `--analysis` reports every
+  declared chain, which one dispatches and for which verb, and whether a named inner analysis
+  would be promoted; `--ref` resolves a relative reference and says whether it leaves the
+  workspace. **A sweep is reported in base SI WITH its unit and its scale** — reading a mark
+  without its scale once produced a run at 2 Hz that looked entirely normal. **A `.csch` reaches
+  the elaborator through the `.cnl`**, in memory, because that is what the GUI's own Simulate does
+  and the two readers disagree about bare words: skipping the round trip reports errors the
+  application does not have. The **DRC engine and the `.wasm` rule model moved to `src/Design`**
+  to make the layout half of `check` possible. Gate:
+  `tests/Ui.Tests/CheckAndExplainCliVerbTests.cs`.
 - Package: **exactly one script per platform, and each builds everything that platform ships** —
   `packaging/windows/build-windows.ps1` (9 files: `.msi` x64/arm64/x86 in both install scopes, plus
   the `.zip` the updater fetches), `packaging/macos/build-macos.sh` (2 `.dmg`s, both architectures;
@@ -329,7 +358,9 @@ Source map: `src/Core` (layers 1–2 + the expression engine), `src/Engine` (lay
 geometry + stackup into an `EmProblem`, **`Layout/Interchange/` — every GDSII, DXF, Gerber, Excellon
 and `.kicad_pcb` reader and writer**, and **the functions that CREATE those artifacts** —
 `WorkspaceCreate`, `CellCreate`, `ComponentImport` — which the GUI's own New Workspace / New Cell /
-Import Component call, not a headless copy of them), `src/Ui` (Avalonia), `src/Cli` (headless driver +
+Import Component call, not a headless copy of them, and **`Layout/Drc/` + `Layout/Assembly/` — the
+DRC engine and the `.wasm` assembly rule model**, so design rules run with no display),
+`src/Ui` (Avalonia), `src/Cli` (headless driver +
 test harness). `RfCore` is an ordinary first-party project alongside the rest — see §Stack for why it is
 no longer at the repo root, and why that changed nothing architecturally.
 
@@ -337,8 +368,12 @@ no longer at the repo root, and why that changed nothing architecturally.
 parameters, expressions, elaboration; it knows nothing about DBU, stackups or drawing layers. Design
 is the artwork side, carved out of `CircuitRF.Ui` in 2026-08 so `src/Cli` could run an EM setup
 without pulling Avalonia across the firewall (`docs/sonnet-briefs/brief-cli-em-verb.md`). It draws
-nothing, docks nothing and observes no canvas — the layout EDITOR, the DRC engine, the PCell
-generators and the `.cem` editor all stayed in `src/Ui`. The namespaces that moved with it are
+nothing, docks nothing and observes no canvas — the layout EDITOR, the PCell generators and the
+`.cem` editor all stayed in `src/Ui`. **The DRC ENGINE did not, from 2026-09-05**: it draws nothing
+either, and `circuitrf check` needs it (`brief-automation-4-check-and-explain.md` R-aut4-3). What
+stayed of it is the two files that are not the engine — `DrcRunReport`, which posts a run to the
+Messages panel, and `WBondWireClearance`, which reads a per-USER preference the engine already takes
+as a setting. The namespaces that moved with it are
 listed once in `src/Ui/GlobalUsings.cs` rather than in ~300 `using` lines.
 
 **The interchange readers and writers moved here in 2026-09** for the same reason and by the same
