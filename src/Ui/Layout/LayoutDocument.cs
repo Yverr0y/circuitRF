@@ -19,8 +19,21 @@ namespace CircuitRF.Ui.Layout;
 /// active without opening a new tab. Mirrors <c>CircuitRF.Ui.Schematic.SchematicDocument</c> exactly,
 /// retargeted from <c>SchematicViewModel</c> to <see cref="LayoutEditorViewModel"/>.
 /// </summary>
-public sealed class LayoutDocument : Document, IUndoableDocument, IActivatableDocument, IFileBackedDocument
+public sealed class LayoutDocument : Document, IUndoableDocument, IActivatableDocument, IFileBackedDocument, IReferenceMarkedDocument
 {
+    /// <summary>
+    /// RC-2 R-rc2-5: true when this file lives in a workspace the open one references EDITABLY —
+    /// the state that is marked in the tab, because it is one somebody explicitly opted out of
+    /// §7A.2's read-only default for. Set by <c>WorkspaceViewModel</c>, which is the only side that
+    /// knows which workspace is asking.
+    /// </summary>
+    public bool IsEditableReference
+    {
+        get => _isEditableReference;
+        set { if (_isEditableReference == value) return; _isEditableReference = value; OnPropertyChanged(); }
+    }
+    private bool _isEditableReference;
+
     // ── Activation focus — view grabs keyboard focus on tab-switch ────────────
     private bool _activationFocusPending;
     public event Action? ActivationFocusRequested;

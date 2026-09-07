@@ -146,8 +146,17 @@ public sealed partial class LayoutEditorViewModel
     /// un-scrollable because it is un-writable. What changes is where the edits can land — Save As,
     /// which §5A.3 already defines as the adopt gesture.</para>
     /// </summary>
+    /// <remarks>
+    /// RC-2 R-rc2-1: OR'd with the reference POLICY, so the band and the disabled Save say the same
+    /// thing about a cell reached through a read-only <c>ws://</c> reference as they already do about
+    /// an unwritable share. The policy question is asked of the CURRENTLY OPEN workspace — the same
+    /// live provider <see cref="IsForeign"/> reads — because the answer differs per window: this file
+    /// is read-only from the workspace that references it and writable from the one that owns it.
+    /// </remarks>
     public bool IsDocumentReadOnly
-        => WorkspaceWritability.IsDocumentReadOnly(CurrentLayoutPath);
+        => WorkspaceWritability.IsDocumentReadOnly(CurrentLayoutPath)
+        || ReferencedWorkspacePolicy.ReadOnlyOwnerRootFor(
+               CurrentWorkspaceRootDirProvider?.Invoke(), CurrentLayoutPath) is not null;
 
     /// <summary>
     /// R-sl2-9: the band is shown for a foreign document OR a read-only one. It is the same band —
@@ -180,6 +189,14 @@ public sealed partial class LayoutEditorViewModel
             string? ws = SourceWorkspaceName;
             if (!IsDocumentReadOnly)
                 return ws is null ? "Not part of any workspace" : $"From workspace: {ws}";
+
+            // RC-2: the POLICY case says something different from SL2's, and the difference is the
+            // whole point — the file COULD be written and circuitRF is declining to, so the way
+            // forward is the workspace that owns it, not a copy in this one.
+            if (ReferencedWorkspacePolicy.ReadOnlyOwnerRootFor(
+                    CurrentWorkspaceRootDirProvider?.Invoke(), CurrentLayoutPath) is { } owner)
+                return $"From workspace: {Path.GetFileName(owner)} — referenced here, so it is "
+                     + "read-only. Open that workspace to edit it.";
 
             return ws is null
                 ? "Read-only — this file's folder cannot be written. Use Save As."

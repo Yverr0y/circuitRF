@@ -134,10 +134,53 @@ The Project panel's filter button (the funnel) has a checkbox for each of these 
 *Referenced Workspaces* — both on by default, so either kind can be put out of the way without touching
 your own cells.
 
+### Fixing a cell in a library you reference {#editing-referenced-cells}
+
+**Referenced cells are read-only from here.** You can open one, read it, push into its hierarchy and pull
+it about to understand it — but the first time you try to *change* something, circuitRF stops you and
+says why. The refusal comes with a button: **Open ‹library›**, which opens that workspace in a window of
+its own and takes you straight to the cell you were trying to edit. Edit it there and save normally.
+
+That is not circuitRF being fussy about a file it could perfectly well write. It is the only point in the
+sequence where you can still do something sensible about it. Editing a library cell in place *works* — the
+file is written, your simulation picks it up, and everything looks right:
+
+- the fix reaches you and **nobody else**; every colleague goes on using the cell as it was;
+- the library's owner was never asked, and has no idea;
+- the next time they publish, your edit is overwritten, or it clashes and there is nothing to merge it
+  back from.
+
+Every step of that is silent. One refusal, at the moment you type, replaces the lot.
+
+**The cell stays in the other workspace, and that is the point.** Opening the library as a workspace of
+its own means the corrected cell is the library's corrected cell — everyone referencing it gets it, and
+the person who maintains it can see what changed. Your own workspace records nothing about the edit,
+because the cell was never yours.
+
+**A cell is edited in one window only.** If the library is already open in another window, the edit does
+not become possible here — that window comes forward with the cell in front of you instead, and this
+window closes its read-only view of it. Two editors over one file would mean two sets of unsaved changes
+over the same file, and whichever you saved second would silently throw the other away.
+
+<div class="callout note">
+<span class="label">If you really do maintain the library</span>
+<p>Right-click the referenced workspace's row in the Project panel and choose <strong>Allow Editing
+Through This Reference…</strong>. circuitRF asks once, then lets you edit its cells from here. The row is
+marked with a pencil afterwards, and so is the tab of every document you open from it, because writing
+into somebody else's project is not something to have to remember. Two people doing this in one library
+at the same time is not arbitrated — the same last-save-wins that applies to any shared folder.</p>
+<p>Choose <strong>Make Reference Read-Only</strong> on the same row to put it back. Existing workspaces
+are read-only too: a reference made before this existed is treated as read-only, because that is the safe
+reading and not the one you happened to have.</p>
+</div>
+
 ## Sharing a workspace with other people {#shared}
 
 Put a workspace on a network share and several people can reach it at once. What that means depends on
 whether they can write to it.
+
+(That is separate from a share whose *permissions* stop you writing, below. A referenced workspace is
+read-only whether or not the folder is — the two reasons stack, and Save says which one applies.)
 
 **A read-only share is the intended shape, and everything still works.** If the folder's permissions
 allow you to read but not write — the usual arrangement for a company library, where one librarian

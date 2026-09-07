@@ -167,26 +167,40 @@ public sealed class ProjectTreeNode
     /// </summary>
     public bool IsReferencedCell { get; }
 
+    /// <summary>
+    /// RC-2 R-rc2-5: true for a referenced WORKSPACE row, or a referenced CELL row, whose reference
+    /// someone explicitly made editable — the opt-out from §7A.2's read-only default.
+    ///
+    /// <para>It is marked because it is a state nobody can otherwise see: two designers editing one
+    /// library this way is exactly the concurrent-edit problem <c>revision-control.md</c> §6.2
+    /// describes and circuitRF is not solving it, so the state must be visible rather than
+    /// inferable. Only the unusual half is marked — a read-only reference is the ordinary case and
+    /// carries no decoration, because marking everything marks nothing.</para>
+    /// </summary>
+    public bool IsEditableReference { get; }
+
     public ProjectTreeNode(
         NodeKind kind,
         string   name,
         string   absolutePath,
         string   relativePath,
-        bool     isPrimary        = false,
-        bool     isTestBench      = false,
-        string?  warningReason    = null,
-        bool     isDirectory      = false,
-        bool     isReferencedCell = false)
+        bool     isPrimary           = false,
+        bool     isTestBench         = false,
+        string?  warningReason       = null,
+        bool     isDirectory         = false,
+        bool     isReferencedCell    = false,
+        bool     isEditableReference = false)
     {
-        Kind             = kind;
-        Name             = name;
-        AbsolutePath     = absolutePath;
-        RelativePath     = relativePath;
-        IsPrimary        = isPrimary;
-        IsTestBench      = isTestBench;
-        WarningReason    = warningReason;
-        IsDirectory      = isDirectory;
-        IsReferencedCell = isReferencedCell;
+        Kind                = kind;
+        Name                = name;
+        AbsolutePath        = absolutePath;
+        RelativePath        = relativePath;
+        IsPrimary           = isPrimary;
+        IsTestBench         = isTestBench;
+        WarningReason       = warningReason;
+        IsDirectory         = isDirectory;
+        IsReferencedCell    = isReferencedCell;
+        IsEditableReference = isEditableReference;
     }
 
     /// <summary>Appends a child.  Called only by <see cref="WorkspaceScanner"/>.</summary>

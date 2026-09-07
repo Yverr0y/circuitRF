@@ -4,7 +4,10 @@
 checkpoint, a restore and a thinning actually rest on are now specified, and two of rev 3's guarantees
 are re-founded on mechanisms that hold ·
 **RC-1 (§3.1/§3.1a, the `.cwsuser` split) is BUILT** — 2026-09-06; the last "still open" item at the
-end of §12 was settled with it. Everything from RC-2 onward remains proposal. ·
+end of §12 was settled with it. **RC-2 (§7A.2/§7A.3, referenced workspaces read-only by default) is
+BUILT** — 2026-09-06, and it needs no git: it is the defect in the workspace model this investigation
+found, specified now in `workspace-and-project-tree.md` §5C.1a where the next reader will look.
+Everything from RC-3 onward remains proposal. ·
 **Date:** 2026-09-06 · **Phase:** unassigned
 
 Specifies how circuitRF gives a workspace a **history** — the ability to see what changed, and to get
@@ -1406,6 +1409,11 @@ repository that is not a safety net, it is an ambush.
 
 ### 7A.2 Referenced workspaces are read-only by default
 
+**Status: BUILT 2026-09-06** · `brief-revision-control-2-read-only-references.md` ·
+`workspace-and-project-tree.md` §5C.1a is where it is specified for a reader who arrives from the
+workspace side rather than from here. Two things the build settled that this section left to a brief
+are marked below.
+
 `CwsWorkspaceRef` gains one field: whether this reference is editable. **The default is read-only**,
 and File ▸ Reference Workspace… creates read-only references.
 
@@ -1513,11 +1521,13 @@ special happens; that is the point of routing the edit to the owner.
 
 **Two gaps this leaves, both small and both worth a brief's attention:**
 
-- **§7A.2's refusal should offer the action, not just name it.** "Open workspace B" as a one-click
-  action on the refusal turns the sequence above from a workaround the designer has to invent into
-  the supported path it should be. Without it, the remedy is correct advice that still costs them a
-  File ▸ Open and a hunt for the folder.
-- **The existing message is worded for the wrong case.** `ActivateIfOpenInAnotherWindow` says
+- **§7A.2's refusal should offer the action, not just name it.** *(BUILT.)* "Open workspace B" as a
+  one-click action on the refusal turns the sequence above from a workaround the designer has to
+  invent into the supported path it should be. Without it, the remedy is correct advice that still
+  costs them a File ▸ Open and a hunt for the folder. **The action opens B AND lands on the cell** —
+  an action that opened the folder and left the designer to find the cell again is the File ▸ Open it
+  was meant to replace.
+- **The existing message is worded for the wrong case.** *(BUILT.)* `ActivateIfOpenInAnotherWindow` says
   *"already open in <window> — shown there rather than opened twice"*, which is right when the
   designer had it open and forgot. Arriving here from a referenced cell they never opened, the true
   reason is ownership, not duplication — the message should say the cell belongs to B and is being

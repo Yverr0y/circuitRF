@@ -1,5 +1,60 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## RC-2 — the reference editability field, and the memo it could not share (2026-09-06)
+
+`CwsWorkspaceRef.Editable` plus `ReferencedWorkspacePolicy`
+(`brief-revision-control-2-read-only-references.md`; `docs/design/revision-control.md` §7A.2,
+`workspace-and-project-tree.md` §5C.1a). The UI half is in `src/Ui/RESOLVED.md`.
+
+### The inverted default, and why it does not contradict SL2's "never a field in the `.cws`"
+
+`workspace-and-project-tree.md` §5D R-sl2-A says read-only is **never** a `ReadOnly: true` field in a
+`.cws` — it would be advisory, maintained by hand, and wrong on precisely the machine where it
+mattered. RC-2 adds a field that looks exactly like the thing that rule forbids, and it is not one.
+They answer different questions:
+
+| | question | source of truth | same answer for everyone? |
+|---|---|---|---|
+| `WorkspaceWritability` (SL2) | **can** circuitRF write into this directory? | the filesystem, discovered by attempting a write | yes |
+| `ReferencedWorkspacePolicy` (RC-2) | **should** it, given which workspace is asking? | this workspace's own `.cws` | **no** — false from the window that owns the content |
+
+That last column is the load-bearing one and it is why the policy is **not** memoised globally per
+root the way SL2's writability is. `WorkspaceWritability.OpenReadOnlyThisSession` marks a root
+read-only for the whole process, which is right for its question and would be catastrophic here: it
+would refuse the *owner's* own save, which is the one save §7A.3 exists to route the edit to. Every
+entry point therefore takes the referencing workspace root as an argument.
+
+The default inverts the house rule its own sibling states three lines away (`CellsOnly`: *false on
+every entry written before this existed, which is the old behaviour*). Both headers now say so
+explicitly, pointing at each other, because a reader who finds only one of them will copy the wrong
+instinct into the next field.
+
+### The alias table could not simply be widened
+
+`ExternalCellRef.AliasMapFor` already memoises alias → other-workspace-root per referencing root, and
+widening its value to carry editability was the obvious move. It is the wrong one: that map is how a
+`ws://` reference **resolves**, and resolution deliberately does not read this flag — a read-only
+reference addresses exactly what an editable one addresses. Coupling them would put a policy read on
+the hot path of every cell-instance render for no benefit. So there is a second, small memo, dropped
+from the same `WorkspaceRootFinder.InvalidateCache` as the other four, which is now the fifth entry
+in that method.
+
+### A `.cws` this build cannot read is "no references", not an error
+
+`ReferencedWorkspacePolicy.Read` swallows the load exception and returns an empty table, matching
+`ExternalCellRef.ReadAliasMap` beside it. Worth naming because a hand-written test fixture with the
+wrong `FormatVersion` then reads as **NotReferenced** rather than as a parse failure — the fixture in
+`ReferencedWorkspaceReadOnlyTests` was written that way first and produced a silently wrong gate. Any
+hand-built `.cws` fixture must carry `WorkspacePersistence.CurrentFormatVersion`, not a literal.
+
+### Prefix matching needs the separator check
+
+A path is inside a referenced root when it IS the root or sits under it *behind a separator*. Without
+the separator test `…/stdlib-old` reads as content of `…/stdlib`, and a sibling project would go
+read-only for no visible reason. Same rule, and the same reason, as
+`WorkspaceWritability.IsUnderSessionReadOnlyRoot`.
+
+
 ## RC-1 — the `.cwsuser` split: what the measurement said, and the reader that was not a choke point (2026-09-06)
 
 Per-user session state moved out of the `.cws` into a sibling `.cwsuser`

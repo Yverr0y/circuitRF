@@ -82,8 +82,24 @@ public partial class WorkspaceViewModel
     /// <para>A scratch document (no path yet) is never read-only — it saves through a picker, which
     /// asks the filesystem its own question about wherever the user points it.</para>
     /// </summary>
-    internal static bool IsDocumentReadOnly(IDockable? dockable)
-        => WorkspaceWritability.IsDocumentReadOnly(DocumentFilePath(dockable));
+    /// <remarks>
+    /// RC-2 R-rc2-1: the two read-only questions combine as an OR, and this is where. SL2's is a fact
+    /// about the filesystem ("can circuitRF write here?"); the second is a POLICY carried on this
+    /// workspace's reference to another one ("should it?"), true even when the filesystem would allow
+    /// the write. Everything below — the disabled Save, the Save As offered in its place, the quit
+    /// sweep, the wording — takes the second without modification, which is why RC-2 built no second
+    /// read-only concept.
+    ///
+    /// <para>An INSTANCE method for the same reason the policy takes the referencing workspace as an
+    /// argument: the answer differs per window. The same cell folder is read-only from the workspace
+    /// that references it and writable from the window that owns it (§7A.3).</para>
+    /// </remarks>
+    internal bool IsDocumentReadOnly(IDockable? dockable)
+    {
+        string? path = DocumentFilePath(dockable);
+        return WorkspaceWritability.IsDocumentReadOnly(path)
+            || ReadOnlyReferenceOwnerOf(path) is not null;
+    }
 
     /// <summary>
     /// R-sl2-7's sentence, or null when the document is writable. It names the WORKSPACE the file
@@ -92,9 +108,19 @@ public partial class WorkspaceViewModel
     /// breath, since a refusal that does not say what to do instead is just the late failure moved
     /// earlier.
     /// </summary>
-    internal static string? ReadOnlyDocumentReason(IDockable? dockable)
+    internal string? ReadOnlyDocumentReason(IDockable? dockable)
     {
         if (DocumentFilePath(dockable) is not { Length: > 0 } path) return null;
+
+        // RC-2: the POLICY reason comes first, and says something different — the file could be
+        // written and circuitRF is declining to, so the way forward is the other workspace rather
+        // than a copy. Offering "Save a copy into your own workspace" here would answer a question
+        // the designer did not ask: they want the LIBRARY fixed, for everyone.
+        if (ReadOnlyReferenceOwnerOf(path) is { } ownerRoot)
+            return $"'{Path.GetFileNameWithoutExtension(path)}' belongs to " +
+                   $"'{Path.GetFileName(ownerRoot)}', which this workspace only references. Open " +
+                   $"'{Path.GetFileName(ownerRoot)}' as a workspace to edit it there.";
+
         if (!WorkspaceWritability.IsDocumentReadOnly(path)) return null;
 
         string name = Path.GetFileNameWithoutExtension(path);
@@ -132,6 +158,9 @@ public partial class WorkspaceViewModel
         OnPropertyChanged(nameof(ActiveDocumentReadOnlyReason));
         OnPropertyChanged(nameof(SaveMenuTooltip));
         OnPropertyChanged(nameof(IsCurrentWorkspaceReadOnly));
+        // RC-2: this fan-out is where the reference policy reaches the documents — see
+        // ApplyReferencePolicyToOpenDocuments for why it is a sweep and not a line at each opener.
+        ApplyReferencePolicyToOpenDocuments();
     }
 
     // ── Creating INTO an unwritable place (R-sl2-13) ─────────────────────────

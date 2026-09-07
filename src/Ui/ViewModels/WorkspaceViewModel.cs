@@ -8969,6 +8969,13 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             case ".cem":   OpenOrActivateEmSetup(abs);     return true;
             case ".charm": OpenHarmonicaPath(abs);         return true;
             case ".wbond": OpenWBondPath(abs);             return true;
+            // RC-2: a cell's PARAMETERS are a document like any other here, and the edit routed to
+            // the workspace that owns a cell (R-rc2-7) can be an edit to them. Deliberately absent
+            // from App.OpenFiles' switch, which is held shut against the three operating systems'
+            // own type registrations — nobody double-clicks a `.ccell` in a file manager.
+            case CellFolder.CcellFileName when Path.GetDirectoryName(abs) is { } cellDir:
+                OpenOrActivateCellPlaceholder(cellDir, Path.GetFileName(cellDir));
+                return true;
             default:       return false;
         }
     }
@@ -9164,9 +9171,19 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
 
             window.Activate();
             other.ActivateOpenDocument(dockable);
+            // RC-2 R-rc2-8 / §7A.3: TWO wordings, because the same routing serves two different
+            // situations and only one of them is about duplication. "Already open — shown there
+            // rather than opened twice" is right when the designer had the file open and forgot.
+            // Arriving from a referenced cell they never opened, the true reason is OWNERSHIP: the
+            // cell belongs to the other workspace and is edited there, which is the fact they need
+            // and the one the duplication wording hides.
             Messages.Info(
-                $"'{Path.GetFileName(wanted)}' is already open in {other.ShellHeader().TrimStart('•', ' ')} — " +
-                "shown there rather than opened twice.");
+                ReadOnlyReferenceOwnerOf(wanted) is { } ownerRoot
+                    ? $"'{Path.GetFileName(wanted)}' belongs to workspace " +
+                      $"'{Path.GetFileName(ownerRoot)}', which this workspace only references — it is " +
+                      "edited there."
+                    : $"'{Path.GetFileName(wanted)}' is already open in {other.ShellHeader().TrimStart('•', ' ')} — " +
+                      "shown there rather than opened twice.");
             return true;
         }
         return false;
@@ -10669,6 +10686,55 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         // no longer resolves, and a render model carries that state until it is rebuilt.
         RefreshAfterReferenceChange();
         Messages.Info($"Workspace reference \"{alias}\" removed (nothing was deleted).");
+    }
+
+    /// <inheritdoc/>
+    public async Task ToggleReferenceEditableAsync(ProjectTreeNodeViewModel node)
+    {
+        if (CurrentWorkspacePath is null) return;
+        if (node.Kind != NodeKind.ReferencedWorkspace) return;
+
+        string myRoot = Path.GetDirectoryName(CurrentWorkspacePath)!;
+        string alias  = node.Name;   // the alias IS the node's name (WorkspaceScanner)
+        bool   makeEditable = !node.IsEditableReference;
+
+        // RC-2 R-rc2-4: only ONE direction asks. Going back to read-only restores the default and can
+        // lose nothing, so a confirmation there would be a dialog whose only answer is yes. Going the
+        // other way opts out of the thing that keeps a library edit from landing in nobody's history,
+        // so it says what that costs before it happens.
+        if (makeEditable)
+        {
+            var window = ResolveOwner(null);
+            if (window is null) return;
+
+            var dlg = new Views.Dialogs.SaveChangesDialog(
+                $"Allow editing cells in \"{alias}\" from this workspace?\n\n"
+              + "Those cells belong to the other workspace. Editing them here writes to its files "
+              + "directly: the change is not recorded in this workspace, the other workspace's owner "
+              + "is not asked, and if they replace the cell later your change is gone.\n\n"
+              + "circuitRF does not arbitrate two people editing one library at the same time.\n\n"
+              + "The supported way to change a library is to open it as a workspace of its own and "
+              + "edit it there, which is what circuitRF offers when it refuses an edit here.",
+                saveLabel:     "Allow Editing",
+                dontSaveLabel: null,
+                cancelLabel:   "Cancel",
+                title:         "Allow Editing Through This Reference");
+            await dlg.ShowDialog(window);
+            if (dlg.Result != SaveChangesResult.Save) return;
+        }
+
+        if (!ReferencedWorkspacePolicy.SetReferenceEditable(myRoot, alias, makeEditable, out string? error))
+        {
+            Messages.Error(error!);
+            return;
+        }
+
+        RefreshAfterReferenceChange();
+        Messages.Info(makeEditable
+            ? $"Cells in \"{alias}\" can now be edited from this workspace. They are marked in the " +
+              "Project panel and in their tabs, because nothing else would show that this workspace " +
+              "is writing into another one."
+            : $"\"{alias}\" is read-only again. Its cells are edited by opening that workspace.");
     }
 
     /// <inheritdoc/>

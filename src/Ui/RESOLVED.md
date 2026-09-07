@@ -1,5 +1,142 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## RC-2 — refusing the edit rather than the write, and the twenty-seven places a guard could have gone (2026-09-06)
+
+A cell reached through a `ws://` reference is not editable through the window that merely references
+it (`brief-revision-control-2-read-only-references.md`; `docs/design/revision-control.md`
+§7A.2/§7A.3, `workspace-and-project-tree.md` §5C.1a). The field and the policy type are in
+`src/Design/RESOLVED.md`.
+
+### The guard belongs on `UndoRedoStack.Execute`, and that is the only reason one guard is enough
+
+The brief's gate is that the refusal fires **on the edit, not on the save** — the whole value is that
+it arrives while the designer still has the context to do something sensible. That needs a hook at
+"the attempt to modify", and SL2 deliberately has none: R-sl2-8 leaves a read-only document fully
+editable and changes only where the edits can land.
+
+`UndoRedoStack.Execute` turned out to be exactly that hook, for a reason that was already written
+down: schematic, symbol, layout, technology, EM setup and cell-parameter editors each state in their
+own class header that **all mutations route through it**. One `Func<bool>` guard therefore covers all
+six, and a seventh editor built on the same stack inherits it. `EditGuard` returning false runs
+nothing and pushes nothing, so a refused edit leaves no history and no dirty flag — which is what
+makes the next paragraph safe.
+
+**Two edit histories are NOT behind it and should be known:** a Data Display keeps its own
+`UndoRedoManager` (`IEditHistoryDocument`, not `IUndoableDocument`), and a wirebond layout's wire
+history is a snapshot stack beside the command stack (WB40). Neither is reachable from a referenced
+workspace's Project-panel sub-tree today — that sub-tree renders cells only — so neither is a hole
+now; both would become one if a referenced sub-tree ever listed a `.cdd`.
+
+### The tab whose editing is handed away must be CLOSED, and the routing order matters
+
+R-rc2-7 routes an edit to the window that owns the workspace. Two things fell out of building it:
+
+- **The referencing window's read-only view is closed as part of routing.** Leaving it open means two
+  views of one file, and this window's would go stale the moment the owner saved — showing content
+  that is no longer on disk with nothing saying so. It costs nothing, because the guard refused every
+  edit through it, so the document cannot be dirty. It is closed only when the edit is actually
+  routed; a refusal the designer has not acted on leaves them looking at the cell they were reading.
+- **It must be closed BEFORE the owner is asked to open the document, or the request bounces back.**
+  `OpenDocumentByPath` ends at `ActivateIfOpenInAnotherWindow`, which finds a file already open in any
+  other window and activates *that* window. With our own read-only tab still open, the owner's open
+  request resolves to it, and the effect of trying to edit a library cell is that the library's window
+  raises the referencing window's tab. Found by reasoning about the call chain, not by a test — a test
+  for it needs two real windows.
+
+### The refusal is returned as data and posted by one line either side
+
+`RefusalForEditOf` returns a record (text, action label, action) and `AllowEditOfDocument` posts it.
+That split exists for testability and the reason is recorded in `ReadOnlyWorkspaceTests` already:
+`MessagesTool` marshals through `Dispatcher.UIThread`, which is a direct call in an isolated run and a
+queued one nobody pumps once another test in the process has bound the dispatcher to its own thread.
+A gate written against the posted message list would pass alone and fail under full-suite load. The
+brief's gate 3 — *assert the action exists on the posted message, not only that the text mentions it*
+— is met on the record, which is the same object `PostAction` receives.
+
+Two seams exist for the same reason (`OwningWindowLookup`, `OpenWorkspaceForEditHook`): a headless
+test cannot make an operating-system window, and the alternative was a source scan of the one thing in
+this brief that is genuinely behavioural.
+
+### The mark is installed by a SWEEP, not at the twenty-seven places a document is registered
+
+`_openDocsByPath[path] = doc` appears **twenty-seven times** in `WorkspaceViewModel`. Putting the
+guard and the tab mark at each is the shape SL2's own header warns about — a rule enforced by
+twenty-seven callers agreeing is true in twenty-six places and found by a user in the twenty-seventh.
+`ApplyReferencePolicyToOpenDocuments` sweeps the registry instead and rides `RefreshReadOnlyMenuState`,
+which already runs on both activation fan-outs; a document that has just been opened is swept before
+it can be typed into, because opening one activates it. The guard is installed once per history and
+never removed — it re-reads the document's own path and the reference table on every edit, so a Save
+As, a re-pointed reference or an editability change needs no re-wiring.
+
+### `IsDocumentReadOnly` and `ReadOnlyDocumentReason` became INSTANCE members
+
+They were static, and could not stay: the second read-only question is a policy on the *open*
+workspace's reference to another one, so the same document is read-only from one window and writable
+from another. The call sites were all already inside instance methods, so the change is invisible
+except in `ReadOnlyWorkspaceTests`, which now constructs a view model to ask.
+
+The policy reason is returned **before** SL2's and says something different on purpose. SL2's remedy
+is *"save a copy into your own workspace"*, which answers a question the designer editing a shared
+library did not ask: they want the library fixed, for everyone.
+
+### The tab mark needed a real property on each document, not a default interface member
+
+The tab header template binds by reflection over the runtime type (`x:CompileBindings="False"`, the
+same way it binds `LayoutDocument.IsForeign`), and a default interface implementation is not reflected
+as a property of the implementing type — it would bind null and render nothing, silently.
+`IReferenceMarkedDocument` therefore states the contract and each of the four document kinds a
+referenced sub-tree can open declares the property itself, so the sweep sets it in one place.
+
+### `.ccell` had to be openable by path, and deliberately not by the OS
+
+Routing an edit to the owner can be routing an edit to a cell's *parameters*, whose file is the cell's
+own `.ccell`. `WorkspaceViewModel.OpenDocumentByPath` gained a case for it; `App.OpenFiles` did
+**not**, and must not — its extension switch is held shut by three parity tests against the macOS
+`Info.plist`, the WiX `.wxs` and the Linux MIME file, and nobody double-clicks a `.ccell` in a file
+manager. `App.NewWorkspaceWindow`'s follow-up document therefore goes straight to
+`OpenWorkspaceThenDocumentsAsync` rather than through `OpenFiles`.
+
+### The other four routes by which two windows can reach one cell folder (reported, not fixed)
+
+R-rc2-7's invariant — *one file, one editor, across every open window* — is broader than references,
+and the brief asks for the other routes to be named whether or not it fixes them. There are four, and
+**`ActivateIfOpenInAnotherWindow` already backstops every one of them** for the two-editors half: a
+file already open anywhere in the process is shown where it is rather than opened twice, and that check
+is by resolved absolute path, not by how the file was reached.
+
+What none of them is covered for is the *divergence* half — editing another project's cell without its
+owner knowing — because RC-2's policy is carried on a `ws://` reference and these are not references:
+
+1. **A referenced LIBRARY that happens to live inside another workspace.** `CwsFile.LibraryRefs` is a
+   bare path list with nothing stopping it pointing at a folder under someone else's `.cws`, and §5C
+   states outright that a cell in a referenced library keeps a relative `CellRef` because *a library is
+   not a workspace*. This is the closest thing to an uncovered case, and it is not hypothetical: it is
+   the shape `ForeignWorkspaceCwsFor`'s own doc comment already names.
+2. **A Known File bookmark** pointing at a document inside another workspace.
+3. **File ▸ Open** on any path — §5A's foreign documents, which is the whole point of that feature.
+4. **A raw relative `CellRef`** (`../../Other/cells/Amp`). §5C R46 says these resolve by accident, are
+   never written by circuitRF, and will go on resolving because breaking them would break the library
+   case.
+
+Routes 2, 3 and 4 are arguably fine as they are: the user typed a path or bookmarked one, which is the
+deliberate act §7A.5 says is the most that can be made visible without a server. Route 1 is the one
+worth a decision, because a librarian's folder referenced as a `.clib` gets none of RC-2's protection
+while the same folder referenced as a workspace gets all of it — and the user cannot see which they
+chose from the tree. Not fixed here: extending the policy to `LibraryRefs` means giving that list a
+shape it does not have (it is strings, not records), which is a `.cws` format change and outside this
+brief.
+
+### What the brief asked for that could not be documented yet
+
+§6 asks the user documentation to state two consequences of editing a library in its own workspace:
+*the change lands in the library's history, not the design's*, and *a pinned reference deliberately
+does not move until asked*. **Neither feature exists** — history is RC-5 onward and pins are RC-9 — so
+`docs/user/src/reference/workspace.md` states the consequence that is true today (the cell is the
+library's, your workspace records nothing about the edit) and the two history/pin sentences are left
+for the briefs that make them true. Writing them now would document behaviour the application does not
+have, which is precisely the false belief §1.4 is written against.
+
+
 ## RC-1 — opening either half of a workspace, and the reference repair that quietly followed the wrong file (2026-09-06)
 
 The `.cwsuser` split itself is in `src/Design/RESOLVED.md`. This is the open path, the three OS

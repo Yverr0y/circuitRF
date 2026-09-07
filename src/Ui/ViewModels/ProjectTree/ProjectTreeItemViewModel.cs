@@ -361,6 +361,26 @@ public sealed class ProjectTreeNodeViewModel : ObservableObject
     /// </summary>
     public bool IsReferencedWorkspace => Kind == NodeKind.ReferencedWorkspace;
 
+    /// <summary>
+    /// RC-2 R-rc2-5: this row's reference was explicitly made editable, so it is marked. The
+    /// ordinary case — a read-only reference — carries no mark, because marking every reference
+    /// would mark none of them.
+    /// </summary>
+    public bool IsEditableReference => _node.IsEditableReference;
+
+    /// <summary>The one sentence the mark's tooltip carries. It names the consequence rather than the
+    /// setting, because "editable" on its own reads like a capability and the thing worth knowing is
+    /// that two people doing this at once is not arbitrated.</summary>
+    public string EditableReferenceTooltip =>
+        "Cells in this referenced workspace can be edited from here. Changes land in that " +
+        "workspace, not in this one, and circuitRF does not arbitrate two people editing it at once.";
+
+    /// <summary>RC-2 R-rc2-4: the per-reference override, offered on the Referenced Workspace row
+    /// itself. Its label states what invoking it will DO, so the menu reads as an action rather than
+    /// as a checkbox whose current state has to be inferred.</summary>
+    public string ToggleReferenceEditableHeader =>
+        IsEditableReference ? "Make Reference Read-Only" : "Allow Editing Through This Reference…";
+
     /// <summary>The other workspace's <c>.cws</c>, or null when this cell belongs to the open one.</summary>
     private string? ForeignWorkspaceCws => _actions?.ForeignWorkspaceCwsFor(this);
 
@@ -390,6 +410,9 @@ public sealed class ProjectTreeNodeViewModel : ObservableObject
 
     /// <summary>Removes this Referenced Workspace entry from the open workspace's own <c>.cws</c>.</summary>
     public IAsyncRelayCommand RemoveWorkspaceReferenceCommand { get; }
+
+    /// <summary>RC-2 R-rc2-4: flips this reference between read-only (the default) and editable.</summary>
+    public IAsyncRelayCommand ToggleReferenceEditableCommand { get; }
 
     /// <summary>New Cell on workspace/library nodes.</summary>
     public IAsyncRelayCommand NewCellCommand { get; }
@@ -621,6 +644,10 @@ public sealed class ProjectTreeNodeViewModel : ObservableObject
 
         RemoveWorkspaceReferenceCommand = new AsyncRelayCommand(
             () => _actions?.RemoveWorkspaceReferenceAsync(this) ?? Task.CompletedTask,
+            () => _actions is not null && IsReferencedWorkspace);
+
+        ToggleReferenceEditableCommand = new AsyncRelayCommand(
+            () => _actions?.ToggleReferenceEditableAsync(this) ?? Task.CompletedTask,
             () => _actions is not null && IsReferencedWorkspace);
 
         RemoveCellReferenceCommand = new AsyncRelayCommand(

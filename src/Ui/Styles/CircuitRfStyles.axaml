@@ -52,9 +52,25 @@
             <Setter Property="HeaderTemplate">
                 <DataTemplate x:CompileBindings="False" DataType="dockCore:IDockable">
                     <Border Background="{Binding IsForeign, Converter={x:Static conv:ForeignDocumentTintConverter.Instance}}">
-                        <TextBlock Text="{Binding Title}"
-                                   VerticalAlignment="Center"
-                                   Padding="{DynamicResource DockHeaderContentPadding}"/>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Title}"
+                                       VerticalAlignment="Center"
+                                       Padding="{DynamicResource DockHeaderContentPadding}"/>
+                            <!-- RC-2 R-rc2-5: this file lives in a workspace the open one references
+                                 EDITABLY, so saving it writes into another project. Bound the same
+                                 x:CompileBindings="False" way IsForeign above is, and for the same
+                                 reason — only the document types a referenced workspace's sub-tree
+                                 can open declare the property, and every other type binds null here
+                                 and renders unmarked. Never an error colour (§5A.4): it is an
+                                 unusual state somebody chose, not a fault. -->
+                            <mi:MaterialIcon Kind="PencilOutline"
+                                             Width="11" Height="11"
+                                             Margin="0,0,6,0"
+                                             VerticalAlignment="Center"
+                                             Foreground="{DynamicResource CrfWarningBrush}"
+                                             ToolTip.Tip="This cell belongs to a referenced workspace that is editable from here. Saving writes into that workspace."
+                                             IsVisible="{Binding IsEditableReference}"/>
+                        </StackPanel>
                     </Border>
                 </DataTemplate>
             </Setter>

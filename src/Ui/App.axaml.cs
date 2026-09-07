@@ -422,7 +422,8 @@ public partial class App : Application
     private static WorkspaceWindow CreateWorkspaceWindow()
         => new WorkspaceWindow { DataContext = new WorkspaceViewModel() };
 
-    internal static WorkspaceWindow NewWorkspaceWindow(string? workspacePath = null)
+    internal static WorkspaceWindow NewWorkspaceWindow(
+        string? workspacePath = null, string? thenOpenDocument = null)
     {
         var window = CreateWorkspaceWindow();
         window.Show();
@@ -436,7 +437,15 @@ public partial class App : Application
             () =>
             {
                 ApplyLayoutPreferences(vm);
-                if (!string.IsNullOrWhiteSpace(workspacePath)) OpenFiles(vm, [workspacePath!]);
+                if (string.IsNullOrWhiteSpace(workspacePath)) return;
+                // Straight to the workspace-then-documents path rather than through OpenFiles:
+                // OpenFiles classifies by the extensions three operating systems are told circuitRF
+                // owns, and RC-2's follow-up document is named by circuitRF itself — a cell's own
+                // `.ccell` among them, which is deliberately not an OS-registered type.
+                if (string.IsNullOrWhiteSpace(thenOpenDocument) || !File.Exists(thenOpenDocument))
+                    OpenFiles(vm, [workspacePath!]);
+                else
+                    _ = OpenWorkspaceThenDocumentsAsync(vm, workspacePath!, [thenOpenDocument!]);
             },
             Avalonia.Threading.DispatcherPriority.Background);
 
@@ -537,14 +546,27 @@ public partial class App : Application
     /// stacks, two dirty flags, last-save-wins. Refusing that is both correct and cheaper than
     /// reconciling it — and "activate the window that has it" is what the user meant anyway.</para>
     /// </summary>
-    internal static WorkspaceWindow OpenWorkspaceInNewWindow(string workspacePath)
+    /// <param name="workspacePath">The <c>.cws</c> to open.</param>
+    /// <param name="thenOpenDocument">
+    /// RC-2 R-rc2-6: a document inside that workspace to land on once it is open. The refusal on an
+    /// edit through a read-only reference offers "open the workspace that owns this" as a one-click
+    /// action, and it has to arrive at the CELL — an action that opened the folder and left the
+    /// designer to find the cell again is the File ▸ Open it was meant to replace. Routed through
+    /// <see cref="OpenFiles"/> so the workspace is fully open before the document is asked for,
+    /// which is the same ordering a desktop double-click of a workspace plus a document needs.
+    /// </param>
+    internal static WorkspaceWindow OpenWorkspaceInNewWindow(
+        string workspacePath, string? thenOpenDocument = null)
     {
         if (WindowShowing(workspacePath) is { } existing)
         {
             existing.Activate();
+            if (thenOpenDocument is { Length: > 0 }
+                && existing.DataContext is WorkspaceViewModel openVm)
+                openVm.OpenDocumentByPath(thenOpenDocument);
             return existing;
         }
-        return NewWorkspaceWindow(workspacePath);
+        return NewWorkspaceWindow(workspacePath, thenOpenDocument);
     }
 
     private void OnActivated(ActivatedEventArgs e, WorkspaceWindow firstWindow)

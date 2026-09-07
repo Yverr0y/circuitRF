@@ -142,6 +142,17 @@ public interface ITreeActions
     Task RemoveWorkspaceReferenceAsync(ProjectTreeNodeViewModel referencedWorkspaceNode);
 
     /// <summary>
+    /// RC-2 R-rc2-4: flips one Referenced Workspace entry between read-only — the default, and what
+    /// an absent field means on every <c>.cws</c> written before the field existed — and editable.
+    ///
+    /// <para>The read-only direction takes effect immediately and asks nothing; the editable
+    /// direction confirms, because it opts out of the one thing that stops a library edit from
+    /// reaching nobody's history, and because circuitRF does not arbitrate two designers doing it at
+    /// once.</para>
+    /// </summary>
+    Task ToggleReferenceEditableAsync(ProjectTreeNodeViewModel referencedWorkspaceNode);
+
+    /// <summary>
     /// Removes one referenced CELL from this workspace's <c>.cws</c> — the way out of the per-cell
     /// reference, and the counterpart of the workspace one above.
     ///

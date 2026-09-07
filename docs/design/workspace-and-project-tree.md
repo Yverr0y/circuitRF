@@ -1082,7 +1082,73 @@ cell in a referenced **library** keeps its relative path: a library is not a wor
 **Cells shown from a referenced workspace are not this workspace's to change.** Rename Cell and Remove Cell
 refuse on one, by the same `IsOutside` test §5A already applies to a foreign document — otherwise a window
 that is not showing another project could rename a cell inside it and break every other workspace that
-references it.
+references it. **§5C.1a extends that from the cell's identity to its CONTENTS**: editing a referenced
+cell's views is refused by default too, for the same reason and by a different mechanism.
+
+### 5C.1a Referenced workspaces are READ-ONLY by default *(RC-2, built 2026-09-06)*
+
+**Status:** BUILT · `docs/sonnet-briefs/brief-revision-control-2-read-only-references.md` ·
+`docs/design/revision-control.md` §7A.2/§7A.3/§7A.5 · findings in `src/Design/RESOLVED.md` and
+`src/Ui/RESOLVED.md`. **This is not a revision-control feature and needs no git**; it arrived through
+that investigation and fixes a defect that has always been here.
+
+**R44b. `CwsWorkspaceRef` carries one field — whether the reference is editable — and the default is
+read-only.** `File ▸ Reference Workspace…` creates read-only references. Editable is a per-reference,
+explicit choice, made from the Referenced Workspace row's own context menu.
+
+The alternative is not "more freedom", it is silent divergence. A designer opens a library cell through
+a reference, finds a wrong pad size, fixes it and saves: the file is written (filesystem-is-truth — §5D
+R-sl2-E already says editing a read-only document is allowed and only the *save* changes), the fix works
+for that designer and for nobody else, and the librarian's next publish overwrites it or conflicts with
+it with nothing to merge from. Every step is silent, and none of it involves history at all. Read-only
+turns the whole chain into **one refusal at the moment of editing**, which is the only point where the
+designer still has the context to do something sensible.
+
+**R44c. An ABSENT field means read-only, and that deliberately inverts this repository's usual rule for
+a field that did not used to exist.** The sibling `CellsOnly` states the house instinct three lines away
+in the same class — *false on every entry written before this existed, which is the old behaviour* — and
+`CwsTreeViewState.ReferencedCells` reasons the same way. The instinct is wrong here: the old behaviour is
+not a preference anyone set, it is the hazard. The cost of inverting is one-time friction for anyone who
+was editing through a reference — a refusal carrying its remedy, and the override one click away. The
+alternative is that the workspaces most likely to have accumulated the practice are the only ones never
+protected from it.
+
+**R44d. This is a POLICY, and §5D R-sl2-A is unchanged.** That rule — read-only is never a `ReadOnly:
+true` field in a `.cws` — is about a *different question*. §5D answers "**can** circuitRF write into this
+directory?", which is a fact about the filesystem, discovered by attempting a write, the same answer for
+everybody. This answers "**should** it write here, given which workspace is asking?", which is true even
+when the filesystem would allow the write and false again from the window that owns the content. The two
+combine as an OR and share every behaviour §5D already built — Save disabled with its reason, Save As in
+its place, the provenance band. There is no second read-only concept.
+
+**R44e. The refusal fires on the EDIT, not on the save, and carries the remedy as an invokable action.**
+Every editor's mutations already meet at one place (`UndoRedoStack.Execute`), which is where the guard
+sits; the message offers *"Open ‹library›"*, which opens that workspace in a window of its own and lands
+on the very cell the designer tried to change. Without the action the remedy is correct advice that still
+costs a File ▸ Open and a hunt for the folder.
+
+**R44f. The cell becomes editable in the OTHER window, never in this one** — R40's invariant, *one file,
+one editor, across every open window*. If the referencing window's view became editable, one file would
+have two editors, two undo stacks and two dirty flags, and the second save would silently discard the
+first: the same designer losing their own work minutes apart in one session, which is worse than the
+cross-workspace divergence this exists to prevent. So the referencing window's read-only view is
+**closed** as part of routing — it can never be dirty, because every edit through it was refused, and
+leaving it open would show content the owner has since replaced.
+
+**R44g. An editably-referenced workspace is marked wherever it appears**, and a document opened from one
+carries the mark in its tab. Two designers working that way in one library is exactly the concurrent-edit
+problem `revision-control.md` §6.2 describes and circuitRF is not solving it, so the state must be visible
+rather than inferable. Only the *unusual* half is marked: a read-only reference is the ordinary case and
+carries no decoration.
+
+**R44h. The mark does not depend on which windows happen to be open.** It describes this workspace's
+*relationship* to the other one — this workspace does not own that content — and that stays true while the
+designer edits it over there. A mark that flickered with window state would produce behaviour nobody can
+reason about.
+
+**Not a lock server and not a permission system** (§7A.5). Someone determined to edit the library's files
+outside circuitRF can. The goal is to make the accidental case impossible and the deliberate case visible,
+which is the whole of what is achievable without a server.
 
 ### 5C.2 Technology — the constraint that shapes the feature
 

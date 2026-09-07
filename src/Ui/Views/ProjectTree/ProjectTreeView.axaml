@@ -373,6 +373,23 @@
                                                   ToolTip.Tip="Workspace default technology"
                                                   IsVisible="{Binding IsWorkspaceDefaultTech}"/>
 
+                                <!-- RC-2 R-rc2-5: the editable-reference mark. Only the UNUSUAL half
+                                     is marked — a read-only reference is the default and the
+                                     ordinary case, and decorating every reference would decorate
+                                     none of them. It does NOT depend on whether the other workspace
+                                     happens to be open (R-rc2-9): it describes this workspace's
+                                     relationship to that one, which stays true while the designer
+                                     edits over there, and a mark that flickered with window state
+                                     would produce behaviour nobody can reason about. -->
+                                <mi:MaterialIcon Grid.Column="1"
+                                                  Kind="PencilOutline"
+                                                  Width="11" Height="11"
+                                                  Margin="0,0,2,0"
+                                                  VerticalAlignment="Center"
+                                                  Foreground="{DynamicResource CrfWarningBrush}"
+                                                  ToolTip.Tip="{Binding EditableReferenceTooltip}"
+                                                  IsVisible="{Binding IsEditableReference}"/>
+
                                 <!-- Name: bold for IsPrimary, italic + warning-color for IsWarning.
                                      Tooltip: WarningReason first (if warning), then RelativePath. -->
                                 <TextBlock Grid.Column="2"
@@ -568,6 +585,19 @@
                                              Workspace row itself — directly above Reveal, since the two
                                              answer the same question ("where does this actually come
                                              from?") and this one answers it in the app. -->
+                                        <!-- RC-2 R-rc2-4: the per-reference override. ABOVE the item
+                                             below it, never between that one and Reveal: those two
+                                             are deliberately adjacent because they answer the same
+                                             question in two ways, and a test holds them together.
+                                             Its header names the ACTION rather than the state, so the
+                                             item reads the same way whichever side of the toggle the
+                                             reference is currently on. -->
+                                        <MenuItem Header="{Binding ToggleReferenceEditableHeader}"
+                                                  Command="{Binding ToggleReferenceEditableCommand}"
+                                                  IsVisible="{Binding IsReferencedWorkspace}">
+                                            <MenuItem.Icon><mi:MaterialIcon Kind="PencilOutline" Width="14" Height="14"/></MenuItem.Icon>
+                                        </MenuItem>
+
                                         <MenuItem Header="Open Referenced Workspace in New Window"
                                                   Command="{Binding OpenReferencedWorkspaceCommand}"
                                                   IsVisible="{Binding CanOpenReferencedWorkspace}">

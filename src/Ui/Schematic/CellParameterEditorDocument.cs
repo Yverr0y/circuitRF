@@ -9,8 +9,21 @@ namespace CircuitRF.Ui.Schematic;
 /// Implements IUndoableDocument so the workspace routes Undo/Redo to the editor's
 /// own stack while this document is active.
 /// </summary>
-public sealed class CellParameterEditorDocument : Document, IUndoableDocument, IFileBackedDocument
+public sealed class CellParameterEditorDocument : Document, IUndoableDocument, IFileBackedDocument, IReferenceMarkedDocument
 {
+    /// <summary>
+    /// RC-2 R-rc2-5: true when this file lives in a workspace the open one references EDITABLY —
+    /// the state that is marked in the tab, because it is one somebody explicitly opted out of
+    /// §7A.2's read-only default for. Set by <c>WorkspaceViewModel</c>, which is the only side that
+    /// knows which workspace is asking.
+    /// </summary>
+    public bool IsEditableReference
+    {
+        get => _isEditableReference;
+        set { if (_isEditableReference == value) return; _isEditableReference = value; OnPropertyChanged(); }
+    }
+    private bool _isEditableReference;
+
     public CellParameterEditorViewModel ViewModel { get; }
     public UndoRedoStack                UndoRedo  => ViewModel.UndoRedo;
 

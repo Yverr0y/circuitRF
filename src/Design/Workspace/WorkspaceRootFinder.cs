@@ -100,6 +100,10 @@ public static class WorkspaceRootFinder
         // it is what makes an explicit gesture (a workspace opening, a Make-Primary, a symbol save)
         // take effect at once instead of within T.
         CellStat.InvalidateCache();
+        // RC-2: the fifth, and for the same reason again — the editability POLICY on a workspace
+        // reference is read out of the same .cws the alias table above comes from, so a .cws being
+        // rewritten (including by the per-reference override itself) changes both answers at once.
+        ReferencedWorkspacePolicy.InvalidateCache();
     }
 
     /// <summary>

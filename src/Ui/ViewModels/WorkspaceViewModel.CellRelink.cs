@@ -275,6 +275,11 @@ public partial class WorkspaceViewModel
         _factory.ProjectTreeTool?.Refresh();
         RebuildOpenSchematics();
         RepaintOpenLayouts();
+
+        // RC-2: a reference's editability is one of the things that can have just changed, and it
+        // decides the tab mark, the Save item's reason and whether an open document may still be
+        // edited at all. RefreshReadOnlyMenuState carries the document sweep with it.
+        RefreshReadOnlyMenuState();
     }
 
     /// <summary>Nudges every open layout frame to re-resolve its instances — the same broadcast the

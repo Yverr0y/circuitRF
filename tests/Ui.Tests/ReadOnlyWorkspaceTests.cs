@@ -353,12 +353,17 @@ public sealed class ReadOnlyWorkspaceTests : IDisposable
 
         var doc = new LayoutDocument("Amp", NewLayoutVm(clay), clay);
 
-        Assert.Null(WorkspaceViewModel.ReadOnlyDocumentReason(doc));   // writable: no reason, Save works
+        // RC-2 made both questions instance members: the second read-only question is a POLICY on the
+        // OPEN workspace's reference to another one, so the answer depends on which window is asking.
+        // This one's workspace is `_mine`, which references nothing — so only SL2's answer is in play.
+        var vm = new WorkspaceViewModel { CurrentWorkspacePath = Path.Combine(_mine, ".cws") };
+
+        Assert.Null(vm.ReadOnlyDocumentReason(doc));   // writable: no reason, Save works
 
         MakeReadOnly(_library);
 
-        Assert.True(WorkspaceViewModel.IsDocumentReadOnly(doc));
-        string reason = Assert.IsType<string>(WorkspaceViewModel.ReadOnlyDocumentReason(doc));
+        Assert.True(vm.IsDocumentReadOnly(doc));
+        string reason = Assert.IsType<string>(vm.ReadOnlyDocumentReason(doc));
         Assert.Contains("stdlib", reason);           // the workspace, named
         Assert.Contains("read-only", reason);
         Assert.Contains("Save a copy", reason);      // and the route out, in the same breath

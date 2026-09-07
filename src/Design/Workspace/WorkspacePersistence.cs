@@ -278,9 +278,43 @@ public sealed class CwsWorkspaceRef
     ///
     /// <para>False on every entry written before this existed, which is the old behaviour: those
     /// aliases were created BY the whole-workspace gesture and go on rendering as they did.</para>
+    ///
+    /// <para><b>That last sentence is the house rule for an absent field, and
+    /// <see cref="Editable"/> below deliberately breaks it.</b> Do not copy this instinct into the
+    /// next field without asking which answer the old behaviour actually was — here it is a
+    /// preference someone set; there it is the hazard.</para>
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool CellsOnly { get; set; }
+
+    /// <summary>
+    /// RC-2 (§7A.2): whether cells reached through this reference may be EDITED in the window that
+    /// merely references them. False — read-only — is the default, and
+    /// <c>File ▸ Reference Workspace…</c> creates read-only references.
+    ///
+    /// <para><b>An absent field means READ-ONLY, which deliberately inverts the rule
+    /// <see cref="CellsOnly"/> states three lines above.</b> The house instinct for a field that did
+    /// not used to exist is "restore the old visible behaviour" — and that instinct is wrong here,
+    /// because the old behaviour is not a preference anyone set, it is the hazard. Editing a library
+    /// cell through a reference writes the file and records the change in NOBODY's history: not the
+    /// designer's workspace (the file is not in it) and not the librarian's (they were not asked).
+    /// The fix works for one designer, every other designer goes on simulating the old cell, and the
+    /// next publish overwrites it or conflicts with nothing to merge from. Every step of that is
+    /// silent, and none of it needs revision control to happen.</para>
+    ///
+    /// <para>The cost of inverting is one-time friction for anyone who was editing through a
+    /// reference: a refusal that carries its remedy, and this flag one click away in the Project
+    /// Tree. The alternative is that the workspaces most likely to have accumulated the practice are
+    /// the only ones never protected from it.</para>
+    ///
+    /// <para><b>This is a POLICY, not a filesystem fact</b> — "should circuitRF write here?", which
+    /// <c>WorkspaceWritability</c>'s "can circuitRF write here?" cannot answer and does not try to.
+    /// §5D R-sl2-A's rule that read-only is never a field in a <c>.cws</c> is about THAT question and
+    /// is unchanged: this field says nothing about permissions, and a determined user editing the
+    /// library's files outside circuitRF is not being stopped by it (§7A.5).</para>
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Editable { get; set; }
 }
 
 /// <summary>

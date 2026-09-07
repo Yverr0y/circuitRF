@@ -58,9 +58,30 @@ public sealed partial class UndoRedoStack : ObservableObject
         ? $"Redo \"{cmd.Description}\""
         : "Redo";
 
+    /// <summary>
+    /// RC-2 (§7A.2): asked before every edit, and a false answer means the edit does not happen —
+    /// the command is not run, nothing is pushed, and the redo stack is left alone.
+    ///
+    /// <para><b>Why the guard is here and not at Save.</b> The whole value of refusing an edit
+    /// through a read-only workspace reference is that it arrives while the designer still has the
+    /// context to do something sensible about it; a refusal at the write arrives after the work.
+    /// This is the one place every editor's mutations already meet — schematic, symbol, layout,
+    /// technology, EM setup and cell parameters all state in their own headers that all mutations
+    /// route through <see cref="Execute"/> — so one guard covers all six and a seventh editor
+    /// inherits it by construction.</para>
+    ///
+    /// <para>The guard REPORTS the refusal itself (that is the only thing it can usefully do with
+    /// the context it has); this method's contract is only that a false answer changes nothing.
+    /// Null — the default — permits every edit, which is what every stack in a workspace the user
+    /// owns has.</para>
+    /// </summary>
+    public Func<bool>? EditGuard { get; set; }
+
     /// <summary>Execute a command and push it onto the undo stack. Clears the redo stack.</summary>
     public void Execute(IUiCommand command)
     {
+        if (EditGuard is { } guard && !guard()) return;
+
         command.Execute();
         _undoStack.Push(command);
         _undoStamps.Push(EditSequence.Next());

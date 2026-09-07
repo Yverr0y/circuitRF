@@ -209,7 +209,8 @@ public static class WorkspaceScanner
     // ── Cell ──────────────────────────────────────────────────────────────────
 
     private static ProjectTreeNode BuildCellNode(
-        string cellDir, string workspaceRoot, bool isReferencedCell = false)
+        string cellDir, string workspaceRoot, bool isReferencedCell = false,
+        bool isEditableReference = false)
     {
         // Read .ccell for IsTestBench (tolerate corrupt file)
         bool isTestBench = false;
@@ -238,7 +239,8 @@ public static class WorkspaceScanner
             relativePath: Rel(cellDir, workspaceRoot),
             isTestBench: isTestBench,
             warningReason: warnings.Count > 0 ? string.Join(" ", warnings) : null,
-            isReferencedCell: isReferencedCell);
+            isReferencedCell: isReferencedCell,
+            isEditableReference: isEditableReference);
 
         // CellViewFolder children — empty sub-folders produce no node (§3.1)
         foreach (ViewType vt in Enum.GetValues<ViewType>())
@@ -395,13 +397,17 @@ public static class WorkspaceScanner
             return new ProjectTreeNode(
                 NodeKind.ReferencedWorkspace, entry.Alias,
                 ResolveRef(entry.Path, workspaceRoot), "",
-                warningReason: UnresolvedReason("Referenced workspace unresolved", entry.Path));
+                warningReason: UnresolvedReason("Referenced workspace unresolved", entry.Path),
+                // RC-2 R-rc2-9: read off the ENTRY, so the mark describes this workspace's
+                // relationship to the other one and not whether the other one could be found.
+                isEditableReference: entry.Editable);
 
         var node = new ProjectTreeNode(
             NodeKind.ReferencedWorkspace,
             name: entry.Alias,
             absolutePath: otherRoot,
-            relativePath: "");
+            relativePath: "",
+            isEditableReference: entry.Editable);
 
         // Cells at any depth (R-sl1-1), and cells only — the same shape a Library sub-tree has. The
         // other workspace's own libraries, known files and referenced workspaces are ITS business:
@@ -438,16 +444,23 @@ public static class WorkspaceScanner
     {
         string? cellDir = ExternalCellRef.ResolveCellDir(cellRef, workspaceRoot);
 
+        // RC-2 R-rc2-5: the alias the cell is addressed through carries the policy, so a cell
+        // referenced on its own is marked on exactly the same terms as a whole referenced workspace.
+        bool editable = ExternalCellRef.TryParse(cellRef, out string cellAlias, out _)
+                     && ReferencedWorkspacePolicy.IsReferenceEditable(workspaceRoot, cellAlias);
+
         if (cellDir is null || !File.Exists(Path.Combine(cellDir, CellFolder.CcellFileName)))
             return new ProjectTreeNode(
                 NodeKind.Cell, RefLeaf(cellRef), cellDir ?? cellRef, "",
                 warningReason: UnresolvedReason("Referenced cell unresolved", cellRef),
-                isReferencedCell: true);
+                isReferencedCell: true,
+                isEditableReference: editable);
 
         // Relative to the OTHER workspace's root where there is one, so the tooltip reads as the path
         // the cell actually has over there rather than a ../../ climb out of this workspace.
         string relativeTo = WorkspaceRootFinder.WorkspaceDirOf(cellDir) ?? Path.GetDirectoryName(cellDir)!;
-        return BuildCellNode(cellDir, relativeTo, isReferencedCell: true);
+        return BuildCellNode(cellDir, relativeTo, isReferencedCell: true,
+                             isEditableReference: editable);
     }
 
     /// <summary>The last path segment of a <c>ws://alias/a/b/Cell</c> reference — what to call a row
