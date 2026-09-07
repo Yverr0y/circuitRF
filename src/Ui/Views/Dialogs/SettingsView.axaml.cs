@@ -7,6 +7,8 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using CircuitRF.Design.Revision;
+using CircuitRF.Ui.Revision;
 using CircuitRF.Ui.Layout.Drc;
 using CircuitRF.Ui.Messages;
 using CircuitRF.Ui.Theming;
@@ -19,6 +21,20 @@ public partial class SettingsView : Window
 {
     // ── State ────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// The workspace directory this dialog was CONSTRUCTED with, which is not always the one that is
+    /// open — see <see cref="CurrentWorkspaceDirectory"/>.
+    ///
+    /// <para><b>The colour-theme code below deliberately still reads this field directly, and that is
+    /// a known defect left alone on purpose (2026-09-06).</b> The macOS application menu passed null
+    /// here for a long time, so on that platform <c>ThemeResolver</c> has never been offered the open
+    /// workspace and workspace-local <c>.ccolor</c> themes have never appeared in the combo box —
+    /// silently, because a missing theme looks exactly like a workspace that has none. Routing the
+    /// theme calls through the fallback would fix it, and would also change what that combo lists on
+    /// every Mac; that is a decision for the owner, not a side effect of the revision-control tab. RC-4
+    /// fixed the call site so the field is now usually populated, which shrinks the defect without
+    /// closing it.</para>
+    /// </summary>
     private readonly string? _workspaceDirPath;
 
     // Guard: prevents recursive writes during programmatic ComboBox population.
@@ -39,7 +55,20 @@ public partial class SettingsView : Window
 
     // ── Construction ─────────────────────────────────────────────────────────
 
-    // Parameterless ctor satisfies the Avalonia XAML resource loader (AVLN3001).
+    /// <summary>
+    /// The workspace the user is looking at, supplied by the application because a dialog cannot see
+    /// the window list.
+    ///
+    /// <para><b>Consulted on ACTIVATION as well as at construction</b>, because this dialog is not
+    /// modal and outlives any one workspace: somebody who opens Settings, switches workspace and looks
+    /// back must be shown the workspace they are looking at. Null — nothing installed it, or nothing is
+    /// open — means "no workspace", which is a state the per-workspace row states plainly rather than
+    /// hiding.</para>
+    /// </summary>
+    internal static Func<string?>? ActiveWorkspaceDirectory { get; set; }
+
+    // Parameterless ctor satisfies the Avalonia XAML resource loader (AVLN3001), and is what the docs
+    // factory captures with: a figure of "no workspace open" is the reproducible one.
     public SettingsView() : this(null) { }
 
     public SettingsView(string? workspaceDirPath)
@@ -48,8 +77,30 @@ public partial class SettingsView : Window
         _originalTheme    = ThemeService.Active;
 
         InitializeComponent();
-        Loaded += OnLoaded;
+        Loaded    += OnLoaded;
+        Activated += OnActivatedRefresh;
     }
+
+    /// <summary>
+    /// Re-reads what depends on WHICH workspace is open. Only the Revision Control tab does — and
+    /// re-reading is also how a change made in another window, or by hand, reaches this dialog: the
+    /// per-workspace flag lives in the <c>.cws</c>, not in anything this window holds.
+    /// </summary>
+    private void OnActivatedRefresh(object? sender, EventArgs e)
+    {
+        if (!IsLoaded) return;
+        RevisionSettings.SetWorkspace(CurrentWorkspaceDirectory());
+    }
+
+    /// <summary>
+    /// What was passed in, or — when nothing was — whatever the application says is in front.
+    ///
+    /// <para><b>The fallback is load-bearing on macOS.</b> <c>circuitRF ▸ Settings…</c> and <c>⌘,</c>
+    /// go through the application menu, which constructs this dialog itself and for a long time passed
+    /// null; on that platform those are the only ways most people open it.</para>
+    /// </summary>
+    private string? CurrentWorkspaceDirectory()
+        => _workspaceDirPath ?? ActiveWorkspaceDirectory?.Invoke();
 
     /// <summary>
     /// Populate every tab exactly as opening the dialog does.
@@ -64,6 +115,7 @@ public partial class SettingsView : Window
     private void OnLoaded(object? sender, RoutedEventArgs e)
     {
         LoadGeneralPrefs();
+        LoadRevisionTab();
         PopulateThemeCombo();
 
         // Open on whichever variant circuitRF is actually rendering right now, not a hardcoded
@@ -72,6 +124,68 @@ public partial class SettingsView : Window
         LightRadio.IsChecked = ThemeService.CurrentVariant != ColorVariant.Dark;
 
         LoadThemeIntoEditor(ThemeService.Active);
+    }
+
+    // ── Revision Control tab ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// For the User-Docs factory only: keeps the Revision Control tab visible whatever this machine's
+    /// git situation is, so a generated figure is a picture of the tab rather than of whether the
+    /// generating machine happened to have git installed.
+    ///
+    /// <para>It changes nothing a user sees. <see cref="ApplyRevisionTabVisibility"/> is what the
+    /// application runs, and it hides the tab exactly as §4.3 requires.</para>
+    /// </summary>
+    internal static bool ShowRevisionTabForCapture { get; set; }
+
+    private void LoadRevisionTab()
+    {
+        RevisionSettings.SetWorkspace(CurrentWorkspaceDirectory());
+        ApplyRevisionTabVisibility();
+
+        // A git named on either host changes the answer to "is there a usable git", so the tab can
+        // appear (or the fallback row disappear) without the dialog being reopened. Both hosts are
+        // subscribed because either one can be the visible one.
+        RevisionSettings.PathControl.GitPathChanged += (_, _) => ApplyRevisionTabVisibility();
+        GitPathFallback.GitPathChanged             += (_, _) => ApplyRevisionTabVisibility();
+    }
+
+    /// <summary>
+    /// R-rc4-3: the whole tab is hidden when git is unavailable and no path has been configured —
+    /// <b>with the single exception of the path field</b>, which moves to Security &amp; Permissions
+    /// so an unusually-located git can still be named.
+    ///
+    /// <para><b>Hidden, not disabled.</b> Absence is silent (§4.3): a designer who does not want a
+    /// history should never learn the feature exists. That is deliberately the opposite of RC-6's HOLD
+    /// state, where the affordances stay visible and refuse — because absent is harmless, while a
+    /// designer who believes they are protected and is not is the failure this whole feature guards
+    /// against.</para>
+    ///
+    /// <para><b>A CONFIGURED path keeps the tab even when it does not resolve.</b> Somebody who named a
+    /// git and got it wrong needs to see the field they got wrong, and the Detect line that says
+    /// why.</para>
+    /// </summary>
+    private void ApplyRevisionTabVisibility()
+    {
+        bool configured = (AppPreferencesIo.Load().RevisionGitPath?.Trim().Length ?? 0) > 0;
+        bool available;
+        try { available = GitDiscovery.IsAvailable; }
+        catch (Exception) { available = false; }
+
+        bool show = ShowRevisionTabForCapture
+                 || RevisionTabVisibility.ShouldShowTab(configured, available);
+
+        RevisionTab.IsVisible = show;
+
+        // Never both. The fallback exists only for the case where the tab that normally hosts it is
+        // gone, and two identical rows in one dialog is worse than either placement.
+        GitPathFallback.IsVisible = !show;
+        if (!show) GitPathFallback.Load();
+
+        // A hidden TabItem that is still the SELECTED one leaves the dialog showing an empty body —
+        // Avalonia does not move the selection off it. This cannot arise from the initial state (the
+        // tab is not selected by default) but does when git stops resolving while Settings is open.
+        if (!show && ReferenceEquals(Tabs.SelectedItem, RevisionTab)) Tabs.SelectedIndex = 0;
     }
 
     // ── General tab ──────────────────────────────────────────────────────────

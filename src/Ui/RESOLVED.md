@@ -21434,3 +21434,231 @@ target INSIDE the referencing workspace. The repoint re-decides the stored form 
 rule, so assert on resolution, never on spelling. A `${NAME}`-tokenised ref (SL1 R-sl1-6) is neither
 counted nor rewritten: substituting an absolute path for a token repairs this machine and silently
 un-shares the reference on every other one.
+
+---
+
+## RC-4 — Settings ▸ Revision Control (2026-09-06)
+
+`docs/sonnet-briefs/brief-revision-control-4-settings-tab.md`, architecture §10A. The tab that says
+what is being kept. No checkpoint is taken by this work; RC-5 does that.
+
+### The tab strip was already over the line before the fifth tab existed
+
+The brief asks whether five headers fit at `MinWidth="620"` with `TechEditorView`'s values. Measured
+with a throwaway headless harness — a real `Window`, shown, arranged at each width, reading each
+`TabItem`'s own `Bounds` — rather than estimated:
+
+| | header widths sum | usable panel width at 620 | result |
+|---|---|---|---|
+| theme's own metrics, default `WrapPanel` | 850 px | 592 px | **two rows** — "Color Theme" and "Wirebonds" wrap |
+| `TechEditorView`'s values (13 pt, `10,4`) | 529 px | 592 px | one row, 63 px spare |
+| 12 pt, `9,4` | 486 px | 592 px | one row, 106 px spare |
+
+**Shipped `TechEditorView`'s values**, per the brief's "adjust only if five headers still do not fit".
+
+The finding worth keeping is the one the measurement produced by accident. The per-header widths under
+the theme's own metrics are `General` 100, `Security & Permissions` 267, `Revision Control` 194,
+`Color Theme` 157, `Wirebonds` 132. **The four original headers sum to 656 px against 592 px of usable
+width** — so `SettingsView` was already spilling onto a second row at its own declared `MinWidth`,
+before this brief added anything. It fitted at the 720 default, which is the only width anyone had
+looked at. That is exactly the failure `TechEditorView.axaml:251` records from its own window, arriving
+a second time in a second dialog, and it is the argument for the brief's R-rc4-5: *verify at the
+minimum width, not the default*.
+
+### What the existing consent model actually says, and where git landed inside it
+
+R-rc4-2a asks for the answer rather than an inference. Security & Permissions does **not** have one
+uniform consent shape. It has three, and reading them is what decided where git goes:
+
+1. **A per-subject prompt.** Generated artwork asks once per kit (`PCellTrustStore`); the tab's row
+   only *forgets* those answers so it asks again.
+2. **A standing on/off switch, default on, with an installation-level override that beats it.**
+   External device workers (`no-device-workers` file, `CRF_NO_DEVICE_WORKERS`), and automatic updates.
+3. **No gate at all.** The Verilog-A compiler is a path and nothing more. Naming it is not consent to
+   run it, and there is no checkbox that stops circuitRF running it — pointing a component at `.va`
+   source is the consent, and the row exists so the user can say *which* program that is.
+
+**git was brought under the model, not given a parallel one, and it takes shapes 3 and 2 together.**
+The path row IS the Verilog-A compiler row with a different program — same blank-means-PATH default,
+same Browse, same status line, same "a named path outranks PATH" — and *keep a history of my
+workspaces* is the standing on/off switch: off means circuitRF never invokes git at all. So there is
+one consent, in two familiar shapes, and the path row's second host is Security & Permissions itself.
+
+The one thing that is genuinely new is that the switch **defaults on** where shape 2's other subjects
+are per-kit opt-in. §4.3 is what pays for that: the entire tab is invisible to anyone who did not
+install git deliberately, so the default only ever reaches somebody who already made that choice.
+
+### R-rc4-3's "hidden, except the path field" needs a second host, not a partial tab
+
+The requirement reads as a contradiction — *the whole tab is hidden … with the single exception of the
+path field itself* — and gate 5 makes it explicit: **the tab is absent AND the path field is still
+reachable**. A tab that is hidden cannot contain a reachable field, so the path row is its own
+`UserControl` with **two hosts**, and exactly one of them shows it:
+
+- `RevisionControlSettingsView` hosts it when the tab exists;
+- `SettingsView`'s Security & Permissions tab hosts it (`GitPathFallback`) when the tab does not.
+
+`RevisionTabVisibility` owns the single decision both read, so "never both" is a property of one
+function rather than of two `IsVisible` assignments agreeing. That is also what let gate 5 be a
+behaviour test in a project that calls no Avalonia runtime API.
+
+### The docs chapter's opening framing was made false by exactly one row
+
+`docs/user/src/reference/settings.md` opened with *"Settings are per user, not per workspace. Nothing
+on this dialog travels inside a `.cws`."* **Keep a history of this workspace** is stored in the `.cws`
+and therefore travels — deliberately, per §5.7. The framing was amended with a callout naming the one
+exception rather than deleted, because the general statement is still the useful one and the exception
+is the interesting one. A reader who skims the top of that chapter and then meets a setting that
+travelled would have been told something false by the page itself.
+
+### "Off deletes nothing" reads correctly at both scopes, but only after a rewrite
+
+The brief asks whether the per-workspace sentence survives being widened to every workspace
+(R-rc4-12a). The first drafting did not. *"Turning this off deletes nothing"* is reassuring about one
+workspace and alarming about all of them, because at the wider scope the reader's next thought is
+*"what about the ones I am not looking at?"* — a question the narrow sentence does not raise and does
+not answer. The shipped pair answers it explicitly and in the same order both times: **what stops**
+(circuitRF stops recording, *in every workspace*), then **what does not** (it deletes nothing; the
+restore points already taken stay listed and restorable; turning it back on carries on where **each
+workspace** left off). The plural is the whole of the difference.
+
+### Two things RC-4 needed that RC-3 did not provide
+
+1. **A thinning journal reader.** `GitReclaim.Reclaim` takes the journal as an argument and RC-6 owns
+   the writer — but gate 9a requires the confirmation to name a **count**, and there was nothing to
+   count from. §5.6 rule 4 specifies the location (`.git/circuitrf/`) and nothing else, so RC-4 defined
+   the format: `ThinningJournal`, one JSON object per line in `.git/circuitrf/thinned.jsonl`, appended.
+   **RC-6 inherits it** — `Format` is public so the writer and the reader cannot disagree, and `Read`
+   ignores unrecognised fields and skips an unparseable line rather than failing, because this is
+   consulted on the path that offers a destructive action and a reader that threw would turn one bad
+   line into a control nobody can use. Today the file never exists, so the count is zero and the action
+   says there is nothing to reclaim — which is correct, not a stub.
+2. **A per-workspace `.cws` accessor.** `WorkspaceRevisionSetting`, in `src/Design`, so RC-5's arming
+   boundary and `src/Cli` read the flag the same way the dialog writes it. Read-modify-write against
+   the file, which is the idiom every other `.cws` writer here already uses.
+
+### Nothing wanted the identity in a git config file
+
+R-rc4-11a asks whether any path still did. **None.** Verified as a source scan across `src/Ui`,
+`src/Design` and `src/Cli` for a `git config` invocation naming `user.name`/`user.email` that is not a
+`--get` (`NoPathAnywhereWritesTheIdentityIntoAGitConfigFile`). The only two hits anywhere are reads:
+`RevisionIdentity.Resolve`'s fallback to git's own resolution, and `GlobalGitDefault`, which is the
+pre-fill. Reading somebody's global config is unobjectionable; only writing it was ever the problem.
+The pre-fill is deliberately **not committed** — it fills the boxes and waits for the user, so a
+machine whose global identity later changes is not silently pinned to the old one by a value circuitRF
+copied unasked.
+
+### `[JsonPropertyName]` takes a `const`, which is what keeps the two readers in step
+
+`AppPreferences.RevisionIdentityName` is attributed `[JsonPropertyName(RevisionIdentity.NameKey)]`, not
+a literal. `src/Cli` cannot reference `AppPreferences`, so `src/Design`'s reader finds the identity by
+key name in the same file — and two spellings of one key means the settings tab writes an identity
+`serve` cannot read, silently, which is precisely the failure §4.4 rev 4 shipped. An attribute argument
+must be a compile-time constant, so RC-3's `public const string` makes this work with no plumbing.
+
+### Traps met, for whoever adds the next numeric preference
+
+- **Set a `NumericUpDown`'s bounds BEFORE its value.** It coerces whatever it is given against its
+  *current* `Minimum`/`Maximum`, so assigning 30 while the minimum is still 0 and then raising the
+  minimum leaves the control holding a number the preference never said. Same family as the Match
+  slider write-back recorded above.
+- **A hard floor is not enforced by `Minimum` alone.** A typed value is coerced on commit, but an empty
+  or unparseable box yields **null**, which coerces to nothing — and letting that reach the preference
+  is how a hard floor quietly becomes an advisory one. Every numeric handler here goes through
+  `Clamped`, which also writes the corrected value back to the control.
+- **"Shown but not switchable" is `IsHitTestVisible="False"`, never `IsEnabled="False"`.** A greyed-out
+  checkbox reads as *not available to you*, which is the opposite of what the AI-edit row says.
+
+### A source scan scoped by the first occurrence of a method name scopes to a CALL SITE
+
+`Section(code, "LoadIdentity")` found `LoadIdentity(prefs);` inside `Load()` and scanned that one line.
+The test passed or failed on unrelated code and would have gone on doing so. It now matches a
+*declaration* (an access modifier, then the name, then an open paren). Worth knowing because this repo
+leans on comment-stripped source scans and the helper is copied between test files.
+
+Likewise, scanning "the 400 characters after the `Name=` attribute" assumes an attribute order that
+XAML does not have — `TextWrapping` legitimately precedes `Name`. Scan the enclosing element.
+
+### Three things the owner reported while it was being built (2026-09-06)
+
+**1. The AI-edit row is `IsEnabled="False"`, not `IsHitTestVisible="False"`.** The first drafting
+reasoned that a greyed control says *not available to you*, which is the opposite of what that row
+means. The owner's call reverses it, and the reasoning is better: a checkbox that looks ordinary and
+silently ignores a click does not teach the user that it is fixed — it teaches them that clicking did
+nothing. Disabled says both halves at once, *it is on and it is not yours to change*, and the sentence
+under it says why. Gate 8 now asserts `IsEnabled="False"`.
+
+**2. Every numeric field in the application drew its number ~2 px above its own label**, and the fix
+belongs in `CircuitRfStyles.axaml` rather than in this tab. Reported against Settings' *Keep them for:*,
+*Always keep at least:* and *Wire clearance:*.
+
+The cause is one step further in than the two `VerticalContentAlignment` fixes already recorded above
+it in that file. **The `Selector="TextBox"` style there already says `Center`, and it does not reach the
+TextBox inside a `NumericUpDown`'s template** — that one's `VerticalContentAlignment` is
+*template-bound* to the NumericUpDown's own, and a template binding is a local value that beats any
+style. So the alignment has to be set on the outer control. `<Style Selector="NumericUpDown">` with
+`VerticalContentAlignment="Center"`, application scope, because the Settings tabs, the technology
+editor and the wBond property panels all pair a numeric field with a label.
+
+Measured rather than eyeballed, by rendering the dialog headless at 192 dpi and reading the glyph ink
+rows: the digits' ink centre sat at **955.5** against the neighbouring label's **960.0** — 4.5 device
+px, ~2 logical px. After the style: **959.5 vs 960.0**. The ±2 device px that remains on some rows is
+per-glyph ink variation (a `1` has no round overshoot, `0.5` has a period on the baseline) and is the
+same magnitude for a ComboBox, which was never wrong.
+
+*Found in the same render, and fixed with it:* "Always keep at least:" measures 147 px and overflowed
+the 130 px label column the other Settings tabs use. Every grid on this tab went to 155 rather than
+only that row's, so the fields still line up down the tab — one wider row would have read worse than
+the overflow it fixed.
+
+**Worth keeping generally: "the geometry is centred" and "it looks centred" are different measurements.**
+The first pass here measured control bounds and found the label and the field centred to within 0.5 px,
+and the TextPresenter centred 3/3 inside its NumericUpDown — all true, and all missing the defect,
+which lives in where the glyphs sit inside the presenter's line box. Reading ink rows off a render is
+what found it.
+
+**3. "No workspace is open" while a workspace was open — and the bug is older than this tab.** The
+macOS application menu's *Settings…* (`circuitRF ▸ Settings…`, `⌘,`) constructs `SettingsView` itself
+rather than going through `WorkspaceViewModel.ShowSettings`, and it passed **null** for the workspace
+directory. On macOS those are the only ways most people open the dialog, so Settings believed no
+workspace was open however many were.
+
+**Nothing noticed until RC-4 put a per-workspace row on the dialog.** The one earlier consumer of that
+argument is `ThemeResolver`, which merely stopped offering workspace-local `.ccolor` themes — a missing
+theme looks exactly like a workspace that has none, so it never read as a fault. RC-4 fixed the call
+site (`App.ActiveWorkspaceDirectory` — the active workspace window, else any visible one) and added a
+fallback so the dialog can answer the question itself when a caller does not.
+
+**And it re-resolves on `Activated`, not only at construction**, because this dialog is not modal and
+outlives any one workspace: opening Settings, switching workspace and looking back must show the
+workspace in front. Re-reading is also how a change made in another window reaches it — the flag lives
+in the `.cws`, not in anything this window holds.
+
+**Left deliberately open, for the owner:** the colour-theme code still reads the raw constructor
+argument rather than the fallback, so routing it through would additionally change what the theme combo
+lists on every Mac. That is a decision, not a side effect of this tab; the field's own comment says so.
+
+**4. Compact and Reclaim name the workspace they act on** (owner, 2026-09-06): *Compact "Board"* and
+*Reclaim Space in "Board"…*. Neither opens a picker — they act on the workspace already open — and a
+button that silently picks its own subject is one a user has to press to find out. With no workspace
+open they are **disabled** and fall back to their unqualified captions, because with nothing to name a
+button cannot say what it would do; the line beneath says why instead.
+
+All three controls take the name from one helper (`QuotedWorkspaceName`), including the per-workspace
+checkbox that already had it. Three controls naming the same workspace three different ways is how one
+of them ends up naming a different one. The name is **truncated at 28 characters** because it goes
+inside a button: a folder named after a part number and a date would otherwise stretch the Disk Space
+row past the dialog's own minimum width, and a button that reflows the layout it sits in is worse than
+one that abbreviates.
+
+*Fixed in passing:* `RepositoryOrExplain` wrote its refusal into the PACKING status line for both
+actions, so a reclaim that had nothing to act on reported itself two rows away from the button that was
+pressed. It now takes the reporter as an argument.
+
+### Not done, and why
+
+- **DocGen was not run** (owner instruction, mid-task). The five settings figures are therefore stale:
+  the four existing ones change because the tab strip changed, and `settings-revision-control` does not
+  exist yet. `DocsFactoryTests.EveryCapturedFigureExistsInBothVariantsAndDrawsSomething` is red for
+  exactly that reason and its message carries the command. R-rc4-9's classified diff cannot be reported
+  until it runs.

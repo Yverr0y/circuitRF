@@ -461,7 +461,7 @@ suite on Windows, macOS, and Linux.
   a third-party cell database, layout view).
 
 ## Commit expectations
-- Never commit unless given an explicit instruction by owner
+- Never commit unless given an explicit instruction by owner; if owners asks for commit it is to main
 
 ## Commercial Vendor References
 - Do not allow references to commercial vendors or their products to leak into the circuitRF repo - not even as a glossery of names to filter out.

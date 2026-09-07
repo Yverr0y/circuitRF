@@ -236,7 +236,7 @@ public static class FigureCatalog
         // ── Settings, one figure per tab ──────────────────────────────────────────
         // 720x506 is the dialog's OWN declared size (720x540) less the synthetic title bar, so a
         // reader is looking at the window their own build opens rather than a re-proportioned one.
-        // The tab strip is in every figure: it is how the page's four sections are told apart.
+        // The tab strip is in every figure: it is how the page's five sections are told apart.
 
         new("settings-general", DocSettingsFixtures.General,
             DocSettingsFixtures.Width, DocSettingsFixtures.Height,
@@ -251,6 +251,14 @@ public static class FigureCatalog
             "Settings, Security and Permissions: everything that decides what circuitRF is allowed "
           + "to run or to fetch - a kit's artwork scripts, a kit's device worker, automatic updates, "
           + "and the Verilog-A compiler. Each control carries its explanation as a tooltip."),
+
+        new("settings-revision-control", DocSettingsFixtures.RevisionControl,
+            DocSettingsFixtures.Width, DocSettingsFixtures.Height,
+            WindowFrame.Titled("circuitRF Settings"),
+            "Settings, Revision Control: which git circuitRF runs, who changes are attributed to, "
+          + "whether a history is kept for your workspaces and for this one, how long restore points "
+          + "are kept, and the two disk-space actions. Every control that reduces what is kept carries "
+          + "its consequence in a sentence beside it."),
 
         new("settings-color-theme", DocSettingsFixtures.ColorTheme,
             DocSettingsFixtures.Width, DocSettingsFixtures.Height,

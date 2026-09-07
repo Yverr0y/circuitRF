@@ -14,7 +14,45 @@
     <Grid RowDefinitions="*,Auto" Margin="14">
 
         <!-- ── Tabs ───────────────────────────────────────────────────────── -->
-        <TabControl Grid.Row="0">
+        <TabControl Grid.Row="0" Name="Tabs">
+
+            <!-- TabControl's DEFAULT ItemsPanel is a WrapPanel, so headers that do not fit SPILL ONTO
+                 A SECOND ROW — they do not clip, and nothing errors. That is exactly how four headers
+                 silently became two rows in TechEditorView as its window narrowed, and adding a fifth
+                 header here brings this dialog to the same edge. The fix is the one already in the
+                 tree at TechEditorView.axaml: a horizontal StackPanel keeps them on one row
+                 unconditionally, and the scoped TabItem style then pins the size explicitly rather
+                 than inheriting the theme's Pivot-scale header metrics — because the panel alone makes
+                 one row a PROMISE and the style is what makes it a FIT.
+
+                 SCOPED to this TabControl's own Styles, never a global TabItem selector: this dialog
+                 is not the only TabControl in the application.
+
+                 BOTH HALVES ARE NECESSARY HERE, and that was MEASURED at MinWidth="620" rather than
+                 assumed — a tab strip that fits at 720 and wraps at 620 is the same defect arriving
+                 later. On the theme's own header metrics the five headers measure 850 px against
+                 592 px of usable width, and under the default WrapPanel "Color Theme" and "Wirebonds"
+                 duly land on a SECOND ROW, silently. TechEditorView's values below bring them to
+                 529 px, one row, 63 px spare.
+
+                 (Those per-header widths also say the four-tab dialog was ALREADY over the line
+                 before this tab existed: 656 px against 592. It fitted at the 720 default and spilled
+                 as the window narrowed, which is exactly the failure TechEditorView records — nobody
+                 had looked at 620.) -->
+            <TabControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal"/>
+                </ItemsPanelTemplate>
+            </TabControl.ItemsPanel>
+
+            <TabControl.Styles>
+                <Style Selector="TabItem">
+                    <Setter Property="FontSize" Value="13"/>
+                    <Setter Property="Padding" Value="10,4"/>
+                    <Setter Property="MinHeight" Value="0"/>
+                    <Setter Property="VerticalContentAlignment" Value="Center"/>
+                </Style>
+            </TabControl.Styles>
 
             <!-- ── General tab ────────────────────────────────────────────── -->
             <TabItem Header="General">
@@ -138,7 +176,38 @@
                              the two that govern what runs without being asked. -->
                         <dlg:VerilogACompilerSettingsView Margin="0,24,0,0"/>
 
+                        <!-- The git path, hosted here ONLY when the Revision Control tab is hidden —
+                             which is the case on a machine with no usable git and no configured path.
+                             The whole tab is hidden there because absence is silent (§4.3): a designer
+                             who does not want a history should never learn the feature exists. But
+                             hiding everything would also hide the one field that makes a git in an
+                             unusual location findable in the first place, so the field survives its own
+                             tab and lands on the tab that already answers "what may circuitRF RUN",
+                             beside the Verilog-A compiler it is a near-copy of.
+
+                             SettingsView.ApplyRevisionTabVisibility decides which of the two hosts
+                             shows it; it is never shown twice. -->
+                        <dlg:GitPathSettingsView Name="GitPathFallback" Margin="0,24,0,0"
+                                                 IsVisible="False"/>
+
                     </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ── Revision Control tab ───────────────────────────────────────
+                 Immediately to the right of Security & Permissions (owner, 2026-09-06), and a tab of
+                 its own rather than a section on that one. Security & Permissions answers exactly one
+                 question — what circuitRF is allowed to RUN and to FETCH — and its own header records
+                 that things were collected there for that SHAPE rather than for the tab they arrived
+                 in. Naming a git executable is the only row here that would fit it; the other nine are
+                 about what is KEPT, and a designer looking for "how long are my restore points kept"
+                 will not look under Security.
+
+                 HIDDEN, not disabled, on a machine with no usable git and no configured path (§4.3) —
+                 see ApplyRevisionTabVisibility, and the git-path fallback above. -->
+            <TabItem Header="Revision Control" Name="RevisionTab">
+                <ScrollViewer Margin="0,8,0,0" HorizontalScrollBarVisibility="Disabled">
+                    <dlg:RevisionControlSettingsView Name="RevisionSettings"/>
                 </ScrollViewer>
             </TabItem>
 

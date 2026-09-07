@@ -830,10 +830,42 @@ public partial class App : Application
         // The ShutdownRequested handler in OnFrameworkInitializationCompleted routes it to Quit().
     }
 
+    /// <summary>
+    /// The workspace folder of the window the user is actually looking at, or null when no workspace is
+    /// open.
+    ///
+    /// <para><b>This exists because the macOS application menu's Settings… had no way to say.</b> That
+    /// item constructs the dialog itself rather than going through
+    /// <c>WorkspaceViewModel.ShowSettings</c>, and it passed null — so on macOS, where
+    /// <c>circuitRF ▸ Settings…</c> and <c>⌘,</c> are the ONLY way most people open the dialog, Settings
+    /// believed no workspace was open however many were. Nothing on the dialog noticed until RC-4 put a
+    /// per-workspace row on it; the one earlier consumer, <c>ThemeResolver</c>, merely stopped offering
+    /// workspace-local <c>.ccolor</c> themes, silently.</para>
+    ///
+    /// <para><b>Active first, then any visible workspace window.</b> With several workspaces open the
+    /// question "which one" has one honest answer, and it is the one in front.</para>
+    /// </summary>
+    private string? ActiveWorkspaceDirectory()
+    {
+        if (_desktop is null) return null;
+
+        var windows = _desktop.Windows.OfType<WorkspaceWindow>().Where(w => w.IsVisible).ToList();
+        var chosen  = windows.FirstOrDefault(w => w.IsActive) ?? windows.FirstOrDefault();
+
+        return chosen?.DataContext is WorkspaceViewModel { CurrentWorkspacePath: { } cws }
+            ? Path.GetDirectoryName(cws)
+            : null;
+    }
+
     private void WireAppMenuItems()
     {
         var appMenu = NativeMenu.GetMenu(this);
         if (appMenu is null) return;
+
+        // Resolved at ACTIVATION time, not at construction: the dialog is not modal and outlives any
+        // one workspace, so a user who opens Settings, switches workspace and looks back must see the
+        // workspace they are looking at rather than the one that was in front when it opened.
+        Views.Dialogs.SettingsView.ActiveWorkspaceDirectory = ActiveWorkspaceDirectory;
 
         var settingsItem = appMenu.Items.OfType<NativeMenuItem>()
                                         .FirstOrDefault(i => i.Header == "Settings…");
@@ -846,7 +878,7 @@ public partial class App : Application
                 _appSettingsWindow.Activate();
                 return;
             }
-            _appSettingsWindow = new Views.Dialogs.SettingsView();
+            _appSettingsWindow = new Views.Dialogs.SettingsView(ActiveWorkspaceDirectory());
             _appSettingsWindow.Closed += (_, _) => _appSettingsWindow = null;
             var owner = (_desktop as IClassicDesktopStyleApplicationLifetime)
                             ?.Windows.FirstOrDefault();

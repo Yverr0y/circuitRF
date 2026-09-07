@@ -1,0 +1,253 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:dlg="clr-namespace:CircuitRF.Ui.Views.Dialogs"
+             x:Class="CircuitRF.Ui.Views.Dialogs.RevisionControlSettingsView">
+
+  <!--
+    Settings > Revision Control (RC-4; docs/design/revision-control.md §10A).
+
+    WHAT IS KEPT, and nothing else. The tab beside it — Security & Permissions — answers exactly one
+    question, what circuitRF is allowed to RUN and to FETCH, and its own header records that things were
+    collected there for that SHAPE rather than for the tab they arrived in. Of the ten rows here, the
+    git path is the only one that would fit that shape and the other nine are about retention; a
+    designer looking for "how long are my restore points kept" will not look under Security.
+
+    That placement decides where a setting is READ. It is NOT a claim that git is exempt from consent —
+    git is both things that tab governs, a program circuitRF runs and (in RC-9) a network operation.
+    See RevisionControlSettingsView.axaml.cs's header for what the existing consent model actually says
+    and where git landed inside it.
+
+    TWO RULES BIND THIS TAB SPECIFICALLY, both §1.4:
+
+      1. Every control that can reduce what is kept states its CONSEQUENCE next to itself, in a
+         sentence, in this UI — not in a tooltip and not only in the manual. That does not conflict with
+         the tooltip pass on the tab beside this one: what moved into tooltips there was EXPLANATION
+         (what a feature is for), and what is required here is a CONSEQUENCE (what you will not get
+         back). The General tab's wrapped 11pt line under its DRC checkbox is the shape; one sentence.
+
+      2. Turning revision control off DELETES NOTHING, and the control says so in those words. An off
+         switch that quietly discarded a history would be the single most damaging control in the
+         application: nobody expects a checkbox to be irreversible, and by the time they discover it
+         was, there is nothing to discover it with.
+
+    Every paragraph tooltip is an explicit TextBlock with TextWrapping and a MaxWidth. Avalonia hands a
+    bare string to a ContentPresenter that does not wrap, so a 400-character tip renders as one line
+    running off the screen edge.
+  -->
+
+  <StackPanel Spacing="0">
+
+    <!-- The git path row, hosted here when this tab exists at all. It is its own control because
+         it has a SECOND host: when this tab is hidden — no usable git and no configured path — the
+         same control appears on Security & Permissions instead, which is how somebody with git in
+         an unusual location makes it available in the first place (R-rc4-3). SettingsView owns
+         which host shows it, so it is never shown twice. -->
+    <dlg:GitPathSettingsView Name="GitPath"/>
+
+      <!-- ── Commit identity ────────────────────────────────────────────────────────────────
+           §4.4. A per-USER preference, applying to every workspace this person opens on this
+           machine, and written to NO git config file. The GLOBAL config is wrong because circuitRF
+           has no business changing a setting that affects every other repository on the machine.
+           The REPOSITORY's config is worse and is what rev 2 of the architecture actually specified:
+           it makes a person a property of a DIRECTORY, so on a network share the second designer to
+           open a shared workspace commits under the first one's name — silently, until somebody
+           reads a history and disbelieves it.
+
+           Pre-filled from the user's existing global git identity if they have one. Reading it is
+           unobjectionable; only writing it was ever the problem. -->
+      <TextBlock Text="Commit Identity" FontSize="11" FontWeight="SemiBold"
+                 Opacity="0.55" Margin="0,24,0,6"/>
+      <Grid ColumnDefinitions="155,*" RowDefinitions="Auto,6,Auto,Auto">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Your name:"
+                   VerticalAlignment="Center" FontSize="12"/>
+        <TextBox   Grid.Row="0" Grid.Column="1" Name="IdentityNameBox" FontSize="12"
+                   LostFocus="OnIdentityCommitted">
+          <ToolTip.Tip>
+            <TextBlock TextWrapping="Wrap" MaxWidth="360"
+                       Text="The name every change circuitRF records is attributed to. It is yours, not the workspace's: it applies to every workspace you open on this machine, and it is never written into a workspace or into your own git configuration. That matters on a shared drive, where storing it with the workspace would mean the next person's changes were recorded under your name."/>
+          </ToolTip.Tip>
+        </TextBox>
+
+        <TextBlock Grid.Row="2" Grid.Column="0" Text="Email:"
+                   VerticalAlignment="Center" FontSize="12"/>
+        <TextBox   Grid.Row="2" Grid.Column="1" Name="IdentityEmailBox" FontSize="12"
+                   LostFocus="OnIdentityCommitted"/>
+
+        <TextBlock Grid.Row="3" Grid.Column="1" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"
+                   Name="IdentityRequiredText"
+                   Text="Both are needed before circuitRF starts keeping a history. Nothing is recorded until they are filled in."/>
+      </Grid>
+
+      <!-- ── What is kept ───────────────────────────────────────────────────────────────────
+           The two switches answer DIFFERENT questions: the preference answers "do I want this at
+           all", the workspace flag answers "not for this one". The second outranks the first, for
+           that workspace only.
+
+           The preference SHIPS ON (§5.7a, §12 Q5): the floor goes in before the capability, and a
+           floor that has to be found in a settings tab is not one. The population it reaches is
+           already narrow, because the whole tab is invisible to anyone without git.
+
+           Rule 2 applies to BOTH, and the wording differs only in scope. -->
+      <TextBlock Text="What Is Kept" FontSize="11" FontWeight="SemiBold"
+                 Opacity="0.55" Margin="0,24,0,6"/>
+      <Grid ColumnDefinitions="155,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+        <CheckBox  Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"
+                   Name="KeepHistoryCheck" FontSize="12"
+                   Content="Keep a history of my workspaces"
+                   IsCheckedChanged="OnKeepHistoryChanged">
+          <ToolTip.Tip>
+            <TextBlock TextWrapping="Wrap" MaxWidth="360"
+                       Text="circuitRF records the state of a workspace at points you can go back to — before an AI edit, and when you close it. This is the setting every workspace follows unless you say otherwise for one of them below."/>
+          </ToolTip.Tip>
+        </CheckBox>
+
+        <!-- Consequence, rule 1. It is the SAME promise as the per-workspace one at a wider scope,
+             and is worded to be reassuring rather than alarming: what turning it off does is stop
+             writing, everywhere, and what it does NOT do is delete, anywhere. -->
+        <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" FontSize="11"
+                   Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0"
+                   Text="Turning this off stops circuitRF recording anything, in every workspace. It deletes nothing: the restore points already taken stay listed and can still be restored, and turning it back on carries on where each workspace left off."/>
+
+        <CheckBox  Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
+                   Name="WorkspaceRevisionCheck" FontSize="12" Margin="0,12,0,0"
+                   Content="Keep a history of this workspace"
+                   IsCheckedChanged="OnWorkspaceRevisionChanged">
+          <ToolTip.Tip>
+            <TextBlock TextWrapping="Wrap" MaxWidth="360"
+                       Text="This one workspace's own answer, which overrides the setting above for it alone. It is stored with the workspace rather than with your preferences, so it travels: a copy of a workspace that was switched off arrives switched off, whatever the person opening it prefers."/>
+          </ToolTip.Tip>
+        </CheckBox>
+
+        <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" FontSize="11"
+                   Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0"
+                   Name="WorkspaceRevisionConsequence"
+                   Text="Turning this off stops circuitRF recording anything in this workspace. It deletes nothing: the restore points already taken stay listed and can still be restored, and turning it back on carries on where it left off."/>
+
+        <!-- Shown INSTEAD of the consequence when there is no workspace open, because the row is
+             then disabled and the reason for that is what a reader needs, not a consequence they
+             cannot reach. -->
+        <TextBlock Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" FontSize="11"
+                   Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0"
+                   Name="WorkspaceRevisionScope" IsVisible="False" Text=""/>
+      </Grid>
+
+      <!-- ── Restore points ─────────────────────────────────────────────────────────────────
+           Retention (§5.6). The count floor is the rule that makes a wrong clock harmless, and it
+           is the reason the age field is not dangerous: a machine whose clock jumps a century
+           forward would otherwise expire everything on the next sweep. -->
+      <TextBlock Text="Restore Points" FontSize="11" FontWeight="SemiBold"
+                 Opacity="0.55" Margin="0,24,0,6"/>
+      <Grid ColumnDefinitions="155,*" RowDefinitions="Auto,Auto,6,Auto,Auto,Auto,Auto,Auto">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Keep them for:"
+                   VerticalAlignment="Center" FontSize="12"/>
+        <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+          <NumericUpDown Name="RetentionDaysUpDown" Increment="1" FormatString="0"
+                         Width="110" FontSize="12"
+                         ValueChanged="OnRetentionDaysChanged"/>
+          <TextBlock Text="days" VerticalAlignment="Center" FontSize="12" Opacity="0.7"/>
+        </StackPanel>
+
+        <TextBlock Grid.Row="1" Grid.Column="1" FontSize="11"
+                   Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0"
+                   Name="RetentionConsequence"
+                   Text="After this long, automatic restore points are thinned and the states they held are no longer offered."/>
+
+        <TextBlock Grid.Row="3" Grid.Column="0" Text="Always keep at least:"
+                   VerticalAlignment="Center" FontSize="12"/>
+        <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+          <NumericUpDown Name="MinimumPointsUpDown" Increment="1" FormatString="0"
+                         Width="110" FontSize="12"
+                         ValueChanged="OnMinimumPointsChanged"/>
+          <TextBlock Text="restore points" VerticalAlignment="Center" FontSize="12" Opacity="0.7"/>
+        </StackPanel>
+
+        <TextBlock Grid.Row="4" Grid.Column="1" FontSize="11"
+                   Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0"
+                   Name="MinimumPointsConsequence"
+                   Text="The newest ones are kept however old they are, so a machine whose clock is wrong cannot expire them. This is why the field has a minimum it will not go below."/>
+
+        <CheckBox  Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2"
+                   Name="CheckpointOnCloseCheck" FontSize="12" Margin="0,12,0,0"
+                   Content="Take a restore point when a workspace is closed"
+                   IsCheckedChanged="OnCheckpointOnCloseChanged">
+          <ToolTip.Tip>
+            <TextBlock TextWrapping="Wrap" MaxWidth="360"
+                       Text="Closing a workspace is the one boundary that reliably exists in every session, and it is behind you rather than in front of you. A session in which circuitRF wrote nothing records nothing."/>
+          </ToolTip.Tip>
+        </CheckBox>
+
+        <!-- SHOWN, ON, and NOT SWITCHABLE (§1.2, the reason the feature exists). Shown rather than
+             hidden so nobody has to wonder whether it is happening.
+
+             DISABLED, so that it READS as not editable (owner, 2026-09-06). The first drafting used
+             IsHitTestVisible="False" on the reasoning that a greyed control says "not available to
+             you" — but a checkbox that looks ordinary and silently ignores a click is worse: the user
+             does not learn it is fixed, they learn that clicking did nothing. Disabled says both
+             halves at once — it is on, and it is not yours to change — and the sentence below it says
+             why. -->
+        <CheckBox  Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2"
+                   Name="CheckpointBeforeAiCheck" FontSize="12" Margin="0,8,0,0"
+                   Content="Take a restore point before an AI edit"
+                   IsChecked="True" IsEnabled="False">
+          <ToolTip.Tip>
+            <TextBlock TextWrapping="Wrap" MaxWidth="360"
+                       Text="Always on. An edit made on your behalf spans many files at once and can be hard to read afterwards, so circuitRF records where you were first. This is the reason the rest of this tab exists, and it is shown here so you never have to wonder whether it is happening."/>
+          </ToolTip.Tip>
+        </CheckBox>
+
+        <TextBlock Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" FontSize="11"
+                   Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0"
+                   Text="Always on, and shown here so you never have to wonder whether it is happening."/>
+      </Grid>
+
+      <!-- ── Disk space ─────────────────────────────────────────────────────────────────────
+           Ordinary users never touch either row. They exist because a history accumulates and
+           somebody eventually asks where the disk went — and because the two answers to that
+           question are completely different: packing stores the same history compactly and reclaim
+           destroys states that were already thinned. -->
+      <TextBlock Text="Disk Space" FontSize="11" FontWeight="SemiBold"
+                 Opacity="0.55" Margin="0,24,0,6"/>
+      <Grid ColumnDefinitions="155,*" RowDefinitions="Auto,Auto,6,Auto,Auto,Auto">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Compact above:"
+                   VerticalAlignment="Center" FontSize="12"/>
+        <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+          <NumericUpDown Name="PackThresholdUpDown" Increment="16" FormatString="0"
+                         Width="110" FontSize="12"
+                         ValueChanged="OnPackThresholdChanged"/>
+          <TextBlock Text="MB" VerticalAlignment="Center" FontSize="12" Opacity="0.7"/>
+          <Button Name="PackNowButton" Content="Compact Now" FontSize="11" Padding="8,3"
+                  Margin="6,0,0,0" Click="OnPackNow"
+                  ToolTip.Tip="Store this workspace's history more compactly, now"/>
+        </StackPanel>
+
+        <TextBlock Grid.Row="1" Grid.Column="1" FontSize="11"
+                   Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0"
+                   Name="PackStatusText"
+                   Text="Stores the same history in less space. Nothing is discarded and nothing becomes unavailable."/>
+
+        <TextBlock Grid.Row="3" Grid.Column="0" Text="Reclaim after:"
+                   VerticalAlignment="Center" FontSize="12"/>
+        <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+          <NumericUpDown Name="ReclaimAgeUpDown" Increment="30" FormatString="0"
+                         Width="110" FontSize="12"
+                         ValueChanged="OnReclaimAgeChanged"/>
+          <TextBlock Text="days" VerticalAlignment="Center" FontSize="12" Opacity="0.7"/>
+          <Button Name="ReclaimButton" Content="Reclaim Space…" FontSize="11" Padding="8,3"
+                  Margin="6,0,0,0" Click="OnReclaimSpace"
+                  ToolTip.Tip="Permanently free the space held by restore points that were already thinned"/>
+        </StackPanel>
+
+        <!-- The one destructive control on the tab, and rule 1 applies to it hardest. Nothing
+             reclaims on a schedule, and the age field on its own does nothing. -->
+        <TextBlock Grid.Row="4" Grid.Column="1" FontSize="11"
+                   Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0"
+                   Name="ReclaimConsequence"
+                   Text="Reclaiming permanently destroys the states behind restore points that were already thinned — after it, nobody can bring them back. Every restore point still listed, and every change you recorded yourself, survives it. It only ever happens when you ask."/>
+
+        <TextBlock Grid.Row="5" Grid.Column="1" FontSize="11"
+                   Opacity="0.75" TextWrapping="Wrap" Margin="0,6,0,0"
+                   Name="ReclaimStatusText" IsVisible="False" Text=""/>
+      </Grid>
+
+  </StackPanel>
+</UserControl>

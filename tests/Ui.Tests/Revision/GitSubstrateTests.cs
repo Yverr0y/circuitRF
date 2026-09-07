@@ -346,8 +346,17 @@ public class GitSubstrateTests
     /// anywhere passes <c>--prune</c></b>; rev 5's §5.6a then ADDED the reclaim operation, which by
     /// definition must prune with an immediate expiry. So the checkable form of the requirement is the
     /// one this asserts: <b><c>--prune</c> appears in exactly one file, that file is
-    /// <c>GitReclaim.cs</c>, and NOTHING IN THE PRODUCT CALLS IT</b> — reclaim is a person's explicit,
-    /// confirmed action (RC-4's one destructive control), never a schedule.
+    /// <c>GitReclaim.cs</c>, and the ONLY caller in the product is the one confirmed destructive
+    /// control</b> — reclaim is a person's explicit action, never a schedule.
+    ///
+    /// <para><b>Extended by RC-4, not relaxed.</b> RC-3 asserted that NOTHING called it, which was the
+    /// checkable form of the requirement while the operation had no user-facing home. RC-4 built that
+    /// home — Settings ▸ Revision Control's <i>Reclaim Space…</i>, behind a confirmation naming the
+    /// count and the age — so the requirement is now that there is exactly ONE caller and it is that
+    /// one. A second call site appearing anywhere is a second, unasked way to destroy the only copy of
+    /// a thinned state, which is what this gate has always been about.
+    /// <c>RevisionControlSettingsTests.NothingElseInTheApplicationReachesTheReclaim</c> holds the same
+    /// property from the other side.</para>
     ///
     /// <para>Leaving the flag off routine packing was necessary and was never sufficient: the
     /// guarantee lives in the three <c>never</c> rows of the repository's own config, because
@@ -376,9 +385,7 @@ public class GitSubstrateTests
         Assert.True(offenders.Count == 0,
             "'--prune' appears in: " + string.Join(", ", offenders) +
             ". Routine packing must never prune — RC-6's whole retention grace period rests on it.");
-        Assert.True(callers.Count == 0,
-            "GitReclaim is called from: " + string.Join(", ", callers) +
-            ". R-rc3-16a: nothing in this brief calls it, and nothing automatic ever may.");
+        Assert.Equal(["RevisionControlSettingsView.axaml.cs"], callers);
 
         // And the packing path's own arguments, read directly rather than inferred from the scan.
         string packing = StripComments(

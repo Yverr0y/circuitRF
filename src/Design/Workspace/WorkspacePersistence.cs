@@ -242,6 +242,37 @@ public sealed class CwsFile
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? ReferencedCells { get; set; }
+
+    /// <summary>
+    /// RC-4 (<c>docs/design/revision-control.md</c> §5.7, §5.7a, R-rc4-12): whether circuitRF keeps a
+    /// history for THIS workspace. <b>Null — never recorded — falls back to the per-user preference</b>
+    /// (<c>RevisionArming.IsArmed</c>); an explicit value outranks it, for this workspace only.
+    ///
+    /// <para><b>Why it is here and not in <c>AppPreferences</c>.</b> An installation-wide flag cannot
+    /// gate per-workspace state: it is correct for the first workspace and silently wrong for the
+    /// second. This repository has already made that mistake once and recorded it
+    /// (<c>src/Ui/RESOLVED.md</c>, the wirebond group work, where a per-installation flag failed on the
+    /// second workspace as floating panels). The per-user preference beside it is not that flag — it is
+    /// the value this one falls back to when it is absent, which is why absent and <c>false</c> are
+    /// different states and this property is nullable.</para>
+    ///
+    /// <para><b>The VERSIONED half, deliberately, not the <c>.cwsuser</c></b> — so turning it off is
+    /// itself a recorded change, and the last checkpoint before the history goes quiet is the one that
+    /// says why (§5.7). It follows from that placement that the setting TRAVELS: a clone or an archive
+    /// of a workspace that was switched off arrives switched off, and the recipient's own preference
+    /// does not override it, because the flag says <i>not for this one</i> about the workspace and the
+    /// workspace is what travelled.</para>
+    ///
+    /// <para><b>Off never deletes anything</b> (§5.7). It means circuitRF stops writing; every restore
+    /// point already taken stays browsable and restorable, and turning it back on resumes the same
+    /// history. Removing a history is deleting one plainly-named folder and is not something circuitRF
+    /// offers.</para>
+    ///
+    /// <para>No <c>FormatVersion</c> bump: an absent field on an older <c>.cws</c> loads as null, which
+    /// is exactly the "has never recorded one" state the fallback is written for.</para>
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? RevisionControl { get; set; }
 }
 
 /// <summary>

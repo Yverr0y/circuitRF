@@ -32,16 +32,35 @@ public static class DocSettingsFixtures
     /// <summary>Security &amp; Permissions: what circuitRF may RUN, and what it may FETCH.</summary>
     public static FigureScene Security() => Tab(1);
 
+    /// <summary>
+    /// Revision Control: which git, who changes are attributed to, what is kept and for how long.
+    ///
+    /// <para><b>Index 2, inserted between Security and Color Theme (RC-4 R-rc4-1), which is why the two
+    /// below it moved.</b> These fixtures select a tab by INDEX, so an insertion here silently
+    /// re-points every figure after it — two chapters illustrating the wrong tab, with no test failing
+    /// on the substance. That is what <c>SettingsDialogFiguresShowTheTabTheyClaim</c> now checks.</para>
+    ///
+    /// <para>Captured with the tab forced visible. The application hides it on a machine with no usable
+    /// git (§4.3), and a figure that depended on whether the generating machine had git installed would
+    /// not be reproducible.</para>
+    /// </summary>
+    public static FigureScene RevisionControl() => Tab(2);
+
     /// <summary>Color Theme: the role list, the RGBA editor and the light/dark variant toggle.</summary>
-    public static FigureScene ColorTheme() => Tab(2);
+    public static FigureScene ColorTheme() => Tab(3);
 
     /// <summary>Wirebonds: the per-user creation defaults, and the built-in wire-clearance rule.</summary>
-    public static FigureScene Wirebonds() => Tab(3);
+    public static FigureScene Wirebonds() => Tab(4);
 
     // ── Shared ────────────────────────────────────────────────────────────────
 
     private static FigureScene Tab(int index)
     {
+        // The Revision Control tab is hidden without git (§4.3), and a figure whose existence depended
+        // on the generating machine's toolchain is not a reproducible figure. This is the docs seam and
+        // nothing a user runs; ApplyRevisionTabVisibility is what the application uses.
+        SettingsView.ShowRevisionTabForCapture = true;
+
         var dialog = new SettingsView(null);
         dialog.PopulateForCapture();
 

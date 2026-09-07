@@ -311,6 +311,26 @@
             <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Setter Property="SelectionBrush" Value="{DynamicResource TextControlSelectionHighlightColor}"/>
         </Style>
+
+        <!-- THE SAME BUG AS THE TWO ABOVE, one control further in (owner-reported 2026-09-06:
+             "all those number edit UI elements have their text that is not vertically aligned to
+             center", against Settings' "Keep them for:", "Always keep at least:" and "Wire
+             clearance:").
+
+             The TextBox style above already says Center — and it does not reach the TextBox inside a
+             NumericUpDown's template, because that one's VerticalContentAlignment is TEMPLATE-BOUND to
+             the NumericUpDown's own, and a template binding is a local value that beats any style. So
+             the alignment has to be set on the OUTER control, which is what this does.
+
+             Measured before and after rather than assumed: with the default (Stretch) the digits'
+             glyph ink is centred ~2 px above the label beside them — small, consistent across every
+             numeric field in the application, and exactly the sort of thing that reads as sloppy
+             without being locatable. Application scope because it is not one dialog's problem: the
+             Settings tabs, the technology editor and the wBond property panels all pair a numeric
+             field with a label. -->
+        <Style Selector="NumericUpDown">
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
         <Style Selector="MenuItem">
             <Setter Property="FontSize" Value="{DynamicResource FontSize}"/>
         </Style>

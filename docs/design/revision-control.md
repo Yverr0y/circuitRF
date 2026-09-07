@@ -15,8 +15,17 @@ gzip penalty reproduced at **594×** per mid-file drag and **1,594×** per delet
 **2.9.0**, set by `core.hooksPath`; `safe.directory` does not raise it. Findings in
 `src/Design/RESOLVED.md`. **Stage 1's substrate is complete** — its remaining item, §8.2's large-file
 guard, lands with RC-5 for the reason R-rc0-2 gives: it is a prompt shown before a commit, and Stage 1
-takes none, so a dialog with no call site would be a dead and untestable feature. **Everything from
-RC-4 onward remains proposal.** ·
+takes none, so a dialog with no call site would be a dead and untestable feature.
+**RC-4 (§10A, the Settings tab) is BUILT** — 2026-09-06: the nine application preferences, §5.7a's
+per-user *keep a history of my workspaces* (shipping **on**), §5.7's per-workspace flag in the `.cws`,
+§5.6's retention age and count floor, §2.4's packing threshold and §5.6a's reclaim as the tab's one
+confirmed destructive action. Measured while building it: five tab headers need the scoped `TabItem`
+style — on the theme's own metrics they come to **850 px against 592 px** of usable width at
+`MinWidth="620"` and two of them wrap, and **the four-header strip was already over that line at 656 px
+before this tab existed**. §5.6 rule 4's journal had no format, so RC-4 defined the reader RC-6's writer
+inherits (`.git/circuitrf/thinned.jsonl`, one appended JSON object per line). Findings in
+`src/Ui/RESOLVED.md`. **Stage 2 has its settings surface and no checkpoint yet; everything from RC-5
+onward remains proposal.** ·
 **Date:** 2026-09-06 · **Phase:** unassigned
 
 Specifies how circuitRF gives a workspace a **history** — the ability to see what changed, and to get

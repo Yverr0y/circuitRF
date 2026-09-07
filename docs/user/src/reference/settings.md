@@ -13,6 +13,7 @@ keywords: preferences, options, configuration, theme, dark mode, colours, colors
 <li><a href="#opening">Opening it, and when a change takes effect</a></li>
 <li><a href="#general">General</a></li>
 <li><a href="#security">Security &amp; Permissions</a></li>
+<li><a href="#revision-control">Revision Control</a></li>
 <li><a href="#color-theme">Color Theme</a></li>
 <li><a href="#wirebonds">Wirebonds</a></li>
 <li><a href="#footer">The footer: Help, Revert, Cancel, Close</a></li>
@@ -20,9 +21,17 @@ keywords: preferences, options, configuration, theme, dark mode, colours, colors
 </ol>
 </nav>
 
-Settings are **per user, not per workspace**. Nothing on this dialog travels inside a `.cws`, and a
-workspace someone sends you cannot change how your copy of circuitRF behaves — that is deliberate, and
-it is the reason several of these controls exist here rather than in the document that uses them.
+Settings are **per user, not per workspace**, with one deliberate exception noted below. A workspace
+someone sends you cannot change how your copy of circuitRF behaves — that is the reason several of these
+controls exist here rather than in the document that uses them.
+
+<div class="callout note">
+<span class="label">The one setting that does travel</span>
+<p><b>Keep a history of this workspace</b>, on the Revision Control tab, is stored <i>with the
+workspace</i> and not with your preferences. It has to be: an application-wide switch would be right for
+the first workspace you open and silently wrong for the second. So that one row travels with a copy of
+the workspace, and it is the only thing on this dialog that does. Everything else here is yours.</p>
+</div>
 
 ## Opening it, and when a change takes effect {#opening}
 
@@ -34,8 +43,8 @@ watch what it does without closing anything.
 
 <div class="callout note">
 <span class="label">Every tab but Color Theme writes immediately</span>
-<p>A combo box, a checkbox or a number on the <b>General</b>, <b>Security &amp; Permissions</b> and
-<b>Wirebonds</b> tabs is saved the moment you change it. There is no "apply" step, and
+<p>A combo box, a checkbox or a number on the <b>General</b>, <b>Security &amp; Permissions</b>,
+<b>Revision Control</b> and <b>Wirebonds</b> tabs is saved the moment you change it. There is no "apply" step, and
 <b>Cancel does not undo it</b> — Cancel and Revert act on the colour editor only, which is the one tab
 that edits a live document-like thing you might want to abandon.</p>
 </div>
@@ -159,6 +168,124 @@ with the source and where the built artefact is cached are all in
 {{anchor: veriloga.html#compiler|the Verilog-A chapter}}.</p>
 </div>
 
+## Revision Control {#revision-control}
+
+{{ui: settings-revision-control}}
+
+circuitRF can keep a **history** of a workspace: the state of every file in it at points you can go back
+to. This tab is where you say whether it does, and what it keeps.
+
+<div class="callout note">
+<span class="label">You will not see this tab unless git is installed</span>
+<p>circuitRF keeps a history by running <b>git</b> as a separate program. It bundles none and links to
+none. If your machine has no git, this tab is not there at all — not greyed out, simply absent — and
+nothing on this page applies to you. Install git and it appears. If you have git somewhere unusual, the
+<b>Git</b> row moves to the Security &amp; Permissions tab so you can still point circuitRF at it.</p>
+</div>
+
+### Git
+
+Leave the box **blank** and the git on your `PATH` is used, which is what most machines want. The row is
+here for the machine that has two of them, or has one somewhere `PATH` does not reach; a git named here
+outranks `PATH`. **Browse…** picks one from disk.
+
+**Detect** finds it and reports the path and the version it identifies itself as, in place. That is the
+answer to *"it says it can't find git"* without anyone needing to ask you for a log. It is also the one
+place circuitRF will tell you your git is **too old** — naming the version you have and the version it
+needs. Everywhere else, a git below that floor is simply treated as though it were not installed.
+
+### Commit Identity
+
+Your name and email, recorded against every change circuitRF keeps.
+
+They are **yours, not the workspace's**: they apply to every workspace you open on this machine.
+circuitRF writes them into **no git configuration file at all** — not the workspace's, and not your own.
+Storing them with a workspace would mean that on a shared drive, the next person to open it would have
+their changes recorded under your name, and nobody would notice until they read a history and did not
+believe it.
+
+If you already use git and have set an identity, these boxes are filled in from it as a convenience.
+circuitRF only ever *reads* that setting; it never changes it.
+
+**Both are needed before circuitRF starts keeping a history.** The tab says so, rather than letting the
+first attempt fail.
+
+### What Is Kept
+
+Two switches, answering two different questions.
+
+| | |
+|---|---|
+| **Keep a history of my workspaces** | *Do I want this at all?* Your own preference, applying to every workspace. **On by default.** |
+| **Keep a history of "*this workspace*"** | *Not for this one.* This workspace's own answer, which **overrides the setting above for it alone**. |
+
+The second is stored **with the workspace**, which is why it travels: a copy of a workspace that was
+switched off arrives switched off, whatever the person opening it prefers.
+
+<div class="callout note">
+<span class="label">Turning either of these off deletes nothing</span>
+<p>Off means circuitRF <b>stops writing</b>. It does not remove anything it has already kept: every
+restore point stays listed and can still be restored, and turning it back on carries on where it left
+off. Nobody expects a checkbox to be irreversible, and this one is not.</p>
+<p>If you genuinely want a history <i>gone</i>, that is deleting one plainly named <code>.git</code>
+folder inside the workspace, with your file manager. circuitRF does not offer a button for it, on
+purpose. <b>Doing it cannot harm your design</b> — a workspace is ordinary files in a folder, and the
+history sits beside them rather than containing them. Delete it and the workspace opens exactly as it
+did, with every file present and current.</p>
+</div>
+
+A workspace is armed at the first moment there is something to record, never simply because you opened
+it. Looking at a colleague's workspace on a shared drive creates nothing in it.
+
+### Restore Points
+
+**Keep them for** *N* days is how long an automatic restore point survives. After that it is **thinned**:
+it is no longer offered, and the state it held is no longer something you can return to. Changes you
+recorded yourself are never thinned.
+
+**Always keep at least** *N* restore points is the rule that makes the one above safe. The newest *N* are
+kept **however old they are**. That matters more than it sounds: a computer's clock is not trustworthy —
+a flat battery, a bad time sync, or a machine that disagrees with itself about time zones can make
+everything look years old at once. The count floor means a wrong clock costs you nothing, which is why
+the field will not go below its minimum.
+
+**Take a restore point when a workspace is closed** is on by default. Closing is the one moment that
+reliably happens in every session, and it is behind you rather than in front of you. A session in which
+nothing was written records nothing.
+
+**Take a restore point before an AI edit** is always on and cannot be switched off. It is the reason the
+rest of this tab exists: an edit made on your behalf can span many files at once, and circuitRF records
+where you were first. It is shown rather than hidden so you never have to wonder whether it is
+happening.
+
+### Disk Space
+
+Most people never touch either of these. They are here because a history accumulates, and one day
+somebody asks where the disk went. The two answers are not the same answer.
+
+**Both buttons name the workspace they act on** — the one you have open. Neither opens a chooser, so
+the name is in the button rather than in a dialog you would have to reach to find out. With no
+workspace open they are greyed out and the line beneath says so.
+
+**Compact above** *N* MB, and the **Compact** button beside it, store the same history in less space.
+**Nothing is discarded** and nothing becomes unavailable. circuitRF does this on its own once a history
+passes the size named here.
+
+**Reclaim after** *N* days, and the **Reclaim Space in…** button beside it, are different, and this is
+**the one destructive control in circuitRF's revision control**. When a restore point is thinned its contents are not actually
+freed — circuitRF never destroys anything on its own, so a thinning you did not mean is recoverable.
+Reclaiming is you saying: those are really gone.
+
+<div class="callout warning">
+<span class="label">What reclaiming destroys</span>
+<p>It permanently frees the states behind restore points that were <b>already thinned</b>, more than the
+number of days you name. <b>After it, nobody can bring them back</b> — not you, and not anybody you send
+the workspace to.</p>
+<p>Every restore point still listed, and every change you recorded yourself, <b>survives it unchanged</b>.
+Your design files are not touched. It asks first, and tells you how many states it would destroy.
+<b>Nothing ever reclaims on a schedule</b> — the number in the field does nothing on its own.</p>
+</div>
+
 ## Color Theme {#color-theme}
 
 {{ui: settings-color-theme}}
@@ -235,7 +362,7 @@ the trailing edge.
 
 | Button | What it does |
 |---|---|
-| **Revert** | Puts the colour editor back to the theme that was active when the dialog opened, without closing it. It does **not** undo anything on the other three tabs — those were already saved. |
+| **Revert** | Puts the colour editor back to the theme that was active when the dialog opened, without closing it. It does **not** undo anything on the other tabs — those were already saved. |
 | **Cancel** | The same restore, and closes. Again, colours only. |
 | **Close** | Keeps the current colours and records the active theme as your preference. |
 

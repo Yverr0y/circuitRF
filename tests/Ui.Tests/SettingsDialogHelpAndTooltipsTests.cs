@@ -72,6 +72,8 @@ public class SettingsDialogHelpAndTooltipsTests
     [InlineData("ExternalWorkerSettingsView.axaml")]
     [InlineData("UpdateSettingsView.axaml")]
     [InlineData("VerilogACompilerSettingsView.axaml")]
+    [InlineData("GitPathSettingsView.axaml")]
+    [InlineData("RevisionControlSettingsView.axaml")]
     public void EveryParagraphTooltipWrapsAndIsBounded(string file)
     {
         foreach (var block in Between(Dialog(file), "<ToolTip.Tip>", "</ToolTip.Tip>"))
@@ -125,15 +127,18 @@ public class SettingsDialogHelpAndTooltipsTests
     }
 
     /// <summary>
-    /// One figure per tab, and every tab has one. A page whose prose walks four tabs while its
-    /// figures show three is the drift the docs factory exists to prevent.
+    /// One figure per tab, and every tab has one. A page whose prose walks five tabs while its figures
+    /// show four is the drift the docs factory exists to prevent.
+    ///
+    /// <para><b>Extended from four to five by RC-4, not relaxed.</b> This test doing its job is
+    /// precisely why the new tab could not be added without its figure and its chapter section.</para>
     /// </summary>
     [Fact]
     public void EveryTabOfTheDialogHasItsOwnFigureAndThePageCitesThemAll()
     {
         string page = Read("docs", "user", "src", "reference", "settings.md");
 
-        foreach (var id in new[] { "settings-general", "settings-security",
+        foreach (var id in new[] { "settings-general", "settings-security", "settings-revision-control",
                                    "settings-color-theme", "settings-wirebonds" })
         {
             Assert.Contains(FigureCatalog.Catalog, r => r.Id == id);
@@ -141,7 +146,7 @@ public class SettingsDialogHelpAndTooltipsTests
         }
 
         int tabs = Occurrences(Dialog("SettingsView.axaml"), "<TabItem Header=");
-        Assert.Equal(4, tabs);
+        Assert.Equal(5, tabs);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

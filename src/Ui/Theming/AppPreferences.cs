@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CircuitRF.Design.Revision;
 using CircuitRF.Ui.Messages;
 
 namespace CircuitRF.Ui.Theming;
@@ -313,6 +314,141 @@ public sealed class AppPreferences
     [JsonPropertyName("veriloga_compiler")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? VerilogACompiler { get; set; }
+
+    // ── Revision control (RC-4, docs/design/revision-control.md §10A) ─────────────────────────────
+    //
+    // NINE application-wide preferences, all nullable and all absent-means-the-documented-default, in
+    // the shape VerilogACompiler above already has. Their defaults have names —
+    // CircuitRF.Ui.Revision.RevisionPreferenceDefaults and RevisionArming.KeepHistoryDefault — rather
+    // than being literals repeated at the control and again at the reader.
+    //
+    // The TENTH row on that tab, "revision control for this workspace", is deliberately NOT here: it is
+    // per-workspace state and lives in the .cws (CwsFile.RevisionControl). An installation-wide flag
+    // cannot gate per-workspace state — correct for the first workspace and silently wrong for the
+    // second — which is a mistake this repository has already made once and recorded.
+
+    /// <summary>
+    /// The git circuitRF drives. Null — the default — means "search <c>PATH</c>", which is what a
+    /// machine with git installed normally wants and needs no configuration at all.
+    ///
+    /// <para>Exactly <see cref="VerilogACompiler"/>'s arrangement, for exactly its reasons: per USER
+    /// because it is a property of the MACHINE, and a NAMED path outranks <c>PATH</c> because a
+    /// preference that lost to <c>PATH</c> would be inert on the one machine that needed it. Read
+    /// through <c>GitDiscovery.Find</c> and nowhere else; <c>GitPathInstaller</c> is the seam.</para>
+    ///
+    /// <para><b>This is the one row of the tab that stays reachable when git is absent</b>
+    /// (§4.3, R-rc4-3) — the whole tab is hidden otherwise, and this field is how somebody with git in
+    /// an unusual location makes it available in the first place.</para>
+    /// </summary>
+    [JsonPropertyName("revision_git_path")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RevisionGitPath { get; set; }
+
+    /// <summary>
+    /// The name every commit circuitRF makes is authored under (§4.4).
+    ///
+    /// <para><b>Per USER, applying to every workspace this person opens on this machine, and written
+    /// to NO git config file.</b> The user's global config is wrong because circuitRF has no business
+    /// changing a setting that affects every other repository on the machine. The REPOSITORY's config
+    /// is worse: it makes a person a property of a DIRECTORY, so on a network share the second designer
+    /// to open a workspace commits under the first one's name — silently, until somebody reads a
+    /// history and disbelieves it. rev 2 of the architecture specified exactly that and rev 3 corrected
+    /// it.</para>
+    ///
+    /// <para><b>The key name is <c>RevisionIdentity.NameKey</c>, not a literal</b>, because
+    /// <c>src/Design</c> reads this same file: <c>src/Cli</c> cannot reference <c>AppPreferences</c>,
+    /// and letting the headless case fall through to git's own resolution names NOBODY on a fresh
+    /// Windows machine — which refused the AI-batch checkpoint for exactly the population it protects.
+    /// The two sides agree by this constant.</para>
+    ///
+    /// <para>Pre-filled in the settings tab from the user's existing global git identity if they have
+    /// one, and never written back to it: reading it is unobjectionable, and only writing it was ever
+    /// the problem.</para>
+    /// </summary>
+    [JsonPropertyName(RevisionIdentity.NameKey)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RevisionIdentityName { get; set; }
+
+    /// <inheritdoc cref="RevisionIdentityName"/>
+    [JsonPropertyName(RevisionIdentity.EmailKey)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RevisionIdentityEmail { get; set; }
+
+    /// <summary>
+    /// <b>Keep a history of my workspaces</b> — the switch that makes every other row on the tab
+    /// reachable (§5.7a, §12 Q13). Null means <c>RevisionArming.KeepHistoryDefault</c>, which is
+    /// <b>on</b>.
+    ///
+    /// <para><b>It ships on</b> because §12 Q5 puts the floor in before the capability arrives and a
+    /// floor that has to be found in a settings tab is not one — and because §4.3 already makes the
+    /// whole feature invisible to anyone without git, so the default only ever reaches somebody who
+    /// installed git deliberately.</para>
+    ///
+    /// <para><b>It is the DEFAULT a workspace with no recorded setting of its own falls back to, not a
+    /// flag that gates them</b> — <c>CwsFile.RevisionControl</c> outranks it, for that workspace only.
+    /// Off means circuitRF writes nothing in any workspace and DELETES nothing in any workspace; every
+    /// history already taken stays browsable and restorable, and turning it back on resumes them
+    /// all.</para>
+    /// </summary>
+    [JsonPropertyName("revision_keep_history")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? RevisionKeepHistory { get; set; }
+
+    /// <summary>
+    /// How long automatic restore points are kept, in days (§5.6). Null means
+    /// <c>RevisionPreferenceDefaults.RetentionDays</c>.
+    ///
+    /// <para><b>An age can never override the count floor</b> below it. That is §5.6's first rule and
+    /// it is what makes a clock jump harmless: a machine whose clock leaps a century forward would
+    /// otherwise expire everything on the next sweep.</para>
+    /// </summary>
+    [JsonPropertyName("revision_retention_days")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RevisionRetentionDays { get; set; }
+
+    /// <summary>
+    /// <b>Always keep at least N restore points</b>, whatever any timestamp says (§5.6 rule 1). Null
+    /// means <c>RevisionPreferenceDefaults.MinimumRestorePoints</c>, and the value can never be set
+    /// below <c>RevisionPreferenceDefaults.MinimumRestorePointsFloor</c> — including by typing one.
+    /// </summary>
+    [JsonPropertyName("revision_minimum_restore_points")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RevisionMinimumRestorePoints { get; set; }
+
+    /// <summary>
+    /// Take a restore point when a workspace closes (§5.3). Null means on.
+    ///
+    /// <para>Close is the boundary §5.3 identifies as the one that reliably exists in every session,
+    /// and it is behind the user rather than in front of them.</para>
+    /// </summary>
+    [JsonPropertyName("revision_checkpoint_on_close")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? RevisionCheckpointOnClose { get; set; }
+
+    /// <summary>
+    /// The repository size at which circuitRF packs on its own, in megabytes (§2.4). Null means
+    /// <c>RevisionPreferenceDefaults.PackThresholdMb</c>.
+    ///
+    /// <para>Ordinary users never touch this. It exists because §2.4 means somebody eventually asks
+    /// where the disk went — and because git's OWN automatic trigger counts loose objects, which
+    /// RC-3 measured never firing on a workspace repository at all. <b>Packing never reclaims.</b></para>
+    /// </summary>
+    [JsonPropertyName("revision_pack_threshold_mb")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RevisionPackThresholdMb { get; set; }
+
+    /// <summary>
+    /// The age the reclaim action is proposed with, in days — reclaim space from restore points thinned
+    /// longer ago than this (§5.6a). Null means <c>RevisionPreferenceDefaults.ReclaimAgeDays</c>.
+    ///
+    /// <para><b>This field on its own does nothing, and nothing reclaims on a schedule.</b> It is the
+    /// value the tab's one confirmed destructive action opens on. Reclaiming destroys only states that
+    /// have already been thinned — every live restore point and every commit survives — but after it
+    /// those states cannot be brought back by anyone, which is why it is never automatic.</para>
+    /// </summary>
+    [JsonPropertyName("revision_reclaim_age_days")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RevisionReclaimAgeDays { get; set; }
 }
 
 public static class AppPreferencesIo
