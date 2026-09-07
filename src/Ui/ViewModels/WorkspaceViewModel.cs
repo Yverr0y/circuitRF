@@ -1598,6 +1598,15 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
                 $"Repointed references in {result.RewrittenFiles.Count} file(s) so they still " +
                 "resolve from the copy.");
 
+        // RC-5 R-rc5-19. The exclusion that stops a copy carrying the history is right, and the
+        // SILENCE was not: "I saved a copy and my history is gone" must be a journey the designer
+        // knows they took, not a discovery weeks later. Save As is the only one of the three ways a
+        // workspace leaves a machine with no dialog to read, so the sentence goes on the report it
+        // already posts. A copy is not a fork of the history and is not presented as one — anyone who
+        // wants the history to travel has the archive.
+        if (Revision.WorkspaceHistoryService.HasHistory(sourceRoot))
+            Messages.Info(CircuitRF.Design.Revision.RestorePointMessages.CopyStartsItsOwnHistory);
+
         // Surfaced, never rolled back — the same contract the archive writer keeps. The copy is on
         // disk either way, and naming what did not come across is the only thing that leaves the user
         // able to act on it.
@@ -2190,6 +2199,9 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         // Record the outgoing workspace's session (open tabs + dock arrangement) BEFORE anything is
         // torn down — nothing else on this path ever wrote it, so those tabs were simply forgotten.
         PersistOutgoingWorkspaceSession();
+        // RC-5 §5.3's third boundary for the workspace being LEFT, after that write (R-rc5-21) and
+        // while CurrentWorkspacePath still names it.
+        TakeCloseCheckpoint(CurrentWorkspacePath);
         // A torn-off document belonging to the OLD workspace closes with it; a foreign one survives.
         // Must run while CurrentWorkspacePath still names the workspace being left — hence before the
         // reassignment below. Without it the OS window outlives its workspace and reopening that
@@ -2303,6 +2315,11 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         // needs migrating, since nothing on this machine put anything there.
         if (!WorkspaceWritability.IsReadOnly(workspaceDir))
             RunResultsWriter.MigrateOldLayout(Path.Combine(workspaceDir, "results"), Messages);
+
+        // RC-5. Reads only — R-rc5-4a: opening a workspace to look at it creates nothing, runs
+        // nothing and writes nothing, which is what keeps a colleague's glance at a folder on a share
+        // from starting a history in somebody else's directory.
+        OnWorkspaceOpenedForRevision();
     }
 
     /// <summary>
@@ -2753,6 +2770,8 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     {
         // Closing a workspace records its session too, so reopening it restores the same tabs.
         PersistOutgoingWorkspaceSession();
+        // RC-5 §5.3's third boundary, after that write (R-rc5-21).
+        TakeCloseCheckpoint(CurrentWorkspacePath);
         // SL4 R-sl4-1: and drops its advisory lock, while CurrentWorkspacePath still names it.
         ReleaseWorkspaceLock();
 
@@ -8347,6 +8366,12 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     /// </summary>
     private async Task SaveWBondDoc(WBondDocument doc, Window? owner, bool saveAs = false)
     {
+        // RC-5 R-rc5-4a: circuitRF is about to write a design file into this workspace, which is what
+        // "would record something" means for a workspace that has never recorded anything. Noted here
+        // rather than derived from the disk later — a file manager touching the folder is not
+        // circuitRF editing a design, and the difference is what keeps a colleague's glance at a
+        // workspace on a share from starting a history in somebody else's directory.
+        NoteWorkspaceWrite();
         string? target = saveAs ? null : doc.FilePath;
 
         if (target is null)
@@ -10932,6 +10957,12 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
 
     private async Task SaveSymbolByPathAsync(string absPath, Window owner)
     {
+        // RC-5 R-rc5-4a: circuitRF is about to write a design file into this workspace, which is what
+        // "would record something" means for a workspace that has never recorded anything. Noted here
+        // rather than derived from the disk later — a file manager touching the folder is not
+        // circuitRF editing a design, and the difference is what keeps a colleague's glance at a
+        // workspace on a share from starting a history in somebody else's directory.
+        NoteWorkspaceWrite();
         var key = Path.GetFullPath(absPath);
         var doc = _openDocsByPath.Values.OfType<SymbolEditorDocument>().FirstOrDefault(d =>
             d.ViewModel.CurrentSymbolPath is { } sp
@@ -10941,6 +10972,12 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
 
     private async Task SaveDataDisplayByPathAsync(string absPath, Window owner)
     {
+        // RC-5 R-rc5-4a: circuitRF is about to write a design file into this workspace, which is what
+        // "would record something" means for a workspace that has never recorded anything. Noted here
+        // rather than derived from the disk later — a file manager touching the folder is not
+        // circuitRF editing a design, and the difference is what keeps a colleague's glance at a
+        // workspace on a share from starting a history in somebody else's directory.
+        NoteWorkspaceWrite();
         var key = Path.GetFullPath(absPath);
         var doc = _openDocsByPath.Values.OfType<DataDisplayDocument>().FirstOrDefault(d =>
             d.FilePath is { } fp
@@ -10951,6 +10988,12 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
 
     private async Task SaveLayoutByPathAsync(string absPath, Window owner)
     {
+        // RC-5 R-rc5-4a: circuitRF is about to write a design file into this workspace, which is what
+        // "would record something" means for a workspace that has never recorded anything. Noted here
+        // rather than derived from the disk later — a file manager touching the folder is not
+        // circuitRF editing a design, and the difference is what keeps a colleague's glance at a
+        // workspace on a share from starting a history in somebody else's directory.
+        NoteWorkspaceWrite();
         var key = Path.GetFullPath(absPath);
         var doc = _openDocsByPath.Values.OfType<LayoutDocument>().FirstOrDefault(d =>
             d.FilePath is { } lp
@@ -10960,6 +11003,12 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
 
     private async Task SaveCellViewsAsync(string cellDir, Window owner)
     {
+        // RC-5 R-rc5-4a: circuitRF is about to write a design file into this workspace, which is what
+        // "would record something" means for a workspace that has never recorded anything. Noted here
+        // rather than derived from the disk later — a file manager touching the folder is not
+        // circuitRF editing a design, and the difference is what keeps a colleague's glance at a
+        // workspace on a share from starting a history in somebody else's directory.
+        NoteWorkspaceWrite();
         foreach (var p in _registry.AllDirtyPaths.Where(p => IsViewInCell(p, cellDir)).ToList())
             SaveSchematicByPath(p);
         foreach (var doc in _openDocsByPath.Values.OfType<SymbolEditorDocument>()
@@ -14045,6 +14094,12 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     {
         var window = ResolveOwner(owner);
         if (window is null) return;
+        // RC-5 R-rc5-4a: circuitRF is about to write a design file into this workspace, which is what
+        // "would record something" means for a workspace that has never recorded anything. Noted here
+        // rather than derived from the disk later — a file manager touching the folder is not
+        // circuitRF editing a design, and the difference is what keeps a colleague's glance at a
+        // workspace on a share from starting a history in somebody else's directory.
+        NoteWorkspaceWrite();
 
         try
         {
@@ -14675,6 +14730,10 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         if (CurrentWorkspacePath is not null)
         {
             WriteWorkspaceFile(CurrentWorkspacePath, silent: true);
+            // RC-5 R-rc5-21: AFTER that write and before anything is torn down, or the restore point
+            // keeps a workspace file one save out of date — which is invisible when wrong, since the
+            // restored workspace simply comes up with slightly stale configuration.
+            TakeCloseCheckpoint(CurrentWorkspacePath);
             // R-L5g-7: quitting is a close too — leave a clean workspace on disk.
             DeleteGeneratedCellsFolder(CurrentWorkspacePath);
             // SL4 R-sl4-1: and leave no advisory lock behind. A lock still there after a clean exit

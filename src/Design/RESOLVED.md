@@ -2880,3 +2880,74 @@ now say "No parameters."
 
 A one-terminal component is rendered as a sentence rather than as a two-column table with a single
 row in it — that being the same "net 1 is terminal 1" shape, at N = 1.
+
+---
+
+## RC-5 — restore points: what a boundary is, and what a restore may not touch (2026-09-06)
+
+`brief-revision-control-5-checkpoints.md`. RC-3 supplied the commit primitive; this is everything
+that decides WHEN one happens, what it is called, and how the workspace is put back. `src/Design/Revision`
+gained `CheckpointReferences`, `CheckpointMessage`, `CheckpointOrigin`, `RestorePoints`,
+`WorkspaceCheckpoints`, `WorkspaceArming`, `WorkspaceRestore`, `RestoreMarker`, `LargeFileGuard`,
+`BatchSession`, `AgentContract`, `RestorePointMessages` and `WindowChannel`.
+
+### The checkpoint was parentless from the first draft, and gate 14a would have caught it otherwise
+
+Reported because the brief asks. `GitCheckpoint.Record` (RC-3) already passed no `-p` and said why in
+its own header, so gate 14a — delete the fifth of ten references, prune with an immediate expiry in a
+scratch copy, assert the fifth object is gone and the other nine are there — passed on the first run.
+**The gate still earns its place**: gate 14 asserts the OTHERS survive, which is true of a parent
+chain as well, so nothing else in the suite could have told the two apart. The scratch copy is the
+part worth remembering: the repository's own `gc.pruneExpire = never` (§4.5) makes the measurement
+impossible in place, and that configuration is itself under test everywhere else.
+
+### `git cat-file --batch`, not one invocation per entry
+
+`RestorePoints.List` reads every entry's metadata in two processes whatever the list's length — one
+`for-each-ref` for the reference-to-object mapping, one batched object read for the rest. The obvious
+shape, `git show -s` per entry, is roughly a third of a second on a list of fifty, paid on every panel
+refresh, and this is a panel that refreshes on every boundary. The output is parsed by finding the
+`<oid> commit <size>` header lines rather than by the announced size: the sizes are BYTES and .NET has
+already decoded the stream to CHARS, so the two disagree the moment a label contains anything
+non-ASCII.
+
+### A restore may only take away what the pre-restore entry actually captured
+
+The rule as written is "a file created after the checkpoint is removed", and the naive reading — every
+file present now that is not in the target tree — is wrong in one case that matters. A file left out
+under R-rc5-15a (over the size threshold, at a boundary nobody was at) is on disk, is not in the
+target tree, and is **not recoverable from anything**. Removing it would be the silent design-IP loss
+§8.2a spends a section rejecting, arriving by a different door. So the removal set is
+`(pre-restore tree) ∩ ¬(target tree)`, which is exactly "things the fallback entry can bring back",
+and `WorkspaceCheckpoints.Take` returns its `TreeId` even when it recorded nothing so a restore can
+compute it after an unchanged-tree boundary.
+
+### `.gitignore` and `.gitattributes` are restored to their CURRENT content, not the entry's
+
+R-rc5-12c says the policy files are preserved. They are also in the tree, so `checkout-index` writes
+the old ones over them; they are re-applied afterwards, and they are the only files a restore leaves
+as it found them. The `.cws` is not in that set — it is restored like any other document, and then its
+one recording field is put back, because a restore is the user's decision about content and never
+about recording.
+
+### The large-file guard never asks about the policy files
+
+Found by a gate running at a 1 kB threshold: circuitRF's own generated `.gitignore` block is ~1.3 kB,
+so it appeared as an unexpectedly large newly-added file. At the shipping threshold (16 MB) it never
+would — but the exclusion is a rule about MEANING rather than a workaround. The guard's question is
+"what IS this file", and for these the answer is fixed: they are how the workspace records what it
+keeps, so leaving one out would discard the answers a designer has already given.
+
+### The batch's modified set is measured, not declared
+
+`BatchSession.Close` diffs the tree the batch opened on against what is on disk, through a private
+index. An agent that forgot to mention a file it wrote cannot then leave that file's window showing
+the old content — which is the failure R-rc5-7b exists to prevent and exactly what an honour-system
+list would reintroduce. It costs one `add` and one `diff-index` at close.
+
+### The reference namespace carries the sequence, and that is what survives a hand-deleted reference
+
+`refs/crf/restore/<6-digit sequence>`. The next number is one past the largest that EXISTS, never a
+count — a count reuses a number the moment retention drops one. It is safe because retention keeps the
+newest N unconditionally, so the largest is never the one thinned. The trailer carries the same number
+so an entry can be read without its reference name, and `RestorePoints.List` prefers the trailer.

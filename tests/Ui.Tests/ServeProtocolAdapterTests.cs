@@ -544,11 +544,18 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
             .GetProperty("tools").EnumerateArray()
             .Select(t => t.GetProperty("name").GetString()).ToArray();
 
-        // R-aut5-4: small and broad. Seven, and the count is asserted because the surface is a
-        // standing cost paid on every interaction whether or not a tool is called. `reference` is
-        // the seventh and it earns its place by being reachable at all in a client that does not
-        // surface RESOURCES to the model — which is where the same bytes are cheaper (R-aut6-4).
-        Assert.Equal(["run", "check", "explain", "create", "import", "read", "reference"], tools);
+        // R-aut5-4: small and broad. Nine, and the count is asserted because the surface is a
+        // standing cost paid on every interaction whether or not a tool is called. `reference` earns
+        // its place by being reachable at all in a client that does not surface RESOURCES to the
+        // model — which is where the same bytes are cheaper (R-aut6-4).
+        //
+        // The last two are RC-5's (revision-control.md §5.3d, §5.3b). `history` is the CLI's own verb
+        // like every tool above it. `batch` is the ONE tool that is not a command line: it holds
+        // SESSION state — opened before an agent's first modification, closed when it is done — and a
+        // process that exits after one command cannot hold that, which is why the architecture puts
+        // it on this server and leaves the other three history nouns as verbs.
+        Assert.Equal(["run", "check", "explain", "create", "import", "read", "history", "reference", "batch"],
+                     tools);
 
         Assert.Equal(0, server.Close());
     }
@@ -626,6 +633,11 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
             // which is a real answer rather than a usage error. Both of its positionals are therefore
             // probed as arguments below, which is what this gate is for.
             ["reference/"]        = [],
+            // RC-5's three history nouns (revision-control.md §5.3d) — CLI verbs like every other
+            // row here, so the same gate applies to them.
+            ["history/checkpoint"] = ["path"],
+            ["history/list"]       = ["path"],
+            ["history/restore"]    = ["path"],
         };
 
         using var server = Start(Root);
@@ -637,6 +649,13 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
         foreach (var tool in tools)
         {
             string name       = tool!["name"]!.GetValue<string>();
+
+            // RC-5's `batch` is the one tool that does not become a command line: it holds session
+            // state this process owns, so there is no verb whose argument loop could be scanned. Its
+            // own gate is that the state and the ten rules come back in the surface's output, which
+            // RestoreAndBatchTests asserts.
+            if (name == "batch") continue;
+
             var    properties = tool["inputSchema"]!["properties"]!.AsObject();
 
             // The selector is the one property with an enum — the same shape ToolCatalog builds it.

@@ -8,13 +8,19 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using CircuitRF.Design.Revision;
 
 namespace CircuitRF.Ui;
 
 sealed class Program
 {
     // Windows single-instance: named pipe forwards workspace paths from a second instance.
-    private const string PipeName = "circuitRF_workspace_v1";
+    //
+    // RC-5 R-rc5-7c: the SAME channel now also carries two requests from a headless `serve` — does
+    // the window hold unsaved changes to this workspace, and here are the documents a batch just
+    // changed. The name is CircuitRF.Design's, because the client half lives below the firewall
+    // where src/Cli can reach it and the two halves must not each spell it for themselves.
+    private const string PipeName = CircuitRF.Design.Revision.WindowChannel.EndpointName;
 
     [STAThread]
     public static void Main(string[] args)
@@ -139,9 +145,22 @@ sealed class Program
             return;
         }
 
-        // macOS: no socket needed — Launch Services delivers "open file" Apple Events to the running
-        // instance via IActivatableLifetime.Activated.
-        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        // macOS. Launch Services still delivers "open file" Apple Events to the running instance via
+        // IActivatableLifetime.Activated, so nothing here forwards a path — but RC-5's channel has a
+        // second job that the OS does not do for us (R-rc5-7c): a headless `serve` has to be able to
+        // ask this window whether it holds unsaved changes, and to tell it what a batch changed. So
+        // the Unix socket comes up here too, listening only.
+        //
+        // Deliberately WITHOUT the instance lock: on macOS a second copy of the application is not
+        // the ordinary state, and taking a lock here would change launch behaviour on the one
+        // platform this feature has no business changing it on. A bind that fails because another
+        // copy already holds the path is simply a copy that does not listen, which is
+        // WindowChannel's "no window to protect" and not an error.
+        var macCts = new CancellationTokenSource();
+        _ = Task.Run(() => RunSocketServerAsync(macCts.Token));
+
+        try   { BuildAvaloniaApp().StartWithClassicDesktopLifetime(args); }
+        finally { macCts.Cancel(); }
     }
 
     // ---- Linux single-instance (Unix domain socket) --------------------------------
@@ -157,11 +176,9 @@ sealed class Program
         return Path.GetTempPath();
     }
 
-    private static string LinuxSocketPath()
-        => Path.Combine(LinuxRuntimeDir(), $"{PipeName}-{Environment.UserName}.sock");
+    private static string LinuxSocketPath() => CircuitRF.Design.Revision.WindowChannel.UnixSocketPath();
 
-    private static string LinuxLockPath()
-        => Path.Combine(LinuxRuntimeDir(), $"{PipeName}-{Environment.UserName}.lock");
+    private static string LinuxLockPath() => CircuitRF.Design.Revision.WindowChannel.UnixLockPath();
 
     /// <summary>Second instance: hand the paths to the running one. Returns false when there is
     /// nobody to hand them to, so the caller can fall back to starting normally.</summary>
@@ -220,8 +237,23 @@ sealed class Program
 
                     var paths = new List<string>();
                     string? line;
+                    string? answer = null;
+
                     while ((line = await reader.ReadLineAsync(ct)) is not null)
-                        if (!string.IsNullOrWhiteSpace(line)) paths.Add(line);
+                    {
+                        if (string.IsNullOrWhiteSpace(line)) continue;
+
+                        // RC-5 R-rc5-7c. A line carrying the request prefix is one of the channel's
+                        // two questions; anything else is a path to open, exactly as before.
+                        if (WindowChannel.Parse(line) is { } request) answer ??= Answer(request);
+                        else paths.Add(line);
+                    }
+
+                    if (answer is not null)
+                    {
+                        byte[] reply = Encoding.UTF8.GetBytes(answer + "\n");
+                        await conn.SendAsync(reply, ct);
+                    }
 
                     if (paths.Count > 0)
                     {
@@ -243,8 +275,12 @@ sealed class Program
         {
             try
             {
+                // InOut rather than In, since RC-5 R-rc5-7c's first message is a QUESTION and a
+                // one-way pipe has nowhere to put the answer. A client that only forwards paths
+                // still connects with PipeDirection.Out and reads nothing back, so the older
+                // behaviour is unchanged.
                 using var server = new NamedPipeServerStream(
-                    PipeName, PipeDirection.In,
+                    PipeName, PipeDirection.InOut,
                     maxNumberOfServerInstances: 1,
                     transmissionMode: PipeTransmissionMode.Byte,
                     options: PipeOptions.Asynchronous);
@@ -254,8 +290,24 @@ sealed class Program
                 using var reader = new StreamReader(server, Encoding.UTF8, leaveOpen: true);
                 var paths = new List<string>();
                 string? line;
+                string? answer = null;
+
                 while ((line = await reader.ReadLineAsync(ct)) is not null)
-                    if (!string.IsNullOrWhiteSpace(line)) paths.Add(line);
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    if (WindowChannel.Parse(line) is { } request) answer ??= Answer(request);
+                    else paths.Add(line);
+
+                    // A request is one line and the client is waiting: reading on would block until
+                    // it closed its end, which it cannot do before it has the answer.
+                    if (answer is not null) break;
+                }
+
+                if (answer is not null)
+                {
+                    using var writer = new StreamWriter(server, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+                    await writer.WriteLineAsync(answer);
+                }
 
                 if (paths.Count > 0)
                 {
@@ -266,6 +318,54 @@ sealed class Program
             }
             catch (OperationCanceledException) { break; }
             catch { /* Swallow per-connection errors; restart loop. */ }
+        }
+    }
+
+    /// <summary>
+    /// Answers one of RC-5's two channel requests (R-rc5-7a, R-rc5-7b).
+    ///
+    /// <para><b>The unsaved question is answered SYNCHRONOUSLY, on the UI thread</b>, because a batch
+    /// is waiting on it and an answer that arrived after the batch had already started would protect
+    /// nothing. The modified notice is posted and not waited on: the window's reload is its own
+    /// business and the batch has nothing to do with the outcome.</para>
+    ///
+    /// <para><b>Anything that goes wrong answers "no"</b> — which is the honest reading: this process
+    /// could not establish that a window holds unsaved changes, and "no window to protect" is a real
+    /// state rather than a failure.</para>
+    /// </summary>
+    private static string Answer(WindowRequest request)
+    {
+        try
+        {
+            switch (request.Verb)
+            {
+                case WindowChannel.AskUnsaved:
+                {
+                    bool dirty = Avalonia.Threading.Dispatcher.UIThread
+                        .InvokeAsync(() => App.WorkspaceHasUnsavedChanges(request.WorkspaceRoot))
+                        .GetTask()
+                        .WaitAsync(WindowChannel.Timeout)
+                        .GetAwaiter().GetResult();
+
+                    return dirty ? WindowChannel.Yes : WindowChannel.No;
+                }
+
+                case WindowChannel.TellModified:
+                {
+                    var root  = request.WorkspaceRoot;
+                    var paths = request.Paths;
+                    Avalonia.Threading.Dispatcher.UIThread.Post(
+                        () => App.WorkspaceDocumentsChangedUnderneath(root, paths));
+                    return "ok";
+                }
+
+                default:
+                    return WindowChannel.No;
+            }
+        }
+        catch (Exception e) when (e is TimeoutException or InvalidOperationException or OperationCanceledException)
+        {
+            return WindowChannel.No;
         }
     }
 

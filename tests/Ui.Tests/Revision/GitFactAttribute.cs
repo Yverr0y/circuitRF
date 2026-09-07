@@ -126,6 +126,31 @@ internal sealed class GitWorkspace : IDisposable
 
     public string ReadGlobalConfig() => System.IO.File.ReadAllText(GlobalConfig);
 
+    /// <summary>
+    /// Writes a file of exactly <paramref name="bytes"/> bytes — for RC-5's large-file guard, whose
+    /// whole question is about size and nothing about content.
+    /// </summary>
+    public void WriteBytes(string relative, int bytes)
+    {
+        string p = File_(relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(p)!);
+        System.IO.File.WriteAllBytes(p, new byte[bytes]);
+    }
+
+    /// <summary>
+    /// Moves the clock git stamps its objects with (RC-5 gate 7).
+    ///
+    /// <para><b>Through git's own date variables rather than the machine's clock</b>, which a test
+    /// has no business changing — and they are what git actually reads, so setting them measures the
+    /// same thing a dead CMOS battery or a re-synced time server would produce.</para>
+    /// </summary>
+    public void SetClock(DateTimeOffset when)
+    {
+        string stamp = when.ToUnixTimeSeconds() + " +0000";
+        Set("GIT_AUTHOR_DATE", stamp);
+        Set("GIT_COMMITTER_DATE", stamp);
+    }
+
     /// <summary>A driver for this workspace, or a failing assertion if git could not be found.</summary>
     public GitCommand Git(GitIdentity? identity = null)
         => GitCommand.For(Root, identity) ?? throw new InvalidOperationException("no git");
@@ -163,5 +188,33 @@ internal sealed class GitWorkspace : IDisposable
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
+    }
+}
+
+
+/// <summary>
+/// Redirects the per-user state directory for the duration, so a test never reads or writes the
+/// developer's own <c>preferences.json</c>.
+///
+/// <para>It is what makes RC-5's identity gate honest: "circuitRF's own preference names nobody" has
+/// to be a real state, and on a machine whose owner has one configured it would otherwise be
+/// unreachable.</para>
+/// </summary>
+internal sealed class AppDataRootScope : IDisposable
+{
+    public string Dir { get; }
+
+    public AppDataRootScope()
+    {
+        Dir = Path.Combine(Path.GetTempPath(), "crf-rc5state-" + Guid.NewGuid().ToString("N")[..12]);
+        Directory.CreateDirectory(Dir);
+        CircuitRF.Ui.AppDataRoot.RedirectTo(Dir);
+    }
+
+    public void Dispose()
+    {
+        CircuitRF.Ui.AppDataRoot.RedirectTo(null);
+        try { if (Directory.Exists(Dir)) Directory.Delete(Dir, recursive: true); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 }

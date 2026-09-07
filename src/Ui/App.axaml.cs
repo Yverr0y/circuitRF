@@ -483,6 +483,72 @@ public partial class App : Application
         return null;
     }
 
+    // ── RC-5's channel (revision-control.md §5.3c; R-rc5-7a, R-rc5-7b) ────────────────────────────
+
+    /// <summary>
+    /// R-rc5-7a. <b>Does a window hold unsaved changes to this workspace?</b> Asked by a headless
+    /// <c>serve</c> before a batch modifies anything.
+    ///
+    /// <para><b>A batch that edited files under a window holding unsaved changes to them would be
+    /// erased by that window's next save</b> — the two-editors-one-file failure §7A.3 already calls
+    /// worse than the divergence RC-2 exists to prevent, reached through the mechanism §1.2 is the
+    /// motive for. A batch is headless and there is nobody to prompt, so the honest answer is a
+    /// refusal and this is the question it turns on.</para>
+    ///
+    /// <para><b>The workspace root is a FOLDER; the window knows its <c>.cws</c></b>, so the match is
+    /// on the containing directory rather than on the file — a caller that has one has no business
+    /// having to guess the other's file name.</para>
+    /// </summary>
+    internal static bool WorkspaceHasUnsavedChanges(string workspaceRoot)
+    {
+        if (WindowForWorkspaceRoot(workspaceRoot) is not { DataContext: WorkspaceViewModel vm })
+            return false;
+
+        return vm.HasAnyDirtyWork(includeFloated: false);
+    }
+
+    /// <summary>
+    /// R-rc5-7b. The documents a batch changed, so the window reloads them and discards their undo
+    /// stacks.
+    ///
+    /// <para><b>It goes through the same path a restore uses</b> (R-rc5-12b) rather than growing a
+    /// second reload — two reload implementations that drift is the shape of defect §5.8 is written
+    /// against — and R-rc5-7a is what makes it cheap: with nothing unsaved anywhere, a reload cannot
+    /// lose anything, which is why the refusal comes first.</para>
+    /// </summary>
+    internal static void WorkspaceDocumentsChangedUnderneath(
+        string workspaceRoot, IReadOnlyList<string> relativePaths)
+    {
+        if (WindowForWorkspaceRoot(workspaceRoot) is not { DataContext: WorkspaceViewModel vm }) return;
+        if (relativePaths.Count == 0) return;
+
+        _ = vm.ReloadAfterExternalChange(relativePaths);
+    }
+
+    /// <summary>The window whose open workspace lives in <paramref name="workspaceRoot"/>.</summary>
+    private static WorkspaceWindow? WindowForWorkspaceRoot(string workspaceRoot)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceRoot)) return null;
+        if ((Application.Current as App)?._desktop is not { } desktop) return null;
+
+        string wanted;
+        try { wanted = Path.GetFullPath(workspaceRoot).TrimEnd(Path.DirectorySeparatorChar); }
+        catch { return null; }
+
+        foreach (var w in desktop.Windows.OfType<WorkspaceWindow>())
+        {
+            if (w.DataContext is not WorkspaceViewModel vm) continue;
+            if (vm.CurrentWorkspacePath is not { } open) continue;
+
+            string dir;
+            try { dir = Path.GetFullPath(Path.GetDirectoryName(open)!).TrimEnd(Path.DirectorySeparatorChar); }
+            catch { continue; }
+
+            if (string.Equals(dir, wanted, StringComparison.OrdinalIgnoreCase)) return w;
+        }
+        return null;
+    }
+
     /// <summary>
     /// The workspace window most recently brought to the front. The answer to "which window did the
     /// user mean" for anything that arrives without one — a file forwarded by the operating system

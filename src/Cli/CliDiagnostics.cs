@@ -1064,7 +1064,25 @@ internal static class CliDiagnostics
 
     public static Diagnostic HistoryUnknownNoun(string noun) => Diagnostic.Create(
         "history.args.unknown-noun", DiagnosticSeverity.Error,
-        "history: there is nothing called '{noun}'. Known: checkpoint.", ("noun", noun));
+        "history: there is nothing called '{noun}'. Known: checkpoint, list, restore.", ("noun", noun));
+
+    /// <summary>RC-5 R-rc5-23. <c>restore</c> needs to be told WHICH one, and the answer is a
+    /// sequence out of <c>history list</c> — never an object identity, which is the vocabulary this
+    /// surface does not use.</summary>
+    public static Diagnostic HistoryRestoreNeedsAPoint() => new(
+        "history.restore.point-required", DiagnosticSeverity.Error,
+        "history restore: say which restore point, as --point <number> from 'history list'.");
+
+    public static Diagnostic HistoryNoSuchPoint(long sequence) => Diagnostic.Create(
+        "history.restore.no-such-point", DiagnosticSeverity.Error,
+        "This workspace has no restore point {sequence}. 'history list' shows the ones it has.",
+        ("sequence", sequence));
+
+    /// <summary>The list is empty. Not a failure — it is the ordinary state of a workspace no
+    /// boundary has reached yet.</summary>
+    public static Diagnostic HistoryNothingKeptYet(string path) => Diagnostic.Create(
+        "history.list.empty", DiagnosticSeverity.Info,
+        "'{path}' has no restore points yet.", ("path", path));
 
     public static Diagnostic HistoryNotAWorkspace(string path) => Diagnostic.Create(
         "history.input.not-a-workspace", DiagnosticSeverity.Error,
@@ -1076,6 +1094,61 @@ internal static class CliDiagnostics
         "history.git.unavailable", DiagnosticSeverity.Error,
         "circuitRF could not find a git to use on this machine, so it cannot keep a history. "
       + "Install one, or name it in Settings ▸ Revision Control.");
+
+    /// <summary>
+    /// RC-5 R-rc5-15. <b>The dialog's question, as a refusal naming the flags that answer it</b> —
+    /// the rule <c>new</c> and <c>import</c> already follow: anything the GUI would have ASKED is a
+    /// refusal here, never a guess. §9A.1 decides why it is a refusal rather than a default:
+    /// including a file is irreversible and leaving it out is not, and a headless run has nobody to
+    /// undo the wrong answer.
+    /// </summary>
+    public static Diagnostic HistoryLargeFilesNeedAnAnswer(string names, int count) => Diagnostic.Create(
+        "history.large-files.unanswered", DiagnosticSeverity.Error,
+        "{count} file(s) here are much larger than a design document and have never been kept: "
+      + "{names}. Say what they are: --include-large to keep them (one copy now, one more whenever "
+      + "they change), or --leave-out <path> for each one to leave out. Nothing was recorded.",
+        ("count", (object?)count), ("names", names));
+
+    // ── the batch, on `serve` (RC-5 §5.3a, §5.3b) ─────────────────────────────────────────────────
+
+    /// <summary>R-rc5-6g. The state, advertised rather than inferred — an agent left to deduce it
+    /// from the filesystem will deduce it wrongly.</summary>
+    public static Diagnostic BatchState(string state, bool open, string? intent, string root)
+        => Diagnostic.Create(
+            "batch.state", DiagnosticSeverity.Info,
+            "This workspace keeps a history: {state}. A change is currently open: {open}{intent}. "
+          + "Its folder is {root}.",
+            ("state", state), ("open", open ? "yes" : "no"),
+            ("intent", open && intent is { Length: > 0 } ? $" (\"{intent}\")" : ""),
+            ("root", root));
+
+    /// <summary>R-rc5-6h. One entry per rule, so a client that reads only sentences still gets them.</summary>
+    public static Diagnostic BatchRule(int number, string text) => Diagnostic.Create(
+        "batch.rule", DiagnosticSeverity.Info, "Rule {n}. {text}",
+        ("n", number), ("text", text));
+
+    /// <summary>
+    /// R-rc5-6i. <b>Said with every refusal</b>, because the failure this pair exists to prevent is
+    /// the HELPFUL one: an agent that, finding no mechanism available, makes its own arrangements and
+    /// reports success — leaving the designer told they are protected by something they cannot go back
+    /// through.
+    /// </summary>
+    public static Diagnostic BatchImproviseNothing() => new(
+        "batch.improvise-nothing", DiagnosticSeverity.Warning,
+        "Stop and say this to the designer. Do not commit anything of your own, do not copy the "
+      + "folder, and do not arrange any other backup: circuitRF would not know about it and the "
+      + "designer could not go back through it.");
+
+    public static Diagnostic BatchClosed(int modified) => Diagnostic.Create(
+        "batch.closed", DiagnosticSeverity.Info,
+        "The change is closed. {n} file(s) in the workspace differ from how it was when it opened.",
+        ("n", modified));
+
+    /// <summary>R-rc5-6d. Not an error: an agent that died and restarted must be able to say so, and
+    /// the restore point it needed was taken before any of that.</summary>
+    public static Diagnostic BatchWasNotOpen() => new(
+        "batch.was-not-open", DiagnosticSeverity.Info,
+        "No change was open. Nothing needed closing.");
 
     public static Diagnostic HistoryNoRepository(string path) => Diagnostic.Create(
         "history.repository.absent", DiagnosticSeverity.Error,

@@ -78,6 +78,7 @@
                         <NativeMenuItem Header="Save Symbol As…"     Command="{Binding SaveLooseSymbolCommand}"    CommandParameter="{Binding $parent[Window]}"/>
                         <NativeMenuItem Header="Save Layout As…"     Command="{Binding SaveLooseLayoutCommand}"     CommandParameter="{Binding $parent[Window]}"/>
                         <NativeMenuItem Header="Save Workspace As…"  Command="{Binding SaveWorkspaceAsCommand}"   CommandParameter="{Binding $parent[Window]}" Gesture="Meta+Shift+S"/>
+                        <NativeMenuItem Header="Keep This State…"    Command="{Binding KeepThisStateCommand}"     CommandParameter="{Binding $parent[Window]}"/>
                         <NativeMenuItemSeparator/>
                         <NativeMenuItem Header="Add Cell to Workspace…" Command="{Binding AddCellToWorkspaceCommand}" CommandParameter="{Binding $parent[Window]}"/>
                         <NativeMenuItem Header="Reference Workspace…" Command="{Binding ReferenceWorkspaceCommand}" CommandParameter="{Binding $parent[Window]}"/>
@@ -205,6 +206,7 @@
                                     <NativeMenuItem Header="Analyses"     Command="{Binding ShowToolPanelCommand}" CommandParameter="Analyses"/>
                                     <NativeMenuItem Header="Messages"     Command="{Binding ShowToolPanelCommand}" CommandParameter="Messages"/>
                                     <NativeMenuItem Header="DRC"          Command="{Binding ShowToolPanelCommand}" CommandParameter="Drc"/>
+                                    <NativeMenuItem Header="Restore Points" Command="{Binding ShowToolPanelCommand}" CommandParameter="RestorePoints"/>
                                     <NativeMenuItem Header="Wire Profile"     Command="{Binding ShowToolPanelCommand}" CommandParameter="WBondProfile"/>
                                     <NativeMenuItem Header="Array Inductance" Command="{Binding ShowToolPanelCommand}" CommandParameter="WBondInductance"/>
                                 </NativeMenu>
@@ -438,6 +440,16 @@
                           CommandParameter="{Binding $parent[Window]}"
                           InputGesture="Ctrl+Shift+S">
                     <MenuItem.Icon><mi:MaterialIcon Kind="ContentSaveEdit" Width="16" Height="16"/></MenuItem.Icon>
+                </MenuItem>
+                <!-- revision-control.md §5.3's second boundary, R-rc5-4c. Beside the save commands,
+                     because that is where a user looking for it will be: §5.3 describes it as
+                     something the user asks for, and it is not a save — it keeps the state you are in
+                     so you can come back to it. -->
+                <MenuItem Header="_Keep This State…"
+                          Command="{Binding KeepThisStateCommand}"
+                          CommandParameter="{Binding $parent[Window]}"
+                          ToolTip.Tip="Keep this workspace as it is now, with a line saying what it is, so you can come back to it.">
+                    <MenuItem.Icon><mi:MaterialIcon Kind="BookmarkOutline" Width="16" Height="16"/></MenuItem.Icon>
                 </MenuItem>
                 <Separator/>
                 <MenuItem Header="Add _Cell to Workspace…"
@@ -725,6 +737,12 @@
                     <MenuItem Header="_DRC"
                               Command="{Binding ShowToolPanelCommand}" CommandParameter="Drc">
                         <MenuItem.Icon><mi:MaterialIcon Kind="ShieldCheckOutline" Width="16" Height="16"/></MenuItem.Icon>
+                    </MenuItem>
+                    <!-- revision-control.md §5.1, R-rc5-4c. Not in either shipped default layout: it
+                         is a safety net, looked at on the days something went wrong. -->
+                    <MenuItem Header="Restore _Points"
+                              Command="{Binding ShowToolPanelCommand}" CommandParameter="RestorePoints">
+                        <MenuItem.Icon><mi:MaterialIcon Kind="History" Width="16" Height="16"/></MenuItem.Icon>
                     </MenuItem>
                     <!-- wbond.md §10.1 — the two wBond panels, which follow the active layout. Not in
                          either shipped default layout: most designs have no wirebonds. -->

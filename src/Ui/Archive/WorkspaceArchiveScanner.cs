@@ -36,8 +36,36 @@ public static class WorkspaceArchiveScanner
     private static readonly string[] SkippedDirectories =
     [
         GeneratedCellStore.ReservedFolderName,
+        RepositoryFolderName,
         "__MACOSX", ".Spotlight-V100", ".Trashes", ".fseventsd", ".TemporaryItems",
     ];
+
+    /// <summary>
+    /// The workspace's own history (RC-5 R-rc5-18, <c>docs/design/revision-control.md</c> §9A).
+    ///
+    /// <para><b>It is excluded in the brief that first puts one inside the folder this scanner
+    /// walks</b>, and that timing is the requirement rather than a detail. The moment a restore point
+    /// creates one, an archive would otherwise carry the whole history — <b>including every earlier
+    /// version of every file kept, and files no longer in the workspace at all.</b> A designer who
+    /// imported a customer's artwork, finished with it, deleted it, and then archived the workspace
+    /// for a different customer would ship that artwork, with nothing in the visible file tree
+    /// showing it.</para>
+    ///
+    /// <para><b>That is disclosure, and unlike every loss in the architecture it cannot be undone by
+    /// anyone at any later time.</b> RC-8 adds the CHOICE to include history; the exclusion is not
+    /// RC-8's to defer — an archive that carried history because nobody told the scanner is that
+    /// failure arrived at through pure inattention, and it would ship in the first build that keeps a
+    /// restore point.</para>
+    ///
+    /// <para><b>Both consumers want the same answer here, and that is what makes it the trap's other
+    /// half.</b> It sits in the SHARED list, so <c>WorkspaceCopy.Run</c> stops copying the repository
+    /// too — which is right for §9A.1's identical reason, a copy made for a different customer must
+    /// not carry the first customer's deleted files (R-rc5-19). Read this beside
+    /// <see cref="IsSkippedFromArchive"/>'s note on <c>.cwsuser</c>, where the two consumers want
+    /// OPPOSITE answers: one shared list, two consumers, and the correct resolution differs by
+    /// entry.</para>
+    /// </summary>
+    public const string RepositoryFolderName = ".git";
 
     private static readonly string[] SkippedFileNames =
     [

@@ -302,6 +302,40 @@ internal static class ToolCatalog
         // surfaces resources to the model, and a capability the model cannot reach is not a
         // capability (R-aut6-4). Two lines, and it earns them by being the thing that unblocks
         // writing a document at all.
+        // R-rc5-23, R-rc5-6h. Three of the four nouns are the CLI's verbs by construction; the
+        // batch's own open and close are NOT here, because they hold session state and a process
+        // that exits after one command cannot. They live on this server (see HistoryBatchTool),
+        // which is the only surface that can hold them.
+        new("history",
+            "This workspace's restore points: keep one, list them, or put the workspace back to one. "
+          + "Open a batch with 'batch' BEFORE your first modification — a restore point taken "
+          + "afterwards protects nothing.",
+            "action",
+            "What to do.",
+            [
+                new("checkpoint", ["history", "checkpoint"],
+                    [new("path", true, "The workspace folder.")],
+                    [
+                        new("intent", "--intent", OptKind.Str,
+                            "One line saying what this state is. It is the label the designer reads."),
+                        new("leaveOut", "--leave-out", OptKind.StrRepeat,
+                            "A workspace-relative path to leave out of this one."),
+                        new("includeLarge", "--include-large", OptKind.Flag,
+                            "Keep unusually large new files too. Without this, an unanswered one is "
+                          + "a refusal naming it: keeping a file cannot be undone, leaving it out can."),
+                    ],
+                    "Keep a restore point of the workspace as it stands."),
+                new("list", ["history", "list"],
+                    [new("path", true, "The workspace folder.")],
+                    [new("limit", "--limit", OptKind.Integer, "Return at most this many, newest first.")],
+                    "The restore points, newest first."),
+                new("restore", ["history", "restore"],
+                    [new("path", true, "The workspace folder.")],
+                    [new("point", "--point", OptKind.Integer,
+                         "Which restore point, as the number 'list' reports.")],
+                    "Put the workspace back to one restore point. The state being replaced is kept first."),
+            ]),
+
         new("reference",
             "What may be written in circuitRF's documents: the reference pages, and the generated " +
             "catalogue of every netlist primitive with its terminals and parameters. " +

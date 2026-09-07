@@ -76,6 +76,10 @@ internal static class JsonRun
     /// (brief-automation-6-reference-and-components.md §5).</summary>
     public static ReferenceReportJson? Reference;
 
+    /// <summary>What <c>history</c> answered — the restore-point list, or what one boundary or one
+    /// restore did (R-rc5-23). About no analysis at all, which is why it is its own payload.</summary>
+    public static HistoryReportJson? History;
+
     /// <summary>
     /// Where <see cref="Finish"/> writes, instead of stdout. Set by <c>serve</c> only.
     ///
@@ -110,6 +114,7 @@ internal static class JsonRun
         Explain             = null;
         Document            = null;
         Reference           = null;
+        History             = null;
         Outputs.Clear();
         Diagnostics.Clear();
     }
@@ -233,8 +238,9 @@ internal static class JsonRun
         // first two run nothing (R-aut4-1), the third is a file rather than a result, and the fourth
         // is about no document at all — so they are answered before the cube machinery, not folded
         // into it.
-        if (Check is not null || Explain is not null || Document is not null || Reference is not null)
-            return new ResultPayload(null, null, Check, Explain, Document, Reference);
+        if (Check is not null || Explain is not null || Document is not null || Reference is not null
+         || History is not null)
+            return new ResultPayload(null, null, Check, Explain, Document, Reference, History);
 
         if (Data is not { } ds) return null;
 

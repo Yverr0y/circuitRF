@@ -114,7 +114,9 @@ namespace RfCore.Export
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         DocumentJson? Document = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        ReferenceReportJson? Reference = null);
+        ReferenceReportJson? Reference = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        HistoryReportJson? History = null);
 
     /// <summary>
     /// One of circuitRF's own documents, read back verbatim.
@@ -361,6 +363,50 @@ namespace RfCore.Export
     /// <param name="Topics">The topic list, with each topic's served size.</param>
     /// <param name="Topic">One topic, with its text.</param>
     /// <param name="Components">The generated catalogue, or the one primitive that was asked for.</param>
+    /// <summary>
+    /// What <c>history</c> answered — the restore-point list, or what one boundary or one restore did
+    /// (<c>docs/design/revision-control.md</c> §5.3d, RC-5 R-rc5-23).
+    ///
+    /// <para><b>No git vocabulary reaches this document</b> (R-rc0-6). What travels is what a designer
+    /// would be shown: a time, a label, how it came about, and whether anything was left out of it. The
+    /// identity of the underlying object is deliberately absent — this is the same surface the panel
+    /// renders, and RC-7's explicit commit is the only place an identifier is ever named.</para>
+    /// </summary>
+    /// <param name="Points">The list, newest first, when the caller asked for one.</param>
+    /// <param name="Recorded">Whether a boundary wrote anything. False when nothing had changed.</param>
+    /// <param name="Point">The entry a boundary produced, or the one a restore went to.</param>
+    /// <param name="FilesWritten">How many files a restore brought back.</param>
+    /// <param name="FilesRemoved">How many a restore took away.</param>
+    public sealed record HistoryReportJson(
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<RestorePointJson>? Points = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        bool?                            Recorded = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        RestorePointJson?                Point = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        int?                             FilesWritten = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        int?                             FilesRemoved = null);
+
+    /// <summary>One entry, as the list and the panel both show it.</summary>
+    /// <param name="Sequence">circuitRF's own monotonic ordering. <b>Not the clock</b> — a wall clock
+    /// is user-writable state, and it supplies the label a human reads and nothing else.</param>
+    /// <param name="Taken">When, in ISO-8601 UTC, for that label.</param>
+    /// <param name="Origin">How it came about: <c>save-point</c>, <c>workspace-closed</c>,
+    /// <c>before-batch</c> or <c>before-restore</c>.</param>
+    /// <param name="Label">The line a designer reads.</param>
+    /// <param name="Kept">Whether retention may never thin it.</param>
+    /// <param name="LeftOut">Paths left out at a boundary nobody was at. A non-empty list means the
+    /// entry is INCOMPLETE and says so.</param>
+    public sealed record RestorePointJson(
+        long                  Sequence,
+        string                Taken,
+        string                Origin,
+        string                Label,
+        bool                  Kept,
+        IReadOnlyList<string> LeftOut);
+
     public sealed record ReferenceReportJson(
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         IReadOnlyList<ReferenceTopicJson>?     Topics,

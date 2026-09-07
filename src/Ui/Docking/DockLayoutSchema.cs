@@ -288,8 +288,24 @@ public static class DockPanelIds
     public const string WBondProfile    = "WBondProfile";
     public const string WBondInductance = "WBondInductance";
 
+    /// <summary>
+    /// RC-5's restore points (<c>docs/design/revision-control.md</c> §5.1, R-rc5-4c).
+    ///
+    /// <para><b>A dockable tool panel, because that is the application's own idiom for a place things
+    /// are listed</b> — it is where the Messages panel already lives, and rev 3 of the architecture
+    /// said checkpoints are "presented in the UI as restore points" without saying where. A boundary
+    /// with a test and no affordance is the gap that requirement was written for.</para>
+    ///
+    /// <para>Absent from both shipped default layouts, deliberately: it is a safety net, looked at on
+    /// the days something went wrong, and a panel permanently occupying a strip of window for that
+    /// would be one most users close. It opens from View ▸ Panels and is then captured and restored
+    /// with every other panel.</para>
+    /// </summary>
+    public const string RestorePoints = "RestorePoints";
+
     public static readonly string[] All =
     [
         ProjectTree, Palette, Properties, Analyses, Messages, Drc, WBondProfile, WBondInductance,
+        RestorePoints,
     ];
 }

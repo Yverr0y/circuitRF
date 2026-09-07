@@ -404,6 +404,14 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
 
     private static readonly string[] ExpectedIds =
     [
+        // RC-5's batch, on `serve` (revision-control.md §5.3a, §5.3b). These are the only ids in this
+        // set that belong to a tool rather than to a verb: a batch holds session state and there is
+        // no command line that could carry it.
+        "batch.closed",
+        "batch.improvise-nothing",
+        "batch.rule",
+        "batch.state",
+        "batch.was-not-open",
         "check.analysis.none",
         "check.args.multiple-paths",
         "check.args.path-required",
@@ -516,7 +524,11 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "history.args.unknown-noun",
         "history.git.unavailable",
         "history.input.not-a-workspace",
+        "history.large-files.unanswered",
+        "history.list.empty",
         "history.repository.absent",
+        "history.restore.no-such-point",
+        "history.restore.point-required",
         "import.args.into-required",
         "import.args.multiple-sources",
         "import.args.noun-required",

@@ -42,7 +42,20 @@ internal sealed class McpServer
     private readonly BlockingCollection<Action> _work = new(new ConcurrentQueue<Action>());
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _inFlight = new();
 
-    public McpServer(JsonRpc rpc, PathRoot root) { _rpc = rpc; _root = root; }
+    /// <summary>
+    /// RC-5's batch, which is the one tool that is not a command line. It holds SESSION state — a
+    /// batch is opened, stays open while an agent works, and is closed — and a process that exits
+    /// after one command cannot hold that, which is why <c>revision-control.md</c> §5.3d puts it
+    /// here and leaves the other three history nouns as CLI verbs.
+    /// </summary>
+    private readonly HistoryBatch _batch;
+
+    public McpServer(JsonRpc rpc, PathRoot root)
+    {
+        _rpc   = rpc;
+        _root  = root;
+        _batch = new HistoryBatch(root);
+    }
 
     /// <summary>Reads until the client disconnects. Returns the process exit code.</summary>
     public int Serve()
@@ -107,7 +120,11 @@ internal sealed class McpServer
                 return;
 
             case "tools/list":
-                _rpc.Result(id, new JsonObject { ["tools"] = ToolCatalog.Advertise() });
+            {
+                var tools = ToolCatalog.Advertise();
+                tools.Add(HistoryBatch.Advertise());
+                _rpc.Result(id, new JsonObject { ["tools"] = tools });
+            }
                 return;
 
             case "tools/call":
@@ -259,11 +276,24 @@ internal sealed class McpServer
     private void Invoke(JsonNode? id, string tool, JsonObject? arguments, JsonNode? progressToken,
                         CancellationToken ct)
     {
-        var argv = ToolCatalog.ToArgv(tool, arguments, _root, out var refusal);
+        int    refusedCode;
+        string document;
 
-        string document = argv is null
-            ? RefusalDocument(tool, refusal!, out int refusedCode)
-            : RunVerb(argv, progressToken, ct, out refusedCode, tool);
+        if (tool == HistoryBatch.ToolName)
+        {
+            // Not a command line, and deliberately not pretended to be one (R-aut-1: the adapter
+            // makes no decisions). The batch is session state this process holds; there is no argv
+            // that could carry it.
+            document = _batch.Invoke(arguments, out refusedCode);
+        }
+        else
+        {
+            var argv = ToolCatalog.ToArgv(tool, arguments, _root, out var refusal);
+
+            document = argv is null
+                ? RefusalDocument(tool, refusal!, out refusedCode)
+                : RunVerb(argv, progressToken, ct, out refusedCode, tool);
+        }
 
         // The document, unchanged (R-aut5-5). The text block is the protocol's own envelope, not a
         // reshaping of the payload: these bytes are the CLI's `--json` bytes.

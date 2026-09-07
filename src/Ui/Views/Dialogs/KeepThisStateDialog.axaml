@@ -1,0 +1,56 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="using:CircuitRF.Ui.Views.Dialogs"
+        x:Class="CircuitRF.Ui.Views.Dialogs.KeepThisStateDialog"
+        Title="Keep This State"
+        Width="620" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False">
+
+  <StackPanel Margin="16" Spacing="10">
+
+    <TextBlock Text="Keep this workspace as it is now, so you can come back to it."
+               TextWrapping="Wrap" />
+
+    <StackPanel Spacing="4">
+      <TextBlock Text="What is this state? (optional)" FontSize="11" Opacity="0.75" />
+      <TextBox x:Name="LabelBox" Watermark="Widen the output match" />
+      <TextBlock FontSize="10" Opacity="0.6" TextWrapping="Wrap"
+                 Text="Without a line it is listed as a save-point with its time. Six weeks from now
+                       the line is the only thing that tells one from another." />
+    </StackPanel>
+
+    <!-- The large-file guard (revision-control.md §8.2). Present only when there is something over
+         the threshold that is not already kept, so the ordinary save-point is one field and a
+         button. -->
+    <StackPanel x:Name="LargeFilesPanel" Spacing="6" IsVisible="False">
+      <Separator />
+      <TextBlock x:Name="LargeFilesHeading" TextWrapping="Wrap" FontWeight="SemiBold" />
+      <TextBlock FontSize="11" Opacity="0.75" TextWrapping="Wrap"
+                 Text="These are much larger than a design document. Say what each one is — the
+                       question is what the file IS, not how it should be stored." />
+      <ItemsControl x:Name="LargeFilesList">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="d:LargeFileRow">
+            <Grid ColumnDefinitions="*,Auto" Margin="0,3">
+              <StackPanel Grid.Column="0">
+                <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Detail}" FontSize="10" Opacity="0.6" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding Consequence}" FontSize="10" Opacity="0.9"
+                           TextWrapping="Wrap" Margin="0,2,0,0" />
+              </StackPanel>
+              <ComboBox Grid.Column="1" Width="230" VerticalAlignment="Top" Margin="8,0,0,0"
+                        ItemsSource="{Binding Choices}"
+                        SelectedIndex="{Binding ChoiceIndex, Mode=TwoWay}" />
+            </Grid>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button x:Name="CancelButton" Content="Cancel" Click="OnCancel" IsCancel="True" />
+      <Button x:Name="KeepButton"   Content="Keep"   Click="OnKeep"   IsDefault="True" />
+    </StackPanel>
+  </StackPanel>
+</Window>

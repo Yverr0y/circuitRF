@@ -865,3 +865,51 @@ reported, classified:
 | `assets/figures/workspace-{overview,regions}*.svg`, `workspace.html`, `quick-start/`, `new-user-guide/` | the known non-deterministic figure families — a live capture, not a content change |
 
 Regenerating is one deliberate pass and belongs to whoever is ready to review 2,200 lines of it.
+
+---
+
+## RC-5 — `history list` / `history restore`, and the one tool that is not a command line (2026-09-06)
+
+`brief-revision-control-5-checkpoints.md` §6a. RC-3 shipped `history checkpoint`; this adds the other
+two nouns and the batch.
+
+### `--ref` and `--message` are gone from `history checkpoint`; `--intent` replaces them
+
+RC-5 owns where a restore point lands (`refs/crf/restore/<sequence>`) and what its message says
+(§5.5's three origins, plus the trailers). A caller that could name a reference could hand out a
+number the ordering sequence had already used, and a caller that could write the whole message could
+omit the origin — so both flags went. `--message` is still accepted as a spelling of `--intent`, for
+a caller that learned it against RC-3. RC-3's own identity gate used `--ref` and was updated rather
+than kept working: it is testing who the commit is BY, and the reference name was incidental to it.
+
+### The batch cannot be a verb, and the reason is structural
+
+`history checkpoint`, `list` and `restore` are verbs because each is one operation that begins and
+ends inside one process. **A batch is a session**: opened before an agent's first modification, held
+open while it works, closed when it is done. A process that exits after one command cannot hold that,
+so `serve` is the only surface in circuitRF that can — which is what `revision-control.md` §5.3d says,
+and it is why `HistoryBatch` is the one tool `ToolCatalog` does not build a command line for.
+
+That exemption had to be made explicit in two gates that were written on the assumption that every
+advertised tool is a verb: `EveryAdvertisedArgument_IsAFlagTheVerbActuallyReads` skips it (there is no
+argument loop to scan), and the tool-count assertion names it and says why. **Its own gate is that the
+state and the ten rules come back in the surface's own output** — a rule an agent cannot read is a
+rule that does not exist.
+
+### Every refusal names what to do instead, and that is a requirement rather than politeness
+
+`revision-control.md` §5.3b's rules 3 and 9 are the load-bearing pair: they prevent the HELPFUL
+failure, where an agent that finds no checkpoint mechanism makes its own arrangements and reports
+success. A vague refusal is what makes an agent improvise, so all five — off, held, nowhere to record,
+a window holding unsaved changes, no git — say what was not done and what to do about it, and a
+`batch.improvise-nothing` warning accompanies every one of them. A gate asserts each refusal contains
+the words "nothing was changed", because "the batch was refused" and "nothing was modified" are two
+claims and only the second is the promise.
+
+### The `history` payload carries no object identity
+
+`HistoryReportJson` / `RestorePointJson` report the sequence, the time, the origin, the label, whether
+it is kept, and what was left out — the same surface the panel renders. The commit identity is
+deliberately absent: R-rc0-6 keeps git vocabulary away from a designer, and `--point <sequence>` is
+what `restore` takes, so nothing a caller needs is missing. RC-7's explicit commit is the one place an
+identifier is ever named, because there the user asked for it and it is theirs to refer to.

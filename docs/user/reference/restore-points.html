@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>circuitRF — Restore Points</title>
+<link rel="icon" href="../assets/img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../assets/css/circuitrf-docs.css">
+<!--
+  GENERATED FILE - do not edit. Edit the Markdown source named below and re-run:
+      dotnet run [project tools/DocGen] [flag out] docs/user
+  (XML comments cannot contain a double hyphen; the flags are ordinary ones.)
+  Source: docs/user/src/reference/restore-points.md
+-->
+</head>
+<body>
+
+<header class="doc-header">
+  <a class="brand" href="../index.html"><img class="logo" src="../assets/img/favicon.svg" alt="circuitRF"><span class="wordmark">circuitRF</span></a>
+  <span class="doc-kind">Reference Guide</span>
+  <div class="doc-search" data-crf-search data-root="../" hidden>
+    <input type="search" class="search-input" autocomplete="off" spellcheck="false"
+           aria-label="Search the documentation" placeholder="Search docs"
+           role="combobox" aria-expanded="false" aria-autocomplete="list">
+    <div class="search-panel" role="listbox" hidden></div>
+  </div>
+</header>
+<hr class="doc-headrule">
+
+<main class="page">
+  <p class="breadcrumb"><a href="../index.html">Docs</a> › <a href="index.html">Reference</a> › Restore Points</p>
+
+  <h1>Restore Points</h1>
+  <p class="lede">circuitRF quietly keeps the state of a workspace at a few moments that matter, so you can put it back the way it was. What is kept, what is not, and how to go back.</p>
+
+<nav class="toc">
+<h2>On this page</h2>
+<ol>
+<li><a href="#what">What a restore point is</a></li>
+<li><a href="#when">When one is kept</a></li>
+<li><a href="#panel">The Restore Points panel</a></li>
+<li><a href="#going-back">Going back — "I broke the match network yesterday"</a></li>
+<li><a href="#results">"My results are gone"</a></li>
+<li><a href="#started">"circuitRF says it started keeping a history"</a></li>
+<li><a href="#copy">"I saved a copy and my history didn't come with it"</a></li>
+<li><a href="#kept">What is kept, and what is not</a></li>
+<li><a href="#assistants">Restore points and AI assistants</a></li>
+</ol>
+</nav>
+<h2 id="what">What a restore point is</h2>
+<p>A <strong>restore point</strong> is the whole workspace, as it stood at one moment: every cell, every schematic,
+every layout, the workspace's own configuration. Going back to one puts those files back the way they
+were.</p>
+<p>It is not undo. <strong>Undo</strong> is per-editor and per-keystroke, it covers the last few minutes inside the
+document you are looking at, and it ends when you close the window. A restore point is
+workspace-wide, action-grained and durable — it is still there next week. The two are deliberately
+unrelated, and between them they cover the whole range: undo for the last few minutes in one view,
+restore points for everything else.</p>
+<div class="callout note">
+<span class="label">Going back is never a one-way door</span>
+<p>Before it replaces anything, circuitRF keeps a restore point of the state you are in right now —
+including work you have done since the last one. So if you go back and it was the wrong moment, you
+can come forward again. That entry appears in the list like any other.</p>
+</div>
+<h2 id="when">When one is kept</h2>
+<p>Three moments, and no others:</p>
+<table>
+<thead>
+<tr>
+<th>moment</th>
+<th>why this one</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>you ask for one</strong> — File ▸ Keep This State…</td>
+<td>your judgement about what matters beats any rule circuitRF could invent</td>
+</tr>
+<tr>
+<td><strong>the workspace closes</strong></td>
+<td>the one moment that reliably arrives in every session, including the ones where you never thought about history</td>
+</tr>
+<tr>
+<td><strong>before an assistant changes anything</strong></td>
+<td>so anything an AI assistant did can be undone in one action</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Not on every save.</strong> One thing you do — widening a match network — writes a layout, a schematic and
+the workspace file, so a restore point per file save would keep fragments of an edit, some of them
+half-finished. And a list with three hundred entries in it is a list nobody reads, which would make it
+useless exactly when you needed it.</p>
+<p><strong>Not on a simulation run, and not on a timer.</strong> Runs are frequent and usually change nothing; a sweep
+would leave dozens of near-identical entries. And an entry made because you went to lunch is one you
+cannot predict, at a moment that meant nothing, labelled with a time instead of a reason.</p>
+<p><strong>A moment where nothing changed keeps nothing.</strong> Close a workspace you only looked at, or press Keep
+This State twice, and there is one entry, not two.</p>
+<div class="callout note">
+<span class="label">Nothing is created until something is worth keeping</span>
+<p>Opening a workspace to look at it writes nothing at all — which matters most for a workspace on a
+shared drive that belongs to somebody else. circuitRF starts keeping a history at the first moment that
+would actually record something, and tells you once when it does.</p>
+</div>
+<h2 id="panel">The Restore Points panel</h2>
+<p><strong>View ▸ Panels ▸ Restore Points.</strong> A list, newest first: a time, what the state was, and how it came
+to be kept.</p>
+<p>The last of those is the part worth reading. <strong>&quot;you asked&quot;</strong> means you decided this state was worth
+keeping. <strong>&quot;on closing&quot;</strong> means circuitRF kept it because you shut the workspace. The automatic one is
+not the lesser of the two — it is frequently the one that saves you — but it means something
+different, and the list says which is which so you never have to guess.</p>
+<p>Three actions:</p>
+<ul>
+<li><strong>Keep this state</strong> — the same thing File ▸ Keep This State… does. It asks for one optional line
+saying what this state is. Write one: six weeks from now that line is the only thing that tells one
+entry from another.</li>
+<li><strong>Go back to this</strong> — see below.</li>
+<li><strong>Keep permanently</strong> — marks an entry so that circuitRF's own tidying-up will never remove it. Ones
+you asked for are already marked.</li>
+</ul>
+<h2 id="going-back">Going back — &quot;I broke the match network yesterday&quot;</h2>
+<p>Open <strong>View ▸ Panels ▸ Restore Points</strong>, find the entry — the times and the lines are what you are
+looking for — select it, and press <strong>Go back to this</strong>.</p>
+<p>What happens, in order:</p>
+<ol>
+<li>If anything is unsaved, circuitRF asks about it, in the same words it asks when you close a
+workspace. A restore is built from what is on disk, so unsaved edits sitting on top of it would
+leave you with a workspace matching neither state.</li>
+<li>The state you are in now is kept, so you can come forward again.</li>
+<li>The files go back. Anything created since is taken away, because yesterday's files plus today's new
+cell is a workspace that never existed.</li>
+<li>Open documents are re-opened from the files that are now there.</li>
+</ol>
+<div class="callout warning">
+<span class="label">Undo does not survive going back</span>
+<p>Every open document's undo history is cleared, deliberately. An undo after going back would re-apply
+the last few minutes of the state you <i>replaced</i> onto the file you just brought <i>back</i> —
+producing a document that never existed at any moment: perfectly well-formed, and wrong.</p>
+</div>
+<p>Going back covers <strong>this workspace's files</strong>. Anything in a workspace this one refers to is not part of
+this workspace's history and is left exactly as it is.</p>
+<h2 id="results">&quot;My results are gone&quot;</h2>
+<p>They were never kept, and that is deliberate — go back to a restore point and your <code>.npy</code>, <code>.spl</code>,
+<code>.lpcwave</code> and <code>.mat</code> files are still sitting exactly where they were.</p>
+<p><strong>A result is a function of the design and the engine</strong>, so the design is the thing worth keeping: run
+the analysis again and you have the results back. It is not about disk space. It is also why going back
+does <em>not</em> delete them: bringing back last Tuesday's design should not destroy the hours of simulation
+sitting beside it.</p>
+<h2 id="started">&quot;circuitRF says it started keeping a history&quot;</h2>
+<p>The first time a workspace reaches one of the three moments above, circuitRF creates a small folder
+inside the workspace to keep restore points in, and says so once in the Messages panel.</p>
+<ul>
+<li><strong>Where the setting is</strong> — Settings ▸ Revision Control. You can turn it off entirely, or off for one
+workspace.</li>
+<li><strong>It cannot harm your design.</strong> The folder is called <code>.git</code>; it sits beside your cells and holds only
+copies of them. Deleting it removes every restore point and touches nothing else.</li>
+<li><strong>Nothing was created before that moment.</strong> If you only opened the workspace and looked, nothing was
+written at all.</li>
+</ul>
+<h2 id="copy">&quot;I saved a copy and my history didn't come with it&quot;</h2>
+<p><strong>File ▸ Save Workspace As</strong> makes a copy of your design and <strong>the copy starts a history of its own.</strong>
+The original keeps every restore point it had.</p>
+<p>That is on purpose. A history holds <em>every earlier version of every file it ever kept</em>, including files
+you deleted long ago — so a copy made for one customer must not carry another customer's deleted
+artwork inside it, invisibly. Save Workspace As says so on the message it posts when the copy is made.</p>
+<p>If you want the history to travel, use <strong>File ▸ Archive Workspace</strong> and include history.</p>
+<h2 id="kept">What is kept, and what is not</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>in a restore point?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>cells, schematics, symbols, layouts, technologies</td>
+<td><strong>yes</strong></td>
+</tr>
+<tr>
+<td>the workspace file — analyses, references, configuration</td>
+<td><strong>yes</strong></td>
+</tr>
+<tr>
+<td>simulation results (<code>.npy</code>, <code>.spl</code>, <code>.lpcwave</code>, <code>.mat</code>)</td>
+<td>no — re-run the analysis</td>
+</tr>
+<tr>
+<td>your own panel layout, open tabs and colour theme</td>
+<td>no — they are yours, not the design's</td>
+</tr>
+<tr>
+<td>generated PCell artwork</td>
+<td>no — it is rebuilt from the layout</td>
+</tr>
+<tr>
+<td>a folder inside the workspace that keeps a history of its own</td>
+<td>no — it is left entirely alone</td>
+</tr>
+<tr>
+<td>a file you answered <strong>&quot;never include files like this&quot;</strong> about</td>
+<td>no — <strong>and it is not in a restore, and not in a copy anyone takes</strong></td>
+</tr>
+<tr>
+<td>a file left out because nobody was there to be asked</td>
+<td><strong>not yet</strong> — the entry says so and names it, and circuitRF asks the next time you keep a state yourself</td>
+</tr>
+</tbody>
+</table>
+<h3 id="unusually-large-files">Unusually large files</h3>
+<p>The first time something much larger than a design document would go into the history — an imported
+artwork file, a whole fabrication set — circuitRF asks what it is:</p>
+<ul>
+<li><strong>Include it</strong> — this is design input. It is kept: one copy now, and one more only when it changes.</li>
+<li><strong>Leave it out this time</strong> — nothing is written, and you will be asked again.</li>
+<li><strong>Never include files like this</strong> — it is a by-product. Files matching it are not kept, so they are
+<strong>not in a restore and not in a copy</strong>. They stay on disk exactly as they are.</li>
+</ul>
+<p>There is deliberately no &quot;keep it once, then ignore it&quot;: it cannot be made to work honestly. Either
+nothing would change while the button said it had, or your history would hold one stale version of a
+file that is missing from every copy anyone else takes.</p>
+<p><strong>At a moment nobody is at</strong> — a workspace closing, or an assistant working — circuitRF does not stop
+to ask. It leaves the file out, records that it did, shows the entry as incomplete with the file's
+name, and asks you the next time you keep a state yourself. Leaving a file out can be undone; putting
+one in cannot.</p>
+<h2 id="assistants">Restore points and AI assistants</h2>
+<p><strong>Before an AI assistant changes anything in your workspace, circuitRF keeps a restore point</strong>, labelled
+with what the assistant said it was about to do — <em>&quot;before: widen the output match&quot;</em>. Going back to that
+entry undoes everything the assistant did, in one action.</p>
+<p>This is automatic, you do not have to ask for it, and it happens <strong>before</strong> the first change rather than
+after the last: an assistant that stopped halfway still leaves the restore point exactly where it should
+be.</p>
+<p>It is also a floor the assistant cannot go around. If circuitRF cannot keep a restore point first —
+history is off for this workspace, the workspace has not been saved anywhere yet, or you have unsaved
+changes open — <strong>the assistant is stopped and told, and nothing is changed.</strong> Being stopped is the
+feature working, not failing: it is not permitted to make its own backup arrangements instead, because
+you would then be told you were protected by something you could not go back through.</p>
+<p>An assistant's restore points are subject to the same tidying-up as the automatic ones. If one of them
+matters, select it and press <strong>Keep permanently</strong>.</p>
+
+<nav class="page-nav">
+  <a class="prev" href="file-formats.html"><span class="dir">Previous</span><span class="name">File Formats</span></a>
+  <a class="next" href="schematic-editor.html"><span class="dir">Next</span><span class="name">The Schematic Editor</span></a>
+</nav>
+</main>
+
+<footer class="doc-footer">
+  <img src="../assets/img/circuitRF-mark.svg" alt="">
+  <span>circuitRF — RF circuit simulator</span>
+  <span class="spacer"></span>
+  <a href="../index.html">Documentation home</a>
+</footer>
+
+<script src="../assets/js/search-index.js" defer></script>
+<script src="../assets/js/docs-search.js" defer></script>
+</body>
+</html>

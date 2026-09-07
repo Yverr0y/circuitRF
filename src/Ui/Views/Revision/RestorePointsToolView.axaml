@@ -1,0 +1,58 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:CircuitRF.Ui.ViewModels.Dock"
+             x:Class="CircuitRF.Ui.Views.Revision.RestorePointsToolView"
+             x:DataType="vm:RestorePointsTool"
+             Background="{DynamicResource SystemChromeLowColor}">
+
+  <Grid RowDefinitions="Auto,*,Auto">
+
+    <!-- The save-point lives on the File menu too (R-rc5-4c). It is here as well because this is
+         where a designer is standing when they decide a state is worth keeping. -->
+    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="4" Margin="4,2">
+      <Button x:Name="SavePointButton" Click="OnSavePointClick"
+              IsEnabled="{Binding HasWorkspace}"
+              ToolTip.Tip="Keep this state, with a line saying what it is"
+              Padding="6,2" Background="Transparent" BorderThickness="0" FontSize="11"
+              Content="Keep this state" />
+      <Button x:Name="RestoreButton" Click="OnRestoreClick"
+              ToolTip.Tip="Put the workspace back to the selected state. What you have now is kept first."
+              Padding="6,2" Background="Transparent" BorderThickness="0" FontSize="11"
+              Content="Go back to this" />
+      <Button x:Name="KeepButton" Click="OnKeepClick"
+              ToolTip.Tip="Never let this one be tidied away"
+              Padding="6,2" Background="Transparent" BorderThickness="0" FontSize="11"
+              Content="Keep permanently" />
+    </StackPanel>
+
+    <ListBox Grid.Row="1"
+             x:Name="PointsList"
+             ItemsSource="{Binding Points}"
+             SelectedItem="{Binding Selected}"
+             Background="Transparent"
+             BorderThickness="0">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="vm:RestorePointRow">
+          <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,1">
+            <TextBlock Grid.Column="0" Text="{Binding When}" FontFamily="monospace"
+                       Opacity="0.75" Margin="0,0,8,0" VerticalAlignment="Center" />
+            <StackPanel Grid.Column="1">
+              <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
+              <TextBlock Text="{Binding Origin}" FontSize="10" Opacity="0.6" />
+              <TextBlock Text="{Binding LeftOutSummary}" FontSize="10" Opacity="0.9"
+                         IsVisible="{Binding IsIncomplete}" TextWrapping="Wrap" />
+            </StackPanel>
+            <TextBlock Grid.Column="2" Text="kept" FontSize="10" Opacity="0.6"
+                       VerticalAlignment="Center" IsVisible="{Binding Kept}" />
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+    <!-- R-rc5-14. Said where it could mislead: "restore my workspace" sounds more total than it is,
+         because content in a referenced workspace is not part of this workspace's history. -->
+    <TextBlock Grid.Row="2" Margin="6,4" FontSize="10" Opacity="0.65" TextWrapping="Wrap"
+               Text="Going back brings back the files in this workspace. Anything in a workspace it
+                     refers to, and any simulation results, are left exactly as they are." />
+  </Grid>
+</UserControl>

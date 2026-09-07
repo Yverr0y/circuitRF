@@ -1,0 +1,272 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using Avalonia.Controls;
+using CommunityToolkit.Mvvm.Input;
+using CircuitRF.Design.Revision;
+using CircuitRF.Ui.Messages;
+using CircuitRF.Ui.Revision;
+using CircuitRF.Ui.Views.Dialogs;
+
+namespace CircuitRF.Ui.ViewModels;
+
+/// <summary>
+/// <b>RC-5's window half</b> — the two Stage 2 affordances, the two automatic boundaries, and going
+/// back (<c>docs/design/revision-control.md</c> §5.3, §5.8; R-rc5-4c, R-rc5-12, R-rc5-21, R-rc5-22).
+///
+/// <para><b>Kept in its own file because none of it is about editing a design.</b> Everything that
+/// decides anything lives below the firewall in <see cref="WorkspaceHistoryService"/> and the
+/// <c>src/Design</c> types under it — the same functions <c>circuitrf history</c> calls, which is
+/// what stops a headless run and a window disagreeing about what a boundary does.</para>
+/// </summary>
+public partial class WorkspaceViewModel
+{
+    private WorkspaceHistoryService? _history;
+
+    /// <summary>
+    /// The service, built on first use so a workspace nobody ever asks about costs nothing.
+    /// </summary>
+    private WorkspaceHistoryService History
+    {
+        get
+        {
+            if (_history is null)
+            {
+                _history = new WorkspaceHistoryService(Messages);
+                _history.Changed += RefreshRestorePointsPanel;
+            }
+            return _history;
+        }
+    }
+
+    /// <summary>The workspace folder, or null when there is no workspace open.</summary>
+    private string? WorkspaceRootDir
+        => CurrentWorkspacePath is { } cws ? Path.GetDirectoryName(cws) : null;
+
+    /// <summary>
+    /// R-rc5-4a. Called by every path that writes a file into the open workspace.
+    ///
+    /// <para><b>This is what keeps a colleague's glance from creating a repository on a share.</b>
+    /// An unarmed workspace arms on close only if circuitRF itself wrote something during the
+    /// session, and that fact has to come from the edit session rather than from the disk — a file
+    /// manager touching the folder is not circuitRF editing a design.</para>
+    /// </summary>
+    public void NoteWorkspaceWrite() => History.NoteWorkspaceWrite();
+
+    // ── The explicit save-point (R-rc5-4c, §5.3's second boundary) ────────────────────────────────
+
+    /// <summary>
+    /// File ▸ <b>Keep This State…</b>
+    ///
+    /// <para><b>Beside the save commands, because that is where a user looking for it will be</b>
+    /// (R-rc5-4c) — §5.3 describes it as something the user asks for. It is not a save: it keeps the
+    /// state the workspace is in so the designer can come back to it.</para>
+    ///
+    /// <para><b>It is the interactive moment §8.2's guard is asked at</b> (R-rc5-15a). A close is at
+    /// the moment the designer asked to leave and a batch is headless, so both of those leave an
+    /// unexpectedly large file out and record that they did; this is where the question finally gets
+    /// put to somebody.</para>
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanCloseWorkspace))]
+    private async Task KeepThisState(Window? owner)
+    {
+        if (WorkspaceRootDir is not { } root) return;
+
+        var dialog = new KeepThisStateDialog();
+        dialog.Present(LargeFilesAwaitingAnAnswer(root), IsFirstRecording(root));
+
+        var choice = owner is null
+            ? new KeepThisStateChoice(null, [], [])
+            : await dialog.ShowDialog<KeepThisStateChoice?>(owner);
+
+        if (choice is null) return;
+
+        // The pattern goes in FIRST, so this recording already honours it and the next boundary does
+        // not ask again. Appended, never rewritten (R-rc3-11b) — the file belongs to the workspace.
+        foreach (string pattern in choice.NeverInclude)
+            LargeFileGuard.AppendIgnorePattern(root, pattern);
+
+        History.TakeSavePoint(root, choice.Label);
+        RefreshRestorePointsPanel();
+    }
+
+    /// <summary>
+    /// What the guard has to ask about at this moment: over the threshold, not already kept, and not
+    /// already excluded. An empty answer is the ordinary case and leaves the dialog one field.
+    /// </summary>
+    private IReadOnlyList<LargeFile> LargeFilesAwaitingAnAnswer(string root)
+    {
+        if (GitCommand.For(root) is not { } git || !git.IsRepositoryRoot()) return [];
+        return LargeFileGuard.Find(git, RestorePoints.Newest(git)?.TreeId);
+    }
+
+    /// <summary>
+    /// R-rc5-17a. Whether this is the FIRST recording into a workspace that already exists — which is
+    /// a different operation from every later one, and is why the dialog summarises by pattern rather
+    /// than naming hundreds of files.
+    /// </summary>
+    private static bool IsFirstRecording(string root)
+        => GitCommand.For(root) is { } git
+        && (!git.IsRepositoryRoot() || CheckpointReferences.List(git).Count == 0);
+
+    // ── The close boundary (§5.3's third, R-rc5-21, R-rc5-22) ─────────────────────────────────────
+
+    /// <summary>
+    /// R-rc5-4's third boundary — <b>the one that reliably exists in every session</b>, including the
+    /// ones where the designer never thought about history.
+    ///
+    /// <para><b>Called AFTER the workspace file has been written</b> (R-rc5-21), or the entry keeps a
+    /// workspace file one save out of date. That is ordering, it costs nothing, and it is invisible
+    /// when wrong: the restored workspace simply comes up with slightly stale configuration and
+    /// nobody connects it to the close.</para>
+    ///
+    /// <para><b>It must not make quitting feel broken</b> (R-rc5-22). This is the one boundary that
+    /// sits in front of the user, and it is a whole-workspace recording over what may be several
+    /// multi-megabyte layouts. It is measured rather than asserted: the elapsed time goes to the
+    /// trace listener where a build can read it, and the process does not exit until the recording has
+    /// completed or failed — a failure still reports (R-rc5-10).</para>
+    /// </summary>
+    private void TakeCloseCheckpoint(string? cwsPath)
+    {
+        if (cwsPath is null) return;
+        if (Path.GetDirectoryName(cwsPath) is not { Length: > 0 } root) return;
+
+        var timer = Stopwatch.StartNew();
+        History.TakeCloseCheckpoint(root);
+        timer.Stop();
+
+        LastCloseCheckpointMs = timer.Elapsed.TotalMilliseconds;
+        Trace.WriteLine($"[circuitRF] close restore point: {timer.Elapsed.TotalMilliseconds:F0} ms");
+    }
+
+    /// <summary>What the last close boundary cost, in milliseconds. R-rc0-8's measurement, read by
+    /// the write-up rather than asserted in a timing test.</summary>
+    public double LastCloseCheckpointMs { get; private set; }
+
+    // ── The panel (R-rc5-4c) ──────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Rebuilds the restore-point list. <b>Called on every boundary and every workspace switch</b> —
+    /// the panel holds no list of its own, because a stale one would offer a designer a way back to a
+    /// state that is no longer there.
+    /// </summary>
+    private void RefreshRestorePointsPanel()
+    {
+        if (_factory.RestorePointsTool is not { } tool) return;
+
+        tool.RestoreRequested   ??= point => _ = GoBackTo(point);
+        tool.KeepRequested      ??= point => { History.Keep(WorkspaceRootDir, point); };
+        tool.SavePointRequested ??= () => _ = KeepThisState(Views.WorkspaceLocator.WindowFor(this));
+
+        tool.SetPoints(History.List(WorkspaceRootDir), WorkspaceRootDir is not null);
+    }
+
+    // ── Going back (§5.8) ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Puts the workspace back to one restore point.
+    ///
+    /// <para><b>Two halves, and the second is the one that is silent if missed</b> (R-rc5-12b):</para>
+    /// <list type="bullet">
+    ///   <item><description><b>Unsaved work is offered up first</b>, through the prompt that already
+    ///   guards a close, an archive and a workspace copy — reused, not rewritten. A restore is built
+    ///   from what is on disk; performed on top of dirty documents it produces a workspace matching
+    ///   neither state.</description></item>
+    ///   <item><description><b>Open documents are reloaded and their undo stacks discarded.</b> An
+    ///   undo after a restore would re-apply the last few minutes of the REPLACED state onto the
+    ///   RESTORED file, producing a document that existed at no moment ever: well-formed, openable,
+    ///   and wrong. §1.3 names that as the failure this whole feature is written against, and it
+    ///   would be this feature causing it.</description></item>
+    /// </list>
+    /// </summary>
+    public async Task GoBackTo(RestorePoint point)
+    {
+        var window = Views.WorkspaceLocator.WindowFor(this);
+        if (WorkspaceRootDir is not { } root) return;
+
+        if (window is not null && HasAnyDirtyWork(includeFloated: false)
+            && !await PromptSaveBeforeClose(window, "going back to an earlier state", includeFloated: false))
+            return;
+
+        if (History.Restore(root, point) is not { Ok: true }) return;
+
+        await ReloadWorkspaceAfterFilesChangedUnderneath();
+    }
+
+    /// <summary>
+    /// R-rc5-12b's second half, and R-rc5-7b's — <b>one implementation with two callers</b>, which is
+    /// the requirement rather than a convenience: two reload paths that drift is the shape of defect
+    /// §5.8 is written against.
+    ///
+    /// <para>Reopening the workspace is what discards the undo stacks, because the edit-session
+    /// registry is cleared as part of the switch. Nothing here reaches into a stack to trim it — an
+    /// undo stack describing a file that no longer contains what the stack describes has no correct
+    /// contents, only an absence.</para>
+    /// </summary>
+    private async Task ReloadWorkspaceAfterFilesChangedUnderneath()
+    {
+        if (CurrentWorkspacePath is not { } cws) return;
+
+        // Discarded rather than retired: by this point the designer has been prompted and answered,
+        // so anything still dirty is deliberately gone. Retiring would refuse to drop it and the
+        // reopened document would come back carrying edits to a file that no longer has them.
+        _registry.Clear();
+        _layoutRegistry.Clear();
+
+        await SwitchToWorkspaceReporting(cws);
+    }
+
+    /// <summary>
+    /// R-rc5-7b. What a batch's close asks the window to do, over R-rc5-7c's channel.
+    ///
+    /// <para><b>The same path a restore uses, and that is the requirement</b> rather than a
+    /// convenience: an agent's edits through a batch are exactly the situation §5.8 works out in full
+    /// for a restore — the window showing the old content over an undo stack describing edits the file
+    /// no longer contains, and the window's next save discarding everything the batch did. Two reload
+    /// implementations that drift is the shape of defect §5.8 is written against.</para>
+    ///
+    /// <para><b>Nothing was unsaved when the batch opened</b> (R-rc5-7a refused it otherwise), so the
+    /// reload cannot lose anything — which is why that refusal comes first and why nothing is prompted
+    /// for here.</para>
+    /// </summary>
+    public async Task ReloadAfterExternalChange(IReadOnlyList<string> relativePaths)
+    {
+        if (relativePaths.Count == 0) return;
+        await ReloadWorkspaceAfterFilesChangedUnderneath();
+    }
+
+    // ── Opening a workspace (R-rc5-12c's last rule, R-rc5-4c) ─────────────────────────────────────
+
+    /// <summary>
+    /// What RC-5 does when a workspace opens: <b>nothing that creates anything</b> (R-rc5-4a — opening
+    /// a workspace to look at it creates nothing), and two things that only read.
+    /// </summary>
+    private void OnWorkspaceOpenedForRevision()
+    {
+        History.ResetForWorkspace();
+
+        // R-rc5-12c. A restore over thousands of files on a share can be cut off by a crash or a
+        // dropped connection, and what it leaves is §1.3's failure exactly: a workspace that opens, is
+        // well-formed, and is half of two states. Detected, never simulated.
+        InterruptedRestore = History.ReportInterruptedRestore(WorkspaceRootDir);
+
+        RefreshRestorePointsPanel();
+    }
+
+    /// <summary>The interrupted restore found on open, or null. Held so the two ways out — finish it,
+    /// or go back to where it started — can act on it.</summary>
+    public RestoreInFlight? InterruptedRestore { get; private set; }
+
+    /// <summary>Carries an interrupted restore through to where it was going.</summary>
+    public async Task FinishInterruptedRestore()
+    {
+        if (InterruptedRestore is not { } inFlight) return;
+
+        History.FinishInterruptedRestore(WorkspaceRootDir, inFlight);
+        InterruptedRestore = null;
+        await ReloadWorkspaceAfterFilesChangedUnderneath();
+    }
+}

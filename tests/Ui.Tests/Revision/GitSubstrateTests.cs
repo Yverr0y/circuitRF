@@ -582,13 +582,17 @@ public class GitSubstrateTests
 
         ws.Write("cells/a.ccell/schematic.csch", "{}");
 
+        // RC-5 took over where the reference lands and what the message says (R-rc5-1, R-rc5-9a), so
+        // `--ref` is gone and the intent is the label: nothing outside src/Design chooses a reference
+        // name any more, which is what keeps the ordering sequence a property of the namespace rather
+        // than of whoever typed the command.
         var run = RunCli(cliDll, state.Dir, ws.Root,
                          ["history", "checkpoint", ws.Root, "--create-repository",
-                          "--ref", "refs/crf/checkpoints/cli", "--message", "headless checkpoint"]);
+                          "--intent", "headless checkpoint"]);
 
         Assert.True(run.Code == 0, run.Err);
-        string commit = run.Out.Trim().Split('\n')[^1].Trim();
-        Assert.Matches("^[0-9a-f]{40}$", commit);
+
+        string commit = CheckpointReferences.List(ws.Git()).Single().CommitId;
 
         var who = ws.Raw("log", "-1", "--format=%an|%ae|%cn|%ce", commit);
         Assert.Equal("Headless Designer|headless@example.invalid|Headless Designer|headless@example.invalid",

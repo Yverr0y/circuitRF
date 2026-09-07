@@ -21683,3 +21683,102 @@ pressed. It now takes the reporter as an argument.
   exist yet. `DocsFactoryTests.EveryCapturedFigureExistsInBothVariantsAndDrawsSomething` is red for
   exactly that reason and its message carries the command. R-rc4-9's classified diff cannot be reported
   until it runs.
+
+---
+
+## RC-5 — the two Stage 2 affordances, the close boundary, and the channel (2026-09-06)
+
+`brief-revision-control-5-checkpoints.md`. The window's half: a Restore Points tool panel, File ▸ Keep
+This State…, the close boundary, going back, and the second-instance channel a headless `serve` reaches
+a running window over.
+
+### The single-instance channel became bidirectional, and macOS gained one
+
+`Program.cs`'s forwarding was one-way and paths-only: a second instance wrote file paths and exited.
+R-rc5-7c needs two messages, and the first is a QUESTION — *does this window hold unsaved changes to
+this workspace?* — so the Windows pipe went from `PipeDirection.In` to `InOut` and the Unix socket
+learned to half-close (`SocketShutdown.Send`, not `Both`) so the server's read loop sees end of input
+and can reply. A line carrying the `crf1 ` prefix is a request; anything else is a path to open,
+exactly as before, so a client that only forwards paths is unaffected.
+
+**macOS now runs the socket server, and deliberately takes no instance lock.** Launch Services still
+delivers "open file" Apple Events to the running instance, so nothing there forwards a path — the
+socket exists only so `serve` can reach the window. Taking a lock as well would change launch behaviour
+on the one platform this feature has no business changing it on; a bind that fails because another copy
+holds the path is simply a copy that does not listen, which is the channel's own "no window to protect".
+**Cost: about forty lines**, all of it the `RunSocketServerAsync` that already existed for Linux.
+
+**A null answer is "no window to protect", not "assume the worst".** Treating an unreachable window as
+dirty would refuse every batch on a machine with no window open — which is exactly the headless case
+§1.2 is written for.
+
+### The close boundary sits after the `.cws` write, in three places
+
+R-rc5-21: `OnCleanExit`, `ResetToBlankShell` and `SwitchToWorkspace` each write the workspace file and
+then take the boundary. Reversed, the entry keeps a workspace file one save out of date — and that is
+invisible when wrong, because the restored workspace simply comes up with slightly stale configuration
+and nobody connects it to the close.
+
+**Measured, not asserted** (R-rc0-8, R-rc5-22). On a 12 MB workspace of 304 cells including four
+4.5 MB layouts, the boundary itself costs **~0.2 s when nothing changed** (the tree test's own path)
+and **~0.4 s with a layout edited**, measured through the CLI with process start subtracted. That is
+under the threshold at which quitting would feel broken, so the window is not raced ahead of it.
+
+### `NoteWorkspaceWrite` is called from the save commands, and deliberately not from the `.cws` write
+
+R-rc5-4a's "would this boundary record something" has to be answerable before a repository exists, and
+the honest signal is *circuitRF wrote a design file*. The tempting hook — `WriteWorkspaceFile` — is
+wrong: `PersistOutgoingWorkspaceSession` calls it on EVERY close, including the close of a workspace
+somebody only looked at, so hooking it would arm on a colleague's glance and defeat the whole rule. The
+six save entry points are hooked instead.
+
+### One reload path, two callers
+
+R-rc5-7b (a batch closing) and R-rc5-12b (a restore) are the same situation — the window showing old
+content over an undo stack describing edits the file no longer contains — so they share
+`ReloadWorkspaceAfterFilesChangedUnderneath`, which clears both edit-session registries and reopens the
+workspace. Two reload implementations that drift is the shape of defect §5.8 is written against.
+**Reopening is what discards the undo stacks**; nothing reaches into a stack to trim it, because a
+stack describing a file that no longer contains what it describes has no correct contents, only an
+absence.
+
+**The existing save-before-close prompt was reused unmodified** — `PromptSaveBeforeClose(window,
+"going back to an earlier state", includeFloated: false)`. A fourth prompt would have been a finding;
+it takes its context string as a parameter and already guards a close, an archive and a workspace copy.
+
+### `.git` joins the shared skip list, and Save As gains one sentence
+
+`WorkspaceArchiveScanner.IsSkipped` filters three lists and the history was in none of them, so the
+first build that took a restore point would have shipped every earlier version of every file — and
+files no longer in the workspace at all — inside every archive. **That is disclosure, and unlike every
+loss in the architecture it cannot be undone by anyone at any later time.**
+
+It goes in the SHARED list, so `WorkspaceCopy.Run` stops copying the repository too, which is right for
+§9A.1's identical reason. **Read that entry beside the `.cwsuser` note directly below it in the same
+file**: one shared list, two consumers, and the correct resolution differs by entry — `.git` is the
+case where both want the same answer and `.cwsuser` the case where they want opposite ones. That is the
+trap, and it is only visible if both are read together.
+
+The silence was the part that was wrong. Save As is the only one of the three ways a workspace leaves a
+machine with no dialog to read, so the copy's own report gains one sentence — the copy starts a history
+of its own, the original keeps every restore point. A gate asserts the SENTENCE, not the absence: the
+absence was already true the moment `.git` joined the list.
+
+### Two view code-behinds shadowed `InitializeComponent`, and a standing gate caught it
+
+`RestorePointsToolView` and `KeepThisStateDialog` were written with the `private void
+InitializeComponent() => AvaloniaXamlLoader.Load(this);` idiom, which `InitializeComponentShadowingTests`
+forbids: the generated partial supplies it, and a hand-written one shadows the generated one so
+`x:Name` fields are never assigned. The convention in this repository is `public Foo() =>
+InitializeComponent();` and nothing else.
+
+### The documentation figures were stale from RC-1, RC-2 and RC-4, and DocGen repaired them
+
+Running DocGen for the new Restore Points chapter regenerated eleven figures and four pages that had
+nothing to do with RC-5: the Settings tab strip had no **Revision Control** tab (RC-4 added it and
+never ran DocGen — `settings-revision-control.svg` did not exist at all, which is why
+`DocsFactoryTests` was already red), the workspace figures had no editable-reference pencil (RC-2), and
+`file-formats.html` had no `.cwsuser` section (RC-1). **All of that is real change and correct to
+commit.** The two nondeterministic figure families were reverted as usual — the ~4.8° rotation in
+`analysis-editor-hb-dark.svg` and harmonicaRF's live "HB solves · fps" readout in
+`harmonica-instrument.svg` and the page that embeds it.

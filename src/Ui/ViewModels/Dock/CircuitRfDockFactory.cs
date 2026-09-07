@@ -81,6 +81,9 @@ public class CircuitRfDockFactory : Factory
     public PaletteTool?      PaletteTool      { get; private set; }
     public DrcTool?          DrcTool          { get; private set; }
 
+    /// <summary>RC-5's restore-point list (R-rc5-4c).</summary>
+    public RestorePointsTool? RestorePointsTool { get; private set; }
+
     /// <summary>wbond.md §10.1 (WB39a/M3) — the two wBond panels, following the active layout.</summary>
     public WBondProfileTool?    WBondProfileTool    { get; private set; }
     public WBondInductanceTool? WBondInductanceTool { get; private set; }
@@ -179,6 +182,7 @@ public class CircuitRfDockFactory : Factory
             PaletteTool     = new PaletteTool();
             MessagesTool    = new MessagesTool();
             DrcTool         = new DrcTool();
+            RestorePointsTool = new RestorePointsTool();
             WBondProfileTool    = new WBondProfileTool();
             WBondInductanceTool = new WBondInductanceTool();
         }
@@ -192,6 +196,7 @@ public class CircuitRfDockFactory : Factory
             PaletteTool     ??= new PaletteTool();
             MessagesTool    ??= new MessagesTool();
             DrcTool         ??= new DrcTool();
+            RestorePointsTool ??= new RestorePointsTool();
             WBondProfileTool    ??= new WBondProfileTool();
             WBondInductanceTool ??= new WBondInductanceTool();
         }
@@ -204,6 +209,7 @@ public class CircuitRfDockFactory : Factory
             DockPanelIds.Analyses    => AnalysesTool,
             DockPanelIds.Messages    => MessagesTool,
             DockPanelIds.Drc         => DrcTool,
+            DockPanelIds.RestorePoints => RestorePointsTool,
             DockPanelIds.WBondProfile    => WBondProfileTool,
             DockPanelIds.WBondInductance => WBondInductanceTool,
             _                        => null,
@@ -607,6 +613,7 @@ public class CircuitRfDockFactory : Factory
         DockPanelIds.Analyses    => AnalysesTool,
         DockPanelIds.Messages    => MessagesTool,
         DockPanelIds.Drc         => DrcTool,
+        DockPanelIds.RestorePoints => RestorePointsTool,
         DockPanelIds.WBondProfile    => WBondProfileTool,
         DockPanelIds.WBondInductance => WBondInductanceTool,
         _                        => null,
