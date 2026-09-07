@@ -16,6 +16,30 @@ namespace CircuitRF.Design.Layout;
 //    - Written through AtomicFile
 //  Extra: LoadFromFile sniffs the gzip magic bytes and transparently decompresses if present, so a
 //  future gzip writer needs no format-version bump (docs/design/layout-view.md §4).
+//
+//  THAT RESERVE IS REVOKED, AND THIS IS A WARNING RATHER THAN AN INVITATION (RC-3 R-rc3-18,
+//  docs/design/revision-control.md §3.2). Measured on a real 28.4 MB board, plain vs gzipped, under
+//  version control:
+//
+//      20 shape ADDITIONS         2.1 KB/commit  vs  6.6 KB/commit      3x
+//      20 mid-file POLYGON DRAGS  5.3 KB/commit  vs  2.69 MB/commit     ~508x
+//      5  mid-file DELETIONS      1.3 KB/commit  vs  2.14 MB/commit     ~1,600x
+//      final .git after 46        5.12 MB        vs  74.22 MB           14.5x
+//
+//  STATE THE TRAP PRECISELY, BECAUSE AN APPEND-ONLY TEST REPORTS A FALSE PASS: deflate resynchronises
+//  after an append, so the addition row looks almost respectable. It is the MID-FILE edit — moving one
+//  polygon, which is what designing actually consists of — that destroys the delta, and deletion is
+//  worse still.
+//
+//  The general rule, which also governs .npy: COMPRESSED OR BINARY CONTENT DOES NOT DELTA. A format
+//  that saves disk once costs the repository a full copy on every save. In a versioned workspace,
+//  plain text IS the compressed format.
+//
+//  Nothing else about .clay changes: 46 design commits cost 197 KB against a 28.4 MB layout, so no
+//  change to how this file is written is required and the minimal-diff serializer that investigation
+//  set out to design is unnecessary. A full reorder of 3,284 shapes costs 41 KB, because git's delta
+//  compression is content-based rather than line-based — preserve shape order for the HUMAN reading a
+//  diff, and never let git be the reason a serializer is constrained.
 // ──────────────────────────────────────────────────────────────────────────────
 
 public sealed class ClayFile
@@ -314,8 +338,15 @@ public static class LayoutPersistence
 }
 
 /// <summary>Shared gzip-sniffing text reader for .clay / .ctech (docs/design/layout-view.md §4):
-/// writers only ever emit plain JSON in v1, but a reader that already sniffs the gzip magic bytes
-/// makes a future gzip writer a write-side-only change with no format-version bump.
+/// writers only ever emit plain JSON in v1, and a reader that already sniffs the gzip magic bytes
+/// means an incoming gzipped file still opens.
+///
+/// <para><b>Do not read this as an invitation to add the WRITER</b> (RC-3 R-rc3-18,
+/// <c>revision-control.md</c> §3.2). Measured on a real 28.4 MB board, gzipping <c>.clay</c> costs a
+/// repository <b>~508x per mid-file polygon drag</b>, ~1,600x per deletion, and 14.5x on the finished
+/// <c>.git</c> — because deflate destroys git's delta on any edit that is not an append. The
+/// APPEND-ONLY case is the trap: it measures 3x and looks almost respectable, so a test written from
+/// intuition reports a false pass. The file header carries the whole table.</para>
 ///
 /// <para>Public rather than internal because a second consumer outside this assembly reads the same
 /// bytes: <c>CellViewFileValidator</c> checks a candidate <c>.clay</c>'s own JSON keys before a cell

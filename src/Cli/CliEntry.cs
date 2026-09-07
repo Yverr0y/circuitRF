@@ -124,6 +124,10 @@ return JsonRun.Finish(JsonRun.Verb switch
     // headless client's loop — it writes a document, asks whether the document is sound, and asks
     // what circuitRF made of it, without paying for a run.
     "check"   => CircuitRF.Cli.Check.Run(args[1..]),
+    // RC-3's one headless spelling, and the only one this brief adds: the safety net has to be
+    // reachable from a process with no src/Ui in it, because §1.2's agent is out of process.
+    // RC-5 adds `list` and `restore`, RC-7 `commit` (R-rc0-19).
+    "history" => CircuitRF.Cli.History.Run(args[1..]),
     "explain" => CircuitRF.Cli.Explain.Run(args[1..]),
     // The inverse of a run verb: the DataSet a run wrote, loaded back through the same two readers
     // the GUI's own source library uses (brief-automation-5-protocol-adapter.md §3's `read`).

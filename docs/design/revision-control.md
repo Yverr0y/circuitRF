@@ -7,7 +7,16 @@ are re-founded on mechanisms that hold ·
 end of §12 was settled with it. **RC-2 (§7A.2/§7A.3, referenced workspaces read-only by default) is
 BUILT** — 2026-09-06, and it needs no git: it is the defect in the workspace model this investigation
 found, specified now in `workspace-and-project-tree.md` §5C.1a where the next reader will look.
-Everything from RC-3 onward remains proposal. ·
+**RC-3 (§4, §4.5–§4.7, §5.2b's commit primitive, §5.6a's reclaim, §2.4's packing, §8.1/§8.1a's policy
+files, §3.2's revoked gzip reserve) is BUILT** — 2026-09-06, in `src/Design/Revision/`, with no
+user-facing revision-control surface: §2.4's overhang re-measured at **26×** on this machine class (148
+MB loose against 5.7 MB packed, at **138 loose objects** — 2% of git's own 6,700 trigger), and §3.2's
+gzip penalty reproduced at **594×** per mid-file drag and **1,594×** per deletion. The version floor is
+**2.9.0**, set by `core.hooksPath`; `safe.directory` does not raise it. Findings in
+`src/Design/RESOLVED.md`. **Stage 1's substrate is complete** — its remaining item, §8.2's large-file
+guard, lands with RC-5 for the reason R-rc0-2 gives: it is a prompt shown before a commit, and Stage 1
+takes none, so a dialog with no call site would be a dead and untestable feature. **Everything from
+RC-4 onward remains proposal.** ·
 **Date:** 2026-09-06 · **Phase:** unassigned
 
 Specifies how circuitRF gives a workspace a **history** — the ability to see what changed, and to get

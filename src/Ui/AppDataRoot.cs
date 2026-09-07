@@ -27,8 +27,6 @@ namespace CircuitRF.Ui;
 /// </summary>
 public static class AppDataRoot
 {
-    private static string? _override;
-
     /// <summary>
     /// Redirect every per-user file to <paramref name="directory"/>, or pass null to go back to the
     /// platform location. Set it before anything reads a preference — in practice, first thing in a
@@ -36,7 +34,11 @@ public static class AppDataRoot
     /// </summary>
     public static void RedirectTo(string? directory)
     {
-        _override = directory is null ? null : Path.GetFullPath(directory);
+        // The directory itself lives BELOW the firewall now (CircuitRF.Design.UserStateDirectory),
+        // because RC-3's commit-identity reader must see the preferences file this dialog writes from
+        // a process that has no src/Ui in it (revision-control.md §4.4). What stays here is the lever:
+        // moving the directory has to drop the caches that were resolved against the old one.
+        CircuitRF.Design.UserStateDirectory.RedirectTo(directory);
         // The preferences are held as ONE in-process copy now (MW1 R-mw1-8), and that copy belongs to
         // whichever directory it was read from — so moving the directory has to drop it, or the next
         // read answers from the old location and the next write puts it in the new one.
@@ -53,12 +55,11 @@ public static class AppDataRoot
     }
 
     /// <summary>True when <see cref="RedirectTo"/> has moved the state directory somewhere else.</summary>
-    public static bool IsRedirected => _override is not null;
+    public static bool IsRedirected => CircuitRF.Design.UserStateDirectory.IsRedirected;
 
     /// <summary>The directory itself. Not created here — each caller creates what it writes.</summary>
-    public static string Dir => _override
-        ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "circuitRF");
+    public static string Dir => CircuitRF.Design.UserStateDirectory.Dir;
 
     /// <summary>A named sub-directory of it, e.g. <c>recovery</c>.</summary>
-    public static string SubDir(string name) => Path.Combine(Dir, name);
+    public static string SubDir(string name) => CircuitRF.Design.UserStateDirectory.SubDir(name);
 }

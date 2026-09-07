@@ -1,4 +1,5 @@
 using CircuitRF.Design.Layout;
+using CircuitRF.Design.Revision;
 
 namespace CircuitRF.Design.Workspace;
 
@@ -107,6 +108,15 @@ public static class WorkspaceCreate
         }
 
         WorkspacePersistence.SaveToFileAtomic(cwsPath, cws);
+
+        // RC-3 R-rc3-11: the .gitignore and .gitattributes are written HERE, whether or not this
+        // workspace ever becomes a repository. This is the one function both File > New Workspace and
+        // `circuitrf new workspace` call, so writing them here means a headlessly-created workspace is
+        // not a second, subtly different product. Both files are inert until there is a repository and
+        // correct the moment there is — and they are NOT a substitute for R-rc3-11a's other half:
+        // every workspace that already exists was created before this line, and gets them when it
+        // first gains a repository instead.
+        WorkspacePolicyFiles.Ensure(workspaceDir);
 
         return new WorkspaceCreateResult(workspaceDir, cwsPath, techPath);
     }

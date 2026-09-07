@@ -1,5 +1,187 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## RC-3 — the git substrate (2026-09-06)
+
+`src/Design/Revision/` (`brief-revision-control-3-git-substrate.md`; `docs/design/revision-control.md`
+§2.4, §3.2, §4, §5.2b, §5.6a, §6.1, §8.1, §8.1a). Nine types, one `src/Cli` verb, no GUI.
+
+### The measurement, re-run on this machine class — including the no-`gc` pass
+
+Gate 16, R-rc0-9. The real 28.4 MB board §2 measured is not in this repository, so this is a
+**stand-in of the same shape**: 11.56 MB, 657,246 lines, 3,284 shapes (1,928 `Poly`, 1,172 `Path`,
+113 `Rect`, 71 `Circle`), `long` DBU coordinates, indented JSON. Identical edit sequence: 20
+additions, 20 mid-file polygon drags, 5 mid-file deletions.
+
+| | plain, `gc` each step | plain, **no `gc`** | gzipped, `gc` each step |
+|---|---|---|---|
+| initial commit | 2,813 KiB | 3,245 KiB | 2,785 KiB |
+| 20 **additions** | **921 B/commit** | — | 5,017 B/commit (5.4×) |
+| 20 mid-file **drags** | **1,945 B/commit** | — | **1,154,508 B/commit (594×)** |
+| 5 mid-file **deletions** | **1,024 B/commit** | — | 1,631,846 B/commit (**1,594×**) |
+| loose objects at the end | 0 | **138 objects, 148,560 KiB** | 0 |
+| final `.git` | 2,874 KiB | 148,147 KiB → **5,660 KiB after one `gc`** | 33,400 KiB (**11.6×**) |
+
+**§2.4's premise reconfirmed, and it is worse here than the architecture measured.** 45 commits with
+no `gc` leave **148 MB against a 5.7 MB packed repository — a 26× overhang**, where §2.4 measured 10×.
+And it is **138 loose objects**, which is 2% of git's own `gc.auto` trigger of 6,700: git would never
+once have decided to do anything about it. That is R-rc3-13's whole case, and the number moves in the
+direction that makes it stronger rather than weaker.
+
+**§3.2's gzip trap reproduced almost exactly**, including the part that makes it a trap: the
+**addition** row is 5.4× and looks almost respectable, because deflate resynchronises after an append,
+so an append-only test reports a false pass. The mid-file rows are 594× and 1,594× against §3.2's
+~508× and ~1,600×. The final packed ratio is 11.6× here against §3.2's 14.5× — lower only because a
+synthetic board's random coordinates compress differently from a real one's.
+
+**Nothing is asserted from any of this** (R-rc0-8). The harness is a scratch script, not a
+`Category=Benchmark` test.
+
+### The version floor is 2.9.0, and `safe.directory` is not what sets it
+
+R-rc3-3a asks for the requirement to be recorded so the floor can later be lowered deliberately.
+**It is set by `core.hooksPath` (git 2.9, 2016)** — R-rc3-7a's hook bypass. Nothing else reaches
+that high: the checkpoint is plumbing (`write-tree`, `commit-tree`, `update-ref`, `GIT_INDEX_FILE`),
+the pack trigger is `count-objects -v`, and `:(exclude)` pathspec magic is 1.9.
+
+**`safe.directory` looks like it should raise the floor to 2.35.2 and does not.** The ownership check
+arrived in 2.35.2 and the backports 2.30.3/2.31.2/2.32.1/2.33.2/2.34.2, and **every git that enforces
+it also accepts the `-c safe.directory=` answer** — so a git old enough to lack the option is old
+enough to lack the check and needs no answer. R-rc3-4's row for it therefore covers a version band
+that may be empty; it is kept because the cost of keeping it is a sentence and the cost of being wrong
+is git's own wording in front of an RF designer.
+
+`git init --initial-branch` (2.28) is deliberately **not** used, for the same reason: it would raise
+the floor for a name no user-visible string in RC-1…RC-6 ever shows.
+
+### Two bugs the gates found that a path-string comparison would have shipped
+
+**1. `IsRepositoryRoot` cannot be a string comparison, and the symptom is "the repository I just
+created is absent".** `git rev-parse --show-toplevel` prints git's own **symlink-resolved** view;
+.NET's `Path.GetFullPath` resolves no links. On macOS `Path.GetTempPath()` is `/var/folders/…` and git
+answers `/private/var/folders/…`; the same gap opens through any symlinked home directory or network
+share, on any platform. `circuitrf history checkpoint --create-repository` created a repository and
+then refused, saying there was none. **The fix is to stop comparing paths at all**: `rev-parse
+--show-prefix` is empty exactly at the top of the work tree, which is the question, and git answers it
+in its own coordinates.
+
+**2. The stale-lock row cannot be recognised by a path prefix either, for the same reason.** Git names
+the lock file in its own resolved coordinates, so `candidate.StartsWith(workspaceRoot)` silently stops
+matching and the row degrades to `revision.git.unrecognised` — raw git output in front of a designer,
+which is the one thing R-rc3-4 exists to prevent. `GitFailures.FindLockPath` now requires the token to
+end in `.lock`, to name a file that **exists**, and to sit inside a directory named `.git`. The last
+condition is what keeps "a path in a message" from being a reason to go looking anywhere else on disk.
+
+### `--prune` is in exactly one file, and gate 6 had to be restated to stay true
+
+Gate 6 (written against rev 2) says *no code path anywhere passes `--prune`*. **rev 5's §5.6a then
+added the reclaim operation, which by definition prunes with an immediate expiry.** Both cannot be
+literally true, so the checkable form is the one `PruneAppearsOnlyInTheReclaimOperationAndNothingInTheProductCallsIt`
+asserts: `--prune` appears in `GitReclaim.cs` and nowhere else, **nothing in the product calls
+`GitReclaim`**, and `GitPacking`'s own `gc` arguments are read directly and contain no prune.
+
+**And reclaim cannot use a bare `git prune`.** That removes only **loose** objects, so a thinned state
+that had already been through one pack would be permanently un-reclaimable — the control that exists to
+answer *"where did the disk go"* would answer *"nowhere"*. It runs `git gc --prune=now`, whose
+command-line expiry overrides the repository's own `gc.pruneExpire = never` for that one invocation and
+nothing else (verified directly).
+
+**The back-dated-object gate held.** An unreachable commit whose objects were aged 40 days survives
+`GitPacking.Pack` with the three `never` rows in place — which is R-rc3-16's whole guarantee and the
+one rev 2 of the architecture got wrong by measuring the tidied state.
+
+### The marker survived every journey it is supposed to and none it is not
+
+R-rc3-7b, gate 7a. A repository circuitRF created and one made by `git init` beside it — with a
+hand-written `.gitignore` and `.gitattributes` — are told apart from `circuitrf.managed` alone. A
+directory copy (what an archive is) **carries** it; `git clone` **does not**, because git does not
+clone a repository's config. No git version copied configuration on clone in any path tested.
+
+### `--no-verify` is not the hook bypass, and the sentinel proves it
+
+Measured before writing the code: with a `post-commit` hook installed, a plain `git commit` fires it;
+`git -c core.hooksPath= commit` does not. R-rc3-7a is right that `--no-verify` skips `pre-commit` and
+`commit-msg` only. With the plumbing path (`commit-tree`) `git commit` never runs at all, so the
+invocation-level empty `core.hooksPath` is what covers every route — and the gate asserts the absence
+of a sentinel file rather than the absence of an error.
+
+### The commit identity needed a per-user directory below the firewall, and a lever for a process
+
+R-rc3-1c wants the identity readable by `src/Cli`. `AppPreferences` is in `src/Ui` and stays there;
+what moved down is only the **directory** — `CircuitRF.Design.UserStateDirectory`, with
+`CircuitRF.Ui.AppDataRoot` delegating to it so there is still exactly one lever and the three caches
+it invalidates still get invalidated.
+
+**That was not enough for a separate process.** In-process redirection is unreachable from a CLI run,
+and the platform variables do not substitute: on macOS .NET resolves `LocalApplicationData` from the
+platform, not from `XDG_DATA_HOME` or `HOME` (which is the finding `AppDataRoot`'s own header already
+records). So `UserStateDirectory` gained **`CRF_STATE_DIR`**, the same arrangement
+`CRF_VERILOGA_COMPILER` already has. Without it gate 22 is untestable and, more to the point, an
+agent's container has no way to tell circuitRF who it is.
+
+### The `.gitignore` excludes result EXTENSIONS and deliberately not the `results/` folder
+
+R-rc3-9 says "results, and simulation output directories". **The folder is not purely output** and
+excluding it would silently drop two things from every restore and every clone:
+
+- a **`.cdd`** Data Display is a design document a designer authored, and the archive scanner already
+  classifies them out of `results/`;
+- an EM run's **`.sNp`** lands there under a predictable name *precisely so a schematic's SnP reference
+  survives a re-run* (`EmRunService.ResolveSnpPath`, R-em-19).
+
+So the block is `*.npy`, `*.spl`, `*.lpcwave`, `*.mat`. **`.sNp` is never excluded** for the mirror
+reason: a vendor-supplied Touchstone is design INPUT and shares the extension with an EM result, and
+there is no pattern that separates them.
+
+### Where the sentence "results are not kept" actually reaches a user, for now
+
+§7's §10B.1 row is **owned by a table RC-5 creates** — there is no revision-control user chapter yet,
+and RC-3 ships no user-facing revision-control surface at all, so a page describing one would document
+a feature that does not exist. The statement is made where a designer actually meets it today: as
+prose in the generated `.gitignore`, which says the exclusion is about **reproducibility rather than
+size** and that the answer is to re-run the analysis. The user-doc row lands with RC-5's chapter.
+
+### `ProcessRunner` and `GitCommand` did NOT converge
+
+R-rc3-1 asks whether a shared primitive is obviously right. **It is not**, and the reason is not
+distance across the firewall. `ProcessRunner` has a closed allow-list of six tools with hard-coded
+absolute paths, no stdin, no per-call environment, no inactivity bound and no cancellation.
+`GitCommand` is one program whose path is discovered, carries a per-invocation environment and a
+per-invocation `-c` prefix, pipes a commit message on stdin, distinguishes a wall-clock bound from an
+inactivity bound, and retries a lock collision. The only shared part is thirty lines of
+"start, pump both streams, bound it, kill the tree" — and extracting that would leave both callers
+importing a type whose interesting behaviour is entirely in the parts that differ. **Reported, not
+moved** (a type does not cross the firewall as part of a findings write-up).
+
+### Git failures encountered during development that R-rc3-4's table does not name
+
+The list the brief says is the most valuable thing it produces. **Two**, both structural rather than
+new rows:
+
+1. **A repository created by `init` at a path whose ancestor is a symlink** — reported as no
+   repository at all. Not a git failure: circuitRF's own comparison. Recorded above.
+2. **`git update-ref` under a private `GIT_INDEX_FILE` reports its lock failure through
+   `update_ref failed for ref … : cannot lock ref … : Unable to create '<abs>.lock': File exists`** —
+   three nested clauses, of which only the innermost names a file anyone can act on. That is the row
+   the table already has; what was new is how much of the message has to be ignored to find the one
+   actionable path in it.
+
+No platform's git needed handling the other two did not, on the one platform this was developed on.
+`safe.directory` was honoured per invocation on every call made here; the foreign-ownership row is
+exercised by simulating git's answer, because constructing a repository owned by another account needs
+a second account and no test may assume one.
+
+### What could not be checked here
+
+- **The macOS shim (R-rc3-2a) was never seen doing its thing**, because this machine has the Command
+  Line Tools installed (`xcode-select -p` succeeds, `/Library/Developer/CommandLineTools/usr/bin/git`
+  exists). The gate runs through the seam on all three platforms and asserts that **no process named
+  `git` is started** when the tools check says absent; the real dialog is a manual check on a machine
+  without them, and it has not been done.
+- **Whether two circuitRF processes ever collide on a reference update in practice.** Eight concurrent
+  checkpoints against one repository produced no collision the retry did not absorb, and the retry
+  bound (six attempts, ~250 ms total) was never exhausted. That is a laboratory answer; the field one
+  needs RC-5's own scheduling.
+
 ## RC-2 — the reference editability field, and the memo it could not share (2026-09-06)
 
 `CwsWorkspaceRef.Editable` plus `ReferencedWorkspacePolicy`

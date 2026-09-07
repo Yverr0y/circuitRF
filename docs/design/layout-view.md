@@ -12,7 +12,7 @@
 5. **Same-layer overlap darkens**, with merge as a documented performance fallback (§2.3, §5.3).
 6. **Curves, circles and rounded rects are first-class primitives**, flattened on demand from a context
    menu and automatically on GDSII export (§3.2).
-7. **`.clay` is plain JSON**; gzip held in reserve (§4).
+7. **`.clay` is plain JSON**; the gzip reserve is **revoked** under version control (§4, RC-3).
 8. **Clipper2 approved** (§6.1) — added to the README acknowledgments.
 9. **An EM run produces an `.snp` artifact** the schematic consumes through the existing SnP component,
    preserving the TestBench invariant (§10.8).
@@ -558,6 +558,30 @@ array.
   no format-version bump if the reader sniffs the gzip magic bytes. `LayoutPersistence.LoadFromFile`
   sniffs the gzip magic bytes (`0x1F 0x8B`) from day one (L0a), so the eventual switch is a writer-side
   change only. A synthetic large-layout test lands in L0 so the ceiling is measured rather than guessed.
+
+  > **The reserve is REVOKED for any workspace under version control** *(RC-3 R-rc3-18,
+  > `revision-control.md` §3.2)*, and the reason is measurement rather than taste. On a real 28.4 MB
+  > board, under git, plain against gzipped:
+  >
+  > | operation | plain `.clay` | gzipped `.clay` | penalty |
+  > |---|---|---|---|
+  > | initial commit | 4.92 MB | 4.40 MB | gzip wins, once |
+  > | 20 shape **additions** | 2.1 KB/commit | 6.6 KB/commit | 3× |
+  > | 20 mid-file **polygon drags** | **5.3 KB/commit** | **2.69 MB/commit** | **~508×** |
+  > | 5 mid-file **deletions** | 1.3 KB/commit | 2.14 MB/commit | ~1,600× |
+  > | final `.git` after 46 commits | **5.12 MB** | **74.22 MB** | **14.5×** |
+  >
+  > **An append-only test reports a false pass**, which is why the trap has to be stated rather than
+  > left to be discovered: deflate resynchronises after an append, so the addition row looks almost
+  > respectable. It is the **mid-file edit** — moving one polygon, which is what designing actually
+  > consists of — that destroys the delta, and deletion is worse still.
+  >
+  > The general rule, because it also governs `.npy`: **compressed or binary content does not delta. A
+  > format that saves disk once costs the repository a full copy on every save. In a versioned
+  > workspace, plain text is the compressed format.**
+  >
+  > The one-line saving on disk is real and is bought at 14.5× the repository. `LayoutPersistence`'s
+  > own header carries the same table, so nobody reads the reserve without the reason it is not taken.
 
 ---
 
@@ -1540,7 +1564,7 @@ the decision and where it now lives in the body.
 | 4 | Connectivity in layout | **Shapes carry a net and the editor maintains it**; LVS is a named future direction | §3.4 R10a |
 | 5 | Same-layer overlap | **Darkens.** Merge becomes an automatic LOD tier above a visible-shape threshold, and the fallback if the benchmark says so | §2.3 R8a/R8b, §5.3 |
 | 6 | Curves | **`Curve`, `Circle`, `RoundedRect` are first-class primitives** over a shared edge-list model, with **Flatten to Polygon** on the context menu and automatic flattening on GDSII export | §3.2 R9a–R9e |
-| 7 | `.clay` size | **Plain JSON.** Gzip held in reserve; the reader sniffs gzip magic bytes from day one so the switch is writer-side only | §4 |
+| 7 | `.clay` size | **Plain JSON.** The reader sniffs gzip magic bytes from day one, but the WRITER reserve is revoked: gzipping costs a repository ~508× per mid-file edit (§4) | §4 |
 | 8 | Clipper2 | **Approved.** Managed C#, Boost licence, integer coordinates. Added to the README acknowledgments | §6.1 |
 | 9 | EM results vs. the TestBench invariant | **`.snp` artifact** consumed by the existing SnP component — invariant preserved, co-simulation for free | §10.8 R17a |
 | 10 | DRC | **In scope.** Min-width + min-spacing first, chosen because those two force the whole framework to exist | §9A, phase L5b |

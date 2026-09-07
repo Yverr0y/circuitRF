@@ -510,6 +510,13 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "explain.path.unknown-kind",
         "explain.ref.not-found",
         "explain.ref.primary-missing",
+        // RC-3's one headless spelling. R-rc0-19 fixes it as a VERB with nouns, so RC-5's `list` and
+        // `restore` and RC-7's `commit` add ids here rather than a second verb.
+        "history.args.noun-required",
+        "history.args.unknown-noun",
+        "history.git.unavailable",
+        "history.input.not-a-workspace",
+        "history.repository.absent",
         "import.args.into-required",
         "import.args.multiple-sources",
         "import.args.noun-required",

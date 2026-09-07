@@ -1055,4 +1055,30 @@ internal static class CliDiagnostics
     public static Diagnostic ServeCancelled(string tool) => Diagnostic.Create(
         "serve.tool.cancelled", DiagnosticSeverity.Error,
         "{tool} was cancelled.", ("tool", tool));
+
+    // ── history (RC-3) ────────────────────────────────────────────────────────────────────────────
+
+    public static Diagnostic HistoryNounRequired() => new(
+        "history.args.noun-required", DiagnosticSeverity.Error,
+        "history: say what to do — 'history checkpoint <workspace>'.");
+
+    public static Diagnostic HistoryUnknownNoun(string noun) => Diagnostic.Create(
+        "history.args.unknown-noun", DiagnosticSeverity.Error,
+        "history: there is nothing called '{noun}'. Known: checkpoint.", ("noun", noun));
+
+    public static Diagnostic HistoryNotAWorkspace(string path) => Diagnostic.Create(
+        "history.input.not-a-workspace", DiagnosticSeverity.Error,
+        "'{path}' is not a workspace folder — there is no .cws in it.", ("path", path));
+
+    /// <summary>R-rc3-3 makes absence SILENT on every automatic path. This one is not automatic: the
+    /// caller typed the command, so they are told rather than left with a no-op.</summary>
+    public static Diagnostic HistoryNoGit() => new(
+        "history.git.unavailable", DiagnosticSeverity.Error,
+        "circuitRF could not find a git to use on this machine, so it cannot keep a history. "
+      + "Install one, or name it in Settings ▸ Revision Control.");
+
+    public static Diagnostic HistoryNoRepository(string path) => Diagnostic.Create(
+        "history.repository.absent", DiagnosticSeverity.Error,
+        "'{path}' is not keeping a history yet. Pass --create-repository to start one.",
+        ("path", path));
 }
