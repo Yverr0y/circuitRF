@@ -149,6 +149,71 @@ public class SettingsDialogHelpAndTooltipsTests
         Assert.Equal(5, tabs);
     }
 
+    /// <summary>
+    /// <b>Colour themes behave the same on all three platforms</b> (owner, 2026-09-06).
+    ///
+    /// <para>They did not. <c>circuitRF ▸ Settings…</c> and <c>⌘,</c> go through the macOS-only
+    /// application menu, which constructs the dialog itself and passed no workspace — and on that
+    /// platform those are the only ways most people open it. <c>ThemeResolver</c> was therefore never
+    /// offered the open workspace on a Mac, so a workspace's own <c>.ccolor</c> themes never appeared
+    /// in the combo box. It read as nothing at all, because a theme that is not listed looks exactly
+    /// like a workspace that has none.</para>
+    ///
+    /// <para>The property that keeps it fixed is <b>one accessor</b>: everything that depends on which
+    /// workspace is open asks the same question, so a future caller cannot reintroduce the split by
+    /// reading the constructor argument that is null on one platform.</para>
+    /// </summary>
+    [Fact]
+    public void EverythingWorkspaceDependentAsksOneAccessorSoAllPlatformsAgree()
+    {
+        string code = Dialog("SettingsView.axaml.cs");
+
+        // The field is read in exactly two places: where it is assigned, and inside the accessor.
+        var reads = System.Text.RegularExpressions.Regex.Matches(code, @"_workspaceDirPath")
+                        .Select(m => m.Index).ToList();
+        Assert.Equal(3, reads.Count);   // declaration, assignment, and the accessor's own read
+
+        Assert.Contains("=> _workspaceDirPath ?? ActiveWorkspaceDirectory?.Invoke();", code);
+
+        // Every theme call goes through the accessor, not the raw field.
+        Assert.DoesNotContain("ThemeResolver.DiscoverThemeNames(_workspaceDirPath)", code);
+        Assert.DoesNotContain("ThemeResolver.Resolve(active.Name, _workspaceDirPath)", code);
+        Assert.DoesNotContain("ThemeResolver.Resolve(name, _workspaceDirPath)", code);
+        // Counted, not merely "does not contain the old spelling": a call site that lost its argument
+        // altogether would satisfy a negative assertion and resolve against no workspace at all.
+        Assert.Equal(3, Occurrences(code, "ThemeResolver.DiscoverThemeNames(CurrentWorkspaceDirectory())"));
+        Assert.Equal(2, Occurrences(code, "ThemeResolver.Resolve(active.Name, CurrentWorkspaceDirectory())")
+                      + Occurrences(code, "ThemeResolver.Resolve(name, CurrentWorkspaceDirectory())"));
+        Assert.Equal(2, Occurrences(code, "ThemeResolver.Resolve("));
+    }
+
+    /// <summary>
+    /// And the seam that accessor falls back to is installed on <b>every</b> platform. It was first
+    /// added inside the macOS-only block — a seam only one platform installs is itself a platform
+    /// difference, which is the thing it exists to remove.
+    /// </summary>
+    [Fact]
+    public void TheWorkspaceSeamIsInstalledOutsideTheMacOsOnlyBlock()
+    {
+        string app = Read("src", "Ui", "App.axaml.cs");
+
+        int install = app.IndexOf("SettingsView.ActiveWorkspaceDirectory = ActiveWorkspaceDirectory",
+                                  StringComparison.Ordinal);
+        Assert.True(install >= 0, "Nothing installs the Settings dialog's workspace seam any more.");
+
+        int macBlock = app.IndexOf("ApplyMacOsDockIcon();", StringComparison.Ordinal);
+        Assert.True(macBlock >= 0);
+        Assert.True(install < macBlock,
+            "The workspace seam is installed inside (or after) the macOS-only block, so on Windows and "
+          + "Linux a Settings dialog that was not told which workspace is open cannot find out — which "
+          + "is the platform split this was added to close.");
+
+        // Nothing between taking the lifetime and installing it is platform-gated.
+        int lifetime = app.IndexOf("_desktop = desktop;", StringComparison.Ordinal);
+        Assert.True(lifetime >= 0 && lifetime < install);
+        Assert.DoesNotContain("IsMacOS", app[lifetime..install]);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static System.Collections.Generic.IEnumerable<string> Between(string text, string open, string close)

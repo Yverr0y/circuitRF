@@ -135,6 +135,11 @@ public partial class App : Application
         {
             _desktop = desktop;
 
+            // EVERY platform, deliberately. It was first added inside the macOS-only block below,
+            // because macOS is where the gap showed — but a seam that only one platform installs is a
+            // platform difference, which is the thing it was added to remove.
+            Views.Dialogs.SettingsView.ActiveWorkspaceDirectory = ActiveWorkspaceDirectory;
+
             if (OperatingSystem.IsMacOS())
             {
                 desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -862,10 +867,6 @@ public partial class App : Application
         var appMenu = NativeMenu.GetMenu(this);
         if (appMenu is null) return;
 
-        // Resolved at ACTIVATION time, not at construction: the dialog is not modal and outlives any
-        // one workspace, so a user who opens Settings, switches workspace and looks back must see the
-        // workspace they are looking at rather than the one that was in front when it opened.
-        Views.Dialogs.SettingsView.ActiveWorkspaceDirectory = ActiveWorkspaceDirectory;
 
         var settingsItem = appMenu.Items.OfType<NativeMenuItem>()
                                         .FirstOrDefault(i => i.Header == "Settings…");

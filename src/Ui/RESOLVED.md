@@ -21634,9 +21634,30 @@ outlives any one workspace: opening Settings, switching workspace and looking ba
 workspace in front. Re-reading is also how a change made in another window reaches it — the flag lives
 in the `.cws`, not in anything this window holds.
 
-**Left deliberately open, for the owner:** the colour-theme code still reads the raw constructor
-argument rather than the fallback, so routing it through would additionally change what the theme combo
-lists on every Mac. That is a decision, not a side effect of this tab; the field's own comment says so.
+**And the colour-theme half was closed straight after** (owner: all platforms should behave the same way
+for colour themes). All five `ThemeResolver` call sites now go through the same accessor, so a Mac lists
+a workspace's own `.ccolor` themes exactly as Windows and Linux do.
+
+Two things worth carrying forward from it:
+
+- **The seam is installed on EVERY platform**, not inside the macOS-only block it was first added to.
+  A seam only one platform installs is itself a platform difference, which is the thing it exists to
+  remove. `SettingsDialogHelpAndTooltipsTests` asserts the install sits between taking the desktop
+  lifetime and the first `IsMacOS` branch.
+- **The constructor argument still WINS where there is one, and that is not laziness.** On Windows and
+  Linux each workspace window opens its own Settings dialog scoped to its own workspace; asking "which
+  window is in front" from a dialog that is itself in front would answer with somebody else's
+  workspace. The fallback is for a dialog that was never told — which is exactly the macOS app-menu
+  case.
+
+The property that keeps it fixed is **one accessor**: `_workspaceDirPath` is now read in exactly three
+places (its declaration, its assignment, and inside `CurrentWorkspaceDirectory`), and a test counts
+them. A future caller cannot reintroduce the split by reading the constructor argument that is null on
+one platform.
+
+*Note the assertion shape:* the theme call sites are **counted**, not merely checked for the absence of
+the old spelling. A call site that lost its argument altogether — `Resolve(name)` against no workspace —
+would satisfy a negative assertion perfectly while resolving nothing.
 
 **4. Compact and Reclaim name the workspace they act on** (owner, 2026-09-06): *Compact "Board"* and
 *Reclaim Space in "Board"…*. Neither opens a picker — they act on the workspace already open — and a

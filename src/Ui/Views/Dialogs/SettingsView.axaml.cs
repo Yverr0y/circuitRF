@@ -22,18 +22,9 @@ public partial class SettingsView : Window
     // ── State ────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The workspace directory this dialog was CONSTRUCTED with, which is not always the one that is
-    /// open — see <see cref="CurrentWorkspaceDirectory"/>.
-    ///
-    /// <para><b>The colour-theme code below deliberately still reads this field directly, and that is
-    /// a known defect left alone on purpose (2026-09-06).</b> The macOS application menu passed null
-    /// here for a long time, so on that platform <c>ThemeResolver</c> has never been offered the open
-    /// workspace and workspace-local <c>.ccolor</c> themes have never appeared in the combo box —
-    /// silently, because a missing theme looks exactly like a workspace that has none. Routing the
-    /// theme calls through the fallback would fix it, and would also change what that combo lists on
-    /// every Mac; that is a decision for the owner, not a side effect of the revision-control tab. RC-4
-    /// fixed the call site so the field is now usually populated, which shrinks the defect without
-    /// closing it.</para>
+    /// The workspace directory this dialog was CONSTRUCTED with. <b>Read it through
+    /// <see cref="CurrentWorkspaceDirectory"/> and never directly</b> — it is null whenever the caller
+    /// did not know, and the fallback is what answers there.
     /// </summary>
     private readonly string? _workspaceDirPath;
 
@@ -95,9 +86,19 @@ public partial class SettingsView : Window
     /// <summary>
     /// What was passed in, or — when nothing was — whatever the application says is in front.
     ///
-    /// <para><b>The fallback is load-bearing on macOS.</b> <c>circuitRF ▸ Settings…</c> and <c>⌘,</c>
-    /// go through the application menu, which constructs this dialog itself and for a long time passed
-    /// null; on that platform those are the only ways most people open it.</para>
+    /// <para><b>Everything that depends on which workspace is open goes through here, including the
+    /// colour themes</b>, so all three platforms behave the same (owner, 2026-09-06). They did not:
+    /// <c>circuitRF ▸ Settings…</c> and <c>⌘,</c> go through the macOS application menu, which
+    /// constructs this dialog itself and passed null — and on that platform those are the only ways
+    /// most people open it. <c>ThemeResolver</c> was therefore never offered the open workspace on a
+    /// Mac, so a workspace's own <c>.ccolor</c> themes never appeared in the combo box. It read as
+    /// nothing at all, because a theme that is not listed looks exactly like a workspace that has
+    /// none.</para>
+    ///
+    /// <para><b>The constructor argument WINS where there is one</b>, and that is not an accident: on
+    /// Windows and Linux each workspace window opens its own Settings dialog scoped to its own
+    /// workspace, and asking "which window is in front" from a dialog that is itself in front would
+    /// answer with somebody else's workspace. The fallback is for a dialog that was never told.</para>
     /// </summary>
     private string? CurrentWorkspaceDirectory()
         => _workspaceDirPath ?? ActiveWorkspaceDirectory?.Invoke();
@@ -352,7 +353,7 @@ public partial class SettingsView : Window
         _updating = true;
         try
         {
-            var names = ThemeResolver.DiscoverThemeNames(_workspaceDirPath).ToList();
+            var names = ThemeResolver.DiscoverThemeNames(CurrentWorkspaceDirectory()).ToList();
             var activeName = ThemeService.Active.Name;
             var idx = names.IndexOf(activeName);
 
@@ -381,7 +382,7 @@ public partial class SettingsView : Window
     /// </summary>
     private bool DiffersFromPreset(ColorTheme active)
     {
-        var preset = ThemeResolver.Resolve(active.Name, _workspaceDirPath);
+        var preset = ThemeResolver.Resolve(active.Name, CurrentWorkspaceDirectory());
         if (!string.Equals(preset.Name, active.Name, StringComparison.OrdinalIgnoreCase))
             return true;  // resolver returned a fallback — name not found in any source
         foreach (var role in ColorRole.All)
@@ -399,7 +400,7 @@ public partial class SettingsView : Window
         if (_updating) return;
         if (ThemeCombo.SelectedItem is not string name) return;
 
-        var resolved = ThemeResolver.Resolve(name, _workspaceDirPath);
+        var resolved = ThemeResolver.Resolve(name, CurrentWorkspaceDirectory());
         ThemeService.Active = resolved;
         LoadThemeIntoEditor(resolved);
     }
@@ -633,7 +634,7 @@ public partial class SettingsView : Window
         _updating = true;
         try
         {
-            var names = ThemeResolver.DiscoverThemeNames(_workspaceDirPath).ToList();
+            var names = ThemeResolver.DiscoverThemeNames(CurrentWorkspaceDirectory()).ToList();
             if (!names.Contains("Custom", StringComparer.OrdinalIgnoreCase))
                 names.Insert(0, "Custom");
 
@@ -676,7 +677,7 @@ public partial class SettingsView : Window
             AppPreferencesIo.Update(p => p.ActiveThemeName = name);
 
             // Ensure name appears in combo.
-            var names = ThemeResolver.DiscoverThemeNames(_workspaceDirPath).ToList();
+            var names = ThemeResolver.DiscoverThemeNames(CurrentWorkspaceDirectory()).ToList();
             _updating = true;
             try
             {
