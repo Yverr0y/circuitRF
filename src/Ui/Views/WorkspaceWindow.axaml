@@ -83,6 +83,9 @@
                         <NativeMenuItemSeparator/>
                         <NativeMenuItem Header="Add Cell to Workspace…" Command="{Binding AddCellToWorkspaceCommand}" CommandParameter="{Binding $parent[Window]}"/>
                         <NativeMenuItem Header="Reference Workspace…" Command="{Binding ReferenceWorkspaceCommand}" CommandParameter="{Binding $parent[Window]}"/>
+                        <NativeMenuItem Header="Copy Workspace Here…" Command="{Binding CopyWorkspaceHereCommand}" CommandParameter="{Binding $parent[Window]}"/>
+                        <NativeMenuItem Header="Bring In Changes"     Command="{Binding BringInChangesCommand}"/>
+                        <NativeMenuItem Header="Send Changes"         Command="{Binding SendChangesCommand}"/>
                         <NativeMenuItemSeparator/>
                         <NativeMenuItem Header="Archive Workspace…"   Command="{Binding ArchiveWorkspaceCommand}"   CommandParameter="{Binding $parent[Window]}"/>
                         <NativeMenuItem Header="Unarchive Workspace…" Command="{Binding UnarchiveWorkspaceCommand}" CommandParameter="{Binding $parent[Window]}"/>
@@ -475,6 +478,28 @@
                           CommandParameter="{Binding $parent[Window]}"
                           ToolTip.Tip="Let this workspace instance cells that live in another project, by reference.">
                     <MenuItem.Icon><mi:MaterialIcon Kind="FolderNetworkOutline" Width="16" Height="16"/></MenuItem.Icon>
+                </MenuItem>
+                <!-- RC-9 R-rc9-1/-6. Beside Reference Workspace…, because the three answer the same
+                     question from different ends: point at a workspace already here, bring one onto
+                     this machine, or exchange with the one it came from. NOTHING HERE IS AUTOMATIC —
+                     an automatic fetch would silently change what a design resolves against, which is
+                     the failure the pin exists to prevent. Mirrored in the macOS NativeMenu above;
+                     the two surfaces are hand-maintained and must not drift. -->
+                <MenuItem Header="_Copy Workspace Here…"
+                          Command="{Binding CopyWorkspaceHereCommand}"
+                          CommandParameter="{Binding $parent[Window]}"
+                          ToolTip.Tip="Copy a workspace onto this machine from an address someone gave you, and open it. Its versions come; their restore points stay on their machine.">
+                    <MenuItem.Icon><mi:MaterialIcon Kind="CloudDownloadOutline" Width="16" Height="16"/></MenuItem.Icon>
+                </MenuItem>
+                <MenuItem Header="_Bring In Changes"
+                          Command="{Binding BringInChangesCommand}"
+                          ToolTip.Tip="See what is new on the copy this workspace came from. Nothing in your own files is touched.">
+                    <MenuItem.Icon><mi:MaterialIcon Kind="TrayArrowDown" Width="16" Height="16"/></MenuItem.Icon>
+                </MenuItem>
+                <MenuItem Header="Sen_d Changes"
+                          Command="{Binding SendChangesCommand}"
+                          ToolTip.Tip="Send the versions you have kept to the copy this workspace came from. Your restore points stay here.">
+                    <MenuItem.Icon><mi:MaterialIcon Kind="TrayArrowUp" Width="16" Height="16"/></MenuItem.Icon>
                 </MenuItem>
                 <Separator/>
                 <MenuItem Header="_Archive Workspace…"

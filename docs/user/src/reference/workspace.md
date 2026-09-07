@@ -17,6 +17,7 @@ you close the application.
 <li><a href="#regions">The regions of the window</a></li>
 <li><a href="#workspace">What a workspace is</a></li>
 <li><a href="#other-workspaces">Using cells from another workspace</a></li>
+<li><a href="#library-team">Using a library another team maintains</a></li>
 <li><a href="#shared">Sharing a workspace with other people</a></li>
 <li><a href="#documents">Documents and tabs</a></li>
 <li><a href="#panels">The tool panels</a></li>
@@ -136,6 +137,9 @@ your own cells.
 
 ### Fixing a cell in a library you reference {#editing-referenced-cells}
 
+*(This is the maintainer's side. If you only **use** a library somebody else looks after, the section
+you want is [using a library another team maintains](#library-team).)*
+
 **Referenced cells are read-only from here.** You can open one, read it, push into its hierarchy and pull
 it about to understand it — but the first time you try to *change* something, circuitRF stops you and
 says why. The refusal comes with a button: **Open ‹library›**, which opens that workspace in a window of
@@ -173,6 +177,101 @@ at the same time is not arbitrated — the same last-save-wins that applies to a
 are read-only too: a reference made before this existed is treated as read-only, because that is the safe
 reading and not the one you happened to have.</p>
 </div>
+
+## Using a library another team maintains {#library-team}
+
+This is the arrangement most RF groups end up with: one person, or one team, maintains a set of
+verified cells, and everybody else references them. This section is the **consumer's** side of it. The
+maintainer's side is [fixing a cell in a library you reference](#editing-referenced-cells) above, and
+the two are worth reading together.
+
+### Getting the library onto your machine {#copying-a-library}
+
+If the library lives on a share you can already reach, **File ▸ Reference Workspace…** is all you need.
+
+If instead you were given an *address* — the library is kept somewhere central and handed out rather
+than sat on a share — use **File ▸ Copy Workspace Here…**. Paste the address, say which folder to put
+it in, and press Copy. What arrives is an ordinary workspace: open it, read it, reference its cells
+from your own designs.
+
+Two things are worth knowing before you press the button:
+
+- **circuitRF never asks you for a sign-in and never stores one.** It uses whatever your machine's
+  `git` is already set up with — whatever your IT department gave you. If the address needs a sign-in
+  that cannot be supplied, the copy **stops and says what was wanted**. It will not sit there waiting.
+- **Their restore points do not come with the copy.** Every version the library's author deliberately
+  *kept* does come, and that is what you would ever want to look at. Their automatic restore points
+  belong to the machine they were taken on. circuitRF starts a safety net of your own the first time it
+  has something to record here.
+
+Once a workspace has been copied this way, **File ▸ Bring In Changes** shows what is new on the copy it
+came from, and **File ▸ Send Changes** sends the versions you have kept back — if you are allowed to.
+Neither happens by itself: circuitRF never contacts anything without being asked.
+
+### "I want my design to keep using the version I tested against" {#pinning}
+
+By default a referenced workspace is a live link. The librarian corrects a cell, and the next time your
+design draws, it uses the corrected cell. That is usually what you want — it is the reason you
+referenced the library instead of copying its cells.
+
+It is not what you want on a design that has been signed off.
+
+Right-click the library's row in the Project panel and choose **Use a Fixed Version…**. From then on
+your design uses *that* version of the library and nothing else.
+
+<div class="callout note">
+<span class="label">What this actually buys you</span>
+<p>It is the difference between "this design uses the amplifier from the shared library" and "this
+design uses <em>the version of it we measured</em>". The first sentence is not reproducible: it means
+whatever the library contains on the day somebody opens the design. The second one is.</p>
+<p>It is also what makes going back to an earlier state <strong>complete</strong> — see below.</p>
+</div>
+
+**The librarian carries on as before.** They publish whenever they like and nothing in your workspace
+changes. When they publish something newer, the library's row in your Project panel says so, and
+there is a **Take the Newer Version…** item on it. Nothing is taken until you take it. There is no
+prompt and no notification that interrupts you.
+
+**Taking the newer version is a change to your workspace**, so it goes into your history with today's
+date. Six weeks later, when something has stopped working, *"when did this design start using the new
+library?"* is a question you can actually answer.
+
+### The part that surprises people {#pinning-surprise}
+
+**With a fixed version, editing a cell in the library and coming back to your design does not show the
+change.** That is not a bug and it is not a refresh problem — it is the whole point. The design goes on
+matching what it was verified against, and it tells you a newer version is available instead.
+
+If you are the person maintaining the library *and* the person using it, this will catch you out at
+least once. Choose **Follow the Newest Version** on the library's row while you are working on it, and
+fix a version again when you are finished.
+
+A reference with a fixed version is always read-only from your workspace, even if you had allowed
+editing through it. What you would be editing is circuitRF's copy of that one version — not the library
+— so the change would reach nobody and would not survive.
+
+### Going back, with the library included {#pinning-restore}
+
+This is the reason the feature is worth the bother.
+
+[Restore points](restore-points.html) and [versions](versions.html) record your workspace — which now
+includes *which version of the library it uses*. So going back to last Tuesday brings back last
+Tuesday's files **and** last Tuesday's library. Without that, a restore hands you your own files back
+and silently keeps today's library, which is a state nobody asked for and nothing tells you about.
+
+### When the version cannot be reached {#pinning-unreachable}
+
+**A fixed version is a name, not a copy.** The cells still live in the other workspace. If that
+workspace is moved away, or its owner rewrites its history so the version you named no longer exists,
+circuitRF says so plainly and the cells stop resolving.
+
+It deliberately does **not** fall back to whatever the library contains now. Falling back would look
+like everything was fine while your design quietly used content it had never been checked against,
+which is precisely what fixing a version exists to prevent.
+
+If you need the library's *content* to travel with your design — to a customer, to an archive, to a
+machine that will never reach the library — that is a
+[workspace archive](restore-points.html#customer), which is a different tool for a different problem.
 
 ## Sharing a workspace with other people {#shared}
 

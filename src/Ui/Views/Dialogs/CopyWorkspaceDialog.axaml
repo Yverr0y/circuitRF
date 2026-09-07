@@ -1,0 +1,74 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="CircuitRF.Ui.Views.Dialogs.CopyWorkspaceDialog"
+        Title="Copy a Workspace Here"
+        Width="620"
+        SizeToContent="Height"
+        MinHeight="280"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False">
+
+    <!--
+      RC-9 R-rc9-1. A workspace, opened in one action, from wherever git can reach it.
+
+      THREE THINGS THIS DIALOG IS BUILT AROUND:
+
+        1. TWO FIELDS AND NO OTHERS. Nothing here is host-specific (R-rc9-4): there is no account,
+           no provider list, no "sign in" button, and no URL parsing beyond what git itself accepts.
+           Whatever the maintainer of the library gave the designer is what goes in the first box.
+
+        2. THE DESTINATION IS NAMED, NEVER DERIVED. git would happily work a folder name out of the
+           address; circuitRF will not, because a folder appearing somewhere the designer did not
+           choose is the surprise §0 forbids. Browse fills it in; typing over it is fine.
+
+        3. THE ROW THAT SAYS WHAT DOES NOT COME (R-rc9-5a). The three ways a workspace leaves a
+           machine disagree deliberately — an archive carries restore points, a Save As copy carries
+           nothing, a copy from a git address carries the versions and not the safety net — and a
+           designer who is not told will assume the strongest of the three. It is stated BEFORE the
+           button rather than reported afterwards, because "that is what I expected" and "why has my
+           history gone" are the same sentence at two different moments.
+
+      There is deliberately NO credential field. circuitRF holds no sign-in and asks for none (§9.1):
+      it uses whatever git on this machine is already set up with. If the address needs one that git
+      cannot supply, the copy REFUSES with a sentence naming what was wanted — it never hangs waiting,
+      which is the one failure mode with no message, no exit code and no end.
+    -->
+
+    <Grid RowDefinitions="*,Auto" Margin="20,16,20,16">
+
+        <StackPanel Grid.Row="0" Spacing="10">
+
+            <TextBlock FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap"
+                       Text="Copy a workspace onto this machine and open it"/>
+
+            <TextBlock FontSize="12" TextWrapping="Wrap" Opacity="0.85"
+                       Text="Give the address the workspace's maintainer gave you, and say where to put it. What arrives is an ordinary workspace: you can open it, read it, reference its cells, and — if you are allowed to — send your own changes back."/>
+
+            <TextBlock FontSize="12" Margin="0,6,0,0" Text="Address"/>
+            <TextBox x:Name="SourceBox" FontSize="12" Watermark="the address you were given"/>
+
+            <TextBlock FontSize="12" Margin="0,6,0,0" Text="Put it in"/>
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBox Grid.Column="0" x:Name="DestinationBox" FontSize="12"
+                         Watermark="a folder that does not exist yet"/>
+                <Button Grid.Column="1" x:Name="BrowseButton" FontSize="12" Padding="10,4"
+                        Margin="8,0,0,0" Content="Browse…" Click="OnBrowseClick"/>
+            </Grid>
+
+            <TextBlock x:Name="WhatComesLabel"
+                       FontSize="11" TextWrapping="Wrap" Opacity="0.7" Margin="0,8,0,0"/>
+
+            <TextBlock x:Name="StatusLabel"
+                       FontSize="11" TextWrapping="Wrap" Opacity="0.85"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right"
+                    Spacing="8" Margin="0,16,0,0">
+            <Button x:Name="CancelButton" FontSize="12" Padding="10,4"
+                    IsCancel="True" Content="Cancel" Click="OnCancelClick"/>
+            <Button x:Name="CopyButton" FontSize="12" Padding="10,4"
+                    IsDefault="True" Content="Copy" Click="OnCopyClick"/>
+        </StackPanel>
+    </Grid>
+</Window>

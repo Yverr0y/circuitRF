@@ -381,6 +381,51 @@ public sealed class ProjectTreeNodeViewModel : ObservableObject
     public string ToggleReferenceEditableHeader =>
         IsEditableReference ? "Make Reference Read-Only" : "Allow Editing Through This Reference…";
 
+    // ── RC-9: the pin, on the Referenced Workspace row (R-rc9-8, R-rc9-12) ────────────────────────
+
+    /// <summary>This reference's pin state, or null when there is none to report.</summary>
+    private CircuitRF.Design.Revision.PinState? Pin
+        => IsReferencedWorkspace ? _actions?.PinStateFor(this) : null;
+
+    /// <summary>True when this design is fixed to one version of that workspace.</summary>
+    public bool IsPinnedReference
+        => Pin is { Status: not CircuitRF.Design.Revision.PinStatus.Unpinned };
+
+    /// <summary>
+    /// R-rc9-12. <b>The state, on the row, with an action beside it</b> — not an ambient event and not
+    /// a prompt. The librarian publishes whenever they like and nothing here changes until somebody
+    /// takes it, so this is how a designer finds out: by looking.
+    /// </summary>
+    public bool HasNewerVersion => Pin is { HasNewerVersion: true };
+
+    /// <summary>R-rc9-16. The pin names a version that cannot be reached, so cells through this alias
+    /// do not resolve — <b>and circuitRF has deliberately not fallen back to whatever is there
+    /// now.</b></summary>
+    public bool PinCannotBeHonoured
+        => Pin is { Status: CircuitRF.Design.Revision.PinStatus.CannotBeHonoured };
+
+    /// <summary>The one sentence the pin mark's tooltip carries. It names the consequence rather than
+    /// the mechanism, because "pinned" on its own says nothing about what the designer will
+    /// see.</summary>
+    public string PinTooltip => Pin?.Status switch
+    {
+        CircuitRF.Design.Revision.PinStatus.NewerAvailable =>
+            "This design uses a fixed version of this workspace, and a newer one exists. Nothing here "
+          + "has changed, and nothing will until you take it.",
+        CircuitRF.Design.Revision.PinStatus.CannotBeHonoured =>
+            "This design uses a version of this workspace that cannot be reached, so its cells do not "
+          + "resolve. circuitRF does not fall back to whatever is there now.",
+        CircuitRF.Design.Revision.PinStatus.Current =>
+            "This design uses a fixed version of this workspace. A change made there does not appear "
+          + "here until you take the newer version.",
+        _ => "",
+    };
+
+    /// <summary>Its label states what invoking it will DO, for the reason the editability toggle's
+    /// does.</summary>
+    public string TogglePinHeader =>
+        IsPinnedReference ? "Follow the Newest Version" : "Use a Fixed Version…";
+
     /// <summary>The other workspace's <c>.cws</c>, or null when this cell belongs to the open one.</summary>
     private string? ForeignWorkspaceCws => _actions?.ForeignWorkspaceCwsFor(this);
 
@@ -413,6 +458,14 @@ public sealed class ProjectTreeNodeViewModel : ObservableObject
 
     /// <summary>RC-2 R-rc2-4: flips this reference between read-only (the default) and editable.</summary>
     public IAsyncRelayCommand ToggleReferenceEditableCommand { get; }
+
+    /// <summary>RC-9 R-rc9-8: fixes this design to one version of that workspace, or lets it follow
+    /// the newest again.</summary>
+    public IAsyncRelayCommand TogglePinCommand { get; }
+
+    /// <summary>RC-9 R-rc9-12: moves the pin to the newest version. Offered only when there is
+    /// one.</summary>
+    public IAsyncRelayCommand TakeNewerVersionCommand { get; }
 
     /// <summary>New Cell on workspace/library nodes.</summary>
     public IAsyncRelayCommand NewCellCommand { get; }
@@ -649,6 +702,14 @@ public sealed class ProjectTreeNodeViewModel : ObservableObject
         ToggleReferenceEditableCommand = new AsyncRelayCommand(
             () => _actions?.ToggleReferenceEditableAsync(this) ?? Task.CompletedTask,
             () => _actions is not null && IsReferencedWorkspace);
+
+        TogglePinCommand = new AsyncRelayCommand(
+            () => _actions?.TogglePinAsync(this) ?? Task.CompletedTask,
+            () => _actions is not null && IsReferencedWorkspace);
+
+        TakeNewerVersionCommand = new AsyncRelayCommand(
+            () => _actions?.TakeNewerVersionAsync(this) ?? Task.CompletedTask,
+            () => _actions is not null && HasNewerVersion);
 
         RemoveCellReferenceCommand = new AsyncRelayCommand(
             () => _actions?.RemoveCellReferenceAsync(this) ?? Task.CompletedTask,

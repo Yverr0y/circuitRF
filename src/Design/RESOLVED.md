@@ -3191,3 +3191,97 @@ disturb the record of what was thinned, and a clone must not inherit one machine
 about restore points the clone does not have (`refs/crf/` does not travel either — R-rc5-1a). Verified
 by the gate's own scratch-copy pack and by the clone in R-rc6-14c's fixture, in which the arriving
 workspace has neither the journal nor the entries it names.
+
+---
+
+## RC-9 — clone, fetch/send, and the pin (2026-09-07)
+
+`brief-revision-control-9-clone-and-pins.md`, `revision-control.md` §7, §7A.4, §9, §9.1, §5.2a.
+`src/Design/Revision` gained `WorkspaceClone`, `WorkspaceRemotes`, `WorkspacePins`, `PinnedContent`
+and `SharingMessages`; `CwsWorkspaceRef` gained `Pin`. Gated by
+`tests/Ui.Tests/Revision/CloneAndPinsTests.cs` (19 tests, the brief's 15 gates).
+
+### The architecture said what a pin RECORDS and never what a pinned reference RESOLVES to
+
+**This is the whole build, and both §7 and the brief can be satisfied without it.** They say the
+reference "carries a commit identity" and that moving it is explicit. An implementation that wrote the
+identity into the `.cws`, reported "a newer version is available", and went on resolving `ws://alias/…`
+through the library's working tree would satisfy every sentence in either document — and would be worth
+nothing. The moment the librarian checks out anything else, the design resolves against content it was
+never verified against: **the exact failure §7A.4 is written to prevent, arriving through the feature
+meant to prevent it.**
+
+R-rc9-15 is the sentence that settles it: with a pinned reference, editing a cell in the library and
+coming back **deliberately does not** show the new cell. That is only true if the pinned bytes are what
+is read. So `ExternalCellRef`'s alias table — the one place an alias becomes a directory — hands back an
+**expanded copy of that version** for a pinned alias, and `PinnedContent` is what expands it.
+
+Three consequences that are not obvious from the requirement:
+
+- **Nothing is written into the referenced workspace** (R-rc0-5). `git worktree add` is the short route
+  and puts administrative files in a repository that is not the open workspace's own. `git archive
+  --format=zip` plus `System.IO.Compression` is a pure read of theirs and a write of ours.
+- **Not `cat-file --batch` through `GitCommand`.** That type collects standard output as TEXT, so a
+  bitmap referenced by a `.clay` or a `.csym` — precisely the case R-rc9-3 asks to be re-checked — would
+  arrive corrupted and open without complaint. `--format=tar` was the other candidate and needs an
+  extractor this repository does not ship on Windows.
+- **A pinned reference must be read-only whatever `Editable` says**, and this is correctness rather than
+  policy. An edit through it writes circuitRF's rebuildable copy of one version: it appears to work,
+  reaches nobody, is in no history, and vanishes on the next rebuild. `SetReferenceEditable` refuses and
+  says so, because a toggle that appears to work and does nothing is the class of failure §7A.2 exists
+  against.
+
+### What a pin costs, measured
+
+Five referenced libraries, each pinned, each 271 files / 5.6 MB (macOS, Debug, warm page cache):
+
+| | |
+|---|---|
+| `WorkspacePins.Survey` — the on-open report, 5 pinned aliases | **350–475 ms** (three git processes per alias) |
+| first resolution, expanding all five | **600–735 ms** |
+| resolution once expanded, alias table dropped | **0.1 ms** |
+| 600 cell resolutions through the memoised alias table | **1.5 ms** |
+| the expanded cache on disk | **28 MB** for 28 MB of library |
+
+**The 0.1 ms row is not free and was 99 ms before a second memo existed.** `ExternalCellRef`'s alias
+table is dropped on ordinary editing events — `CellSymbolResolver.InvalidateAll` rides a symbol-editor
+save — so without one, a design with five pinned libraries paid a tenth of a second of subprocess starts
+every time somebody saved a symbol, for an answer that had not changed. `PinnedContent`'s memo therefore
+**outlives that table on purpose**, and the justification is that it answers a different question: the
+alias table answers *where does this alias point*, which changes whenever a `.cws` is written; the memo
+answers *is this exact, immutable commit present, and where is it expanded*, which changes only when a
+pin moves or somebody rewrites the library's history. The first is dropped by `WorkspacePins.Invalidate`;
+the second is dropped by `Survey` when it finds a pin that can no longer be honoured, which is the path
+the window and the CLI both run on open.
+
+**Survey's 350–475 ms is subprocess starts and stays that way.** It runs once, on open, on an explicit
+Refresh, and after a pin changes — never per render — and each alias needs three separate answers from
+git (is this a repository, does that commit exist, what is the newest). Batching them would mean parsing
+one invocation's combined output, which is how a translation stops being keyed on structure.
+
+### Nothing carries the management marker across, and the gate forbids it rather than observing it
+
+R-rc9-5c wants a clone to reach the ordinary arming path. Git does not clone config, so that is free —
+which is exactly why the gate is a **source scan of `WorkspaceClone` for `WriteMarker`** as well as an
+assertion that today's copy has none. The same shape holds R-rc9-5a: the absence of restore points in a
+copy reads as a bug, and the obvious "fix" is one line widening the refspec, so the gate forbids
+`refs/crf`, `--refmap` and `+refs/*:refs/*` appearing in `WorkspaceClone` or `WorkspaceRemotes` at all.
+**Nobody was tempted during the build**, and the row exists precisely because the behaviour is correct
+and looks wrong.
+
+### R-rc5-14's caveat is retired in half, and saying which half is the point
+
+The old sentence — *"anything in a workspace it refers to is not part of this workspace's history and is
+left exactly as it is"* — is still exactly true of an **unpinned** reference and is now misleading about
+a **pinned** one, where the restore does bring back which version the design resolves against.
+`RestorePointMessages.RestoreReferenceCaveat(bool)` picks, from whether the workspace has any pin at all.
+Saying the weaker thing always would tell a designer whose references are all pinned that the restore was
+less complete than it is; saying the stronger thing always would tell one with none that it was more.
+
+### `git clone` needs two `safe.directory` entries, not one
+
+R-rc9-5b is written as though a clone touches one tree. It touches two — the parent it writes into, and,
+when the source is a local path (which is §7A's librarian scenario), the repository it reads — and git's
+ownership check applies to each separately. `GitRunOptions` gained `SafeDirectories` for it; each is
+named individually and never `*`. The working directory is the destination's **parent**, because a
+process cannot start in a folder that does not exist yet.

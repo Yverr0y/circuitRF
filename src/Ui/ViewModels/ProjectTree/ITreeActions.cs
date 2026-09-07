@@ -153,6 +153,44 @@ public interface ITreeActions
     Task ToggleReferenceEditableAsync(ProjectTreeNodeViewModel referencedWorkspaceNode);
 
     /// <summary>
+    /// RC-9 R-rc9-8: fixes this design to the version of that workspace which is there now, or lets it
+    /// go back to following whatever the workspace contains.
+    ///
+    /// <para><b>The pin is on the ALIAS and there is deliberately no per-cell spelling of it</b>
+    /// (R-rc9-9): one referenced workspace is one repository with one identity, and pinning per cell
+    /// would let one design reference two mutually inconsistent versions of one library — a state
+    /// nobody wants and nothing detects.</para>
+    ///
+    /// <para>Fixing a version confirms, because it produces a surprise worth explaining before it
+    /// happens (R-rc9-15): a cell edited in the library afterwards <b>deliberately does not</b> show up
+    /// here. Letting it go asks nothing — it restores the default and can lose nothing, the same
+    /// asymmetry the editability toggle above already has.</para>
+    /// </summary>
+    Task TogglePinAsync(ProjectTreeNodeViewModel referencedWorkspaceNode);
+
+    /// <summary>
+    /// RC-9 R-rc9-12: moves the pin to the newest version that workspace has.
+    ///
+    /// <para><b>Explicit, per reference, and never a prompt.</b> The librarian publishes whenever they
+    /// like and nothing in this workspace changes; "a newer version is available" is a state on the
+    /// row, and this is the action beside it. Taking it writes this workspace's own <c>.cws</c>, so it
+    /// lands in the local history with a date — which is what answers "when did this design start
+    /// using the new library?" (R-rc9-13).</para>
+    /// </summary>
+    Task TakeNewerVersionAsync(ProjectTreeNodeViewModel referencedWorkspaceNode);
+
+    /// <summary>
+    /// RC-9 R-rc9-12: what this reference's pin says right now, or null when it has none.
+    ///
+    /// <para><b>Asked here rather than carried on the node</b> — unlike editability, which is a plain
+    /// field of the <c>.cws</c>, a pin's STATE ("is a newer one available?") is answered by reading the
+    /// referenced workspace's own history, and a tree scan is not the place to run git once per
+    /// referenced workspace. The workspace view model surveys them at the moments that matter — on
+    /// open, and after a pin changes — and this reads that survey.</para>
+    /// </summary>
+    CircuitRF.Design.Revision.PinState? PinStateFor(ProjectTreeNodeViewModel referencedWorkspaceNode);
+
+    /// <summary>
     /// Removes one referenced CELL from this workspace's <c>.cws</c> — the way out of the per-cell
     /// reference, and the counterpart of the workspace one above.
     ///

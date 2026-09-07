@@ -140,6 +140,19 @@ public static class ReferencedWorkspacePolicy
             return false;
         }
 
+        // RC-9 R-rc9-8. A pinned reference resolves to a rebuildable copy of one recorded version, so
+        // there is nothing there an edit could usefully write to — see the rule in Read() below. It is
+        // refused HERE rather than silently ignored, because a toggle that appears to work and does
+        // nothing is exactly the class of failure this whole area is written against.
+        if (editable && entry.Pin is { Length: > 0 })
+        {
+            error = $"This design uses a fixed version of \"{alias}\", so its cells cannot be edited " +
+                    "from here — what you would be editing is circuitRF's copy of that version, not " +
+                    "the workspace itself. Stop using a fixed version first, or open that workspace " +
+                    "and edit it there.";
+            return false;
+        }
+
         if (entry.Editable == editable) return true;
         entry.Editable = editable;
 
@@ -195,9 +208,19 @@ public static class ReferencedWorkspacePolicy
         foreach (var entry in cws.ReferencedWorkspaces ?? [])
         {
             if (string.IsNullOrWhiteSpace(entry.Alias)) continue;
+
+            // RC-9 R-rc9-8: A PINNED REFERENCE IS READ-ONLY WHATEVER THE EDITABILITY FLAG SAYS, and
+            // this is a correctness rule rather than a policy preference. A pinned alias resolves to an
+            // expanded copy of one recorded version (PinnedContent) — a rebuildable cache in the
+            // per-user state directory, not the library. An edit through it would write into that
+            // cache: it would appear to work, it would not reach the library, it would not be in
+            // anybody's history, and it would vanish the next time the cache was rebuilt. That is
+            // every failure §7A.2 exists to prevent, with an extra one on the end.
+            bool editable = entry.Editable && entry.Pin is not { Length: > 0 };
+
             // Resolved through the alias table rather than by re-implementing the walk: one rule for
             // where a reference points, whatever is being asked about it.
-            list.Add((entry.Alias, ExternalCellRef.WorkspaceRootForAlias(workspaceRoot, entry.Alias), entry.Editable));
+            list.Add((entry.Alias, ExternalCellRef.WorkspaceRootForAlias(workspaceRoot, entry.Alias), editable));
         }
         return list;
     }

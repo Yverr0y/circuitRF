@@ -57,6 +57,14 @@ internal static class History
             "restore"    => Restore(args[1..]),
             "commit"     => Commit(args[1..]),
             "versions"   => Versions(args[1..]),
+            // RC-9 R-rc9-20. A build machine reproducing a signed-off result is the reason the pin
+            // exists at all, so clone, pin and pin resolution have to be reachable with no display.
+            "clone"      => Clone(args[1..]),
+            "pins"       => Pins(args[1..]),
+            "pin"        => Pin(args[1..], clear: false),
+            "unpin"      => Pin(args[1..], clear: true),
+            "fetch"      => Exchange(args[1..], send: false),
+            "send"       => Exchange(args[1..], send: true),
             _            => UnknownNoun(noun),
         };
     }
@@ -277,7 +285,8 @@ internal static class History
         if (!result.Ok) return JsonRun.Finish(1);
 
         Console.WriteLine($"restored: {point.Sequence}  {point.Label}");
-        Console.WriteLine(RestorePointMessages.RestoreCoversThisWorkspaceOnly);
+        Console.WriteLine(RestorePointMessages.RestoreReferenceCaveat(
+            WorkspacePins.Survey(root).Any(p => p.Pin is not null)));
         Console.WriteLine(RestorePointMessages.RestoreLeavesResultsAlone);
         return JsonRun.Finish(0);
     }
@@ -461,6 +470,238 @@ internal static class History
         => $"{v.WhenUtc.ToLocalTime():yyyy-MM-dd HH:mm}  {v.Title}"
          + (v.RestoredFrom is { } from ? $"  [brought back from '{from.Label}']" : "");
 
+    // ── history clone (RC-9 R-rc9-1, R-rc9-20) ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Copies a workspace here from wherever git can reach it.
+    ///
+    /// <para><b>Both positions are required</b> — git would derive a folder name from the address and
+    /// circuitRF will not: a folder appearing somewhere the caller did not name is the surprise §0
+    /// forbids, and on a build machine there is nobody to notice it.</para>
+    ///
+    /// <para><b>It never asks for a credential and it never blocks on one</b> (§9.1, R-rc9-7a).
+    /// circuitRF supplies whatever git is already configured to supply; an operation that would have
+    /// asked <b>refuses</b>, which is what <c>GIT_TERMINAL_PROMPT=0</c> buys and is the whole
+    /// difference between a sentence and a process that never returns.</para>
+    /// </summary>
+    private static int Clone(string[] args)
+    {
+        string? source      = null;
+        string? destination = null;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i].StartsWith('-'))
+                return JsonRun.Fail(CliDiagnostics.RunUnknownOption("history clone", args[i]));
+            if (source is null)           source      = args[i];
+            else if (destination is null) destination = args[i];
+            else return JsonRun.Fail(CliDiagnostics.RunUnknownOption("history clone", args[i]));
+        }
+
+        if (source is null || destination is null)
+        {
+            JsonRun.Report(CliDiagnostics.CloneNeedsSourceAndDestination());
+            return Usage();
+        }
+
+        if (GitDiscovery.Find(out _) is not { } installation)
+            return JsonRun.Fail(CliDiagnostics.HistoryNoGit());
+
+        var result = WorkspaceClone.Clone(installation, source, destination);
+        foreach (var d in result.Diagnostics) JsonRun.Report(d);
+
+        JsonRun.History = new HistoryReportJson(
+            Copy: new CloneJson(result.Destination, result.WorkspaceCwsPath, RestorePoints: false));
+
+        if (!result.Ok) return JsonRun.Finish(1);
+
+        Console.WriteLine(result.IsWorkspace
+            ? $"copied: {result.Destination}"
+            : $"copied (not a workspace): {result.Destination}");
+        return JsonRun.Finish(0);
+    }
+
+    // ── history pins / pin / unpin (RC-9 R-rc9-8, R-rc9-9, R-rc9-12) ──────────────────────────────
+
+    /// <summary>
+    /// Which version of each referenced workspace this design is built against.
+    ///
+    /// <para><b>This is the noun a build machine reads</b>, and it is why RC-9 has a headless spelling
+    /// at all: reproducing a signed-off result means resolving the same library content, and the only
+    /// thing that says which content that is, is the pin.</para>
+    /// </summary>
+    private static int Pins(string[] args)
+    {
+        string? workspace = null;
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i].StartsWith('-'))
+                return JsonRun.Fail(CliDiagnostics.RunUnknownOption("history pins", args[i]));
+            if (workspace is not null)
+                return JsonRun.Fail(CliDiagnostics.RunUnknownOption("history pins", args[i]));
+            workspace = args[i];
+        }
+
+        if (BindWorkspace(workspace, "history pins", out string root, out int failure) is false)
+            return failure;
+
+        var states = WorkspacePins.Survey(root);
+
+        JsonRun.History = new HistoryReportJson(Pins: [.. states.Select(ToJson)]);
+
+        if (states.Count == 0)
+        {
+            JsonRun.Report(CliDiagnostics.NoWorkspaceReferencesHere(root));
+            return JsonRun.Finish(0);
+        }
+
+        // R-rc9-16. An unhonourable pin is an ERROR and the exit code says so: a build machine that
+        // treated it as a warning would produce a result against content the design was never verified
+        // against — which is the one outcome the pin exists to prevent.
+        bool broken = false;
+        foreach (var state in states)
+        {
+            if (state.Diagnostic is { } d) JsonRun.Report(d);
+            if (state.Status == PinStatus.CannotBeHonoured) broken = true;
+            Console.WriteLine(Describe(state));
+        }
+
+        return JsonRun.Finish(broken ? 1 : 0);
+    }
+
+    private static string Describe(PinState s)
+    {
+        string what = s.Status switch
+        {
+            PinStatus.Unpinned         => "follows the newest",
+            PinStatus.Current          => "newest",
+            PinStatus.NewerAvailable   => "a newer one is available",
+            PinStatus.CannotBeHonoured => "CANNOT BE REACHED",
+            _                          => "keeps no history",
+        };
+        return $"{s.Alias,-24}  {s.Pin ?? "-",-14}  {what}";
+    }
+
+    /// <summary>
+    /// Fixes this design to one version of a referenced workspace, moves it to another, or lets it go.
+    ///
+    /// <para><b>The pin is on the ALIAS</b> (R-rc9-9) — there is deliberately no way to pin a cell, and
+    /// no <c>--cell</c> flag to add one later. One referenced workspace is one repository with one
+    /// commit identity, and per-cell pinning would allow one design to reference two mutually
+    /// inconsistent versions of one library: a state nobody wants and nothing detects.</para>
+    ///
+    /// <para><b>Moving it is a human decision and this is not a resolver</b> (R-rc9-17). No version
+    /// ranges, no transitive constraints, nothing that picks a version on the caller's behalf: with no
+    /// <c>--to</c>, it takes the newest, which is what the designer's own "take the newer version"
+    /// action does.</para>
+    /// </summary>
+    private static int Pin(string[] args, bool clear)
+    {
+        string  verb      = clear ? "history unpin" : "history pin";
+        string? workspace = null;
+        string? alias     = null;
+        string? to        = null;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--alias" when i + 1 < args.Length: alias = args[++i]; break;
+                case "--to" when i + 1 < args.Length && !clear: to = args[++i]; break;
+                default:
+                    if (args[i].StartsWith('-'))
+                        return JsonRun.Fail(CliDiagnostics.RunUnknownOption(verb, args[i]));
+                    if (workspace is not null)
+                        return JsonRun.Fail(CliDiagnostics.RunUnknownOption(verb, args[i]));
+                    workspace = args[i];
+                    break;
+            }
+        }
+
+        if (BindWorkspace(workspace, verb, out string root, out int failure) is false) return failure;
+
+        if (alias is not { Length: > 0 })
+        {
+            JsonRun.Report(CliDiagnostics.PinNeedsAnAlias());
+            return Usage();
+        }
+
+        var change = clear
+            ? WorkspacePins.Unpin(root, alias)
+            : WorkspacePins.Pin(root, alias, to);
+
+        JsonRun.Report(change.Diagnostic);
+        JsonRun.History = new HistoryReportJson(
+            Recorded: change.Written,
+            Pins:     [.. WorkspacePins.Survey(root).Select(ToJson)]);
+
+        if (!change.Ok) return JsonRun.Finish(1);
+
+        // R-rc9-13. The write IS the point: it lands in this workspace's own history with a date and an
+        // author, which is what later answers "when did this design start using the new library?".
+        Console.WriteLine(change.Written
+            ? (change.Pin is null ? $"unpinned: {alias}" : $"pinned: {alias} -> {change.Pin}")
+            : "nothing changed");
+
+        return JsonRun.Finish(0);
+    }
+
+    private static PinJson ToJson(PinState s) => new(
+        s.Alias,
+        s.Pin,
+        s.Status switch
+        {
+            PinStatus.Unpinned         => "unpinned",
+            PinStatus.Current          => "current",
+            PinStatus.NewerAvailable   => "newer-available",
+            PinStatus.CannotBeHonoured => "cannot-be-honoured",
+            _                          => "no-history-there",
+        },
+        s.Newest);
+
+    // ── history fetch / send (RC-9 R-rc9-6, R-rc9-7) ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Exchanges versions with the other copy this workspace came from.
+    ///
+    /// <para><b>Explicit, always</b> (R-rc9-6). Nothing in this series contacts a network without being
+    /// asked, and there is no automatic caller of either direction anywhere — gate 10 asserts it. An
+    /// automatic fetch would silently change what a design resolves against, which is the failure §7A.4
+    /// is written to prevent.</para>
+    ///
+    /// <para><b>A fetch applies nothing to the working tree</b>, so it cannot surprise a document that
+    /// is open, and there is no merge in this series at all: the five design formats are marked
+    /// unmergeable and resolution is whole-file, pick a side.</para>
+    /// </summary>
+    private static int Exchange(string[] args, bool send)
+    {
+        string  verb      = send ? "history send" : "history fetch";
+        string? workspace = null;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i].StartsWith('-'))
+                return JsonRun.Fail(CliDiagnostics.RunUnknownOption(verb, args[i]));
+            if (workspace is not null)
+                return JsonRun.Fail(CliDiagnostics.RunUnknownOption(verb, args[i]));
+            workspace = args[i];
+        }
+
+        if (Bind(workspace, verb, create: false, out string root, out var git, out int failure) is false)
+            return failure;
+
+        var result = send ? WorkspaceRemotes.Push(git!) : WorkspaceRemotes.Fetch(git!);
+        foreach (var d in result.Diagnostics) JsonRun.Report(d);
+
+        JsonRun.History = new HistoryReportJson(
+            Exchange: new ExchangeJson(result.Remote, result.Changed));
+
+        if (!result.Ok) return JsonRun.Finish(1);
+
+        Console.WriteLine(result.Changed ? "changed" : "nothing changed");
+        return JsonRun.Finish(0);
+    }
+
     // ── shared ────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -519,6 +760,36 @@ internal static class History
         return true;
     }
 
+    /// <summary>
+    /// Resolves the workspace and nothing else — <b>for the nouns that need no repository at all.</b>
+    /// The pin lives in the <c>.cws</c>, so listing or changing one works on a workspace circuitRF has
+    /// never kept a history for; requiring a repository here would refuse the very case the pin is most
+    /// useful in, which is a design that merely CONSUMES a library somebody else versions.
+    /// </summary>
+    private static bool BindWorkspace(string? workspace, string verb, out string root, out int failure)
+    {
+        root    = "";
+        failure = 0;
+
+        if (workspace is null)
+        {
+            JsonRun.Report(CliDiagnostics.InputRequired(verb, "workspace folder"));
+            failure = Usage();
+            return false;
+        }
+
+        root = Path.GetFullPath(workspace);
+        JsonRun.InputPath = root;
+
+        if (!File.Exists(Path.Combine(root, WorkspacePersistence.FileName)))
+        {
+            failure = JsonRun.Fail(CliDiagnostics.HistoryNotAWorkspace(root));
+            return false;
+        }
+
+        return true;
+    }
+
     /// <summary>The wire shape of one entry. <b>Built here and nowhere else</b>, so the terminal line
     /// and the document cannot describe different things.</summary>
     private static VersionJson ToJson(HistoryVersion v) => new(
@@ -546,7 +817,13 @@ internal static class History
           + "       circuitrf history list <workspace> [--limit <n>]\n"
           + "       circuitrf history restore <workspace> --point <number>\n"
           + "       circuitrf history commit <workspace> [--title <text>] [--leave-out <path>]\n"
-          + "       circuitrf history versions <workspace> [--limit <n>] [--changes <version>]");
+          + "       circuitrf history versions <workspace> [--limit <n>] [--changes <version>]\n"
+          + "       circuitrf history clone <address> <folder>\n"
+          + "       circuitrf history pins <workspace>\n"
+          + "       circuitrf history pin <workspace> --alias <name> [--to <version>]\n"
+          + "       circuitrf history unpin <workspace> --alias <name>\n"
+          + "       circuitrf history fetch <workspace>\n"
+          + "       circuitrf history send <workspace>");
         return 2;
     }
 }

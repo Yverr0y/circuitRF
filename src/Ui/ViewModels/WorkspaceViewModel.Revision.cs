@@ -387,6 +387,12 @@ public partial class WorkspaceViewModel
         InterruptedRestore = History.ReportInterruptedRestore(WorkspaceRootDir);
 
         RefreshRestorePointsPanel();
+
+        // RC-9 R-rc9-12/-16. Reads only, and reaches no network: the pin's state is a property of the
+        // referenced workspace's repository AS IT ALREADY IS on this machine. Nothing in this series
+        // contacts a network without being asked (R-rc9-6), and an automatic fetch here would silently
+        // change what a design resolves against — the failure §7A.4 is written to prevent.
+        OnWorkspaceOpenedForSharing();
     }
 
     /// <summary>The interrupted restore found on open, or null. Held so the two ways out — finish it,

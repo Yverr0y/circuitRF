@@ -51,7 +51,7 @@ Instead, briefly paraphrase owner/user messages. Pre-existing quotes are ok.
 - Test:    `dotnet test`
 - Run CLI: `dotnet run --project src/Cli -- <args>`
   Verbs: `sparam`, `dc`, **`hb`**, **`lp`**, **`lpp`**, **`em`**, **`convert`**, **`new`**,
-  **`import`**, **`check`**, **`explain`**, `elab`. **The CLI has its own design doc —
+  **`import`**, **`check`**, **`explain`**, **`history`**, `elab`. **The CLI has its own design doc —
   `docs/design/cli.md`** — covering the five-step anatomy of a run verb, the stdout/stderr split, and
   the rules below; read it before adding a verb. `hb`/`lp`/`lpp` run the netlist's harmonic-balance,
   loadpull and loadpull-pursuit analyses, and each runs the whole sweep when a `parametric_sweep`
@@ -135,6 +135,28 @@ Instead, briefly paraphrase owner/user messages. Pre-existing quotes are ok.
   application does not have. The **DRC engine and the `.wasm` rule model moved to `src/Design`**
   to make the layout half of `check` possible. Gate:
   `tests/Ui.Tests/CheckAndExplainCliVerbTests.cs`.
+  **`history` is ONE verb with nouns, and every revision-control operation has a spelling on it**
+  (`docs/design/revision-control.md` §5.3d) — `checkpoint`, `list`, `restore`, `commit`, `versions`,
+  and RC-9's `clone`, `pins`, `pin`, `unpin`, `fetch`, `send`. It exists because the governing motive
+  of that whole feature is a floor under an AI-authored edit and **the agent is out of process**: a
+  safety net reachable only from a window is worth nothing to it. Each noun calls the `src/Design`
+  function the GUI's own command calls and holds no logic of its own — the rule `Authoring.cs` already
+  states, and a comment-stripped source scan is what holds it. **The batch's open and close are
+  deliberately NOT here**: they carry session state a process that exits after one command cannot, so
+  they stay on `serve`; `history checkpoint --intent` IS what a batch's open takes.
+  **`clone` derives nothing** — both the address and the destination folder are required, because git
+  would work a folder name out of the address and a folder appearing somewhere the caller did not name
+  is a surprise nobody is there to notice on a build machine. **`pins`/`pin` name an ALIAS and there is
+  no per-cell spelling**: one referenced workspace is one repository with one commit identity, and
+  pinning per cell would let one design reference two mutually inconsistent versions of one library.
+  `pins` exits 1 on a pin that cannot be honoured — a build machine treating that as a warning would
+  produce a result against content the design was never verified against, which is the one outcome the
+  pin exists to prevent. **Nothing reaches a network without being asked** (`fetch`/`send` only), and
+  **circuitRF holds no credential and asks for none**: it uses whatever git is already configured with,
+  and `GIT_TERMINAL_PROMPT=0` turns an operation that would have asked into a refusal rather than a
+  process that never returns. `pins`/`pin`/`unpin` need no repository — the pin lives in the consuming
+  design's `.cws`, which is very often a workspace circuitRF has never kept a history for. Gates:
+  `tests/Ui.Tests/Revision/CloneAndPinsTests.cs` and the RC-5/RC-7 files beside it.
 - Package: **exactly one script per platform, and each builds everything that platform ships** —
   `packaging/windows/build-windows.ps1` (9 files: `.msi` x64/arm64/x86 in both install scopes, plus
   the `.zip` the updater fetches), `packaging/macos/build-macos.sh` (2 `.dmg`s, both architectures;

@@ -1,4 +1,5 @@
 using Dock.Model.Core;
+using CircuitRF.Design.Revision;
 using CircuitRF.Ui.Commands;
 using CircuitRF.Ui.Messages;
 
@@ -147,6 +148,26 @@ public partial class WorkspaceViewModel
                 null, null);
 
         string ownerCws = Path.Combine(ownerRoot!, ".cws");
+
+        // RC-9 R-rc9-15. THE PIN SURPRISES SOMEBODY, DELIBERATELY, AND IT IS EXPLAINED RATHER THAN
+        // DISCOVERED. A designer who reaches for a cell in a pinned library is one step away from
+        // editing it in its own window, coming back, and finding their change is not here — which is
+        // correct and is not what anybody expects. Said at the moment they are looking at the cell,
+        // which is the only moment the sentence is about something in front of them.
+        if (PinStateFor(alias) is { Status: not PinStatus.Unpinned })
+            return new ReferenceEditRefusal(
+                $"'{name}' belongs to workspace '{ownerName}', which this workspace uses at a FIXED "
+              + $"version referenced as \"{alias}\", so it is read-only here — and a change made in "
+              + $"'{ownerName}' will not appear here either, until you take the newer version. That is "
+              + "what a fixed version means: the design goes on matching what it was verified against. "
+              + $"(Right-click \"{alias}\" in the Project panel to follow the newest version instead.)",
+                $"Open '{ownerName}'",
+                () =>
+                {
+                    OpenOwningWorkspaceForEdit(path!, ownerCws, dockable);
+                    return Task.CompletedTask;
+                });
+
         return new ReferenceEditRefusal(
             $"'{name}' belongs to workspace '{ownerName}', which this workspace only references, so " +
             $"it is read-only here. Open '{ownerName}' as a workspace to edit it there, with its own " +

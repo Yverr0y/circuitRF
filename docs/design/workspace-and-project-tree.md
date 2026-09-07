@@ -717,7 +717,9 @@ The `.cws` records **configuration only — never membership** (membership is th
   not hand out a starter workspace with a working library reference in it, which is the one thing a librarian
   most wants to hand out. A `.cws` naming `${CRF_LIB}/stdlib/v2.3/.cws` is portable to everyone who has
   `CRF_LIB` set, and **version pinning is then a path the librarian publishes** rather than a resolver anyone
-  has to build (two versions side by side = two aliases).
+  has to build (two versions side by side = two aliases). *(That is no longer the only way: §5C.1b's `Pin`
+  records the version in the CONSUMING design, which is what makes a restore bring the library back too.
+  The token mechanism is unchanged and the two do not conflict.)*
   - **One syntax on every platform: `${NAME}`.** Never `%NAME%`, never bare `$NAME` — a `.cws` travels between
     machines, and a per-platform spelling resolves on the machine that wrote it and nowhere else.
   - **A `CellRef` is NEVER expanded.** It is the workspace-relative remainder (§5C R45) and has no business
@@ -1149,6 +1151,51 @@ reason about.
 **Not a lock server and not a permission system** (§7A.5). Someone determined to edit the library's files
 outside circuitRF can. The goal is to make the accidental case impossible and the deliberate case visible,
 which is the whole of what is achievable without a server.
+
+### 5C.1b A referenced workspace may carry a VERSION *(RC-9, built 2026-09-07)*
+
+**Status:** BUILT · `docs/sonnet-briefs/brief-revision-control-9-clone-and-pins.md` ·
+`revision-control.md` §7, §7A.4 · `CwsWorkspaceRef.Pin` + `WorkspacePins`/`PinnedContent` in
+`src/Design/Revision/` · gated by `tests/Ui.Tests/Revision/CloneAndPinsTests.cs`.
+
+**R44i. `CwsWorkspaceRef` gains `Pin` — a commit identity in the REFERENCED workspace's own
+repository, or null.** Under version control an unversioned reference is a hazard: *"this design uses
+the amplifier cell from that workspace"* resolves to whatever that workspace contains today, which is
+not reproducible and not what was simulated.
+
+**R44j. It sits on the ALIAS, beside `Editable`, for the reason this section already gives**: the alias
+table is the one place a cross-workspace path is written down exactly once, so pinning there pins every
+`ws://alias/…` through it, consistently. **One referenced workspace is one repository with one commit
+identity.** Pinning per cell would let one design reference two mutually inconsistent versions of one
+library — a state nobody wants and nothing detects.
+
+**R44k. An absent `Pin` means UNPINNED, which puts R44c's inversion back**, and the two fields on one
+record therefore take opposite defaults. There the old behaviour was the hazard; here it is a
+*preference* — a designer who never asked for a pin wants the librarian's corrections, which is the
+reason they referenced a workspace rather than copying its cells. Defaulting to pinned would freeze
+every existing reference at whatever was checked out the first time a new build opened the design, and
+the symptom would be a library fix that never arrives.
+
+**R44l. A pinned alias resolves to the pinned CONTENT, not merely to a recorded number.** `ExternalCellRef`'s
+alias table hands back an expanded copy of that version, kept in the per-user state directory and
+rebuildable from the library's own repository. A pin that only checked whether the library happened to
+be sitting on the right commit would be a warning rather than a pin — the moment the librarian checks
+out anything else, the design silently resolves against content it was never verified against.
+
+**R44m. A pinned reference is READ-ONLY whatever `Editable` says**, and that is correctness rather than
+policy: what an edit through it would write is circuitRF's rebuildable copy of one version, so the
+change reaches nobody, is in no history, and does not survive the next rebuild. `SetReferenceEditable`
+refuses rather than silently ignoring, because a toggle that appears to work and does nothing is the
+class of failure this whole area exists to prevent.
+
+**R44n. A version that cannot be reached is REPORTED and never fallen back from** — the alias resolves
+to nothing, exactly as a moved or deleted project does, and the state is drawn and repairable. Resolving
+to current content would defeat the entire feature, invisibly.
+
+**This supersedes §5's "version pinning is a path the librarian publishes"**, which is the `${NAME}`
+token note above. That mechanism is unchanged and still works — two versions side by side are two
+aliases — but it makes the *librarian* responsible for publishing an immutable path per version, and it
+records nothing in the consuming design that a restore could bring back. The pin does both.
 
 ### 5C.2 Technology — the constraint that shapes the feature
 

@@ -598,6 +598,31 @@
                                             <MenuItem.Icon><mi:MaterialIcon Kind="PencilOutline" Width="14" Height="14"/></MenuItem.Icon>
                                         </MenuItem>
 
+                                        <!-- RC-9 R-rc9-8/-12: the pin, on the Referenced Workspace
+                                             row, because THE PIN IS ON THE ALIAS AND NEVER ON A CELL.
+                                             One referenced workspace is one repository with one
+                                             identity; a per-cell row here would let one design
+                                             reference two mutually inconsistent versions of one
+                                             library, which is a state nobody wants and nothing
+                                             detects.
+
+                                             "Take the Newer Version" is its own row rather than a
+                                             mode of the one above it, and it appears only when there
+                                             IS one: R-rc9-12 makes that a visible per-reference state
+                                             with an explicit action, never an ambient event and never
+                                             a prompt. The librarian publishes whenever they like, and
+                                             this is where a designer finds out — by looking. -->
+                                        <MenuItem Header="{Binding TogglePinHeader}"
+                                                  Command="{Binding TogglePinCommand}"
+                                                  IsVisible="{Binding IsReferencedWorkspace}">
+                                            <MenuItem.Icon><mi:MaterialIcon Kind="PinOutline" Width="14" Height="14"/></MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem Header="Take the Newer Version…"
+                                                  Command="{Binding TakeNewerVersionCommand}"
+                                                  IsVisible="{Binding HasNewerVersion}">
+                                            <MenuItem.Icon><mi:MaterialIcon Kind="Update" Width="14" Height="14"/></MenuItem.Icon>
+                                        </MenuItem>
+
                                         <MenuItem Header="Open Referenced Workspace in New Window"
                                                   Command="{Binding OpenReferencedWorkspaceCommand}"
                                                   IsVisible="{Binding CanOpenReferencedWorkspace}">

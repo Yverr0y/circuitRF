@@ -22017,3 +22017,87 @@ once-per-session latch itself is `SessionHousekeeping`, held by the service and 
 when a boundary actually wrote an entry. Collapsing them would let a session that attempted a boundary
 and recorded nothing run a sweep under its own retention preference over somebody else's restore
 points — §12 Q24's share case, which the gate asserts on the repository directory's bytes.
+
+---
+
+## RC-9 — copying a workspace, exchanging with it, and the pin on the tree row (2026-09-07)
+
+`brief-revision-control-9-clone-and-pins.md`. `src/Ui/Revision/WorkspaceSharingService.cs`,
+`src/Ui/ViewModels/WorkspaceViewModel.Sharing.cs`, `src/Ui/Views/Dialogs/CopyWorkspaceDialog.axaml`,
+three File-menu items on **both** surfaces, and two rows on the Referenced Workspace context menu.
+Gated by `tests/Ui.Tests/Revision/CloneAndPinsTests.cs`.
+
+### The pin's state is asked of the view model, not carried on the tree node
+
+`ProjectTreeNode.IsEditableReference` is a plain field of the `.cws` and rides the scan. A pin's state is
+not: *"is a newer one available?"* is answered by reading the referenced workspace's own history, and a
+tree scan is the wrong place to start three git processes per referenced workspace. So `ITreeActions`
+gained `PinStateFor(node)`, the view model surveys at the two moments that matter — on open, and after a
+pin changes — and the row reads that survey. **Measured in `src/Design/RESOLVED.md`**: the survey is
+350–475 ms for five pinned libraries, which is fine once and not fine per scan.
+
+### RC-2's refusal grew a second wording, because the pin's surprise lands there
+
+R-rc9-15 says the pin surprises somebody deliberately and that it must be explained rather than
+discovered. The moment a designer is closest to that surprise is the one where they are looking at a cell
+from a pinned library and have just tried to type into it — RC-2's refusal. So
+`RefusalForEditOf` has a pinned branch that says the extra half: not only *"it is edited over there"* but
+*"and a change made over there will not appear here until you take the newer version"*. The two sentences
+have the same remedy button and different bodies; the pinned one is the only place in the UI where the
+consequence is stated at the moment it applies to something in front of the reader.
+
+### Menu items on two surfaces, and the usual reminder
+
+The macOS `NativeMenu` and the in-window `Menu` in `WorkspaceWindow.axaml` are hand-maintained and must
+not drift. Copy Workspace Here… / Bring In Changes / Send Changes went into both, in the same order, in
+the same group above Archive Workspace… — beside Reference Workspace… because the three answer the same
+question from different ends: point at a workspace already here, bring one onto this machine, exchange
+with the one it came from.
+
+### Both exchange commands key on `CanExchangeWithOtherCopy`, which runs git
+
+`WorkspaceRemotes.HasOtherCopy` is a `git remote` invocation, so it is not a property to poll — it is
+read on workspace open and the commands are told to re-evaluate then. A workspace that was not copied
+from anywhere shows both items greyed rather than failing when pressed, which is the ordinary state of
+almost every workspace.
+
+### R-rc9-7b: git's network operations were NOT given a second consent gate, and here is why
+
+The brief says to read RC-4's answer and follow it rather than build a parallel model. RC-4's answer
+(above, *"What the existing consent model actually says"*) is that Security & Permissions has three
+shapes, and that git took shapes 3 and 2 together: the path row is the Verilog-A compiler's row with a
+different program, and *keep a history of my workspaces* is the standing on/off switch for the part
+that happens **automatically**.
+
+RC-9 adds nothing automatic. **Every network operation in it is a gesture** — a menu item pressed, a
+dialog filled in, a CLI noun typed — which is precisely shape 3: *"pointing a component at `.va` source
+is the consent, and there is no checkbox that stops circuitRF running it."* A checkbox in front of
+Copy Workspace Here… would be a consent prompt in front of an action whose only trigger is the user
+asking for it, and that is the second parallel model R-rc4-2a says is worse than either placement.
+
+**The one thing this does NOT do is gate copying on the recording switch.** RC-4's note says off means
+circuitRF never invokes git at all, and read literally that would hide Copy Workspace Here… from
+somebody who merely does not want a history of their own designs. That reading is rejected: the switch
+is titled *keep a history of my workspaces* and is about what circuitRF records unasked. Copying a
+workspace somebody gave you the address for is not that, and a designer who turned recording off has
+said nothing about it. **Stated rather than inferred, because it is the kind of thing the next brief
+would otherwise answer the other way.**
+
+### Two existing gates had to move, and where the three items landed was a decision
+
+`FileMenuRestructureTests` asserts both File menus' exact order against MW1/MW2's briefs, and
+`CliStructuredOutputTests` holds a committed set of diagnostic ids. Both were updated rather than
+worked around — which is the point of them: they made "where does this go" a decision somebody has to
+write down instead of a place three items happened to fit.
+
+The three sharing items joined the **Add Cell to Workspace… / Reference Workspace…** band rather than
+the archive one below it. That band's subject is *what this workspace can reach*, and the three answer
+it from the other ends: point at a workspace already on this machine, bring one onto it, exchange with
+the one it came from. Beside Archive they would read as three more ways of packaging a workspace up —
+the reading MW2 §2.1 already rejected when it put Reference Workspace… in a band of its own.
+
+### The copy dialog collects two strings and starts nothing
+
+No process, no network, no credential field. That is what lets every refusal be the caller's — and what
+makes the dialog testable without one. It suggests a folder leaf from the address into a field the
+designer can edit; it never derives a destination and acts on it.

@@ -346,6 +346,40 @@ public sealed class CwsWorkspaceRef
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool Editable { get; set; }
+
+    /// <summary>
+    /// RC-9 (§7, §7A.4): the version of the referenced workspace this design was built and verified
+    /// against — a commit identity in THAT workspace's own repository. Null, the default, is
+    /// <b>unpinned</b>: the reference resolves to whatever the other workspace contains today, which
+    /// is the behaviour every <c>.cws</c> written before this field existed already had.
+    ///
+    /// <para><b>Absent means UNPINNED, which is <see cref="Editable"/>'s inversion put back.</b> The
+    /// two fields sit on one record and take opposite defaults, so each has to say why. There the old
+    /// behaviour was the hazard — an unrecorded edit into somebody else's library — and inverting it
+    /// costs one refusal that carries its remedy. Here the old behaviour is a <i>preference</i>: a
+    /// designer who never asked for a pin wants the librarian's corrections, which is the reason they
+    /// referenced a workspace rather than copying its cells. Defaulting to pinned would freeze every
+    /// existing reference at whatever commit happened to be checked out the first time a new build
+    /// opened the design, silently, and the symptom would be a library fix that never arrives.</para>
+    ///
+    /// <para><b>It is on the ALIAS, not on each cell</b> (R-rc9-9). This record is already the one
+    /// place a cross-workspace path is written down exactly once — its own header says so — and
+    /// pinning here pins every <c>ws://alias/…</c> through it, consistently. <b>One referenced
+    /// workspace is one repository with one commit identity.</b> Pinning per cell would let one design
+    /// reference two mutually inconsistent versions of one library: a state nobody wants and nothing
+    /// detects.</para>
+    ///
+    /// <para><b>A pin is not a copy</b> (R-rc9-16). The content still lives in the other workspace;
+    /// this records an identity, not bytes. If that workspace is unreachable, has no history, or has
+    /// had its history rewritten, the pin cannot be honoured — and that is REPORTED, never fallen back
+    /// from to "whatever is there now", which would defeat the whole feature. Content that must travel
+    /// with the design is the workspace archive's job, which is a different tool for a different
+    /// problem.</para>
+    ///
+    /// <para>No <c>FormatVersion</c> bump: an absent field on an older <c>.cws</c> loads as null.</para>
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Pin { get; set; }
 }
 
 /// <summary>

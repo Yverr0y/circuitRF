@@ -1065,7 +1065,7 @@ internal static class CliDiagnostics
     public static Diagnostic HistoryUnknownNoun(string noun) => Diagnostic.Create(
         "history.args.unknown-noun", DiagnosticSeverity.Error,
         "history: there is nothing called '{noun}'. Known: checkpoint, list, restore, commit, "
-      + "versions.", ("noun", noun));
+      + "versions, clone, pins, pin, unpin, fetch, send.", ("noun", noun));
 
     /// <summary>RC-5 R-rc5-23. <c>restore</c> needs to be told WHICH one, and the answer is a
     /// sequence out of <c>history list</c> — never an object identity, which is the vocabulary this
@@ -1175,4 +1175,31 @@ internal static class CliDiagnostics
         "history.repository.absent", DiagnosticSeverity.Error,
         "'{path}' is not keeping a history yet. Pass --create-repository to start one.",
         ("path", path));
+
+    // ── clone and the pin (RC-9 R-rc9-20) ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <c>clone</c> takes two positions and neither can be guessed. <b>Not a default destination</b>:
+    /// git would derive one from the address, and a folder appearing somewhere the caller did not name
+    /// is the surprise §0 forbids — the more so on a build machine, where nobody is watching.
+    /// </summary>
+    public static Diagnostic CloneNeedsSourceAndDestination() => new(
+        "history.clone.args", DiagnosticSeverity.Error,
+        "history clone: say where to copy from and where to put it — "
+      + "'history clone <address> <folder>'.");
+
+    /// <summary>
+    /// R-rc9-9. The pin is on the ALIAS, so an alias is what names one. There is deliberately no way
+    /// to pin a cell: one referenced workspace is one repository with one identity, and a per-cell
+    /// spelling would let one design reference two mutually inconsistent versions of one library.
+    /// </summary>
+    public static Diagnostic PinNeedsAnAlias() => new(
+        "history.pin.alias-required", DiagnosticSeverity.Error,
+        "history pin: say which referenced workspace, as --alias <name>. 'history pins <workspace>' "
+      + "lists them. A pin is per referenced workspace, never per cell.");
+
+    /// <summary>This workspace references nothing, so there is nothing to pin.</summary>
+    public static Diagnostic NoWorkspaceReferencesHere(string path) => Diagnostic.Create(
+        "history.pins.none", DiagnosticSeverity.Info,
+        "'{path}' does not reference any other workspace.", ("path", path));
 }

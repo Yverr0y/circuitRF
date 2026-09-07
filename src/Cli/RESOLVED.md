@@ -935,3 +935,51 @@ it is kept, and what was left out — the same surface the panel renders. The co
 deliberately absent: R-rc0-6 keeps git vocabulary away from a designer, and `--point <sequence>` is
 what `restore` takes, so nothing a caller needs is missing. RC-7's explicit commit is the one place an
 identifier is ever named, because there the user asked for it and it is theirs to refer to.
+
+---
+
+## RC-9 — `history clone`, `history pins|pin|unpin`, `history fetch|send` (2026-09-07)
+
+`brief-revision-control-9-clone-and-pins.md` R-rc9-20. Six nouns on the existing `history` verb, each
+calling the `src/Design` function the GUI's own command calls. **Adding them to the repo-root
+`CLAUDE.md`'s verb list is the owner's edit — flagged, not made.**
+
+### Why this brief has a headless spelling at all, which is not the usual reason
+
+The other verbs are here because an operation that lives only in a view model is not a capability. This
+one is here for a stronger reason the brief states outright: **a build machine reproducing a signed-off
+result is why the pin exists.** `history pins --json` is the noun that matters — it is the only way a
+CI job can find out which version of each referenced library a design is built against, and therefore
+the only way it can tell "the same design" from "the same files".
+
+### `history pins` exits 1 on a pin that cannot be honoured
+
+Deliberately not a warning. A build machine that treated it as one would produce a result against
+content the design was never verified against, which is the single outcome the pin exists to prevent.
+It is the same posture `check` takes for an error and the opposite of the one it takes for a warning,
+and the difference is that this one changes what the result MEANS.
+
+### `pins` and `pin` need no repository, and requiring one would refuse the main case
+
+The pin lives in the consuming design's `.cws`, not in a repository. `Bind` — the existing helper — binds
+a workspace AND a git driver AND asserts a repository is there, which is right for `checkpoint`,
+`restore` and `commit` and wrong here: the consuming design is very often a workspace circuitRF has never
+kept a history for, referencing a library somebody else versions. `BindWorkspace` is the shorter one.
+
+### `clone` refuses to derive a destination, and `--json` says so
+
+Git happily works a folder name out of an address. Circuit RF will not: a folder appearing somewhere the
+caller did not name is the surprise §0 forbids, and headless there is nobody to notice it. Both positions
+are required. The GUI's dialog *suggests* a leaf name into a field the designer can see and edit, which
+is the same rule seen from the other side.
+
+`CloneJson` carries `RestorePoints: false` as a field rather than leaving it implied — §5.2a's three
+journeys disagree deliberately, and a caller who is not told will assume the strongest of the three.
+
+### One pre-existing `rev-parse` in this file, and the gate says so out loud
+
+RC-9's source-scan gate holds `src/Cli/History.cs` to a weaker list than the two UI surfaces, because
+RC-7's `history versions --changes` asks git directly whether a version has a parent before handing the
+comparison to `HistoryBrowser`. It is one read and it is not RC-9's; the gate asserts there is exactly
+**one** occurrence, so a second cannot arrive quietly. Every noun this brief added assembles no git
+argument at all.

@@ -16,6 +16,7 @@ keywords: version, commit, history, release, share, compare, conflict
 <li><a href="#comparing">What changed between two versions</a></li>
 <li><a href="#restore-then">"I went back to an old version, then kept working"</a></li>
 <li><a href="#gaps">Gaps in the list</a></li>
+<li><a href="#other-copy">Exchanging versions with another copy</a></li>
 <li><a href="#two-of-you">"Two of us are editing the same workspace"</a></li>
 <li><a href="#rewriting">"Something went in that shouldn't have"</a></li>
 </ol>
@@ -125,6 +126,25 @@ done in between is not in this history."*
 
 It is not shown as a quiet fortnight in which you happened not to keep anything. Those are completely
 different situations and only one of them means the work is recoverable.
+
+## Exchanging versions with another copy {#other-copy}
+
+If this workspace was brought here with
+[File ▸ Copy Workspace Here…](workspace.html#copying-a-library), two more items on the File menu apply
+to it.
+
+- **Bring In Changes** shows what is new on the copy it came from. **Nothing in your own files is
+  touched** — what arrives appears in the Versions panel, and if a document has changed on both sides
+  you are asked which version you want, exactly as [below](#two-of-you).
+- **Send Changes** sends the versions *you* have kept back to that copy. Your restore points stay here:
+  they are your machine's safety net and mean nothing on anybody else's.
+
+**Neither happens by itself.** circuitRF never contacts anything without being asked, and it holds no
+sign-in of its own — it uses whatever your machine's `git` is already set up with. If a sign-in is
+needed that cannot be supplied, the operation stops and says what was wanted rather than waiting.
+
+If the other side has moved on since you last brought its changes in, **Send Changes** says so and
+sends nothing. Bring the changes in first, choose where the two disagree, and send again.
 
 ## "Two of us are editing the same workspace" {#two-of-you}
 

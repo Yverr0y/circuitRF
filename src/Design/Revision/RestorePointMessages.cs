@@ -143,6 +143,27 @@ public static class RestorePointMessages
         "This brings back the files in this workspace. Anything in a workspace it refers to is not "
       + "part of this workspace's history and is left exactly as it is.";
 
+    /// <summary>
+    /// RC-9 R-rc9-14: <b>the half of R-rc5-14's caveat the pin retires</b>, and only that half. Where a
+    /// reference names a version, the restore brings that back too — which is what makes a restore
+    /// complete rather than "your files, and today's library".
+    /// </summary>
+    public const string RestoreBringsBackTheLibraryVersionsToo =
+        "It also brings back which version of each referenced workspace this design uses, so the "
+      + "restored design resolves against what it did then. The referenced workspaces' own files are "
+      + "still theirs and are left exactly as they are.";
+
+    /// <summary>
+    /// The right caveat for this workspace. <b>Both sentences are true and neither is true in the
+    /// other's case</b>, so the choice is made from the workspace rather than by saying the weaker
+    /// thing always — a designer whose references are all pinned would otherwise be told the restore
+    /// was less complete than it is, and one with none would be told it was more.
+    /// </summary>
+    public static string RestoreReferenceCaveat(bool anyReferenceIsPinned)
+        => anyReferenceIsPinned
+            ? RestoreCoversThisWorkspaceOnly + " " + RestoreBringsBackTheLibraryVersionsToo
+            : RestoreCoversThisWorkspaceOnly;
+
     /// <summary>Results are not in a restore point, so a restore leaves them alone (§5.8).</summary>
     public const string RestoreLeavesResultsAlone =
         "Simulation results are not kept in the history, so they are left untouched — re-run the "

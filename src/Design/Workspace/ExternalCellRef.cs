@@ -271,7 +271,23 @@ public static class ExternalCellRef
         foreach (var entry in cws.ReferencedWorkspaces ?? [])
         {
             if (string.IsNullOrWhiteSpace(entry.Alias) || map.ContainsKey(entry.Alias)) continue;
-            map[entry.Alias] = ResolveOtherRoot(workspaceRoot, entry.Path);
+
+            string? root = ResolveOtherRoot(workspaceRoot, entry.Path);
+
+            // RC-9 R-rc9-8/-15/-16: a PINNED alias resolves to the version this design was verified
+            // against, not to whatever that workspace contains today. That is the whole feature — with
+            // an unpinned reference, editing a cell in the library and coming back shows the new cell;
+            // with a pinned one it deliberately does not.
+            //
+            // WHEN IT CANNOT BE HONOURED THE ALIAS RESOLVES TO NULL, which is the same state a moved
+            // or deleted project produces: cells drawn as Not Found, repairable, reported by
+            // WorkspacePins.Survey with the reason. Falling back to the current content would be the
+            // silent wrong answer the pin exists to prevent, and it would be invisible — the design
+            // would simulate, and against something else.
+            if (root is not null && entry.Pin is { Length: > 0 } pin)
+                root = Revision.WorkspacePins.ResolvePinned(root, pin, out _);
+
+            map[entry.Alias] = root;
         }
         return map;
     }

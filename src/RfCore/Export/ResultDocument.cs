@@ -386,6 +386,19 @@ namespace RfCore.Export
     /// <param name="Version">The version an explicit commit produced.</param>
     /// <param name="Changes">What differs between two versions, at the granularity of documents
     /// (R-rc7-11). Naming a changed document is the answer; what changed inside one is not.</param>
+    /// <param name="Copy">
+    /// Where a copy of a workspace landed, and whether it is one (RC-9 R-rc9-1). <b>Named
+    /// <c>Copy</c> rather than <c>Clone</c> for a language reason, not a vocabulary one</b> — a record
+    /// may not declare a member called <c>Clone</c> — and it happens to match what the user-facing
+    /// wording calls it.
+    /// </param>
+    /// <param name="Pins">
+    /// RC-9's pins — which version of each referenced workspace this design is built against
+    /// (R-rc9-8, R-rc9-9). <b>One entry per ALIAS, never per cell</b>: one referenced workspace is one
+    /// repository with one commit identity, and a per-cell shape would let a build machine reproduce a
+    /// design against two mutually inconsistent versions of one library.
+    /// </param>
+    /// <param name="Exchange">What a fetch or a send did (R-rc9-6).</param>
     public sealed record HistoryReportJson(
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         IReadOnlyList<RestorePointJson>? Points = null,
@@ -402,7 +415,54 @@ namespace RfCore.Export
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         VersionJson?                     Version = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        IReadOnlyList<DocumentChangeJson>? Changes = null);
+        IReadOnlyList<DocumentChangeJson>? Changes = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        CloneJson?                         Copy = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<PinJson>?            Pins = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        ExchangeJson?                      Exchange = null);
+
+    /// <summary>Where a copy of a workspace landed (RC-9 R-rc9-1).</summary>
+    /// <param name="Destination">The folder that was created.</param>
+    /// <param name="Workspace">Its <c>.cws</c>, or absent when what arrived is not a workspace.</param>
+    /// <param name="RestorePoints">
+    /// Always <c>false</c>, and present rather than implied (R-rc9-5a, §5.2a). <b>A clone carries the
+    /// narrative and not the safety net</b>, because git's default fetch takes branches and tags and
+    /// nothing under a private namespace. The three ways a workspace leaves a machine disagree
+    /// deliberately, and a caller who is not told will assume the strongest of the three.
+    /// </param>
+    public sealed record CloneJson(
+        string  Destination,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Workspace,
+        bool    RestorePoints);
+
+    /// <summary>
+    /// One referenced workspace's pin — <b>the identity a build machine reproduces a signed-off result
+    /// from</b>, which is the reason RC-9 has a headless spelling at all (R-rc9-20).
+    /// </summary>
+    /// <param name="Alias">The name <c>ws://alias/…</c> uses.</param>
+    /// <param name="Pin">The identity this design is built against, or absent when unpinned.</param>
+    /// <param name="Status">
+    /// <c>unpinned</c>, <c>current</c>, <c>newer-available</c>, <c>cannot-be-honoured</c> or
+    /// <c>no-history-there</c>. <b><c>cannot-be-honoured</c> is a failure and never a fall-back</b>
+    /// (R-rc9-16): the cells behind that alias do not resolve, and reporting the newest version instead
+    /// would be the silent wrong answer the pin exists to prevent.
+    /// </param>
+    /// <param name="Newest">The newest identity that workspace has, when it keeps a history.</param>
+    public sealed record PinJson(
+        string  Alias,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Pin,
+        string  Status,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Newest);
+
+    /// <summary>What a fetch or a send did (RC-9 R-rc9-6).</summary>
+    /// <param name="Remote">What the other copy is called.</param>
+    /// <param name="Changed">Whether anything actually moved.</param>
+    public sealed record ExchangeJson(string Remote, bool Changed);
 
     /// <summary>
     /// One version a designer kept (RC-7 R-rc7-1, R-rc7-5).

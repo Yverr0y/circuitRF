@@ -38,12 +38,19 @@ public sealed record GitResult(
 /// two circuitRF processes contend only on reference updates, which git makes atomic.
 /// </param>
 /// <param name="Timeout">Overrides the default bound for this call.</param>
+/// <param name="SafeDirectories">
+/// Extra paths named as <c>safe.directory</c> alongside the workspace root (R-rc9-5b, §4.7). <b>A
+/// clone touches two trees, not one</b> — the destination's parent and, when the source is a local
+/// path, the source repository — and git's ownership check applies to each of them separately. Named
+/// individually, never <c>*</c>, exactly as the root itself is.
+/// </param>
 public sealed record GitRunOptions(
     string?   StandardInput = null,
     bool      ReadOnly      = false,
     bool      Network       = false,
     string?   IndexFile     = null,
-    TimeSpan? Timeout       = null);
+    TimeSpan? Timeout       = null,
+    IReadOnlyList<string>? SafeDirectories = null);
 
 /// <summary>
 /// <b>The one type that starts a git process.</b> Every git invocation circuitRF makes goes through
@@ -134,6 +141,12 @@ public sealed class GitCommand
         };
 
         foreach (string a in GitEnvironment.GlobalArguments(WorkspaceRoot)) psi.ArgumentList.Add(a);
+        foreach (string extra in options.SafeDirectories ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(extra)) continue;
+            psi.ArgumentList.Add("-c");
+            psi.ArgumentList.Add("safe.directory=" + extra);
+        }
         foreach (string a in arguments) psi.ArgumentList.Add(a);
 
         GitEnvironment.Apply(psi.Environment, Identity);

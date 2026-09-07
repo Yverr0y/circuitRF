@@ -133,7 +133,13 @@ public class FileMenuRestructureTests
         // Archive would read as a third way of packaging one.
         // MW3: Add Cell to Workspace… sits directly above it, in the same band — the two are the same
         // subject (what this workspace can reach), and the drag gesture's dialog offers both outcomes.
-        "Add _Cell to Workspace…", "_Reference Workspace…", "---",
+        // RC-9 R-rc9-1/-6: the three sharing items join THAT band rather than the archive one below.
+        // The band's subject is what this workspace can reach, and the three answer it from the other
+        // ends — point at a workspace already on this machine, bring one onto it, exchange with the
+        // one it came from. Beside Archive they would read as three more ways of packaging a
+        // workspace up, which is the reading MW2 §2.1 already rejected for Reference Workspace…
+        "Add _Cell to Workspace…", "_Reference Workspace…",
+        "_Copy Workspace Here…", "_Bring In Changes", "Sen_d Changes", "---",
         "_Archive Workspace…", "_Unarchive Workspace…", "---",
         "_Import", "_Export", "_Manage PDKs…", "---",
         // "Close Workspace Window", not "Close Window": that name is already taken by the item
@@ -148,7 +154,8 @@ public class FileMenuRestructureTests
         "New", "New Workspace…", "New Window", "---",
         "Open Workspace…", "Open Workspace in New Window…", "Open Recent", "Open", "---",
         "Save", "Save Schematic As…", "Save Symbol As…", "Save Layout As…", "Save Workspace As…", "Keep This State…", "Keep This Version…", "---",
-        "Add Cell to Workspace…", "Reference Workspace…", "---",
+        "Add Cell to Workspace…", "Reference Workspace…",
+        "Copy Workspace Here…", "Bring In Changes", "Send Changes", "---",
         "Archive Workspace…", "Unarchive Workspace…", "---",
         "Import", "Export", "Manage PDKs…", "---",
         "Close Window", "Close Workspace", "Close Workspace Window",

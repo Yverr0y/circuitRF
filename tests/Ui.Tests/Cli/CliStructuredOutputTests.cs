@@ -522,10 +522,17 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         // `restore` and RC-7's `commit` add ids here rather than a second verb.
         "history.args.noun-required",
         "history.args.unknown-noun",
+        // RC-9's three refusals of its own. `clone` takes two positions and derives neither: git would
+        // work a folder name out of the address, and a folder appearing somewhere the caller did not
+        // name is a surprise nobody is there to notice on a build machine. `pin` names an ALIAS
+        // because the pin is per referenced workspace and never per cell (R-rc9-9).
+        "history.clone.args",
         "history.git.unavailable",
         "history.input.not-a-workspace",
         "history.large-files.unanswered",
         "history.list.empty",
+        "history.pin.alias-required",
+        "history.pins.none",
         "history.repository.absent",
         "history.restore.no-such-point",
         "history.restore.point-required",

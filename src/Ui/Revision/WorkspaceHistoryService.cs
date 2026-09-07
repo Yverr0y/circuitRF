@@ -228,7 +228,8 @@ public sealed class WorkspaceHistoryService
 
         if (result.Ok)
         {
-            _messages.Info(RestorePointMessages.RestoreCoversThisWorkspaceOnly);
+            _messages.Info(RestorePointMessages.RestoreReferenceCaveat(
+                WorkspacePins.Survey(workspaceRoot!).Any(p => p.Pin is not null)));
             _messages.Info(RestorePointMessages.RestoreLeavesResultsAlone);
         }
 

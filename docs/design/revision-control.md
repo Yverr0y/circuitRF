@@ -1414,6 +1414,17 @@ blocking a branch switch, in a world where they do not switch branches). Their e
 
 ## 7. Cell references and version binding
 
+**Status: BUILT 2026-09-07** · `brief-revision-control-9-clone-and-pins.md` · `CwsWorkspaceRef.Pin`,
+`WorkspacePins` and `PinnedContent` in `src/Design/Revision/`, `WorkspaceSharingService` and the
+Project-panel rows in `src/Ui`, `circuitrf history pins|pin|unpin`, gated by
+`tests/Ui.Tests/Revision/CloneAndPinsTests.cs`. **One thing this section left unstated decided the
+whole build**: it says the reference "carries a commit identity" and does not say what a pinned
+reference then RESOLVES to. Recording the identity and going on reading the library's working tree
+would satisfy every sentence here and be worth nothing — the moment the librarian checks out anything
+else, the design resolves against content it was never verified against, which is the failure §7A.4 is
+written to prevent arriving through the feature meant to prevent it. So a pinned alias resolves to an
+expanded copy of that version, and `src/Design/RESOLVED.md`'s RC-9 entry has the cost of it.
+
 `workspace-and-project-tree.md` §5B/§5C define referenced workspaces and external cell references: a
 `.cws` carries a `ReferencedWorkspaces` alias table (`CwsWorkspaceRef` — an alias and a path) and a
 `ReferencedCells` list of `ws://alias/rel/path` strings resolving through it.
@@ -1747,6 +1758,14 @@ than solving it.
 ---
 
 ## 9. Cloning a repository as a workspace
+
+**Status: BUILT 2026-09-07** · `brief-revision-control-9-clone-and-pins.md` · `WorkspaceClone` and
+`WorkspaceRemotes` in `src/Design/Revision/`, `CopyWorkspaceDialog` and three File-menu items in
+`src/Ui`, `circuitrf history clone|fetch|send`, gated by
+`tests/Ui.Tests/Revision/CloneAndPinsTests.cs`. **Nothing here is host-specific and nothing here is
+automatic**, both by construction: the only thing not passed through to git is a source beginning with
+`-`, and the gate for the second is a source scan of the open and checkpoint paths rather than an
+observation of one run.
 
 If a cloned directory contains a `.cws`, circuitRF can open it as a workspace. Once git is already
 being driven as a subprocess this is nearly free, and it is the strongest *product* argument in this
@@ -2179,9 +2198,9 @@ of §5.5's first row. §6.3 needs no handling at all: a restore followed by a co
 **Stage 3 also gains the archive's include-history option** (§9A) — the exclusion is Stage 2's
 safety gate, the *choice* needs a history worth offering and the vocabulary to describe it.
 
-**Stage 4 — sharing.** Clone-as-workspace (§9), fetch/push with §9.1's credential posture, and the
-commit-pinned references of §7 — which is what turns §7A's read-only libraries from a restriction into
-a managed collection.
+**Stage 4 — sharing. BUILT 2026-09-07** (`brief-revision-control-9-clone-and-pins.md`).
+Clone-as-workspace (§9), fetch/push with §9.1's credential posture, and the commit-pinned references of
+§7 — which is what turns §7A's read-only libraries from a restriction into a managed collection.
 
 **The user documentation of §10B is not a stage.** Each stage ships the part of it that stage makes
 true. A stage that lands mechanism without explanation has not landed.
