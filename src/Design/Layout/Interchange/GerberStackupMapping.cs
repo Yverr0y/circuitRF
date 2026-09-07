@@ -12,7 +12,16 @@
 //  * permittivity and loss tangent are read if present and left UNSET if not;
 //  * conductivity and Mur are defaulted exactly as PcbStackupMapping already defaults them, through
 //    the same constant, and are NAMED as defaults in the same note;
-//  * with no job file at all the stackup stays EMPTY and one message says so.
+//  * with no job file at all a SKELETON is built — structure only, no substrate (GI2).
+//
+// GI2 (brief-gi2-stackup-skeleton.md) separates two things this file used to refuse together. How many
+// conductors there are, in what order, called what, bound to which drawing layer, is bookkeeping the
+// IMPORT HAS ALREADY DONE — it is in the files and the cascade resolved it. Thickness, permittivity and
+// loss tangent are not in the files at all. The first is emitted; the second is still refused, and the
+// refusal is spelled ZERO: zero thickness and Epsr = 0 are outside every extractor's own guard and
+// outside TechValidation's `Epsr < 1`, so a skeleton is UNSIMULATABLE by construction. Epsr's own C#
+// default of 1.0 would have been AIR — a perfectly valid substrate that runs and answers the wrong
+// question — which is why the skeleton writes 0 explicitly and a test asserts it.
 //
 // Never infer permittivity from a material name. It is a lookup table of laminate trade names, it is
 // out of scope, and it would put third-party product names into this repo (root CLAUDE.md
@@ -35,31 +44,32 @@ public static class GerberStackupMapping
     /// reporting when it disagrees with the number of copper files actually imported.</param>
     /// <param name="copperLayers">The drawing layers the cascade resolved for copper, top to bottom.
     /// The i-th <see cref="StackupKind.Conductor"/> entry links to the i-th of these.</param>
+    /// <param name="copperLayerNames">What those drawing layers are CALLED, in the same order — the
+    /// names the technology's own layer table gives them. GI2's skeleton names each conductor entry
+    /// after its drawing layer, so the Stackup tab and the layer table read as one document. Shorter
+    /// than <paramref name="copperLayers"/> (or null) falls back to the key.</param>
+    /// <param name="maskAndPasteLayerNames">The mask/paste/legend drawing layers this set imported as
+    /// artwork — R-gi2-6. None of them becomes a stackup entry; their presence is stated once so the
+    /// omission is a decision rather than an oversight.</param>
     public static Result Build(
         IReadOnlyList<GerberJobFile.JobStackupEntry>? entries,
         double? boardThicknessMm,
         int? layerNumber,
         IReadOnlyList<LayerKey> copperLayers,
-        int dbuPerMicron)
+        int dbuPerMicron,
+        IReadOnlyList<string>? copperLayerNames = null,
+        IReadOnlyList<string>? maskAndPasteLayerNames = null)
     {
         var messages = new List<string>();
 
-        // R-L4g-9, second branch. An individual Gerber file carries no substrate data whatsoever, so a
-        // set with no job file has nothing to build a stackup FROM. Leave it empty and say so.
-        // L4d's R-L4d-6 holds here unchanged: do not fabricate a plausible substrate. An invented
-        // stackup is worse than none, because nothing downstream will ever question it and it WILL be
-        // simulated.
+        // R-L4g-9's second branch, as GI2 rewrote it. An individual Gerber file carries no substrate
+        // data whatsoever — so there is still nothing to build a substrate FROM, and L4d's R-L4d-6
+        // holds unchanged: do not fabricate a plausible one. What there IS is the STRUCTURE, already
+        // resolved by the identity cascade before this is called, and discarding it left the person
+        // who imported a six-layer board to hand-author eleven rows reproducing a result the import
+        // had already computed.
         if (entries is null || entries.Count == 0)
-        {
-            messages.Add(
-                "This file set carries no job-file stackup, so the technology's stackup was left EMPTY " +
-                "and no substrate was invented — an individual Gerber file states nothing about the " +
-                "substrate at all." +
-                (boardThicknessMm is { } t ? $" The job file does state an overall board thickness of {t:0.###} mm." : "") +
-                " Before the EM path can run, the technology needs a dielectric thickness, a relative " +
-                "permittivity and a loss tangent for each dielectric, and a thickness for each conductor.");
-            return new Result(null, 0, 0, messages);
-        }
+            return Skeleton(boardThicknessMm, copperLayers, copperLayerNames, maskAndPasteLayerNames, messages);
 
         var stackup = new Stackup();
         int conductors = 0, dielectrics = 0, ignored = 0;
@@ -139,6 +149,112 @@ public static class GerberStackupMapping
             "the format either and were left at the technology's own defaults" +
             (gaps.Count > 0 ? $". The job file also omitted: {string.Join("; ", gaps)}" : "") +
             ". Check them all before simulating.");
+
+        return new Result(stackup, conductors, dielectrics, messages);
+    }
+
+    /// <summary>
+    /// GI2's skeleton: the STRUCTURE the import already resolved, with every substrate quantity left
+    /// unset (R-gi2-1 … R-gi2-6).
+    ///
+    /// <para><b>Why every number here is zero, and why <see cref="StackupLayer.Epsr"/> in particular
+    /// is written explicitly.</b> <c>Epsr</c>'s own C# default is <c>1.0</c> — air — which is a
+    /// perfectly valid, entirely simulatable substrate, and a board silently modelled in air runs to
+    /// completion and answers a different question. That would make a skeleton WORSE than the empty
+    /// stackup it replaces. <c>0</c> is already outside <c>TechValidation</c>'s <c>Epsr &lt; 1</c>
+    /// check and outside both extractors' own <c>Epsr &gt;= 1</c> guards, so it is the spelling of
+    /// "unset" this codebase already treats as unusable. Zero thickness plus zero permittivity is
+    /// what makes a skeleton unsimulatable, and that is the point of it — do not "tidy" either to a
+    /// plausible value.</para>
+    ///
+    /// <para>Conductor conductivity is the one thing that IS filled in, through the same constant
+    /// <c>PcbStackupMapping</c> already exposes. Copper's bulk conductivity is physics, not a guess
+    /// about this board, and R-L4d-7's precedent is to default it and NAME it as a default.</para>
+    /// </summary>
+    private static Result Skeleton(
+        double? boardThicknessMm,
+        IReadOnlyList<LayerKey> copperLayers,
+        IReadOnlyList<string>? copperLayerNames,
+        IReadOnlyList<string>? maskAndPasteLayerNames,
+        List<string> messages)
+    {
+        // No copper at all — a drill-only set, or a folder of silkscreen. There is no structure to
+        // emit either, so this is the one case that still leaves the stackup genuinely EMPTY.
+        if (copperLayers.Count == 0)
+        {
+            messages.Add(
+                "This file set carries no job-file stackup and no copper artwork, so the technology's " +
+                "stackup was left EMPTY and no substrate was invented — an individual Gerber file " +
+                "states nothing about the substrate at all." +
+                (boardThicknessMm is { } t0 ? $" The job file does state an overall board thickness of {t0:0.###} mm." : "") +
+                " Before the EM path can run, the technology needs its conductor and dielectric layers, " +
+                "each with a thickness, and each dielectric with a relative permittivity and a loss tangent.");
+            return new Result(null, 0, 0, messages);
+        }
+
+        var stackup = new Stackup();
+        int conductors = 0, dielectrics = 0;
+
+        for (int i = 0; i < copperLayers.Count; i++)
+        {
+            if (i > 0)
+            {
+                // R-gi2-5. Positional and neutral, ALWAYS. The number and construction of the layers
+                // between two copper sheets is a fabrication decision that no artwork file states, and
+                // a laminate trade name here would be both an invention and a third-party product name
+                // in this repo (root CLAUDE.md §"Commercial Vendor References"). A plausible name is
+                // also the thing that stops someone checking.
+                stackup.Layers.Add(new StackupLayer
+                {
+                    Kind = StackupKind.Dielectric,
+                    Name = $"Dielectric {dielectrics + 1}",
+                    ThicknessDbu = 0,
+                    Epsr = 0,           // NOT 1.0 — see this method's own note. 1.0 is air, and air runs.
+                    TanD = 0,
+                    Mur = 1.0,
+                });
+                dielectrics++;
+            }
+
+            stackup.Layers.Add(new StackupLayer
+            {
+                Kind = StackupKind.Conductor,
+                Name = copperLayerNames is { } names && i < names.Count && names[i] is { Length: > 0 } n
+                    ? n
+                    : $"Conductor {i + 1}",
+                ThicknessDbu = 0,
+                SigmaSm = PcbStackupMapping.DefaultCopperConductivitySm,
+                DrawingLayers = [copperLayers[i]],
+            });
+            conductors++;
+        }
+
+        // R-gi2-12 — ONE paragraph replacing the old "left EMPTY" line, and it must still say plainly
+        // that no substrate was invented. The order of the two halves is deliberate: what was built
+        // first, what was refused second, because the refusal is the part that has to survive being
+        // skim-read.
+        messages.Add(
+            $"{conductors} conductor layer(s) and {dielectrics} dielectric layer(s) were created from the " +
+            "artwork, in the order the copper files were resolved into, each conductor bound to its own " +
+            "drawing layer. NO SUBSTRATE WAS INVENTED: every thickness is zero and every dielectric's " +
+            "relative permittivity and loss tangent are unset, because an individual Gerber file states " +
+            "nothing about the substrate at all." +
+            (boardThicknessMm is { } t ? $" The job file does state an overall board thickness of {t:0.###} mm." : "") +
+            $" Conductor conductivity is defaulted to {PcbStackupMapping.DefaultCopperConductivitySm:0.###e+0} S/m " +
+            "(copper) and is named here as a default; it was not inferred from anything in the files. " +
+            "The technology cannot be simulated until the missing values are entered on the Technology " +
+            "editor's Stackup tab.");
+
+        // R-gi2-6. Mask IS a dielectric in the physical stack, and its artwork states neither its
+        // thickness nor its permittivity — so an entry for it would be exactly the invention the rest
+        // of this file refuses, and it would silently change the conductor-to-conductor geometry a
+        // solver sees. Left out, and said once.
+        if (maskAndPasteLayerNames is { Count: > 0 } masks)
+            messages.Add(
+                $"{masks.Count} soldermask, paste or legend drawing layer(s) ({string.Join(", ", masks)}) " +
+                "were imported as artwork and are NOT in the stackup — their artwork states neither a " +
+                "thickness nor a permittivity, and adding them would change the conductor-to-conductor " +
+                "geometry a solver sees. Add them on the Stackup tab if your run needs them.");
 
         return new Result(stackup, conductors, dielectrics, messages);
     }

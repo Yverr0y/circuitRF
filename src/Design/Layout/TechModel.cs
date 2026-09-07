@@ -254,6 +254,45 @@ public sealed class Stackup
 
     /// <summary>Ordered TOP to BOTTOM.</summary>
     public List<StackupLayer> Layers { get; set; } = [];
+
+    /// <summary>
+    /// GI3 R-gi3-7: the board's OVERALL thickness as some other document stated it — a Gerber job
+    /// file's <c>BoardThickness</c>, today — carried so the editor can show it beside the sum of
+    /// <see cref="StackupLayer.ThicknessDbu"/> over the non-via entries and say when the two disagree.
+    ///
+    /// <para><b>It is a second opinion, never a constraint, and nothing derives geometry from it.</b>
+    /// No extractor reads it: the stack a solver sees is built from the entries, exactly as before. The
+    /// two numbers disagreeing is INFORMATION — a stack transcribed row by row and never added up does
+    /// not match the board it came from — and which of them is wrong is not something the application
+    /// knows, so it reports the disagreement and corrects neither.</para>
+    ///
+    /// <para>Null means nothing stated one, which is the case for every hand-authored technology and
+    /// for every import whose files carry no overall thickness. Additive, nullable, no <c>.ctech</c>
+    /// <c>FormatVersion</c> bump — the <see cref="StackupLayer.Fill"/>/<see cref="StackupLayer.SheetAt"/>
+    /// pattern.</para>
+    /// </summary>
+    public long? BoardThicknessDbu { get; set; }
+
+    /// <summary>The sum of <see cref="StackupLayer.ThicknessDbu"/> over the Conductor and Dielectric
+    /// entries — the stack's own height. <b>Via entries are excluded</b>: a via has no z band of its
+    /// own (it traverses the dielectrics between the conductors it spans), which is why
+    /// <c>PlanarExtractor.BuildStack</c> skips them and why <c>TechValidation</c> does not require a
+    /// thickness on one.
+    ///
+    /// <para><c>[JsonIgnore]</c> for <see cref="DrcRule.NeedsSecondRegion"/>'s reason: get-only
+    /// properties serialize by default, and a derived total written into every <c>.ctech</c> would be
+    /// noise that looks authoritative and is silently ignored on read.</para></summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public long TotalThicknessDbu
+    {
+        get
+        {
+            long total = 0;
+            foreach (var l in Layers)
+                if (l.Kind != StackupKind.Via) total += l.ThicknessDbu;
+            return total;
+        }
+    }
 }
 
 // Annular ring — (ViaShape.PadSize - ViaShape.DrillSize) / 2 — is still unbuilt, and is expressible

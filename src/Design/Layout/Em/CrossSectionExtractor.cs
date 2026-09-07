@@ -364,17 +364,28 @@ public static class CrossSectionExtractor
                        "(FR-4 is 4.4, GaAs 12.9, air 1.0).";
         }
 
+        // GI3 R-gi3-2 — the two metals this refusal names are read from the ONE conductivity table,
+        // not repeated here. A refusal quoting a number the editor's own preset list disagrees with is
+        // worse than one quoting none.
+        //
+        // "0.###e0" and NOT the "0.###e+0" the interchange notes use: this sentence has always spelled
+        // copper "5.8e7", the sentence is what the user reads back into the σ field, and the two
+        // spellings are deliberately not unified — a message someone retypes should not carry a "+"
+        // they then have to decide about.
+        static string Sigma(ConductorMaterial m) =>
+            m.SigmaSm.ToString("0.###e0", CultureInfo.InvariantCulture);
+        string ConductivityHint = $"copper is {Sigma(ConductorMaterials.Copper)} S/m, " +
+                                  $"gold {Sigma(ConductorMaterials.Gold)} S/m";
+
         if (!(signal.Layer.SigmaSm > 0))
             return $"Stackup layer '{signal.Layer.Name}' is the signal conductor but has σ = " +
                    $"{signal.Layer.SigmaSm.ToString("G4", CultureInfo.InvariantCulture)} S/m. Set its " +
-                   "conductivity in the technology editor's Stackup tab (copper is 5.8e7 S/m, " +
-                   "gold 4.1e7 S/m).";
+                   $"conductivity in the technology editor's Stackup tab ({ConductivityHint}).";
 
         if (ground is not null && !(ground.Layer.SigmaSm > 0))
             return $"Stackup layer '{ground.Layer.Name}' is the ground reference but has σ = " +
                    $"{ground.Layer.SigmaSm.ToString("G4", CultureInfo.InvariantCulture)} S/m. Set its " +
-                   "conductivity in the technology editor's Stackup tab (copper is 5.8e7 S/m, " +
-                   "gold 4.1e7 S/m).";
+                   $"conductivity in the technology editor's Stackup tab ({ConductivityHint}).";
 
         return null;
     }

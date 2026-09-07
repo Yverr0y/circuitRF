@@ -148,6 +148,20 @@ public static class SubstrateResolver
 
         double h = DbuToMeters(hDbu, FallbackDbuPerMicron);
         double er = weightedEpsr / hDbu;
+
+        // GI2 R-gi2-4's rule, on the third consumer of a stackup. Both EM extractors already refuse a
+        // dielectric with er < 1; this path did not, because until GI2 nothing could HAND it one — an
+        // unset Epsr read as its C# default of 1.0, which is air and computes. A Gerber import with no
+        // job file now writes Epsr = 0 deliberately, so a stackup that has had its thicknesses filled
+        // in but not its permittivities can reach here, and Kirschning-Jansen on er = 0 returns a
+        // number rather than failing. Refuse it where it is still attributable to a layer.
+        if (!(er >= 1))
+        {
+            return (null, new SubstrateResolutionFailure(
+                $"the dielectric between '{signal.Name}' and '{ground.Name}' in technology '{technology.Name}' " +
+                $"has a relative permittivity of {er:G4}; er is >= 1. Set it on the technology editor's " +
+                "Stackup tab (an imported Gerber set carries no permittivity, so it is left unset)"), warn);
+        }
         double tanD = weightedTanD / hDbu;
         double t = DbuToMeters(signal.ThicknessDbu, FallbackDbuPerMicron);
 

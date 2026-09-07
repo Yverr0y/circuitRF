@@ -621,10 +621,39 @@ public static class GerberImport
         control?.SetStageLabel("building the technology");
         var tech = BuildTechnology(importName, allIdentities, copperTopToBottom, finalKeyByFile, destTech, sourceLayers);
 
+        // GI2 R-gi2-2/R-gi2-6. The skeleton names each conductor entry after the drawing layer it
+        // binds, so the Stackup tab and the layer table read as one document rather than two — and
+        // the mask/paste/legend layers this set imported as ARTWORK are named so their absence from
+        // the stackup is a stated decision. Both are read off the technology this import has just
+        // built, which is the only place the final, reconciled names exist.
+        var nameByKey = tech.Layers
+            .GroupBy(l => l.Key)
+            .ToDictionary(g => g.Key, g => g.First().Name);
+        var copperLayerNames = copperKeys
+            .Select(k => nameByKey.TryGetValue(k, out string? n) ? n : "")
+            .ToList();
+        var maskNames = allIdentities
+            .Where(IsMaskPasteOrLegend)
+            .Select(i => nameByKey.TryGetValue(finalKeyByFile[i.FilePath], out string? n) ? n : i.LayerName)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+
         var stackup = GerberStackupMapping.Build(
-            job?.MaterialStackup, job?.BoardThicknessMm, job?.LayerNumber, copperKeys, destDbuPerMicron);
+            job?.MaterialStackup, job?.BoardThicknessMm, job?.LayerNumber, copperKeys, destDbuPerMicron,
+            copperLayerNames, maskNames);
         if (stackup.Stackup is not null) tech.Stackup = stackup.Stackup;
         messages.AddRange(stackup.Messages);
+
+        // GI3 R-gi3-7. The job file's overall board thickness was read, reported once, and then
+        // DROPPED — so the one number that could have checked a hand-entered stackup never reached the
+        // document anyone enters it in. Carried here rather than inside GerberStackupMapping because it
+        // has to survive the branches where that mapping builds no stackup at all (a drill-only set, a
+        // job file whose stackup declares nothing electrical): the fact is about the BOARD, not about
+        // whether we managed to build rows for it. Nothing derives geometry from it — see
+        // Stackup.BoardThicknessDbu.
+        if (job?.BoardThicknessMm is { } boardMm && boardMm > 0)
+            tech.Stackup.BoardThicknessDbu = PcbUnits.Length(boardMm, destDbuPerMicron);
 
         // A drill layer is DECLARED by the file set (a drill file was actually read), and a
         // StackupKind.Via entry is what marks the drawing layer it landed on as one — it carries no
@@ -638,6 +667,7 @@ public static class GerberImport
         // has no conductor entries to name, and inventing two would be a substrate invented under
         // another name — that import already says, in words, that the technology is incomplete.
         var conductorEntries = tech.Stackup.Layers.Where(l => l.Kind == StackupKind.Conductor).ToList();
+        int platedViaEntries = 0;
         foreach (var (drillFile, drillRead, identity) in drills)
         {
             // GI1 R-gi1-2. The plating of this file was already settled up in step 5, where it chose
@@ -678,6 +708,19 @@ public static class GerberImport
 
                 SpanFromLayer = conductive && conductorEntries.Count > 0 ? conductorEntries[0].Name : null,
                 SpanToLayer = conductive && conductorEntries.Count > 0 ? conductorEntries[^1].Name : null,
+
+                // GI3 R-gi3-4. The default already existed everywhere BUT here: every shipped
+                // technology writes 25 µm and StarterTechnologies writes Um(25), while the one
+                // document guaranteed to need the field — an imported board — minted its via entries
+                // with no wall thickness at all, so it was the only technology in the product that
+                // failed its own validator on a field with a known answer. Written through the same
+                // constant those five documents now read, at THIS import's resolution, and named as a
+                // default in the message below (R-L4d-7's pattern, which the conductivity default in
+                // GerberStackupMapping already follows).
+                //
+                // Only on a conductive entry: wall thickness is a property of metal, and Fill is left
+                // unstated on a non-plated hole for the same reason.
+                WallThicknessDbu = conductive ? ViaDefaults.PlatedWallThicknessDbu(destDbuPerMicron) : null,
             });
 
             if (routedOnly)
@@ -692,7 +735,21 @@ public static class GerberImport
                     $"{drillFile.FileName}: these holes are NON-PLATED, so this layer's holes are not " +
                     "conductors and an EM run will not build vias from them. The holes themselves are " +
                     "imported and drawn exactly as they are.");
+
+            if (conductive) platedViaEntries++;
         }
+
+        // GI3 R-gi3-4 — said ONCE for the whole import, not once per drill file: it is one fact about
+        // one process, and the per-file lines above are already the busiest part of this report.
+        if (platedViaEntries > 0)
+            messages.Add(
+                $"Plated via wall thickness is defaulted to {ViaDefaults.PlatedWallThicknessUm:0.###} µm " +
+                $"on {platedViaEntries} via layer(s) and is named here as a default — no Gerber or " +
+                "Excellon file states a plating thickness. It is the same value every technology " +
+                "shipped with circuitRF uses, and it is a PLATING thickness (the metal on the barrel " +
+                "wall), not the hole radius. Above roughly 1 GHz a wall this thick is already many skin " +
+                "depths, so an S-parameter run is insensitive to it; a thermal one is not. Change it on " +
+                "the Technology editor's Stackup tab.");
 
         // ── 10. Write (R-L4g-13) — nothing is created before this point ─────────────────────────
         //
@@ -1156,6 +1213,38 @@ public static class GerberImport
         for (int i = 0; i < list.Count; i++)
             if (string.Equals(list[i].FilePath, filePath, StringComparison.Ordinal)) return i;
         return -1;
+    }
+
+    /// <summary>
+    /// GI2 R-gi2-6 — a drawing layer that is soldermask, solder paste or legend/silkscreen.
+    ///
+    /// <para>Recognised from the file's own <c>FileFunction</c> when it declared one, and from the
+    /// name the cascade's heuristic rung settled on otherwise — the two are the only places this fact
+    /// exists, and the heuristic's names for these are a closed set it owns
+    /// (<c>GerberLayerIdentity.Patterns</c>). Never from the file's extension: the point of the
+    /// classifier's own doctrine is that an extension is the LAST evidence, not the first.</para>
+    ///
+    /// <para>Nothing branches on this except the sentence that says these layers were left out of the
+    /// stackup, so a miss costs a line of text, not a wrong stackup.</para>
+    /// </summary>
+    private static bool IsMaskPasteOrLegend(GerberLayerIdentity identity)
+    {
+        if (identity.IsConductor) return false;
+        if (string.Equals(identity.Purpose, GerberLayerCascade.DrillPurpose, StringComparison.Ordinal)) return false;
+
+        if (identity.FileFunction is { Length: > 0 } fn)
+        {
+            string kind = fn.Split(',')[0].Trim();
+            if (kind.Equals("Soldermask", StringComparison.OrdinalIgnoreCase) ||
+                kind.Equals("Paste", StringComparison.OrdinalIgnoreCase) ||
+                kind.Equals("SolderPaste", StringComparison.OrdinalIgnoreCase) ||
+                kind.Equals("Legend", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return identity.LayerName.StartsWith("Soldermask", StringComparison.Ordinal)
+            || identity.LayerName.StartsWith("Paste", StringComparison.Ordinal)
+            || identity.LayerName.StartsWith("Silk", StringComparison.Ordinal);
     }
 
     /// <summary>R-L4g-8: a NEW technology, written into the import folder, pointed at by the new

@@ -174,12 +174,38 @@ public sealed partial class TechEditorViewModel : ObservableObject
         OnPropertyChanged(nameof(InterchangeFilterSummary));
     }
 
+    /// <summary>
+    /// GI3 R-gi3-9. The substrate entries in <see cref="Stackup.Layers"/>' own order, then the vias as
+    /// their own group below them.
+    ///
+    /// <para><b>The MODEL's order is untouched.</b> <c>Stackup.Layers</c> is documented "Ordered TOP to
+    /// BOTTOM" and that order IS z — L4d's R-L4d-5, restated by <c>GerberStackupMapping</c>'s
+    /// R-L4g-10: a reversed stack simulates cleanly and answers a different question. This is a
+    /// PRESENTATION change and nothing here writes to the list. What it fixes is that a via entry, which
+    /// has no position in z at all, used to render as a row in the middle of the stack — and a via added
+    /// before the conductors rendered above the top copper, reading as a layer sitting over the board.</para>
+    /// </summary>
     private void ApplyStackupFilter()
     {
         var q = StackupFilter.Trim();
         FilteredStackupLayers.Clear();
+
+        // Cleared on EVERY row first, not just the listed ones: a header left set on a row the filter
+        // has excluded reappears the moment the filter is cleared, in the wrong place.
+        foreach (var r in StackupLayers) r.ShowsViaGroupHeader = false;
+
         foreach (var r in StackupLayers)
-            if (Matches(r.Layer.Name, q)) FilteredStackupLayers.Add(r);
+            if (r.Layer.Kind != StackupKind.Via && Matches(r.Layer.Name, q)) FilteredStackupLayers.Add(r);
+
+        bool firstVia = true;
+        foreach (var r in StackupLayers)
+        {
+            if (r.Layer.Kind != StackupKind.Via || !Matches(r.Layer.Name, q)) continue;
+            r.ShowsViaGroupHeader = firstVia;
+            firstVia = false;
+            FilteredStackupLayers.Add(r);
+        }
+
         OnPropertyChanged(nameof(StackupFilterSummary));
     }
 
@@ -558,6 +584,78 @@ public sealed partial class TechEditorViewModel : ObservableObject
         StackupLayers.Clear();
         foreach (var sl in Working.Stackup.Layers)
             StackupLayers.Add(new StackupLayerRowViewModel(sl, this));
+
+        RaiseStackHeightViews();
+    }
+
+    // ── GI3 R-gi3-6 / R-gi3-7 — does the stackup add up? ──────────────────────────────────────────
+    //
+    // The cheapest possible check on a hand-entered stackup, and it catches the common error directly:
+    // a stack transcribed one row at a time and never added up does not match the board it came from,
+    // and nothing in the application said so at any point before a run gave a wrong answer.
+    //
+    // Recomputed from Working on every rebuild, which is after every committed edit — so it follows a
+    // thickness the moment that field commits, and follows an undo and a redo for free.
+
+    /// <summary>The sum of the Conductor and Dielectric thicknesses, in the editor's display unit.
+    /// <b>Vias are excluded</b> — a via has no z band of its own, which is why
+    /// <c>PlanarExtractor.BuildStack</c> skips them and why the validator asks no thickness of one.</summary>
+    public string StackTotalText =>
+        LayoutUnits.Format(Working.Stackup.TotalThicknessDbu, Working.DefaultDisplayUnit,
+                           LayoutUnits.DefaultDbuPerMicron) + " " +
+        LayoutUnits.Suffix(Working.DefaultDisplayUnit);
+
+    /// <summary>Whether another document stated an overall board thickness for this stackup to be
+    /// compared against — a Gerber job file's <c>BoardThickness</c>, today. False for every
+    /// hand-authored technology, which is most of them.</summary>
+    public bool HasBoardThickness => Working.Stackup.BoardThicknessDbu is > 0;
+
+    public string BoardThicknessText =>
+        Working.Stackup.BoardThicknessDbu is { } b
+            ? LayoutUnits.Format(b, Working.DefaultDisplayUnit, LayoutUnits.DefaultDbuPerMicron) + " " +
+              LayoutUnits.Suffix(Working.DefaultDisplayUnit)
+            : "";
+
+    /// <summary>How far the two numbers may differ before the editor says so: <b>1 % of the stated
+    /// board thickness, or 1 µm, whichever is larger</b>. The percentage is what makes it useful across
+    /// a 100 µm die and a 1.6 mm board; the floor is what stops a rounding difference on a thin stack
+    /// reading as a discrepancy. This is a TRANSCRIPTION check, not a fabrication-tolerance one — a
+    /// real board's thickness tolerance is far wider, and a stackup within it still adds up.</summary>
+    private long StackHeightTolerance(long boardDbu) =>
+        Math.Max(LayoutUnits.ToDbu(1m, LayoutUnit.Um, LayoutUnits.DefaultDbuPerMicron),
+                 (long)Math.Round(boardDbu * 0.01));
+
+    public bool HasStackHeightMismatch =>
+        Working.Stackup.BoardThicknessDbu is { } b && b > 0 &&
+        Math.Abs(Working.Stackup.TotalThicknessDbu - b) > StackHeightTolerance(b);
+
+    /// <summary><b>States the disagreement and corrects nothing.</b> Which of the two numbers is wrong
+    /// is not something the application knows: the entered layers may be incomplete, or the stated
+    /// board thickness may exclude plating and mask, or the file may simply be wrong. Saying so is the
+    /// whole value; silently reconciling them would destroy it.</summary>
+    public string StackHeightMismatchText
+    {
+        get
+        {
+            if (Working.Stackup.BoardThicknessDbu is not { } b || b <= 0) return "";
+            long diff = Working.Stackup.TotalThicknessDbu - b;
+            string sign = diff > 0 ? "thicker than" : "thinner than";
+            string mag = LayoutUnits.Format(Math.Abs(diff), Working.DefaultDisplayUnit,
+                                            LayoutUnits.DefaultDbuPerMicron) + " " +
+                         LayoutUnits.Suffix(Working.DefaultDisplayUnit);
+            return $"The layers entered here add up to {mag} {sign} the board thickness the imported " +
+                   "job file states. Nothing has been corrected — which of the two is right is not " +
+                   "something circuitRF can know.";
+        }
+    }
+
+    private void RaiseStackHeightViews()
+    {
+        OnPropertyChanged(nameof(StackTotalText));
+        OnPropertyChanged(nameof(HasBoardThickness));
+        OnPropertyChanged(nameof(BoardThicknessText));
+        OnPropertyChanged(nameof(HasStackHeightMismatch));
+        OnPropertyChanged(nameof(StackHeightMismatchText));
     }
 
     [RelayCommand]
@@ -575,10 +673,28 @@ public sealed partial class TechEditorViewModel : ObservableObject
         Working.Stackup.Layers.Add(new StackupLayer
         {
             Kind         = kind,
-            Name         = $"New {kind}",
+            Name         = NextFreeStackupName(kind),
             ThicknessDbu = LayoutUnits.ToDbu(1m, LayoutUnit.Um, LayoutUnits.DefaultDbuPerMicron),
         });
         CommitEdit(before, $"Add {kind} stackup layer");
+    }
+
+    /// <summary>
+    /// GI3 R-gi3-8's other half. The flat <c>$"New {kind}"</c> this used to write meant that clicking
+    /// "＋ Conductor" twice produced two entries with one name — which is now a reported problem, and
+    /// would have been one the editor inflicted on itself. Numbered exactly as
+    /// <see cref="NextFreeDrcRuleName"/> already numbers a new rule.
+    /// </summary>
+    private string NextFreeStackupName(StackupKind kind)
+    {
+        var existing = new HashSet<string>(Working.Stackup.Layers.Select(l => l.Name), StringComparer.Ordinal);
+        string bare = $"New {kind}";
+        if (!existing.Contains(bare)) return bare;
+        for (int i = 2; ; i++)
+        {
+            var candidate = $"{bare} {i}";
+            if (!existing.Contains(candidate)) return candidate;
+        }
     }
 
     internal void RemoveStackupLayer(StackupLayerRowViewModel row)
@@ -588,11 +704,28 @@ public sealed partial class TechEditorViewModel : ObservableObject
         CommitEdit(before, $"Remove stackup layer {row.Layer.Name}");
     }
 
+    /// <summary>
+    /// Moves a Conductor or Dielectric entry one place within the z order.
+    ///
+    /// <para>GI3 R-gi3-10: <b>a Via row is refused outright</b> (its list position means nothing, so
+    /// the swap changed the reading order and no physical fact), and a substrate row swaps with the
+    /// next SUBSTRATE entry, stepping over any via entries lying between them in the list. Both follow
+    /// from the same premise as R-gi3-9's grouping: the z order is the order of the non-via entries,
+    /// and a via sits outside it. Swapping across an intervening via leaves that via's own index
+    /// untouched, which is correct precisely because its index carries no meaning.</para>
+    /// </summary>
     internal void MoveStackupLayer(StackupLayerRowViewModel row, int direction)
     {
+        if (!row.CanMove) return;
+
         int index = Working.Stackup.Layers.IndexOf(row.Layer);
+        if (index < 0) return;
+
         int other = index + direction;
-        if (index < 0 || other < 0 || other >= Working.Stackup.Layers.Count) return;
+        while (other >= 0 && other < Working.Stackup.Layers.Count &&
+               Working.Stackup.Layers[other].Kind == StackupKind.Via)
+            other += direction;
+        if (other < 0 || other >= Working.Stackup.Layers.Count) return;
 
         var before = SnapshotJson();
         (Working.Stackup.Layers[index], Working.Stackup.Layers[other]) =

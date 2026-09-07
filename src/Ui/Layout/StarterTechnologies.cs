@@ -83,7 +83,7 @@ public static class StarterTechnologies
                     new StackupLayer
                     {
                         Kind = StackupKind.Conductor, Name = "Top Copper (1 oz)",
-                        ThicknessDbu = Um(35), SigmaSm = 5.8e7,
+                        ThicknessDbu = Um(35), SigmaSm = ConductorMaterials.Copper.SigmaSm,
                         DrawingLayers = [topCopper],
                     },
                     new StackupLayer
@@ -94,7 +94,7 @@ public static class StarterTechnologies
                     new StackupLayer
                     {
                         Kind = StackupKind.Conductor, Name = "Bottom Copper (1 oz)",
-                        ThicknessDbu = Um(35), SigmaSm = 5.8e7,
+                        ThicknessDbu = Um(35), SigmaSm = ConductorMaterials.Copper.SigmaSm,
                         DrawingLayers = [bottomCopper],
                         // R-pc-9: the natural ground-reference plane for a PCB microstrip's default
                         // (zero-configuration) substrate resolution — Top Copper is the topmost
@@ -109,7 +109,7 @@ public static class StarterTechnologies
                     {
                         Kind = StackupKind.Via, Name = "Plated Through-Hole",
                         DrawingLayers = [drill],
-                        Fill = ViaFillKind.Plated, WallThicknessDbu = Um(25),
+                        Fill = ViaFillKind.Plated, WallThicknessDbu = Um(ViaDefaults.PlatedWallThicknessUm),
                         SpanFromLayer = "Top Copper (1 oz)", SpanToLayer = "Bottom Copper (1 oz)",
                     },
                 ],
@@ -182,7 +182,7 @@ public static class StarterTechnologies
                     new StackupLayer
                     {
                         Kind = StackupKind.Conductor, Name = "Metal2",
-                        ThicknessDbu = Um(3), SigmaSm = 4.1e7,
+                        ThicknessDbu = Um(3), SigmaSm = ConductorMaterials.Gold.SigmaSm,
                         DrawingLayers = [metal2],
                     },
                     new StackupLayer
@@ -198,7 +198,7 @@ public static class StarterTechnologies
                     new StackupLayer
                     {
                         Kind = StackupKind.Conductor, Name = "MIM Metal",
-                        ThicknessDbu = Um(0.25m), SigmaSm = 4.1e7,
+                        ThicknessDbu = Um(0.25m), SigmaSm = ConductorMaterials.Gold.SigmaSm,
                         DrawingLayers = [mimMetal],
                     },
                     new StackupLayer
@@ -226,7 +226,7 @@ public static class StarterTechnologies
                     new StackupLayer
                     {
                         Kind = StackupKind.Conductor, Name = "Metal1",
-                        ThicknessDbu = Um(3), SigmaSm = 4.1e7,
+                        ThicknessDbu = Um(3), SigmaSm = ConductorMaterials.Gold.SigmaSm,
                         DrawingLayers = [metal1],
                         // MIM-6 — the sheet on the TOP of the band, so a capacitor run's plate gap
                         // is the MIM Dielectric alone rather than that dielectric plus Metal1's own
@@ -244,7 +244,7 @@ public static class StarterTechnologies
                     new StackupLayer
                     {
                         Kind = StackupKind.Conductor, Name = "Backside Metal",
-                        ThicknessDbu = Um(3), SigmaSm = 4.1e7,
+                        ThicknessDbu = Um(3), SigmaSm = ConductorMaterials.Gold.SigmaSm,
                         // R-pc-9: the ground-reference plane. NOTE this stack's topmost conductor is
                         // Metal2 (an airbridge/crossover level, §3.1), not Metal1 — a genuinely
                         // three-conductor stack, which the design doc calls out as the case the

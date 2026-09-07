@@ -137,6 +137,28 @@ public static class PlanarExtractor
                 "the metal is, what is under it, or where the ground plane sits. Add a stackup in the " +
                 "technology editor.");
 
+        // GI2 R-gi2-4 — the SKELETON refusal, and it has to come before everything below it.
+        //
+        // A stackup whose every conductor and dielectric is zero thick puts every band at z = 0, so
+        // the first thing that noticed was the slab-height check, which then said "the signal sits at
+        // or below the ground plane — mark a conductor as a ground reference or check the stackup
+        // order". Every word of that is a wrong diagnosis of a stack whose order is fine and whose
+        // thicknesses were simply never entered — which is exactly the document a Gerber import with
+        // no job file now produces. Answer the real question here, once, before any geometry
+        // reasoning can reach a misleading conclusion about it.
+        //
+        // Narrow on purpose: EVERY non-via entry zero, not any of them. A partly filled-in stackup is
+        // a different state with its own per-layer refusals, and this must not widen into them.
+        if (stack.All(b => b.Layer.ThicknessDbu == 0))
+            return PlanarExtractionResult.No(
+                $"Every conductor and dielectric in technology '{tech.Name}' has zero thickness, so the " +
+                "stackup states the layers and their order but nothing about the substrate — there is " +
+                "no height for a slab, no separation between levels and no material to solve in. Enter " +
+                "a thickness for each layer, and a relative permittivity and loss tangent for each " +
+                "dielectric, on the technology editor's Stackup tab. (A Gerber file set with no job " +
+                "file carries none of those values, so an import creates this shape deliberately rather " +
+                "than inventing a substrate.)");
+
         // ── Classify shapes against the stackup's DrawingLayers bindings ──────────────────────
         var binding = BuildLayerBinding(stack);
         var viaBinding = BuildViaBinding(tech.Stackup, out int nonPlatedViaEntries);

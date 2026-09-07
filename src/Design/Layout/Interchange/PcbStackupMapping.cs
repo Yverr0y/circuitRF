@@ -15,8 +15,13 @@ public static class PcbStackupMapping
     /// <summary>Copper's bulk conductivity, S/m — the default R-L4d-7 names, applied because the format
     /// states no conductivity at all. <b>Never inferred from the entry's <c>material</c> string</b>:
     /// that is a lookup table of laminate trade names, it is out of scope, and it would put third-party
-    /// product names into this repo (root <c>CLAUDE.md</c> §"Commercial Vendor References").</summary>
-    public const double DefaultCopperConductivitySm = 5.8e7;
+    /// product names into this repo (root <c>CLAUDE.md</c> §"Commercial Vendor References").
+    ///
+    /// <para>GI3 R-gi3-2: the NUMBER now comes from <see cref="ConductorMaterials.Copper"/>, the one
+    /// table in this repository that holds it. The name stays because R-L4d-7 is what this default IS,
+    /// and every message here says so by it — but it is no longer a second copy of the value.</para>
+    /// </summary>
+    public static double DefaultCopperConductivitySm => ConductorMaterials.Copper.SigmaSm;
 
     public sealed record Result(Stackup? Stackup, IReadOnlyList<string> Messages);
 

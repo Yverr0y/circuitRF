@@ -88,6 +88,38 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
     [ObservableProperty] private string _stagedMur  = "";
     [ObservableProperty] private string _stagedSigmaSm = "";
 
+    // ── GI3 R-gi3-1/R-gi3-2 — the conductivity preset ─────────────────────────────────────────
+    //
+    // σ was one of the two fields on this panel with no tooltip, no preset and — after a Gerber
+    // import — no value, while every field beside it carried guidance. This is a SHORTCUT, not a
+    // constraint: the text box stays freely typeable and remains the source of truth, the model
+    // stores only a number, and nothing in the .ctech, the extractors or the validator has ever heard
+    // of a material name. A value matching no metal reads as "Custom", which is a readout of the
+    // field rather than a value — selecting it does nothing.
+    //
+    // The table itself lives in src/Design (ConductorMaterials) because five other sites already held
+    // copies of these numbers. Element conductivities only, and never a laminate table — see that
+    // file's header.
+    public static IReadOnlyList<string> ConductorMaterialChoices { get; } =
+        [ConductorMaterials.Custom, .. ConductorMaterials.All.Select(m => m.Name)];
+
+    private string _selectedConductorMaterial = ConductorMaterials.Custom;
+    public string SelectedConductorMaterial
+    {
+        get => _selectedConductorMaterial;
+        set
+        {
+            if (!SetProperty(ref _selectedConductorMaterial, value) || _isRefreshing) return;
+            if (ConductorMaterials.ByName(value) is not { } metal) return;   // "Custom" is a readout
+
+            // Written THROUGH the staged text and the existing commit, not straight onto the model:
+            // one code path sets σ, so the undo entry, the dirty mark and the redisplay are the ones
+            // every other edit on this row already produces.
+            StagedSigmaSm = metal.SigmaSm.ToString("0.###e+0", Inv);
+            CommitSigmaSm();
+        }
+    }
+
     /// <summary>brief-technology-editor-units-and-layers.md R-tec-1: settable ONLY on conductor rows
     /// (meaningless on dielectric/via — <see cref="StackupLayer.IsGroundReference"/>'s own doc
     /// comment). Commits immediately on toggle, mirroring <c>LayerRowViewModel</c>'s own
@@ -285,6 +317,28 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
     public IRelayCommand MoveUpCommand   { get; }
     public IRelayCommand MoveDownCommand { get; }
 
+    /// <summary>
+    /// GI3 R-gi3-10. <b>A via row cannot be moved, because there is nothing for it to move within.</b>
+    /// <c>Stackup.Layers</c> is documented "Ordered TOP to BOTTOM" and that order IS z — but a via
+    /// entry has no z band of its own, so its position in the list means nothing. Swapping it with a
+    /// conductor changed the reading order and not one physical fact, and under
+    /// <see cref="ShowsViaGroupHeader"/>'s grouping it would now appear to do nothing at all.
+    /// </summary>
+    public bool CanMove => !IsVia;
+
+    /// <summary>
+    /// GI3 R-gi3-9. True on the FIRST via row of the presented list — the row the "outside the z
+    /// order" separator is drawn above. Set by <see cref="TechEditorViewModel"/> as it builds the
+    /// filtered projection, because which row is first depends on the filter, not on the model.
+    /// </summary>
+    public bool ShowsViaGroupHeader
+    {
+        get => _showsViaGroupHeader;
+        internal set => SetProperty(ref _showsViaGroupHeader, value);
+    }
+
+    private bool _showsViaGroupHeader;
+
     public StackupLayerRowViewModel(StackupLayer layer, TechEditorViewModel owner)
     {
         Layer = layer;
@@ -314,6 +368,7 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
         StagedTanD           = Layer.TanD.ToString("0.######", Inv);
         StagedMur            = Layer.Mur.ToString("0.####", Inv);
         StagedSigmaSm        = Layer.SigmaSm.ToString("0.###e+0", Inv);
+        SelectedConductorMaterial = ConductorMaterials.Match(Layer.SigmaSm)?.Name ?? ConductorMaterials.Custom;
         IsGroundReference    = Layer.IsGroundReference;
         SelectedSheetAt      = Layer.SheetAt ?? ConductorSheetSurface.Bottom;
         SelectedPresentWith  = Layer.PresentWithLayer is { Length: > 0 } p ? p : SpanNone;

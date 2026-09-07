@@ -59,6 +59,71 @@ public static class TechValidation
                 "connects or what the board is made of. Add the copper and dielectric layers on the " +
                 "Stackup tab. (An imported Gerber set carries no stackup unless it ships a job file.)"));
 
+        // ── GI2 R-gi2-9 — the SKELETON state, reported once ──────────────────────────────────────
+        //
+        // The same rule as the one above, applied to the state GI2's skeleton creates: entries exist,
+        // in the right order, bound to their drawing layers, and every substrate VALUE is still unset.
+        // Without this, a six-layer skeleton engages every per-row check at once — eleven "non-positive
+        // thickness" problems and five "εr < 1" — which is the 22-message wall arriving by a different
+        // door, and it would make the skeleton a regression rather than a head start.
+        //
+        // R-gi2-11: the distinction that matters is UNSET versus WRONG. Exactly zero on a freshly
+        // imported row is unset and is summarised here; a NEGATIVE thickness, or a permittivity
+        // someone typed as 0.5, is wrong and is still reported on its own row below. That is also what
+        // makes the summary progressive (gate 5): filling in one dielectric's thickness and εr drops
+        // it out of both counts and raises nothing new.
+        var substrateRows = tech.Stackup.Layers.Where(l => l.Kind != StackupKind.Via).ToList();
+        int unsetThickness = substrateRows.Count(l => l.ThicknessDbu == 0);
+        int unsetEpsr = substrateRows.Count(l => l.Kind == StackupKind.Dielectric && l.Epsr == 0);
+        bool stackupIsSkeleton = substrateRows.Count > 0 && (unsetThickness > 0 || unsetEpsr > 0);
+        if (stackupIsSkeleton)
+        {
+            int conductorRows = substrateRows.Count(l => l.Kind == StackupKind.Conductor);
+            int dielectricRows = substrateRows.Count - conductorRows;
+            var still = new List<string>();
+            if (unsetThickness > 0)
+                still.Add($"{unsetThickness} still need{(unsetThickness == 1 ? "s" : "")} a thickness");
+            if (unsetEpsr > 0)
+                still.Add($"{unsetEpsr} dielectric(s) still need a relative permittivity and a loss tangent");
+
+            problems.Add(new(TechProblemArea.Stackup,
+                $"The stackup's structure is in place — {conductorRows} conductor(s) and {dielectricRows} " +
+                $"dielectric(s) — but its substrate values are not: {string.Join(" and ", still)}. Fill " +
+                "them in on the Stackup tab; nothing will simulate until they are set. (A Gerber import " +
+                "with no job file creates exactly this shape: the artwork states the layers and their " +
+                "order, and states nothing at all about the substrate.)"));
+        }
+
+        // ── GI3 R-gi3-8 — two entries with one name ───────────────────────────────────────────────
+        //
+        // SpanFromLayer, SpanToLayer and PresentWithLayer all resolve a stackup entry BY NAME, and the
+        // sets they resolve against are HashSets — so two conductors sharing a name collapse to one,
+        // every reference to that name becomes ambiguous, and until now nothing said a word about it.
+        // Hand-authored stackups grow duplicates easily: the natural names for the layers between six
+        // copper sheets repeat.
+        //
+        // Reported ONCE PER DUPLICATED NAME, naming every entry that carries it — this file's own
+        // one-problem-per-cause rule. A via spanning the ambiguous name is deliberately NOT reported as
+        // well: the name IS in the conductor set, so the span check below passes, and a second message
+        // about a consequence would bury the cause.
+        //
+        // Dielectrics and vias are held to the same rule even though nothing references either by name
+        // today. The cost of allowing a duplicate is not paid by whoever creates it; it is paid by
+        // whoever adds the next name-based reference.
+        foreach (var group in tech.Stackup.Layers
+                     .Select((l, i) => (Layer: l, Index: i))
+                     .GroupBy(e => e.Layer.Name, StringComparer.Ordinal)
+                     .Where(g => g.Count() > 1))
+        {
+            var entries = group.ToList();
+            problems.Add(new(TechProblemArea.Stackup,
+                $"{entries.Count} stackup entries share the name \"{group.Key}\" — " +
+                string.Join(", ", entries.Select(e => $"#{e.Index + 1} ({e.Layer.Kind})")) +
+                ". A via's span, a patterned dielectric's plate and every other name-based reference " +
+                "in a technology resolves to the FIRST entry with that name, so the rest are " +
+                "unreachable and nothing reports it. Give each entry its own name."));
+        }
+
         foreach (var sl in tech.Stackup.Layers)
         {
             foreach (var dl in sl.DrawingLayers)
@@ -72,7 +137,9 @@ public static class TechValidation
                 problems.Add(new(TechProblemArea.Stackup,
                     $"Stackup layer \"{sl.Name}\" is a conductor with non-positive conductivity ({sl.SigmaSm} S/m)."));
 
-            if (sl.Kind == StackupKind.Dielectric && sl.Epsr < 1)
+            // Epsr == 0 is UNSET (GI2's skeleton spelling) and is summarised above; anything else
+            // below 1 is a value someone entered that no material has.
+            if (sl.Kind == StackupKind.Dielectric && sl.Epsr < 1 && !(stackupIsSkeleton && sl.Epsr == 0))
                 problems.Add(new(TechProblemArea.Stackup,
                     $"Stackup layer \"{sl.Name}\" is a dielectric with εr < 1 ({sl.Epsr})."));
 
@@ -80,7 +147,11 @@ public static class TechValidation
             // vertical connector, not a horizontal layer at one z — it has no independent thickness of
             // its own (it traverses whatever dielectric(s) separate the conductors it spans), so the
             // "must have positive thickness" rule below applies only to Dielectric/Conductor entries.
-            if (sl.Kind != StackupKind.Via && sl.ThicknessDbu <= 0)
+            //
+            // R-gi2-11: zero is unset and is summarised above; negative is wrong and is always its
+            // own problem, because nobody imports a negative thickness — someone typed it.
+            if (sl.Kind != StackupKind.Via && sl.ThicknessDbu <= 0 &&
+                !(stackupIsSkeleton && sl.ThicknessDbu == 0))
                 problems.Add(new(TechProblemArea.Stackup,
                     $"Stackup layer \"{sl.Name}\" has non-positive thickness ({sl.ThicknessDbu} DBU)."));
 

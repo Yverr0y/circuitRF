@@ -1,5 +1,284 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## Phase GI3 — COMPLETE (2026-09-07)
+
+`docs/sonnet-briefs/brief-gi3-substrate-fields.md`, third of the GI series. Every other field on the
+Technology editor's Stackup tab carried guidance; the two a board import leaves blank — a conductor's
+`σ` and a plated via's `Wall` — had no tooltip, no preset and, after a Gerber import, no value. GI3
+answers both, puts the conductivity constants in one place, and adds the three structural checks that
+ride along on the same tab. Gated by `tests/Ui.Tests/Gi3SubstrateFieldsTests.cs` (37 tests).
+
+### 0. Two existing tests moved, and one that did not
+
+* **`ExtractionRefusalTests.ASignalConductorWithZeroSigma_…`** asserts the cross-section refusal
+  contains the literal `5.8e7`, and reading the number out of the table briefly turned it into
+  `5.8e+7` — because the interchange notes format with `0.###e+0`. Restored to `0.###e0`, and the two
+  spellings are **deliberately not unified**: this sentence is one the user reads back INTO the σ
+  field, and a number someone retypes should not carry a `+` they then have to decide about.
+* **`Gi2StackupSkeletonTests.AFreshSkeletonReportsOneStackupSummary_…`** counted THREE stackup
+  problems on a fresh skeleton and named the third in its own comment as *"the drill layer's plated via
+  has no wall thickness (GI3's field, unchanged here)"*. R-gi3-4 is that field, so the count is now
+  two and the third's absence is asserted by name rather than inferred from a number.
+* **`SharedLibraryConcurrencyTests.TheOnFocusRefresh_…` failed under full-suite load and passes
+  alone — NOT this phase's.** Nothing here touches `WorkspaceScanner`, `CellStat` or the referenced
+  library, and the assertion is `Assert.Equal(0, CellStat.Calls)` around a **process-global static
+  counter** (`CellStat._calls`, reset and read across a parallel suite). Any concurrently running test
+  that stats a cell in that window increments it. Recorded, not chased.
+
+### 1. Where the conductivity constants were, and where they are now
+
+The table is **`ConductorMaterials` in `src/Design/Layout/StackupDefaults.cs`** — silver 6.30e7,
+copper 5.80e7, gold 4.10e7, aluminium 3.77e7, nickel 1.43e7 S/m at 20 °C. Element conductivities out
+of any physics handbook; a laminate/dielectric table is refused permanently for the reason
+`GerberStackupMapping`'s own header gives, and that file states the refusal so the next person does
+not have to rediscover it.
+
+**Consolidated out of six sites in three files** (a comment-stripped source scan over all three is
+gate 2, so a seventh copy fails the build):
+
+| Was | Now reads |
+|---|---|
+| `PcbStackupMapping.DefaultCopperConductivitySm` — `const 5.8e7` | `=> ConductorMaterials.Copper.SigmaSm` (still a `public` member, because R-L4d-7 is what the default *is* and every message names it by that; it is no longer a second copy of the value) |
+| `StarterTechnologies.cs:86, :97` — `SigmaSm = 5.8e7` | `ConductorMaterials.Copper.SigmaSm` |
+| `StarterTechnologies.cs:185, :201, :229, :247` — `SigmaSm = 4.1e7` | `ConductorMaterials.Gold.SigmaSm` |
+| `CrossSectionExtractor.cs:370-377` — two refusal strings quoting `5.8e7`/`4.1e7` as advice | one `ConductivityHint` built from the table |
+
+That last one was not in the brief's list and is the one worth naming: it is **advice text**, so a copy
+there does not fail a run, it silently tells the user a number the editor's own preset list may have
+stopped agreeing with. Prose copies are the ones nothing catches.
+
+**Two copies were deliberately NOT consolidated, and neither is reachable from here:**
+
+* **`src/WBond/Materials.cs`** (`WireMaterials.Gold/Aluminium/Copper/Silver`) repeats four of these
+  numbers. `CircuitRF.WBond` references only `CircuitRF.Diagnostics` — not `CircuitRF.Design` — so it
+  cannot read the table without a new project reference, and it should not: a `WireMaterial` carries a
+  temperature coefficient and a density as well, and is evaluated at an **operating** temperature
+  (85 °C by default, 22-25 % below the 20 °C figure). Two tables, two purposes, and the shared subset
+  agrees. Do not "unify" them by pulling Design into WBond's reference graph.
+* **`src/Core/Devices/ComponentModelFactory.DefaultSubstrateSigmaSPerM`** is 5.8e7 for the same metal.
+  `src/Design` references `src/Core`, so the dependency runs the wrong way — the table cannot move to
+  Core without dragging the stackup vocabulary with it, and Core is the CIRCUIT design layer that
+  knows nothing about stackups by design. Left alone, recorded here so the next reader does not
+  "find" it and wire something backwards.
+
+### 2. The total-height readout: what it found on the stackups already in the tree
+
+`Stackup.TotalThicknessDbu` sums Conductor and Dielectric entries only (a via has no z band of its own
+— `PlanarExtractor.BuildStack` skips them and `TechValidation` asks no thickness of one). It is
+`[JsonIgnore]`d for `DrcRule.NeedsSecondRegion`'s reason: get-only properties serialize by default, and
+a derived total in every `.ctech` is noise that looks authoritative.
+
+**No shipped technology is wrong, but the five of them do not agree on what their own file name
+measures** — which is exactly the ambiguity the readout exists to surface:
+
+| Technology | Σ Conductor + Dielectric | What the file name names |
+|---|---|---|
+| `pcb-2layer_FR-4_70mil_1oz` | 1.848 mm (72.76 mil) | the **dielectric**: 1.778 mm = 70.00 mil |
+| `pcb-2layer_RO4350B_20mil_1oz` | 0.578 mm (22.76 mil) | the **dielectric**: 0.508 mm = 20.00 mil |
+| `pcb-2layer_RO4350B_30mil_1oz` | 0.832 mm (32.76 mil) | the **dielectric**: 0.762 mm = 30.00 mil |
+| `pcb-4layer_FR-4_62mil_1oz` | 1.5782 mm (62.13 mil) | the **total**: 62 mil, to 0.13 mil |
+| `mmic-GaAs_2LM_100um` | 112 µm | the **substrate**: 100 µm of GaAs |
+
+The three two-layer boards name their dielectric; the four-layer board names its overall thickness; the
+MMIC names its substrate. Every stackup adds up to what its own rows say — nothing is mis-transcribed
+— so **nothing was adjusted**, per the brief's instruction to report rather than quietly fix. None of
+the five carries a `BoardThicknessDbu`, so none of them raises the R-gi3-7 disagreement flag either.
+The reason to write it down is that a reader comparing "70mil" against a 72.76 mil readout will think
+one of them is a bug, and neither is.
+
+**`Stackup.BoardThicknessDbu`** is the additive nullable field the job file's `BoardThickness` is
+carried onto. It is set in **`GerberImport`, not in `GerberStackupMapping`** — deliberately: the
+mapping returns a null stackup on a drill-only set and on a job file whose stackup declares nothing
+electrical, and the board's thickness is a fact about the BOARD, not about whether rows were built for
+it. Nothing derives geometry from it; the stack a solver sees is still built from the entries alone.
+
+**The `.kicad_pcb` path was left alone.** `PcbStackupMapping.Build` takes an `overallThicknessMm` it
+also drops, and carrying it would be the same three lines — but the brief scopes GI3 to the Gerber
+import and lists neither `PcbStackupMapping` nor `PcbImport` in its Touches. It is a clean follow-up,
+not an oversight.
+
+The disagreement tolerance is **1 % of the stated board thickness, floored at 1 µm**, and is stated in
+`TechEditorViewModel.StackHeightTolerance`'s own doc comment: the percentage is what makes one rule
+work across a 100 µm die and a 1.6 mm board, the floor is what stops a rounding difference on a thin
+stack reading as a discrepancy. It is a **transcription** check, not a fabrication-tolerance one — a
+real board's thickness tolerance is far wider, and a stackup inside it still adds up.
+
+### 3. Duplicate stackup names: none existed, and one was about to
+
+**There are exactly five `.ctech` files in the repository** — the five shipped technologies under
+`src/Design/resources/technologies/` — and **not one of them carries a duplicate stackup entry name**.
+There are no `.ctech` fixtures under `testdata/`, `tests/` or `docs/`; every test that needs a
+technology builds one in C#. So nothing was load-bearing, nothing had to be renamed, and the new check
+is silent on everything the application ships. A test pins that (`NoShippedTechnologyHasADuplicate…`),
+because a shipped file that trips a validator the product added is a self-inflicted wound.
+
+**The one duplicate that DID exist was in the editor's own Add button.** `AddStackupLayer` wrote a flat
+`$"New {kind}"`, so two clicks on "＋ Conductor" produced two entries called "New Conductor" — which,
+the moment R-gi3-8 landed, is a reported problem the editor inflicts on itself the first time anyone
+uses it. Now numbered exactly as `NextFreeDrcRuleName` already numbers a new DRC rule. **This is the
+shape of the requirement worth remembering: adding a uniqueness check means auditing every path that
+MINTS a name, not just the files that hold them.**
+
+Why the check matters at all: `SpanFromLayer`, `SpanToLayer` and `PresentWithLayer` all resolve an
+entry **by name**, and `TechValidation` builds `conductorNames` as a `HashSet<string>`. Two conductors
+sharing a name collapse to one, every reference to that name silently resolves to the first, and the
+via-span check *passes* — which is why gate 7 asserts that a via spanning the ambiguous name produces
+**no second message**. The cause is reported once naming every entry that carries the name; the
+consequence is not reported at all.
+
+### 4. Via rows are outside the z order — a presentation change, and only that
+
+`Stackup.Layers` is documented "Ordered TOP to BOTTOM" and the editor bound it directly, so a Via entry
+— which has no position in that order — rendered as a row in the middle of the stack, and a via added
+before the conductors rendered **above the top copper**, reading as a layer sitting over the board.
+
+`ApplyStackupFilter` now projects the substrate entries in the model's own order and then the vias as
+their own labelled group. **`Stackup.Layers` itself is never touched**, and gate 8 asserts the
+Conductor/Dielectric sequence is identical before and after: that order IS z, and a reversed stack
+simulates cleanly and answers a different question (L4d's R-L4d-5, restated by `GerberStackupMapping`'s
+R-L4g-10). The group header is set by the owner as it builds the filtered list, and cleared on **every**
+row first — a header left set on a row the filter excluded reappears in the wrong place the moment the
+filter is cleared.
+
+**`MoveStackupLayer` needed two changes, not one.** R-gi3-10 asks only that the control be disabled on
+a via row (`CanMove`, bound to both buttons, and refused in the method as well — a disabled button is
+not an enforcement point). But the *same* premise makes the old unconditional swap wrong for substrate
+rows too: with `[Conductor, Via, Conductor]` in the list, moving the second conductor up swapped it
+with the **via**, changing the reading order and not one physical fact — and under the new grouping it
+would have appeared to do nothing at all. A substrate row now swaps with the next **substrate** entry,
+stepping over any vias between them; the vias' own indices do not move, which is correct precisely
+because those indices carry no meaning.
+
+### 5. The wall thickness: the default existed everywhere but where it was needed
+
+Every shipped PCB technology writes `WallThicknessDbu: 25000` and `StarterTechnologies` writes
+`Um(25)`, while a Gerber import minted its via entries with **no wall thickness at all** — so the one
+document in the product *guaranteed* to need the field was the only technology that failed the
+product's own validator on a field with a known answer (`"Via stackup layer … is Plated with no wall
+thickness."`). Now defaulted through `ViaDefaults.PlatedWallThicknessUm`, which the five shipped
+documents' own value also reads from.
+
+**Kept in MICRONS, not DBU.** An import's destination resolution is a parameter (`dbuPerMicron`), and a
+`25000` constant would be silently correct at the default and silently wrong at every other resolution
+— the same class of bug as reading a sweep mark without its scale. `ViaDefaults.PlatedWallThicknessDbu(int)`
+converts at the point of use.
+
+**The `.kicad_pcb` path does not have this hole and was left alone.** `PcbViaSpanMapping` mints its
+via entries with `Fill` unstated as well as `WallThicknessDbu`, and the validator's wall-thickness rule
+only fires on `Fill == ViaFillKind.Plated` — so a board import has never reported the problem a Gerber
+import reported on every run. It carries no fill model at all, which is a different (and quieter)
+question than the one GI3 was asked; noted here rather than changed, alongside the board-thickness
+follow-up in §2.
+
+Named as a default **once for the whole import**, not once per drill file: it is one fact about one
+process, and the per-file lines are already the busiest part of that report. A **non-plated** entry
+still gets no wall thickness and is not counted — wall thickness is a property of metal, which is the
+same rule that leaves `Fill` unstated on a hole that is not a conductor (GI1 R-gi1-2).
+
+The tooltip answers the question actually being asked, out of `TechModel.cs`'s own `ViaFillKind`
+documentation: it is a **plating** thickness, not the hole radius; 20-25 µm is typical; **above roughly
+1 GHz it barely matters**, because a wall a few µm thick is already many skin depths; for **thermal**
+it is a direct multiplier on conductive cross-section. Someone who reads that stops worrying about
+getting it exactly right for an S-parameter run, which is the useful outcome.
+
+## Phase GI2 — COMPLETE (2026-09-07)
+
+`docs/sonnet-briefs/brief-gi2-stackup-skeleton.md`, second of the GI series. An import that resolved
+six copper layers, worked out their order, bound each to a drawing layer and reported all of it — and
+then wrote a stackup holding two via entries and nothing else. GI2 emits the STRUCTURE the import had
+already computed and still refuses every VALUE that describes the substrate. Gated by
+`tests/Ui.Tests/Gi2StackupSkeletonTests.cs` (16 tests).
+
+### What a skeleton saves, in numbers, on the six-layer set
+
+**11 rows created against 21 numbers still required.** The created half is 6 `Conductor` entries — each
+named after its own drawing layer and bound to it, in the resolved top-to-bottom order — 5 positionally
+named `Dielectric` entries between them, and the drill layer's two span ends, which now name real
+conductors instead of nothing. The required half is 11 thicknesses, 5 εᵣ and 5 tanδ, every one of them
+a fabrication fact that no Gerber file states.
+
+That ratio is the honest measure of the phase: it does not shorten the list of numbers anyone has to
+type by one, and it was never going to — what it removes is having to hand-author eleven rows **in the
+right order with the right bindings** first, reproducing a result the importer already had.
+
+### `Epsr = 0` survived the tree, but it exposed a THIRD consumer the brief did not list
+
+Zero, not `StackupLayer.Epsr`'s own C# default of `1.0`, because 1.0 is **air** — a perfectly valid,
+entirely simulatable substrate. A skeleton shipping 1.0 would be worse than the empty stackup it
+replaces, because it would run to completion and answer a different question. Zero is already outside
+`TechValidation`'s `Epsr < 1` and outside both extractors' `Epsr >= 1` guards, so it is the spelling of
+"unset" this codebase already treats as unusable.
+
+Every consumer of `StackupLayer.Epsr` was checked. Nothing treated zero as air and nothing divided by
+it, but the survey turned up two things worth carrying:
+
+* **`PlanarExtractor` refused for the WRONG REASON, and that had to be fixed here.** With every
+  thickness zero every band sits at z = 0, so the first check to notice was the slab-height one, which
+  answered *"the signal conductor sits at or below the ground plane — either mark that conductor as a
+  ground reference, or check the stackup order"*. Every word of that is a wrong diagnosis of a stack
+  whose order is fine and whose thicknesses were simply never entered. A stackup whose **every**
+  non-via entry is zero thick is now refused at the top of `Extract`, before any geometry reasoning can
+  reach a misleading conclusion about it. Deliberately `All`, not `Any` — a partly filled stackup is a
+  different state with its own per-layer refusals and this must not widen into them.
+  `CrossSectionExtractor` needed nothing: its `ValidateStack` already names the zero-thickness layer.
+  (On the six-layer set the cross-section kernel refuses on multi-level geometry first, which is
+  correct and unrelated — a six-layer board is not one cross-section whatever its substrate says.)
+
+* **`SubstrateResolver` — the microstrip path — was a NEW silent-garbage route that this phase itself
+  opened.** It is the third consumer of a stackup and it had no εᵣ check at all, because until GI2
+  nothing could hand it an unset one: `Epsr` read as 1.0, which is air and computes. Its `hDbu <= 0`
+  guard catches a *fresh* skeleton, but a stackup whose thicknesses have been filled in and whose
+  permittivities have not reaches Kirschning-Jansen with εᵣ = 0, which returns a number. It now refuses
+  `er < 1` where the value is still attributable to a layer. **This is the finding worth carrying
+  forward**: the risk of the zero spelling is not the fresh document, which everything refuses, but the
+  half-edited one.
+
+The remaining consumers are inert on zero: `PcbWriter` writes `epsilon_r 0` to an exported
+`.kicad_pcb`, which is honest; `PlanarExtractor.UngroundedRefusal` prints it inside a refusal string;
+`TechnologyMerge`, `PatternedDielectric` and `StackupLayerRowViewModel` copy or render it.
+
+### The validator's message count: 18 → 3 (measured, not estimated)
+
+A skeleton has conductors, so `stackupIsSubstrateless` goes false and every per-row check re-engages at
+once. Measured directly by disabling the new summary and running `TechValidation.Analyze` on a freshly
+imported six-layer skeleton: **18 Stackup problems** — 11 "non-positive thickness", 5 "εr < 1", the
+ground-reference one and the via wall-thickness one. That is the same 22-message wall the
+substrateless rule was written to stop, arriving by a different door, and it would have made the
+skeleton a regression.
+
+With the summary: **3**, and each is a different fact — the skeleton summary, the missing ground
+reference (a real decision no artwork file can make, deliberately left on its own), and GI3's via wall
+thickness. Before GI2 the same set produced 1, but that one said the stackup was missing and the
+stackup was in fact missing.
+
+**The rule that makes it progressive is UNSET versus WRONG, and it is keyed on exact zero.** A
+thickness of `0` or an `Epsr` of `0` is unset and is counted in the summary; a negative thickness, or a
+permittivity someone typed as 0.5, is a value a person entered and keeps its own row. Filling in one
+dielectric drops it out of both counts and raises nothing new.
+
+### Two things the wiring made obvious only once it was written
+
+**The skeleton needs the technology, not just the layer keys.** `GerberStackupMapping.Build` took
+`IReadOnlyList<LayerKey>` and had no way to NAME a conductor entry after the drawing layer it binds.
+The names live only in the `Technology` that `BuildTechnology` returns two lines earlier, so the call
+now passes them (and the mask/paste/legend names) in. Naming a conductor "Conductor 3" beside a layer
+table calling it "Inner 2" would have been two documents rather than one.
+
+**Soldermask is genuinely a dielectric in the physical stack, which is exactly why leaving it out has
+to be SAID.** Its artwork states neither a thickness nor a permittivity, and adding an entry for it
+silently changes the conductor-to-conductor geometry a solver sees. One message names the layers and
+says they are artwork only.
+
+### What the artwork turned out to state about thickness — nothing
+
+Left on the table, honestly: **nothing.** The only thickness-shaped number anywhere in a no-job-file
+set is an Excellon tool diameter, which is a hole size. A job file's `BoardThickness` is still reported
+when one is present and is deliberately **not** distributed across the dielectrics — dividing one
+overall height by five unknown layers is a substrate invented under another name. Copper weight
+sometimes appears inside a job file stackup entry's material or notes text; reading it would be
+inferring a value from a name, which is the one thing `GerberStackupMapping`'s header forbids outright.
+
+
 ## Phase GI1 — COMPLETE (2026-09-07)
 
 `docs/sonnet-briefs/brief-gi1-report-says-less-than-it-knows.md`, first of the GI series

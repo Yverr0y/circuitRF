@@ -811,10 +811,23 @@ public class GerberImportTests : IDisposable
             m.Contains("loss tangent (1 dielectric(s) left unset)", StringComparison.Ordinal));
     }
 
-    // -- Gate 12: no job file, no stackup, and NO fabricated substrate -----------------------------
+    // -- Gate 12: no job file, and NO fabricated substrate ----------------------------------------
 
+    /// <summary>
+    /// <b>GI2 changed what this gate asserts, and the change is a narrowing, not a relaxation.</b>
+    /// It used to assert an EMPTY stackup, because "structure" and "values" were refused together.
+    /// GI2 (brief-gi2-stackup-skeleton.md) splits them: the number of conductors, their order and
+    /// their drawing-layer bindings were already resolved by the identity cascade and are now
+    /// emitted, while every quantity that describes the SUBSTRATE is still refused. R-L4d-6's rule
+    /// is unchanged and is what the second half of this test now holds — a test that asserted a
+    /// plausible thickness or permittivity here would be asserting the bug, because nothing
+    /// downstream would ever question it and it WOULD be simulated.
+    ///
+    /// <para>The full skeleton gate is <c>Gi2StackupSkeletonTests</c>; this keeps L4g's own check
+    /// that a set with no job file invents nothing.</para>
+    /// </summary>
     [Fact]
-    public void ASetWithNoJobFile_YieldsNoSubstrate_AndOneMessageSaysSo()
+    public void ASetWithNoJobFile_InventsNoSubstrate_AndOneMessageSaysSo()
     {
         var dir = Folder("nojob");
         Write(dir, "board.gtl", Artwork("Copper,L1,Top,Signal"));
@@ -822,15 +835,24 @@ public class GerberImportTests : IDisposable
 
         var result = Import(dir, _root, "nojob_import");
         var stackup = TechPersistence.LoadFromFile(result.TechPath!).Stackup;
+        var electrical = stackup.Layers.Where(l => l.Kind != StackupKind.Via).ToList();
 
-        // A test that asserted a plausible default here would be asserting the bug: an invented stackup
-        // is worse than none, because nothing downstream will ever question it and it WILL be simulated.
-        Assert.DoesNotContain(stackup.Layers,
-                              l => l.Kind is StackupKind.Conductor or StackupKind.Dielectric);
+        // Structure: two copper files, so two conductors with one dielectric between them.
+        Assert.Equal(
+            [StackupKind.Conductor, StackupKind.Dielectric, StackupKind.Conductor],
+            electrical.Select(l => l.Kind));
+
+        // Values: none. Zero thickness and Epsr = 0 are outside every extractor's own guard, which is
+        // what makes the result unsimulatable rather than merely wrong. Epsr's C# default of 1.0 would
+        // have been AIR — a valid substrate that runs.
+        Assert.All(electrical, l => Assert.Equal(0, l.ThicknessDbu));
+        Assert.Equal(0.0, electrical[1].Epsr);
+        Assert.Equal(0.0, electrical[1].TanD);
+
         Assert.Contains(result.Messages, m =>
-            m.Contains("no job-file stackup", StringComparison.Ordinal) &&
-            m.Contains("left EMPTY and no substrate was invented", StringComparison.Ordinal) &&
-            m.Contains("Before the EM path can run", StringComparison.Ordinal));
+            m.Contains("were created from the artwork", StringComparison.Ordinal) &&
+            m.Contains("NO SUBSTRATE WAS INVENTED", StringComparison.Ordinal) &&
+            m.Contains("cannot be simulated", StringComparison.Ordinal));
     }
 
     // -- Gate 13: order is DECLARED, or it is reported as a guess ----------------------------------
