@@ -733,6 +733,21 @@ reflog is the same idea.
 with a title the designer wrote. This is what a history browser shows, what is shared, and what is
 pushed.
 
+**Status: BUILT 2026-09-06** · `brief-revision-control-7-commit-and-history.md` · `WorkspaceCommit`,
+`CommitMessage`, `RestoreProvenance`, `HistoryBrowser` and `DocumentClash` in `src/Design/Revision/`,
+the Versions panel in `src/Ui`, `history commit`/`history versions` in `src/Cli`, gated by
+`tests/Ui.Tests/Revision/CommitAndHistoryTests.cs`. **Three things the build settled that this section
+did not say.** §5.5's restored-from line **cannot be derived** from content — a commit that went back to
+Tuesday is indistinguishable from one that undid three days by hand — so the restore writes it down
+(`RestoreProvenance`) and the commit reports and clears it. **The commit must write the repository's
+SHARED index and a checkpoint still must not**: the index is defined relative to `HEAD`, so the moment
+`HEAD` names a commit and the index is empty, git's own porcelain reads the whole design as deleted and
+`git checkout` refuses to run — which breaks §4.1's promise about the escape hatch, and is invisible from
+inside circuitRF. And **"does this workspace have a history" became two questions**: §5.7's off/on
+transition was gated on the restore-point count alone, so a workspace holding only versions recorded no
+transition and its off period rendered as a quiet interval — §5.7's own failure, reached from the other
+side.
+
 ### 5.2a Where checkpoints live, and which journeys they survive *(new in rev 3)*
 
 §5.1 says checkpoints go on "a reference outside the branch the designer sees", which rev 2 left as a
@@ -1345,6 +1360,13 @@ and would make both worse.
 
 This section exists because the failure mode of this whole idea is importing software-engineering
 workflow wholesale into a domain that cannot support it.
+
+**Status: BUILT 2026-09-06** (§6.1's user-facing half, §6.3, §6.4) ·
+`brief-revision-control-7-commit-and-history.md` · `DocumentClash` in `src/Design/Revision/`.
+**One thing the build settled:** because `.gitattributes` marks the five types `-merge`, git writes **no
+conflict markers** for them — so there is nothing in the working tree to find, and the two versions live
+only in the index's unmerged entries (stage 2 and stage 3, read with `ls-files -u`). An implementation
+that scanned files for markers would report all-clear on every clash it exists for.
 
 **6.1 There is no merge for a layout, and circuitRF must not pretend there is.** A three-way text
 merge of a polygon's vertex list can produce geometry that is invalid, or valid and wrong, while

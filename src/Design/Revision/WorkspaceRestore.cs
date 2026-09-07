@@ -165,6 +165,16 @@ public static class WorkspaceRestore
             // ── 7. The marker goes after the last file ────────────────────────────────────────────
             RestoreMarker.Clear(git.WorkspaceRoot);
 
+            // RC-7 R-rc7-6. What the tree was brought back FROM, for the next commit to name.
+            //
+            // It cannot be derived afterwards: from the content alone, a commit that went back to
+            // Tuesday is indistinguishable from one that undid three days of work by hand, and those
+            // are different decisions. A failure to write it is not a reason to fail the restore —
+            // the workspace holds what was asked for, and all that is lost is one line in a message
+            // that may never be written.
+            RestoreProvenance.Write(git.WorkspaceRoot,
+                                    new RestoredState(target.Label, target.TakenUtc));
+
             notes.Add(RestorePointMessages.Restored(target.Label, written, removed));
             return new RestoreResult(true, written, removed, before.Point, notes);
         }

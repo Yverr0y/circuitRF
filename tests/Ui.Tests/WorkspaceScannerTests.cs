@@ -455,6 +455,49 @@ public class WorkspaceScannerTests : IDisposable
         Assert.DoesNotContain("readme.source", folderFiles);
     }
 
+    /// <summary>
+    /// <b>The four things circuitRF itself writes beside a design are not documents, and the tree does
+    /// not show them.</b>
+    ///
+    /// <para>The <c>.cws</c> has been hidden since the beginning for this reason; the other four
+    /// arrived with the workspace-file split and revision control and are the same kind of thing.
+    /// <c>.cwsuser</c> is per-USER state — panel layout, open tabs, colour theme — which is precisely
+    /// why it was split out of the <c>.cws</c>. <c>.gitignore</c> and <c>.gitattributes</c> are policy:
+    /// what is kept, and what is never merged. <c>.git</c> is the history itself, hundreds of
+    /// two-character object directories that would swamp the tree — and rendering it would make
+    /// deleting a history look like an ordinary tree operation, which <c>revision-control.md</c> §5.7
+    /// deliberately keeps outside circuitRF.</para>
+    ///
+    /// <para><b>This predicate is an explicit set, not a dotfile rule</b>, so each of these has to be
+    /// named or it renders as a loose file node. That is what the test is for.</para>
+    /// </summary>
+    [Fact]
+    public void Scan_WorkspaceOwnFilesAndTheHistoryFolder_AreNotInTheTree()
+    {
+        string cellDir = MakeCell("MyCell");
+        AddView(cellDir, ViewType.Schematic, "a.csch");
+
+        File.WriteAllText(Path.Combine(_root, ".cwsuser"), "{}");
+        File.WriteAllText(Path.Combine(_root, ".gitignore"), "*.npy\n");
+        File.WriteAllText(Path.Combine(_root, ".gitattributes"), "*.clay -merge\n");
+        File.WriteAllText(Path.Combine(_root, "notes.txt"), "");
+
+        // A history folder with the shape of a real one, so the assertion is about the FOLDER rather
+        // than about it happening to be empty.
+        Directory.CreateDirectory(Path.Combine(_root, ".git", "objects", "ab"));
+        Directory.CreateDirectory(Path.Combine(_root, ".git", "refs", "crf", "restore"));
+        File.WriteAllText(Path.Combine(_root, ".git", "HEAD"), "ref: refs/heads/main\n");
+
+        var tree = WorkspaceScanner.Scan(_root);
+
+        var names = tree.Children.Select(n => n.Name).ToList();
+        Assert.Contains("notes.txt", names);
+        Assert.Contains("MyCell", names);
+
+        foreach (string hidden in (string[])[".cws", ".cwsuser", ".gitignore", ".gitattributes", ".git"])
+            Assert.DoesNotContain(hidden, names);
+    }
+
     [Fact]
     public void Scan_HiddenFileInKnownFiles_StillVisible()
     {

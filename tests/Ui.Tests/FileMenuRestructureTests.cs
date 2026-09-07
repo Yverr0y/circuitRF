@@ -119,7 +119,12 @@ public class FileMenuRestructureTests
         // revision-control.md §5.3 describes it as something the user asks for and that is where a
         // user looking for it will be. It is NOT a save — it keeps the state you are in — which is
         // why it comes after the four and before the separator rather than among them.
-        "{Binding SaveMenuHeader}", "Save Schematic _As…", "Save S_ymbol As…", "Save _Layout As…", "Save Workspace _As…", "_Keep This State…", "---",
+        //
+        // RC-7 R-rc7-1 puts Keep This Version… directly under it, and the two are deliberately NOT
+        // merged into one command: a restore point is a safety-net entry nobody else ever sees, and a
+        // version is what the designer titles and sends out. §5's whole argument is that one history
+        // cannot serve both, so one menu item cannot either.
+        "{Binding SaveMenuHeader}", "Save Schematic _As…", "Save S_ymbol As…", "Save _Layout As…", "Save Workspace _As…", "_Keep This State…", "Keep This _Version…", "---",
         // Sharing a workspace with someone on another machine (owner request, 2026-08-15) — placed
         // under Save Workspace As… behind its own separator, because it is a different KIND of
         // save: it writes one portable file, not the workspace itself.
@@ -142,7 +147,7 @@ public class FileMenuRestructureTests
     [
         "New", "New Workspace…", "New Window", "---",
         "Open Workspace…", "Open Workspace in New Window…", "Open Recent", "Open", "---",
-        "Save", "Save Schematic As…", "Save Symbol As…", "Save Layout As…", "Save Workspace As…", "Keep This State…", "---",
+        "Save", "Save Schematic As…", "Save Symbol As…", "Save Layout As…", "Save Workspace As…", "Keep This State…", "Keep This Version…", "---",
         "Add Cell to Workspace…", "Reference Workspace…", "---",
         "Archive Workspace…", "Unarchive Workspace…", "---",
         "Import", "Export", "Manage PDKs…", "---",
@@ -706,11 +711,14 @@ public class FileMenuRestructureTests
     {
         foreach (var children in new[] { InWindowFileChildren(), NativeFileChildren() })
         {
-            // RC-5 R-rc5-4c put Keep This State… at the foot of the save band. It is not a save, so it
-            // does not match on the word — but it IS the last item of that group, and the property
-            // under test is that a separator closes the group before Import/Export opens the next.
+            // RC-5 R-rc5-4c put Keep This State… at the foot of the save band, and RC-7 R-rc7-1 put
+            // Keep This Version… under it. Neither is a save, so neither matches on the word — but the
+            // pair IS the end of that group, and the property under test is that a separator closes it
+            // before Import/Export opens the next.
             var lastSaveIdx   = children.ToList().FindLastIndex(
-                n => n.Header.Contains("Save") || n.Header.Contains("Keep This State"));
+                n => n.Header.Contains("Save")
+                  || n.Header.Contains("Keep This State")
+                  || n.Header.Contains("Version…"));
             var importIdx     = children.ToList().FindIndex(n => n.Header is "_Import" or "Import");
             Assert.True(importIdx > lastSaveIdx);
             Assert.True(children[lastSaveIdx + 1].IsSeparator,

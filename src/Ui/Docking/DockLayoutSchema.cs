@@ -303,9 +303,22 @@ public static class DockPanelIds
     /// </summary>
     public const string RestorePoints = "RestorePoints";
 
+    /// <summary>
+    /// RC-7's history browser — the versions a designer kept deliberately
+    /// (<c>docs/design/revision-control.md</c> §5.2, R-rc7-9).
+    ///
+    /// <para><b>A panel of its own, beside <see cref="RestorePoints"/> and never merged with it.</b>
+    /// The two lists have different authors, different granularity and different audiences: this one
+    /// is what a designer wrote down on purpose and what gets shared; that one is the dense,
+    /// automatic, local safety net. Conflating them produces a log no human will read — which then
+    /// makes the safety net useless too, because nobody looks at it. They may sit side by side, and
+    /// the shipped layouts leave both closed for the reason the restore-point panel is closed.</para>
+    /// </summary>
+    public const string VersionHistory = "VersionHistory";
+
     public static readonly string[] All =
     [
         ProjectTree, Palette, Properties, Analyses, Messages, Drc, WBondProfile, WBondInductance,
-        RestorePoints,
+        RestorePoints, VersionHistory,
     ];
 }

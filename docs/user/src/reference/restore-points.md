@@ -33,7 +33,12 @@ A **restore point** is the whole workspace, as it stood at one moment: every cel
 every layout, the workspace's own configuration. Going back to one puts those files back the way they
 were.
 
-It is not undo. **Undo** is per-editor and per-keystroke, it covers the last few minutes inside the
+It is also not a [version](versions.html). A version is something you decide on and give a title to;
+it travels with a copy of the workspace and it is what you send out. A restore point is a safety net
+that never leaves this machine. The two are kept in separate panels on purpose — a list with three
+hundred automatic entries and four deliberate ones mixed among them is a list nobody reads.
+
+It is not undo either. **Undo** is per-editor and per-keystroke, it covers the last few minutes inside the
 document you are looking at, and it ends when you close the window. A restore point is
 workspace-wide, action-grained and durable — it is still there next week. The two are deliberately
 unrelated, and between them they cover the whole range: undo for the last few minutes in one view,

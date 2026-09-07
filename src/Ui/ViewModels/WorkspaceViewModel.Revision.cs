@@ -14,8 +14,14 @@ using CircuitRF.Ui.Views.Dialogs;
 namespace CircuitRF.Ui.ViewModels;
 
 /// <summary>
-/// <b>RC-5's window half</b> — the two Stage 2 affordances, the two automatic boundaries, and going
-/// back (<c>docs/design/revision-control.md</c> §5.3, §5.8; R-rc5-4c, R-rc5-12, R-rc5-21, R-rc5-22).
+/// <b>The window half of RC-5, RC-6 and RC-7</b> — the affordances, the two automatic boundaries,
+/// going back, and the explicit commit (<c>docs/design/revision-control.md</c> §5.2, §5.3, §5.8;
+/// R-rc5-4c, R-rc5-12, R-rc5-21, R-rc5-22, R-rc7-1, R-rc7-17).
+///
+/// <para><b>Two commands and two panels, never one of each</b> (R-rc7-9). Keep This State… writes a
+/// restore point; Keep This Version… writes a version the designer titled. They look similar and are
+/// not: one is a safety-net entry nobody else ever sees, the other is what gets shared. Merging the
+/// commands would merge the histories, which §5 exists to prevent.</para>
 ///
 /// <para><b>Kept in its own file because none of it is about editing a design.</b> Everything that
 /// decides anything lives below the firewall in <see cref="WorkspaceHistoryService"/> and the
@@ -189,6 +195,94 @@ public partial class WorkspaceViewModel
             state == RecordingState.On ? "" : HoldMessages.IndicatorDetailFor(state));
 
         RefreshRecordingIndicator();
+    }
+
+    // ── RC-7: keeping a version, and the browser (§5.2, §5.5, §6.3) ───────────────────────────────
+
+    /// <summary>
+    /// File ▸ <b>Keep This Version…</b> — R-rc7-1's explicit commit.
+    ///
+    /// <para><b>Beside Keep This State…, and the pair is deliberate.</b> They are different operations
+    /// with different audiences: a save-point is a safety net entry nobody else ever sees, and a
+    /// version is what a designer writes down on purpose and sends out. Merging the two commands would
+    /// merge the two histories, which §5 exists to prevent.</para>
+    ///
+    /// <para><b>Two things the dialog says before the button is pressed.</b> Whether this version will
+    /// record having been brought back from an earlier state (R-rc7-6) — discovering that in the list
+    /// afterwards is how a history comes to read as a change of mind — and §8.3's sentence about
+    /// rewriting (R-rc7-21), which is stated and never offered.</para>
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanCloseWorkspace))]
+    private async Task KeepThisVersion(Window? owner)
+    {
+        if (WorkspaceRootDir is not { } root) return;
+
+        var dialog = new KeepThisVersionDialog();
+        dialog.Present(RestoreProvenance.Read(root) is { } state
+                           ? new RestoredFrom(state.Label, state.TakenUtc)
+                           : null);
+
+        var choice = owner is null
+            ? new KeepThisVersionChoice(null)
+            : await dialog.ShowDialog<KeepThisVersionChoice?>(owner);
+
+        if (choice is null) return;
+
+        History.KeepVersion(root, choice.Title);
+        RefreshVersionHistoryPanel();
+    }
+
+    /// <summary>
+    /// Rebuilds the version list. <b>Called whenever a version is kept and on every workspace
+    /// switch</b> — the panel holds no list of its own, for the reason the restore-point panel holds
+    /// none.
+    /// </summary>
+    private void RefreshVersionHistoryPanel()
+    {
+        if (_factory.VersionHistoryTool is not { } tool) return;
+
+        tool.KeepVersionRequested ??= () => _ = KeepThisVersion(Views.WorkspaceLocator.WindowFor(this));
+        tool.GoBackRequested      ??= version => _ = GoBackToVersion(version);
+
+        if (!_versionSelectionWired)
+        {
+            _versionSelectionWired = true;
+            tool.SelectionChanged += version =>
+                tool.SetChanges(version is null ? [] : History.ChangesIn(WorkspaceRootDir, version));
+        }
+
+        var state = History.State(WorkspaceRootDir);
+        tool.SetRows(
+            History.VersionRows(WorkspaceRootDir),
+            WorkspaceRootDir is not null,
+            state == RecordingState.On ? "" : HoldMessages.IndicatorDetailFor(state));
+    }
+
+    /// <summary>Subscribed once. A handler added on every refresh would fire once per refresh, which
+    /// is silent and gets worse the longer the session runs.</summary>
+    private bool _versionSelectionWired;
+
+    /// <summary>
+    /// R-rc7-17. <b>Going back to a version is RC-5's restore with that version's tree as the
+    /// source</b> — there is no second restore implementation, so everything R-rc5-12c guarantees
+    /// applies unchanged, including the checkpoint of the state being replaced.
+    ///
+    /// <para>Both halves of R-rc5-12b belong here for the same reason they do for a restore point:
+    /// unsaved work is offered up first, and the open documents are reloaded with their undo stacks
+    /// discarded afterwards.</para>
+    /// </summary>
+    public async Task GoBackToVersion(HistoryVersion version)
+    {
+        var window = Views.WorkspaceLocator.WindowFor(this);
+        if (WorkspaceRootDir is not { } root) return;
+
+        if (window is not null && HasAnyDirtyWork(includeFloated: false)
+            && !await PromptSaveBeforeClose(window, "going back to an earlier version", includeFloated: false))
+            return;
+
+        if (History.GoBackToVersion(root, version) is not { Ok: true }) return;
+
+        await ReloadWorkspaceAfterFilesChangedUnderneath();
     }
 
     // ── Going back (§5.8) ─────────────────────────────────────────────────────────────────────────

@@ -172,12 +172,30 @@ public static class WorkspaceScanner
         return root;
     }
 
-    /// <summary>True for the reserved generated-cells folder (R-L5-3), excluded from the ordinary
+    /// <summary>
+    /// True for a folder the tree never walks into.
+    ///
+    /// <para>The reserved generated-cells folder (R-L5-3), which is excluded from the ordinary
     /// per-directory scan and rendered instead as the <see cref="NodeKind.GeneratedCellsGroup"/>
-    /// synthetic group above.</summary>
+    /// synthetic group above — and <c>.git</c>, which is where the workspace's history lives.</para>
+    ///
+    /// <para><b><c>.git</c> is not a design folder and must not read as one.</b> It holds hundreds of
+    /// two-character directories of compressed objects; rendered in the tree it would swamp the
+    /// workspace, invite a designer to open something meaningless, and — worse — make deleting the
+    /// history look like an ordinary tree operation. <c>revision-control.md</c> §5.7 is explicit that
+    /// removing a history is deleting one plainly-named folder <i>in a file manager</i>, deliberately
+    /// outside circuitRF: there is no "delete all history" command at any stage, and a tree node with
+    /// a Delete on its context menu would be one.</para>
+    /// </summary>
     private static bool IsReservedTreeDir(string dir)
-        => string.Equals(Path.GetFileName(dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
-            CircuitRF.Ui.Layout.PCells.GeneratedCellStore.ReservedFolderName, StringComparison.OrdinalIgnoreCase);
+    {
+        string name = Path.GetFileName(
+            dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+        return string.Equals(name, CircuitRF.Ui.Layout.PCells.GeneratedCellStore.ReservedFolderName,
+                             StringComparison.OrdinalIgnoreCase)
+            || string.Equals(name, ".git", StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>Every absolute path the tree already renders, as <see cref="PathKey"/> keys.</summary>
     private static HashSet<string> CollectAbsolutePaths(ProjectTreeNode node)
@@ -613,6 +631,19 @@ public static class WorkspaceScanner
             // dotfile rule, so a file circuitRF itself drops has to be named here or it renders as a
             // loose file node in every tree and travels into every archive.
             || string.Equals(name, CircuitRF.Design.Workspace.MoveRedirects.FileName, StringComparison.OrdinalIgnoreCase)
+            // The three files revision control drops beside a design (RC-1, RC-3). Same argument
+            // again, and it is the one this predicate keeps being extended for: this is an explicit
+            // set, not a dotfile rule, so a file circuitRF itself writes into a workspace has to be
+            // named here or it renders as a loose file node.
+            //
+            // The .cwsuser is the panel layout and colour theme — per-USER state, not the design's,
+            // which is exactly why it was split out of the .cws in the first place. The .gitignore
+            // and .gitattributes are POLICY: what is kept and what is never merged. All three are
+            // circuitRF's answers rather than a designer's documents, and the .cws beside them has
+            // been hidden since the beginning for the same reason.
+            || string.Equals(name, CircuitRF.Design.Workspace.WorkspaceUserPersistence.FileName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(name, CircuitRF.Design.Revision.WorkspacePolicyFiles.GitIgnoreName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(name, CircuitRF.Design.Revision.WorkspacePolicyFiles.GitAttributesName, StringComparison.OrdinalIgnoreCase)
             || string.Equals(Path.GetExtension(path), ".source", StringComparison.OrdinalIgnoreCase);
     }
 

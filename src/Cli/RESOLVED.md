@@ -6,6 +6,28 @@ what the design says.
 
 ---
 
+
+## RC-7 — `history commit` and `history versions` (2026-09-06)
+
+`brief-revision-control-7-commit-and-history.md` R-rc7-22, §5.3d. Two nouns on the existing verb, each
+calling the `src/Design` function the GUI's own command calls. Gated by
+`tests/Ui.Tests/Revision/CommitAndHistoryTests.cs`, which compares the commit the process makes against
+the one the window's command makes — same tree, same message, byte for byte.
+
+**Four refusals, and three of them are circuitRF's rather than git's.** Held, off and
+no-history-here are states circuitRF decided; only the fourth (nothing to commit) comes out of the
+recording path, and it is decided by comparing trees rather than by matching git's English. Nothing here
+translates a git failure locally — R-rc7-19/R-rc7-20 mean a translation living only in one surface is a
+translation the other does not have, and the gate scans for a read of `StdErr` in either.
+
+**`versions` is a different list from `list`, and the separation is the point** (R-rc7-9). `list` is the
+safety net; `versions` is the narrative. An off period appears in `versions` as its own row carrying its
+dates and its reason, never as an ordinary interval between two versions.
+
+**`--changes <version>` reports at the granularity of DOCUMENTS.** Which cells differ, not which lines
+inside one — that is the design layer's question, and a per-document comparison needs a reader per
+document type, which is a different piece of work.
+
 ## AUT-1 — `--json`: structured results and structured failures (2026-09-05)
 
 `brief-automation-1-structured-output.md`. Every verb gained `--json`; nothing that does not pass the

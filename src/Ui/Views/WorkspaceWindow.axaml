@@ -79,6 +79,7 @@
                         <NativeMenuItem Header="Save Layout As…"     Command="{Binding SaveLooseLayoutCommand}"     CommandParameter="{Binding $parent[Window]}"/>
                         <NativeMenuItem Header="Save Workspace As…"  Command="{Binding SaveWorkspaceAsCommand}"   CommandParameter="{Binding $parent[Window]}" Gesture="Meta+Shift+S"/>
                         <NativeMenuItem Header="Keep This State…"    Command="{Binding KeepThisStateCommand}"     CommandParameter="{Binding $parent[Window]}"/>
+                        <NativeMenuItem Header="Keep This Version…"  Command="{Binding KeepThisVersionCommand}"   CommandParameter="{Binding $parent[Window]}"/>
                         <NativeMenuItemSeparator/>
                         <NativeMenuItem Header="Add Cell to Workspace…" Command="{Binding AddCellToWorkspaceCommand}" CommandParameter="{Binding $parent[Window]}"/>
                         <NativeMenuItem Header="Reference Workspace…" Command="{Binding ReferenceWorkspaceCommand}" CommandParameter="{Binding $parent[Window]}"/>
@@ -207,6 +208,7 @@
                                     <NativeMenuItem Header="Messages"     Command="{Binding ShowToolPanelCommand}" CommandParameter="Messages"/>
                                     <NativeMenuItem Header="DRC"          Command="{Binding ShowToolPanelCommand}" CommandParameter="Drc"/>
                                     <NativeMenuItem Header="Restore Points" Command="{Binding ShowToolPanelCommand}" CommandParameter="RestorePoints"/>
+                                    <NativeMenuItem Header="Versions"     Command="{Binding ShowToolPanelCommand}" CommandParameter="VersionHistory"/>
                                     <NativeMenuItem Header="Wire Profile"     Command="{Binding ShowToolPanelCommand}" CommandParameter="WBondProfile"/>
                                     <NativeMenuItem Header="Array Inductance" Command="{Binding ShowToolPanelCommand}" CommandParameter="WBondInductance"/>
                                 </NativeMenu>
@@ -450,6 +452,16 @@
                           CommandParameter="{Binding $parent[Window]}"
                           ToolTip.Tip="Keep this workspace as it is now, with a line saying what it is, so you can come back to it.">
                     <MenuItem.Icon><mi:MaterialIcon Kind="BookmarkOutline" Width="16" Height="16"/></MenuItem.Icon>
+                </MenuItem>
+                <!-- revision-control.md §5.2, RC-7 R-rc7-1. Beside Keep This State… and deliberately
+                     NOT merged with it: one writes a safety-net entry nobody else ever sees, the other
+                     records a version the designer titled and sends out. Two commands, because they
+                     are two histories (R-rc7-9). -->
+                <MenuItem Header="Keep This _Version…"
+                          Command="{Binding KeepThisVersionCommand}"
+                          CommandParameter="{Binding $parent[Window]}"
+                          ToolTip.Tip="Record this workspace as a version, under a title you write — what you come back to, and what you send out.">
+                    <MenuItem.Icon><mi:MaterialIcon Kind="TagOutline" Width="16" Height="16"/></MenuItem.Icon>
                 </MenuItem>
                 <Separator/>
                 <MenuItem Header="Add _Cell to Workspace…"
@@ -743,6 +755,13 @@
                     <MenuItem Header="Restore _Points"
                               Command="{Binding ShowToolPanelCommand}" CommandParameter="RestorePoints">
                         <MenuItem.Icon><mi:MaterialIcon Kind="History" Width="16" Height="16"/></MenuItem.Icon>
+                    </MenuItem>
+                    <!-- revision-control.md §5.2, RC-7 R-rc7-9. A panel of its own beside the restore
+                         points and never merged with it: the narrative and the safety net have
+                         different authors, different granularity and different audiences. -->
+                    <MenuItem Header="_Versions"
+                              Command="{Binding ShowToolPanelCommand}" CommandParameter="VersionHistory">
+                        <MenuItem.Icon><mi:MaterialIcon Kind="SourceCommit" Width="16" Height="16"/></MenuItem.Icon>
                     </MenuItem>
                     <!-- wbond.md §10.1 — the two wBond panels, which follow the active layout. Not in
                          either shipped default layout: most designs have no wirebonds. -->

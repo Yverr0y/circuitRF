@@ -1,5 +1,51 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+
+## RC-7 — the version history panel, and the four things the project tree stopped showing (2026-09-06)
+
+`brief-revision-control-7-commit-and-history.md`. The window half: `KeepThisVersionDialog`,
+`VersionHistoryTool` + its view, `WorkspaceHistoryService`'s narrative half, and
+`WorkspaceViewModel.Revision`'s `KeepThisVersion` command. The mechanism findings are in
+`src/Design/RESOLVED.md`.
+
+### A Dock `Tool` needs an explicit `DataTemplate`, and RC-5's panel never had one
+
+`ViewLocator.Match` returns true only for a `ViewModelBase`, and `Dock.Model.Mvvm.Controls.Tool` is not
+one — so a tool panel with no row in `App.axaml`'s `Application.DataTemplates` resolves to nothing at
+all. **`RestorePointsTool` had been in that state since RC-5 shipped**: the view existed, the view model
+existed, the panel opened, and it drew nothing. Found while adding the second panel, which would have
+had the identical defect. Both are registered now, and anything else deriving from `Tool` needs the same
+row.
+
+### Two commands beside each other, and they are not one command
+
+File ▸ Keep This State… and File ▸ Keep This Version… look like the same operation and are not: one
+writes a safety-net entry nobody else ever sees, the other records a version the designer titled and
+sends out. Merging the commands would merge the histories, which `revision-control.md` §5 exists to
+prevent — so they are two menu items, two panels, and two lists that never interleave.
+
+### The §8.3 sentence is in an `Expander`, and that placement is the whole of the judgement
+
+R-rc7-21 requires the escape hatch stated in plain language beside the action a user would look for it
+from, and forbids a button. Putting it inline in the dialog would make the ordinary case — keeping a
+version — read as a warning about something most designers never encounter. Collapsed, it is one line of
+header a designer reads only when they are looking for exactly that answer, and it is still *there*
+rather than only in a manual. The CLI's `history commit` prints it on success for the same reason: that
+verb is where the equivalent user is standing.
+
+### The project tree now hides `.git`, `.cwsuser`, `.gitignore` and `.gitattributes`
+
+Owner request, same session. `WorkspaceScanner.IsHiddenTreeFile` is an **explicit set, not a dotfile
+rule** — its own header has said so since SL4 — so each of the three files had to be named or it rendered
+as a loose file node in every tree and travelled into every archive. `.git` goes in
+`IsReservedTreeDir` beside `.generated-cells`, which is the one place every walk passes through.
+
+Beyond the clutter, `.git` had a second reason: rendering it as a folder would make **deleting a history
+look like an ordinary tree operation**, with a Delete on its context menu. `revision-control.md` §5.7 is
+explicit that removing a history is deleting one plainly-named folder *in a file manager*, deliberately
+outside circuitRF — there is no "delete all history" command at any stage, and a tree node would be one.
+Held by `WorkspaceScannerTests.Scan_WorkspaceOwnFilesAndTheHistoryFolder_AreNotInTheTree`.
+
 ## RC-2 — refusing the edit rather than the write, and the twenty-seven places a guard could have gone (2026-09-06)
 
 A cell reached through a `ws://` reference is not editable through the window that merely references

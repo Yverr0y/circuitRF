@@ -1,0 +1,51 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="CircuitRF.Ui.Views.Dialogs.KeepThisVersionDialog"
+        Title="Keep This Version"
+        Width="640" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False">
+
+  <StackPanel Margin="16" Spacing="10">
+
+    <TextBlock Text="Record this workspace as a version, under a title you write. It is what you
+                     come back to, and what you send out."
+               TextWrapping="Wrap" />
+
+    <StackPanel Spacing="4">
+      <TextBlock Text="What is this version?" FontSize="11" Opacity="0.75" />
+      <TextBox x:Name="TitleBox" Watermark="Output match retuned for 3.5 GHz" />
+      <TextBlock FontSize="10" Opacity="0.6" TextWrapping="Wrap"
+                 Text="Six weeks from now the title is the only thing that tells one version from
+                       another. Write what changed, not what you did." />
+    </StackPanel>
+
+    <!-- R-rc7-6. A restore since the last version is recorded in this one, and the designer is told
+         so BEFORE they press the button rather than discovering it in the list afterwards. Two
+         consecutive versions where the second reverts the first read as a change of mind with no
+         record of the moment; this is the line that stops that. -->
+    <Border x:Name="RestoredPanel" IsVisible="False"
+            Background="{DynamicResource SystemChromeLowColor}"
+            CornerRadius="3" Padding="10,8">
+      <TextBlock x:Name="RestoredText" TextWrapping="Wrap" FontSize="11" />
+    </Border>
+
+    <!-- R-rc7-21. §8.3's escape hatch, in plain language, beside the action a user would look for it
+         from. History rewriting is the only real remedy for something already recorded, circuitRF
+         must not offer a button for it, and a user who genuinely needs it should be TOLD rather than
+         left to conclude the application has no answer — which is how somebody ends up deleting the
+         whole history and losing everything else with it.
+
+         Collapsed by default: it is the answer to a question most designers never ask, and putting it
+         in front of every version would make the ordinary case read as a warning. -->
+    <Expander Header="What if something should not have gone in?" FontSize="11">
+      <TextBlock x:Name="RewritingText" TextWrapping="Wrap" FontSize="11" Margin="0,4"
+                 MaxWidth="560" HorizontalAlignment="Left" />
+    </Expander>
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button x:Name="CancelButton" Content="Cancel" Click="OnCancel" IsCancel="True" />
+      <Button x:Name="KeepButton"   Content="Keep"   Click="OnKeep"   IsDefault="True" />
+    </StackPanel>
+  </StackPanel>
+</Window>

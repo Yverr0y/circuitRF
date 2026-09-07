@@ -84,6 +84,10 @@ public class CircuitRfDockFactory : Factory
     /// <summary>RC-5's restore-point list (R-rc5-4c).</summary>
     public RestorePointsTool? RestorePointsTool { get; private set; }
 
+    /// <summary>RC-7's version history — the narrative, which is never merged with the list above
+    /// (R-rc7-9).</summary>
+    public VersionHistoryTool? VersionHistoryTool { get; private set; }
+
     /// <summary>wbond.md §10.1 (WB39a/M3) — the two wBond panels, following the active layout.</summary>
     public WBondProfileTool?    WBondProfileTool    { get; private set; }
     public WBondInductanceTool? WBondInductanceTool { get; private set; }
@@ -183,6 +187,7 @@ public class CircuitRfDockFactory : Factory
             MessagesTool    = new MessagesTool();
             DrcTool         = new DrcTool();
             RestorePointsTool = new RestorePointsTool();
+            VersionHistoryTool = new VersionHistoryTool();
             WBondProfileTool    = new WBondProfileTool();
             WBondInductanceTool = new WBondInductanceTool();
         }
@@ -197,6 +202,7 @@ public class CircuitRfDockFactory : Factory
             MessagesTool    ??= new MessagesTool();
             DrcTool         ??= new DrcTool();
             RestorePointsTool ??= new RestorePointsTool();
+            VersionHistoryTool ??= new VersionHistoryTool();
             WBondProfileTool    ??= new WBondProfileTool();
             WBondInductanceTool ??= new WBondInductanceTool();
         }
@@ -209,7 +215,8 @@ public class CircuitRfDockFactory : Factory
             DockPanelIds.Analyses    => AnalysesTool,
             DockPanelIds.Messages    => MessagesTool,
             DockPanelIds.Drc         => DrcTool,
-            DockPanelIds.RestorePoints => RestorePointsTool,
+            DockPanelIds.RestorePoints  => RestorePointsTool,
+            DockPanelIds.VersionHistory => VersionHistoryTool,
             DockPanelIds.WBondProfile    => WBondProfileTool,
             DockPanelIds.WBondInductance => WBondInductanceTool,
             _                        => null,
@@ -613,7 +620,8 @@ public class CircuitRfDockFactory : Factory
         DockPanelIds.Analyses    => AnalysesTool,
         DockPanelIds.Messages    => MessagesTool,
         DockPanelIds.Drc         => DrcTool,
-        DockPanelIds.RestorePoints => RestorePointsTool,
+        DockPanelIds.RestorePoints  => RestorePointsTool,
+        DockPanelIds.VersionHistory => VersionHistoryTool,
         DockPanelIds.WBondProfile    => WBondProfileTool,
         DockPanelIds.WBondInductance => WBondInductanceTool,
         _                        => null,

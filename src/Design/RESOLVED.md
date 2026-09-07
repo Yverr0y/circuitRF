@@ -1,5 +1,100 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## RC-7 — the commit and the history browser (2026-09-06)
+
+`brief-revision-control-7-commit-and-history.md`; `docs/design/revision-control.md` §5.2, §5.5's first
+row, §6.1, §6.3, §6.4, §5.3d. Five new types in `src/Design/Revision/` — `WorkspaceCommit`,
+`CommitMessage`, `RestoreProvenance`, `HistoryBrowser`, `DocumentClash` — plus `HistoryMessages`.
+Gated by `tests/Ui.Tests/Revision/CommitAndHistoryTests.cs` (20 tests).
+
+### The restored-from line cannot be derived, which is why a restore writes something down
+
+R-rc7-6 requires the commit after a restore to name what it was restored from, and the obvious
+implementation — compare the new tree against every restore point and report a match — **is wrong in a
+way that only shows up in use**. It finds a match for the first commit made straight after a restore
+and none at all once one more edit has landed on top, so the line appears or vanishes depending on how
+much work happened in between. That is the least predictable behaviour available, and a designer would
+reasonably conclude the line means something it does not.
+
+The deeper reason it cannot be derived: **from the content alone, a commit that went back to Tuesday is
+indistinguishable from a commit that undid three days of work by hand.** Those are different decisions
+and the history exists to tell them apart. So `WorkspaceRestore` writes `RestoreProvenance` —
+`.git/circuitrf/restored-from.json`, beside the restore marker and the thinning journal — and
+`WorkspaceCommit` reads it, reports it, and clears it. The **last** restore wins: restore to A, then to
+B, then commit, and the content is B's, so naming A would be a plain untruth in a perfectly well-formed
+entry.
+
+Not in the `.cws`, deliberately: a designer's workspace file must not gain a field that changes on every
+restore, and one that travelled with a Save As copy would put a sentence about this machine's history
+into somebody else's workspace.
+
+### `update-ref HEAD` is why nothing here needs a reference name
+
+R-rc7-16 withdrew the variant, and the mechanism that makes "no branch, ever" easy rather than
+effortful is one plumbing call: `update-ref HEAD <new> <old>` follows the symbolic reference the
+workspace is already on and moves **that**. Nothing in `WorkspaceCommit` names a reference, creates one,
+or needs to know what the current one is called — so R-rc7-3's rule is not merely enforced by a source
+scan, there is genuinely nothing for a name to be needed for. The compare-and-swap third argument is
+what makes two processes committing at once resolve as one winner and one retry rather than a lost
+commit.
+
+### The commit had to write the SHARED index, and a checkpoint still must not — the reason is HEAD
+
+**Found by a gate, not by inspection**, and it is the finding most likely to bite the next person.
+
+`GitCheckpoint` builds through a private index for §4.6's reasons, and leaves the repository's shared
+index alone. That is exactly right for a checkpoint, whose reference sits outside `HEAD`: with `HEAD`
+unborn and the index empty, `git status` in the workspace shows every design file as untracked, which is
+the truth.
+
+**The moment RC-7 puts a commit on `HEAD`, the same empty index becomes a lie.** The index is defined
+relative to `HEAD`, so git's own porcelain reads every file as staged-for-deletion *and* untracked at
+once: `git status` lists the whole design as deleted, and `git checkout` refuses to do anything at all
+because untracked files would be overwritten. That is not "an ordinary git repository, readable and
+repairable by every existing tool" (§4.1) — it is a repository that looks broken to the single tool the
+escape hatch is a promise about.
+
+So `WorkspaceCommit` ends with a best-effort `read-tree <tree>`, which writes the index from the tree and
+touches no file in the working tree. **Only the commit does this.** A checkpoint doing the same would
+re-introduce exactly the index contention §5.2b removed, for a state the index has nothing to say about.
+
+The gate that caught it is `AClashOffersTwoNamedVersionsAndKeepsOneWhole`, whose fixture needs raw git to
+create a second line of work — and could not, because `checkout` refused. A test that only drove
+circuitRF's own paths would never have found it.
+
+### RC-6's "has this workspace a history" was one question and is now two
+
+`RevisionSwitch.ExistingRepository` decided whether to record an off/on transition by counting restore
+points. A workspace whose designer has only ever kept **versions** has none — so turning recording off
+recorded no transition, the off period had no ends, and RC-7's browser then rendered it as an ordinary
+quiet interval between two versions. That is precisely the false belief §5.7 claims does not happen,
+arrived at from the other side. It now also asks whether the line of work holds anything.
+
+### Two histories, two panels, and the `.axaml` template RC-5 never had
+
+R-rc7-9's separation is mechanical rather than a rendering choice — checkpoints live on references in
+circuitRF's own namespace and versions on the line of work, and neither reader walks the other — so the
+gate asserting it is cheap and worth having anyway.
+
+Building the second panel turned up that **`RestorePointsTool` had no `DataTemplate` in `App.axaml` at
+all**: `ViewLocator.Match` requires a `ViewModelBase` and a Dock `Tool` is not one, so RC-5's panel
+resolved to nothing. Both are registered now. Anything deriving from `Dock.Model.Mvvm.Controls.Tool`
+needs its row there; the convention-based locator does not cover them.
+
+### Clash resolution reads the index, not the working tree
+
+`.gitattributes` marks the five document types `-merge`, so git writes **no conflict markers** for them —
+there is nothing in the working tree to find. The two versions live in the index's unmerged entries,
+stage 2 and stage 3, and `ls-files -u` is the only thing that reports them. An implementation that
+scanned the files for markers would find nothing and report all-clear on every clash it exists for.
+
+### What was measured, and what is deliberately not asserted
+
+A commit into the 11.56 MB stand-in board of RC-3's measurement costs the same as a checkpoint of the
+same tree — the object write is identical; only the parent and the reference differ. No timing gate was
+added (R-rc0-8).
+
+
 ## RC-3 — the git substrate (2026-09-06)
 
 `src/Design/Revision/` (`brief-revision-control-3-git-substrate.md`; `docs/design/revision-control.md`

@@ -10,8 +10,15 @@ using CircuitRF.Ui.Theming;
 namespace CircuitRF.Ui.Revision;
 
 /// <summary>
-/// <b>The window's half of RC-5</b> — the three boundaries, the restore-point list, and going back
-/// (<c>docs/design/revision-control.md</c> §5.3, §5.7a, §5.8; R-rc5-4 … R-rc5-22).
+/// <b>The window's half of the whole feature</b> — RC-5's three boundaries, the restore-point list
+/// and going back; RC-6's hold, off/on and retention; and RC-7's narrative, which is the versions a
+/// designer keeps deliberately (<c>docs/design/revision-control.md</c> §5.2, §5.3, §5.7a, §5.8;
+/// R-rc5-4 … R-rc5-22, R-rc6-4 … R-rc6-15, R-rc7-1 … R-rc7-17).
+///
+/// <para><b>The two histories stay separate all the way up</b> (R-rc7-9). <see cref="List"/> and
+/// <see cref="Versions"/> read different things and are never combined: the safety net is dense,
+/// automatic and local; the narrative is sparse, deliberate and shared. Merging them produces a log
+/// no human will read, which then makes the safety net useless too because nobody looks at it.</para>
 ///
 /// <para><b>It owns no revision-control logic.</b> Every decision is made below the firewall by
 /// <see cref="WorkspaceArming"/>, <see cref="WorkspaceCheckpoints"/>, <see cref="RestorePoints"/> and
@@ -445,9 +452,162 @@ public sealed class WorkspaceHistoryService
         return outcome.Ok;
     }
 
-    /// <summary>R-rc6-13's data, for the browser RC-7 builds.</summary>
+    /// <summary>R-rc6-13's data, for the browser below.</summary>
     public IReadOnlyList<RevisionGap> Gaps(string? workspaceRoot)
         => RevisionGaps.Find(ListIncludingThinned(workspaceRoot));
+
+    // ── RC-7: the narrative — keeping a version, and browsing them (§5.2, §5.5, §6.1, §6.3) ───────
+
+    /// <summary>
+    /// <b>The explicit commit</b> (R-rc7-1, R-rc7-7): an ordinary version on the ordinary line of
+    /// work, created deliberately, with a title the designer wrote.
+    ///
+    /// <para><b>It arms exactly as a save-point does</b> (R-rc5-4a) — it is a request, so a workspace
+    /// with no history yet gains one here rather than refusing. And it refuses in the three ways
+    /// R-rc7-2 requires: hidden entirely when git is absent (the caller never gets this far),
+    /// <b>visible and refusing when held</b>, and refusing when recording is off for this
+    /// workspace.</para>
+    ///
+    /// <para><b>Unlike a checkpoint, this one always reports</b> (R-rc7-7). The person reading the
+    /// entry pressed the button that made the thing being named, which is exactly the qualification
+    /// R-rc7-4 states — and the identity in it is what makes §4.1's escape hatch usable.</para>
+    /// </summary>
+    public CommitResult KeepVersion(string? workspaceRoot, string? title,
+                                    IReadOnlyList<string>? leaveOut = null)
+    {
+        if (workspaceRoot is not { Length: > 0 })
+            return CommitResult.Refused(HistoryMessages.NoHistoryToKeepAVersionIn(""));
+
+        string name = RevisionSwitch.WorkspaceName(workspaceRoot);
+
+        // R-rc6-8. Held is loud: the affordance stayed visible, so the refusal has to say what the
+        // state is rather than the button quietly doing nothing.
+        if (Situation(workspaceRoot).IsHeld)
+        {
+            var held = HistoryMessages.CannotKeepAVersionHeld();
+            _messages.PostDiagnostic(held);
+            return CommitResult.Refused(held);
+        }
+
+        var prefs   = AppPreferencesIo.Load();
+        var setting = WorkspaceRevisionSetting.Read(WorkspaceRevisionSetting.CwsPathFor(workspaceRoot));
+
+        if (!RevisionArming.IsArmed(prefs.RevisionKeepHistory ?? RevisionArming.KeepHistoryDefault, setting))
+        {
+            var off = HistoryMessages.CannotKeepAVersionOff();
+            _messages.PostDiagnostic(off);
+            return CommitResult.Refused(off);
+        }
+
+        // A save-point's own arming path, and for the same reason: this is a request, so a workspace
+        // that has never recorded anything gains a history here. The announcement is R-rc5-4b's and
+        // fires once, exactly as it does for a save-point.
+        var armed = WorkspaceArming.Arm(
+            workspaceRoot, CheckpointOrigin.SavePoint,
+            prefs.RevisionKeepHistory ?? RevisionArming.KeepHistoryDefault,
+            setting, CircuitRfWroteAFileThisSession);
+
+        if (armed.Announcement is { } announcement) _messages.PostDiagnostic(announcement);
+
+        if (!armed.Armed || armed.Git is null)
+        {
+            var why = armed.Refusal ?? HistoryMessages.NoHistoryToKeepAVersionIn(name);
+            _messages.PostDiagnostic(why);
+            return CommitResult.Refused(why);
+        }
+
+        var result = WorkspaceCommit.Commit(armed.Git, title, leaveOut);
+        foreach (var d in result.Diagnostics) _messages.PostDiagnostic(d);
+
+        if (result.Ok) RecordedSomethingThisSession = true;
+
+        Changed?.Invoke();
+        return result;
+    }
+
+    /// <summary>
+    /// Whether keeping a version would record anything. <b>Asked before the dialog opens</b>, so a
+    /// designer is not given a field to fill in for an operation that can only answer "nothing has
+    /// changed".
+    /// </summary>
+    public bool HasSomethingToKeep(string? workspaceRoot)
+        => Bind(workspaceRoot) is { } git && WorkspaceCommit.HasSomethingToKeep(git);
+
+    /// <summary>
+    /// R-rc7-9. <b>The narrative, which is a different list from the restore points and is never
+    /// merged with them.</b>
+    /// </summary>
+    public IReadOnlyList<HistoryVersion> Versions(string? workspaceRoot, int limit = 0)
+        => Bind(workspaceRoot) is { } git ? HistoryBrowser.Versions(git, limit) : [];
+
+    /// <summary>
+    /// R-rc7-10. The browser's rows: the versions, with each off period placed among them as a gap
+    /// carrying its reason — because rendering it as an ordinary interval between two versions is the
+    /// false-belief failure in its purest form.
+    /// </summary>
+    public IReadOnlyList<HistoryRow> VersionRows(string? workspaceRoot, int limit = 0)
+        => Bind(workspaceRoot) is { } git
+            ? HistoryBrowser.Rows(HistoryBrowser.Versions(git, limit),
+                                  RestorePoints.ListIncludingThinned(git))
+            : [];
+
+    /// <summary>R-rc7-11. What differs between two versions, at the granularity of documents.</summary>
+    public IReadOnlyList<DocumentChange> Compare(string? workspaceRoot, HistoryVersion from,
+                                                 HistoryVersion to)
+        => Bind(workspaceRoot) is { } git ? HistoryBrowser.Compare(git, from.CommitId, to.CommitId) : [];
+
+    /// <summary>
+    /// What one version changed against the one before it — the ordinary question the browser asks of
+    /// a single selected row. An initial version has nothing before it and reports no changes rather
+    /// than every file it holds.
+    /// </summary>
+    public IReadOnlyList<DocumentChange> ChangesIn(string? workspaceRoot, HistoryVersion version)
+    {
+        if (Bind(workspaceRoot) is not { } git) return [];
+
+        var parent = git.Run(["rev-parse", "--verify", "--quiet", version.CommitId + "^"],
+                             new GitRunOptions(ReadOnly: true));
+        return parent.Ok && parent.Line.Length > 0
+            ? HistoryBrowser.Compare(git, parent.Line, version.CommitId)
+            : [];
+    }
+
+    /// <summary>
+    /// R-rc7-17. <b>Going back to a version uses RC-5's restore, with that version's tree as the
+    /// source — there is no second restore implementation.</b>
+    ///
+    /// <para>Everything R-rc5-12c guarantees therefore applies unchanged: the state being replaced is
+    /// kept first, files added since are taken away, ignored files are left alone, the recording flag
+    /// and the policy files survive, and an interruption is detectable. The one difference is what the
+    /// following version's line names.</para>
+    ///
+    /// <para><b>The caller must still offer up unsaved work first and reload the open documents
+    /// afterwards</b> (R-rc5-12b), exactly as for a restore point.</para>
+    /// </summary>
+    public RestoreResult? GoBackToVersion(string? workspaceRoot, HistoryVersion version)
+        => Restore(workspaceRoot, HistoryBrowser.AsRestorePoint(version));
+
+    /// <summary>R-rc7-13. Documents changed in two places at once, awaiting a choice.</summary>
+    public IReadOnlyList<DocumentClash> Clashes(string? workspaceRoot)
+        => Bind(workspaceRoot) is { } git ? DocumentClashes.Find(git) : [];
+
+    /// <summary>
+    /// R-rc7-13. <b>Keeps one side whole.</b> There is no third content and no path that could produce
+    /// one — a merged design that is silently wrong is worse than a clash, because the clash is at
+    /// least visible.
+    /// </summary>
+    public bool KeepSide(string? workspaceRoot, DocumentClash clash, ClashSide side)
+    {
+        if (Bind(workspaceRoot) is not { } git) return false;
+
+        var outcome = DocumentClashes.Keep(git, clash, side);
+        if (outcome.Diagnostic is { } d) _messages.PostDiagnostic(d);
+        else _messages.PostDiagnostic(
+                 HistoryMessages.ChoiceKept(clash.RelativePath, DocumentClashes.Describe(side)));
+
+        Changed?.Invoke();
+        return outcome.Ok;
+    }
 
     // ── Shared ────────────────────────────────────────────────────────────────────────────────────
 

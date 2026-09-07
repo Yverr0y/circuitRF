@@ -529,6 +529,10 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "history.repository.absent",
         "history.restore.no-such-point",
         "history.restore.point-required",
+        // RC-7's own two. `versions` is a DIFFERENT list from `list` (R-rc7-9) — the narrative rather
+        // than the safety net — so its empty state and its not-found are separate ids.
+        "history.versions.empty",
+        "history.versions.no-such-version",
         "import.args.into-required",
         "import.args.multiple-sources",
         "import.args.noun-required",

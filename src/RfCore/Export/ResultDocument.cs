@@ -377,6 +377,15 @@ namespace RfCore.Export
     /// <param name="Point">The entry a boundary produced, or the one a restore went to.</param>
     /// <param name="FilesWritten">How many files a restore brought back.</param>
     /// <param name="FilesRemoved">How many a restore took away.</param>
+    /// <param name="Versions">
+    /// RC-7's narrative — the versions a designer kept deliberately, newest first. <b>A different list
+    /// from <paramref name="Points"/> and never merged with it</b> (R-rc7-9): one is the sparse,
+    /// human-written history that gets shared, the other the dense, machine-written safety net that
+    /// does not leave the machine.
+    /// </param>
+    /// <param name="Version">The version an explicit commit produced.</param>
+    /// <param name="Changes">What differs between two versions, at the granularity of documents
+    /// (R-rc7-11). Naming a changed document is the answer; what changed inside one is not.</param>
     public sealed record HistoryReportJson(
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         IReadOnlyList<RestorePointJson>? Points = null,
@@ -387,7 +396,47 @@ namespace RfCore.Export
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         int?                             FilesWritten = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        int?                             FilesRemoved = null);
+        int?                             FilesRemoved = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<VersionJson>?      Versions = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        VersionJson?                     Version = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<DocumentChangeJson>? Changes = null);
+
+    /// <summary>
+    /// One version a designer kept (RC-7 R-rc7-1, R-rc7-5).
+    ///
+    /// <para><b>This is the one place in the whole feature where an object identity travels</b>, and
+    /// R-rc7-4 is why: the caller asked for this commit, and the identifier is what makes §4.1's
+    /// escape hatch usable. The restore-point list beside it carries none, deliberately.</para>
+    /// </summary>
+    /// <param name="Id">Its identity — what to give anyone helping outside circuitRF.</param>
+    /// <param name="Kept">When, in ISO-8601 UTC.</param>
+    /// <param name="Title">The line the designer wrote.</param>
+    /// <param name="Who">Who kept it.</param>
+    /// <param name="RestoredFrom">
+    /// What the workspace had been brought back from when this was kept, or absent. <b>Present on
+    /// exactly the versions that need it</b> (R-rc7-6): without it, two consecutive versions where the
+    /// second reverts the first read as a change of mind with no record of the moment.
+    /// </param>
+    public sealed record VersionJson(
+        string  Id,
+        string  Kept,
+        string  Title,
+        string  Who,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? RestoredFrom = null);
+
+    /// <summary>One document that differs between two versions.</summary>
+    /// <param name="Path">Where it is in the workspace.</param>
+    /// <param name="Change"><c>added</c>, <c>changed</c>, <c>removed</c> or <c>renamed</c>.</param>
+    /// <param name="Was">Where it used to be, on a rename.</param>
+    public sealed record DocumentChangeJson(
+        string  Path,
+        string  Change,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Was = null);
 
     /// <summary>One entry, as the list and the panel both show it.</summary>
     /// <param name="Sequence">circuitRF's own monotonic ordering. <b>Not the clock</b> — a wall clock

@@ -1064,7 +1064,8 @@ internal static class CliDiagnostics
 
     public static Diagnostic HistoryUnknownNoun(string noun) => Diagnostic.Create(
         "history.args.unknown-noun", DiagnosticSeverity.Error,
-        "history: there is nothing called '{noun}'. Known: checkpoint, list, restore.", ("noun", noun));
+        "history: there is nothing called '{noun}'. Known: checkpoint, list, restore, commit, "
+      + "versions.", ("noun", noun));
 
     /// <summary>RC-5 R-rc5-23. <c>restore</c> needs to be told WHICH one, and the answer is a
     /// sequence out of <c>history list</c> — never an object identity, which is the vocabulary this
@@ -1149,6 +1150,26 @@ internal static class CliDiagnostics
     public static Diagnostic BatchWasNotOpen() => new(
         "batch.was-not-open", DiagnosticSeverity.Info,
         "No change was open. Nothing needed closing.");
+
+    // ── the narrative half (RC-7 R-rc7-22) ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The list is empty. <b>Not a failure</b> — a workspace with restore points and no versions is
+    /// the ordinary state of one nobody has deliberately kept a version of, which is most of them.
+    /// </summary>
+    public static Diagnostic HistoryNoVersionsYet(string path) => Diagnostic.Create(
+        "history.versions.empty", DiagnosticSeverity.Info,
+        "You have not kept a version of '{path}' yet.", ("path", path));
+
+    /// <summary>
+    /// R-rc7-4. <b>This surface names a version by its identity, and only this one.</b> The
+    /// restore-point nouns beside it take an ordering number instead, because those are circuitRF's
+    /// own and nobody outside it has an identifier for one.
+    /// </summary>
+    public static Diagnostic HistoryNoSuchVersion(string wanted) => Diagnostic.Create(
+        "history.versions.no-such-version", DiagnosticSeverity.Error,
+        "This workspace has no version starting {wanted}. 'history versions' shows the ones it has.",
+        ("wanted", wanted));
 
     public static Diagnostic HistoryNoRepository(string path) => Diagnostic.Create(
         "history.repository.absent", DiagnosticSeverity.Error,

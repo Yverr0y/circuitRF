@@ -1,0 +1,98 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:CircuitRF.Ui.ViewModels.Dock"
+             x:Class="CircuitRF.Ui.Views.Revision.VersionHistoryToolView"
+             x:DataType="vm:VersionHistoryTool"
+             Background="{DynamicResource SystemChromeLowColor}">
+
+  <Grid RowDefinitions="Auto,Auto,*,Auto,Auto">
+
+    <!-- The commit lives on the File menu too. It is here as well because this is the list a designer
+         is looking at when they decide the workspace is worth recording. -->
+    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="4" Margin="4,2">
+      <Button x:Name="KeepVersionButton" Click="OnKeepVersionClick"
+              IsEnabled="{Binding HasWorkspace}"
+              ToolTip.Tip="Record this workspace as a version, under a title you write"
+              Padding="6,2" Background="Transparent" BorderThickness="0" FontSize="11"
+              Content="Keep this version" />
+      <Button x:Name="GoBackButton" Click="OnGoBackClick"
+              IsEnabled="{Binding HasVersionSelected}"
+              ToolTip.Tip="Put the workspace back to the selected version. What you have now is kept first."
+              Padding="6,2" Background="Transparent" BorderThickness="0" FontSize="11"
+              Content="Go back to this" />
+    </StackPanel>
+
+    <!-- R-rc7-2. HELD MUST NOT LOOK LIKE ABSENT: with no git the whole panel is unreachable, because
+         absent is harmless; held is a designer who may believe they are protected. So the buttons
+         above stay visible and refuse, and this line says why. The remedy is deliberately not
+         restated (R-rc6-9's second cadence) — it was said once, on open. -->
+    <TextBlock Grid.Row="1" Margin="6,2" FontSize="11" TextWrapping="Wrap"
+               IsVisible="{Binding IsRecordingBlocked}"
+               Text="{Binding RecordingState}" />
+
+    <ListBox Grid.Row="2"
+             x:Name="VersionsList"
+             ItemsSource="{Binding Rows}"
+             SelectedItem="{Binding Selected}"
+             Background="Transparent"
+             BorderThickness="0">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="vm:VersionRow">
+          <Grid Margin="0,2">
+            <!-- R-rc7-10. An off period is a row of its own with its reason on it, never an ordinary
+                 interval between two versions. -->
+            <TextBlock Text="{Binding GapText}" IsVisible="{Binding IsGap}"
+                       FontSize="10" FontStyle="Italic" Opacity="0.7" TextWrapping="Wrap"
+                       Margin="0,4" />
+
+            <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding IsVersion}">
+              <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                <TextBlock Text="{Binding When}" FontFamily="monospace" Opacity="0.75" />
+                <TextBlock Text="{Binding Day}" FontSize="9" Opacity="0.5" />
+              </StackPanel>
+              <StackPanel Grid.Column="1">
+                <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Who}" FontSize="10" Opacity="0.6" />
+                <!-- R-rc7-6. The one thing a version can otherwise lie about by omission. -->
+                <TextBlock Text="{Binding RestoredFrom}" FontSize="10" Opacity="0.9"
+                           IsVisible="{Binding WasRestored}" TextWrapping="Wrap" />
+              </StackPanel>
+            </Grid>
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+    <!-- R-rc7-9. The line that stops an empty panel reading as a broken one: a workspace with restore
+         points and no versions is the ordinary state of one nobody has kept a version of. -->
+    <TextBlock Grid.Row="2" Margin="10" FontSize="11" Opacity="0.7" TextWrapping="Wrap"
+               VerticalAlignment="Top"
+               IsVisible="{Binding !Rows.Count}"
+               Text="{Binding EmptyText}" />
+
+    <!-- R-rc7-11. Comparison is the browser's real job, at the granularity of DOCUMENTS. -->
+    <Border Grid.Row="3" BorderThickness="0,1,0,0" MaxHeight="180"
+            BorderBrush="{DynamicResource SystemBaseLowColor}"
+            IsVisible="{Binding HasVersionSelected}">
+      <ScrollViewer>
+        <ItemsControl ItemsSource="{Binding Changes}" Margin="6,4">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:VersionChangeRow">
+              <Grid ColumnDefinitions="70,*" Margin="0,1">
+                <TextBlock Grid.Column="0" Text="{Binding Kind}" FontSize="10" Opacity="0.6" />
+                <StackPanel Grid.Column="1">
+                  <TextBlock Text="{Binding Path}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding Detail}" FontSize="9" Opacity="0.55"
+                             IsVisible="{Binding HasDetail}" />
+                </StackPanel>
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+    </Border>
+
+    <TextBlock Grid.Row="4" Margin="6,4" FontSize="10" Opacity="0.65" TextWrapping="Wrap"
+               Text="{Binding ComparisonNote}" />
+  </Grid>
+</UserControl>

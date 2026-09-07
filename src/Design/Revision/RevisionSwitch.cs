@@ -115,7 +115,14 @@ public static class RevisionSwitch
         if (GitCommand.For(workspaceRoot) is not { } git) return null;
         if (!EnclosingRepository.Detect(git).MayRecord) return null;
         if (!git.IsRepositoryRoot()) return null;
-        if (CheckpointReferences.List(git).Count == 0) return null;
+
+        // "Has this workspace a history at all" — and from RC-7 that is TWO questions, not one. A
+        // workspace whose designer has only ever kept VERSIONS has no restore points, and counting
+        // those alone answered no: the transition was not recorded, the off period had no ends, and
+        // RC-7's browser then rendered it as an ordinary quiet interval between two versions — which
+        // is precisely the false belief §5.7 claims does not happen, arrived at from the other side.
+        if (CheckpointReferences.List(git).Count == 0
+            && WorkspaceCommit.CurrentVersionId(git) is null) return null;
 
         git.Identity ??= RevisionIdentity.Resolve(git);
         return git.Identity is null ? null : git;
