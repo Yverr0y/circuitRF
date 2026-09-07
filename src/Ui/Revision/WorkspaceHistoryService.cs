@@ -247,8 +247,12 @@ public sealed class WorkspaceHistoryService
         if (workspaceRoot is not { Length: > 0 }) return null;
         if (RestoreMarker.Read(workspaceRoot) is not { } inFlight) return null;
 
-        _messages.PostDiagnostic(RestorePointMessages.RestoreWasInterrupted(
-            inFlight.Target.Label, inFlight.Fallback.Label));
+        // A marker the crash truncated names no states, and the ordinary sentence would then quote two
+        // empty labels — which reads as a defect rather than as the interruption it is.
+        _messages.PostDiagnostic(inFlight.Target.CommitId.Length == 0
+            ? RestorePointMessages.RestoreWasInterruptedUnnamed()
+            : RestorePointMessages.RestoreWasInterrupted(
+                  inFlight.Target.Label, inFlight.Fallback.Label));
 
         return inFlight;
     }
@@ -630,7 +634,16 @@ public sealed class WorkspaceHistoryService
     /// <summary>
     /// Whether this workspace has a history at all — what the Save As report asks before adding
     /// R-rc5-19's sentence, because a workspace with nothing to lose must not be told it lost it.
+    ///
+    /// <para><b>"Has a history" is TWO questions, not one</b>, and counting restore points alone
+    /// answered the wrong one. A designer who has only ever kept VERSIONS has no restore points at all
+    /// — so a Save As from their workspace said nothing, and the copy silently began a fresh history
+    /// while the sentence that exists to stop exactly that discovery was withheld. This is the same
+    /// mistake RC-7 found in the off/on transition, in a second place: see
+    /// <c>RevisionSwitch.ExistingRepository</c>, which asks both questions for the same reason.</para>
     /// </summary>
     public static bool HasHistory(string? workspaceRoot)
-        => Bind(workspaceRoot) is { } git && CheckpointReferences.List(git).Count > 0;
+        => Bind(workspaceRoot) is { } git
+           && (CheckpointReferences.List(git).Count > 0
+            || WorkspaceCommit.CurrentVersionId(git) is not null);
 }

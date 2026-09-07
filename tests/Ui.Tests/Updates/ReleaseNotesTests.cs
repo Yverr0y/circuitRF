@@ -840,7 +840,7 @@ public class ReleaseNotesWiringTests
             // contain it.
             .Where(f => UpdateInstallSiteTests.StripComments(File.ReadAllText(f))
                                               .Contains(".ShowReleaseNotes", StringComparison.Ordinal))
-            .Select(Path.GetFileName)
+            .Select(f => Path.GetFileName(f)!)
             .ToArray();
 
         Assert.Equal(["ReleaseNotesGate.cs"], readers);

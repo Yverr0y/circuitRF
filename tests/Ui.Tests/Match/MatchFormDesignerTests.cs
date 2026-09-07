@@ -340,7 +340,7 @@ public sealed class MatchFormDesignerTests(ITestOutputHelper output)
         // Seven selectable lines; the badge stays a plain TextBlock — a tick has nothing to copy,
         // and it is the element carrying the tooltip that explains it.
         Assert.Equal(7, Regex.Matches(card, "<SelectableTextBlock ").Count);
-        Assert.Equal(1, Regex.Matches(card, "<TextBlock ").Count);
+        Assert.Single(Regex.Matches(card, "<TextBlock "));
         Assert.Contains("Classes=\"solbadge\"", card, StringComparison.Ordinal);
 
         // …and the gesture the selectable text would otherwise have eaten. Both halves, because a

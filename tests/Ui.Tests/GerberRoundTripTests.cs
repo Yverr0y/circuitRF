@@ -402,8 +402,8 @@ public class GerberRoundTripTests : IDisposable
                      vias.Select(v => (v.PadSize, v.DrillSize)));
 
         // ...and NOT as a circle plus an orphaned hole.
-        Assert.Empty(LoadView(c.Import1.CellDir!).Shapes.OfType<CircleShape>()
-            .Where(s => vias.Any(v => v.X == s.Cx && v.Y == s.Cy)));
+        Assert.DoesNotContain(LoadView(c.Import1.CellDir!).Shapes.OfType<CircleShape>(),
+                              s => vias.Any(v => v.X == s.Cx && v.Y == s.Cy));
 
         // R-L4h-12 / L4d's R-L4d-10 discipline: barrel and landing are exactly the pair that reads
         // correctly while rendering wrong, so the orientation is proven by EXPORTING and comparing,

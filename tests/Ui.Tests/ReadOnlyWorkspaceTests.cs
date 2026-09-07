@@ -141,6 +141,7 @@ public sealed class ReadOnlyWorkspaceTests : IDisposable
     /// express an unwritable directory, and never passes vacuously.
     /// </summary>
     [UnwritableDirFact]
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]   // what UnwritableDirFact skips for
     public void TheRealProbeAnswersCorrectlyAgainstARealUnwritableDirectory()
     {
         WorkspaceWritability.WritabilityProbe = null;   // the real thing, not the seam

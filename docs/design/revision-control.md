@@ -514,6 +514,33 @@ on Windows — have no git installed. The revision-control affordances are there
 when git is unavailable, rather than shown disabled. A designer who does not want this feature should
 never learn it exists.
 
+**4.3b Settings ▸ Revision Control is the one exception** *(owner's decision, 2026-09-07; §12 Q31)*.
+The tab is shown on **every** machine, whatever this section says about the affordances. Hiding it kept
+absence silent, and it also hid — from the designer who *would* have wanted a history — the fact that
+circuitRF can keep one and is not keeping one here. That is §1.4's false belief reached from the other
+side, and the remedy it concealed is a program the designer could install in five minutes.
+
+The arrangement is honest in both directions, and the split is the whole of it:
+
+- **The rows are visible**, so what circuitRF would keep, and on what terms, is legible before anyone
+  installs anything.
+- **They are disabled**, so nobody can come away believing something is being kept. One sentence in
+  place of the controls says that there is no usable git, that nothing is being kept in any workspace,
+  and what to do about it.
+- **The git path and its Detect stay live**, because that row is the remedy. A disabled Detect would
+  leave a machine unable to answer its own question — and answering it is precisely why somebody
+  without git opens this tab.
+
+**This is not §12 Q4's hold**, which is also visible-and-refusing and means something else: held is a
+repository circuitRF may not write to, where a designer may believe they are protected. Here nothing has
+been promised at all, and the tab says so where the controls are.
+
+**Two consequences.** The git-path row's **second host on Security & Permissions is withdrawn** — it
+existed only so that hiding the tab did not also hide that field, and with the tab always present a
+second copy is a row nobody could ever reach. And §10A's opening sentence is superseded by this one.
+Everywhere else in the application §4.3's silence is unchanged: no Versions panel, no restore-point
+list, no menu item, no badge.
+
 **4.3a Detection must not itself be the surprise** *(new in rev 5)*. On macOS, `/usr/bin/git` is
 present on every machine whether or not git is installed: it is a shim that, when the Command Line
 Tools are absent, **opens Apple's "install the developer tools?" dialog** instead of running. A
@@ -1998,9 +2025,11 @@ Listed so that a later phase does not quietly adopt them:
 ## 10A. Settings ▸ Revision Control *(new in rev 2)*
 
 A new tab in `SettingsView`, alongside General / Security & Permissions / Color Theme / Wirebonds.
-**The whole tab is hidden when git is unavailable and no path has been configured** (§4.3) — with the
-single exception of the path field itself, which is how someone with git in an unusual location makes
-it available in the first place.
+**The tab is shown on every machine** *(owner, 2026-09-07 — §4.3b, which supersedes rev 5's "hidden
+when git is unavailable")*. Without a usable git every row below is **disabled**, with one sentence in
+their place saying that nothing is being kept and why; the **path field and its Detect stay live**,
+because that row is the remedy rather than one of the settings. The path field's former second host on
+Security & Permissions is withdrawn with the hiding rule that created it.
 
 | setting | notes |
 |---|---|
@@ -2499,6 +2528,15 @@ nouns `checkpoint`, `list`, `restore` and (Stage 3) `commit`, each calling the f
 save-point is a commit with a message, and the brief that creates each checkpoint owns its wording.
 And a nested repository is found by a walk for `.git` directories, not by `rev-parse`, and excluded by
 pathspec, because `git add` would otherwise record it as an embedded repository (§12 Q4).
+
+**Q31. Is Settings ▸ Revision Control hidden on a machine with no git? DECIDED: no — shown, with its
+rows disabled and the git path still live.** §4.3b, §10A *(owner, 2026-09-07)*. §4.3's silence was
+written against the designer who does not want this feature; it also silenced the one who does, and
+concealed a remedy that costs five minutes. The tab is where somebody goes to ask *does git work on
+this machine*, so the row that answers that question is the one row that may never be greyed. Hiding
+remains right for every other affordance, and this is deliberately not §12 Q4's hold: held means
+circuitRF may not write to a repository that exists, and a designer may believe they are protected —
+here nothing has been promised, and the tab says so.
 
 **Still open from rev 5, and it is not small.** Two writers with different retention preferences on
 one shared workspace apply whichever closed last, bounded by rule 1's floor (§5.6). Whether the

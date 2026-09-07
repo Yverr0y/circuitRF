@@ -108,8 +108,7 @@ public class DevicePaletteWiringTests
         // The two bipolar polarities do NOT share a glyph. The emitter arrow is the only cue that
         // separates them on a schematic, so a shared glyph would draw one of them wrongly — this is
         // the assertion that stops a future "they're the same topology" tidy-up.
-        Assert.NotEqual(BuiltInSymbols.Primitives(SymbolKind.BjtNpn).Primitives.Count,
-                        0);
+        Assert.NotEmpty(BuiltInSymbols.Primitives(SymbolKind.BjtNpn).Primitives);
         Assert.False(ReferenceEquals(BuiltInSymbols.Primitives(SymbolKind.BjtNpn),
                                      BuiltInSymbols.Primitives(SymbolKind.BjtPnp)));
     }

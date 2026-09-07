@@ -482,8 +482,8 @@ public class ArchiveWithHistoryTests
         var plan = Prepared(ws);
 
         // The pack ran: the loose objects are gone, and a pack file is there instead.
-        Assert.Empty(Directory.EnumerateDirectories(Path.Combine(ws.Root, ".git", "objects"))
-                              .Where(d => Path.GetFileName(d)!.Length == 2));
+        Assert.DoesNotContain(Directory.EnumerateDirectories(Path.Combine(ws.Root, ".git", "objects")),
+                              d => Path.GetFileName(d)!.Length == 2);
         Assert.NotEmpty(Directory.EnumerateFiles(Path.Combine(ws.Root, ".git", "objects", "pack"), "*.pack"));
 
         string zip = Path.Combine(ws.Root + "-out", "with.zip");

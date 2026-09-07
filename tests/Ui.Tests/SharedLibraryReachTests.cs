@@ -221,9 +221,9 @@ public class SharedLibraryReachTests : IDisposable
         // The nested workspace's FOLDER is walked like any other folder — its own CONFIGURATION is
         // not, so the third library it references is reached not at all.
         Assert.Equal("NestedCell", Child(ws, "delivery").Children.Single().Name);
-        Assert.Empty(Descendants(ws).Where(n => n.Name == "ThirdPartyCell"));
-        Assert.Empty(Descendants(ws).Where(n => n.Kind is NodeKind.LibrariesGroup or NodeKind.Library
-                                             or NodeKind.KnownFilesGroup or NodeKind.ReferencedWorkspace));
+        Assert.DoesNotContain(Descendants(ws), n => n.Name == "ThirdPartyCell");
+        Assert.DoesNotContain(Descendants(ws), n => n.Kind is NodeKind.LibrariesGroup or NodeKind.Library
+                                                        or NodeKind.KnownFilesGroup or NodeKind.ReferencedWorkspace);
 
         static System.Collections.Generic.IEnumerable<ProjectTreeNode> Descendants(ProjectTreeNode n)
             => n.Children.Concat(n.Children.SelectMany(Descendants));

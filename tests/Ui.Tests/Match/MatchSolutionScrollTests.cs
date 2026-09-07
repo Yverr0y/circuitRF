@@ -76,7 +76,7 @@ public sealed class MatchSolutionScrollTests(ITestOutputHelper output)
         var pick = first.AllSolutions.Skip(4).First();
         pick.Apply();
         first.WaitForAnalysis();
-        Assert.True(first.Solutions.Any(r => r.IsCurrent));
+        Assert.Contains(first.Solutions, r => r.IsCurrent);
 
         string payload = comp1.Parameters.First(p => p.Name == "Design").Expression;
         first.Dispose();

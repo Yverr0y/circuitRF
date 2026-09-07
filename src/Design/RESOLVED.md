@@ -3285,3 +3285,68 @@ when the source is a local path (which is §7A's librarian scenario), the reposi
 ownership check applies to each separately. `GitRunOptions` gained `SafeDirectories` for it; each is
 named individually and never `*`. The working directory is the destination's **parent**, because a
 process cannot start in a folder that does not exist yet.
+
+---
+
+## Review of RC-0 … RC-9 against `docs/design/revision-control.md` (2026-09-07)
+
+A read of the whole series against rev 5 of the architecture. Coverage is good — every mechanism the
+document specifies is present and the shapes are right, including the four that are easiest to get
+wrong (the parentless commit through a temporary index, the per-checkpoint reference namespace, the
+`--root` PATH walk behind the archive's deleted-file warning, and `gc.pruneExpire = never` with reclaim
+as the only pruning path). What follows is what the read actually found: four defects, each of which
+turns a stated guarantee into a sentence that is technically executed and practically useless.
+
+### A refused retention sweep reported that it wanted to remove **zero** restore points
+
+`RetentionSweep.Plan` returns `Thin = []` on a refusal — correctly, because §5.6 rule 3 refuses the pass
+*whole* rather than applying a bounded prefix. `Run` then built the report from `plan.Thin.Count`, so
+the one message this rule exists to produce always read *"circuitRF was about to tidy away **0** of this
+workspace's 40 restore points at once, which is far more than an ordinary tidy-up."*
+
+Rule 3's entire value is that it converts a clock fault from silent data loss into a sentence a designer
+can act on. A sentence naming zero does the opposite: it reads as a defect in circuitRF, and the reader
+learns nothing about their clock. `SweepPlan` gained a `Wanted` field for the count the pass would have
+dropped had it been permitted to, and it is not derivable from anything else on the record — on the one
+path where the number matters, the list it would have come from is deliberately empty.
+
+### A restore that failed before writing anything left its interrupted-restore marker behind
+
+`RestoreMarker` is written before the first file and cleared after the last, so that a crash mid-restore
+is *detected on the next open rather than discovered by simulating* (§5.8, §12 Q25). But every failure
+inside `WorkspaceRestore.Restore` returned through one `Fail` helper, including the `read-tree` that
+runs **before** any file is written. A `read-tree` that refuses therefore left a marker on disk over a
+working tree nothing had touched — and the next open greeted the designer with a report naming two
+states and two ways out of a situation they were not in.
+
+The marker's meaning is *this workspace may be half of two states*, and a workspace nothing was written
+into is not. The fix is the distinction, not the clearing: failures **before** the first write clear the
+marker, failures after it leave it. `FailBeforeAnyWrite` is the second exit, and a target tree holding
+no files now takes it too rather than reaching `checkout-index` with nothing to check out.
+
+### A marker the crash truncated was treated as no marker at all
+
+`RestoreMarker.Read`'s own header said *"a truncated marker is a marker, so it is reported rather than
+dropped — a file half-written by the same crash is evidence of exactly the state this is looking for"*,
+and then caught `JsonException` alongside the I/O failures and returned null. So the marker was most
+likely to be dropped **precisely when it was most likely to be true**: the write that got cut off is the
+write the crash cut off.
+
+An unreadable file now resolves to `RestoreMarker.Unreadable`, whose ends are blank, and the report
+picks a second sentence for it (`RestoreWasInterruptedUnnamed`). The ordinary message quotes two labels;
+rendered from blank ends it would have read *"Going back to '' did not finish … or go back to ''"*,
+which names a defect rather than an interruption. Only an **absent** file, or one that cannot be read at
+all, still means nothing was in flight.
+
+### `GitDiscovery.Find` memoised the answer and threw away the reasons
+
+The cache is keyed on the configured path, which is right. It stored only the `GitInstallation?`, so a
+cache hit handed back an **empty** rejection list — and RC-4's Detect line is the one place in the whole
+application where an under-floor or wrong-path git is ever reported by name (§4.7). Pressing Detect
+twice on such a machine gave *"No usable git: '/usr/bin/git': it is version 1.8.3, older than the 2.9
+circuitRF needs"* and then *"No git was found on PATH."* Nothing about the machine had changed; only
+circuitRF's memory of it had. The rejections are memoised with the answer now.
+
+(Detect also invalidates the cache before asking, which is a separate point and not a substitute for
+this one: it is the button somebody presses **because** they just installed git or fixed a `PATH`, and a
+memoised "no" answers for the machine as it was before they did.)

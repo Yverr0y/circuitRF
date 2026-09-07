@@ -126,12 +126,25 @@ public static class WorkspaceRestore
             var options = new GitRunOptions(IndexFile: index);
 
             // ── 4. Write the state (R-rc5-12c, rule 1: nothing is checked out) ────────────────────
+            //
+            // A failure BEFORE the first file is written clears the marker again; a failure after it
+            // leaves it. That distinction is the marker's whole meaning — it says "this workspace may
+            // be half of two states", and a workspace nothing was written into is not. Leaving it on
+            // the early failures would greet the designer on the next open with a report naming two
+            // states and two ways out of a situation they are not in, which trains them to dismiss the
+            // one report that must never be dismissed.
             var loaded = git.Run(["read-tree", target.TreeId], options);
             if (!loaded.Ok)
-                return Fail(GitFailures.Translate(loaded, "going back to an earlier state", git.WorkspaceRoot));
+                return FailBeforeAnyWrite(
+                    GitFailures.Translate(loaded, "going back to an earlier state", git.WorkspaceRoot));
 
             var targetPaths = PathsIn(git, target.TreeId);
-            int written     = WriteFiles(git, options, targetPaths);
+            if (targetPaths.Count == 0)
+                return FailBeforeAnyWrite(GitFailures.Unrecognised(
+                    "going back to an earlier state",
+                    "that state holds no files, so there is nothing to bring back"));
+
+            int written = WriteFiles(git, options, targetPaths);
             if (written < 0)
                 return Fail(GitFailures.Unrecognised("going back to an earlier state",
                                                      "the files could not be written"));
@@ -185,6 +198,14 @@ public static class WorkspaceRestore
         }
 
         RestoreResult Fail(Diagnostic d) => new(false, 0, 0, before.Point, [d]);
+
+        // The same failure, from a point where the working tree is untouched — so the marker goes with
+        // it. See the comment at step 4.
+        RestoreResult FailBeforeAnyWrite(Diagnostic d)
+        {
+            RestoreMarker.Clear(git.WorkspaceRoot);
+            return Fail(d);
+        }
     }
 
     /// <summary>

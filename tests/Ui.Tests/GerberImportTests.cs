@@ -435,7 +435,7 @@ public class GerberImportTests : IDisposable
         var cell = LoadCell(Import(dir, _root, "mask_not_pad_import"));
 
         Assert.Empty(cell.Shapes.OfType<ViaShape>());
-        Assert.Single(cell.Shapes.OfType<CircleShape>().Where(c => c.Cx == 5_000_000 && c.R == 150_000));
+        Assert.Single(cell.Shapes.OfType<CircleShape>(), c => c.Cx == 5_000_000 && c.R == 150_000);
     }
 
     /// <summary>Total filled area of every conductor-ish shape in the cell, vias excluded — the vias
@@ -825,7 +825,8 @@ public class GerberImportTests : IDisposable
 
         // A test that asserted a plausible default here would be asserting the bug: an invented stackup
         // is worse than none, because nothing downstream will ever question it and it WILL be simulated.
-        Assert.Empty(stackup.Layers.Where(l => l.Kind is StackupKind.Conductor or StackupKind.Dielectric));
+        Assert.DoesNotContain(stackup.Layers,
+                              l => l.Kind is StackupKind.Conductor or StackupKind.Dielectric);
         Assert.Contains(result.Messages, m =>
             m.Contains("no job-file stackup", StringComparison.Ordinal) &&
             m.Contains("left EMPTY and no substrate was invented", StringComparison.Ordinal) &&
@@ -972,7 +973,7 @@ public class GerberImportTests : IDisposable
 
         var result = Import(dir, _root, "composite_import");
 
-        var composited = Assert.Single(result.Layers.Where(l => l.Composited));
+        var composited = Assert.Single(result.Layers, l => l.Composited);
         Assert.Equal("board.gtl", composited.FileName);
         Assert.Contains(result.Messages, m =>
             m.StartsWith("board.gtl", StringComparison.Ordinal) &&

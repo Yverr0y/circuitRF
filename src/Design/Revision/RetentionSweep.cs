@@ -11,11 +11,22 @@ namespace CircuitRF.Design.Revision;
 /// <param name="Unkept">How many entries the fraction was computed over — the kept ones count toward
 /// nothing (R-rc6-5a).</param>
 /// <param name="Allowance">The most this pass was permitted to drop.</param>
+/// <param name="Wanted">
+/// How many entries the pass would have dropped had it been permitted to — <b>which on a refusal is
+/// the only number that makes the report mean anything</b>.
+///
+/// <para>It is not <c>Thin.Count</c>: a refusal thins nothing, so on the one path where this number
+/// is worth saying, <c>Thin</c> is empty. Rule 3's whole purpose is to convert a clock fault into a
+/// sentence a designer can act on — "circuitRF was about to tidy away 38 of your 40 restore points" —
+/// and a sentence built from <c>Thin.Count</c> says "about to tidy away 0", which reads as a defect in
+/// circuitRF rather than as a wrong clock.</para>
+/// </param>
 public sealed record SweepPlan(
     IReadOnlyList<RestorePoint> Thin,
     bool                        Refused,
     int                         Unkept,
-    int                         Allowance)
+    int                         Allowance,
+    int                         Wanted = 0)
 {
     /// <summary>Nothing to do, and no fault — the ordinary answer.</summary>
     public static readonly SweepPlan Nothing = new([], false, 0, 0);
@@ -110,8 +121,8 @@ public static class RetentionSweep
         // R-rc6-3. Refused WHOLE. A bounded prefix would destroy real work under a clock fault and
         // still leave the fault undiagnosed, which is the worst of the three available outcomes.
         return candidates.Count > allowance
-            ? new SweepPlan([], true, unkept.Count, allowance)
-            : new SweepPlan(candidates, false, unkept.Count, allowance);
+            ? new SweepPlan([], true, unkept.Count, allowance, candidates.Count)
+            : new SweepPlan(candidates, false, unkept.Count, allowance, candidates.Count);
     }
 
     /// <summary>
@@ -147,7 +158,10 @@ public static class RetentionSweep
         var plan   = Plan(points, policy, now ?? DateTimeOffset.UtcNow);
 
         if (plan.Refused)
-            return new SweepResult([], plan, [HoldMessages.RetentionSweepRefused(plan.Thin.Count, plan.Unkept)]);
+            // Plan.WANTED, never Thin.Count: a refusal drops nothing, so the list is empty and the
+            // message would have read "about to tidy away 0 of your 40", which names a defect in
+            // circuitRF instead of a wrong clock — the one thing this report exists to say.
+            return new SweepResult([], plan, [HoldMessages.RetentionSweepRefused(plan.Wanted, plan.Unkept)]);
 
         if (plan.Thin.Count == 0) return new SweepResult([], plan, []);
 

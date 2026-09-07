@@ -24,6 +24,12 @@ public sealed record GitInstallation(string Path, Version Version, string Banner
 /// difference is the point: absent is harmless, held is a designer who may believe they are
 /// protected.</para>
 ///
+/// <para><b>Settings ▸ Revision Control is the one exception, by the owner's decision of
+/// 2026-09-07</b> (<c>CircuitRF.Ui.Revision.RevisionTabAvailability</c>). That tab is shown on every
+/// machine with its rows greyed, because it is where somebody goes to find out whether git works here
+/// — and hiding it hid the fact that circuitRF can keep a history and is not keeping one. Everywhere
+/// else the silence above is unchanged.</para>
+///
 /// <para><b>A configured path outranks <c>PATH</c></b> (R-rc3-2), exactly as
 /// <c>VerilogACompilerDiscovery</c> does and for the same reason: a preference that lost to
 /// <c>PATH</c> would be inert on precisely the machine it exists for — the one with two gits, or one
@@ -100,36 +106,51 @@ public static class GitDiscovery
     internal static IReadOnlyList<string> ProbedPaths => _probed;
     private static readonly List<string> _probed = [];
 
-    private static GitInstallation? _cached;
-    private static string?          _cachedKey;
-    private static bool             _cacheValid;
+    private static GitInstallation?       _cached;
+    private static IReadOnlyList<string>  _cachedRejections = [];
+    private static string?                _cachedKey;
+    private static bool                   _cacheValid;
 
     /// <summary>Drop the memoised answer — after the setting changes, or in a test.</summary>
     public static void InvalidateCache()
     {
-        _cacheValid = false;
-        _cached     = null;
+        _cacheValid       = false;
+        _cached           = null;
+        _cachedRejections = [];
         lock (_probed) _probed.Clear();
     }
 
-    /// <summary>The git to use, or null with <paramref name="rejected"/> explaining each candidate.</summary>
+    /// <summary>
+    /// The git to use, or null with <paramref name="rejected"/> explaining each candidate.
+    ///
+    /// <para><b>The rejections are memoised with the answer, and that is not tidiness.</b> They are the
+    /// whole content of the one place an under-floor or wrong-path git is ever reported — RC-4's Detect
+    /// line — and a cache that kept the null and dropped the reasons made the SECOND press of that
+    /// button answer "no git was found on PATH" where the first had said which git was found and why it
+    /// was refused. The user's situation had not changed; only circuitRF's memory of it had.</para>
+    /// </summary>
     public static GitInstallation? Find(out IReadOnlyList<string> rejected)
     {
-        var notes = new List<string>();
-        rejected  = notes;
-
         string? preferred = PreferredPath?.Invoke()?.Trim();
         string  key       = preferred ?? "";
 
         // Memoised, but keyed on the preference: a user who names a different git and asks again must
         // not get the previous answer back.
-        if (_cacheValid && string.Equals(_cachedKey, key, StringComparison.Ordinal)) return _cached;
+        if (_cacheValid && string.Equals(_cachedKey, key, StringComparison.Ordinal))
+        {
+            rejected = _cachedRejections;
+            return _cached;
+        }
+
+        var notes = new List<string>();
+        rejected  = notes;
 
         var found = Locate(preferred, notes);
 
-        _cached     = found;
-        _cachedKey  = key;
-        _cacheValid = true;
+        _cached           = found;
+        _cachedRejections = notes;
+        _cachedKey        = key;
+        _cacheValid       = true;
         return found;
     }
 

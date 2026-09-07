@@ -35,7 +35,10 @@ public sealed record BatchCloseResult(bool WasOpen, IReadOnlyList<string> Modifi
 ///
 /// <para><b>Batches do not nest</b> (R-rc5-6c): a second open inside an open batch is the same batch.
 /// Two entries around one logical action is the unreadable log §5.3 rejects, and the designer's
-/// question — what did this look like before the agent touched it — has exactly one answer.</para>
+/// question — what did this look like before the agent touched it — has exactly one answer. <b>A second
+/// open on a DIFFERENT workspace is refused instead</b>, because it is not that action: replacing the
+/// running batch would abandon it, and an abandoned batch never closes, so the window holding the first
+/// workspace is never told which documents changed (R-rc5-7b) and its next save discards them.</para>
 ///
 /// <para><b>An unclosed batch is not a failure and needs no repair</b> (R-rc5-6d). The entry was
 /// taken before anything was modified, which is the whole of what §1.2 asks; if the agent dies
@@ -47,9 +50,12 @@ public sealed record BatchCloseResult(bool WasOpen, IReadOnlyList<string> Modifi
 /// not to the agent. §1.2 asks for revertible in one action; it does not ask for a tool call an agent
 /// can use to erase what it did — which is why there is no such method here.</para>
 ///
-/// <para><b>Four refusals, resolved at the same moment and for the same reason</b> (R-rc5-6f,
-/// R-rc5-7a) — off, held, nowhere to record, and a window holding unsaved changes. All are answered
-/// BEFORE anything is modified, because <b>a floor announced after the fall is not a floor</b>.</para>
+/// <para><b>Five refusals, resolved at the same moment and for the same reason</b> (R-rc5-6f,
+/// R-rc5-7a) — off, held, nowhere to record, a window holding unsaved changes, and a batch already
+/// running on another workspace. All are answered BEFORE anything is modified, because <b>a floor
+/// announced after the fall is not a floor</b>, and each names what to do instead, because
+/// §5.3b rule 9 tells an agent to stop and say so and a vague refusal is what makes one
+/// improvise.</para>
 /// </summary>
 public sealed class BatchSession
 {
@@ -85,12 +91,25 @@ public sealed class BatchSession
     /// <param name="workspaceRoot">The workspace folder, or null for one with no folder yet.</param>
     public BatchOpenResult Open(string? workspaceRoot, string? intent)
     {
-        // R-rc5-6c. A second open is the same batch, and it takes no second entry.
+        // R-rc5-6c, both halves.
+        //
+        // SAME workspace: the same batch, and it takes no second entry. Two entries around one logical
+        // action is the unreadable log §5.3 rejects, and the designer's question — what did this look
+        // like before the agent touched it — has exactly one answer.
+        //
+        // DIFFERENT workspace: REFUSED, and refused FIRST, before this workspace's own state is even
+        // asked about. It is not the same batch and cannot be folded into one, and the alternative to
+        // refusing is not untidiness — it is abandoning the open batch. An abandoned batch never
+        // closes, so the window holding the first workspace is never told which documents changed
+        // (R-rc5-7b) and never reloads them: it goes on showing the old content over an undo stack
+        // describing edits its files no longer contain, and its next save discards everything that
+        // batch did. §5.3b rule 9 already tells the agent what to do with a refusal, and the refusal
+        // names the open batch so it can.
         if (OpenWorkspace is { } running)
         {
-            bool same = workspaceRoot is { } asked
-                     && string.Equals(Path.GetFullPath(asked), running, StringComparison.Ordinal);
-            if (same) return new BatchOpenResult(true, true, null, null);
+            if (SameWorkspace(workspaceRoot, running)) return new BatchOpenResult(true, true, null, null);
+            return Refuse(RestorePointMessages.AnotherBatchIsOpen(
+                RevisionSwitch.WorkspaceName(running), OpenIntent));
         }
 
         var setting = workspaceRoot is { Length: > 0 }
@@ -214,4 +233,25 @@ public sealed class BatchSession
     };
 
     private static BatchOpenResult Refuse(Diagnostic d) => new(false, false, null, d);
+
+    /// <summary>
+    /// Whether an asked-for workspace is the one a batch is already open on.
+    ///
+    /// <para>A workspace with no folder yet is never the same as one that has: <see cref="Open"/>
+    /// refuses it in its own right, and answering "same batch" for it would hand back an
+    /// <c>Ok</c> with no entry behind it.</para>
+    ///
+    /// <para><b>A path that cannot be resolved is not the same one</b>, rather than an exception out of
+    /// the comparison: this runs before every batch, and a malformed argument must reach the refusal
+    /// that names what is wrong with it instead of ending the call.</para>
+    /// </summary>
+    private static bool SameWorkspace(string? asked, string running)
+    {
+        if (asked is not { Length: > 0 }) return false;
+        try { return string.Equals(Path.GetFullPath(asked), running, StringComparison.Ordinal); }
+        catch (Exception e) when (e is ArgumentException or PathTooLongException or NotSupportedException)
+        {
+            return false;
+        }
+    }
 }

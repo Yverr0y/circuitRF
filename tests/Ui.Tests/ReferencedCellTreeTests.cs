@@ -145,14 +145,14 @@ public class ReferencedCellTreeTests : IDisposable
 
         var tree = WorkspaceScanner.Scan(_mine);
 
-        var row = Assert.Single(tree.Children.Where(c => c.IsReferencedCell));
+        var row = Assert.Single(tree.Children, c => c.IsReferencedCell);
         Assert.Equal("Amp", row.Name);
         Assert.Equal(NodeKind.Cell, row.Kind);
         Assert.Null(row.WarningReason);
 
         // Nothing else of theirs came along — not the workspace row, not its other cells.
-        Assert.Empty(tree.Children.Where(c => c.Kind == NodeKind.ReferencedWorkspace));
-        Assert.Empty(tree.Children.Where(c => c.Name is "Mixer" or "passives"));
+        Assert.DoesNotContain(tree.Children, c => c.Kind == NodeKind.ReferencedWorkspace);
+        Assert.DoesNotContain(tree.Children, c => c.Name is "Mixer" or "passives");
 
         // The same network glyph the referenced WORKSPACE row carries: both rows say "not mine".
         var rowVm = Vm(tree, new ProjectTreeFilterState()).Children.Single(c => c.IsReferencedCell);
@@ -198,7 +198,7 @@ public class ReferencedCellTreeTests : IDisposable
         cws.ReferencedCells = ["ws://gone/Amp"];
         WriteMyCws(cws);
 
-        var row = Assert.Single(WorkspaceScanner.Scan(_mine).Children.Where(c => c.IsReferencedCell));
+        var row = Assert.Single(WorkspaceScanner.Scan(_mine).Children, c => c.IsReferencedCell);
         Assert.Equal("Amp", row.Name);
         Assert.NotNull(row.WarningReason);
     }
@@ -214,7 +214,7 @@ public class ReferencedCellTreeTests : IDisposable
         WriteMyCws(cws);
 
         var tree = WorkspaceScanner.Scan(_mine);
-        var ws   = Assert.Single(tree.Children.Where(c => c.Kind == NodeKind.ReferencedWorkspace));
+        var ws   = Assert.Single(tree.Children, c => c.Kind == NodeKind.ReferencedWorkspace);
         Assert.Equal("theirs", ws.Name);
         Assert.Equal("Amp", Assert.Single(ws.Children).Name);
         Assert.DoesNotContain(tree.Children, c => c.Name == "Referenced Workspaces");
@@ -344,8 +344,8 @@ public class ReferencedCellTreeTests : IDisposable
 
         // One alias, one workspace row — and the cell listing stands on its own beside it.
         var tree = WorkspaceScanner.Scan(_mine);
-        Assert.Single(tree.Children.Where(c => c.Kind == NodeKind.ReferencedWorkspace));
-        Assert.Single(tree.Children.Where(c => c.IsReferencedCell));
+        Assert.Single(tree.Children, c => c.Kind == NodeKind.ReferencedWorkspace);
+        Assert.Single(tree.Children, c => c.IsReferencedCell);
     }
 
     // ── 7. The context menu, as the .axaml actually spells it ─────────────────

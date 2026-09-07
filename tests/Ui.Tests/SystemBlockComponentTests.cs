@@ -81,8 +81,8 @@ public class SystemBlockComponentTests
         var body = Assert.Single(sym.Primitives.OfType<RoundedRectPrimitive>());
         double leftEdge = body.Cx - body.W / 2;
 
-        var ant = Assert.Single(sym.Primitives.OfType<LinePrimitive>()
-            .Where(l => Near(l.X1, -300) && Near(l.Y1, 0)));
+        var ant = Assert.Single(sym.Primitives.OfType<LinePrimitive>(),
+                                l => Near(l.X1, -300) && Near(l.Y1, 0));
         Assert.Equal(leftEdge, ant.X2, 9);
         Assert.Equal(0.0, ant.Y2, 9);
     }
@@ -128,8 +128,8 @@ public class SystemBlockComponentTests
     {
         var sym   = BuiltInSymbols.Primitives(kind);
         var body  = Assert.Single(sym.Primitives.OfType<RoundedRectPrimitive>());
-        var label = Assert.Single(sym.Primitives.OfType<TextPrimitive>()
-                                     .Where(t => t.Content == expected));
+        var label = Assert.Single(sym.Primitives.OfType<TextPrimitive>(),
+                                  t => t.Content == expected);
 
         double halfW = expected.Length * label.FontSize * 0.6 / 2;
         double halfH = label.FontSize * 0.75 / 2;
@@ -140,8 +140,8 @@ public class SystemBlockComponentTests
 
         // The arrow's shaft, at the label's own vertical extent. At the centre of the body it is at
         // x = 0, which is why a centred label cannot survive.
-        var shaft = Assert.Single(sym.Primitives.OfType<LinePrimitive>()
-            .Where(l => l.X1 != l.X2 && l.Y1 != l.Y2));
+        var shaft = Assert.Single(sym.Primitives.OfType<LinePrimitive>(),
+                                  l => l.X1 != l.X2 && l.Y1 != l.Y2);
         double t  = (label.AnchorY + halfH - shaft.Y1) / (shaft.Y2 - shaft.Y1);
         double xAtLabel = shaft.X1 + t * (shaft.X2 - shaft.X1);
         Assert.True(label.AnchorX + halfW < xAtLabel - 10,
@@ -213,8 +213,8 @@ public class SystemBlockComponentTests
         Assert.Same(ccw, BuiltInSymbols.PrimitivesForCirculator(CirculatorDirection.CCW));
 
         // The two turn OPPOSITE ways, which is the whole content of the symbol.
-        var a = Assert.Single(cw.Primitives.OfType<ArcPrimitive>().Where(x => x.R < 150));
-        var b = Assert.Single(ccw.Primitives.OfType<ArcPrimitive>().Where(x => x.R < 150));
+        var a = Assert.Single(cw.Primitives.OfType<ArcPrimitive>(), x => x.R < 150);
+        var b = Assert.Single(ccw.Primitives.OfType<ArcPrimitive>(), x => x.R < 150);
         Assert.NotEqual(System.Math.Sign(a.SweepDeg), System.Math.Sign(b.SweepDeg));
     }
 
@@ -249,8 +249,8 @@ public class SystemBlockComponentTests
         Assert.Same(t2, BuiltInSymbols.PrimitivesForSwitchD(SwitchThrow.T2));
 
         // The blade starts at the common contact and rises to throw 1 or falls to throw 2.
-        var b1 = Assert.Single(t1.Primitives.OfType<LinePrimitive>().Where(l => l.Y1 != l.Y2));
-        var b2 = Assert.Single(t2.Primitives.OfType<LinePrimitive>().Where(l => l.Y1 != l.Y2));
+        var b1 = Assert.Single(t1.Primitives.OfType<LinePrimitive>(), l => l.Y1 != l.Y2);
+        var b2 = Assert.Single(t2.Primitives.OfType<LinePrimitive>(), l => l.Y1 != l.Y2);
         Assert.Equal(-100.0, b1.Y2);
         Assert.Equal( 100.0, b2.Y2);
     }

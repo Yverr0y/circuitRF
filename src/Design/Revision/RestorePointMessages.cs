@@ -93,6 +93,39 @@ public static class RestorePointMessages
         "This workspace has unsaved changes open in circuitRF, so a change made underneath them would "
       + "be lost when they are saved. Nothing was changed. Save them and ask again.");
 
+    /// <summary>
+    /// R-rc5-6c's other half: <b>a batch is already open on a DIFFERENT workspace.</b>
+    ///
+    /// <para>A second open on the SAME workspace is the same batch and takes no second entry — the
+    /// designer's question, <i>what did this look like before the agent touched it</i>, has exactly one
+    /// answer. On a different workspace it is not the same batch and cannot be treated as one, and the
+    /// alternative to refusing is worse than untidy: replacing the open batch abandons it, so the
+    /// window holding the first workspace is never told which documents changed and never reloads
+    /// them. It goes on showing the old content over an undo stack describing edits its files no
+    /// longer contain, and its next save discards everything the first batch did — the
+    /// two-editors-one-file failure §7A.3 already calls worse than the divergence §7A.2 exists to
+    /// prevent, reached through the mechanism §1.2 is the motive for.</para>
+    ///
+    /// <para><b>It names the open batch</b>, because an agent given a vague refusal will improvise,
+    /// which §5.3b rule 9 forbids — and because the remedy is one call the agent already has.</para>
+    /// </summary>
+    /// <param name="openWorkspace">The workspace the running batch belongs to.</param>
+    /// <param name="openIntent">What that batch said it was doing, when it said anything.</param>
+    public static Diagnostic AnotherBatchIsOpen(string openWorkspace, string? openIntent)
+        => openIntent?.Trim() is { Length: > 0 } intent
+            ? Diagnostic.Create(
+                  "revision.batch.refused.another-open",
+                  DiagnosticSeverity.Error,
+                  "A change is already under way in '{workspace}' ({intent}), and circuitRF looks after "
+                + "one at a time. Nothing was changed here. Close that one first, then ask again.",
+                  ("workspace", (object?)openWorkspace), ("intent", intent))
+            : Diagnostic.Create(
+                  "revision.batch.refused.another-open",
+                  DiagnosticSeverity.Error,
+                  "A change is already under way in '{workspace}', and circuitRF looks after one at a "
+                + "time. Nothing was changed here. Close that one first, then ask again.",
+                  ("workspace", (object?)openWorkspace));
+
     /// <summary>There is no git on this machine, so no history can be kept. Reported only where the
     /// caller ASKED — R-rc3-3's silence still governs every automatic path.</summary>
     public static Diagnostic NoGitHere() => new(
@@ -192,10 +225,27 @@ public static class RestorePointMessages
         ("target", (object?)target), ("fallback", fallback));
 
     /// <summary>
+    /// The same report when the marker itself was truncated — <b>which is the crash case, not an
+    /// exotic one</b>: the write that was cut off is the write the crash cut off.
+    ///
+    /// <para>It names no states because there are none to name, and it must not pretend otherwise: the
+    /// ordinary message's two quoted labels would render as two pairs of empty quotes, which reads as
+    /// a defect rather than as the one thing that is certainly true — that this workspace may be part
+    /// one state and part another, and that the list is where to settle it.</para>
+    /// </summary>
+    public static Diagnostic RestoreWasInterruptedUnnamed() => new(
+        "revision.restore.interrupted-unnamed",
+        DiagnosticSeverity.Error,
+        "Going back to an earlier state did not finish, so this workspace may be part one state and "
+      + "part another. circuitRF could not read which states were involved. Check the restore points "
+      + "and go back to the one you want.");
+
+    /// <summary>
     /// R-rc5-19. <b>The one sentence a Save Workspace As copy adds</b>, because that is the only one
     /// of the three journeys with no dialog to read: without it, "I saved a copy and my history is
     /// gone" is a discovery rather than a decision.
     /// </summary>
     public const string CopyStartsItsOwnHistory =
-        "The copy starts a history of its own. The original keeps every restore point it had.";
+        "The copy starts a history of its own. The original keeps every restore point and every "
+      + "version it had.";
 }

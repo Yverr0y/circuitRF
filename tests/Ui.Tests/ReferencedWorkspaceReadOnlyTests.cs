@@ -262,7 +262,7 @@ public sealed class ReferencedWorkspaceReadOnlyTests : IDisposable
     /// on the very document the designer tried to edit.
     /// </summary>
     [Fact]
-    public void TheRefusalCarriesAnInvokableAction_ThatOpensTheOwningWorkspace()
+    public async Task TheRefusalCarriesAnInvokableAction_ThatOpensTheOwningWorkspace()
     {
         WriteLegacyCws();
         string ccell = LibraryCell();
@@ -279,7 +279,7 @@ public sealed class ReferencedWorkspaceReadOnlyTests : IDisposable
         Assert.NotNull(refusal.Invoke);
         Assert.Contains("stdlib", refusal.ActionLabel!);
 
-        refusal.Invoke!().GetAwaiter().GetResult();
+        await refusal.Invoke!();
 
         Assert.Equal(Path.Combine(_library, ".cws"), opened!.Value.Cws);
         Assert.Equal(ccell, opened!.Value.Doc);

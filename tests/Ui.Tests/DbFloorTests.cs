@@ -60,7 +60,7 @@ public class DbFloorTests
         // above sit ABOVE -300 dB, so a -300 dB floor would still leave visible jitter.
         var raw = MatchedLineS11Magnitudes.Where(m => m > 0).Select(m => 20.0 * Math.Log10(m)).ToArray();
 
-        Assert.NotEmpty(raw.Where(v => v > -300.0));
+        Assert.Contains(raw, v => v > -300.0);
         Assert.All(raw, v => Assert.True(v < DbFloor.FloorDb,
             $"{v} dB is above the floor — roundoff must sit below it or the floor does not flatten it."));
     }

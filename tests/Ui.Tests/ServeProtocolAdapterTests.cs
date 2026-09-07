@@ -448,7 +448,7 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
         Assert.Equal("ok", doc.GetProperty("status").GetString());
 
         var kinds = doc.GetProperty("outputs").EnumerateArray()
-            .Select(o => o.GetProperty("kind").GetString()).ToArray();
+            .Select(o => o.GetProperty("kind").GetString()!).ToArray();
         Assert.Equal(["touchstone", "npy"], kinds);
 
         foreach (var o in doc.GetProperty("outputs").EnumerateArray())
@@ -542,7 +542,7 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
 
         var tools = JsonDocument.Parse(server.Request("tools/list", null)).RootElement
             .GetProperty("tools").EnumerateArray()
-            .Select(t => t.GetProperty("name").GetString()).ToArray();
+            .Select(t => t.GetProperty("name").GetString()!).ToArray();
 
         // R-aut5-4: small and broad. Nine, and the count is asserted because the surface is a
         // standing cost paid on every interaction whether or not a tool is called. `reference` earns

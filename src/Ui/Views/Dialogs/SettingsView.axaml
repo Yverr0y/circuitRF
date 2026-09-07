@@ -176,20 +176,6 @@
                              the two that govern what runs without being asked. -->
                         <dlg:VerilogACompilerSettingsView Margin="0,24,0,0"/>
 
-                        <!-- The git path, hosted here ONLY when the Revision Control tab is hidden —
-                             which is the case on a machine with no usable git and no configured path.
-                             The whole tab is hidden there because absence is silent (§4.3): a designer
-                             who does not want a history should never learn the feature exists. But
-                             hiding everything would also hide the one field that makes a git in an
-                             unusual location findable in the first place, so the field survives its own
-                             tab and lands on the tab that already answers "what may circuitRF RUN",
-                             beside the Verilog-A compiler it is a near-copy of.
-
-                             SettingsView.ApplyRevisionTabVisibility decides which of the two hosts
-                             shows it; it is never shown twice. -->
-                        <dlg:GitPathSettingsView Name="GitPathFallback" Margin="0,24,0,0"
-                                                 IsVisible="False"/>
-
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
@@ -203,8 +189,13 @@
                  about what is KEPT, and a designer looking for "how long are my restore points kept"
                  will not look under Security.
 
-                 HIDDEN, not disabled, on a machine with no usable git and no configured path (§4.3) —
-                 see ApplyRevisionTabVisibility, and the git-path fallback above. -->
+                 SHOWN ON EVERY MACHINE, whether or not there is a git (owner, 2026-09-07). §4.3 as
+                 first written hid the whole tab when git was absent, so that absence stayed silent —
+                 and hiding it also hid the fact that circuitRF CAN keep a history and is not keeping
+                 one here, which is the same false belief the design is written against reached from
+                 the other side. Without a git the rows are greyed and one sentence says why; the git
+                 path and its Detect stay live, because they are the remedy. See
+                 RevisionTabAvailability. -->
             <TabItem Header="Revision Control" Name="RevisionTab">
                 <ScrollViewer Margin="0,8,0,0" HorizontalScrollBarVisibility="Disabled">
                     <dlg:RevisionControlSettingsView Name="RevisionSettings"/>

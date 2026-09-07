@@ -56,10 +56,11 @@ public static class DocSettingsFixtures
 
     private static FigureScene Tab(int index)
     {
-        // The Revision Control tab is hidden without git (§4.3), and a figure whose existence depended
-        // on the generating machine's toolchain is not a reproducible figure. This is the docs seam and
-        // nothing a user runs; ApplyRevisionTabVisibility is what the application uses.
-        SettingsView.ShowRevisionTabForCapture = true;
+        // The Revision Control tab is on every machine, but WITHOUT a git its rows are greyed and a
+        // notice replaces them (owner, 2026-09-07) — so a figure taken here would show one of two
+        // pictures depending on the generating machine's toolchain, which is not a reproducible
+        // figure. This is the docs seam and nothing a user runs.
+        RevisionControlSettingsView.ShowAsAvailableForCapture = true;
 
         var dialog = new SettingsView(null);
         dialog.PopulateForCapture();

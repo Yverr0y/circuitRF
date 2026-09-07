@@ -19,7 +19,7 @@ namespace CircuitRF.Ui.Tests.Revision;
 /// is not interactive" are read out of the XAML — which is honest, because what is being pinned IS the
 /// XAML. The two things that are genuinely decisions — which switch wins, and whether the tab exists at
 /// all — were extracted into <see cref="RevisionArming"/> and
-/// <see cref="RevisionTabVisibility"/> precisely so they could be tested as decisions rather than
+/// <see cref="RevisionTabAvailability"/> precisely so they could be tested as decisions rather than
 /// inferred from a condition inline in a dialog.</para>
 ///
 /// <para><b>Comments are stripped before every source scan.</b> This repository has been caught by a
@@ -153,11 +153,11 @@ public class RevisionControlSettingsTests
         }
     }
 
-    /// <summary>The figure is captured with the tab forced visible, so it does not depend on whether the
-    /// generating machine happened to have git installed.</summary>
+    /// <summary>The figure is captured with the tab's controls forced live, so it does not depend on
+    /// whether the generating machine happened to have git installed.</summary>
     [Fact]
-    public void TheSettingsFigureCaptureForcesTheRevisionTabVisible()
-        => Assert.Contains("ShowRevisionTabForCapture",
+    public void TheSettingsFigureCaptureForcesTheRevisionTabAvailable()
+        => Assert.Contains("ShowAsAvailableForCapture",
                            StripCode(Read("src", "Ui", "Diagnostics", "Fixtures", "DocSettingsFixtures.cs")));
 
     // ── Gate 4: five figures, five citations ─────────────────────────────────────────────────────
@@ -180,49 +180,92 @@ public class RevisionControlSettingsTests
         Assert.Contains("#revision-control", page[..page.IndexOf("</nav>", StringComparison.Ordinal)]);
     }
 
-    // ── Gate 5: hidden without git, and the path field survives ───────────────────────────────────
+    // ── Gate 5: shown always, usable only with git, and the path row never grey ───────────────────
 
     /// <summary>
-    /// R-rc4-3, <b>both halves — the exception is the whole point</b>. With no git found and no path
-    /// configured the tab is absent; the path field is still reachable, because it moves to its second
-    /// host.
+    /// <b>The tab is on every machine</b> (owner, 2026-09-07) — which reverses R-rc4-3's original
+    /// answer, and the reversal is the requirement rather than a relaxation of it.
+    ///
+    /// <para>Hiding the tab kept absence silent. It also hid, from the designer who WOULD have wanted a
+    /// history, the fact that circuitRF can keep one and is not keeping one here — the same false
+    /// belief §1.4 is written against, reached from the other side, and the remedy was a program they
+    /// could have installed in five minutes. What replaces it is honest in both directions: the rows
+    /// are visible so what would be kept is legible, and greyed so nobody believes anything is.</para>
     /// </summary>
     [Theory]
-    // configured, available, tab shown, fallback shown
-    [InlineData(false, false, false, true)]   // nothing at all: hidden, and the field survives
-    [InlineData(false, true,  true,  false)]  // git on PATH: the ordinary case
-    [InlineData(true,  false, true,  false)]  // a path that does NOT resolve: still shown, so it is fixable
-    [InlineData(true,  true,  true,  false)]
-    public void TheTabIsHiddenWithoutGitAndThePathFieldIsStillReachable(
-        bool configured, bool available, bool tabShown, bool fallbackShown)
+    [InlineData(false)]   // no usable git: shown, and everything but the path row is greyed
+    [InlineData(true)]    // a usable git: shown, and live
+    public void TheTabIsShownOnEveryMachineAndIsUsableOnlyWithGit(bool gitAvailable)
     {
-        Assert.Equal(tabShown,      RevisionTabVisibility.ShouldShowTab(configured, available));
-        Assert.Equal(fallbackShown, RevisionTabVisibility.ShouldShowPathFallback(configured, available));
-
-        // Never both, in any combination — one control, two hosts.
-        Assert.NotEqual(RevisionTabVisibility.ShouldShowTab(configured, available),
-                        RevisionTabVisibility.ShouldShowPathFallback(configured, available));
+        Assert.True(RevisionTabAvailability.TabIsAlwaysShown);
+        Assert.Equal(gitAvailable, RevisionTabAvailability.ControlsEnabled(gitAvailable));
     }
 
     /// <summary>
-    /// The second host is really wired: the Security &amp; Permissions tab declares the same control,
-    /// and the dialog drives both visibilities from the one decision.
+    /// <b>The git-path row is OUTSIDE the block that gets disabled, and that is the whole of the
+    /// arrangement.</b> It is the remedy — how somebody with git in an unusual location, or none at
+    /// all, finds out what circuitRF sees and fixes it — so a greyed Detect would leave a machine
+    /// unable to answer its own question.
     /// </summary>
     [Fact]
-    public void TheGitPathRowHasItsSecondHostOnSecurityAndPermissions()
+    public void TheGitPathRowSurvivesTheDisabledBlockAndTheNoticeExplainsIt()
+    {
+        string xaml = StripXaml(Dialog("RevisionControlSettingsView.axaml"));
+
+        int path     = xaml.IndexOf("<dlg:GitPathSettingsView", StringComparison.Ordinal);
+        int notice   = xaml.IndexOf("Name=\"NoGitNotice\"", StringComparison.Ordinal);
+        int disabled = xaml.IndexOf("Name=\"HistoryControls\"", StringComparison.Ordinal);
+
+        Assert.True(path >= 0 && notice > path && disabled > notice,
+                    "the git-path row must precede the notice and the disabled block, and sit outside it");
+
+        // Every other row is inside the block, so a row added later cannot be forgotten.
+        foreach (string control in (string[])
+                 ["IdentityNameBox", "KeepHistoryCheck", "WorkspaceRevisionCheck",
+                  "RetentionDaysUpDown", "MinimumPointsUpDown", "CheckpointOnCloseCheck",
+                  "CheckpointBeforeAiCheck", "PackThresholdUpDown", "PackNowButton",
+                  "ReclaimAgeUpDown", "ReclaimButton"])
+            Assert.True(xaml.IndexOf($"Name=\"{control}\"", StringComparison.Ordinal) > disabled,
+                        $"{control} must sit inside the block that is disabled without a git");
+
+        string code = StripCode(Dialog("RevisionControlSettingsView.axaml.cs"));
+        Assert.Contains("RevisionTabAvailability.ControlsEnabled", code);
+        Assert.Contains("HistoryControls.IsEnabled", code);
+        Assert.Contains("RevisionTabAvailability.NoGitNotice", code);
+    }
+
+    /// <summary>
+    /// <b>Detect turns the rest of the tab on.</b> Detect writes no preference, so a handler keyed on
+    /// the path changing would miss the ordinary sequence — install git, press the button that exists
+    /// to find it — and the rows would stay grey until Settings was closed and reopened.
+    /// </summary>
+    [Fact]
+    public void DetectReAsksTheMachineAndReportsThatAvailabilityMayHaveChanged()
+    {
+        string detect = Section(StripCode(Dialog("GitPathSettingsView.axaml.cs")), "OnDetectGit");
+        Assert.Contains("GitDiscovery.InvalidateCache", detect);
+        Assert.Contains("GitAvailabilityChanged", detect);
+
+        Assert.Contains("GitPath.GitAvailabilityChanged",
+                        StripCode(Dialog("RevisionControlSettingsView.axaml.cs")));
+    }
+
+    /// <summary>
+    /// The git-path row's second host is gone with the rule that created it. It existed only so that
+    /// hiding the tab did not also hide the field; with the tab always present, a copy on Security
+    /// &amp; Permissions would be a row nobody could ever reach.
+    /// </summary>
+    [Fact]
+    public void TheGitPathRowHasExactlyOneHost()
     {
         string xaml = StripXaml(Dialog("SettingsView.axaml"));
         int security = xaml.IndexOf("<TabItem Header=\"Security &amp; Permissions\"", StringComparison.Ordinal);
         int revision = xaml.IndexOf("<TabItem Header=\"Revision Control\"", StringComparison.Ordinal);
         Assert.True(security >= 0 && revision > security);
 
-        string securityTab = xaml[security..revision];
-        Assert.Contains("GitPathSettingsView", securityTab);
-        Assert.Contains("Name=\"GitPathFallback\"", securityTab);
-
-        string code = StripCode(Dialog("SettingsView.axaml.cs"));
-        Assert.Contains("RevisionTabVisibility.ShouldShowTab", code);
-        Assert.Contains("GitPathFallback.IsVisible", code);
+        Assert.DoesNotContain("GitPathSettingsView", xaml[security..revision]);
+        Assert.DoesNotContain("GitPathFallback", xaml);
+        Assert.DoesNotContain("GitPathFallback", StripCode(Dialog("SettingsView.axaml.cs")));
     }
 
     // ── Gate 6: the per-workspace flag round-trips, and two workspaces are independent ────────────
@@ -873,12 +916,12 @@ public class RevisionControlSettingsTests
     }
 
     /// <summary>An under-floor git leaves the rest of the application behaving as though git were
-    /// absent — the tab's own visibility rule sees "not available".</summary>
+    /// absent — the tab is still there, and everything on it but the path row is greyed.</summary>
     [Fact]
     public void AnUnderFloorGitIsAbsentEverywhereButTheDetectLine()
     {
-        Assert.False(RevisionTabVisibility.ShouldShowTab(pathConfigured: false, gitAvailable: false));
-        Assert.True(RevisionTabVisibility.ShouldShowPathFallback(pathConfigured: false, gitAvailable: false));
+        Assert.True(RevisionTabAvailability.TabIsAlwaysShown);
+        Assert.False(RevisionTabAvailability.ControlsEnabled(gitAvailable: false));
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────────
@@ -892,6 +935,7 @@ public class RevisionControlSettingsTests
     /// stand-in would need a real executable built for the purpose, which is more than this gate is
     /// worth when two of the three CI platforms cover it.</para>
     /// </summary>
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]   // the caller guards for it
     private static string FakeGit(string version)
     {
         string dir = Path.Combine(Path.GetTempPath(), "crf-rc4-" + Guid.NewGuid().ToString("N")[..12]);

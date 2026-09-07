@@ -61,23 +61,44 @@ public static class RestoreMarker
     }
 
     /// <summary>
-    /// What was in flight, or null when nothing was. <b>Never throws</b>: a truncated marker is a
-    /// marker, so it is reported rather than dropped — a file half-written by the same crash is
-    /// evidence of exactly the state this is looking for.
+    /// What was in flight, or null when nothing was. <b>Never throws</b>.
+    ///
+    /// <para><b>A truncated marker is still a marker</b>, and this is the case the type exists for: a
+    /// file half-written by the very crash that interrupted the restore is evidence of exactly the
+    /// state being looked for. Treating an unparseable one as absent would make the marker most likely
+    /// to be dropped precisely when it is most likely to be true — so a file that is there but
+    /// unreadable answers with <see cref="Unreadable"/>, whose ends are blank and whose report
+    /// therefore says a restore was interrupted without naming states it cannot name.</para>
+    ///
+    /// <para>Only an <b>absent</b> file, or one that cannot be read at all, is "nothing was in
+    /// flight".</para>
     /// </summary>
     public static RestoreInFlight? Read(string workspaceRoot)
     {
         string path = PathFor(workspaceRoot);
+        string text;
+
         try
         {
             if (!File.Exists(path)) return null;
-            return JsonSerializer.Deserialize<RestoreInFlight>(File.ReadAllText(path));
+            text = File.ReadAllText(path);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+
+        try
         {
-            return null;
+            return JsonSerializer.Deserialize<RestoreInFlight>(text) ?? Unreadable;
         }
+        catch (JsonException) { return Unreadable; }
     }
+
+    /// <summary>
+    /// The marker that says only <i>a restore was interrupted</i> — what a truncated file resolves to.
+    /// Both ends are blank, and every caller that renders one already handles a blank label, because a
+    /// restore point with no label is an ordinary thing.
+    /// </summary>
+    public static RestoreInFlight Unreadable { get; } =
+        new(new RestoreEnd("", "", ""), new RestoreEnd("", "", ""), DateTimeOffset.UnixEpoch);
 
     /// <summary>Removes it, after the last file.</summary>
     public static void Clear(string workspaceRoot)

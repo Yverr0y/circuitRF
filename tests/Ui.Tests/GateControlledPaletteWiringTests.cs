@@ -56,6 +56,7 @@ public class GateControlledPaletteWiringTests
             var item = items.FirstOrDefault(i => i.Kind == kind);
             Assert.True(item is not null, $"{kind} is missing from the palette catalog");
             Assert.Equal(ComponentCategory.Devices, item!.Category);
+            Assert.NotNull(item.ExtraCategories);
             Assert.Contains(ComponentCategory.Nonlinear, item.ExtraCategories);
         }
 

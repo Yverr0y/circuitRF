@@ -334,7 +334,7 @@ public sealed class MatchDcBlockDesignerTests(ITestOutputHelper output)
         Assert.Contains(schematic.Components, c => c.Id == block.Name + MatchSchematicModel.GroundIdSuffix);
         Assert.DoesNotContain(schematic.Components, c => c.Id == host + MatchSchematicModel.GroundIdSuffix);
         Assert.Contains(schematic.Components, c => c.Id == "L1" + MatchSchematicModel.GroundIdSuffix);
-        Assert.Single(schematic.ConnectionDots.Where(d => Math.Abs(d.X - inductor.X) < 1e-9));
+        Assert.Single(schematic.ConnectionDots, d => Math.Abs(d.X - inductor.X) < 1e-9);
 
         output.WriteLine($"{host} at ({inductor.X:0}, {inductor.Y:0}); {block.Name} at ({block.X:0}, {block.Y:0}); "
                          + $"L1 at ({end.X:0}, {end.Y:0}) grounded at {MatchLadderLayout.GroundYFor(vm.Ladder, end):0}");
@@ -642,7 +642,7 @@ public sealed class MatchDcBlockDesignerTests(ITestOutputHelper output)
         Assert.DoesNotContain(schematic.Components, c => c.Id == host + MatchSchematicModel.GroundIdSuffix);
 
         // ONE junction dot for the arm, at the spine, and it belongs to the inductor.
-        Assert.Single(schematic.ConnectionDots.Where(d => Math.Abs(d.X - inductor.X) < 1e-9));
+        Assert.Single(schematic.ConnectionDots, d => Math.Abs(d.X - inductor.X) < 1e-9);
 
         output.WriteLine($"{host} at ({inductor.X:0}, {inductor.Y:0}); "
                          + $"{block.Name} at ({block.X:0}, {block.Y:0}); ground at "

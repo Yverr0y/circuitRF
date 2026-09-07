@@ -3,19 +3,18 @@
              x:Class="CircuitRF.Ui.Views.Dialogs.GitPathSettingsView">
 
   <!--
-    The git circuitRF runs to keep a workspace's history — ONE control, TWO HOSTS, and which host it
-    appears in is the whole of RC-4's R-rc4-3.
+    The git circuitRF runs to keep a workspace's history.
 
-    The Revision Control tab is HIDDEN on a machine with no usable git and no configured path (§4.3):
-    absence is silent, a designer who does not want this should never learn it exists, and hidden is
-    deliberately not disabled — that is RC-6's HOLD state, which is a different thing. But "hide
-    everything" would hide the one field that makes an unusually-located git findable in the first
-    place, so when that tab is absent this same control is hosted on Security & Permissions instead,
-    beside the Verilog-A compiler it is a near-copy of. It is never shown twice; SettingsView owns that.
+    THE ONE ROW ON THE REVISION CONTROL TAB THAT IS NEVER DISABLED (owner, 2026-09-07). That tab is
+    shown on every machine, whether or not there is a git; without one, everything else on it is greyed
+    and a sentence says why, and this row stays live because it is the remedy. A greyed Detect would
+    leave a machine unable to answer its own question — which is exactly the user this arrangement is
+    for: somebody who wants to know whether git works here.
 
-    Security & Permissions is the right fallback host and not an arbitrary one: that tab answers what
-    circuitRF is permitted to RUN, git is a program circuitRF runs, and the Verilog-A compiler row
-    directly above is the same control with a different program — blank means PATH, a named path
+    It used to have a second host on Security & Permissions, for the case where the whole tab was
+    hidden. That case no longer exists, and neither does the second host: one control, one place.
+
+    It is still shaped exactly like the Verilog-A compiler row — blank means PATH, a named path
     outranks PATH, Browse picks one from disk, and the status line reports what it found.
 
     Detect rather than Test: what a user with a problem needs to know is not only "does it work" but

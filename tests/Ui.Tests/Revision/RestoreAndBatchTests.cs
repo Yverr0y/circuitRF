@@ -209,7 +209,7 @@ public class RestoreAndBatchTests
         Assert.NotEqual("HEAD", branch);
     }
 
-    // ── Gate 18 / 19: the batch protocol and its four refusals ──────────────────────────────────
+    // ── Gate 18 / 19: the batch protocol and its five refusals ──────────────────────────────────
 
     /// <summary>
     /// R-rc5-6c, R-rc5-6d. <b>A batch opened twice is one batch and one entry</b> — two entries around
@@ -248,6 +248,65 @@ public class RestoreAndBatchTests
         ws.Write("cells/a/thing.csch", "what the agent did");
         Assert.True(WorkspaceRestore.Restore(git, point).Ok);
         Assert.Equal("before the agent", File.ReadAllText(ws.File_("cells/a/thing.csch")));
+    }
+
+    /// <summary>
+    /// R-rc5-6c's other half. <b>A batch opened on a DIFFERENT workspace while one is running is
+    /// refused, and the refusal names the one that is running.</b>
+    ///
+    /// <para>Two entries around one logical action is the log §5.3 rejects, which is why a second open
+    /// on the SAME workspace folds into one batch — but a different workspace is not that action and
+    /// cannot be folded into it. What the alternative costs is not untidiness: replacing the open batch
+    /// ABANDONS it, so it never closes, and the window holding the first workspace is never told which
+    /// documents changed (R-rc5-7b). It goes on showing the old content over an undo stack describing
+    /// edits its files no longer contain, and its next save discards everything that batch did — the
+    /// two-editors-one-file failure §7A.3 calls worse than the divergence §7A.2 prevents, arriving
+    /// through the mechanism §1.2 is the motive for.</para>
+    ///
+    /// <para><b>The first batch survives the refusal intact</b>, which is the half that would be easy
+    /// to break while fixing this: refusing and then clearing the session's state would abandon it just
+    /// as thoroughly, only with a message.</para>
+    /// </summary>
+    [GitFact]
+    public void ABatchOnASecondWorkspaceIsRefusedAndTheFirstSurvives()
+    {
+        using var one = Armed();
+        using var two = Armed();
+
+        one.Write("cells/a/thing.csch", "before the agent");
+        two.Write("cells/b/thing.csch", "untouched");
+
+        string otherFile = two.File_("cells/b/thing.csch");
+        var    before    = File.GetLastWriteTimeUtc(otherFile);
+
+        var session = new BatchSession { KeepHistoryPreference = true };
+        Assert.True(session.Open(one.Root, "widen the output match").Ok);
+
+        var second = session.Open(two.Root, "something in the other one");
+
+        Assert.False(second.Ok);
+        Assert.False(second.AlreadyOpen);
+        Assert.Null(second.Point);
+        Assert.Equal("revision.batch.refused.another-open", second.Refusal!.Id);
+
+        // It names the batch that is running — the workspace AND what it said it was doing — because
+        // §5.3b rule 9 tells an agent to stop and say so, and a vague refusal is what makes one
+        // improvise instead.
+        string said = second.Refusal.Render();
+        Assert.Contains(Path.GetFileName(one.Root.TrimEnd(Path.DirectorySeparatorChar)), said,
+                        StringComparison.Ordinal);
+        Assert.Contains("widen the output match", said, StringComparison.Ordinal);
+
+        // The second workspace was not touched, and nothing was recorded in it.
+        Assert.Equal(before, File.GetLastWriteTimeUtc(otherFile));
+        Assert.Empty(CheckpointReferences.List(two.Git()));
+
+        // And the first batch is still the open one — refusing must not abandon what it protects.
+        Assert.Equal(Path.GetFullPath(one.Root), session.OpenWorkspace);
+        Assert.Equal("widen the output match", session.OpenIntent);
+
+        var closed = session.Close();
+        Assert.True(closed.WasOpen);
     }
 
     /// <summary>
@@ -586,8 +645,8 @@ public class RestoreAndBatchTests
         // The attribute is what carries the skip, so the property being tested is that the gates use
         // it rather than a plain Fact with a git call inside.
         foreach (var m in methods)
-            Assert.Empty(m.GetCustomAttributes(typeof(FactAttribute), false)
-                          .Where(a => a.GetType() == typeof(FactAttribute)));
+            Assert.DoesNotContain(m.GetCustomAttributes(typeof(FactAttribute), false),
+                                  a => a.GetType() == typeof(FactAttribute));
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────────────────────────

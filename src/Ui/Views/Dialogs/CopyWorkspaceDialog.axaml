@@ -46,12 +46,12 @@
                        Text="Give the address the workspace's maintainer gave you, and say where to put it. What arrives is an ordinary workspace: you can open it, read it, reference its cells, and — if you are allowed to — send your own changes back."/>
 
             <TextBlock FontSize="12" Margin="0,6,0,0" Text="Address"/>
-            <TextBox x:Name="SourceBox" FontSize="12" Watermark="the address you were given"/>
+            <TextBox x:Name="SourceBox" FontSize="12" PlaceholderText="the address you were given"/>
 
             <TextBlock FontSize="12" Margin="0,6,0,0" Text="Put it in"/>
             <Grid ColumnDefinitions="*,Auto">
                 <TextBox Grid.Column="0" x:Name="DestinationBox" FontSize="12"
-                         Watermark="a folder that does not exist yet"/>
+                         PlaceholderText="a folder that does not exist yet"/>
                 <Button Grid.Column="1" x:Name="BrowseButton" FontSize="12" Padding="10,4"
                         Margin="8,0,0,0" Content="Browse…" Click="OnBrowseClick"/>
             </Grid>

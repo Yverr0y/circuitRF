@@ -31,10 +31,10 @@ namespace CircuitRF.Ui.Views.Dialogs;
 /// that git also gets the second shape's standing switch, because
 /// <b><i>keep a history of my workspaces</i> IS the on/off consent</b> for running it — off means
 /// circuitRF never invokes git at all. So git is not outside the model and is not given a parallel one:
-/// it has the compiler's path row and the updater's switch, in the tab that owns what is KEPT, and the
-/// path row's second host is Security &amp; Permissions itself. The one thing that is genuinely new is
-/// that the switch defaults ON where the others' subjects are opt-in per kit — which §4.3 pays for by
-/// making the entire feature invisible to anyone who did not install git deliberately.</para>
+/// it has the compiler's path row and the updater's switch, in the tab that owns what is KEPT. The one
+/// thing that is genuinely new is that the switch defaults ON where the others' subjects are opt-in per
+/// kit — which is paid for by the switch doing nothing at all until there is a git to run, a state this
+/// tab now shows rather than hides (<see cref="RevisionTabAvailability"/>, owner 2026-09-07).</para>
 ///
 /// <para><b>Every control that can reduce what is kept states its consequence beside itself</b>
 /// (R-rc4-13), in this UI and not only in a tooltip. Those sentences are in the XAML; the ones that
@@ -61,6 +61,12 @@ public partial class RevisionControlSettingsView : UserControl
     public RevisionControlSettingsView()
     {
         InitializeComponent();
+
+        // Naming a git, or a Detect that resolved one, is the only thing that turns the rest of this
+        // tab on. Subscribed here rather than left to the host, because the host is not the only
+        // thing that has to react — these controls do.
+        GitPath.GitAvailabilityChanged += (_, _) => ApplyGitAvailability();
+
         Load();
     }
 
@@ -72,7 +78,8 @@ public partial class RevisionControlSettingsView : UserControl
         Load();
     }
 
-    /// <summary>The git-path control, so a host can move it to its other home.</summary>
+    /// <summary>The git-path control. Exposed so the host can watch the same signal this view watches
+    /// — naming a git changes what several tabs are entitled to claim, not only this one's rows.</summary>
     public GitPathSettingsView PathControl => GitPath;
 
     // ── Load ─────────────────────────────────────────────────────────────────────────────────────
@@ -112,8 +119,48 @@ public partial class RevisionControlSettingsView : UserControl
 
             LoadWorkspaceScopedControls();
             RefreshConsequences();
+            ApplyGitAvailability();
         }
         finally { _loading = false; }
+    }
+
+    /// <summary>
+    /// <b>Greys everything but the git-path row when there is no usable git</b> (owner, 2026-09-07;
+    /// <see cref="RevisionTabAvailability"/>).
+    ///
+    /// <para>The tab itself is always present. What a machine with no git must not have is a set of
+    /// live controls implying something is being kept — and what it must have is the one row that
+    /// fixes it, which is why <c>GitPath</c> sits outside the block this disables.</para>
+    ///
+    /// <para>Re-run whenever the answer can change: on load, and when the git-path control reports
+    /// that a path was named or a Detect resolved one. It is not run on a timer and asks discovery
+    /// rather than the disk, so a git installed while Settings is open is picked up by Detect — which
+    /// is the button a user in that situation presses anyway.</para>
+    /// </summary>
+    /// <summary>
+    /// For the User-Docs factory only: renders the tab as it looks on a machine that HAS a git.
+    ///
+    /// <para><b>The tab is now on every machine, so what varies is no longer whether the figure exists
+    /// but what it shows</b> — greyed rows on a machine with no git, live ones otherwise. A figure that
+    /// depended on the generating machine's toolchain either way is not a reproducible figure, which is
+    /// what the seam it replaces existed to prevent; it moved here because this is where the answer is
+    /// now decided.</para>
+    /// </summary>
+    internal static bool ShowAsAvailableForCapture { get; set; }
+
+    private void ApplyGitAvailability()
+    {
+        bool available = ShowAsAvailableForCapture;
+        if (!available)
+        {
+            try { available = GitDiscovery.IsAvailable; }
+            catch (Exception) { available = false; }
+        }
+
+        HistoryControls.IsEnabled = RevisionTabAvailability.ControlsEnabled(available);
+
+        NoGitNotice.Text      = available ? "" : RevisionTabAvailability.NoGitNotice;
+        NoGitNotice.IsVisible = !available;
     }
 
     /// <summary>
@@ -455,7 +502,13 @@ public partial class RevisionControlSettingsView : UserControl
         try
         {
             var before = GitPacking.Measure(git);
-            var (outcome, diagnostic) = GitPacking.Pack(git);
+
+            // THRESHOLD ZERO, because the user pressed the button. The threshold above is the
+            // schedule — it decides when circuitRF packs on its own at a close, where nobody asked.
+            // Applying it here would make "Compact Now" a button that does nothing on every workspace
+            // under the threshold, which is every workspace that has not yet grown a problem, and it
+            // would report that as "nothing worth compacting" — a sentence the user cannot act on.
+            var (outcome, diagnostic) = GitPacking.Pack(git, thresholdBytes: 0);
 
             if (diagnostic is not null) { PackStatusText.Text = diagnostic.Render(); return; }
 
@@ -465,8 +518,19 @@ public partial class RevisionControlSettingsView : UserControl
                 PackOutcome.Packed when before is not null && after is not null =>
                     $"Compacted: {Megabytes(before.LooseBytes + before.PackedBytes)} → "
                   + $"{Megabytes(after.LooseBytes + after.PackedBytes)}. Nothing was discarded.",
-                PackOutcome.Packed  => "Compacted. Nothing was discarded.",
-                _                   => "There was nothing worth compacting.",
+                PackOutcome.Packed => "Compacted. Nothing was discarded.",
+
+                // Each of the remaining outcomes means something a user can act on, and reporting all
+                // three as "nothing worth compacting" told two of them something untrue: packing
+                // YIELDS while somebody else has the workspace open, and an abandoned pack leaves a
+                // correct repository that is simply not smaller yet.
+                PackOutcome.Yielded =>
+                    "Somebody else has this workspace open, so nothing was compacted. It is safe to "
+                  + "try again once they have closed it.",
+                PackOutcome.Cancelled =>
+                    "Compacting stopped before it finished. Nothing was lost — the history is intact "
+                  + "and simply not stored more compactly yet.",
+                _ => "There was nothing to compact.",
             };
         }
         catch (Exception ex) { PackStatusText.Text = ex.Message; }

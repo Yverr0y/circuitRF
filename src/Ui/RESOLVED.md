@@ -22101,3 +22101,73 @@ the reading MW2 §2.1 already rejected when it put Reference Workspace… in a b
 No process, no network, no credential field. That is what lets every refusal be the caller's — and what
 makes the dialog testable without one. It suggests a folder leaf from the address into a field the
 designer can edit; it never derives a destination and acts on it.
+
+---
+
+## Settings ▸ Revision Control is shown on every machine (owner, 2026-09-07)
+
+`docs/design/revision-control.md` §4.3b and §12 Q31 carry the decision; this is what it cost and the two
+defects the same read found in the tab.
+
+### Why hiding the tab was wrong in a way §4.3's own reasoning could not see
+
+§4.3 hides every revision-control affordance when there is no usable git, so that *a designer who does
+not want this feature never learns it exists*. That reasoning is sound and still governs everything
+else — no Versions panel, no restore-point list, no menu item, no badge. It was applied to the settings
+tab as though the tab were another affordance, and it is not: it is where somebody goes to ask **does
+git work on this machine**. Hiding it silenced the designer who *would* have wanted a history, and
+concealed a remedy costing five minutes — §1.4's false belief reached from the other side.
+
+**Disabled is the honest middle, and the split is the whole of it.** The rows are visible, so what
+circuitRF would keep is legible before anything is installed; they are greyed, so nobody believes
+anything is being kept; one sentence in their place says there is no usable git and what to do. The
+git-path row and its Detect stay live, because a greyed Detect leaves a machine unable to answer its own
+question. `RevisionTabAvailability` owns the decision, and the XAML puts every other control inside one
+`HistoryControls` block — disabled as a block rather than row by row, so a row added later cannot be
+forgotten.
+
+**Detect had to raise the availability signal, and that is the half easy to leave out.** Detect writes
+no preference, so the existing `GitPathChanged` never fired for it — the ordinary sequence (install git,
+press the button that exists to find it) would have left the rows grey until Settings was closed and
+reopened, with nothing saying why. The event is renamed `GitAvailabilityChanged` for what it now means,
+and it fires on the *failing* path too: a git that used to resolve and no longer does changes what this
+tab may claim by exactly as much.
+
+### Two things deleted, and one moved rather than deleted
+
+**The git-path row's second host on Security & Permissions is gone.** It existed only so that hiding the
+tab did not also hide the one field that makes an unusually-located git findable. With the tab always
+present it would be a row nobody could ever reach, and `RevisionTabVisibility`'s whole "never both"
+machinery went with it.
+
+**The docs-figure seam moved instead of going.** `SettingsView.ShowRevisionTabForCapture` forced the tab
+*visible* so a generated figure did not depend on the generating machine's toolchain. What varies now is
+not whether the figure exists but what it shows — greyed rows or live ones — which is the same
+non-reproducibility one level down. It became `RevisionControlSettingsView.ShowAsAvailableForCapture`,
+at the place the answer is now decided.
+
+### Compact Now applied the scheduling threshold, so on most workspaces it did nothing
+
+`OnPackNow` called `GitPacking.Pack(git)` with the default 64 MB trigger. That number is the **schedule**
+— it decides when circuitRF packs unasked at a workspace close — and applying it to a button meant
+"Compact Now" was inert on every workspace below it, which is every workspace that has not yet grown a
+problem, and reported that as *"There was nothing worth compacting."* The button now passes
+`thresholdBytes: 0`, because the threshold's whole question — *is this worth doing unasked* — was
+already answered by the press.
+
+### Three pack outcomes were reported as one, and two of them untruthfully
+
+The status line mapped everything but `Packed` to *"There was nothing worth compacting."* Packing
+**yields** while somebody else has the workspace open (§4.6 — the advisory notice used as a notice), and
+an abandoned pack leaves a correct repository that is simply not smaller yet. Both were reported as
+nothing-to-do, which is a sentence the user cannot act on and, in the yield case, is false. Each outcome
+now says what happened and what to do about it.
+
+### And one defect in the service above it, of a shape RC-7 had already found once
+
+`WorkspaceHistoryService.HasHistory` — which gates §9A.6's *"the copy starts a history of its own"*
+sentence on Save Workspace As — counted restore points only. A designer who has only ever kept
+**versions** has none, so their Save As said nothing at all, and the copy silently began a fresh history
+with the one sentence that exists to stop exactly that discovery withheld. This is the mistake RC-7
+recorded against the off/on transition (`RevisionSwitch.ExistingRepository`, which asks both questions)
+arriving in a second place: *"does this workspace have a history"* is two questions here and always was.

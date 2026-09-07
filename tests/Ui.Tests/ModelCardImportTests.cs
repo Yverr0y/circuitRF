@@ -803,7 +803,7 @@ public class ModelCardImportTests : IDisposable
             "Isr", "Nr", "Nbv", "Area", "Tnom", "Xti", "Eg",
         ];
 
-        Assert.Empty(engineReads.Where(n => !declared.Contains(n)));
+        Assert.DoesNotContain(engineReads, n => !declared.Contains(n));
     }
     // ── UI wiring ─────────────────────────────────────────────────────────────
 

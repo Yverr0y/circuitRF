@@ -340,9 +340,9 @@ public sealed class MatchRound9Tests(ITestOutputHelper output)
         Assert.Contains("PhaseContainer.RequestPlotRedraw();", announce, StringComparison.Ordinal);
 
         // Nowhere else raises either notification — one exit, not four.
-        Assert.Equal(1, Regex.Matches(src, @"MagnitudeContainer\.OnPlotChanged").Count);
-        Assert.Equal(1, Regex.Matches(src, @"PhaseContainer\.OnPlotChanged").Count);
-        Assert.Equal(1, Regex.Matches(src, @"RequestPlotRedraw\(\);\s*\n\s*PhaseContainer\.RequestPlotRedraw").Count);
+        Assert.Single(Regex.Matches(src, @"MagnitudeContainer\.OnPlotChanged"));
+        Assert.Single(Regex.Matches(src, @"PhaseContainer\.OnPlotChanged"));
+        Assert.Single(Regex.Matches(src, @"RequestPlotRedraw\(\);\s*\n\s*PhaseContainer\.RequestPlotRedraw"));
 
         // …and both exits of the two rebuild paths take it.
         Assert.Contains("AnnounceRebuiltPlots();", Between(src, "public void UpdatePlots()"),
@@ -488,7 +488,7 @@ public sealed class MatchRound9Tests(ITestOutputHelper output)
         Assert.True(grid < picto, "the heading Grid does not close before the pictogram row");
 
         // One button, one template, and it kept everything that made it usable.
-        Assert.Equal(1, Regex.Matches(xaml, @"Command=""\{Binding ProbeCommand\}""").Count);
+        Assert.Single(Regex.Matches(xaml, @"Command=""\{Binding ProbeCommand\}"""));
         string tag = OpeningTag(xaml, "Command=\"{Binding ProbeCommand}\"");
         Assert.Contains("Content=\"Probe\"", tag, StringComparison.Ordinal);
         Assert.Contains("IsEnabled=\"{Binding CanProbe}\"", tag, StringComparison.Ordinal);
@@ -1327,7 +1327,7 @@ public sealed class MatchRound9Tests(ITestOutputHelper output)
 
         foreach (var o in d.Filter.Orders) o.IsOn = false;
         foreach (var r in d.Filter.Responses) r.IsOn = false;
-        Assert.Empty(d.Solutions.Where(r => !r.IsCurrent));
+        Assert.DoesNotContain(d.Solutions, r => !r.IsCurrent);
 
         var before = d.Design.Transforms.Select(t => (t.ElementA, t.Form, t.N)).ToList();
         d.Term2.Resistance = 75.0;

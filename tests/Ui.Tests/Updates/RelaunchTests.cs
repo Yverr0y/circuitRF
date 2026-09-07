@@ -80,7 +80,9 @@ public sealed class RelaunchTests : IDisposable
 
         RelaunchSession.Write([a, b]);
 
-        Assert.Equal([a, b], RelaunchSession.Take());
+        var taken = RelaunchSession.Take();
+        Assert.NotNull(taken);
+        Assert.Equal([a, b], taken);
     }
 
     /// <summary>
@@ -146,7 +148,9 @@ public sealed class RelaunchTests : IDisposable
         RelaunchSession.Write([gone, kept]);
         File.Delete(gone);
 
-        Assert.Equal([kept], RelaunchSession.Take());
+        var taken = RelaunchSession.Take();
+        Assert.NotNull(taken);
+        Assert.Equal([kept], taken);
     }
 
     /// <summary>

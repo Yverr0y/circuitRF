@@ -219,7 +219,7 @@ public sealed class SchematicCycleRejectionTests : IDisposable
 
         // Nothing placed, one error, and it names the loop rather than only its existence.
         Assert.Empty(model.Components);
-        var error = Assert.Single(sink.Posts.Where(p => p.Level == MessageLevel.Error));
+        var error = Assert.Single(sink.Posts, p => p.Level == MessageLevel.Error);
         Assert.Contains("cycle", error.Text);
         Assert.Contains("Amp", error.Text);
         Assert.Contains("Buf", error.Text);

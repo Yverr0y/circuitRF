@@ -704,7 +704,7 @@ public sealed class ReferenceCliVerbTests(ITestOutputHelper output)
         Assert.Equal((0f, +200f), (pins[1].LocalX, pins[1].LocalY));
 
         // And the symbol the renderer draws agrees, since those are two code paths.
-        Assert.Equal(["+", "−"], BuiltInSymbols.Primitives(kind).Pins.Select(p => p.Name).ToArray());
+        Assert.Equal(["+", "−"], BuiltInSymbols.Primitives(kind).Pins.Select(p => p.Name!).ToArray());
     }
 
     /// <summary>

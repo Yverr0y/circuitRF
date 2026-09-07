@@ -129,65 +129,11 @@ public partial class SettingsView : Window
 
     // ── Revision Control tab ─────────────────────────────────────────────────
 
-    /// <summary>
-    /// For the User-Docs factory only: keeps the Revision Control tab visible whatever this machine's
-    /// git situation is, so a generated figure is a picture of the tab rather than of whether the
-    /// generating machine happened to have git installed.
-    ///
-    /// <para>It changes nothing a user sees. <see cref="ApplyRevisionTabVisibility"/> is what the
-    /// application runs, and it hides the tab exactly as §4.3 requires.</para>
-    /// </summary>
-    internal static bool ShowRevisionTabForCapture { get; set; }
-
     private void LoadRevisionTab()
-    {
-        RevisionSettings.SetWorkspace(CurrentWorkspaceDirectory());
-        ApplyRevisionTabVisibility();
-
-        // A git named on either host changes the answer to "is there a usable git", so the tab can
-        // appear (or the fallback row disappear) without the dialog being reopened. Both hosts are
-        // subscribed because either one can be the visible one.
-        RevisionSettings.PathControl.GitPathChanged += (_, _) => ApplyRevisionTabVisibility();
-        GitPathFallback.GitPathChanged             += (_, _) => ApplyRevisionTabVisibility();
-    }
-
-    /// <summary>
-    /// R-rc4-3: the whole tab is hidden when git is unavailable and no path has been configured —
-    /// <b>with the single exception of the path field</b>, which moves to Security &amp; Permissions
-    /// so an unusually-located git can still be named.
-    ///
-    /// <para><b>Hidden, not disabled.</b> Absence is silent (§4.3): a designer who does not want a
-    /// history should never learn the feature exists. That is deliberately the opposite of RC-6's HOLD
-    /// state, where the affordances stay visible and refuse — because absent is harmless, while a
-    /// designer who believes they are protected and is not is the failure this whole feature guards
-    /// against.</para>
-    ///
-    /// <para><b>A CONFIGURED path keeps the tab even when it does not resolve.</b> Somebody who named a
-    /// git and got it wrong needs to see the field they got wrong, and the Detect line that says
-    /// why.</para>
-    /// </summary>
-    private void ApplyRevisionTabVisibility()
-    {
-        bool configured = (AppPreferencesIo.Load().RevisionGitPath?.Trim().Length ?? 0) > 0;
-        bool available;
-        try { available = GitDiscovery.IsAvailable; }
-        catch (Exception) { available = false; }
-
-        bool show = ShowRevisionTabForCapture
-                 || RevisionTabVisibility.ShouldShowTab(configured, available);
-
-        RevisionTab.IsVisible = show;
-
-        // Never both. The fallback exists only for the case where the tab that normally hosts it is
-        // gone, and two identical rows in one dialog is worse than either placement.
-        GitPathFallback.IsVisible = !show;
-        if (!show) GitPathFallback.Load();
-
-        // A hidden TabItem that is still the SELECTED one leaves the dialog showing an empty body —
-        // Avalonia does not move the selection off it. This cannot arise from the initial state (the
-        // tab is not selected by default) but does when git stops resolving while Settings is open.
-        if (!show && ReferenceEquals(Tabs.SelectedItem, RevisionTab)) Tabs.SelectedIndex = 0;
-    }
+        // No visibility to apply: the tab is on every machine (owner, 2026-09-07). What a machine with
+        // no git gets is the tab with its rows greyed and a sentence saying why, which the tab's own
+        // view decides — and it subscribes to the git-path control itself, so nothing here has to.
+        => RevisionSettings.SetWorkspace(CurrentWorkspaceDirectory());
 
     // ── General tab ──────────────────────────────────────────────────────────
 

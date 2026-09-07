@@ -176,11 +176,15 @@ circuitRF can keep a **history** of a workspace: the state of every file in it a
 to. This tab is where you say whether it does, and what it keeps.
 
 <div class="callout note">
-<span class="label">You will not see this tab unless git is installed</span>
+<span class="label">Nothing here works without git</span>
 <p>circuitRF keeps a history by running <b>git</b> as a separate program. It bundles none and links to
-none. If your machine has no git, this tab is not there at all — not greyed out, simply absent — and
-nothing on this page applies to you. Install git and it appears. If you have git somewhere unusual, the
-<b>Git</b> row moves to the Security &amp; Permissions tab so you can still point circuitRF at it.</p>
+none. If your machine has no usable git, everything on this tab below the <b>Git</b> row is greyed out,
+a line says so, and <b>no history is being kept for any workspace</b> — whatever the switches appear to
+say. The <b>Git</b> row itself stays available, because it is how you fix that: name a git, or install
+one and press <b>Detect</b>. The rest of the tab comes to life as soon as Detect finds one.</p>
+<p>Elsewhere in circuitRF the feature is simply absent on a machine with no git — no restore-point list,
+no menu items, nothing. This tab is the one place it is shown and disabled instead, so that "circuitRF
+is not keeping a history for me" is something you can find out rather than something you assume.</p>
 </div>
 
 ### Git

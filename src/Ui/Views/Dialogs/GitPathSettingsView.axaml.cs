@@ -7,8 +7,11 @@ using CircuitRF.Ui.Theming;
 namespace CircuitRF.Ui.Views.Dialogs;
 
 /// <summary>
-/// Names the git circuitRF runs — implemented once and hosted by whichever of the two tabs is showing
-/// (see the XAML's header for why there are two).
+/// Names the git circuitRF runs, and reports what answered.
+///
+/// <para><b>The one row on Settings ▸ Revision Control that stays live when there is no git</b>
+/// (owner, 2026-09-07). Everything else on that tab is greyed there, because none of it is keeping
+/// anything; this is greyed nowhere, because it is the remedy.</para>
 ///
 /// <para><b>Blank is the default and means "look on PATH".</b> It is never seeded with a discovered
 /// path: a seeded value would freeze today's PATH answer into <c>preferences.json</c> and stop tracking
@@ -18,8 +21,16 @@ namespace CircuitRF.Ui.Views.Dialogs;
 /// </summary>
 public partial class GitPathSettingsView : UserControl
 {
-    /// <summary>Raised after the named git changes, so a host can re-evaluate what it shows.</summary>
-    public event EventHandler? GitPathChanged;
+    /// <summary>
+    /// Raised whenever the answer to <i>"is there a usable git"</i> may have changed — a path named or
+    /// cleared, or a Detect that resolved one.
+    ///
+    /// <para><b>Detect raises it too, and that is the half that is easy to leave out.</b> Detect writes
+    /// no preference, so a handler keyed on the PATH changing would miss the ordinary sequence of
+    /// installing git and pressing the button that exists to find it — and the controls it should have
+    /// enabled would stay grey until Settings was closed and reopened, with nothing saying why.</para>
+    /// </summary>
+    public event EventHandler? GitAvailabilityChanged;
 
     /// <summary>The populate guard — opening and closing Settings without touching anything must
     /// write nothing. Same reason as <see cref="VerilogACompilerSettingsView"/>'s.</summary>
@@ -64,7 +75,7 @@ public partial class GitPathSettingsView : UserControl
         GitDiscovery.InvalidateCache();
 
         ShowStatus("");
-        GitPathChanged?.Invoke(this, EventArgs.Empty);
+        GitAvailabilityChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private async void OnBrowseForGit(object? sender, RoutedEventArgs e)
@@ -103,11 +114,17 @@ public partial class GitPathSettingsView : UserControl
     /// </summary>
     private void OnDetectGit(object? sender, RoutedEventArgs e)
     {
+        // Ask the machine again rather than the memo. Detect is the button somebody presses BECAUSE
+        // they just changed something outside circuitRF — installed git, fixed a PATH, mounted a share
+        // — and a memoised "no" would answer for the machine as it was before they did.
+        GitDiscovery.InvalidateCache();
+
         try
         {
             if (GitDiscovery.Find(out var rejected) is { } found)
             {
                 ShowStatus($"Found, {found.HowFound}: {found.Path} — {found.Banner}");
+                GitAvailabilityChanged?.Invoke(this, EventArgs.Empty);
                 return;
             }
 
@@ -117,6 +134,10 @@ public partial class GitPathSettingsView : UserControl
             ShowStatus(rejected.Count == 0
                 ? "No git was found on PATH. Install git, or name one above."
                 : "No usable git: " + string.Join("; ", rejected));
+
+            // Raised on the failing path as well: a git that used to resolve and no longer does is
+            // exactly as much of a change to what this tab may claim as one that has just appeared.
+            GitAvailabilityChanged?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception ex) { ShowStatus(ex.Message); }
     }

@@ -144,7 +144,7 @@ public class SpiceModelVersusImportedCellTests : IDisposable
         var (model, comp) = PlaceSpiceModel("broken.sp", "broken");
         _ = comp;
         var r = NetExtractor.Extract(model, "tb");
-        Assert.Empty(r.TestBench.Instances.Where(i => i.InstanceName == "X1"));
+        Assert.DoesNotContain(r.TestBench.Instances, i => i.InstanceName == "X1");
         Assert.NotEmpty(r.Conflicts);
     }
 

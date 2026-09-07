@@ -432,7 +432,7 @@ public class MimCapacitorTests(ITestOutputHelper output)
 
         Assert.Equal(["Metal1", "MIM Metal", "Metal2"], p.Layers.Select(l => l.Name));
         Assert.Equal(2, p.Layers[1].Polygons.Count);            // two top plates
-        Assert.Equal(1, p.Layers[0].Polygons.Count);            // one Metal1 shape: plates AND line
+        Assert.Single(p.Layers[0].Polygons);                    // one Metal1 shape: plates AND line
         Assert.Equal(2, p.Layers[2].Polygons.Count);            // two Metal2 feeds
 
         var via = Assert.Single(p.ViaList);                     // ONE via entry, TWO footprints

@@ -113,7 +113,7 @@ public class CurrentSourceComponentTests
     public void ITone_Glyph_CarriesAFilledArrowheadPointingAtPinOne()
     {
         var sym = BuiltInSymbols.Primitives(SymbolKind.CurrentToneSource);
-        var head = Assert.Single(sym.Primitives.OfType<PolygonPrimitive>().Where(p => p.Filled));
+        var head = Assert.Single(sym.Primitives.OfType<PolygonPrimitive>(), p => p.Filled);
 
         double tipY  = head.Points.Min(pt => pt[1]);   // most negative Y = nearest the top pin
         double baseY = head.Points.Max(pt => pt[1]);
@@ -130,8 +130,8 @@ public class CurrentSourceComponentTests
     {
         var sym    = BuiltInSymbols.Primitives(SymbolKind.Vccs);
         var polys  = sym.Primitives.OfType<PolygonPrimitive>().ToList();
-        var body   = Assert.Single(polys.Where(p => !p.Filled));
-        var head   = Assert.Single(polys.Where(p =>  p.Filled));
+        var body   = Assert.Single(polys, p => !p.Filled);
+        var head   = Assert.Single(polys, p =>  p.Filled);
 
         Assert.Equal(4, body.Points.Count);                       // the dependent-source diamond
 

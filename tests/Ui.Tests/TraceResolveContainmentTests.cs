@@ -138,7 +138,7 @@ public sealed class TraceResolveContainmentTests
             // fixture's short buffer is refused by RequireShapeConsistent BEFORE the gather, so the
             // gather's own half of the pair is gated in RfCore's DataCubeShapeIntegrityTests instead.
             Assert.Contains("id=0x", trail);
-            Assert.Equal(1, System.Text.RegularExpressions.Regex.Matches(trail, "id=0x").Count);
+            Assert.Single(System.Text.RegularExpressions.Regex.Matches(trail, "id=0x"));
             Assert.Contains("Malformed cube", trail);
         }
         finally

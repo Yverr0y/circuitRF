@@ -344,7 +344,7 @@ public sealed class AuthoringCliVerbTests(ITestOutputHelper output) : IDisposabl
         Assert.Contains("--cell", run.StdErr, StringComparison.Ordinal);
         Assert.Contains("--variant", run.StdErr, StringComparison.Ordinal);
         Assert.Contains("--list-parts", run.StdErr, StringComparison.Ordinal);
-        Assert.Empty(Directory.GetDirectories(ws).Where(d => Path.GetFileName(d) != "tech"));
+        Assert.DoesNotContain(Directory.GetDirectories(ws), d => Path.GetFileName(d) != "tech");
     }
 
     /// <summary>

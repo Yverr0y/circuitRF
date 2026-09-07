@@ -157,7 +157,7 @@ public class SpiceModelComponentTests : IDisposable
 
         // In BASE SI, as the card states them — the trap ModelCardCellBuilder documents. A row
         // carrying the registry's convenience unit would read 4e-12 as picofarads of picofarads.
-        var cj = Assert.Single(inst.Overrides.Where(o => o.Name.Equals("Cj0", StringComparison.OrdinalIgnoreCase)));
+        var cj = Assert.Single(inst.Overrides, o => o.Name.Equals("Cj0", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(4e-12, double.Parse(cj.Expression, System.Globalization.CultureInfo.InvariantCulture), 15);
     }
 
@@ -220,7 +220,7 @@ public class SpiceModelComponentTests : IDisposable
         // The one contract that cannot be checked by looking at either side alone: the symbol's
         // pin k and the cell's port k must name the same terminal, or the design is wired to a
         // circuit other than the one it draws — and it still simulates.
-        Assert.Equal(cell.Ports, symbol.Pins.OrderBy(p => p.PortIndex).Select(p => p.Name).ToList());
+        Assert.Equal(cell.Ports, symbol.Pins.OrderBy(p => p.PortIndex).Select(p => p.Name!).ToList());
     }
 
     [Fact]
@@ -313,7 +313,7 @@ public class SpiceModelComponentTests : IDisposable
             ("rval", "37"), ("notdeclared", "9")));
 
         var inst = Assert.Single(r.TestBench.Instances);
-        Assert.Equal("37", Assert.Single(inst.Overrides.Where(o => o.Name == "rval")).Expression);
+        Assert.Equal("37", Assert.Single(inst.Overrides, o => o.Name == "rval").Expression);
 
         // A subcircuit handed a parameter it never declared is an error in the elaborator, so it is
         // dropped here rather than allowed to reach it.
@@ -433,10 +433,10 @@ public class SpiceModelComponentTests : IDisposable
         Write("d.model", DiodeCard);
 
         var extracted = NetExtractor.Extract(TwoPortAround("d.model"));
-        var inst = Assert.Single(extracted.TestBench.Instances.Where(i => i.InstanceName == "X1"));
+        var inst = Assert.Single(extracted.TestBench.Instances, i => i.InstanceName == "X1");
 
         var elaborated = new Elaborator(extracted.Library).Elaborate(extracted.TestBench);
-        var device = Assert.Single(elaborated.Components.Where(c => c.InstancePath == "X1"));
+        var device = Assert.Single(elaborated.Components, c => c.InstancePath == "X1");
 
         // The elaborated device is the DIODE the card names, carrying the card's own saturation
         // current — not a default one, and not a stand-in.
@@ -567,7 +567,7 @@ public class SpiceModelComponentTests : IDisposable
 
         var r = NetExtractor.Extract(model);
         Assert.Equal(2, r.TestBench.Instances.Count);
-        Assert.Single(r.Library.Cells.Where(c => c.Name == "lowpass"));
+        Assert.Single(r.Library.Cells, c => c.Name == "lowpass");
     }
 
     [Fact]
