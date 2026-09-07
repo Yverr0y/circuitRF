@@ -30,6 +30,19 @@ public enum DrillFormatEvidence
 {
     /// <summary>Given by the caller (L4h's prompt). Beats everything the file says, by definition.</summary>
     Override,
+    /// <summary>
+    /// GI4 R-gi4-3. A companion parameter file in the SAME FOLDER declaring the format the whole
+    /// output job was written with — <see cref="GerberDeclaration"/>.
+    ///
+    /// <para><b>Its rung on this ladder is "above every inference", which is where it sits, and it is
+    /// still outranked by the file's OWN statement — which is not where it sits.</b> The two are
+    /// different axes and the ladder only has one: a job-wide declaration is authoritative about the
+    /// JOB, and a drill file carrying its own <c>;FILE_FORMAT</c> or <c>INCH</c>/<c>METRIC</c> line is
+    /// authoritative about ITSELF. So <see cref="ExcellonFormat.Resolve"/> prefers the file's own
+    /// statement over this rung and REPORTS the disagreement — that report is the only signal anyone
+    /// will ever get that one of the two is stale.</para>
+    /// </summary>
+    Declaration,
     /// <summary>An explicit format comment — <c>;FILE_FORMAT=2:4</c>.</summary>
     FormatComment,
     /// <summary>The <c>INCH</c> / <c>METRIC</c> keyword and the <c>LZ</c>/<c>TZ</c> word that usually
@@ -82,6 +95,20 @@ public sealed class DrillFormatInference
     /// the suppression convention are both moot (R-L4f-2).</summary>
     public required bool DecimalCoordinates { get; init; }
 
+    /// <summary>
+    /// GI4. False when the format is known to suppress NOTHING — every coordinate is written at its
+    /// full field width, so both conventions parse to the same number and
+    /// <see cref="ZeroOmission"/> carries a nominal value that is never used.
+    ///
+    /// <para>Additive with a default of <c>true</c>, so every existing construction reads exactly as
+    /// it did. <see cref="DrillFormatEvidence.CoordinateWidth"/> already meant this and is still
+    /// tested for by name in <see cref="ToString"/>; what needed a flag is the case where a
+    /// <b>declaration file</b> states "no zero suppression", which carries
+    /// <see cref="DrillFormatEvidence.Declaration"/> instead and would otherwise have printed
+    /// "leading zeros suppressed" over an evidence line saying the opposite (GI1's R-gi1-1).</para>
+    /// </summary>
+    public bool ZeroSuppressionApplies { get; init; } = true;
+
     /// <summary>One sentence per part of the format, naming the source that settled it. Handed
     /// verbatim to whatever reports the import.</summary>
     public required IReadOnlyList<string> Evidence { get; init; }
@@ -125,7 +152,7 @@ public sealed class DrillFormatInference
     public override string ToString() =>
         $"{(Unit == GerberUnit.Inches ? "inch" : "mm")} {IntegerDigits}:{DecimalDigits} " +
         (DecimalCoordinates ? "decimal-point coordinates" :
-         ZeroOmissionEvidence == DrillFormatEvidence.CoordinateWidth
+         ZeroOmissionEvidence == DrillFormatEvidence.CoordinateWidth || !ZeroSuppressionApplies
              ? "full-width coordinates (neither zero convention applies)" :
          ZeroOmission == GerberZeroOmission.Leading ? "leading zeros suppressed" : "trailing zeros suppressed");
 }
@@ -173,11 +200,45 @@ public static class ExcellonFormat
     public const int DefaultInchIntegerDigits = 2, DefaultInchDecimalDigits = 4;
     public const int DefaultMetricIntegerDigits = 3, DefaultMetricDecimalDigits = 3;
 
-    /// <summary>Turns what the file said (plus any caller override) into a decision, and records which
-    /// rung of §2's ladder settled each of the three separate unknowns.</summary>
-    public static DrillFormatInference Resolve(DrillFormatDeclarations found, DrillFormatOverride? overrides)
+    /// <summary>
+    /// GI4 R-gi4-4. Turns a declaration file's SUPPRESSION FLAGS into a
+    /// <see cref="GerberZeroOmission"/>, and it is a DIRECT mapping — deliberately placed beside the
+    /// Excellon inversion this file's header warns about, because reading one as the other is a board
+    /// wrong by a factor of ten thousand that parses perfectly.
+    ///
+    /// <para>Gerber's <c>%FS&lt;L|T&gt;</c> names the zeros that are OMITTED. Excellon's
+    /// <c>LZ</c>/<c>TZ</c> names the zeros that are KEPT, and <c>ExcellonReader.ScanUnitsKeyword</c> is
+    /// the only place that inverts. A declaration file's flags name the zeros that are SUPPRESSED — the
+    /// <b>Gerber</b> sense — so they map straight through with no inversion at all.</para>
+    ///
+    /// <para>Returns <c>(null, true)</c> when both flags say nothing is suppressed: that is a real,
+    /// stated third answer, not an absent one, and it is what
+    /// <see cref="DrillFormatInference.ZeroSuppressionApplies"/> carries.</para>
+    /// </summary>
+    public static (GerberZeroOmission? Omission, bool None) ZeroOmissionFromSuppressionFlags(
+        bool? leadingSuppressed, bool? trailingSuppressed)
+    {
+        if (leadingSuppressed == true) return (GerberZeroOmission.Leading, false);
+        if (trailingSuppressed == true) return (GerberZeroOmission.Trailing, false);
+        if (leadingSuppressed == false && trailingSuppressed == false) return (null, true);
+
+        // One flag, saying its own class is not suppressed, says nothing about the other class. A file
+        // that states only "leading zeros are not suppressed" has not said whether trailing ones are.
+        return (null, false);
+    }
+
+    /// <summary>Turns what the file said (plus any caller override, plus GI4's companion declaration)
+    /// into a decision, and records which rung of §2's ladder settled each of the three separate
+    /// unknowns.</summary>
+    /// <param name="declaration">R-gi4-3's companion parameter file, already scoped to this file by
+    /// its caller. It outranks every INFERENCE and is outranked by the file's own statement; where the
+    /// two disagree the file wins and the disagreement is reported, because that report is the only
+    /// signal anyone gets that one of the two is stale.</param>
+    public static DrillFormatInference Resolve(
+        DrillFormatDeclarations found, DrillFormatOverride? overrides, GerberDeclaration? declaration = null)
     {
         var evidence = new List<string>();
+        var decl = declaration is { Refusal: null } d && d.StatesAnything ? d : null;
 
         // ── Unit ──────────────────────────────────────────────────────────────
         GerberUnit unit;
@@ -193,6 +254,17 @@ public static class ExcellonFormat
             unit = fu;
             unitEvidence = found.UnitEvidence;
             evidence.Add($"Units: {Name(unit)} — declared by the file ({Describe(found.UnitEvidence)}).");
+            if (decl?.Unit is { } du && du != fu)
+                evidence.Add($"The parameter file {decl.FileName} says {Name(du)}, which DISAGREES with " +
+                             "this file's own statement. The file was preferred — it is authoritative " +
+                             "about itself — but one of the two is stale.");
+        }
+        else if (decl?.Unit is { } du2)
+        {
+            unit = du2;
+            unitEvidence = DrillFormatEvidence.Declaration;
+            evidence.Add($"Units: {Name(unit)} — declared by {decl.FileName}, a parameter file in the " +
+                         "same folder; this file does not say.");
         }
         else if (InferUnitFromToolDiameters(found.ToolDiameterTexts) is { } tu)
         {
@@ -224,6 +296,10 @@ public static class ExcellonFormat
             decimalDigits = fd;
             digitsEvidence = found.DigitsEvidence;
             evidence.Add($"Digit format: {fi}:{fd} — declared by the file ({Describe(found.DigitsEvidence)}).");
+            if (decl is { IntegerDigits: { } di, DecimalDigits: { } dd } && (di != fi || dd != fd))
+                evidence.Add($"The parameter file {decl.FileName} says {di}:{dd}, which DISAGREES with " +
+                             "this file's own statement. The file was preferred — it is authoritative " +
+                             "about itself — but one of the two is stale.");
         }
         else if (found.DecimalCoordinates)
         {
@@ -231,6 +307,23 @@ public static class ExcellonFormat
             decimalDigits = DefaultDecimals(unit);
             digitsEvidence = DrillFormatEvidence.DecimalCoordinates;
             evidence.Add("Digit format: not needed — every coordinate carries a literal decimal point.");
+        }
+        else if (decl is { IntegerDigits: { } di2, DecimalDigits: { } dd2 })
+        {
+            integerDigits = di2;
+            decimalDigits = dd2;
+            digitsEvidence = DrillFormatEvidence.Declaration;
+            evidence.Add($"Digit format: {di2}:{dd2} — declared by {decl.FileName}, a parameter file in " +
+                         "the same folder; this file declares no format.");
+
+            // A declaration outranks an INFERENCE (R-gi4-3), so the width the file's own coordinates
+            // imply does not change the answer — but it is the one cross-check available on a file
+            // that says nothing, and a set whose parameter file has drifted from its drill data is
+            // exactly what this phase exists to surface.
+            if (found.CoordinateDigitWidth is { } observed && observed != di2 + dd2)
+                evidence.Add($"This file's own coordinate words are {observed} digits wide, which does " +
+                             $"not match the declared {di2 + dd2}. The declaration was used; check it " +
+                             "against the board's real extent.");
         }
         else if (found.CoordinateDigitWidth is { } width && width > DefaultIntegers(unit))
         {
@@ -257,6 +350,7 @@ public static class ExcellonFormat
         // ── Zero suppression ──────────────────────────────────────────────────
         GerberZeroOmission zero;
         DrillFormatEvidence zeroEvidence;
+        bool zeroSuppressionApplies = true;
         if (overrides?.ZeroOmission is { } oz)
         {
             zero = oz;
@@ -269,23 +363,50 @@ public static class ExcellonFormat
             zeroEvidence = DrillFormatEvidence.DecimalCoordinates;
             evidence.Add("Zero suppression: not applicable — every coordinate carries a literal decimal point.");
         }
-        else if (digitsEvidence == DrillFormatEvidence.CoordinateWidth && found.ZeroOmission is null)
+        else if (found.ZeroOmission is { } fz)
+        {
+            // Ahead of the full-width rung below, which is where it already effectively sat: that
+            // branch has always been guarded by `found.ZeroOmission is null`, so the file's own LZ/TZ
+            // word has always won. Said in the order it is decided, now that a third source can sit
+            // between them.
+            zero = fz;
+            zeroEvidence = DrillFormatEvidence.UnitsKeyword;
+            evidence.Add($"Zero suppression: {Name(zero)} — declared by the file's LZ/TZ word " +
+                         "(Excellon's LZ/TZ names the zeros KEPT, the opposite sense to Gerber's %FS).");
+            if (decl is not null && (decl.ZeroOmission is not null || decl.ZeroSuppressionNone) &&
+                (decl.ZeroSuppressionNone || decl.ZeroOmission != fz))
+                evidence.Add($"The parameter file {decl.FileName} says " +
+                             (decl.ZeroSuppressionNone ? "nothing is suppressed" : Name(decl.ZeroOmission!.Value)) +
+                             ", which DISAGREES with this file's own LZ/TZ word. The file was preferred " +
+                             "— it is authoritative about itself — but one of the two is stale.");
+        }
+        else if (decl is not null && (decl.ZeroOmission is not null || decl.ZeroSuppressionNone))
+        {
+            // R-gi4-4: the declaration's flags name what is SUPPRESSED, which is already
+            // GerberZeroOmission's own sense. Nothing is inverted here; see
+            // ZeroOmissionFromSuppressionFlags.
+            zeroSuppressionApplies = !decl.ZeroSuppressionNone;
+            zero = decl.ZeroOmission ?? GerberZeroOmission.Leading;
+            zeroEvidence = DrillFormatEvidence.Declaration;
+            evidence.Add(decl.ZeroSuppressionNone
+                ? $"Zero suppression: none — declared by {decl.FileName}, a parameter file in the same " +
+                  "folder, whose suppression flags are both off. Its flags name the zeros SUPPRESSED " +
+                  "(Gerber's sense), not the zeros kept (Excellon's)."
+                : $"Zero suppression: {Name(zero)} — declared by {decl.FileName}, a parameter file in " +
+                  "the same folder. Its flags name the zeros SUPPRESSED (Gerber's sense), not the " +
+                  "zeros kept (Excellon's).");
+        }
+        else if (digitsEvidence == DrillFormatEvidence.CoordinateWidth)
         {
             // Nothing is suppressed, so the question has no answer to get wrong: a word already at the
             // full width parses to the same integer under either convention (ParseCoordinateWord pads
             // only up to that width). Recorded as settled rather than defaulted, which is what keeps
             // the import from raising a prompt about a file that left nothing open.
+            zeroSuppressionApplies = false;
             zero = GerberZeroOmission.Leading;
             zeroEvidence = DrillFormatEvidence.CoordinateWidth;
             evidence.Add("Zero suppression: none — every coordinate is written at its full width, so " +
                          "neither convention changes what the numbers mean.");
-        }
-        else if (found.ZeroOmission is { } fz)
-        {
-            zero = fz;
-            zeroEvidence = DrillFormatEvidence.UnitsKeyword;
-            evidence.Add($"Zero suppression: {Name(zero)} — declared by the file's LZ/TZ word " +
-                         "(Excellon's LZ/TZ names the zeros KEPT, the opposite sense to Gerber's %FS).");
         }
         else
         {
@@ -304,6 +425,7 @@ public static class ExcellonFormat
             ZeroOmission = zero,
             ZeroOmissionEvidence = zeroEvidence,
             DecimalCoordinates = found.DecimalCoordinates,
+            ZeroSuppressionApplies = zeroSuppressionApplies,
             Evidence = evidence,
         };
     }
@@ -355,6 +477,7 @@ public static class ExcellonFormat
         DrillFormatEvidence.CoordinateWidth => "the width of its own coordinate words",
         DrillFormatEvidence.DecimalCoordinates => "decimal-point coordinates",
         DrillFormatEvidence.Override => "a caller override",
+        DrillFormatEvidence.Declaration => "a parameter file in the same folder",
         _ => "nothing — defaulted",
     };
 }

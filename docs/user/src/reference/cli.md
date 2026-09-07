@@ -589,6 +589,7 @@ Convert a directory of drawings in one line:
 | `--drill-format <int>:<dec>` | Excellon digit counts, e.g. `2:4`. Applies to every drill file in the set. |
 | `--drill-zeros <leading or trailing>` | Excellon zero suppression. Applies to every drill file in the set. |
 | `--accept-inferred-drill-format` | Take each drill file's own inference rather than refusing. |
+| `--open-archives` | Look inside an archive when a Gerber folder holds no artwork of its own. It is unpacked to a temporary folder, imported from there, and deleted again; nothing is added to the folder you named. Without this flag, such a folder is a refusal that names the flag. |
 
 ### Which cell gets exported {#convert-cell}
 

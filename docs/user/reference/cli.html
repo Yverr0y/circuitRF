@@ -842,6 +842,10 @@ that, and <code>--to</code> is <strong>required</strong> when the output is a fo
 <td><code>--accept-inferred-drill-format</code></td>
 <td>Take each drill file's own inference rather than refusing.</td>
 </tr>
+<tr>
+<td><code>--open-archives</code></td>
+<td>Look inside an archive when a Gerber folder holds no artwork of its own. It is unpacked to a temporary folder, imported from there, and deleted again; nothing is added to the folder you named. Without this flag, such a folder is a refusal that names the flag.</td>
+</tr>
 </tbody>
 </table>
 <h3 id="convert-cell">Which cell gets exported</h3>

@@ -71,10 +71,29 @@ public static class GerberImport
         IReadOnlyList<LayerReport> Layers,
         IReadOnlyList<string> DrillCandidates,
         IReadOnlyList<string> SkippedFiles,
-        IReadOnlyList<string> Messages);
+        IReadOnlyList<string> Messages,
+        IReadOnlyList<string> ArchiveCandidates)
+    {
+        public ImportResult(
+            bool cancelled, IReadOnlyList<string> createdCellDirs, string? cellDir, string? importDir,
+            string? techPath, Technology? technology, IReadOnlyList<LayerReport> layers,
+            IReadOnlyList<string> drillCandidates, IReadOnlyList<string> skippedFiles,
+            IReadOnlyList<string> messages)
+            : this(cancelled, createdCellDirs, cellDir, importDir, techPath, technology, layers,
+                   drillCandidates, skippedFiles, messages, []) { }
+    }
 
-    private static ImportResult Nothing(IReadOnlyList<string> messages, IReadOnlyList<string>? candidates = null)
-        => new(true, [], null, null, null, null, [], candidates ?? [], [], messages);
+    /// <summary>GI4 R-gi4-10's OFFER, and it is only ever an offer. Called when the chosen folder
+    /// yielded no artwork of its own and does hold an archive; returning true unpacks it to a
+    /// temporary location, imports from there, and leaves nothing behind. A null callback — the CLI's
+    /// case before its flag, and every existing test's — never opens anything, which is what keeps
+    /// this additive.</summary>
+    public delegate bool OfferArchive(IReadOnlyList<string> archivePaths);
+
+    private static ImportResult Nothing(
+        IReadOnlyList<string> messages, IReadOnlyList<string>? candidates = null,
+        IReadOnlyList<string>? archives = null)
+        => new(true, [], null, null, null, null, [], candidates ?? [], [], messages, archives ?? []);
 
     /// <summary>
     /// Imports one Gerber file SET as a single flat cell plus a technology of its own.
@@ -104,13 +123,14 @@ public static class GerberImport
         int destDbuPerMicron,
         Func<IReadOnlyList<LayerMappingRow>, IReadOnlyDictionary<LayerKey, LayoutFragment.LayerReconciliationChoice>?>? resolveLayerMapping = null,
         ResolveDrillFormat? resolveDrillFormat = null,
-        RunControl? control = null)
+        RunControl? control = null,
+        OfferArchive? offerArchive = null)
     {
         var messages = new List<string>();
         try
         {
             return ImportUnobserved(filePaths, parentDir, importName, destTech, destDbuPerMicron,
-                                    resolveLayerMapping, resolveDrillFormat, control, messages);
+                                    resolveLayerMapping, resolveDrillFormat, control, messages, offerArchive);
         }
         catch (OperationCanceledException)
         {
@@ -152,7 +172,8 @@ public static class GerberImport
         Func<IReadOnlyList<LayerMappingRow>, IReadOnlyDictionary<LayerKey, LayoutFragment.LayerReconciliationChoice>?>? resolveLayerMapping,
         ResolveDrillFormat? resolveDrillFormat,
         RunControl? control,
-        List<string> messages)
+        List<string> messages,
+        OfferArchive? offerArchive)
     {
         // ── 1. What is in the set at all (R-L4g-1) ──────────────────────────────────────────────
         // Indeterminate: the classifier reads every candidate file's CONTENT (R-L4g-1 decides by
@@ -171,23 +192,72 @@ public static class GerberImport
         var artworkFiles = classified.Where(c => c.Kind == GerberFileKind.Artwork).ToList();
         var drillFiles = classified.Where(c => c.Kind == GerberFileKind.Drill).ToList();
         var jobFiles = classified.Where(c => c.Kind == GerberFileKind.JobFile).ToList();
-        var skipped = classified.Where(c => c.Kind == GerberFileKind.Other).ToList();
+        var declarationFiles = classified.Where(c => c.Kind == GerberFileKind.Declaration).ToList();
+        var archiveFiles = classified.Where(c => c.Kind == GerberFileKind.Archive).ToList();
+        var skipped = classified.Where(c => c.Kind is GerberFileKind.Other or GerberFileKind.Archive).ToList();
 
         // R-L4g-2: a folder scan that silently ignores half of what it found is the same failure as a
         // reader that silently ignores a token, and it is more alarming because the user can see the
         // files sitting there.
+        //
+        // GI4 R-gi4-9: this list keeps naming everything genuinely skipped, and an archive is
+        // genuinely skipped — it is the DECLARATIONS that leave it, because they are now read. It
+        // gets shorter, which is the point.
         var skippedNames = skipped.Select(s => s.FileName).ToList();
         foreach (var file in skipped)
             messages.Add($"Skipped {file.FileName} — {file.Why}.");
 
         var drillCandidates = GerberFileClassifier.FindSiblingDrillCandidates(
-            [.. classified.Where(c => c.Kind != GerberFileKind.Other).Select(c => c.Path)]);
+            [.. classified.Where(c => c.Kind is not (GerberFileKind.Other or GerberFileKind.Archive))
+                          .Select(c => c.Path)]);
+
+        // ── 1b. The archive, which is an OFFER and never an action (R-gi4-10, R-gi4-11) ──────────
+        //
+        // Reached ONLY when the folder yielded no artwork of its own. A set that already yields
+        // artwork imports from the files on disk and never touches an archive sitting beside it, even
+        // if it holds the same board — reading both is how two versions of one board get silently
+        // merged.
+        var archivePaths = archiveFiles.Select(a => a.Path).ToList();
+        if (artworkFiles.Count == 0 && archiveFiles.Count > 0)
+        {
+            messages.Add(
+                $"This set holds no Gerber artwork of its own, and {archiveFiles.Count} archive(s) sit " +
+                $"beside it: {string.Join(", ", archiveFiles.Select(a => a.FileName))}.");
+
+            if (offerArchive is not null && offerArchive(archivePaths))
+                foreach (var archive in archiveFiles)
+                {
+                    using var extracted = ExtractedArchive.Open(archive.Path, out string? archiveError);
+                    if (extracted is null) { messages.Add(archiveError!); continue; }
+
+                    messages.Add(
+                        $"Looking inside {extracted.SourceName}: {extracted.Files.Count} file(s) were " +
+                        "unpacked to a temporary folder, imported from there, and the temporary folder " +
+                        "was deleted. Nothing was added to the folder you pointed at.");
+
+                    // No nested offer: an archive inside an archive is not something to open on the
+                    // strength of one "yes", and one round of unpacking is the whole of what was
+                    // agreed to.
+                    var inner = ImportUnobserved(
+                        extracted.Files, parentDir, importName, destTech, destDbuPerMicron,
+                        resolveLayerMapping, resolveDrillFormat, control, messages, offerArchive: null);
+                    if (inner.CellDir is not null) return inner;
+                }
+        }
 
         if (artworkFiles.Count == 0 && drillFiles.Count == 0)
         {
             messages.Add("None of the files given hold Gerber artwork or drill data, so nothing was imported.");
-            return Nothing(messages, drillCandidates);
+            return Nothing(messages, drillCandidates, archivePaths);
         }
+
+        // ── 1c. The folder's own declarations (R-gi4-1, R-gi4-6) ────────────────────────────────
+        //
+        // Scoped to the files of their own kind in their own folder, and no further. What they settle
+        // is reported by the format inference itself, one rung above every guess (R-gi4-3); what
+        // could NOT be used is reported here, by name, with the reason (R-gi4-8).
+        var companions = GerberCompanionFiles.Read(declarationFiles);
+        messages.AddRange(companions.Messages);
 
         // ONE counted stage from here to the end, and the only BeginStage after this point — every
         // later phase renames the label THROUGH the tick, which is what keeps the bar monotone. The
@@ -261,7 +331,7 @@ public static class GerberImport
         if (reads.Count == 0 && drillFiles.Count == 0)
         {
             messages.Add("No artwork could be read, so nothing was imported.");
-            return Nothing(messages, drillCandidates);
+            return Nothing(messages, drillCandidates, archivePaths);
         }
 
         // ── 4. The identity cascade (R-L4g-5) ───────────────────────────────────────────────────
@@ -285,11 +355,17 @@ public static class GerberImport
             var file = drillFiles[drillIndex];
             control?.TickStage(1, $"reading {file.FileName}");
 
+            // GI4 R-gi4-3. The folder's own parameter file, scoped to this file, handed to EVERY read
+            // of it below — the first one, the cross-check retries and the re-read after a prompt.
+            // A declaration that reached only the first read would be silently dropped by exactly the
+            // paths that exist because the format was uncertain.
+            var declaration = companions.DrillDeclarationFor(file.Path);
+
             ExcellonReadResult read;
             try
             {
                 using var stream = File.OpenRead(file.Path);
-                read = ExcellonReader.Read(stream, destDbuPerMicron);
+                read = ExcellonReader.Read(stream, destDbuPerMicron, null, declaration);
             }
             catch (IOException ex)
             {
@@ -333,7 +409,7 @@ public static class GerberImport
                     try
                     {
                         using var retryStream = File.OpenRead(file.Path);
-                        retry = ExcellonReader.Read(retryStream, destDbuPerMicron, candidate);
+                        retry = ExcellonReader.Read(retryStream, destDbuPerMicron, candidate, declaration);
                     }
                     catch (IOException) { break; }
 
@@ -360,7 +436,7 @@ public static class GerberImport
                 if (choice is null)
                 {
                     messages.Add("The drill format was not settled, so nothing was imported.");
-                    return Nothing(messages, drillCandidates);
+                    return Nothing(messages, drillCandidates, archivePaths);
                 }
                 if (choice.ApplyToAll && standingFormat is null)
                 {
@@ -375,7 +451,7 @@ public static class GerberImport
                 if (choice.Override is { } overrides)
                 {
                     using var stream = File.OpenRead(file.Path);
-                    read = ExcellonReader.Read(stream, destDbuPerMicron, overrides);
+                    read = ExcellonReader.Read(stream, destDbuPerMicron, overrides, declaration);
                     if (read.Refusal is { } reread)
                     {
                         messages.Add($"{file.FileName}: {reread}");
@@ -387,6 +463,16 @@ public static class GerberImport
 
             messages.Add($"{file.FileName}: {read.Format}. {string.Join(" ", read.Format.Evidence)}");
             if (!crossCheck.Agrees) messages.Add($"{file.FileName}: {crossCheck.Report}");
+
+            // GI4 R-gi4-7. AFTER the format is settled and never before: the listing is matched by
+            // tool number AND diameter, and a diameter cannot be compared until the file's own unit
+            // is known. It contributes the plating column and nothing else — the drill file remains
+            // authoritative about every hit, every coordinate and every diameter.
+            if (companions.ListingFor(file.Path) is { } listing)
+            {
+                read = ExcellonReader.ApplyToolListing(read, listing, destDbuPerMicron, out var listingNotes);
+                foreach (string note in listingNotes) messages.Add($"{file.FileName}: {note}");
+            }
 
             bool? plated = read.Plated ?? ExcellonReader.PlatingFromFileName(file.Path);
             string layerName = plated == false ? "Drill (non-plated)" : "Drill";
@@ -422,6 +508,27 @@ public static class GerberImport
                     "in the BINARY (EIA-coded) form looks exactly like that — circuitRF reads only the " +
                     "ASCII/Excellon form. If this board's holes are missing, re-export the drill data as " +
                     "ASCII and import it with the set.");
+        }
+
+        // GI4 R-gi4-8. What a declaration SETTLED is named by the format evidence above, in the same
+        // sentence as the format itself. What it did NOT settle has to say why — otherwise a file
+        // that was recognised, read and then ignored reads exactly like a file that was skipped, and
+        // the whole point of this phase is that those two are different.
+        foreach (var declaration in companions.Declarations)
+        {
+            if (declaration.Refusal is not null || declaration.Scope == GerberDeclarationScope.Artwork) continue;
+            if (companions.DrillDeclarationFor(declaration.Path) != declaration) continue;   // already reported
+
+            var inFolder = drills.Where(d => SameFolder(d.File.Path, declaration.Path)).ToList();
+            if (inFolder.Count == 0)
+                messages.Add(
+                    $"{declaration.FileName} declares {declaration.Summary} for this job's drill data, " +
+                    "but no drill file in its folder was read, so it settled nothing.");
+            else if (!inFolder.Any(d => SettledByDeclaration(d.Read.Format)))
+                messages.Add(
+                    $"{declaration.FileName} declares {declaration.Summary}, and it settled nothing: " +
+                    "every drill file in its folder states its own format, and a file is authoritative " +
+                    "about itself.");
         }
 
         // ── 6. Layer order (R-L4g-10) ───────────────────────────────────────────────────────────
@@ -497,7 +604,7 @@ public static class GerberImport
             if (choices is null)
             {
                 messages.Add("Layer mapping was cancelled, so nothing was imported.");
-                return Nothing(messages, drillCandidates);
+                return Nothing(messages, drillCandidates, archivePaths);
             }
         }
         choices ??= LayoutLayerMapping.BuildChoices(rows);
@@ -801,7 +908,7 @@ public static class GerberImport
             // R-L4g-14: "nothing was created" has to stay literally true on every exit path.
             ImportFolder.RemoveIfEmpty(importDir);
             messages.Add($"The import could not be written ({ex.Message}), so nothing was created.");
-            return Nothing(messages, drillCandidates);
+            return Nothing(messages, drillCandidates, archivePaths);
         }
 
         // ── 11. What the user is told (R-L4g-15, -16, -17) ──────────────────────────────────────
@@ -916,8 +1023,18 @@ public static class GerberImport
 
         return new ImportResult(
             false, [cellDir], cellDir, importDir, techPath, tech,
-            layerReports, drillCandidates, skippedNames, messages);
+            layerReports, drillCandidates, skippedNames, messages, archivePaths);
     }
+
+    /// <summary>GI4: whether any part of a resolved format came from a companion parameter file.</summary>
+    private static bool SettledByDeclaration(DrillFormatInference format) =>
+        format.UnitEvidence == DrillFormatEvidence.Declaration ||
+        format.DigitsEvidence == DrillFormatEvidence.Declaration ||
+        format.ZeroOmissionEvidence == DrillFormatEvidence.Declaration;
+
+    private static bool SameFolder(string a, string b) =>
+        string.Equals(Path.GetDirectoryName(Path.GetFullPath(a)),
+                      Path.GetDirectoryName(Path.GetFullPath(b)), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The other readings of a drill file that the file itself did not rule out — one
     /// override per thing that was GUESSED, and their combination. Ordered cheapest-mistake first:

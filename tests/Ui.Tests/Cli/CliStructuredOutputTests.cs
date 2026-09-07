@@ -487,6 +487,7 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "convert.drill.format-unstated",
         "convert.failed",
         "convert.gdsii.coordinate-overflow",
+        "convert.gerber.archive-not-opened",
         "convert.gerber.cross-technology-mapping",
         "convert.gerber.hierarchy-ceiling",
         "convert.gerber.refused",

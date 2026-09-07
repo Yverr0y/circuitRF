@@ -74,8 +74,13 @@ public sealed record DrillExtentsCheck(
     bool Agrees, int HitsOutside, int HitCount, double WidthRatio, double HeightRatio, string Report);
 
 /// <summary>Everything one drill file turned out to be. <see cref="Refusal"/> non-null means nothing
-/// was read and nothing must be created.</summary>
-public sealed class ExcellonReadResult
+/// was read and nothing must be created.
+///
+/// <para>A <c>record</c> for its <c>with</c> expression and for nothing else: GI4's tool listing
+/// re-states the plating column of an already-read file, and a hand-written copy constructor over
+/// fifteen properties is a property somebody forgets to carry the next time one is added. Nothing
+/// compares two of these.</para></summary>
+public sealed record ExcellonReadResult
 {
     public string? Refusal { get; init; }
 
@@ -131,8 +136,12 @@ public sealed partial class ExcellonReader
     /// that can drift from it (R-L4e-20).</summary>
     public const long HitHardCeiling = GerberReader.EntityHardCeiling;
 
+    /// <param name="declaration">GI4 R-gi4-3: a companion parameter file from the SAME FOLDER,
+    /// already scoped to this file by its caller. It outranks every inference and is outranked by
+    /// anything this file says about itself.</param>
     public static ExcellonReadResult Read(
-        Stream stream, int dbuPerMicron = LayoutUnits.DefaultDbuPerMicron, DrillFormatOverride? overrides = null)
+        Stream stream, int dbuPerMicron = LayoutUnits.DefaultDbuPerMicron, DrillFormatOverride? overrides = null,
+        GerberDeclaration? declaration = null)
     {
         using var ms = new MemoryStream();
         stream.CopyTo(ms);
@@ -142,15 +151,17 @@ public sealed partial class ExcellonReader
         // byte it dislikes with U+FFFD, which would erase the very evidence this refusal reads.
         if (BinaryRefusal(bytes) is { } refusal) return Refuse(refusal, overrides);
 
-        return Read(Encoding.UTF8.GetString(bytes).TrimStart('\uFEFF'), dbuPerMicron, overrides);
+        return Read(Encoding.UTF8.GetString(bytes).TrimStart('\uFEFF'), dbuPerMicron, overrides, declaration);
     }
 
     public static ExcellonReadResult Read(
-        TextReader reader, int dbuPerMicron = LayoutUnits.DefaultDbuPerMicron, DrillFormatOverride? overrides = null)
-        => Read(reader.ReadToEnd(), dbuPerMicron, overrides);
+        TextReader reader, int dbuPerMicron = LayoutUnits.DefaultDbuPerMicron, DrillFormatOverride? overrides = null,
+        GerberDeclaration? declaration = null)
+        => Read(reader.ReadToEnd(), dbuPerMicron, overrides, declaration);
 
     public static ExcellonReadResult Read(
-        string text, int dbuPerMicron = LayoutUnits.DefaultDbuPerMicron, DrillFormatOverride? overrides = null)
+        string text, int dbuPerMicron = LayoutUnits.DefaultDbuPerMicron, DrillFormatOverride? overrides = null,
+        GerberDeclaration? declaration = null)
     {
         if (BinaryRefusal(text) is { } binary) return Refuse(binary, overrides);
         if (NotADrillFileRefusal(text) is { } notDrill) return Refuse(notDrill, overrides);
@@ -159,11 +170,126 @@ public sealed partial class ExcellonReader
         // the things that settles it (§2 evidence source 4) — so the file is scanned for what it
         // declares, the inference is resolved, and only then are coordinates turned into DBU.
         var declared = ScanDeclarations(text);
-        var inference = ExcellonFormat.Resolve(declared, overrides);
+        var inference = ExcellonFormat.Resolve(declared, overrides, declaration);
 
         var reader = new ExcellonReader(inference, dbuPerMicron);
         reader.Parse(text);
         return reader.Build();
+    }
+
+    /// <summary>
+    /// GI4 R-gi4-7. Takes the PLATING COLUMN of a companion tool listing and nothing else.
+    ///
+    /// <para><b>The drill file stays authoritative about every hit, every coordinate and every
+    /// diameter.</b> A listing is a table of prose that <c>GerberFileClassifier</c> deliberately
+    /// refuses to drill from, and that refusal is correct and unchanged — but refusing to READ a file
+    /// is a different decision from refusing to DRILL from it, and the column it carries is the one a
+    /// drill file most often omits. Matching is by tool number AND diameter: a row that disagrees
+    /// about the tool's size may be describing a different tool, so its plating is not taken and the
+    /// disagreement is reported with both numbers in it.</para>
+    ///
+    /// <para>A tool that already carries plating from the drill file's own <c>;TYPE=</c> section or
+    /// <c>TA.AperFunction</c> attribute keeps it — the file speaks for itself, exactly as it does
+    /// about its format (R-gi4-3).</para>
+    /// </summary>
+    public static ExcellonReadResult ApplyToolListing(
+        ExcellonReadResult read, DrillToolListing listing, int dbuPerMicron, out IReadOnlyList<string> notes)
+    {
+        var said = new List<string>();
+        notes = said;
+        if (read.Refusal is not null || read.Tools.Count == 0) return read;
+
+        // The listing's numbers are read in ITS unit when it states one and in the drill file's
+        // otherwise — the two are written by one step of one job, and a listing that states nothing is
+        // stating that it did not change units.
+        var listingFormat = new GerberCoordinateFormat(
+            listing.Unit ?? read.Format.Unit, read.Format.IntegerDigits, read.Format.DecimalDigits,
+            read.Format.ZeroOmission, GerberNotation.Absolute, dbuPerMicron);
+
+        var rows = new Dictionary<int, DrillToolListingRow>();
+        foreach (var row in listing.Rows) rows.TryAdd(row.Number, row);
+
+        var tools = new List<DrillTool>(read.Tools.Count);
+        var takenFrom = new List<string>();
+        int missing = 0;
+        foreach (var tool in read.Tools)
+        {
+            if (!rows.TryGetValue(tool.Number, out var row) || row.Plated is null)
+            {
+                missing++;
+                tools.Add(tool);
+                continue;
+            }
+
+            long listed = listingFormat.DecimalToDbu(row.DiameterText, out _);
+            long tolerance = Math.Max(1, tool.DiameterDbu / 200);      // 0.5 %, and never zero
+            if (Math.Abs(listed - tool.DiameterDbu) > tolerance)
+            {
+                said.Add($"{listing.FileName} lists tool T{tool.Number} as {row.DiameterText}, but the " +
+                         $"drill file defines it as {tool.DiameterText}. The drill file's diameter was " +
+                         "used — it is authoritative about its own geometry — and the plating stated on " +
+                         "that row was NOT taken, because a row that disagrees about a tool's size may " +
+                         "be describing a different tool.");
+                tools.Add(tool);
+                continue;
+            }
+
+            if (tool.Plated is { } own)
+            {
+                if (own != row.Plated)
+                    said.Add($"{listing.FileName} lists tool T{tool.Number} as " +
+                             $"{(row.Plated == true ? "plated" : "non-plated")}, which DISAGREES with the " +
+                             "drill file's own statement. The drill file was preferred.");
+                tools.Add(tool);
+                continue;
+            }
+
+            takenFrom.Add($"T{tool.Number} {(row.Plated == true ? "plated" : "NON-PLATED")}");
+            tools.Add(tool with { Plated = row.Plated });
+        }
+
+        if (takenFrom.Count == 0)
+        {
+            if (missing > 0 && said.Count == 0)
+                said.Add($"{listing.FileName} is a tool listing, but it states plating for none of this " +
+                         "file's tools, so nothing was taken from it.");
+            return read;
+        }
+
+        var platingByTool = tools.ToDictionary(t => t.Number, t => t.Plated);
+        var hits = read.Hits
+            .Select(h => h.Plated is null && platingByTool.TryGetValue(h.Tool, out bool? p) && p is not null
+                ? h with { Plated = p } : h)
+            .ToList();
+        var slots = read.Slots
+            .Select(s => s.Plated is null && platingByTool.TryGetValue(s.Tool, out bool? p) && p is not null
+                ? s with { Plated = p } : s)
+            .ToList();
+
+        said.Add($"Plating was read from {listing.FileName}, a tool listing in the same folder: " +
+                 string.Join(", ", takenFrom) + "." +
+                 (missing > 0 ? $" {missing} of this file's tool(s) are not in it and stay unstated." : ""));
+
+        // GI1's field is per-LAYER, and a drill file is one layer — so the file-level answer is only
+        // available when the tools agree. A mixed file keeps its unstated (i.e. plated) layer entry
+        // and says why: marking the whole layer non-plated would delete every real via on it, and
+        // marking it plated is what it already was.
+        bool? filePlated = read.Plated;
+        if (filePlated is null)
+        {
+            var used = tools.Where(t => hits.Any(h => h.Tool == t.Number) || slots.Any(sl => sl.Tool == t.Number))
+                            .ToList();
+            if (used.Count == 0) used = tools;
+            if (used.All(t => t.Plated == false)) filePlated = false;
+            else if (used.All(t => t.Plated == true)) filePlated = true;
+            else if (used.Any(t => t.Plated == false))
+                said.Add($"{listing.FileName} marks some of this file's tools plated and others not, so " +
+                         "this drill layer has no single answer: its stackup entry stays PLATED and the " +
+                         "non-plated holes are drawn exactly as they are. Split the non-plated tools " +
+                         "into their own drill file if they need to be excluded from an EM run.");
+        }
+
+        return read with { Tools = tools, Hits = hits, Slots = slots, Plated = filePlated };
     }
 
     /// <summary>R-L4f-5's second spelling: two files that differ only in name. Content cannot settle

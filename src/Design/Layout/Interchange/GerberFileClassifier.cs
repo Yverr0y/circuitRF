@@ -27,6 +27,28 @@ public enum GerberFileKind
     /// (R-L4g-5 rung 0).</summary>
     JobFile,
 
+    /// <summary>
+    /// GI4 R-gi4-1. A companion file the OUTPUT JOB wrote about itself: a <c>KEYWORD  VALUE</c>
+    /// parameter file stating the coordinate format, the units and the zero suppression the whole job
+    /// was written with, or (R-gi4-2, the same kind, separately identified by
+    /// <see cref="GerberFileClass.Form"/>) a tool listing carrying the plating column a drill file
+    /// most often omits.
+    ///
+    /// <para><b>Recognised by its KEYWORDS, never by a filename convention</b> — the doctrine this
+    /// file's own header states, and the reason gate 2 exists. See
+    /// <see cref="GerberDeclarationFile"/>.</para>
+    /// </summary>
+    Declaration,
+
+    /// <summary>
+    /// GI4 R-gi4-10. An archive sitting beside the artwork, holding a second copy of all of it.
+    /// Reported as skipped exactly like anything else that is not artwork or drill data — but named
+    /// as what it is, so a folder whose ONLY artwork is inside one can be an OFFER rather than a dead
+    /// end. <b>Never opened unless the folder needs it</b> (R-gi4-11): reading both is how two
+    /// versions of one board get silently merged.
+    /// </summary>
+    Archive,
+
     /// <summary>A sibling to skip: a report, a listing, a placement file, a netlist, an image, a PDF.
     /// R-L4g-2 — every one of these is reported by name, once.</summary>
     Other,
@@ -37,6 +59,11 @@ public enum GerberFileKind
 public sealed record GerberFileClass(string Path, GerberFileKind Kind, string Why)
 {
     public string FileName => System.IO.Path.GetFileName(Path);
+
+    /// <summary>GI4 R-gi4-2: which of the two companion forms this is, for a
+    /// <see cref="GerberFileKind.Declaration"/>. <see cref="GerberDeclarationForm.None"/> for every
+    /// other kind. Additive with a default, so every existing construction is unchanged.</summary>
+    public GerberDeclarationForm Form { get; init; } = GerberDeclarationForm.None;
 }
 
 public static class GerberFileClassifier
@@ -69,6 +96,12 @@ public static class GerberFileClassifier
     /// drives, so no fixture needs a temporary directory to assert what a byte stream is.</summary>
     public static GerberFileClass ClassifyContent(string path, string head)
     {
+        // Before the text test, because an archive IS binary and "not text" is the true, useless
+        // answer this replaces (R-gi4-10). The four bytes are ASCII-range, so they survive the UTF-8
+        // decode above unchanged and no second read of the file is needed.
+        if (LooksLikeZipArchive(head))
+            return new GerberFileClass(path, GerberFileKind.Archive, "a ZIP archive; its contents were not read");
+
         if (LooksBinary(head))
             return new GerberFileClass(path, GerberFileKind.Other, "not text");
 
@@ -80,6 +113,13 @@ public static class GerberFileClassifier
 
         if (DrillEvidence(head) is { } drill)
             return new GerberFileClass(path, GerberFileKind.Drill, drill);
+
+        // LAST, and that order is gate 2's second half: a real drill file renamed to whatever a
+        // declaration is conventionally called still reaches DrillEvidence first and still classifies
+        // as drill data. Nothing here can take a file the drill test already claimed.
+        if (GerberDeclarationFile.Recognize(head, out string declaration) is var form &&
+            form != GerberDeclarationForm.None)
+            return new GerberFileClass(path, GerberFileKind.Declaration, declaration) { Form = form };
 
         return new GerberFileClass(path, GerberFileKind.Other, "no Gerber or drill content in its head");
     }
@@ -194,7 +234,7 @@ public static class GerberFileClassifier
     /// <summary>Two stems belong to the same board when they are equal, or when one is the other
     /// followed by a separator — "board" and "board-PTH" are the same board; "board" and "boardroom"
     /// are not, which is why the separator is required rather than a bare prefix test.</summary>
-    private static bool StemsMatch(string artworkStem, string drillStem)
+    internal static bool StemsMatch(string artworkStem, string drillStem)
     {
         if (string.Equals(artworkStem, drillStem, StringComparison.OrdinalIgnoreCase)) return true;
         return HasSeparatedPrefix(artworkStem, drillStem) || HasSeparatedPrefix(drillStem, artworkStem);
@@ -206,6 +246,15 @@ public static class GerberFileClassifier
         !char.IsLetterOrDigit(full[prefix.Length]);
 
     // ── Content sniffing ──────────────────────────────────────────────────────
+
+    /// <summary>The ZIP local-file-header signature, <c>PK\x03\x04</c>. Only ZIP, deliberately:
+    /// this recognition exists to support R-gi4-10's OFFER to look inside, and offering to open
+    /// something circuitRF cannot open would be worse than saying nothing. Anything else stays "not
+    /// text".</summary>
+    private static bool LooksLikeZipArchive(string head) =>
+        head.StartsWith("PK\u0003\u0004", StringComparison.Ordinal) ||
+        head.StartsWith("PK\u0005\u0006", StringComparison.Ordinal) ||     // an empty archive
+        head.StartsWith("PK\u0007\u0008", StringComparison.Ordinal);       // a spanned one
 
     private static bool LooksBinary(string head)
     {

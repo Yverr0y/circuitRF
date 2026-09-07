@@ -1,5 +1,244 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## Phase GI4 — COMPLETE (2026-09-07)
+
+`docs/sonnet-briefs/brief-gi4-companion-declaration-files.md`, fourth of the GI series. A production
+output set ships a plain-text parameter file stating the coordinate format the whole job was written
+with, and a tool listing carrying the plating column a drill file most often omits. Both were
+classified *"no Gerber or drill content in its head"*, skipped, and reported as skipped — in the same
+run that said, in words, that the digit format had been **INFERRED**. Gated by
+`tests/Ui.Tests/Gi4CompanionDeclarationTests.cs` (18 tests, one per gate plus the four the archive
+needs).
+
+### 1. The keyword set, and whether two was enough
+
+`GerberDeclarationFile.Vocabulary` — **nine canonical keys behind 39 aliases**, and the aliases are
+what make this work without naming anyone. Every key is normalized before lookup: uppercased, and
+every run of non-alphanumeric characters collapsed to one hyphen, so `INTEGER_PLACES`,
+`Integer Places` and `integer.places` are one key. That is the whole reason the table can be small
+and still cover the sets in circulation — the same phrase is spelled four ways and means one thing.
+
+| Canonical key | What it settles |
+|---|---|
+| `INTEGER-DIGITS` / `DECIMAL-DIGITS` | the digit split, one half each |
+| `FORMAT` | both halves at once, as `3:4` or `3.4` |
+| `UNITS` | inch or mm |
+| `SUPPRESS-LEADING-ZEROS` / `SUPPRESS-TRAILING-ZEROS` | one flag per zero class |
+| `ZERO-SUPPRESSION` | the single-word spelling of the same pair (`LEADING`/`TRAILING`/`NONE`) |
+| `SCALE` | R-gi4-5's refusal |
+| `DATA-TYPE` | R-gi4-6's scope — drill or artwork |
+
+**Two was enough, and it is doing real work.** The false positives it stops are not hypothetical:
+`UNITS`, `FORMAT` and `SCALE` are each single English words that appear as a bare `KEY VALUE` line in
+unrelated settings files, and any one of them alone would have claimed such a file as a declaration.
+Two recognised keys is the same caution `LooksLikeJobFile` already applies when it refuses to call
+arbitrary JSON a job file. A one-keyword file classifies `Other` and is gate 1.
+
+**A tool listing is recognised separately** — `GerberDeclarationForm.ToolListing`, on the same
+`GerberFileKind.Declaration` — by ≥ 2 rows of *(tool number, decimal diameter)* of which at least one
+carries a plating word. Two independent guards, and neither is spare: a bare integer is **not**
+accepted as a diameter (these tables carry a hit count, which would otherwise read as one), and a
+listing with no plating column is refused outright, because R-gi4-7 reads it for that column and
+nothing else.
+
+**One trap found while writing the row parser.** `NON PLATED` is written with a space in some of
+these tables. Testing the plating word field by field sees `NON` (which matches nothing) followed by
+`PLATED` (which means the opposite of what the row says), so the row parser normalizes the **whole
+tail** of the row and tests that — where the separator collapse turns both spellings into one. A
+field-by-field test would have marked every non-plated tool plated, silently, and the only visible
+symptom would have been an EM run whose mounting holes short the stack.
+
+### 2. How often the declaration agreed with the inference
+
+**Unmeasurable in this repository, and that has to be said rather than answered with a number.**
+There is no production output set in the tree: `testdata/pcb-samples` is board files, and every
+Gerber fixture under `tests/` is hand-authored (L4e/L4f/L4g's own precedent — worth less than a real
+set as a dialect test, costs nothing to redistribute, names no toolchain). Nothing in the repository
+carries a companion parameter file at all — a `grep` for the keyword set finds exactly two files, the
+reader and its gate.
+
+So the honest form of the brief's §8.1 and §8.2: **the agreement rate is a question for whoever has
+the real sets, and the import now answers it for them on every run.** That is what §3 below is for —
+a disagreement between a declaration and a file that speaks for itself is reported by name, with both
+values in one sentence, and is the only signal anyone will ever get that one of the two is stale.
+What can be stated from here is what the fixtures prove: the inference and the declaration agree on a
+file written at full coordinate width (the `CoordinateWidth` rung reproduces `3:4` from a 7-digit
+word), and they disagree on the case the declaration exists for — a file with too few coordinate
+words for the width inference, which defaults to `3:3` and lands every hole **ten times** too far out.
+
+### 3. Where a declaration ranks, and the one place the ladder cannot say it
+
+`DrillFormatEvidence.Declaration` sits where the brief puts it: directly below `Override`, above
+`FormatComment`. **The ladder is one axis and this is two**, and the enum's own doc comment now says
+so — a job-wide declaration is authoritative about the JOB, and a drill file's own `;FILE_FORMAT` or
+`INCH`/`METRIC` line is authoritative about ITSELF. `ExcellonFormat.Resolve` therefore prefers the
+file over its rung, and reports the disagreement rather than resolving it silently. Reading the enum
+alone would tell you the opposite, which is why the note is on the enum member and not only here.
+
+Resolution order, per unknown, after this phase:
+
+| | Unit | Digits | Zero suppression |
+|---|---|---|---|
+| 1 | caller override | caller override | caller override |
+| 2 | the file's own `INCH`/`METRIC`/`M71`/`M72` | the file's own `;FILE_FORMAT` / digit field | the file's own `LZ`/`TZ` |
+| 3 | **the declaration** | the file's decimal-point coordinates | **the declaration** |
+| 4 | the tool diameters | **the declaration** | full-width coordinates |
+| 5 | defaulted | the coordinate width | defaulted |
+| 6 | — | defaulted | — |
+
+Two of those placements are decisions, not transcription. **Decimal-point coordinates outrank the
+declaration** (row 3, digits column) because a file whose every coordinate carries a literal point has
+answered the question itself — there is no digit split left to state. And **the coordinate-width
+inference is below it** but still reported: when a declaration settles the digits and the file's own
+words are a different width, the declaration is used *and the mismatch is printed*, because a
+parameter file that has drifted from its drill data is exactly the set this phase exists to surface.
+
+**Moved, and it is behaviour-identical:** the `found.ZeroOmission` branch now runs *before* the
+full-width branch. It always effectively did — the full-width branch has always been guarded by
+`found.ZeroOmission is null` — but with a third source between them the order had to be the order it
+is decided in.
+
+**One field added to `DrillFormatInference`: `ZeroSuppressionApplies`**, defaulting to `true` so every
+existing construction reads as it did. Zero suppression is a THREE-way question and `GerberZeroOmission`
+only has two values, so "the declaration says nothing is suppressed" had nowhere to live and would
+have rendered as *"leading zeros suppressed"* over an evidence line saying the opposite — GI1's
+R-gi1-1 failure exactly, in a new arm. `ToString` still tests `CoordinateWidth` by name as well, so
+the case GI1 fixed keeps its own spelling.
+
+### 4. The inversion (R-gi4-4), and why the conversion is where it is
+
+`ExcellonFormat.ZeroOmissionFromSuppressionFlags` — **deliberately in the file whose header already
+warns about the opposite conversion**, and immediately above `Resolve`. Three senses, and getting any
+two of them confused is a board wrong by four orders of magnitude that parses perfectly:
+
+| Source | Names | `SUPPRESS-LEADING-ZEROS YES` maps to |
+|---|---|---|
+| Gerber `%FS<L\|T>` | the zeros **omitted** | — |
+| Excellon `LZ`/`TZ` | the zeros **kept** | — |
+| a declaration's flags | the zeros **suppressed** | `GerberZeroOmission.Leading` |
+
+So a declaration maps **straight through with no inversion**, and `ExcellonReader.ScanUnitsKeyword`
+remains the only place in the codebase that inverts anything. Gate 3 asserts all three in one test and
+finishes with the coordinate values: the word `12` under 3:3 is the format integer **12** (0.012 mm)
+read the declaration's way and **120000** (120 mm) read Excellon's `LZ` way.
+
+Both flags off is a real third answer and is carried as one (`ZeroSuppressionNone`), not as a
+`Leading` nobody stated. **One flag off is not**: a file stating only that leading zeros are not
+suppressed has said nothing about trailing ones, and the mapping returns "unstated" for that.
+
+### 5. The tool listing: one column, and the question it cannot answer
+
+`ExcellonReader.ApplyToolListing` runs **after** the format is settled and never before — matching is
+by tool number *and* diameter, and a diameter cannot be compared until the drill file's own unit is
+known. A row whose diameter disagrees beyond 0.5 % is reported with **both** numbers and its plating
+is **not** taken: a row that disagrees about a tool's size may be describing a different tool. A tool
+that already carries plating from the drill file's own `;TYPE=` section or `TA.AperFunction` keeps it,
+and the disagreement is reported — the same rule as R-gi4-3, one level down.
+
+**The case with no answer, and it is recorded rather than resolved:** GI1's `Plated` is a field on a
+`StackupLayer`, and a drill file is one drawing layer. A listing that marks *some* of one file's tools
+non-plated leaves that layer with no single answer. Marking the whole entry non-plated would delete
+every real via on it; marking it plated is what it already was. So a mixed file keeps its unstated
+(plated) entry, its individual holes carry the plating the listing gave them, and the import says in
+words that the fix is to split the non-plated tools into their own drill file. A file whose *used*
+tools are uniformly non-plated does mint a non-plated via entry — that is gate 7's second half, and
+`Fill` and `WallThicknessDbu` go unstated with it, exactly as GI1/GI3 established.
+
+`ExcellonReadResult` became a `record` for this, for its `with` expression and for nothing else. A
+hand-written copy constructor over fifteen properties is a property somebody forgets to carry the
+next time one is added; nothing compares two of these.
+
+### 6. The archive: an offer, and the two shapes it takes
+
+**Two new file kinds, not one.** The brief asks for `Declaration`; `Archive` came with it, because
+R-gi4-10 is not implementable without it. An archive was classified `Other` with the `Why` string
+`"not text"`, and the only way to find one again would have been to match on that string — which is
+also the string the binary-drill-file advice keys on, so an archive was already inflating a message
+about EIA-coded drill files. It is now named as what it is, stays in the skipped list (R-gi4-9), and
+leaves that count.
+
+**ZIP only, deliberately.** Recognition is the local-file-header signature, read from the head the
+classifier already has (`PK\x03\x04` and its two siblings are ASCII-range, so they survive the UTF-8
+decode unchanged and no second read is needed). Offering to look inside something circuitRF cannot
+open would be worse than saying nothing.
+
+**The trigger is R-gi4-11's, and it is the narrow one:** the offer is raised only when the chosen set
+yields **no artwork of its own**. A set that already yields artwork imports from the files on disk and
+never touches an archive beside it, even one holding the same board — and the gate asserts the
+callback is never *called*, not merely that nothing was extracted. Reading both is how two versions of
+one board get silently merged.
+
+**No nested offer.** An archive inside an archive is not something to open on the strength of one
+"yes", so the inner import is run with the offer callback null. One round of unpacking is the whole of
+what was agreed to.
+
+Everything lands in `ExtractedArchive`, which is `IDisposable` and deletes its whole tree — *"leave
+nothing behind"* is a gate and is measured, not assumed: the two archive tests count the
+`crf-gerber-zip-*` folders in the system temp directory before and after and require the list to be
+identical. Entries that would land outside the temporary root are skipped (an archive is an untrusted
+file like any other). The folder **inside** the archive with the most Gerber content is what gets
+imported, ties going to the shallowest — an output set is routinely archived with its own folder
+around it, and its top level is often a read-me and nothing else.
+
+**Whether the archive path ever ran, and what it cost:** it ran only under the gate, on a two-file
+fixture, where it is not separable from process noise. **No timing is recorded, and none should be** —
+the repo's standing rule is to assert counters, not wall clock, and a number measured on a 400-byte
+archive would be quoted later as if it meant something about a real set. What *is* recorded: it
+unpacks the whole archive once, classifies each extracted folder, and imports one of them, so its cost
+is one decompression plus one ordinary import.
+
+Headless, the same question is a **refusal naming the flag that answers it** — `--open-archives`,
+exactly as an unstated drill coordinate format already refuses with `--accept-inferred-drill-format`.
+A dialog's question becomes a flag, never a guess.
+
+### 7. Scoping, and the one boundary that costs nothing to honour
+
+R-gi4-6 is enforced by **directory**, not by proximity in the file list: a declaration speaks for the
+files of its own kind in its own folder, and `GerberImport` never reaches outside the list the user's
+choice resolved to. Two parameter files in one folder that agree are a copy and the first is used; two
+that disagree are a folder nobody can read a job format out of, and **none** of them is used — picking
+one would be the silent guess this phase removes.
+
+**An artwork-scoped declaration is recognised, reported, and never used.** That is not a gap: every
+Gerber artwork file carries a mandatory `%FS`/`%MO` pair, so a declaration about the artwork is always
+outranked by the file it describes (R-gi4-3). The message says exactly that, which is R-gi4-8's
+"recognised and not used says why". A declaration that states **no** data type is applied to the drill
+data — the only kind in a Gerber set that does not state its own format — and the report says so
+rather than assuming it silently.
+
+`GerberImportEntry.Survey` deliberately does **not** count declarations or archives. It answers one
+question — would importing the folder produce different *layers* than importing this one file — and
+neither is a layer. Counting them would raise R-L4h-3's prompt on a folder whose two answers produce
+the same one-layer cell.
+
+### 8. One collateral gate, and it is the one that should have caught this
+
+`CliStructuredOutputTests.DiagnosticIds_AreTheCommittedSet_UniqueAndCaseDistinct` failed on the first
+full run, exactly as designed: a diagnostic id is a permanent contract (R-aut1-8), so a new one has to
+be recorded in that test's committed list rather than appearing silently. `convert.gerber.archive-not-opened`
+is now in it. `tests/Firewall.Tests` is green throughout, which is what holds the no-Avalonia boundary
+shut while `GerberDeclarationFile` and `GerberArchive` grow in `src/Design`.
+
+**The two `SharedLibraryConcurrencyTests` failures are the ones GI3 already recorded, and they are
+still not this phase's.** `WithoutTheCache_OneEditCostsFourFilesystemCallsPerReferencedComponent`
+(expected 40, got 55) and `TheOnFocusRefresh_DoesNotReadTheReferencedLibrary_ButTheButtonDoes`
+(expected 0, got 24) both assert an exact value of **`CellStat.Calls`, a process-global static
+counter** reset and read across a parallel suite: any concurrently running test that stats a cell
+inside that window inflates it. Attributed rather than chased, in the repo's own cost order —
+`git status` shows nothing changed on `WorkspaceScanner`, `CellStat` or the shared-library path, and
+all 25 tests in that class pass in isolation in 143 ms. An isolated pass separates "deterministic
+break" from "load-dependent"; it does not prove the race absent, and whether it has genuinely
+worsened is a question about the repo rather than about this change.
+
+### 9. What gate 11 actually compares
+
+"A set with no declaration file imports exactly as it does today" has no *today* to compare against
+inside a test run, so it is asserted in the form that has one: the same set imported twice into two
+parents, once plain and once with the whole declaration path present but **inert** — a companion
+refused for its scale, plus one scoped to the other kind. The written `.clay` and `.ctech` must be
+**byte-identical**. If GI4 changed anything about a set it cannot speak for, those two documents
+differ. `ADrillDeclarationDoesNotAlterArtworkReading` is the same comparison from the other side.
+
 ## Phase GI3 — COMPLETE (2026-09-07)
 
 `docs/sonnet-briefs/brief-gi3-substrate-fields.md`, third of the GI series. Every other field on the

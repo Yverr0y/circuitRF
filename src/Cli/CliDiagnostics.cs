@@ -305,6 +305,13 @@ internal static class CliDiagnostics
         "{fileName} does not state its coordinate format, and the inference had to guess.",
         ("fileName", fileName), ("inferred", inferred));
 
+    /// <summary>GI4 R-gi4-10: a folder whose only artwork is inside an archive, and the flag that
+    /// opens it. An offer in the GUI is a refusal naming a flag here.</summary>
+    public static Diagnostic ConvertArchiveNotOpened(string archives) => Diagnostic.Create(
+        "convert.gerber.archive-not-opened", DiagnosticSeverity.Error,
+        "This folder holds no Gerber artwork of its own, only {archives}. Pass --open-archives to look inside.",
+        ("archives", archives));
+
     public static Diagnostic ConvertCellHasNoLayout(string cellName) => Diagnostic.Create(
         "convert.cell.no-layout", DiagnosticSeverity.Error,
         "'{cellName}' holds no layout view to convert.", ("cellName", cellName));

@@ -49,6 +49,9 @@ public static class LayoutConvert
         public GerberZeroOmission? DrillZeros;
         public int? DrillIntegerDigits, DrillDecimalDigits;
         public bool AcceptInferredDrillFormat;
+
+        // GI4 R-gi4-10. A dialog's question becomes a flag, never a guess.
+        public bool OpenArchives;
     }
 
     public static int Run(string[] args)
@@ -113,6 +116,7 @@ public static class LayoutConvert
                     o.DrillIntegerDigits = id; o.DrillDecimalDigits = dd; break;
                 }
                 case "--accept-inferred-drill-format": o.AcceptInferredDrillFormat = true; break;
+                case "--open-archives": o.OpenArchives = true; break;
 
                 default:
                     if (a.StartsWith('-')) { JsonRun.Report(CliDiagnostics.ConvertUnknownOption(a)); return Usage(); }
@@ -360,7 +364,8 @@ public static class LayoutConvert
             : Path.GetFileNameWithoutExtension(o.Input!);
 
         var r = GerberImport.Import(files, staging, importName, destTech, o.DbuPerMicron,
-            resolveDrillFormat: (fileName, inferred, crossCheck, _) => ResolveDrillFormat(o, fileName, inferred, crossCheck));
+            resolveDrillFormat: (fileName, inferred, crossCheck, _) => ResolveDrillFormat(o, fileName, inferred, crossCheck),
+            offerArchive: archives => OfferArchive(o, archives));
         Report(r.Messages);
         if (r.Cancelled) return Refused();
         if (r.CellDir is null) { JsonRun.Report(CliDiagnostics.ConvertNoCell()); return null; }
@@ -396,6 +401,25 @@ public static class LayoutConvert
         Console.Error.WriteLine("       Accept it with --accept-inferred-drill-format, or state it:");
         Console.Error.WriteLine("         --drill-units mm|inch  --drill-format <int>:<dec>  --drill-zeros leading|trailing");
         return null;
+    }
+
+    /// <summary>
+    /// GI4 R-gi4-10's offer, answered by a flag. A folder whose only artwork is inside an archive is a
+    /// dead end, and the GUI offers to look inside — so headless this is a REFUSAL NAMING THE FLAG
+    /// THAT ANSWERS IT, exactly as an unstated drill coordinate format already is. A dialog's question
+    /// becomes a flag, never a guess: unpacking somebody's archive because it happened to be sitting
+    /// there is precisely the surprise R-L4g-3 forbids.
+    /// </summary>
+    private static bool OfferArchive(Options o, IReadOnlyList<string> archives)
+    {
+        if (o.OpenArchives) return true;
+
+        string names = string.Join(", ", archives.Select(Path.GetFileName));
+        Console.Error.WriteLine($"error: this folder holds no Gerber artwork of its own, only {names}.");
+        JsonRun.Note(CliDiagnostics.ConvertArchiveNotOpened(names));
+        Console.Error.WriteLine("       circuitRF does not unpack an archive unless asked. Look inside it with:");
+        Console.Error.WriteLine("         --open-archives");
+        return false;
     }
 
     // ── Between the two halves ────────────────────────────────────────────────────────────────────

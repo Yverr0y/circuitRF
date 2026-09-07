@@ -96,6 +96,11 @@ public static class GerberImportEntry
                 case GerberFileKind.Artwork: artwork++; break;
                 case GerberFileKind.Drill: drill++; break;
                 case GerberFileKind.JobFile: job++; break;
+                // GI4: a declaration and an archive are NOT counted here. This survey answers one
+                // question — would importing the folder produce a different set of LAYERS than
+                // importing this file alone — and neither of those is a layer. A folder holding one
+                // Gerber file and a parameter file must not raise a prompt whose two answers produce
+                // the same one-layer cell.
                 default: break;
             }
         }
@@ -156,7 +161,8 @@ public static class GerberImportEntry
         PickFolder pickFolder,
         Func<IReadOnlyList<LayerMappingRow>, IReadOnlyDictionary<LayerKey, LayoutFragment.LayerReconciliationChoice>?>? resolveLayerMapping = null,
         GerberImport.ResolveDrillFormat? resolveDrillFormat = null,
-        RunControl? control = null)
+        RunControl? control = null,
+        GerberImport.OfferArchive? offerArchive = null)
     {
         // The survey classifies every file in the folder BY CONTENT, before either prompt — so it is
         // the first thing that can take a visible moment on a large set, and the first thing worth
@@ -193,7 +199,7 @@ public static class GerberImportEntry
 
         return GerberImport.Import(
             files, parentDir, importName, destTech, destDbuPerMicron,
-            resolveLayerMapping, resolveDrillFormat, control);
+            resolveLayerMapping, resolveDrillFormat, control, offerArchive);
     }
 
     /// <summary>The same flow for a folder chosen outright, with no file and therefore no
@@ -205,14 +211,15 @@ public static class GerberImportEntry
         int destDbuPerMicron,
         Func<IReadOnlyList<LayerMappingRow>, IReadOnlyDictionary<LayerKey, LayoutFragment.LayerReconciliationChoice>?>? resolveLayerMapping = null,
         GerberImport.ResolveDrillFormat? resolveDrillFormat = null,
-        RunControl? control = null)
+        RunControl? control = null,
+        GerberImport.OfferArchive? offerArchive = null)
     {
         var (files, importName) = ResolveFolder(dir);
         if (files.Count == 0)
             return Cancelled("That folder holds no files, so nothing was imported.");
         return GerberImport.Import(
             files, parentDir, importName, destTech, destDbuPerMicron, resolveLayerMapping,
-            resolveDrillFormat, control);
+            resolveDrillFormat, control, offerArchive);
     }
 
     private static GerberImport.ImportResult Cancelled(string why)

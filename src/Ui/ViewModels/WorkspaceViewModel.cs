@@ -4704,7 +4704,14 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
                         resolveDrillFormat: (fileName, inferred, crossCheck, remaining) => Dispatcher.UIThread
                             .InvokeAsync(() => ResolveGerberDrillFormatAsync(window, fileName, inferred, crossCheck, remaining))
                             .GetAwaiter().GetResult(),
-                        control: control));
+                        control: control,
+                        // GI4 R-gi4-10: an OFFER, raised only when the chosen folder yields no artwork
+                        // of its own and does hold an archive. Same UI-thread hop as the two prompts
+                        // above.
+                        offerArchive: archives => Dispatcher.UIThread
+                            .InvokeAsync(() => new CircuitRF.Ui.Views.Dialogs.GerberArchiveOfferDialog(archives)
+                                .ShowDialog<bool>(window))
+                            .GetAwaiter().GetResult()));
             }
             catch (Exception ex)
             {
