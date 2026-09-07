@@ -350,15 +350,31 @@ public static class GerberDeclarationFile
         ["COORDINATE-UNITS"] = KeyUnits,
         ["MEASUREMENT-UNITS"] = KeyUnits,
 
+        // BOTH the full word and the clipped one. These tables are written to a fixed column width,
+        // so "LEADING" is routinely clipped to "LEAD" and "TRAILING" to "TRAIL" — and the cost of
+        // missing the alias is not a missing keyword, it is the WHOLE FILE going quiet about the one
+        // field this rung exists for. A parameter file that states the digits and whose suppression
+        // line is not recognised is strictly WORSE than no declaration at all: it supplies the digit
+        // count, which displaces the file's own coordinate-width inference, and then leaves the
+        // suppression DEFAULTED — so a set that settled itself before is raised as a prompt, or
+        // headless refused outright.
         ["SUPPRESS-LEADING-ZEROS"] = KeySuppressLeading,
         ["SUPPRESS-LEADING-ZEROES"] = KeySuppressLeading,
+        ["SUPPRESS-LEAD-ZEROS"] = KeySuppressLeading,
+        ["SUPPRESS-LEAD-ZEROES"] = KeySuppressLeading,
         ["OMIT-LEADING-ZEROS"] = KeySuppressLeading,
+        ["OMIT-LEAD-ZEROS"] = KeySuppressLeading,
         ["LEADING-ZERO-SUPPRESSION"] = KeySuppressLeading,
+        ["LEAD-ZERO-SUPPRESSION"] = KeySuppressLeading,
 
         ["SUPPRESS-TRAILING-ZEROS"] = KeySuppressTrailing,
         ["SUPPRESS-TRAILING-ZEROES"] = KeySuppressTrailing,
+        ["SUPPRESS-TRAIL-ZEROS"] = KeySuppressTrailing,
+        ["SUPPRESS-TRAIL-ZEROES"] = KeySuppressTrailing,
         ["OMIT-TRAILING-ZEROS"] = KeySuppressTrailing,
+        ["OMIT-TRAIL-ZEROS"] = KeySuppressTrailing,
         ["TRAILING-ZERO-SUPPRESSION"] = KeySuppressTrailing,
+        ["TRAIL-ZERO-SUPPRESSION"] = KeySuppressTrailing,
 
         ["ZERO-SUPPRESSION"] = KeyZeroSuppression,
         ["ZEROS"] = KeyZeroSuppression,
@@ -369,10 +385,19 @@ public static class GerberDeclarationFile
         ["COORDINATE-SCALE"] = KeyScale,
         ["OUTPUT-SCALE"] = KeyScale,
 
+        // DEVICE-TYPE names the OUTPUT DEVICE the job was written for, and that is the only place an
+        // artwork parameter file usually says which data it describes. Without it such a file is
+        // Unstated, so it lands in the same folder bucket as the drill parameter file beside it, the
+        // two are compared, and a folder whose companions describe DIFFERENT KINDS of data is
+        // reported as one whose companions contradict each other — with both discarded. The value
+        // guard below is what keeps this from claiming a plotter model number: it yields a scope only
+        // when the value names a data kind.
         ["DATA-TYPE"] = KeyDataType,
         ["FILE-TYPE"] = KeyDataType,
         ["OUTPUT-TYPE"] = KeyDataType,
         ["CONTENT-TYPE"] = KeyDataType,
+        ["DEVICE-TYPE"] = KeyDataType,
+        ["OUTPUT-DEVICE"] = KeyDataType,
     };
 
     private static string? Canonical(string key) =>
@@ -429,13 +454,29 @@ public static class GerberDeclarationFile
     private static GerberDeclarationScope? DataType(string value)
     {
         string t = Normalize(value);
+
+        // "NC" is a WORD here and never a substring, which is the one asymmetry in this method and it
+        // is deliberate: two letters test true inside dozens of ordinary ones — "INCH" and "ENCODED"
+        // among them — and this test runs first, so a substring match would classify an artwork
+        // declaration as drill data and scope the whole file at the wrong half of the set. Every
+        // other marker below is long enough that a substring cannot collide by accident.
         if (t.Contains("DRILL", StringComparison.Ordinal) || t.Contains("ROUT", StringComparison.Ordinal) ||
-            t.Contains("EXCELLON", StringComparison.Ordinal) || t.Contains("NC", StringComparison.Ordinal))
+            t.Contains("EXCELLON", StringComparison.Ordinal) || HasWord(t, "NC"))
             return GerberDeclarationScope.Drill;
         if (t.Contains("GERBER", StringComparison.Ordinal) || t.Contains("ARTWORK", StringComparison.Ordinal) ||
             t.Contains("IMAGE", StringComparison.Ordinal) || t.Contains("PLOT", StringComparison.Ordinal))
             return GerberDeclarationScope.Artwork;
         return null;
+    }
+
+    /// <summary>Whether <paramref name="word"/> appears in <paramref name="normalized"/> as a whole
+    /// hyphen-separated word. <see cref="Normalize"/> has already collapsed every separator to a
+    /// hyphen, so a split on it is the whole of the test.</summary>
+    private static bool HasWord(string normalized, string word)
+    {
+        foreach (string part in normalized.Split('-'))
+            if (part.Equals(word, StringComparison.Ordinal)) return true;
+        return false;
     }
 
     private static bool Contains(string value, string what) =>

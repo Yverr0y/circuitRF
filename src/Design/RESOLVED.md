@@ -1,5 +1,82 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## GI series — review follow-up (2026-09-07)
+
+Three defects found reviewing the five phases against a production six-layer output set. All three
+are in GI4, all three are fixed, and the first of them was a **regression**: the phase made a folder
+that had imported correctly stop importing at all.
+
+### 1. A declaration that settled the digits and not the suppression made the file WORSE than no declaration
+
+**The bug.** The zero-suppression ladder's full-width rung was keyed on
+`digitsEvidence == DrillFormatEvidence.CoordinateWidth` — that is, on the digit count having been
+settled *by* the coordinate width. GI4 put the declaration rung above that one, so a parameter file
+that stated the digit split displaced the conclusion the coordinates still proved, and the
+suppression fell through to `Defaulted`. `Defaulted` is the value that raises the format prompt, and
+headless it is a refusal: `The drill format was not settled, so nothing was imported.`
+
+So a drill file that writes every coordinate at its full field width — which settles the question by
+itself, and did — was refused the moment a companion parameter file **that agreed with it** was added
+to the folder. Adding evidence made the answer worse. That is the shape of failure this whole series
+exists to remove, arriving through the series' own new code.
+
+**The fix.** The rung now keys on the FORMAT rather than on the digits' provenance: it fires whenever
+the file's own coordinate words are at the resolved full width, whichever rung supplied the digit
+count. `DrillFormatDeclarations.CoordinateDigitWidth` is already non-null only when every coordinate
+word is one width **and** one of them carries a leading zero — which is what proves nothing is
+suppressed — so the condition is a restatement of what that field already means, not a new inference.
+The declaration rung still sits above it, so a declaration that *does* state suppression still wins.
+
+The resolution table in §3 of the GI4 entry below is unchanged by this: the rung stayed where it was,
+it stopped being unreachable.
+
+### 2. The suppression keywords were not recognised clipped
+
+`SUPPRESS-LEADING-ZEROS` and `SUPPRESS-TRAILING-ZEROS` were in the vocabulary; `SUPPRESS-LEAD-ZEROES`
+and `SUPPRESS-TRAIL-ZEROES` were not. These tables are written to a fixed column width and the words
+are routinely clipped to fit it.
+
+**The cost of the miss is not a missing keyword.** The file still classifies as a declaration on the
+strength of its other lines, so it is recognised, read, and reported as having settled the format —
+while the one field it exists to settle is silently absent. Combined with §1 that turned a working
+import into a refusal; on its own it leaves the most dangerous of the three unknowns defaulted with
+the answer sitting in the file. Eight aliases added, four per zero class.
+
+### 3. An artwork parameter file scoped itself through a keyword that was not read
+
+`GerberCompanionFiles.Read` compares two parameter files in one folder and, when they disagree,
+discards **both** — correct when they describe the same data, and wrong when they describe different
+kinds of it. An artwork parameter file usually says which kind it is only by naming the **output
+device** the job was written for, and `DEVICE-TYPE` was not a `DATA-TYPE` alias. So it read as
+`Unstated`, landed in the drill bucket beside the drill parameter file, contradicted it (4:5 against
+3:4, which is not a contradiction at all — it is two statements about two different files), and took
+both out of the run with a message asserting they *"declare DIFFERENT coordinate formats"*.
+
+An output folder holding one parameter file per data kind is an ordinary shape, so this disabled GI4
+outright on a whole class of set while reporting a contradiction that did not exist. `DEVICE-TYPE`
+and `OUTPUT-DEVICE` added; the value guard is what keeps them from claiming a plotter model number,
+since `DataType` yields a scope only when the value names a data kind.
+
+**And a latent one found in that guard.** `NC` was tested as a SUBSTRING, and it is two letters — it
+is inside `INCH` and `ENCODED` among others, and the drill markers are tested before the artwork
+ones. So a value naming artwork could be scoped at the drill data. It is now matched as a whole
+hyphen-separated word; every other marker in that method is long enough that a substring cannot
+collide by accident.
+
+### What the review did not find
+
+* **R-gi5-1 holds.** Every netlist path attaches facts to shapes the readers built. `AttachNets` walks
+  a list it is handed and sets a string; `SpanFor`, `ApplyPlating` and `NetlistHoleIndex` return facts.
+  No shape is created, moved or removed anywhere in `BoardNetlistFile.cs`.
+* **`Plated` round-trips.** `TechPersistence` serialises `Stackup` whole and omits nulls, so GI1's
+  field needs no format work and an older `.ctech` reads bit-identically.
+* **`CrossSectionExtractor` needed no non-plated exclusion.** GI1's brief asks both extractors to skip
+  a non-plated via; that extractor already ignores every via shape (a uniform cross-section has none),
+  so the requirement is met without a change there.
+* **The archive path is zip-slip safe.** `ExtractedArchive.Destination` refuses any entry landing
+  outside the temporary root. There is no size cap on extraction, which is worth knowing but is not
+  reachable without an explicit yes.
+
 ## Phase GI5 — COMPLETE (2026-09-07)
 
 `docs/sonnet-briefs/brief-gi5-netlist-companion.md`, last of the GI series and the largest. A Gerber

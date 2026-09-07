@@ -526,6 +526,135 @@ public class Gi4CompanionDeclarationTests : IDisposable
     private static byte[] ClayBytes(GerberImport.ImportResult r) =>
         File.ReadAllBytes(Directory.GetFiles(r.CellDir!, "*.clay", SearchOption.AllDirectories).Single());
 
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // Review follow-up — three ways a real folder went past the reader that was written for it
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>A drill file that writes every coordinate at its full field width, and states nothing
+    /// else — the shape that makes a declaration's PARTIAL answer dangerous rather than merely
+    /// incomplete.</summary>
+    private const string FullWidthDrill =
+        "M48\nMETRIC\nT1C0.600\n%\nG90\nT1\n" +
+        "X0056999Y0318200\nX0064999Y0318200\nX0014999Y0231800\nX0027001Y0231800\nM30\n";
+
+    /// <summary>
+    /// <b>A declaration that settles the DIGITS and not the SUPPRESSION must not leave the file worse
+    /// off than no declaration at all.</b>
+    ///
+    /// <para>The full-width rung used to be keyed on the digits having been settled BY the coordinate
+    /// width. A declaration outranks that rung and supplies the digits itself, so it displaced the
+    /// conclusion the coordinates still proved — and the suppression fell through to Defaulted, which
+    /// is the value that raises a prompt and, headless, refuses the whole import. The file had
+    /// settled itself; adding a companion that agreed with it broke it.</para>
+    ///
+    /// <para>The rung now keys on the FORMAT: the file's own words are at the resolved full width, so
+    /// nothing is suppressed, whichever rung supplied the digit count.</para>
+    /// </summary>
+    [Fact]
+    public void ADeclarationThatStatesOnlyTheDigits_LeavesTheFullWidthCoordinatesToSettleSuppression()
+    {
+        // No suppression line of any kind in the declaration — only the digit split and the unit.
+        var digitsOnly = Declaration("UNITS  METRIC\nINTEGER-PLACES  3\nDECIMAL-PLACES  4\n");
+        Assert.Null(digitsOnly.ZeroOmission);
+        Assert.False(digitsOnly.ZeroSuppressionNone);
+
+        var withDeclaration = ReadDrill(FullWidthDrill, digitsOnly);
+        var without = ReadDrill(FullWidthDrill);
+
+        // The declaration settled the digits…
+        Assert.Equal(DrillFormatEvidence.Declaration, withDeclaration.Format.DigitsEvidence);
+        Assert.Equal(3, withDeclaration.Format.IntegerDigits);
+        Assert.Equal(4, withDeclaration.Format.DecimalDigits);
+
+        // …and the coordinates still settle the suppression, exactly as they do on their own. NOT
+        // Defaulted: that is the value that makes the import stop and ask about a file that left
+        // nothing open.
+        Assert.Equal(DrillFormatEvidence.CoordinateWidth, withDeclaration.Format.ZeroOmissionEvidence);
+        Assert.Equal(without.Format.ZeroOmissionEvidence, withDeclaration.Format.ZeroOmissionEvidence);
+        Assert.False(withDeclaration.Format.ZeroSuppressionApplies);
+        Assert.DoesNotContain("suppress", withDeclaration.Format.ToString(), StringComparison.OrdinalIgnoreCase);
+
+        // And the holes land in the same place either way, which is the point of the whole rung.
+        Assert.Equal(without.Slots.Count, withDeclaration.Slots.Count);
+    }
+
+    /// <summary>
+    /// <b>The suppression keywords are recognised CLIPPED as well as spelled out.</b> These tables are
+    /// written to a fixed column width, so "LEADING" is routinely clipped to "LEAD". Missing the alias
+    /// does not cost a keyword — it costs the one field the rung exists for, silently, while the file
+    /// still counts as a recognised declaration on the strength of its other lines.
+    /// </summary>
+    [Theory]
+    [InlineData("SUPPRESS-LEAD-ZEROES", "SUPPRESS-TRAIL-ZEROES")]
+    [InlineData("SUPPRESS-LEADING-ZEROS", "SUPPRESS-TRAILING-ZEROS")]
+    [InlineData("OMIT-LEAD-ZEROS", "OMIT-TRAIL-ZEROS")]
+    public void TheClippedSuppressionKeywordsAreReadLikeTheSpelledOutOnes(string leading, string trailing)
+    {
+        // Both flags off is a STATED third answer — nothing is suppressed — not an absent one.
+        var none = Declaration(
+            $"UNITS  METRIC\nINTEGER-PLACES  3\nDECIMAL-PLACES  4\n{leading}  NO\n{trailing}  NO\n");
+        Assert.True(none.ZeroSuppressionNone);
+        Assert.Null(none.ZeroOmission);
+        Assert.Contains("no zero suppression", none.Summary, StringComparison.Ordinal);
+
+        // And the Gerber sense, NOT the Excellon inversion: the flag names the zeros SUPPRESSED.
+        var lead = Declaration(
+            $"UNITS  METRIC\nINTEGER-PLACES  3\nDECIMAL-PLACES  4\n{leading}  YES\n{trailing}  NO\n");
+        Assert.Equal(GerberZeroOmission.Leading, lead.ZeroOmission);
+        Assert.False(lead.ZeroSuppressionNone);
+    }
+
+    /// <summary>
+    /// <b>An artwork parameter file that names its data through the OUTPUT DEVICE scopes itself, and
+    /// stops colliding with the drill parameter file beside it.</b>
+    ///
+    /// <para>Two parameter files in one folder are compared, and two that disagree are both discarded
+    /// — correct when they describe the same data, and wrong when they describe different kinds of it.
+    /// An artwork file usually says which it is only by naming the device the job was written for, so
+    /// without that alias it was Unstated, landed in the drill bucket, contradicted the drill file's
+    /// own parameters and took both of them out of the run.</para>
+    /// </summary>
+    [Fact]
+    public void AnArtworkParameterFileNamedByItsOutputDevice_DoesNotContradictTheDrillOne()
+    {
+        string dir = Folder("device-type");
+        Write(dir, "top.gbr", Artwork);
+        Write(dir, "board.drl", SilentDrill);
+        Write(dir, "art_param.txt",
+              "DEVICE-TYPE   GERBER_RS274X\nOUTPUT-UNITS  MM\nFORMAT  4.5\nSUPPRESS-LEAD-ZEROES  YES\n");
+        Write(dir, "nc_param.txt", Parameters(dataType: "", units: "METRIC")
+                                       .Replace("DATA-TYPE                 \n", ""));
+
+        string all = string.Join("\n", Import(dir, "device-type").Messages);
+
+        // The artwork file is recognised, scoped to the artwork, and set aside with the reason.
+        Assert.Contains("art_param.txt", all, StringComparison.Ordinal);
+        Assert.Contains("ARTWORK", all, StringComparison.Ordinal);
+
+        // The two are NOT reported as contradicting each other…
+        Assert.DoesNotContain("DIFFERENT coordinate formats", all, StringComparison.Ordinal);
+
+        // …and the drill parameter file is the one that speaks for the drill data.
+        var declaration = GerberCompanionFiles
+            .Read([GerberFileClassifier.ClassifyContent(Path.Combine(dir, "nc_param.txt"),
+                                                        File.ReadAllText(Path.Combine(dir, "nc_param.txt")))])
+            .DrillDeclarationFor(Path.Combine(dir, "board.drl"));
+        Assert.NotNull(declaration);
+        Assert.Equal(3, declaration!.IntegerDigits);
+        Assert.Equal(4, declaration.DecimalDigits);
+    }
+
+    /// <summary>"NC" is two letters and it is a WORD here, never a substring — it runs before the
+    /// artwork markers, so a substring match scopes an artwork declaration at the drill data.</summary>
+    [Fact]
+    public void TheDrillMarkerNcIsAWordAndNotASubstring()
+    {
+        Assert.Equal(GerberDeclarationScope.Drill,
+                     Declaration("DATA-TYPE  NC DRILL\nUNITS  METRIC\n").Scope);
+        Assert.Equal(GerberDeclarationScope.Artwork,
+                     Declaration("DATA-TYPE  ENCODED GERBER\nUNITS  METRIC\n").Scope);
+    }
+
     // ── The CLI, as a process ─────────────────────────────────────────────────────────────────
 
     private (int ExitCode, string StdOut, string StdErr) RunCli(params string[] args)

@@ -396,12 +396,23 @@ public static class ExcellonFormat
                   "the same folder. Its flags name the zeros SUPPRESSED (Gerber's sense), not the " +
                   "zeros kept (Excellon's).");
         }
-        else if (digitsEvidence == DrillFormatEvidence.CoordinateWidth)
+        else if (digitsEvidence == DrillFormatEvidence.CoordinateWidth ||
+                 (found.CoordinateDigitWidth is { } fullWidth && fullWidth == integerDigits + decimalDigits))
         {
             // Nothing is suppressed, so the question has no answer to get wrong: a word already at the
             // full width parses to the same integer under either convention (ParseCoordinateWord pads
             // only up to that width). Recorded as settled rather than defaulted, which is what keeps
             // the import from raising a prompt about a file that left nothing open.
+            //
+            // The second condition is a statement about THIS FORMAT, not about where the digit count
+            // came from, and the first alone was not: CoordinateDigitWidth is already only non-null
+            // when every coordinate word is one width AND one of them carries a leading zero, which
+            // is what proves nothing is suppressed. So the rung has to fire whenever those words are
+            // at the resolved full width — including when the digits were settled a rung above, by a
+            // companion parameter file or by the file's own ;FILE_FORMAT comment. Keying it on
+            // digitsEvidence alone meant a declaration that stated the digits and not the suppression
+            // DISPLACED this conclusion and left the answer Defaulted, so a file that had settled
+            // itself became a prompt — and headless, a refusal.
             zeroSuppressionApplies = false;
             zero = GerberZeroOmission.Leading;
             zeroEvidence = DrillFormatEvidence.CoordinateWidth;
