@@ -46,11 +46,18 @@ per [cell](file-formats.html#hierarchy). Membership is the filesystem itself: th
 what is in the folder, so copying a cell folder in with the Finder or Explorer puts that cell in the
 workspace, and there is no index to repair afterwards.
 
-The `.cws` records **configuration, never content** — the panel arrangement, which documents were
-open, referenced libraries, bookmarked "Known Files", the default technology and the colour theme. A
+The `.cws` records **configuration, never content** — referenced libraries, bookmarked "Known
+Files", the default technology and assembly rules, and the other projects and kits this one uses. A
 cell is referenced, not embedded, so the same cell or library can belong to several workspaces at
 once. The full on-disk layout, file type by file type, is in
 <a href="file-formats.html">File Formats</a>.
+
+The things that describe **your** view of the project rather than the project itself — the panel
+arrangement, which documents were open, which tree categories you expanded, the colour theme — are
+kept in a second file beside it, the **`.cwsuser`**. It is optional: a workspace with no `.cwsuser`
+opens on the default arrangement and nothing is wrong. It is also the one file you can safely delete
+to get your panels back if they end up somewhere unusable. See
+<a href="file-formats.html#cwsuser">Your own view of a workspace</a>.
 
 Two consequences worth knowing early:
 
@@ -180,7 +187,7 @@ are two tabs you can put side by side.
 Tabs are rearrangeable, splittable and detachable: drag one along the strip to reorder it, drop it
 against an edge of the document area to split the area in two, or drag it clear of the window to
 give it a window of its own. A detached document is still part of the workspace — it saves, runs and
-undoes exactly as it did while docked — and where you left it is recorded in the `.cws`.
+undoes exactly as it did while docked — and where you left it is recorded in the `.cwsuser`.
 
 ## The tool panels {#panels}
 
@@ -209,8 +216,9 @@ panel back where you last had it in this workspace, press again to close it. The
 
 Tool panels dock the same way documents do. Drag a panel by its tab: onto another panel to tab them
 together, against an edge to give it a column or a row of its own, or out of the window to float it.
-Drag a splitter to change the proportions. All of it is saved into the `.cws`, so a workspace
-reopens arranged the way you left it.
+Drag a splitter to change the proportions. All of it is saved into the `.cwsuser` beside the `.cws`,
+so a workspace reopens arranged the way you left it — and deleting that one file is how you get the
+default arrangement back if it ever ends up somewhere you cannot use.
 
 Three commands cover the rest:
 
@@ -230,8 +238,8 @@ Three commands cover the rest:
 **File ▸ New Workspace…** (<kbd>Ctrl/⌘+N</kbd>) and **File ▸ Open Workspace…**
 (<kbd>Ctrl/⌘+O</kbd>) both work **in place**: the window you are in becomes that workspace. Anything
 unsaved is offered to you first, the dock layout is rebuilt from your Window Layout setting, and the
-documents the incoming `.cws` had open are reopened. **File ▸ Open Recent** is the same operation
-against a list of the last few.
+documents the incoming workspace's `.cwsuser` had open are reopened. **File ▸ Open Recent** is the
+same operation against a list of the last few.
 
 You do not need a workspace at all to get started. **File ▸ New Schematic** opens a scratch sheet
 that belongs to no cell and no folder; wire it up and simulate it immediately. If it turns out to be

@@ -10,6 +10,12 @@
         <comment>circuitRF Workspace</comment>
         <glob pattern="*.crfw"/>
         <glob pattern="*.cws"/>
+        <!-- RC-1 — the per-user half, a THIRD GLOB on the existing type rather than a type of its
+             own. A <mime-type> is a container of globs, so this needs no second <mime-type> and no
+             second MimeType= entry in the .desktop file; and it is the right shape as well as the
+             cheap one, since `.cws` and `.cwsuser` are two halves of one document that open the
+             same way. -->
+        <glob pattern="*.cwsuser"/>
     </mime-type>
 
     <mime-type type="application/x-circuitrf-harmonica">

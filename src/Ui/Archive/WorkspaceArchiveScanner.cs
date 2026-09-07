@@ -77,6 +77,34 @@ public static class WorkspaceArchiveScanner
         return false;
     }
 
+    /// <summary>
+    /// True for a path an ARCHIVE leaves out. <see cref="IsSkipped"/> plus the one thing an archive
+    /// excludes and a copy keeps.
+    ///
+    /// <para><b>The asymmetry is the requirement, and it is deliberate</b> (RC-1 R-rc1-15a,
+    /// <c>docs/design/revision-control.md</c> §3.1a/§9A.2). <see cref="IsSkipped"/> is shared with
+    /// <c>WorkspaceCopy.Run</c>, and for <c>.cwsuser</c> the two consumers want OPPOSITE answers:</para>
+    /// <list type="bullet">
+    ///   <item><description><b>An archive goes to somebody else</b>, who has no use for the sender's
+    ///   monitor layout, open tabs or colour scheme — so it is never archived.</description></item>
+    ///   <item><description><b>A Save Workspace As copy is the same person's own workspace on the
+    ///   same machine</b>, which the window then switches to. Losing the panel arrangement there is
+    ///   a small annoyance with nothing bought by it — so it travels.</description></item>
+    /// </list>
+    ///
+    /// <para><b>This is the REVERSE of <c>.git</c></b>, where both consumers want the same answer for
+    /// the same reason — which is exactly why it is said here rather than left to be noticed. Tidying
+    /// the two predicates back into one would silently change whichever half the tidier was not
+    /// thinking about, and neither change announces itself: an archive that carries a colleague's
+    /// dock layout looks like nothing at all, and a copy that lost its own reads as a bug in the
+    /// docking.</para>
+    /// </summary>
+    public static bool IsSkippedFromArchive(string relativePath)
+        => IsSkipped(relativePath) ||
+           string.Equals(Path.GetFileName(relativePath),
+                         CircuitRF.Design.Workspace.WorkspaceUserPersistence.FileName,
+                         StringComparison.OrdinalIgnoreCase);
+
     // ── Defaults ──────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -149,7 +177,7 @@ public static class WorkspaceArchiveScanner
         {
             var rel = Rel(workspaceDir, file);
 
-            if (IsSkipped(rel)) { plan.SkippedPaths.Add(rel); continue; }
+            if (IsSkippedFromArchive(rel)) { plan.SkippedPaths.Add(rel); continue; }
 
             if (IsInside(file, resultsRoot))
             {
@@ -591,7 +619,7 @@ public static class WorkspaceArchiveScanner
 
         foreach (var f in EnumerateFilesSafe(dir))
         {
-            if (IsSkipped(Rel(dir, f))) continue;
+            if (IsSkippedFromArchive(Rel(dir, f))) continue;
             if (++count > fileLimit) { complete = false; break; }
             total += Math.Max(0, SizeOf(f));
         }

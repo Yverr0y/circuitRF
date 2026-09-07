@@ -107,12 +107,31 @@ public static class MoveRefRegistry
     private static Func<string, bool> Ext(string extension) =>
         f => Path.GetExtension(f).Equals(extension, StringComparison.OrdinalIgnoreCase);
 
-    // `.cws` is the WHOLE file name, so Path.GetExtension returns "" for it — matching by extension
-    // would silently skip every workspace manifest, which is a third of this table.
+    // `.cws` is the WHOLE file name — a dotfile with no stem — so it is matched by NAME.
+    // (Not because Path.GetExtension fails on it: that returns ".cws", which is exactly what
+    // App.OpenFiles' own switch relies on. Matching by name is simply the right rule for a file
+    // whose name IS the whole thing.)
     private const string CwsFileName = ".cws";
 
     private static readonly Func<string, bool> IsCws =
         f => Path.GetFileName(f).Equals(CwsFileName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The per-user half of a workspace (RC-1). <b>Three of the rows below moved to it and the file
+    /// predicate is the only thing that changed</b> — the paths, their base directory and their
+    /// storage rule are identical, because the fields themselves did not change, only the file they
+    /// are written to.
+    ///
+    /// <para>Missing this is silent and looks like data loss: a moved cell's schematic would still be
+    /// listed under its old path in the open-document list and in the dock layout, so the workspace
+    /// would reopen with the tab missing — reading as "the move lost my file" rather than as a
+    /// reference nobody repaired. That is exactly what happened when the split first landed, and
+    /// <c>TreeMoveTests.Gate6_CwsOpenDocumentListFollowsTheCellThatMoves</c> is what caught it.</para>
+    /// </summary>
+    private static readonly Func<string, bool> IsCwsUser =
+        f => Path.GetFileName(f).Equals(
+                 CircuitRF.Design.Workspace.WorkspaceUserPersistence.FileName,
+                 StringComparison.OrdinalIgnoreCase);
 
     // ── Base-directory rules ──────────────────────────────────────────────────
 
@@ -270,7 +289,6 @@ public static class MoveRefRegistry
         new("cws/KnownFiles",           IsCws, n => RefSlot.ForArray(n, "KnownFiles"),    OwnDir, PlainResolve, RootStore),
         new("cws/DefaultTechRef",       IsCws, n => One(RefSlot.For(n, "DefaultTechRef")),     OwnDir, PlainResolve, RootStore),
         new("cws/DefaultAssemblyRef",   IsCws, n => One(RefSlot.For(n, "DefaultAssemblyRef")), OwnDir, PlainResolve, RootStore),
-        new("cws/ActiveDocumentPath",   IsCws, n => One(RefSlot.For(n, "ActiveDocumentPath")), OwnDir, PlainResolve, RootStore),
 
         new("cws/PdkRefs",              IsCws,
             n => Items(n, "PdkRefs").Select(p => RefSlot.For(p, "Path")).OfType<RefSlot>(),
@@ -283,7 +301,13 @@ public static class MoveRefRegistry
             n => Items(n, "ReferencedWorkspaces").Select(w => RefSlot.For(w, "Path")).OfType<RefSlot>(),
             OwnDir, PlainResolve, RootStore),
 
-        new("cws/OpenDocuments",        IsCws,
+        // ── .cwsuser ──────────────────────────────────────────────────────────
+        // The per-user half, since RC-1. Same base directory as the `.cws` beside it — the workspace
+        // root, which is its own directory — because these are the same paths they always were.
+        new("cwsuser/ActiveDocumentPath", IsCwsUser, n => One(RefSlot.For(n, "ActiveDocumentPath")),
+            OwnDir, PlainResolve, RootStore),
+
+        new("cwsuser/OpenDocuments",      IsCwsUser,
             n => Items(n, "OpenDocuments").Select(d => RefSlot.For(d, "Path")).OfType<RefSlot>(),
             OwnDir, PlainResolve, RootStore),
 
@@ -291,7 +315,7 @@ public static class MoveRefRegistry
         // tab, every torn-off window's list, and the split document region's tree. Left out, a moved
         // cell's schematic reopens as a missing file on the next workspace open, which looks like the
         // move lost it.
-        new("cws/DockLayout",           IsCws, DockLayoutSlots, OwnDir, PlainResolve, RootStore),
+        new("cwsuser/DockLayout",         IsCwsUser, DockLayoutSlots, OwnDir, PlainResolve, RootStore),
     ];
 
     // ── Locator helpers ───────────────────────────────────────────────────────

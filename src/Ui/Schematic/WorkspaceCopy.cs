@@ -44,6 +44,14 @@ public sealed record WorkspaceCopyResult(
 /// that matters here — circuitRF's own <c>.crf-</c> session bookkeeping. Copying the advisory lock
 /// into the destination would hand the copy a held lock naming a session that has nothing to do with
 /// it.</para>
+/// <para><b>It is <see cref="WorkspaceArchiveScanner.IsSkipped"/> and NOT
+/// <c>IsSkippedFromArchive</c>, on purpose</b> (RC-1 R-rc1-15a). The one thing the two predicates
+/// disagree about is the per-user <c>.cwsuser</c> sidecar, and a copy KEEPS it: an archive goes to
+/// somebody else, who has no use for the sender's monitor layout, while a copy is the same person's
+/// own workspace on the same machine — the window switches to it, and arriving there with the panels
+/// rearranged is a small annoyance with nothing bought by it. This is the reverse of <c>.git</c>,
+/// where both consumers want the same answer; see <c>IsSkippedFromArchive</c>'s own note before
+/// tidying the two into one.</para>
 ///
 /// <h3>The repair (R-swa-2)</h3>
 /// <para><see cref="WorkspaceMove"/> already expresses exactly this: capture every resolvable

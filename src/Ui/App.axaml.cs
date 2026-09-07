@@ -599,6 +599,12 @@ public partial class App : Application
     /// looked exactly like a broken file. The <c>.charm</c> work could not be built on top of a stub,
     /// so the stub is gone rather than worked around.</para>
     ///
+    /// <para><b>A workspace has two halves and either one opens it</b> (RC-1 R-rc1-13). RC-1 moved
+    /// the panel arrangement, open tabs, tree state and colour scheme out of the <c>.cws</c> and into
+    /// a sibling <c>.cwsuser</c>; both are registered to circuitRF on all three platforms, and both
+    /// resolve here to the folder that contains them. A <c>.cwsuser</c> arriving with no <c>.cws</c>
+    /// beside it gets a sentence rather than an empty window.</para>
+    ///
     /// <para><b>Several workspaces now open one WINDOW EACH</b> (MW1 R-mw1-16). That used to be
     /// destructive — a workspace switch replaced the window's contents, so the second would silently
     /// discard the first — and is not any more. The count is capped, because someone multi-selecting
@@ -612,9 +618,21 @@ public partial class App : Application
         // .cws opened second would leave the user looking at a window that discarded what they
         // double-clicked — the same "opened nothing" failure this dispatcher exists to have fixed,
         // reached by multi-selecting a .cws alongside a .csch.
-        string? workspacePath = null;
-        var extraWorkspaces = new List<string>();
+        // Deduplicated by full path, because the two halves of one workspace can arrive together:
+        // select-all in a workspace folder hands over `.cws` AND `.cwsuser`, and both resolve to the
+        // same workspace. Without this they would open it twice — once in this window and once in a
+        // window of its own.
+        var workspaces = new List<string>();
+        var seenWorkspaces = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var documents = new List<string>();
+
+        void AddWorkspace(string cwsPath)
+        {
+            string full;
+            try   { full = Path.GetFullPath(cwsPath); }
+            catch { full = cwsPath; }
+            if (seenWorkspaces.Add(full)) workspaces.Add(full);
+        }
 
         foreach (string path in paths)
         {
@@ -626,9 +644,33 @@ public partial class App : Application
                 // own (R-mw1-16), because that is no longer destructive.
                 case ".crfw":
                 case ".cws":
-                    if (workspacePath is null) workspacePath = path;
-                    else                       extraWorkspaces.Add(path);
+                    AddWorkspace(path);
                     break;
+
+                // RC-1 R-rc1-13 — the per-user half of a workspace opens the WHOLE workspace.
+                // `.cws` and `.cwsuser` are two halves of one document; a user who double-clicks
+                // either one means the same thing by it, and a file that shows a circuitRF icon and
+                // then does nothing reads as a broken file — the exact complaint this dispatcher
+                // exists to have fixed. It resolves through the containing folder, exactly as its
+                // sibling `.cws` does.
+                case ".cwsuser":
+                {
+                    // R-rc1-8: a `.cwsuser` with no `.cws` beside it is NOT a workspace, and says so
+                    // in a sentence. Someone who copied one file out of a folder must not get an
+                    // empty window — that is the "opened nothing" failure again, arriving by a new
+                    // route, and the sidecar is exactly the file someone would copy by mistake.
+                    if (WorkspaceUserPersistence.ResolveWorkspace(path) is not { } sibling)
+                    {
+                        vm.Messages.Warning(
+                            $"'{Path.GetFileName(path)}' only records how a workspace was arranged on " +
+                            "screen — the workspace itself is the folder it sits in, and this folder " +
+                            "has no '.cws' in it.");
+                        break;
+                    }
+
+                    AddWorkspace(sibling);
+                    break;
+                }
 
                 // The document types. Every one of these is claimed by the plist, the .wxs and the
                 // Linux mime file, and three parity tests hold this list shut against all three — a
@@ -650,16 +692,16 @@ public partial class App : Application
             }
         }
 
-        OpenExtraWorkspaceWindows(vm, extraWorkspaces);
+        OpenExtraWorkspaceWindows(vm, workspaces.Skip(1).ToList());
 
-        if (workspacePath is null)
+        if (workspaces.Count == 0)
         {
             foreach (string doc in documents)
                 vm.OpenDocumentByPath(doc);
             return;
         }
 
-        _ = OpenWorkspaceThenDocumentsAsync(vm, workspacePath, documents);
+        _ = OpenWorkspaceThenDocumentsAsync(vm, workspaces[0], documents);
     }
 
     /// <summary>

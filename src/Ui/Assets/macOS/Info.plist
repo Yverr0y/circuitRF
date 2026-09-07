@@ -83,6 +83,11 @@
                          folder is that folder's `.cws`, and `.crfw` is the standalone spelling.
                          Claiming only one left half the workspaces on the machine with no owner. -->
                     <string>cws</string>
+                    <!-- RC-1 — the per-user half, under the SAME type rather than a type of its own:
+                         `.cws` and `.cwsuser` are two halves of one document and double-clicking
+                         either opens the whole workspace. A separate UTI would offer the user a
+                         choice that has no second answer. -->
+                    <string>cwsuser</string>
                 </array>
             </dict>
         </dict>
@@ -300,6 +305,7 @@
             <array>
                 <string>crfw</string>
                 <string>cws</string>
+                <string>cwsuser</string>
             </array>
         </dict>
         <dict>

@@ -227,25 +227,85 @@ saved, copied, and version-controlled exactly like any other cell.
 > filesystem-is-truth** — the tree is built by scanning the folder structure, so the `.cws` **member-files
 > list below is removed**. The `.cws` records configuration only.
 
+> **Split by RC-1 (`revision-control.md` §3.1/§3.1a, 2026-09-06):** a workspace is now **two files** —
+> the `.cws` below and a sibling **`.cwsuser`** carrying everything that belongs to one person's
+> session. See *The `.cwsuser` sidecar* immediately after this section.
+
 The **`.cws`** file is the **workspace config** — a JSON document that records:
-1. **The Dock layout** (§2.0 panel/tab arrangement) — stored as a JSON blob so the user's panel
-   arrangement is restored on next open.
-2. **Referenced libraries** — relative or absolute paths to external library folders added via
+1. **Referenced libraries** — relative or absolute paths to external library folders added via
    File → Add Library. Unresolvable → shown System.Warning + italics in the tree.
-3. **Known Files** — an arbitrary list of paths to other files the user keeps at hand while working (no
+2. **Known Files** — an arbitrary list of paths to other files the user keeps at hand while working (no
    semantic role; convenient bookmarks). Unresolvable → System.Warning + italics, same as a broken library.
    *(Replaces the old “member files” entry — membership is now the filesystem, not a list.)*
-4. **Color scheme name** (`ColorSchemeName`, optional/null) — the `.ccolor` theme to activate on open.
-   Resolved via the four-step chain: workspace dir → user themes dir → bundled assets → `ColorTheme.BuiltIn`.
-   Null means "use the application-level user preference". Omitted from the file when it is null
-   (`WhenWritingNull`).
-5. **Tree view-state** (optional) — the user's custom ordering and active filter set, so the tree restores
-   as arranged.
+3. **Default technology and default assembly rules** (`DefaultTechRef`, `DefaultAssemblyRef`) — what a
+   `.clay` with no `TechRef` of its own, and a `.wBond` with no `AssemblyRef`, fall back to.
+4. **Referenced workspaces, referenced cells and PDK references** — the alias table a `ws://` reference
+   resolves through, the individual cells brought in one at a time, and what an import settled about
+   each kit.
+5. **The settled Python interpreter** (`PythonInterpreter`) — per-*machine* rather than per-user, and it
+   stays here on purpose: the `.cwsuser` is not a per-machine file either, and moving it would cost a
+   kit-using workspace a process-launch storm on every fresh clone for no gain.
+
+**Moved out in RC-1** (they were ~98% of a real `.cws`, measured): the Dock layout, the tree view-state,
+the open-document list, the active document, and the colour scheme name.
 
 It **references, never embeds** — the actual design lives in the cell folders; the same cell/library can
 be referenced by multiple workspaces. A workspace is the “what am I working on right now” document; the
 cells/libraries are the durable artifacts. The format uses the same conventions as `.csch` (System.Text.Json,
 enum-as-string, format_version reject-on-mismatch). Implemented in `WorkspacePersistence` (`src/Ui/Schematic/`).
+
+### The `.cwsuser` sidecar = one person's session
+
+A workspace's **`.cwsuser`** sits beside its `.cws`, one per workspace, the same no-stem convention. It
+records **only what belongs to one person's session**, and it is the file `.gitignore` excludes:
+
+1. **The Dock layout** — the panel/tab/floating-window arrangement, our own schema, restored on open.
+2. **Tree view-state** — which tree categories this user has expanded, and the ordering preference.
+3. **Open documents** — which tabs were open, in what order.
+4. **Active document** — which tab was in front.
+5. **Colour scheme name** (`ColorSchemeName`) — the `.ccolor` theme to activate on open, resolved via the
+   four-step chain (workspace dir → user themes dir → bundled assets → `ColorTheme.BuiltIn`). Null means
+   "use the application-level preference". **Per-user by the owner's decision of 2026-09-06** — the one
+   field whose side `revision-control.md` §3.1 had assigned rather than measured.
+
+**Why it exists.** Before the split, the `.cws` changed on **every session close** for reasons that have
+nothing to do with the design. That is already wrong in an archive, wrong on a shared workspace and wrong
+in a read-only referenced one; version control makes it wrong a fourth way, not the first.
+
+**The rules, all of which are load-bearing:**
+
+- **Absent is the NORMAL state, not an edge case.** Every clone, every archive and every workspace handed
+  to a colleague arrives without one. A `.cws` with no `.cwsuser` beside it opens on the default
+  arrangement, exactly as a freshly-created workspace does.
+- **Its absence is never reported** — no warning, no repair prompt, no "recovering your layout". Anything
+  else trains users to think something is wrong when nothing is. The read path lives in `src/Design` and
+  has no message sink to post to, so this is structural rather than a convention.
+- **A malformed `.cwsuser` is treated as an absent one** — the same posture `CwsFile.DockLayout` already
+  takes with a structurally malformed block. Per-user convenience state must never be able to prevent a
+  design from opening.
+- **Deleting it is a supported repair.** A designer whose panels have ended up somewhere unusable closes
+  the workspace, deletes one file and reopens. That holds only while **nothing on the versioned side
+  depends on the sidecar** — nothing may. A future field that must survive that deletion belongs in the
+  `.cws`.
+- **A `.cwsuser` with no `.cws` beside it is not a workspace**, and says so in a sentence rather than
+  opening an empty window.
+- **Double-clicking either half opens the whole workspace.** Both extensions are registered to circuitRF
+  on all three platforms, under the workspace's own type, and both resolve through the folder that
+  contains them.
+- **Archived by neither, copied by Save Workspace As.** An archive goes to somebody else, who has no use
+  for the sender's monitor layout; a Save Workspace As copy is the same person's own workspace on the
+  same machine. The asymmetry is deliberate — this is the reverse of `.git`, where both want the same
+  answer.
+- **There is no `FormatVersion` bump and no migration pass.** An older `.cws` carrying the five moved
+  fields is honoured on read; they land in the `.cwsuser` on the next save and the stale copies are
+  dropped by that same save. That is the whole of the migration.
+
+`.cwsuser` carries a `FormatVersion` of its own for a human reader, and it is **never rejected on** — the
+worst a misread sidecar can do is restore the wrong panel, so a version check could only turn a readable
+file into a silently-discarded one.
+
+Implemented in `WorkspaceUserPersistence` (`src/Design/Workspace/`), written and read only through
+`WorkspacePersistence`'s own choke points.
 
 **Id-not-persisted rule (applies to ALL circuitRF file formats):** Runtime object identity (`Id` fields on
 `EditableComponent`, `EditableWire`, etc.) must NOT appear in any persisted file. Ids are auto-generated on

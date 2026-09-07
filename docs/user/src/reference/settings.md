@@ -184,6 +184,10 @@ The path under the editor is the role's own name, which is what a `.ccolor` file
 palette built into the application. A workspace can therefore carry its own house colours without
 changing anything on your machine. Opening Settings from the macOS application menu when no workspace is
 open simply omits the first of the three.</p>
+<p><b>Which theme is active is yours, not the project's.</b> The choice is recorded in the workspace's
+<code>.cwsuser</code> (see <a href="file-formats.html#cwsuser">Your own view of a workspace</a>), so a
+workspace you receive from somebody else does not switch your theme — its <code>.ccolor</code> files
+travel with it and are there in the list, but you pick one.</p>
 </div>
 
 ## Wirebonds {#wirebonds}

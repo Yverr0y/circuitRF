@@ -1,5 +1,84 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## RC-1 — opening either half of a workspace, and the reference repair that quietly followed the wrong file (2026-09-06)
+
+The `.cwsuser` split itself is in `src/Design/RESOLVED.md`. This is the open path, the three OS
+registrations, and the two things in `src/Ui` that turned out to read or write session state through
+a path the persistence choke point does not cover.
+
+### `MoveRefRegistry` writes session state, and nothing said so
+
+Three rows of the move-repair table — `ActiveDocumentPath`, `OpenDocuments` and `DockLayout` — locate
+path-shaped references **inside the `.cws`, at the JSON level**, and rewrite them when a cell moves.
+They bypass `CwsFile` entirely and deliberately (a typed round trip would drop fields this build does
+not know about). The moment those three fields moved to the sidecar, the rows matched a file that no
+longer contained them.
+
+**The symptom is indistinguishable from data loss.** Nothing throws: a moved cell's schematic stays
+listed under its old path in the open-document list and in the dock layout, so the workspace reopens
+with the tab simply missing, which reads as "the move lost my file" rather than as an unrepaired
+reference. `TreeMoveTests.Gate6_CwsOpenDocumentListFollowsTheCellThatMoves` caught it; without that
+test the split would have shipped.
+
+The fix is a second file predicate (`IsCwsUser`) and nothing else — same base directory, same resolve
+and store rules, because the fields did not change, only the file they are written to.
+
+**This is the answer to R-rc1-10's question** ("whether any caller needed changing — that would mean
+session state is read or written somewhere the choke point does not cover"). It is not a *caller* of
+`SaveToFileAtomic`; it is a second, JSON-level writer that predates the split and is sanctioned. Two
+mechanisms in this tree edit a `.cws` without going through `WorkspacePersistence`, both for the same
+stated reason — `MoveRefRegistry`/`WorkspaceMove` and `WorkspaceArchiveWriter.RewriteCws` — and any
+future field that moves between the two halves has to be checked against both.
+
+### A read-only test that asserted the `.cws` bytes had CHANGED
+
+`ReadOnlyWorkspaceTests.WritingTheWorkspaceFileOnAWritableWorkspaceStillWrites` asserted that a
+`WriteWorkspaceFile` on a writable workspace made the `.cws` bytes differ, on the grounds that "the
+dock layout this view model just captured is written". After the split the layout lands in the
+sidecar and the `.cws` can legitimately be byte-identical — so the assertion had become a statement
+that the split had NOT happened. Re-pointed at the observable that still means what the test meant:
+the sidecar appears, and the layout comes back on the next read through the same one `CwsFile` shape.
+
+### The dispatcher: dedupe, because both halves can arrive together
+
+`App.OpenFiles` gained `case ".cwsuser":`, resolving through the containing folder
+(`WorkspaceUserPersistence.ResolveWorkspace`). It also gained **deduplication by full path**, which
+the `.cws`-only version did not need: select-all in a workspace folder hands over `.cws` *and*
+`.cwsuser`, both resolve to the same workspace, and without the dedupe that opens it twice — once in
+this window and once in a window of its own (MW1's extra-window path).
+
+An orphan `.cwsuser` — one copied out of its folder — gets one sentence and no window. That is the
+`OpenFiles` "opened nothing / looks like a broken file" failure arriving by a new route, and the
+sidecar is precisely the file someone copies by mistake, being the small one with the unfamiliar name.
+
+### The archive and the copy want OPPOSITE answers, and the shared list could not give both
+
+`WorkspaceArchiveScanner.IsSkipped` is consulted by the archive **and** by `WorkspaceCopy.Run`. For
+`.cwsuser` they disagree: an archive goes to somebody else, who has no use for the sender's monitor
+layout; a Save Workspace As copy is the same person's own workspace on the same machine, which the
+window then switches to. So the exclusion lives in a second predicate, `IsSkippedFromArchive`, used
+by the archive side only.
+
+**This is the reverse of `.git`**, where both consumers want the same answer for the same reason
+(RC-5). Both the predicate and `WorkspaceCopy`'s own type comment say so, because the failure of
+tidying the two into one is silent in both directions: an archive carrying a colleague's dock layout
+looks like nothing at all, and a copy that lost its own reads as a bug in the docking. The gate
+asserts **both halves** — a test for the archive alone would pass on a shared list.
+
+### The three OS registrations went under the type the workspace already has
+
+macOS gets a third `CFBundleTypeExtensions` entry and a third filename-extension tag on the existing
+`com.circuitrf.crfw` UTI; Windows a third `<Extension>` under the existing `circuitRF.Workspace`
+ProgId (**no `Verb`** — a Verb is registered against the ProgId, and a second copy is two identical
+registry rows and a WIX0091); Linux a third `<glob>` on the existing `application/x-circuitrf-workspace`
+mime-type. The Linux shape matters beyond tidiness: a `<mime-type>` is a container of globs, so no
+second type is created and `TheDesktopEntryAndTheMimeFileClaimExactlyTheSameTypes` needs no change.
+
+`EveryDocumentTypeTheAppDispatcherAccepts_IsOpenedByTheWorkspaceViewModel` filters out the workspace
+spellings, and `cwsuser` joins `crfw`/`cws` there — it is a workspace spelling, not an exemption:
+`App` resolves it to the sibling `.cws` before anything opens, so there is no document for
+`OpenDocumentByPath` to have a case for.
+
 ## An IProbe placed on a wire clears the wire it shorts (2026-09-06)
 
 An IProbe is a 0 V series ammeter, so it is only useful IN a wire — and the gesture that puts it

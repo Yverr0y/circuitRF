@@ -3,6 +3,8 @@
 **Status:** Proposal — **rev 5**, owner decisions §12 Q1–Q17 taken and Q18–Q30 added; the mechanics a
 checkpoint, a restore and a thinning actually rest on are now specified, and two of rev 3's guarantees
 are re-founded on mechanisms that hold ·
+**RC-1 (§3.1/§3.1a, the `.cwsuser` split) is BUILT** — 2026-09-06; the last "still open" item at the
+end of §12 was settled with it. Everything from RC-2 onward remains proposal. ·
 **Date:** 2026-09-06 · **Phase:** unassigned
 
 Specifies how circuitRF gives a workspace a **history** — the ability to see what changed, and to get
@@ -314,6 +316,7 @@ consequences, and the second is the serious one:
 | `TreeViewState` | 221 | **no** — which tree categories this user expanded |
 | `OpenDocuments` | 170 | **no** — which tabs this user left open, in what order |
 | `ActiveDocumentPath` | 41 | **no** — which tab this user was looking at |
+| `ColorSchemeName` | (absent here) | **no** — per-user, decided 2026-09-06; see below |
 | `DefaultTechRef` | 41 | **yes** — design configuration |
 | `LibraryRefs`, `KnownFiles` | 4 (empty here) | **yes** |
 | `FormatVersion` | 1 | **yes** |
@@ -321,10 +324,29 @@ consequences, and the second is the serious one:
 **Roughly 96% of a real `.cws` is per-user session state.** The split is not a tidy-up around one
 field; it is a separation of two documents that were only ever one by accident.
 
-**What moves:** `DockLayout`, `TreeViewState`, `OpenDocuments`, `ActiveDocumentPath`.
-**What stays:** `FormatVersion`, `LibraryRefs`, `KnownFiles`, `DefaultTechRef`, `ReferencedWorkspaces`,
-`ReferencedCells`, `PdkRefs`, and the active color scheme — everything that is a property of the
-*project* rather than of one person's afternoon.
+*Re-measured after the split was built* (2026-09-06), by loading and re-saving this repo's own demo
+workspace through `WorkspacePersistence` itself rather than by counting fields: **`.cws` 2,914 bytes →
+65; `.cwsuser` 2,873; 97.8% per-user.** Slightly worse than the estimate above, and the shape is what
+matters — what is left of the `.cws` on a workspace with no libraries and no kits is a format version
+and two empty arrays.
+
+**What moves:** `DockLayout`, `TreeViewState`, `OpenDocuments`, `ActiveDocumentPath` — and, by the
+owner's decision of **2026-09-06**, `ColorSchemeName` (see below).
+**What stays:** `FormatVersion`, `LibraryRefs`, `KnownFiles`, `DefaultTechRef`, `DefaultAssemblyRef`,
+`PythonInterpreter`, `ReferencedWorkspaces`, `ReferencedCells`, `PdkRefs` — everything that is a
+property of the *project* rather than of one person's afternoon.
+
+**`ColorSchemeName` is per-USER** *(owner's decision, 2026-09-06 — the "still open" item at the end of
+§12, now closed)*. rev 2 put it on the versioned side on the grounds that a house style is a real
+thing; it was the one field in the table above whose side was **assigned rather than measured**, and it
+was settled the other way: a theme is one person's preference, and a shared workspace imposing its
+author's theme on everyone who opens it is the more common annoyance of the two. The cost accepted with
+it is that a workspace deliberately shipping a house theme no longer activates it for a colleague (the
+`.ccolor` files still travel; the *selection* does not), and that deleting the sidecar — the supported
+repair — resets the theme along with the panels. **`PythonInterpreter` stays**, and is the one
+judgement call in the other direction: it is per-*machine* rather than per-user, but the `.cwsuser` is
+not a per-machine file either, and moving it would cost a kit-using workspace a process-launch storm on
+every fresh clone for no gain.
 
 The sidecar is excluded by the generated `.gitignore`. **This is worth doing whether or not revision
 control ships** — the same state is already the wrong thing to put in an archived or shared
@@ -1932,7 +1954,7 @@ find in ten seconds and trust:
 |---|---|---|
 | schematics, symbols, layouts, technologies | yes | yes |
 | workspace configuration (libraries, referenced workspaces, default technology) | yes | yes |
-| panel layout, open tabs, tree expansion | **no** — deliberately, §3.1 | no, and nothing is lost by that |
+| panel layout, open tabs, tree expansion, **colour theme** | **no** — deliberately, §3.1; they live in the `.cwsuser` | no, and nothing is lost by that |
 | simulation results (`.npy`, `.spl`, `.lpcwave`) | **no** — by default, §8.1 | **no.** Re-run the analysis. |
 | files excluded by a "never include files like this" choice | **no** | **no**, and they are absent from a clone too |
 | anything in a **referenced** workspace | **no** — it is not in this repository, §7A.1 | no; that workspace has its own history |
@@ -2378,12 +2400,12 @@ retention age and floor should become per-workspace state in the `.cws` — so t
 decides how long its history is kept, rather than whoever closed it — is worth deciding before RC-6
 lands, and not before, since RC-6 is where the preference is first consumed.
 
-**Still open, and it is small.** §3.1's split leaves `ColorSchemeName` on the versioned side, on the
-grounds that it is a property of the project. It is arguably one person's preference, and a shared
-workspace would then impose its author's theme on everyone who opens it. The argument runs both ways
-(a house style is a real thing), the cost of being wrong is trivial in either direction, and it is the
-one field in §3.1's table whose side was assigned rather than measured. **Worth one decision before
-RC-1 lands, and not worth more than that.**
+**Closed, 2026-09-06 (owner).** §3.1's split had left `ColorSchemeName` on the versioned side, on the
+grounds that it is a property of the project — the one field in §3.1's table whose side was assigned
+rather than measured. **It is per-USER and lives in the `.cwsuser`.** The argument ran both ways (a
+house style is a real thing) and was settled on the other one: a theme is one person's preference, and
+a shared workspace imposing its author's theme on everyone who opens it is the more common annoyance.
+§3.1 carries the decision and what it costs.
 
 ---
 

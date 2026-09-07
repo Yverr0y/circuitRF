@@ -4,7 +4,7 @@ slug: reference/file-formats.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > File Formats
 lede: circuitRF stores a project as a folder of small, human-readable, text files — diffable and version-control friendly. The core idea: the **schematic** (what you draw) is the source of truth; the **netlist** (what the engine runs) is derived from it.
-keywords: file extension, cws, csch, csym, clay, ctech, cem, cnl, ccell, cdd, format, on disk
+keywords: file extension, cws, cwsuser, csch, csym, clay, ctech, cem, cnl, ccell, cdd, format, on disk
 ---
 
 <nav class="toc">
@@ -13,6 +13,7 @@ keywords: file extension, cws, csch, csym, clay, ctech, cem, cnl, ccell, cdd, fo
       <li><a href="#principle">Schematic vs. netlist</a></li>
       <li><a href="#family">The file family at a glance</a></li>
       <li><a href="#hierarchy">Workspace › Library › Cell</a></li>
+      <li><a href="#cwsuser">Your own view of a workspace</a></li>
       <li><a href="#testbench">What makes a TestBench</a></li>
       <li><a href="#netlistcnl">The generated <code>netlist.cnl</code></a></li>
       <li><a href="#rules">Shared rules</a></li>
@@ -56,7 +57,8 @@ visually until you draw one.
       <tr><td><code>.clay</code></td><td>Layout view — the cell's physical geometry: shapes on layers, instances, PCell placements, bitmaps, the display unit and the snap grid. A real, first-class view; see <a href="layout-editor.html">The Layout Editor</a>.</td></tr>
       <tr><td><code>.cdd</code></td><td>Data Display config — placed plots/tables/contours, their binding to a run's results, markers, view state.</td></tr>
       <tr><td><code>.cnl</code></td><td>Netlist — the engine's input (derived from a schematic, or hand-authored).</td></tr>
-      <tr><td><code>.cws</code></td><td>Workspace config — the top-level "what am I working on" document. References libraries, known files, the active color theme, and panel layout.</td></tr>
+      <tr><td><code>.cws</code></td><td>Workspace config — the top-level "what am I working on" document. References libraries, known files, the default technology and assembly rules, and any other projects or kits this one uses.</td></tr>
+      <tr><td><code>.cwsuser</code></td><td>Your own view of a workspace — the panel arrangement, which tabs were open, which tree categories you expanded, and the colour theme. Sits beside the <code>.cws</code>. Optional, personal, and safe to delete; see <a href="#cwsuser">Your own view of a workspace</a>.</td></tr>
       <tr><td><code>.clib</code></td><td>Library manifest — name, version, metadata (cells are discovered by scanning, not listed here).</td></tr>
       <tr><td><code>.ccolor</code></td><td>Color theme — a named light+dark palette for rendering.</td></tr>
       <tr><td><code>.ctech</code></td><td>Technology — the layer table (GDSII layer/datatype pairs, colours, purposes), the substrate stackup, the DRC rules, and the default display unit and snap grid. Shared at workspace level: every layout in the workspace resolves against one of these. See <a href="layout-editor.html#technology">Technology</a>.</td></tr>
@@ -75,8 +77,9 @@ in this family and are not documents you open: they are imported into cells, or 
 <span class="label">Which of these are documents you open</span>
 <p><code>.csch</code>, <code>.csym</code>, <code>.clay</code>, <code>.cdd</code>, <code>.ctech</code>,
 <code>.cem</code>, <code>.charm</code> and <code>.wBond</code> each open as a tab in the workspace.
-<code>.ccell</code>, <code>.clib</code> and <code>.cws</code> are manifests the application maintains
-for you. <code>.cnl</code> is the engine's input and is normally derived rather than edited.</p>
+<code>.ccell</code>, <code>.clib</code>, <code>.cws</code> and <code>.cwsuser</code> are manifests the
+application maintains for you — though double-clicking either half of a workspace opens the whole
+workspace. <code>.cnl</code> is the engine's input and is normally derived rather than edited.</p>
 </div>
 
 ## Workspace › Library › Cell {#hierarchy}
@@ -115,9 +118,36 @@ Membership is **filesystem-is-truth** — the Project Tree discovers cells by sc
 ### Workspace = the project that references the above
 
 A workspace is a **folder** (its name = the folder name) containing a `.cws` file. Membership is
-the filesystem; the `.cws` records configuration only: the panel/dock layout, referenced
-libraries, "Known Files" bookmarks, the active color theme, and tree view-state. It **references,
-never embeds** — the same cell or library can be used by multiple workspaces.
+the filesystem; the `.cws` records configuration only: referenced libraries, "Known Files"
+bookmarks, the default technology and assembly rules, and the other projects and kits this one
+uses. It **references, never embeds** — the same cell or library can be used by multiple
+workspaces.
+
+Beside it sits a second, optional file: the **`.cwsuser`**, which is yours rather than the
+project's.
+
+## Your own view of a workspace {#cwsuser}
+
+The `.cwsuser` holds the things that describe **your afternoon rather than the design**: where you
+put the panels, which tabs were open and which one was in front, which categories of the Project
+Tree you had expanded, and which colour theme you were using. Nothing in it affects a simulation, a
+schematic or a layout.
+
+Three things follow, and all three are deliberate:
+
+- **It is optional, always.** A workspace with no `.cwsuser` opens perfectly normally, on the default
+  arrangement — exactly like a brand-new one. Nothing is reported and nothing is wrong. This is the
+  usual state of a workspace somebody hands you.
+- **It does not travel.** It is left out of a workspace **archive**, because your monitor layout is of
+  no use to whoever you send the archive to. It **is** carried by *File ▸ Save Workspace As*, because
+  that copy is still yours, on the same machine, and the window switches straight to it.
+- **Deleting it is a repair, not a risk.** If your panels have ended up somewhere unusable, close the
+  workspace, delete the `.cwsuser`, and open the workspace again. You get the default arrangement
+  back and lose nothing but the arrangement.
+
+Double-clicking either the `.cws` or the `.cwsuser` opens the whole workspace — they are two halves
+of one thing. A `.cwsuser` on its own, with no `.cws` beside it, is not a workspace, and circuitRF
+says so rather than opening an empty window.
 
 ## What makes a TestBench {#testbench}
 

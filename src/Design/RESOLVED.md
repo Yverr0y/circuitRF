@@ -1,5 +1,94 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## RC-1 — the `.cwsuser` split: what the measurement said, and the reader that was not a choke point (2026-09-06)
+
+Per-user session state moved out of the `.cws` into a sibling `.cwsuser`
+(`brief-revision-control-1-workspace-file-split.md`; `docs/design/revision-control.md` §3.1/§3.1a).
+`WorkspaceUserPersistence` is the new type; nothing else may write the file.
+
+### The measurement, re-taken with the real writer
+
+§3.1 estimated ~96% per-user on a 2,178-byte `.cws`. Measured on this repo's own demo workspace by
+loading and re-saving through `WorkspacePersistence` itself, not by counting fields:
+
+| | bytes |
+|---|---|
+| `.cws` before | 2,914 |
+| `.cws` after | **65** |
+| `.cwsuser` | 2,873 |
+| per-user share | **97.8%** |
+
+The figure is slightly *worse* than §3.1's, and the shape is what matters: what is left of the `.cws`
+on a workspace with no libraries and no kits is a format version and two empty arrays. A file that
+changed on every session close was, in content, almost entirely one person's monitor.
+
+### `TryLoadCws` is not a read choke point, and the brief's premise (R-rc1-10) is wrong about it
+
+The brief says the read is "one read becoming two, inside `TryLoadCws`
+(`WorkspaceViewModel.cs:2531`) — the corresponding choke point, which has existed since the
+beginning." **It is not one.** There are THREE private `TryLoadCws` helpers — in
+`WorkspaceViewModel`, `WorkspaceScanner` and `WorkspaceArchiveScanner` — and roughly **twenty-five
+direct calls** to `WorkspacePersistence.LoadFromFile` in `src/Ui`, `src/Design` and `src/Cli` that go
+through none of them. Merging there would have given the merged shape to one of four readers.
+
+So the merge went **into `LoadFromFile` itself**, which is the actual lowest level and the exact
+mirror of what SL2 did for writes. The consequence is the one R-rc1-10 wanted: **no caller changed**,
+and a twenty-sixth reader inherits the merge without knowing the split exists.
+
+This is worth stating rather than fixing quietly, because the brief drew the wrong conclusion from a
+real fact: reads DID have a choke point "since the beginning" — it is `LoadFromFile`, not the view
+model's corruption-tolerant wrapper around it.
+
+### The `.cws` is stripped at the JSON level, and the list names what LEAVES
+
+`Serialize` serializes the whole `CwsFile` and then removes five keys, rather than copying a typed
+object with five fields left out. A hand-written copy list drops any field it forgets — silently, and
+only for the workspaces of whoever hits it. Naming the five that leave means a sixth field added to
+`CwsFile` next year keeps being written with no thought required, which is the direction the mistake
+should fall. `WorkspaceArchiveWriter.RewriteCws` already edits the parsed tree for the same reason.
+
+### Delete-on-empty is not tidiness, it is what makes the split behaviour-preserving
+
+Before RC-1, a caller that assembled a `CwsFile` with no session state and saved it CLEARED those
+fields out of the `.cws` — and several callers do exactly that (`ExternalRefs`' `catch { cws = new
+CwsFile(); }` branches). If the sidecar were merely left alone in that case, the two halves would
+disagree about whether a layout exists and "close every tab, then save" would reopen the closed tabs.
+So a save with nothing to record DELETES the sidecar. The behaviour is identical to before; only the
+file it happens in changed.
+
+### The sidecar carries a `FormatVersion` that is never rejected on
+
+Deliberate, not an omission. `Deserialize` refuses a `.cws` whose version it does not know because
+the alternative is loading a design wrongly. The worst a misread `.cwsuser` can do is restore the
+wrong panel, and its malformed case is already specified as "treated as absent" — so a version check
+here could only ever turn a readable file into a silently-discarded one.
+
+### `PythonInterpreter` stays, and `ColorSchemeName` moved (owner, 2026-09-06)
+
+The brief flagged both as judgement calls. `PythonInterpreter` stays in the `.cws` as the brief
+proposed, and the implementation found no reason to disagree: it is per-*machine* rather than
+per-user, but the `.cwsuser` is not a per-machine file either, and moving it would cost a kit-using
+workspace a process-launch storm on every fresh clone for no gain.
+
+`ColorSchemeName` was the one field in §3.1's table whose side had been **assigned rather than
+measured**, and the owner settled it the other way from §3.1: **it is per-user and lives in the
+sidecar.** The costs accepted with that are real and are recorded in §3.1 — a workspace deliberately
+shipping a house theme no longer activates it for a colleague (the `.ccolor` files still travel; the
+*selection* does not), and deleting the sidecar resets the theme along with the panels.
+
+### `Path.GetExtension` of a dotfile with no stem returns the whole name
+
+`Path.GetExtension(".cws")` is `".cws"`, not `""` — which is what `App.OpenFiles`' switch has always
+relied on, and what makes `case ".cwsuser":` work. `MoveRefRegistry` carried a comment asserting the
+opposite; it was harmless there (that table matches by whole file name anyway) but it is exactly the
+kind of belief that would make someone "fix" the dispatcher into opening nothing. Corrected, and
+pinned by a test.
+
+### Open for RC-3
+
+`.cwsuser` must be in the generated `.gitignore` (R-rc1-16). RC-3 owns the generator; the line and
+the reason for it belong to this brief and there is no generator to put it in yet.
+
 ## VProbe — a probe that names a net, and the two ways it could have changed the circuit (2026-09-06)
 
 The voltage probe is a one-terminal component that stamps nothing: extraction emits a `VProbe:` line,

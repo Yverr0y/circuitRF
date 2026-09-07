@@ -15,6 +15,17 @@ namespace CircuitRF.Design.Workspace;
 //   - format_version: reject on mismatch
 //   - references, never embedded payloads
 //   - relative paths preferred
+//
+// ── The per-user half lives elsewhere, since RC-1 ────────────────────────────
+// `CwsFile` is still the ONE shape callers hold, but five of its properties — DockLayout,
+// TreeViewState, OpenDocuments, ActiveDocumentPath and ColorSchemeName — are PERSISTED in a sibling
+// `.cwsuser` (see WorkspaceUserPersistence). They were ~98% of a real `.cws`, and none of them
+// describes the design: the file used to change on every session close for reasons that have nothing
+// to do with the project, which is wrong in an archive, wrong on a share, wrong in a read-only
+// referenced workspace, and wrong a fourth way under version control.
+//
+// The split is a PERSISTENCE split, not a model split. Serialize/SaveToFile/SaveToFileAtomic write
+// two files; LoadFromFile reads both and hands back one merged `CwsFile`. No caller changed.
 
 /// <summary>
 /// One open document entry persisted in .cws — path, kind, and tab order.
@@ -92,6 +103,9 @@ public sealed class CwsFile
     /// try/catch, so a layout problem can never prevent a workspace from opening. It also means a
     /// block written by a newer build round-trips verbatim instead of being rewritten to a lossy
     /// subset. Null when no layout has been captured yet.</para>
+    ///
+    /// <para><b>Persisted in the sibling <c>.cwsuser</c>, not in the <c>.cws</c></b> (RC-1) — see
+    /// <see cref="CwsUserFile"/>. Still read and written through this property; only the file changed.</para>
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonNode? DockLayout { get; set; }
@@ -100,6 +114,9 @@ public sealed class CwsFile
     /// Name of the color scheme (.ccolor) to activate when this workspace is opened.
     /// Resolved via ThemeResolver (workspace dir → user dir → built-in assets).
     /// Null means "use the application-level preference".
+    ///
+    /// <para><b>Persisted in the sibling <c>.cwsuser</c>, not in the <c>.cws</c></b> (RC-1) — see
+    /// <see cref="CwsUserFile"/>. Still read and written through this property; only the file changed.</para>
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ColorSchemeName { get; set; }
@@ -107,6 +124,9 @@ public sealed class CwsFile
     /// <summary>
     /// Project Tree filter category flags + ordering, restored on open.
     /// Null means "use defaults" (all categories on, alphabetical ordering).
+    ///
+    /// <para><b>Persisted in the sibling <c>.cwsuser</c>, not in the <c>.cws</c></b> (RC-1) — see
+    /// <see cref="CwsUserFile"/>. Still read and written through this property; only the file changed.</para>
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public CwsTreeViewState? TreeViewState { get; set; }
@@ -115,6 +135,9 @@ public sealed class CwsFile
     /// Documents open in the main DocumentDock when the workspace was last saved.
     /// Null or empty means no documents to restore (welcome stub is shown).
     /// Scratch documents are never persisted here.
+    ///
+    /// <para><b>Persisted in the sibling <c>.cwsuser</c>, not in the <c>.cws</c></b> (RC-1) — see
+    /// <see cref="CwsUserFile"/>. Still read and written through this property; only the file changed.</para>
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<CwsOpenDocument>? OpenDocuments { get; set; }
@@ -122,6 +145,9 @@ public sealed class CwsFile
     /// <summary>
     /// Relative (preferred) or absolute path of the active document when the workspace
     /// was last saved.  Null when no named document was active.
+    ///
+    /// <para><b>Persisted in the sibling <c>.cwsuser</c>, not in the <c>.cws</c></b> (RC-1) — see
+    /// <see cref="CwsUserFile"/>. Still read and written through this property; only the file changed.</para>
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ActiveDocumentPath { get; set; }
@@ -360,6 +386,12 @@ public static class WorkspacePersistence
 {
     public const int CurrentFormatVersion = 2;
 
+    /// <summary>
+    /// The manifest's file name — a dotfile with no stem, which is why a workspace is a FOLDER and
+    /// why the per-user sidecar beside it is named <c>.cwsuser</c> by the same convention.
+    /// </summary>
+    public const string FileName = ".cws";
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         WriteIndented              = true,
@@ -367,11 +399,34 @@ public static class WorkspacePersistence
         PropertyNameCaseInsensitive = true,
     };
 
+    /// <summary>
+    /// The <c>.cws</c>'s own bytes — the PROJECT half only. The five per-user fields are stripped
+    /// here rather than at the callers, so the file this returns is the file that is versioned
+    /// (RC-1, <c>docs/design/revision-control.md</c> §3.1).
+    ///
+    /// <para>Stripped from the serialized JSON rather than from a copied object: see
+    /// <see cref="WorkspaceUserPersistence.MovedFieldNames"/> for why the list names what leaves
+    /// rather than what stays.</para>
+    /// </summary>
     public static string Serialize(CwsFile ws)
-        => JsonSerializer.Serialize(ws, JsonOpts);
+    {
+        var node = JsonSerializer.SerializeToNode(ws, JsonOpts);
+        if (node is not JsonObject obj) return JsonSerializer.Serialize(ws, JsonOpts);
 
+        foreach (var moved in WorkspaceUserPersistence.MovedFieldNames) obj.Remove(moved);
+        return obj.ToJsonString(JsonOpts);
+    }
+
+    /// <summary>
+    /// Writes both halves, non-atomically. <b>The read-only rule lives in
+    /// <see cref="SaveToFileAtomic"/>, not here</b> — this overload never had it, and giving it one
+    /// now would change the behaviour of the fixtures and tests that are its only callers.
+    /// </summary>
     public static void SaveToFile(string path, CwsFile ws)
-        => File.WriteAllText(path, Serialize(ws));
+    {
+        File.WriteAllText(path, Serialize(ws));
+        WorkspaceUserPersistence.Save(path, WorkspaceUserPersistence.Extract(ws));
+    }
 
     /// <summary>
     /// Atomic write: serializes to a temp file then renames over the target.
@@ -402,7 +457,18 @@ public static class WorkspacePersistence
 
         if (WorkspaceWritability.IsReadOnly(dir)) return false;
 
+        // ONE write became two, inside the choke point (RC-1 R-rc1-9). Splitting at the callers
+        // would mean eighteen of them agreeing, which is what SL2's own header says makes a rule
+        // true in seventeen places and found by a user in the eighteenth.
+        //
+        // Atomicity is PER FILE and there is no cross-file transaction (R-rc1-11): the .cws still
+        // either lands whole or leaves the old file intact, and a sidecar write that fails after it
+        // loses panel positions and nothing else. That is not a gap being tolerated — it is the
+        // reason the split put the unimportant half in the second file. The read-only rule above
+        // covers both: a read-only workspace writes NEITHER, and the sidecar is skipped as silently
+        // as the .cws is.
         AtomicFile.WriteAllText(path, Serialize(ws));
+        WorkspaceUserPersistence.Save(path, WorkspaceUserPersistence.Extract(ws));
         return true;
     }
 
@@ -417,6 +483,26 @@ public static class WorkspacePersistence
         return ws;
     }
 
+    /// <summary>
+    /// Loads a workspace's configuration — <b>both halves, merged into the one
+    /// <see cref="CwsFile"/> shape every caller already holds</b>. The split is a persistence
+    /// change, not a model change, so no caller of this method changed for RC-1.
+    ///
+    /// <para>The merge is here, at the lowest level, rather than in any one view model's own
+    /// loader: there are three <c>TryLoadCws</c> helpers and roughly twenty-five direct calls to
+    /// this method, so "the read choke point" is this function and nothing above it.</para>
+    ///
+    /// <para><b>Migration is a read-side default and there is no rewrite pass</b> (R-rc1-12). An
+    /// older <c>.cws</c> carrying the five moved fields has no sidecar beside it, so its own values
+    /// are honoured exactly as they are today; they land in the <c>.cwsuser</c> on the next save,
+    /// and the stale copies left behind in the <c>.cws</c> are dropped by the same save. That is the
+    /// whole of the migration — no <c>FormatVersion</c> bump, no upgrade prompt, no batch
+    /// conversion.</para>
+    /// </summary>
     public static CwsFile LoadFromFile(string path)
-        => Deserialize(File.ReadAllText(path));
+    {
+        var ws = Deserialize(File.ReadAllText(path));
+        if (WorkspaceUserPersistence.TryLoad(path) is { } user) WorkspaceUserPersistence.Merge(ws, user);
+        return ws;
+    }
 }

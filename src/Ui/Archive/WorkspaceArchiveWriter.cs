@@ -115,7 +115,7 @@ public static class WorkspaceArchiveWriter
                 foreach (var file in WorkspaceArchiveScanner.EnumerateFilesSafe(option.SourcePath))
                 {
                     var rel = WorkspaceArchiveScanner.Rel(option.SourcePath, file);
-                    if (WorkspaceArchiveScanner.IsSkipped(rel)) continue;
+                    if (WorkspaceArchiveScanner.IsSkippedFromArchive(rel)) continue;
                     WriteFile(zip, $"{rootName}/{option.ArchivePath}/{rel}", file, result);
                 }
             }

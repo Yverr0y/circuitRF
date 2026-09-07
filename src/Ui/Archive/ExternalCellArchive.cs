@@ -135,7 +135,7 @@ public static class ExternalCellArchive
         foreach (var file in files)
         {
             string rel = Rel(otherRoot, file);
-            if (WorkspaceArchiveScanner.IsSkipped(rel)) continue;
+            if (WorkspaceArchiveScanner.IsSkippedFromArchive(rel)) continue;
             members.Add(new ArchiveMember(file, rel));
         }
     }

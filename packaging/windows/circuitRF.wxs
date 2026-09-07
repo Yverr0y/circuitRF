@@ -202,6 +202,12 @@
             keep their own Content Type row, which IS per-extension and may safely repeat.
           -->
           <Extension Id="cws" ContentType="application/x-circuitrf-workspace" />
+          <!--
+            RC-1 — the per-user half. Same ProgId and no Verb, for the reason above: a workspace's
+            `.cws` and its `.cwsuser` are two halves of one document, and App.OpenFiles resolves
+            either to the folder that contains it.
+          -->
+          <Extension Id="cwsuser" ContentType="application/x-circuitrf-workspace" />
         </ProgId>
 
         <ProgId Id="circuitRF.Harmonica" Description="harmonicaRF Document" Icon="CircuitRfExe" Advertise="no">

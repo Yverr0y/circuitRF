@@ -692,9 +692,12 @@ public class WBondStandaloneTests : IDisposable
         string vm = ReadRepoCode("src", "Ui", "ViewModels", "WorkspaceViewModel.cs");
 
         // The workspace spellings are handled by App itself (OpenWorkspacePathAsync), not by the
-        // document dispatcher, so they are the two the view model is not expected to carry.
+        // document dispatcher, so they are the three the view model is not expected to carry.
+        // `.cwsuser` is one of them rather than an exemption: RC-1 made it the per-user HALF of a
+        // workspace, and App resolves it to the sibling `.cws` before anything is opened, so there
+        // is no document for OpenDocumentByPath to have a case for.
         var documentTypes = ClaimedMacExtensions()
-            .Where(e => e is not ("crfw" or "cws"))
+            .Where(e => e is not ("crfw" or "cws" or "cwsuser"))
             .ToArray();
 
         Assert.NotEmpty(documentTypes);

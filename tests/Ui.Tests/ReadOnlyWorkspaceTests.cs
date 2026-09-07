@@ -311,20 +311,26 @@ public sealed class ReadOnlyWorkspaceTests : IDisposable
 
     /// <summary>The same path on a WRITABLE workspace still writes — the guard is a branch on one
     /// question, not a new mode. Without this the test above would pass on a method that had simply
-    /// stopped working.</summary>
+    /// stopped working.
+    ///
+    /// <para><b>What "writes" means moved with RC-1.</b> The dock layout this view model captures now
+    /// lands in the sibling <c>.cwsuser</c>, so the <c>.cws</c>'s own bytes may legitimately be
+    /// unchanged — that is the split working, and asserting on them would be asserting that it had
+    /// not happened. The observable that still means the same thing is that the layout came back on
+    /// the next read, through the same one <c>CwsFile</c> shape callers have always held.</para></summary>
     [Fact]
     public void WritingTheWorkspaceFileOnAWritableWorkspaceStillWrites()
     {
-        string cws = Path.Combine(_mine, ".cws");
-        byte[] before = File.ReadAllBytes(cws);
+        string cws     = Path.Combine(_mine, ".cws");
+        string sidecar = Path.Combine(_mine, ".cwsuser");
+        Assert.False(File.Exists(sidecar));
 
         var vm = new WorkspaceViewModel { CurrentWorkspacePath = cws };
         MakeReadOnly(_library);   // the OTHER one
 
         vm.WriteWorkspaceFile(cws);
 
-        // The dock layout this view model just captured is written, so the bytes MUST differ.
-        Assert.NotEqual(before, File.ReadAllBytes(cws));
+        Assert.True(File.Exists(sidecar));
         Assert.NotNull(WorkspacePersistence.LoadFromFile(cws).DockLayout);
     }
 

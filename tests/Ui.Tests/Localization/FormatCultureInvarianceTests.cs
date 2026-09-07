@@ -188,6 +188,17 @@ public sealed class FormatCultureInvarianceTests
     public void Cws_Workspace_IsCultureIndependent() =>
         AssertBytesAreCultureIndependent(".cws", () => Utf8(WorkspacePersistence.Serialize(SampleWorkspace())));
 
+    /// <summary>
+    /// The per-user half of a workspace (RC-1). It carries a tab-order integer and a format version,
+    /// so it has numbers to get wrong under a comma-decimal culture like every other format here —
+    /// and being the file whose absence is normal is no reason to leave it out: a `.cwsuser` written
+    /// under one culture and read under another must restore the same tabs.
+    /// </summary>
+    [Fact]
+    public void Cwsuser_WorkspaceSession_IsCultureIndependent() =>
+        AssertBytesAreCultureIndependent(
+            ".cwsuser", () => Utf8(WorkspaceUserPersistence.Serialize(SampleWorkspaceSession())));
+
     [Fact]
     public void Ccell_Cell_IsCultureIndependent() =>
         AssertBytesAreCultureIndependent(".ccell", () => Utf8(CellPersistence.Serialize(SampleCell())));
@@ -371,6 +382,15 @@ public sealed class FormatCultureInvarianceTests
         FormatVersion = WorkspacePersistence.CurrentFormatVersion,
         LibraryRefs = ["../lib"],
         KnownFiles  = ["Amp/Amp.ccell"],
+    };
+
+    private static CwsUserFile SampleWorkspaceSession() => new()
+    {
+        DockLayout         = System.Text.Json.Nodes.JsonNode.Parse("""{"Root":{"Proportion":0.25}}"""),
+        TreeViewState      = new CwsTreeViewState { Cells = true, Libraries = false },
+        OpenDocuments      = [new CwsOpenDocument { Path = "Amp/schematic/Amp.csch", Kind = "schematic", TabOrder = 2 }],
+        ActiveDocumentPath = "Amp/schematic/Amp.csch",
+        ColorSchemeName    = "dusk",
     };
 
     private static CcellFile SampleCell() => new()
