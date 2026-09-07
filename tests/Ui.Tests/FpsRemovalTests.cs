@@ -18,7 +18,7 @@ public class FpsRemovalTests
     }
 
     [Theory]
-    [InlineData("src/Ui/Renderers/SchematicRenderer.cs")]
+    [InlineData("src/Render/Renderers/SchematicRenderer.cs")]
     [InlineData("src/Ui/Controls/SchematicCanvas.cs")]
     [InlineData("src/Ui/Views/Content/SchematicView.axaml.cs")]
     [InlineData("src/Ui/Views/Content/SchematicView.axaml")]

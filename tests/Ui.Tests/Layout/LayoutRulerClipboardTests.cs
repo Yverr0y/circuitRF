@@ -12,6 +12,7 @@ namespace CircuitRF.Ui.Tests.Layout;
 /// same PHYSICAL distance in a document at a different resolution) and the PowerPoint path (the ruler
 /// appears in the vector graphic, and a <c>Fixed</c>-mode ruler's text is fully inside the page).
 /// </summary>
+[Collection(LayoutTextOutlineTypefaceCollection.Name)]
 public class LayoutRulerClipboardTests : System.IDisposable
 {
     public LayoutRulerClipboardTests() => LayoutTextOutline.TestOverrideTypeface = SKTypeface.Default;

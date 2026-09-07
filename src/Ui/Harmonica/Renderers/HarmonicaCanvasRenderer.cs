@@ -72,7 +72,7 @@ public static class HarmonicaCanvasRenderer
             vm?.Frame       ?? HarmonicaFrame.Empty,
             vm?.Layout      ?? CharmLayout.Default,
             vm?.RenderTheme ?? HarmonicaRenderTheme.Dark,
-            vm?.Variant     != Theming.ColorVariant.Light,
+            vm?.Variant     != ColorVariant.Light,
             vm is null ? [] : [.. vm.PickedTraces],
             vm?.ShowGridPoints ?? false,
             vm?.TopmostMarker,

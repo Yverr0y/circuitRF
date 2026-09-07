@@ -19,6 +19,7 @@ namespace CircuitRF.Ui.Tests.Layout;
 /// asserted here directly, on all four manufacturing writers: the same layout with and without rulers
 /// produces BYTE-IDENTICAL output. It passes because none of those writers was touched at all.</para>
 /// </summary>
+[Collection(LayoutTextOutlineTypefaceCollection.Name)]
 public class LayoutRulerModelTests : System.IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "crf-ruler-model-" + System.Guid.NewGuid().ToString("N"));

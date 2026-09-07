@@ -157,6 +157,11 @@ product) independent of any GUI framework. Full detail:
         │        the functions that CREATE a workspace, a cell and an imported part.  No UI:
         │        it draws nothing and docks nothing; the EDITORS all stay in src/Ui.
         │
+  src/Render    The Skia RENDERERS: schematic, symbol, layout and bondwire, their themes and
+        ▲        caches, the colour-theme model and .ccolor reader, and the overlay descriptions
+        │        of a frame's transient chrome.  SkiaSharp only — pixels out, and nothing in.
+        │        Referenced by BOTH src/Ui and src/Cli, so there is exactly one renderer.
+        │
   src/Ui        Presentation: Avalonia 12 + SkiaSharp. Schematic/symbol/layout editors,
                  Data Display, workspace. Depends on everything above. Nothing depends on it.
 
@@ -232,10 +237,11 @@ just a host.
 ### The framework firewall
 
 The circuitRF *engines* must be skinnable by any new
-UI with as little trouble as possible — so **`RfCore`, `src/Core`, `src/Engine`, `src/Design`, `src/Cli`,
-`src/Diagnostics`, `src/Harmonica` and `src/WBond` reference no UI framework at all** (no Avalonia). This
-is **not** a hope; it's an **enforced invariant** — [`tests/Firewall.Tests`](tests/Firewall.Tests) loads
-each of those eight assemblies and fails the build if any references `Avalonia*`.
+UI with as little trouble as possible — so **`RfCore`, `src/Core`, `src/Engine`, `src/Design`,
+`src/Render`, `src/Cli`, `src/Diagnostics`, `src/Harmonica` and `src/WBond` reference no UI framework at
+all** (no Avalonia). This is **not** a hope; it's an **enforced invariant** —
+[`tests/Firewall.Tests`](tests/Firewall.Tests) loads each of those nine assemblies and fails the build if
+any references `Avalonia*`.
 
 That firewall is why `circuitrf em` exists at all. The half of the EM path that turns a `.cem` plus a
 `.clay` into an `EmProblem` used to sit in the `CircuitRF.Ui` assembly; it was carved out into
@@ -251,6 +257,15 @@ session files stayed exactly where they were: the canvas, the edit session, undo
 drag-follow, the palette and `PlacementService` are presentation and belong to `src/Ui`. The DRC engine
 and the interchange readers and writers crossed on the same terms and for the same reason — `circuitrf
 check` and `circuitrf convert` need them, and `src/Cli` cannot reference `src/Ui`.
+
+**And a third time, for the picture.** The ~11,000 lines of Skia that draw every frame the application
+shows — `SchematicRenderer`, `SymbolEditorRenderer`, `LayoutRenderer` and `WBondRenderer` — moved to
+**`src/Render`** so a command line can produce the picture the GUI produces rather than one that
+resembles it. Two things had to be fixed on the way, both of which failed SILENTLY before: the embedded
+fonts and the shipped `.ccolor` loaded through Avalonia's `AssetLoader`, which needs a live app host, so
+a headless render quietly drew in the platform's default typeface and fell back to the in-code palette.
+Both are ordinary embedded resources now, read out of `CircuitRF.Render` itself, and `src/Ui` LINKS the
+same files rather than keeping a second copy.
 
 The entire engine↔UI contract is two shapes: **design model down, `DataSet` up.** A replacement UI
 re-implements only the *presentation* of those two shapes; the engine, elaboration, analyses, result model,
@@ -314,6 +329,17 @@ circuitRF/
 │  ├─ Diagnostics/     the coded-diagnostic leaf: id, typed arguments, English template (no UI)
 │  ├─ Harmonica/       harmonicaRF's framework-free half — interactive harmonic loadpull (no UI)
 │  ├─ WBond/           wBond's framework-free half — bondwire geometry + its own 3D MoM (no UI)
+│  ├─ Render/          The Skia RENDERERS, below the firewall — one renderer, called by the GUI
+│  │  │                and (from RND-1 on) by the command line, so a headless picture cannot
+│  │  │                drift from the one on screen. It draws; it does not edit.
+│  │  ├─ Renderers/      SchematicRenderer, SymbolEditorRenderer, LayoutRenderer + partials,
+│  │  │                  WBondRenderer, their themes, the path/bitmap caches and the LOD tiers
+│  │  ├─ Layout/         the hit-test, handle, snap and overlay geometry the renderer shares with
+│  │  │                  the editors (the EDITORS themselves stay in src/Ui)
+│  │  ├─ Schematic/      the schematic and symbol OVERLAY types — a frame's transient chrome
+│  │  ├─ Theming/        the colour-theme model, its roles and the .ccolor reader
+│  │  └─ Assets/         the embedded fonts and the shipped Default.ccolor — src/Ui LINKS these
+│  │                     rather than holding a second copy
 │  ├─ Ui/              Avalonia 12 + SkiaSharp — the only place UI-framework code lives
 │  │  ├─ Schematic/      the schematic EDITOR: canvas, edit session, undo, hit-testing, the
 │  │  │                  library palette, PlacementService  (the MODEL is in src/Design)
@@ -323,7 +349,10 @@ circuitRF/
 │  │  │  ├─ Em/            the .cem editor panel and back-annotation  (the RUN is in src/Design)
 │  │  │  ├─ Drc/           the DRC run's Messages report and the per-user wBond clearance setting
 │  │  │  └─ TechImport/    importing a technology from a foreign stackup
-│  │  ├─ Renderers/      pure SkiaSharp renderers (schematic, symbols, layout) — no Avalonia types
+│  │  ├─ Renderers/      what is left of the render layer here: the module initializers that hand
+│  │  │                  src/Render its Avalonia-loaded pieces, harmonicaRF's theme bridge (it
+│  │  │                  reaches a Data Display type), and the Avalonia-Bitmap adapter over the
+│  │  │                  component preview  (the RENDERERS are in src/Render)
 │  │  ├─ Controls/       Avalonia custom controls hosting Skia surfaces + input
 │  │  ├─ DataDisplay/    DataCube-native plots (Smith/polar/rect/table), loadpull surface, contours
 │  │  ├─ Harmonica/  WBond/   the two standalone tools' views — each also has its own Main()

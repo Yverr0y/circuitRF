@@ -34,3 +34,13 @@ global using CircuitRF.Design.Workspace;
 // the path.
 global using CircuitRF.Design.Schematic;
 global using CircuitRF.Design.Symbol;
+
+// The Skia renderers and the small framework-free types they read, which crossed the same wall in
+// RND-1 (brief-render-1-render-layer-below-the-firewall.md R-rnd1-1) so `circuitrf render` can draw
+// what the application draws rather than something that resembles it. What moved is every renderer
+// and its theme, the OVERLAY descriptions of a frame's transient chrome (LayoutOverlay,
+// SchematicOverlay, SymbolEditorOverlay), the hit-test/handle/snap geometry the renderer and the
+// editors share, and the colour theme model with its `.ccolor` reader. The editors, view models,
+// canvases and commands all stayed here, as did AppPreferences and ClipboardRenderPolicy, which read
+// a per-USER preference store.
+global using CircuitRF.Render;

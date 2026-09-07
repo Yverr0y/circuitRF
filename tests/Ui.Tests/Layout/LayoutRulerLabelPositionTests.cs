@@ -22,6 +22,7 @@ namespace CircuitRF.Ui.Tests.Layout;
 /// region, Zoom-to-Fit and the clipboard's painted bounds then follow for free. A second placement
 /// path would give a number you can see and cannot click.</para>
 /// </summary>
+[Collection(LayoutTextOutlineTypefaceCollection.Name)]
 public class LayoutRulerLabelPositionTests : System.IDisposable
 {
     public LayoutRulerLabelPositionTests() => LayoutTextOutline.TestOverrideTypeface = SKTypeface.Default;

@@ -16,3 +16,9 @@ global using CircuitRF.Design.Theming;
 global using CircuitRF.Design.Workspace;
 global using CircuitRF.Design.Schematic;
 global using CircuitRF.Design.Symbol;
+
+// And the same for the renderers, which moved to CircuitRF.Render in RND-1
+// (brief-render-1-render-layer-below-the-firewall.md). Gate 5 of that brief asks that the
+// renderers' existing tests keep passing; this line is what makes "unchanged" literally true for
+// them too.
+global using CircuitRF.Render;

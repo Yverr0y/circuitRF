@@ -329,7 +329,7 @@ namespace CircuitRF.Ui.DataDisplay
                 // ---- Live VSWR drag readout (unclipped — must not be cut off near the edge) ----
                 if (vswrReadout is { } ro)
                 {
-                    using var font  = new SKFont(CircuitRF.Ui.Renderers.SkiaFonts.PlexRegular,
+                    using var font  = new SKFont(SkiaFonts.PlexRegular,
                                                  (float)(Math.Min(canvasSize.W, canvasSize.H) * 0.0224));
                     // Theme text colour — the SAME one MarkerInfoBox draws its lines in. It was a
                     // hardcoded black, which is invisible against a dark-theme plot background.

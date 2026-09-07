@@ -191,7 +191,12 @@ public class WBondStandaloneTests : IDisposable
 
         Assert.Contains("ExternalDeviceRegistry.ResetResolved", app);
         Assert.Contains("PCellRegistry.ClearResolvers", app);
-        Assert.Contains("ThemeResolver.SetBuiltInProvider", app);
+        // NOT SetBuiltInProvider any more (R-rnd1-5): ThemeResolver reads the shipped .ccolor out
+        // of CircuitRF.Render's own manifest resources by default, so there is nothing to install
+        // here and installing one would be a second copy of the same file reached a second way.
+        // What this entry point must still do is APPLY the saved preference, which is what
+        // ActiveThemeName is.
+        Assert.DoesNotContain("ThemeResolver.SetBuiltInProvider", app);
         Assert.Contains("ActiveThemeName", app);
     }
 

@@ -382,6 +382,12 @@ and `.kicad_pcb` reader and writer**, and **the functions that CREATE those arti
 `WorkspaceCreate`, `CellCreate`, `ComponentImport` — which the GUI's own New Workspace / New Cell /
 Import Component call, not a headless copy of them, and **`Layout/Drc/` + `Layout/Assembly/` — the
 DRC engine and the `.wasm` assembly rule model**, so design rules run with no display),
+**`src/Render`** (the Skia RENDERERS — `SchematicRenderer`, `SymbolEditorRenderer`,
+`LayoutRenderer` and its partials, `WBondRenderer`, their themes and caches, the colour-theme model
+and its `.ccolor` reader, and the hit-test/handle/snap/overlay geometry they share with the editors;
+below the firewall since 2026-09-07 and referenced by BOTH `src/Ui` and `src/Cli`, so a headless
+picture is drawn by the code the GUI draws with rather than by a second renderer that would drift
+invisibly),
 `src/Ui` (Avalonia), `src/Cli` (headless driver +
 test harness). `RfCore` is an ordinary first-party project alongside the rest — see §Stack for why it is
 no longer at the repo root, and why that changed nothing architecturally.
@@ -425,7 +431,20 @@ itself proves nothing:
   ImageMagick), which is what makes packaging work identically on all three. Not in `circuitRF.slnx`,
   so a plain `dotnet build` neither builds it nor restores its `Svg.Skia` dependency.
 
-**UI firewall:** `RfCore`, `src/Core`, `src/Engine`, `src/Design`, `src/Cli` must reference **no UI framework**
+**`src/Render` draws; it does not edit.** Nothing in it docks, undoes, observes a canvas or holds a
+view model — it draws committed geometry plus the OVERLAY types describing a frame's transient chrome
+(a marquee, a handle, a snap marker), which the editors fill in. It is not `src/Design` for the reason
+that project's own `.csproj` gives: nothing in `src/Design` draws, and 11,000 lines of drawing code
+would make that comment false. **Two silent fallbacks had to be fixed to put it there** and both are
+worth knowing about: `SkiaFonts` loaded its `.ttf` faces through Avalonia's `AssetLoader` and CAUGHT
+its no-host failure by returning `SKTypeface.Default`, and `ThemeResolver`'s built-in `.ccolor`
+provider was installed only by `App.axaml.cs`, so a theme name that resolves in the GUI fell through
+to `ColorTheme.BuiltIn`. Both are ordinary embedded resources in `src/Render` now, read with
+`Assembly.GetManifestResourceStream`; **`src/Ui` LINKS the same files back as `AvaloniaResource`**
+rather than keeping a second copy, so its `avares://CircuitRF.Ui/Assets/{Fonts,Color}/…` URIs are
+unchanged. Detail and the rest of the findings in `src/Render/RESOLVED.md`.
+
+**UI firewall:** `RfCore`, `src/Core`, `src/Engine`, `src/Design`, `src/Render`, `src/Cli` must reference **no UI framework**
 (no Avalonia) — all UI-framework code lives in `src/Ui`, so circuitRF can be re-skinned by replacing
 `src/Ui` only. This is an **enforced** invariant (a CI assembly-reference check fails the build if the
 core references Avalonia). Contract across the boundary: design model down, `DataSet` up. See

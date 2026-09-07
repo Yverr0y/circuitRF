@@ -3,7 +3,7 @@
 //
 // Both live on the UI side of the firewall — the preference is in AppPreferences and the state
 // directory is AppDataRoot, which tools redirect — and CircuitRF.Core may reference neither. So Core
-// exposes the seam and this fills it, exactly as UiTypefaceInstaller fills LayoutTextOutline's.
+// exposes the seam and this fills it, exactly as RenderTypefaceInstaller fills LayoutTextOutline's.
 //
 // A MODULE INITIALIZER for the same reason as that one: it runs before any type in this assembly is
 // touched, so there is no startup ordering to get wrong and no second entry point to remember (the

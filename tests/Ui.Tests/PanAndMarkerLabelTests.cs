@@ -31,9 +31,15 @@ using Xunit;
 
 namespace CircuitRF.Ui.Tests;
 
-public sealed class PanAndMarkerLabelTests
+public sealed class PanAndMarkerLabelTests : IDisposable
 {
+    // Restored on dispose. The field is a shared mutable static and xunit runs test classes in
+    // PARALLEL, so a class that sets it and walks away decides what every other class draws with.
+    private readonly SKTypeface? _previousTypeface = SkiaFonts.TestOverrideTypeface;
+
     public PanAndMarkerLabelTests() => SkiaFonts.TestOverrideTypeface = SKTypeface.Default;
+
+    public void Dispose() => SkiaFonts.TestOverrideTypeface = _previousTypeface;
 
     private static readonly double[] Freqs = [1e9, 2e9, 3e9, 4e9, 5e9];
 

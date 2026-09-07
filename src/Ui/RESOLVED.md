@@ -1,5 +1,58 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## RND-1 — what changed on THIS side when the renderers moved out (2026-09-07)
+
+`docs/sonnet-briefs/brief-render-1-render-layer-below-the-firewall.md`. The findings about the move
+itself are in **`src/Render/RESOLVED.md`**; this entry is only what `src/Ui` is left holding, and the
+three traps that came with it.
+
+### What is left in `src/Ui/Renderers/`, and why each one stayed
+
+- **`UiTypefaceInstaller.cs` — GONE**, and that was not optional. It moved to `src/Render` as
+  `RenderTypefaceInstaller`. It fed `LayoutTextOutline.TypefaceSource` from `SkiaFonts.Plex*`, which
+  fell back to `SKTypeface.Default` in every process — so the application and `circuitrf convert`
+  flattened labels against the same substitute and agreed by accident. Fixing `SkiaFonts` (R-rnd1-4)
+  moved the application's side to the real face and left the CLI's behind, and
+  `ConvertCliVerbTests`' byte-for-byte Gerber comparison failed on the label's coordinates. The full
+  chain, including why a `[ModuleInitializer]` alone does not reach `src/Cli`, is in
+  `src/Render/RESOLVED.md`.
+- **`UiPCellGeneratorInstaller.cs`** — new, and the same shape. `CellPins` moved with the renderer that
+  reads it; `PCellRegistry` could not follow, because `PCellTrust` reads a per-USER preference through
+  `AppPreferencesIo`. The registry stays here and reaches down through `CellPins.GeneratorSource`.
+- **`HarmonicaRenderTheme.cs`** — it returns a `CircuitRF.Ui.DataDisplay.RenderTheme`, which is
+  **RND-4's** carve-out. It should move with the Data Display, in one step.
+- **`ComponentPreviewRenderer.cs`** — reduced to `Wrap` and the two `Render*` methods that call it. The
+  drawing is `CircuitRF.Render.ComponentPreviewRaster`.
+
+### `global using CircuitRF.Render;` — one line, and three qualified names it could not fix
+
+`src/Ui/GlobalUsings.cs` gained one line, exactly as the equivalent Design and Schematic moves did. What
+a global using cannot resolve is a name someone QUALIFIED: `Renderers.LayoutRenderer`,
+`Theming.ColorVariant`, `Layout.DrcMarker` and friends still named a namespace that no longer holds the
+type. Five files needed the prefix dropped, and one — `PaletteGlyphControl`'s `BitmapCache` — needed the
+opposite, a FULL qualification, because `Avalonia.Media` defines a `BitmapCache` too and the global
+using made it ambiguous where a `using CircuitRF.Ui.Renderers` had not.
+
+### The three `App` classes stopped registering a built-in `.ccolor` provider
+
+`ThemeResolver` now reads the shipped `Default.ccolor` out of `CircuitRF.Render`'s own manifest
+resources by default, in every process. Registering an `AssetLoader`-backed one on top would be a second
+copy of the same file reached a second way, shadowing a default that works everywhere — which is the
+arrangement that produced the silent fallback in the first place. `WBondStandaloneTests` and
+`HarmonicaStandaloneTests` asserted the call was PRESENT; they now assert it is absent and that the
+saved preference is still applied, which is the part that actually matters to a standalone binary.
+
+### The trap: a test that leaves a shared static set decides what every other test draws with
+
+`SkiaFonts.TestOverrideTypeface` is a shared mutable static and xunit runs test classes in PARALLEL —
+`SkiaFonts.Load`'s own comment records this and the full-solution run demonstrated it again.
+`MarkerGlyphContourTests` set it in its constructor and never restored it, which was harmless while the
+override was the only way to render text headlessly and is not harmless now: a gate written as "render
+twice with the typeface swapped" passed alone and failed under load, because another class had already
+substituted the face for BOTH renders. That class now restores on dispose, and the gate was rewritten to
+read the exported SVG's own `font-family` rather than to touch the static at all.
+
+
 
 ## RC-8 — archiving a workspace with its history, and the enumeration that was quietly wrong (2026-09-07)
 

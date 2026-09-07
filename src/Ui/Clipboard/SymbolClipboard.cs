@@ -195,7 +195,7 @@ public static class SymbolClipboard
         SymbolEditorRenderer.DrawPinMarkersPlain(canvas, pins, panX, panY, zoom, theme);
     }
 
-    private static byte[]? TryRenderToPdf(
+    internal static byte[]? TryRenderToPdf(
         IReadOnlyList<SymbolPrimitive> primitives,
         IReadOnlyList<SymbolPin>       pins,
         double bbMinX, double bbMinY, double worldW, double worldH,
@@ -223,7 +223,7 @@ public static class SymbolClipboard
         catch { return null; }
     }
 
-    private static string? TryRenderToSvg(
+    internal static string? TryRenderToSvg(
         IReadOnlyList<SymbolPrimitive> primitives,
         IReadOnlyList<SymbolPin>       pins,
         double bbMinX, double bbMinY, double worldW, double worldH,

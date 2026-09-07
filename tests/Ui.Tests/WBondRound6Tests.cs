@@ -418,7 +418,7 @@ public class WBondRound6Tests
         Assert.Equal("Default", ThemeResolver.DefaultThemeName);
         Assert.Equal(["Default"], ThemeResolver.BuiltInThemeNames);
 
-        string dir = Path.Combine(RepoRoot(), "src", "Ui", "Assets", "Color");
+        string dir = Path.Combine(RepoRoot(), "src", "Render", "Assets", "Color");
         Assert.False(File.Exists(Path.Combine(dir, "wBond-Orchid.ccolor")));
 
         // Resolving through the real chain — including a NAME NOBODY SHIPS ANY MORE, which is what a

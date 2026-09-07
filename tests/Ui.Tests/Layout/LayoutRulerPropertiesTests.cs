@@ -12,6 +12,7 @@ namespace CircuitRF.Ui.Tests.Layout;
 /// mechanism (R-rul-11a), and a mixed size-mode selection disables the one size field rather than
 /// guessing a unit (R-rul-3a).
 /// </summary>
+[Collection(LayoutTextOutlineTypefaceCollection.Name)]
 public class LayoutRulerPropertiesTests : System.IDisposable
 {
     public LayoutRulerPropertiesTests() => LayoutTextOutline.TestOverrideTypeface = SKTypeface.Default;

@@ -21,7 +21,7 @@ public static class LayoutTextOutline
 
     /// <summary>
     /// Where the four real typefaces come from. <c>src/Ui</c> installs the embedded IBM Plex faces
-    /// into this the moment its assembly loads (<c>UiTypefaceInstaller</c>, a module initializer), and
+    /// into this the moment its assembly loads (<c>RenderTypefaceInstaller</c>, a module initializer), and
     /// nothing else ever sets it.
     ///
     /// <para><b>Why it is a seam rather than a direct call.</b> The faces load through Avalonia's

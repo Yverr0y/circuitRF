@@ -219,8 +219,10 @@ public sealed class HarmonicaStandaloneTests(ITestOutputHelper output)
                         app, StringComparison.Ordinal);
         Assert.Contains("PCellRegistry.ClearResolvers()", app, StringComparison.Ordinal);
 
-        // …and the theme, or every .ccolor the user has resolves to nothing.
-        Assert.Contains("ThemeResolver.SetBuiltInProvider", app, StringComparison.Ordinal);
+        // …and the theme. NOT SetBuiltInProvider any more (R-rnd1-5): ThemeResolver reads the
+        // shipped .ccolor out of CircuitRF.Render's own manifest resources by default, in every
+        // process. What this entry point must still do is APPLY the saved preference.
+        Assert.DoesNotContain("ThemeResolver.SetBuiltInProvider", app, StringComparison.Ordinal);
         Assert.Contains("ActiveThemeName", app, StringComparison.Ordinal);
     }
 

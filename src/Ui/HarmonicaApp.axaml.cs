@@ -27,8 +27,9 @@ namespace CircuitRF.Ui;
 /// <c>ProcessExit</c> cleanups: harmonicaRF can hold an external DUT, so it can leak a device worker
 /// — and on macOS a leaked worker holds a VM slot indefinitely, so the NEXT run dies with a broken
 /// pipe and no worker output at all. The reason is written out in <c>App.OnFrameworkInitializationCompleted</c>
-/// and applies here identically. Also the theme: without <c>ThemeResolver.SetBuiltInProvider</c>
-/// every <c>.ccolor</c> the user has resolves to nothing.</para>
+/// and applies here identically. The theme no longer needs anything installed here at all: <c>ThemeResolver</c>
+/// reads the shipped <c>.ccolor</c> out of <c>CircuitRF.Render</c>'s own manifest resources
+/// (R-rnd1-5), which is what a headless process reads too.</para>
 /// </summary>
 public partial class HarmonicaApp : Application
 {
@@ -39,19 +40,9 @@ public partial class HarmonicaApp : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
-        // Built-in .ccolor assets, so a saved theme name resolves to something. Same provider the
-        // full application installs; without it ThemeResolver answers null for every built-in.
-        ThemeResolver.SetBuiltInProvider(name =>
-        {
-            try
-            {
-                var uri = new Uri($"avares://CircuitRF.Ui/Assets/Color/{name}.ccolor");
-                using var stream = AssetLoader.Open(uri);
-                using var reader = new StreamReader(stream);
-                return ColorThemeIo.Load(reader.ReadToEnd());
-            }
-            catch { return null; }
-        });
+        // The built-in .ccolor provider is NOT registered here any more (R-rnd1-5):
+        // ThemeResolver reads the shipped Default.ccolor out of CircuitRF.Render's own
+        // manifest resources by default, in every process, with or without an app host.
 
         var prefs = AppPreferencesIo.Load();
 

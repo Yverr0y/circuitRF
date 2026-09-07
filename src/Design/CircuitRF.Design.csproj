@@ -106,6 +106,12 @@
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
       <_Parameter1>CircuitRF.Ui</_Parameter1>
     </AssemblyAttribute>
+    <!-- And the same grant to the renderers, which were IN src/Ui until RND-1 and reach the same
+         internal helpers (CellHierarchy.LayoutBaseDirOf, LayoutFlattener.FlattenOpenEdgeList,
+         LayoutTextOutline.ResolveLabelAnchor). -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>CircuitRF.Render</_Parameter1>
+    </AssemblyAttribute>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
       <_Parameter1>CircuitRF.Ui.Tests</_Parameter1>
     </AssemblyAttribute>

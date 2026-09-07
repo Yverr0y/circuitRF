@@ -273,7 +273,7 @@ public sealed class PaletteGlyphControl : Control
             if (string.IsNullOrEmpty(_iconPath)) return false;
 
             // Qualified: Avalonia.Media also defines a BitmapCache.
-            var bmp = Renderers.BitmapCache.Load(_iconPath);
+            var bmp = CircuitRF.Render.BitmapCache.Load(_iconPath);
             if (bmp is null || bmp.Width <= 0 || bmp.Height <= 0) return false;
 
             float availW = (float)(_bounds.Width  * (1.0 - 2.0 * Padding));

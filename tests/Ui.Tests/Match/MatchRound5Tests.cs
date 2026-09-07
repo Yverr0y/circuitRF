@@ -1381,7 +1381,7 @@ public sealed class MatchRound5Tests(ITestOutputHelper output)
     public void TheLabelThreshold_DropsByTwoScrollWheelClicks()
     {
         string renderer = File.ReadAllText(
-            Path.Combine(RepoRoot(), "src", "Ui", "Renderers", "SchematicRenderer.cs"));
+            Path.Combine(RepoRoot(), "src", "Render", "Renderers", "SchematicRenderer.cs"));
         var m = Regex.Match(renderer, @"SimplifiedThreshold\s*=\s*([\d.]+)");
         Assert.True(m.Success);
         double now = double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
@@ -1399,8 +1399,8 @@ public sealed class MatchRound5Tests(ITestOutputHelper output)
         // The threshold is now a QUESTION the renderer answers, so the network pane's label hit-test
         // cannot offer a click target for text that is faded out. Two clicks either side of it.
         double at = now / 300.0;                       // the zoom the threshold sits at
-        Assert.True(CircuitRF.Ui.Renderers.SchematicRenderer.LabelsVisibleAt(at * click));
-        Assert.False(CircuitRF.Ui.Renderers.SchematicRenderer.LabelsVisibleAt(at / click));
+        Assert.True(SchematicRenderer.LabelsVisibleAt(at * click));
+        Assert.False(SchematicRenderer.LabelsVisibleAt(at / click));
         Assert.Contains("SchematicRenderer.LabelsVisibleAt(_zoom)", Canvas(), StringComparison.Ordinal);
     }
 }

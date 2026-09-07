@@ -11,6 +11,7 @@ namespace CircuitRF.Ui.Tests;
 /// real GDSII export + import to the SAME rendered result, verified by off-screen pixel comparison —
 /// the test that catches reflect-after-rotate (§2.1 item 4).
 /// </summary>
+[Collection(LayoutTextOutlineTypefaceCollection.Name)]
 public sealed class LayoutGdsiiTransformTests : IDisposable
 {
     private static readonly LayerKey LayerA = new(1, 0);

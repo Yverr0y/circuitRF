@@ -453,7 +453,7 @@ public class WBondRound4Tests
         Assert.Equal(["Default"], ThemeResolver.BuiltInThemeNames);
         Assert.Equal("Default", ThemeResolver.DefaultThemeName);
 
-        string dir = Path.Combine(RepoRoot(), "src", "Ui", "Assets", "Color");
+        string dir = Path.Combine(RepoRoot(), "src", "Render", "Assets", "Color");
         Assert.Equal(["Default.ccolor"],
                      Directory.GetFiles(dir, "*.ccolor").Select(Path.GetFileName).Order());
     }
@@ -469,7 +469,7 @@ public class WBondRound4Tests
     [Fact]
     public void EveryBuiltInThemeName_IsUriSafeAndHasAFileBehindIt()
     {
-        string dir = Path.Combine(RepoRoot(), "src", "Ui", "Assets", "Color");
+        string dir = Path.Combine(RepoRoot(), "src", "Render", "Assets", "Color");
 
         foreach (string name in ThemeResolver.BuiltInThemeNames)
         {
@@ -492,7 +492,7 @@ public class WBondRound4Tests
     public void TheDefaultThemeFileAndTheInCodeDefault_AgreeOnEveryWBondRole()
     {
         var file = ColorThemeIo.LoadFile(
-            Path.Combine(RepoRoot(), "src", "Ui", "Assets", "Color", "Default.ccolor"));
+            Path.Combine(RepoRoot(), "src", "Render", "Assets", "Color", "Default.ccolor"));
         Assert.Equal("Default", file.Name);
 
         string[] roles =
@@ -537,7 +537,7 @@ public class WBondRound4Tests
     {
         const string name = "Default";
         var theme = ColorThemeIo.LoadFile(
-            Path.Combine(RepoRoot(), "src", "Ui", "Assets", "Color", name + ".ccolor"));
+            Path.Combine(RepoRoot(), "src", "Render", "Assets", "Color", name + ".ccolor"));
 
         foreach (var variant in new[] { ColorVariant.Light, ColorVariant.Dark })
         {
@@ -589,7 +589,7 @@ public class WBondRound4Tests
     public void TheWBondRoles_ReachTheRenderer()
     {
         var theme = ColorThemeIo.LoadFile(
-            Path.Combine(RepoRoot(), "src", "Ui", "Assets", "Color", "Default.ccolor"));
+            Path.Combine(RepoRoot(), "src", "Render", "Assets", "Color", "Default.ccolor"));
 
         var projected = WBondRenderTheme.FromTheme(theme, ColorVariant.Dark);
         var expected = theme.Resolve(ColorRole.WBondWireVertex, ColorVariant.Dark);

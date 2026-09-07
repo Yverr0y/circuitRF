@@ -5,8 +5,8 @@ namespace CircuitRF.Firewall.Tests;
 
 /// <summary>
 /// Enforces the UI-framework firewall: RfCore, CircuitRF.Core, CircuitRF.Engine, CircuitRF.Design,
-/// CircuitRF.Cli, CircuitRF.Harmonica and CircuitRF.WBond must not reference any UI framework
-/// assembly. All UI-framework code must live exclusively in src/Ui. See
+/// CircuitRF.Render, CircuitRF.Cli, CircuitRF.Harmonica and CircuitRF.WBond must not reference any
+/// UI framework assembly. All UI-framework code must live exclusively in src/Ui. See
 /// docs/design/ui-architecture.md §3.
 /// </summary>
 public class UiFirewallTests
@@ -33,6 +33,15 @@ public class UiFirewallTests
         // being clean, `circuitrf em` stops being buildable, silently, at whatever later date
         // someone reaches for a Dispatcher in the layout reader.
         { "CircuitRF.Design", "CircuitRF.Design.dll" },
+        // The Skia renderers (brief-render-1-render-layer-below-the-firewall.md R-rnd1-1). This row
+        // is the assertion the whole RND series rests on: SchematicRenderer, SymbolEditorRenderer,
+        // LayoutRenderer and WBondRenderer were IN CircuitRF.Ui, next to Avalonia, until they moved
+        // — and `circuitrf render` is only worth having because it calls THEM rather than a second
+        // renderer that would drift invisibly. SkiaSharp is allowed across this wall and is what
+        // they draw with; Avalonia is not, which is why the fonts and the shipped .ccolor became
+        // ordinary embedded resources on the way down (R-rnd1-4/R-rnd1-5) rather than staying on
+        // AssetLoader, which needs a live app host and silently substitutes a default without one.
+        { "CircuitRF.Render", "CircuitRF.Render.dll" },
         // The coded-diagnostics leaf (brief-localization-groundwork.md R-loc-5). Gated because its
         // ENTIRE reason for existing is to be referenceable from every project that authors
         // user-facing text — RfCore and WBond included, which are leaves with no common ancestor.

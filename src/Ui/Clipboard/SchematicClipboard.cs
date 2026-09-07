@@ -226,7 +226,7 @@ public static class SchematicClipboard
     /// The PDF page is sized to the schematic bounding box (with padding) — no fixed paper size.
     /// Note: PDF viewers may render a transparent background as white regardless of the flag.
     /// </summary>
-    private static byte[]? TryRenderToPdf(
+    internal static byte[]? TryRenderToPdf(
         IReadOnlyList<EditableComponent>    components,
         IReadOnlyList<EditableWire>         wires,
         IReadOnlyList<EditableCanvasObject> canvasObjects,
@@ -265,7 +265,7 @@ public static class SchematicClipboard
     }
 
     /// <summary>Renders selection to an SVG string using SkiaSharp's SVG canvas.</summary>
-    private static (string Svg, float W, float H)? TryRenderToSvg(
+    internal static (string Svg, float W, float H)? TryRenderToSvg(
         IReadOnlyList<EditableComponent>    components,
         IReadOnlyList<EditableWire>         wires,
         IReadOnlyList<EditableCanvasObject> canvasObjects,

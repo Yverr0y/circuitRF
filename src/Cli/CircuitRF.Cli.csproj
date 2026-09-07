@@ -7,6 +7,10 @@
          extractors. Framework-free and gated by tests/Firewall.Tests exactly as Core and Engine are,
          which is what makes the `em` verb possible at all (brief-cli-em-verb.md R-emcli-1). -->
     <ProjectReference Include="..\Design\CircuitRF.Design.csproj" />
+    <!-- The Skia renderers, gated the same way (brief-render-1-render-layer-below-the-firewall.md).
+         Referenced from RND-1 onward so `circuitrf render` draws with the code the application
+         draws with rather than with something that resembles it (R-rnd0-1). -->
+    <ProjectReference Include="..\Render\CircuitRF.Render.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -27,6 +27,10 @@ using Xunit.Abstractions;
 
 namespace CircuitRF.Ui.Tests;
 
+// This class renders a LabelShape, so it reads LayoutTextOutline.TestOverrideTypeface — a shared
+// static several other classes set. See the collection's own note for why that now selects a
+// different FACE rather than merely a loadable one.
+[Collection(LayoutTextOutlineTypefaceCollection.Name)]
 public sealed class ConvertCliVerbTests(ITestOutputHelper output) : IDisposable
 {
     private readonly string _root = Path.Combine(

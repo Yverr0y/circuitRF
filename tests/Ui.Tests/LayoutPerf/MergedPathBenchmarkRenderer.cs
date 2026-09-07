@@ -1,7 +1,7 @@
 // Test-only stand-in for L2c's not-yet-built R8b merge tier (docs/design/layout-view.md §2.3 R8b,
 // §5.3 item 2) — used ONLY to produce comparable timing numbers for the L2a baseline table's R8b
 // crossover measurement (docs/sonnet-briefs/brief-L2a-performance-harness.md §3/§5). This file changes
-// nothing in src/Ui/Renderers/LayoutRenderer.cs and implements no production behavior — L2a's own
+// nothing in src/Render/Renderers/LayoutRenderer.cs and implements no production behavior — L2a's own
 // guardrail (§6) forbids building the real merge tier now.
 //
 // Where the real per-shape ("darkening") path draws N shapes as N separate `canvas.DrawPath(fill)`

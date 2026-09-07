@@ -73,18 +73,13 @@ public partial class App : Application
         // are UI-project code, which is why this is registered here rather than shipped as a built-in.
         Layout.TechImport.ProcessTechnologyRecognizers.RegisterOnce();
 
-        // Register built-in .ccolor assets via AssetLoader so ThemeResolver can find them.
-        ThemeResolver.SetBuiltInProvider(name =>
-        {
-            try
-            {
-                var uri = new Uri($"avares://CircuitRF.Ui/Assets/Color/{name}.ccolor");
-                using var stream = AssetLoader.Open(uri);
-                using var reader = new System.IO.StreamReader(stream);
-                return ColorThemeIo.Load(reader.ReadToEnd());
-            }
-            catch { return null; }
-        });
+        // The built-in .ccolor provider is NOT registered here any more (R-rnd1-5):
+        // ThemeResolver reads the shipped Default.ccolor out of CircuitRF.Render's own
+        // manifest resources by default. Registering an AssetLoader-backed one on top would
+        // be a second copy of the same file reached a second way, and it was the ABSENCE of
+        // this call in every headless process that made a theme silently resolve to
+        // ColorTheme.BuiltIn instead. The .ccolor is still an AvaloniaResource in this
+        // project (linked from src/Render), so the Settings editor's avares:// URI is unchanged.
 
         // Apply the theme before the first window is shown — the saved preference, or the SHIPPED
         // DEFAULT when there is none. See ThemeResolver.DefaultThemeName for why that default is a

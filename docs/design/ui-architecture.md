@@ -106,7 +106,8 @@ A rule described but not enforced erodes. 6a adds an **automated check that fail
 non-UI project references a UI framework:
 - **Primary mechanism:** an assembly-reference assertion \u2014 a small test (in the existing test suite, runnable
   in CI on all three OSes) that loads each non-UI assembly (`RfCore`, `CircuitRF.Core`, `CircuitRF.Engine`,
-  `CircuitRF.Design`, `CircuitRF.Cli`, `CircuitRF.Harmonica`, `CircuitRF.WBond`) and asserts its referenced-assemblies list contains **no `Avalonia*`** (and no other
+  `CircuitRF.Design`, `CircuitRF.Render`, `CircuitRF.Cli`, `CircuitRF.Harmonica`, `CircuitRF.WBond`,
+  `CircuitRF.Diagnostics`) and asserts its referenced-assemblies list contains **no `Avalonia*`** (and no other
   UI-framework package). Fails with a clear message naming the offending project and reference.
 - **What it does NOT forbid:** see §3.3 (headless SkiaSharp is allowed). The check targets *UI frameworks*
   (Avalonia and its integration layers), not 2D-graphics math libraries.
@@ -128,6 +129,41 @@ hosts a Skia surface in a window and pumps input events. The firewall therefore 
 Renderer-vs-PlotControl split). A re-skin keeps the renderers and re-hosts them in the new framework's
 surface \u2014 so the rendering investment survives a framework change. The §3.2 check allows SkiaSharp; it forbids
 Avalonia in the core.
+
+### 3.4 `src/Render` \u2014 the renderers took that separation literally (2026-09-07)
+
+§3.3's "in practice the renderers live with the display layer" stopped being true. `SchematicRenderer`,
+`SymbolEditorRenderer`, `LayoutRenderer` and `WBondRenderer` are now **`CircuitRF.Render`**, a project of
+its own with its own firewall row, referenced by **both `src/Ui` and `src/Cli`**
+(`docs/sonnet-briefs/brief-render-1-render-layer-below-the-firewall.md`).
+
+    src/Render  ->  Core, Engine, Design, RfCore, WBond, SkiaSharp
+    src/Ui      ->  + CircuitRF.Render
+    src/Cli     ->  + CircuitRF.Render
+
+**The arrow is one-way and one-shaped: pixels out, and nothing in.** Nothing in `src/Render` docks,
+undoes, observes a canvas or holds a view model \u2014 it draws committed geometry plus the *overlay*
+types that describe a frame's transient chrome (a marquee, a handle, a snap marker), which are
+persisted-model-free value types the editors fill in.
+
+**Why not `src/Design`:** that project's own `.csproj` says, in as many words, that nothing in it draws.
+Eleven thousand lines of drawing code would make that comment false.
+
+**The two things that had to change on the way down, and both failed silently before:**
+
+- **Fonts.** `SkiaFonts` loaded its `.ttf` assets through Avalonia's `AssetLoader`, which throws with no
+  live app host \u2014 and it CAUGHT that and returned `SKTypeface.Default`. Correct for
+  `LayoutTextOutline`'s label flattening, where the substitution is reported; unacceptable for a whole
+  picture, whose text would then be a different face at different metrics. The nine faces it loads are
+  ordinary `EmbeddedResource`s in `src/Render` now, read with `Assembly.GetManifestResourceStream`.
+- **The shipped `.ccolor`.** `ThemeResolver`'s chain ends in a built-in provider that only
+  `App.axaml.cs` installed. With no app host it was never installed, so a theme name that resolves in
+  the GUI fell through to `ColorTheme.BuiltIn` \u2014 a different picture, reported as a success.
+  The provider now defaults to a framework-free reader over `src/Render`'s own resources, and the three
+  `App` classes no longer register one.
+
+**`src/Ui` links both sets of files back as `AvaloniaResource`** rather than keeping a second copy, so
+the `avares://CircuitRF.Ui/Assets/{Fonts,Color}/...` URIs its XAML and RTF export ask for are unchanged.
 
 ---
 

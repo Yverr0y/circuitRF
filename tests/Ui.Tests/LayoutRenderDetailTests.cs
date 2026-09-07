@@ -1,4 +1,4 @@
-// The render-tolerance detail tier (src/Ui/Renderers/LayoutRenderDetail.cs) — the LOD that engages on
+// The render-tolerance detail tier (src/Render/Renderers/LayoutRenderDetail.cs) — the LOD that engages on
 // geometry FINER than the screen, as opposed to geometry SMALLER than the screen (LayoutLodMergeTests).
 //
 // Owner report, 2026-09-04: panning and zooming an imported Gerber with every layer visible was slow

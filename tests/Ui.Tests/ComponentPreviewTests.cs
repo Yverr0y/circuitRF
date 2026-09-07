@@ -342,12 +342,12 @@ public class ComponentPreviewTests : IDisposable
     [InlineData(240, 400)]   // a pane taller than it is wide fits on the OTHER axis
     public void TheFootprintDrawing_FillsThePane_AndIsCentredInIt(int w, int h)
     {
-        Renderers.SkiaFonts.TestOverrideTypeface = SkiaSharp.SKTypeface.Default;
+        SkiaFonts.TestOverrideTypeface = SkiaSharp.SKTypeface.Default;
         try
         {
             var preview = ComponentPreview.Build(Widget9(), null, Dbu);
-            using var bmp = Renderers.ComponentPreviewRenderer.RasterFootprint(
-                preview.Layouts[0].View, preview.Technology, Renderers.LayoutRenderTheme.Light, w, h, 1.0);
+            using var bmp = ComponentPreviewRaster.RasterFootprint(
+                preview.Layouts[0].View, preview.Technology, LayoutRenderTheme.Light, w, h, 1.0);
 
             Assert.NotNull(bmp);
             var ink = InkBox(bmp!);
@@ -355,19 +355,19 @@ public class ComponentPreviewTests : IDisposable
 
             AssertFramed(ink, w, h);
         }
-        finally { Renderers.SkiaFonts.TestOverrideTypeface = null; }
+        finally { SkiaFonts.TestOverrideTypeface = null; }
     }
 
     /// <summary>The same, for the symbol half — a different renderer and a different handedness.</summary>
     [Fact]
     public void TheSymbolDrawing_FillsThePane_AndIsCentredInIt()
     {
-        Renderers.SkiaFonts.TestOverrideTypeface = SkiaSharp.SKTypeface.Default;
+        SkiaFonts.TestOverrideTypeface = SkiaSharp.SKTypeface.Default;
         try
         {
             var preview = ComponentPreview.Build(Widget9(), null, Dbu);
-            using var bmp = Renderers.ComponentPreviewRenderer.RasterSymbol(
-                preview.Symbol, Renderers.SchematicRenderTheme.Light, 400, 240, 1.0);
+            using var bmp = ComponentPreviewRaster.RasterSymbol(
+                preview.Symbol, SchematicRenderTheme.Light, 400, 240, 1.0);
 
             Assert.NotNull(bmp);
             var ink = InkBox(bmp!);
@@ -375,7 +375,7 @@ public class ComponentPreviewTests : IDisposable
 
             AssertFramed(ink, 400, 240);
         }
-        finally { Renderers.SkiaFonts.TestOverrideTypeface = null; }
+        finally { SkiaFonts.TestOverrideTypeface = null; }
     }
 
     // ── The list's search and type filter ───────────────────────────────────────────────────────

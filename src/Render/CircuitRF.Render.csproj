@@ -1,0 +1,120 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    CircuitRF.Render — the Skia renderers, below the UI firewall
+    (docs/sonnet-briefs/brief-render-1-render-layer-below-the-firewall.md, R-rnd0-3/R-rnd1-1).
+
+    WHAT LIVES HERE: every renderer that turns a design-layer document into pixels —
+    SchematicRenderer, SymbolEditorRenderer, LayoutRenderer and its partials, WBondRenderer,
+    their themes and caches — plus the small framework-free types those renderers read: the
+    overlay descriptions of a frame's transient chrome (LayoutOverlay, SchematicOverlay,
+    SymbolEditorOverlay), the hit-test/handle/snap geometry they share with the editors, and the
+    colour theme model and its `.ccolor` reader.
+
+    WHAT MUST NOT: anything that docks, undoes, observes a canvas, or holds a view model. This
+    project draws; it does not edit. It is on the far side of the UI firewall and
+    tests/Firewall.Tests asserts it references no Avalonia — transitively, exactly as it does for
+    Core/Engine/Design/RfCore/Cli. A project that starts clean and is not gated does not stay clean.
+
+    WHY IT IS NOT `src/Design`: that project's own .csproj says, in as many words, that nothing in
+    it draws. Eleven thousand lines of drawing code would make that comment false, and a comment
+    that is false is worse than no comment (R-rnd0-3).
+
+    The dependency runs ONE way: src/Ui consumes this, never the reverse. src/Cli consumes it too —
+    that is what will make `circuitrf render` possible without a second copy of the renderer.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyName>CircuitRF.Render</AssemblyName>
+    <RootNamespace>CircuitRF.Render</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Core/CircuitRF.Core.csproj" />
+    <ProjectReference Include="../Engine/CircuitRF.Engine.csproj" />
+    <ProjectReference Include="../RfCore/RfCore.csproj" />
+    <!-- The design-layer documents these renderers draw: the layout model, the technology, the
+         schematic and symbol model, the cell folder. -->
+    <ProjectReference Include="../Design/CircuitRF.Design.csproj" />
+    <!-- WBondRenderer draws a wire model that lives in wBond's framework-free half. -->
+    <ProjectReference Include="../WBond/CircuitRF.WBond.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The 2D graphics library every renderer here is written against. SkiaSharp is explicitly
+         ALLOWED across the UI firewall (tests/Firewall.Tests: headless 2D graphics is not a UI
+         framework) — which is the whole reason this project can exist. -->
+    <PackageReference Include="SkiaSharp" Version="3.119.4" />
+  </ItemGroup>
+
+  <!--
+    THE FONTS THE RENDERERS DRAW WITH, as ordinary .NET embedded resources
+    (brief-render-1-render-layer-below-the-firewall.md R-rnd1-4).
+
+    SkiaFonts used to load these through Avalonia's AssetLoader, which throws
+    "Unable to locate 'Avalonia.Platform.IAssetLoader'" with no live app host — and SkiaFonts
+    CAUGHT that and fell back to SKTypeface.Default. That fallback is correct for
+    LayoutTextOutline's label flattening, where the substitution is reported; it is completely
+    unacceptable for a whole rendered picture, because text at a different typeface and different
+    metrics is a DIFFERENT PICTURE and the byte-identity gate would have had to be weakened to
+    accept it. Assembly.GetManifestResourceStream needs no platform at all. Same fix, same reason,
+    as ShippedTechnologies and the `reference` pages in src/Design.
+
+    ONLY THE NINE FACES SkiaFonts ACTUALLY LOADS are embedded here (3.8 MB of the folder's 15 MB).
+    The other faces exist for Avalonia's own FontFamily resources and for WindowsClipboard's RTF
+    embedding, both of which are src/Ui's and reach them through the AvaloniaResource LINK in
+    src/Ui/CircuitRF.Ui.csproj — the same files, not a second copy. ADD A FACE TO SkiaFonts AND ADD
+    IT HERE: a face that is named but not embedded resolves to SKTypeface.Default, silently.
+
+    The LogicalName is explicit and mirrors the asset-relative path with dots for separators, so
+    SkiaFonts.Load's argument is still the path a reader can find on disk rather than a manifest
+    name nobody should have to predict.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\Fonts\DejaVuSans.ttf"             LogicalName="CircuitRF.Render.Assets.Fonts.DejaVuSans.ttf" />
+    <EmbeddedResource Include="Assets\Fonts\DejaVuSans-Bold.ttf"        LogicalName="CircuitRF.Render.Assets.Fonts.DejaVuSans-Bold.ttf" />
+    <EmbeddedResource Include="Assets\Fonts\DejaVuSans-Oblique.ttf"     LogicalName="CircuitRF.Render.Assets.Fonts.DejaVuSans-Oblique.ttf" />
+    <EmbeddedResource Include="Assets\Fonts\DejaVuSans-BoldOblique.ttf" LogicalName="CircuitRF.Render.Assets.Fonts.DejaVuSans-BoldOblique.ttf" />
+    <EmbeddedResource Include="Assets\Fonts\IBM_Plex_Sans\static\IBMPlexSans-Regular.ttf"  LogicalName="CircuitRF.Render.Assets.Fonts.IBM_Plex_Sans.static.IBMPlexSans-Regular.ttf" />
+    <EmbeddedResource Include="Assets\Fonts\IBM_Plex_Sans\static\IBMPlexSans-Bold.ttf"     LogicalName="CircuitRF.Render.Assets.Fonts.IBM_Plex_Sans.static.IBMPlexSans-Bold.ttf" />
+    <EmbeddedResource Include="Assets\Fonts\IBM_Plex_Sans\static\IBMPlexSans-SemiBold.ttf" LogicalName="CircuitRF.Render.Assets.Fonts.IBM_Plex_Sans.static.IBMPlexSans-SemiBold.ttf" />
+    <EmbeddedResource Include="Assets\Fonts\IBM_Plex_Sans\static\IBMPlexSans-Italic.ttf"   LogicalName="CircuitRF.Render.Assets.Fonts.IBM_Plex_Sans.static.IBMPlexSans-Italic.ttf" />
+    <EmbeddedResource Include="Assets\Fonts\IBM_Plex_Sans\static\IBMPlexSans-Light.ttf"    LogicalName="CircuitRF.Render.Assets.Fonts.IBM_Plex_Sans.static.IBMPlexSans-Light.ttf" />
+  </ItemGroup>
+
+  <!--
+    THE SHIPPED COLOUR THEME, embedded on the fonts' terms and for the same reason (R-rnd1-5).
+
+    ThemeResolver's chain is workspace dir -> user themes dir -> built-in provider ->
+    ColorTheme.BuiltIn, and step 3 used to be installed ONLY by App.axaml.cs, out of
+    avares://CircuitRF.Ui/Assets/Color/. With no app host that provider was never installed, so a
+    theme name that resolves in the GUI fell silently through to BuiltIn — a different picture,
+    reported as a success. ThemeResolver now defaults the provider to a framework-free reader over
+    THIS assembly's own resources.
+
+    Exactly one file, Default.ccolor: ThemeResolver.DefaultThemeName's own comment records that the
+    six wBond-... palettes were folded into it and deleted. src/Ui keeps its avares:// URI working
+    through the AvaloniaResource link, so the Settings editor is unchanged.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\Color\*.ccolor"
+                      LogicalName="CircuitRF.Render.Assets.Color.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- src/Ui reaches internal renderer members (SkiaFonts among them), and the renderer tests
+         live in tests/Ui.Tests. Same grant src/Design carries, for the same reason. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>CircuitRF.Ui</_Parameter1>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>CircuitRF.Ui.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+</Project>

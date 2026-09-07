@@ -21,6 +21,7 @@ namespace CircuitRF.Ui.Tests.Layout;
 /// token and ignores every group code it does not specifically look for and would therefore accept a
 /// file no other reader will open. The third-party check is recorded in <c>src/Ui/RESOLVED.md</c>.</para>
 /// </summary>
+[Collection(LayoutTextOutlineTypefaceCollection.Name)]
 public class LayoutRulerDxfTests : System.IDisposable
 {
     public LayoutRulerDxfTests() => LayoutTextOutline.TestOverrideTypeface = SKTypeface.Default;

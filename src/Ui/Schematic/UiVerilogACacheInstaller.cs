@@ -8,7 +8,7 @@
 // preferences, none of which this brief moves. So the directory is supplied from here instead of
 // recomputed there, which is the whole point of AppDataRoot existing.
 //
-// A MODULE INITIALIZER, for the same reason UiTypefaceInstaller is one: it runs before any type in
+// A MODULE INITIALIZER, for the same reason RenderTypefaceInstaller is one: it runs before any type in
 // this assembly is touched, so there is no startup ordering to get wrong and no second entry point
 // (the standalone harmonicaRF and wBond binaries are this same assembly with a different Main) to
 // remember. It reads AppDataRoot LAZILY, per call, so a later redirect still takes effect.

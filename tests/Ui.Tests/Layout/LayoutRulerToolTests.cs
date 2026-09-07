@@ -11,6 +11,7 @@ namespace CircuitRF.Ui.Tests.Layout;
 /// docs/design/layout-view.md §9B.5/§9B.6 — placing, snapping, selecting, dragging, deleting and
 /// clearing rulers. Gates 6, 7, 8 and 11.
 /// </summary>
+[Collection(LayoutTextOutlineTypefaceCollection.Name)]
 public class LayoutRulerToolTests : System.IDisposable
 {
     public LayoutRulerToolTests() => LayoutTextOutline.TestOverrideTypeface = SKTypeface.Default;

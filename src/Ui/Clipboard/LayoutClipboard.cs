@@ -67,7 +67,7 @@ public static class LayoutClipboard
         string baseDir = "",
         Engine.Mom.PlanarMeshReport? planarMesh = null,
         Engine.Mom.PlanarCurrentDensityMap? currentDensity = null,
-        IReadOnlyList<Layout.DrcMarker>? drcMarkers = null)
+        IReadOnlyList<DrcMarker>? drcMarkers = null)
     {
         // §9B.9: RULERS COUNT AS CONTENT. Owner report, 2026-08-27 — pasting a ruler produced some
         // other geometry instead of it. A ruler-only copy fell out of this guard and returned
@@ -158,7 +158,7 @@ public static class LayoutClipboard
         string BaseDir,
         Engine.Mom.PlanarMeshReport? PlanarMesh,
         Engine.Mom.PlanarCurrentDensityMap? CurrentDensity,
-        IReadOnlyList<Layout.DrcMarker>? DrcMarkers = null);
+        IReadOnlyList<DrcMarker>? DrcMarkers = null);
 
     /// <summary>
     /// Bounds of what will actually be PAINTED (R-L1f-4: the SELECTION, never the current view) —
@@ -371,7 +371,7 @@ public static class LayoutClipboard
         LayoutFragment.Payload payload, Technology? tech, LayoutRenderTheme theme, bool transparent,
         string baseDir = "", Engine.Mom.PlanarMeshReport? planarMesh = null,
         Engine.Mom.PlanarCurrentDensityMap? currentDensity = null,
-        IReadOnlyList<Layout.DrcMarker>? drcMarkers = null)
+        IReadOnlyList<DrcMarker>? drcMarkers = null)
         => new(payload, tech, theme, transparent, baseDir, planarMesh, currentDensity, drcMarkers);
 
     /// <summary>Test seam over <see cref="ComputeSelectionBounds"/> — the page-framing rule is the

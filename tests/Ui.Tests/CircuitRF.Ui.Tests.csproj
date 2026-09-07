@@ -77,7 +77,7 @@
 
   <!-- Copy Default.ccolor preset so ColorThemeTests can load it from AppContext.BaseDirectory. -->
   <ItemGroup>
-    <Content Include="..\..\src\Ui\Assets\Color\Default.ccolor" CopyToOutputDirectory="PreserveNewest">
+    <Content Include="..\..\src\Render\Assets\Color\Default.ccolor" CopyToOutputDirectory="PreserveNewest">
       <Link>Default.ccolor</Link>
     </Content>
   </ItemGroup>

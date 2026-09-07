@@ -189,6 +189,28 @@
 
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
+
+    <!--
+      The fonts and the shipped colour theme moved to src/Render with the renderers that read them
+      (brief-render-1-render-layer-below-the-firewall.md R-rnd1-4/R-rnd1-5): SkiaFonts and
+      ThemeResolver now read them out of CircuitRF.Render's OWN assembly through
+      Assembly.GetManifestResourceStream, which needs no Avalonia host and therefore cannot silently
+      substitute SKTypeface.Default or ColorTheme.BuiltIn in a headless process.
+
+      THEY ARE LINKED BACK HERE, NOT COPIED. The `avares://CircuitRF.Ui/Assets/Fonts/...` and
+      `.../Assets/Color/...` URIs are what App.axaml's FontFamily resources, WindowsClipboard's RTF
+      font table and the three App.axaml.cs built-in theme providers ask for, and they are unchanged.
+      Two copies of a font file is two files that will be updated on one side only, with nothing to
+      report the drift.
+
+      The Include above is a blanket Assets\**, so these must be added DELIBERATELY — and checked in
+      the PUBLISHED output, not just in `dotnet run`: a build-file change that works in one and fails
+      in the other is exactly how tools/pcell-python shipped broken once.
+    -->
+    <AvaloniaResource Include="..\Render\Assets\Fonts\**"
+                      Link="Assets\Fonts\%(RecursiveDir)%(Filename)%(Extension)" />
+    <AvaloniaResource Include="..\Render\Assets\Color\**"
+                      Link="Assets\Color\%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
   <!-- The shipped default technologies moved to src/Design with ShippedTechnologies.cs
@@ -242,6 +264,10 @@
          src/Cli references the same project, which is what makes `circuitrf em` possible without a
          second copy of the layout reader (brief-cli-em-verb.md R-emcli-1). -->
     <ProjectReference Include="../Design/CircuitRF.Design.csproj" />
+    <!-- The Skia renderers, below the same wall (brief-render-1-render-layer-below-the-firewall.md
+         R-rnd0-3). src/Cli references the same project, which is what will make `circuitrf render`
+         possible without a second copy of the renderer. -->
+    <ProjectReference Include="../Render/CircuitRF.Render.csproj" />
     <!-- harmonicaRF's framework-free half. The dependency runs ONE way only: src/Ui consumes
          src/Harmonica, never the reverse — src/Harmonica is on the far side of the UI firewall and
          tests/Firewall.Tests asserts it references no Avalonia (docs/design/harmonicarf.md §3.2). -->

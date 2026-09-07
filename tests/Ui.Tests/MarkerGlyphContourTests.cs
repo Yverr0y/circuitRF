@@ -4,8 +4,12 @@
 //  marker glyph: harmonicaRF-matched size, name-length branch (inside vs above), and the
 //  derived Bone-tinted fill colour's luminance floor.
 //
-//  SkiaFonts.PlexBold cannot load headlessly (src/Ui/CLAUDE.md) — TestOverrideTypeface substitutes
-//  SKTypeface.Default, which is typeface-independent for the pixel-presence checks used here.
+//  TestOverrideTypeface substitutes SKTypeface.Default, which is typeface-independent for the
+//  pixel-presence checks used here. It is NOT a workaround any more: since R-rnd1-4 SkiaFonts reads
+//  the embedded faces out of CircuitRF.Render's own manifest resources and loads them fine
+//  headlessly. The substitution is kept because these assertions are about ink, not about glyphs.
+//  It is RESTORED on dispose — the field is a shared mutable static and xunit runs test classes in
+//  parallel, so a class that sets it and walks away decides what every other class draws with.
 // ================================================================
 
 using System;
@@ -19,9 +23,13 @@ using Xunit;
 
 namespace CircuitRF.Ui.Tests;
 
-public sealed class MarkerGlyphContourTests
+public sealed class MarkerGlyphContourTests : IDisposable
 {
+    private readonly SKTypeface? _previousTypeface = SkiaFonts.TestOverrideTypeface;
+
     public MarkerGlyphContourTests() => SkiaFonts.TestOverrideTypeface = SKTypeface.Default;
+
+    public void Dispose() => SkiaFonts.TestOverrideTypeface = _previousTypeface;
 
     private static (Trace trace, TransformSet tf, RenderTheme theme) BuildFixture()
     {
@@ -167,11 +175,11 @@ public sealed class MarkerGlyphContourTests
     //  Measured against the SHIPPED typeface, loaded straight off disk rather than through the
     //  class's SKTypeface.Default substitution: whether "m1" overflows is a property of the face,
     //  and the substitute's does not overflow where IBM Plex Bold's does. The static font seam is
-    //  deliberately left alone — other test classes read it concurrently.
+    //  deliberately left alone here — other test classes read it concurrently.
 
     private static float PlexBoldHalfDiagonalPerEm(string name)
     {
-        string path = Path.Combine(RepoRoot(), "src", "Ui", "Assets", "Fonts",
+        string path = Path.Combine(RepoRoot(), "src", "Render", "Assets", "Fonts",
             "IBM_Plex_Sans", "static", "IBMPlexSans-Bold.ttf");
         using var face = SKTypeface.FromFile(path);
         Assert.NotNull(face);

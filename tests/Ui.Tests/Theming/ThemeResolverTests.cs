@@ -41,8 +41,10 @@ public class ThemeResolverTests
         }
         finally
         {
-            // Restore no-op to avoid affecting other tests.
-            ThemeResolver.SetBuiltInProvider(_ => null);
+            // Restore THE DEFAULT, not a no-op: since R-rnd1-5 the default provider reads the
+            // shipped .ccolor out of CircuitRF.Render, and leaving a no-op here made every later
+            // test in the process fall through to ColorTheme.BuiltIn.
+            ThemeResolver.ResetBuiltInProvider();
         }
     }
 
@@ -67,7 +69,7 @@ public class ThemeResolverTests
         }
         finally
         {
-            ThemeResolver.SetBuiltInProvider(_ => null);
+            ThemeResolver.ResetBuiltInProvider();
         }
     }
 

@@ -10,6 +10,7 @@ namespace CircuitRF.Ui.Tests.Layout;
 /// docs/design/layout-view.md §9B.3/§9B.4 — gates 9, 10 and 14. Every assertion here is MEASURED
 /// (through the renderer's own measurement pair, or off an off-screen render), never eyeballed.
 /// </summary>
+[Collection(LayoutTextOutlineTypefaceCollection.Name)]
 public class LayoutRulerRenderingTests : System.IDisposable
 {
     public LayoutRulerRenderingTests() => LayoutTextOutline.TestOverrideTypeface = SKTypeface.Default;
@@ -234,15 +235,15 @@ public class LayoutRulerRenderingTests : System.IDisposable
     [Fact]
     public void BothRulerAnnotationRoles_AreInColorRoleAll_WithLightAndDarkDefaults()
     {
-        Assert.Contains(CircuitRF.Ui.Theming.ColorRole.LayoutRulerAnnotationLine, CircuitRF.Ui.Theming.ColorRole.All);
-        Assert.Contains(CircuitRF.Ui.Theming.ColorRole.LayoutRulerAnnotationText, CircuitRF.Ui.Theming.ColorRole.All);
+        Assert.Contains(ColorRole.LayoutRulerAnnotationLine, ColorRole.All);
+        Assert.Contains(ColorRole.LayoutRulerAnnotationText, ColorRole.All);
 
-        foreach (var variant in new[] { CircuitRF.Ui.Theming.ColorVariant.Light, CircuitRF.Ui.Theming.ColorVariant.Dark })
+        foreach (var variant in new[] { ColorVariant.Light, ColorVariant.Dark })
         {
-            var line = CircuitRF.Ui.Theming.ColorTheme.BuiltIn.Resolve(
-                CircuitRF.Ui.Theming.ColorRole.LayoutRulerAnnotationLine, variant);
-            var text = CircuitRF.Ui.Theming.ColorTheme.BuiltIn.Resolve(
-                CircuitRF.Ui.Theming.ColorRole.LayoutRulerAnnotationText, variant);
+            var line = ColorTheme.BuiltIn.Resolve(
+                ColorRole.LayoutRulerAnnotationLine, variant);
+            var text = ColorTheme.BuiltIn.Resolve(
+                ColorRole.LayoutRulerAnnotationText, variant);
             Assert.True(line.A > 0);
             Assert.True(text.A > 0);
         }

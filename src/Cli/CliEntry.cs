@@ -61,6 +61,18 @@ internal static class CliEntry
     /// </summary>
     public static int Run(string[] args)
     {
+// The glyph outlines a label is flattened with — the ONE thing that has to be installed before any
+// verb runs (brief-render-1-render-layer-below-the-firewall.md).
+//
+// CircuitRF.Render has a [ModuleInitializer] that does this, and it is not enough here: .NET loads
+// an assembly on first use, and `convert` reaches GerberExport in CircuitRF.Design without ever
+// naming a CircuitRF.Render type — so the module would never load and the initializer would never
+// run. LayoutTextOutline would then fall back to SKTypeface.Default and a label flattened by
+// `convert` would be a different SHAPE from the same label flattened by the application, which
+// ConvertCliVerbTests compares byte for byte. This call is what loads the module, and it is
+// greppable in a way a load-order accident is not. Idempotent; costs nothing.
+CircuitRF.Render.RenderTypefaceInstaller.Install();
+
 // ── command dispatch ──────────────────────────────────────────────────────────
 
 // --json, --only and --group are taken FIRST, and before the empty-argument check, so that

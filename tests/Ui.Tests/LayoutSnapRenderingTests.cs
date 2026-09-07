@@ -245,7 +245,7 @@ public class LayoutSnapRenderingTests
     [Fact]
     public void SnapMarkerSizeConstants_AreAFurtherTenPercentLarger_PerBriefRCmb6()
     {
-        var src = ReadRepoFile("src/Ui/Renderers/LayoutRenderer.Snap.cs");
+        var src = ReadRepoFile("src/Render/Renderers/LayoutRenderer.Snap.cs");
         // docs/sonnet-briefs/brief-snap-combobox-and-consistency.md R-cmb-6: a further 10% on top of
         // the 7.7/1.65 pair above — 8.47/1.815. Both must move together (a bigger outline box with an
         // unchanged stroke width would look thin and small regardless of the box size).

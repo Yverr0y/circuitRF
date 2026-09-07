@@ -10,7 +10,7 @@ namespace CircuitRF.Ui.Tests.Theming;
 /// this pins the Color Theme tab's open-time init by reading the real source.
 ///
 /// The Light/Dark radio and the color listing must open on whatever variant circuitRF is CURRENTLY
-/// RENDERING (<see cref="CircuitRF.Ui.Theming.ThemeService.CurrentVariant"/>), not a hardcoded
+/// RENDERING (<see cref="ThemeService.CurrentVariant"/>), not a hardcoded
 /// default — otherwise the editor shows colors the user isn't looking at.
 /// </summary>
 public class SettingsViewColorThemeInitTests

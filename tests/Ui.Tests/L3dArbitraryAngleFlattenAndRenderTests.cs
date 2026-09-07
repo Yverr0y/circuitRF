@@ -10,6 +10,7 @@ namespace CircuitRF.Ui.Tests;
 /// brief-L3d-arbitrary-angle-instances.md gates 3, 4, 7 (end to end), 10 and 11 — the parts that need
 /// a cell folder on disk, a real renderer, or the source tree itself.
 /// </summary>
+[Collection(LayoutTextOutlineTypefaceCollection.Name)]
 public sealed class L3dArbitraryAngleFlattenAndRenderTests : IDisposable
 {
     private static readonly LayerKey LayerA = new(1, 0);

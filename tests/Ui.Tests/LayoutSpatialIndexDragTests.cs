@@ -61,8 +61,8 @@ public class LayoutSpatialIndexDragTests
         var overlay = new LayoutOverlay { DragOverrides = new System.Collections.Generic.Dictionary<int, LayoutShape> { [0] = translated } };
 
         using var surface = SkiaSharp.SKSurface.Create(new SkiaSharp.SKImageInfo(200, 200));
-        var opts = new Renderers.LayoutRenderOptions { Theme = Renderers.LayoutRenderTheme.Light, ShowGrid = false, Overlay = overlay };
-        var result = Renderers.LayoutRenderer.Draw(surface.Canvas, model, tech, vp, opts);
+        var opts = new LayoutRenderOptions { Theme = LayoutRenderTheme.Light, ShowGrid = false, Overlay = overlay };
+        var result = LayoutRenderer.Draw(surface.Canvas, model, tech, vp, opts);
 
         Assert.Equal(1, result.ShapesDrawn); // the dragged shape is force-included and drawn at its LIVE position
     }

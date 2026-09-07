@@ -885,7 +885,7 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         // The same visibility floor an ordinary committed label gets — a port marker that renders
         // sub-pixel is a port the user cannot see they placed (the L1-fix default-zoom lesson).
         long height = zoomPxPerDbu > 0
-            ? Renderers.LayoutRenderer.EffectiveVisibleLabelHeightDbu(_labelHeightDbu, zoomPxPerDbu)
+            ? LayoutRenderer.EffectiveVisibleLabelHeightDbu(_labelHeightDbu, zoomPxPerDbu)
             : _labelHeightDbu;
 
         return new LabelShape

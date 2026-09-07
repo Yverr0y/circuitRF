@@ -6,7 +6,7 @@
 // with it — except the z a NEW wire's feet land at, which is a per-installation preference
 // (Settings ▸ Wirebonds) and therefore app state. That half stays here, and installs itself.
 //
-// A MODULE INITIALIZER, for the same reason UiTypefaceInstaller is one: it runs before any type in
+// A MODULE INITIALIZER, for the same reason RenderTypefaceInstaller is one: it runs before any type in
 // this assembly is touched, so there is no startup ordering to get wrong and no second entry point
 // (the standalone harmonicaRF and wBond binaries are this same assembly with a different Main) to
 // remember. Unset, WBondPlacement falls back to the shipped 4 mil, which is what a headless process

@@ -18,6 +18,7 @@ namespace CircuitRF.Ui.Tests.Layout;
 /// silently not reaching the clipboard, a flat selection refusing its own graphic export, and the DXF
 /// exporter reporting its OWN Δ as a non-ASCII fidelity note about the user's drawing).
 /// </summary>
+[Collection(LayoutTextOutlineTypefaceCollection.Name)]
 public class LayoutRulerRound2Tests : System.IDisposable
 {
     public LayoutRulerRound2Tests() => LayoutTextOutline.TestOverrideTypeface = SKTypeface.Default;

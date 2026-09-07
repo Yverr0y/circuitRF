@@ -70,8 +70,8 @@ public sealed class HarmonicaPowerSweepAndDcivTests(ITestOutputHelper output)
     {
         const int W = 500, H = 320;
         var theme = HarmonicaRenderTheme.Dark;
-        SkiaSharp.SKTypeface? saved = CircuitRF.Ui.Renderers.SkiaFonts.TestOverrideTypeface;
-        CircuitRF.Ui.Renderers.SkiaFonts.TestOverrideTypeface = SkiaSharp.SKTypeface.Default;
+        SkiaSharp.SKTypeface? saved = SkiaFonts.TestOverrideTypeface;
+        SkiaFonts.TestOverrideTypeface = SkiaSharp.SKTypeface.Default;
         try
         {
             using var surface = SkiaSharp.SKSurface.Create(new SkiaSharp.SKImageInfo(W, H));
@@ -101,7 +101,7 @@ public sealed class HarmonicaPowerSweepAndDcivTests(ITestOutputHelper output)
             }
             Assert.True(found, "no pixel near the right border painted in Harmonica.EfficiencyTrace");
         }
-        finally { CircuitRF.Ui.Renderers.SkiaFonts.TestOverrideTypeface = saved; }
+        finally { SkiaFonts.TestOverrideTypeface = saved; }
     }
 
     // ══ R-h9b-10 — right-click begins no drag, and the four units are offered ══════════════════

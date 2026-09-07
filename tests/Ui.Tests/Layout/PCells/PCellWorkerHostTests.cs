@@ -306,11 +306,11 @@ public sealed class PCellWorkerHostTests : IDisposable
         // object initializer — which culls everything and makes this test pass without ever reaching
         // the generator. Found by removing the guard and watching it still pass.
         var viewport = new LayoutViewport(-2000, -2000, 0.05, 256, 256);
-        var exception = Record.Exception(() => CircuitRF.Ui.Renderers.LayoutRenderer.Draw(
+        var exception = Record.Exception(() => LayoutRenderer.Draw(
             surface.Canvas, parent, null, viewport,
-            new CircuitRF.Ui.Renderers.LayoutRenderOptions
+            new LayoutRenderOptions
             {
-                Theme = CircuitRF.Ui.Renderers.LayoutRenderTheme.Light,
+                Theme = LayoutRenderTheme.Light,
                 ShowGrid = false, BaseDir = _root, ShowPCellPins = true,
             }));
 

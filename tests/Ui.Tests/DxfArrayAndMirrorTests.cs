@@ -13,6 +13,7 @@ namespace CircuitRF.Ui.Tests;
 /// to the SAME rendered result, off-screen pixel comparison — mirrors LayoutGdsiiTransformTests exactly,
 /// this time proving DXF's DIRECT (no +180) mirror mapping.
 /// </summary>
+[Collection(LayoutTextOutlineTypefaceCollection.Name)]
 public sealed class DxfArrayAndMirrorTests : IDisposable
 {
     private static readonly LayerKey LayerA = new(1, 0);
