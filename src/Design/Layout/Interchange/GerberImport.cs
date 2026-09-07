@@ -428,8 +428,18 @@ public static class GerberImport
         control?.SetStageLabel("working out the layer stack");
         var conductors = identities.Where(i => i.IsConductor).ToList();
         var guessedOrder = conductors.Where(c => c.CopperIndex is null).ToList();
+        // GI1 R-gi1-4. A numeric prefix in the file names, when EVERY conductor has one and they are
+        // all distinct, is what a production output set uses to say its own stack order — and it is a
+        // far better tiebreak than the alphabetical one it replaces here ("Layer_10" sorts before
+        // "Layer_2"). It is applied strictly INSIDE SideRank, so it can only order the layers whose
+        // side is unknown; a file the cascade identified as Top or Bottom keeps that position
+        // whatever its number says. That bound is the whole safety argument: the worst a misleading
+        // prefix can do is shuffle the inner layers, which is the case that was already being
+        // guessed.
+        var prefixes = NumericPrefixes(conductors);
         var copperTopToBottom = conductors
             .OrderBy(c => c.CopperIndex ?? SideRank(c.Side))
+            .ThenBy(c => prefixes is null ? 0 : prefixes[c.FilePath])
             .ThenBy(InnerRank)                                  // "Inner 2" before "Inner 10"
             .ThenBy(c => c.FileName, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -442,10 +452,18 @@ public static class GerberImport
             // A silently wrong stack order produces a simulation that runs cleanly and answers a
             // different question (L4d's R-L4d-5), which is why the guess must never be
             // indistinguishable from the declaration.
+            //
+            // GI1 R-gi1-5: naming the numeric prefix does NOT promote this out of the guessed class.
+            // A prefix is a convention and a set numbered in export order rather than stack order
+            // exists. But "we had nothing" and "we used the numbering the files carry" are different
+            // guesses and the reader can only check the second one.
             messages.Add(
                 $"Copper stack order was GUESSED for {guessedOrder.Count} of {conductors.Count} copper layer(s) — " +
                 string.Join(", ", copperTopToBottom.Where(guessedOrder.Contains).Select(g => g.LayerName)) +
-                " — because neither the job file nor %TF.FileFunction ranked them. The order used, top to " +
+                " — because neither the job file nor %TF.FileFunction ranked them" +
+                (prefixes is null
+                    ? ". The order used, top to "
+                    : ", so the numeric prefix in the file names was used instead. The order used, top to ") +
                 "bottom, is: " + string.Join(", ", copperTopToBottom.Select(c => c.LayerName)) + ".");
 
         // ── 7. Source layers, and the one reconciliation (R-L4g-0, R-L4g-7, R-L4g-11) ───────────
@@ -620,16 +638,61 @@ public static class GerberImport
         // has no conductor entries to name, and inventing two would be a substrate invented under
         // another name — that import already says, in words, that the technology is incomplete.
         var conductorEntries = tech.Stackup.Layers.Where(l => l.Kind == StackupKind.Conductor).ToList();
-        foreach (var (_, _, identity) in drills)
+        foreach (var (drillFile, drillRead, identity) in drills)
+        {
+            // GI1 R-gi1-2. The plating of this file was already settled up in step 5, where it chose
+            // the drawing layer's NAME — and was then thrown away, so every drill file, including one
+            // that declared itself non-plated, minted a Plated via entry. Settle it once, here, by
+            // the same rule, and carry it: PlanarExtractor builds a conductive barrel out of every
+            // via entry it can bind, so a 4 mm non-plated mounting hole modelled as plated shorts
+            // every layer it passes through and the run completes cleanly.
+            bool? plated = drillRead.Plated ?? ExcellonReader.PlatingFromFileName(drillFile.Path);
+
+            // GI1 R-gi1-3. A file that drilled NOTHING and only routed is board outline and cutouts,
+            // not interconnect. The entry itself stays — it is the drawing-layer marker that makes a
+            // bare opening re-export as a routed feature rather than as copper (see the note above) —
+            // but a file that produced no holes is not evidence for a plated barrel spanning the whole
+            // board, so it asserts neither plating nor a span.
+            //
+            // A rout file that says nothing about plating defaults to NON-plated rather than to the
+            // usual "null means plated". That is not a symmetry break for its own sake: a slot IS a
+            // drawn region on the drill layer, and PlanarExtractor's region branch builds a vertical
+            // conductor out of every region on a via-bound layer — so leaving it unstated turns a
+            // board outline and its cutouts into metal shorting the whole stack. A rout file that
+            // DOES declare itself plated (a castellated edge) keeps what it declared.
+            bool routedOnly = drillRead.Hits.Count == 0 && drillRead.Slots.Count > 0;
+            bool? entryPlated = routedOnly ? plated ?? false : plated;
+            bool conductive = entryPlated != false;
+
             tech.Stackup.Layers.Add(new StackupLayer
             {
                 Kind = StackupKind.Via,
                 Name = identity.LayerName,
                 DrawingLayers = [finalKeyByFile[identity.FilePath]],
-                Fill = ViaFillKind.Plated,
-                SpanFromLayer = conductorEntries.Count > 0 ? conductorEntries[0].Name : null,
-                SpanToLayer = conductorEntries.Count > 0 ? conductorEntries[^1].Name : null,
+
+                // Fill is a fill MODEL and only means anything for something that is metal, so it is
+                // left unstated on an entry that is not — rather than reading "Plated" beside a
+                // Plated flag of false.
+                Fill = conductive ? ViaFillKind.Plated : null,
+                Plated = entryPlated,
+
+                SpanFromLayer = conductive && conductorEntries.Count > 0 ? conductorEntries[0].Name : null,
+                SpanToLayer = conductive && conductorEntries.Count > 0 ? conductorEntries[^1].Name : null,
             });
+
+            if (routedOnly)
+                messages.Add(
+                    $"{drillFile.FileName}: this file routed {drillRead.Slots.Count:N0} slot(s) and " +
+                    "drilled no holes, so its layer was marked as a routed layer, not as a plated via " +
+                    "layer — it states nothing about what connects to what, and its openings are not " +
+                    "extracted as conductors. If these slots are plated (a castellated edge), tick " +
+                    "Plated on that stackup entry in the Technology editor.");
+            else if (plated == false)
+                messages.Add(
+                    $"{drillFile.FileName}: these holes are NON-PLATED, so this layer's holes are not " +
+                    "conductors and an EM run will not build vias from them. The holes themselves are " +
+                    "imported and drawn exactly as they are.");
+        }
 
         // ── 10. Write (R-L4g-13) — nothing is created before this point ─────────────────────────
         //
@@ -911,6 +974,61 @@ public static class GerberImport
                int.TryParse(identity.LayerName.AsSpan(prefix.Length), out int n)
             ? n
             : int.MaxValue;
+    }
+
+    /// <summary>
+    /// GI1 R-gi1-4. The leading run of digits in each conductor's file name, keyed by path — or
+    /// <b>null unless EVERY conductor yields one and they are all distinct</b>.
+    ///
+    /// <para>All-or-nothing on purpose. A prefix on some of the files orders those against each other
+    /// and says nothing about where the unnumbered ones go, so a partial answer is not a weaker
+    /// version of this evidence — it is a different and worse ordering than the one it would replace.
+    /// Repeated prefixes are the same problem: two files claiming position 3 rank equally and fall
+    /// through to the alphabetical tiebreak anyway, having first displaced the layers around them.</para>
+    ///
+    /// <para>Two conditions, not one. The digits are read from the first digit run ANYWHERE in the
+    /// name rather than only from position 0, because the numbering in these sets is routinely
+    /// preceded by a fixed word — but that run must then START AT THE SAME INDEX in every conductor
+    /// name. Without the second condition the rung fires on names that merely CONTAIN digits:
+    /// "top_1oz" and "inner_35um" both yield a number, they are distinct, and ordering a stack by
+    /// them is nonsense. A shared fixed prefix keeps the index equal by construction, so the pair
+    /// admits exactly the sets that are systematically numbered.</para>
+    /// </summary>
+    private static Dictionary<string, int>? NumericPrefixes(IReadOnlyList<GerberLayerIdentity> conductors)
+    {
+        if (conductors.Count < 2) return null;
+
+        var byPath = new Dictionary<string, int>(StringComparer.Ordinal);
+        var seen = new HashSet<int>();
+        int? sharedStart = null;
+        foreach (var c in conductors)
+        {
+            if (FirstDigitRun(Path.GetFileNameWithoutExtension(c.FileName)) is not { } run) return null;
+            var (n, start) = run;
+
+            // The run must begin at the SAME index in every name. That is what separates a set that
+            // is systematically NUMBERED from one whose names merely contain digits: "top_1oz" and
+            // "inner_35um" both yield a number, and ordering by it would be nonsense. A fixed word
+            // before the number is ordinary and stays allowed, because it is the same word every time.
+            sharedStart ??= start;
+            if (sharedStart != start) return null;
+
+            if (!seen.Add(n)) return null;
+            byPath[c.FilePath] = n;
+        }
+        return byPath;
+    }
+
+    /// <summary>The first run of digits in <paramref name="name"/>, and where it starts — null when
+    /// there is none, or when it does not parse (a run longer than an int).</summary>
+    private static (int Value, int Start)? FirstDigitRun(string name)
+    {
+        int i = 0;
+        while (i < name.Length && !char.IsAsciiDigit(name[i])) i++;
+        if (i == name.Length) return null;
+        int start = i;
+        while (i < name.Length && char.IsAsciiDigit(name[i])) i++;
+        return int.TryParse(name.AsSpan(start, i - start), out int n) ? (n, start) : null;
     }
 
     private static int SideRank(string? side) => side switch

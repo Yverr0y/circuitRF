@@ -1,5 +1,108 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## Phase GI1 — COMPLETE (2026-09-07)
+
+`docs/sonnet-briefs/brief-gi1-report-says-less-than-it-knows.md`, first of the GI series
+(`brief-gi-series.md`). Three facts a Gerber import establishes and then contradicts, discards or
+undersells. **No parsing changed** — every number was already right; what changed is what the import
+says about them and, in one case, what it builds from them. Gated by
+`tests/Ui.Tests/Gi1ImportSaysWhatItKnowsTests.cs` (15 tests).
+
+### The headline/evidence contradiction was a two-way render of a three-way question
+
+`DrillFormatInference.ToString()` switched on `ZeroOmission`, which carries a **nominal** `Leading` on
+both rungs that mean "the question does not arise" — precisely because the value is unused there. So a
+file settled by `CoordinateWidth` printed "leading zeros suppressed" one sentence before its own
+evidence line read "Zero suppression: none". The import prints the two together
+(`GerberImport`'s `"{file}: {read.Format}. {evidence}"`), so the message argued with itself.
+
+Fixed by keying on `ZeroOmissionEvidence`. The replacement wording deliberately contains **no form of
+the word "suppress"** — "full-width coordinates (neither zero convention applies)" — because the gate
+that stops this regressing is a bare `DoesNotContain("suppress")` over the rendered headline, and a
+phrasing that needs a cleverer assertion is a phrasing that will be broken again.
+
+**Answering the brief's §6.1** — whether any other `ToString()` in the interchange readers renders
+fewer cases than its object carries: no other one was found. This one was found by reading a real
+import log, not by a test, and that remains the only route to this class of defect.
+
+### `Plated` had to be a new field, because `ViaFillKind` has no non-conductor
+
+`GerberImport` settled each drill file's plating (`read.Plated ?? PlatingFromFileName`), used it to
+choose the drawing layer's NAME, and then minted the via stackup entry with `Fill = ViaFillKind.Plated`
+hard-coded 230 lines later. The fact was in scope and discarded.
+
+It could not simply be pushed into `Fill`: **both `ViaFillKind` values are metal.** `Plated` is a hollow
+barrel with a wall and `Solid` is a filled one; neither can express "this hole is not a conductor",
+which is what a non-plated hole is. So `StackupLayer.Plated` is a new nullable bool — **null means
+plated**, so every technology authored before it reads bit-identically, and `false` is written only
+when a file said so.
+
+**`PlanarExtractor.BuildViaBinding` is the single exclusion point, and that mattered more than
+expected.** It is the sole route from a drawing layer to a via entry, so filtering there covers the
+point-via branch (a `ViaShape`) and MIM-1's region branch at once, and cannot be bypassed by a third
+kind of via artwork arriving later. `CrossSectionExtractor` needed nothing — it already ignores every
+via entry outright, since a 2D cross-section has no vias — so the brief's §6.2 "before and after"
+count applies to the planar path only.
+
+### A rout-only file was the worse half of the same bug, and the safe default here inverts
+
+A file with slots and no hits minted a full `Plated` via entry spanning topmost to bottommost
+conductor. The consequence is larger than it first reads: **a slot is a drawn REGION on the drill
+layer**, and the extractor's region branch builds a vertical conductor out of every region on a
+via-bound layer — so a board outline and its cutouts became metal shorting the whole stack.
+
+So a rout-only file defaults to **non**-plated, which is the opposite of the "unstated means plated"
+rule everywhere else. That asymmetry is deliberate and is the only safe direction: unstated-means-plated
+turns cutouts into metal, and a castellated edge that really is plated declares itself and keeps what it
+declared. The entry itself stays — it is the drawing-layer marker that makes a bare opening re-export as
+a routed feature rather than as copper.
+
+### The numeric-prefix rung needed a second condition that the brief did not anticipate
+
+R-gi1-4 as briefed required every conductor file to yield a distinct number. That is not enough: names
+like `top_1oz` and `inner_35um` both yield one, and ordering by it is nonsense. The implemented rule
+adds that **the digit run must start at the same character index in every conductor name** — which is
+what separates a set that is systematically numbered from one whose names merely contain digits, while
+still allowing the fixed word before the number that these sets routinely carry.
+
+**Answering the brief's §6.3** — how often the prefix was available, and whether it ever disagreed with
+the side/inner ordering it replaced: unmeasured against real sets, because none is committed to this
+repository. On the hand-authored fixtures it is decisive exactly where it was meant to be — the
+alphabetical tiebreak it replaces sorts `l10` before `l2`, and the gate uses that pair specifically so
+a pass cannot be the old ordering agreeing by luck. **Whoever next imports a real multi-layer set
+should record the answer here.**
+
+### The validator had to learn the same distinction, or the fix traded one bug for two messages
+
+A non-plated via entry — and every rout-only layer, which reaches this as `Plated == false` for
+exactly that reason — has no span, because it connects nothing. `TechValidation` reported that as two
+"spans an unknown conductor layer" problems. Invisible on a set with no job file (the
+`stackupIsSubstrateless` shortcut suppresses the whole via block) and immediate on a set that ships
+both a job file and a rout file. The span and wall-thickness checks now skip a non-plated entry; its
+drawing-layer binding and thickness rule still apply, because those are not questions about metal.
+
+### Two things this phase exposed and deliberately did not fix
+
+1. **A set mixing DECLARED and GUESSED conductors orders every declared one before every guessed
+   one**, because `OrderBy(c => c.CopperIndex ?? SideRank(c.Side))` ranks a real copper index (a small
+   int) against `SideRank`'s sentinels (`int.MaxValue / 2`, `int.MaxValue - 1`). A declared bottom
+   layer therefore lands above an unidentified inner one. Pre-existing, unrelated to the prefix rung,
+   and found only because a fixture happened to mix the two. Recorded rather than changed: it is a
+   ranking question of its own and GI1's remit was the guessed-only path.
+2. **A `.ctech` from a set with no job file has no conductor stackup entries at all**, so the stack
+   order the import worked out cannot be read back off the technology it wrote — the gate reads it out
+   of the reported message instead. That is GI2's whole subject and is not worked around here.
+
+### One thing added beyond the brief, on purpose
+
+`StackupLayer.Plated` gets a **checkbox in the Technology editor's via row**. The brief did not ask for
+a control, but the import's own message tells the reader to tick it — and a model field that nothing in
+the application can show or edit means a wrong inference is uncorrectable outside a text editor. It
+writes `null` rather than `true` when ticked, so a technology that never had an opinion round-trips
+byte-for-byte instead of gaining a field. The rest of the Technology editor's via and conductor fields
+are GI3's.
+
+
 ## RC-7 — the commit and the history browser (2026-09-06)
 
 `brief-revision-control-7-commit-and-history.md`; `docs/design/revision-control.md` §5.2, §5.5's first

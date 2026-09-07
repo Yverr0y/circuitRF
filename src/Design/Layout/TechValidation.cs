@@ -110,7 +110,13 @@ public static class TechValidation
                         "conductor whose artwork the film is deposited under."));
             }
 
-            if (sl.Kind == StackupKind.Via && !stackupIsSubstrateless)
+            // GI1 R-gi1-2/R-gi1-3: a via entry that is NOT PLATED connects nothing, by definition —
+            // it is a hole, not a vertical conductor — so a missing span is its correct state and not
+            // a problem to report. The same is true of a routed layer, which reaches this as
+            // Plated == false for exactly that reason. Its drawing-layer binding and its thickness
+            // rule are still checked above; only the two span questions and the wall-thickness one
+            // stop applying, because all three are questions about metal.
+            if (sl.Kind == StackupKind.Via && !stackupIsSubstrateless && sl.Plated != false)
             {
                 if (sl.SpanFromLayer is not { Length: > 0 } || !conductorNames.Contains(sl.SpanFromLayer))
                     problems.Add(new(TechProblemArea.Stackup,

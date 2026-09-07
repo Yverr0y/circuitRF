@@ -197,7 +197,33 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
         }
     }
 
-    public bool IsPlatedVia => IsVia && SelectedFill == ViaFillKind.Plated;
+    public bool IsPlatedVia => IsVia && IsPlated && SelectedFill == ViaFillKind.Plated;
+
+    // GI1 R-gi1-2 — is this via layer's hole metal AT ALL? Separate from Fill, which is a fill model
+    // whose two values are both conductive. A checkbox rather than a combo (unlike SheetAt beside
+    // it) because this genuinely IS a flag and its absence: null on the model means plated, which is
+    // what every technology authored before the field meant, so an unticked box is the one state
+    // that has to be written down explicitly.
+    //
+    // A Gerber import writes false here for a drill file that declared itself non-plated and for a
+    // rout-only file, and the import's own message points the user at this box — so it must exist,
+    // or a wrong inference is uncorrectable outside a text editor.
+    public bool IsPlated
+    {
+        get => Layer.Plated != false;
+        set
+        {
+            if (IsPlated == value) return;
+            if (_isRefreshing) { OnPropertyChanged(); return; }
+            var before = _owner.SnapshotJson();
+            // Written as null rather than true when ticked, so a technology that never had an opinion
+            // round-trips through the editor byte-for-byte instead of gaining a field.
+            Layer.Plated = value ? null : false;
+            _owner.CommitEdit(before, $"Set {Layer.Name} {(value ? "plated" : "non-plated")}");
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsPlatedVia));
+        }
+    }
 
     // ── MIM-6 — which surface of its own band a conductor's analysis sheet sits on ─────────────
     //
@@ -317,6 +343,7 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
             SelectedSpanFrom    = Layer.SpanFromLayer is { Length: > 0 } f ? f : SpanNone;
             SelectedSpanTo      = Layer.SpanToLayer   is { Length: > 0 } t ? t : SpanNone;
             SelectedFill        = Layer.Fill ?? ViaFillKind.Plated;
+            OnPropertyChanged(nameof(IsPlated));
             StagedWallThickness = Layer.WallThicknessDbu is { } w
                 ? LayoutUnits.Format(w, _owner.Working.DefaultDisplayUnit, LayoutUnits.DefaultDbuPerMicron)
                 : "";

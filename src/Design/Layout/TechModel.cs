@@ -217,6 +217,28 @@ public sealed class StackupLayer
     /// <see cref="ViaFillKind.Plated"/>; null/unset for <see cref="ViaFillKind.Solid"/>.</summary>
     public long? WallThicknessDbu { get; set; }
 
+    /// <summary>
+    /// GI1 R-gi1-2. Whether this via layer's holes are PLATED — i.e. whether they are metal at all.
+    ///
+    /// <para><b>This is a separate question from <see cref="Fill"/>, and cannot be folded into
+    /// it.</b> <see cref="ViaFillKind"/> is a fill MODEL and both of its values are conductive:
+    /// <see cref="ViaFillKind.Plated"/> is a hollow barrel with a wall, <see cref="ViaFillKind.Solid"/>
+    /// is a filled one. Neither can express "this hole is not a conductor" — which is what a
+    /// non-plated hole is, and what a board's mounting holes are.</para>
+    ///
+    /// <para><b>Null means plated</b>, so every technology authored before this field existed reads
+    /// bit-identically. <c>false</c> is written only when a drill file said so — through its
+    /// <c>;TYPE=NON_PLATED</c> section, its <c>TF.FileFunction</c>, or its file name. The
+    /// distinction matters because <c>PlanarExtractor.BuildViaBinding</c> turns every via entry into
+    /// a conductive <c>PlanarVia</c>: a millimetre-scale non-plated hole modelled as a plated barrel
+    /// shorts every layer it passes through, and the run completes cleanly.</para>
+    ///
+    /// <para>Additive, nullable, no <c>.ctech</c> <c>FormatVersion</c> bump — the
+    /// <see cref="SheetAt"/>/<see cref="PresentWithLayer"/>/<see cref="Fill"/> pattern. Meaningless
+    /// (ignored) on a non-Via entry.</para>
+    /// </summary>
+    public bool? Plated { get; set; }
+
     /// <summary>R-via-3: the two conductor <see cref="StackupLayer.Name"/> values this via spans —
     /// unambiguous on a two-conductor board, undefined (by design — not this brief's problem to solve)
     /// on anything thicker. Unread until L6/L9; added now so the via primitive doesn't force a model

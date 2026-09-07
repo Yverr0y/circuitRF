@@ -139,7 +139,14 @@ public static class PlanarExtractor
 
         // ── Classify shapes against the stackup's DrawingLayers bindings ──────────────────────
         var binding = BuildLayerBinding(stack);
-        var viaBinding = BuildViaBinding(tech.Stackup);
+        var viaBinding = BuildViaBinding(tech.Stackup, out int nonPlatedViaEntries);
+        if (nonPlatedViaEntries > 0)
+            // GI1 R-gi1-2. Reported rather than silent: the shapes on those layers are still in the
+            // layout and still drawn, so "my vias disappeared" needs an answer at the point the
+            // decision was made.
+            notes.Add($"{nonPlatedViaEntries} via stackup entr(y/ies) are marked NON-PLATED and were " +
+                      "not extracted as conductors — a non-plated hole is a hole, not metal. Their " +
+                      "artwork is unchanged; only the vertical conductor is absent.");
         var conductorShapes = new List<(LayoutShape Shape, Band Band)>();
         int ignoredAnnotation = 0, ignoredGround = 0, ignoredOther = 0;
 
@@ -1023,12 +1030,21 @@ public static class PlanarExtractor
     /// two conductors a via joins) and are kept apart rather than merged, so the z arithmetic above
     /// stays untouched by anything a via does.
     /// </summary>
-    private static Dictionary<LayerKey, StackupLayer> BuildViaBinding(Stackup stackup)
+    private static Dictionary<LayerKey, StackupLayer> BuildViaBinding(Stackup stackup, out int nonPlated)
     {
         var map = new Dictionary<LayerKey, StackupLayer>();
+        nonPlated = 0;
         foreach (var l in stackup.Layers)
         {
             if (l.Kind != StackupKind.Via) continue;
+
+            // GI1 R-gi1-2. THE ONE PLACE a non-plated via is excluded, and deliberately so: this map
+            // is the sole route from a drawing layer to a via entry, so both the point-via branch
+            // (a ViaShape) and the MIM-1 region branch resolve through it. Filtering here cannot be
+            // bypassed by a third kind of via artwork arriving later; filtering at either use site
+            // could. Null is plated, so nothing authored before StackupLayer.Plated existed moves.
+            if (l.Plated == false) { nonPlated++; continue; }
+
             foreach (var key in l.DrawingLayers) map.TryAdd(key, l);
         }
         return map;

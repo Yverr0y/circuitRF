@@ -101,9 +101,32 @@ public sealed class DrillFormatInference
     /// the digit split.</summary>
     public int CoordinateWidth => IntegerDigits + DecimalDigits;
 
+    /// <summary>
+    /// GI1 R-gi1-1. <b>This renders the same object as <see cref="Evidence"/> and must never
+    /// contradict it</b> — the import prints the two in one sentence
+    /// (<c>GerberImport</c>: <c>"{file}: {read.Format}. {evidence}"</c>), so a headline naming a
+    /// suppression convention the evidence says was never chosen is a message that argues with
+    /// itself.
+    ///
+    /// <para>Zero suppression is a THREE-way question, not a two-way one: leading, trailing, or the
+    /// question does not arise. Two rungs settle it the third way —
+    /// <see cref="DrillFormatEvidence.DecimalCoordinates"/> (every coordinate carries a literal
+    /// point) and <see cref="DrillFormatEvidence.CoordinateWidth"/> (every coordinate is written at
+    /// its full field width, so both conventions parse to the same number). The second had no arm
+    /// here and fell through to "leading zeros suppressed", against an evidence line reading
+    /// "Zero suppression: none".</para>
+    ///
+    /// <para>So this keys on the EVIDENCE, not on <see cref="ZeroOmission"/> — which carries a
+    /// nominal <c>Leading</c> in both of those cases precisely because the value is unused. The
+    /// <see cref="DecimalCoordinates"/> test stays first and stays on the flag rather than the
+    /// evidence, so an explicit caller override on a file whose coordinates carry decimal points
+    /// still reads as "decimal-point coordinates" exactly as it did before.</para>
+    /// </summary>
     public override string ToString() =>
         $"{(Unit == GerberUnit.Inches ? "inch" : "mm")} {IntegerDigits}:{DecimalDigits} " +
         (DecimalCoordinates ? "decimal-point coordinates" :
+         ZeroOmissionEvidence == DrillFormatEvidence.CoordinateWidth
+             ? "full-width coordinates (neither zero convention applies)" :
          ZeroOmission == GerberZeroOmission.Leading ? "leading zeros suppressed" : "trailing zeros suppressed");
 }
 

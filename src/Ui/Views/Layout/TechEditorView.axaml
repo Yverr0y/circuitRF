@@ -623,7 +623,11 @@
 
                                             <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding IsVia}">
                                                 <TextBlock Text="Fill:" Width="70" FontSize="11" VerticalAlignment="Center"/>
+                                                <CheckBox Content="Plated" FontSize="11"
+                                                          IsChecked="{Binding IsPlated, Mode=TwoWay}"
+                                                          ToolTip.Tip="Whether these holes are metal at all. Unticked means a non-plated hole — a mounting hole, a routed cutout, a castellation that was not plated — which is drawn exactly as it is but is NOT extracted as a vertical conductor by an EM run. Plated is the default and is what every technology means when it says nothing."/>
                                                 <ComboBox Classes="cell" MinWidth="90"
+                                                          IsVisible="{Binding IsPlated}"
                                                           ItemsSource="{Binding FillChoices}"
                                                           SelectedItem="{Binding SelectedFill, Mode=TwoWay}"/>
                                                 <TextBlock Text="Wall:" FontSize="11" VerticalAlignment="Center"
