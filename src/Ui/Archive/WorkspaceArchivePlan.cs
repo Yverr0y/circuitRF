@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using CircuitRF.Design.Revision;
 
 namespace CircuitRF.Ui.Archive;
 
@@ -134,9 +135,55 @@ public sealed class WorkspaceArchivePlan
     /// <summary>Paths the scan deliberately left out, for the message log — temp and OS clutter.</summary>
     public List<string> SkippedPaths { get; init; } = [];
 
-    /// <summary>Sum of what is currently ticked, plus the unconditional material.</summary>
+    // ── The history (RC-8, docs/design/revision-control.md §9A) ───────────────
+
+    /// <summary>
+    /// Whether this workspace has a history of its own to offer. False on a workspace circuitRF has
+    /// never recorded, and on one sitting inside somebody else's version-controlled folder — where
+    /// there is no repository at the workspace root and R-rc0-5 means circuitRF would not carry that
+    /// one anyway.
+    /// </summary>
+    public bool HistoryAvailable { get; set; }
+
+    /// <summary>
+    /// <b>Whether the history travels — off by default, and the default is a safety property rather
+    /// than a preference</b> (R-rc8-1, R-rc8-2, §9A.1).
+    ///
+    /// <para>Every other failure the architecture guards against is a LOSS: a restore point not taken,
+    /// one thinned early, a history switched off. Those are bad, and the design itself is ordinary
+    /// files on disk and survives all of them. <b>Including a history in an archive risks the opposite
+    /// kind of failure, and it is unrecoverable.</b> The history holds every earlier version of every
+    /// file kept — including files that are no longer in the workspace at all — so a designer who
+    /// imported one customer's artwork, finished with it, deleted it, and then archived the workspace
+    /// for a DIFFERENT customer would ship that artwork. Nothing in the visible file tree would show
+    /// it, and nobody would find out until someone else did.</para>
+    ///
+    /// <para><b>When a default can be wrong in two directions, it points away from the irreversible
+    /// one.</b> That is the whole of it — and including a history is otherwise genuinely the better
+    /// handover (R-rc8-3). The point is only that it must be chosen, not inherited.</para>
+    ///
+    /// <para><b>There is deliberately no third state</b> (R-rc8-11, §9A.4). "The last N versions" and
+    /// "from this date forward" are history rewriting, and worse, they invite exactly the wrong
+    /// belief: a user who chose them to avoid sending something will assume the something is gone. A
+    /// guarantee that is nearly true is worse than no guarantee, because the near-truth is what people
+    /// act on.</para>
+    /// </summary>
+    public bool IncludeHistory { get; set; }
+
+    /// <summary>
+    /// What including it adds, computed once the box is ticked — never before, because computing it
+    /// means packing the repository (R-rc8-9) and an archive that leaves history out must cost exactly
+    /// what it costs today.
+    /// </summary>
+    public HistoryArchiveSummary? History { get; set; }
+
+    /// <summary>Sum of what is currently ticked, plus the unconditional material — and the history
+    /// when it is travelling, whose figure is post-pack (R-rc8-9) and is therefore the one the archive
+    /// actually spends.</summary>
     public long SelectedBytes =>
-        AlwaysIncludedBytes + Options.Where(o => o.Selected && o.SizeBytes > 0).Sum(o => o.SizeBytes);
+        AlwaysIncludedBytes
+      + Options.Where(o => o.Selected && o.SizeBytes > 0).Sum(o => o.SizeBytes)
+      + (IncludeHistory ? History?.Bytes ?? 0 : 0);
 
     /// <summary>Human-readable size, the way a file manager writes one.</summary>
     public static string FormatSize(long bytes)

@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using System.Text.Json.Nodes;
+using CircuitRF.Design.Revision;
 
 namespace CircuitRF.Ui.Archive;
 
@@ -31,6 +32,19 @@ public sealed class ArchiveWriteResult
     /// simply not there, and a Data Display that plots it will come up empty on the other machine.
     /// </summary>
     public List<string> ExcludedResults { get; init; } = [];
+
+    /// <summary>True when the sender chose to send the history (RC-8).</summary>
+    public bool HistoryIncluded { get; set; }
+
+    /// <summary>
+    /// Bytes of the repository actually written. <b>Computed by the same enumeration the dialog's
+    /// figure was</b>, so the number the sender agreed to and the number the archive spent cannot
+    /// disagree (RC-8 gate 6).
+    /// </summary>
+    public long HistoryBytes { get; set; }
+
+    /// <summary>Files of the repository written, for the report.</summary>
+    public int HistoryFileCount { get; set; }
 }
 
 /// <summary>
@@ -119,6 +133,9 @@ public static class WorkspaceArchiveWriter
                     WriteFile(zip, $"{rootName}/{option.ArchivePath}/{rel}", file, result);
                 }
             }
+
+            // ── The history, if the sender chose to send it ───────────────────
+            if (plan.IncludeHistory && plan.HistoryAvailable) WriteHistory(zip, rootName, plan, result);
         }
 
         result.ZipBytes = WorkspaceArchiveScanner.SizeOf(zipPath);
@@ -315,6 +332,49 @@ public static class WorkspaceArchiveWriter
         if (WorkspaceArchiveScanner.IsInside(abs, plan.WorkspaceDir)) return null;
 
         return WorkspaceRelativeDestination(abs, included);
+    }
+
+    /// <summary>
+    /// Copies the workspace's own repository into the archive
+    /// (<c>docs/design/revision-control.md</c> §9A.2, §9A.5; RC-8 R-rc8-5).
+    ///
+    /// <para><b>Nothing about RC-5's exclusion changes to make this work, and that is the shape the
+    /// brief asks for.</b> <see cref="WorkspaceArchiveScanner.IsSkippedFromArchive"/> still refuses
+    /// <c>.git</c> for both of its consumers — the archive scan AND <c>WorkspaceCopy.Run</c> — so the
+    /// default is enforced in one place and a copy is untouched by this feature existing. Including
+    /// is an ADDITION here, on the writer, reached only through the plan's own flag. A second
+    /// exclusion that had to agree with the first would be the bug.</para>
+    ///
+    /// <para><b>The empty directories are written as directory entries, and leaving them out would be
+    /// silent.</b> git decides a folder is a repository by finding <c>objects</c> and <c>refs</c>
+    /// inside it, and the pack R-rc8-9 requires is what empties <c>refs/heads</c> and <c>refs/tags</c>
+    /// — so a zip that stored only files would produce an extracted workspace whose history git
+    /// refuses to read at all, with nothing having gone wrong that anyone could see.</para>
+    ///
+    /// <para><b>What is carried is the repository, whole</b> — including the marker in its config that
+    /// says circuitRF created it, which is why §9A.5's extracted archive is adopted without ceremony
+    /// (R-rc0-15), and including every thinned restore point's objects, which nothing reclaims unless
+    /// a person asks (§5.6a).</para>
+    /// </summary>
+    private static void WriteHistory(ZipArchive zip, string rootName, WorkspaceArchivePlan plan,
+                                     ArchiveWriteResult result)
+    {
+        result.HistoryIncluded = true;
+
+        foreach (var file in HistoryArchive.RepositoryFiles(plan.WorkspaceDir))
+        {
+            var rel = WorkspaceArchiveScanner.Rel(plan.WorkspaceDir, file);
+            long before = result.UncompressedBytes;
+            int  count  = result.FileCount;
+
+            WriteFile(zip, $"{rootName}/{rel}", file, result);
+
+            result.HistoryBytes     += result.UncompressedBytes - before;
+            result.HistoryFileCount += result.FileCount - count;
+        }
+
+        foreach (var relativeDir in HistoryArchive.RepositoryEmptyDirectories(plan.WorkspaceDir))
+            zip.CreateEntry($"{rootName}/{relativeDir}/");
     }
 
     // ── Zip plumbing ──────────────────────────────────────────────────────────

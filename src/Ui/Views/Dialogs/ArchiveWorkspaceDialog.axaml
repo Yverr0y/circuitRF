@@ -10,7 +10,7 @@
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False">
 
-    <Grid RowDefinitions="Auto,Auto,*,Auto,Auto" Margin="16">
+    <Grid RowDefinitions="Auto,Auto,*,Auto,Auto,Auto" Margin="16">
 
         <SelectableTextBlock Grid.Row="0" x:Name="HeaderText"
                              FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap"/>
@@ -66,14 +66,32 @@
             </TreeView>
         </Border>
 
-        <SelectableTextBlock Grid.Row="3" x:Name="TotalText"
+        <!-- RC-8. The history is not a row in the tree: it is not a file the recipient might or might
+             not want, it is a decision about what leaves the machine, and it is the one choice in this
+             dialog that cannot be undone after the archive is sent. It is off by default because a
+             default that can be wrong in two directions points away from the irreversible one — and
+             what it adds is stated in the panel below, computed, once it is ticked. -->
+        <Border Grid.Row="3" x:Name="HistoryPanel" IsVisible="False"
+                Margin="0,10,0,0" Padding="10,8" CornerRadius="3"
+                BorderThickness="1" BorderBrush="{DynamicResource SystemBaseLowColor}">
+            <StackPanel Spacing="4">
+                <CheckBox x:Name="IncludeHistoryCheck" FontSize="12"
+                          Content="Include this workspace's history"
+                          IsCheckedChanged="OnIncludeHistoryChanged"/>
+                <SelectableTextBlock x:Name="HistoryDetailText"
+                                     FontSize="11" Opacity="0.8" TextWrapping="Wrap"
+                                     Margin="24,0,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <SelectableTextBlock Grid.Row="4" x:Name="TotalText"
                              FontSize="11" Opacity="0.8" Margin="0,8,0,0"/>
 
-        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right"
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right"
                     Spacing="8" Margin="0,12,0,0">
             <Button Content="Cancel" Width="90" FontSize="12"
                     HorizontalContentAlignment="Center" Click="OnCancelClick"/>
-            <Button Content="Archive…" Width="90" IsDefault="True" FontSize="12"
+            <Button x:Name="ArchiveButton" Content="Archive…" Width="90" IsDefault="True" FontSize="12"
                     HorizontalContentAlignment="Center" Click="OnArchiveClick"/>
         </StackPanel>
     </Grid>

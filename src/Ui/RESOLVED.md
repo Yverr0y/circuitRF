@@ -1,6 +1,127 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
 
+## RC-8 — archiving a workspace with its history, and the enumeration that was quietly wrong (2026-09-07)
+
+`brief-revision-control-8-archive-with-history.md`. One checkbox, off by default, and the sentence that
+makes ticking it safe. `HistoryArchive` in `src/Design/Revision/` (the enumeration and the figures),
+`ArchiveHistoryPreparation` + `WorkspaceArchiveWriter.WriteHistory` in `src/Ui/Archive/`, the panel in
+`ArchiveWorkspaceDialog`. Gated by `tests/Ui.Tests/Revision/ArchiveWithHistoryTests.cs`.
+
+### The deleted-file enumeration must be a PATH walk, and an object walk is wrong in the quiet direction
+
+The obvious implementation is `git rev-list --objects` over every tip: one process, it names every path
+in the history, and it is three times faster than what shipped. **It is wrong, and it fails by saying
+less.** `rev-list --objects` prints each OBJECT once — so two files whose content is identical share one
+blob and only one of them is ever named.
+
+Measured on a fixture of 250 documents, 40 versions and 300 restore points, with seventeen deleted
+imports that happened to hold the same bytes: the object walk reported **one** filename, the path walk
+reported all seventeen. The sender reads the one name, recognises it, decides the archive is fine — and
+sixteen files they never saw go out with it. That is exactly the nearly-true guarantee §9A.4 rejects,
+arrived at by accident, and nothing about it is visible from the outside.
+
+What ships is `git log --stdin --root -m --name-only -z --pretty=format:` over every tip, and each
+flag is load-bearing:
+
+- **`--root`.** A restore point is a **parentless** commit by design (§5.2b — that is what makes
+  retention's thinning free anything at all). Without `--root` git shows no diff for a parentless
+  commit, so every file that lived only inside restore points is absent — which is precisely the
+  population R-rc8-7a says the warning exists for, since a deliberately kept file is one the designer
+  already knows about. **A branch-only enumeration passes gate 5 and fails gate 5a**, which is why
+  those are two gates.
+- **`-z`.** `HistoryBrowser.Compare`'s reason: without it a path holding a quote or a non-ASCII
+  character is re-encoded on the way out and mis-split on the way in.
+- **`-m`.** Covers the one thing circuitRF never creates and a designer's own shell might — a merge
+  whose tree holds a path neither parent had.
+- **`--stdin`.** A workspace with a few hundred restore points would otherwise build an argument list
+  long enough to be refused by the operating system — and only on the workspaces with the most history
+  to warn about.
+
+Renames are deliberately **not** detected (no `-M`), so a rename appears as both names and both are
+checked against the disk. §9A.4 names "a path renamed before it was deleted" as one of the ways a
+filter leaks; here it simply cannot.
+
+### An archive that carries only FILES is not a repository, and packing is what creates the hole
+
+git decides a folder is a repository by finding `objects` **and `refs`** inside it. `git gc` — which
+R-rc8-9 runs in front of the user precisely so the size figure is honest — packs every loose reference
+into `packed-refs` and leaves `refs/heads` and `refs/tags` **empty**. A zip stores files, not folders,
+so the whole of `refs/` vanishes from the archive and the extracted workspace answers *fatal: not a git
+repository* — with every design file present and correct, and nothing anywhere saying what happened.
+
+Verified rather than reasoned about: deleting `.git/refs` from a working repository reproduces it
+exactly. So `HistoryArchive.RepositoryEmptyDirectories` finds them and the writer stores them as zip
+**directory entries**, and `WorkspaceArchiveExtractor` — which previously filtered every entry ending in
+`/` out of its list — now creates them. A file manager's own unzip reads the same entries, which is the
+other half of why it is a directory entry rather than a placeholder file.
+
+**Note the coupling**: the two mandatory halves of this brief interact. Without R-rc8-9's pack the loose
+references are ordinary files and the archive works by luck; with it, the archive is broken unless the
+directory entries are written. Building either half alone would have shipped.
+
+### `.lock` files do not travel
+
+Everything else under `.git` is copied verbatim — that is what makes an archive with history worth
+having. A lock file is the momentary state of a write happening right now, and one copied into an
+archive arrives as a repository the recipient's git refuses to write to, with no cause they could find
+in a folder they were told holds only copies of their own files.
+
+### RC-5's `.git` exclusion held unmodified, which is the shape the brief asked for
+
+`WorkspaceArchiveScanner.IsSkippedFromArchive` still refuses `.git` for **both** its consumers — the
+archive scan and `WorkspaceCopy.Run` — and not a character of it changed. Including is an **addition**
+on the writer, reached only through `WorkspaceArchivePlan.IncludeHistory`, so the default is enforced in
+one place and Save Workspace As is untouched by this feature existing. A second exclusion that had to
+agree with the first would have been the bug.
+
+For the same reason **"Include All" does not tick the history.** Every row in the tree is about bulk or
+provenance and every one of those choices is recoverable; the history is the one decision in the dialog
+that cannot be undone once the archive has been sent, so a convenience button must not be able to make
+it.
+
+### Measurements — the enumeration arrives before the user clicks through
+
+Machine class: Apple Silicon, Release build, warm cache. Two fixtures, both far larger than a real
+workspace at this stage.
+
+| fixture | branch only | **branch + checkpoints + thinned** | pack | pack + enumerate |
+|---|---|---|---|---|
+| 250 documents · 40 versions · 300 restore points | 17 ms | **231 ms** | ~840 ms | **1.07 s** |
+| 1,200 documents · 1 version · 600 restore points | 24 ms | **967 ms** | ~1.9 s | **2.84 s** |
+
+Read against the brief's own two questions:
+
+- **Is it fast enough to run when the box is ticked, rather than on a delay?** Yes, comfortably. The
+  second fixture walks 720,000 path entries and answers in under a second; the whole preparation,
+  packing included, is under three seconds and is reported as live progress in the Messages panel while
+  it runs. A warning that arrived after the user had clicked through would not be a warning, and this
+  one does not.
+- **What did walking the checkpoint references cost over the branch alone?** Between **10× and 40×** —
+  and that is the honest comparison, because the branch walk is nearly free and answers the wrong
+  question. Cost scales as (states × documents), which is the shape of the enumeration and not
+  something a smarter query avoids: the object walk that exploits git's own sharing is the one that
+  loses filenames.
+
+**Unpacked is where the surprise lives, and it is R-rc8-9's whole justification.** The first fixture
+was 19.6 MB of loose objects and 438 KB packed — a **45× overhang** — with only 4,791 loose objects,
+well under git's own 6,700 trigger, so git would never have packed it on its own. A size figure taken
+before the pack would have described an archive nobody was going to get. Enumerating unpacked also
+costs 2.5–3× more (587 ms and 2.9 s on the two fixtures), so packing first pays for part of itself.
+
+### Foreign ownership is a non-event, and the sentence exists for the git that predates the fix
+
+R-rc8-5b calls this the most likely real-world first impression of an archive with history — the
+recipient extracts it and git considers the tree owned by somebody else, which is the ordinary state of
+a network share. **It does not arise**, because `GitEnvironment.GlobalArguments` names the workspace
+root as an exception on every single invocation. Verified with git's own `GIT_TEST_ASSUME_DIFFERENT_OWNER`
+switch, which makes git take exactly the branch a genuinely foreign tree takes: the extracted archive
+opens, lists its restore points and restores from them with nothing said. Clearing the exception (an
+empty value resets git's list, which is the closest a test can get to a git old enough to lack the
+option) reaches `GitFailures.ForeignOwnership`, whose sentence names neither `safe.directory` nor
+"dubious ownership".
+
+
 ## RC-7 — the version history panel, and the four things the project tree stopped showing (2026-09-06)
 
 `brief-revision-control-7-commit-and-history.md`. The window half: `KeepThisVersionDialog`,

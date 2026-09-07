@@ -8,6 +8,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using CircuitRF.Ui.Archive;
+using CircuitRF.Ui.Messages;
 
 namespace CircuitRF.Ui.Views.Dialogs;
 
@@ -23,18 +24,27 @@ namespace CircuitRF.Ui.Views.Dialogs;
 public partial class ArchiveWorkspaceDialog : Window
 {
     private readonly WorkspaceArchivePlan? _plan;
+    private readonly IMessageSink? _messages;
     private ObservableCollection<ArchiveTreeNode> _roots = [];
+    private bool _historyPrepared;
 
     public ArchiveWorkspaceDialog() => InitializeComponent();
 
-    public ArchiveWorkspaceDialog(WorkspaceArchivePlan plan) : this()
+    public ArchiveWorkspaceDialog(WorkspaceArchivePlan plan, IMessageSink? messages = null) : this()
     {
-        _plan = plan;
+        _plan     = plan;
+        _messages = messages;
 
         HeaderText.Text = $"Archive “{Path.GetFileName(plan.WorkspaceDir.TrimEnd(Path.DirectorySeparatorChar))}”";
 
         var roots = _roots = BuildRoots(plan);
         Tree.ItemsSource = roots;
+
+        // RC-8 R-rc8-2. Off, and set from the plan rather than from anything remembered: nothing
+        // persists this choice, so every archive is decided on its own.
+        HistoryPanel.IsVisible       = plan.HistoryAvailable;
+        IncludeHistoryCheck.IsChecked = plan.IncludeHistory;
+        HistoryDetailText.Text        = HistoryInvitation;
 
         UpdateTotal();
 
@@ -140,6 +150,11 @@ public partial class ArchiveWorkspaceDialog : Window
     /// expanded is standing in for rows it has not built yet — writing through the node alone would
     /// reach only the rows on screen, which is the shape this dialog's laziness makes easy to get
     /// wrong.</para>
+    ///
+    /// <para><b>"Everything optional" deliberately does not include the history</b> (RC-8 R-rc8-2).
+    /// The tree's rows are about bulk and provenance and are all recoverable choices; the history is
+    /// the one decision in this dialog that cannot be undone once the archive has been sent, so a
+    /// convenience button must not be able to make it.</para>
     /// </summary>
     private void SetAll(bool included)
     {
@@ -150,6 +165,87 @@ public partial class ArchiveWorkspaceDialog : Window
 
         UpdateTotal();
     }
+
+    // ── The history (RC-8) ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// What the row says before it is ticked. <b>It describes the CONTENT, not the mechanism</b>
+    /// (R-rc8-6): a label reading "include git history" fails on two counts — it is git vocabulary,
+    /// and it does not tell the sender what they are about to send.
+    ///
+    /// <para><b>And it does not read as a warning against its own feature</b> (R-rc8-3). Handing a
+    /// design to a partner WITH its history is a far better handover than a snapshot, and internally
+    /// it is usually what is wanted. The point of the default is only that it must be chosen, not
+    /// inherited.</para>
+    /// </summary>
+    private const string HistoryInvitation =
+        "Every earlier version of every file this workspace has kept, and every restore point — "
+      + "the recipient can go back to any of them. Tick it to see what that adds.";
+
+    /// <summary>
+    /// Ticking it computes the answer; unticking it puts the invitation back.
+    ///
+    /// <para><b>The work is done once and behind the dialog.</b> Preparing means PACKING the
+    /// repository (R-rc8-9), which is seconds of I/O on a large history — so it runs off the UI
+    /// thread, reports itself in the Messages panel, and says so here in the meantime. A warning that
+    /// arrives after the user has clicked through is not a warning, so the Archive button is held
+    /// until the figures are in.</para>
+    /// </summary>
+    private void OnIncludeHistoryChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_plan is null) return;
+
+        bool ticked = IncludeHistoryCheck.IsChecked == true;
+        _plan.IncludeHistory = ticked;
+
+        if (!ticked)
+        {
+            HistoryDetailText.Text = HistoryInvitation;
+            UpdateTotal();
+            return;
+        }
+
+        if (_historyPrepared)
+        {
+            ShowHistorySummary();
+            UpdateTotal();
+            return;
+        }
+
+        HistoryDetailText.Text = "Working out what that adds…";
+        ArchiveButton.IsEnabled = false;
+
+        var plan     = _plan;
+        var messages = _messages;
+
+        // The dialog can be cancelled while this is in flight. The pack itself is safe to abandon and
+        // leaves a correct repository either way; what must not happen is the continuation writing the
+        // figures into a window that is no longer on screen.
+        bool open = true;
+        Closed += (_, _) => open = false;
+
+        _ = Task.Run(() => ArchiveHistoryPreparation.Prepare(plan, messages))
+                .ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+                {
+                    if (!open) return;
+
+                    _historyPrepared        = true;
+                    ArchiveButton.IsEnabled = true;
+                    HistoryPanel.IsVisible  = plan.HistoryAvailable;
+                    ShowHistorySummary();
+                    UpdateTotal();
+                }), TaskScheduler.Default);
+    }
+
+    /// <summary>
+    /// The computed sentences (R-rc8-7). <b>The deleted-file names are the item that does the real
+    /// work</b> (R-rc8-8) — someone about to leak a file will almost always recognise it by name, and
+    /// nobody recognises "the repository contains historical objects".
+    /// </summary>
+    private void ShowHistorySummary()
+        => HistoryDetailText.Text = _plan?.History is { } summary
+            ? string.Join(Environment.NewLine, summary.Describe())
+            : HistoryInvitation;
 
     private void OnIncludeAllClick(object? sender, RoutedEventArgs e)  => SetAll(true);
     private void OnIncludeNoneClick(object? sender, RoutedEventArgs e) => SetAll(false);

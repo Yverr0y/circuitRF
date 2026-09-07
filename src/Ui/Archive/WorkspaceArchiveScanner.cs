@@ -231,6 +231,11 @@ public static class WorkspaceArchiveScanner
         AddReferencedWorkspaces(plan);
         AddExternalFiles(plan);
 
+        // RC-8. Whether there is a history to OFFER — asked as a directory test, which costs nothing
+        // and is the exactly right question (see HistoryArchive.Available). What including it would
+        // add is computed only if the box is ticked, because computing it means packing.
+        plan.HistoryAvailable = CircuitRF.Design.Revision.HistoryArchive.Available(workspaceDir);
+
         return plan;
     }
 

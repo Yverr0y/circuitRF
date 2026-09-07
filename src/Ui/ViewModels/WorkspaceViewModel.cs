@@ -1650,7 +1650,10 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         try { plan = WorkspaceArchiveScanner.Scan(workspaceDir); }
         catch (Exception ex) { Messages.Error($"Archive: could not read the workspace — {ex.Message}"); return; }
 
-        if (await new ArchiveWorkspaceDialog(plan).ShowDialog<bool>(window) is not true) return;
+        // The Messages sink goes in so RC-8's pack can report itself as progress rather than as a
+        // stall: ticking "include the history" packs the repository before it can state a size, and
+        // that is the one moment R-rc3-14's "where it cannot be noticed" is deliberately suspended.
+        if (await new ArchiveWorkspaceDialog(plan, Messages).ShowDialog<bool>(window) is not true) return;
 
         var suggested = Path.GetFileName(workspaceDir.TrimEnd(Path.DirectorySeparatorChar));
         var target = await window.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
@@ -1670,6 +1673,15 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             Messages.Success(
                 $"Archived {result.FileCount} file(s) to {Path.GetFileName(zipPath)} " +
                 $"({WorkspaceArchivePlan.FormatSize(result.ZipBytes)}).");
+
+            // RC-8. Said on the log as well as in the dialog, because this is the half of the archive
+            // nobody can see by looking at the zip, and the sender is the only person who can still
+            // act on it.
+            if (result.HistoryIncluded && plan.History is { } history)
+            {
+                Messages.Info("This archive carries the workspace's history.");
+                foreach (var line in history.Describe()) Messages.Info(line);
+            }
 
             if (result.Repointed.Count > 0)
                 Messages.Info($"Repointed references in {result.Repointed.Count} file(s) to the archived copies.");

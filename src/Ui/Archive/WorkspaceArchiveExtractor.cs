@@ -50,6 +50,14 @@ public static class WorkspaceArchiveExtractor
         var entries = zip.Entries.Where(e => e.FullName.Length > 0 && !e.FullName.EndsWith('/')).ToList();
         var root    = CommonRootFolder(entries.Select(e => e.FullName));
 
+        // RC-8. Directory entries are not files and are not counted, but they cannot be dropped: an
+        // archive that carries a history carries the repository's EMPTY directories as entries of this
+        // shape, and git decides a folder is a repository by finding `objects` and `refs` inside it.
+        // `git gc` — which R-rc8-9 runs before an archive with history — is exactly what empties
+        // `refs/heads` and `refs/tags`, so ignoring these produces an extracted workspace whose
+        // history git refuses to read, with nothing visible having gone wrong.
+        var directories = zip.Entries.Where(e => e.FullName.EndsWith('/')).ToList();
+
         // No shared root folder — synthesise one so the extract cannot scatter files.
         var synthetic = root is null ? Path.GetFileNameWithoutExtension(zipPath) : null;
         var targetDir = Path.GetFullPath(Path.Combine(destinationParent, root ?? synthetic ?? "workspace"));
@@ -59,6 +67,15 @@ public static class WorkspaceArchiveExtractor
 
         var rejected = new List<string>();
         int count = 0;
+
+        foreach (var entry in directories)
+        {
+            var relative = synthetic is null ? entry.FullName : $"{synthetic}/{entry.FullName}";
+            var full     = Path.GetFullPath(Path.Combine(destinationParent, relative.Replace('/', Path.DirectorySeparatorChar)));
+
+            if (!WorkspaceArchiveScanner.IsInside(full, destinationParent)) { rejected.Add(entry.FullName); continue; }
+            Directory.CreateDirectory(full);
+        }
 
         foreach (var entry in entries)
         {

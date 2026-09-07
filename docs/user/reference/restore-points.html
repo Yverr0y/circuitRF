@@ -43,6 +43,7 @@
 <li><a href="#results">"My results are gone"</a></li>
 <li><a href="#started">"circuitRF says it started keeping a history"</a></li>
 <li><a href="#copy">"I saved a copy and my history didn't come with it"</a></li>
+<li><a href="#customer">"I'm sending this workspace to a customer"</a></li>
 <li><a href="#kept">What is kept, and what is not</a></li>
 <li><a href="#tidying">Tidying up — "I can't get back to last month"</a></li>
 <li><a href="#enclosing">"My workspace is inside another version-controlled folder"</a></li>
@@ -176,7 +177,67 @@ The original keeps every restore point it had.</p>
 <p>That is on purpose. A history holds <em>every earlier version of every file it ever kept</em>, including files
 you deleted long ago — so a copy made for one customer must not carry another customer's deleted
 artwork inside it, invisibly. Save Workspace As says so on the message it posts when the copy is made.</p>
-<p>If you want the history to travel, use <strong>File ▸ Archive Workspace</strong> and include history.</p>
+<p>If you want the history to travel, use <strong>File ▸ Archive Workspace</strong> and include history — read the
+next section first.</p>
+<h2 id="customer">&quot;I'm sending this workspace to a customer&quot;</h2>
+<p><strong>File ▸ Archive Workspace…</strong> puts the workspace into one <code>.zip</code>: every cell, every technology, the
+workspace file, and whatever else you tick — kits, referenced files, results. <strong>The history is not in
+it unless you say so</strong>, and there is a tickbox for saying so.</p>
+<h3 id="the-one-sentence-that-matters">The one sentence that matters</h3>
+<p><strong>A file you deleted from the workspace is still in the history.</strong></p>
+<p>A history holds every earlier version of every file it ever kept, and that includes files that are not
+in the workspace any more. If you imported one customer's artwork, finished with it, deleted it, and
+then archived this workspace for a <em>different</em> customer, <strong>including the history would send that
+artwork with it</strong> — and nothing in the visible file tree would show it.</p>
+<p>That is why the tickbox starts unticked. Everything else circuitRF is careful about here is a <em>loss</em>
+you can recover from; this one is the opposite, and nobody can undo it afterwards.</p>
+<h3 id="what-each-choice-sends">What each choice sends</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>what the recipient gets</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>history left out</strong> <em>(the default)</em></td>
+<td>a working workspace with no history. Completely normal — it opens, everything is present and current, and if they switch recording on they start a history of their own.</td>
+</tr>
+<tr>
+<td><strong>history included</strong></td>
+<td>the same workspace, <strong>plus every earlier version of every file it ever kept, and every restore point</strong> — so they can go back to any of them.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Including it is often the right thing to do.</strong> A design handed to a partner <em>with</em> its history is a
+far better handover than a snapshot, and inside your own organisation it is usually what you want. The
+point of the default is only that it should be a decision, not something that happens by itself.</p>
+<h3 id="what-circuitrf-tells-you-when-you-tick-it">What circuitRF tells you when you tick it</h3>
+<p>Before you press Archive, the dialog states — for this workspace, not in general:</p>
+<ul>
+<li><strong>how much larger</strong> the archive becomes;</li>
+<li><strong>how many versions and restore points</strong> it carries;</li>
+<li>and <strong>how many files are in the history that are not in the workspace now, and what they are
+called.</strong></li>
+</ul>
+<p>That last line is the one to read. If you recognise a filename on it, you have found the problem while
+you can still do something about it.</p>
+<div class="callout note">
+<span class="label">An archive is the only way a restore point travels</span>
+<p>A copy of a workspace (<b>File ▸ Save Workspace As</b>) carries no history at all. An archive with
+history included carries the whole of it — your versions <i>and</i> your restore points. It is the
+strongest handover circuitRF can make.</p>
+</div>
+<h3 id="there-is-no-just-the-last-few-versions">There is no &quot;just the last few versions&quot;</h3>
+<p>It sounds like the best of both, and it is not offered, deliberately. It cannot be done without
+changing every entry in the history, so the copy you sent could never be compared with the one you
+kept. Worse, it would invite exactly the wrong belief: having chosen &quot;the last ten&quot;, you would assume
+the thing you were worried about was gone — and a filter that missed one file, or a file renamed before
+it was deleted, would be a leak you had explicitly tried to prevent and been told was handled.</p>
+<p><strong>Two honest choices are better than a third that is nearly true.</strong> If something must never leave your
+machine, take it out of the history before you send it — that is
+<a href="versions.html#rewriting">yours to do, with <code>git</code></a> — or send the archive without the history.</p>
 <h2 id="kept">What is kept, and what is not</h2>
 <table>
 <thead>
@@ -225,6 +286,10 @@ artwork inside it, invisibly. Save Workspace As says so on the message it posts 
 <tr>
 <td>anything at all, when your workspace sits inside another version-controlled folder</td>
 <td>no — circuitRF records nothing there, and says so</td>
+</tr>
+<tr>
+<td>the history, in a <strong>workspace archive</strong></td>
+<td><strong>not unless you tick it</strong> — and you still have it either way. It is the only way a restore point ever travels: see <a href="#customer">sending a workspace to a customer</a></td>
 </tr>
 <tr>
 <td>a restore point circuitRF <strong>tidied away</strong></td>

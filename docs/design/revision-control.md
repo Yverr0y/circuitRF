@@ -1790,6 +1790,22 @@ a reported failure.
 
 ## 9A. Archiving a workspace — history is excluded by default *(new in rev 2)*
 
+**Status: BUILT 2026-09-07** · `brief-revision-control-8-archive-with-history.md` · `HistoryArchive`
+in `src/Design/Revision/`, `ArchiveHistoryPreparation` and the writer's own repository copy in
+`src/Ui/Archive/`, the checkbox and its computed block in `ArchiveWorkspaceDialog`, gated by
+`tests/Ui.Tests/Revision/ArchiveWithHistoryTests.cs`. **Three things the build settled that this
+section did not say.** §9A.3's enumeration cannot be an OBJECT walk: `git rev-list --objects` prints
+each object once, so two deleted files with identical content collapse to one name — measured, on a
+340-state fixture seventeen deleted files were reported as **one**, which is §9A.4's nearly-true
+guarantee reached by accident and in the direction of saying less. It is a PATH walk
+(`git log --stdin --root -m --name-only -z`), and **`--root` is load-bearing**: a checkpoint is
+parentless by design (§5.2b), so without it git shows no diff for one at all and the whole population
+this warning exists for is absent. **And an archive that carries only FILES is not a repository**: git
+decides a folder is one by finding `objects` and `refs` inside it, and the pack §9A.3 requires is
+exactly what leaves `refs/heads` and `refs/tags` empty — a zip stores files, so the empty directories
+have to travel as directory entries or the extracted workspace answers *fatal: not a git repository*
+with nothing visible having gone wrong. Findings in `src/Ui/RESOLVED.md`. ·
+
 The workspace archive (`src/Ui/Archive/`) is how a workspace leaves the machine it was made on: to a
 colleague, to a customer, to a supplier, into an email. Once a workspace has a history, the archive
 has to decide whether to take it, and **the decision is not symmetric.**
