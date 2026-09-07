@@ -99,13 +99,26 @@ public static class WorkspaceArming
         if (GitCommand.For(workspaceRoot) is not { } git)
             return new ArmingResult(false, null, false, null, null);
 
-        // §4.4 first, BEFORE anything is created: a repository made for a machine that cannot name a
-        // committer is a folder that will never hold anything.
+        // RC-6 R-rc6-6, BEFORE anything is created, and this is the check that has to come first.
+        //
+        // Without it, `IsRepositoryRoot()` answers false for a workspace INSIDE somebody else's
+        // repository, so the code below would run `git init` at the workspace root and plant a nested
+        // repository in their tree; and for a repository the USER created at the root it answers true
+        // while the marker is absent, so the code below would rewrite their configuration and write
+        // circuitRF's policy files without ever asking. Both are the ambush §7A.1 exists to prevent,
+        // and both are silent. A HOLD is a refusal that SAYS SO (R-rc6-8): absent is harmless and is
+        // hidden, held is a designer who may believe they are protected.
+        var situation = EnclosingRepository.Detect(git);
+        if (!situation.MayRecord)
+            return new ArmingResult(false, git, false, null, HoldRefusalFor(situation));
+
+        // §4.4 next, still BEFORE anything is created: a repository made for a machine that cannot
+        // name a committer is a folder that will never hold anything.
         git.Identity ??= RevisionIdentity.Resolve(git);
         if (git.Identity is null)
             return new ArmingResult(false, git, false, null, GitFailures.NoIdentity());
 
-        bool existed = git.IsRepositoryRoot() && GitRepository.IsManagedByCircuitRf(git);
+        bool existed = situation.Placement == RepositoryPlacement.Managed;
 
         if (!existed)
         {
@@ -126,4 +139,20 @@ public static class WorkspaceArming
 
         return new ArmingResult(true, git, !existed, announcement, null);
     }
+
+    /// <summary>
+    /// What a held workspace says when a boundary reaches it.
+    ///
+    /// <para><b>The workspace-root row answers with a refusal here and nothing more</b>, because it is
+    /// a QUESTION the window asks (R-rc6-7a) and this path has no dialog. What matters is that it
+    /// refuses rather than adopting the user's repository by default — the answer is theirs.</para>
+    /// </summary>
+    private static Diagnostic? HoldRefusalFor(RepositorySituation situation) => situation.Placement switch
+    {
+        RepositoryPlacement.Ancestor
+            => HoldMessages.HeldByAncestorOnOpen(situation.RepositoryRoot ?? ""),
+        RepositoryPlacement.UserRepositoryAtRoot or RepositoryPlacement.Declined
+            => HoldMessages.HeldRefusal(),
+        _   => null,
+    };
 }

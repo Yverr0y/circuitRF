@@ -44,8 +44,32 @@ public sealed class WorkspaceHistoryService
     /// <summary>Set by every path that writes into the open workspace.</summary>
     public void NoteWorkspaceWrite() => CircuitRfWroteAFileThisSession = true;
 
+    /// <summary>
+    /// R-rc6-4a. Whether a boundary in this session actually WROTE an entry.
+    ///
+    /// <para><b>This is what stops a colleague's glance running housekeeping</b> (§12 Q24). RC-5's
+    /// arming guard keeps that glance from creating a repository; on its own it did not keep it from
+    /// running a retention sweep, under the READER'S preference, over the OWNER'S restore points — a
+    /// per-user setting acting on a shared artifact, which is §4.4's identity mistake in a third file.
+    /// Not "was a boundary attempted" and not "is there a repository": a session that only looked
+    /// leaves the repository exactly as it found it, down to the bytes.</para>
+    /// </summary>
+    public bool RecordedSomethingThisSession { get; private set; }
+
     /// <summary>A new workspace is a new session's worth of that knowledge.</summary>
-    public void ResetForWorkspace() => CircuitRfWroteAFileThisSession = false;
+    public void ResetForWorkspace()
+    {
+        CircuitRfWroteAFileThisSession = false;
+        RecordedSomethingThisSession   = false;
+        _housekeeping.ResetForWorkspace();
+        _reportedOnOpen                = false;
+    }
+
+    /// <summary>R-rc6-4a's once-per-session pass. Held here because a session is what a window is.</summary>
+    private readonly SessionHousekeeping _housekeeping = new();
+
+    /// <summary>R-rc6-9's first cadence fires once per workspace, not once per boundary.</summary>
+    private bool _reportedOnOpen;
 
     public WorkspaceHistoryService(IMessageSink messages) => _messages = messages;
 
@@ -108,8 +132,11 @@ public sealed class WorkspaceHistoryService
             // refusal is identity, which is precisely the failure §4.4 says would otherwise be
             // invisible on a fresh machine.
             if (armed.Refusal is { } why)
+            {
+                _lastBoundaryFailed = true;
                 _messages.PostDiagnostic(RestorePointMessages.CouldNotTake(
                     WorkspaceCheckpoints.Describe(origin), why.Render()));
+            }
             return false;
         }
 
@@ -120,6 +147,10 @@ public sealed class WorkspaceHistoryService
             switch (d.Severity)
             {
                 case DiagnosticSeverity.Error:
+                    // R-rc6-10's third reason. A failed boundary means nothing since then is in the
+                    // history, which is the same thing to a designer as off or held — so it lights the
+                    // same indicator rather than a third one nobody would notice.
+                    _lastBoundaryFailed = true;
                     _messages.PostDiagnostic(RestorePointMessages.CouldNotTake(
                         WorkspaceCheckpoints.Describe(origin), d.Render()));
                     break;
@@ -137,6 +168,8 @@ public sealed class WorkspaceHistoryService
                     break;
             }
         }
+
+        if (outcome.Recorded) RecordedSomethingThisSession = true;
 
         Changed?.Invoke();
         return outcome.Recorded;
@@ -223,6 +256,198 @@ public sealed class WorkspaceHistoryService
         Changed?.Invoke();
         return result;
     }
+
+    // ── RC-6: the hold, off/on, retention (§5.6, §5.7, §12 Q4) ────────────────────────────────────
+
+    /// <summary>Which of §12 Q4's four situations this workspace is in (R-rc6-7).</summary>
+    public static RepositorySituation Situation(string? workspaceRoot)
+        => EnclosingRepository.Detect(workspaceRoot);
+
+    /// <summary>
+    /// <b>What the persistent indicator says</b> (R-rc6-10) — one indicator, three reasons, and the
+    /// reason is in its text. Held, off and a failure all mean the same thing to a designer:
+    /// <i>nothing is being recorded right now.</i>
+    ///
+    /// <para><b>A machine with no git answers <see cref="RecordingState.On"/> and shows nothing</b>,
+    /// which is not a lie by omission but R-rc3-3's silence: absence is harmless, and a designer who
+    /// never had this feature must not be given a badge about it.</para>
+    /// </summary>
+    public RecordingState State(string? workspaceRoot)
+    {
+        if (workspaceRoot is not { Length: > 0 } || !Directory.Exists(workspaceRoot)) return RecordingState.On;
+        if (GitCommand.For(workspaceRoot) is null) return RecordingState.On;
+
+        if (Situation(workspaceRoot).IsHeld) return RecordingState.Held;
+
+        var prefs   = AppPreferencesIo.Load();
+        var setting = WorkspaceRevisionSetting.Read(WorkspaceRevisionSetting.CwsPathFor(workspaceRoot));
+
+        if (!RevisionArming.IsArmed(prefs.RevisionKeepHistory ?? RevisionArming.KeepHistoryDefault, setting))
+            return RecordingState.Off;
+
+        return _lastBoundaryFailed ? RecordingState.Failed : RecordingState.On;
+    }
+
+    /// <summary>R-rc6-10's third reason. Set by the one place that reports a failed boundary.</summary>
+    private bool _lastBoundaryFailed;
+
+    /// <summary>
+    /// R-rc6-9's <b>first cadence</b>: one message on workspace open, saying what is not being kept,
+    /// why, and how to remedy it — <b>once per workspace</b>, never per boundary.
+    ///
+    /// <para>Returns the situation so the caller can put R-rc6-7a's question, which is the one row
+    /// this does not report: the workspace-root case is a QUESTION, and a message about it would be
+    /// answered by a dialog the user is already looking at.</para>
+    /// </summary>
+    public RepositorySituation ReportStateOnOpen(string? workspaceRoot)
+    {
+        var situation = Situation(workspaceRoot);
+        if (_reportedOnOpen || workspaceRoot is not { Length: > 0 }) return situation;
+        _reportedOnOpen = true;
+
+        if (EnclosingRepository.OpenReportFor(situation) is { } held)
+        {
+            _messages.PostDiagnostic(held);
+            return situation;
+        }
+
+        // R-rc6-14c. The flag lives in the .cws, so it TRAVELS: a clone or an archive of a workspace
+        // that was switched off arrives switched off, and the recipient's own preference does not
+        // override it. Reported at their first boundary rather than silently doing nothing — and only
+        // when the workspace itself recorded the answer, because "the preference is off everywhere" is
+        // a state the user set on this machine and does not need to be told about per workspace.
+        if (WorkspaceRevisionSetting.Read(WorkspaceRevisionSetting.CwsPathFor(workspaceRoot)) == false)
+            _messages.PostDiagnostic(HoldMessages.ArrivedSwitchedOff(
+                RevisionSwitch.WorkspaceName(workspaceRoot)));
+
+        return situation;
+    }
+
+    /// <summary>
+    /// R-rc6-9's <b>second cadence</b>: a refusal on an attempt, saying why <b>and not restating the
+    /// remedy</b> — the user has been told once, and repeating it on every attempt is how a message
+    /// becomes noise.
+    ///
+    /// <para>Returns true when it refused, so the caller stops. <b>The affordance stays visible</b>
+    /// (R-rc6-8): a hidden button is indistinguishable from a feature that was never there, and the
+    /// failure this whole feature guards against is a designer who believes they are protected and is
+    /// not.</para>
+    /// </summary>
+    public bool RefusedBecauseHeld(string? workspaceRoot)
+    {
+        if (!Situation(workspaceRoot).IsHeld) return false;
+        _messages.PostDiagnostic(HoldMessages.HeldRefusal());
+        return true;
+    }
+
+    /// <summary>
+    /// R-rc6-7a. Records one answer to <i>"this workspace already keeps a history of its own"</i>, and
+    /// the marker it writes is what makes the question asked <b>once</b> rather than on every open.
+    /// </summary>
+    public bool AnswerAdoption(string? workspaceRoot, AdoptionAnswer answer)
+    {
+        if (workspaceRoot is not { Length: > 0 } || GitCommand.For(workspaceRoot) is not { } git)
+            return false;
+
+        git.Identity ??= RevisionIdentity.Resolve(git);
+
+        var outcome = RepositoryAdoption.Apply(git, answer);
+        if (outcome.Diagnostic is { } d) _messages.PostDiagnostic(d);
+
+        Changed?.Invoke();
+        return outcome.Ok;
+    }
+
+    /// <summary>
+    /// R-rc6-11/R-rc6-14a. Stops recording for this workspace — <b>writing the setting, then one final
+    /// entry that records the change, and only then stopping.</b> Deletes nothing.
+    /// </summary>
+    public RevisionSwitchResult TurnOff(string? workspaceRoot) => Flip(workspaceRoot, on: false);
+
+    /// <summary>R-rc6-11's symmetry. Resumes the existing history and records the resumption, which is
+    /// the far end of R-rc6-13's gap.</summary>
+    public RevisionSwitchResult TurnOn(string? workspaceRoot) => Flip(workspaceRoot, on: true);
+
+    private RevisionSwitchResult Flip(string? workspaceRoot, bool on)
+    {
+        if (workspaceRoot is not { Length: > 0 }) return new RevisionSwitchResult(false, null, []);
+
+        bool preference = AppPreferencesIo.Load().RevisionKeepHistory ?? RevisionArming.KeepHistoryDefault;
+
+        var result = on ? RevisionSwitch.TurnOn(workspaceRoot, preference)
+                        : RevisionSwitch.TurnOff(workspaceRoot, preference);
+
+        foreach (var d in result.Diagnostics) _messages.PostDiagnostic(d);
+        if (result.Transition is not null) RecordedSomethingThisSession = true;
+
+        Changed?.Invoke();
+        return result;
+    }
+
+    /// <summary>
+    /// R-rc6-15. <b>An AI edit requested while recording is off says so before anything is modified,
+    /// and offers to turn it back on.</b>
+    ///
+    /// <para>Switching revision control off switches off the one checkpoint RC-4 makes non-switchable,
+    /// because it is §1.2 — the reason the feature exists. That is a legitimate thing to choose and an
+    /// illegitimate thing to stumble into, so the conflict is resolved out loud, at the moment it
+    /// matters. <b>The remedy is OFFERED rather than named</b> (§7A.3), which the Messages panel can
+    /// carry; the sentence still reads correctly with no button on the end, because a headless sink
+    /// drops the action.</para>
+    /// </summary>
+    public void ReportAiEditRefusedBecauseOff(string? workspaceRoot)
+        => _messages.PostAction(
+               MessageLevel.Warning,
+               HoldMessages.AiEditWhileOff().Render(),
+               HoldMessages.TurnRecordingOnAction,
+               () => { TurnOn(workspaceRoot); return System.Threading.Tasks.Task.CompletedTask; });
+
+    /// <summary>
+    /// R-rc6-4a. <b>The one housekeeping pass, at close, after the close checkpoint.</b> A sweep and
+    /// then a pack, and neither runs in a session that recorded nothing.
+    /// </summary>
+    public HousekeepingResult CloseHousekeeping(string? workspaceRoot)
+    {
+        if (Bind(workspaceRoot) is not { } git) return HousekeepingResult.Skipped;
+
+        var prefs = AppPreferencesIo.Load();
+
+        var result = _housekeeping.OnClose(
+            git,
+            RecordedSomethingThisSession,
+            new RetentionPolicy(
+                prefs.RevisionRetentionDays        ?? RevisionPreferenceDefaults.RetentionDays,
+                prefs.RevisionMinimumRestorePoints ?? RevisionPreferenceDefaults.MinimumRestorePoints),
+            (long)(prefs.RevisionPackThresholdMb ?? RevisionPreferenceDefaults.PackThresholdMb)
+                * 1024 * 1024);
+
+        foreach (var d in result.Diagnostics) _messages.PostDiagnostic(d);
+        return result;
+    }
+
+    /// <summary>
+    /// R-rc6-4. The restore points <b>including the ones retention thinned</b>, each thinned one
+    /// marked — because a state that silently vanished from the list is indistinguishable from one
+    /// that was destroyed.
+    /// </summary>
+    public IReadOnlyList<RestorePoint> ListIncludingThinned(string? workspaceRoot)
+        => Bind(workspaceRoot) is { } git ? RestorePoints.ListIncludingThinned(git) : [];
+
+    /// <summary>R-rc6-4's way back: one reference update, from the journal.</summary>
+    public bool BringBackThinned(string? workspaceRoot, RestorePoint point)
+    {
+        if (Bind(workspaceRoot) is not { } git) return false;
+
+        var outcome = RestorePoints.RestoreThinned(git, point);
+        if (outcome.Diagnostic is { } d) _messages.PostDiagnostic(d);
+
+        Changed?.Invoke();
+        return outcome.Ok;
+    }
+
+    /// <summary>R-rc6-13's data, for the browser RC-7 builds.</summary>
+    public IReadOnlyList<RevisionGap> Gaps(string? workspaceRoot)
+        => RevisionGaps.Find(ListIncludingThinned(workspaceRoot));
 
     // ── Shared ────────────────────────────────────────────────────────────────────────────────────
 

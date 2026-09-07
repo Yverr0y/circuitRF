@@ -97,8 +97,14 @@ public static class AgentContract
         // Held is decided BEFORE off, and the order matters: a repository circuitRF does not manage
         // is not circuitRF's to write into whatever any preference says, and reporting it as "off"
         // would invite an agent to suggest turning something on that would not help.
-        if (git.IsRepositoryRoot() && !GitRepository.IsManagedByCircuitRf(git))
-            return RevisionAvailability.Held;
+        //
+        // Through RC-6's own detection, not a `.git` test of its own (R-rc6-6). Two of the four rows
+        // are invisible to a test at the workspace root: a repository an ANCESTOR owns leaves
+        // `IsRepositoryRoot()` false, which rev 5's spelling reported as ON — so an agent would have
+        // been told it had a floor under it, in the one situation where a checkpoint must never be
+        // taken at all. And a workspace whose owner ANSWERED "don't keep history" carries a marker,
+        // which `IsManagedByCircuitRf` reports as managed.
+        if (!EnclosingRepository.Detect(git).MayRecord) return RevisionAvailability.Held;
 
         return RevisionArming.IsArmed(keepHistoryPreference, workspaceSetting)
             ? RevisionAvailability.On

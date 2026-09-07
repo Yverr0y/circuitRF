@@ -54,6 +54,8 @@ public static class CheckpointMessage
             CheckpointOrigin.WorkspaceClosed => "workspace closed",
             CheckpointOrigin.BeforeBatch     => "before: " + (trimmed.Length > 0 ? trimmed : UnnamedBatch),
             CheckpointOrigin.BeforeRestore   => "before going back",
+            CheckpointOrigin.RecordingOff    => "recording turned off",
+            CheckpointOrigin.RecordingOn     => "recording turned back on",
             _                                => UnnamedSavePoint,
         };
     }
@@ -65,6 +67,8 @@ public static class CheckpointMessage
         CheckpointOrigin.WorkspaceClosed => "workspace-closed",
         CheckpointOrigin.BeforeBatch     => "before-batch",
         CheckpointOrigin.BeforeRestore   => "before-restore",
+        CheckpointOrigin.RecordingOff    => "recording-off",
+        CheckpointOrigin.RecordingOn     => "recording-on",
         _                                => "save-point",
     };
 
@@ -73,6 +77,8 @@ public static class CheckpointMessage
         "workspace-closed" => CheckpointOrigin.WorkspaceClosed,
         "before-batch"     => CheckpointOrigin.BeforeBatch,
         "before-restore"   => CheckpointOrigin.BeforeRestore,
+        "recording-off"    => CheckpointOrigin.RecordingOff,
+        "recording-on"     => CheckpointOrigin.RecordingOn,
         _                  => CheckpointOrigin.SavePoint,
     };
 
@@ -119,6 +125,8 @@ public static class CheckpointMessage
         CheckpointOrigin.WorkspaceClosed => "circuitRF kept this state because the workspace was closed.",
         CheckpointOrigin.BeforeBatch     => "circuitRF kept this state before an assistant changed anything.",
         CheckpointOrigin.BeforeRestore   => "circuitRF kept this state before replacing it with an earlier one.",
+        CheckpointOrigin.RecordingOff    => "This is the last state circuitRF kept before recording was switched off.",
+        CheckpointOrigin.RecordingOn     => "This is the first state circuitRF kept after recording was switched back on.",
         _                                => "circuitRF kept this state.",
     };
 
@@ -164,9 +172,13 @@ public static class CheckpointMessage
 
         var parsedOrigin = Parse(origin);
 
-        // A save-point carries the mark by construction (§5.6 rule 6) — an old entry written before
-        // the trailer existed is still one, so the mark is derived rather than only read.
-        if (parsedOrigin == CheckpointOrigin.SavePoint) kept = true;
+        // Three origins carry the mark by construction (§5.6 rule 6, R-rc6-5a) — a save-point, and the
+        // pair that brackets an off period. Derived rather than only read, so an entry written before
+        // the trailer existed is still marked, and so a hand-edited message cannot un-keep the pair
+        // that gives a gap its ends.
+        if (parsedOrigin is CheckpointOrigin.SavePoint
+                         or CheckpointOrigin.RecordingOff
+                         or CheckpointOrigin.RecordingOn) kept = true;
 
         return new CheckpointMetadata(subject, sequence, parsedOrigin, intent, kept, leftOut);
     }

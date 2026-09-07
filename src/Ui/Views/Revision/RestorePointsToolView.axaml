@@ -5,7 +5,7 @@
              x:DataType="vm:RestorePointsTool"
              Background="{DynamicResource SystemChromeLowColor}">
 
-  <Grid RowDefinitions="Auto,*,Auto">
+  <Grid RowDefinitions="Auto,Auto,*,Auto">
 
     <!-- The save-point lives on the File menu too (R-rc5-4c). It is here as well because this is
          where a designer is standing when they decide a state is worth keeping. -->
@@ -23,9 +23,27 @@
               ToolTip.Tip="Never let this one be tidied away"
               Padding="6,2" Background="Transparent" BorderThickness="0" FontSize="11"
               Content="Keep permanently" />
+      <!-- R-rc6-4's way back. Shown only on a row retention tidied away, because on any other row it
+           has nothing to do and a button that does nothing teaches nothing. -->
+      <Button x:Name="BringBackButton" Click="OnBringBackClick"
+              IsVisible="{Binding Selected.Thinned, FallbackValue=False}"
+              ToolTip.Tip="Bring this one back into the list"
+              Padding="6,2" Background="Transparent" BorderThickness="0" FontSize="11"
+              Content="Bring this back" />
     </StackPanel>
 
-    <ListBox Grid.Row="1"
+    <!-- R-rc6-8. HELD MUST NOT LOOK LIKE ABSENT. RC-3 hides every affordance when git is missing,
+         because absent is harmless; held is a designer who may believe they are protected. So the
+         buttons above stay visible and REFUSE, and this line says why. A hidden button is
+         indistinguishable from a feature that was never there.
+
+         The remedy is deliberately NOT restated here (R-rc6-9's second cadence): it was said once, on
+         open, and repeating it on every glance is how a message becomes noise. -->
+    <TextBlock Grid.Row="1" Margin="6,2" FontSize="11" TextWrapping="Wrap"
+               IsVisible="{Binding IsRecordingBlocked}"
+               Text="{Binding RecordingState}" />
+
+    <ListBox Grid.Row="2"
              x:Name="PointsList"
              ItemsSource="{Binding Points}"
              SelectedItem="{Binding Selected}"
@@ -36,14 +54,14 @@
           <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,1">
             <TextBlock Grid.Column="0" Text="{Binding When}" FontFamily="monospace"
                        Opacity="0.75" Margin="0,0,8,0" VerticalAlignment="Center" />
-            <StackPanel Grid.Column="1">
+            <StackPanel Grid.Column="1" Opacity="{Binding RowOpacity}">
               <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
               <TextBlock Text="{Binding Origin}" FontSize="10" Opacity="0.6" />
               <TextBlock Text="{Binding LeftOutSummary}" FontSize="10" Opacity="0.9"
                          IsVisible="{Binding IsIncomplete}" TextWrapping="Wrap" />
             </StackPanel>
-            <TextBlock Grid.Column="2" Text="kept" FontSize="10" Opacity="0.6"
-                       VerticalAlignment="Center" IsVisible="{Binding Kept}" />
+            <TextBlock Grid.Column="2" Text="{Binding Mark}" FontSize="10" Opacity="0.6"
+                       VerticalAlignment="Center" IsVisible="{Binding HasMark}" />
           </Grid>
         </DataTemplate>
       </ListBox.ItemTemplate>
@@ -51,7 +69,7 @@
 
     <!-- R-rc5-14. Said where it could mislead: "restore my workspace" sounds more total than it is,
          because content in a referenced workspace is not part of this workspace's history. -->
-    <TextBlock Grid.Row="2" Margin="6,4" FontSize="10" Opacity="0.65" TextWrapping="Wrap"
+    <TextBlock Grid.Row="3" Margin="6,4" FontSize="10" Opacity="0.65" TextWrapping="Wrap"
                Text="Going back brings back the files in this workspace. Anything in a workspace it
                      refers to, and any simulation results, are left exactly as they are." />
   </Grid>

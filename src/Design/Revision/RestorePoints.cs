@@ -41,6 +41,20 @@ public sealed record RestorePoint(
 {
     /// <summary>True when a file was left out of this entry and the question has not been asked yet.</summary>
     public bool IsIncomplete => LeftOut.Count > 0;
+
+    /// <summary>
+    /// <b>Retention dropped this entry's reference, and it is listed anyway</b> (RC-6 R-rc6-4).
+    ///
+    /// <para>Thinning frees the objects; it does not destroy them — §4.5's <c>gc.pruneExpire = never</c>
+    /// forbids any pack from removing an unreachable object, and nothing reclaims unless a person asks
+    /// (§5.6a). So a thinned state is still there and still restorable, and hiding it from the list
+    /// would make rule 4's promise invisible: the designer would see a state disappear and have no way
+    /// to learn it had not gone. Marked rather than merged, because "still offered" and "kept for now"
+    /// are different promises.</para>
+    ///
+    /// <para>Not a positional member: every construction of this record predates it and means false.</para>
+    /// </summary>
+    public bool Thinned { get; init; }
 }
 
 /// <summary>
@@ -126,6 +140,85 @@ public static class RestorePoints
         return moved.Ok
             ? RevisionOutcome.Success
             : RevisionOutcome.Failed(GitFailures.Translate(moved, "marking a restore point to keep", git.WorkspaceRoot));
+    }
+
+    // ── Thinned entries (RC-6 R-rc6-4) ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Every restore point <b>including the ones retention thinned</b>, newest first, each thinned one
+    /// marked (<see cref="RestorePoint.Thinned"/>).
+    ///
+    /// <para><b>This is what makes "thins, never prunes" a promise to a designer rather than to a git
+    /// user.</b> A sweep that made states silently vanish from the list would be indistinguishable from
+    /// one that destroyed them, and the escape hatch that finds an unreachable commit —
+    /// <c>git fsck --unreachable</c> — is only an escape hatch for somebody who already knows git.</para>
+    ///
+    /// <para><b>The journal is the source, and an entry whose object is genuinely gone is dropped from
+    /// the list.</b> That is the state a reclaim leaves behind if its journal rewrite did not complete,
+    /// and offering a way back to it would be worse than not listing it at all.</para>
+    /// </summary>
+    public static IReadOnlyList<RestorePoint> ListIncludingThinned(GitCommand git)
+    {
+        var live    = List(git);
+        var journal = ThinningJournal.Read(git.WorkspaceRoot);
+        if (journal.Count == 0) return live;
+
+        var liveCommits = new HashSet<string>(live.Select(p => p.CommitId), StringComparer.OrdinalIgnoreCase);
+
+        List<RestorePoint> all = [.. live];
+        foreach (var entry in journal)
+        {
+            // Restored already, or journalled twice: the live entry wins and there is only ever one row.
+            if (liveCommits.Contains(entry.CommitId)) continue;
+            if (Describe(git, entry) is { } point) all.Add(point);
+        }
+
+        all.Sort((a, b) => b.Sequence.CompareTo(a.Sequence));
+        return all;
+    }
+
+    /// <summary>One thinned journal entry as a list row, or null when its object is no longer there.</summary>
+    private static RestorePoint? Describe(GitCommand git, ThinnedState entry)
+    {
+        var bodies = ReadObjects(git, [entry.CommitId]);
+        if (!bodies.TryGetValue(entry.CommitId, out string? raw)) return null;
+
+        var (treeId, takenUtc, message) = SplitCommitObject(raw);
+        if (treeId.Length == 0) return null;
+
+        var meta = CheckpointMessage.Read(message);
+
+        return new RestorePoint(
+            entry.Reference ?? CheckpointReferences.NameFor(meta.Sequence ?? entry.Sequence),
+            entry.CommitId, treeId,
+            meta.Sequence ?? entry.Sequence,
+            takenUtc,
+            meta.Origin,
+            meta.Subject.Length > 0 ? meta.Subject
+                                    : entry.Label ?? CheckpointMessage.SubjectFor(meta.Origin, meta.Intent),
+            meta.Intent,
+            meta.Kept,
+            meta.LeftOut) { Thinned = true };
+    }
+
+    /// <summary>
+    /// Puts a thinned entry back in the live list — <b>one reference update, which is the whole of
+    /// R-rc6-4's promise</b>.
+    ///
+    /// <para>The journal entry is removed on success, because the state is no longer thinned; leaving it
+    /// would list the same state twice and would let a later reclaim destroy something now live.</para>
+    /// </summary>
+    public static RevisionOutcome RestoreThinned(GitCommand git, RestorePoint point)
+    {
+        if (!point.Thinned) return RevisionOutcome.Success;
+
+        var updated = git.Run(["update-ref", point.Reference, point.CommitId]);
+        if (!updated.Ok)
+            return RevisionOutcome.Failed(GitFailures.Translate(
+                updated, "bringing back a restore point that had been tidied away", git.WorkspaceRoot));
+
+        ThinningJournal.Remove(git.WorkspaceRoot, [point.CommitId]);
+        return RevisionOutcome.Success;
     }
 
     // ── Reading objects in one process ────────────────────────────────────────────────────────────

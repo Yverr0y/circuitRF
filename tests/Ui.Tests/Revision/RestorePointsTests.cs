@@ -172,10 +172,10 @@ public class RestorePointsTests
     [Fact]
     public void OnlyThreeBoundariesExistAndNeitherARunNorATimerIsOne()
     {
-        // The origins ARE the boundaries — a fourth automatic one would have to be a fifth member
-        // here, so this is a structural statement rather than a search through prose.
+        // The origins ARE the boundaries — a new automatic one would have to be a new member here, so
+        // this is a structural statement rather than a search through prose.
         var origins = Enum.GetValues<CheckpointOrigin>();
-        Assert.Equal(4, origins.Length);
+        Assert.Equal(6, origins.Length);
         Assert.Contains(CheckpointOrigin.SavePoint, origins);
         Assert.Contains(CheckpointOrigin.WorkspaceClosed, origins);
         Assert.Contains(CheckpointOrigin.BeforeBatch, origins);
@@ -183,6 +183,14 @@ public class RestorePointsTests
         // The fourth is a restore's own pre-state, which is not a boundary a session reaches on its
         // own — it exists only because R-rc5-12a makes going back symmetric.
         Assert.Contains(CheckpointOrigin.BeforeRestore, origins);
+
+        // The fifth and sixth arrived with RC-6 and are not session boundaries either: each is taken
+        // exactly once, by an explicit request to stop or start recording (R-rc6-14a). They are the
+        // two ends of an off period, which is what lets it render as a GAP rather than as a stretch in
+        // which nothing happened to be worth keeping. No session reaches either on its own, and
+        // nothing takes one on a timer.
+        Assert.Contains(CheckpointOrigin.RecordingOff, origins);
+        Assert.Contains(CheckpointOrigin.RecordingOn,  origins);
 
         string source = ReadSource("src/Design/Revision/WorkspaceCheckpoints.cs")
                       + ReadSource("src/Design/Revision/WorkspaceArming.cs")

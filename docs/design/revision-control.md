@@ -1035,6 +1035,13 @@ taken is always reported.
 
 ### 5.6 Retention, and what a clock change must not do *(new in rev 2, answers §12 Q3)*
 
+**Status: BUILT 2026-09-06** · `brief-revision-control-6-retention-hold-and-off.md` ·
+`RetentionPolicy`/`RetentionSweep`/`SessionHousekeeping` in `src/Design/Revision/`, gated by
+`tests/Ui.Tests/Revision/RetentionHoldAndOffTests.cs`. **Two things the build settled that this section
+left open:** the bound is a quarter of the unkept entries and it cannot distinguish a clock jump from a
+long absence — that refusal is reported rather than tuned away; and rule 1's floor is computed over the
+UNKEPT entries only, since kept ones "count toward nothing". `src/Design/RESOLVED.md` has both.
+
 §1.3 argues the recovery window is weeks, because the failure being guarded against may not be noticed
 for weeks. That implies a retention policy — thin out old checkpoints, keep human-written commits
 forever — rather than unbounded growth. Retention is a user preference (§10A).
@@ -1103,6 +1110,10 @@ of them, and it is where circuitRF is already doing housekeeping.
 
 ### 5.6a Reclaiming space is explicit, and nothing does it unasked *(new in rev 5, §12 Q20)*
 
+**Status: BUILT 2026-09-06** · the operation was RC-3's; RC-6 added the journal it reads, and made
+`GitReclaim.Reclaim` remove the entries it acted on — an entry left behind offers a way back to a state
+that no longer exists.
+
 rev 3 wrote `gc.pruneExpire = never` into §4.5 and left *"until ordinary packing eventually reclaims
 them"* in rule 4. Both cannot be true, and the review found the document quietly relying on each.
 **§1.4 decides it: no automatic operation may destroy history, and reclaiming unreachable objects is
@@ -1122,6 +1133,11 @@ was thinned — so the reclaim protects the journal's newer entries for its dura
 entries it acted on.
 
 ### 5.7 Turning it off — off, paused, and removed *(new in rev 2)*
+
+**Status: BUILT 2026-09-06** · `RevisionSwitch` and `RevisionGaps` in `src/Design/Revision/`. The
+ordering is owned by one function so no caller can reverse it, and the two transition entries carry
+§5.6 rule 6's kept mark. **Turning it OFF never creates a repository** — arming to record that a
+designer does not want a history is §5.7a's surprise pointed at a directory.
 
 "Can I switch this off for a workspace, and does that delete the `.git`?" has three answers, and
 conflating any two of them is how a designer loses history they meant to keep.
@@ -1413,6 +1429,11 @@ machinery for the *referencing* half already exists (§7). What this section set
 does across that boundary.
 
 ### 7A.1 The rule everything else follows from
+
+**Status: BUILT 2026-09-06** · `EnclosingRepository` in `src/Design/Revision/`. **Two paths reached a
+repository that was not the workspace's own before this landed, and both were silent** — `git init` at
+a workspace root inside somebody else's repository, and a rewrite of a user's own configuration at the
+workspace root. `src/Design/RESOLVED.md`'s RC-6 entry has the analysis.
 
 > **circuitRF commits to exactly one repository: the one whose root is the open workspace.**
 

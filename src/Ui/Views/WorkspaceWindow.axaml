@@ -942,6 +942,40 @@
             </StackPanel>
         </Border>
 
+        <!-- ── Recording indicator (RC-6 R-rc6-9, R-rc6-10) ───────────────
+             THE PERSISTENT, NON-SCROLLING INDICATOR, and it is deliberately a strip at the foot of
+             the window rather than a Messages entry or a badge on the project tree.
+
+             §12 Q4 Refinement 2: a scrolling log is read once and then trained against, while "circuitRF
+             is recording nothing for this workspace" is permanent for the session and should be
+             displayed permanently. This is the measure most likely to actually prevent the false
+             belief §1.4 is written against.
+
+             It is NOT collapsed to a badge on the project-tree root, which the architecture offers as
+             the alternative: that panel can be closed, floated, or replaced by a workspace layout, so
+             the indicator would vanish exactly when the designer had stopped looking at the history.
+             The window always has a foot.
+
+             ONE indicator, THREE reasons — off, held, and a boundary that failed — because all three
+             mean the same thing to a designer: nothing is being recorded right now. The reason is in
+             the text beside it. Collapsed entirely when recording is normal: a badge that is always
+             there is a badge nobody reads, and on a machine with no git the feature does not exist. -->
+        <Border DockPanel.Dock="Bottom"
+                IsVisible="{Binding HasRecordingIndicator}"
+                Background="{DynamicResource SystemChromeLowColor}"
+                BorderBrush="{DynamicResource SystemBaseLowColor}"
+                BorderThickness="0,1,0,0"
+                Padding="8,3">
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <mi:MaterialIcon Kind="AlertCircleOutline" Width="14" Height="14" Opacity="0.8"/>
+                <TextBlock Text="{Binding RecordingIndicator}" FontSize="11" FontWeight="SemiBold"
+                           VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding RecordingIndicatorDetail}" FontSize="11" Opacity="0.7"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           ToolTip.Tip="{Binding RecordingIndicatorDetail}"/>
+            </StackPanel>
+        </Border>
+
         <!-- ── DockControl (the four Dock regions) ─────────────────────── -->
         <!-- RUNTIME NOTE: DockControl requires Dock.Avalonia styles to be loaded in
              App.axaml (see <StyleInclude Source="avares://Dock.Avalonia/..."/>).

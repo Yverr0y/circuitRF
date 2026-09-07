@@ -1,0 +1,83 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="CircuitRF.Ui.Views.Dialogs.AdoptExistingHistoryDialog"
+        Title="This workspace already keeps a history"
+        Width="560"
+        SizeToContent="Height"
+        MinHeight="260"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False">
+
+    <!--
+      §12 Q4 Refinement 3 (RC-6 R-rc6-7a). THE WORKSPACE-ROOT CASE IS A QUESTION, NOT AN OFFER.
+
+      rev 3 offered adoption as a one-click action and never said what the user was choosing between.
+      The user is asked, told what keeping their own configuration COSTS, and encouraged to adopt
+      circuitRF's. Three answers, not two — the third is the hold state, which stays available.
+
+      TWO THINGS THIS DIALOG IS BUILT AROUND:
+
+        1. The consequences of "keep my settings" are stated AT THE POINT OF CHOOSING, and they are
+           RECOVERABILITY consequences rather than tidiness ones — a fortnight instead of the promised
+           weeks, and an escape hatch gone at thirty days. Listing configuration keys at a reader who
+           did not come for them is not stating a consequence.
+
+        2. The line that must be drawn or "keep my settings" is read as "and run my hooks": the answer
+           governs REPOSITORY CONFIGURATION ONLY. Bypassing a hook is not a setting anyone can keep,
+           because it is not a property of the repository — it is the rule that an automatic recording
+           must neither fire somebody's tooling nor be blocked by it. That sentence is at the foot,
+           where it applies to all three answers.
+
+      The recommended answer is the default button AND says so in its own label. Nothing here is
+      destructive, so there is no reason to make the safe answer the awkward one.
+    -->
+
+    <Grid RowDefinitions="*,Auto" Margin="20,16,20,16">
+
+        <StackPanel Grid.Row="0" Spacing="10">
+            <TextBlock x:Name="HeadlineLabel"
+                       FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap"/>
+
+            <TextBlock FontSize="12" TextWrapping="Wrap" Opacity="0.85"
+                       Text="circuitRF keeps restore points so you can go back to how a workspace was earlier. It can look after this one's history for you, or leave your own settings exactly as they are."/>
+
+            <TextBlock x:Name="CostHeadingLabel"
+                       FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,6,0,0"
+                       Text="If you keep your own settings:"/>
+
+            <ItemsControl x:Name="CostList" Margin="8,0,0,0">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}" FontSize="12" TextWrapping="Wrap"
+                                   Opacity="0.85" Margin="0,0,0,4"/>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock x:Name="SurvivesLabel"
+                       FontSize="12" TextWrapping="Wrap" Opacity="0.7" Margin="0,4,0,0"/>
+
+            <TextBlock x:Name="SettingsOnlyLabel"
+                       FontSize="11" TextWrapping="Wrap" Opacity="0.65"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right"
+                    Spacing="8" Margin="0,16,0,0">
+            <Button x:Name="DeclineButton" FontSize="12" Padding="10,4"
+                    HorizontalContentAlignment="Center"
+                    IsCancel="True"
+                    Content="Don't keep a history here"
+                    Click="OnDeclineClick"/>
+            <Button x:Name="KeepButton" FontSize="12" Padding="10,4"
+                    HorizontalContentAlignment="Center"
+                    Content="Keep my settings"
+                    Click="OnKeepClick"/>
+            <Button x:Name="AdoptButton" FontSize="12" Padding="10,4"
+                    HorizontalContentAlignment="Center"
+                    IsDefault="True"
+                    Content="Use circuitRF's settings (recommended)"
+                    Click="OnAdoptClick"/>
+        </StackPanel>
+    </Grid>
+</Window>

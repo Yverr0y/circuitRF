@@ -171,7 +171,11 @@ internal static class History
         if (Bind(workspace, "history list", create: false, out string root, out var git, out int failure) is false)
             return failure;
 
-        var points = RestorePoints.List(git!);
+        // RC-6 R-rc6-4: the entries retention TIDIED AWAY are listed too, marked. Thinning drops a
+        // reference and leaves the objects, so those states are still there and still restorable — and
+        // a list that omitted them would make "thins, never prunes" invisible to the one caller who
+        // cannot open a panel to check.
+        var points = RestorePoints.ListIncludingThinned(git!);
         if (limit > 0 && points.Count > limit) points = [.. points.Take(limit)];
 
         JsonRun.History = new HistoryReportJson(Points: [.. points.Select(ToJson)]);
@@ -192,7 +196,7 @@ internal static class History
     /// change what the entry means — kept, and incomplete.</summary>
     private static string Describe(RestorePoint p)
     {
-        string marks = (p.Kept ? " [kept]" : "")
+        string marks = (p.Thinned ? " [tidied away]" : p.Kept ? " [kept]" : "")
                      + (p.IsIncomplete ? $" [incomplete: {string.Join(", ", p.LeftOut)}]" : "");
 
         return $"{p.Sequence,6}  {p.TakenUtc.ToLocalTime():yyyy-MM-dd HH:mm}  {p.Label}{marks}";
@@ -242,8 +246,16 @@ internal static class History
             return Usage();
         }
 
-        var point = RestorePoints.List(git!).FirstOrDefault(p => p.Sequence == wanted);
+        var point = RestorePoints.ListIncludingThinned(git!).FirstOrDefault(p => p.Sequence == wanted);
         if (point is null) return JsonRun.Fail(CliDiagnostics.HistoryNoSuchPoint(wanted));
+
+        // R-rc6-4. A thinned entry is put back in the live list first — one reference update from the
+        // journal — so that going back to it leaves a workspace whose history says where it came from.
+        if (point.Thinned)
+        {
+            var back = RestorePoints.RestoreThinned(git!, point);
+            if (!back.Ok) return JsonRun.Fail(back.Diagnostic!);
+        }
 
         var result = WorkspaceRestore.Restore(git!, point);
         foreach (var d in result.Diagnostics) JsonRun.Report(d);
@@ -328,7 +340,8 @@ internal static class History
         CheckpointMessage.Spell(p.Origin),
         p.Label,
         p.Kept,
-        p.LeftOut);
+        p.LeftOut,
+        p.Thinned);
 
     private static int Usage()
     {

@@ -2951,3 +2951,148 @@ list would reintroduce. It costs one `add` and one `diff-index` at close.
 count — a count reuses a number the moment retention drops one. It is safe because retention keeps the
 newest N unconditionally, so the largest is never the one thinned. The trailer carries the same number
 so an entry can be read without its reference name, and `RestorePoints.List` prefers the trailer.
+
+## RC-6 — retention, the enclosing-repository hold, and turning it off (2026-09-06)
+
+`docs/sonnet-briefs/brief-revision-control-6-retention-hold-and-off.md`. Below the firewall this added
+`RetentionPolicy`, `RetentionSweep`, `SessionHousekeeping`, `EnclosingRepository`,
+`RepositoryAdoption`, `RevisionSwitch`, `RevisionGaps` and `HoldMessages`, and gave `ThinningJournal`
+its writer. Gate: `tests/Ui.Tests/Revision/RetentionHoldAndOffTests.cs` (27 tests, ~58 s, every one of
+them in the routine tier).
+
+### The finding that mattered most: two paths reached a repository that was not the workspace's own
+
+R-rc6-6 says circuitRF writes to exactly one repository — the one whose root IS the open workspace —
+and the brief asks for any path by which a checkpoint could reach another to be reported. **Two
+existed, and both were silent.**
+
+- **`WorkspaceArming.Arm` planted a repository inside somebody else's tree.** For a workspace INSIDE an
+  enclosing repository, `git.IsRepositoryRoot()` answers false — it asks `rev-parse --show-prefix`,
+  which is non-empty there — so the arming path fell straight through to `GitRepository.Create`, which
+  runs `git init` **at the workspace root**. The result is a nested repository inside a project
+  somebody else owns, created because a designer opened a folder. Nothing committed to the ancestor, so
+  the worst outcome §7A.1 names did not occur; but §12 Q4's ancestor row was not implemented at all,
+  and the row it silently took instead was "start a fresh history here".
+- **It also rewrote a user's own repository configuration without asking.** For a repository the USER
+  created at the workspace root, `IsRepositoryRoot()` answers true and the marker is absent, so
+  `existed` was false and the same call ran `Configure` — every one of §4.5's rows, `--local`, into
+  their repository — plus `WorkspacePolicyFiles.Ensure`, which appends circuitRF's block to their
+  `.gitignore` and `.gitattributes`. That is §12 Q4 *Refinement 3*'s question answered "adopt" by
+  default, on their files, with nothing said.
+
+Both are fixed by `EnclosingRepository.Detect` running **before anything is created**, and by
+`WorkspaceArming` deriving `existed` from the detected placement rather than from a root test.
+
+**And `AgentContract.StateOf` had the same hole from the other side.** It tested
+`git.IsRepositoryRoot() && !IsManagedByCircuitRf(git)` for the held state, which reports the ancestor
+case as **on** — so an agent asking whether it had a floor under it was told yes, in the one situation
+where a checkpoint must never be taken at all. It now goes through the same detection. This is exactly
+the shape R-rc0-15 warned about: a `.git` directory alone cannot answer the question, and neither can
+its absence at one particular path.
+
+### `rev-parse --show-prefix` answers three rows; the fourth needs a walk, and the walk is not optional
+
+`rev-parse` goes UP and never down. A repository nested INSIDE the workspace is invisible to it, and
+handing such a directory to `git add` records a **gitlink** — mode `160000`, a pointer to that
+repository's current commit — which is §7A.5's "committed as something by the enclosing workspace",
+with a warning nobody reads. `NestedRepositories.Find` was already there from RC-3; RC-6 is what makes
+it part of the placement answer, and the gate asserts the checkpoint's tree contains **neither the
+files nor a `160000` entry**.
+
+### A clock a century in the past is not expressible, and the gate had to move the century
+
+The brief's gate 1 asks for every checkpoint's timestamp to be set a century in the past. **That
+fixture records nothing.** `GitWorkspace.SetClock` writes `GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE` as
+seconds since 1970, so 1926 is a negative number and git's commit path refuses it — the first
+`Take` returns `Recorded: false` and every assertion after it is vacuous. The gate puts the century on
+the SWEEP's clock instead (`now + 100 years`), which is identical arithmetic and is also the more
+honest reproduction: the hazard is a machine that woke up in the wrong century, not a repository that
+was written in one.
+
+### The bound cannot distinguish a clock jump from a long absence, and it is not tuned away
+
+R-rc6-3 refuses a pass that wants more than `RetentionPolicy.MaxFraction` (a quarter) of the unkept
+entries. **A designer returning after a long absence produces exactly the same data as a clock jump**:
+everything past the floor is legitimately expired, the pass is refused, and the message says the clock
+is wrong when it is not. There is no signal in the repository that separates the two — the newest entry
+is old in both cases — so the alternative is a policy that deletes in both, which §1.4 forbids. The
+refusal costs nothing (nothing is removed, and the floor already protects the newest N); what it costs
+is one message that is, in that one case, wrong about the cause. Recorded rather than tuned away.
+
+### Two writers with different retention preferences on one share: still open, and now bounded
+
+The architecture holds this open (§12) and asked this brief to report rather than settle it. **It did
+not arise in review as a new failure**, because §12 Q24's rule removes most of it: a session that
+recorded nothing sweeps nothing, so a colleague who only looked applies no preference at all. What
+remains is two people who both EDIT one shared workspace with different retention settings — whichever
+closed last applies theirs, bounded by R-rc6-1's floor and R-rc6-3's fraction, and nothing is destroyed
+either way because thinning never prunes. **Recommendation, not taken here: leave retention per-user.**
+Moving it into the `.cws` would make one designer's preference decide another's recovery window on
+their own machine, which is the same identity mistake §4.4 corrected — and the failure it would prevent
+(a state thinned earlier than you expected) is recoverable, while the one it would introduce is a
+setting you cannot change on a workspace you do not own.
+
+### `gate 7a` and `R-rc6-7a` cannot both be literally true, and the split matters
+
+R-rc6-7a says the management marker is written **whichever answer is given** — that is what makes the
+question asked once. Gate 7a says *keep my settings* leaves the repository's own configuration
+**byte-for-byte unchanged**. The marker IS repository configuration, so one of the two has to give.
+
+Built as: **`KeepUserSettings` writes only `circuitrf.managed` and `circuitrf.management`, and none of
+§4.5's rows, and neither policy file.** The gate asserts every §4.5 key is *absent* and that the
+config file is identical outside the `[circuitrf]` section. Dropping the marker instead was considered
+and rejected: without it the question returns on every open, which R-rc6-7a explicitly forbids, and
+`R-rc5-6g`'s advertised state becomes underivable. Putting the marker in `.git/circuitrf/` beside the
+journal would satisfy the letter of the gate and keeps the archive-carries/clone-does-not property —
+but it splits "did circuitRF create this" across two homes, which is the drift R-rc0-15 chose one home
+to avoid.
+
+### A clone presents as HELD, not as off — and that is R-rc0-15 working
+
+R-rc6-14c's gate clones a switched-off workspace and asserts the flag travelled. It does. But the
+clone's *state* is `Held`, not `Off`: git does not clone a repository's config, so the management
+marker does not travel — which is the exact property R-rc0-15 chose config placement FOR — and the
+clone therefore presents as somebody else's repository at the workspace root and is asked about. It
+records nothing either way, which is what R-rc6-14c asks. **That it arrives held rather than off is
+RC-9's to settle**; the gate pins the behaviour so it is visible rather than discovered.
+
+### Thinning drops the reference FIRST and journals SECOND, and the order is the failure analysis
+
+Journalling first and dropping second lists the same state **twice** on a crash — once live and once
+tidied away — which is the one thing a list a designer trusts must not do. This order risks the
+opposite: an unreachable state with no record, recoverable through `git fsck --unreachable`. One is
+recoverable and the other is not, so this is the direction that fails safely. **A journal write that
+fails stops the sweep** rather than carrying on dropping references it can no longer record.
+
+### The transition checkpoints need `forceRecord`, and it is the only caller
+
+`WorkspaceCheckpoints.Take` suppresses a recording whose tree equals the newest entry's (R-rc5-5a),
+which is exactly right everywhere else and wrong for the two recording transitions: a transition is not
+a fact about CONTENT but about whether recording is happening, and a suppressed one leaves the gap with
+one end — which renders as the quiet interval §5.7 forbids. `forceRecord` exists for those two callers
+and nothing else, and both are also `IsAlwaysKept`, because a pair retention could thin is a gap
+retention could erase.
+
+### Turning recording OFF must never create a repository
+
+`RevisionSwitch.TurnOff` uses `ExistingRepository`, not `WorkspaceArming.Arm`. Arming would `git init`
+in order to record that the designer does not want a history, which is absurd and is R-rc5-4a's
+surprise pointed at a directory. `TurnOn` does go through arming, because there creating one is exactly
+what was just asked for. A workspace with no history yet records no transition at all, and there is no
+gap because there was never anything either side of it.
+
+### `GitReclaim` now removes the journal entries it acted on
+
+It has to: after the prune those objects are gone, and an entry left in the journal offers a designer a
+way back to a state that no longer exists — and `RestorePoints.ListIncludingThinned` would keep
+rendering a row for it. Removed AFTER the prune, so a failure between the two leaves an entry pointing
+at nothing rather than a state pointing at nobody.
+
+### The journal survives a `git gc` and does not survive a `git clone` — both intended
+
+`.git/circuitrf/thinned.jsonl` is not an object, a reference or a config key, so `git gc` does not look
+at it and `git clone` does not copy it. Both are the answers this design wants: a routine pack must not
+disturb the record of what was thinned, and a clone must not inherit one machine's thinning history
+about restore points the clone does not have (`refs/crf/` does not travel either — R-rc5-1a). Verified
+by the gate's own scratch-copy pack and by the clone in R-rc6-14c's fixture, in which the arriving
+workspace has neither the journal nor the entries it names.

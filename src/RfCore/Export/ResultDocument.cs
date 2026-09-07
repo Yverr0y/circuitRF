@@ -394,18 +394,25 @@ namespace RfCore.Export
     /// is user-writable state, and it supplies the label a human reads and nothing else.</param>
     /// <param name="Taken">When, in ISO-8601 UTC, for that label.</param>
     /// <param name="Origin">How it came about: <c>save-point</c>, <c>workspace-closed</c>,
-    /// <c>before-batch</c> or <c>before-restore</c>.</param>
+    /// <c>before-batch</c>, <c>before-restore</c>, <c>recording-off</c> or <c>recording-on</c>.</param>
     /// <param name="Label">The line a designer reads.</param>
     /// <param name="Kept">Whether retention may never thin it.</param>
     /// <param name="LeftOut">Paths left out at a boundary nobody was at. A non-empty list means the
     /// entry is INCOMPLETE and says so.</param>
+    /// <param name="Thinned">
+    /// Whether retention has tidied this one away. <b>It is still listed and still restorable</b> —
+    /// thinning drops the pointer and leaves the state, and nothing reclaims it unless a person asks.
+    /// Omitted when false, which is every entry written before RC-6.
+    /// </param>
     public sealed record RestorePointJson(
         long                  Sequence,
         string                Taken,
         string                Origin,
         string                Label,
         bool                  Kept,
-        IReadOnlyList<string> LeftOut);
+        IReadOnlyList<string> LeftOut,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        bool                  Thinned = false);
 
     public sealed record ReferenceReportJson(
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

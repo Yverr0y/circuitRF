@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace CircuitRF.Design.Revision;
 
 /// <summary>
-/// The journal of what retention thinned — <b>read here, written by RC-6</b>
+/// The journal of what retention thinned — <b>the way back after a sweep</b>
 /// (<c>docs/design/revision-control.md</c> §5.6 rule 4, §5.6a).
 ///
 /// <para><b>Why a journal exists at all.</b> Retention thins and never prunes: dropping a checkpoint
@@ -82,14 +82,80 @@ public static class ThinningJournal
 
     /// <summary>One entry's line. Public so RC-6's writer and this reader cannot disagree.</summary>
     public static string Format(ThinnedState entry)
-        => JsonSerializer.Serialize(new JournalLine(entry.CommitId, entry.ThinnedUtc));
+        => JsonSerializer.Serialize(new JournalLine(
+               entry.CommitId, entry.ThinnedUtc, entry.Reference, entry.Sequence, entry.Label));
+
+    // ── Writing (RC-6) ────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Appends one dropped reference to the journal, creating <c>.git/circuitrf/</c> if this is the
+    /// first.
+    ///
+    /// <para><b>Appended, never rewritten</b> (§5.6 rule 4), so a sweep records what it dropped without
+    /// reading and re-serialising everything before it — and so a process killed mid-sweep leaves a
+    /// journal that is short rather than one that is corrupt.</para>
+    ///
+    /// <para><b>Called AFTER the reference is gone, never before.</b> A journal entry for a reference
+    /// that still resolves would list the same state twice — once live and once thinned — which is the
+    /// one thing a list a designer trusts must not do. A failure to append therefore loses the way back
+    /// to a state, which is why it returns false rather than throwing: the sweep reports it and stops
+    /// rather than carrying on dropping references it can no longer record.</para>
+    /// </summary>
+    public static bool Append(string workspaceRoot, ThinnedState entry)
+    {
+        string path = PathFor(workspaceRoot);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.AppendAllText(path, Format(entry) + "\n");
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Removes the entries a reclaim acted on — <b>the one operation that makes this file shrink</b>
+    /// (§5.6a). Everything not named survives, in order.
+    ///
+    /// <para>A rewrite, and the only one: after a reclaim the objects behind those entries are gone, so
+    /// leaving them listed would offer a designer a way back to a state that no longer exists. Written
+    /// to a temporary file and moved into place, so a crash mid-rewrite leaves the old journal rather
+    /// than half of a new one.</para>
+    /// </summary>
+    public static bool Remove(string workspaceRoot, IEnumerable<string> commitIds)
+    {
+        var drop = new HashSet<string>(commitIds, StringComparer.OrdinalIgnoreCase);
+        if (drop.Count == 0) return true;
+
+        string path = PathFor(workspaceRoot);
+        try
+        {
+            if (!File.Exists(path)) return true;
+
+            var keep = Read(workspaceRoot).Where(e => !drop.Contains(e.CommitId)).ToList();
+
+            string temporary = path + ".new";
+            File.WriteAllText(temporary, string.Concat(keep.Select(e => Format(e) + "\n")));
+            File.Move(temporary, path, overwrite: true);
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
 
     private static ThinnedState? TryParse(string line)
     {
         try
         {
             var parsed = JsonSerializer.Deserialize<JournalLine>(line);
-            return parsed is { Commit: { Length: > 0 } id } ? new ThinnedState(id, parsed.Thinned) : null;
+            return parsed is { Commit: { Length: > 0 } id }
+                ? new ThinnedState(id, parsed.Thinned, parsed.Reference, parsed.Sequence, parsed.Label)
+                : null;
         }
         catch (JsonException)
         {
@@ -100,5 +166,8 @@ public static class ThinningJournal
 
     private sealed record JournalLine(
         [property: System.Text.Json.Serialization.JsonPropertyName("commit")]  string         Commit,
-        [property: System.Text.Json.Serialization.JsonPropertyName("thinned")] DateTimeOffset Thinned);
+        [property: System.Text.Json.Serialization.JsonPropertyName("thinned")] DateTimeOffset Thinned,
+        [property: System.Text.Json.Serialization.JsonPropertyName("ref")]     string?        Reference = null,
+        [property: System.Text.Json.Serialization.JsonPropertyName("seq")]     long           Sequence  = 0,
+        [property: System.Text.Json.Serialization.JsonPropertyName("label")]   string?        Label     = null);
 }

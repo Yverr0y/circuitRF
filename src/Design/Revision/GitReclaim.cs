@@ -12,7 +12,20 @@ namespace CircuitRF.Design.Revision;
 /// the journal exists. git's own expiry is by OBJECT AGE, so a two-year-old restore point thinned
 /// yesterday would be destroyed by "thinned more than a month ago" without this.
 /// </param>
-public sealed record ThinnedState(string CommitId, DateTimeOffset ThinnedUtc);
+/// <param name="Reference">
+/// The reference the sweep dropped. <b>What makes restoring a thinned entry ONE reference update</b>
+/// (RC-6 R-rc6-4) rather than an escape-hatch expedition through <c>git fsck --unreachable</c>.
+/// Null on an entry written before this field existed, which lists but cannot be restored in place —
+/// <see cref="CheckpointReferences.NameFor"/> rebuilds it from <paramref name="Sequence"/> instead.
+/// </param>
+/// <param name="Sequence">R-rc5-8's ordering, so a thinned entry sits where it belongs in the list.</param>
+/// <param name="Label">The line the list shows. Carried so listing a thinned entry costs no object read.</param>
+public sealed record ThinnedState(
+    string         CommitId,
+    DateTimeOffset ThinnedUtc,
+    string?        Reference = null,
+    long           Sequence  = 0,
+    string?        Label     = null);
 
 /// <summary>What a reclaim did.</summary>
 /// <param name="Reclaimed">The journal entries acted on — RC-6 removes exactly these.</param>
@@ -105,6 +118,13 @@ public static class GitReclaim
             if (!pruned.Ok)
                 return new ReclaimResult([], journal,
                     GitFailures.Translate(pruned, "reclaiming space", git.WorkspaceRoot));
+
+            // The journal shrinks HERE and nowhere else (§5.6a). The objects behind these entries are
+            // gone, so leaving them listed would offer a designer a way back to a state that no longer
+            // exists — which is the one thing a list they trust must not do. Removed AFTER the prune,
+            // so a failure between the two leaves an entry pointing at nothing rather than a state
+            // pointing at nobody.
+            ThinningJournal.Remove(git.WorkspaceRoot, reclaim.Select(e => e.CommitId));
 
             return new ReclaimResult(reclaim, protect);
         }

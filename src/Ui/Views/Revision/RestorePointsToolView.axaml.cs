@@ -23,4 +23,7 @@ public partial class RestorePointsToolView : UserControl
 
     private void OnKeepClick(object? sender, RoutedEventArgs e)
         => (DataContext as RestorePointsTool)?.Keep();
+
+    private void OnBringBackClick(object? sender, RoutedEventArgs e)
+        => (DataContext as RestorePointsTool)?.BringBack();
 }

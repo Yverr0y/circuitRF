@@ -283,7 +283,13 @@ public class RevisionControlSettingsTests
 
         string code = StripCode(Dialog("RevisionControlSettingsView.axaml.cs"));
         var handler = Section(code, "OnWorkspaceRevisionChanged");
-        Assert.Contains("WorkspaceRevisionSetting.Write", handler);
+
+        // It writes the WORKSPACE'S setting, through RC-6's ordered transition rather than by writing
+        // the flag directly (R-rc6-14a): the .cws first, then one entry recording the change, and only
+        // then does circuitRF stop writing. Reversed, the flag is set, nothing records it, and the
+        // history stops with no entry saying why — which is invisible from the flag alone. What this
+        // gate is actually about is unchanged: whatever it writes, it is not an application preference.
+        Assert.Contains("RevisionSwitch.Turn", handler);
         Assert.DoesNotContain("AppPreferencesIo.Update", handler);
     }
 

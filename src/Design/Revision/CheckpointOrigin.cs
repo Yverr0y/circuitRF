@@ -33,4 +33,22 @@ public enum CheckpointOrigin
     /// vocabulary in it.</para>
     /// </summary>
     BeforeRestore,
+
+    /// <summary>
+    /// <b>The last thing recorded before recording was switched off</b> (RC-6 R-rc6-14a, §5.7).
+    ///
+    /// <para>Turning it off writes the <c>.cws</c>, then takes this, and only THEN stops writing.
+    /// Reverse those two and the flag is set, circuitRF is already off, nothing is recorded, and the
+    /// history simply stops with no entry saying why — which is precisely what §5.7 claims does not
+    /// happen. <b>Always kept</b> (R-rc6-5a): a pair retention could thin is a gap retention could
+    /// erase, and an erased gap renders as exactly the quiet interval §5.7 forbids.</para>
+    /// </summary>
+    RecordingOff,
+
+    /// <summary>
+    /// <b>The first thing recorded after recording was switched back on.</b> The other end of the gap,
+    /// and kept for the same reason: two entries are what let a browser render an off period as a gap
+    /// rather than as an interval in which nothing happened to be worth keeping.
+    /// </summary>
+    RecordingOn,
 }

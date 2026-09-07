@@ -140,7 +140,21 @@ public partial class WorkspaceViewModel
 
         LastCloseCheckpointMs = timer.Elapsed.TotalMilliseconds;
         Trace.WriteLine($"[circuitRF] close restore point: {timer.Elapsed.TotalMilliseconds:F0} ms");
+
+        // RC-6 R-rc6-4a. The one housekeeping pass — a retention sweep and then packing — AFTER the
+        // close entry and in the same window. It is here rather than at each of this method's three
+        // callers because "at most once per session" is a property of the session, and three callers
+        // agreeing about it is how it becomes true in two of them.
+        //
+        // A session that recorded nothing does neither (§12 Q24): a colleague's glance at a shared
+        // workspace must not run a sweep under the reader's retention preference over the owner's
+        // restore points.
+        LastCloseHousekeeping = History.CloseHousekeeping(root);
     }
+
+    /// <summary>What the close-time sweep and pack did, if anything. R-rc0-8's measurement, read by
+    /// the write-up rather than asserted in a timing test.</summary>
+    public HousekeepingResult? LastCloseHousekeeping { get; private set; }
 
     /// <summary>What the last close boundary cost, in milliseconds. R-rc0-8's measurement, read by
     /// the write-up rather than asserted in a timing test.</summary>
@@ -157,11 +171,24 @@ public partial class WorkspaceViewModel
     {
         if (_factory.RestorePointsTool is not { } tool) return;
 
-        tool.RestoreRequested   ??= point => _ = GoBackTo(point);
-        tool.KeepRequested      ??= point => { History.Keep(WorkspaceRootDir, point); };
-        tool.SavePointRequested ??= () => _ = KeepThisState(Views.WorkspaceLocator.WindowFor(this));
+        tool.RestoreRequested    ??= point => _ = GoBackTo(point);
+        tool.KeepRequested       ??= point => { History.Keep(WorkspaceRootDir, point); };
+        tool.SavePointRequested  ??= () => _ = KeepThisState(Views.WorkspaceLocator.WindowFor(this));
+        tool.BringBackRequested  ??= point => { History.BringBackThinned(WorkspaceRootDir, point); };
 
-        tool.SetPoints(History.List(WorkspaceRootDir), WorkspaceRootDir is not null);
+        // RC-6 R-rc6-4. The list carries the entries retention TIDIED AWAY as well as the live ones,
+        // each marked. A state that silently vanished from the list is indistinguishable to a designer
+        // from one that was destroyed — and this one has not been, and can be brought back.
+        //
+        // R-rc6-8/R-rc6-10: the buttons stay visible whatever the state, and this line is what makes a
+        // hold or an off state legible instead of looking like a feature that was never built.
+        var state = History.State(WorkspaceRootDir);
+        tool.SetPoints(
+            History.ListIncludingThinned(WorkspaceRootDir),
+            WorkspaceRootDir is not null,
+            state == RecordingState.On ? "" : HoldMessages.IndicatorDetailFor(state));
+
+        RefreshRecordingIndicator();
     }
 
     // ── Going back (§5.8) ─────────────────────────────────────────────────────────────────────────
@@ -248,6 +275,18 @@ public partial class WorkspaceViewModel
     {
         History.ResetForWorkspace();
 
+        // RC-6 R-rc6-9's first cadence, and R-rc6-14c's. One message saying what is NOT being kept and
+        // why — for the ancestor row, the declined row, and a workspace whose own setting travelled
+        // here switched off. It reads only.
+        var situation = History.ReportStateOnOpen(WorkspaceRootDir);
+        RefreshRecordingIndicator();
+
+        // R-rc6-7a. The workspace-root row is the one that is a QUESTION rather than a report, and it
+        // is asked ONCE — the answer goes in the repository's own marker, so a reopen does not ask
+        // again. Deferred off the open path so a dialog never sits in front of the thing the designer
+        // actually asked for.
+        if (situation.NeedsAnAnswer) _ = AskAboutExistingHistory();
+
         // R-rc5-12c. A restore over thousands of files on a share can be cut off by a crash or a
         // dropped connection, and what it leaves is §1.3's failure exactly: a workspace that opens, is
         // well-formed, and is half of two states. Detected, never simulated.
@@ -268,5 +307,91 @@ public partial class WorkspaceViewModel
         History.FinishInterruptedRestore(WorkspaceRootDir, inFlight);
         InterruptedRestore = null;
         await ReloadWorkspaceAfterFilesChangedUnderneath();
+    }
+
+    // ── RC-6: the indicator, the question, and switching recording off (§5.6, §5.7, §12 Q4) ───────
+
+    /// <summary>
+    /// <b>The persistent, non-scrolling indicator</b> (R-rc6-9, R-rc6-10) — the measure most likely to
+    /// actually prevent the false belief.
+    ///
+    /// <para>A scrolling log is read once and then trained against; the state is permanent for the
+    /// session and is therefore displayed permanently, in the workspace window's own status strip.
+    /// <b>One indicator, three reasons</b> — off, held, and a boundary that failed — because all three
+    /// mean the same thing to a designer: nothing is being recorded right now. Three separate
+    /// indicators would be three things to notice.</para>
+    ///
+    /// <para>Empty when recording is normal. A badge that is always there is a badge nobody reads, and
+    /// on a machine with no git the feature does not exist at all (R-rc3-3).</para>
+    /// </summary>
+    public string RecordingIndicator
+    {
+        get => _recordingIndicator;
+        private set { if (_recordingIndicator != value) { _recordingIndicator = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasRecordingIndicator)); } }
+    }
+    private string _recordingIndicator = "";
+
+    /// <summary>The sentence behind the indicator, which is where the reason lives.</summary>
+    public string RecordingIndicatorDetail
+    {
+        get => _recordingIndicatorDetail;
+        private set { if (_recordingIndicatorDetail != value) { _recordingIndicatorDetail = value; OnPropertyChanged(); } }
+    }
+    private string _recordingIndicatorDetail = "";
+
+    /// <summary>Whether the strip shows anything at all.</summary>
+    public bool HasRecordingIndicator => RecordingIndicator.Length > 0;
+
+    /// <summary>Re-reads the recording state. Cheap, and called wherever it could have changed.</summary>
+    public void RefreshRecordingIndicator()
+    {
+        var state = History.State(WorkspaceRootDir);
+        RecordingIndicator       = HoldMessages.IndicatorFor(state);
+        RecordingIndicatorDetail = HoldMessages.IndicatorDetailFor(state);
+    }
+
+    /// <summary>
+    /// R-rc6-7a. <b>The workspace-root case is a QUESTION, not an offer.</b>
+    ///
+    /// <para>rev 3 offered adoption as a one-click action and never said what the user was choosing
+    /// between. They are asked, told what keeping their own configuration costs — specifically, in
+    /// recoverability terms rather than tidiness ones — and encouraged to adopt circuitRF's. Three
+    /// answers, not two.</para>
+    ///
+    /// <para><b>Cancelling is not a fourth answer.</b> A closed dialog records nothing, so the question
+    /// is put again next time the workspace opens — which is right: an unanswered question is not an
+    /// answer, and the alternative is a workspace held forever because somebody pressed Escape.</para>
+    /// </summary>
+    public async Task AskAboutExistingHistory()
+    {
+        if (WorkspaceRootDir is not { } root) return;
+        if (Views.WorkspaceLocator.WindowFor(this) is not { } owner) return;
+
+        var answer = await new AdoptExistingHistoryDialog(Path.GetFileName(root)).ShowDialog<AdoptionAnswer?>(owner);
+        if (answer is not { } chosen) return;
+
+        History.AnswerAdoption(root, chosen);
+        RefreshRecordingIndicator();
+        RefreshRestorePointsPanel();
+    }
+
+    /// <summary>
+    /// R-rc6-11. Stops recording for this workspace, or starts it again — <b>through the ordered
+    /// transition</b>, never by writing the flag alone.
+    ///
+    /// <para>Reverse the order and the flag is set, circuitRF is already off, nothing is recorded, and
+    /// the history simply stops with no entry saying why (R-rc6-14a). That is invisible from the flag,
+    /// which is why the ordering lives below the firewall in one function rather than at each
+    /// caller.</para>
+    /// </summary>
+    public void SetRecordingForThisWorkspace(bool on)
+    {
+        if (WorkspaceRootDir is null) return;
+
+        if (on) History.TurnOn(WorkspaceRootDir);
+        else    History.TurnOff(WorkspaceRootDir);
+
+        RefreshRecordingIndicator();
+        RefreshRestorePointsPanel();
     }
 }

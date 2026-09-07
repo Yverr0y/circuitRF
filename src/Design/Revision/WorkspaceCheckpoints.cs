@@ -59,18 +59,26 @@ public static class WorkspaceCheckpoints
     /// <paramref name="exclusions"/>.
     /// </param>
     /// <param name="exclusions">Workspace-relative paths the caller has already decided to leave out.</param>
-    /// <param name="kept">Whether retention may never thin this one. A save-point is always kept
-    /// (R-rc5-1f) whatever the caller says.</param>
+    /// <param name="kept">Whether retention may never thin this one. A save-point and the two
+    /// recording transitions are always kept (R-rc5-1f, R-rc6-5a) whatever the caller says.</param>
+    /// <param name="forceRecord">
+    /// <b>Record even when the tree is unchanged</b> — for the two recording transitions only
+    /// (R-rc6-14a). Everywhere else the tree test is exactly right: a boundary whose state is already
+    /// in the history adds nothing. A transition is not a fact about CONTENT, though; it is the fact
+    /// that recording stopped or started, and suppressing it would leave the gap with one end, which
+    /// is what makes it render as a quiet interval rather than as a gap.
+    /// </param>
     public static CheckpointOutcome Take(
         GitCommand             git,
         CheckpointOrigin       origin,
         string?                label,
-        bool                   attended  = true,
-        IReadOnlyList<string>? exclusions = null,
-        bool                   kept       = false)
+        bool                   attended    = true,
+        IReadOnlyList<string>? exclusions  = null,
+        bool                   kept        = false,
+        bool                   forceRecord = false)
     {
         var newest       = RestorePoints.Newest(git);
-        string? previous = newest?.TreeId;
+        string? previous = forceRecord ? null : newest?.TreeId;
 
         List<string> leaveOut   = [.. exclusions ?? []];
         List<Diagnostic> notes  = [];
@@ -88,11 +96,12 @@ public static class WorkspaceCheckpoints
             }
         }
 
-        long   sequence  = CheckpointReferences.NextSequence(git);
-        string reference = CheckpointReferences.NameFor(sequence);
-        string message   = CheckpointMessage.Build(
+        bool   alwaysKept = IsAlwaysKept(origin);
+        long   sequence   = CheckpointReferences.NextSequence(git);
+        string reference  = CheckpointReferences.NameFor(sequence);
+        string message    = CheckpointMessage.Build(
             origin, label, sequence,
-            kept: kept || origin == CheckpointOrigin.SavePoint,
+            kept: kept || alwaysKept,
             leftOut: leaveOut);
 
         var result = GitCheckpoint.Record(git, reference, message, previous, leaveOut);
@@ -111,7 +120,7 @@ public static class WorkspaceCheckpoints
         var point = new RestorePoint(
             reference, result.CommitId!, result.TreeId!, sequence, DateTimeOffset.UtcNow,
             origin, CheckpointMessage.SubjectFor(origin, label), label?.Trim(),
-            kept || origin == CheckpointOrigin.SavePoint, leaveOut);
+            kept || alwaysKept, leaveOut);
 
         return new CheckpointOutcome(true, point, leaveOut, notes, result.TreeId);
     }
@@ -126,6 +135,21 @@ public static class WorkspaceCheckpoints
         CheckpointOrigin.WorkspaceClosed => "this workspace as it was when you closed it",
         CheckpointOrigin.BeforeBatch     => "this workspace as it was before an assistant changed it",
         CheckpointOrigin.BeforeRestore   => "this workspace as it was before going back",
+        CheckpointOrigin.RecordingOff    => "this workspace as it was when you turned recording off",
+        CheckpointOrigin.RecordingOn     => "this workspace as it was when you turned recording back on",
         _                                => "this workspace",
     };
+
+    /// <summary>
+    /// The three origins retention may never thin, whatever the caller passes (R-rc5-1f, R-rc6-5a).
+    ///
+    /// <para>A save-point, because the user's judgement about what matters beats any heuristic and
+    /// thinning it would discard exactly that judgement. And the pair that brackets an off period,
+    /// because they are what gives the gap its ends — a pair retention could thin is a gap retention
+    /// could erase.</para>
+    /// </summary>
+    public static bool IsAlwaysKept(CheckpointOrigin origin)
+        => origin is CheckpointOrigin.SavePoint
+                  or CheckpointOrigin.RecordingOff
+                  or CheckpointOrigin.RecordingOn;
 }

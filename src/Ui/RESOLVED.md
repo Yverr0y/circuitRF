@@ -21782,3 +21782,71 @@ never ran DocGen — `settings-revision-control.svg` did not exist at all, which
 commit.** The two nondeterministic figure families were reverted as usual — the ~4.8° rotation in
 `analysis-editor-hb-dark.svg` and harmonicaRF's live "HB solves · fps" readout in
 `harmonica-instrument.svg` and the page that embeds it.
+
+## RC-6 — the hold, the persistent indicator, and switching recording off (2026-09-06)
+
+`docs/sonnet-briefs/brief-revision-control-6-retention-hold-and-off.md`. The window half of retention,
+the enclosing-repository hold and off/on. Every decision is below the firewall (see
+`src/Design/RESOLVED.md`'s RC-6 entry, which carries the findings that matter); what is here is what
+only a window has — the preference, the Messages sink, a dialog, and somewhere permanent to put a
+badge. Gate: `tests/Ui.Tests/Revision/RetentionHoldAndOffTests.cs`.
+
+### The persistent indicator's home: a strip at the FOOT of the workspace window
+
+R-rc6-9 asks for "a status-bar item or a badge on the project-tree root", and calls it the measure most
+likely to actually prevent the false belief. **circuitRF had no status bar** — `WorkspaceWindow.axaml`
+is a `DockPanel` with a menu, a toolbar and the dock control, and nothing at the bottom — so one of the
+two had to be built.
+
+**The project-tree badge was rejected, and the reason is that it is not persistent.** That panel can be
+closed, floated, or replaced wholesale by a Window Layout, and it is closed most often by exactly the
+designer who is heads-down in a layout and not thinking about history. A badge that vanishes when the
+designer stops looking at the history panel is the opposite of what R-rc6-9 asks for. The window always
+has a foot, so a `DockPanel.Dock="Bottom"` border is where it went — collapsed entirely
+(`IsVisible="{Binding HasRecordingIndicator}"`) when recording is normal, because a badge that is
+always there is a badge nobody reads.
+
+**One indicator, three reasons** (R-rc6-10) — off, held, and a boundary that failed — with the reason
+in the text beside it. The third is the one that would have been forgotten: `WorkspaceHistoryService`
+sets `_lastBoundaryFailed` in the two places that report a failed boundary, so a workspace that is
+armed and not recording says so rather than looking healthy.
+
+### The panel's actions stay VISIBLE and refuse, and a source scan holds that shut
+
+R-rc6-8's rule is the inverse of RC-3's absence gate: absent is hidden, held is loud. The three buttons
+in `RestorePointsToolView.axaml` carry no `IsVisible` binding, and the gate asserts that by reading the
+XAML — the view model alone cannot show it, because "the button is still there" is a fact about the
+view. `IsEnabled="False"` was also rejected: a greyed button says "not available to you" and nothing
+about why, and this whole feature exists to stop a designer holding a belief nobody corrected.
+
+### The settings checkbox had to stop writing the flag directly
+
+`OnWorkspaceRevisionChanged` called `WorkspaceRevisionSetting.Write` and nothing else. That is exactly
+the reversed ordering R-rc6-14a forbids — the flag set, circuitRF already off, nothing recorded, and
+the history stopping with no entry saying why. It now calls `RevisionSwitch.TurnOff`/`TurnOn`, which
+owns the order. **The status line is shown AFTER `LoadWorkspaceScopedControls`**, which rewrites that
+same `TextBlock`; the first drafting showed it before and it was silently overwritten every time.
+
+### The adoption question is a dialog, and cancelling is not a fourth answer
+
+`AdoptExistingHistoryDialog` returns `AdoptionAnswer?`. A closed dialog records nothing, so the
+question is asked again next time the workspace opens — which is right: an unanswered question is not
+an answer, and the alternative is a workspace held forever because somebody pressed Escape. The costs
+of "keep my settings" are read from `RepositoryAdoption.KeepingCosts()` rather than transcribed into
+the XAML, so a configuration row added below the firewall cannot go unmentioned in the dialog.
+
+### Close-time housekeeping lives in `TakeCloseCheckpoint`, not at its three callers
+
+`WorkspaceViewModel.TakeCloseCheckpoint` has three call sites. "At most once per session" is a property
+of the session, and three callers agreeing about it is how it becomes true in two of them — so the
+sweep-and-pack call sits inside that one method, after the entry and in the same window. The
+once-per-session latch itself is `SessionHousekeeping`, held by the service and reset by
+`ResetForWorkspace`.
+
+### `RecordedSomethingThisSession` is a second flag, and it is not the same as the first
+
+`CircuitRfWroteAFileThisSession` (RC-5) answers *may this workspace arm*.
+`RecordedSomethingThisSession` (RC-6) answers *may this session run housekeeping*, and it is set only
+when a boundary actually wrote an entry. Collapsing them would let a session that attempted a boundary
+and recorded nothing run a sweep under its own retention preference over somebody else's restore
+points — §12 Q24's share case, which the gate asserts on the repository directory's bytes.

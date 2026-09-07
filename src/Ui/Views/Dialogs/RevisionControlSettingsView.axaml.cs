@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using CircuitRF.Design.Revision;
@@ -330,17 +331,47 @@ public partial class RevisionControlSettingsView : UserControl
     /// this repository uses. A read-only workspace declines the write silently, exactly as it declines
     /// every other one — so the row is re-read afterwards rather than left showing a value that was not
     /// stored.</para>
+    ///
+    /// <para><b>Through <see cref="RevisionSwitch"/>, never by writing the flag alone</b> (RC-6
+    /// R-rc6-14a). The transition is ORDERED: the <c>.cws</c> is written, then one final entry records
+    /// that change, and only then does circuitRF stop writing. Reverse the two and the flag is set,
+    /// circuitRF is already off, nothing is recorded, and the history simply stops with no entry saying
+    /// why — which is invisible from the flag alone, and is exactly what §5.7 claims does not happen.
+    /// The pair of entries is also what gives an off period two ends, without which a browser can only
+    /// render it as an interval in which nothing happened to be worth keeping.</para>
     /// </summary>
     private void OnWorkspaceRevisionChanged(object? sender, RoutedEventArgs e)
     {
         if (_loading) return;
         if (_workspaceDir is not { Length: > 0 } dir) return;
 
-        WorkspaceRevisionSetting.Write(WorkspaceRevisionSetting.CwsPathFor(dir),
-                                       WorkspaceRevisionCheck.IsChecked == true);
+        bool on = WorkspaceRevisionCheck.IsChecked == true;
+        bool preference = KeepHistoryCheck.IsChecked == true;
+
+        var result = on ? RevisionSwitch.TurnOn(dir, preference)
+                        : RevisionSwitch.TurnOff(dir, preference);
 
         _loading = true;
         try { LoadWorkspaceScopedControls(); } finally { _loading = false; }
+
+        // AFTER the reload, which rewrites this very line. The consequence sentence is already beside
+        // the control (rule 1), so what a reader needs here is confirmation that the switch did what it
+        // says: nothing was deleted, and turning it back on carries on where it left off.
+        ShowWorkspaceRevisionStatus(result);
+    }
+
+    /// <summary>
+    /// What the switch just did, in the row's own scope line. <b>Every message the transition produced
+    /// is shown</b>, not only the first: a workspace that could not be written to says so, and a
+    /// designer who was told "recording is off" while the file refused the write would believe a state
+    /// that is not true.
+    /// </summary>
+    private void ShowWorkspaceRevisionStatus(RevisionSwitchResult result)
+    {
+        if (result.Diagnostics.Count == 0) return;
+
+        WorkspaceRevisionScope.Text      = string.Join("  ", result.Diagnostics.Select(d => d.Render()));
+        WorkspaceRevisionScope.IsVisible = true;
     }
 
     private void OnRetentionDaysChanged(object? sender, NumericUpDownValueChangedEventArgs e)
