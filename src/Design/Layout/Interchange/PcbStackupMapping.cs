@@ -63,7 +63,19 @@ public static class PcbStackupMapping
             return new Result(null, messages);
         }
 
-        var stackup = new Stackup();
+        var stackup = new Stackup
+        {
+            // GI3 R-gi3-7, extended from the Gerber path to this one. The board file states its overall
+            // thickness and this reader had always dropped it after one sentence — so the one number
+            // that could check a stackup was never in the document anyone checks a stackup in. Carried
+            // on the stackup this mapping BUILDS rather than onto the destination technology, which is
+            // the difference from GerberImport: a board import never replaces a stackup that is already
+            // there, and a thickness belonging to a different board must be refused with the rows it
+            // came with. Nothing derives geometry from it — see Stackup.BoardThicknessDbu.
+            BoardThicknessDbu = overallThicknessMm is { } overallMm && overallMm > 0
+                ? PcbUnits.Length(overallMm, dbuPerMicron)
+                : null,
+        };
         int conductors = 0, dielectrics = 0, ignored = 0;
 
         // R-L4d-5: the file's order is top-to-bottom and must STAY top-to-bottom. A reversed stackup

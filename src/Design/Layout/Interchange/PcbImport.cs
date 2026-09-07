@@ -128,7 +128,8 @@ public static class PcbImport
         var viaSpans = PcbViaSpanMapping.Build(
             [.. spanByShape.Values.Distinct()],
             effectiveStackup,
-            [.. sourceLayers.Select(l => l.Key).Concat(destTech?.Layers.Select(l => l.Key) ?? [])]);
+            [.. sourceLayers.Select(l => l.Key).Concat(destTech?.Layers.Select(l => l.Key) ?? [])],
+            destDbuPerMicron);
 
         // ── Cell folders ────────────────────────────────────────────────────────────────────────
         var cellsByKey = board.FootprintCells.Values.ToList();

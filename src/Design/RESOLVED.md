@@ -92,10 +92,18 @@ mapping returns a null stackup on a drill-only set and on a job file whose stack
 electrical, and the board's thickness is a fact about the BOARD, not about whether rows were built for
 it. Nothing derives geometry from it; the stack a solver sees is still built from the entries alone.
 
-**The `.kicad_pcb` path was left alone.** `PcbStackupMapping.Build` takes an `overallThicknessMm` it
-also drops, and carrying it would be the same three lines — but the brief scopes GI3 to the Gerber
-import and lists neither `PcbStackupMapping` nor `PcbImport` in its Touches. It is a clean follow-up,
-not an oversight.
+**The `.kicad_pcb` path had the same gap and now does the same thing** (owner's ask, after the phase
+was otherwise complete — the brief scopes GI3 to the Gerber import and lists neither
+`PcbStackupMapping` nor `PcbImport` in its Touches). `PcbStackupMapping.Build` took an
+`overallThicknessMm`, named it in one sentence and dropped it; it now sets `BoardThicknessDbu` on the
+stackup it BUILDS.
+
+**That placement is the one real difference between the two importers.** Gerber mints its own
+technology, so the fact is written onto `tech.Stackup` and survives every branch where no rows were
+built. A board import never replaces a stackup that is already there — `ApplyImportToTechnology`
+assigns `clone.Stackup = imported` only when the destination declares none — so the thickness must
+travel WITH the rows and be refused with them. A board thickness applied to a technology whose stackup
+describes a different board would be worse than dropping it.
 
 The disagreement tolerance is **1 % of the stated board thickness, floored at 1 µm**, and is stated in
 `TechEditorViewModel.StackHeightTolerance`'s own doc comment: the percentage is what makes one rule
@@ -163,12 +171,20 @@ documents' own value also reads from.
 — the same class of bug as reading a sweep mark without its scale. `ViaDefaults.PlatedWallThicknessDbu(int)`
 converts at the point of use.
 
-**The `.kicad_pcb` path does not have this hole and was left alone.** `PcbViaSpanMapping` mints its
-via entries with `Fill` unstated as well as `WallThicknessDbu`, and the validator's wall-thickness rule
-only fires on `Fill == ViaFillKind.Plated` — so a board import has never reported the problem a Gerber
-import reported on every run. It carries no fill model at all, which is a different (and quieter)
-question than the one GI3 was asked; noted here rather than changed, alongside the board-thickness
-follow-up in §2.
+**The `.kicad_pcb` path was QUIET rather than right, and now states both** (same owner's ask).
+`PcbViaSpanMapping` minted its via entries with `Fill` unstated as well as `WallThicknessDbu`, and the
+validator's rule only fires on `Fill == ViaFillKind.Plated` — which is the only reason a board import
+never reported the problem a Gerber import reported on every run. An entry is minted there ONLY for a
+span that resolved to two DIFFERENT conductor entries, which is to say only for interconnect, and
+interconnect is plated by definition; leaving the fill model unstated was an omission that happened to
+dodge a diagnostic.
+
+**The two fields have to be written together, and that is the trap worth recording.** `Fill = Plated`
+alone engages the wall-thickness rule and hands the user back the exact problem R-gi3-4 removed — so
+"state the fill model" is not a one-line change, and a future reader tidying one of them away
+reintroduces it. `PcbViaSpanMapping.Build` grew a `dbuPerMicron` parameter for this, for
+`ViaDefaults`'s own reason: the constant is in microns and a DBU literal is silently wrong at any
+resolution but the default.
 
 Named as a default **once for the whole import**, not once per drill file: it is one fact about one
 process, and the per-file lines are already the busiest part of that report. A **non-plated** entry

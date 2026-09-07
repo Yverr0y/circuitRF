@@ -563,6 +563,94 @@ public class Gi3SubstrateFieldsTests : IDisposable
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
+    // The board import — the same two answers, on the path GI3's own brief did not scope
+    //
+    // Both were noticed while writing this phase's RESOLVED.md note and fixed on the owner's ask
+    // rather than left as follow-ups. Neither is a new idea: they are R-gi3-7 and R-gi3-4 applied to
+    // the reader that had the same two gaps.
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// R-gi3-7 on the board path. <c>PcbStackupMapping</c> took an <c>overallThicknessMm</c>, named it
+    /// in one sentence and dropped it. It is now carried on the stackup it BUILDS — which is the
+    /// difference from the Gerber path: a board import never replaces a stackup that is already there,
+    /// so a thickness belonging to a different board must be refused with the rows it came with.
+    /// </summary>
+    [Fact]
+    public void ABoardFilesOverallThickness_ReachesTheStackupItBuilds()
+    {
+        var stackup = PcbStackupMapping.Build(
+            [
+                new PcbStackupEntry("F.Cu",         "copper",  0.035, null, null),
+                new PcbStackupEntry("dielectric 1", "core",    1.500, 4.4,  0.02),
+                new PcbStackupEntry("B.Cu",         "copper",  0.035, null, null),
+            ],
+            overallThicknessMm: 1.6, dbuPerMicron: 1000, _ => null);
+
+        Assert.Equal(1_600_000, stackup.Stackup!.BoardThicknessDbu);
+
+        // ...and it is a second opinion, not a correction: the rows still sum to what the rows say.
+        Assert.Equal(1_570_000, stackup.Stackup.TotalThicknessDbu);
+    }
+
+    /// <summary>A file stating no overall thickness carries none — the field must stay null rather
+    /// than acquire a number nothing said.</summary>
+    [Fact]
+    public void ABoardFileStatingNoOverallThickness_CarriesNone()
+    {
+        var stackup = PcbStackupMapping.Build(
+            [new PcbStackupEntry("F.Cu", "copper", 0.035, null, null)],
+            overallThicknessMm: null, dbuPerMicron: 1000, _ => null);
+
+        Assert.Null(stackup.Stackup!.BoardThicknessDbu);
+    }
+
+    /// <summary>
+    /// R-gi3-4 on the board path. <c>PcbViaSpanMapping</c> minted its entries with no fill model at
+    /// all, which is the only reason they never tripped the validator's wall-thickness rule — that
+    /// rule fires on <c>Fill == Plated</c>. Quiet, not right: an entry is minted ONLY for a span
+    /// joining two DIFFERENT conductors, which is to say only for interconnect, and interconnect is
+    /// plated. <b>Both fields together</b> — Fill alone would engage the rule and hand back the very
+    /// problem this phase removed.
+    /// </summary>
+    [Fact]
+    public void AMintedBoardViaEntry_IsPlatedWithTheSameWallThicknessEverythingElseUses()
+    {
+        var stackup = new Stackup();
+        stackup.Layers.AddRange(
+        [
+            new StackupLayer { Kind = StackupKind.Conductor, Name = "Top",
+                               ThicknessDbu = 35_000, SigmaSm = 5.8e7, DrawingLayers = [new LayerKey(1, 0)] },
+            new StackupLayer { Kind = StackupKind.Dielectric, Name = "Core",
+                               ThicknessDbu = 1_500_000, Epsr = 4.4, TanD = 0.02 },
+            new StackupLayer { Kind = StackupKind.Conductor, Name = "Bottom",
+                               ThicknessDbu = 35_000, SigmaSm = 5.8e7, DrawingLayers = [new LayerKey(2, 0)] },
+        ]);
+
+        var built = PcbViaSpanMapping.Build(
+            [new PcbViaSpanMapping.SourceSpan(new LayerKey(1, 0), new LayerKey(2, 0))],
+            stackup,
+            [new LayerKey(1, 0), new LayerKey(2, 0)],
+            dbuPerMicron: 1000);
+
+        var entry = Assert.Single(built.NewEntries);
+        Assert.Equal(ViaFillKind.Plated, entry.Fill);
+        Assert.Equal(ViaDefaults.PlatedWallThicknessDbu(1000), entry.WallThicknessDbu);
+        Assert.Equal(25_000, entry.WallThicknessDbu);
+
+        // Named as a default, in the sentence that says the entries were created (R-L4d-7's pattern).
+        Assert.Contains(built.Messages,
+            m => m.Contains("wall thickness defaulted to 25 µm", StringComparison.Ordinal) &&
+                 m.Contains("PLATING thickness", StringComparison.Ordinal));
+
+        // And the whole point: applying it leaves a technology the validator is silent about, rather
+        // than one carrying a problem the import itself created.
+        foreach (var e in built.NewEntries) stackup.Layers.Add(e);
+        Assert.DoesNotContain(TechValidation.Validate(new Technology { Name = "T", Stackup = stackup }),
+            m => m.Contains("Plated with no wall thickness", StringComparison.Ordinal));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
     // Gerber fixtures — hand-authored, following L4e/L4f/L4g/GI1/GI2's precedent
     // ══════════════════════════════════════════════════════════════════════════════════════════
 

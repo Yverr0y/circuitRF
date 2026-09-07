@@ -53,10 +53,14 @@ public static class PcbViaSpanMapping
     /// <param name="reservedKeys">Every <see cref="LayerKey"/> already spoken for — the destination
     /// technology's and the import's own synthetic ones — so a minted drill layer collides with
     /// neither.</param>
+    /// <param name="dbuPerMicron">Destination resolution, for the plated-wall default a minted entry
+    /// carries (GI3 R-gi3-4). Only ever used to convert <see cref="ViaDefaults.PlatedWallThicknessUm"/>
+    /// — a DBU constant here would be silently wrong at every resolution but the default.</param>
     public static Result Build(
         IReadOnlyCollection<SourceSpan> spans,
         Stackup? stackup,
-        IReadOnlyCollection<LayerKey> reservedKeys)
+        IReadOnlyCollection<LayerKey> reservedKeys,
+        int dbuPerMicron)
     {
         if (spans.Count == 0) return Empty;
 
@@ -126,17 +130,33 @@ public static class PcbViaSpanMapping
                 DrawingLayers = [key],
                 SpanFromLayer = top.Name,
                 SpanToLayer = bottom.Name,
+
+                // GI3 R-gi3-4, extended from the Gerber path to this one. A minted entry used to carry
+                // no fill model at all, which is why it never tripped the validator's wall-thickness
+                // rule — that rule only fires on Fill == Plated. It was quiet rather than right: a via
+                // reaches here ONLY when its span resolved to two DIFFERENT conductor entries, which is
+                // to say only when it is interconnect, and interconnect is plated by definition. So it
+                // is now stated, with the same 25 µm default every shipped technology carries, through
+                // the same constant. The two must be written TOGETHER — Fill alone would engage the
+                // wall-thickness rule and hand the user back the problem GI3 removed.
+                Fill = ViaFillKind.Plated,
+                WallThicknessDbu = ViaDefaults.PlatedWallThicknessDbu(dbuPerMicron),
             };
             newEntries.Add(entry);
             barrelBySpan[span] = key;
             minted.Add($"{top.Name}→{bottom.Name} (\"{entry.Name}\" on \"Drill {label}\")");
         }
 
+        // R-L4d-7's pattern, which every other default this importer applies already follows: applied,
+        // and NAMED as applied, in the sentence that says the entries were created.
         if (minted.Count > 0)
             messages.Add(
                 $"Via spans: {minted.Count:N0} via entr{(minted.Count == 1 ? "y" : "ies")} added to the stackup, " +
                 $"each with its own drill layer — {string.Join(", ", minted)}. The vias were drawn on those layers, " +
-                "which is what states the span; a via drawn elsewhere joins nothing.");
+                "which is what states the span; a via drawn elsewhere joins nothing. Each is plated with a wall " +
+                $"thickness defaulted to {ViaDefaults.PlatedWallThicknessUm:0.###} µm — the board file states no " +
+                "plating thickness, and this is the same value every technology shipped with circuitRF uses. It is " +
+                "a PLATING thickness, not the hole radius; change it on the Technology editor's Stackup tab.");
 
         if (reused.Count > 0)
             messages.Add(
