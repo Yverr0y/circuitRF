@@ -193,6 +193,7 @@ public static class GerberImport
         var drillFiles = classified.Where(c => c.Kind == GerberFileKind.Drill).ToList();
         var jobFiles = classified.Where(c => c.Kind == GerberFileKind.JobFile).ToList();
         var declarationFiles = classified.Where(c => c.Kind == GerberFileKind.Declaration).ToList();
+        var netlistFiles = classified.Where(c => c.Kind == GerberFileKind.Netlist).ToList();
         var archiveFiles = classified.Where(c => c.Kind == GerberFileKind.Archive).ToList();
         var skipped = classified.Where(c => c.Kind is GerberFileKind.Other or GerberFileKind.Archive).ToList();
 
@@ -258,6 +259,18 @@ public static class GerberImport
         // could NOT be used is reported here, by name, with the reason (R-gi4-8).
         var companions = GerberCompanionFiles.Read(declarationFiles);
         messages.AddRange(companions.Messages);
+
+        // ── 1d. The folder's own BOARD NETLIST (GI5) ────────────────────────────────────────────
+        //
+        // Read here and settled later: its coordinates cannot be trusted until they have been checked
+        // against the artwork's own extent (R-gi5-10), and the artwork has not been read yet. What it
+        // contributes — the via/component-hole distinction, plating, layer spans and net names — is
+        // EVIDENCE about shapes the readers below build, and never a shape (R-gi5-1).
+        var netlists = netlistFiles.Count > 0
+            ? BoardNetlistEvidence.Read(netlistFiles, destDbuPerMicron)
+            : BoardNetlistEvidence.None(destDbuPerMicron);
+        messages.AddRange(netlists.Messages);
+        int netlistMessagesReported = netlists.Messages.Count;
 
         // ONE counted stage from here to the end, and the only BeginStage after this point — every
         // later phase renames the label THROUGH the tick, which is what keeps the bar monotone. The
@@ -346,6 +359,16 @@ public static class GerberImport
         var artworkForExtent = new List<GerberImportedShape>();
         foreach (var (_, read) in reads) artworkForExtent.AddRange(read.Shapes);
         var artworkExtent = DrillViaPairing.ArtworkExtents(artworkForExtent);
+
+        // GI5 R-gi5-10, at the first moment it can be asked: this format carries its own units AND
+        // its own resolution, and the two inch resolutions in circulation differ by a factor of ten.
+        // A netlist read at a wrong scale that still lands inside the board mislabels every pad on
+        // it, silently — the artwork's extent is what separates that from a netlist that simply
+        // matches nothing.
+        netlists.CrossCheck(artworkExtent);
+        for (int i = netlistMessagesReported; i < netlists.Messages.Count; i++)
+            messages.Add(netlists.Messages[i]);
+        netlistMessagesReported = netlists.Messages.Count;
 
         var drills = new List<(GerberFileClass File, ExcellonReadResult Read, GerberLayerIdentity Identity)>();
         var drillNames = new List<string>();
@@ -464,6 +487,11 @@ public static class GerberImport
             messages.Add($"{file.FileName}: {read.Format}. {string.Join(" ", read.Format.Evidence)}");
             if (!crossCheck.Agrees) messages.Add($"{file.FileName}: {crossCheck.Report}");
 
+            // GI5 R-gi5-4. The read as the drill FILE itself left it, kept before either companion
+            // speaks: it is the only way to tell a value the file declared from a value a companion
+            // contributed, and "if the two companions disagree, prefer neither" needs exactly that.
+            var fileOwnRead = read;
+
             // GI4 R-gi4-7. AFTER the format is settled and never before: the listing is matched by
             // tool number AND diameter, and a diameter cannot be compared until the file's own unit
             // is known. It contributes the plating column and nothing else — the drill file remains
@@ -472,6 +500,16 @@ public static class GerberImport
             {
                 read = ExcellonReader.ApplyToolListing(read, listing, destDbuPerMicron, out var listingNotes);
                 foreach (string note in listingNotes) messages.Add($"{file.FileName}: {note}");
+            }
+
+            // GI5 R-gi5-4. Where a drill file declares nothing, the netlist's per-record plating flag
+            // settles it — and the case that matters is a board's mounting holes, because a
+            // millimetre-scale barrel modelled as plated shorts every layer it passes through and
+            // produces a run that completes cleanly and is wrong.
+            if (netlists.Any)
+            {
+                read = netlists.ApplyPlating(read, fileOwnRead, out var platingNotes);
+                foreach (string note in platingNotes) messages.Add($"{file.FileName}: {note}");
             }
 
             bool? plated = read.Plated ?? ExcellonReader.PlatingFromFileName(file.Path);
@@ -679,13 +717,54 @@ public static class GerberImport
         ];
         var carved = new List<CircleShape>();
 
+        var netlistHoles = netlists.Any ? netlists.Holes : null;
+        var netlistSpans = new List<string>();
+        var spanByDrillFile = new Dictionary<string, DrillSpan>(StringComparer.Ordinal);
+        int netlistVias = 0, netlistComponentHoles = 0, netlistHolesUncovered = 0;
+
         foreach (var (file, read, identity) in drills)
         {
             var drillKey = finalKeyByFile[identity.FilePath];
-            var span = DrillViaPairing.MapSpan(read.Span, drillKey, copperKeys);
+
+            // GI5 R-gi5-5. The drill file's own span always wins; the netlist is consulted only where
+            // it declared none, which is the case the "no layer span was declared" apology exists
+            // for. NOTHING here synthesises a stackup entry per distinct span — the spans found are
+            // reported, and one is applied to the via entry this file already mints.
+            var span = read.Span;
+            string? spanEvidence = null;
+            if (span is null && netlists.Any)
+            {
+                var (fromNetlist, found, _, uncovered) = netlists.SpanFor(read, copperKeys.Count);
+                netlistSpans.AddRange(found);
+                if (fromNetlist is not null)
+                {
+                    span = fromNetlist;
+                    spanEvidence = "The board netlist";
+                }
+                else if (found.Count > 1)
+                    messages.Add(
+                        $"{file.FileName}: the board netlist names {found.Count} different layer spans " +
+                        $"for this file's holes ({string.Join(", ", found)}), so none was applied — one " +
+                        "drill file is one stackup entry and it cannot carry two. Split them into one " +
+                        "drill file per span if the difference matters.");
+                if (uncovered > 0 && fromNetlist is not null)
+                    messages.Add(
+                        $"{file.FileName}: the span above was read from the {read.Hits.Count - uncovered} " +
+                        $"hole(s) the netlist covers; {uncovered} more are not in it and were given the " +
+                        "same span.");
+            }
+
+            // ONLY a netlist-derived span is carried to the stackup entry, and that bound is
+            // R-gi5-2's. A drill file that declares its OWN span already minted a full-stack via
+            // entry before this phase existed; narrowing that too would be strictly more correct and
+            // would also change the `.ctech` of a set with no netlist in it, which is the one thing
+            // this phase promised not to do. Recorded in src/Design/RESOLVED.md as its own piece of
+            // work rather than smuggled in here.
+            if (spanEvidence is not null && span is not null) spanByDrillFile[identity.FilePath] = span;
+            var spanLayers = DrillViaPairing.MapSpan(span, drillKey, copperKeys, spanEvidence);
             var paired = DrillViaPairing.Pair(
-                remaining, read, span.Barrel, span.Landing, destDbuPerMicron, compositedCopper,
-                compositedPads, copperKeys);
+                remaining, read, spanLayers.Barrel, spanLayers.Landing, destDbuPerMicron, compositedCopper,
+                compositedPads, copperKeys, netlistHoles);
 
             if (paired.Refusal is { } refusal)
             {
@@ -705,9 +784,21 @@ public static class GerberImport
             tools += read.Tools.Count;
             hits += read.Hits.Count;
 
-            messages.Add($"{file.FileName}: {read.Tools.Count} tool(s), {read.Hits.Count} hit(s) → {paired.Vias.Count} via(s). {span.Note}");
+            netlistVias += paired.NetlistVias;
+            netlistComponentHoles += paired.NetlistComponentHoles;
+            netlistHolesUncovered += paired.NetlistUnclassified;
+
+            messages.Add($"{file.FileName}: {read.Tools.Count} tool(s), {read.Hits.Count} hit(s) → {paired.Vias.Count} via(s). {spanLayers.Note}");
             foreach (var diagnostic in paired.Diagnostics) messages.Add($"{file.FileName}: {diagnostic}");
-            foreach (var diagnostic in read.Diagnostics) messages.Add($"{file.FileName}: {diagnostic}");
+            foreach (var diagnostic in read.Diagnostics)
+            {
+                // GI5 R-gi5-12: REPLACE the apology, never print it beside its replacement. The drill
+                // reader's sentence is true about the drill FILE and false about the folder once a
+                // netlist in it has stated the span, and the line above has already said which.
+                if (spanEvidence is not null &&
+                    diagnostic.StartsWith(NoSpanDeclared, StringComparison.Ordinal)) continue;
+                messages.Add($"{file.FileName}: {diagnostic}");
+            }
             if (!read.ToolDiametersExact)
                 messages.Add($"{file.FileName}: at least one tool diameter did not land on a whole DBU and was rounded.");
         }
@@ -722,6 +813,37 @@ public static class GerberImport
                 "instead of part of the surrounding copper. The layer's copper is unchanged: every pad " +
                 "cut lay wholly inside it, and the via puts the same disc back." +
                 (remaining.Count != before ? $" ({before:N0} → {remaining.Count:N0} artwork shape(s).)" : ""));
+        }
+
+        // ── 8b. Net names, from the netlist (GI5 R-gi5-6, R-gi5-8, R-gi5-9) ─────────────────────
+        //
+        // THE ONE THING THIS PHASE GIVES BACK THAT IS OTHERWISE PERMANENTLY LOST. A clear-polarity
+        // layer has had its per-object identities unioned away by compositing and no amount of
+        // re-reading the artwork recovers them — but a netlist coordinate still falls INSIDE the
+        // composited region, so the union that destroyed the pad's identity did not destroy its
+        // LOCATION, and the region containing it can be named.
+        //
+        // Runs AFTER the carve, deliberately: CarveClaimedPads rebuilds the shapes it cuts, so a name
+        // attached before it would be attached to a shape that is no longer in the document.
+        //
+        // R-gi5-1 holds here as hard as anywhere: this walks a list it was handed and sets a string
+        // on shapes already in it. Nothing is created, moved or removed.
+        NetlistAttachment? netlistNets = null;
+        if (netlists.Any)
+        {
+            var named = new List<LayoutShape>(remaining.Count + drillShapes.Count);
+            named.AddRange(remaining.Select(s => s.Shape));
+            named.AddRange(drillShapes);
+
+            netlistNets = netlists.AttachNets(named, copperKeys);
+            messages.Add(
+                $"Net names: {netlistNets.ShapesNamed:N0} shape(s) took a net name from the board " +
+                $"netlist ({netlistNets.Containment:N0} coordinate(s) fell inside a shape, " +
+                $"{netlistNets.Near:N0} within {netlists.ToleranceText} of one — one count of the " +
+                "netlist's own coordinate resolution, which is the whole of the tolerance used). " +
+                $"{netlistNets.AlreadyNamed:N0} already carried the same name from the artwork's own " +
+                "attributes.");
+            foreach (string note in netlistNets.Messages) messages.Add(note);
         }
 
         // ── 9. The technology this import mints (R-L4g-8, R-L4g-9) ──────────────────────────────
@@ -813,8 +935,14 @@ public static class GerberImport
                 Fill = conductive ? ViaFillKind.Plated : null,
                 Plated = entryPlated,
 
-                SpanFromLayer = conductive && conductorEntries.Count > 0 ? conductorEntries[0].Name : null,
-                SpanToLayer = conductive && conductorEntries.Count > 0 ? conductorEntries[^1].Name : null,
+                // GI5 R-gi5-5. Where a span is actually KNOWN for this file — the drill file declared
+                // one, or the netlist beside it did — the entry names the two conductors that span
+                // reaches instead of the whole stack. A blind or buried hole modelled as through-hole
+                // is a barrel shorting layers it never touches, which is the same class of silent
+                // error as a non-plated mounting hole modelled as metal. No entry is SYNTHESISED per
+                // span, which is R-gi5-5's other half: this is the entry the import already mints.
+                SpanFromLayer = SpanEndName(identity.FilePath, conductive, conductorEntries, spanByDrillFile, true),
+                SpanToLayer = SpanEndName(identity.FilePath, conductive, conductorEntries, spanByDrillFile, false),
 
                 // GI3 R-gi3-4. The default already existed everywhere BUT here: every shipped
                 // technology writes 25 µm and StarterTechnologies writes Um(25), while the one
@@ -973,9 +1101,17 @@ public static class GerberImport
                 "is written as its outline, so any of those in the design that produced these files is " +
                 "a polygon here");
         if (reads.Any(r => r.Read.Composited))
+            // GI5 R-gi5-12. The identities are still gone and always will be — but where a netlist
+            // came with the set, the net names are NOT, and the sentence has to stop saying they
+            // are. Only the half that is still true is printed.
             losses.Add(
-                "a layer that painted in clear polarity was COMPOSITED, so its individual shape " +
-                "identities and its per-object net names are gone (the geometry is exact)");
+                netlistNets is { ShapesNamed: > 0 }
+                    ? "a layer that painted in clear polarity was COMPOSITED, so its individual shape " +
+                      $"identities are gone (the geometry is exact); its per-object NET NAMES were " +
+                      $"recovered from the board netlist in this set, which is the only reason they " +
+                      "survived"
+                    : "a layer that painted in clear polarity was COMPOSITED, so its individual shape " +
+                      "identities and its per-object net names are gone (the geometry is exact)");
         losses.Add(
             "text is not a type this format carries, so a label in the source design is polygon " +
             "outlines here and cannot become a label again");
@@ -1000,8 +1136,49 @@ public static class GerberImport
                 $"by the files themselves), {unpairedHoles:N0} unpaired hole(s), {componentHoles:N0} component hole(s), " +
                 $"{slots:N0} slot(s).");
 
+        // GI5 R-gi5-11. A hole the netlist names and no drill file drilled is information about the
+        // SET — one of the two files is from a different revision of this job — and it is invisible
+        // without a reader for the netlist. Counted and said; repaired in no way.
+        if (netlists.Any && drills.Count > 0 &&
+            netlists.HolesNotDrilled(drills.Select(d => d.Read)) is > 0 and var notDrilled)
+            messages.Add(
+                $"The board netlist names {notDrilled:N0} hole(s) that no drill file in this set drills. " +
+                "Nothing was created for them — a netlist is evidence about the artwork, never geometry " +
+                "— and the usual cause is that the netlist and the drill data come from different " +
+                "revisions of this job.");
+
+        // GI5 R-gi5-13. ONE line with the counts that matter, so the value of the netlist can be read
+        // off a run without reading the twenty lines above it. Printed only when there was a netlist:
+        // R-gi5-2's absent-is-bit-identical gate is the whole reason this phase is safe to add.
+        if (netlists.Any)
+        {
+            int records = netlists.Usable.Sum(n => n.Records.Count);
+            int nets = netlists.Usable.SelectMany(n => n.Nets).Distinct(StringComparer.Ordinal).Count();
+            messages.Add(
+                $"Board netlist: {records:N0} record(s) read from " +
+                $"{string.Join(", ", netlists.Usable.Select(n => n.FileName))} naming {nets:N0} net(s). " +
+                $"Holes: {netlistVias:N0} classified as vias, {netlistComponentHoles:N0} as component " +
+                $"holes, {netlistHolesUncovered:N0} not covered by it. Pads: " +
+                $"{netlistNets?.Containment ?? 0:N0} matched by containment, {netlistNets?.Near ?? 0:N0} " +
+                $"by nearest-within-{netlists.ToleranceText}, {netlistNets?.Unmatched ?? 0:N0} matched " +
+                $"nothing. Nets: {netlistNets?.ShapesNamed ?? 0:N0} attached, " +
+                $"{netlistNets?.Ambiguous ?? 0:N0} region(s) left unnamed for holding more than one. " +
+                (netlistSpans.Count > 0
+                    ? $"Layer spans found: {string.Join(", ", netlistSpans.Distinct())}."
+                    : "No layer span was recoverable from it."));
+        }
+
         if (skippedNames.Count > 0)
             messages.Add($"{skippedNames.Count} file(s) in the set were not artwork or drill data: {string.Join(", ", skippedNames)}.");
+
+        // GI5. A netlist in the set that was recognised and then contributed nothing must not read
+        // like a file that was skipped — that difference is the whole point of recognising it.
+        if (netlistFiles.Count > 0 && !netlists.Any)
+            messages.Add(
+                $"{netlistFiles.Count} board netlist(s) were recognised in this set — " +
+                $"{string.Join(", ", netlistFiles.Select(f => f.FileName))} — and none of them could be " +
+                "used; the reason is above. The import's via, plating and net-name reporting is what it " +
+                "would have been without them.");
 
         if (drillCandidates.Count > 0)
             messages.Add(
@@ -1025,6 +1202,35 @@ public static class GerberImport
             false, [cellDir], cellDir, importDir, techPath, tech,
             layerReports, drillCandidates, skippedNames, messages, archivePaths);
     }
+
+    /// <summary>
+    /// GI5 R-gi5-5. Which conductor entry one end of a drill file's span names.
+    ///
+    /// <para>The stack's own end when no span was declared for the file — the pre-GI5 behaviour, and
+    /// what a through hole is — and the named conductor when one WAS. A span naming a layer the
+    /// stackup does not have falls back to the stack's end rather than to nothing, because an entry
+    /// with one end named and the other null is a via that spans nothing, which is exactly what the
+    /// technology validator reports.</para>
+    /// </summary>
+    private static string? SpanEndName(
+        string filePath, bool conductive, IReadOnlyList<StackupLayer> conductors,
+        IReadOnlyDictionary<string, DrillSpan> spans, bool from)
+    {
+        if (!conductive || conductors.Count == 0) return null;
+
+        if (spans.TryGetValue(filePath, out var span))
+        {
+            int index = (from ? span.FromLayer : span.ToLayer) - 1;
+            if (index >= 0 && index < conductors.Count) return conductors[index].Name;
+        }
+
+        return from ? conductors[0].Name : conductors[^1].Name;
+    }
+
+    /// <summary>The opening of <c>ExcellonReader</c>'s own no-span sentence — matched as a PREFIX so
+    /// the two copies cannot drift into silently never matching, which is the failure mode of
+    /// comparing a whole paragraph.</summary>
+    private const string NoSpanDeclared = "No layer span was declared";
 
     /// <summary>GI4: whether any part of a resolved format came from a companion parameter file.</summary>
     private static bool SettledByDeclaration(DrillFormatInference format) =>

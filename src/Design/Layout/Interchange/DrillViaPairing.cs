@@ -64,6 +64,23 @@ public sealed class DrillPairingResult
     public int DeclaredVias { get; init; }
     public int InferredVias { get; init; }
 
+    /// <summary>GI5 R-gi5-3: holes the BOARD NETLIST classified — a hole carrying a net and no
+    /// component reference is a via, one carrying a reference and a pin is a component hole. Split
+    /// out from <see cref="DeclaredVias"/> deliberately: that number is what the artwork and the
+    /// drill file said about themselves, and these are what a second file in the folder said about
+    /// them. Conflating the two would hide which evidence the import actually had.</summary>
+    public int NetlistVias { get; init; }
+    public int NetlistComponentHoles { get; init; }
+
+    /// <summary>GI5 R-gi5-3's second half: holes the netlist did not cover at all. Reported, because
+    /// "the netlist settled it" and "the netlist was silent about it" are different answers and only
+    /// the second one leaves the old apology standing.</summary>
+    public int NetlistUnclassified { get; init; }
+
+    /// <summary>Holes the netlist covered but could classify neither way — a record carrying a
+    /// component reference with no pin on it. See <see cref="BoardNetlistRecord.Unclassified"/>.</summary>
+    public int NetlistAmbiguousHoles { get; init; }
+
     public IReadOnlyList<string> Diagnostics { get; init; } = [];
 
     /// <summary>Every shape this produced, in one list, for a caller that just wants to add them to a
@@ -78,8 +95,13 @@ public static class DrillViaPairing
     /// board lands on <c>copperTopToBottom[0]</c> and <c>[3]</c>. A span the board cannot honour
     /// (indices outside the resolved stack) falls back to through-hole and says so — an import must
     /// not fail because a drill file counts its layers differently from the artwork set.</summary>
+    /// <param name="spanEvidence">GI5 R-gi5-12. Where the span came from, when it did not come from
+    /// the drill file itself — a board netlist in the same folder states one, and the message must
+    /// then say so rather than keep printing "no layer span was declared" beside a span that was.
+    /// Null means the drill file spoke for itself, which is the pre-GI5 wording unchanged.</param>
     public static DrillSpanLayers MapSpan(
-        DrillSpan? span, LayerKey drillLayer, IReadOnlyList<LayerKey> copperTopToBottom)
+        DrillSpan? span, LayerKey drillLayer, IReadOnlyList<LayerKey> copperTopToBottom,
+        string? spanEvidence = null)
     {
         LayerKey? top = copperTopToBottom.Count > 0 ? copperTopToBottom[0] : null;
         LayerKey? bottom = copperTopToBottom.Count > 0 ? copperTopToBottom[^1] : null;
@@ -101,9 +123,16 @@ public static class DrillViaPairing
         // The honest statement of what the model can and cannot hold. A ViaShape has ONE landing
         // layer, so the far side of a blind or buried span is carried by the drill layer the caller
         // minted for this file and by nothing on the via itself.
+        // R-gi5-2's bit-identity, in the small: with no evidence named this is the pre-GI5 sentence
+        // character for character, so a set with no netlist beside it reports exactly what it did.
+        string what = span.IsThroughHole ? "Through-hole" : span.Kind;
+        string opening = spanEvidence is { Length: > 0 } named
+            ? $"{named} states a {what.ToLowerInvariant()} span {span.FromLayer}-{span.ToLayer}"
+            : $"{what} span {span.FromLayer}-{span.ToLayer}";
+
         string note = span.IsThroughHole
-            ? $"Through-hole span {span.FromLayer}-{span.ToLayer}."
-            : $"{span.Kind} span {span.FromLayer}-{span.ToLayer}: the via lands on copper layer " +
+            ? $"{opening}."
+            : $"{opening}: the via lands on copper layer " +
               $"{span.FromLayer}. Its far side (copper layer {span.ToLayer}) is carried by the drill " +
               "layer this file was given, because a via holds one landing layer and not two.";
 
@@ -153,6 +182,12 @@ public static class DrillViaPairing
     /// on a real board the SOLDER MASK OPENING around each mounting hole, which turned six 4.6 mm mask
     /// clearances into 4.6 mm copper pads sitting on a pour that has a deliberate hole there. Null or
     /// empty means the caller could not say, and every layer stays eligible as before.</param>
+    /// <param name="netlist">GI5 R-gi5-3. What the folder's board netlist says about each hole — a
+    /// hole carrying a net and no component reference is a via; one carrying a reference and a pin is
+    /// a component hole. That is precisely the distinction this file otherwise reports as
+    /// unavailable, and it arrives here as a pure lookup so the pairing stays what its own header
+    /// says it is: shapes and hits in, shapes out. Null (every caller before GI5, and every set with
+    /// no netlist in it) leaves every count and every sentence below exactly as they were.</param>
     public static DrillPairingResult Pair(
         IReadOnlyList<GerberImportedShape> artwork,
         ExcellonReadResult drill,
@@ -161,7 +196,8 @@ public static class DrillViaPairing
         int dbuPerMicron = LayoutUnits.DefaultDbuPerMicron,
         int compositedCopperLayers = 0,
         IReadOnlyList<GerberImportedShape>? compositedPads = null,
-        IReadOnlyCollection<LayerKey>? copperLayers = null)
+        IReadOnlyCollection<LayerKey>? copperLayers = null,
+        NetlistHoleIndex? netlist = null)
     {
         if (drill.Refusal is not null)
             return new DrillPairingResult { Refusal = drill.Refusal };
@@ -221,6 +257,7 @@ public static class DrillViaPairing
         var componentHoles = new List<CircleShape>();
         var diagnostics = new List<string>();
         int declared = 0, inferred = 0, declaredViaWithNoPad = 0, indistinguishable = 0;
+        int netlistVias = 0, netlistComponentHoles = 0, netlistUnclassified = 0, netlistAmbiguous = 0;
 
         foreach (var hit in drill.Hits)
         {
@@ -230,8 +267,23 @@ public static class DrillViaPairing
             bool declaredComponent = IsComponentFunction(hit.Function);
             bool declaredVia = string.Equals(hit.Function, "ViaDrill", StringComparison.OrdinalIgnoreCase);
 
-            if (declaredComponent)
+            // GI5 R-gi5-3, and it ranks BELOW the drill file's own attribute for the same reason
+            // every companion in this series does: a file is authoritative about itself. It is
+            // consulted only where the drill file declared nothing, which is the overwhelmingly
+            // common case and the one the old apology was written for.
+            var fact = netlist?.At(hit.X, hit.Y);
+            if (netlist is not null)
             {
+                if (fact is null) netlistUnclassified++;
+                else if (fact.Unclassified) netlistAmbiguous++;
+            }
+
+            bool netlistComponent = !declaredVia && !declaredComponent && fact?.IsComponentHole == true;
+            bool netlistVia = !declaredVia && !declaredComponent && fact?.IsVia == true;
+
+            if (declaredComponent || netlistComponent)
+            {
+                if (netlistComponent) netlistComponentHoles++;
                 componentHoles.Add(Hole(hit, barrel));
                 continue;
             }
@@ -246,6 +298,7 @@ public static class DrillViaPairing
 
             bool viaPad = string.Equals(candidates[flash].AperFunction, "ViaPad", StringComparison.OrdinalIgnoreCase);
             if (declaredVia || viaPad) declared++;
+            else if (netlistVia) { netlistVias++; inferred++; }
             else { inferred++; indistinguishable++; }
 
             var pad = (CircleShape)candidates[flash].Shape;
@@ -261,7 +314,13 @@ public static class DrillViaPairing
                 DrillSize = hit.DiameterDbu,
                 Layer = barrel,
                 LandingLayer = landingLayer ?? pad.Layer,
-                Net = pad.Net,
+
+                // GI5 R-gi5-6. The pad's own net attribute first — a file is authoritative about
+                // itself — and the netlist's only where the artwork carried none, which is every via
+                // on a composited layer and every set written without net attributes at all. A via
+                // sits on the DRILL layer, so the net attachment pass over the copper layers never
+                // reaches it; this is the only place it can be named.
+                Net = pad.Net ?? fact?.Net,
             });
         }
 
@@ -297,11 +356,33 @@ public static class DrillViaPairing
             diagnostics.Add($"{componentHoles.Count} hole(s) are declared component or mechanical drills, so " +
                             "they were imported as holes rather than vias and their pads were left in the " +
                             "copper artwork.");
+        // GI5 R-gi5-12: where the netlist settled the question, the message says what settled it —
+        // not the old sentence plus a new one. The old sentence stands, unchanged, exactly where it
+        // is still true: a run that read a netlist and STILL cannot tell a via from a component hole
+        // must say so specifically, which is the second branch.
+        if (netlistVias > 0 || netlistComponentHoles > 0)
+            diagnostics.Add(
+                $"The board netlist classified {netlistVias + netlistComponentHoles} hole(s) the artwork " +
+                $"could not: {netlistVias} via(s) (a net at that coordinate and no component reference on " +
+                $"it) and {netlistComponentHoles} component hole(s) (a reference and a pin). This is the " +
+                "distinction a Gerber set alone does not carry.");
         if (indistinguishable > 0)
             diagnostics.Add($"{indistinguishable} hole(s) were reconstructed as vias without the file saying " +
                             "so: with no ViaDrill/ComponentDrill attribute and no ViaPad flash, a via and a " +
                             "plated component hole are indistinguishable from artwork alone — both are a " +
-                            "plated hole with copper landing on it. The distinction was not available.");
+                            "plated hole with copper landing on it. " +
+                            (netlist is null
+                                ? "The distinction was not available."
+                                : "The board netlist in this set does not cover them either, so the " +
+                                  "distinction is still not available for these."));
+        if (netlist is not null && netlistUnclassified > 0)
+            diagnostics.Add($"{netlistUnclassified} of this file's hole(s) have no record in the board " +
+                            "netlist at all — it is most likely written for a different revision of this " +
+                            "board, or these holes are mechanical and were left out of it.");
+        if (netlistAmbiguous > 0)
+            diagnostics.Add($"{netlistAmbiguous} hole(s) have a netlist record carrying a component " +
+                            "reference but no pin, which settles neither way, so they were classified " +
+                            "from the artwork exactly as before.");
         if (slots.Count > 0)
             diagnostics.Add($"{slots.Count} routed slot(s) were imported as single openings on the drill layer.");
 
@@ -325,6 +406,10 @@ public static class DrillViaPairing
             ],
             DeclaredVias = declared,
             InferredVias = inferred,
+            NetlistVias = netlistVias,
+            NetlistComponentHoles = netlistComponentHoles,
+            NetlistUnclassified = netlistUnclassified,
+            NetlistAmbiguousHoles = netlistAmbiguous,
             Diagnostics = diagnostics,
         };
     }

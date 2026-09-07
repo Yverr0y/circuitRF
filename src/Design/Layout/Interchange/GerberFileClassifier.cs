@@ -49,7 +49,19 @@ public enum GerberFileKind
     /// </summary>
     Archive,
 
-    /// <summary>A sibling to skip: a report, a listing, a placement file, a netlist, an image, a PDF.
+    /// <summary>
+    /// GI5. The board netlist an output set ships beside its artwork: one record per pad and per
+    /// hole, carrying the net at that coordinate, whether the hole is plated, the component reference
+    /// and pin where there is one, and the layers the feature reaches.
+    ///
+    /// <para>It is <b>evidence about the artwork and never geometry</b> (R-gi5-1) — see
+    /// <see cref="BoardNetlistFile"/>. It is what settles the three questions a Gerber import
+    /// currently apologises for in the same run: via versus plated component hole, the net names a
+    /// composited layer destroyed, and the layer span no drill file declared.</para>
+    /// </summary>
+    Netlist,
+
+    /// <summary>A sibling to skip: a report, a listing, a placement file, an image, a PDF.
     /// R-L4g-2 — every one of these is reported by name, once.</summary>
     Other,
 }
@@ -113,6 +125,13 @@ public static class GerberFileClassifier
 
         if (DrillEvidence(head) is { } drill)
             return new GerberFileClass(path, GerberFileKind.Drill, drill);
+
+        // GI5, and BEFORE the declaration test rather than after it: a netlist's signature is a
+        // specific one — three-digit operation codes over letter-tagged coordinates — while a
+        // declaration is recognised by a two-keyword minimum over free-form KEYWORD/VALUE lines, and
+        // the specific test must never be reachable only when the loose one happens to miss.
+        if (BoardNetlistFile.Recognize(head, out string netlist))
+            return new GerberFileClass(path, GerberFileKind.Netlist, netlist);
 
         // LAST, and that order is gate 2's second half: a real drill file renamed to whatever a
         // declaration is conventionally called still reaches DrillEvidence first and still classifies

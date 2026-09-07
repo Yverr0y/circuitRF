@@ -1,5 +1,214 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## Phase GI5 — COMPLETE (2026-09-07)
+
+`docs/sonnet-briefs/brief-gi5-netlist-companion.md`, last of the GI series and the largest. A Gerber
+import of a real multi-layer board printed three apologies in one run — that a via and a plated
+component hole are *"indistinguishable from artwork alone"*, that a composited layer's *"per-object
+net names are gone"*, and that *"no layer span was declared"* so every hole is assumed to go through
+the board. Every one of those is true about the **artwork** and none of them is true about the
+**folder**: a production output set routinely ships an IPC-D-356/356A board netlist beside its
+artwork, and that file was classified *"no Gerber or drill content in its head"* and skipped. New
+reader: `src/Design/Layout/Interchange/BoardNetlistFile.cs` (the reader plus the evidence/matching
+half, one file, exactly as `GerberDeclarationFile.cs` holds GI4's two). Gated by
+`tests/Ui.Tests/Gi5NetlistCompanionTests.cs` — **28 tests**, one or more per gate.
+
+Written from public documentation only. The format is a standards-body one in the same class as
+Gerber and Excellon; nothing in the reader or its fixtures names a tool, product or toolchain.
+
+### 1. What the format turned out NOT to carry (the brief's §8.5, and the biggest finding)
+
+**The layer span.** The brief's §1 lists, among what the netlist carries, *"the layers the feature
+reaches — which is the layer span"*. It does not carry that. It carries an **access code**: one
+value per record, saying either "reachable from both outer surfaces" or naming the **single** layer
+the feature is reachable from. That is **accessibility, not a span**, and the difference is exactly
+the case R-gi5-5 was written for — **a buried via is reachable from neither surface**, so no single
+access code can describe one.
+
+A span is therefore recoverable only where a writer emits **two records at one coordinate naming two
+different layers**, and whether it does is a property of the writer rather than of the format. So
+`BoardNetlistEvidence.SpanFor` is deliberately three-valued:
+
+| What the records at one hole say | What is done |
+|---|---|
+| any record says "both surfaces" | a through-hole span, top conductor to bottom |
+| two or more records name two or more layers | that span, min to max, classified through / blind / buried |
+| exactly one record naming one inner layer | **reported and used for nothing** — one layer is not a span, and inventing the other end is inventing a stackup |
+
+R-gi5-5's other half holds: **no stackup entry is synthesised per span**. The span lands on the via
+entry `GerberImport` already mints for that drill file, through `SpanEndName`, and a file whose holes
+disagree about their span applies **neither** and names both (one drill file is one stackup entry and
+it cannot carry two).
+
+Two smaller things the format does not carry the way one would assume:
+
+* **Net names are limited to a fourteen-column field.** A longer name is written into the header as
+  an alias and the record carries the alias — so a reader that ignores the header table reports a
+  net name that is **wrong** rather than missing, and nothing downstream would question it. Both
+  spellings of the header record in circulation are read (`BoardNetlistFile.LongNetNames`), because
+  the difference between them is whitespace and getting it wrong costs every long name in the file.
+* **Conductor-route and board-outline records exist and are geometry.** They are counted, reported
+  as present, and read for nothing — R-gi5-1, and §7's rule that building connectivity from this
+  data is a different piece of work.
+
+### 2. The match rate (§8.1) — and there is no real set in this repository to measure it on
+
+**Unmeasurable here, and that has to be said rather than answered with a number.** GI4's own note
+records the same fact and it has not changed: `testdata/pcb-samples` is board files, every Gerber
+fixture under `tests/` is hand-authored, and a search of the whole tree for a netlist's own header
+record or its record codes finds **nothing**. Manufacturing every number below from fixtures I wrote
+is not a match rate; it is a check that the reader does what its own tests say.
+
+What the fixtures do measure, stated as fixtures:
+
+| Fixture | Records | Containment | Near | Unmatched | Nets attached | Ambiguous |
+|---|---|---|---|---|---|---|
+| via + component hole | 2 | 2 | 0 | 0 | 1 (+1 already named) | 0 |
+| one net in a composited pour | 1 | 1 | 0 | 0 | 1 | 0 |
+| two nets in one composited region | 2 | 2 | 0 | 0 | 0 | 1 |
+| two nets, one on an isolated island | 2 | 2 | 0 | 0 | 2 | 0 |
+| a coordinate one count outside a pad | 1 | 0 | **1** | 0 | 1 | 0 |
+
+**The near rung is real and is not decoration** — but the reason it exists is not round-off between
+two exporters. It is that **the coarsest resolution this format defines is COARSER than the pairing
+tolerance the drill reader uses**: one count at 0.0001 in is 2.54 µm, against
+`DrillViaPairing.SnapMicrons`' 1 µm. A fixed one-micron tolerance would have missed real matches on
+every inch-resolution set in the world. `BoardNetlistEvidence.ToleranceDbu` is therefore **derived
+from the netlist's own resolution** (one count, floored at one micron) and stated in the report by
+the number rather than by the word "tolerance". It is still two orders of magnitude below the
+tightest pad pitch in circulation, which is the bound that matters.
+
+### 3. What R-gi5-6's headline capability is actually worth (§8.2)
+
+**Most large pours should come back with a usable net name, and the reason is structural rather than
+lucky.** This was the open question in the brief — *"if most large pours are ambiguous, say so"* —
+and it is answerable from how compositing works, then measured.
+
+A pad of a second net inside a pour is separated from it by a **clearance**. Compositing unions the
+layer through Clipper, which turns that clearance into a **hole** in the pour — and
+`LayoutClipper.FromClipperTree` **recurses into a hole's own islands and emits them as further
+top-level shapes**. So the isolated pad is its own shape, with its own outline, and the containment
+test names it directly. Measured:
+`APadIsolatedInsideAPourByItsClearance_IsItsOwnRegion_AndBothNetsAreNamed` — **two nets, two shapes,
+two names, zero ambiguous.**
+
+Ambiguity therefore requires two nets to share **one** region, which means copper that is
+galvanically joined — which on a correctly drawn board is not two nets. The fixture that produces it
+(gate 7) has to join them deliberately. **R-gi5-9 is still exactly right and must not be relaxed**:
+when it does happen, `LayoutShape.Net` is one nullable string and a region holding two nets cannot
+honestly carry either, so it carries neither and is counted. A test asserting it picked one would be
+asserting the bug.
+
+The one loss that stays permanent, and the loss sentence now says only this: **the shape
+IDENTITIES are gone.** The net names are not, when a netlist came with the set — so the sentence in
+`GerberImport`'s "what this format cannot carry back" list is rewritten rather than added to
+(R-gi5-12).
+
+### 4. The via/component split versus the heuristic it replaces (§8.3)
+
+**They disagree on every through-hole component pin on a board, and that is not a tuning problem —
+the old rule is systematically wrong there and says so itself.** `DrillViaPairing`'s pre-GI5 rule is:
+a hole with a copper flash at the same coordinate is a via, unless the drill tool DECLARED itself a
+component or mechanical drill. A through-hole resistor's pin is a hole with a copper flash at the
+same coordinate, so it was a via — and the diagnostic that said *"the distinction was not
+available"* was an accurate description of that, not a hedge.
+
+The netlist settles it by a field lookup, and the two agree exactly where the drill file already
+declared a tool function (which is where the old rule was not guessing) and disagree exactly where it
+did not. Ranking is unchanged from the rest of this series: **the drill file's own attribute
+outranks the netlist**, because a file is authoritative about itself.
+
+**R-gi5-3 is read literally, and deliberately so.** A record with a reference AND a pin is a
+component hole; a record with a net and NO reference is a via; **a record with a reference and no
+pin settles neither way** and is counted. The tempting shortcut — treat any reference as a component
+— fails badly on a writer that puts a marker word in the reference field of a via: every via on the
+board would be counted as a component hole, silently. The unclassified bucket is reported instead,
+which is the only outcome a reader can check.
+
+### 5. Every disagreement between the netlist and the artwork, by kind (§8.4)
+
+All seven are reported with counts and **none of them repairs anything**:
+
+| Kind | What is said |
+|---|---|
+| a coordinate matching no copper | counted, with the tolerance; nothing is drawn |
+| a hole named but drilled by no file | counted; the usual cause named as revision skew |
+| a net name disagreeing with the artwork's own `%TO.N` | the artwork's is kept, the disagreement counted |
+| plating: netlist vs the drill file's own statement | the drill file wins, and it is said |
+| plating: netlist vs the tool listing | **neither** is applied, both are named (see below) |
+| two layer spans in one drill file | neither applied, both named |
+| the netlist's scale against the artwork's extent | settled against the artwork, or the file is dropped by name |
+
+**The tool-listing case is the one R-gi5-4 exists for and it needed a three-rank design.** GI4's
+listing and GI5's netlist are companions of **equal** standing: neither is the drill file, so when
+they disagree there is no principled winner and picking one is the silent guess this series exists to
+remove. `BoardNetlistEvidence.ApplyPlating` therefore takes the read **as the drill file itself left
+it** — before any listing was applied — which is the only way to tell a declared value from a
+contributed one.
+
+### 6. Traps found while building it
+
+* **The apology lives in two places, and only one of them is visible.** Replacing
+  `DrillViaPairing.MapSpan`'s "no layer span was declared" note left the sentence still printed —
+  the copy that reaches the user comes from `ExcellonReader`'s own `Diagnostics`, which
+  `GerberImport` prints verbatim a few lines later. That copy is true about the drill FILE and false
+  about the folder once a netlist in it has stated the span, so it is suppressed at the point of
+  printing (matched as a prefix, so the two copies cannot drift into never matching) rather than
+  removed from the reader that is right about itself.
+* **A via is copper on a layer that is not a copper layer.** It sits on the DRILL layer and carries
+  its landing copper layer separately, so the net-attach pass's "copper layers only" filter skipped
+  it — and reported the coordinate whose pad had just BECOME that via as *"matched nothing"*. A via
+  is now matched by its landing layer, and its net comes from the pad's own attribute first and the
+  netlist's only where the artwork carried none, which is every via on a composited layer.
+* **A companion disagreement RETRACTS a value, and patching only fills nulls.** `ApplyToolListing`
+  writes plating onto the tools AND onto every hit. When the netlist then disagrees and the tool goes
+  back to unstated, a fill-the-nulls pass leaves the hits still marked — two halves of one file
+  disagreeing with each other. The hits are rebuilt from the drill file's own, against the final
+  tool table.
+* **The extent cross-check must be a PROPORTION, not zero-outside.**
+  `ExcellonReader.CrossCheckExtents` demands that no hit fall outside the artwork, which is right for
+  drill data. A netlist names fiducials and tooling holes that legitimately sit outside the copper's
+  centreline extent, so the same rule would have rejected every real netlist. Ten per cent is far
+  above what a board's edge features produce and orders of magnitude below what any resolution error
+  does.
+* **A netlist whose records sit at one point has no span**, so the ratio against the artwork's is a
+  zero that reads like a catastrophic scale error rather than like the absence of a measurement. Said
+  as an absence.
+* **Recognition needed a header-plus-one-record rule.** Two feature records is the standalone
+  minimum, for the reason `GerberDeclarationFile.MinimumKeywords` is two — but a
+  `P  KEYWORD VALUE` header record is this format's own and nothing else writes one, so **one record
+  beside a header is a stronger signature than two bare records**. Recognition runs after the artwork
+  and drill tests (nothing here can take a file the drill test already claimed) and **before** the
+  declaration test, because a specific signature must never be reachable only when a loose one
+  happens to miss.
+* **The record tail is read as an ordered TAG STREAM, not by exact column.** The format is
+  column-oriented and the head (net name, reference, pin) is read that way — but the tail's fields
+  are self-identifying and their exact columns are not honoured by every writer, while a coordinate
+  read one column short is wrong by a factor of ten. The field ORDER is what disambiguates the two
+  X/Y pairs in one record: the first is the location, the second is the feature's own width and
+  height, from which this reader takes nothing (R-gi5-1 — the artwork is the sole source of every
+  dimension).
+* **The containment flattening tolerance is a hundredth of the match tolerance, not one DBU.** One
+  nanometre cannot change a yes/no about a point that is matched to 2.54 µm, and on a curved trace it
+  would flatten a millimetre-scale arc into thousands of segments to answer it.
+
+### 7. One thing left undone on purpose, because doing it would have broken gate 1
+
+**A drill file that declares its OWN blind or buried span still mints a via stackup entry spanning
+the whole stack.** `SpanEndName` can narrow it and does — but only for a span the NETLIST supplied.
+Narrowing the drill file's own would be strictly more correct and would change the `.ctech` of a set
+with **no netlist in it**, which is the single thing R-gi5-2 promised not to do. It is a small,
+self-contained piece of work for whoever picks it up: pass `read.Span` into `spanByDrillFile`
+alongside the netlist's, and expect `tests/Ui.Tests` to need a new expectation rather than a fix.
+
+### 8. What is deliberately NOT here
+
+Everything in the brief's §7, unchanged: no connectivity model and no net extraction from this data
+(`NetExtractor` derives nets from geometry and the two must not be conflated), blind/buried vias as a
+first-class stackup concept, component placement or footprint hierarchy (`GerberImport`'s own note at
+the site where footprint inference would go still stands), and any second netlist dialect — a second
+dialect is a second reader and its own decision.
+
 ## Phase GI4 — COMPLETE (2026-09-07)
 
 `docs/sonnet-briefs/brief-gi4-companion-declaration-files.md`, fourth of the GI series. A production
