@@ -95,7 +95,25 @@ public partial class RestorePointsTool : Tool
     /// <summary>What the list currently holds, newest first.</summary>
     public ObservableCollection<RestorePointRow> Points { get; } = [];
 
-    [ObservableProperty] private RestorePointRow? _selected;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSelection))]
+    [NotifyPropertyChangedFor(nameof(CanKeepPermanently))]
+    private RestorePointRow? _selected;
+
+    /// <summary>Whether the two actions that act on a row have a row to act on.</summary>
+    /// <remarks>
+    /// This is not the greying R-rc6-8 forbids. That rule is about a state — held, off, failing —
+    /// where a greyed control says <i>not available to you</i> and nothing about why, so the buttons
+    /// stay live and refuse out loud instead. "Nothing is selected" needs no sentence: the list is
+    /// right there and the remedy is to click a row.
+    /// </remarks>
+    public bool HasSelection => Selected is not null;
+
+    /// <summary>
+    /// Whether <b>keep permanently</b> has anything to do. An entry already marked keep is skipped by
+    /// the operation itself, so a live button on one would be a button that does nothing.
+    /// </summary>
+    public bool CanKeepPermanently => Selected is { Kept: false };
 
     /// <summary>True when there is a workspace with a history to show. Otherwise the panel says why
     /// it is empty rather than looking broken.</summary>

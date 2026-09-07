@@ -58,18 +58,35 @@
                                        Padding="{DynamicResource DockHeaderContentPadding}"/>
                             <!-- RC-2 R-rc2-5: this file lives in a workspace the open one references
                                  EDITABLY, so saving it writes into another project. Bound the same
-                                 x:CompileBindings="False" way IsForeign above is, and for the same
-                                 reason — only the document types a referenced workspace's sub-tree
-                                 can open declare the property, and every other type binds null here
-                                 and renders unmarked. Never an error colour (§5A.4): it is an
-                                 unusual state somebody chose, not a fault. -->
+                                 x:CompileBindings="False" way IsForeign above is: the declared
+                                 DataType is IDockable, and only the document types a referenced
+                                 workspace's sub-tree can open (schematic, symbol, layout, cell
+                                 parameters) declare the property at all.
+
+                                 FallbackValue=False IS THE WHOLE FIX, and its absence was an
+                                 owner-reported bug (2026-09-07: every .cdd Data Display tab carried
+                                 the pencil). The comment that used to sit here said every other
+                                 document type "binds null here and renders unmarked", which is the
+                                 wrong model: a MISSING property is not null, it is UnsetValue, and a
+                                 property left unset takes its DEFAULT — and IsVisible's default is
+                                 TRUE. So the mark appeared on exactly the tabs that cannot be
+                                 referenced at all (Data Display, harmonicaRF, technology, EM setup),
+                                 which is the opposite of what it means.
+
+                                 IsForeign above escapes this only because it goes through a
+                                 converter to a Background, where unset is transparent either way —
+                                 so it is not the precedent it looks like. Any future binding here
+                                 onto a property some document types lack needs this too.
+
+                                 Never an error colour (§5A.4): it is an unusual state somebody
+                                 chose, not a fault. -->
                             <mi:MaterialIcon Kind="PencilOutline"
                                              Width="11" Height="11"
                                              Margin="0,0,6,0"
                                              VerticalAlignment="Center"
                                              Foreground="{DynamicResource CrfWarningBrush}"
                                              ToolTip.Tip="This cell belongs to a referenced workspace that is editable from here. Saving writes into that workspace."
-                                             IsVisible="{Binding IsEditableReference}"/>
+                                             IsVisible="{Binding IsEditableReference, FallbackValue=False}"/>
                         </StackPanel>
                     </Border>
                 </DataTemplate>

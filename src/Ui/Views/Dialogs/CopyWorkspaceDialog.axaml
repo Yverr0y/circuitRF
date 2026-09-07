@@ -1,7 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="CircuitRF.Ui.Views.Dialogs.CopyWorkspaceDialog"
-        Title="Copy a Workspace Here"
+        Title="Clone a Workspace"
         Width="620"
         SizeToContent="Height"
         MinHeight="280"
@@ -40,10 +40,10 @@
         <StackPanel Grid.Row="0" Spacing="10">
 
             <TextBlock FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap"
-                       Text="Copy a workspace onto this machine and open it"/>
+                       Text="Clone a workspace onto this machine and open it"/>
 
             <TextBlock FontSize="12" TextWrapping="Wrap" Opacity="0.85"
-                       Text="Give the address the workspace's maintainer gave you, and say where to put it. What arrives is an ordinary workspace: you can open it, read it, reference its cells, and — if you are allowed to — send your own changes back."/>
+                       Text="Give the address the workspace's maintainer gave you, and say where to put it. What arrives is an ordinary workspace: you can open it, read it, reference its cells, and — if you are allowed to — push your own changes back."/>
 
             <TextBlock FontSize="12" Margin="0,6,0,0" Text="Address"/>
             <TextBox x:Name="SourceBox" FontSize="12" PlaceholderText="the address you were given"/>
@@ -68,7 +68,7 @@
             <Button x:Name="CancelButton" FontSize="12" Padding="10,4"
                     IsCancel="True" Content="Cancel" Click="OnCancelClick"/>
             <Button x:Name="CopyButton" FontSize="12" Padding="10,4"
-                    IsDefault="True" Content="Copy" Click="OnCopyClick"/>
+                    IsDefault="True" Content="Clone" Click="OnCopyClick"/>
         </StackPanel>
     </Grid>
 </Window>

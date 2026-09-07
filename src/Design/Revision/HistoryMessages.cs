@@ -117,6 +117,18 @@ public static class HistoryMessages
       + "under a title you write, so you can find it again and send it out.";
 
     /// <summary>
+    /// The same empty panel with <b>no workspace open at all</b>, which is a different fact and needs a
+    /// different sentence.
+    ///
+    /// <para><see cref="NothingKeptYet"/> says <i>this workspace</i>, and with nothing open there is no
+    /// <i>this workspace</i> for it to be about — so the panel would be making a confident claim about
+    /// a workspace the designer had just closed. That is the same defect as an indicator left running
+    /// after a close, one panel over.</para>
+    /// </summary>
+    public const string NoWorkspaceOpen =
+        "No workspace is open. Versions are kept per workspace; open one to see its versions.";
+
+    /// <summary>
     /// R-rc7-10. <b>An off period renders as a gap, with its reason.</b>
     ///
     /// <para>Rendering it as an ordinary interval between two versions is §1.4's false-belief failure

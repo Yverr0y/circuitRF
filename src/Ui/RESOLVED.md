@@ -22171,3 +22171,268 @@ sentence on Save Workspace As — counted restore points only. A designer who ha
 with the one sentence that exists to stop exactly that discovery withheld. This is the mistake RC-7
 recorded against the off/on transition (`RevisionSwitch.ExistingRepository`, which asks both questions)
 arriving in a second place: *"does this workspace have a history"* is two questions here and always was.
+
+---
+
+## Revision control: the surfaces after a close, the panel toolbars, and two toolbar buttons (2026-09-07)
+
+Owner-reported while testing the revision-control feature end to end.
+
+### A closed workspace went on being described at the foot of its own window
+
+*"History failing — circuitRF tried to record this workspace and could not"* stayed rendered after the
+workspace was closed. **Two independent defects met in that one sentence**, and either produces it alone.
+
+**Nothing refreshed the revision surfaces on the way to the blank shell.** `OnWorkspaceOpenedForRevision`
+refreshes the indicator, the Restore Points panel and the Versions panel; `ResetToBlankShell` had no
+counterpart, so all three kept the last workspace's answer indefinitely. Opening a *second* workspace hid
+it — that path runs the open refresh — which is why it survived: the failure needs a close with nothing
+after it. `OnWorkspaceClosedForRevision` is the counterpart, and it is called **after**
+`WhileRebuildingLayout`, never before: the rebuild replaces the panel instances, so a refresh performed
+first fills the tools that are about to be discarded and leaves the new ones holding the old list.
+
+**`WorkspaceHistoryService._lastBoundaryFailed` outlived the workspace.** One window builds one service and
+every workspace opened in that window shares it, so a boundary that failed in workspace A reported
+workspace B as failing — about which the indicator's own sentence, *nothing since then is in the history*,
+is simply untrue. `ResetForWorkspace` now clears it with the rest of the session. **An indicator caught
+saying something false is how a designer learns to stop reading it**, which costs §1.4's guarantee in both
+directions, so the fix is worth more than the size of it suggests.
+
+Same shape, one panel over: the Versions panel's empty line said *"You have not kept a version of **this
+workspace** yet"* with no workspace open. `HistoryMessages.NoWorkspaceOpen` is the other sentence.
+
+### The two panels' header buttons were labelled, and three of them began with "Keep"
+
+*Keep this state*, *Keep permanently* and — one panel over — *Keep this version* read as three spellings
+of one operation. They are not: the first writes a restore point, the second pins an **existing** restore
+point so retention never removes it, and the third writes a titled version. **The owner pressed "Keep
+permanently" and went looking for a new version**, which is the confusion the three labels invite.
+
+Both toolbars are now the icon-only shape the Analyses list and the Project panel already use
+(transparent, borderless, 14 px glyph in `SystemBaseMediumColor`, a hairline separator between what
+creates an entry and what acts on the selection), and the glyphs carry the distinction the labels could
+not: **save-plus** creates a restore point, a **pin** marks one permanent, a **tag** writes a version, and
+*go back to this* is the one action the two panels genuinely share so it carries the same glyph in both.
+Every button keeps a full sentence as its tooltip, and the pin's says what it is not.
+
+`RestorePointsTool` gained `HasSelection` and `CanKeepPermanently`. **This is not the greying R-rc6-8
+forbids** — that rule is about held/off/failing, where a greyed control says *not available to you* and
+nothing about why, so those buttons stay live and refuse out loud. "Nothing is selected" needs no
+sentence, and "already pinned" would be a button that does nothing.
+
+### The workspace toolbar's two history buttons, and why the visibility test is not `State()`
+
+Restore Points and Versions now sit at the right-hand end of the toolbar beside Library / Properties /
+Messages, on the same three-state toggle, under the glyphs the View menu already uses for them.
+
+They are shown only when `WorkspaceHistoryService.KeepingHistoryHere` is true — a workspace is open, there
+is a usable git, and *keep a history* is on for this workspace — and are **absent rather than greyed**
+(R-rc3-3's silence, on the strip a designer's eye crosses every few seconds).
+
+**`State()` cannot answer this**, and the reason is a deliberate part of its design: with no git it returns
+`RecordingState.On`, because the feature is meant to be invisible there. As a visibility test that puts the
+buttons on the one machine with nothing behind them.
+
+**And the check runs no git.** It is re-read on every window `Activated` — which is how a change made in
+Settings ▸ Revision Control reaches the toolbar, since that dialog writes preferences directly and
+notifies no window — so a subprocess here would be paid on every alt-tab, forever, to answer a question
+whose answer changes about twice in a workspace's life. `GitDiscovery.Find` is cached; `Situation()` and
+`GitCommand.For` are not, and a source-scan gate keeps them out.
+
+### A cropped figure, and why it is a crop rather than a drawing
+
+The editable-reference mark (RC-2 R-rc2-5) is an 11 px pencil on a document tab. In
+`workspace-overview` it is four pixels of orange no reader will find, and it is the piece of chrome a
+designer is most likely to meet *before* meeting the feature it belongs to — so it has a figure of its
+own, `editable-reference-tab`, cropped to the tab strip.
+
+`FigureCrop` hosts the **real** window content, at its real size, inside a clipping frame and offsets it;
+the rectangle is the union of the live `DocumentTabStripItem` bounds, never a measured constant, and a
+crop that finds none of them throws rather than silently photographing the top-left corner. The fixture
+builds a real second workspace, references it editably in a real `.cws`, opens its cell through the
+Project panel, and **asserts the mark is set before the figure ships** — an unmarked tab and a marked one
+are the same picture to anyone not already looking for the mark, which is exactly this figure's reader.
+
+**Its colour is the theme's `SystemWarning` role**, which is why it reads to a designer as a report that
+they have done something wrong — the reaction it drew on first sight. `workspace-and-project-tree.md` §5A.4 says the opposite in as many words — *use the
+palette's unusual-but-fine accent rather than an error colour* — so the implementation and the
+architecture disagree here. Recorded, not changed: it is one `DynamicResource` in two places
+(`CircuitRfStyles.axaml`'s tab header template and `ProjectTreeView.axaml`'s row), and it is the owner's
+call which of the two documents is wrong.
+
+### The indicator did not notice history being turned on
+
+Owner-reported the same day: history was switched on with the workspace open and the foot of the window
+went on reading *History off*.
+
+**Settings ▸ Revision Control writes preferences and the `.cws` directly and notifies nothing**, and the
+dialog is **not modal** — the workspace it describes is on screen while the switch is thrown. Nothing
+re-read the state until the next workspace open, so the one indicator §1.4 exists to be believed was left
+stating the opposite of what the user had just chosen.
+
+Every remedy that works by *asking again later* was rejected on cost: `WorkspaceHistoryService.State`
+runs git (`EnclosingRepository.Detect` is a `rev-parse` plus a directory walk), so refreshing it on
+window activation would be a subprocess per alt-tab, forever. A settings change is an **event**, and the
+fix treats it as one — `WorkspaceViewModel.RefreshRevisionSurfacesEverywhere()`, called from the four
+handlers that change what a window says: the per-user switch, the per-workspace switch, git becoming
+available or unavailable, and a reclaim (which destroys thinned states the panel is still offering the
+way back to).
+
+**Every open workspace, not the one the dialog was opened from**: one of those switches is per-user, and
+the others are on screen at the time. **A broadcast rather than a static event** — a static event would
+hold a reference to every workspace view model that ever subscribed, and workspaces open and close
+throughout a session.
+
+Two latent versions of the same omission fixed with it: `SetRecordingForThisWorkspace` and
+`AskAboutAdoption` each refreshed the indicator and the Restore Points panel but **not the Versions
+panel** — and an off period is a *row* in that list with its reason on it (R-rc7-10), so it was the panel
+those two transitions most visibly change. All three now go through one `RefreshRevisionSurfaces()`.
+
+**`SetRecordingForThisWorkspace` has no callers at all**, which is why this was never noticed from that
+side: the Settings tab is the only way to flip the per-workspace switch today.
+
+### The editable-reference pencil was on every Data Display tab
+
+Owner-reported: `.cdd` documents in an ordinary workspace carried the mark that says *saving this writes
+into somebody else's project*.
+
+**The cause is a general Avalonia trap and the fix is one attribute.** The document tab's `HeaderTemplate`
+declares `IDockable` as its data type and binds `IsEditableReference` with `x:CompileBindings="False"`,
+because only the four cell-view document types declare that property. The template's own comment claimed
+every other type "binds null here and renders unmarked". **That is not what happens: a property the
+runtime object does not have is `UnsetValue`, not null, and a property left unset takes its DEFAULT —
+and `IsVisible`'s default is `true`.** So the mark appeared on exactly the tabs that can never be reached
+through a referenced workspace at all (Data Display, harmonicaRF, technology, EM setup), which is the
+opposite of what it means.
+
+**`IsForeign`, two lines above it, is not the precedent it looks like.** It runs through a converter into
+a `Background`, where unset renders transparent either way, so the same defect is invisible there. Only a
+direct binding onto a property whose target default is the wrong answer can fail this way.
+
+`FallbackValue=False` is the whole fix. `EditableReferenceTabMarkTests` holds three things: that document
+types without the property exist (which is what makes the fallback load-bearing rather than defensive),
+that this binding carries it, and — the general rule — that **every** direct binding in that template
+onto a property `IDockable` does not declare carries one. That template is the only place in the
+application that binds against a heterogeneous set of runtime types with compiled bindings deliberately
+off, so it is the only place this can happen.
+
+**Worst direction for this mark to be wrong in**: its whole value is being rare, and one that is on by
+default is one a designer learns to ignore before ever meeting the real thing.
+
+### File menu: git's own words for the three items that reach another machine
+
+Owner's decision, 2026-09-07, taken against `revision-control.md` §0 with the trade named: *Copy
+Workspace Here…* → **Clone Workspace…**, *Bring In Changes* → **Pull Changes**, *Send Changes* → **Push
+Changes**, with a separator above the group.
+
+**§0's rule stands everywhere else** — a restore point is still a restore point, a version is still a
+version, and nothing anywhere says *commit*. These three are the deliberate exception because they
+genuinely **are** clone, fetch and push, they reach a git host, and an engineer who has been handed an
+address already knows the three words. The tooltips still carry circuitRF's own sentence, so the
+vocabulary is a label rather than a prerequisite. The dialog's title, heading and button follow the menu.
+
+**One inexactness the owner accepted by choosing the word:** *Pull Changes* is a **fetch**, not a
+fetch-plus-merge. There is no merge anywhere in this feature (§6.1 — the five design formats are marked
+unmergeable and resolution is whole-file, pick a side), which is what makes offering it safe at all. The
+tooltip says *nothing in your own files is touched*, which is the part a git-literate user would
+otherwise assume wrongly.
+
+The separator is a change of grouping as well as a rename: the band above is about workspaces on **this**
+machine, and these three are the ones that reach another. `FileMenuRestructureTests` carries both menu
+surfaces, so the macOS `NativeMenu` and the in-window menu cannot drift.
+
+### The Versions panel was never refreshed on workspace open, and its own button was dead
+
+Owner-reported: the Versions panel said *No workspace open* with a workspace open. **The wrong sentence
+was the small half.**
+
+`VersionHistoryTool.HasWorkspace` starts false and is set only by `SetRows`, and `SetRows` is reached
+only from `RefreshVersionHistoryPanel` — whose callers were *a version was just kept* and *changes were
+just brought in*. **Nothing refreshed it on workspace open.** So on every freshly opened workspace the
+panel's own **Keep this version** button was disabled, and the only thing that would have enabled it was
+keeping a version — which is what the button does. File ▸ Keep This Version… still worked, which is why
+it went unnoticed; and until `EmptyText` learned to distinguish the two empties (same session, above) the
+panel looked merely empty rather than wrong.
+
+The two panels are now refreshed through **one** `RefreshHistoryPanels()`, called on open and subscribed
+to `WorkspaceHistoryService.Changed` — which previously drove the restore-point panel alone, even though
+several of the operations that raise it change the versions list too (turning recording off and on puts a
+gap row in it, R-rc7-10; a restore adds the entry it took first). **Every defect in this area so far has
+been one of the pair left out of a refresh**, so the pair is now a single method rather than a convention.
+
+### Pull Changes downloaded the versions and showed the user nothing — FIXED
+
+Found while answering a question about it. Measured, not inferred: two repositories, a clone, a version
+kept on the far side, then exactly the fetch `WorkspaceRemotes.Fetch` runs.
+
+- The objects arrive. `rev-list origin/HEAD` lists both versions.
+- `HistoryBrowser.Versions` runs **`rev-list HEAD`** — the local branch only — so the Versions panel shows
+  nothing new and there is nothing to go back to.
+- Restore points do not arrive, which is correct, deliberate (R-rc9-5a) and documented.
+
+Three things in the tree assert otherwise and are wrong today: `WorkspaceViewModel.Sharing`'s header
+(*"what arrives shows up in the versions list"*), `versions.md` (*"shows what is new on the copy it came
+from"*), and the `RefreshVersionHistoryPanel()` call sitting immediately after the fetch — a refresh of a
+list that cannot have changed.
+
+**The pick-a-side resolver that was supposed to be the way you take their version is unreachable.**
+`DocumentClashes.Find` reads the **index's unmerged entries**, which only a merge creates; nothing in this
+series merges, and `read-tree` is used only in its single-tree form. `WorkspaceHistoryService.Clashes` and
+`KeepSide` have **no UI callers at all**. So R-rc7-13 is built, tested and cannot fire.
+
+**What was built** (owner's decision, 2026-09-07): `WorkspaceRemotes.IncomingRef` resolves where a fetch
+put things — `@{upstream}` first, since that is what a clone configures, then the remote's own default
+branch, then the same-named branch, and **null rather than a guess** at `refs/remotes/<remote>/*`, because
+circuitRF has no branch concept and picking one of several would be inventing an answer.
+`HistoryBrowser.Incoming` walks `<ref> --not HEAD` — the versions *there and not here*, since listing the
+reference outright repeats every version the two copies share, which is most of them, in a list whose
+value is that it is short. Those rows are marked (`HistoryVersion.OnTheOtherCopy`, an `init` property
+rather than a positional member, exactly as `RestorePoint.Thinned` is and for the same reason), placed
+above the local ones, dimmed, and counted in a line above the list.
+
+**They are listed first rather than merged by time.** An incoming version is newer than everything present
+almost by definition, so a time sort puts them on top anyway — and occasionally would not, stranding one
+mid-list under a mark nobody would look for there.
+
+**Go back to this needed no new code at all**: `GoBackToVersion` restores a commit's tree, a fetched commit
+has one, and RC-5's restore already keeps what it replaces. So taking a version from the other copy is a
+whole-workspace, whole-file, pick-a-side act with a way back — which is exactly §6.1's model, at workspace
+granularity.
+
+### STILL OPEN — the per-DOCUMENT pick-a-side resolver cannot fire, and a user chapter describes it
+
+Separate from the above and not closed by it. `DocumentClashes.Find` reads the **index's unmerged
+entries**, which only a merge creates; nothing in this series merges, and `read-tree` appears only in its
+single-tree form. `WorkspaceHistoryService.Clashes` and `KeepSide` have **no UI callers at all**. R-rc7-13
+is built, tested, and unreachable.
+
+`versions.md` §"Two of us are editing the same workspace" describes that flow to users as though it
+works — *circuitRF shows you both versions and asks which one you want* — and it does not. **Left standing
+deliberately**: rewriting a user chapter to describe a feature's absence is an editorial decision for the
+owner, not a side effect of a neighbouring fix. The adjacent Pull bullet no longer cross-references it.
+
+### A floated panel outlived the workspace window it belonged to
+
+Owner-reported: File ▸ **Close Workspace Window** left the Restore Points panel showing the closed
+workspace.
+
+**Nothing closed an owned floating window on any per-window path.** `App.CloseAllFloatingWindows` runs
+only for File ▸ Quit, so every floated panel of a closed workspace window was orphaned — Properties,
+Messages, Library, DRC and the two history panels alike. Closing the **workspace** (File ▸ Close
+Workspace) does not show it, because `ResetToBlankShell` now empties both history panels and a floated
+panel is the *same tool instance*; closing the **window** goes through neither path.
+
+**Worse than stale.** The view model behind an orphaned panel is still alive and its buttons still work,
+so *Go back to this* on one would have restored a workspace whose window had gone.
+
+`CloseFloatingToolWindows` runs from the window's own `OnClosed` — **not** from `OnCleanExit`. Quit asks
+every window before closing any of them (MW1 R-mw1-18), so a cancel at the second window leaves the first
+one open, and `OnCleanExit` has already run on it by then; closing its panels there would take them from a
+window the user had just chosen to keep. `OnClosed` runs only when the window really has closed, which
+also means the OS close box is covered by the same fix as the menu item.
+
+**Tool panels only.** A tool panel belongs to the workspace (R-dock-13) and holds nothing of its own. What
+happens to a torn-off DOCUMENT when its window closes is a separate and already-litigated question
+(R-fgn-1/-2, answered for a workspace *switch* by `CloseFloatedDocumentsOwnedByWorkspace`), and answering
+it as a side effect of this fix would change an owner decision nobody asked about. A float holding both is
+left alone, because it holds a document.

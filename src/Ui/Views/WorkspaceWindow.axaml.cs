@@ -63,6 +63,11 @@ public partial class WorkspaceWindow : Window
             // fallback should be (R-mw1-13).
             App.NoteWorkspaceActivated(this);
             AttachNativeMenuAtApplicationScope();
+            // Settings ▸ Revision Control writes preferences directly and tells no window about it, so
+            // coming back to the workspace is where the toolbar's two history buttons find out that
+            // git was named, or that "keep a history" was switched. Cheap by construction — see
+            // WorkspaceHistoryService.KeepingHistoryHere, which runs no git.
+            _vm?.RefreshRevisionButtonAvailability();
         };
     }
 
@@ -318,6 +323,17 @@ public partial class WorkspaceWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         base.OnClosed(e);
+
+        // This window's floating TOOL panels go with it. Nothing closed them on any per-window path —
+        // App's sweep runs only for File ▸ Quit — so a floated Restore Points, Properties or Messages
+        // panel outlived its own workspace window and went on describing it, with live buttons behind
+        // a view model whose window had gone (owner-reported, 2026-09-07).
+        //
+        // HERE and not in OnCleanExit: Quit asks every window before closing any of them, so a cancel
+        // at the second window leaves the first open — and OnCleanExit has already run on it by then.
+        // OnClosed runs only when this window really has closed.
+        _vm?.CloseFloatingToolWindows();
+
         Avalonia.Threading.Dispatcher.UIThread.Post(
             () => (App.Current as App)?.NotifyWindowCountChanged(),
             Avalonia.Threading.DispatcherPriority.Background);

@@ -2902,6 +2902,11 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         SubscribeToDocumentPanes();
         WireAnalysesRun();
 
+        // After the rebuild, because it populates the panels the rebuild just replaced. Clears the
+        // recording indicator at the foot of the window and empties both history panels — all three
+        // were still describing the workspace that has just gone.
+        OnWorkspaceClosedForRevision();
+
         Messages.Clear();
         Messages.Info("Workspace closed.");
 

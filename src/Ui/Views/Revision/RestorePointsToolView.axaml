@@ -1,35 +1,67 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:CircuitRF.Ui.ViewModels.Dock"
+             xmlns:mi="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
              x:Class="CircuitRF.Ui.Views.Revision.RestorePointsToolView"
              x:DataType="vm:RestorePointsTool"
              Background="{DynamicResource SystemChromeLowColor}">
 
   <Grid RowDefinitions="Auto,Auto,*,Auto">
 
-    <!-- The save-point lives on the File menu too (R-rc5-4c). It is here as well because this is
-         where a designer is standing when they decide a state is worth keeping. -->
-    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="4" Margin="4,2">
+    <!-- The header toolbar, in the shape every other circuitRF panel header uses (the Analyses list
+         and the Project panel are the two references): icon-only buttons, transparent, borderless,
+         14 px glyphs in SystemBaseMediumColor, each one carrying its own sentence as a tooltip, with
+         a hairline separator between what CREATES an entry and what ACTS ON the selected one.
+
+         GLYPHS RATHER THAN WORDS, and the glyphs are the point here more than elsewhere. Three of the
+         four actions began with the word "Keep" — keep this state, keep permanently, and, one panel
+         over, keep this version — which read as three spellings of one operation and are not: one
+         writes a restore point, one marks an existing restore point never to be tidied away, and one
+         writes a titled version. The pin, the save-plus and (in the Versions panel) the tag say the
+         difference at a glance in a way three "Keep" labels never did. -->
+    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="0" Margin="4,4,4,2">
+
+      <!-- The save-point lives on the File menu too (R-rc5-4c). It is here as well because this is
+           where a designer is standing when they decide a state is worth keeping. -->
       <Button x:Name="SavePointButton" Click="OnSavePointClick"
               IsEnabled="{Binding HasWorkspace}"
-              ToolTip.Tip="Keep this state, with a line saying what it is"
-              Padding="6,2" Background="Transparent" BorderThickness="0" FontSize="11"
-              Content="Keep this state" />
+              ToolTip.Tip="Keep this state — writes a restore point for the workspace as it stands, with a line saying what it is"
+              Padding="3,2" Background="Transparent" BorderThickness="0" Margin="0,0,1,0">
+        <mi:MaterialIcon Kind="ContentSavePlusOutline" Width="14" Height="14"
+                         Foreground="{DynamicResource SystemBaseMediumColor}"/>
+      </Button>
+
+      <Border Width="1" Height="12" Margin="3,0,3,0" VerticalAlignment="Center"
+              Background="{DynamicResource SystemBaseLowColor}"/>
+
       <Button x:Name="RestoreButton" Click="OnRestoreClick"
-              ToolTip.Tip="Put the workspace back to the selected state. What you have now is kept first."
-              Padding="6,2" Background="Transparent" BorderThickness="0" FontSize="11"
-              Content="Go back to this" />
+              IsEnabled="{Binding HasSelection}"
+              ToolTip.Tip="Go back to this — puts the workspace back to the selected state. What you have now is kept first."
+              Padding="3,2" Background="Transparent" BorderThickness="0" Margin="0,0,1,0">
+        <mi:MaterialIcon Kind="ArrowULeftTop" Width="14" Height="14"
+                         Foreground="{DynamicResource SystemBaseMediumColor}"/>
+      </Button>
+
+      <!-- A PIN, deliberately. The action does not create anything and it does not make a version: it
+           marks the selected restore point so that tidying up never removes it. The row picks up the
+           word "kept" on its right-hand side when it has worked. -->
       <Button x:Name="KeepButton" Click="OnKeepClick"
-              ToolTip.Tip="Never let this one be tidied away"
-              Padding="6,2" Background="Transparent" BorderThickness="0" FontSize="11"
-              Content="Keep permanently" />
+              IsEnabled="{Binding CanKeepPermanently}"
+              ToolTip.Tip="Keep permanently — pins the selected restore point so tidying up never removes it. It stays a restore point; it does not become a version."
+              Padding="3,2" Background="Transparent" BorderThickness="0" Margin="0,0,1,0">
+        <mi:MaterialIcon Kind="PinOutline" Width="14" Height="14"
+                         Foreground="{DynamicResource SystemBaseMediumColor}"/>
+      </Button>
+
       <!-- R-rc6-4's way back. Shown only on a row retention tidied away, because on any other row it
            has nothing to do and a button that does nothing teaches nothing. -->
       <Button x:Name="BringBackButton" Click="OnBringBackClick"
               IsVisible="{Binding Selected.Thinned, FallbackValue=False}"
-              ToolTip.Tip="Bring this one back into the list"
-              Padding="6,2" Background="Transparent" BorderThickness="0" FontSize="11"
-              Content="Bring this back" />
+              ToolTip.Tip="Bring this back — returns a tidied-away state to the list"
+              Padding="3,2" Background="Transparent" BorderThickness="0">
+        <mi:MaterialIcon Kind="DeleteRestore" Width="14" Height="14"
+                         Foreground="{DynamicResource SystemBaseMediumColor}"/>
+      </Button>
     </StackPanel>
 
     <!-- R-rc6-8. HELD MUST NOT LOOK LIKE ABSENT. RC-3 hides every affordance when git is missing,

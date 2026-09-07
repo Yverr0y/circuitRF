@@ -55,6 +55,14 @@ public static class FigureCatalog
             WindowFrame.Titled("Amplifier Design — circuitRF"),
             "The same window with each region numbered."),
 
+        // A CROP of the same window rather than a panel of its own (see FigureCrop): the thing being
+        // photographed is 11 px wide, and in workspace-overview above it is four pixels of orange a
+        // reader cannot find. No chrome — it is the inside of a window, not a window.
+        new("editable-reference-tab", DocWorkspaceFixtures.EditableReferenceTab, 460, 46, null,
+            "Two open documents, one of them opened out of a workspace this one references with "
+          + "editing allowed. The pencil beside its name says that saving it writes into that other "
+          + "project. A tab with no pencil is an ordinary document of this workspace."),
+
         new("schematic-editor", DocFixtures.SchematicEditor, 1100, 700,
             WindowFrame.Titled("circuitRF — FET S-Parameters"),
             "The schematic editor with the shipped FET S-parameter test bench open."),

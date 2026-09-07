@@ -130,20 +130,23 @@ different situations and only one of them means the work is recoverable.
 ## Exchanging versions with another copy {#other-copy}
 
 If this workspace was brought here with
-[File ▸ Copy Workspace Here…](workspace.html#copying-a-library), two more items on the File menu apply
+[File ▸ Clone Workspace…](workspace.html#copying-a-library), two more items on the File menu apply
 to it.
 
-- **Bring In Changes** shows what is new on the copy it came from. **Nothing in your own files is
-  touched** — what arrives appears in the Versions panel, and if a document has changed on both sides
-  you are asked which version you want, exactly as [below](#two-of-you).
-- **Send Changes** sends the versions *you* have kept back to that copy. Your restore points stay here:
+- **Pull Changes** brings down what is new on the copy it came from and **lists it**. The versions
+  waiting for you appear at the top of the Versions panel, marked *on the copy this came from — not
+  here yet*, with a line above the list saying how many. **Nothing in your own files is touched by the
+  pull itself.** Select one to see which documents it changes; **Go back to this** puts those files
+  into your workspace — and, like every other way back, keeps what you have now as a restore point
+  first, so it is not a one-way door.
+- **Push Changes** sends the versions *you* have kept back to that copy. Your restore points stay here:
   they are your machine's safety net and mean nothing on anybody else's.
 
 **Neither happens by itself.** circuitRF never contacts anything without being asked, and it holds no
 sign-in of its own — it uses whatever your machine's `git` is already set up with. If a sign-in is
 needed that cannot be supplied, the operation stops and says what was wanted rather than waiting.
 
-If the other side has moved on since you last brought its changes in, **Send Changes** says so and
+If the other side has moved on since you last brought its changes in, **Push Changes** says so and
 sends nothing. Bring the changes in first, choose where the two disagree, and send again.
 
 ## "Two of us are editing the same workspace" {#two-of-you}

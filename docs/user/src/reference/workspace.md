@@ -178,6 +178,34 @@ are read-only too: a reference made before this existed is treated as read-only,
 reading and not the one you happened to have.</p>
 </div>
 
+### The pencil on a document tab {#pencil-mark}
+
+{{ui: editable-reference-tab}}
+
+The pencil appears beside a document's name when that document lives in **another workspace that you
+have allowed editing through**. It answers one question, and only that one: *if I press Save, whose
+project does this get written into?* A tab with no pencil is a document of the workspace you have open.
+
+**You have not done anything wrong.** The mark is not a warning and there is no error behind it. It is
+there because allowing editing through a reference is a deliberate, unusual choice somebody made once —
+often weeks ago, possibly not by you — and the moment it matters is the moment you are about to save,
+which is exactly when nothing on screen would otherwise mention it.
+
+A few things it is worth knowing:
+
+- **It never turns green, and there is no second state.** The mark is either there or it is not. Green
+  would imply a check that had passed, and nothing is being checked.
+- **It is not about unsaved changes.** That is the bullet in the window title, and the two are
+  independent.
+- **It does not depend on whether the other workspace is open.** It describes the relationship between
+  the two projects, which stays true whatever windows you have.
+- **To make it go away**, right-click that workspace's row in the Project panel and choose **Make
+  Reference Read-Only**. The reference keeps working; you simply read through it again, which is the
+  default for every reference.
+
+The same pencil appears on the referenced workspace's own row in the Project panel, which is where you
+can act on it.
+
 ## Using a library another team maintains {#library-team}
 
 This is the arrangement most RF groups end up with: one person, or one team, maintains a set of
@@ -190,8 +218,8 @@ the two are worth reading together.
 If the library lives on a share you can already reach, **File ▸ Reference Workspace…** is all you need.
 
 If instead you were given an *address* — the library is kept somewhere central and handed out rather
-than sat on a share — use **File ▸ Copy Workspace Here…**. Paste the address, say which folder to put
-it in, and press Copy. What arrives is an ordinary workspace: open it, read it, reference its cells
+than sat on a share — use **File ▸ Clone Workspace…**. Paste the address, say which folder to put
+it in, and press Clone. What arrives is an ordinary workspace: open it, read it, reference its cells
 from your own designs.
 
 Two things are worth knowing before you press the button:
@@ -204,8 +232,9 @@ Two things are worth knowing before you press the button:
   belong to the machine they were taken on. circuitRF starts a safety net of your own the first time it
   has something to record here.
 
-Once a workspace has been copied this way, **File ▸ Bring In Changes** shows what is new on the copy it
-came from, and **File ▸ Send Changes** sends the versions you have kept back — if you are allowed to.
+Once a workspace has been cloned this way, **File ▸ Pull Changes** brings down what is new on the copy
+it came from and lists it at the top of the Versions panel — marked, and applied to your files only if
+you choose one. **File ▸ Push Changes** sends the versions you have kept back, if you are allowed to.
 Neither happens by itself: circuitRF never contacts anything without being asked.
 
 ### "I want my design to keep using the version I tested against" {#pinning}

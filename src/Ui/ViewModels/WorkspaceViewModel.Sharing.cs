@@ -58,9 +58,10 @@ public partial class WorkspaceViewModel
     // ── Copying a workspace here (R-rc9-1) ────────────────────────────────────────────────────────
 
     /// <summary>
-    /// File ▸ <b>Copy Workspace Here…</b>
+    /// File ▸ <b>Clone Workspace…</b>
     ///
-    /// <para>Beside Reference Workspace…, because the two answer the same question from opposite ends:
+    /// <para>Below Reference Workspace… and separated from it, because the two answer the same question
+    /// from opposite ends:
     /// one points at a workspace already on this machine, the other brings one onto it. It opens in a
     /// window of its own, exactly as opening any workspace does — <b>a copy is an ordinary workspace
     /// and there is deliberately nothing special about it afterwards.</b></para>
@@ -100,12 +101,19 @@ public partial class WorkspaceViewModel
     public bool CanExchangeWithOtherCopy => WorkspaceSharingService.HasOtherCopy(WorkspaceRootDir);
 
     /// <summary>
-    /// File ▸ <b>Bring In Changes</b>. Explicit, always (R-rc9-6) — an automatic fetch would silently
+    /// File ▸ <b>Pull Changes</b>. Explicit, always (R-rc9-6) — an automatic fetch would silently
     /// change what a design resolves against.
     ///
     /// <para><b>It applies nothing to the workspace's files</b>, so no open document can be surprised
-    /// by it: what arrives shows up in the versions list, and choosing between two versions of a
-    /// document is RC-7's whole-file, pick-a-side decision that nothing here makes for anybody.</para>
+    /// by it: what arrives is LISTED, marked, at the top of the versions panel, and taking one is a
+    /// separate act the designer performs. Choosing between two versions is RC-7's whole-file,
+    /// pick-a-side decision, and nothing here makes it for anybody.</para>
+    ///
+    /// <para><b>The refresh below is what makes the fetch an operation with a result</b>, and until
+    /// <c>HistoryBrowser.Incoming</c> existed it was not: a fetch updates the remote-tracking
+    /// reference and moves nothing else, every surface read <c>HEAD</c>, and so this line refreshed a
+    /// list that could not have changed. The versions were on the machine, complete, and invisible.
+    /// Findings in <c>src/Ui/RESOLVED.md</c>.</para>
     /// </summary>
     [RelayCommand(CanExecute = nameof(CanExchangeWithOtherCopy))]
     private void BringInChanges()
@@ -115,7 +123,7 @@ public partial class WorkspaceViewModel
     }
 
     /// <summary>
-    /// File ▸ <b>Send Changes</b>.
+    /// File ▸ <b>Push Changes</b>.
     ///
     /// <para><b>The restore points do not go</b> (R-rc9-5a): they are one machine's safety net, ordered
     /// by a sequence that means nothing anywhere else. What goes is the narrative — the versions

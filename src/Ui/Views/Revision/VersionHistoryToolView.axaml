@@ -1,34 +1,66 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:CircuitRF.Ui.ViewModels.Dock"
+             xmlns:mi="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
              x:Class="CircuitRF.Ui.Views.Revision.VersionHistoryToolView"
              x:DataType="vm:VersionHistoryTool"
              Background="{DynamicResource SystemChromeLowColor}">
 
   <Grid RowDefinitions="Auto,Auto,*,Auto,Auto">
 
-    <!-- The commit lives on the File menu too. It is here as well because this is the list a designer
-         is looking at when they decide the workspace is worth recording. -->
-    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="4" Margin="4,2">
+    <!-- The header toolbar, in the shape every other circuitRF panel header uses (the Analyses list
+         and the Project panel are the two references): icon-only buttons, transparent, borderless,
+         14 px glyphs in SystemBaseMediumColor, each carrying its own sentence as a tooltip.
+
+         THE TAG IS THE GLYPH THAT DISTINGUISHES THIS PANEL FROM THE OTHER ONE. A version is something
+         a designer names on purpose and sends out; the Restore Points panel's pin marks an automatic
+         entry never to be tidied away. Both were labelled with the word "Keep", which is what made
+         them look like the same operation done twice. "Go back to this" is the ONE action the two
+         panels genuinely share, and it deliberately carries the SAME glyph in both. -->
+    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="0" Margin="4,4,4,2">
+
+      <!-- The commit lives on the File menu too. It is here as well because this is the list a
+           designer is looking at when they decide the workspace is worth recording. -->
       <Button x:Name="KeepVersionButton" Click="OnKeepVersionClick"
               IsEnabled="{Binding HasWorkspace}"
-              ToolTip.Tip="Record this workspace as a version, under a title you write"
-              Padding="6,2" Background="Transparent" BorderThickness="0" FontSize="11"
-              Content="Keep this version" />
+              ToolTip.Tip="Keep this version — records the whole workspace under a title you write, so you can find it again and send it out"
+              Padding="3,2" Background="Transparent" BorderThickness="0" Margin="0,0,1,0">
+        <mi:MaterialIcon Kind="TagPlusOutline" Width="14" Height="14"
+                         Foreground="{DynamicResource SystemBaseMediumColor}"/>
+      </Button>
+
+      <Border Width="1" Height="12" Margin="3,0,3,0" VerticalAlignment="Center"
+              Background="{DynamicResource SystemBaseLowColor}"/>
+
       <Button x:Name="GoBackButton" Click="OnGoBackClick"
               IsEnabled="{Binding HasVersionSelected}"
-              ToolTip.Tip="Put the workspace back to the selected version. What you have now is kept first."
-              Padding="6,2" Background="Transparent" BorderThickness="0" FontSize="11"
-              Content="Go back to this" />
+              ToolTip.Tip="Go back to this — puts the workspace into the selected version, whether it is one of yours or one waiting on the copy this came from. What you have now is kept first."
+              Padding="3,2" Background="Transparent" BorderThickness="0">
+        <mi:MaterialIcon Kind="ArrowULeftTop" Width="14" Height="14"
+                         Foreground="{DynamicResource SystemBaseMediumColor}"/>
+      </Button>
     </StackPanel>
 
     <!-- R-rc7-2. HELD MUST NOT LOOK LIKE ABSENT: with no git the whole panel is unreachable, because
          absent is harmless; held is a designer who may believe they are protected. So the buttons
          above stay visible and refuse, and this line says why. The remedy is deliberately not
          restated (R-rc6-9's second cadence) — it was said once, on open. -->
-    <TextBlock Grid.Row="1" Margin="6,2" FontSize="11" TextWrapping="Wrap"
-               IsVisible="{Binding IsRecordingBlocked}"
-               Text="{Binding RecordingState}" />
+    <StackPanel Grid.Row="1">
+      <TextBlock Margin="6,2" FontSize="11" TextWrapping="Wrap"
+                 IsVisible="{Binding IsRecordingBlocked}"
+                 Text="{Binding RecordingState}" />
+
+      <!-- RC-9 R-rc9-6. WHAT A PULL ACTUALLY BROUGHT IN, said above the list as well as marked on each
+           row. A fetch updates the remote-tracking reference and moves nothing else, so before this
+           existed Pull Changes was a download with no visible result at all: the versions were on the
+           machine, complete, and every surface that reads HEAD could not see them. The count is the
+           answer to "did that do anything", and counting marked rows is not something to ask of a
+           reader. Absent when there is nothing incoming, which is the ordinary state. -->
+      <TextBlock Margin="6,2" FontSize="11" TextWrapping="Wrap"
+                 Foreground="{DynamicResource SystemAccentColor}"
+                 IsVisible="{Binding HasIncoming}"
+                 Text="{Binding IncomingText}" />
+    </StackPanel>
 
     <ListBox Grid.Row="2"
              x:Name="VersionsList"
@@ -45,7 +77,8 @@
                        FontSize="10" FontStyle="Italic" Opacity="0.7" TextWrapping="Wrap"
                        Margin="0,4" />
 
-            <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding IsVersion}">
+            <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding IsVersion}"
+                  Opacity="{Binding RowOpacity}">
               <StackPanel Grid.Column="0" Margin="0,0,8,0">
                 <TextBlock Text="{Binding When}" FontFamily="monospace" Opacity="0.75" />
                 <TextBlock Text="{Binding Day}" FontSize="9" Opacity="0.5" />
@@ -53,6 +86,12 @@
               <StackPanel Grid.Column="1">
                 <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
                 <TextBlock Text="{Binding Who}" FontSize="10" Opacity="0.6" />
+                <!-- R-rc9-6. HERE and AVAILABLE TO TAKE are different promises. A row that read the
+                     same for both would tell a designer their workspace contains something it does
+                     not — so an incoming version is marked and dimmed rather than merged in. -->
+                <TextBlock Text="{Binding OtherCopyNote}" FontSize="10" FontStyle="Italic"
+                           Foreground="{DynamicResource SystemAccentColor}"
+                           IsVisible="{Binding OnTheOtherCopy}" TextWrapping="Wrap" />
                 <!-- R-rc7-6. The one thing a version can otherwise lie about by omission. -->
                 <TextBlock Text="{Binding RestoredFrom}" FontSize="10" Opacity="0.9"
                            IsVisible="{Binding WasRestored}" TextWrapping="Wrap" />

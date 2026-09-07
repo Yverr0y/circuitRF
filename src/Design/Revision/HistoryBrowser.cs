@@ -25,7 +25,22 @@ public sealed record HistoryVersion(
     string          Title,
     bool            Explicit,
     RestoredFrom?   RestoredFrom,
-    string          Who);
+    string          Who)
+{
+    /// <summary>
+    /// <b>This version is on the copy this workspace came from and is not here yet</b> (R-rc9-6).
+    ///
+    /// <para>A fetch updates the remote-tracking reference and moves nothing else, so what it brings in
+    /// is on the machine, complete, and invisible to anything that reads <c>HEAD</c>. Listing those
+    /// versions is what makes Pull Changes an operation with a result rather than a silent download —
+    /// and marking them is what stops the list claiming they are part of this workspace's own history,
+    /// which they are not until somebody chooses one.</para>
+    ///
+    /// <para>Not a positional member: every construction of this record predates it and means false.
+    /// The same reasoning as <see cref="RestorePoint.Thinned"/>, and for the same reason.</para>
+    /// </summary>
+    public bool OnTheOtherCopy { get; init; }
+}
 
 /// <summary>What changed between two versions, at the granularity of documents (R-rc7-11).</summary>
 public enum DocumentChangeKind { Added, Changed, Removed, Renamed }
@@ -81,10 +96,32 @@ public static class HistoryBrowser
     /// </summary>
     /// <param name="limit">At most this many, or 0 for all of them.</param>
     public static IReadOnlyList<HistoryVersion> Versions(GitCommand git, int limit = 0)
+        => Walk(git, ["HEAD"], limit, onTheOtherCopy: false);
+
+    /// <summary>
+    /// <b>The versions a Pull brought in that are not here yet</b> (R-rc9-6), newest first, or an empty
+    /// list — which is the ordinary answer for a workspace with no other copy, and for one that is
+    /// already level with it.
+    ///
+    /// <para><c>--not HEAD</c> is the whole of it: what is wanted is the versions on the other copy and
+    /// not on this one. Listing the remote reference outright would repeat every version the two copies
+    /// share, which is most of them, each appearing twice in a list whose value is that it is short.</para>
+    ///
+    /// <para><b>Nothing here reaches a network</b> (R-rc9-6). It reads what a fetch already put on this
+    /// machine, so the panel answers the same before and after an alt-tab and a Pull is the only thing
+    /// that changes it.</para>
+    /// </summary>
+    public static IReadOnlyList<HistoryVersion> Incoming(GitCommand git, int limit = 0)
+        => WorkspaceRemotes.IncomingRef(git) is { } reference
+            ? Walk(git, [reference, "--not", "HEAD"], limit, onTheOtherCopy: true)
+            : [];
+
+    private static IReadOnlyList<HistoryVersion> Walk(
+        GitCommand git, IReadOnlyList<string> revisions, int limit, bool onTheOtherCopy)
     {
         List<string> walk = ["rev-list"];
         if (limit > 0) { walk.Add("--max-count=" + limit.ToString(CultureInfo.InvariantCulture)); }
-        walk.Add("HEAD");
+        walk.AddRange(revisions);
 
         var listed = git.Run(walk, new GitRunOptions(ReadOnly: true));
         if (!listed.Ok) return [];
@@ -106,7 +143,10 @@ public static class HistoryBrowser
             var meta = CommitMessage.Read(message);
 
             versions.Add(new HistoryVersion(
-                id, treeId, when, meta.Title, meta.Explicit, meta.RestoredFrom, who));
+                id, treeId, when, meta.Title, meta.Explicit, meta.RestoredFrom, who)
+            {
+                OnTheOtherCopy = onTheOtherCopy,
+            });
         }
 
         return versions;

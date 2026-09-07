@@ -63,6 +63,25 @@ public sealed class VersionRow
     public bool WasRestored => RestoredFrom.Length > 0;
 
     /// <summary>
+    /// R-rc9-6. <b>This version is on the copy this workspace came from and is not here yet.</b>
+    ///
+    /// <para>Marked rather than merged into the list, for the reason a thinned restore point is marked
+    /// rather than hidden: <i>here</i> and <i>available to take</i> are different promises, and a row
+    /// that read the same for both would tell a designer their workspace contains something it does
+    /// not. Going back to one writes its files over this workspace — after keeping what is here now,
+    /// like every other restore.</para>
+    /// </summary>
+    public bool OnTheOtherCopy => Version is { OnTheOtherCopy: true };
+
+    /// <summary>The line that says so, on the row itself.</summary>
+    public string OtherCopyNote
+        => OnTheOtherCopy ? "on the copy this came from — not here yet" : "";
+
+    /// <summary>An incoming version reads dimmer than one of this workspace's own — present and
+    /// offered, but not part of this history until it is taken.</summary>
+    public double RowOpacity => OnTheOtherCopy ? 0.75 : 1.0;
+
+    /// <summary>
     /// R-rc7-4. <b>The one identifier this feature ever shows a designer</b>, and only because they
     /// pressed the button that made it. It is what they, or someone helping them, gives to a git
     /// command when circuitRF's own window cannot answer the question.
@@ -119,14 +138,17 @@ public partial class VersionHistoryTool : Tool
 
     /// <summary>True when there is a workspace to show versions of. Otherwise the panel says why it
     /// is empty rather than looking broken.</summary>
-    [ObservableProperty] private bool _hasWorkspace;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(EmptyText))]
+    private bool _hasWorkspace;
 
     /// <summary>
     /// R-rc7-9's line: what an empty list means. <b>A workspace with restore points and no versions is
     /// the ordinary state of one nobody has deliberately kept a version of</b>, which is most of them
     /// — so the empty panel explains the feature rather than reading as a failure.
     /// </summary>
-    public string EmptyText => HistoryMessages.NothingKeptYet;
+    public string EmptyText => HasWorkspace ? HistoryMessages.NothingKeptYet
+                                            : HistoryMessages.NoWorkspaceOpen;
 
     /// <summary>R-rc7-11's caveat, said where a designer might expect more of the list than it
     /// gives.</summary>
@@ -173,6 +195,27 @@ public partial class VersionHistoryTool : Tool
         Title = "Versions";
     }
 
+    /// <summary>
+    /// R-rc9-6. How many of the rows are versions a Pull brought in and this workspace does not have.
+    /// <b>Said above the list as well as marked on each row</b>: the count is the answer to "did that
+    /// Pull do anything", and counting marked rows is not something to ask of a reader.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasIncoming))]
+    [NotifyPropertyChangedFor(nameof(IncomingText))]
+    private int _incomingCount;
+
+    public bool HasIncoming => IncomingCount > 0;
+
+    public string IncomingText => IncomingCount switch
+    {
+        0 => "",
+        1 => "1 version on the copy this workspace came from is not here yet. "
+           + "Select it to see what it changes, or go back to it to bring it in.",
+        _ => $"{IncomingCount} versions on the copy this workspace came from are not here yet. "
+           + "Select one to see what it changes, or go back to it to bring it in.",
+    };
+
     /// <summary>Replaces the list. Called whenever a version is kept and on every workspace switch.</summary>
     public void SetRows(IReadOnlyList<HistoryRow> rows, bool hasWorkspace, string recordingState = "")
     {
@@ -184,10 +227,11 @@ public partial class VersionHistoryTool : Tool
         foreach (var row in rows)
             Rows.Add(row.IsGap ? new VersionRow(row.Gap!) : new VersionRow(row.Version!));
 
-        HasWorkspace = hasWorkspace;
-        Selected     = keep is { } id
-                     ? Rows.FirstOrDefault(r => r.Version?.CommitId == id)
-                     : null;
+        HasWorkspace  = hasWorkspace;
+        IncomingCount = Rows.Count(r => r.OnTheOtherCopy);
+        Selected      = keep is { } id
+                      ? Rows.FirstOrDefault(r => r.Version?.CommitId == id)
+                      : null;
     }
 
     /// <summary>Replaces what the selected version changed.</summary>

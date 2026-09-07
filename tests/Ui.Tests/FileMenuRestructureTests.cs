@@ -133,13 +133,18 @@ public class FileMenuRestructureTests
         // Archive would read as a third way of packaging one.
         // MW3: Add Cell to Workspace… sits directly above it, in the same band — the two are the same
         // subject (what this workspace can reach), and the drag gesture's dialog offers both outcomes.
-        // RC-9 R-rc9-1/-6: the three sharing items join THAT band rather than the archive one below.
-        // The band's subject is what this workspace can reach, and the three answer it from the other
-        // ends — point at a workspace already on this machine, bring one onto it, exchange with the
-        // one it came from. Beside Archive they would read as three more ways of packaging a
-        // workspace up, which is the reading MW2 §2.1 already rejected for Reference Workspace…
-        "Add _Cell to Workspace…", "_Reference Workspace…",
-        "_Copy Workspace Here…", "_Bring In Changes", "Sen_d Changes", "---",
+        // RC-9 R-rc9-1/-6: the three sharing items sit BELOW that band and separated from it (owner,
+        // 2026-09-07). They answer the same subject — what this workspace can reach — from the other
+        // end, but the band above is about this machine and these three are the ones that reach
+        // another. Beside Archive they would read as three more ways of packaging a workspace up,
+        // which is the reading MW2 §2.1 already rejected for Reference Workspace…
+        //
+        // GIT'S OWN WORDS, by the owner's decision, and only here: these three ARE clone, fetch and
+        // push. revision-control.md §0's "nothing git-shaped appears unbidden" stands everywhere else
+        // — a restore point is still a restore point and nothing says "commit" — and this is the
+        // deliberate exception, recorded so the next reader does not "fix" it back.
+        "Add _Cell to Workspace…", "_Reference Workspace…", "---",
+        "_Clone Workspace…", "_Pull Changes", "P_ush Changes", "---",
         "_Archive Workspace…", "_Unarchive Workspace…", "---",
         "_Import", "_Export", "_Manage PDKs…", "---",
         // "Close Workspace Window", not "Close Window": that name is already taken by the item
@@ -154,8 +159,8 @@ public class FileMenuRestructureTests
         "New", "New Workspace…", "New Window", "---",
         "Open Workspace…", "Open Workspace in New Window…", "Open Recent", "Open", "---",
         "Save", "Save Schematic As…", "Save Symbol As…", "Save Layout As…", "Save Workspace As…", "Keep This State…", "Keep This Version…", "---",
-        "Add Cell to Workspace…", "Reference Workspace…",
-        "Copy Workspace Here…", "Bring In Changes", "Send Changes", "---",
+        "Add Cell to Workspace…", "Reference Workspace…", "---",
+        "Clone Workspace…", "Pull Changes", "Push Changes", "---",
         "Archive Workspace…", "Unarchive Workspace…", "---",
         "Import", "Export", "Manage PDKs…", "---",
         "Close Window", "Close Workspace", "Close Workspace Window",

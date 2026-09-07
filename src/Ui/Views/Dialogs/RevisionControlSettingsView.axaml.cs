@@ -161,7 +161,34 @@ public partial class RevisionControlSettingsView : UserControl
 
         NoGitNotice.Text      = available ? "" : RevisionTabAvailability.NoGitNotice;
         NoGitNotice.IsVisible = !available;
+
+        // Naming a git, or pressing Detect after installing one, turns the whole feature on for every
+        // open workspace at once — the toolbar's two buttons appear and the indicator changes. Nothing
+        // else would tell them.
+        //
+        // Behind _loading like every other handler here: this also runs while the tab is being filled
+        // in, and merely OPENING Settings must not re-read the revision state of every open workspace.
+        // Each of those runs git.
+        if (!_loading) TellTheOpenWorkspaces();
     }
+
+    /// <summary>
+    /// <b>Re-reads the revision surfaces of every open workspace</b> — the foot-of-window indicator and
+    /// the two history panels.
+    ///
+    /// <para>Owner-reported, 2026-09-07: history was turned on with the workspace open and the window
+    /// went on saying <i>History off</i>. This dialog writes preferences and the <c>.cws</c> directly
+    /// and notifies nothing, and it is <b>not modal</b> — the workspace it describes is on screen while
+    /// the switch is thrown. Nothing re-read the state until the next workspace open, so the one
+    /// indicator §1.4 exists to be believed was left stating the opposite of what the user had just
+    /// chosen.</para>
+    ///
+    /// <para>Called from every handler here that changes what those surfaces say: the per-user switch,
+    /// the per-workspace switch, git becoming available or unavailable, and a reclaim — which destroys
+    /// restore points and would otherwise leave the panel listing states that are gone.</para>
+    /// </summary>
+    private static void TellTheOpenWorkspaces()
+        => ViewModels.WorkspaceViewModel.RefreshRevisionSurfacesEverywhere();
 
     /// <summary>
     /// Fills the identity boxes, <b>pre-filling from the user's existing global git identity when
@@ -368,6 +395,10 @@ public partial class RevisionControlSettingsView : UserControl
         // rewritten where it has. Re-reading is what keeps those two cases apart.
         _loading = true;
         try { LoadWorkspaceScopedControls(); } finally { _loading = false; }
+
+        // EVERY open workspace, because this switch is per-user: it changes what all of them should be
+        // saying, not only the one this dialog was opened from.
+        TellTheOpenWorkspaces();
     }
 
     /// <summary>
@@ -405,6 +436,8 @@ public partial class RevisionControlSettingsView : UserControl
         // the control (rule 1), so what a reader needs here is confirmation that the switch did what it
         // says: nothing was deleted, and turning it back on carries on where it left off.
         ShowWorkspaceRevisionStatus(result);
+
+        TellTheOpenWorkspaces();
     }
 
     /// <summary>
@@ -578,6 +611,11 @@ public partial class RevisionControlSettingsView : UserControl
                 + $"{(result.Reclaimed.Count == 1 ? "state" : "states")}. "
                 + $"{result.Protected.Count} newer {(result.Protected.Count == 1 ? "one was" : "were")} "
                 + "left alone, and every restore point still listed is unaffected.");
+
+            // The thinned rows this destroyed are still ON SCREEN in the Restore Points panel, each
+            // offering the way back R-rc6-4 gives a thinned entry — which is now the one promise in
+            // this feature that reclaim deliberately breaks. The panel has to stop offering it.
+            TellTheOpenWorkspaces();
         }
         catch (Exception ex) { ShowReclaimStatus(ex.Message); }
     }

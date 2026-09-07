@@ -150,6 +150,8 @@ public partial class WorkspaceViewModel
         OnPropertyChanged(nameof(IsLibraryPanelShowing));
         OnPropertyChanged(nameof(IsPropertiesPanelShowing));
         OnPropertyChanged(nameof(IsMessagesPanelShowing));
+        OnPropertyChanged(nameof(IsRestorePointsPanelShowing));
+        OnPropertyChanged(nameof(IsVersionsPanelShowing));
 
         ToolPanelVisibilityChanged?.Invoke();
     }
@@ -170,6 +172,12 @@ public partial class WorkspaceViewModel
 
     /// <summary>Whether the Messages panel is on screen — the toolbar toggle's state.</summary>
     public bool IsMessagesPanelShowing => IsToolPanelShowing(DockPanelIds.Messages);
+
+    /// <summary>Whether the Restore Points panel is on screen — its toolbar toggle's state.</summary>
+    public bool IsRestorePointsPanelShowing => IsToolPanelShowing(DockPanelIds.RestorePoints);
+
+    /// <summary>Whether the Versions panel is on screen — its toolbar toggle's state.</summary>
+    public bool IsVersionsPanelShowing => IsToolPanelShowing(DockPanelIds.VersionHistory);
 
     /// <summary>
     /// Whether <paramref name="panelId"/> is <b>in view</b> right now — in the tree, docked in the shell
@@ -1319,6 +1327,51 @@ public partial class WorkspaceViewModel
             catch (Exception ex)
             {
                 Messages.Warning($"A torn-off document window could not be closed: {ex.Message}");
+            }
+        }
+    }
+
+    // ---- Floating TOOL windows, when their workspace window closes ------------
+
+    /// <summary>
+    /// Closes the floating <b>tool panel</b> windows this workspace owns.
+    ///
+    /// <para><b>Owner-reported, 2026-09-07: a floated Restore Points panel outlived File ▸ Close
+    /// Workspace Window and went on showing the closed workspace's list.</b> Nothing closed an owned
+    /// float on any per-window path — <see cref="App"/>'s sweep runs only for File ▸ Quit — so every
+    /// floated panel of a closed window was orphaned: Properties, Messages, Library, DRC and the two
+    /// history panels alike. Worse than stale, because the buttons still worked: the view model behind
+    /// them was alive, so <i>Go back to this</i> on an orphaned panel would have restored a workspace
+    /// whose window had gone.</para>
+    ///
+    /// <para><b>Tool panels only, and torn-off DOCUMENT windows are deliberately left alone.</b> A tool
+    /// panel belongs to the workspace (R-dock-13) and holds nothing of its own, so its workspace
+    /// closing settles it. What happens to a torn-off document when its window closes is a different
+    /// and already-litigated question (R-fgn-1/-2, and
+    /// <see cref="CloseFloatedDocumentsOwnedByWorkspace"/> is where a workspace SWITCH answers it) —
+    /// re-opening it as a side effect of this fix would be changing an owner decision nobody asked
+    /// about. A float holding both is left, because it holds a document.</para>
+    ///
+    /// <para><b>Called from the window's own <c>OnClosed</c>, never from <c>OnCleanExit</c>.</b> Quit
+    /// asks every window before closing any of them (MW1 R-mw1-18), so a cancel at the second window
+    /// leaves the first one open — and <c>OnCleanExit</c> has already run on it by then. Closing its
+    /// panels there would take them away from a window the user had just chosen to keep.</para>
+    /// </summary>
+    internal void CloseFloatingToolWindows()
+    {
+        if (Avalonia.Application.Current?.ApplicationLifetime
+                is not IClassicDesktopStyleApplicationLifetime desktop) return;
+
+        foreach (var window in desktop.Windows.OfType<Dock.CrfHostWindow>().ToList())
+        {
+            if (!ReferenceEquals(window.OwningWorkspace, this)) continue;  // MW1 R-mw1-11: mine only
+            if (!WindowFloatsATool(window)) continue;
+            if (FindAnyDocumentInWindow(window) is not null) continue;     // holds a document: not ours to decide
+
+            try { window.Close(); }
+            catch (Exception ex)
+            {
+                Messages.Warning($"A floating panel window could not be closed: {ex.Message}");
             }
         }
     }

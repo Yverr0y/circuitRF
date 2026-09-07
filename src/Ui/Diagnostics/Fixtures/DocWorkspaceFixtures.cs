@@ -4,6 +4,7 @@ using System.Linq;
 using Avalonia.Controls;
 using Avalonia.LogicalTree;
 using Avalonia.VisualTree;
+using CircuitRF.Ui.Commands;
 using CircuitRF.Ui.Layout;
 using CircuitRF.Ui.Messages;
 using CircuitRF.Ui.Schematic;
@@ -12,6 +13,7 @@ using CircuitRF.Ui.ViewModels.Dock;
 using CircuitRF.Ui.ViewModels.ProjectTree;
 using CircuitRF.Ui.Views;
 using CircuitRF.Ui.Views.Content;
+using Dock.Avalonia.Controls;
 
 namespace CircuitRF.Ui.Diagnostics.Fixtures;
 
@@ -255,5 +257,140 @@ public static class DocWorkspaceFixtures
     private static void Pump()
     {
         for (int i = 0; i < 12; i++) Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+    }
+
+    // ── The editable-reference mark on a document tab (RC-2 R-rc2-5) ──────────
+
+    /// <summary>The library the marked tab is opened from, and the cell in it.</summary>
+    private const string LibraryWorkspaceName = "RF Library";
+    private const string LibraryCell          = "Bias Tee";
+
+    /// <summary>
+    /// <b>The document tab strip, close up, with one tab carrying the editable-reference mark.</b>
+    ///
+    /// <para>The mark is an 11 px pencil beside a tab title. In the whole-window figure it is four
+    /// pixels of orange nobody will find, and it is the one piece of chrome a designer is most likely
+    /// to meet before they meet the feature it belongs to — so it gets a figure of its own, cropped to
+    /// the tab strip. Everything in it is the real thing: a real reference marked editable in a real
+    /// <c>.cws</c>, a real cell opened out of the referenced workspace through the Project panel, and
+    /// the mark set by <c>WorkspaceViewModel</c>'s own sweep rather than by this fixture.</para>
+    ///
+    /// <para><b>Two tabs, and the second one is the point.</b> A figure of the marked tab alone would
+    /// not show what the reader actually has to do, which is tell a marked tab from an unmarked one
+    /// sitting next to it. The local cell is in front so the reader sees the mark on a background tab,
+    /// which is where they will first notice it.</para>
+    /// </summary>
+    public static FigureScene EditableReferenceTab()
+    {
+        string root = NewTempDir();
+
+        // The library, and one cell in it worth opening.
+        string library = Path.Combine(root, LibraryWorkspaceName);
+        Directory.CreateDirectory(library);
+        string bias = Path.Combine(library, LibraryCell);
+        Directory.CreateDirectory(Path.Combine(bias, CellFolder.SchematicSubFolder));
+        CellPersistence.SaveToFile(Path.Combine(bias, CellFolder.CcellFileName), new CcellFile());
+        SchematicPersistence.SaveToFile(
+            Path.Combine(bias, CellFolder.SchematicSubFolder, LibraryCell + ".csch"),
+            ShippedSchematicTemplates.Load(DocFixtures.SchematicTemplateId), LibraryCell);
+        WorkspacePersistence.SaveToFile(Path.Combine(library, ".cws"), new CwsFile());
+
+        // The designer's own workspace, referencing it EDITABLY — the state the mark exists to make
+        // visible, and the one somebody has to opt into (§7A.2's default is read-only).
+        string mine = Path.Combine(root, WorkspaceName);
+        string cws  = WriteWorkspace(mine);
+        WorkspacePersistence.SaveToFile(cws, new CwsFile
+        {
+            DefaultTechRef       = Path.GetFileName(Directory.GetFiles(mine, "*.ctech")[0]),
+            ReferencedWorkspaces =
+            [
+                new CwsWorkspaceRef
+                {
+                    Alias    = LibraryWorkspaceName,
+                    Path     = Path.Combine("..", LibraryWorkspaceName, ".cws"),
+                    Editable = true,
+                },
+            ],
+        });
+        WorkspaceRootFinder.InvalidateCache();
+
+        var priorMode = MessageDisplay.Mode;
+        MessageDisplay.Mode = MessageTimestampMode.None;
+
+        var vm      = new WorkspaceViewModel();
+        var window  = new WorkspaceWindow { DataContext = vm };
+        var content = (Control)window.Content!;
+        window.Content = null;
+        content.DataContext = vm;
+
+        vm.OpenWorkspacePath(cws);
+        Pump();
+
+        // The referenced cell first, then the local one, so the marked tab is the one BEHIND.
+        OpenReferencedCell(vm);
+        OpenCellView(vm, AmplifierCell, ViewType.Schematic);
+
+        var crop = FigureCrop.Around(
+            content, 1400, 900,
+            c => c.GetVisualDescendants().OfType<DocumentTabStripItem>(),
+            pad: 3,
+            describeWhatIsMissing:
+                "This figure crops to the document tab strip. If Dock's DocumentTabStripItem has been "
+              + "replaced, this fixture must follow it rather than guess at an offset.");
+
+        return new FigureScene(crop.Content)
+        {
+            AfterLayout = _ =>
+            {
+                AssertTheMarkIsActuallySet(content);
+                crop.Apply();
+            },
+            Cleanup = () =>
+            {
+                MessageDisplay.Mode = priorMode;
+                TryDelete(root);
+            },
+        };
+    }
+
+    /// <summary>
+    /// Opens the library's cell the way a designer does: from the referenced workspace's own branch of
+    /// the Project panel, so the reference machinery — and therefore the mark — runs for real.
+    /// </summary>
+    private static void OpenReferencedCell(WorkspaceViewModel vm)
+    {
+        var tree = ((CircuitRfDockFactory)vm.DockFactory).ProjectTreeTool
+                   ?? throw new InvalidOperationException("the dock factory built no Project Tree tool.");
+
+        var referenced = tree.RootItems.SelectMany(r => r.Children)
+                             .FirstOrDefault(n => n.Kind == NodeKind.ReferencedWorkspace)
+            ?? throw new InvalidOperationException(
+                "the docs workspace scanned no referenced workspace, so there is no tab to mark.");
+
+        var cell = referenced.Children.FirstOrDefault(n => n.Kind == NodeKind.Cell && n.Name == LibraryCell)
+            ?? throw new InvalidOperationException(
+                $"the referenced workspace holds no cell '{LibraryCell}'. It scanned: "
+              + string.Join(", ", referenced.Children.Select(n => $"{n.Kind} {n.Name}")));
+
+        vm.OpenCellSchematic(cell);
+        Pump();
+    }
+
+    /// <summary>
+    /// <b>An unmarked tab and a marked one produce the same figure to anyone who is not looking for
+    /// the mark</b> — which is exactly the reader this figure is for. So the figure proves the mark is
+    /// on before it ships, the way a popup figure proves its popup opened.
+    /// </summary>
+    private static void AssertTheMarkIsActuallySet(Control content)
+    {
+        bool marked = content.GetVisualDescendants().OfType<DocumentTabStripItem>()
+                             .Select(t => t.DataContext)
+                             .OfType<IReferenceMarkedDocument>()
+                             .Any(d => d.IsEditableReference);
+        if (!marked)
+            throw new InvalidOperationException(
+                "The editable-reference figure has no marked document, so it would be a picture of two "
+              + "ordinary tabs. Either the reference was not read as editable, or the sweep that sets "
+              + "the mark no longer runs when a document opens.");
     }
 }

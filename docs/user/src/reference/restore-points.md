@@ -240,7 +240,7 @@ machine, take it out of the history before you send it — that is
 | anything saved while history is switched **off** for the workspace | no — **but everything recorded before you switched it off is still there** |
 | anything at all, when your workspace sits inside another version-controlled folder | no — circuitRF records nothing there, and says so |
 | the history, in a **workspace archive** | **not unless you tick it** — and you still have it either way. It is the only way a restore point ever travels: see [sending a workspace to a customer](#customer) |
-| restore points, in a workspace **copied from an address** (File ▸ Copy Workspace Here…) | no — **and not recoverable.** The versions its author kept do come; their restore points belong to the machine they were taken on, and yours start here. See [using a library another team maintains](workspace.html#copying-a-library) |
+| restore points, in a workspace **copied from an address** (File ▸ Clone Workspace…) | no — **and not recoverable.** The versions its author kept do come; their restore points belong to the machine they were taken on, and yours start here. See [using a library another team maintains](workspace.html#copying-a-library) |
 | **which version of a referenced library** your design uses | **yes** — so going back brings the library back with your files, not just the files. See [going back, with the library included](workspace.html#pinning-restore) |
 | a restore point circuitRF **tidied away** | **yes, still** — it stays in the list marked *tidied away*, and you can bring it back, until you reclaim the space (which asks first) |
 

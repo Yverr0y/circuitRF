@@ -155,19 +155,22 @@ done in between is not in this history.&quot;</em></p>
 different situations and only one of them means the work is recoverable.</p>
 <h2 id="other-copy">Exchanging versions with another copy</h2>
 <p>If this workspace was brought here with
-<a href="workspace.html#copying-a-library">File ▸ Copy Workspace Here…</a>, two more items on the File menu apply
+<a href="workspace.html#copying-a-library">File ▸ Clone Workspace…</a>, two more items on the File menu apply
 to it.</p>
 <ul>
-<li><strong>Bring In Changes</strong> shows what is new on the copy it came from. <strong>Nothing in your own files is
-touched</strong> — what arrives appears in the Versions panel, and if a document has changed on both sides
-you are asked which version you want, exactly as <a href="#two-of-you">below</a>.</li>
-<li><strong>Send Changes</strong> sends the versions <em>you</em> have kept back to that copy. Your restore points stay here:
+<li><strong>Pull Changes</strong> brings down what is new on the copy it came from and <strong>lists it</strong>. The versions
+waiting for you appear at the top of the Versions panel, marked <em>on the copy this came from — not
+here yet</em>, with a line above the list saying how many. <strong>Nothing in your own files is touched by the
+pull itself.</strong> Select one to see which documents it changes; <strong>Go back to this</strong> puts those files
+into your workspace — and, like every other way back, keeps what you have now as a restore point
+first, so it is not a one-way door.</li>
+<li><strong>Push Changes</strong> sends the versions <em>you</em> have kept back to that copy. Your restore points stay here:
 they are your machine's safety net and mean nothing on anybody else's.</li>
 </ul>
 <p><strong>Neither happens by itself.</strong> circuitRF never contacts anything without being asked, and it holds no
 sign-in of its own — it uses whatever your machine's <code>git</code> is already set up with. If a sign-in is
 needed that cannot be supplied, the operation stops and says what was wanted rather than waiting.</p>
-<p>If the other side has moved on since you last brought its changes in, <strong>Send Changes</strong> says so and
+<p>If the other side has moved on since you last brought its changes in, <strong>Push Changes</strong> says so and
 sends nothing. Bring the changes in first, choose where the two disagree, and send again.</p>
 <h2 id="two-of-you">&quot;Two of us are editing the same workspace&quot;</h2>
 <p>If two people change the same document and the changes come together, circuitRF shows you <strong>both

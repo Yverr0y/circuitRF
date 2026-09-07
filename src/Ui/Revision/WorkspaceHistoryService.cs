@@ -63,13 +63,26 @@ public sealed class WorkspaceHistoryService
     /// </summary>
     public bool RecordedSomethingThisSession { get; private set; }
 
-    /// <summary>A new workspace is a new session's worth of that knowledge.</summary>
+    /// <summary>
+    /// A new workspace is a new session's worth of that knowledge.
+    ///
+    /// <para><b><see cref="_lastBoundaryFailed"/> is reset here too, and leaving it out was a defect.</b>
+    /// The service outlives the workspace — one window builds it once and every workspace opened in
+    /// that window shares it — so a boundary that failed in workspace A left
+    /// <see cref="RecordingState.Failed"/> latched, and workspace B was reported as failing when
+    /// nothing about it had been tried. Worse in the direction that matters: the indicator says
+    /// <i>nothing since then is in the history</i>, which about B is simply untrue, and a designer who
+    /// checks and finds it false learns to disregard the one indicator §1.4 exists to be believed.
+    /// The failure is a property of a session over one workspace, so it ends when that session
+    /// does.</para>
+    /// </summary>
     public void ResetForWorkspace()
     {
         CircuitRfWroteAFileThisSession = false;
         RecordedSomethingThisSession   = false;
         _housekeeping.ResetForWorkspace();
         _reportedOnOpen                = false;
+        _lastBoundaryFailed            = false;
     }
 
     /// <summary>R-rc6-4a's once-per-session pass. Held here because a session is what a window is.</summary>
@@ -302,6 +315,39 @@ public sealed class WorkspaceHistoryService
 
     /// <summary>R-rc6-10's third reason. Set by the one place that reports a failed boundary.</summary>
     private bool _lastBoundaryFailed;
+
+    /// <summary>
+    /// <b>Whether this workspace is one circuitRF is keeping a history for at all</b> — the question
+    /// the workspace toolbar's two revision buttons are shown or hidden on (owner, 2026-09-07).
+    ///
+    /// <para>Three conditions, and they are exactly the three a designer would name: there is a
+    /// workspace open, there is a usable git for circuitRF to run, and <i>keep a history</i> is on for
+    /// this workspace. Any one of them false and the buttons are simply not there — R-rc3-3's silence
+    /// applied to the toolbar, which is the surface a designer looks at most and the one where a
+    /// permanently dead control is most expensive.</para>
+    ///
+    /// <para><b>Deliberately NOT <see cref="State"/>.</b> That answers what the indicator SAYS and
+    /// folds two states this question must keep apart: with no git it answers
+    /// <see cref="RecordingState.On"/> — correctly, because the feature is meant to be invisible
+    /// there — which as a visibility test would put the buttons on the one machine that has nothing to
+    /// show behind them.</para>
+    ///
+    /// <para><b>And deliberately cheap.</b> This is re-read whenever the window is activated, so that a
+    /// change made in Settings is reflected when the designer comes back to the workspace. It reads the
+    /// cached git discovery and two small files, and — unlike <see cref="State"/> — never runs git: a
+    /// subprocess per window activation would be paid on every alt-tab, forever, to answer a question
+    /// whose answer changes about twice in a workspace's life.</para>
+    /// </summary>
+    public static bool KeepingHistoryHere(string? workspaceRoot)
+    {
+        if (workspaceRoot is not { Length: > 0 } || !Directory.Exists(workspaceRoot)) return false;
+        if (GitDiscovery.Find(out _) is null) return false;
+
+        var prefs   = AppPreferencesIo.Load();
+        var setting = WorkspaceRevisionSetting.Read(WorkspaceRevisionSetting.CwsPathFor(workspaceRoot));
+
+        return RevisionArming.IsArmed(prefs.RevisionKeepHistory ?? RevisionArming.KeepHistoryDefault, setting);
+    }
 
     /// <summary>
     /// R-rc6-9's <b>first cadence</b>: one message on workspace open, saying what is not being kept,
@@ -551,10 +597,33 @@ public sealed class WorkspaceHistoryService
     /// false-belief failure in its purest form.
     /// </summary>
     public IReadOnlyList<HistoryRow> VersionRows(string? workspaceRoot, int limit = 0)
-        => Bind(workspaceRoot) is { } git
-            ? HistoryBrowser.Rows(HistoryBrowser.Versions(git, limit),
-                                  RestorePoints.ListIncludingThinned(git))
-            : [];
+    {
+        if (Bind(workspaceRoot) is not { } git) return [];
+
+        // R-rc9-6. What a Pull brought in FIRST, then this workspace's own — and the two lists never
+        // merge into one undifferentiated history, because a version on the other copy is not part of
+        // this workspace until somebody chooses it.
+        //
+        // Not sorted together by time either: an incoming version is newer than everything here almost
+        // by definition, so time ordering would put them on top anyway and would occasionally not,
+        // leaving one stranded mid-list under a mark nobody would look for there.
+        var incoming = HistoryBrowser.Incoming(git, limit);
+        var mine     = HistoryBrowser.Rows(HistoryBrowser.Versions(git, limit),
+                                           RestorePoints.ListIncludingThinned(git));
+
+        if (incoming.Count == 0) return mine;
+
+        List<HistoryRow> rows = [.. incoming.Select(v => new HistoryRow(v, null))];
+        rows.AddRange(mine);
+        return rows;
+    }
+
+    /// <summary>
+    /// How many versions a Pull has brought in that are not here yet — <b>what the panel says above the
+    /// list</b>, so the count is legible without counting marked rows.
+    /// </summary>
+    public int IncomingCount(string? workspaceRoot)
+        => Bind(workspaceRoot) is { } git ? HistoryBrowser.Incoming(git).Count : 0;
 
     /// <summary>R-rc7-11. What differs between two versions, at the granularity of documents.</summary>
     public IReadOnlyList<DocumentChange> Compare(string? workspaceRoot, HistoryVersion from,

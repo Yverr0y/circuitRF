@@ -83,9 +83,10 @@
                         <NativeMenuItemSeparator/>
                         <NativeMenuItem Header="Add Cell to Workspace…" Command="{Binding AddCellToWorkspaceCommand}" CommandParameter="{Binding $parent[Window]}"/>
                         <NativeMenuItem Header="Reference Workspace…" Command="{Binding ReferenceWorkspaceCommand}" CommandParameter="{Binding $parent[Window]}"/>
-                        <NativeMenuItem Header="Copy Workspace Here…" Command="{Binding CopyWorkspaceHereCommand}" CommandParameter="{Binding $parent[Window]}"/>
-                        <NativeMenuItem Header="Bring In Changes"     Command="{Binding BringInChangesCommand}"/>
-                        <NativeMenuItem Header="Send Changes"         Command="{Binding SendChangesCommand}"/>
+                        <NativeMenuItemSeparator/>
+                        <NativeMenuItem Header="Clone Workspace…"     Command="{Binding CopyWorkspaceHereCommand}" CommandParameter="{Binding $parent[Window]}"/>
+                        <NativeMenuItem Header="Pull Changes"         Command="{Binding BringInChangesCommand}"/>
+                        <NativeMenuItem Header="Push Changes"         Command="{Binding SendChangesCommand}"/>
                         <NativeMenuItemSeparator/>
                         <NativeMenuItem Header="Archive Workspace…"   Command="{Binding ArchiveWorkspaceCommand}"   CommandParameter="{Binding $parent[Window]}"/>
                         <NativeMenuItem Header="Unarchive Workspace…" Command="{Binding UnarchiveWorkspaceCommand}" CommandParameter="{Binding $parent[Window]}"/>
@@ -479,24 +480,34 @@
                           ToolTip.Tip="Let this workspace instance cells that live in another project, by reference.">
                     <MenuItem.Icon><mi:MaterialIcon Kind="FolderNetworkOutline" Width="16" Height="16"/></MenuItem.Icon>
                 </MenuItem>
-                <!-- RC-9 R-rc9-1/-6. Beside Reference Workspace…, because the three answer the same
-                     question from different ends: point at a workspace already here, bring one onto
-                     this machine, or exchange with the one it came from. NOTHING HERE IS AUTOMATIC —
-                     an automatic fetch would silently change what a design resolves against, which is
-                     the failure the pin exists to prevent. Mirrored in the macOS NativeMenu above;
-                     the two surfaces are hand-maintained and must not drift. -->
-                <MenuItem Header="_Copy Workspace Here…"
+                <!-- RC-9 R-rc9-1/-6. Below Reference Workspace… and separated from it, because these
+                     three are the group that reaches ANOTHER MACHINE: point at a workspace already
+                     here is one question, bringing one onto this machine and exchanging with where it
+                     came from is another. NOTHING HERE IS AUTOMATIC — an automatic fetch would
+                     silently change what a design resolves against, which is the failure the pin
+                     exists to prevent. Mirrored in the macOS NativeMenu above; the two surfaces are
+                     hand-maintained and must not drift.
+
+                     GIT'S OWN WORDS, by the owner's decision (2026-09-07). revision-control.md §0 says
+                     nothing git-shaped appears unbidden, and these three items are the deliberate
+                     exception to it: they ARE clone, fetch and push, they reach a git host, and an
+                     engineer who has been given an address already knows those three words. The
+                     tooltips still carry circuitRF's own sentence, so the vocabulary is a label rather
+                     than a prerequisite. The rule stands everywhere else — a restore point is still a
+                     restore point and nothing anywhere says "commit". -->
+                <Separator/>
+                <MenuItem Header="_Clone Workspace…"
                           Command="{Binding CopyWorkspaceHereCommand}"
                           CommandParameter="{Binding $parent[Window]}"
                           ToolTip.Tip="Copy a workspace onto this machine from an address someone gave you, and open it. Its versions come; their restore points stay on their machine.">
                     <MenuItem.Icon><mi:MaterialIcon Kind="CloudDownloadOutline" Width="16" Height="16"/></MenuItem.Icon>
                 </MenuItem>
-                <MenuItem Header="_Bring In Changes"
+                <MenuItem Header="_Pull Changes"
                           Command="{Binding BringInChangesCommand}"
                           ToolTip.Tip="See what is new on the copy this workspace came from. Nothing in your own files is touched.">
                     <MenuItem.Icon><mi:MaterialIcon Kind="TrayArrowDown" Width="16" Height="16"/></MenuItem.Icon>
                 </MenuItem>
-                <MenuItem Header="Sen_d Changes"
+                <MenuItem Header="P_ush Changes"
                           Command="{Binding SendChangesCommand}"
                           ToolTip.Tip="Send the versions you have kept to the copy this workspace came from. Your restore points stay here.">
                     <MenuItem.Icon><mi:MaterialIcon Kind="TrayArrowUp" Width="16" Height="16"/></MenuItem.Icon>
@@ -981,6 +992,37 @@
                               IsChecked="{Binding IsMessagesPanelShowing, Mode=OneWay}"
                               ToolTip.Tip="Messages">
                     <mi:MaterialIcon Kind="MessageTextOutline" Width="18" Height="18"/>
+                </ToggleButton>
+
+                <!-- ── The two history panels (owner, 2026-09-07) ──────────────────────────
+                     Same three-state toggle as the three above, and the same glyphs the View menu
+                     already uses for these two panels — a button and a menu item that open the same
+                     panel under different pictures are two things to learn.
+
+                     PRESENT ONLY WHEN THERE IS A HISTORY TO LOOK AT: a workspace is open, there is a
+                     usable git, and "keep a history" is on for this workspace (CanShowRevisionButtons).
+                     Absent rather than greyed, which is RC-3's rule — a designer who never turns this
+                     on should not carry two dead buttons across the toolbar for the life of the
+                     application. The View menu still opens both panels whatever the toolbar shows, so
+                     nothing becomes unreachable.
+
+                     The separator is inside the same visibility, or a machine with no git would keep a
+                     hairline rule with nothing after it. -->
+                <Border Width="1" Margin="3,2" Background="{DynamicResource SystemBaseMediumLowColor}"
+                        IsVisible="{Binding CanShowRevisionButtons}"/>
+                <ToggleButton Classes="PanelToggle"
+                              Command="{Binding ToggleToolPanelCommand}" CommandParameter="RestorePoints"
+                              IsChecked="{Binding IsRestorePointsPanelShowing, Mode=OneWay}"
+                              IsVisible="{Binding CanShowRevisionButtons}"
+                              ToolTip.Tip="Restore Points — states of this whole workspace that circuitRF kept for you, so you can put it back the way it was. Kept automatically, and whenever you ask.">
+                    <mi:MaterialIcon Kind="History" Width="18" Height="18"/>
+                </ToggleButton>
+                <ToggleButton Classes="PanelToggle"
+                              Command="{Binding ToggleToolPanelCommand}" CommandParameter="VersionHistory"
+                              IsChecked="{Binding IsVersionsPanelShowing, Mode=OneWay}"
+                              IsVisible="{Binding CanShowRevisionButtons}"
+                              ToolTip.Tip="Versions — the states of this workspace you kept on purpose and gave a title to. These are what travel with a copy and what you send out.">
+                    <mi:MaterialIcon Kind="SourceCommit" Width="18" Height="18"/>
                 </ToggleButton>
 
             </StackPanel>

@@ -42,7 +42,12 @@ public partial class WorkspaceViewModel
             if (_history is null)
             {
                 _history = new WorkspaceHistoryService(Messages);
-                _history.Changed += RefreshRestorePointsPanel;
+
+                // BOTH panels, not the restore-point one alone. Several of the operations that raise
+                // this change the versions list too — turning recording off and on puts a gap row in
+                // it (R-rc7-10), and a restore adds the entry it took first — and subscribing only one
+                // panel is how those arrived on screen in one list and not the other.
+                _history.Changed += RefreshHistoryPanels;
             }
             return _history;
         }
@@ -386,13 +391,53 @@ public partial class WorkspaceViewModel
         // well-formed, and is half of two states. Detected, never simulated.
         InterruptedRestore = History.ReportInterruptedRestore(WorkspaceRootDir);
 
-        RefreshRestorePointsPanel();
+        // BOTH panels on open, and the Versions one was missing — a defect with a consequence well
+        // past the list itself (owner-reported, 2026-09-07). VersionHistoryTool.HasWorkspace starts
+        // false and is set only by SetRows, and SetRows is only reached from here; before this line
+        // existed, the only callers were "a version was just kept" and "changes were just brought in".
+        // So on a freshly opened workspace the panel's own Keep-this-version button was DISABLED, and
+        // the one thing that would have enabled it was keeping a version — which is what the button
+        // does. File ▸ Keep This Version… still worked, which is why it went unnoticed.
+        RefreshHistoryPanels();
 
         // RC-9 R-rc9-12/-16. Reads only, and reaches no network: the pin's state is a property of the
         // referenced workspace's repository AS IT ALREADY IS on this machine. Nothing in this series
         // contacts a network without being asked (R-rc9-6), and an automatic fetch here would silently
         // change what a design resolves against — the failure §7A.4 is written to prevent.
         OnWorkspaceOpenedForSharing();
+    }
+
+    /// <summary>
+    /// What RC-5 does when a workspace CLOSES and no other one takes its place — the counterpart of
+    /// <see cref="OnWorkspaceOpenedForRevision"/>, and its absence was a defect.
+    ///
+    /// <para><b>Every one of these surfaces is a statement about a workspace, and there is no longer a
+    /// workspace for it to be about.</b> Opening a second workspace happened to hide the problem,
+    /// because the open path resets all three; closing to the blank shell went through no such path,
+    /// so the foot of the window went on saying <i>History failing — circuitRF tried to record this
+    /// workspace and could not</i> about a workspace that was no longer open, and the two panels went
+    /// on listing its restore points and its versions. A permanent indicator is only worth having if
+    /// it is true, and the one thing that reliably teaches a designer to stop reading it is catching
+    /// it saying something false (§1.4).</para>
+    ///
+    /// <para><b>Called after the dock layout has been rebuilt</b>, never before: the rebuild replaces
+    /// the panel instances, so a refresh performed first would populate the tools that are about to be
+    /// discarded and leave the new, empty ones holding the previous workspace's list.</para>
+    /// </summary>
+    private void OnWorkspaceClosedForRevision()
+    {
+        // The session ends with the workspace. This is what clears a latched failed boundary, so the
+        // blank shell — and the next workspace opened in this window — is not reported as failing.
+        History.ResetForWorkspace();
+
+        InterruptedRestore = null;
+
+        // With no workspace open all three read empty: History.State(null) is On, and both lists are
+        // empty. Nothing here decides anything of its own — see the note on this partial's header.
+        // RefreshRecordingIndicator also takes the toolbar's two history buttons away with it.
+        RefreshRecordingIndicator();
+        RefreshRestorePointsPanel();
+        RefreshVersionHistoryPanel();
     }
 
     /// <summary>The interrupted restore found on open, or null. Held so the two ways out — finish it,
@@ -442,12 +487,101 @@ public partial class WorkspaceViewModel
     /// <summary>Whether the strip shows anything at all.</summary>
     public bool HasRecordingIndicator => RecordingIndicator.Length > 0;
 
+    // ── The workspace toolbar's two revision buttons (owner, 2026-09-07) ──────────────────────────
+
+    /// <summary>
+    /// Whether the toolbar shows the <b>Restore Points</b> and <b>Versions</b> buttons at all.
+    ///
+    /// <para><b>Three conditions, all of them required</b>: a workspace is open, there is a usable git,
+    /// and <i>keep a history</i> is on for this workspace. Otherwise the buttons are absent rather than
+    /// greyed — R-rc3-3's silence, on the surface where it matters most. The toolbar is the one strip a
+    /// designer's eye crosses every few seconds, and a control that is permanently dead there is paid
+    /// for on every one of those glances by everybody who will never turn the feature on.</para>
+    ///
+    /// <para><b>The panels themselves stay reachable from the View menu whatever this says</b>, which
+    /// is what makes hiding the buttons safe: a designer who has just switched history off can still
+    /// open the list and look at what was kept before they did.</para>
+    /// </summary>
+    public bool CanShowRevisionButtons => _canShowRevisionButtons;
+    private bool _canShowRevisionButtons;
+
+    /// <summary>
+    /// Re-reads that answer. <b>Called wherever the answer can change</b> — a workspace opening or
+    /// closing, the per-workspace switch being flipped — and on window activation, which is what
+    /// catches a change made over in Settings: that dialog writes preferences directly and tells no
+    /// window about it, so coming back to the workspace is the moment the toolbar can notice.
+    /// </summary>
+    public void RefreshRevisionButtonAvailability()
+    {
+        bool now = WorkspaceHistoryService.KeepingHistoryHere(WorkspaceRootDir);
+        if (now == _canShowRevisionButtons) return;
+
+        _canShowRevisionButtons = now;
+        OnPropertyChanged(nameof(CanShowRevisionButtons));
+    }
+
+    /// <summary>
+    /// <b>Everything this window says about revision control, re-read.</b> The indicator at the foot,
+    /// the Restore Points panel and the Versions panel — the three surfaces that describe the same
+    /// underlying state and had, between them, three sets of call sites.
+    /// </summary>
+    public void RefreshRevisionSurfaces()
+    {
+        RefreshRecordingIndicator();
+        RefreshHistoryPanels();
+    }
+
+    /// <summary>
+    /// <b>The two history panels, always together.</b> They read different things and are never
+    /// combined (R-rc7-9), but almost nothing changes one without changing the other — and every bug
+    /// in this area so far has been one of the pair left out of a refresh.
+    /// </summary>
+    private void RefreshHistoryPanels()
+    {
+        RefreshRestorePointsPanel();
+        RefreshVersionHistoryPanel();
+    }
+
+    /// <summary>
+    /// The same, for <b>every open workspace</b> — what Settings ▸ Revision Control calls when
+    /// something it changed makes those surfaces wrong (owner-reported, 2026-09-07: history was turned
+    /// on with the workspace open and the foot of the window went on saying <i>History off</i>).
+    ///
+    /// <para><b>A settings change is an EVENT, and this is the only thing that treats it as one.</b>
+    /// That dialog writes preferences and the <c>.cws</c> directly and tells no window; nothing else
+    /// re-read the state until the next workspace open, so a designer who turned history on was told,
+    /// permanently and in the one place built to be believed, that it was off. Every remedy that works
+    /// by asking again later — a poll, a refresh on activation — is either too expensive to run at that
+    /// cadence (<see cref="WorkspaceHistoryService.State"/> runs git) or arrives after the user has
+    /// already read the wrong answer.</para>
+    ///
+    /// <para><b>Every open workspace, not the one the dialog was opened from.</b> The two switches that
+    /// matter here have different scopes — one is per-user and one is per-workspace — and the per-user
+    /// one changes what every window should be saying. The dialog is also non-modal, so the others are
+    /// on screen at the time.</para>
+    ///
+    /// <para><b>A broadcast rather than a subscription</b>, deliberately: a static event would hold a
+    /// reference to every workspace view model that ever subscribed, and workspaces open and close
+    /// throughout a session.</para>
+    /// </summary>
+    public static void RefreshRevisionSurfacesEverywhere()
+    {
+        foreach (var window in Views.WorkspaceLocator.AllWindows())
+            if (window.DataContext is WorkspaceViewModel vm)
+                vm.RefreshRevisionSurfaces();
+    }
+
     /// <summary>Re-reads the recording state. Cheap, and called wherever it could have changed.</summary>
     public void RefreshRecordingIndicator()
     {
         var state = History.State(WorkspaceRootDir);
         RecordingIndicator       = HoldMessages.IndicatorFor(state);
         RecordingIndicatorDetail = HoldMessages.IndicatorDetailFor(state);
+
+        // The toolbar's two buttons answer a different question from the indicator's (see
+        // CanShowRevisionButtons), but every path that can change one can change the other, so they
+        // are refreshed together rather than from two sets of call sites that would drift apart.
+        RefreshRevisionButtonAvailability();
     }
 
     /// <summary>
@@ -471,8 +605,11 @@ public partial class WorkspaceViewModel
         if (answer is not { } chosen) return;
 
         History.AnswerAdoption(root, chosen);
-        RefreshRecordingIndicator();
-        RefreshRestorePointsPanel();
+
+        // All three, not two. Answering this question changes the HOLD state, and the hold is the line
+        // both panels carry — the Versions panel included, which was left out and went on showing the
+        // old one.
+        RefreshRevisionSurfaces();
     }
 
     /// <summary>
@@ -491,7 +628,8 @@ public partial class WorkspaceViewModel
         if (on) History.TurnOn(WorkspaceRootDir);
         else    History.TurnOff(WorkspaceRootDir);
 
-        RefreshRecordingIndicator();
-        RefreshRestorePointsPanel();
+        // All three. An off period is a ROW in the versions list with its reason on it (R-rc7-10), so
+        // the panel that was left out here is the one this transition most visibly changes.
+        RefreshRevisionSurfaces();
     }
 }

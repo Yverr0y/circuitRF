@@ -73,6 +73,45 @@ public static class WorkspaceRemotes
     public static bool HasOtherCopy(GitCommand git) => OtherCopy(git) is not null;
 
     /// <summary>
+    /// <b>Where a fetch put what it brought in</b> — the remote-tracking reference this workspace's own
+    /// line of work corresponds to, or null when there is none.
+    ///
+    /// <para>This exists because a fetch updates <c>refs/remotes/…</c> and moves nothing else. Without
+    /// it, everything that reads the history reads <c>HEAD</c> and a Pull is a download with no visible
+    /// result — the versions are on the machine and the panel that exists to list them cannot see them
+    /// (R-rc9-6's own promise that <i>what arrives shows up in the versions list</i>).</para>
+    ///
+    /// <para><b>Three ways to ask, in order of how much they know.</b> <c>@{upstream}</c> is what a
+    /// clone configures and is the exact answer when it is there. A remote added by hand has no
+    /// upstream configured, so the remote's own default branch is asked next, and the same-named branch
+    /// last. Returning null rather than guessing at <c>refs/remotes/&lt;remote&gt;/*</c> is deliberate:
+    /// circuitRF has no branch concept, so a repository with several remote branches is one this
+    /// feature has no opinion about, and picking one would be inventing an answer.</para>
+    /// </summary>
+    public static string? IncomingRef(GitCommand git)
+    {
+        if (Resolves(git, "@{upstream}") is { } upstream) return upstream;
+        if (OtherCopy(git) is not { } remote) return null;
+
+        if (Resolves(git, $"refs/remotes/{remote}/HEAD") is { } head) return head;
+
+        var branch = git.Run(["symbolic-ref", "--quiet", "--short", "HEAD"],
+                             new GitRunOptions(ReadOnly: true));
+        return branch.Ok && branch.Line.Length > 0
+            ? Resolves(git, $"refs/remotes/{remote}/{branch.Line}")
+            : null;
+    }
+
+    /// <summary>The full reference name, when it resolves to something. Null otherwise — including for
+    /// the ordinary case of a workspace whose history circuitRF started and which has no remote.</summary>
+    private static string? Resolves(GitCommand git, string reference)
+    {
+        var r = git.Run(["rev-parse", "--symbolic-full-name", "--verify", "--quiet", reference],
+                        new GitRunOptions(ReadOnly: true));
+        return r.Ok && r.Line.Length > 0 ? r.Line : null;
+    }
+
+    /// <summary>
     /// Brings in what is new on the other copy. <b>Explicit only</b> (R-rc9-6) — there is no caller
     /// for this on any automatic path and gate 10 asserts there is not.
     /// </summary>
