@@ -1,8 +1,12 @@
 # Sonnet Brief — RC-3: the git substrate
 
 **Read `brief-revision-control-0-overview.md` first.** The architecture is
-`docs/design/revision-control.md` §2.4, §3.2, §4 (**including §4.5, §4.6 and §4.7, new in rev 3**),
-§6.1, §8.1, §8.1a and §8.3. **Depends on RC-1** (the `.gitignore` line that excludes the `.cwsuser`).
+`docs/design/revision-control.md` §2.4, §3.2, §4 (**including §4.5, §4.6 and §4.7, new in rev 3, and
+§4.3a, new in rev 5**), §5.2b, §5.6a, §6.1, §8.1, §8.1a and §8.3. **Depends on RC-1** (the `.gitignore`
+line that excludes the `.cwsuser`). **rev 5 corrected three things in this brief**: §4.6's serialiser
+(R-rc3-1b), the reflog rationale (R-rc3-7), and where the identity comes from (R-rc3-1c); and added the
+macOS shim (R-rc3-2a), `safe.directory` per invocation (R-rc3-4), the hook bypass mechanism (R-rc3-7a)
+and the reclaim operation (R-rc3-16a).
 
 **Scope: everything that has to be true before circuitRF may take a single commit, and no user-facing
 revision-control UI at all.** Finding git, driving it, translating what it says, creating the
@@ -47,28 +51,67 @@ failure** (§4.5):
   keys on exit codes and stable formats; a localised git will not produce the English a substring match
   expects, and that failure appears only on someone else's machine.
 - **`--no-pager`, an explicit working directory, and a timeout on every call.** A subprocess this type
-  cannot bound is a subprocess that can wedge a workspace close.
+  cannot bound is a subprocess that can wedge a workspace close. **The bound is wall-clock for a local
+  call and inactivity for a network one** (§4.5, §9.1, rev 5): a fixed limit turns RC-9's legitimate
+  slow clone of a large library into a reported failure, which is not the defect the bound exists for.
+- **`safe.directory` naming the open workspace's root**, per invocation (§4.7, rev 5). The only remedy
+  a designer could otherwise be handed is a global config write in git vocabulary, which §4.4 rules
+  out. Narrowed to the one root, never `*`; the trade — trusting a folder the user chose to open and
+  whose contents circuitRF already loads — is stated in the type's header.
 - **The commit identity — author AND committer** (§4.4). Git resolves the two separately, and supplying
   only one leaves the other to config or to a guess at `user@hostname`. **Nothing is written to a git
   config file**; where circuitRF's own preference is unset, git's ordinary resolution applies. RC-4
-  owns where the value comes from; this type owns getting it onto the invocation.
+  owns the dialog that captures the value; **R-rc3-1c owns reading it**, so that `src/Cli` sees it too.
+- **An empty `core.hooksPath`**, per invocation (R-rc3-7a) — `--no-verify` leaves `post-commit` to fire.
 - **Signing off for circuitRF's own commits.** A designer who signs globally would otherwise have every
   automatic checkpoint block on a passphrase prompt with no window to appear in. **Per invocation, not
   in the repository config**, because it is a statement about circuitRF's commits rather than about the
   repository — that designer's own commits from a shell in the same folder should still sign, exactly
   as they configured.
 
-**R-rc3-1b. One writer per repository, across processes** (§4.6). The GUI, `src/Cli`, the packing
-scheduler and — per RC-5 §5.3b — an agent's own shell all reach one repository, and git's index is a
-single lock-protected resource. R-rc3-4 *translates* the `index.lock` failure; this requirement
-*prevents* it, using the workspace's existing per-workspace cross-process advisory lock rather than a
-second implementation of one. **Reads never wait on a writer** — listing restore points or resolving a
-pin must not block behind a pack — and **packing yields rather than queues** (R-rc3-14).
+**R-rc3-1b. Two processes on one repository are kept apart by a temporary index and git's own locks —
+not by the advisory lock** (§4.6, corrected in rev 5). The GUI, `src/Cli`, the packing scheduler and —
+per RC-5 §5.3b — an agent's own shell all reach one repository. rev 4 assigned the serialisation to
+`WorkspaceLock` (`src/Design/Workspace/WorkspaceLock.cs`); **read its header before building anything
+on it**: it holds no file handle, both "open anyway" and "open read-only" are always available, and it
+says a lock this product treated as authoritative *would become a stale file that locks out a team*. It
+also fires in exactly the situation RC-5 §2.3 designs for — the GUI and `serve` holding one workspace
+at once — so it cannot be what keeps them apart. Three rules:
+
+- **A checkpoint never touches the shared index.** It is built through a private index file (§5.2b,
+  RC-5 R-rc5-1c), so the resource git's writers contend on is left to the designer's own shell, and two
+  circuitRF processes checkpointing at once contend only on reference updates, which git makes atomic.
+- **Git's own lock files serialise what remains.** They are atomic-create files — the correct primitive,
+  and the one a second implementation would have had to reinvent. A collision is retried for a short
+  bound before R-rc3-4 translates it, because a collision between two automatic operations is a delay.
+- **Reads never wait on a writer** — listing restore points or resolving a pin must not block behind a
+  pack — and **packing yields to the advisory notice** rather than queuing (R-rc3-14). That is the
+  notice used as a notice.
+
+**R-rc3-1c. The commit identity is read from circuitRF's per-user preference file by a type in this
+project, so `src/Cli` sees the value the Settings tab captured** (§4.4, §12 Q21, rev 5). rev 4 let the
+headless case fall through to git's own resolution because `AppPreferences` is in `src/Ui`. On the fresh
+Windows machine §4.4 describes that resolution names nobody, so the AI-batch checkpoint — the governing
+motive — was refused for exactly the population it exists to protect, with no remedy but the global
+config write circuitRF refuses to make. Reading a JSON file in `AppPreferencesIo.PrefsDir` crosses no
+firewall; only the type that owns the dialog does. The reader knows the file's location and the two
+identity keys and nothing else about `AppPreferences`; RC-4 writes through its own type as today, and
+the two agree on the path and the key names by a shared constant in this project. Where the file names
+nobody, git's ordinary resolution applies; where neither does, the feature does not arm and the refusal
+names the Settings tab.
 
 **R-rc3-2. Discovery: a configured path outranks `PATH`, and blank means "search `PATH`".** A
 preference that lost to `PATH` would be inert on exactly the machine it exists for — the one with two
 gits, or one somewhere `PATH` does not reach. This mirrors `VerilogACompilerDiscovery` exactly; RC-4
 builds the settings row on top of it.
+
+**R-rc3-2a. On macOS, presence is established without running anything named `git`** (§4.3a, §12 Q23,
+rev 5). `/usr/bin/git` exists on every Mac whether or not git is installed: with the Command Line Tools
+absent it is a shim that **opens Apple's "install the developer tools?" dialog** instead of running.
+Discovery by `git --version` would show that dialog, unbidden, on every launch, to precisely the users
+R-rc3-3 promises never learn the feature exists. Check that the tools are installed first —
+`xcode-select -p` succeeds, or the receipt is present — and treat a shim without tools as absent. A
+configured path (R-rc3-2) is run as configured, because there the user named it.
 
 **R-rc3-3. Absence is silent.** No git on `PATH` and none configured means the feature is simply not
 there (§4.3) — every affordance hidden, not disabled. A designer who does not want this should never
@@ -98,17 +141,19 @@ match on English text where an exit code or a status will do:
 | no identity configured | what must be filled in, and where (§4.4) |
 | nothing to commit | not a failure — the state is already recorded |
 | a lock file left by a crashed process | what to remove, and that it is safe |
-| a dirty tree blocking a checkout | which files, and the choice |
+| an embedded repository — a directory that is itself a repository, handed to `git add` | that a nested repository was found and excluded (RC-6 R-rc6-7); nothing about gitlinks |
 | a non-fast-forward push | that the other side moved (RC-9) |
 | git not executable / wrong thing at the path | the path that was tried |
-| **`safe.directory` — "detected dubious ownership"** | that the workspace is owned by someone else, and the one setting that answers it |
+| **`safe.directory` — "detected dubious ownership"** | reached only by a git too old to accept the per-invocation answer (R-rc3-1a); that the workspace is owned by someone else, and that a newer git would not ask |
 | a git older than the floor | treated as absent (R-rc3-3a), not reported as broken |
 | a credential the remote wanted and git could not supply | what it wanted — never a hang (R-rc3-1a) |
 
 **`safe.directory` is the entry most likely to be left out and most likely to be hit** (§4.7). Git
 2.35.2 and later refuse to operate on a repository owned by another user, and that is the **ordinary**
 state of a workspace on a network share and of an archive someone else extracted. RF workspaces live on
-shares, and §7A's librarian scenario assumes one. Git's own wording must never reach a designer.
+shares, and §7A's librarian scenario assumes one. Git's own wording must never reach a designer. **And
+on a git at or above the floor it is never reached at all**, because R-rc3-1a names the root per
+invocation (rev 5); the row exists for the git that predates the option.
 
 **R-rc3-5. Anything unrecognised is reported verbatim and honestly, never swallowed** — the same
 posture the run services already take with an engine error. The raw output is always available and
@@ -142,7 +187,7 @@ code:
 |---|---|---|
 | `gc.auto` | `0` | this brief's byte-based packing schedule and git's count-based one fighting |
 | `gc.pruneExpire` | `never` | **R-rc3-16.** Otherwise a routine pack permanently destroys thinned checkpoints after two weeks |
-| `gc.reflogExpire`, `gc.reflogExpireUnreachable` | `never` | the reflog **is** the escape hatch after a mistaken sweep; at its 30-day default it is gone before §1.3 says the designer looks |
+| `gc.reflogExpire`, `gc.reflogExpireUnreachable` | `never` | the reflog is the escape hatch for the **designer's own branch** — a reset or amend from a shell in Stage 3; at its 30-day default it is gone before §1.3 says the designer looks. **It is not the way back after a sweep** (rev 5): a deleted reference takes its reflog with it, and references outside `refs/heads/` carry none by default. RC-6's journal is that way back |
 | `core.longpaths` | `true` (Windows) | nested cell folders plus git's own object paths pass 260 characters — a refusal on one machine class only |
 | `core.autocrlf` | `false` | §5's byte-stability argument; see R-rc3-12a |
 | a **management marker** naming circuitRF, and recording RC-6's §12 Q4 answer | written once | **R-rc3-7b.** "Did circuitRF create this repository" is load-bearing three times and a `.git` directory alone cannot answer it |
@@ -166,10 +211,13 @@ management decision into everybody else's clone. Recording the *answer* rather t
 presence is what stops RC-6 asking the question on every open.
 
 **R-rc3-7a. Every commit circuitRF makes bypasses hooks.** RC-6's §12 Q4 offers **adoption** of a
-repository the user created, which may carry a `pre-commit` hook written for their own workflow.
-Running someone's hook on an automatic checkpoint they did not initiate is R-rc0-5's ambush arriving by
+repository the user created, which may carry a `pre-commit` hook written for their own workflow. Running
+someone's hook on an automatic checkpoint they did not initiate is R-rc0-5's ambush arriving by
 another route: the checkpoint is circuitRF's, not theirs, and it must neither be blocked by their
-tooling nor set it off.
+tooling nor set it off. **`--no-verify` is not the mechanism** (rev 5): it skips `pre-commit` and
+`commit-msg` only, and `post-commit` still fires. The bypass is an empty `core.hooksPath` supplied per
+invocation (R-rc3-1a) — and with R-rc5-1c's plumbing path, `git commit` is not even the command that
+runs, so the invocation-level bypass is what covers every path.
 
 **R-rc3-8. Creation is not automatic in this brief.** RC-3 provides the operation; RC-4's settings and
 RC-5's first checkpoint decide when it runs. A repository appearing in a folder because the user
@@ -281,6 +329,17 @@ half of R-rc0-7, and it is now three config values rather than one absent flag.
 past two weeks, run the packing path, and assert the object is still there. That test is the whole
 guarantee.
 
+**R-rc3-16a. Reclaiming is a separate operation this brief provides and nothing in this brief calls**
+(§5.6a, §12 Q20, rev 5). rev 4's architecture said *"until ordinary packing eventually reclaims them"*
+in the same document that set `gc.pruneExpire = never`; both could not be true, and §1.4 decided for
+never. So packing never reclaims, and reclaim is one function: given an age, protect every entry in
+RC-6's thinning journal **newer** than that age by giving each a temporary reference, prune unreachable
+objects with an immediate expiry, drop the temporary references, and remove the journal entries acted
+on. The protection step is not optional — git's own expiry is by object age, which is when a state was
+*made*, not when it was thinned, so a two-year-old restore point thinned yesterday would otherwise be
+reclaimed by *"thinned more than a month ago"*. RC-4 exposes the function as the tab's one confirmed
+destructive action; RC-6 owns the journal it reads.
+
 **R-rc3-17. The threshold is a constant in this brief and a setting in RC-4.** Ship a default, measure
 it (R-rc0-9), and let RC-4 expose it. Ordinary users never touch it; it exists because §2.4 means
 someone eventually asks where the disk went.
@@ -348,7 +407,8 @@ let git be the reason a serializer is constrained.**
    are attributed differently. That is the network-share case, and it is the gate rev 2 would have
    failed.
 9. **Hooks and signing** (R-rc3-7a, R-rc3-1a): a repository carrying a `pre-commit` hook that fails is
-   committed into anyway, and a global signing setting neither blocks nor slows a checkpoint.
+   committed into anyway, **a `post-commit` hook does not fire** — assert by a hook that writes a
+   sentinel file — and a global signing setting neither blocks nor slows a checkpoint.
 10. **The environment is applied** (R-rc3-1a): assert `GIT_TERMINAL_PROMPT=0` reaches the subprocess
    and that a call that would prompt **returns a failure rather than blocking** — drive it with a
    fixture remote that demands credentials and assert the call completes within its timeout. A test
@@ -371,15 +431,29 @@ let git be the reason a serializer is constrained.**
 16. **The measurement, not a timing assertion** (R-rc0-8, R-rc0-9). Re-run §2's and §3.2's sequences
    on the target machine class — **including the no-`gc` pass**, which is the one that finds the
    overhang — and report the numbers. Do not add a wall-clock test.
-17. **`safe.directory` is reached and translated** (R-rc3-4): construct a repository the running user
-    does not own, or simulate the condition git reports, and assert circuitRF's own sentence rather
-    than git's.
+17. **`safe.directory` is answered per invocation, and translated where it cannot be** (R-rc3-1a,
+    R-rc3-4): construct a repository the running user does not own, or simulate the condition git
+    reports, and assert first that the call **succeeds** with the root named, and second — with the
+    per-invocation answer withheld to simulate an old git — that circuitRF's own sentence appears
+    rather than git's.
 18. **Every gate in this brief needs git, and says what it does without one** (R-rc0-10b). Follow
     `RfCore.Tests`' `FixtureFact`/`FixtureTheory` idiom: **skip with a reason**, never fail. CI has git
     on all three platforms, so nothing is lost. Do not commit or vendor a git binary.
-19. **One writer at a time** (R-rc3-1b): drive two concurrent writers at one repository and assert the
-    second waits rather than producing an `index.lock` failure — and that a **read** issued during a
-    write does not wait.
+19. **Two writers, no clobber, no advisory lock** (R-rc3-1b): drive two concurrent checkpoints at one
+    repository and assert both references land and the shared index is byte-for-byte untouched; drive a
+    reference-update collision and assert the retry resolves it with no `Diagnostic` posted; assert a
+    **read** issued during a pack does not wait; and source-scan for any use of `WorkspaceLock` on the
+    write path, comments stripped — its only permitted caller here is packing's yield.
+20. **macOS discovery never invokes the shim** (R-rc3-2a): with the developer-tools check seamed to
+    "absent", assert no process named `git` is started and the answer is "not available". Runs on every
+    platform through the seam; the real shim is a manual check recorded in the write-up.
+21. **Reclaim protects what is newer than the age** (R-rc3-16a): thin three checkpoints at three journal
+    times, reclaim with an age between them, and assert the newer ones' commits are still present and
+    the older one's is gone. **Then assert that with no age given nothing is reclaimed**, and that
+    packing (R-rc3-13) never removes any of them.
+22. **`src/Cli` sees the identity the tab wrote** (R-rc3-1c): write the preference through RC-4's own
+    type, take a checkpoint from a `Cli` process, and assert the commit is attributed to it — with the
+    user's global git identity absent, which is the case that matters.
 
 ---
 
@@ -416,3 +490,9 @@ Findings to `src/Design/RESOLVED.md` — **never to a `CLAUDE.md`**.
 - Whether `ProcessRunner` and this type converged closely enough that a shared primitive is obviously
   right (R-rc3-1). **Report it; do not move a type across the firewall as part of a findings
   write-up.**
+- **What the macOS shim actually did on a machine without the tools** (R-rc3-2a) — this is the one
+  gate that cannot run in CI, and the write-up is where it is recorded.
+- Whether git's retry on a reference-update collision ever exhausted its bound (R-rc3-1b), and how
+  often two circuitRF processes actually collided in practice.
+- Whether the per-invocation `safe.directory` was honoured on every platform and every git version CI
+  runs (R-rc3-1a); if a version ignored it, that version sets the floor.

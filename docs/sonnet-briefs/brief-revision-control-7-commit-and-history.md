@@ -1,7 +1,10 @@
-# Sonnet Brief — RC-7: the commit action, the history browser, and variants
+# Sonnet Brief — RC-7: the commit action and the history browser
 
 **Read `brief-revision-control-0-overview.md` first.** The architecture is
-`docs/design/revision-control.md` §5.2, §5.5, §6.1, §6.3, §6.4 and §4.2. **Depends on RC-5 and RC-6.**
+`docs/design/revision-control.md` §5.2, §5.5 (its first row — the other three are RC-5's), §6.1, §6.3,
+§6.4, §5.3d and §4.2. **Depends on RC-5 and RC-6.** **rev 5 withdrew variants from this brief** (§6.3,
+§12 Q19): a restore never checks anything out, so restore-then-edit is linear and there is no branch to
+name. §5 below is what replaced them.
 
 **Scope: the narrative half** — the sparse, deliberate, human-written history a designer creates on
 purpose and browses later. This is the risky, user-facing stage, which is why everything else came
@@ -32,20 +35,21 @@ explicit action produces may be named precisely.**
 ## 2. What a commit says
 
 **R-rc7-5. A commit message records how the commit came about**, because six weeks later *"which of
-these did I mean?"* is the only question anyone asks of a history. Three origins, three distinguishable
-messages:
+these did I mean?"* is the only question anyone asks of a history. §5.5 has four rows; **this brief owns
+the first and RC-5 R-rc5-9a owns the other three**, because the brief that creates a commit owns its
+message (corrected in rev 5 — rev 4 put all four here, three stages after the first three were created):
 
-| origin | message shape |
-|---|---|
-| the user pressed **Commit** and typed a title | the user's title, plus a line recording that this was an explicit commit by the user |
-| the workspace was **closed** | a message stating the workspace was closed — the designer did not choose this moment, and the history must not imply they did |
-| **before an AI batch** | the batch's own intent — *"before: widen the output match"* — on the checkpoint reference, never on the designer's branch |
+| origin | where it lives | message shape |
+|---|---|---|
+| the user pressed **Commit** and typed a title | the designer's branch | the user's title, plus a line recording that this was an explicit commit by the user — and, when the working tree was restored since the previous commit, **which restore point it was restored from** (R-rc7-16) |
 
-**R-rc7-6. The distinction between the first two is the point.** A designer scanning their history has
-to be able to tell *"I decided this was worth keeping"* from *"circuitRF kept this because I shut the
-lid"*, **without opening either.** The automatic one is not lesser — it is frequently the one that
-saves them — but it means something different, and a history that renders them identically is lying by
-omission.
+**R-rc7-6. The commit after a restore says what it came from, and that is the whole of what the
+narrative needs to record about a restore.** The save-point-versus-close distinction rev 4 placed here is
+drawn in the restore-point list, where those two entries appear together (RC-5 R-rc5-9a); an explicit
+commit never shares a list with either. What the narrative can lie about by omission is a restore: two
+consecutive commits where the second silently reverts the first is a history that reads as a change of
+mind with no record of the moment. The line names the restore point, and it is written by the commit
+path from the state R-rc5-12c's restore leaves behind.
 
 **R-rc7-7. The Messages panel reports an explicit commit, and names it.** One entry: what was
 committed, and **the commit's identity**. That identifier is what makes the escape hatch usable — it is
@@ -101,27 +105,34 @@ item on the list.
 
 ---
 
-## 5. Variants — the one place a branch exists
+## 5. Restore, then commit — one line of work, and no branch anywhere
 
-**R-rc7-15. Designers will not create branches and are not asked to.** The native idiom for trying an
-idea in this domain is already **another cell, or another view within a cell** — cheaper, visible in
-the project tree, and comparable side by side, which a branch is not.
+**R-rc7-15. Designers will not create branches, and circuitRF creates none either.** The native idiom
+for trying an idea in this domain is already **another cell, or another view within a cell** — cheaper,
+visible in the project tree, and comparable side by side, which a branch is not.
 
-**R-rc7-16. Branches appear, unavoidably, in exactly one scenario: restore an old state, then keep
-editing.** Git requires a branch there. The branch is created **silently and named after the design
-intent**, and surfaced as a *variant* — *"You are editing from an earlier version; saving will create a
-new variant."* **The words branch, checkout and HEAD appear nowhere.**
+**R-rc7-16. Restore-then-keep-editing is linear** (§6.3, §12 Q19, corrected in rev 5). rev 4 said git
+requires a branch there and had this brief build a silently-created *variant*. It does not: a branch is
+required only if the restore is a *checkout*, and RC-5 R-rc5-12c's restore is a working-tree write that
+never moves `HEAD`. The next commit records the restored content as the next step on the same branch —
+what the designer meant by "I went back to Tuesday", and the only shape that survives R-rc7-12 on a
+shared branch, where a second line of work would be a merge nobody can perform. **The variant, its
+branch, its naming and its tree marking are withdrawn.** What this brief builds is R-rc7-5's line —
+the commit says which restore point it came from — and the browser shows that line. The words branch,
+checkout and HEAD have no scenario in which to appear, and gate 8 scans for the commands that would
+create one.
 
-**R-rc7-16a. The restore this builds on is RC-5's and already has preconditions** (§5.8, R-rc5-12a/b):
-it takes a checkpoint of the state it replaces, offers up unsaved work through the existing prompt, and
-**discards the undo stacks of reloaded documents**. This brief does not re-implement any of that and
-must not weaken it — in particular, a variant created by editing after a restore does not make the
-pre-restore checkpoint redundant, because that checkpoint is what a designer who chose the wrong
-restore point gets back from.
+**R-rc7-16a. The restore this builds on is RC-5's and already has preconditions** (§5.8, R-rc5-12a/b/c):
+it takes a checkpoint of the state it replaces, offers up unsaved work through the existing prompt,
+**discards the undo stacks of reloaded documents**, removes files created after the restore point,
+leaves ignored files alone, preserves the off flag and the policy files, and leaves a marker while it
+runs. This brief does not re-implement any of that and must not weaken it — in particular, a commit
+made after a restore does not make the pre-restore checkpoint redundant, because that checkpoint is what
+a designer who chose the wrong restore point gets back from.
 
-**R-rc7-17. Two variants must be distinguishable in the browser and in the project tree**, because the
-whole failure mode is a designer editing in one and looking at the other. §10B.2 scenario 3 exists
-because this surprises people.
+**R-rc7-17. A restore reached from the history browser — restoring to a COMMIT rather than to a
+checkpoint — goes through the same restore** (R-rc5-12c), with the commit's tree as the source. There is
+no second restore implementation, and the one difference is what the following commit's line names.
 
 **R-rc7-18. Stashes are excluded** (§6.4). A stash solves a problem designers do not have — a dirty
 tree blocking a branch switch, in a world where they do not switch branches. Their equivalent is
@@ -139,6 +150,10 @@ swallowed, never replaced with a generic apology.
 **R-rc7-20. Any failure this brief encounters that RC-3's table does not name is added to that table**,
 not handled locally. A translation living only in the UI is a translation `src/Cli` does not have.
 
+**R-rc7-22. `history commit` is the headless spelling** (§5.3d, RC-5 R-rc5-23): the fourth noun on
+RC-5's verb, calling the same `src/Design` function the Commit action calls, with the title as an
+argument and the same refusals — held, off, absent, and nothing to commit. Gate 12 is what holds it.
+
 **R-rc7-21. The one place §8.3's escape hatch is stated in plain language is here** (RC-0 §5). History
 rewriting is the only real remedy for a large file already committed, circuitRF must not offer a button
 for it (R-rc0-7), and a user who genuinely needs it should be **told so plainly rather than left to
@@ -150,9 +165,9 @@ for you, and it invalidates every existing clone — which is why.
 
 ## 7. Gates
 
-1. **Three origins, three distinguishable messages** (R-rc7-5): assert a user commit and a
-   workspace-close commit are told apart **from the history listing alone**, without opening either
-   (R-rc7-6).
+1. **An explicit commit says it was explicit, and a commit after a restore says what it restored from**
+   (R-rc7-5, R-rc7-6): restore to a restore point, commit, and assert the message names it — and that a
+   commit with no restore since the previous one carries no such line.
 2. **The commit identity is reported once, on an explicit commit only** (R-rc7-7, R-rc7-8).
 3. **No git vocabulary except where R-rc7-4 permits it**: source-scan every user-visible string for
    branch, checkout, HEAD, detached, stash, merge — comments stripped. The one permitted appearance is
@@ -163,16 +178,22 @@ for you, and it invalidates every existing clone — which is why.
 6. **An off period renders as a gap with its reason** (R-rc7-10), driven by the data RC-6 records.
 7. **A conflict offers two named versions and no reconcile path** (R-rc7-13): assert there is no code
    path that writes a merged file for any of the five unmergeable types.
-8. **Restore-then-edit produces a variant** (R-rc7-16), named after the intent, with no vocabulary
-   leaking; and two variants are distinguishable (R-rc7-17).
+8. **Restore-then-edit is linear and creates nothing** (R-rc7-16): restore, edit, commit, and assert
+   the branch has one new commit, `HEAD` never left it, and no reference under `refs/heads/` was created.
+   Source-scan the paths this brief touches for `checkout`, `switch`, `branch`, `stash` and `reset`
+   invocations and fail on a hit, comments stripped — RC-5 gate 24's scan, over this brief's paths.
+8a. **Restoring to a commit uses RC-5's restore** (R-rc7-17): restore from the browser to an old commit
+   and assert the pre-restore checkpoint exists, ignored files survived, and a file added since is gone —
+   the same assertions as RC-5 gates 15 and 17a, reached from this entry point.
 9. **Every failure surfaced to the user came from RC-3's table** (R-rc7-19): a local sentence for a git
    failure fails the gate.
 10. **A restore reached from the history browser still checkpoints first** (R-rc7-16a): assert the
-   pre-restore state is restorable after a restore-then-edit that produced a variant.
+   pre-restore state is restorable after a restore-then-edit-then-commit.
 11. **The §8.3 sentence exists and offers no button** (R-rc7-21): source-scan for a rewrite,
    amend, rebase or filter code path and fail on a hit, comments stripped.
-12. **Headless parity where it exists.** Anything `src/Cli` can also do produces the same result as the
-    GUI path, byte for byte, exempting only a legitimately-varying timestamp and naming it.
+12. **`history commit` is byte-identical to the Commit action** (R-rc7-22), exempting only a
+    legitimately-varying timestamp and naming it, and a comment-stripped source scan proves the view
+    model kept no second copy — the standard `AuthoringCliVerbTests` already holds.
 
 ---
 
@@ -180,8 +201,10 @@ for you, and it invalidates every existing clone — which is why.
 
 - **Scenario 2** — *"I want to keep this version — it's the one I'm sending out."* An explicit commit,
   its title, and where it shows up afterwards.
-- **Scenario 3** — *"I went back to an old version, then kept working."* What happened, why there are
-  now two lines of work, and how to tell them apart. **Notably without the words branch or checkout.**
+- **Scenario 3** — *"I went back to an old version, then kept working."* That the restore is one step
+  in one line of work, that the moment before it is itself a restore point, and that the next commit
+  says what it was restored from. **There is no second line of work to explain**, and the words branch
+  and checkout do not appear because nothing they would name exists.
 - **Scenario 4** — *"Two of us are editing the same workspace."* Whole-file, pick a side, and **why
   circuitRF will not merge them** — which is a statement about geometry and connectivity, not about
   effort.
@@ -195,10 +218,10 @@ Findings to `src/Ui/RESOLVED.md` and `src/Design/RESOLVED.md` — **never to a `
 **Report, do not silently absorb:**
 - Every git failure encountered that RC-3's table did not name (R-rc7-20), and whether it was added
   there rather than handled locally.
-- Whether the variant naming produced anything a designer could not read, which is the single most
-  likely place vocabulary leaks.
+- Whether the restored-from line read correctly when the restore point was itself a thinned one
+  restored from RC-6's journal, and when it was the pre-restore checkpoint of an earlier restore — two
+  restores in a row is where the wording is most likely to confuse.
 - Whether the browser could show what changed at document granularity without a per-document diff, and
   what it cost if not (R-rc7-11).
-- Whether the variant path interacted badly with RC-5's pre-restore checkpoint (R-rc7-16a) — two
-  restore points a designer cannot tell apart would be a finding, and the fix is wording, not
-  mechanism.
+- Whether a restore-then-commit ever left two restore points a designer cannot tell apart
+  (R-rc7-16a) — that would be a finding, and the fix is wording, not mechanism.

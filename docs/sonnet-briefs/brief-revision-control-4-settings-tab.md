@@ -1,8 +1,9 @@
 # Sonnet Brief — RC-4: Settings ▸ Revision Control
 
 **Read `brief-revision-control-0-overview.md` first.** The architecture is
-`docs/design/revision-control.md` §10A, plus §4.4 (identity), §5.6 (retention), §5.7 (off) and §2.4
-(packing). **Depends on RC-3** for git discovery and the packing threshold.
+`docs/design/revision-control.md` §10A, plus §4.4 (identity), §5.6 (retention), §5.6a (reclaim, new in
+rev 5), §5.7 (off) and §2.4 (packing). **Depends on RC-3** for git discovery, the packing threshold, the
+identity reader and the reclaim operation.
 
 **Scope: one new tab in the Settings dialog, holding every preference this feature needs, and the
 tab-strip change that makes room for it.** No checkpoint is taken by this brief; RC-5 does that. What
@@ -22,7 +23,7 @@ General | Security & Permissions | Revision Control | Color Theme | Wirebonds
 **R-rc4-2. It is a tab of its own and does not share one with Security & Permissions.** That tab
 answers exactly one question — what circuitRF is allowed to *run* and to *fetch* — and its own header
 records that things were collected there for that shape rather than for the tab they arrived in. Naming
-a git executable is the only row here that would fit, and the other eight are about what is kept.
+a git executable is the only row here that would fit, and the other nine are about what is kept.
 
 **R-rc4-2a. That placement decides where a setting is READ, and is not a statement that git is exempt
 from consent** (§10A, rev 3). Git is both things Security & Permissions governs: a **program circuitRF
@@ -93,22 +94,23 @@ reverted rather than committed — check the standing notes before reporting a d
 
 ## 4. The controls
 
-**R-rc4-10.** Nine rows, in this order. Each cross-reference is the section that decides its
+**R-rc4-10.** Ten rows, in this order. Each cross-reference is the section that decides its
 behaviour; this brief builds the control and the sentence beside it, not the behaviour.
 
 | setting | shape | notes |
 |---|---|---|
 | **Path to git** | text box, Browse, Detect, status line | Blank means "search `PATH`". **Copy `VerilogACompilerSettingsView`** (`src/Ui/Views/Dialogs/VerilogACompilerSettingsView.axaml`, 49 lines) — same blank-means-PATH default, same Browse, its Test becomes **Detect**, same status line. On success it shows **the resolved path and the version**, so *"it says it can't find git"* is answerable without a support call. **A git below RC-3 R-rc3-3a's floor is reported as too old, naming the version found and the version needed** — this is the one place that state is visible, because everywhere else treats an under-floor git as absent (§4.7). |
-| **Commit identity — name and email** | two text boxes | §4.4. **A per-USER preference in `AppPreferences`, applying to every workspace this person opens on this machine** — written to **no git config file at all**, and supplied per invocation by RC-3 (R-rc3-1a). **Pre-filled from the user's existing global git identity** if they have one: reading it is unobjectionable, and only writing it was ever the problem. **Required before the feature arms, and the tab says so** rather than letting the first checkpoint fail. |
+| **Commit identity — name and email** | two text boxes | §4.4. **A per-USER preference in `AppPreferences`, applying to every workspace this person opens on this machine** — written to **no git config file at all**, and supplied per invocation by RC-3 (R-rc3-1a). **Stored in the per-user preference file where RC-3's `src/Design` reader finds it** (R-rc3-1c, rev 5), so `serve` commits under the same name. **Pre-filled from the user's existing global git identity** if they have one: reading it is unobjectionable, and only writing it was ever the problem. **Required before the feature arms, and the tab says so** rather than letting the first checkpoint fail. |
 | **Keep a history of my workspaces** | on / off | **§5.7a, §12 Q13 — new in rev 4, and it is the row that makes every other one reachable.** A per-user application preference, and **the default a workspace with no recorded setting of its own falls back to**. **On by default** — see R-rc4-12a. Off means circuitRF writes nothing in any workspace and **deletes nothing in any workspace**, and the control says so in those words, exactly as the per-workspace one does (R-rc4-14). |
 | **Revision control for this workspace** | on / off | §5.7. Stored **in the `.cws`**, not in `AppPreferences` — see R-rc4-12. **It outranks the preference above, for this workspace only.** |
 | **Keep restore points for** | duration | §5.6. |
 | **Always keep at least *N* restore points** | number, with a hard floor | §5.6 rule 1. The field **cannot be set below the minimum**; this is the control that makes a clock jump cost the user nothing. |
 | **Take a restore point on workspace close** | checkbox, on by default | §5.3. |
 | **Take a restore point before an AI edit** | shown, **on, and not switchable** | §1.2 — the reason the feature exists. **Shown rather than hidden** so nobody has to wonder whether it is happening. |
-| **Pack the repository** | threshold, plus a "do it now" action | §2.4, RC-3 R-rc3-17. Ordinary users never touch it; it exists because someone eventually asks where the disk went. |
+| **Pack the repository** | threshold, plus a "do it now" action | §2.4, RC-3 R-rc3-17. Ordinary users never touch it; it exists because someone eventually asks where the disk went. Packing never reclaims. |
+| **Reclaim space from thinned restore points** | an age, plus a confirmed action | §5.6a, RC-3 R-rc3-16a (rev 5). **The one destructive control on the tab.** The confirmation says what it destroys — states already thinned more than the age ago, which after this nobody can bring back — and that every live restore point and every commit survives. Nothing reclaims on a schedule, and the age field on its own does nothing. |
 
-**R-rc4-11. The eight application-wide preferences live in `AppPreferences`**
+**R-rc4-11. The nine application-wide preferences live in `AppPreferences`**
 (`src/Ui/Theming/AppPreferences.cs`), following `VerilogACompiler` (`:315`) — nullable, `JsonIgnore`
 when null, absent means the documented default.
 
@@ -125,10 +127,15 @@ touch on this machine. **Nothing is written into `.git/config`, and nothing into
 The original objection to the global config stands and is unchanged: circuitRF has no business
 changing a setting that affects every other repository on the machine.
 
-**Where this preference is unset, git's ordinary resolution applies** — the user's own global identity.
-That is what makes the headless case work: `src/Cli` cannot read `AppPreferences` across the firewall,
-and a headless run identifying itself as whoever is running it is the right answer anyway. If neither
-circuitRF nor git can name a committer, the feature does not arm (RC-5 R-rc5-9).
+**`src/Cli` reads this preference too, through RC-3's reader, and rev 4 had this wrong** (§4.4,
+§12 Q21). rev 4 let the headless case fall through to git's own resolution because `src/Cli` cannot
+reference `AppPreferences`. On the fresh Windows machine this section opens with, that resolution names
+nobody — so the AI-batch checkpoint was refused for exactly the population it protects, with no remedy
+but a global config write. The file in `AppPreferencesIo.PrefsDir` is readable from `src/Design` without
+crossing anything; this brief writes it through `AppPreferences` as today, and shares the path and the
+two key names with R-rc3-1c through a constant in `src/Design`. **Where the preference is unset, git's
+ordinary resolution applies**; where neither names a committer, the feature does not arm (RC-5 R-rc5-9)
+and the refusal names this tab.
 
 **R-rc4-12. "Revision control for this workspace" is per-workspace state and lives in the `.cws`.** An
 installation-wide flag cannot gate per-workspace state: it is correct for the first workspace and
@@ -216,15 +223,21 @@ and `EveryParagraphTooltipWrapsAndIsBounded` already asserts it for the three ex
 8. **The AI-edit row is shown, on, and cannot be switched off** — assert the control is present and
    not interactive, not that it is absent.
 9. **Consequence sentences exist** (R-rc4-13): a source scan for a standing wrapped sentence beside
-   each of the retention duration, the count floor and the off switch. Strip comments before scanning —
-   this repo has been caught by a source scan matching its own documentation.
+   each of the retention duration, the count floor, the off switch **and the reclaim action**. Strip
+   comments before scanning — this repo has been caught by a source scan matching its own documentation.
+9a. **Reclaim asks, names what it will destroy, and is the only control that calls RC-3's reclaim**
+   (R-rc4-10): assert the confirmation is presented with the count and the age, that cancelling reclaims
+   nothing, and — source-scanned, comments stripped — that no other path in `src/Ui` reaches
+   R-rc3-16a's function.
 10. **Tooltips wrap and are bounded** (R-rc4-15), through the existing theory.
 11. **Identity is written to NO config file** (R-rc4-11a): after arming and committing, assert the
     fixture repository's config carries no `user.name`/`user.email` **and** the user's global config is
     untouched, while the commit names the right author and committer. RC-3 holds the
     two-identities-one-workspace half of this; **this brief holds that the preference is per-user and
     not per-workspace** — assert it does not move when the open workspace changes, which is the
-    opposite of R-rc4-12's flag and the pair is worth testing together.
+    opposite of R-rc4-12's flag and the pair is worth testing together. **And assert RC-3's reader
+    returns what this tab wrote** (R-rc3-1c) — the same name, from a type that references nothing in
+    `src/Ui`.
 12. **The identity field pre-fills from an existing global git identity** and does not write it back
     (R-rc4-11a).
 13. **Detect reports an under-floor git as too old**, naming both versions, and the rest of the tab

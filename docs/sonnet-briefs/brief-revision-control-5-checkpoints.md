@@ -2,7 +2,12 @@
 
 **Read `brief-revision-control-0-overview.md` first.** The architecture is
 `docs/design/revision-control.md` §5.1, §5.2a, §5.3, §5.3a, §5.3b, §5.5, §5.8, §5.9, §4.4, §4.6, §8.2,
-§8.2a, §8.1a, §9A.3 and §9A.6, plus **§5.3c and §5.7a (new in rev 4)**. **Depends on RC-3 and RC-4.**
+§8.2a, §8.1a, §9A.3 and §9A.6, plus **§5.3c and §5.7a (new in rev 4)** and **§5.2b, §5.3d, §5.6 rule 6
+and §8.2b (new in rev 5)**. **Depends on RC-3 and RC-4.** **rev 5 changed this brief more than any
+other**: the checkpoint's mechanical shape (§1.1), the tree test and the save-point's label, the
+definition of arming, the identity path, the message wording this brief now owns, five restore rules,
+the withdrawal of variants, the unattended-boundary rule, the named channel, the `history` verb, and the
+gate that proves thinning frees anything.
 **Six of those sections are new in rev 3 and this brief grew accordingly** — the checkpoint reference shape, the batch protocol, the
 agent-facing contract, restoring, scratch, and the first commit into a workspace that already exists.
 
@@ -35,6 +40,39 @@ The consequence is that the three ways a workspace leaves a machine disagree, an
 for each rather than leaving anyone to discover it**: an archive with history carries checkpoints
 (it copies the directory), a clone does not, and a Save Workspace As copy carries no history at all
 (R-rc5-19).
+
+### 1.1 What a checkpoint is, mechanically (§5.2b, new in rev 5)
+
+**R-rc5-1b. A checkpoint commit has NO parent.** R-rc5-1's argument — deleting one reference frees that
+checkpoint's objects — holds only if the next checkpoint does not name this one as its parent. Chained,
+a deletion frees nothing, RC-6 thins nothing, and gate 14 as rev 4 wrote it would have passed anyway,
+because it asserted the *other* references survive. The sequence trailer (R-rc5-8) carries the order a
+chain would have carried; `git log <ref>` shows one commit, which is the truth. **Gate 14a is the one
+that proves it.**
+
+**R-rc5-1c. It is built through a temporary index, never the repository's shared one**: every file
+into a private index (`GIT_INDEX_FILE`), write the tree, write the commit, update the reference. `HEAD`
+and the designer's branch never move, the designer's own staged state from a shell is untouched, and
+RC-3 R-rc3-1b's contention on the index does not exist. **This is also what makes R-rc5-13's linear
+restore possible**: a restore is a working-tree write, and nothing ever checks anything out.
+
+**R-rc5-1d. It captures every file the workspace holds that `.gitignore` does not exclude — including
+files no checkpoint has seen before.** *"`commit -a`-shaped"* in the architecture names the intent, not
+the command: a literal `commit -a` skips untracked files, and a new cell folder an agent just created is
+exactly the file §1.2 exists to capture. Gate 5 creates a file for this reason. Two exclusions apply
+beyond `.gitignore`: a nested repository's subtree (R-rc5-7d) and a file left out under R-rc5-15a,
+which the checkpoint's own metadata records.
+
+**R-rc5-1e. Its metadata is in the commit message, as trailers**: the sequence, the origin (R-rc5-9a),
+the intent, whether it is **kept** (R-rc5-1f), and any file left out. **The sequence is derived from
+the references that exist, never from a counter file**, so it survives a crash, a clone and a
+hand-deleted reference.
+
+**R-rc5-1f. Some checkpoints are KEPT, and RC-6's retention may not thin them** (§5.6 rule 6). This
+brief sets the mark on an explicit save-point — the user's judgement about what matters beats any
+heuristic, and thinning it would discard exactly that judgement — and offers a **keep** action on any
+entry in the restore-point list, which is §10B.3's *"make it permanent"* and exists here, in Stage 2,
+before there is a Commit to turn anything into. RC-6 sets it on the pair that brackets an off period.
 
 **Why two histories at all.** A single history cannot serve both motives: the dense, automatic,
 machine-written safety net and the sparse, deliberate, human-written narrative have different authors,
@@ -79,6 +117,14 @@ near-identical checkpoints — and it silently couples history to the analysis e
 is specifically arranged to avoid. An idle timeout produces a checkpoint the user cannot predict, at a
 moment meaningful to nobody, labelled with a time rather than an intent; and "idle" during a long
 simulation is not idle at all.
+
+**R-rc5-5a. A boundary at which nothing changed records nothing, and the explicit save-point takes a
+label** (§5.3, rev 5). A close after a session that only looked, or a save-point pressed twice, would
+otherwise add an entry indistinguishable from the one before it — the unreadable log R-rc5-4 rejects.
+The test is the tree, not the clock: a checkpoint is taken only if the workspace's tree differs from the
+newest checkpoint's, which R-rc5-1c's plumbing makes a comparison of two tree identities. And the
+save-point asks for one optional line, because R-rc5-6b's reasoning applies to it — the intent is the
+whole value of the entry — and shows *save-point* with its time when none is given, never a bare time.
 
 **R-rc5-6. The AI-batch boundary is defined where the BATCH is known, not where a file is written.**
 The only agent-facing surface today is `src/Cli/Serve/` — out of process and headless — so the
@@ -141,7 +187,7 @@ architecture. §5.3b holds the canonical ten; reproduce them, do not paraphrase 
 >    supply.
 > 4. **Do not rewrite, and do not reclaim.** No amend, rebase, reset, filter or forced push; no `gc`,
 >    `prune` or `reflog expire`. RC-3's configuration exists so a mistaken deletion stays recoverable
->    for weeks, and one housekeeping command undoes that for everyone.
+>    until the designer chooses otherwise, and one housekeeping command undoes that for everyone.
 > 5. **Do not change what the working tree contains.** No checkout, branch, switch, stash or `restore`
 >    — the files are open documents in a running application (R-rc5-12b).
 > 6. **Do not touch configuration or `.git` itself.**
@@ -177,7 +223,8 @@ already calls worse than the divergence RC-2 exists to prevent — reached throu
 the motive for. A checkpoint protects the history and does nothing whatever about it.
 
 **R-rc5-7a. A batch is refused while the window holds unsaved changes to that workspace, before anything
-is modified.** §5.8 resolves this for a restore by *asking*, but a batch is headless and out of process
+is modified** — the window is asked over R-rc5-7c's channel. §5.8 resolves this for a restore by
+*asking* the designer, but a batch is headless and out of process
 and there is nobody to answer a prompt. A refusal is the only honest answer; it is **the fourth member
 of R-rc5-6f's family** — off, held, scratch, dirty — refused at the same moment and for the same reason,
 and §5.3b rule 9 already tells the agent exactly what to do with it. The designer saves and asks again.
@@ -187,12 +234,25 @@ discarded.** §5.8's rule, for §5.8's reason, through §5.8's code path — R-r
 requirement is a second caller, not a second implementation. **R-rc5-7a is what makes it cheap:** with
 nothing unsaved anywhere, a reload cannot lose anything, which is why the refusal comes first.
 
-**R-rc5-7c. The window learns the batch closed; it does not discover it on focus.** The on-focus rescan
+**R-rc5-7c. The window learns the batch closed over the second-instance channel; it does not discover
+it on focus, on a timer, or from the lock file** (§5.3c, §12 Q28, named in rev 5). The on-focus rescan
 is the wrong mechanism twice over — it rebuilds the tree rather than the documents, and a designer
-watching an agent work never leaves the window, so it may not fire at all. The state is already
-advertised (R-rc5-6g) and the two processes already share the workspace's advisory lock (R-rc3-1b); the
-observation belongs on one of those. **Do not add a filesystem watcher** — `workspace-and-project-tree.md`
-§9 defers one deliberately and this does not un-defer it.
+watching an agent work never leaves the window, so it may not fire at all. **The channel is the one the
+application already has for a second process to reach a running window**: `src/Ui/Program.cs`'s
+single-instance forwarding — a named pipe on Windows, a Unix-domain socket on Linux — which is brought
+up on macOS as well for this purpose, since there the OS carries the double-click and nothing else had
+needed it. Two messages travel on it: `serve` asks the window whether it holds unsaved changes to this
+workspace (R-rc5-7a), and tells it which documents a batch modified when the batch closes. No window
+listening means no window to protect. **Not the advisory lock file**: a dirty flag rewritten there is a
+write to a shared folder on every edit, and reading it back is a timer. **Do not add a filesystem
+watcher** — `workspace-and-project-tree.md` §9 defers one deliberately and this does not un-defer it.
+
+**R-rc5-7d. A nested repository's subtree is excluded from every checkpoint by pathspec** (§7A.5,
+§12 Q4 and Q30). RC-6 R-rc6-7 finds it — by a walk for `.git` directories, since `rev-parse` walks up
+and not down — and this brief keeps it out. It matters mechanically: handing a directory that contains
+a `.git` to `git add` records it as an *embedded repository*, a pointer to that repository's commit,
+which is precisely the *"committed as something by the enclosing workspace"* §7A.5 forbids, with a
+warning nobody is reading.
 
 **What this must not become is a window the agent shares.** One file, one editor (§7A.3) still holds:
 during a batch the workspace's documents belong to the batch, and after it they belong to the window
@@ -214,7 +274,12 @@ makes it matter is the one §7A and §4.7 both assume — a workspace on a share
 else — where creating a repository because a colleague glanced at the folder is R-rc0-5's ambush pointed
 at a directory instead of a history. It is also the whole of R-rc3-8's objection (*"a repository
 appearing in a folder because the user launched circuitRF once is a surprise"*), answered without
-defaulting the feature off.
+defaulting the feature off. **And "would record something" is defined without a repository** (§5.7a,
+§12 Q24, rev 5), because before one exists there is nothing to diff against: an unarmed workspace arms
+on close only if circuitRF itself wrote a file into the workspace during the session — which the
+edit-session registry knows without asking the disk — and always on a save-point or a batch. An armed
+workspace applies R-rc5-5a's tree test. Under this rule the colleague's glance creates nothing, runs
+nothing and writes nothing, and RC-6 R-rc6-4a extends the same rule to housekeeping.
 
 **R-rc5-4b. The first time a workspace gains a repository, that is announced — once.** One Messages
 entry: a history is now being kept for this workspace, where the setting is, and — per §5.7's closing
@@ -255,20 +320,37 @@ sequence retrofitted later cannot order the checkpoints taken before it existed.
 
 ## 4. Failure is reported; success is not
 
-**R-rc5-9. Identity is a prerequisite, not an error to translate** (§4.4). `git commit` refuses
-outright when `user.name` and `user.email` are unset, and on a fresh Windows machine they are unset —
-so the first checkpoint circuitRF ever takes would fail, **silently**, since a checkpoint is not
-user-initiated and has no dialog to fail into. RC-4 captures identity as a **per-user preference**
-(R-rc4-11a) before the feature arms; RC-3 supplies it **per invocation**, in no config file
-(R-rc3-1a); this brief refuses to arm when neither circuitRF's preference nor git's own resolution can
-name a committer.
+**R-rc5-9. Identity is a prerequisite, not an error to translate** (§4.4). A commit with no author
+refuses outright, and on a fresh Windows machine `user.name` and `user.email` are unset — so the first
+checkpoint circuitRF ever takes would fail, **silently**, since a checkpoint is not user-initiated and
+has no dialog to fail into. RC-4 captures identity as a **per-user preference** (R-rc4-11a) before the
+feature arms; RC-3 supplies it **per invocation**, in no config file (R-rc3-1a), **and reads it for
+both processes** (R-rc3-1c); this brief refuses to arm when neither circuitRF's preference nor git's own
+resolution can name a committer, and the refusal names the Settings tab.
 
-**The headless path resolves it differently and that is correct.** `src/Cli` cannot read
-`AppPreferences` across the firewall, so a headless checkpoint identifies itself through git's ordinary
-resolution — whoever is running it. **Do not invent a synthetic committer** for the automatic or
-AI-initiated cases: a fabricated author would be indistinguishable from a real person of that name, and
-it would break `git log --author` for the actual designer. R-rc5-5's origin is already carried in the
-commit *message* (RC-7 R-rc7-5), which is where the distinction belongs.
+**The headless path resolves it the same way, and rev 4 had this wrong** (§12 Q21). It let `serve`
+fall through to git's own resolution on the grounds that `src/Cli` cannot read `AppPreferences` — true,
+and on the machine §4.4 describes that resolution names nobody, so the governing motive's checkpoint
+was refused for exactly its target population. RC-3's reader closes that. **Do not invent a synthetic
+committer** for the automatic or AI-initiated cases: a fabricated author would be indistinguishable
+from a real person of that name, and it would break `git log --author` for the actual designer. The
+origin is carried in the commit *message* (R-rc5-9a), which is where the distinction belongs.
+
+**R-rc5-9a. This brief owns the message of every commit it creates** (§5.5, corrected in rev 5 — rev 4
+left all three checkpoint rows to RC-7, a later stage that creates none of them). Three origins, three
+distinguishable messages, each carrying R-rc5-1e's trailers:
+
+| origin | message shape |
+|---|---|
+| the user asked for a **save-point** | the user's label, or *save-point* when they gave none, plus a line recording that the user asked for it |
+| the workspace was **closed** | a message stating the workspace was closed — the designer did not choose this moment, and the history must not imply they did |
+| **before an AI batch** | the batch's own intent — *"before: widen the output match"* |
+
+The distinction between the first two is the point, and it is drawn in the restore-point list, where
+they appear together: a designer scanning it must be able to tell *"I decided this was worth keeping"*
+from *"circuitRF kept this because I shut the lid"* without opening either. The automatic one is not
+lesser — it is frequently the one that saves them — but it means something different. RC-7 owns the
+fourth row, the explicit commit, and nothing here.
 
 **R-rc5-10. A checkpoint that could not be taken is always reported.** §1.4 forbids a designer
 believing they are protected when they are not, and a checkpoint failing quietly is the purest form of
@@ -308,12 +390,36 @@ DISCARDED** (§5.8). Two halves, and the second is the one that is silent if mis
   *implemented*, and it is not permission to leave a stack describing a file that no longer contains
   what the stack describes.
 
-**R-rc5-13. Restore-then-keep-editing creates a branch silently, and the word never appears** (§6.3).
-Git requires a branch there; the architecture's answer is that it is created silently and **named after
-the design intent**, surfaced as a *variant* — *"You are editing from an earlier version; saving will
-create a new variant."* The words branch, checkout and HEAD appear nowhere. **RC-7 owns the variant UI
-in full**; this brief must not paint itself into a corner that makes it impossible — specifically, the
-restore operation must not leave a state RC-7 cannot name.
+**R-rc5-12c. Five more restore rules, each silent when missed** (§5.8, §12 Q25, new in rev 5):
+
+- **A restore never moves `HEAD`.** It writes the checkpoint's tree into the working tree through
+  R-rc5-1c's plumbing; the designer's branch, if one exists yet, stays where it was. Nothing is ever
+  checked out — gate 24 scans for it.
+- **A file created after the checkpoint is removed**, because last Tuesday's files plus Thursday's new
+  cell matches neither state. The pre-restore checkpoint (R-rc5-12a) is what makes the removal safe.
+- **Ignored files are not touched.** Results are not in the checkpoint, and a restore that swept them
+  away would destroy hours of simulation to bring back the design that produced them. A restore acts on
+  the set R-rc5-1d would capture and on nothing else.
+- **The revision-control flag and the policy files are preserved.** The `.cws` carries RC-6's off flag,
+  so a restore across an off period would silently switch recording on or off; `.gitignore` carries
+  R-rc5-15's answers, so a restore to before one was given would silently start including the file.
+  Both are re-applied after the tree is written, and they are the only things a restore leaves as it
+  found them.
+- **An interrupted restore is detected on the next open.** Thousands of files over a share can be cut
+  off by a crash or a dropped connection, leaving §1.3's failure exactly: well-formed, and half of two
+  states. Write a marker under `.git/circuitrf/` before the first file and remove it after the last; a
+  marker found on open is reported, naming the target and the pre-restore checkpoint, with the action
+  to finish or to go back.
+
+**R-rc5-13. Restore-then-keep-editing is LINEAR, and no branch is ever created** (§6.3, §12 Q19,
+corrected in rev 5). rev 4 said git requires a branch there and specified a silently-created *variant*.
+It does not: a branch is required only if the restore is a *checkout*, and R-rc5-12c's first rule says
+it never is. The next checkpoint or, in Stage 3, the next commit simply records the restored content as
+the next step — which is what the designer meant by "I went back to Tuesday", and the only shape that
+survives §6.1 on a shared branch, where a second line of work would be a merge nobody can perform.
+**The variant, its branch and its naming are withdrawn from RC-7**; what RC-7 inherits from this brief
+is a restore that leaves no state to name. The words branch, checkout and HEAD have no scenario in
+which to appear.
 
 **R-rc5-13a. There is no reference the designer sees, and the words never appear** — R-rc5-2 governs
 the restore list too, including whatever R-rc5-12a's pre-restore checkpoint is called in it. It is a
@@ -411,6 +517,30 @@ case where they differ is a file that is large *and* changes often *and* whose c
 while its history does not — and the correct answer there is "Never include files like this", which is
 one row above it in the same dialog.
 
+**R-rc5-15a. At a boundary nobody is at, the checkpoint proceeds and the file is left out** (§8.2b,
+§12 Q26, new in rev 5). R-rc5-15's guard and R-rc5-17a's summary both ask a question, and two of the
+three boundaries have nobody to answer it: a close is at the moment the designer asked to leave, and a
+batch is headless. §9A.1's rule decides the direction — including is irreversible, leaving out is not.
+The checkpoint's trailers record what was left out (R-rc5-1e), the restore-point list shows the entry
+as incomplete with the names, one Messages entry per session says so, and **the question is asked at
+the next interactive moment** — the next explicit save-point, or the entry's own action. R-rc5-17a's
+summary follows the same rule by pattern. What must not happen is the silent version of either
+direction.
+
+---
+
+## 6a. The headless spelling (§5.3d, new in rev 5)
+
+**R-rc5-23. One verb, `history`, with nouns `checkpoint`, `list` and `restore`** — RC-7 adds `commit`.
+rev 4 left every history operation reachable only from a window or an agent's tool call, which breaks
+the rule `src/Cli/Authoring.cs` exists to hold: an operation that lives only in a view model is not a
+capability, and `serve`'s tools are the CLI's verbs by construction. Each noun calls the `src/Design`
+function the GUI's own command calls; the verb is argument parsing, refusals and reporting. `history
+checkpoint --intent "…"` is an explicit save-point and is also what a batch's open does; the batch's
+open and close themselves stay on `serve`, which is the only surface that can hold session state.
+**Adding the verb to the repo-root `CLAUDE.md` and to `docs/design/cli.md` is the owner's edit** — flag
+it in the write-up.
+
 ---
 
 ## 7. The archive gate — mandatory, and it is this phase's
@@ -463,8 +593,12 @@ one**; anyone wanting the history to travel has RC-8's archive.
    two boundaries takes none (R-rc5-4).
 4. **Simulation runs and idle time take none** (R-rc5-5) — assert directly, because these are the two
    most likely to be re-added by someone who did not read the reasons.
-5. **A checkpoint spans files the user did not open** (R-rc5-7): modify three files outside any open
-   document and assert all three are captured.
+5. **A checkpoint spans files the user did not open, including files that did not exist** (R-rc5-7,
+   R-rc5-1d): modify three files outside any open document **and create a fourth** — a new cell folder
+   — and assert all four are captured. The fourth is the one a literal `commit -a` misses.
+5a. **A boundary with an unchanged tree records nothing** (R-rc5-5a): open, close, and assert no new
+   reference; take a save-point twice and assert one. **And a save-point's label is its message**, with
+   *save-point* substituted when none is given — assert the trailer, never a bare time.
 6. **Headless.** The AI-batch checkpoint is takeable from `src/Cli` with no display, and the result is
    **byte-identical** to the one the GUI's own path produces for the same workspace — the standard
    `EmCliVerbTests` already holds for a verb. Where a legitimate difference exists (a timestamp), exempt
@@ -490,6 +624,12 @@ one**; anyone wanting the history to travel has RC-8's archive.
 14. **One reference per checkpoint** (R-rc5-1): after ten checkpoints there are ten references, and
     deleting one leaves the other nine intact and restorable. **RC-6 cannot be built without this**, so
     it is gated here rather than there.
+14a. **Deleting a reference makes its commit unreachable** (R-rc5-1b): delete the fifth of ten, run a
+    test-only prune with an immediate expiry in a scratch copy of the repository, and assert the fifth
+    commit object is **gone** and the other nine are present. **Gate 14 passes on a parent chain; this
+    one does not**, and it is the gate that makes RC-6's thinning real rather than nominal.
+14b. **The shared index and `HEAD` are untouched** (R-rc5-1c): stage something by hand, take a
+    checkpoint, and assert the staged state and `HEAD` are byte-for-byte as they were.
 15. **A restore checkpoints first** (R-rc5-12a): restore with uncommitted work present, then assert the
     pre-restore state is itself restorable. This is the gate that keeps a restore from being a second
     cliff.
@@ -497,6 +637,18 @@ one**; anyone wanting the history to travel has RC-8's archive.
     assert an undo cannot re-apply the replaced edits onto the restored file.
 17. **The close checkpoint sees the final `.cws`** (R-rc5-21): change something that lands in the
     workspace file, close, restore, and assert the change is present.
+17a. **A restore removes what came after and leaves what was never in** (R-rc5-12c): create a cell after
+    the checkpoint and write a results file, restore, and assert the cell is gone and the results file
+    is byte-for-byte present.
+17b. **A restore preserves the off flag and the policy files** (R-rc5-12c): switch recording off after
+    the checkpoint, add a `.gitignore` line, restore, and assert both survive while every design file
+    matches the checkpoint.
+17c. **An interrupted restore is reported** (R-rc5-12c): abort a restore through its seam after the
+    first file, reopen, and assert the marker is found, both restore points are named, and finishing
+    produces the target state.
+17d. **A restore never moves `HEAD`** (R-rc5-12c, R-rc5-13): in a Stage 3 fixture with commits on the
+    branch, restore to an old restore point, take a checkpoint, and assert `HEAD` and the branch are
+    where they were and no new reference under `refs/heads/` exists.
 18. **Scratch takes no checkpoint and refuses a batch** (R-rc5-20), and the refusal offers the save.
 18a. **Arming happens at a boundary, not at open** (R-rc5-4a): open a workspace with the preference on,
     change nothing, close **without** the close boundary firing — assert no repository was created. Then
@@ -516,6 +668,16 @@ one**; anyone wanting the history to travel has RC-8's archive.
     must use the same path.
 19c. **No filesystem watcher was added** (R-rc5-7c): source-scan for `FileSystemWatcher` in the paths
     this brief touches and fail on a hit, comments stripped.
+19d. **The channel carries both facts, and the lock file carries neither** (R-rc5-7a, R-rc5-7c): with a
+    window holding a dirty document, a batch open over the real channel is refused; with it clean, a
+    batch close over the channel reloads the named documents. Assert the advisory lock file's bytes did
+    not change across either exchange.
+19e. **A nested repository is excluded by pathspec** (R-rc5-7d): `git init` inside a cell folder, take a
+    checkpoint, and assert the checkpoint's tree contains no entry for that folder — neither its files
+    nor a gitlink.
+19f. **An unattended boundary leaves a large file out and says so** (R-rc5-15a): drop a file over the
+    threshold, close, and assert the checkpoint exists, the file is absent from its tree, the trailer
+    names it, one Messages entry was posted, and the next explicit save-point asks.
 19. **The batch protocol** (R-rc5-6a…f): a batch opened twice is one batch and one checkpoint; a batch
     never closed still leaves a usable restore point; a batch opened against an off, held or scratch
     workspace is refused **with nothing modified** — assert file mtimes, not just the refusal.
@@ -527,6 +689,15 @@ one**; anyone wanting the history to travel has RC-8's archive.
     build a fixture with a hundred result files and assert the prompt groups them.
 22. **Git-absent machines skip with a reason** (R-rc0-10b), following `RfCore.Tests`'
     `FixtureFact`/`FixtureTheory` idiom. Never fail; never vendor a git.
+23. **`history checkpoint`, `list` and `restore` are byte-identical to the GUI's own path** (R-rc5-23),
+    exempting only a legitimately-varying timestamp and naming it — the standard `EmCliVerbTests`
+    already holds for a verb. And a source scan proves the view model kept no second copy of the
+    operation, exactly as `AuthoringCliVerbTests` does.
+24. **Nothing checks out, nothing branches** (R-rc5-12c, R-rc5-13): source-scan the paths this brief
+    touches for a `checkout`, `switch`, `branch`, `stash` or `reset` invocation and fail on a hit,
+    comments stripped. Restore is `read-tree`/`checkout-index` against a private index, or equivalent.
+25. **A kept checkpoint is marked** (R-rc5-1f): a save-point's trailer carries the mark, and the keep
+    action on a restore point adds it — RC-6 gates that retention honours it.
 
 ---
 
@@ -548,14 +719,21 @@ one**; anyone wanting the history to travel has RC-8's archive.
   and the workspace says so once when it is.
 - **The §10B.1 rows for a Save As copy and for a scratch workspace**: nothing is kept in either, and
   the reason differs — a copy starts fresh, a scratch workspace has nowhere to keep anything yet.
+- **The §10B.1 table itself, with its two "yes" rows** — design documents, and workspace configuration —
+  since this is the first brief with a chapter to put it in; later briefs add rows to it.
+- **The §10B.1 row for a file left out at an unattended boundary** (R-rc5-15a): not yet kept, the entry
+  says so and names it, and the question comes at the next save-point.
+- **§10B.3 also says what happens when the floor is not there** (rev 3): that a batch against an off,
+  held, scratch or unsaved workspace is stopped and told, that the agent may not improvise a substitute,
+  and that being stopped is the feature working rather than failing.
 - **§10B.3 — AI checkpoints get their OWN chapter, not interleaved.** Two reasons, and the second is
   the operative one: someone who never uses AI features should be able to read the history
   documentation without encountering them; and **they mean something different from a commit the
   designer made.** A restore point taken before an agent edit is a safety device the user did not ask
   for; a commit is a statement the user made. Presenting them together invites the belief that one
   substitutes for the other. The chapter states what triggers a checkpoint, that they are automatic,
-  that they are subject to retention while explicit commits are not, and how to turn one into a
-  permanent commit.
+  that they are subject to retention while explicit commits are not, and how to mark one **kept**
+  (R-rc5-1f), which is what makes it permanent.
 
 ---
 
@@ -570,7 +748,12 @@ Findings to `src/Design/RESOLVED.md`, `src/Ui/RESOLVED.md` and `src/Cli/RESOLVED
 - Anything the AI-batch boundary needed that `src/Cli/Serve` could not supply — that is a gap in the
   agent surface and it is the most valuable thing this brief can find, because §12 Q5 says this floor
   must be in place before the capability arrives.
-- Whether the restore path leaves any state RC-7's variant handling cannot name (R-rc5-13).
+- **Whether gate 14a passed on the first implementation** (R-rc5-1b). If the first draft chained
+  checkpoints and the gate caught it, say so — that is the finding that justifies the gate.
+- Whether the second-instance channel needed the Unix socket brought up on macOS, and what it cost
+  (R-rc5-7c).
+- How often an unattended boundary actually left a file out on a realistic workspace (R-rc5-15a), and
+  whether the next-interactive-moment question arrived where a designer would expect it.
 - **Whether the ten rules survived contact with a real agent** (R-rc5-6h). If one of them is ambiguous
   enough that a capable agent could obey it and still do the wrong thing, that is a defect in the rule,
   not in the agent — report the wording, and say which rule.

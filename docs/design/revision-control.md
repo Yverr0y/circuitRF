@@ -1,8 +1,8 @@
 # circuitRF — Revision Control (architecture)
 
-**Status:** Proposal — **rev 4**, owner decisions §12 Q1–Q12 taken and Q13–Q17 added; what arms a
-workspace, what an out-of-process agent does to the window holding it, and what circuitRF asks before
-taking over someone else's repository are now specified ·
+**Status:** Proposal — **rev 5**, owner decisions §12 Q1–Q17 taken and Q18–Q30 added; the mechanics a
+checkpoint, a restore and a thinning actually rest on are now specified, and two of rev 3's guarantees
+are re-founded on mechanisms that hold ·
 **Date:** 2026-09-06 · **Phase:** unassigned
 
 Specifies how circuitRF gives a workspace a **history** — the ability to see what changed, and to get
@@ -85,6 +85,52 @@ opposite answers; **§9A.3** says which references the deleted-file warning walk
 computation in this document whose incompleteness cannot be undone; and **§10A** gains the row §12 Q13
 creates.
 
+**What changed in rev 5.** rev 4 was reviewed against the nine briefs a third time. Coverage was again
+complete, and the rev 3 and rev 4 corrections were re-checked against git's documented behaviour and
+stand. What this pass found is different in kind: **mechanisms the document treated as settled by
+naming them, which on inspection do not do what the sentence around them says.** Five of those silently
+revoke a guarantee made elsewhere, and each is now specified rather than assumed:
+
+- **A checkpoint's parent was never stated, and with the wrong parent §5.6 thins nothing.** One
+  reference per checkpoint (§5.2a) makes a deletion free objects only if the next checkpoint does not
+  name the previous one as its parent. **§5.2b** fixes the shape: parentless commits, built through a
+  temporary index, capturing every file the workspace holds including ones no checkpoint has seen.
+- **The reflog was named as the escape hatch after a sweep, and it is not one.** Deleting a reference
+  deletes its reflog with it, and references outside `refs/heads/` carry none by default. What survives
+  a sweep is the unreachable objects, because §4.5 forbids pruning them; **§5.6 rule 4** now says so,
+  and circuitRF keeps a journal of what it thinned so recovery is one action rather than an `fsck`.
+- **§4.5 said objects are never pruned and §5.6 said packing eventually reclaims them.** Both cannot be
+  true. **§5.6a** decides: nothing reclaims automatically, ever — which is what §1.4 already required —
+  and reclaiming is an explicit, confirmed action on the Settings tab.
+- **§4.6 asked the advisory lock to serialise writers, and its own header says it cannot.**
+  `WorkspaceLock` holds no handle, is overridable in both directions, and exists to *notice* two
+  sessions on one workspace — precisely the situation §5.3c designs for. **§4.6** now lets git's own
+  atomic locks serialise, behind a temporary index that keeps checkpoints out of the shared index.
+- **The headless batch could not read the identity §4.4 captures.** `AppPreferences` lives in
+  `src/Ui`, so `serve` fell through to git's own resolution, which on the fresh Windows machine §4.4
+  describes names nobody — and the governing motive's checkpoint was refused for exactly the population
+  it targets. **§4.4** moves the identity's storage to a per-user file a `src/Design` reader serves to
+  both processes.
+
+Two are corrections to premises rather than to mechanisms. **§6.3 asserted that git requires a branch
+after a restore.** It does not: a restore that writes a checkpoint's tree into the working tree and
+never moves `HEAD` makes restore-then-edit linear, and the variant concept, its UI and its
+documentation scenario are withdrawn (**§12 Q19**). **§4.3 assumed that a `git` on `PATH` is a git.**
+On macOS it is a stub that opens an Apple installation dialog when run, so detection must check for
+the developer tools first (**§4.3a**).
+
+The rest are rules for cases that had none: what *"would record something"* means before a repository
+exists (**§5.7a**); what a restore does to files created after the checkpoint, to ignored results, to
+the `.cws`'s own off flag and to the policy files, and how an interrupted restore is detected
+(**§5.8**); what a checkpoint does with an unexpectedly large file at a boundary where nobody can
+answer §8.2's question (**§8.2b**); which checkpoints retention may never thin (**§5.6 rule 6**); that
+a session which recorded nothing on a shared workspace sweeps and packs nothing (**§5.6**); how a
+nested repository is actually found, since `rev-parse` walks up and not down (**§12 Q4**); the
+concrete channel by which `serve` and the window exchange the two facts §5.3c needs (**§5.3c**); the
+headless surface for every history operation (**§5.3d**); §4.7's remedy, supplied per invocation
+rather than left to a config write; and §5.5's fourth row, the explicit save-point, whose message the
+brief that creates it must own.
+
 ---
 
 ## 0. The governing principle
@@ -147,7 +193,8 @@ called out where they bite:
   a manual. A designer who believes they can get back to last Tuesday and cannot has been failed by
   this design, whatever the release notes said.
 - **No automatic operation may destroy history.** Retention thins; it never prunes to permanence
-  (§5.6). History rewriting is not offered at all (§8.3).
+  (§5.6), and nothing reclaims what thinning freed unless a person asks (§5.6a). History rewriting is
+  not offered at all (§8.3).
 
 ---
 
@@ -414,7 +461,7 @@ reasons matter more:
 **4.2 What arm's length costs, and who pays it.** Git's diagnostics are written for people who already
 understand git. Shelling out means inheriting them. **The architecture must therefore include a
 translation layer**: a bounded set of recognised failures (no identity configured, nothing to commit,
-a lock file left by a crashed process, a non-fast-forward push, a dirty tree blocking a checkout) each
+a lock file left by a crashed process, a non-fast-forward push, an embedded repository refused) each
 mapped to a sentence in circuitRF's own vocabulary, with the raw git output available but not
 foregrounded. Anything unrecognised is reported verbatim and honestly, never swallowed — the same
 posture the run services already take with an engine error.
@@ -423,6 +470,16 @@ posture the run services already take with an engine error.
 on Windows — have no git installed. The revision-control affordances are therefore **hidden entirely**
 when git is unavailable, rather than shown disabled. A designer who does not want this feature should
 never learn it exists.
+
+**4.3a Detection must not itself be the surprise** *(new in rev 5)*. On macOS, `/usr/bin/git` is
+present on every machine whether or not git is installed: it is a shim that, when the Command Line
+Tools are absent, **opens Apple's "install the developer tools?" dialog** instead of running. A
+discovery that establishes presence by invoking `git --version` would therefore show an unbidden system
+dialog to precisely the users §4.3 promises will never learn the feature exists — on first launch, and
+on every launch after it. Discovery on macOS checks that the developer tools are installed
+(`xcode-select -p` succeeds, or an equivalent that never invokes the shim) **before** running anything
+named `git`, and treats the shim without tools as absent. The other two platforms have no such shim.
+§10A's Detect action is the one place the shim may be reported by name, because there the user asked.
 
 **4.4 Identity is a prerequisite, not an error to translate** *(new in rev 2)*. `git commit` refuses
 outright when `user.name` and `user.email` are unset, and on a fresh Windows machine they are unset.
@@ -454,11 +511,20 @@ user-initiated and has no dialog to fail into. Two rules follow:
     writes nothing" and §7A.1's "one repository" are both weakened by a design that writes a per-user
     value into a shared artifact for no functional gain.
 
-  **Where circuitRF's own preference is unset, git's ordinary resolution applies** — the user's global
-  config, if they have one. That is what makes the headless case work (`src/Cli` cannot read a GUI
-  preference across the firewall) and it is the correct answer there anyway: a headless run should
-  identify itself as whoever is running it. If neither circuitRF nor git can name a committer, the
-  feature does not arm, which is the whole of §4.4's first sentence.
+  **The preference is stored where both processes can read it, and that is a rev 5 correction.** rev 3
+  and rev 4 let the headless case fall through to git's own resolution, on the grounds that `src/Cli`
+  cannot read a GUI preference across the firewall. That is true of `AppPreferences`, which lives in
+  `src/Ui` — and it defeats the governing motive: §1.2's agent reaches circuitRF through `serve`, out
+  of process, and on the fresh Windows machine this very section describes git's own resolution names
+  nobody. The AI-batch checkpoint would be refused for exactly the population it exists to protect, and
+  the only remedy would be the global config write circuitRF refuses to make. **So the identity is
+  written by the Settings tab into circuitRF's per-user preference file and read back by a small
+  `src/Design` reader that the GUI and `src/Cli` both use.** Reading a JSON file in the per-user
+  directory crosses no firewall; only the type that owns the dialog does. **Where that file names
+  nobody, git's ordinary resolution applies** — the user's global config, if they have one — which is
+  still the right fallback for a headless run on a machine where circuitRF was never configured. If
+  neither can name a committer, the feature does not arm, which is the whole of §4.4's first sentence,
+  and `serve`'s refusal names the Settings tab rather than a git command.
 
   **The Settings tab should offer the user's existing global git identity as the pre-filled default**
   (§10A). *Reading* someone's global config is unobjectionable; only writing it was ever the problem.
@@ -490,7 +556,7 @@ user's global one:
 |---|---|---|
 | `gc.auto` | `0` | circuitRF's byte-based packing schedule and git's count-based one fighting (§2.4) |
 | `gc.pruneExpire` | `never` | **§5.6 rule 4.** Otherwise a routine pack destroys thinned checkpoints permanently after two weeks |
-| `gc.reflogExpire`, `gc.reflogExpireUnreachable` | `never` | the reflog **is** §4.1's escape hatch after a mistaken sweep; at its 30-day default it is gone before §1.3 says the designer looks |
+| `gc.reflogExpire`, `gc.reflogExpireUnreachable` | `never` | the reflog is the escape hatch for the **designer's own branch** — a mistaken reset or amend from a shell (§5.2); at its 30-day default it is gone before §1.3 says the designer looks. **It is not the escape hatch after a sweep** *(corrected in rev 5, §5.6 rule 4)*: a deleted reference takes its reflog with it |
 | `core.longpaths` | `true` (Windows) | nested cell folders plus git's own object paths pass 260 characters; the failure is a refusal on one machine class only |
 | `core.autocrlf` | `false` | see *line endings*, below |
 | a **management marker** naming circuitRF and recording §12 Q4's answer | written once | **§12 Q4, §9A.5 and §5.3b all turn on "did circuitRF create this repository", and a `.git` directory alone cannot answer it.** See below |
@@ -514,7 +580,10 @@ and the Settings tab can show what was decided.
 **Every commit circuitRF makes bypasses hooks.** §12 Q4 offers *adoption* of a repository the user
 created, which may carry a `pre-commit` hook written for their own workflow. Running someone's hook on
 a checkpoint they did not initiate is §7A.1's ambush by another route: the checkpoint is circuitRF's,
-not theirs, and it must neither be blocked by their tooling nor set it off.
+not theirs, and it must neither be blocked by their tooling nor set it off. **`--no-verify` does not achieve that on its own**
+*(rev 5)*: it skips `pre-commit` and `commit-msg` and leaves `post-commit` and the rest to fire. The
+bypass is an empty `core.hooksPath`, supplied per invocation like everything else that is a statement
+about circuitRF's commits rather than about the repository.
 
 **Invocation environment.** Every subprocess starts with:
 
@@ -525,7 +594,11 @@ not theirs, and it must neither be blocked by their tooling nor set it off.
 - **A locale pinned to `C`, and machine-readable output wherever a result is parsed.** §4.2's table
   must key on exit codes and stable formats, never on English prose a localised git will not produce.
 - **`--no-pager`, an explicit working directory, and a timeout.** A subprocess circuitRF cannot bound
-  is a subprocess that can wedge a workspace close.
+  is a subprocess that can wedge a workspace close. The bound is wall-clock for a local operation and
+  **inactivity** for a network one (§9.1): a fixed limit kills the legitimate slow clone of a large
+  library, which is not a hang.
+- **`safe.directory` naming the open workspace's root** (§4.7), so that a workspace on a share or an
+  extracted archive works without a config write.
 - **The commit identity** (§4.4) — author *and* committer, since git resolves the two separately and
   supplying only one leaves the other to config or to a guess at `user@hostname`. Nothing is written to
   a config file; unset in circuitRF, git's own resolution applies.
@@ -545,21 +618,33 @@ marking. The two live in one file for one reason: a design document's bytes are 
 ### 4.6 Two processes, one repository *(new in rev 3)*
 
 **§1.2's agent is out of process** (`src/Cli`), the GUI is another, §2.4's packing runs when a workspace
-closes, and §5.3b's agent may hold a shell of its own. They drive one repository, and git's index is a
-single lock-protected resource. Two concurrent writers produce an `index.lock` failure that §4.2
-translates — but **a failure this predictable should be prevented, not narrated.**
+closes, and §5.3b's agent may hold a shell of its own. They drive one repository, and a concurrent pair
+of writers produces a lock failure that §4.2 translates — but **a failure this predictable should be
+prevented where it can be, and narrated honestly where it cannot.**
 
-**Serialisation is circuitRF's, not git's.** One writer per repository at a time, across processes,
-through the mechanism the workspace already has for this exact question — the existing per-workspace,
-cross-process advisory lock is the same shape of problem and should not acquire a second
-implementation. Two rules follow:
+**rev 3 assigned the serialisation to the workspace's advisory lock, and that was a category error**
+*(corrected in rev 5)*. `WorkspaceLock` (`src/Design/Workspace/WorkspaceLock.cs`) is a notice, not a
+lock: its own header says it holds no file handle, that both "open anyway" and "open read-only" are
+always available, and that a lock this product treated as authoritative *"would become a stale file that
+locks out a team."* It also fires in exactly the situation §5.3c designs for — the GUI and `serve`
+holding one workspace at once — so it cannot be what keeps them apart. Three rules replace it:
 
+- **Checkpoints never touch the shared index.** A checkpoint is built through a temporary index file
+  (§5.2b), so the one resource git's writers actually contend on is left to the designer's own shell,
+  and two circuitRF processes checkpointing at once contend only on reference updates, which git makes
+  atomic.
+- **Git's own lock files serialise what remains.** They are atomic-create files, which is the correct
+  primitive and the one a second implementation would have had to reinvent. A collision is retried for
+  a short bound before it is translated, because a collision between two automatic operations is a
+  delay and not an error.
 - **A read never waits on a writer.** Listing restore points, resolving a pin, or computing §9A.3's
   archive figures must not block behind a pack. Git's read paths do not take the index lock unless
   asked to refresh it, and circuitRF's must not ask.
-- **Packing yields.** §2.4 already requires it to be interruptible and safe to abandon; it must also
-  not start while another process holds the workspace, and must abandon rather than queue when one
-  arrives.
+
+**Packing yields, and the advisory notice is the right thing for it to yield to.** §2.4 already requires
+packing to be interruptible and safe to abandon; it must also not start while another process has the
+workspace open — which is precisely the question the advisory notice answers — and must abandon rather
+than queue when one arrives. That is the notice used as a notice.
 
 ### 4.7 The version floor, and the failure that only appears on a share *(new in rev 3)*
 
@@ -574,6 +659,16 @@ another user — *"detected dubious ownership"* — and that is the ordinary sta
 network share** and of **an archive extracted by someone else**. RF workspaces live on shares, and
 §7A's librarian scenario assumes one. This is a recognised failure in §4.2's table, with its own
 sentence and its own remedy; it must never reach a designer in git's wording.
+
+**And the remedy is supplied per invocation, not written anywhere** *(new in rev 5)*. rev 4 left the
+remedy implicit, and the only one a designer could be handed is a global git config write — the thing
+§4.4 rules out, in git vocabulary, shown unbidden. Git accepts `safe.directory` on the command line, so
+every invocation names the open workspace's root as safe (§4.5). The trade is stated rather than hidden:
+the ownership check exists because a foreign-owned repository's configuration can name programs to run,
+and naming the root trusts a folder the user chose to open and whose contents circuitRF already loads.
+That is the trust the open already expressed. It is narrowed to the one root, never `*`, and the
+translated failure stays in §4.2's table for the git that is too old to accept it — which is one of the
+behaviours the floor is set from.
 
 ---
 
@@ -630,6 +725,32 @@ Someone who clones gets the narrative and starts a safety net of their own, whic
 someone handed an archive gets the sender's restore points too, which is a stronger handover and is
 exactly why §9A's checkbox needs §9A.3's warning.
 
+### 5.2b What a checkpoint is, mechanically *(new in rev 5, §12 Q18)*
+
+§5.2a fixed the reference shape and left the commit's shape unstated. Four properties, each of which
+decides something elsewhere in this document:
+
+- **A checkpoint commit has no parent.** This is not a preference. §5.2a's whole argument — that
+  deleting one reference frees that checkpoint's objects — holds only if the next checkpoint does not
+  name this one as its parent. Chained, a deletion frees nothing, §5.6 thins nothing, and no gate that
+  asserts *survival* would notice. The sequence trailer (§5.6 rule 2) carries the order a parent chain
+  would have carried; `git log <ref>` shows one commit, which is the truth.
+- **It is built through a temporary index**, never the repository's shared one: add every file into a
+  private index, write the tree, write the commit, update the reference. `HEAD` and the designer's
+  branch never move, the designer's own staged state from a shell is untouched, and §4.6's contention
+  on the index disappears. This is also what makes §6.3's linear restore possible: a restore is a
+  working-tree write, and nothing ever checks anything out.
+- **It captures every file the workspace holds that `.gitignore` does not exclude — including files no
+  checkpoint has seen before.** The phrase *"`commit -a`-shaped"* elsewhere in this document names the
+  intent, not the command: a literal `commit -a` skips untracked files, and a new cell folder an agent
+  just created is exactly the file §1.2 exists to capture. Two exclusions apply beyond `.gitignore`: a
+  nested repository's subtree (§7A.5, §12 Q4), and a file left out under §8.2b, which the checkpoint's
+  own metadata records.
+- **Its metadata is in the commit message, as trailers**: the sequence, the origin (§5.5), the intent,
+  whether it is **kept** (§5.6 rule 6), and any file left out. The sequence is derived from the
+  references that exist, never from a counter file, so it survives a crash, a clone and a hand-deleted
+  reference. A boundary whose tree equals the newest checkpoint's records nothing (§5.3).
+
 ### 5.3 When is a checkpoint taken? *(decided: §12 Q2)*
 
 Not on every save. The measurement in §2 says a commit per save is *affordable* (single-digit KB). It
@@ -649,6 +770,14 @@ Stage 2:**
 | **before an AI-initiated batch** | §1.2 — this is the motive | **no** (§10A) |
 | **an explicit save-point the user asks for** | the user's own judgement about what matters is better than any heuristic | n/a — it is the request |
 | **on workspace close** | the one boundary that reliably exists in every session, including the ones where the designer never thought about history at all | yes |
+
+**The explicit save-point takes a one-line label, optionally**, because §5.3a rule 2's reasoning
+applies to it: the intent is the whole value of the entry, and a save-point with no label is shown as
+one — *save-point*, with its time — never as a bare time. **And a boundary at which nothing changed
+records nothing** *(new in rev 5)*: a close after a session that only looked, or a save-point pressed
+twice, would otherwise add an entry indistinguishable from the one before it, which is the unreadable
+log this section opens by rejecting. The test is the tree, not the clock: a checkpoint is taken only if
+the workspace's tree differs from the newest checkpoint's (§5.2b).
 
 **Deliberately not shipping, and the reasons are worth keeping** so they are not revisited casually:
 
@@ -726,7 +855,8 @@ agent learns them from the server rather than from having read this document. Th
 >    which carries metadata and an ordering sequence you cannot supply.
 > 4. **Do not rewrite, and do not reclaim.** No amend, rebase, reset, filter or forced push; no `gc`,
 >    `prune` or `reflog expire`. §4.5's configuration exists so that a mistaken deletion stays
->    recoverable for weeks, and a single housekeeping command undoes that for everyone.
+>    recoverable until the designer chooses otherwise (§5.6a), and a single housekeeping command undoes
+>    that for everyone.
 > 5. **Do not change what the working tree contains.** No checkout, no branch, no switch, no stash, no
 >    `restore`. The files are open documents in a running application; changing them underneath it
 >    produces a design nobody has (§5.8).
@@ -774,7 +904,8 @@ history and does nothing whatever about it.
 Three rules, and the first is what makes the other two small:
 
 1. **A batch is refused while the window holds unsaved changes to that workspace**, before anything is
-   modified. §5.8 resolves this for a restore by *asking* — but a batch is headless and out of process,
+   modified — the window is asked over the channel rule 3 names. §5.8 resolves this for a restore by
+   *asking* the designer — but a batch is headless and out of process,
    and there is nobody to answer a prompt. A refusal is the only honest answer, it is the fourth member
    of §5.3a's family (off, held, scratch, dirty), it arrives at the same moment as the other three, and
    §5.3b rule 9 already tells the agent exactly what to do with it. The designer saves and asks again.
@@ -783,14 +914,37 @@ Three rules, and the first is what makes the other two small:
    unsaved work anywhere, a reload cannot lose anything.
 3. **The window learns the batch closed; it does not discover it on focus.** The on-focus rescan is the
    wrong mechanism twice over — it rebuilds the tree rather than the documents, and a designer watching
-   the agent work never leaves the window, so it may not fire at all. The batch state is already
-   advertised (§5.3b) and the two processes already share the workspace's advisory lock (§4.6); the
-   observation belongs on one of those, not on a new watcher.
+   the agent work never leaves the window, so it may not fire at all. **The channel is the one
+   the application already has for a second process to reach a running window** *(named in rev 5,
+   §12 Q28)*: the single-instance forwarding in `src/Ui/Program.cs` — a named pipe on Windows and a
+   Unix-domain socket on Linux, which is brought up on macOS as well for this purpose, since there the
+   OS carries the double-click and nothing else had needed it. Two messages travel on it, one in each
+   direction: `serve` asks the window whether it holds unsaved changes to this workspace (rule 1), and
+   tells it which documents a batch modified when the batch closes (this rule). No window listening
+   means no window to protect, and the batch proceeds with nothing to reload. **Not the advisory lock
+   file**: a dirty flag rewritten there is a write to a shared folder on every edit, and reading it back
+   is a timer. Not a watcher, for the reason above.
 
 **What this deliberately does not do is make the window an editor the agent shares.** One file, one
 editor (§7A.3) still holds: during a batch the workspace's documents belong to the batch, and after it
 they belong to the window again. Any design in which both are live at once is the failure above with
 more machinery.
+
+### 5.3d Every history operation has a headless spelling *(new in rev 5, §12 Q29)*
+
+§5.3a puts the batch on `serve`, and rev 4 left it there: the only ways to take a checkpoint, list
+restore points, restore one or commit were a window and an agent's tool call. That breaks a rule this
+repository already holds for every other capability — *an operation that lives only in a view model is
+not a capability* — and `serve`'s tools are the CLI's verbs by construction, not a parallel surface. A
+build machine reproducing a signed-off result, a script that wants a save-point before it rewrites a
+technology, and a person with no window all need the same thing.
+
+**One verb, `history`, with nouns**: `checkpoint` (an explicit save-point, with `--intent`, which is
+also what a batch's open does), `list`, `restore`, and, from Stage 3, `commit`. Each calls the function
+the GUI's own command calls, in `src/Design`; the verb is argument parsing, refusals and reporting,
+exactly as `new` and `import` are. The batch's open and close remain `serve`'s, because they carry
+session state a one-shot process cannot hold. Adding the verb to the repo-root `CLAUDE.md`'s list and
+to `docs/design/cli.md` is the owner's edit, not a brief's.
 
 ---
 
@@ -807,16 +961,23 @@ view, the checkpoint covers everything else.
 did I mean?" is the only question anyone asks of a history. Three origins, three distinguishable
 messages:
 
-| origin | message shape |
-|---|---|
-| the user pressed **Commit** and typed a title | the user's title, plus a line recording that this was an explicit commit by the user |
-| the workspace was **closed** | a message that states the workspace was closed — the designer did not choose this moment, and the history must not imply they did |
-| **before an AI batch** | the batch's own intent — *"before: widen the output match"* — on the checkpoint reference, never on the designer's branch |
+| origin | where it lives | message shape |
+|---|---|---|
+| the user pressed **Commit** and typed a title *(Stage 3)* | the designer's branch | the user's title, plus a line recording that this was an explicit commit by the user — and, after a restore, which restore point it was restored from (§6.3) |
+| the user asked for a **save-point** *(Stage 2)* | a checkpoint reference | the user's label, or *save-point* when they gave none, plus a line recording that the user asked for it |
+| the workspace was **closed** | a checkpoint reference | a message that states the workspace was closed — the designer did not choose this moment, and the history must not imply they did |
+| **before an AI batch** | a checkpoint reference | the batch's own intent — *"before: widen the output match"* — never on the designer's branch |
 
-The distinction between the first two is the point. A designer scanning their history has to be able
-to tell *"I decided this was worth keeping"* from *"circuitRF kept this because I shut the lid"*,
-without opening either. The automatic one is not lesser — it is frequently the one that saves them —
-but it means something different, and a history that renders them identically is lying by omission.
+**rev 4 had three rows for four events, and put the wording of every checkpoint row in the Stage 3
+brief, which creates none of them** *(corrected in rev 5)*. The brief that creates a commit owns its
+message.
+
+The distinction between the second and third rows is the point, and it is drawn in the restore-point
+list, where those two appear together. A designer scanning it has to be able to tell *"I decided this
+was worth keeping"* from *"circuitRF kept this because I shut the lid"* without opening either. The
+automatic one is not lesser — it is frequently the one that saves them — but it means something
+different, and a list that renders them identically is lying by omission. The same distinction reaches
+the escape hatch through the message, which is why it is in the message and not only in the list.
 
 **The Messages panel reports an explicit commit, and names it.** On a user-initiated commit, one entry:
 what was committed, and **the commit's identity**. That identifier is what makes the escape hatch of
@@ -843,7 +1004,7 @@ re-synced NTP server, and a dual-boot machine disagreeing about whether the hard
 produce the same class of fault, and all of them are ordinary.
 
 **A retention policy that can be triggered into mass deletion by a clock change is unacceptable under
-§1.4.** Five rules; the first two are sufficient on their own and the rest are defence in depth:
+§1.4.** Six rules; the first two are sufficient on their own and the rest are defence in depth:
 
 1. **A count floor that age can never override.** The newest *N* checkpoints are kept unconditionally,
    whatever any timestamp says. *N* has a hard minimum below which the preference cannot be set. A
@@ -857,24 +1018,65 @@ produce the same class of fault, and all of them are ordinary.
    a clock fault from silent data loss into a Messages entry saying something is wrong with the
    clock, which is both true and useful.
 4. **Retention thins; it never prunes.** Dropping a checkpoint reference leaves its objects in the
-   repository, recoverable via `git reflog` and the escape hatch, until ordinary packing eventually
-   reclaims them. Combined with §2.4's "never `--prune=now`", a mistaken sweep has a grace period
-   measured in weeks rather than being instantly permanent.
+   repository as unreachable objects, which §4.5's `gc.pruneExpire = never` forbids any pack from
+   removing — so a mistaken sweep is never permanent, and §5.6a says what is. **rev 3 named the reflog
+   as the way back, and it is not** *(corrected in rev 5, §12 Q20)*: a deleted reference takes its
+   reflog with it, and references outside `refs/heads/` carry none by default in any case. What finds
+   an unreachable commit is `git fsck --unreachable`, which is an escape hatch only for someone who
+   already knows git. So **circuitRF keeps a journal of what it thinned** — each dropped reference's
+   name, commit identity and the time it was thinned, appended under `.git/circuitrf/` — and restoring
+   a thinned checkpoint is one reference update, offered from the same list the live ones are in,
+   marked as thinned. The journal is what makes rule 4 a promise to a designer rather than to a git
+   user.
 5. **Human-written commits are out of scope for retention entirely.** They are small (§2), they are
    the designer's own record, and no automatic process gets to delete them.
+6. **Some checkpoints are kept, and retention may not thin them** *(new in rev 5, §12 Q27)*. Three
+   kinds carry the mark (§5.2b): an explicit save-point, because §5.3 says the user's judgement about
+   what matters beats any heuristic and thinning it would discard exactly that judgement; the two
+   checkpoints that bracket an off period (§5.7), because they are what gives the gap its ends and a
+   gap with no ends renders as the quiet interval §5.7 forbids; and any restore point the designer
+   marks **keep** from the list. That third one is §10B.3's *"turn a restore point into something
+   permanent"*, and it exists in Stage 2, before there is a Commit to turn it into.
 
 **When a sweep runs, which rule 3 needs and rev 3 did not say.** *"No single pass may remove more than a
 small fraction"* is not a guarantee until the passes are counted: a sweep on every checkpoint at one
 tenth removes everything inside twenty checkpoints, while a sweep once per session cannot. **A sweep
 runs at most once per session, on workspace close, after the close checkpoint and in the same window as
 §2.4's packing** — which it also composes with, since thinning is what makes objects unreachable and
-packing is what eventually reclaims them.
+packing is what stores them compactly until §5.6a's explicit reclaim, if that ever comes.
+
+**And a session that recorded nothing sweeps nothing and packs nothing** *(new in rev 5, §12 Q24)*.
+§5.7a keeps a colleague's glance from creating a repository on a share; it did not keep it from running
+a sweep, under the reader's retention preference, over the owner's checkpoints — a per-user setting
+acting on a shared artifact, which is §4.4's mistake in a third file. A close that took no checkpoint
+does no housekeeping either. Two writers with different preferences on one share still apply whichever
+closed last, bounded by rule 1's floor; §12 records that as open.
 
 Three alternatives were considered and each fails on a stated principle. **On open** puts work in front
 of the thing the designer asked for. **On a timer** is §5.3's rejected idle trigger under a third name.
 **On every checkpoint** is the case that makes rule 3 vacuous, above. Close is the boundary §5.3 already
 identifies as the one that reliably exists in every session, it is behind the user rather than in front
 of them, and it is where circuitRF is already doing housekeeping.
+
+### 5.6a Reclaiming space is explicit, and nothing does it unasked *(new in rev 5, §12 Q20)*
+
+rev 3 wrote `gc.pruneExpire = never` into §4.5 and left *"until ordinary packing eventually reclaims
+them"* in rule 4. Both cannot be true, and the review found the document quietly relying on each.
+**§1.4 decides it: no automatic operation may destroy history, and reclaiming unreachable objects is
+destruction** — of nothing a designer can see, but of the only copy of a thinned state. So nothing
+automatic reclaims, ever, and the repository grows by the objects thinning frees. For the design
+documents that is kilobytes per checkpoint (§2) and it does not matter; for an import a designer
+included under §8.2 and later regretted, it is the whole import, for as long as they leave it.
+
+**The answer to *"where did the disk go"* is therefore an action, not a schedule.** §10A gains a row:
+reclaim space from restore points thinned more than *N* ago, as a confirmed action carrying the
+consequence sentence §10A's first rule demands — after this, those states cannot be brought back by
+anyone. It is the one destructive control on the tab, it destroys only what has already been thinned,
+and it is neither the "delete all history" §5.7 refuses nor the rewriting §8.3 refuses: every restore
+point and every commit survives it unchanged. Rule 4's journal is what makes *"thinned more than N
+ago"* answerable — git's own expiry is by object age, which is when the state was *made*, not when it
+was thinned — so the reclaim protects the journal's newer entries for its duration and removes the
+entries it acted on.
 
 ### 5.7 Turning it off — off, paused, and removed *(new in rev 2)*
 
@@ -913,13 +1115,20 @@ silently wrong for the second, which is a mistake this repository has already ma
 half, not the `.cwsuser` — which has a pleasing side effect: **turning it off is itself a recorded
 change**, so the last commit before the history goes quiet is the one that says why.
 
+**Because it is in the `.cws`, it travels** *(stated in rev 5)*. A clone or an archive of a workspace
+that was switched off arrives switched off, and the recipient's own preference does not override it
+(§5.7a): the flag says *not for this one* about the workspace, and the workspace is what travelled.
+The recipient is told at their first boundary, exactly as §12 Q4's hold is reported, and the setting is
+one click away.
+
 **That side effect is only real if the transition is ordered, and the ordering is the whole of it.**
 Turning it off writes the `.cws`, then takes one final checkpoint recording that change, and only then
 stops writing. Reverse the two and the flag is set, circuitRF is already off, nothing is committed, and
 the history simply stops with no entry saying why — which is the thing this paragraph claims not to
 happen. Turning it back on records the resumption at the next boundary. **The pair is what gives the gap
 two ends**, which is what the history browser needs in order to render it as a gap rather than as a
-quiet interval. This is §5.8's ordering problem in another place: the `.cws` is written before the
+quiet interval. Both carry §5.6 rule 6's kept mark, because a pair that retention could thin is a gap
+that retention could erase. This is §5.8's ordering problem in another place: the `.cws` is written before the
 checkpoint that is supposed to contain it.
 
 **One conflict this creates, and it must not be resolved silently.** §10A makes the AI-batch
@@ -978,7 +1187,13 @@ rejects:**
 - **A workspace is armed at the first boundary that would record something, never at open.** Opening a
   workspace to look at it creates nothing. This matters most for the case §7A and §4.7 both assume — a
   workspace on a share, belonging to somebody else — where creating a repository because a colleague
-  glanced at the folder is §7A.1's ambush pointed at a directory instead of a history.
+  glanced at the folder is §7A.1's ambush pointed at a directory instead of a history. **And *"would
+  record something"* needs a definition that does not need a repository** *(new in rev 5, §12 Q24)*,
+  because before one exists there is nothing to diff against. For a workspace that has never been
+  armed, the close boundary records something if circuitRF itself wrote a file into the workspace
+  during the session — which it knows without asking the disk; an explicit save-point or a batch
+  always does. For an armed workspace, §5.3's tree test applies. Under this rule a colleague's glance
+  creates nothing, runs nothing and writes nothing, whichever of the two states the workspace is in.
 - **The first time a workspace gains a repository, it is announced**: one Messages entry saying that a
   history is now being kept for this workspace, where the setting is, and — per §5.7's closing
   paragraph — that removing it later is deleting one plainly-named folder and cannot harm the design.
@@ -1018,6 +1233,31 @@ against, and it would be this feature that caused it.
 otherwise. Content in a referenced workspace is not in this repository (§7A.1), so until §7's pins
 exist a restore is deliberately partial — which is the strongest argument for §7 (§7A.4) and is stated
 in the documentation rather than left to be discovered.
+
+**Five more, each silent when missed** *(new in rev 5, §12 Q25)*:
+
+- **A restore never moves `HEAD`.** It writes the checkpoint's tree into the working tree; the
+  designer's branch, if there is one yet, stays where it was, and the next checkpoint or commit records
+  the restored content as an ordinary next step (§6.3). Nothing is ever checked out.
+- **A file created after the checkpoint is removed by the restore**, because a workspace holding last
+  Tuesday's files plus Thursday's new cell matches neither state — the failure the second rule above
+  exists to prevent, arriving from the other side. The pre-restore checkpoint is what makes that
+  removal safe.
+- **Ignored files are not touched.** Results are not in the checkpoint (§8.1), so a restore that swept
+  them away would destroy hours of simulation to bring back a design that produced them. A restore acts
+  on the set of files a checkpoint would capture (§5.2b) and on nothing else.
+- **The revision-control flag and the policy files are preserved across a restore.** The `.cws`
+  carries §5.7's off flag, so a restore across an off period would silently switch recording on or off
+  — a restore is the user's decision about *content*, never about *recording*. And `.gitignore` carries
+  §8.2's answers, so a restore to before one was given would silently start including the file it
+  excluded. Both are re-applied after the tree is written, and they are the only things a restore
+  leaves as it found them.
+- **An interrupted restore is detected on the next open, not discovered by simulating.** A restore over
+  thousands of files on a share can be interrupted by a crash or a dropped connection, and what it
+  leaves is §1.3's failure exactly: a workspace that opens, is well-formed, and is half of two states.
+  circuitRF writes a marker under `.git/circuitrf/` before the first file and removes it after the last;
+  a marker found on open is reported, naming both the target restore point and the pre-restore
+  checkpoint, with the action to finish or to go back.
 
 ### 5.9 A workspace with no folder yet *(new in rev 3)*
 
@@ -1070,15 +1310,20 @@ whole-file conflict resolution as correct rather than lazy, it identifies the on
 enterprise-grade feature on this list (§7), and it is the reason §7A's referenced workspaces default
 to **read-only** — which is the cheapest available approximation of a lock, and needs no server.
 
-**6.3 Designers will not create branches, and should not be asked to.** The native idiom for trying an
-idea in this domain is already **another cell, or another view within a cell** — cheaper, visible in
-the project tree, and comparable side by side, which a branch is not.
+**6.3 Designers will not create branches, and circuitRF creates none either.** The native idiom for
+trying an idea in this domain is already **another cell, or another view within a cell** — cheaper,
+visible in the project tree, and comparable side by side, which a branch is not.
 
-Branches nevertheless appear, unavoidably, in one scenario: **restore an old state, then keep
-editing.** Git requires a branch there. The architecture's answer is that the branch is created
-**silently and named after the design intent**, surfaced as a *variant* — *"You are editing from an
-earlier version; saving will create a new variant."* The words "branch", "checkout" and "HEAD" appear
-nowhere.
+**rev 4 said branches nevertheless appear in one scenario — restore an old state, then keep editing —
+because "git requires a branch there". It does not** *(corrected in rev 5, §12 Q19)*. Git requires a
+branch only if the restore is a *checkout* of the old commit. It is not: a restore writes the old
+state's tree into the working tree and leaves `HEAD` where it was (§5.8). The next checkpoint or commit
+then records the restored content as the next step in one line of work — which is exactly what the
+designer meant by "I went back to Tuesday", and exactly what a shared branch needs under §6.1, where a
+second line of work would be a merge nobody can perform. The commit that follows says what it was
+restored from (§5.5). The *variant*, its silently-created branch, its naming and its documentation
+scenario are withdrawn, and the words "branch", "checkout" and "HEAD" now have no scenario in which to
+appear.
 
 **6.4 Stashes: excluded.** A stash is a solution to a problem designers do not have (a dirty tree
 blocking a branch switch, in a world where they do not switch branches). Their equivalent is already
@@ -1383,6 +1628,23 @@ visible marker that this workspace's history is deliberately incomplete**, surfa
 or a clone is offered. That is a large amount of machinery to support an option whose better
 alternative is one row above it in the same dialog.
 
+### 8.2b The boundary nobody is at *(new in rev 5, §12 Q26)*
+
+§8.2's guard and §8.1a's first-commit summary both ask a question, and two of §5.3's three boundaries
+have nobody to answer it: a close is at the moment the designer asked to leave, and a batch is
+headless. A dialog at quit time listing four years of result files is quitting feeling broken; a batch
+that waits on one hangs an agent.
+
+**At a boundary with nobody to answer, the checkpoint proceeds and the file is left out.** §9A.1's rule
+decides which way: including a file is irreversible (§8.3 — it is in the history for good), leaving it
+out is not (it is asked about next time, and included then if that is the answer). The checkpoint's
+metadata records what was left out (§5.2b), the restore-point list shows the entry as incomplete with
+the names, one Messages entry per session says so, and **the question is asked at the next interactive
+moment** — the next explicit save-point, or the entry's own action. §8.1a's summary follows the same
+rule by pattern: the generated `.gitignore` applies, patterns over the threshold are left out, and the
+summary is presented at the next interactive moment rather than at the door. What must not happen is
+the silent version of either direction, and §10B.1 gains the row.
+
 **8.3 No cure, on purpose.** History rewriting is the only real remedy, and it invalidates every
 existing clone. **circuitRF must not offer a button for it.** A user who genuinely needs it has the
 escape hatch of §4 and should be told so in plain language. Storing large files out-of-band via an
@@ -1420,6 +1682,16 @@ What makes that minimal posture *safe* rather than merely small is §4.5's envir
 naming what the remote wanted and what would satisfy it. Without that rule the same minimalism produces
 a subprocess blocked on an invisible prompt — no message, no exit code, and a workspace close that
 never completes.
+
+**`GIT_TERMINAL_PROMPT=0` reaches git's own prompts and nothing else** *(new in rev 5)*. An SSH key
+with a passphrase and no agent prompts through `ssh`, which does not read that variable; with no
+terminal it fails rather than hangs, which is the wanted outcome — but only because circuitRF gives it
+no terminal. A credential helper that opens its own window, the ordinary Windows case, is the user's
+configured setup and may open it: that is not a hang, it is the helper doing what the user installed
+it to do, and §9's posture is to let it. What circuitRF must never do is supply a terminal, an
+`SSH_ASKPASS`, or a stored answer of its own. And the bound on a network operation is inactivity, not
+wall-clock (§4.5): a slow clone of a large library is not a hang, and a fixed limit would turn it into
+a reported failure.
 
 ---
 
@@ -1559,7 +1831,9 @@ it.
 Listed so that a later phase does not quietly adopt them:
 
 - **A merge UI.** §6.1 — there is nothing correct for it to do.
-- **A branch UI.** §6.3 — branches exist, invisibly, for one scenario only.
+- **A branch, in any form.** §6.3 — a restore never checks anything out, so no scenario creates one.
+- **Automatic reclaim of what thinning freed.** §5.6a — reclaiming is an explicit, confirmed action,
+  never a schedule, and never a side effect of packing.
 - **A stash UI.** §6.4.
 - **History rewriting.** §8.3 — including the "archive only the last N versions" shape of it, §9A.4.
 - **A "delete all history" command.** §5.7 — removal is deleting one plainly-named folder, not a
@@ -1583,9 +1857,13 @@ Listed so that a later phase does not quietly adopt them:
   jobs are different shapes.
 - **A batch running against a window with unsaved changes.** §5.3c — refused, because a headless batch
   has nobody to answer §5.8's prompt.
-- **A filesystem watcher.** §5.3c — the window learns a batch closed from the batch state it is already
-  advertised, not by watching the disk. `workspace-and-project-tree.md` §9 defers a watcher and this
-  does not un-defer it.
+- **A filesystem watcher.** §5.3c — the window learns a batch closed over the second-instance channel,
+  not by watching the disk. `workspace-and-project-tree.md` §9 defers a watcher and this does not
+  un-defer it.
+- **A dirty flag in the advisory lock file, or a poll of it.** §5.3c — the notice is a notice; the two
+  facts a batch and a window exchange travel on the channel, in both directions.
+- **A second implementation of a cross-process lock.** §4.6 — git's own atomic lock files serialise
+  what a temporary index does not already keep apart.
 
 ---
 
@@ -1599,14 +1877,15 @@ it available in the first place.
 | setting | notes |
 |---|---|
 | **Path to `git`** | blank means "search `PATH`". A Detect action, and the resolved path and version shown once found, so "it says it can't find git" is answerable without a support call. |
-| **Commit identity — name and email** | §4.4. **A per-user preference, applying to every workspace this person opens on this machine — written to no git config file, and supplied per invocation** (§4.5). Pre-filled from the user's existing global git identity if they have one, because reading it is unobjectionable and only writing it was ever the problem. Required before the feature arms; the tab says so rather than letting the first checkpoint fail. |
+| **Commit identity — name and email** | §4.4. **A per-user preference, applying to every workspace this person opens on this machine — written to no git config file, and supplied per invocation** (§4.5). Stored in circuitRF's per-user preference file and read by a `src/Design` reader, so `serve` sees the value this tab captured (§4.4, rev 5). Pre-filled from the user's existing global git identity if they have one, because reading it is unobjectionable and only writing it was ever the problem. Required before the feature arms; the tab says so rather than letting the first checkpoint fail. |
 | **Keep a history of my workspaces** | on / off, **a per-user application preference**, and the default every workspace falls back to (§5.7a). **On by default.** Off means circuitRF writes nothing anywhere and deletes nothing anywhere; the control says so in those words, exactly as the per-workspace one does. |
 | **Revision control for this workspace** | **outranks the preference above for this workspace only** (§5.7a); on / off, stored **in the `.cws`** because an installation-wide flag cannot gate per-workspace state (§5.7). Off stops circuitRF writing and deletes nothing; the control says so in those words. |
 | **Keep restore points for** | the retention age (§5.6). |
 | **Always keep at least *N* restore points** | the count floor (§5.6 rule 1), with a hard minimum the field cannot go below. |
 | **Take a restore point on workspace close** | on by default (§5.3). |
 | **Take a restore point before an AI edit** | shown, **on, and not switchable.** It is §1.2 — the reason the feature exists. Shown rather than hidden so nobody has to wonder whether it is happening. |
-| **Pack the repository** | the §2.4 housekeeping threshold and a "do it now" action. Ordinary users never touch this; it exists because §2.4 means someone eventually asks where the disk went. |
+| **Pack the repository** | the §2.4 housekeeping threshold and a "do it now" action. Ordinary users never touch this; it exists because §2.4 means someone eventually asks where the disk went. Packing never reclaims. |
+| **Reclaim space from thinned restore points** | §5.6a. An explicit, confirmed action with an age — *thinned more than N ago* — and the one destructive control on the tab. It says what it destroys: states already thinned, which after this nobody can bring back. Every live restore point and every commit survives it. Nothing reclaims on a schedule. |
 
 **Two rules bind this tab specifically, both from §1.4:**
 
@@ -1665,6 +1944,8 @@ find in ten seconds and trust:
 | anything at all, in a **scratch** workspace | **no** — §5.9 | no. There is no folder yet; save the workspace first |
 | anything at all, before a workspace is **armed** | **no** — §5.7a | no. A workspace is armed at its first boundary, and it says so once when it is |
 | **panel layout, in a Save Workspace As copy** | n/a — the copy is your own | **yes**, and this is the one thing a copy keeps that an archive does not (§3.1a) |
+| a file left out of a restore point because it was unexpectedly large (§8.2b) | **not yet** — the entry says so and names it | no, until the question is answered; the file itself is still on disk |
+| a restore point that retention thinned | **no** — but its state is still in the repository until you reclaim it (§5.6a) | **yes**, from the same list, marked as thinned — until a reclaim, which asks first |
 
 Wherever a row says no, the docs say **no** plainly. Softening any of them is how a designer ends up
 with a false belief.
@@ -1678,9 +1959,10 @@ and is not available afterwards.** The last three are the ones people get wrong:
 1. **"I broke the match network yesterday and I want it back."** The ordinary case, start to finish.
 2. **"I want to keep this version — it's the one I'm sending out."** An explicit commit, its title,
    and where it shows up afterwards.
-3. **"I went back to an old version, then kept working."** The variant of §6.3 — what happened, why
-   there are now two lines of work, and how to tell them apart. Notably *without* the words branch or
-   checkout.
+3. **"I went back to an old version, then kept working."** §6.3 and §5.8 — that the restore is one
+   step in one line of work, that the moment before the restore is itself a restore point, and that
+   the next commit says what it was restored from. There is no second line of work to explain, and the
+   words branch and checkout do not appear because nothing they would name exists.
 4. **"Two of us are editing the same workspace."** Whole-file, pick-a-side (§6.1), and why circuitRF
    will not merge them.
 5. **"I use a library another team maintains."** §7A — read-only, the pin, what "a newer version is
@@ -1712,6 +1994,8 @@ and is not available afterwards.** The last three are the ones people get wrong:
    *Refinement 3* — the three answers in plain words, and what keeping their own settings actually
    costs. The two consequences that matter are recoverability ones, not tidiness ones, and the chapter
    says so rather than listing configuration keys.
+15. **"My disk is full and it says the history is taking the space."** §5.6a — that thinning keeps the
+   states, that reclaiming is the one action that does not, and exactly what it destroys.
 
 ### 10B.3 AI checkpoints are documented separately
 
@@ -1726,8 +2010,8 @@ and the second is the operative one:
   other — which is exactly the false-confidence failure of §1.4, arrived at from the other direction.
 
 The AI section states plainly: what triggers a checkpoint, that they are automatic, that they are
-subject to retention (§5.6) while explicit commits are not, and how to turn one into a permanent
-commit if a designer wants to keep it.
+subject to retention (§5.6) while explicit commits are not, and how to mark one **kept** (§5.6 rule
+6), which is what makes it permanent.
 
 **It also states what happens when the floor is not there** *(new in rev 3)*. §5.3a refuses a batch
 against a workspace that cannot be checkpointed — off, held, or scratch — and §5.3b rule 9 forbids the
@@ -1750,7 +2034,8 @@ Ordered so that the risky, user-facing half comes last and everything before it 
 **Stage 1 — the substrate.** The generated `.gitignore` and `.gitattributes` — including §4.5's
 end-of-line pinning — the large-file guard (§8.2), the workspace-file split (§3.1), the never-gzip rule
 (§3.2), the packing scheduler (§2.4), **the repository configuration and invocation environment of
-§4.5**, the version floor and `safe.directory` translation of §4.7, §8.1a's rule that the policy files
+§4.5**, the macOS shim rule of §4.3a, the version floor and `safe.directory` handling of §4.7, the
+reclaim operation §5.6a's action calls (provided, not exposed), §8.1a's rule that the policy files
 follow a *repository* rather than only a creation, and the **read-only default on referenced workspaces
 (§7A.2)**. **No user-facing revision-control UI at
 all.** Every later stage depends on this. Two parts of it are worth doing on their own merits and,
@@ -1760,7 +2045,8 @@ application today (§7A.2) and must reach the majority of users who will never h
 the only people protected from it are the ones who already have a history to recover from.
 
 **Stage 2 — the safety net.** Automatic checkpoints on the three boundaries of §5.3, on the
-per-checkpoint references of §5.2a, surfaced as restore points; the batch protocol of §5.3a and the
+per-checkpoint references of §5.2a and in the shape of §5.2b, surfaced as restore points with §5.6 rule
+6's kept mark; the `history` verb of §5.3d; §8.2b's rule for the unattended boundary; the batch protocol of §5.3a and the
 agent-facing contract of §5.3b; restore and its preconditions (§5.8); scratch's refusal (§5.9);
 cross-process serialisation (§4.6); the first-commit summary of §8.1a; retention per §5.6; the Settings
 tab (§10A); the identity prerequisite (§4.4); the enclosing-repository hold and its indicator (§12 Q4);
@@ -1774,11 +2060,12 @@ Its standalone value against human error is what carries it until then.
 first-boundary rule and the announcement — since Stage 2 is the first stage that creates a repository at
 all; and §5.3c's batch-versus-window rules, which belong with the batch protocol that makes them
 necessary. §12 Q4's ask (Refinement 3) is Stage 2's too, for the same reason: it is the first stage with
-a repository to have a question about.
+a repository to have a question about. **And rev 5 adds §5.6a's reclaim action to the Settings tab**,
+because Stage 2 is the first stage that thins anything.
 
 **Stage 3 — the narrative.** A commit action and a history browser, hidden entirely when git is
-absent (§4.3), with the error-translation layer of §4.2, the commit wording and Messages reporting of
-§5.5, and the variant handling of §6.3.
+absent (§4.3), with the error-translation layer of §4.2 and the commit wording and Messages reporting
+of §5.5's first row. §6.3 needs no handling at all: a restore followed by a commit is linear.
 
 **Stage 3 also gains the archive's include-history option** (§9A) — the exclusion is Stage 2's
 safety gate, the *choice* needs a history worth offering and the vocabulary to describe it.
@@ -1827,6 +2114,15 @@ answer to the owner's question about message cadence:
 | the repository root is an **ancestor** of the workspace | **hold**, no adoption offered. This is the serious case: an automatic `commit -a` here would sweep up unrelated work in progress under a circuitRF message (§7A.1). Nor may circuitRF write `.gitignore`/`.gitattributes` into someone else's repository root. |
 | a repository **nested inside** the workspace | that subtree is excluded and reported; the workspace's own history is otherwise normal (§7A.5). |
 
+**`rev-parse` walks up, never down, so the nested row needs a detection of its own** *(new in rev 5,
+§12 Q30)*. The three rows above it are one `rev-parse`; the fourth is a walk of the workspace tree for
+directories named `.git`, done at the moment the checkpoint enumerates files anyway (§5.2b), so it costs
+nothing extra. It matters mechanically as well as by principle: handing a directory that contains a
+`.git` to `git add` records it as an *embedded repository* — a pointer to that repository's current
+commit — which is precisely §7A.5's *"committed as something by the enclosing workspace"*, with a
+warning nobody is reading. The subtree is excluded from every checkpoint by pathspec and named once in
+the Messages panel.
+
 *Refinement 1 — "held" must not look like "absent."* §4.3 hides the affordances when git is missing.
 Doing the same here would be wrong: absent is harmless, held is a designer who may believe they are
 protected. So in the hold state the commit action stays **visible and refuses**, saying why — because a
@@ -1864,8 +2160,9 @@ this document makes elsewhere:
 
 - **`gc.pruneExpire` at its two-week default destroys thinned checkpoints permanently after a
   fortnight** — so §5.6 rule 4's grace period does not exist, inside §1.3's own recovery window.
-- **`gc.reflogExpireUnreachable` at 30 days removes the escape hatch** before §1.3 says the designer
-  looks for it.
+- **`gc.reflogExpireUnreachable` at 30 days removes the way back from a mistaken reset or amend on
+  the designer's own branch** before §1.3 says the designer looks for it — and, with `gc.pruneExpire`
+  above, the journal of §5.6 rule 4 points at objects that are no longer there.
 - `gc.auto` at 6,700 leaves two packing schedules running against each other (§2.4).
 - On Windows, `core.autocrlf` makes the `.clay` on disk a different file from the one
   `LayoutPersistence` wrote, and `core.longpaths` unset is a refusal on that machine class only.
@@ -1903,7 +2200,8 @@ since a chain can only be truncated and truncation leaves everything reachable. 
 what a checkpoint *is*: ordered by a monotonic sequence that means nothing on another machine, thinned
 by this machine's retention preference. **The consequence to state rather than discover is that the
 three journeys disagree** — an archive carries checkpoints, a clone does not, a Save As carries no
-history at all — and §10B.1 now has a row for each.
+history at all — and §10B.1 now has a row for each. **rev 5 adds the commit's shape (Q18)**: with a
+parent chain between checkpoints, the per-reference shape thins nothing either.
 
 **Q8. What triggers the AI checkpoint? DECIDED: the agent declares the batch, explicitly, with its
 intent.** §5.3a. rev 2 named the most important checkpoint in the document and gave it no mechanism;
@@ -1920,7 +2218,9 @@ reload.** §5.8. A restore writes over every file while the workspace is open. I
 the state it is about to replace — otherwise it is an automatic operation destroying history, which
 §1.4 forbids — offers up unsaved work through the prompt that already guards a close, and **discards
 the undo stacks of reloaded documents**, because an undo after a restore would produce a document that
-existed at no moment ever.
+existed at no moment ever. **rev 5 adds five rules (Q25)**: it never moves `HEAD`, it removes files
+created after the checkpoint, it leaves ignored files alone, it preserves the off flag and the policy
+files, and it leaves a marker while it runs.
 
 **Q10. What does circuitRF configure, and what does it run git with? DECIDED: §4.5's split, and it
 corrects rev 2 twice.** The dividing line is **what a setting is a property of**: the repository's
@@ -1928,7 +2228,8 @@ config carries properties of the *repository* — packing and how files reach di
 a property of the *person*, or of circuitRF's own behaviour, is supplied per invocation and written to
 no config file.
 
-`gc.pruneExpire=never` and the two reflog expiries are what make §5.6 rule 4 true (correction one);
+`gc.pruneExpire=never` is what makes §5.6 rule 4 true, and the two reflog expiries guard the
+designer's own branch — rev 5 corrected which was which (correction one);
 `core.longpaths` and the end-of-line pinning are platform failures appearing on one machine class only.
 Hook-free commits and signing off keep the user's own setup from breaking an automatic checkpoint, and
 both are **per invocation**, because they are statements about circuitRF's commits rather than about
@@ -1941,9 +2242,9 @@ circuitRF must not write `user.name` into the user's global config, and then wro
 share, which §4.7 and §7A both assume, the second designer to open the workspace commits under the
 first one's name, silently. **It is §3.1's mistake in another file**, and it takes §3.1's fix: identity
 is a per-user circuitRF preference, supplied per invocation, in no config file at all. Where circuitRF
-has none, git's ordinary resolution applies — which is also what makes the headless case work, since
-`src/Cli` cannot read a GUI preference across the firewall and a headless run should identify itself as
-whoever is running it. `GIT_TERMINAL_PROMPT=0` is the one that prevents a **hang**, which is the worst
+has none, git's ordinary resolution applies. **rev 5 corrects where the preference lives (Q21)**: a
+`src/Design` reader of the per-user file, so `src/Cli` sees the value the tab captured rather than
+falling through to a resolution that names nobody on the machines §4.4 describes. `GIT_TERMINAL_PROMPT=0` is the one that prevents a **hang**, which is the worst
 failure mode available because it is the only one with no message. §4.6 adds one writer at a time
 across processes; §4.7 adds a version floor and `safe.directory`, which is the ordinary state of a
 workspace on a network share.
@@ -1977,7 +2278,7 @@ one-click action without saying what the alternative cost. Three answers — ado
 history here — with the two load-bearing consequences of keeping named specifically, because they
 silently revoke guarantees made elsewhere in this document: `gc.pruneExpire`'s two-week default destroys
 thinned checkpoints inside §1.3's own recovery window, and `gc.reflogExpireUnreachable`'s thirty days
-removes §4.1's escape hatch before anyone looks for it. **"Keep my settings" governs repository
+removes the way back on the designer's own branch before anyone looks for it. **"Keep my settings" governs repository
 configuration only** — §4.5's per-invocation set, the identity and the hook bypass, is circuitRF's
 whichever answer is given, because bypassing a hook is not a property of the repository.
 
@@ -1992,8 +2293,8 @@ prompt — and it makes the reload cheap, since with no unsaved work a reload ca
 the close checkpoint.** §5.6. Rule 3's bound — *"no single pass may remove more than a small
 fraction"* — guarantees nothing until the passes are counted: a sweep per checkpoint at one tenth
 empties the set inside twenty checkpoints. Close is the boundary §5.3 already identifies as reliably
-present, it is behind the user, and it composes with §2.4's packing, which is what eventually reclaims
-what thinning made unreachable.
+present, it is behind the user, and it composes with §2.4's packing, which stores what thinning made
+unreachable compactly until §5.6a's explicit reclaim, if that ever comes.
 
 **Q17. Three smaller things rev 3 left implicit, each silent when missed.** The **off transition is
 ordered** — write the `.cws`, take one final checkpoint, then stop — or §5.7's "turning it off is itself
@@ -2004,6 +2305,78 @@ branch-only enumeration produces exactly the nearly-true guarantee §9A.4 reject
 is excluded from an archive but kept in a Save Workspace As copy** (§3.1a) — one shared skip list, two
 consumers, opposite correct answers, which is the reverse of `.git` and has to be deliberate in the code
 or it gets tidied away.
+
+**Q18. What is a checkpoint commit, mechanically? DECIDED: parentless, built through a temporary
+index, capturing every non-ignored file including new ones, with its metadata in trailers and its
+sequence derived from the references that exist.** §5.2b. Parentless is the load-bearing half: §5.2a's
+per-reference shape thins nothing if each checkpoint names the previous one as its parent, and no gate
+that asserts survival would notice. The temporary index is what keeps `HEAD` and the designer's own
+staged state untouched, which is what Q19 and Q22 rest on.
+
+**Q19. Does restore-then-edit create a branch? DECIDED: no, and no branch is ever created.** §6.3,
+§5.8. rev 4's "git requires a branch there" is true only of a checkout, and a restore is a working-tree
+write that never moves `HEAD`. The following commit records the restored content as the next step in
+one line of work and says what it was restored from (§5.5). The variant, its branch, its naming and
+§10B.2 scenario 3's "two lines of work" are withdrawn. *(A rev 5 judgement taken on the review's
+recommendation; reversible before RC-5 lands and not after.)*
+
+**Q20. What survives a sweep, and what ever reclaims it? DECIDED: the unreachable objects survive
+because §4.5 forbids pruning them, recovery is through a journal circuitRF keeps rather than the
+reflog, and reclaim is an explicit, confirmed action — never automatic.** §5.6 rule 4, §5.6a. rev 3's
+reflog claim was wrong for references outside `refs/heads/`, and rev 3's "packing eventually reclaims"
+contradicted its own `gc.pruneExpire = never`. §1.4 settles the contradiction in favour of never, and
+the Settings tab gains the one destructive control, which destroys only what is already thinned.
+
+**Q21. Where does the commit identity live so that `serve` can read it? DECIDED: in circuitRF's
+per-user preference file, behind a `src/Design` reader both processes use.** §4.4. Falling through to
+git's own resolution names nobody on the fresh Windows machine §4.4 itself describes, which refused the
+governing motive's checkpoint for exactly its target population.
+
+**Q22. Who serialises two processes on one repository? DECIDED: git's own atomic lock files, behind a
+temporary index, with a short retry — not the advisory lock.** §4.6. `WorkspaceLock`'s header says it
+is a notice and must not be treated as authoritative; it is what packing yields to, and nothing else.
+
+**Q23. What does discovery do on macOS? DECIDED: check for the developer tools before invoking
+anything named `git`, and treat the shim without them as absent.** §4.3a. The shim opens an Apple
+dialog when run, which is §4.3's forbidden surprise delivered by the detection itself.
+
+**Q24. What does "would record something" mean before a repository exists, and who does housekeeping
+on a shared workspace? DECIDED: an unarmed workspace arms on close only if circuitRF wrote a file this
+session, and always on a save-point or a batch; an armed one applies the tree test; a session that
+recorded nothing sweeps nothing and packs nothing.** §5.7a, §5.6, §5.3. The colleague's glance creates
+nothing, runs nothing and writes nothing.
+
+**Q25. What else does a restore do? DECIDED: it never moves `HEAD`, removes files created after the
+checkpoint, leaves ignored files alone, preserves the off flag and the policy files, and leaves a
+marker so an interrupted restore is reported on the next open.** §5.8.
+
+**Q26. What happens to an unexpectedly large file at a boundary nobody is at? DECIDED: the checkpoint
+proceeds, the file is left out, the entry says so and names it, and the question is asked at the next
+interactive moment.** §8.2b. §9A.1's rule chooses the reversible direction: leaving out can be undone
+next time, including cannot. *(A rev 5 judgement.)*
+
+**Q27. Which checkpoints may retention never thin? DECIDED: explicit save-points, the pair that
+brackets an off period, and any the designer marks kept.** §5.6 rule 6. The third is §10B.3's "make it
+permanent", available in Stage 2.
+
+**Q28. How do `serve` and the window exchange the dirty state and the batch-closed notice? DECIDED:
+over the existing second-instance channel, brought up on macOS for the purpose — not the lock file,
+not a watcher, not a timer.** §5.3c.
+
+**Q29. Is there a headless spelling for history operations? DECIDED: one verb, `history`, with the
+nouns `checkpoint`, `list`, `restore` and (Stage 3) `commit`, each calling the function the GUI calls.**
+§5.3d. The batch's open and close stay on `serve`, which is the only surface that can hold them.
+
+**Q30. Two smaller things rev 4 left implicit.** §5.5 has four rows, not three — the explicit
+save-point is a commit with a message, and the brief that creates each checkpoint owns its wording.
+And a nested repository is found by a walk for `.git` directories, not by `rev-parse`, and excluded by
+pathspec, because `git add` would otherwise record it as an embedded repository (§12 Q4).
+
+**Still open from rev 5, and it is not small.** Two writers with different retention preferences on
+one shared workspace apply whichever closed last, bounded by rule 1's floor (§5.6). Whether the
+retention age and floor should become per-workspace state in the `.cws` — so the workspace's owner
+decides how long its history is kept, rather than whoever closed it — is worth deciding before RC-6
+lands, and not before, since RC-6 is where the preference is first consumed.
 
 **Still open, and it is small.** §3.1's split leaves `ColorSchemeName` on the versioned side, on the
 grounds that it is a property of the project. It is arguably one person's preference, and a shared

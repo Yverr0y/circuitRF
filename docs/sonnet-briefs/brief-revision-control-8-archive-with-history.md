@@ -106,7 +106,10 @@ archive is exactly where that surprises someone; it also makes R-rc8-7's size fi
 front of the user because **this is the one time that is the correct place for it** — the user asked for
 the archive — so **report it as progress, never let it read as a stall** (`IMessageSink.BeginProgress`
 already exists for this). R-rc3-1b's rule that packing yields to another process holding the workspace
-still applies.
+still applies. **And packing never reclaims** (§5.6a, rev 5): the archive carries every thinned restore
+point's objects too, which the enumeration of R-rc8-7a must therefore walk — RC-6's journal is how it
+finds them — and the size figure includes them. A designer who wants a smaller archive has RC-4's
+reclaim action, which asks first; this dialog does not offer it.
 
 **R-rc8-10. Referenced cells brought in by the archive scan carry no history.** They come from another
 workspace with its own repository, and the one-workspace-one-history rule holds in this direction too:
@@ -146,6 +149,9 @@ near-truth is what people act on. The two honest states in §2 are all this offe
    **checkpoint** (never an explicit commit), delete it, checkpoint again, then archive with history —
    assert it is named. **A branch-only enumeration passes gate 5 and fails this one**, which is the
    whole reason the gate is separate.
+5b. **A file that only ever existed inside a THINNED checkpoint is named too** (R-rc8-9, rev 5): repeat
+   5a, then let RC-6 thin that checkpoint, and assert the file is still named — its objects are still in
+   the directory the archive copies, and a live-references-only enumeration would miss it.
 6. **The size figure is post-pack** (R-rc8-9): assert packing ran before the figure was computed, and
    that the figure matches the archive actually written.
 7. **No `.cwsuser` in either state** (R-rc8-4).

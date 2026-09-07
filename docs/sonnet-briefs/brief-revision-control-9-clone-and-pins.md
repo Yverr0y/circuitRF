@@ -53,10 +53,14 @@ scenario assumes one, so this is an ordinary path rather than an edge.
 
 **R-rc9-5c. A clone arrives with no management marker, and therefore reaches the ordinary arming path**
 (R-rc3-7b, R-rc0-13). Git does not clone a repository's config, so RC-3's marker does not travel — which
-is correct rather than a gap: a clone is a new workspace on a new machine, and its recipient's own
-preference decides whether a history is kept, on their first boundary, announced once (R-rc5-4b). **Do
-not carry the marker across by hand**; a marker that travelled would make one designer's management
-decision everybody's, which is the reason it is config rather than a reference.
+is correct rather than a gap: a clone is a new workspace on a new machine, and it reaches R-rc5-4a's
+first-boundary rule on its own terms, announced once (R-rc5-4b). **Do not carry the marker across by
+hand**; a marker that travelled would make one designer's management decision everybody's, which is
+the reason it is config rather than a reference. **One thing does travel, and rev 4 said otherwise**
+(corrected in rev 5, RC-6 R-rc6-14c): the `.cws` is versioned, so a workspace its owner switched **off**
+clones as off, and the recipient's preference does not override that — the flag says *not for this
+one* about the workspace, and the workspace is what travelled. The recipient sees RC-6's indicator at
+their first boundary, with the setting one click away.
 
 ---
 
@@ -82,6 +86,16 @@ operation that would have asked **refuses** instead, with a sentence naming what
 Without it the same minimalism produces a subprocess blocked on an invisible prompt — no message, no
 exit code, and a workspace close that never completes. **A hang is the worst failure mode available**,
 and it is the one this brief is most likely to produce by accident.
+
+**And that variable reaches git's own prompts and nothing else** (§9.1, rev 5). An SSH key with a
+passphrase and no agent prompts through `ssh`, which does not read it; with no terminal `ssh` fails
+rather than hangs, which is the wanted outcome — but only because RC-3's type gives the subprocess no
+terminal. A credential helper that opens its own window, the ordinary Windows case, is the user's
+configured setup and may open it: that is the helper doing what the user installed it to do, not a
+hang, and §9's posture is to let it. What this brief must never do is supply a terminal, an
+`SSH_ASKPASS`, or a stored answer of its own. **And the bound on every network call is inactivity, not
+wall-clock** (R-rc3-1a): a slow clone of a large library is not a hang, and a fixed limit would report
+it as one.
 
 **R-rc9-7b. Reaching a network is the question Security & Permissions answers** (RC-4 R-rc4-2a). The
 updater is on that tab for exactly this reason. Whether git's network operations come under the same
@@ -158,6 +172,11 @@ solving. **A pin is an exact identity and moving it is a human decision.**
 write, not the filesystem declining. The goal is to make the accidental case impossible and the
 deliberate case visible, which is the whole of what is achievable without a server.
 
+**R-rc9-20. Clone, pin, fetch and push have a headless spelling on RC-5's `history` verb** (§5.3d,
+R-rc5-23), or on nouns of their own if the owner prefers — each calling the `src/Design` function the
+GUI calls, because a build machine reproducing a signed-off result is the reason the pin exists at all.
+Gate 14 is what holds it. Adding nouns to the repo-root `CLAUDE.md` is the owner's edit; flag it.
+
 **R-rc9-19. Not nested repositories.** A repository *inside* a workspace — a library cloned into it —
 is left alone entirely: not committed to, and not committed *as* anything by the enclosing workspace.
 It is reported as an excluded subtree, exactly as RC-6 reports the enclosing case.
@@ -191,11 +210,16 @@ It is reported as an excluded subtree, exactly as RC-6 reports the enclosing cas
 11. **A clone carries no restore points, and the refspec was not widened** (R-rc9-5a): assert the
     clone has none, and source-scan for a refspec reaching circuitRF's checkpoint namespace.
 12. **An operation needing credentials refuses within its timeout rather than blocking**
-    (R-rc9-7a) — drive it against a fixture remote that demands them. **Give the test a bound**: a
-    test that hangs is the exact defect being gated.
+    (R-rc9-7a) — drive it against a fixture remote that demands them, **and separately against an SSH
+    remote with a passphrase-protected key and no agent**, which `GIT_TERMINAL_PROMPT` does not cover.
+    **Give both tests a bound**: a test that hangs is the exact defect being gated. And assert a slow but
+    live transfer is **not** cut off by the inactivity bound — drive a fixture remote that trickles.
 13. **`safe.directory` on a cloned or share-hosted tree produces circuitRF's sentence** (R-rc9-5b).
-14. **Headless.** Clone, pin and pin-resolution work from `src/Cli` with no display, since a build
-    machine reproducing a signed-off result is the reason the pin exists at all.
+14. **Headless** (R-rc9-20). Clone, pin and pin-resolution work from `src/Cli` with no display, byte
+    for byte against the GUI path, since a build machine reproducing a signed-off result is the reason
+    the pin exists at all — and a comment-stripped source scan proves the view model kept no second copy.
+15. **A clone of a switched-off workspace arrives off** (R-rc9-5c): clone one, open it with the
+    preference on, and assert no checkpoint is taken and RC-6's indicator shows.
 
 ---
 

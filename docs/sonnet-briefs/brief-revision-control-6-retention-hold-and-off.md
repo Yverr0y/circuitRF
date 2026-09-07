@@ -1,7 +1,11 @@
 # Sonnet Brief — RC-6: retention, the enclosing-repository hold, and turning it off
 
 **Read `brief-revision-control-0-overview.md` first.** The architecture is
-`docs/design/revision-control.md` §5.6, §5.7, §7A.1, §7A.5, §8.1a and §12 Q4. **Depends on RC-5.**
+`docs/design/revision-control.md` §5.6, §5.6a, §5.7, §7A.1, §7A.5, §8.1a and §12 Q4, plus §5.2b for the
+checkpoint shape thinning depends on. **Depends on RC-5.** **rev 5 corrected the way back after a sweep**
+(R-rc6-4 — a journal, not the reflog), **settled reclaim** (R-rc6-4b — explicit, never automatic),
+**exempted three kinds of checkpoint** (R-rc6-5a), **gave the nested row a detection** (R-rc6-7), and
+**made the transition checkpoints kept** (R-rc6-14a).
 
 **Scope: the three ways a designer can end up with less history than they think they have** — it aged
 out, circuitRF never started, or they switched it off. Each one is a false-belief failure under §1.4,
@@ -38,18 +42,28 @@ existing checkpoints. **A pass that wants to remove more is refused and reported
 clock fault from silent data loss into a Messages entry saying something is wrong with the clock, which
 is both true and useful.
 
-**R-rc6-4. Retention thins; it never prunes.** Dropping a checkpoint reference leaves its objects in
-the repository, recoverable through the escape hatch. **This works because RC-5 gives each checkpoint
-its own reference** (R-rc5-1) — a single reference walking a chain could only be truncated, and
-truncation leaves everything before the cut reachable, so it would thin nothing. Dropping one is a
-single reference delete: the pointer goes, the objects stay.
+**R-rc6-4. Retention thins; it never prunes — and the way back is a journal, not the reflog** (§5.6
+rule 4, §12 Q20, corrected in rev 5). Dropping a checkpoint reference leaves its objects in the
+repository as unreachable objects. **This works because RC-5 gives each checkpoint its own reference
+AND no parent** (R-rc5-1, R-rc5-1b) — a chain, by reference or by parent, leaves everything before the
+cut reachable and thins nothing; RC-5 gate 14a is what proves the shape. Dropping one is a single
+reference delete: the pointer goes, the objects stay.
 
-**And the grace period is real only because RC-3 CONFIGURED it to be** (R-rc3-16, corrected in rev 3).
-Not passing `--prune=now` is not sufficient: plain `git gc` prunes unreachable objects at
-`gc.pruneExpire` (**default two weeks**) and expires the reflog at 30 and 90 days, unasked. Without
-`gc.pruneExpire=never` and the two reflog settings, **this rule's promise expires after a fortnight** —
-which is inside §1.3's own recovery window. **If RC-3's back-dated unreachable-object gate did not
-pass, this requirement is not met, whatever this brief does.**
+**rev 4 said the objects were "recoverable via `git reflog`", and they are not.** A deleted reference
+takes its reflog with it, and references outside `refs/heads/` carry none by default in any case. What
+finds an unreachable commit is `git fsck --unreachable`, which is an escape hatch only for someone who
+already knows git. So **this brief keeps a journal of what it thinned** — each dropped reference's name,
+commit identity and the time it was thinned, appended under `.git/circuitrf/` — and a thinned restore
+point is **listed** in the same list as the live ones, marked as thinned, with restoring it being one
+reference update from the journal. The journal is what makes rule 4 a promise to a designer rather than
+to a git user, and it is what R-rc6-4b's reclaim reads.
+
+**And the objects survive only because RC-3 CONFIGURED them to** (R-rc3-16, corrected in rev 3). Not
+passing `--prune=now` is not sufficient: plain `git gc` prunes unreachable objects at `gc.pruneExpire`
+(**default two weeks**), unasked. Without `gc.pruneExpire=never`, **this rule's promise expires after a
+fortnight** — inside §1.3's own recovery window. **If RC-3's back-dated unreachable-object gate did not
+pass, this requirement is not met, whatever this brief does.** The two reflog settings stay for the
+designer's own branch in Stage 3; they are not what this rule rests on.
 
 **R-rc6-4a. A sweep runs at most once per session, on workspace close, after the close checkpoint and
 in the same window as RC-3's packing** (§5.6, §12 Q16 — new in rev 4). **R-rc6-3's bound guarantees
@@ -58,11 +72,38 @@ twenty checkpoints, while a sweep once per session cannot. Three alternatives ea
 principle — **on open** puts work in front of the thing the designer asked for, **on a timer** is
 R-rc5-5's rejected idle trigger under a third name, and **on every checkpoint** is the case that makes
 R-rc6-3 vacuous. Close is the boundary R-rc5-4 already identifies as reliably present in every session,
-it is behind the user rather than in front of them, and it composes with packing — which is what
-eventually reclaims what thinning made unreachable (R-rc6-4).
+it is behind the user rather than in front of them, and it composes with packing — which stores what
+thinning made unreachable compactly, and never reclaims it (R-rc6-4b).
+
+**And a session that recorded nothing sweeps nothing and packs nothing** (§5.6, §12 Q24, rev 5). RC-5
+R-rc5-4a keeps a colleague's glance from creating a repository on a share; on its own it did not keep
+that glance from running a sweep, under the *reader's* retention preference, over the *owner's*
+checkpoints — a per-user setting acting on a shared artifact, which is the identity mistake §4.4
+corrected, in a third file. A close that took no checkpoint does no housekeeping. Two writers with
+different preferences on one share still apply whichever closed last, bounded by R-rc6-1's floor; the
+architecture records that as open (§12), and it is this brief's to report on.
+
+**R-rc6-4b. Nothing reclaims what thinning freed unless a person asks** (§5.6a, §12 Q20, rev 5). rev 4
+said *"until ordinary packing eventually reclaims them"* in the same document that set `gc.pruneExpire`
+to `never`; both could not be true, and §1.4 decided for never. So the repository grows by what thinning
+frees — kilobytes per checkpoint for design documents, and the whole of any import a designer included
+and later regretted — and the answer to *"where did the disk go"* is RC-4's reclaim action, which calls
+RC-3 R-rc3-16a with an age. **This brief owns the journal that age is measured against**: git's own
+expiry is by object age, which is when a state was *made*, not when it was thinned, so R-rc3-16a
+protects every journal entry newer than the age for its duration and removes the entries it acted on.
+Reclaim is the one destructive control in the feature, it destroys only what has already been thinned,
+and it is neither R-rc6-16's "delete all history" nor history rewriting: every live restore point and
+every commit survives it.
 
 **R-rc6-5. Human-written commits are out of scope for retention entirely.** They are small, they are
 the designer's own record, and **no automatic process gets to delete them.**
+
+**R-rc6-5a. Kept checkpoints are out of scope too** (§5.6 rule 6, §12 Q27, rev 5). RC-5 R-rc5-1f marks
+three kinds: an explicit save-point, because the user's judgement about what matters beats any
+heuristic and thinning it would discard exactly that judgement; the pair that brackets an off period
+(R-rc6-14a), because they are what gives the gap its ends; and any restore point the designer marked
+**keep**. A sweep counts them toward nothing and removes none of them, and R-rc6-3's fraction is
+computed over the unkept.
 
 ---
 
@@ -84,6 +125,14 @@ not open. In someone else's repository that is not a safety net, it is an ambush
 | the repository root is an **ancestor** of the workspace | **hold, no adoption offered.** This is the serious case. Nor may circuitRF write `.gitignore`/`.gitattributes` into someone else's repository root. |
 | a repository **nested inside** the workspace | that subtree is excluded and reported; the workspace's own history is otherwise normal. |
 
+**`rev-parse` walks up, never down, so the fourth row needs a detection of its own** (§12 Q4 and Q30,
+rev 5). The first three rows are one `rev-parse`; the fourth is a walk of the workspace tree for
+directories named `.git`, done as the checkpoint enumerates files anyway (RC-5 R-rc5-1d), so it costs
+nothing extra. It matters mechanically as well as by principle: handing such a directory to `git add`
+records it as an *embedded repository* — a gitlink to that repository's commit — which is exactly the
+*"committed as something by the enclosing workspace"* §7A.5 forbids, with a warning nobody is reading.
+This brief finds it and reports it once; RC-5 R-rc5-7d keeps it out of every checkpoint by pathspec.
+
 **R-rc6-7a. The workspace-root case is a QUESTION, not an offer** (§12 Q4 *Refinement 3*, owner's
 decision, new in rev 4). rev 3 offered adoption as a one-click action and never said what the user was
 choosing between. **The user is asked, told what keeping their own configuration costs, and encouraged
@@ -101,8 +150,9 @@ makes elsewhere**, which is why they lead:
 
 - **`gc.pruneExpire` at its two-week default destroys thinned checkpoints permanently after a
   fortnight**, so **R-rc6-4's grace period does not exist** — inside §1.3's own recovery window.
-- **`gc.reflogExpireUnreachable` at thirty days removes the escape hatch** R-rc6-4 depends on, before
-  §1.3 says the designer looks for it.
+- **`gc.reflogExpireUnreachable` at thirty days removes the way back from a reset or amend on the
+  designer's own branch** before §1.3 says the designer looks for it — and with the row above, R-rc6-4's
+  journal points at objects that are no longer there.
 - `gc.auto` at 6,700 leaves two packing schedules running against each other (R-rc3-13).
 - On Windows, `core.autocrlf` makes the `.clay` on disk a different file from the one
   `LayoutPersistence` wrote (R-rc3-12a), and `core.longpaths` unset is a refusal on that machine class
@@ -189,7 +239,12 @@ already off, nothing is committed, and the history simply stops with no entry sa
 precisely what R-rc6-14 claims does not happen. Turning it back on records the resumption at the next
 boundary. **The pair is what gives the gap two ends**, which is what R-rc6-13 needs in order to be
 renderable as a gap rather than as a quiet interval. This is R-rc5-21's ordering problem in another
-place: the `.cws` is written before the checkpoint that is supposed to contain it.
+place: the `.cws` is written before the checkpoint that is supposed to contain it. **Both carry the
+kept mark** (R-rc6-5a, rev 5): a pair that retention could thin is a gap that retention could erase,
+and the erased gap renders as exactly the quiet interval R-rc6-13 forbids. **And a restore preserves
+the flag** (RC-5 R-rc5-12c): the `.cws` travels with the tree, so without that rule a restore across
+an off period would silently switch recording on or off — a restore is a decision about content, not
+about recording.
 
 **R-rc6-14b. The per-workspace flag defaults to RC-4's application preference** (§5.7a, R-rc0-13,
 R-rc4-12a). A workspace that has never recorded a setting takes the preference's value; one that has
@@ -197,6 +252,12 @@ keeps its own, and **is not silently rewritten when the preference changes.** Th
 questions — *"do I want this at all"* versus *"not for this one"* — and R-rc6-14's rule that an
 installation-wide flag cannot gate per-workspace state is untouched: the preference is not that flag, it
 is the value the flag falls back to.
+
+**R-rc6-14c. Because the flag is in the `.cws`, it travels** (§5.7, rev 5). A clone or an archive of a
+workspace that was switched off arrives switched off, and the recipient's preference does not override
+it: the flag says *not for this one* about the workspace, and the workspace is what travelled. The
+recipient is told at their first boundary through R-rc6-10's indicator, exactly as the hold is
+reported, with the setting one click away. RC-9 R-rc9-5c is corrected accordingly.
 
 **R-rc6-15. An AI edit requested while revision control is off states plainly that no restore point
 will be taken, and offers to turn it back on — before anything is modified.** RC-4 makes the AI-batch
@@ -226,12 +287,24 @@ a direct consequence of git being a storage engine rather than a user interface.
    moving backwards and assert the sweep removes the ones RC-5's sequence says are oldest.
 3. **A bounded sweep refuses and reports** (R-rc6-3): construct the clock-jump case and assert **no
    deletion and one message**, not a partial deletion.
-4. **Thinning is not pruning** (R-rc6-4): after a sweep, the dropped checkpoints' objects are still in
-   the repository and reachable through the escape hatch.
+4. **Thinning is not pruning, and the journal is the way back** (R-rc6-4): after a sweep, the dropped
+   checkpoints' objects are still in the repository, each dropped checkpoint is listed as thinned, and
+   restoring one from the journal produces its exact tree. **Then, in a scratch copy, prune with an
+   immediate expiry and assert the thinned commits are gone and every kept and live one is present** —
+   the consumer-side half of RC-5 gate 14a, which is what proves the sweep freed anything at all.
+4a. **Reclaim honours the journal's ages and removes what it acted on** (R-rc6-4b): thin three
+   checkpoints at three journal times, reclaim with an age between them, and assert the newer two are
+   still listed as thinned and restorable, the older one is gone from both the repository and the
+   journal, and no live or kept restore point moved.
 5. **Human commits are never swept** (R-rc6-5), including one older than every checkpoint.
-6. **All four `rev-parse` situations** (R-rc6-7) are driven by a real fixture tree and produce the
-   right behaviour — the **ancestor** case is the one that matters most, and it must assert **nothing
-   was committed and nothing was written into the ancestor's root**.
+5a. **Kept checkpoints are never swept** (R-rc6-5a): a save-point, both transition checkpoints and a
+   user-kept restore point, each older than every unkept one, survive a sweep that removes the unkept —
+   and are not counted toward R-rc6-3's fraction.
+6. **All four situations** (R-rc6-7) are driven by a real fixture tree and produce the right behaviour —
+   the **ancestor** case is the one that matters most, and it must assert **nothing was committed and
+   nothing was written into the ancestor's root**. The **nested** case is a `git init` inside a cell
+   folder, found by the walk and not by `rev-parse` — assert it is reported once, and that RC-5's
+   checkpoint carries neither its files nor a gitlink.
 7. **Adoption writes the policy files and the configuration** into the user's repository, and a
    `pre-commit` hook in it neither blocks nor fires on the checkpoints that follow (R-rc6-7,
    R-rc3-7a).
@@ -254,6 +327,9 @@ a direct consequence of git being a storage engine rather than a user interface.
 10a. **A sweep runs on close and only once** (R-rc6-4a): drive ten checkpoints in one session and
     assert **no sweep ran**; then close, and assert exactly one did. This is what makes R-rc6-3's bound
     a guarantee rather than an arithmetic curiosity.
+10a'. **A session that recorded nothing does no housekeeping** (R-rc6-4a): open an armed workspace,
+    change nothing, close — assert no sweep, no pack, and that the repository directory's bytes are
+    unchanged. This is the share case, and the assertion is on the bytes.
 10b. **The off transition is ordered** (R-rc6-14a): switch off, then assert the **last** thing in the
     history is a checkpoint that contains the `.cws` with the flag already off. Reversed, the flag is
     set and nothing records it — which is the defect, and it is invisible from the flag alone.
@@ -268,6 +344,8 @@ a direct consequence of git being a storage engine rather than a user interface.
 13. **The gap is recorded** (R-rc6-13) in a form the browser can render as a gap — assert the data
     exists, since the rendering is RC-7's.
 14. **Two workspaces hold independent off state** (R-rc6-14) — the mistake the repo made before.
+14a. **The flag travels** (R-rc6-14c): switch a workspace off, archive it and clone it, open each with
+    the preference on, and assert both are off, both show the indicator, and neither wrote a checkpoint.
 15. **An AI edit while off refuses first and offers to re-arm** (R-rc6-15), and **nothing is modified**
     before the answer. Assert the file mtimes, not just the prompt.
 16. **No delete-history command exists** (R-rc6-16): source-scan for one and fail on a hit, comments
@@ -290,10 +368,15 @@ a direct consequence of git being a storage engine rather than a user interface.
   **The two consequences that matter are recoverability ones, not tidiness ones** — a fortnight instead
   of the promised weeks, and an escape hatch gone at thirty days — so the chapter says that, rather than
   listing configuration keys at a reader who did not come for them.
+- **Scenario 15** — *"My disk is full and it says the history is taking the space."* (§5.6a,
+  R-rc6-4b.) That thinning keeps the states, that reclaiming is the one action that does not, and
+  exactly what it destroys. RC-4 owns the control; this brief owns the explanation, because the journal
+  is what the explanation is about.
 - **The §10B.1 rows**: anything saved while revision control is off is not kept and not recoverable —
   *but everything recorded before it was switched off is still there*; anything at all when an enclosing
-  repository was detected is not kept and not recoverable. **Wherever a row says no, the docs say no
-  plainly.**
+  repository was detected is not kept and not recoverable; **a restore point that retention thinned is
+  still restorable, marked as thinned, until a reclaim — which asks first.** **Wherever a row says no,
+  the docs say no plainly.**
 
 ---
 
@@ -312,3 +395,9 @@ Findings to `src/Design/RESOLVED.md` and `src/Ui/RESOLVED.md` — **never to a `
 - Whether the persistent indicator found a home that is genuinely non-scrolling, and where.
 - Any path by which a checkpoint could reach a repository other than the open workspace's own
   (R-rc6-6). That is the finding that matters most in this brief.
+- **Two writers with different retention preferences on one shared workspace** (R-rc6-4a): whether it
+  arose in review, and whether retention should become per-workspace state in the `.cws`. The
+  architecture holds this open until this brief; do not settle it silently in either direction.
+- Whether the journal survived a hand-run `git gc` and a `git clone` (R-rc6-4) — it lives under
+  `.git/circuitrf/`, which the first ignores and the second does not copy, and both are the intended
+  answers.
