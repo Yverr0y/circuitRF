@@ -451,7 +451,11 @@ public sealed class ReferenceCliVerbTests(ITestOutputHelper output)
         var topics = Payload(run.StdOut).GetProperty("reference").GetProperty("topics");
         var names  = topics.EnumerateArray().Select(t => t.GetProperty("topic").GetString()).ToArray();
 
-        Assert.Equal(ReferenceLibrary.TopicNames.Concat(["components"]), names);
+        // The authored pages first, then the four GENERATED topics: the two document formats
+        // (AUT-10 R-aut10-3/4), the analysis directives (R-aut10-1) and the component catalogue.
+        Assert.Equal(
+            ReferenceLibrary.TopicNames.Concat(["data-display", "technology", "analyses", "components"]),
+            names);
 
         foreach (var t in topics.EnumerateArray())
         {

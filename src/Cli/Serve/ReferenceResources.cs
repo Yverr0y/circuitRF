@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using CircuitRF.Core.Netlist;
 using CircuitRF.Design.Reference;
 using CircuitRF.Design.Schematic;
 
@@ -59,12 +60,27 @@ internal static class ReferenceResources
             resources.Add(Describe(topic.Topic, topic.Title, topic.Summary,
                                    Encoding.UTF8.GetByteCount(ReferenceLibrary.Read(topic))));
 
+        // The two generated FORMAT topics. Advertised on the resource channel like every other,
+        // measured by rendering them, and the summary is the one the CLI's own topic list prints.
+        foreach (var f in DocumentSchema.All)
+            resources.Add(Describe(f.Topic, f.Title, Reference.SchemaSummary(f),
+                                   Encoding.UTF8.GetByteCount(DocumentSchema.Render(f))));
+
+        resources.Add(Describe(
+            Reference.AnalysesTopic,
+            "Analysis directives",
+            $"Generated from the schema the .cnl reader validates against: the " +
+            $"{AnalysisDirectiveSchema.Specs.Count} analysis type= tokens, their other accepted " +
+            "spellings, and every key with its default and whether it is required.",
+            Encoding.UTF8.GetByteCount(Reference.AnalysesText())));
+
         var catalog = ComponentCatalog.All();
         resources.Add(Describe(
             Reference.ComponentsTopic,
             "Component types",
-            $"Generated from the live registries: the {catalog.Count} .cnl type tokens, their " +
-            "terminals, and every parameter with its default, unit and visibility.",
+            $"Generated from the live registries: the {catalog.Count} .cnl type tokens, how many " +
+            "nets each instance line binds, their terminals, and every parameter with its default, " +
+            "unit and visibility.",
             // Measured by rendering it, the way the CLI's own topic list measures it. The catalogue
             // is a walk over static tables, so this is cheap, and a hard-coded number here would be a
             // second fact about the first that nothing keeps in step.

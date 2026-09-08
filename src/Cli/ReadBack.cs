@@ -78,6 +78,11 @@ internal static class ReadBack
             // `convert` is the verb that reads those, and it is named rather than guessed at.
             DocumentKind.Interchange => JsonRun.Fail(
                 CliDiagnostics.ReadInterchange(path, DocumentKinds.InterchangeFormat(path) ?? "interchange")),
+            // The one document of circuitRF's OWN that is compiled rather than written. Reading it
+            // as text produced a string of whatever the bytes decoded to, with nothing saying so
+            // (R-aut10-5).
+            DocumentKind.AssemblyRules => JsonRun.Fail(
+                CliDiagnostics.ReadBinaryDocument(path, DocumentKinds.Name(kind))),
             _                        => ReadDocument(path, kind),
         };
     }

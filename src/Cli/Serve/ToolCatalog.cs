@@ -497,18 +497,28 @@ internal static class ToolCatalog
             // expensive in a way a JSON document is not.
             Adapter:
             [
+                // R-aut10-5: what the cap DOES was stated only in the result, so a caller that asked
+                // for bytes and got a path had to work out why from the note it may not have read.
                 new(AttachImageArgument, "", OptKind.Flag,
-                    "Return the rendered file itself in the result, as well as writing it. Off by default; "
-                  + "a file over " + (AttachmentCapBytes / (1024 * 1024)) + " MB comes back as its path with a "
-                  + "note saying what to narrow."),
+                    "Return the rendered file itself in the result, as well as writing it. Off by default. "
+                  + "The file is written either way, and its path is always in outputs. If the written file "
+                  + "exceeds " + (AttachmentCapBytes / (1024 * 1024)) + " MB the result carries the PATH and "
+                  + "no image, plus a warning naming the size and what to narrow (--detail screen, a window, "
+                  + "fewer layers, or png instead of svg) — the call still succeeds and is not retried for you."),
             ]),
 
         new("read",
             "Read a file back: a result file as cubes, or one of circuitRF's own documents as its own text.",
             null, null,
             [
+                // R-aut10-5. The declared list used to omit `.cdd`, which this verb has always
+                // accepted — a schema that under-promises costs a caller exactly what one that
+                // over-promises does, because a client believes it either way.
                 new("", [ "read" ],
-                    [new("path", true, "A .npy or Touchstone result, or a .cws .csch .csym .clay .ctech .cem .cnl document.")],
+                    [new("path", true, "A .npy or Touchstone (.sNp) result, or a .cws .csch .csym "
+                       + ".clay .ctech .cem .cnl .cdd document. A cell folder or a workspace is "
+                       + "refused — check and explain answer what is IN one; an interchange file is "
+                       + "refused and names convert; a .wasm assembly-rule module is compiled, not text.")],
                     [.. Narrowing],
                     ""),
             ]),

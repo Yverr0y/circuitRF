@@ -1,5 +1,6 @@
 using System.Linq;
 using CircuitRF.Core.Devices;
+using CircuitRF.Core.Netlist;
 using CircuitRF.Design.Cells;
 
 namespace CircuitRF.Design.Schematic;
@@ -40,6 +41,25 @@ public sealed record CatalogPorts(
     int?                  ListedAt,
     string                OrderNote = "");
 
+/// <summary>
+/// How many nets this primitive's <c>.cnl</c> INSTANCE LINE binds — which is a different quantity
+/// from <see cref="CatalogPorts"/>, and the one a caller writing a netlist is actually asking about.
+///
+/// <para><b>Why it is its own field (R-aut10-2).</b> The catalogue used to publish the symbol's pin
+/// count under the heading "nets". They differ wherever a terminal is implicit on the glyph — a
+/// <c>Tuner</c> draws one pin and its line takes two, a <c>Port</c> draws one and takes two — and
+/// they differ for an <c>SDD</c> by construction. A client that wrote a one-net <c>Tuner</c> from
+/// the catalogue's own description got a bench whose bias tee delivered nothing, at the engine's
+/// floor sentinel, with every diagnostic clean, and reported the component as broken. It is not.
+/// See <see cref="InstanceNetContract"/>, which is where this comes from.</para>
+/// </summary>
+/// <param name="Count">The fixed number of nets, or null when the count is not fixed.</param>
+/// <param name="DeterminedBy">The <c>.cnl</c> parameter that sets it. NOT always
+/// <see cref="CatalogPorts.DeterminedBy"/>: the panel calls an SDD's <c>NumPorts</c>, an instance
+/// line spells it <c>SddPortCount</c>.</param>
+/// <param name="Rule">One sentence, where a number is not the answer. Empty otherwise.</param>
+public sealed record CatalogNets(int? Count, string? DeterminedBy, string Rule);
+
 /// <summary>One palette entry that places this primitive: what it is called, where it is found, and
 /// the parameters a freshly-placed one carries.</summary>
 public sealed record CatalogSymbol(
@@ -58,11 +78,14 @@ public sealed record CatalogSymbol(
 /// <param name="Placeable">Whether any <see cref="SymbolKind"/> draws it.</param>
 /// <param name="Note">Why the two disagree, when they do — the §2.3 mismatch, reported rather than
 /// filtered out (R-aut6-10). Empty when they agree.</param>
+/// <param name="Nets">What the INSTANCE LINE binds, which is the netlist contract; <paramref name="Ports"/>
+/// is what the SYMBOL draws. See <see cref="CatalogNets"/> for why they are two fields.</param>
 public sealed record CatalogEntry(
     string                       Type,
     bool                         Simulatable,
     bool                         Placeable,
     string                       Note,
+    CatalogNets                  Nets,
     CatalogPorts                 Ports,
     IReadOnlyList<CatalogSymbol> Symbols);
 
@@ -158,9 +181,26 @@ public static class ComponentCatalog
 
             entries.Add(new CatalogEntry(
                 token, simulatable, symbols.Length > 0, NoteFor(token, simulatable, symbols.Length > 0),
-                TokenPorts(kinds), symbols));
+                NetsFor(token, simulatable), TokenPorts(kinds), symbols));
         }
         return entries;
+    }
+
+    /// <summary>
+    /// What this token's instance line binds, from the one place that knows — <c>CnlReader</c>'s own
+    /// contract (R-aut10-2).
+    ///
+    /// <para><b>A token the engine cannot build binds nothing.</b> <c>GND</c>, <c>VAR</c>,
+    /// <c>MEAS</c> and <c>Pin</c> are schematic elements the extractor consumes and never instance
+    /// lines at all, so a net count for them would be an answer to a question that cannot be asked.
+    /// <see cref="NoteFor"/> says which of those each one is.</para>
+    /// </summary>
+    private static CatalogNets NetsFor(string token, bool simulatable)
+    {
+        if (!simulatable) return new CatalogNets(null, null, "");
+
+        var c = InstanceNetContract.ForToken(token);
+        return new CatalogNets(c.Count, c.DeterminedBy, c.Rule);
     }
 
     /// <summary>
@@ -307,9 +347,13 @@ public static class ComponentCatalog
     {
         if (simulatable && placeable) return "";
         if (simulatable)
+            // What this note used to end with — "nothing below the UI firewall states how many nets
+            // its instance line takes" — was the defect, not a disclaimer of it (R-aut10-2). The net
+            // count is stated, on its own line, for this token like every other; what a symbol-less
+            // type is genuinely missing is the palette's parameter defaults and its pin NAMES.
             return "No palette entry: this type can be written in a .cnl and has no symbol, so " +
-                   "nothing places it, no default parameters are declared for it, and nothing " +
-                   "below the UI firewall states how many nets its instance line takes.";
+                   "nothing places it and no default parameters are declared for it. Its net count " +
+                   "is the 'nets' line above; the terminals have no names because nothing draws them.";
         // The sentinels. They are named rather than described as broken, because "not a component"
         // is the answer for them and it is a complete one.
         if (token is "GND" or "VAR" or "MEAS" or "Pin")

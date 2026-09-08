@@ -1304,10 +1304,15 @@ With `--json`, `--only` and `--group` narrow what comes back — which matters, 
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference
 <span class="prompt">$ </span>circuitrf reference netlist
 <span class="prompt">$ </span>circuitrf reference components
-<span class="prompt">$ </span>circuitrf reference components MLIN</code></pre>
+<span class="prompt">$ </span>circuitrf reference components MLIN
+<span class="prompt">$ </span>circuitrf reference analyses
+<span class="prompt">$ </span>circuitrf reference analyses sparam
+<span class="prompt">$ </span>circuitrf reference data-display
+<span class="prompt">$ </span>circuitrf reference technology</code></pre>
 
 They are, in order: the list of topics with what each costs; one page as text; every netlist
-primitive; and just that one.
+primitive; just that one; every analysis directive with every key it takes; just that one; and the
+two document formats nothing else here creates for you.
 
 `check` tells you that what you wrote is wrong. `explain` tells you what circuitRF made of it.
 This one tells you what you are **allowed** to write in the first place — the primitive type names,
@@ -1332,17 +1337,21 @@ direction and a 4 kB page and an 84 kB one should not look alike:
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference
 <span class="output">Reference topics — circuitrf reference &lt;topic&gt;
 
-  netlist            12.1 kB  The Netlist (.cnl) Format
+  netlist            17.7 kB  The Netlist (.cnl) Format
   expressions         9.1 kB  Expressions
   units              10.9 kB  Units
   measurements        5.8 kB  Measurements
   pins-ports-terms    4.3 kB  Pins, Ports &amp; Terms
   sdd                12.2 kB  The SDD (Symbolically-Defined Device)
-  file-formats        9.5 kB  File Formats
-  component-notes    71.3 kB  Components
-  components         84.1 kB  Component types
+  file-formats       11.6 kB  File Formats
+  component-notes    74.2 kB  Components
+  data-display       12.8 kB  The .cdd data-display format
+  technology          6.1 kB  The .ctech technology format
+  analyses            8.5 kB  Analysis directives
+  components         91.3 kB  Component types
 
-  circuitrf reference components &lt;TYPE&gt;   one primitive</span></code></pre>
+  circuitrf reference components &lt;TYPE&gt;   one primitive
+  circuitrf reference analyses &lt;TYPE&gt;     one analysis directive</span></code></pre>
 
 These are the same pages you are reading now, shipped inside the program so they are there on a
 machine that has no copy of this site. `components` is the **generated catalogue** — read from the
@@ -1358,9 +1367,11 @@ Asking for a topic prints it as its own Markdown, so it redirects cleanly:
 
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference components MLIN
 <span class="output">MLIN
-  nets: 2  1 2
+  nets: 2
+  terminals: 2  1 2
+  order: The two terminals are interchangeable: the line is uniform, so neither end is the input.
   Mlin (MLIN) — Microstrip   search: MLIN, microstrip, microstrip line, line, hammerstad
-    nets: 2  1 2
+    terminals: 2  1 2
     W                  2.9              mm     shown
     L                  10               mm     shown
     SignalLayer        -                -      -
@@ -1369,22 +1380,68 @@ Asking for a topic prints it as its own Markdown, so it redirects cleanly:
 The columns are the parameter's **name**, its **default expression**, its **unit**, whether it shows
 on the schematic by default, and — where the registry has one — what it means.
 
-`nets` is the part you cannot get from a picture: **how many nets the instance line takes, and in what
-order.** That order is a contract the models themselves read, and it is not always the one you would
-guess — a MESFET is gate, drain, source while a JFET is drain, gate, source; a diode is anode then
-cathode; a 2-port SDD takes four nets, as ± pairs.
+`terminals` is the part you cannot get from a picture: the pins the symbol draws, **in the order a
+netlist line writes their nets.** That order is a contract the models themselves read, and it is not
+always the one you would guess — a MESFET is gate, drain, source while a JFET is drain, gate, source,
+and a diode is anode then cathode.
+
+<div class="callout warn">
+<span class="label">`nets` and `terminals` are two different numbers, and the first is the one to write to</span>
+<p><b>How many nets the instance line binds</b> is <code>nets</code>. <b>How many pins the symbol
+draws</b> is <code>terminals</code>. They are usually the same and they are not always: a
+<code>Tuner</code> draws one pin and its line takes two, because its reference terminal is implicit
+on the glyph. So do <code>Port</code>, <code>Term</code>, <code>Vdc</code> and <code>IProbe</code>;
+a 2-port <code>SDD</code> takes four nets, as ± pairs.</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference components Tuner
+<span class="output">Tuner
+  nets: 2
+  terminals: 1  1</span></code></pre>
+<p>Writing <code>Tuner:T1 n_drain Z[1]=50 BiasTee=on Vbias=48</code> — one net — is now refused by
+name. It used to run: the bias tee delivered nothing, every diagnostic was clean, and the output sat
+at the engine's floor at every drive point.</p>
+</div>
 
 <div class="callout note">
-<span class="label">Some port counts are not fixed, and they say so</span>
-<p>An SDD, a <code>Z_Port</code> and an <code>SnP</code> take as many ports as <code>NumPorts</code>
-says; a Verilog-A model takes as many as <code>Pins</code> says; an ideal switch takes
-<code>1 + Throws</code>. Those report <b>what sets the count</b> rather than a number, and any
-terminals they list are labelled with the count they were listed at:</p>
+<span class="label">Some counts are not fixed, and they say so</span>
+<p>An SDD's, a <code>Z_Port</code>'s and an <code>SnP</code>'s follow a port-count parameter; a
+Verilog-A model's follows <code>Pins</code>; an ideal switch's follows <code>Throws</code>; a wBond's
+follows the arrays it places. Those report <b>the rule</b> rather than a number:</p>
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference components SDD
 <span class="output">SDD
-  nets: set by NumPorts — at NumPorts=2: 1+ 1- 2+ 2-</span></code></pre>
-<p>A number printed where the honest answer is "it depends" is worse than no number at all.</p>
+  nets: SddPortCount=N binds 2N nets.
+  terminals: set by NumPorts — at NumPorts=2: 1+ 1- 2+ 2-</span></code></pre>
+<p>Note that the two lines name <i>different parameters</i>, and that is not a mistake: the parameter
+panel calls it <code>NumPorts</code>, and a <code>.cnl</code> instance line spells it
+<code>SddPortCount</code>. A number printed where the honest answer is "it depends" is worse than no
+number at all.</p>
 </div>
+
+### Analysis directives {#reference-analyses}
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference analyses sparam
+<span class="output">sparam   also: sp, s_param, sparameter, s_parameters
+  bare words: log
+  type                   required       The analysis kind. One of the tokens this page lists.
+  enabled                true           false skips the analysis at run time without deleting it.
+  start                  required       First frequency. Bare number in Hz unless a unit follows or Unit=/startUnit= is given.
+  stop                   required       Last frequency, same spelling rules as start.
+  step                   1e8            Step size. Mutually exclusive with npts; npts wins when both are given.
+  npts                   -              Point count. Selects the point-count sweep mode.
+  Unit                   -              Sets startUnit, stopUnit and stepUnit at once. Any one of those given individually overrides it.
+  ...</span></code></pre>
+
+Every `analysis type=` token, every other spelling of it that is accepted, and every key it may carry
+with its default and whether it is required. It is read from the same table the `.cnl` reader
+validates against, so a key that is not on this page is a key the reader **refuses** — it is not
+ignored, and it has not been since the netlist contract landed.
+
+### The two formats nothing creates for you {#reference-formats}
+
+`circuitrf reference data-display` and `circuitrf reference technology` describe the `.cdd` and
+`.ctech` files field by field, generated from the types their readers actually deserialise into, each
+with a minimal example that was written out and run. They are here because those are the two formats
+you may have to write by hand: `new workspace` copies a technology in for you, but nothing creates a
+data display.
 
 A few entries carry a **note** instead of a clean answer, and the note is the useful part. `GND`,
 `VAR`, `MEAS` and `Pin` are schematic elements the netlist extractor consumes rather than components

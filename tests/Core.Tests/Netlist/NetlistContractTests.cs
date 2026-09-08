@@ -251,20 +251,30 @@ public class NetlistContractTests
     [Fact]
     public void EveryRegisteredPrimitiveEitherStatesANetCountOrIsANamedException()
     {
-        // The two that deliberately return null, and why, are documented in InstanceNetContract.
-        var exempt = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "SnP", "ExtDevice", "VerilogA" };
+        // The ones that deliberately return null, and why, are documented in InstanceNetContract.
+        var exempt = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { "SnP", "wBond", "ExtDevice", "VerilogA" };
 
         var unstated = new List<string>();
         foreach (var type in ComponentModelFactory.PrimitiveTypeNames)
         {
             if (exempt.Contains(type)) continue;
-            if (!TryMinimalModel(type, out var model)) continue;   // needs a kit/file to construct
+            // The catalogue's OWN minimal parameters (AUT-10 R-aut10-2), not a second set written
+            // here: a private copy left Tuner, Match and Mutual unconstructible and therefore
+            // silently skipped by this test — including the one type the whole series is about.
+            if (!InstanceNetContract.TryMinimalModel(type, 2, out var model)) continue;
             if (InstanceNetContract.Expected(model!) is null) unstated.Add(type);
         }
 
         Assert.True(unstated.Count == 0,
             "These registered primitives state no net count and are not named exceptions in " +
             $"InstanceNetContract: {string.Join(", ", unstated)}");
+
+        // And the test is not vacuous: the three that a private minimal-parameter table used to
+        // skip are now reached. Tuner is the one the series exists for.
+        foreach (string reached in (string[])["Tuner", "Match", "Mutual"])
+            Assert.True(InstanceNetContract.TryMinimalModel(reached, 2, out _),
+                $"{reached} could not be constructed, so this test says nothing about it.");
     }
 
     // ── R-aut8-5. Boolean parameter spellings ────────────────────────────────
@@ -473,32 +483,6 @@ public class NetlistContractTests
             "GHZ" => 1e9, "MHZ" => 1e6, "KHZ" => 1e3, _ => 1.0,
         };
     }
-
-    private static bool TryMinimalModel(string type, out ComponentModel? model)
-    {
-        try
-        {
-            model = ComponentModelFactory.TryCreate(type, MinimalParameters(type), null, 27.0);
-            return model is not null;
-        }
-        catch
-        {
-            // A type that cannot be constructed without a file, a kit or a worker is not something
-            // this test can speak to. It is still covered: InstanceNetContract's own switch has an
-            // arm for it or it lands on the exempt list above.
-            model = null;
-            return false;
-        }
-    }
-
-    /// <summary>The few parameters a type needs before it will construct at all.</summary>
-    private static Dictionary<string, Value> MinimalParameters(string type) => type switch
-    {
-        "SDD"    => new() { ["SddPortCount"]  = new Value(2.0) },
-        "Z_Port" => new() { ["ZPortCount"]    = new Value(1.0) },
-        "SnP"    => new() { ["NumPorts"]      = new Value(2.0) },
-        _        => [],
-    };
 
     private static IEnumerable<string> WriterOutputForEveryAnalysisKind()
     {

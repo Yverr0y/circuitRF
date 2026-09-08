@@ -592,14 +592,31 @@ namespace RfCore.Export
     /// <param name="Placeable">False for a token a <c>.cnl</c> may write that nothing draws.</param>
     /// <param name="Note">Why the two disagree, when they do. The mismatch is part of the answer and
     /// is never filtered out (R-aut6-10).</param>
+    /// <param name="Nets">How many nets this type's <c>.cnl</c> INSTANCE LINE binds — the netlist
+    /// contract, and the field to read before writing a line. <paramref name="Ports"/> is the
+    /// SYMBOL's pin count, which is a different quantity: a <c>Tuner</c> draws one pin and its line
+    /// takes two (AUT-10 R-aut10-2).</param>
     public sealed record ReferenceComponentJson(
         string                               Type,
         bool                                 Simulatable,
         bool                                 Placeable,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string?                              Note,
+        ReferenceNetsJson                    Nets,
         ReferencePortsJson                   Ports,
         IReadOnlyList<ReferenceSymbolJson>   Symbols);
+
+    /// <summary>
+    /// The netlist net contract of one type, on the wire. Exactly one of the three carries the
+    /// answer; a reader that finds no <c>count</c> must read <c>rule</c> rather than assume one.
+    /// </summary>
+    public sealed record ReferenceNetsJson(
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        int?    Count,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? DeterminedBy,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Rule);
 
     /// <summary>
     /// What <c>reference</c> answered. Exactly one of the three is present.
@@ -773,7 +790,54 @@ namespace RfCore.Export
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         ReferenceTopicJson?                    Topic,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        IReadOnlyList<ReferenceComponentJson>? Components);
+        IReadOnlyList<ReferenceComponentJson>? Components,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<ReferenceAnalysisJson>?  Analyses = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<ReferenceSchemaTypeJson>? Schema  = null);
+
+    /// <summary>One object type of a JSON document format, generated from the type the reader
+    /// deserialises into (AUT-10 R-aut10-3/4). The first entry is the root.</summary>
+    public sealed record ReferenceSchemaTypeJson(
+        string                                  Type,
+        IReadOnlyList<ReferenceSchemaFieldJson> Fields);
+
+    /// <param name="Type">The JSON shape, not the CLR type name.</param>
+    /// <param name="Default">What the field is when a document omits it, read off a
+    /// default-constructed instance. Empty where nothing could be read, never a guessed zero.</param>
+    public sealed record ReferenceSchemaFieldJson(string Name, string Type, string Default);
+
+    /// <summary>
+    /// One <c>analysis type=</c> token and every key its directive may carry — generated from the
+    /// registry the reader validates against, so a key here is a key the reader reads and a key the
+    /// reader reads is a key here (AUT-10 R-aut10-1).
+    /// </summary>
+    /// <param name="Aliases">Other spellings of <paramref name="Type"/> the reader accepts. The
+    /// schematic's own serialisation tags are among them, which is what cost one client eight
+    /// guesses to find <c>loadpull_pursuit</c>.</param>
+    /// <param name="BareWords">Keywords legal with no <c>=</c>.</param>
+    /// <param name="RequiredOneOf">Groups where exactly one member must be written. Not expressible
+    /// as a per-key <c>required</c>: a multi-tone HB writes <c>Tone[1]</c> and never a bare
+    /// <c>Tone=</c>.</param>
+    public sealed record ReferenceAnalysisJson(
+        string                                    Type,
+        IReadOnlyList<string>                     Aliases,
+        IReadOnlyList<ReferenceAnalysisKeyJson>   Keys,
+        IReadOnlyList<string>                     BareWords,
+        IReadOnlyList<IReadOnlyList<string>>      RequiredOneOf);
+
+    /// <param name="Universal">True for a key legal on EVERY directive whatever its type, listed
+    /// against each one so a reader of a single type's entry has the whole legal set.</param>
+    /// <param name="Indexed">True for a key written <c>Name[i]</c>. <paramref name="Name"/> then
+    /// carries the <c>[i]</c>, because that is the form a caller writes.</param>
+    public sealed record ReferenceAnalysisKeyJson(
+        string  Name,
+        bool    Required,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Default,
+        string  Summary,
+        bool    Indexed,
+        bool    Universal);
 
     // ── the loadpull summary, on the wire ────────────────────────────────────
 

@@ -111,6 +111,185 @@ public static class InstanceNetContract
         _                                                                                     => null,
     };
 
+    // ── What the catalogue publishes (AUT-10 R-aut10-2) ──────────────────────
+
+    /// <summary>
+    /// What one <c>.cnl</c> type token's instance line binds, as the generated catalogue states it.
+    ///
+    /// <para>Exactly one of the three carries the answer, and the gate
+    /// (<c>NetlistContractTests</c>) holds that true for every registered token: a fixed
+    /// <paramref name="Count"/>, a <paramref name="DeterminedBy"/> parameter with the rule beside
+    /// it, or a <paramref name="Rule"/> alone where nothing about the count is a number.</para>
+    /// </summary>
+    /// <param name="Count">The number of nets the line binds, when it is the same for every legal
+    /// instance of the type.</param>
+    /// <param name="DeterminedBy">The <c>.cnl</c> PARAMETER that sets the count — which is not
+    /// always the symbol's own port-count parameter: an <c>SDD</c> instance line spells it
+    /// <c>SddPortCount</c> where the schematic tile calls it <c>NumPorts</c>.</param>
+    /// <param name="Rule">One sentence stating the rule, in the caller's own spelling. Empty
+    /// wherever <paramref name="Count"/> alone is the whole answer.</param>
+    public sealed record NetContract(int? Count, string? DeterminedBy, string Rule);
+
+    /// <summary>
+    /// The net contract for a <c>.cnl</c> type token.
+    ///
+    /// <para><b>MEASURED wherever a model can be built</b>, exactly as
+    /// <c>ComponentCatalog.PortsOf</c> measures whether a symbol's pin count is fixed. The type is
+    /// constructed at three port counts and <see cref="Expected"/> asked of each: three equal
+    /// answers is a fixed count, an affine progression is a rule with the multiplier and the
+    /// intercept read off the measurement, and anything else is reported as the three numbers it
+    /// actually is. Nothing here writes a count down, so a component whose wiring changes cannot
+    /// leave a stale number behind in a catalogue.</para>
+    ///
+    /// <para><b>The minimal parameters are chosen not to change the answer</b>, and the three-point
+    /// probe is what proves it: a value that moved the count would show up as a progression rather
+    /// than as a constant. <c>Match</c>'s <c>Design</c> is the EMPTY design, not a real one.</para>
+    ///
+    /// <para><b><see cref="_ruleOnly"/> is the rest</b> — the four tokens no measurement can reach,
+    /// each because the rule genuinely is not a number. Three of them are <see cref="Expected"/>'s
+    /// own null arms; the fourth (<c>VerilogA</c>) is a second token over the same model.</para>
+    /// </summary>
+    public static NetContract ForToken(string token)
+    {
+        if (_ruleOnly.TryGetValue(token, out string? stated))
+            return new NetContract(null, PortCountKey(token), stated);
+
+        var measured = new int?[_probes.Length];
+        for (int i = 0; i < _probes.Length; i++)
+            measured[i] = TryMinimalModel(token, _probes[i], out var model) ? Expected(model!) : null;
+
+        // A token nothing can build and no rule names. Not silence: NetlistContractTests fails on a
+        // registered token that lands here, so it is either measurable or given a sentence.
+        if (measured.Any(m => m is null)) return new NetContract(null, null, "");
+
+        int[] n = [.. measured.Select(m => m!.Value)];
+        if (n.All(v => v == n[0])) return new NetContract(n[0], null, "");
+
+        string key = PortCountKey(token) ?? "a parameter";
+        int    per = n[1] - n[0];
+        int    c   = n[0] - per * _probes[0];
+
+        // Affine, and CHECKED at the third point rather than assumed from two — a count that is not
+        // a straight line would otherwise be published as one.
+        if (per > 0 && n.Select((v, i) => v == per * _probes[i] + c).All(ok => ok))
+        {
+            string tail = c == 0 ? "" : c > 0 ? $" + {c}" : $" - {-c}";
+            return new NetContract(null, key,
+                $"{key}=N binds {(per == 1 ? "N" : per + "N")}{tail} nets.");
+        }
+
+        return new NetContract(null, key,
+            $"Set by {key}: " +
+            string.Join(", ", _probes.Select((p, i) => $"{p} → {n[i]} nets")) + ".");
+    }
+
+    /// <summary>The port counts <see cref="ForToken"/> probes at. Three, because two points cannot
+    /// tell an affine rule from a coincidence.</summary>
+    private static readonly int[] _probes = [2, 3, 4];
+
+    /// <summary>
+    /// The <c>.cnl</c> parameter that sets a variadic type's net count.
+    ///
+    /// <para><b>It is the NETLIST's spelling, which is not always the symbol's.</b>
+    /// <c>ComponentTypeRegistry.PortCountParameter</c> answers <c>NumPorts</c> for all three
+    /// variadic boxes because that is what the parameter panel calls it; a <c>.cnl</c> line spells
+    /// it <c>SddPortCount</c>, <c>ZPortCount</c> and <c>NumPorts</c> respectively, and the catalogue
+    /// is read by something that is about to write a <c>.cnl</c>.</para>
+    /// </summary>
+    public static string? PortCountKey(string token) => token.ToUpperInvariant() switch
+    {
+        "SDD"      => "SddPortCount",
+        "Z_PORT"   => "ZPortCount",
+        "SNP"      => "NumPorts",
+        "SWITCH"   => "Throws",
+        "WBOND"    => "Arrays",
+        "VERILOGA" => "Pins",
+        _          => null,
+    };
+
+    /// <summary>
+    /// The tokens whose contract is a sentence rather than a number, with the sentence.
+    ///
+    /// <para>Three of the four are <see cref="Expected"/>'s own <c>null</c> arms, which is the same
+    /// judgement stated for the same reason: a number here would be a second, wrong statement of a
+    /// rule that is not a number. <c>VerilogA</c> is a second token over
+    /// <see cref="ExternalDeviceModel"/> and cannot be constructed without the file it names.</para>
+    /// </summary>
+    private static readonly Dictionary<string, string> _ruleOnly = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["SnP"] =
+            "NumPorts=N binds N nets, or N+1 where the extra trailing net is a floating reference. " +
+            "Both counts are legal and the reader tells them apart by how many were written.",
+        ["wBond"] =
+            "2 nets per wire array — Arrays=M binds 2M — plus one trailing reference net when " +
+            "RefPin is on. The arrays come from the design the instance carries or names, so there " +
+            "is no count at all until one is chosen.",
+        ["ExtDevice"] =
+            "Set by the model this instance names: the provider's EXTERNAL pin count, which is not " +
+            "its port count and does not include the internal nodes the model asked for. An " +
+            "instance may state a smaller ConnectedPinCount to place a five-terminal model as a " +
+            "four-pin part.",
+        ["VerilogA"] =
+            "Set by the compiled model the File parameter names: one net per declared terminal, " +
+            "which the module's own source states and no registry here can.",
+    };
+
+    /// <summary>
+    /// A model of this type built from the fewest parameters that will construct one, at
+    /// <paramref name="portCount"/> where the type has a port-count parameter.
+    ///
+    /// <para>Public because the gate writes its <c>.cnl</c> line from the same parameters: a test
+    /// that invented its own minimal set would be comparing the catalogue against a second guess
+    /// rather than against the reader.</para>
+    /// </summary>
+    public static bool TryMinimalModel(string token, int portCount, out ComponentModel? model)
+    {
+        try
+        {
+            model = ComponentModelFactory.TryCreate(token, MinimalParameters(token, portCount), null, 27.0);
+            return model is not null;
+        }
+        catch
+        {
+            // A type that cannot be constructed without a file, a kit or a worker. Never silence:
+            // it is either in _ruleOnly or the gate fails on it.
+            model = null;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The fewest parameters a type needs before it will construct at all — a port count where one
+    /// is read at construction, and otherwise the one or two values whose ABSENCE is a refusal.
+    /// None of them can change the net count, which is what the three-point probe establishes.
+    /// </summary>
+    public static IReadOnlyDictionary<string, Expressions.Value> MinimalParameters(string token, int portCount)
+    {
+        var p = new Dictionary<string, Expressions.Value>(StringComparer.Ordinal);
+
+        if (PortCountKey(token) is { } key) p[key] = new Expressions.Value((double)portCount);
+
+        switch (token.ToUpperInvariant())
+        {
+            // A tuner with no termination at all is a refusal, and the fundamental's is the one it
+            // asks for by name. 50 is the reference impedance, not a chosen value.
+            case "TUNER":  p["Z[1]"] = new Expressions.Value(50.0); break;
+
+            // The mutual element names two INDUCTORS rather than two nets, so these are the nets'
+            // stand-ins: without them there is no element, and with them there are still no nets.
+            case "MUTUAL":
+                p["Inductor1"] = new Expressions.Value("L1");
+                p["Inductor2"] = new Expressions.Value("L2");
+                break;
+
+            // The EMPTY design, base64 of "{}" — a Match with no network in it. A real one would be
+            // a chosen circuit; this is the absence of one, and it still has the two ends every
+            // matching network has.
+            case "MATCH":  p["Design"] = new Expressions.Value(Convert.ToBase64String("{}"u8)); break;
+        }
+        return p;
+    }
+
     /// <summary>
     /// The refusal text for a line whose net count is wrong. Names the type, the instance, what was
     /// written and what is needed — all four, because the caller of a headless verb has no line to

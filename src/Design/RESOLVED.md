@@ -1,5 +1,30 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## The component catalogue reported one number where there are two (AUT-10, 2026-09-08)
+
+`CatalogEntry` carried `Ports` — the SYMBOL's pin count, from `SymbolPortDefs` — and the CLI printed
+it under a line labelled `nets:`. Those are different quantities wherever a terminal is implicit on
+the glyph (`Tuner`, `Port`, `Term`, `Vdc`, `IProbe` all draw one fewer pin than their instance line
+binds nets) and different by construction for `SDD`. The catalogue is the only statement of the
+netlist contract a client with no schematic editor and no source tree has, and it was wrong for about
+a third of the registry.
+
+`CatalogEntry.Nets` is the second field, from `CircuitRF.Core.Netlist.InstanceNetContract` — the table
+the elaborator refuses a wrong count with, so there is one statement rather than two. `Ports` is
+unchanged and still means what it meant; only the label it is printed under changed, to `terminals:`.
+
+**Two smaller things fell out of it.**
+
+`NoteFor`'s text for a symbol-less type ended "…and nothing below the UI firewall states how many nets
+its instance line takes." That was true when it was written and became the defect: the reader knew all
+along. The note now says what such a type is genuinely missing — the palette's parameter defaults and
+its pin names — and points at the `nets` line for the count.
+
+`TokenPorts` returns a blank `CatalogPorts` for TWO different reasons — no symbol draws the type, or
+several tiles draw it and disagree about the pin set (`Port` has `Term` and `TermG`) — and the CLI
+printed one sentence for both. They are different facts and the second one has an answer: each tile's
+own line below IS it.
+
 ## GI series — review follow-up (2026-09-07)
 
 Three defects found reviewing the five phases against a production six-layer output set. All three

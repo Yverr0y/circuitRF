@@ -6,6 +6,48 @@ only for findings that are still true, still surprising, and would cost someone 
 rediscover. Mirrors `src/Ui/DataDisplay/RESOLVED.md`'s own pattern.
 
 
+## The net contract had to answer about a TYPE, not only about a model (AUT-10, 2026-09-08)
+
+AUT-8 gave `InstanceNetContract.Expected(ComponentModel)` — asked of the CONSTRUCTED model, so a
+parameterised type answers from its own resolved parameters. The generated catalogue
+(`brief-automation-10-generated-reference.md` R-aut10-2) needs the same fact keyed on the `.cnl` TYPE
+TOKEN, before any instance exists, and that is a different question in three ways worth recording.
+
+**The count is measured at three port counts, not one.** `ForToken` builds the type at 2, 3 and 4 and
+asks `Expected` of each. Three equal answers is a fixed count; an affine progression gives a rule with
+its multiplier and intercept read off the measurement. Two points would have been enough for `SDD`
+(`2N`) and wrong for `Switch`, which is `2N + 2` — the common port is not a throw, and an intercept
+assumed to be zero would have published a number that is plausible, specific and wrong for every
+`Throws` but one.
+
+**A minimal parameter set is not an invented one.** Six types refuse to construct at all without a
+value: `Tuner` (`Z[1]`), `Mutual` (two inductor NAMES, not nets), `Match` (a `Design` payload — the
+empty design, base64 of `{}`, constructs), and `SnP`/`SDD`/`Z_Port` (a port count). None of those can
+move the net count, and the three-point probe is what establishes that rather than a comment claiming
+it. This is the distinction R-aut6-9 draws: reading a port count off a model built from made-up
+parameter VALUES is forbidden; supplying the value whose absence is a refusal is not.
+
+**The port-count parameter's netlist spelling is not its symbol's.** `ComponentTypeRegistry.PortCountParameter`
+answers `NumPorts` for `SnP`, `Z_Port` and `SDD` alike, because that is what the parameter panel calls
+it. A `.cnl` line spells them `NumPorts`, `ZPortCount` and `SddPortCount`. `InstanceNetContract.PortCountKey`
+is the netlist side, and the catalogue prints both — a client that copied `NumPorts` off the panel into
+an SDD instance line would set nothing at all.
+
+**Four tokens state a sentence instead of a number**, and all four are cases where the rule genuinely
+is not one: `SnP` (N or N+1, the extra being a floating reference), `wBond` (2 per array plus an
+optional return), `ExtDevice` and `VerilogA` (the model file's own external pin count). Three are
+`Expected`'s own `null` arms; the fourth is a second token over `ExternalDeviceModel`.
+`NetlistContractTests` holds the set exhaustive, so a new primitive is either measurable or given a
+sentence — never a third category.
+
+**A test that could not construct a type said nothing about it, and looked as if it did.**
+`EveryRegisteredPrimitiveEitherStatesANetCountOrIsANamedException` used a private minimal-parameter
+table covering `SDD`, `Z_Port` and `SnP`, and skipped anything that threw. `Tuner` — the type this
+whole series exists because of — was among the skipped. It now uses the production
+`InstanceNetContract.MinimalParameters` and asserts that `Tuner`, `Match` and `Mutual` are actually
+reached, so the exhaustiveness claim is one the test can make.
+
+
 ## A `.lib` section could be read but never asked for (2026-09-01)
 
 `Session.Run` has tracked `.LIB <name>`/`.ENDL` framing since it was written — above conditionals,

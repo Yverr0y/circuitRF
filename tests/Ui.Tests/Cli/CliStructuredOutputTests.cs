@@ -596,12 +596,17 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "read.args.multiple-paths",
         "read.args.path-required",
         "read.args.unknown-option",
+        // AUT-10 R-aut10-5: a .wasm assembly-rule module is compiled, not text. It used to come
+        // back as whatever its bytes decoded to, with nothing saying so.
+        "read.file.binary",
         "read.file.interchange",
         "read.file.unreadable",
         "read.file.unsupported",
         "read.path.is-a-folder",
         "read.path.not-found",
         // brief-automation-6-reference-and-components.md — the reference surface.
+        // AUT-10 R-aut10-1 added the first: an unknown analysis type on the generated topic.
+        "reference.analysis.unknown",
         "reference.args.item-not-for-topic",
         "reference.args.item-without-topic",
         "reference.args.too-many",

@@ -177,14 +177,35 @@ internal sealed class McpServer
             },
             ["serverInfo"]   = new JsonObject { ["name"] = "circuitrf", ["version"] = Version() },
             // Terse, English, invariant (R-aut5-7). It says the three things a client cannot learn
-            // from a tool schema.
+            // from a tool schema — and then, since AUT-10 R-aut10-5, SHOWS them once. Most of what
+            // the exercise behind this series learned by trial and error is in that sequence, and a
+            // worked example is the one form of documentation a client does not have to go and ask
+            // for. It costs ~1 kB per session against tools/list's 20 kB.
             ["instructions"] =
                 "circuitRF is driven by writing its documents and then running, checking or " +
                 "explaining them; the file formats are the interface and there are no per-primitive " +
                 "edit tools. What may be written is in the reference resources, and in the " +
                 "'reference' tool for the same bytes. Every path resolves under this server's root, " +
                 "and a path outside it is refused. Nothing here deletes or overwrites an existing " +
-                "workspace.",
+                "workspace.\n" +
+                "\n" +
+                "End to end. Nothing here writes a document — use your own file tools for step 3.\n" +
+                "  1. create   what=workspace path=<root> name=demo      -> <root>/demo/.cws\n" +
+                "  2. reference topic=analyses type=sparam               -> every legal key, with defaults\n" +
+                "  3. write <root>/demo/pad.cnl:\n" +
+                "       Port:P1 in  0 Num=1 Z=50 Ohm\n" +
+                "       Port:P2 out 0 Num=2 Z=50 Ohm\n" +
+                "       R:R1 in  mid R=96 Ohm\n" +
+                "       R:R2 mid 0   R=71.2 Ohm\n" +
+                "       R:R3 mid out R=96 Ohm\n" +
+                "       analysis SP1 type=sparam start=1 stop=6 npts=51 Unit=GHz\n" +
+                "  4. check    path=<root>/demo/pad.cnl                  -> 0 errors, 0 warnings\n" +
+                "  5. run      analysis=sparam path=<root>/demo/pad.cnl output=<root>/demo/pad.s2p\n" +
+                "  6. read     path=<root>/demo/pad.s2p                  -> the cubes; narrow with only/at/range\n" +
+                "On an instance line the NETS come first and every 'Key=value' after them; how many " +
+                "nets each type takes is the 'nets' field of reference components, which is not the " +
+                "same number as its symbol's pin count. render draws a .csch, .csym, .clay or .cdd " +
+                "— never a .cnl. An unknown analysis key or type= token is refused, not ignored.",
         };
     }
 

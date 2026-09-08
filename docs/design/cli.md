@@ -50,7 +50,7 @@ Nine verbs run no analysis, so none of §3-§6 applies to them and §7's exit co
 | `render` | the same three view documents, a cell folder, a workspace + `--cell`, or a `.cdd` | draws it with the renderer the GUI draws with | one `.svg` / `.pdf` / `.png` — §13, and §13.7 for a data display |
 | `read` | a result file, or one of circuitRF's own documents | loads it back through the readers the GUI reads through | **nothing** — §11.4 |
 | `serve` | `--root <dir>` | a protocol server on stdin/stdout — §11 | whatever the tool it was asked for writes |
-| `reference` | **nothing at all** | reports what a caller may WRITE: the shipped reference pages, and the component catalogue generated from the live registries | **nothing** — §12 |
+| `reference` | **nothing at all** | reports what a caller may WRITE: the shipped reference pages, plus four topics generated from the live registries and readers — the component catalogue, the analysis directives, and the `.cdd` and `.ctech` formats | **nothing** — §12 |
 
 **`new` is one verb with a noun, not three** (`brief-automation-3-authoring-verbs.md` R-aut3-13): the
 surface has a standing cost, and adding `new schematic` later is a noun rather than a fourth
@@ -969,7 +969,9 @@ Three constraints, and they matter more than the feature:
   case where the caller should have narrowed. Base64 adds a third on top, which is why the cap is on
   the file rather than on the frame. **Over it, the answer is the path plus a diagnostic naming the
   size and what would narrow it** — never truncated and never dropped in silence, because a client
-  that asked for a picture and got nothing with no explanation simply asks again.
+  that asked for a picture and got nothing with no explanation simply asks again. **The schema says
+  so too** (AUT-10 R-aut10-5): stating the cap's behaviour only in the result leaves a caller that
+  asked for bytes and got a path working out why from a note it may not have read.
 - **Each format is attached as itself or not at all.** A `.png`/`.svg` is `image` content; a `.pdf` is
   an embedded `resource` with a `blob`, because a PDF is not an image. It is never transcoded to make
   it attachable — that would be the adapter making a rendering decision.
@@ -984,10 +986,24 @@ standing catalogue whose bytes do not change. A rendered image is per-call and e
 advertising one would mean advertising a URI whose content depends on arguments the URI does not
 carry.
 
+### 11.3c The server's `instructions` carry one worked example
+
+**AUT-10 R-aut10-5.** `initialize` already said the three things a client cannot learn from a tool
+schema — the formats are the interface, every path resolves under the root, nothing deletes. It now
+SHOWS them once as well: create a workspace, write a six-line `.cnl`, `check`, `run`, `read`, in
+about fifteen lines, with the three sentences a client most often needs after that (nets come before
+the first `Key=value`; `nets` is not the symbol's pin count; `render` does not take a `.cnl`).
+
+Most of what the exercise behind this series learned by trial and error is in that sequence, and a
+worked example is the one form of documentation a client does not have to know to go and ask for. It
+is ~1 kB per session against `tools/list`'s 20 kB, which is the proportion that makes it worth the
+standing cost. **The example is a real one** — it was written out and run before it was written down.
+
 ### 11.3a Resources — the cheaper channel for the same bytes
 
-The server also declares MCP **resources**, one per reference topic, at
-`circuitrf://reference/<topic>`. This is the correct channel for the reference surface: a resource
+The server also declares MCP **resources**, one per reference topic — the four generated ones
+included, so `circuitrf://reference/analyses`, `.../data-display` and `.../technology` are advertised
+beside the authored pages — at `circuitrf://reference/<topic>`. This is the correct channel for the reference surface: a resource
 costs a URI, a title and a size until it is read, where a tool description is a standing per-session
 cost. Each entry advertises its `size` in bytes for the reason the CLI's own topic list prints one —
 a list that hides the cost makes the cheap topics and the expensive ones look alike.
@@ -1017,6 +1033,16 @@ reason (§10.1). A directory is refused rather than walked — what a workspace 
 and `explain` answer — and an interchange file is refused NAMING `convert`, since half those formats
 are binary and handing back a GDSII stream as a JSON string would be an encoding decision this verb
 has no business making.
+
+**A `.wasm` assembly-rule module is refused for the same reason** (AUT-10 R-aut10-5). It is one of
+circuitRF's OWN document kinds, so it fell through to the text path and came back as whatever its
+bytes decoded to, with nothing saying so — a plausible-looking string, which is the failure class
+this surface exists to remove.
+
+**Its declared path kinds are audited against what it accepts.** The schema omitted `.cdd`, which
+this verb has always taken; an out-of-process client found that by trying it. A schema that
+under-promises costs a caller exactly what one that over-promises does, because a client believes it
+either way, and `ServeProtocolAdapterTests` is where that stays true.
 
 ### 11.5 What it refuses
 
@@ -1081,6 +1107,10 @@ circuitrf reference                     # the topic list, with each topic's size
 circuitrf reference netlist             # one topic, as its own text
 circuitrf reference components          # the catalogue
 circuitrf reference components MLIN     # one primitive
+circuitrf reference analyses            # every analysis directive and every key it takes
+circuitrf reference analyses sparam     # one directive
+circuitrf reference data-display        # the .cdd format, generated from the reader's own type
+circuitrf reference technology          # the .ctech format, likewise
 ```
 
 It takes no path, reads no file and writes nothing — the only verb here about no document at all,
@@ -1112,6 +1142,19 @@ one is changed.
 would be a second description of `CnlReader` that drifts from it silently, which is the exact failure
 this whole series exists to prevent.
 
+**Three more topics are generated the same way** (AUT-10). `analyses` is read from
+`AnalysisDirectiveSchema` — the table `CnlReader` itself validates against — so every `type=` token,
+every alias, every key, its default and whether it is required come from the thing that enforces
+them. `data-display` and `technology` are read by REFLECTION from `DataDisplayConfig` and `CtechFile`,
+the types their readers deserialise into, with each field's default taken off a freshly-constructed
+instance. Each of those two carries an authored preamble — what the format is for, and a minimal
+example that was written out and run — and everything after the preamble is generated.
+
+**What the generated half deliberately will not say is what a field MEANS.** A `.ctech` type carries
+no per-field summary the walk could read, and an invented meaning is worse than none — R-aut6-8's
+rule, applied to a format instead of to a parameter. The prose chapters (`stackup.html`,
+`data-display.html`) answer that half.
+
 ### 12.2 The topic set is curated
 
 Reading is the expensive direction (`automation-architecture.md` R-aut-10) and a client pays for every
@@ -1120,6 +1163,11 @@ byte, so what ships is the authoring critical path: `netlist`, `expressions`, `u
 excluded deliberately** — at 54 kB it is the largest page of them all, and a protocol client already
 has every verb's schema from `tools/list`, so it is the one page it needs least.
 
+The generated topics follow: `data-display`, `technology`, `analyses`, `components`. The first two are
+here because they are formats a client must WRITE and that `create` does not make one of — the
+exercise behind this series got a plot only because an unrelated `.cdd` happened to be on the machine
+to copy from.
+
 The topic list carries each topic's size **as served**, in bytes, so a client choosing between a
 4.4 kB page and an 84 kB one can choose.
 
@@ -1127,7 +1175,42 @@ The topic list carries each topic's size **as served**, in bytes, so a client ch
 answer different questions — the catalogue says what may be WRITTEN, the page says what it MEANS —
 and they cannot both hold the same name. The machine answer keeps the plain one.
 
-### 12.3 A port count that is not fixed is reported as not fixed
+### 12.3 A symbol's pin count is not a netlist line's net count, and the catalogue says both
+
+**This was the origin of the series' worst finding** (AUT-7 §3, AUT-10 R-aut10-2). The catalogue
+published the SYMBOL's pin count under the heading `nets`. They differ wherever a terminal is
+implicit on the glyph — a `Tuner` draws one pin and its instance line binds two, and so do `Port`,
+`Term`, `Vdc` and `IProbe` — and they differ for an `SDD` by construction. A client wrote
+`Tuner:T1 n1 Z[1]=50 BiasTee=on Vbias=48` from the catalogue's own description, got a bench whose
+bias tee delivered nothing with `status: ok` and Pout at the engine's floor sentinel at every drive
+point, and reported the component as broken. The model was correct.
+
+Each entry now carries **two** facts under two headings:
+
+```
+Tuner
+  nets: 2                     <- what the .cnl instance line binds
+  terminals: 1  1             <- what the symbol draws
+```
+
+`nets` comes from `InstanceNetContract` — the same table the elaborator refuses a wrong count with
+(§R-aut8-4), so the catalogue and the reader cannot disagree. It is **measured**, not written down:
+`ForToken` constructs the type at three port counts and asks `Expected` of each, so three equal
+answers is a fixed count and a progression is a rule with its multiplier and intercept read off the
+measurement. Four tokens no measurement can reach (`SnP`, `wBond`, `ExtDevice`, `VerilogA`) state a
+sentence instead, each because the rule genuinely is not a number.
+
+**The parameter that sets a variadic count is the NETLIST's spelling, which is not always the
+symbol's.** The parameter panel calls an SDD's port count `NumPorts`; a `.cnl` line spells it
+`SddPortCount`. The catalogue prints the first against `terminals` and the second against `nets`,
+which is exactly what is true of it.
+
+The note against a symbol-less type used to end "…and nothing below the UI firewall states how many
+nets its instance line takes." **That caveat was the defect, not a disclaimer of it**, and it is
+gone: the count is stated for those types like every other, and what such a type is genuinely
+missing is the palette's defaults and its pin names.
+
+### 12.4 A port count that is not fixed is reported as not fixed
 
 Several primitives are variadic: an SDD's and a `Z_Port`'s and an `SnP`'s port count follow
 `NumPorts`, a Verilog-A model's follows `Pins`, the ideal switch's follows `Throws`, a wBond's follows
@@ -1136,13 +1219,16 @@ the `sweep-unit-scale-and-mark` failure class — a number that is plausible, sp
 nothing reporting it. So those report `determinedBy` and no count, and the terminals they do carry are
 labelled with the port count they were listed at.
 
-**Nothing constructs a parameterized model to ask it.** And nothing reads
-`ComponentModel.PortCount` either: that is the model's port count in the MNA sense and is not the
+**Nothing constructs a parameterized model to ask it for a TERMINAL count.** And nothing reads
+`ComponentModel.PortCount` anywhere: that is the model's port count in the MNA sense and is not the
 number of nets an instance line writes — a current probe reports 1 and takes two nets, a FET reports 2
 and takes three, a 2-port SDD reports 2 and takes four. `SymbolPortDefs` is the contract
-`NetExtractor` emits nets by, so it is the one that answers the question a caller is actually asking.
+`NetExtractor` emits nets by, so it is the one that answers the terminal question; `InstanceNetContract`
+answers the net one (§12.3), and it DOES construct — from a minimal parameter set that the three-point
+probe proves cannot have moved the answer, which is a different thing from reading a count off a model
+built out of invented values.
 
-### 12.4 The mismatch is part of the answer
+### 12.5 The mismatch is part of the answer
 
 `ComponentModelFactory` keys on the `.cnl` token; `ComponentTypeRegistry` keys on `SymbolKind`; and
 `EngineReference` bridges them without being total in either direction. **Five** `EngineReference`
@@ -1153,12 +1239,20 @@ placeable in a `.cnl` and has no palette metadata; one in the first is drawable 
 elaborate. Both are things a client needs told, so the catalogue emits both with a note, never the
 intersection.
 
-### 12.5 The gate
+### 12.6 The gate
 
 `tests/Ui.Tests/ReferenceCliVerbTests.cs` for the verb, the embedded set and the catalogue;
 `tests/Ui.Tests/ServeProtocolAdapterTests.cs` for both protocol channels. Every catalogue assertion is
 made against the live registry rather than a committed list — a golden of all 68 primitives would pass
 forever after somebody froze it.
+
+`tests/Ui.Tests/GeneratedReferenceTests.cs` for AUT-10's three: **every stated net count is the count
+the reader binds** — asserted by writing the instance line and elaborating it, one net short and one
+net long as well, not by comparing two functions in one file; **every `type=` token and every key the
+generated analyses topic lists is one the reader accepts, and vice versa**; and **every topic the index
+lists resolves, is non-empty, and is the size the index promised**. The two format topics' examples are
+extracted from the served page and parsed, because an example that does not work is the failure the
+topic was written to prevent.
 
 
 ## 13. `render` — the one output the command line did not have

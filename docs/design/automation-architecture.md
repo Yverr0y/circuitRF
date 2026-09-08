@@ -134,13 +134,32 @@ that are different in kind:
 | Half | Source | How it stays true |
 |---|---|---|
 | The reference pages | the authored `docs/user/src/reference/` pages, embedded in `CircuitRF.Design` | referenced in place from the `.csproj`, so the embedded bytes ARE the authored bytes; a test compares them |
-| The component catalogue | `ComponentModelFactory`, `ComponentTypeRegistry`, `SymbolPortDefs` | generated at every call; `DocTables` renders the documentation tables from the same `ComponentCatalog` |
+| The component catalogue | `ComponentModelFactory`, `ComponentTypeRegistry`, `SymbolPortDefs`, `InstanceNetContract` | generated at every call; `DocTables` renders the documentation tables from the same `ComponentCatalog` |
 
 **There is no third thing** — no grammar, no schema, no BNF. A hand-written grammar in an adapter is a
 second description of `CnlReader` that drifts from it silently, which is the failure this whole series
 exists to prevent. The prose is authored and maintained; the code facts are generated; and where a
 registry knows a parameter's name, default, unit and visibility but not what it is FOR, the catalogue
 says nothing rather than inventing a meaning.
+
+**AUT-10 widened the generated half to everything else a client has to write** (2026-09-08):
+
+| Topic | Generated from | What it prevents |
+|---|---|---|
+| `analyses` | `AnalysisDirectiveSchema`, the table `CnlReader` validates against | eight guesses to find `loadpull_pursuit`, and ~fifteen round trips to reconstruct one directive's keys |
+| `data-display` | `DataDisplayConfig`, by reflection over the type the `.cdd` reader deserialises into | a client that could only plot because an unrelated `.cdd` was on the machine to copy from |
+| `technology` | `CtechFile`, likewise | the same, for `.ctech` |
+
+Each of the two format topics carries an authored preamble — what the format is FOR and a minimal
+example that was written out and RUN — and generates everything after it. Neither claims what a field
+MEANS: the types carry no per-field summary to read one from, and an invented meaning is worse than
+none.
+
+**The catalogue's own worst defect was fixed here, not in AUT-6.** It published the SYMBOL's pin count
+under the heading `nets`, which is a different quantity: a `Tuner` draws one pin and its instance line
+binds two. A client that believed it reported a working component as broken. The net count is now its
+own field, from `InstanceNetContract` — the same table the elaborator refuses a wrong count with — and
+the gate writes an instance line per registered type and elaborates it.
 
 `cli.md` §12 has the detail, including why a port count that is not fixed is reported as not fixed and
 why the two keyings' mismatch is part of the answer rather than filtered out of it.
@@ -367,6 +386,13 @@ than as a rough edge, and it is why the fixes are shaped the way they are:
 - **A refusal names the thing to change.** The pattern is the artwork half's unknown-technology
   refusal, which lists the five real ids: not "invalid layer mapping" but the key, what it was given,
   and what it accepts.
+- **A page that states the caveat instead of closing it is the defect too.** The catalogue carried a
+  note against `Term` saying nothing below the UI firewall stated how many nets its instance line
+  takes. It was accurate and it was the problem: the reader knew, and nothing asked it. AUT-10's
+  R-aut10-2 removed the note by removing the gap.
+- **A schema that under-promises costs what one that over-promises does.** `read` accepted a `.cdd`
+  and did not say so; a client that believes a schema is behaving correctly either way. Auditing the
+  declared path kinds against what each tool accepts is part of the same rule.
 
 Where a full determination is genuinely too expensive for a verb's budget, the weaker claim stated
 honestly beats the strong one stated wrongly — `declared` rather than `runnable`. `explain` reports

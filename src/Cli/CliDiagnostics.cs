@@ -1092,6 +1092,18 @@ internal static class CliDiagnostics
         "circuitRF's own documents.",
         ("path", path), ("format", format));
 
+    /// <summary>
+    /// The one document kind of circuitRF's own that is BINARY (AUT-10 R-aut10-5). A compiled
+    /// assembly-rule module read as text comes back as whatever the bytes decode to and reaches a
+    /// caller as a plausible-looking string, which is the failure class this surface exists to
+    /// remove — so it is a refusal that names what the file is.
+    /// </summary>
+    public static Diagnostic ReadBinaryDocument(string path, string kind) => Diagnostic.Create(
+        "read.file.binary", DiagnosticSeverity.Error,
+        "read: '{path}' is a {kind} module, which is compiled binary rather than text. read returns " +
+        "a document's own bytes as text, and there is no text here to return.",
+        ("path", path), ("kind", kind));
+
     // ── reference (brief-automation-6-reference-and-components.md) ───────────
 
     /// <summary>An unknown topic, LISTING the real ones — <c>--tech</c>'s precedent (AUT-3): never
@@ -1107,11 +1119,19 @@ internal static class CliDiagnostics
         "reference.component.unknown", DiagnosticSeverity.Error,
         "No primitive type '{type}'. Types: {known}", ("type", type), ("known", known));
 
-    /// <summary>A second argument on a topic that does not have items. Only <c>components</c>
-    /// does.</summary>
+    /// <summary>An <c>analysis type=</c> token nothing understands, listing every one that IS
+    /// understood — the same shape as the reader's own refusal (AUT-8 R-aut8-2), because a caller
+    /// that reaches this one is about to write the line the reader will refuse.</summary>
+    public static Diagnostic ReferenceUnknownAnalysis(string type, string known) => Diagnostic.Create(
+        "reference.analysis.unknown", DiagnosticSeverity.Error,
+        "No analysis type '{type}'. Types: {known}", ("type", type), ("known", known));
+
+    /// <summary>A second argument on a topic that does not have items. Only <c>components</c> and
+    /// <c>analyses</c> do.</summary>
     public static Diagnostic ReferenceItemNotForTopic(string topic) => Diagnostic.Create(
         "reference.args.item-not-for-topic", DiagnosticSeverity.Error,
-        "reference: '{topic}' is one page and names nothing inside it. Only 'components' takes a type.",
+        "reference: '{topic}' is one page and names nothing inside it. Only 'components' and " +
+        "'analyses' take a name.",
         ("topic", topic));
 
     /// <summary>A type named with no topic. Reachable from a tool call, where the two arguments are
