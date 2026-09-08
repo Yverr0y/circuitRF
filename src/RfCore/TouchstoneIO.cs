@@ -328,7 +328,16 @@ namespace RfCore
             }
 
             // ---- Option line ----
-            (string freqUnitStr, double freqDiv) = writeSnp.FreqUnit switch
+            // AUT-8 R-aut8-3: when nobody has STATED a unit, the data chooses it. An SNP produced by
+            // an analysis carries SNP.FreqUnit's own default of GHz, so a sweep that ran in the Hz
+            // decade used to write "# GHz" above a first column reading 5E-10 — a file that is wrong
+            // whichever end you believe, with nothing in it to say which. A file that was READ keeps
+            // the unit its own option line declared, so a read-write round trip is byte-identical.
+            var declaredUnit = writeSnp.FreqUnitIsStated
+                ? writeSnp.FreqUnit
+                : UnitForData(snp.Frequencies);
+
+            (string freqUnitStr, double freqDiv) = declaredUnit switch
             {
                 FrequencyUnit.Hz  => ("Hz",  1.0),
                 FrequencyUnit.kHz => ("kHz", 1e3),
@@ -496,6 +505,7 @@ namespace RfCore
             ref MatrixFormat format, ref double z0Real,
             ref FrequencyUnit freqUnit)
         {
+            // (see UnitForData below for the write-side counterpart of this parse)
             var parts = line[1..].Trim()
                 .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
 
@@ -572,6 +582,30 @@ namespace RfCore
         // ============================================================
         //  Private helpers — writer
         // ============================================================
+
+        /// <summary>
+        /// The unit an option line should declare for a sweep nobody has stated a unit for: the
+        /// largest one in which the highest frequency still reads as at least 1.
+        ///
+        /// <para>GHz for an empty or all-zero sweep, which is this type's own long-standing default
+        /// and the only case where there is nothing in the data to go on.</para>
+        /// </summary>
+        internal static FrequencyUnit UnitForData(double[] frequencies)
+        {
+            double max = 0.0;
+            foreach (double f in frequencies)
+            {
+                double a = Math.Abs(f);
+                if (double.IsFinite(a) && a > max) max = a;
+            }
+
+            return max <= 0.0 ? FrequencyUnit.GHz
+                 : max >= 1e12 ? FrequencyUnit.THz
+                 : max >= 1e9  ? FrequencyUnit.GHz
+                 : max >= 1e6  ? FrequencyUnit.MHz
+                 : max >= 1e3  ? FrequencyUnit.kHz
+                 :               FrequencyUnit.Hz;
+        }
 
         private static void AppendFormatted(StringBuilder sb, Complex c,
                                             MatrixFormat fmt, string precision)

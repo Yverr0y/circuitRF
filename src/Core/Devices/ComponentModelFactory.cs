@@ -515,15 +515,10 @@ public static class ComponentModelFactory
         {
             if (!key.Equals(VerilogAOpVarsParam, StringComparison.OrdinalIgnoreCase)) continue;
 
-            if (val.Kind == ValueKind.Bool) return val.AsBool();
-            if (val.Kind == ValueKind.Real) return val.AsReal() != 0.0;
-            if (val.Kind != ValueKind.String) return true;
-
-            string s = val.AsString().Trim();
-            return !(s.Equals("0",     StringComparison.Ordinal)          ||
-                     s.Equals("false", StringComparison.OrdinalIgnoreCase) ||
-                     s.Equals("no",    StringComparison.OrdinalIgnoreCase) ||
-                     s.Equals("off",   StringComparison.OrdinalIgnoreCase));
+            // AUT-8 R-aut8-5. This recognised four spellings of FALSE and read everything else —
+            // a typo included — as true, which is BiasTee's defect with the sign reversed. One rule
+            // now, and an unrecognised spelling is refused rather than silently turning the flag on.
+            return BooleanParameter.Parse(VerilogAOpVarsParam, val);
         }
         return true;
     }
@@ -807,11 +802,12 @@ public static class ComponentModelFactory
         if (parameters.TryGetValue("Zdefault", out var zdv))
             zDefault = ToComplex(zdv);
 
-        bool   hasBiasTee = false;
+        // AUT-8 R-aut8-5. This used to test for the literal string "on" and nothing else, so
+        // BiasTee=true, =1, =True and =Yes were each accepted in silence and each produced a Tuner
+        // with no bias at all — a wired-wrong circuit that simulates to completion. Every ordinary
+        // spelling now works and anything else is refused by name.
+        bool   hasBiasTee = BooleanParameter.Parse(parameters, "BiasTee", whenAbsent: false);
         double vbias      = 0.0;
-        if (parameters.TryGetValue("BiasTee", out var btv) &&
-            btv.Kind == ValueKind.String && btv.AsString().Equals("on", StringComparison.OrdinalIgnoreCase))
-            hasBiasTee = true;
         if (parameters.TryGetValue("Vbias", out var vbv) && vbv.Kind == ValueKind.Real)
             vbias = vbv.AsReal();
 
@@ -2520,7 +2516,7 @@ public static class ComponentModelFactory
             design.OperatingTempC = temp.AsReal();
 
         if (parameters.TryGetValue("GroundPlane", out var plane))
-            design.GroundPlane.Enabled = IsTrue(plane);
+            design.GroundPlane.Enabled = BooleanParameter.Parse("GroundPlane", plane);
 
         // The overmold permittivity (wbond.md §3.7). Applied to the DECODED design, exactly as Temp
         // and GroundPlane are: the payload carries the document's own value and the instance parameter
@@ -2542,14 +2538,14 @@ public static class ComponentModelFactory
         // has 2M terminals, with it on 2M+1. REF is always the LAST one, so this changes nothing about
         // the signal terminals or the stamp — see WBondModel's own note. Read as text rather than as a
         // number because that is how the schematic writes it and how the elaborator stores it.
-        bool refPin = parameters.TryGetValue("RefPin", out var pin) && IsTrue(pin);
+        bool refPin = BooleanParameter.Parse(parameters, "RefPin", whenAbsent: false);
 
         // Capacitance to the reference plane (wbond.md §3.7). An instance parameter WINS over the
         // design's own flag, the same way GroundPlane and Temp do; absent, the design decides — which
         // is what makes the wBond editor's toolbar toggle the default a newly-placed component
         // inherits rather than a setting the schematic silently ignores.
         bool? includeCapacitance = parameters.TryGetValue("IncludeCapacitance", out var cap)
-            ? IsTrue(cap)
+            ? BooleanParameter.Parse("IncludeCapacitance", cap)
             : null;
 
         return new WBondModel(design, path, refPin, notes, includeCapacitance);
@@ -2626,19 +2622,6 @@ public static class ComponentModelFactory
         value = default!;
         return false;
     }
-
-    /// <summary>
-    /// A boolean-ish parameter value: <c>true</c> either as a real non-zero or as the word. Both
-    /// spellings reach here — a schematic writes "true"/"false", and a hand-authored <c>.cnl</c> may
-    /// write 1/0.
-    /// </summary>
-    private static bool IsTrue(Value value) => value.Kind switch
-    {
-        ValueKind.String => value.AsString().Equals("true", StringComparison.OrdinalIgnoreCase),
-        ValueKind.Bool => value.AsBool(),
-        ValueKind.Real => value.AsReal() != 0.0,
-        _ => false,
-    };
 
     /// <summary>
     /// Reduces the resolved parameter dictionary to the <b>controlling parameters</b> of

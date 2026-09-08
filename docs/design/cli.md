@@ -562,6 +562,20 @@ as a step: what was being resolved, from where, to what, and by which rule.
   and the run cannot part company. A named analysis that comes back from selection but is not of that
   verb's kind is **not** reported as dispatched: `SelectTop` hands back `owner ?? named`, so
   `lp -a HB1` returns HB1, and calling that "lp dispatches HB1" would describe a run that cannot happen.
+
+  **`runnable` is two claims, not one (AUT-8 R-aut8-8).** The chain has to bottom out in an enabled
+  analysis *and* every reference the analysis names by string has to resolve. It used to be the first
+  half alone, so a loadpull-pursuit naming a load tuner and a source tuner that do not exist in the
+  design came back `runnable: true, dispatched: true, dispatchedBy: lpp`. Whether a thing will run is
+  the question this verb exists to answer, and answering it optimistically is worse than not
+  answering: the caller acts on the yes, and the refusal it eventually gets is about something it has
+  already been told is fine. The references checked are the tuner instance names, the inner analysis a
+  sweep wraps, the swept variable, and the variables a tone expression reads — each a lookup against a
+  list already in memory, so R-aut4-1's no-solve budget is untouched. When any fails, `unresolved`
+  carries one line per failure naming the key and what it pointed at, because "not runnable" without
+  **which** reference failed leaves the caller no better off. What is deliberately NOT claimed is
+  anything needing a solve: "this bench has no bias source" is a property of the solved circuit, and
+  asserting it here would be the same overreach in the other direction.
 - **`--expr`** — evaluated in the design's own resolved scope, through the one expression engine
   (`Elaborator.EvaluateInGlobalScope`), never by substitution. The kind is reported, never coerced.
   `--set` applies first, exactly as it does for a run verb (§5).
@@ -667,6 +681,87 @@ plus one field of its own for a document returned verbatim:
 
 `outputs` is empty for both — neither verb writes a file, and a caller looking for one must not find
 one invented.
+
+---
+
+## 10A. The netlist contract: what the reader refuses
+
+**AUT-8.** `check` and `explain` can only be as honest as the reader underneath them, and the reader
+used to accept a line and discard whatever it did not recognise. That combination — accept, discard,
+report clean — is what made the surface manufacture confident wrong answers about the product: an
+out-of-process client wrote up a working component as defective, with a minimal reproduction case,
+because nothing in the surface was willing to say which of the two participants was wrong
+(`brief-automation-7-mcp-hardening.md` §3).
+
+**The rule is that silence is the defect.** Three things follow from it.
+
+### 10A.1 The analysis directive has a schema, and it is a registry rather than a document
+
+`src/Core/Netlist/AnalysisDirectiveSchema.cs` states every `type=` token and, for each, every legal
+key with whether the directive is incomplete without it. `CnlReader` validates against it before any
+`TryParse*Directive` sees the line, so:
+
+- an unknown `type=` is refused **with the legal tokens listed** — it used to fall through to a
+  `RawDirective` and surface, much later, as *"The document declares no analysis"*, which named
+  neither the token nor the problem and cost one exercise eight guesses;
+- an unknown key is refused **by name, with the legal keys for that type**;
+- **every** missing required key is reported at once, because a caller that must re-run to discover
+  the second one pays the full cost of a run for each.
+
+The schema is authoritative about a key's NAME and whether it is required. It is deliberately **not**
+authoritative about defaults: the reader's own `GetValueOrDefault` calls still apply those, and a
+second copy here would be a second place to change. `NetlistContractTests` holds the two halves in
+step — every key `CnlWriter` emits must be one the schema declares (or the application could not read
+its own output), and every token the schema declares must produce a typed analysis (or it is a
+promise the reader does not keep).
+
+**Aliases are derived, not tabulated.** The schematic serialises the same concepts as
+`LpLoadTunerName`, `LpToneExpr`, `LppOutputGridPath` and about twenty more; the `.cnl` spelling of
+each is that name with an `Lp`/`Lpp`/`Psa` prefix and an `Expr`/`Name`/`Path` suffix removed. Writing
+the rule rather than sixty pairs is what keeps it true after the next key is added — and a key that
+would itself be changed by the rule (and so could shadow another) fails a test rather than colliding.
+
+### 10A.2 A net count is not a port count
+
+`src/Core/Netlist/InstanceNetContract.cs` states how many nets each primitive's instance line binds.
+It is a separate statement from `ComponentModel.PortCount` because **"port" means three different
+things in this codebase and none of them is "net"**: a resistor's two ports are its two terminals; a
+FET's two ports are (gate,source) and (drain,source), which is three nets; an ideal S-block's ports
+take a signal net and a reference net each; a `Tuner` declares one port and takes two nets.
+
+Reading a net count off `PortCount` is how the generated catalogue came to describe `Tuner` as a
+one-net part — and a client that wrote it that way got a circuit whose bias tee delivered nothing,
+`status: ok`, and Pout at the engine's floor sentinel at all 56 drive points.
+
+The check runs in `Elaborator`, **after** the model is constructed (so a parameterised part answers
+from its own resolved parameters) and **before** any node minting or family expansion (so the array
+still holds exactly what the line wrote). The ordering matters more than it looks: every family
+expansion in that method is guarded by an exact length — `resolvedNodes.Length == 3` and friends — so
+a short line did not fail there, it *skipped* the expansion and built a wired-wrong circuit that
+simulated to completion.
+
+A model that returns null states no count, and each null is a named exception with a reason: `SnP`
+takes N nets or N+1 and `CnlReader.ValidateSnpNets` already says so better; `ExtDevice`'s count is
+the provider's external pin count, which is neither fixed per type nor equal to `PortCount`, and
+`BuildExternalDeviceNodes` already refuses a mismatch with more detail than a number could carry.
+There is no third category: a test walks `ComponentModelFactory`'s registry and fails on a type that
+is neither counted nor named.
+
+### 10A.3 One reading of a boolean, and one of an inline unit
+
+`BooleanParameter` is the single reading of a yes/no parameter. There were three, each silent about
+what it did not recognise, and two of them disagreed: `BiasTee` accepted the literal `on`, `IsTrue`
+accepted the literal `true`, and the Verilog-A op-vars flag recognised four spellings of FALSE and
+read everything else — a typo included — as true. **Widening without refusing would only move the
+silent boundary**, so both halves ship together: the ordinary spellings all work, and anything else
+is refused by name with the list.
+
+`Units.LiftInlineUnit` is the single reading of a unit written inline in an assignment. The `.cnl`
+reader lifted only the scaling units and the schematic's VAR path lifted those plus the identity ones,
+so `VDS = 48 V` meant a variable in a schematic and a parse error in a netlist while the reference
+page documented one rule for both. The rule is now the wider one, and the parse verification the wide
+unit table needs — split only when the split turns text the parser rejects into text it accepts — is
+what keeps `x = 2 * f` a multiplication rather than two femtoseconds.
 
 ---
 

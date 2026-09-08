@@ -542,21 +542,130 @@ internal static class Explain
             }
 
             var top = AnalysisChain.ResolveEffectiveTop(a, tb);
+
+            // R-aut8-8. "Runnable" is the chain reaching an enabled analysis AND every reference the
+            // chain names by string resolving. Checked over the whole chain, not just this root: a
+            // parametric sweep is runnable exactly when the analysis it wraps is.
+            var unresolved = UnresolvedReferences(a, tb);
+            bool runnable  = top is not null
+                          && AnalysisChain.IsChainRunnable(top, tb)
+                          && unresolved.Count == 0;
+
             rows.Add(new ExplainAnalysisJson(
                 a.Name,
                 KindOf(a),
                 a.Enabled,
-                top is not null && AnalysisChain.IsChainRunnable(top, tb),
+                runnable,
                 !inner.Contains(a.Name),
                 chain,
-                dispatched.ContainsKey(a.Name),
-                dispatched.TryGetValue(a.Name, out var byVerb) ? byVerb : null,
+                dispatched.ContainsKey(a.Name) && runnable,
+                dispatched.TryGetValue(a.Name, out var byVerb) && runnable ? byVerb : null,
                 promoted.TryGetValue(a.Name, out var from) ? from : null,
-                SweepOf(a)));
+                SweepOf(a),
+                unresolved.Count > 0 ? unresolved : null));
         }
 
         return (rows, exit);
     }
+
+    /// <summary>
+    /// The references an analysis names as STRINGS and that do not resolve in this design — the load
+    /// and source tuner instance names, the inner analysis a sweep wraps, and the variables a tone
+    /// expression reads.
+    ///
+    /// <para><b>Why <c>explain</c> asks this at all (AUT-8 R-aut8-8).</b> A DUT cell was reported
+    /// <c>runnable: true, dispatched: true, dispatchedBy: lpp</c> while naming a load tuner and a
+    /// source tuner that do not exist in it, containing no bias source, and referencing an undefined
+    /// variable. Whether a thing will run is the question this verb exists to answer.</para>
+    ///
+    /// <para><b>Within R-aut4-1's budget.</b> Each of these is a name lookup against a list already in
+    /// memory — no elaboration, no solve. What is deliberately NOT checked is anything needing one:
+    /// "contains no bias source" is a property of the SOLVED circuit, and claiming it here would be
+    /// the same overreach in the other direction. So this reports what it can establish and the
+    /// chain's own enabled-ness, and nothing it would have to guess at.</para>
+    /// </summary>
+    private static List<string> UnresolvedReferences(Analysis a, TestBench tb)
+    {
+        var bad = new List<string>();
+
+        // Walk the chain: a sweep's own runnability is its inner analysis's.
+        Analysis? walk = a;
+        for (int guard = 0; walk is not null && guard < 64; guard++)
+        {
+            switch (walk)
+            {
+                case ParametricSweepAnalysis ps:
+                    if (AnalysisChain.ResolveEffectiveInner(ps.InnerAnalysisName, tb) is null)
+                        bad.Add($"Inner={ps.InnerAnalysisName}: no analysis of that name in this document.");
+                    if (!string.IsNullOrEmpty(ps.SweepVarName) && !DeclaresVariable(tb, ps.SweepVarName))
+                        bad.Add($"Var={ps.SweepVarName}: no global variable of that name.");
+                    walk = AnalysisChain.ResolveEffectiveInner(ps.InnerAnalysisName, tb);
+                    continue;
+
+                case LoadpullAnalysis lp:
+                    CheckTuner(bad, tb, "LoadTuner",   lp.LoadTunerName);
+                    CheckTuner(bad, tb, "SourceTuner", lp.SourceTunerName);
+                    CheckTone (bad, tb, lp.ToneExpr);
+                    break;
+
+                case LoadpullPursuitAnalysis lpp:
+                    CheckTuner(bad, tb, "LoadTuner",   lpp.LoadTunerName);
+                    CheckTuner(bad, tb, "SourceTuner", lpp.SourceTunerName);
+                    CheckTone (bad, tb, lpp.ToneExpr);
+                    break;
+
+                case HarmonicBalanceAnalysis hb:
+                    if (hb.ToneExprs.Length > 0)
+                        foreach (var t in hb.ToneExprs) CheckTone(bad, tb, t);
+                    else
+                        CheckTone(bad, tb, hb.ToneExpr);
+                    break;
+            }
+            break;
+        }
+
+        return bad;
+    }
+
+    /// <summary>A tuner is named by INSTANCE name and must be a Tuner in the bench itself — a loadpull
+    /// tunes the top-level terminations, so one inside a sub-cell is not reachable by this name.</summary>
+    private static void CheckTuner(List<string> bad, TestBench tb, string key, string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) { bad.Add($"{key}= is empty."); return; }
+
+        var hit = tb.Instances.FirstOrDefault(
+            i => i.InstanceName.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (hit is null)
+        {
+            var tuners = tb.Instances
+                .Where(i => i.Reference.Equals("Tuner", StringComparison.OrdinalIgnoreCase))
+                .Select(i => i.InstanceName).ToList();
+            bad.Add($"{key}={name}: no instance of that name in this document." +
+                    (tuners.Count > 0 ? $" Its Tuners are: {string.Join(", ", tuners)}." : " It has no Tuner."));
+        }
+        else if (!hit.Reference.Equals("Tuner", StringComparison.OrdinalIgnoreCase))
+            bad.Add($"{key}={name}: that instance is a {hit.Reference}, not a Tuner.");
+    }
+
+    /// <summary>
+    /// Every bare name a tone expression reads must be a declared global. A tone that silently
+    /// resolves to nothing is what made a run announce <c>f0=0 GHz</c> and proceed.
+    /// </summary>
+    private static void CheckTone(List<string> bad, TestBench tb, string expr)
+    {
+        if (string.IsNullOrWhiteSpace(expr)) return;
+
+        IReadOnlyCollection<string> names;
+        try   { names = AstWalker.CollectRefs(Parser.Parse(expr)); }
+        catch (ExpressionException ex) { bad.Add($"Tone={expr}: {ex.Message}"); return; }
+
+        foreach (var n in names)
+            if (!DeclaresVariable(tb, n))
+                bad.Add($"Tone={expr}: '{n}' is not a variable this document declares.");
+    }
+
+    private static bool DeclaresVariable(TestBench tb, string name)
+        => tb.GlobalVariables.Any(v => v.Name.Equals(name, StringComparison.Ordinal));
 
     private static string KindOf(Analysis a) => a switch
     {
@@ -760,6 +869,12 @@ internal static class Explain
                         (s.Step is { } st ? $" step {st:G6}" : "") +
                         $" {s.BaseUnit} ({s.Points} pts, {s.Kind}" +
                         (s.StatedUnit.Length > 0 ? $", stated in {s.StatedUnit} ×{s.Scale:G6}" : "") + ")");
+
+                // R-aut8-8. "not-runnable" without WHICH reference failed leaves the caller no
+                // better off than the optimistic "runnable" this replaced, so the reasons are on
+                // stdout too rather than only in --json.
+                foreach (var u in a.Unresolved ?? [])
+                    Console.WriteLine($"      unresolved: {u}");
             }
         }
     }

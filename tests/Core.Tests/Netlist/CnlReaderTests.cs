@@ -307,7 +307,7 @@ public class CnlReaderTests
     [Fact]
     public void InlineRead_SParamPromotedToTyped()
     {
-        var src = "analysis SP type=sparam start=1 GHz\nmeasure Gain = dB(S(2,1))\n";
+        var src = "analysis SP type=sparam start=1 GHz stop=10 GHz\nmeasure Gain = dB(S(2,1))\n";
         var (_, tb) = new CnlReader().Read(src);
         // type=sparam is now promoted to a typed SParameterAnalysis, not a RawDirective
         Assert.Empty(tb.RawDirectives);

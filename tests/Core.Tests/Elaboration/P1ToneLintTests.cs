@@ -101,7 +101,7 @@ R:R1  n1 0  R=100 Ohm
         var nl = Parse(@"
 P1Tone:P1  n1 0  Pavl=0 dBm Z=50 Ohm Freq=1 GHz Phase=0 deg
 R:R1  n1 0  R=100 Ohm
-analysis HB type=hb fund=1 GHz harmonics=5
+analysis HB type=hb Tone=1 GHz MaxHarm=5
 ");
         Assert.False(HasNumWarning(nl),
             $"Expected no Num warning without an S-parameter analysis; got: {string.Join("; ", nl.Warnings)}");

@@ -822,6 +822,22 @@ public sealed class Elaborator
                                      ?? throw new InvalidOperationException(
                                          $"Failed to create model for primitive '{inst.Reference}' at '{childPath}'");
 
+                // AUT-8 R-aut8-4. The net count is checked HERE — after the model exists, so a
+                // parameterised part answers from its own resolved parameters, and BEFORE any of the
+                // minting and family expansion below, which is the only point at which the array
+                // still holds exactly what the instance line wrote.
+                //
+                // Every expansion below is guarded by an exact length ("resolvedNodes.Length == 3"),
+                // so a short line does not fail there — it SKIPS the expansion and builds a
+                // wired-wrong circuit that simulates to completion. That silence is what let a
+                // one-net Tuner return status: ok with Pout at the floor sentinel at all 56 drive
+                // points, and be written up as a defective component model.
+                if (Netlist.InstanceNetContract.Expected(model) is { } expectedNets &&
+                    inst.NetBindings.Count != expectedNets)
+                    throw new InvalidOperationException(
+                        Netlist.InstanceNetContract.Refusal(inst.Reference, childPath,
+                                                    inst.NetBindings.Count, expectedNets));
+
                 if (model is ToneSourceModelBase tsm)
                     foreach (var w in tsm.GetZeroHzToneWarnings(childPath))
                         netlist.AddWarningOnce($"zero-hz-tone:{childPath}", w);

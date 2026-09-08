@@ -1549,3 +1549,28 @@ RC-7's `history versions --changes` asks git directly whether a version has a pa
 comparison to `HistoryBrowser`. It is one read and it is not RC-9's; the gate asserts there is exactly
 **one** occurrence, so a second cannot arrive quietly. Every noun this brief added assembles no git
 argument at all.
+
+
+## AUT-8 R-aut8-8 — `explain` reported `runnable: true` for a chain that could not run (2026-09-07)
+
+A DUT cell came back `runnable: true, dispatched: true, dispatchedBy: lpp` while naming a load tuner
+and a source tuner that do not exist in it. `runnable` was `AnalysisChain.IsChainRunnable` alone —
+"the chain bottoms out in an enabled analysis" — which says nothing about the references the analysis
+names by string.
+
+`Explain.UnresolvedReferences` now resolves those: the tuner instance names (present, and actually a
+`Tuner`), the inner analysis a sweep wraps, the swept variable, and every free variable in a tone
+expression. Each is a lookup against a list already in memory, so R-aut4-1's no-solve budget is
+untouched.
+
+Three things worth keeping:
+
+- **`dispatched` had to move with `runnable`.** Reporting a chain as not runnable while still saying a
+  verb would dispatch it is the same optimistic claim wearing a different field name.
+- **The false case has to say WHICH reference failed**, or the caller is no better off than with a
+  clean report. `unresolved` carries one line per failure naming the key and what it pointed at, and
+  the tuner case lists the design's actual `Tuner` instances when there are any.
+- **What is deliberately NOT claimed.** The same DUT also contained no bias source. That is a property
+  of the SOLVED circuit; asserting it inside a verb that does not solve would be the same overreach in
+  the other direction, and the brief's own instruction is that the weaker claim stated honestly beats
+  the stronger one stated wrongly.

@@ -281,6 +281,48 @@ assumes the caller already knows what to put in the file.
 
 ---
 
+## 6A. Silence is the defect
+
+**AUT-7 R-aut7-0, inherited by AUT-8 through AUT-12.** A client that writes a document, asks `check`
+whether it is sound, and is told "yes" must be able to act on that answer.
+
+The cost of a surface that stays quiet is usually described as wasted effort, and that much is
+already high: one exercise spent eight guesses finding an undocumented `type=` token and roughly
+fifteen round trips reconstructing one directive's key names, each a full process launch and a full
+result payload. But the real cost is worse than slow.
+
+> **A surface that stays silent manufactures confident wrong answers about the product.**
+
+The exercise's loadpull task was abandoned as impossible. It was blocked by a one-net `Tuner`
+instance line the client had written from the catalogue's own description of the part. `check`
+reported zero errors and zero warnings; `explain` reported the analysis runnable; the run returned
+`status: ok` with Pout at the engine's floor sentinel at all 56 drive points, with no diagnostic. On
+that evidence the client wrote up the component model as defective, with a minimal reproduction case,
+and stopped. The model is correct. With the second net supplied the same run completes in 38 seconds.
+
+**A client that reports a working product as broken is behaving reasonably on the evidence it was
+given.** That is the argument for treating acceptance-in-silence as a defect class of its own rather
+than as a rough edge, and it is why the fixes are shaped the way they are:
+
+- **A fix that makes something work but leaves the silent-acceptance path intact does not satisfy the
+  requirement.** Accepting `Unit=` on a `sparam` directive is only half of R-aut8-3; refusing the
+  unrecognised keys around it is the other half, and it is the half that generalises.
+- **Widening and refusing ship together.** Accepting more boolean spellings without refusing the rest
+  moves the silent boundary rather than removing it.
+- **No third category.** Every input is handled or refused. A registry the reader validates against
+  is only worth having if a test holds it exhaustive — otherwise the third category grows back, and
+  it grows back silently, which is the whole problem.
+- **A refusal names the thing to change.** The pattern is the artwork half's unknown-technology
+  refusal, which lists the five real ids: not "invalid layer mapping" but the key, what it was given,
+  and what it accepts.
+
+Where a full determination is genuinely too expensive for a verb's budget, the weaker claim stated
+honestly beats the strong one stated wrongly — `declared` rather than `runnable`. `explain` reports
+what it can establish from names already in memory and declines to claim anything that would need a
+solve.
+
+---
+
 ## 7. What is deliberately excluded
 
 **R-aut-11. The running GUI is not remote-controlled.** No command channel into a live

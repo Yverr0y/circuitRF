@@ -208,6 +208,22 @@ namespace RfCore.Export
     /// The inner analysis whose name would have been promoted to this chain. Non-null only when the
     /// caller named one, and the whole reason this option exists (<c>cli.md</c> §4).
     /// </param>
+    /// <param name="Runnable">
+    /// Whether this chain would actually run — the chain bottoms out in an enabled analysis AND every
+    /// reference the analysis names by string resolves.
+    ///
+    /// <para><b>Both halves are needed (AUT-8 R-aut8-8).</b> This used to be the first half alone, so
+    /// a loadpull-pursuit naming a load tuner and a source tuner that do not exist in the design was
+    /// reported <c>runnable: true, dispatched: true</c>. Whether a thing will run is the question
+    /// <c>explain</c> exists to answer, and answering it optimistically is worse than not answering:
+    /// a caller acts on the yes, and the refusal it eventually gets is about something it has already
+    /// been told is fine.</para>
+    /// </param>
+    /// <param name="Unresolved">
+    /// The references that did not resolve, one line each, naming the key and what it pointed at.
+    /// Null when everything resolved — which is what makes the false case say WHICH reference failed
+    /// rather than merely that one did.
+    /// </param>
     public sealed record ExplainAnalysisJson(
         string                Name,
         string                Kind,
@@ -221,7 +237,9 @@ namespace RfCore.Export
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string?               PromotedFrom,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        ExplainSweepJson?     Sweep);
+        ExplainSweepJson?     Sweep,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<string>? Unresolved = null);
 
     /// <param name="Kind">The <c>ValueKind</c> — <c>real</c>, <c>complex</c>, <c>bool</c>, or
     /// whatever else the engine produced. Reported rather than coerced: a Bool forced to a number is

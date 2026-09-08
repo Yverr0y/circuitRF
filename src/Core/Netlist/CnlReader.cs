@@ -86,6 +86,12 @@ public sealed class CnlReader
                 : "";
             var tb = _currentCell is null ? _testBench! : ThrowDirectiveInCell(line);
 
+            // AUT-8 R-aut8-1/2/3. Everything the reader does not understand on this line is refused
+            // HERE, before any TryParse* sees it, and every key that IS understood comes back in its
+            // canonical spelling. The parsers below are unchanged: they still read the keys they know
+            // and ignore the rest — the difference is that "the rest" is now empty by construction.
+            rawLine = PrepareAnalysisDirective(rawLine, line);
+
             // If this is a type=hb directive, parse it into a typed HarmonicBalanceAnalysis.
             if (TryParseHbDirective(rawLine, out var hbAnalysis))
                 tb.Analyses.Add(hbAnalysis!);
@@ -782,6 +788,145 @@ public sealed class CnlReader
         return result;
     }
 
+    // ── Analysis directive validation (AUT-8) ─────────────────────────────────
+
+    /// <summary>
+    /// Validates one <c>analysis</c> directive against <see cref="AnalysisDirectiveSchema"/> and
+    /// returns it with every key in its canonical spelling. Throws <see cref="CnlReadException"/> —
+    /// which carries the line number and the line's own text — on anything the reader does not
+    /// understand.
+    ///
+    /// <para><b>Silence was the defect (AUT-7 R-aut7-0).</b> The parsers below collect
+    /// <c>key=value</c> pairs into a dictionary and read the ones they know. A key they did not know
+    /// used to be accepted and dropped without a word, so a client that wrote a loadpull-pursuit
+    /// directive by copying key names out of a schematic's own analysis block had all twenty-odd of
+    /// them discarded, <c>check</c> reported zero errors, and the run failed on one missing key per
+    /// attempt. Worse, <c>Unit=GHz</c> on a <c>sparam</c> directive was dropped and the sweep ran in
+    /// Hz — a flat, entirely plausible S11 nine orders of magnitude from the band asked for.</para>
+    ///
+    /// <para><b>Everything wrong on the line is reported at once.</b> A caller that must re-run to
+    /// discover the second missing key pays the full cost of a run for each one.</para>
+    ///
+    /// <para>Returns the line unchanged when it carries no <c>type=</c> at all. That is not an
+    /// analysis this reader types, and it has always been carried through as a
+    /// <see cref="RawDirective"/> — a <c>.cnl</c> written to be included by another may hold one.</para>
+    /// </summary>
+    private string PrepareAnalysisDirective(string rawLine, string wholeLine)
+    {
+        var tokens = TokeniseLine(rawLine);
+        if (tokens.Count < 2) return rawLine;
+
+        string? typeVal = null;
+        for (int i = 1; i < tokens.Count; i++)
+        {
+            int eq = tokens[i].IndexOf('=');
+            if (eq <= 0) continue;
+            if (tokens[i][..eq].Equals("type", StringComparison.OrdinalIgnoreCase))
+                typeVal = Unquote(tokens[i][(eq + 1)..]);
+        }
+        if (typeVal is null) return rawLine;
+
+        var spec = AnalysisDirectiveSchema.Find(typeVal);
+        if (spec is null)
+            throw new CnlReadException(_lineNumber, wholeLine,
+                $"'type={typeVal}' is not an analysis circuitRF knows. It understands: " +
+                $"{string.Join(", ", AnalysisDirectiveSchema.TypeTokens)}.");
+
+        var rebuilt   = new List<string>(tokens.Count) { tokens[0] };
+        var unknown   = new List<string>();
+        var supplied  = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 1; i < tokens.Count; i++)
+        {
+            var tok = tokens[i];
+            int eq  = tok.IndexOf('=');
+
+            if (eq <= 0)
+            {
+                // Bare words: the 'log' keyword, a trailing frequency unit ("start=1 GHz"), and the
+                // value half of the split spelling ("start= 1 GHz"). Anything else on an analysis
+                // line is a key the writer forgot the '=' on, and saying so beats dropping it.
+                if (spec.BareWords.Any(b => b.Equals(tok, StringComparison.OrdinalIgnoreCase)) ||
+                    Units.IsRecognizedUnit(tok) ||
+                    double.TryParse(tok, System.Globalization.NumberStyles.Float,
+                                    System.Globalization.CultureInfo.InvariantCulture, out _))
+                {
+                    if (spec.BareWords.Any(b => b.Equals(tok, StringComparison.OrdinalIgnoreCase)))
+                        supplied.Add(tok);
+                    rebuilt.Add(tok);
+                    continue;
+                }
+                unknown.Add(tok);
+                continue;
+            }
+
+            var written = tok[..eq];
+            var value   = tok[(eq + 1)..];
+            if (AnalysisDirectiveSchema.ResolveKey(spec, written) is not { } canonical)
+            {
+                unknown.Add(written);
+                continue;
+            }
+
+            // The TYPE's value is canonicalised as well as its key. Resolving `type=lpp` for
+            // validation and then handing the parsers the alias would leave every one of them
+            // declining it, and the directive would fall through to a RawDirective — which is the
+            // exact silence R-aut8-2 is about, moved one step later.
+            if (canonical.Equals("type", StringComparison.OrdinalIgnoreCase))
+                value = spec.Type;
+
+            supplied.Add(canonical);
+            rebuilt.Add(canonical + "=" + value);
+        }
+
+        var missing = new List<string>();
+        foreach (var key in spec.Keys)
+        {
+            if (!key.Required || key.Indexed) continue;
+            if (!IsSupplied(key.Name)) missing.Add(key.Name);
+        }
+        foreach (var group in spec.RequiredOneOf)
+            if (!group.Any(IsSupplied))
+                missing.Add(string.Join(" or ", group));
+
+        if (unknown.Count > 0 || missing.Count > 0)
+        {
+            var parts = new List<string>();
+            if (unknown.Count > 0)
+                parts.Add($"analysis '{tokens[0]}' (type={spec.Type}) carries " +
+                          (unknown.Count == 1 ? "a key" : $"{unknown.Count} keys") +
+                          $" this reader does not understand: {string.Join(", ", unknown)}");
+            if (missing.Count > 0)
+                parts.Add($"analysis '{tokens[0]}' (type={spec.Type}) needs " +
+                          (missing.Count == 1 ? "a key it does not have" : $"{missing.Count} keys it does not have") +
+                          $": {string.Join(", ", missing)}");
+            parts.Add($"The keys type={spec.Type} takes are: " +
+                      $"{string.Join(", ", AnalysisDirectiveSchema.KeyNamesForMessage(spec))}.");
+            throw new CnlReadException(_lineNumber, wholeLine, string.Join(". ", parts));
+        }
+
+        return string.Join(" ", rebuilt);
+
+        // A key written but left blank is a key the directive does not have. The engine has always
+        // treated it that way — an empty LoadTuner= is the refusal LoadpullEngine raises — and
+        // reporting it here is what turns that into one line at parse time instead of one run.
+        bool IsSupplied(string name)
+        {
+            if (!supplied.Contains(name)) return false;
+            foreach (var t in rebuilt)
+            {
+                int e = t.IndexOf('=');
+                if (e <= 0) continue;
+                if (!t[..e].Equals(name, StringComparison.OrdinalIgnoreCase)) continue;
+                return Unquote(t[(e + 1)..]).Trim().Length > 0;
+            }
+            return true;   // a bare keyword, which carries no value to be blank
+        }
+    }
+
+    private static string Unquote(string s)
+        => s.Length >= 2 && s[0] == '"' && s[^1] == '"' ? s[1..^1] : s;
+
     // ── Shared enabled-flag parser ────────────────────────────────────────────
 
     /// <summary>
@@ -1024,14 +1169,35 @@ public sealed class CnlReader
         //  token. We handle this by re-scanning tokens after the key=value pairs.)
         // NormalizeFreqExpr handles old-style unquoted `start=1 GHz` for backward compat.
         // New-style `start="1" startUnit=GHz` gives startExpr="1" and startUnit from kv below.
-        string startExpr = NormalizeFreqExpr(kv.GetValueOrDefault("start", "1e9"),
-                                              tokens, kv.Keys, "start");
-        string stopExpr  = NormalizeFreqExpr(kv.GetValueOrDefault("stop",  "10e9"),
-                                              tokens, kv.Keys, "stop");
+        string startRaw  = kv.GetValueOrDefault("start", "1e9");
+        string stopRaw   = kv.GetValueOrDefault("stop",  "10e9");
+        string startExpr = NormalizeFreqExpr(startRaw, tokens, kv.Keys, "start");
+        string stopExpr  = NormalizeFreqExpr(stopRaw,  tokens, kv.Keys, "stop");
 
-        // Read explicit unit keys (new format). Absent → "Hz" (back-compat with baked values).
-        string startUnit = kv.GetValueOrDefault("startUnit", "Hz");
-        string stopUnit  = kv.GetValueOrDefault("stopUnit",  "Hz");
+        // Whether the inline spelling already consumed a unit and produced a Hz literal. A value that
+        // has been scaled once must not be scaled again by Unit= below — `start=1 GHz … Unit=GHz`
+        // would otherwise sweep at 1e18 Hz, which is the same class of silent wrong answer R-aut8-3
+        // is about, arriving from the other direction.
+        bool startInline = startExpr != startRaw;
+        bool stopInline  = stopExpr  != stopRaw;
+
+        // AUT-8 R-aut8-3 — the highest-severity finding in that brief. `Unit=` was read by the
+        // parametric_sweep directive in this same file and NOT by this one, so
+        // `analysis SP1 type=sparam Start=0.5 Stop=6 Npts=551 Unit=GHz` swept 0.5 Hz to 6 Hz. Nothing
+        // said so: `check` reported zero errors, `explain --analysis` reported the analysis runnable,
+        // and the written Touchstone's header said `# GHz` above a first column reading 5E-10. The
+        // resulting S11 was flat at the terminations' DC reflection coefficient — a curve a reader has
+        // no way to recognise as wrong. Two directives in one format cannot spell one concept two
+        // ways, so `Unit=` is the shorthand that sets all three; a unit given individually still wins,
+        // because it is the more specific statement.
+        // The shorthand applies to a value the DIRECTIVE stated. It must never reach one of this
+        // method's own fallbacks — `step`'s is the bare literal 1e8, and reading that as 1e8 GHz
+        // because the line happens to carry Unit=GHz would be a 100 MHz step becoming 1e17 Hz.
+        string sweepUnit = kv.GetValueOrDefault("Unit", "Hz");
+        string startUnit = kv.GetValueOrDefault("startUnit",
+            startInline || !kv.ContainsKey("start") ? "Hz" : sweepUnit);
+        string stopUnit  = kv.GetValueOrDefault("stopUnit",
+            stopInline  || !kv.ContainsKey("stop")  ? "Hz" : sweepUnit);
 
         // Detect kind: bare "log" keyword OR log=true key.
         bool isLog = bare.Contains("log") ||
@@ -1048,9 +1214,11 @@ public sealed class CnlReader
         }
         else
         {
-            string stepExpr = NormalizeFreqExpr(kv.GetValueOrDefault("step", "1e8"),
-                                                 tokens, kv.Keys, "step");
-            string stepUnit = kv.GetValueOrDefault("stepUnit", "Hz");
+            string stepRaw  = kv.GetValueOrDefault("step", "1e8");
+            string stepExpr = NormalizeFreqExpr(stepRaw, tokens, kv.Keys, "step");
+            bool   stepInline = stepExpr != stepRaw;
+            string stepUnit = kv.GetValueOrDefault("stepUnit",
+                stepInline || !kv.ContainsKey("step") ? "Hz" : sweepUnit);
             freqSpec = new FrequencySpec(startExpr, stopExpr, stepExpr, kind, startUnit, stopUnit, stepUnit);
         }
 
@@ -1723,8 +1891,11 @@ public sealed class CnlReader
         var stripped = StripInlineComment(rhs);
         if (stripped.Trim().Length == 0) return ("", null);
         // The trailing-unit rule itself lives in Units so the schematic VAR path applies exactly
-        // the same one — "RFfreq = 2 GHz" must mean one thing, not two.
-        return Units.SplitTrailingUnit(stripped);
+        // the same one — "RFfreq = 2 GHz" must mean one thing, not two. Since AUT-8 R-aut8-6 that
+        // is LiftInlineUnit rather than the bare table test: identity units (V, A, W, dBm) lift
+        // here too, so "VDS = 48 V" means what the reference page says it means instead of being a
+        // parse error, and the parse check the wider table needs is inside it.
+        return Units.LiftInlineUnit(stripped);
     }
 
     /// <summary>

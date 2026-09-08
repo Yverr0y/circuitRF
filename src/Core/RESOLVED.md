@@ -2628,3 +2628,144 @@ design change rather than part of this fix. After this change a leftover worker 
 only idle: a dead one is replaced automatically instead of blocking the run.
 
 Gate: `tests/Core.Tests/Devices/External/DeadProviderRestartTests.cs`.
+
+
+## AUT-8 — the netlist contract: refuse what the reader does not understand (2026-09-07)
+
+`brief-automation-8-netlist-contract.md`. Every requirement converted a silent acceptance into a
+refusal or a misleading report into an accurate one. What is worth keeping:
+
+### `PortCount` is not a net count, and it is not one number's worth of wrong
+
+The generated catalogue described `Tuner` as a one-net part because it read `PortCount`. Writing that
+line produced a circuit whose bias tee delivered nothing, `status: ok`, and Pout at the engine's floor
+sentinel at all 56 drive points — and the client reported the component model as defective.
+
+**"Port" means three different things across `src/Core` and none of them is "net":**
+
+| Family | `PortCount` | Nets the instance line binds |
+|---|---|---|
+| R, C, L, SRLC, PRLC, Bead, Short, Port, Term, TLIN, M\* | terminals | the same |
+| Vdc, IProbe, Tuner, V_1Tone/V_nTone/I_1Tone/I_nTone, P1Tone, PnTone, NonlinearC, Diode | 1 | **2** — the reference terminal is implicit on the glyph |
+| VCCS, VCVS | 2 (an output pair and a control pair) | **4** |
+| Ideal S-blocks (Atten, Balun, Circulator, Coupler, Switch, Amp, Filter), Duplexer, Mixer | RF ports | **2 × PortCount** |
+| SDD, Z_Port | ports | **2 × PortCount** (differential) |
+| FET / BJT / IGBT / VDMOS / JFET | intrinsic ports + internal nodes | **3** (what the user draws) |
+| MOS | as above | **4** |
+| Chain | 2 | **4** |
+
+The table lives once, in `src/Core/Netlist/InstanceNetContract.cs`, asked of the CONSTRUCTED model so
+a parameterised part answers from its own resolved parameters.
+
+**Where the check runs is load-bearing, not incidental.** It is in `Elaborator`, after
+`ComponentModelFactory.TryCreate` and *before* the node minting and the family expansions. Those
+expansions are each guarded by an exact length — `resolvedNodes.Length == 3` and friends — so **a
+short line never failed there; it skipped the expansion in silence** and built a wired-wrong circuit
+that simulated to completion. Moving the check after them would restore exactly the defect it exists
+to remove.
+
+`SnP` and `ExtDevice` deliberately state no count, and both have a better statement of their own rule
+already: N-or-N+1 for `SnP` (`CnlReader.ValidateSnpNets`), and for `ExtDevice` the provider's external
+pin count, which is neither `PortCount` (that includes the internal nodes) nor fixed per type (a
+component may state a smaller `ConnectedPinCount` to place a five-terminal model as four pins).
+`BuildExternalDeviceNodes` names the type id and which of the two rules the count was measured
+against. Trying `ext.PortCount` here was the first attempt and it refused seven working tests — the
+count it produced was plausible, specific and wrong, which is the failure mode this whole area is
+about.
+
+### Two fixtures in the repo had been silently mis-simulating
+
+Both surfaced the moment the reader started refusing, which is what the brief predicted would happen
+and the reason it said to report rather than edit:
+
+- `tests/Core.Tests/Elaboration/P1ToneLintTests.cs` wrote `analysis HB type=hb fund=1 GHz
+  harmonics=5`. **Neither `fund` nor `harmonics` is a key**, so both were discarded and the analysis
+  ran at `Tone=0` with the default `MaxHarm=7`. The test asserts a lint warning and so never noticed.
+  Now `Tone=1 GHz MaxHarm=5`.
+- `tests/Core.Tests/Netlist/CnlReaderTests.cs` wrote `analysis SP type=sparam start=1 GHz` with no
+  `stop`, taking the reader's invented 10 GHz default. `stop` is required now and the fixture states
+  the band it means.
+
+Nothing under `testdata/` needed changing — the committed `.cnl` fixtures were all well formed.
+
+### The alias rule is derived, and that is what makes it safe to extend
+
+The schematic's key names are the `.cnl` ones with an `Lp`/`Lpp`/`Psa` prefix and an
+`Expr`/`Name`/`Path` suffix. `AnalysisDirectiveSchema.Canonicalise` strips those plus underscores and
+case. Two traps:
+
+- **Longest prefix first.** `Lpp` must be tried before `Lp`, or `LppEffType` canonicalises to `peff`.
+- **The rule is applied to the legal names too**, so the comparison is canonical-to-canonical. On a
+  legal name it must be a no-op beyond case and underscores — a key ending in `Name` would silently
+  shadow the one it canonicalises onto. `NetlistContractTests.NoDeclaredKeyIsItselfChangedByCanonicalisation`
+  is what stops that being discovered by a user.
+
+### The type token has to be rewritten, not just recognised
+
+Resolving `type=lpp` for validation and then handing the parsers the alias leaves every
+`TryParse*Directive` declining it, and the directive falls through to a `RawDirective` — R-aut8-2's
+silence, moved one step later. `PrepareAnalysisDirective` rewrites the value as well as the key. This
+was caught by the gate test, not by review.
+
+### `Unit=` on `sparam`: the shorthand must not reach a fallback
+
+`Unit=` sets `startUnit`/`stopUnit`/`stepUnit` when they are not given individually. Two ways to get
+it wrong, both found while writing it:
+
+- **A value already scaled by an INLINE unit must not be scaled again.** `start=1 GHz … Unit=GHz`
+  reaching 1e18 Hz is R-aut8-3's own defect from the other direction. `NormalizeFreqExpr` returning
+  something different from what it was given is the tell.
+- **The shorthand must apply only to a key the directive actually stated.** `step`'s own fallback is
+  the bare literal `1e8`; reading that as 1e8 GHz turns a 100 MHz step into 1e17 Hz.
+
+### One boolean rule, and both halves have to ship together
+
+There were three readings of a yes/no parameter and each was silent about what it did not recognise.
+Two disagreed outright: `BiasTee` accepted the literal `on`, `IsTrue` accepted the literal `true`. The
+Verilog-A op-vars flag was the mirror image — it recognised four spellings of FALSE and read
+everything else, a typo included, as true. `BooleanParameter` is the one reading.
+
+**Widening without refusing would only move the silent boundary**, so the refusal is not optional
+polish: it is what makes the wider table safe. A `Real` is accepted only as exactly 0 or 1 — a
+boolean parameter given 2.5 is a mistake about *which* parameter is being set, not a spelling of true.
+
+
+## AUT-8 R-aut8-6 — one rule for a unit written inline in an assignment (2026-09-07)
+
+`Units.LiftInlineUnit` is now the single implementation. The `.cnl` reader called
+`SplitTrailingUnit(includeIdentityUnits: false)` and the schematic's VAR path called
+`NetExtractor.LiftInlineUnit`, which passed `true` — so `RFfreq = 2 GHz` worked in both and
+`VDS = 48 V` was `Parse error at position 6: Unexpected token 'V'` in a netlist and a working variable
+in a schematic, while the reference page documented one rule without qualification.
+
+**The parse verification is what makes the wide unit table safe, and it is not optional.** Every bare
+SI prefix is a unit name here, so a purely token-based rule tears `2 * f` into `2 *` + femto and
+`R * m` into `R *` + milli. The rule: leave anything that already parses completely alone, and accept
+a split only when it turns text the parser rejects into text it accepts.
+
+That makes the wider table a strict improvement rather than a trade. A unit suffix always produces a
+parse error in this grammar (juxtaposition is not an operator), so the lift is reachable by exactly
+the assignments it is for — and `x = 2 * n`, which the old token-only rule tore into `2 *` + nano and
+then failed to evaluate, now survives.
+
+### Two more parts that state no net count, both found by the suite rather than by review
+
+The first attempt gave `wBond` and `ExtDevice` numbers off their own `PortCount`. Both were wrong,
+and both were wrong in the direction that matters — a plausible, specific number that refuses working
+designs:
+
+- **`ExtDevice`** — `PortCount` is `Descriptor.NodeCount`, which INCLUDES the internal nodes the model
+  asked for. The count an instance line states is the provider's *external* pin count, and it is not
+  even fixed per type: a component may state a smaller `ConnectedPinCount` to place a five-terminal
+  model as a four-pin part. Seven working tests were refused.
+- **`wBond`** — an N-or-N+1 part, like `SnP`. `2M` nets for an M-wire array, with an optional trailing
+  reference net the model reads when `RefPin` says so and ignores otherwise. `PortCount` counts that
+  pin only when the parameter turned it on, while the netlist may supply the net either way — so the
+  model reported one fewer than the netlist legitimately wrote, every time.
+
+Both now return null with the reason written down, and both already had a better refusal of their own
+(`BuildExternalDeviceNodes` names the type id and which rule the count was measured against; wBond's
+own ground-plane refusal names the array and the missing return).
+
+**The lesson is the one the table's own doc comment states, arriving twice more:** `PortCount` is not
+a net count, and it is not off by a constant either. There is no formula — only a per-model statement.

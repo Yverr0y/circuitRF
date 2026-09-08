@@ -1090,6 +1090,29 @@ HB1      hb                 enabled  runnable         → promoted to SWEEP1</sp
 A sweep is reported in **base SI with its unit and its scale**. Reading a mark without its scale has
 already produced a run at 2 Hz that looked entirely normal.
 
+`runnable` is two claims, not one: the chain reaches an enabled analysis, **and** every reference the
+analysis names resolves — the tuner instances, the inner analysis a sweep wraps, the swept variable,
+and the variables a tone expression reads. When one does not, the chain is not runnable and the
+report says which:
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain pa.cnl --analysis
+<span class="output">  analyses:
+    LP1              loadpull-pursuit   LP1                          not-runnable
+      unresolved: LoadTuner=NoSuchTuner: no instance of that name in this document. Its Tuners are: Load.
+      unresolved: SourceTuner=AlsoMissing: no instance of that name in this document. Its Tuners are: Load.</span></code></pre>
+
+<div class="callout warning">
+    <span class="label">Changed in 1.0</span>
+    <p><code>runnable</code> used to mean only the first half, so the analysis above was reported
+    <code>runnable</code> and <code>dispatched by lpp</code> while naming two tuners that do not
+    exist. Whether a thing will run is the question this verb exists to answer, and a caller that
+    acts on an optimistic yes gets its refusal later, about something it has already been told is
+    fine.</p>
+    <p>What <code>explain</code> still does <em>not</em> claim is anything that would need a solve —
+    "this bench has no bias source" is a property of the solved circuit, and this verb solves
+    nothing. It reports what it can establish and stays quiet about the rest.</p>
+  </div>
+
 <h3 id="explain-touchstone">`explain` on a Touchstone file — what IS this part?</h3>
 
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain part.s2p

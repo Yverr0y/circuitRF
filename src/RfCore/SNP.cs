@@ -93,7 +93,26 @@ namespace RfCore
         /// Populated from the option line when reading; defaults to GHz.
         /// The underlying <see cref="Frequencies"/> array is always stored in Hz.
         /// </summary>
-        public FrequencyUnit FreqUnit { get; set; } = FrequencyUnit.GHz;
+        public FrequencyUnit FreqUnit
+        {
+            get => _freqUnit;
+            set { _freqUnit = value; FreqUnitIsStated = true; }
+        }
+
+        private FrequencyUnit _freqUnit = FrequencyUnit.GHz;
+
+        /// <summary>
+        /// Whether <see cref="FreqUnit"/> was set by somebody, rather than being this type's default.
+        ///
+        /// <para><b>Why the distinction is load-bearing (AUT-8 R-aut8-3).</b> An SNP built by an
+        /// analysis carries whatever this type defaults to, and the default is GHz — so a sweep that
+        /// ran in the Hz decade wrote a file whose header said <c>#&#160;GHz</c> above a first column
+        /// reading <c>5E-10</c>. That file is internally inconsistent whichever end is wrong, and a
+        /// reader has no way to tell which. <see cref="TouchstoneIO"/> lets the DATA choose the unit
+        /// when nothing has stated one; a file that was READ keeps the unit its own option line
+        /// declared, so a read-write round trip is unchanged.</para>
+        /// </summary>
+        public bool FreqUnitIsStated { get; private set; }
 
         /// <summary>True for placeholder SNPs created for missing files (no data loaded).</summary>
         public bool IsEmpty => Frequencies.Length == 0;
@@ -228,7 +247,11 @@ namespace RfCore
         internal void CopyMetadataFrom(SNP source)
         {
             Format   = source.Format;
-            FreqUnit = source.FreqUnit;
+            // Carries the STATED-ness with the value: copying a unit that was only this type's
+            // default must not turn it into a declaration, or a converted network would go back to
+            // announcing GHz over Hz data (AUT-8 R-aut8-3).
+            _freqUnit        = source._freqUnit;
+            FreqUnitIsStated = source.FreqUnitIsStated;
             Comments.Clear();
             Comments.AddRange(source.Comments);
         }
@@ -245,7 +268,8 @@ namespace RfCore
             Matrices    = source.Matrices;
             Type        = source.Type;
             Format      = source.Format;
-            FreqUnit    = source.FreqUnit;
+            _freqUnit        = source._freqUnit;
+            FreqUnitIsStated = source.FreqUnitIsStated;
             Z0          = source.Z0;
             Comments.Clear();
             Comments.AddRange(source.Comments);

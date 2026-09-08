@@ -410,32 +410,14 @@ public static class NetExtractor
     /// collects the failure and names the measurement and the text — so there is nothing hidden there
     /// to fix, and a measurement expression is far likelier to end in a letter token legitimately.</para>
     ///
-    /// <para><b>The split is verified against the parser, not just the unit table.</b> Every bare SI
-    /// prefix is a unit name, so a purely token-based rule would tear "2 * f" into "2 *" + femto and
-    /// "R * m" into "R *" + milli — expressions that are perfectly legal today. So: leave anything
-    /// that already parses completely alone, and accept a split only when it turns text the parser
-    /// rejects into text it accepts. That makes this reachable by exactly the rows it is for and
-    /// unreachable by every row that was already working.</para>
+    /// <para><b>The rule itself lives in <see cref="Units.LiftInlineUnit"/> since AUT-8 R-aut8-6</b>,
+    /// because the <c>.cnl</c> reader applies the same one and the two had drifted: this path lifted
+    /// identity units (V, A, W, dBm) and the reader's did not, so <c>VDS = 48 V</c> meant a variable
+    /// in a schematic and a parse error in a netlist. See that method for the parse-verification the
+    /// wide unit table depends on.</para>
     /// </summary>
     internal static (string Expression, string? Unit) LiftInlineUnit(string expression)
-    {
-        try
-        {
-            Parser.Parse(expression);
-            return (expression, null);      // already a valid expression — nothing to lift
-        }
-        catch (ExpressionException)
-        {
-            // Identity units (V, A, W, dBm, …) are included here, unlike in the .cnl reader: they
-            // carry no multiplier, but lifting one is still what keeps the variable ALIVE, and the
-            // parse check above is what makes the wider table safe to use.
-            var (expr, unit) = Units.SplitTrailingUnit(expression, includeIdentityUnits: true);
-            if (unit is null) return (expression, null);
-            try { Parser.Parse(expr); }
-            catch (ExpressionException) { return (expression, null); }   // split didn't help
-            return (expr, unit);                 // already the engine spelling
-        }
-    }
+        => Units.LiftInlineUnit(expression);
 
     // ── Cell instance emission ───────────────────────────────────────────────
 

@@ -222,4 +222,44 @@ public static class Units
         bool isUnit = includeIdentityUnits ? IsRecognizedUnit(last) : IsKnown(last);
         return isUnit ? (string.Join(" ", tokens[..^1]), last) : (rhs.Trim(), null);
     }
+
+    /// <summary>
+    /// Lifts a unit written inline in an assignment's EXPRESSION — <c>2 GHz</c>, <c>48 V</c> — into
+    /// the unit the row would have carried had there been a unit column to type it in. Returns the
+    /// expression unchanged with a null unit when there is nothing to lift.
+    ///
+    /// <para><b>The split is verified against the parser, not just the unit table</b>, which is what
+    /// makes the wide table safe. Every bare SI prefix is a unit name here, so a purely token-based
+    /// rule tears <c>2 * f</c> into <c>2 *</c> + femto and <c>R * m</c> into <c>R *</c> + milli —
+    /// expressions that are perfectly legal. So: leave anything that already parses completely alone,
+    /// and accept a split only when it turns text the parser rejects into text it accepts. A unit
+    /// suffix always produces a parse error (juxtaposition is not an operator in this grammar), so
+    /// this is reachable by exactly the assignments it is for and unreachable by every one that was
+    /// already working.</para>
+    ///
+    /// <para><b>Why the two entry points share it (AUT-8 R-aut8-6).</b> The reference page states,
+    /// without qualification, that a variable may carry a unit, and <c>RFfreq = 2 GHz</c> is its own
+    /// worked example. <c>VDS = 48 V</c> was
+    /// <c>Parse error at position 6: Unexpected token 'V'</c> — because the <c>.cnl</c> reader passed
+    /// <c>includeIdentityUnits: false</c> and so lifted only the linear-SCALE units, while the
+    /// schematic's VAR path (<c>NetExtractor.LiftInlineUnit</c>, which this replaces) lifted both. One
+    /// documented rule cannot have two implementations that disagree about which units count, so
+    /// there is now one implementation and the rule is the wider one.</para>
+    /// </summary>
+    public static (string Expression, string? Unit) LiftInlineUnit(string expression)
+    {
+        try
+        {
+            Parser.Parse(expression);
+            return (expression, null);      // already a valid expression — nothing to lift
+        }
+        catch (ExpressionException)
+        {
+            var (expr, unit) = SplitTrailingUnit(expression, includeIdentityUnits: true);
+            if (unit is null) return (expression, null);
+            try { Parser.Parse(expr); }
+            catch (ExpressionException) { return (expression, null); }   // split didn't help
+            return (expr, unit);                 // already the engine spelling
+        }
+    }
 }

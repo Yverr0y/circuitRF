@@ -1595,3 +1595,18 @@ directly, but that is a sweep of its own and would not have fixed this — a war
 channel naming 0.159 Hz is still wrong.
 
 Gate: `tests/Engine.Tests/Devices/TLineResonanceWarningTests.cs`.
+
+
+## AUT-8 R-aut8-4 — the VCCS net-count refusal moved from the engine to elaboration (2026-09-07)
+
+`CurrentSourceTests.Vccs_WithThreeNets_IsRefusedAndNamesTheInstance` used to elaborate a three-net
+VCCS successfully and assert that `NonlinearDcEngine.Run` refused it. The refusal is now raised by
+`Elaborator` — same substance, and richer (it names the type, the instance, the count given and the
+count expected) — so the test asserts at elaboration instead.
+
+**Why the move is the point rather than a side effect.** `circuitrf check` runs no analysis by design
+(AUT-4 R-aut4-1), so a refusal only the engine could raise was one `check` could never make. A
+mis-wired instance line was therefore invisible to every headless caller until it ran — and for the
+parts whose expansions are guarded on an exact net count (`Tuner`, the FET/BJT/MOS families) it was
+invisible after it ran too, because a short line skips the expansion in silence and simulates to
+completion.

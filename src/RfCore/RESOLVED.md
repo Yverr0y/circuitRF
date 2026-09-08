@@ -420,3 +420,22 @@ of the line, so narrowing the separation fails loudly instead of quietly.
 - **`SNP` cannot be constructed empty** — both constructors refuse — so `TouchstoneHealth.Analyze`'s
   zero-point branch is defensive and deliberately ungated. A test for it would have to defeat SNP's
   own guard to build the input.
+
+
+## AUT-8 R-aut8-3 — a Touchstone header that said GHz over Hz data (2026-09-07)
+
+`SNP.FreqUnit` defaults to `GHz` and nothing sets it on an SNP produced by an analysis, so a sweep
+that ran in the Hz decade wrote a file whose option line said `# GHz` above a first column reading
+`5E-10`. That file is wrong whichever end you believe, with nothing in it to say which.
+
+**The fix is a stated/unstated distinction, not a new default.** `FreqUnitIsStated` is set by the
+property setter, so the Touchstone reader marks it simply by assigning the unit it parsed off the
+option line; an SNP nobody has set it on stays unstated and `TouchstoneIO.WriteFile` picks the unit
+from the data (`UnitForData` — the largest unit in which the highest frequency still reads as at
+least 1). A file that was READ therefore keeps its own declared unit and a read-write round trip is
+byte-identical, which is what stops this touching the byte-for-byte export gates.
+
+**The copy paths need the stated-ness carried with the value.** `CopyMetadataFrom` and `RefreshFrom`
+assign through the private field and copy the flag, because `FreqUnit = source.FreqUnit` would turn a
+unit that was only the type's default into a declaration — and a converted network would go straight
+back to announcing GHz over Hz data.

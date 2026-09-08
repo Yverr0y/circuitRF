@@ -158,8 +158,20 @@ RFfreq = 2 GHz
 
 Top-level **global variables**, usable anywhere a value is expected. They're also **sweepable** —
 and both are swept by the analyses below (`Pin` is the drive level, `RFfreq` the fundamental). A
-variable may carry a unit (`2 GHz`); when it does, that unit wins wherever the variable is
-referenced.
+variable may carry a unit (`2 GHz`, `48 V`, `10 dBm`, `50 Ohm`); when it does, that unit wins
+wherever the variable is referenced.
+
+<div class="callout note">
+    <span class="label">Any unit, not just the scaling ones</span>
+    <p>Both kinds work here: the ones that scale a number (<code>GHz</code>, <code>mF</code>,
+    <code>pH</code>) and the ones that only name a quantity (<code>V</code>, <code>A</code>,
+    <code>W</code>, <code>dBm</code>, <code>Ohm</code>, <code>deg</code>). Before circuitRF 1.0
+    <code>VDS = 48 V</code> was a parse error while <code>RFfreq = 2 GHz</code> was fine; the two
+    are the same thing now.</p>
+    <p>The unit is only ever read off the end of something that is <em>not</em> already a valid
+    expression, so an expression whose last token happens to spell a unit is left alone —
+    <code>x = 2 * f</code> is a multiplication, not two femtoseconds.</p>
+  </div>
 
 ### 4 · Components & instances {#w-components}
 
@@ -243,6 +255,86 @@ each of 3 frequencies from 1 to 3 GHz (`Npts=3`, `Unit=GHz`). The result is a 3-
     Nest them with <code>Inner=</code> to sweep more than one variable. The innermost non-sweep analysis
     (<code>HB1</code>) is what each point actually solves.</p>
   </div>
+
+#### What a directive may say {#w-analysis-keys}
+
+`type=` takes one of six tokens, and each one has a fixed set of keys:
+
+| `type=` | Verb that runs it | Keys it must have |
+|---|---|---|
+| `dc` | `dc` | *(none)* |
+| `sparam` | `sparam` | `start`, `stop` |
+| `hb` | `hb` | `Tone`, or `Tone[1]` for a multi-tone run |
+| `loadpull` | `lp` | `Tone`, `LoadTuner`, `SourceTuner`, `Grid` |
+| `loadpull_pursuit` | `lpp` | `Tone`, `LoadTuner`, `SourceTuner` |
+| `parametric_sweep` | *(the inner analysis's)* | `Var`, `Inner`, and either `Values` or `Start`+`Stop` |
+
+**A key circuitRF does not recognise is refused, by name, with the legal ones listed** — and so is a
+`type=` token it does not recognise. Every missing required key is reported at once rather than one
+per run. Before 1.0 an unrecognised key was accepted and thrown away in silence, so a directive could
+`check` clean and then run something quite different from what it said.
+
+The schematic editor's own key names are accepted as aliases, since a natural way to write a
+directive is to copy them out of a saved `.csch`: an `Lp`/`Lpp`/`Psa` prefix and an
+`Expr`/`Name`/`Path` suffix are stripped, so `LpLoadTunerName=` is `LoadTuner=` and `PsaVarName=` is
+`Var=`. So are the editor's short type tags — `sp`, `lp`, `lpp`, `sweep`.
+
+#### Frequency units on a `sparam` directive {#w-sparam-unit}
+
+A frequency may state its unit three ways, and they mean the same thing:
+
+```netlist
+analysis SP1 type=sparam start=0.5 GHz stop=6 GHz npts=551
+analysis SP1 type=sparam start=0.5 stop=6 npts=551 Unit=GHz
+analysis SP1 type=sparam start="0.5" startUnit=GHz stop="6" stopUnit=GHz npts=551
+```
+
+`Unit=` sets `startUnit`, `stopUnit` and `stepUnit` together; any of the three given individually
+wins over it. **A bare number with no unit anywhere is hertz.**
+
+<div class="callout warning">
+    <span class="label">Changed in 1.0</span>
+    <p><code>Unit=</code> used to be read by <code>parametric_sweep</code> and silently ignored by
+    <code>sparam</code>, so the second line above swept <strong>0.5 Hz to 6 Hz</strong>. It reported
+    no error at any stage, and the S11 it produced was flat and entirely plausible-looking — the
+    terminations' DC reflection coefficient, nine orders of magnitude from the band that was asked
+    for. If you have a <code>.cnl</code> written against the old behaviour that deliberately relied
+    on the unit being dropped, it will now sweep the band it states.</p>
+  </div>
+
+An exported Touchstone file's declared unit follows its data, so a header saying `# GHz` above a
+first column reading `5E-10` is no longer possible. A file that was *read* keeps the unit its own
+option line declared.
+
+#### Wiring, and how many nets a part takes {#w-net-counts}
+
+The nets on an instance line come before the first `key=value`, and **the count has to match the
+part**. A line with the wrong number is refused, naming the type, the instance and both counts:
+
+```
+Tuner:T1 is wired to 1 net, and a Tuner takes 2. Add the missing net before the
+first 'name=value' on the line.
+```
+
+A part's net count is **not** always the pin count its schematic symbol draws — several parts have an
+implicit reference terminal. `Port`, `Term` and `Tuner` each take two nets (signal and reference)
+where the glyph shows one pin; `SDD` and `Z_Port` take two per port; an ideal system block such as
+`Atten` or `Coupler` takes two per RF port. `circuitrf reference components` states the net count for
+each part beside its pin count.
+
+<div class="callout warning">
+    <span class="label">Changed in 1.0</span>
+    <p>A short instance line used to produce either <code>Index was outside the bounds of the
+    array</code> — which named nothing — or, on a <code>Tuner</code>, no error at all: the run
+    completed, reported <code>ok</code>, and gave a circuit whose bias tee delivered nothing.</p>
+  </div>
+
+#### Yes-and-no parameters {#w-booleans}
+
+A parameter that is a switch — `BiasTee`, `RefPin`, `RefNode`, `IncludeCapacitance`, `GroundPlane`,
+`OpVars` — accepts `on`/`true`/`yes`/`1` and `off`/`false`/`no`/`0`, in any case. **Anything else is
+refused by name.** Before 1.0 `BiasTee` accepted the literal `on` and nothing else, so `BiasTee=true`
+was read as *off* without a word.
 
 ### 6 · Measurements {#w-measures}
 

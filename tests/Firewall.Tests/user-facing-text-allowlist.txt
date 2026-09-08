@@ -28,6 +28,7 @@ src/Core/ComponentModel.cs|{GetType().Name} is not a nonlinear model
 src/Core/ComponentModel.cs|{GetType().Name}.Stamp is not implemented
 src/Core/ComponentModel.cs|{GetType().Name}: H[{w}] is not defined
 src/Core/Design/Analysis.cs|SParameterAnalysis requires at least one FrequencySpec.
+src/Core/Devices/BooleanParameter.cs|{parameterName}={Describe(value)} is not something circuitRF can read as yes or no. 
 src/Core/Devices/ComponentModelFactory.cs|Expected numeric value, got {v.Kind}
 src/Core/Devices/ComponentModelFactory.cs|ExtDevice: provider '{providerName}' described type '{typeId}' with 
 src/Core/Devices/ComponentModelFactory.cs|ExtDevice: provider '{providerName}' does not expose a device type '{typeId}'. 

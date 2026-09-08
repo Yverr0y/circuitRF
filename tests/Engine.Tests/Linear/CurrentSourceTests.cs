@@ -303,7 +303,16 @@ Port:P2   nout 0   Num=2  Z=50 Ohm
         Assert.Equal(0.0,   s21.Imaginary, 9);
     }
 
-    // ── A VCCS with too few nets is refused, by name ──────────────────────────
+    /// <summary>
+    /// A VCCS with too few nets is refused, by name.
+    ///
+    /// <para>The refusal moved from the ENGINE to ELABORATION in AUT-8 (R-aut8-4), and this test
+    /// moved with it. The message it asserts is unchanged in substance and richer in fact — it now
+    /// names the type, the instance, the count given and the count expected — but it arrives before
+    /// anything is stamped, which is what lets <c>circuitrf check</c> report it. <c>check</c> runs no
+    /// analysis by design, so a refusal that only the engine could raise was one <c>check</c> could
+    /// never make.</para>
+    /// </summary>
     [Fact]
     public void Vccs_WithThreeNets_IsRefusedAndNamesTheInstance()
     {
@@ -314,9 +323,10 @@ R:RL      n_out 0  R=100 Ohm
 
 analysis DC1  type=dc
 ");
-        var nl = new Elaborator(lib).Elaborate(tb);
-        var ex = Assert.ThrowsAny<Exception>(() => NonlinearDcEngine.Run(nl));
+        var ex = Assert.ThrowsAny<Exception>(() => new Elaborator(lib).Elaborate(tb));
         Assert.Contains("G1", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("3 nets", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("takes 4", ex.Message, StringComparison.Ordinal);
         output.WriteLine(ex.Message);
     }
 }
