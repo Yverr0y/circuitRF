@@ -705,3 +705,27 @@ src/Core/Expressions/Evaluator.cs|{cl.Name}: no WSProbe named '{label}'. Probes 
 src/Core/Expressions/Evaluator.cs|{exprName}: wsp {which} {value} is outside 1..{ax.Values.Length} 
 src/Engine/SParameterEngine.cs|WSProbe '{probes[i].Label}' allocated no branch in the S-parameter assembly.
 src/Engine/SParameterEngine.cs|wsprobe.port-short: port {port.PortNum} has Z0 = 0 and cannot be terminated 
+
+# ── WSP-2: the WSProbe derived metrics (2026-09-08) ──────────────────────────────────────────
+# The reference document's single-probe function library, registered as expression built-ins. These
+# are argument-shape and argument-type refusals of the EXPRESSION ENGINE, and they join the whole
+# Evaluator family already listed above rather than becoming the one file in it that speaks
+# diagnostics. Two reasons, both about not making the backlog harder to clear: an expression error
+# reaches the user through MeasurementEvaluator's error LIST, which carries strings and would have
+# to change for every message at once; and each of these sentences names the argument position and
+# the spelling that fixes it, which is the information a Diagnostic would carry as typed arguments.
+# Convert them with the rest of Evaluator.cs, in one pass, when that family is converted.
+src/Core/Expressions/Evaluator.Wsp.cs|{cl.Name}: argument 2 is the kind, a quoted string — \"BI\", \"UNI\" (or \"FOR\"), 
+src/Core/Expressions/Evaluator.Wsp.cs|{cl.Name}: argument {i + 1} must be a probe index — SP1.idx(\"GATE\") or an 
+src/Core/Expressions/Evaluator.Wsp.cs|{cl.Name}: argument {i + 1} must be {what}, not a single number. 
+src/Core/Expressions/Evaluator.Wsp.cs|{cl.Name}: does not work with multi-index swept data (the reference document's own 
+src/Core/Expressions/Evaluator.Wsp.cs|{cl.Name}: expects a 2-PORT ({{…, freq, i, j}} with i, j in {{1, 2}}); this cube is 
+src/Core/Expressions/Evaluator.Wsp.cs|{cl.Name}: needs a single locus ({{freq}}); this cube has {cube.Rank} axes 
+src/Core/Expressions/Evaluator.Wsp.cs|{cl.Name}: no frequency was given and this value has no freq axis to take one from 
+src/Core/Expressions/Evaluator.Wsp.cs|{cl.Name}: probe index {idx} is outside 1..{probeCount} 
+src/Core/Expressions/Evaluator.Wsp.cs|{cl.Name}: stimulus must be \"series\" (App. C, the default) or \"shunt\" 
+src/Core/Expressions/Evaluator.Wsp.cs|{fn}: {what} has {vals.Length} values but the network has {blocks} — they must be 
+src/Core/Expressions/Evaluator.Wsp.cs|{fn}: {what} must be square; its last two axes are 
+src/Core/Expressions/Evaluator.Wsp.cs|{fn}: {what} must have its two matrix axes last; this cube has rank {c.Rank}.
+src/RfCore/Stability/WspNodal.cs|wsp_loopgain: unknown kind '{kind}'. Kinds are BI (bilateral/Tian), UNI (forward 
+src/RfCore/Stability/WspRenorm.cs|{NegativeReferenceKey}: {what} has Re = {z.Real:G6} Ω. A reference impedance must have 

@@ -44,7 +44,7 @@ An expression is **parsed once** into an AST and cached; evaluation re-runs the 
 - **Identifier** — `[A-Za-z_][A-Za-z0-9_]*`, used for variable/parameter/argument names and function names. Hierarchical paths in measurements use `.` between identifiers (`X1.drain`) — see §13.
 - **Imaginary unit** — `j` is a reserved constant equal to `(0, 1)`; imaginary values are written `j*4`, `2 + j*3` (matching the prototype's `j*` convention). `pi` and `e` are reserved constants.
 - **`freq` — reserved injected keyword.** Lowercase `freq` is the **simulator's current stamping frequency** (in Hz), injected into scope by the engine when it evaluates a frequency-dependent component value (the `Z_Port` impedance expression, linear-engine §4; any future `Z(freq)`/`Y(freq)` model). It is **read-only and reserved** — a user may **not** name a variable `freq`. It is in scope only for component-value expressions the engine stamps per-frequency; it is **not** available in SDD time-domain equations (those see port voltages `_v`, not frequency) nor in ordinary variable/parameter expressions evaluated at elaboration. Distinct from the user-set **`Freq`** parameter (capital F) on a voltage source, which names the tone a source drives at (linear-engine §4.4); the commensurability check (harmonic-balance §3) verifies each source's `Freq` lands on the grid the engine stamps `freq` at.
-- **Reserved names.** Constants (`j`, `pi`, `e`), the injected `freq`, and all built-in function names (`sin`, `cos`, …, `real`, `imag`, `abs`, `mag`, `phase`, `phase_rad`, `polar`, … §7) are reserved — a user variable/parameter/argument may not shadow them.
+- **Reserved names.** Constants (`j`, `pi`, `e`), the injected `freq`, and all built-in function names (`sin`, `cos`, …, `real`, `imag`, `abs`, `mag`, `phase`, `phase_rad`, `polar`, the WSProbe derived metrics `wsp_*`/`y_to_*`/`z_to_*`/`enc`/`_dB`, … §7) are reserved — a user variable/parameter/argument may not shadow them.
 - **Operators** — `+ - * / ^`, `< <= > >= == !=`, `&& || !`, `? :`, and `( ) ,`.
 - **Whitespace** separates tokens and is otherwise ignored.
 
@@ -135,6 +135,24 @@ For the enumerated string parameters (`Type`, `InterpMode`, `ExtrapMode`), the *
 The extraction/construction family is consistent with the result-model **cube transforms** of the same name (`.real`/`.imag`/`.mag`/`.phase` in `measurements.md`): same operation, same units (phase in degrees), one on a scalar value, the other on a whole cube. **`phase`/`phase_rad` and the `.phase` cube transform must agree on units (degrees for `.phase`/`phase`).** Note `abs` is the canonical modulus (extending its real `|x|` meaning to complex), with `mag` a pure alias.
 
 `dB(...)` and `dBm(...)` are **measurement** functions (§13), not general-expression built-ins, because they are logarithmic and tied to power/wave semantics. They are also why `dB`/`dBm` are **not** unit suffixes (§8).
+
+**WSProbe derived metrics** (measurement context only, over a run that carries a `WSProbe`): the
+reference document's own function library, registered under the document's own names and argument
+order. The full table — equations, arguments and return shapes — is in
+`docs/design/stability-wsprobe.md` §5.2; the names are
+
+`wsp_yparam`, `wsp_zparam`, `wsp_H0`, `wsp_Y0`, `wsp_ZG`, `wsp_ZL`, `wsp_YG`, `wsp_YL`, `wsp_zop`,
+`wsp_yop`, `wsp_loopgain`, `wsp_nodal_gamma`, `wsp_nZ`, `wsp_nY`, `wsp_stability_margin`,
+`wsp_unstable_freq_kurokawa`, `encirculations`, `enc`, `_dB`, `wsp_zsrc`, `wsp_zprc`,
+`wsp_impedance`, `wsp_gain`, `GainDEFs`, `wsp_rc_renorm_s`, `wsp_zo_renorm_s`, and the twelve
+immittance conversions `z_to_pr/pc/pl/sr/sc/sl` and `y_to_pr/pc/pl/sr/sc/sl`.
+
+They are reserved like every other built-in (§2). Three of them are worth knowing about from the
+grammar's side alone: **`_dB` is a legal identifier** (the tokenizer has always accepted a leading
+underscore) and is `10·log10|M|`, a POWER dB, which is why it is not `dB`; the `y_to_*`/`z_to_*`
+family returns **farads and henries**, never the document's picofarads and nanohenries; and the
+frequency argument of `wsp_zsrc`, `wsp_zprc` and the six frequency-dependent conversions **may be
+omitted**, in which case the cube's own `freq` (or `ssfreq`) axis is used.
 
 The set is intentionally close to what other tools' equation-defined devices provide, so hero SDD equations transcribe cleanly (§14). Functions beyond that common set are allowed for non-hero use but should be added knowingly.
 

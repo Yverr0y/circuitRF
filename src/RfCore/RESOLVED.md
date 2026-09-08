@@ -522,3 +522,128 @@ six default outputs. Two things to know before extending it (WSP-2 does):
   as `ZGFromY`/`ZLFromY` for tests only. **No epsilon is added to any denominator** — `H0 = 0` or
   `Y0 = 0` returns NaN with `Degenerate` set, and the engine warns once per probe. The document's own
   `wsp_yop`/`wsp__zop` add `1e-15`; circuitRF does not (overview D-7).
+
+## WSP-2 — `Stability/`, the single-probe derived metrics (2026-09-08)
+
+Six more files beside `WspReduction.cs`, plus the cube glue in `src/Core/Expressions/Evaluator.Wsp.cs`
+(the expression engine's own file — it computes nothing, it maps). The design note
+`docs/design/stability-wsprobe.md` §5 is the reference; what follows is what was *found* while
+building it, none of which is in the brief.
+
+### The brief's gate (f) claimed something the algebra does not give — and the fixture had to be
+### built to make the claim true
+
+The brief's even-mode gate reads "the even-mode impedance at either drain probe equals the value
+found by simulating one half with the common load doubled". That is only true for a particular
+placement of the *stimulus* probe, and the reason is worth writing down because it decides what
+`wsp_impedance` means:
+
+Off the diagonal the ratio is `V_j / iS_j` at the response probe, and **which side of that probe is
+source-free decides what the ratio is**:
+
+- Drive on the response probe's **L side** → its G side is source-free, KCL gives
+  `v_Gj/Z_Gj + iS_j = 0`, and the ratio is `−Z_Gj` — with **no dependence on the drive at all**.
+- Drive reaching it through its **G side**, with an active device on the L side → the ratio is the
+  effective impedance that device works into, i.e. a genuine load line.
+
+So a naive fixture — two drain probes in a combiner, the stimulus in one of the branches — measures
+the *other* device's output resistance, negated, and never a load line. `combiner_even_mode.cnl`
+therefore puts a third probe on the **common input node**: driving that excites both halves in
+phase, both devices are live, and either drain reads `RM + 2·RL = 55 Ω` exactly, independent of gm,
+of the device output resistance and of frequency. `WspNodalFunctionTests.F_…` asserts both readings
+on the same circuit — 55 Ω from the common probe and −1000 Ω from the other branch's probe — because
+the contrast is the finding.
+
+**Eq. 37's shunt form and App. C's series form are the SAME number off the diagonal**, exactly. The
+brief presents them as two forms that "both cancel the common stimulus"; they cancel it to the same
+value, because the ratio is a property of the response probe and the excitation, not of which
+generator produced it. They differ only on the diagonal, where the series form is `−ZG` and the
+shunt form is `1/YL`. The `stimulus` argument is therefore there for the diagonal case and for
+fidelity to the document — not because the two disagree where the function is normally used.
+
+### The circulator direction mapping was a prediction; it is a measurement now
+
+The brief predicted `Direction="CW"` ↔ `"REV"` and `"CCW"` ↔ `"UNI"`. Replacing `hero1_probed.cnl`'s
+`WSProbe:P1` with circuitRF's own `Circulator` (ports 1 and 2 in the same node, port 3 brought out as
+a fifth analysis port) and comparing `S55` against `wsp_loopgain`: **CW matches REV to 4.7e-15,
+against 0.18 the other way; CCW matches UNI to 4.6e-15.** Two independent implementations — a
+transcribed `ȳ` formula and a stamped 3×3 S-block — agreeing to machine precision is about as strong
+as a gate gets, and it pins Eq. 97/99, the `ȳ = Z0·y` normalisation, the probe's G/L orientation and
+the series-source sign all at once.
+
+### `wsp_yparam`'s output shape is a capability the document does not mention
+
+It returns `{…, freq, i, j}` with `i`/`j` valued 1 and 2 and unit `"port"` — byte-for-byte the shape
+an `S` cube has. Converted to S at a real reference, **Rollett K, μ, μ′, |Δ|, MAG/MSG and the
+stability circles of the reduced two-port at a probe** all come from `NetworkMetrics` with nothing
+new written, once WSP-4 exposes a probe's reduced network as a Data Display source. That is why the
+shape is asserted in the gate rather than left to chance.
+
+### Three shapes, and one of them has to be allowed to be empty
+
+`wsp_unstable_freq_kurokawa` returns a `{n}` cube of frequencies which is **empty** when no crossing
+was sampled. That survives the whole path — `MeasurementEvaluator`, the DataSet, the `.npy` export
+and `DataSetImporter` — and is asserted end to end, because the alternative the document takes
+(returning a zero) makes "no crossing" indistinguishable from "a crossing at DC". An empty result
+means *no crossing was sampled*, not *the circuit is stable*: a sweep coarser than the resonance can
+step over one.
+
+`GainDEFs` returns four NAMED numbers per frequency, which in this result model is a labelled axis
+and nothing else — `{…, freq, gaindef}` with labels `GT_dB`, `GP_dB`, `GA_dB`, `Gmax_dB`, picked
+with `at(...)`. There is no other honest spelling for it in an expression language whose values are
+scalars and cubes.
+
+### Two traps in the test fixtures, both of which produce a passing test of nothing
+
+- **A probe with a dangling one-port on its G side has `ZG = 1/YG` exactly**, however much feedback
+  the rest of the circuit carries (the design note's §2.4 — ground is not a path). The first
+  `derived_metrics.cnl` had exactly that at `P1`, so the Eq. 79 assertion measured 5e-16 and would
+  have "passed" any looser test while proving nothing. One capacitor from `a1` to `a2` closes a path
+  around both probes that runs through neither, and the discrepancy becomes 45%.
+- **`GP` and `GA` are not `|S21|²` at `ΓS = ΓL = 0`.** Only `GT` is. Each of the other two still
+  divides by the mismatch its own definition leaves un-terminated (`Γin = S11`, `Γout = S22`), so the
+  matched-limit gate is `|S21|²/(1 − |S11|²)` and `|S21|²/(1 − |S22|²)`.
+
+### The inverse of the reduction, which is what makes the identity gate a real test
+
+A random `[Y]` is turned back into the four transfer functions `A, B, C, D` the probe would have
+measured by reading Eq. 44 backwards:
+
+```
+C = H0 = 1/(y11 + y12 + y21 + y22)     (which is Eq. 93's 1/H0 = YG + YL)
+A = −C·(y12 + y22)      D = C·(y21 + y22)      B = |Y|·C   (which is Eq. 69's 1/Y0 = ZG + ZL)
+```
+
+`WspReduction.YParam` of that quad returns the original `[Y]`, and **that round trip is asserted
+first** in `WspNodalTests.A_…`: without it every identity after it would be checking the fixture
+against itself. The two parenthesised remarks are not decoration — they are why the closed form
+exists at all, and they are the cheapest sanity check on it.
+
+### `wsp_zo_renorm_s` IS the power-wave renormalisation, so it does not transcribe E.10
+
+E.10's `S' = F·(I − conj(Zr)·Y)·(I + Zr·Y)⁻¹·F⁻¹` with `F = diag(1/(2√Re Z))` is Kurokawa's
+power-wave form with `Z = Y⁻¹` substituted and the `Y⁻¹` cancelled. The shipped path is therefore
+`RFNetwork.SToS` — the repository's one complex-reference renormalisation, the Z0-override path's —
+and the transcription lives in the test as the oracle and nowhere else. They agree to 1e-11 on 300
+random two-ports with random complex references.
+
+### `wsp_nZ` and `wsp_nY` are names chosen here, not the document's
+
+The brief gives the two normalised driving-point loci as formulas (`nZ`, `nY`) and no function name,
+because they are circuitRF's own rather than the reference document's. The registered spellings are
+`wsp_nZ(wsp, idx)` and `wsp_nY(wsp, idx)` — the brief's own symbols, under the `wsp_` prefix every
+probe function carries so a designer finds them beside the rest. They are the only two names in the
+whole library that a reader of the document will not recognise, which is exactly why their
+doc-comments and their Data Display descriptions have to keep saying **"not the published margin"**.
+
+### The normalised loci give the same crossings, not the same doubles
+
+The brief's gate (i) asks that `wsp_unstable_freq_kurokawa` "return identical frequencies" on `nZ`
+and on `Y0`. The invariance is real and exact — dividing by a positive real cannot move a zero of
+`Im(g)` — but bit equality is unattainable and the reason is structural: the search **interpolates
+linearly between two samples**, and the normaliser `|ZG| + |ZL|` is not constant across that
+interval, so the two straight lines cross zero at very slightly different places. Measured on both
+of the document's resonators: **12 Hz on a 10 MHz grid, 1.19e-6 of a sweep step**, four orders below
+anything the sweep resolves. The gate asserts the same COUNT and agreement to 1e-4 of a step, and
+prints the drift; asserting bit equality would be asserting a property of the interpolator rather
+than of the loci.

@@ -1,0 +1,90 @@
+; derived_metrics.cnl — a two-port stage with two WSProbes and one measure line per single-probe
+; derived metric (brief-wsprobe-2 R-wsp2-14(j)). Two ports, so SP1.S is the 2x2 cube GainDEFs and
+; the two renormalisations take; CB closes a loop around both probes, so
+; ZG != 1/YG and every loop gain is non-zero.
+Port:Term1 p1 0 Num=1 Z=50 Ohm
+Port:Term2 p2 0 Num=2 Z=50 Ohm
+
+L:L1   p1 a1   L=3.3 nH
+C:C1   a1 0    C=1.5 pF
+
+WSProbe:P1  a1 g
+R:RG   g 0     R=200 Ohm
+
+VCCS:M1  d 0  g 0  G=0.06
+R:RO   d 0     R=300 Ohm
+C:CF   g d     C=0.3 pF
+
+WSProbe:P2  d a2
+L:L2   a2 p2   L=2.7 nH
+C:C2   p2 0    C=1.0 pF
+
+; CB closes a path around BOTH probes that does not run through either of them, which is the only
+; thing that makes y12 != 0 and ZG != 1/YG (Eq. 79). Without it each probe's G side is a dangling
+; one-port and the two stimulations agree exactly, however much feedback the rest of the circuit has.
+C:CB   a1 a2   C=0.15 pF
+
+analysis SP1 type=sparam start=1 stop=3 npts=21 Unit=GHz
+
+; --- the reductions (Eq. 44, 48) -------------------------------------------
+measure Yred = wsp_yparam(SP1.wsp, SP1.idx("P1"))
+measure Zred = wsp_zparam(SP1.wsp, SP1.idx("P1"))
+
+; --- driving-point, bidirectional and open-port immittances (E.14-E.16) ----
+measure h0  = wsp_H0(SP1.wsp, SP1.idx("P1"))
+measure y0  = wsp_Y0(SP1.wsp, SP1.idx("P1"))
+measure zg  = wsp_ZG(SP1.wsp, SP1.idx("P1"))
+measure zl  = wsp_ZL(SP1.wsp, SP1.idx("P1"))
+measure yg  = wsp_YG(SP1.wsp, SP1.idx("P1"))
+measure yl  = wsp_YL(SP1.wsp, SP1.idx("P1"))
+measure zop = wsp_zop(SP1.wsp, SP1.idx("P1"))
+measure yop = wsp_yop(SP1.wsp, SP1.idx("P1"))
+
+; --- all eight loop gains (Eq. 92, 97, 99-104) -----------------------------
+measure lgbi   = wsp_loopgain(wsp_yparam(SP1.wsp, SP1.idx("P1")), "BI")
+measure lguni  = wsp_loopgain(wsp_yparam(SP1.wsp, SP1.idx("P1")), "UNI", 50)
+measure lgfor  = wsp_loopgain(wsp_yparam(SP1.wsp, SP1.idx("P1")), "FOR", 50)
+measure lgrev  = wsp_loopgain(wsp_yparam(SP1.wsp, SP1.idx("P1")), "REV", 50)
+measure lghst  = wsp_loopgain(wsp_yparam(SP1.wsp, SP1.idx("P1")), "HST")
+measure lgmb   = wsp_loopgain(wsp_yparam(SP1.wsp, SP1.idx("P1")), "MB")
+measure lgmbr  = wsp_loopgain(wsp_yparam(SP1.wsp, SP1.idx("P1")), "MBR")
+measure lggft  = wsp_loopgain(wsp_yparam(SP1.wsp, SP1.idx("P1")), "GFT")
+measure lggftr = wsp_loopgain(wsp_yparam(SP1.wsp, SP1.idx("P1")), "GFTR")
+
+; --- the nodal gamma, the normalised loci, the encirclement count ----------
+measure ngam = wsp_nodal_gamma(SP1.wsp, SP1.idx("P1"))
+measure nz   = wsp_nZ(SP1.wsp, SP1.idx("P1"))
+measure ny   = wsp_nY(SP1.wsp, SP1.idx("P1"))
+measure encl = enc(SP1.LG("P1"))
+measure encf = encirculations(SP1.LG("P1"))
+measure lgdb = _dB(SP1.LG("P1"))
+
+; --- Kurokawa's start-up search on both driving-point functions (E.12) -----
+measure kfy = wsp_unstable_freq_kurokawa(SP1.Y0("P1"))
+measure kfh = wsp_unstable_freq_kurokawa(SP1.H0("P1"))
+
+; --- the remote transfer functions (App. C, App. D) ------------------------
+measure zrem  = wsp_impedance(SP1.wsp, SP1.idx("P1"), SP1.idx("P2"))
+measure zrems = wsp_impedance(SP1.wsp, SP1.idx("P1"), SP1.idx("P2"), "shunt")
+measure gdb   = wsp_gain(SP1.wsp, SP1.idx("P1"), SP1.idx("P1"), SP1.idx("P2"))
+
+; --- the immittance models, in FARADS and HENRIES (E.4, E.11) --------------
+measure rp   = y_to_pr(SP1.Y0("P1"))
+measure cp   = y_to_pc(SP1.Y0("P1"))
+measure lp   = y_to_pl(SP1.Y0("P1"))
+measure rs   = y_to_sr(SP1.Y0("P1"))
+measure cs   = y_to_sc(SP1.Y0("P1"))
+measure ls   = y_to_sl(SP1.Y0("P1"))
+measure zrp  = z_to_pr(SP1.H0("P1"))
+measure zcp  = z_to_pc(SP1.H0("P1"))
+measure zlp  = z_to_pl(SP1.H0("P1"))
+measure zrs  = z_to_sr(SP1.H0("P1"))
+measure zcs  = z_to_sc(SP1.H0("P1"))
+measure zls  = z_to_sl(SP1.H0("P1"))
+measure zmp  = wsp_zprc(y_to_pr(SP1.Y0("P1")), y_to_pc(SP1.Y0("P1")))
+measure zms  = wsp_zsrc(y_to_sr(SP1.Y0("P1")), y_to_sc(SP1.Y0("P1")))
+
+; --- gains and renormalisation (E.1, E.10) ---------------------------------
+measure gains = GainDEFs((SP1.ZG("P1") - 50) / (SP1.ZG("P1") + 50), SP1.S, (SP1.ZL("P2") - 50) / (SP1.ZL("P2") + 50))
+measure szo   = wsp_zo_renorm_s(SP1.ZG("P1"), SP1.S, SP1.ZL("P2"))
+measure src   = wsp_rc_renorm_s(z_to_sr(SP1.ZG("P1")), 0.2e-12, SP1.S, z_to_sr(SP1.ZL("P2")), 0.1e-12)

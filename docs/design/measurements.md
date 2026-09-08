@@ -156,6 +156,37 @@ axis stays 0-based positional — `SP1.S[0, :, 2, 1]` is S21 at the first sweep 
 
 The shared shorthand grammar is documented in `docs/design/trace-card.md` §5.
 
+### WSProbe: the reference document's derived metrics
+
+A run carrying a `WSProbe` adds the `wsp` matrix cube, six default cubes per probe and the
+`__WspProbes` label ↔ idx metadata (`stability-wsprobe.md` §3), reachable through the accessors
+`SP1.wsp`, `SP1.wsp(r, c)`, `SP1.idx("GATE")` and `SP1.H0("GATE")` … `SP1.F("GATE")`.
+
+Everything the reference document derives from **one** probe's block of that matrix is a built-in of
+the expression engine, under the document's own name and argument order — the full table is in
+`stability-wsprobe.md` §5.2, and `expressions.md` §7 lists the names. They are **derived metrics**,
+not scripts, and they are available in a `measure` line and in the Data Display alike:
+
+```
+measure zg    = wsp_ZG(SP1.wsp, SP1.idx("GATE"))            # Ω over freq, Eq. 67
+measure Yred  = wsp_yparam(SP1.wsp, SP1.idx("GATE"))        # {freq, i, j}, Eq. 44
+measure lg    = wsp_loopgain(Yred, "REV", 50)               # Eq. 97
+measure fosc  = wsp_unstable_freq_kurokawa(SP1.Y0("GATE"))  # {n} Hz, Eq. 108 — possibly empty
+measure cpar  = y_to_pc(SP1.Y0("GATE"))                     # FARADS, not the document's picofarads
+```
+
+Three shapes come out of them and they follow the rules above: a reduction is `{…, freq, i, j}` with
+`i`/`j` the **1-based port numbers** of the reduced two-port (the same shape an `S` cube has, so the
+network-parameter paths accept it), a per-frequency quantity is `{…, freq}`, and the Kurokawa search
+returns a `{n}` list of frequencies which is **empty** when none was sampled. `GainDEFs` returns
+`{…, freq, gaindef}` with the labelled axis `GT_dB`, `GP_dB`, `GA_dB`, `Gmax_dB` — pick one with
+`at(...)`, exactly as any other labelled axis.
+
+`wsp_unstable_freq_kurokawa` and `enc` refuse swept data rather than guessing a shape for it; the
+refusal names `at(...)` as the way to pin the sweep first. A misspelled probe label lists the probes
+present, and `wsp_stability_margin` refuses with the paper's DOI rather than answering
+(`stability-wsprobe.md` §5.6).
+
 ## Current state (honest inventory)
 
 What works (end-to-end on a UI run):

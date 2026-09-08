@@ -1,0 +1,29 @@
+; stage_gain.cnl — one transconductance stage with three probes, for brief-wsprobe-2 R-wsp2-14(f).
+;
+; P0 (idx 1) carries the stimulus, PG (idx 2) sits at the gate and PD (idx 3) at the drain, so both
+; response probes read a real node voltage and the current flowing into their L side — which is
+; exactly the two real powers App. D's wsp_gain takes the ratio of. Closed form, at every frequency:
+;
+;     GT = 10*log10[ (G^2 / |1/RO + 1/RL + jw*CL|^2) * (RIN/RL) ]
+;
+; because Re(V*conj(I)) at the gate is |V(gt)|^2/RIN (CIN carries no real power) and at the drain is
+; |V(dl)|^2/RL, with V(dl) = -G*V(gt)/(1/RO + 1/RL + jw*CL).
+;
+; T-14 lives here too: had Eq. 199/201 been implemented as printed — the drain index in BOTH factors
+; — this would read 0 dB at every frequency.
+R:RSRC  s0 0   R=50 Ohm
+WSProbe:P0  s0 ni
+R:RC    ni ng  R=10 Ohm
+
+WSProbe:PG  ng gt
+R:RIN   gt 0   R=100 Ohm
+C:CIN   gt 0   C=0.5 pF
+
+VCCS:M1  dv 0  gt 0  G=0.05
+R:RO    dv 0   R=1000 Ohm
+
+WSProbe:PD  dv dl
+R:RL    dl 0   R=50 Ohm
+C:CL    dl 0   C=0.2 pF
+
+analysis SP1 type=sparam start=1 stop=5 npts=9 Unit=GHz

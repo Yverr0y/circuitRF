@@ -7,7 +7,7 @@ namespace CircuitRF.Core.Expressions;
 /// Walks a scope chain, evaluates AST nodes, enforces cycle detection and memoization (§10).
 /// One Evaluator instance per elaboration run; holds the resolving-stack and memo cache.
 /// </summary>
-public sealed class Evaluator
+public sealed partial class Evaluator
 {
     // names currently being resolved — the cycle-detection stack
     private readonly List<string> _resolving = [];
@@ -220,6 +220,11 @@ public sealed class Evaluator
         // user-defined function?
         if (_functions.TryGetValue(cl.Name, out var ufn))
             return CallUserFunction(ufn, cl.Args, scope);
+
+        // The WSProbe derived metrics (Evaluator.Wsp.cs) — the reference document's own function
+        // library, registered under the document's own names. Routed before the table below rather
+        // than folded into it because there are three dozen of them and every one is a cube map.
+        if (IsWspBuiltin(cl.Name)) return EvalWspCall(cl, scope);
 
         // built-ins — cube-aware variants handle DataCube args; scalars fall through to normal math
         return cl.Name switch

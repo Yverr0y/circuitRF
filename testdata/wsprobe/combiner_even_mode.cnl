@@ -1,0 +1,31 @@
+; combiner_even_mode.cnl — a symmetric two-way combiner, for brief-wsprobe-2 R-wsp2-14(f).
+;
+; Two identical transconductance devices drive a common load through equal arms. P0 splits the
+; COMMON input node, so its series stimulus excites both halves in phase — which is what makes
+; wsp_impedance(wsp, P0, P2) the EVEN-MODE load line at drain 2 rather than a one-port impedance
+; (App. C, Eq. 196/197). By symmetry both branch currents are equal, the whole 2i flows in RL, and
+;
+;     V(d2)/iS(P2) = RM + 2*RL = 5 + 50 = 55 Ohm
+;
+; exactly — independent of gm, of RO and of frequency, which is the classic even-mode reduction and
+; is what combiner_half.cnl reproduces with ONE branch and the load doubled.
+;
+; No ports (R-wsp1-6): the document's own fixtures have none either.
+R:RSRC   s0 0    R=50 Ohm
+WSProbe:P0  s0 ni
+
+R:RIN    ni 0    R=1000 Ohm
+
+VCCS:M1  d1 0  ni 0  G=0.05
+R:RO1    d1 0    R=1000 Ohm
+WSProbe:P1  d1 m1
+R:RM1    m1 sum  R=5 Ohm
+
+VCCS:M2  d2 0  ni 0  G=0.05
+R:RO2    d2 0    R=1000 Ohm
+WSProbe:P2  d2 m2
+R:RM2    m2 sum  R=5 Ohm
+
+R:RL     sum 0   R=25 Ohm
+
+analysis SP1 type=sparam start=1 stop=3 npts=5 Unit=GHz
