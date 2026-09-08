@@ -194,3 +194,33 @@ fixtures, and its own piece of work.
   only `Wrap` and the two `Render*` methods. The Render-side class is deliberately NOT called
   `ComponentPreviewRenderer` — `src/Ui` has a `global using CircuitRF.Render`, and two types of one name
   in scope is an ambiguity error at every call site.
+
+
+## RND-2 — what the `render` verb needed from this project (2026-09-07)
+
+`brief-render-2-render-verb.md`. The verb itself is `src/Cli/Render.cs` and its findings are in
+`src/Cli/RESOLVED.md`; three things landed here.
+
+- **`SvgFontNormalizer.cs` came down from `src/Ui/Diagnostics`**, beyond RND-1's measured closure. It is
+  framework-free and it was already on every SVG path in the repository — the three clipboard exports,
+  the plot exporter and wBond's all pass Skia's output through `RepairPositionLists`, because Skia
+  writes each text run's per-glyph position list with a trailing separator that Firefox reads as invalid
+  and drops. Leaving it up there would have made the headless SVG differ from the application's by
+  exactly that defect: correct in Chrome and Safari, unreadable in Firefox, reported as a success.
+  `SvgPostPass` stayed — it is the docs generator's size pass, reaches `System.Xml.Linq`, and is not a
+  renderer's concern.
+- **`LodPixelThreshold` and `MergeShapeCountThreshold` grew the "off" branch the other six tier knobs
+  already had.** `LayoutRenderOptions` documents that "a NEGATIVE value disables the tier outright,
+  which is how an export pins exact vector geometry", and those two read `> 0 ? value : default` — so a
+  caller asking for the tier to be OFF silently got the DEFAULT, in the one direction where the mistake
+  produces a plausible picture of less geometry than the document holds. `EffectiveLodPixelThreshold`
+  and `EffectiveMergeShapeCountThreshold` are the fix; nothing passed a negative before, so no existing
+  caller changed behaviour.
+- **`LayoutRenderResult.VerticesEmitted`**, on `PathsConstructed`' own terms and for its own reason —
+  see that field's doc comment for what it deliberately does not count, and `src/Cli/RESOLVED.md` for
+  the measurement that made it necessary.
+
+`InternalsVisibleTo("CircuitRF.Cli")` was added for `MeasureLabelWorldBbox` (a label's stored bbox is
+its ANCHOR, and framing on that is what cropped ports off a pasted page) and
+`LayoutRenderDetail.ToleranceDbu` (the effective decimation tolerance the verb REPORTS). A second copy
+of either measurement would be free to drift, silently.

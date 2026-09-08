@@ -141,6 +141,10 @@ return JsonRun.Finish(JsonRun.Verb switch
     // RC-5 adds `list` and `restore`, RC-7 `commit` (R-rc0-19).
     "history" => CircuitRF.Cli.History.Run(args[1..]),
     "explain" => CircuitRF.Cli.Explain.Run(args[1..]),
+    // The one output the command line did not have: a picture (brief-render-2-render-verb.md). It
+    // owns no rendering — every pixel comes out of the same CircuitRF.Render the application draws
+    // each frame with, which is the whole reason RND-1 put that project below the firewall.
+    "render"  => CircuitRF.Cli.Render.Run(args[1..]),
     // The inverse of a run verb: the DataSet a run wrote, loaded back through the same two readers
     // the GUI's own source library uses (brief-automation-5-protocol-adapter.md §3's `read`).
     "read"    => CircuitRF.Cli.ReadBack.Run(args[1..]),
@@ -1752,6 +1756,7 @@ static int PrintHelp()
     Console.WriteLine("  import part <file>     (a footprint and its symbol, as a cell)");
     Console.WriteLine("  check   <path>         (is it well formed, does it resolve, is it sound)");
     Console.WriteLine("  explain <path>         (what did circuitRF resolve it to, and by which walk)");
+    Console.WriteLine("  render  <path> -o out.svg  (a schematic, symbol or layout as a picture)");
     Console.WriteLine("  read    <path>         (a result file as cubes, or a document as its own text)");
     Console.WriteLine("  reference [topic] [type]  (what a caller may WRITE: the prose pages, and the");
     Console.WriteLine("                          generated component catalogue. Takes no path.)");
@@ -1829,6 +1834,26 @@ static int PrintHelp()
     Console.WriteLine("                          With none of the three: the document's own walks —");
     Console.WriteLine("                          its workspace, its layout, its technology.");
     Console.WriteLine();
+    Console.WriteLine("render options:");
+    Console.WriteLine("  <path>                  a .csch .csym .clay, a cell folder (--view), or a");
+    Console.WriteLine("                          workspace (--cell). A document belonging to no");
+    Console.WriteLine("                          workspace renders on the fallback palette.");
+    Console.WriteLine("  -o <out.svg|.pdf|.png>  REQUIRED — the extension picks the format.");
+    Console.WriteLine("                          --format svg|pdf|png overrides it.");
+    Console.WriteLine("  --fit                   the whole document (default), with --margin <f>");
+    Console.WriteLine("  --window x0,y0,x1,y1    an explicit world rectangle. On a LAYOUT every");
+    Console.WriteLine("                          coordinate carries a unit (500um, 0.5mm) — a bare");
+    Console.WriteLine("                          number is refused, never guessed.");
+    Console.WriteLine("  --center x,y --span w   a centre and a width; height follows the aspect");
+    Console.WriteLine("  --size WxH              device pixels (png) or points (svg/pdf). 1600x1200");
+    Console.WriteLine("  --scale n / --dpi n     png only; --dpi is relative to 96");
+    Console.WriteLine("  --layers a,b            layout only — render only these");
+    Console.WriteLine("  --hide-layers a,b       layout only — render everything except these");
+    Console.WriteLine("  --detail full|screen|<px>  full (default) pins exact stored geometry;");
+    Console.WriteLine("                          screen engages the LOD tiers as a canvas would");
+    Console.WriteLine("  --theme name|f.ccolor   --variant light|dark   --grid   --no-rulers");
+    Console.WriteLine("  --background opaque|transparent");
+    Console.WriteLine();
     Console.WriteLine("read options:");
     Console.WriteLine("  <path>                  a .npy or Touchstone result, read back as cubes, or");
     Console.WriteLine("                          one of circuitRF's own documents, returned verbatim.");
@@ -1872,6 +1897,9 @@ static int PrintHelp()
     Console.WriteLine("Example: circuitrf new cell ~/designs/Amp Stage1 --views schematic,symbol");
     Console.WriteLine("Example: circuitrf import part parts/ --into ~/designs/Amp --cell SOT-23");
     Console.WriteLine("Example: circuitrf read results/Amp_em.npy --only S --json");
+    Console.WriteLine("Example: circuitrf render Stage1/layout/Stage1.clay -o stage1.svg");
+    Console.WriteLine("Example: circuitrf render Amp --cell Stage1 --view schematic -o s1.png --scale 2");
+    Console.WriteLine("Example: circuitrf render board.clay -o crop.png --window 0um,0um,500um,300um");
     Console.WriteLine("Example: circuitrf serve --root ~/designs");
     return 0;
 }

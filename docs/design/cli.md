@@ -47,6 +47,7 @@ Nine verbs run no analysis, so none of §3-§6 applies to them and §7's exit co
 | `import part` | a component file or folder | `ComponentRead` + `ComponentImport.Import` | a cell folder holding the land patterns and the symbol |
 | `check` | a workspace, a cell folder, or one document | the validators that already exist | **nothing** — §10 |
 | `explain` | the same, plus `--expr` / `--analysis` / `--ref` | reports what resolution DECIDED | **nothing** — §10 |
+| `render` | the same three view documents, a cell folder, or a workspace + `--cell` | draws it with the renderer the GUI draws with | one `.svg` / `.pdf` / `.png` — §13 |
 | `read` | a result file, or one of circuitRF's own documents | loads it back through the readers the GUI reads through | **nothing** — §11.4 |
 | `serve` | `--root <dir>` | a protocol server on stdin/stdout — §11 | whatever the tool it was asked for writes |
 | `reference` | **nothing at all** | reports what a caller may WRITE: the shipped reference pages, and the component catalogue generated from the live registries | **nothing** — §12 |
@@ -443,6 +444,12 @@ override it takes lands in the `EmSetup`, not at the run service, for the same r
 
 `check`, `explain` and `read` follow 1, 4, 6 and 7, and their §5 analogue is §10's — they run
 nothing and they write nothing.
+
+`render` follows 1, 4, 6 and 7. Its §5 analogue is §13's and it is the same one the authoring verbs
+have in a different costume: **it owns no rendering.** Every pixel comes out of the three renderers in
+`CircuitRF.Render` that the application draws each frame with, so "a headless picture and the GUI's are
+the same picture" is true by construction rather than by care — which is what makes §13.6's byte
+identity a gate rather than an aspiration.
 
 `reference` follows 1, 4, 6 and 7 and is outside everything else, because it reads no file either
 (§12). Its §5 analogue is R-aut6-7: **it transcribes nothing.** The prose half is the authored page,
@@ -858,3 +865,162 @@ intersection.
 `tests/Ui.Tests/ServeProtocolAdapterTests.cs` for both protocol channels. Every catalogue assertion is
 made against the live registry rather than a committed list — a golden of all 68 primitives would pass
 forever after somebody froze it.
+
+
+## 13. `render` — the one output the command line did not have
+
+`brief-render-2-render-verb.md`. circuitRF could already run, check, explain, convert and author
+headlessly. It could not SHOW anything: a client that had just authored a layout had no way to look at
+what it made, and neither did the person reading its report.
+
+```
+circuitrf render <path> -o <out.svg|.pdf|.png> [options]
+```
+
+**One verb over every document kind**, with the kind inferred from the path through
+`src/Cli/DocumentKinds.Classify` — the same function `check` and `explain` infer with (§10.2). There is
+no `render-schematic`.
+
+### 13.1 It owns no rendering, and that is the whole design
+
+`SchematicRenderer`, `SymbolEditorRenderer` and `LayoutRenderer` are ~7,000 lines of measured, tuned
+Skia that already draw every frame the application shows and already produce the SVG and PDF on its
+clipboard. RND-1 moved them into `CircuitRF.Render`, below the firewall, precisely so this verb could
+CALL them rather than resemble them: a CLI that re-implemented any of it would drift, and the drift
+would be invisible, because a picture that is *plausible* is indistinguishable from a picture that is
+*right*.
+
+What `src/Cli/Render.cs` contains is argument parsing, viewport arithmetic, refusals and reporting —
+which is what `src/Cli/Authoring.cs` already established a CLI verb is allowed to be.
+
+### 13.2 What it takes, and what it refuses to guess
+
+| Input | Resolved by |
+|---|---|
+| a `.csch`, `.csym` or `.clay` | directly, **including one that belongs to no workspace** |
+| a cell folder | `--view`, or the sole view it holds; primacy is `CellFolder.ResolvePrimary`'s answer |
+| a workspace | `--cell <name>`, resolved by the same walk `explain --cells` reports |
+
+**An orphan document is a first-class input, not a degraded one.** A `.clay` with no workspace above it
+resolves no technology, renders on the fallback palette exactly as the layout editor does with an
+unresolved technology, and says so as a NOTE. A caller rendering a bare `.clay` handed to it by a
+converter already knows there is no workspace; calling that a warning teaches it to ignore warnings.
+
+Everything a dialog would have ASKED is a refusal naming the flag that answers it (R-rnd0-6): a cell
+folder holding three views lists them and names `--view`; a workspace with no `--cell` says so, because
+rendering "the workspace" is not a picture of anything; an output extension this verb does not write
+lists the three it does; a layer the technology does not define names `explain --layers`, because a
+misspelling that was silently skipped is indistinguishable from a layer that is genuinely empty.
+
+**`-o` is required and there is no picture on stdout.** A binary there would break §3.1's contract that
+stdout is *the result* in a form a caller can read, and `--json` has to be able to co-exist with the
+write. The extension picks the format exactly as `convert` infers one from a path; `--format` overrides.
+
+### 13.3 The viewport, and the unit rule
+
+```
+--fit                      the whole document, with --margin (default 0.10 — Zoom to Fit's own)
+--window <x0,y0,x1,y1>     an explicit world-space rectangle
+--center <x,y> --span <w>  a centre and a width; height follows from the output aspect
+```
+
+The three are **refused together rather than ordered** — `explain`'s rule for its own three questions.
+A precedence nobody stated is an invention.
+
+**On a layout, every coordinate carries an SI unit and a bare number is a refusal.** `--window
+0,0,500,300` could mean DBU, micrometres or millimetres; those are three pictures six orders of
+magnitude apart and all three are plausible, and the picture that comes back from the wrong one is a
+plausible picture of the wrong thing. This is `sweep-unit-scale-and-mark`'s failure class exactly, so
+the refusal prints what it would have accepted and does not guess. A schematic or symbol takes bare
+numbers, because its coordinates ARE dimensionless design units — and the `--json` document says
+`"unit": "design-units"` rather than leaving a caller to assume metres.
+
+**The requested window is honoured exactly and an aspect mismatch is LETTERBOXED** — never cropped and
+never stretched. A caller that asked for a region and silently got less of it than it asked for has no
+way to notice. The resolved window, after letterboxing, is in the document.
+
+**What is fitted is the PAINTED box, not the stored one.** A label's stored bbox is its anchor, an EM
+port paints a width bar and an arrow beyond it, and an instance's extent resolves through its cell.
+
+### 13.4 Size, resolution and detail
+
+```
+--size <W>x<H>   device pixels for png, points for svg/pdf. Default 1600x1200.
+--scale <n>      raster multiplier. png only; a refusal on svg/pdf, which have no pixels to multiply.
+--dpi <n>        the same number spelled relative to 96. Refused together with --scale.
+--detail full | screen | <pixel budget>
+```
+
+| `--detail` | Means |
+|---|---|
+| `full` (default) | every level-of-detail tier off. What is stored is what is drawn. |
+| `screen` | the tiers engage exactly as they would on a canvas at this zoom — what a user sees. |
+| `<n>` | the pixel budget; `LayoutRenderDetail`'s octave bucketing still applies and the effective tolerance is reported. |
+
+**The default is `full` and it is a deliberate cost.** Measured on a board matched to
+`LayoutRenderDetail`'s own import (3,284 shapes, 764,032 vertices), whole board at 1600x1200: an
+undecimated SVG is **23.5 MB in 1.44 s**; the same picture at `--detail screen` is **6.2 MB in 0.36 s**.
+The PDF is 9.6 MB against 2.6 MB. A PNG barely moves (1.4 MB against 1.0 MB) because a raster's size is
+set by its pixels, not by the geometry behind them. The verb reports the vertex count and the file size
+it produced, so a caller finds this out from the answer rather than from a 23 MB file.
+
+`--detail` is layout-only and is refused on a schematic or a symbol, whose renderers key their own LOD
+on zoom rather than on this. `PathCache` is null on this path — one-shot render, nothing to persist
+across frames — which is what every existing export already passes.
+
+### 13.5 Layers, colour and what is off by construction
+
+```
+--layers <a,b,...>       render only these        (layout only; refused on a schematic or symbol)
+--hide-layers <a,b,...>  render everything except these
+--theme <name|path.ccolor>   --variant light|dark   --background opaque|transparent
+--grid                   default off      --no-rulers   default: whatever the document says
+```
+
+The default is every layer the resolved technology marks visible — `LayerDef.Visible`, which is what the
+editor honours, not "all layers regardless". **The selection is applied to a CLONE of the resolved
+technology, never to the cached one**: `TechnologyCache` hands back a shared instance and flipping
+`Visible` on it would leak into the next render in the same process, which is not hypothetical because
+`serve` runs many calls in one. That is the class of defect that only appears on the second call.
+
+Theme resolution is `ThemeResolver`'s existing chain and nothing new — an explicit `--theme <path>`
+first, then workspace directory, user themes directory, shipped `.ccolor`. With no `--theme`, the
+workspace's own recorded theme; with no workspace, the shipped default. A theme NAME that resolves to
+nothing is a refusal listing what was looked at, because that chain's last step always succeeds and a
+misspelling would otherwise produce a differently-coloured picture reported as a success.
+
+**Overlay, handles, marquee, PCell pins, snap glyphs and the EM/DRC overlays are off by construction** —
+each defaults off in `LayoutRenderOptions` and this verb never sets one. **Rulers are the exception and
+they stay ON**, because a ruler is document content rather than overlay state: it is in the `.clay`, and
+an export that dropped it would contradict `layout-view.md` §9B.9.
+
+### 13.6 Progress, `--json`, and the gate
+
+Progress goes to stderr and through `RunHost`'s `RunControl` — the same one `em` uses — so `serve` gets
+`notifications/progress` and cancellation with no plumbing in this verb, and a cancelled render exits
+**130 and writes nothing**. The bytes are complete before the file is ever opened, which is what makes
+that true rather than merely intended. Four stages are reported: *resolve*, *measure*, *draw*, *encode*.
+Measured, a whole real board is under a second and a half, so the value here is the cancellation rather
+than the bar.
+
+`--json` carries `outputs` with the file written and `result.render` with what was decided — the
+viewport (including `letterboxed`), the document's extents, the size, the theme and WHICH step of the
+chain resolved it, the layers with whether each was drawn and how many shapes the document has on it,
+the detail mode with its effective tolerance in DBU, and `counters`. **There is no duration**:
+`counters` is `LayoutRenderResult`'s own work count — deterministic and machine-independent by
+construction — which is what lets a gate assert about work done rather than about a shared runner's
+wall clock. Extents and viewport come back in base SI **with the unit and the scale named**, the rule
+`explain --analysis` already follows.
+
+`verticesEmitted` is the one counter this verb added, in that existing style and for that reason: nothing
+else could be asserted against `--detail`'s claim, because the same shapes are drawn and the same paths
+are built. It counts vertices of stored vertex lists emitted into committed-layer geometry, after
+decimation; analytic geometry (a circle, a via annulus) has no vertex list and contributes none.
+
+The gate is `tests/Ui.Tests/Render/RenderCliVerbTests.cs`: the verb run **as a process** writes the same
+bytes as the in-process `CircuitRF.Render` call on the same document, theme and viewport — for the
+schematic, the symbol and the layout, in SVG and in PDF — and that call is itself gated against the
+GUI's own clipboard export by RND-1. Measured, **all four came back byte-identical with no exclusion at
+all**: RND-1's `clipPath` id counter is per process and does not differ between the two here, and the
+`SKDocumentPdfMetadata` date §5.2 predicted never appeared. Both normalisations are written and applied
+only where the raw bytes differ, so an exclusion that stops being needed stops being applied.

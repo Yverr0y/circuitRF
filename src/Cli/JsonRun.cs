@@ -80,6 +80,12 @@ internal static class JsonRun
     /// restore did (R-rc5-23). About no analysis at all, which is why it is its own payload.</summary>
     public static HistoryReportJson? History;
 
+    /// <summary>What <c>render</c> decided — the viewport, the theme, the layers, the detail tier and
+    /// the frame's own work counters (R-rnd2-11). About no analysis either, and about a file the run
+    /// WROTE rather than one it read, which is why <c>outputs</c> carries the picture and this carries
+    /// everything the picture cannot say about itself.</summary>
+    public static RenderReportJson? Render;
+
     /// <summary>
     /// Where <see cref="Finish"/> writes, instead of stdout. Set by <c>serve</c> only.
     ///
@@ -115,6 +121,7 @@ internal static class JsonRun
         Document            = null;
         Reference           = null;
         History             = null;
+        Render              = null;
         Outputs.Clear();
         Diagnostics.Clear();
     }
@@ -203,6 +210,11 @@ internal static class JsonRun
         ".spl"                  => "spl",
         ".lpcwave"              => "lpcwave",
         ".gam"                  => "gamma-grid",
+        // `render`'s three (R-rnd2-2). Named rather than left as "file" for the reason every other row
+        // here exists: `outputs` is meant to say what a file IS, not leave a caller re-deriving it.
+        ".svg"                  => "svg",
+        ".pdf"                  => "pdf",
+        ".png"                  => "png",
         var e when e.StartsWith(".s", StringComparison.Ordinal) && e.EndsWith('p') => "touchstone",
         _                       => "file",
     };
@@ -239,8 +251,8 @@ internal static class JsonRun
         // is about no document at all — so they are answered before the cube machinery, not folded
         // into it.
         if (Check is not null || Explain is not null || Document is not null || Reference is not null
-         || History is not null)
-            return new ResultPayload(null, null, Check, Explain, Document, Reference, History);
+         || History is not null || Render is not null)
+            return new ResultPayload(null, null, Check, Explain, Document, Reference, History, Render);
 
         if (Data is not { } ds) return null;
 

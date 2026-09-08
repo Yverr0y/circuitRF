@@ -296,9 +296,11 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
     /// accidental change show up here rather than as a silently broken caller. Add an id and this
     /// test tells you to record it; RENAME one and it tells you that you have made a new diagnostic.
     ///
-    /// <para>Read from source rather than by reflection because <c>CircuitRF.Cli</c> is referenced by
-    /// this assembly with <c>ReferenceOutputAssembly="false"</c> — it is launched as a process, not
-    /// linked — so its types are not available to bind against here.</para>
+    /// <para><b>Read from SOURCE rather than by reflection</b>, and it stays that way now that
+    /// <c>CircuitRF.Cli</c> is linked as well as launched (RND-2 needed that for two in-process
+    /// gates): reflection would report the ids a build happens to contain, where the point of this
+    /// test is to compare what a HUMAN wrote against what was committed. The source scan also catches
+    /// an id declared but never returned, which reflection over a static class would not.</para>
     /// </summary>
     [Fact]
     public void DiagnosticIds_AreTheCommittedSet_UniqueAndCaseDistinct()
@@ -587,6 +589,50 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "reference.component.unknown",
         "reference.resource.unknown",
         "reference.topic.unknown",
+        // brief-render-2-render-verb.md — `circuitrf render`. Every one of these is a question
+        // the GUI would have asked in a dialog (R-rnd0-6), refused rather than defaulted past.
+        "render.args.multiple-paths",
+        "render.args.output-required",
+        "render.args.path-required",
+        "render.args.unknown-background",
+        "render.args.unknown-format",
+        "render.args.unknown-option",
+        "render.args.unknown-variant",
+        "render.cancelled",
+        "render.cell.no-primary",
+        "render.cell.no-view",
+        "render.cell.view-required",
+        "render.detail.malformed",
+        "render.detail.not-applicable",
+        "render.document.empty",
+        "render.document.unreadable",
+        "render.layers.conflict",
+        "render.layers.no-technology",
+        "render.layers.not-applicable",
+        "render.layers.unknown",
+        "render.margin.malformed",
+        "render.output.unknown-format",
+        "render.output.write-failed",
+        "render.path.not-drawable",
+        "render.path.not-found",
+        "render.scale.conflict",
+        "render.scale.malformed",
+        "render.scale.vector",
+        "render.size.malformed",
+        "render.tech.note",
+        "render.tech.unresolved",
+        "render.theme.unreadable",
+        "render.theme.unresolved",
+        "render.viewport.center-malformed",
+        "render.viewport.coordinate-malformed",
+        "render.viewport.empty",
+        "render.viewport.malformed",
+        "render.viewport.multiple-modes",
+        "render.viewport.span-required",
+        "render.viewport.unit-required",
+        "render.workspace.ambiguous-cell",
+        "render.workspace.cell-required",
+        "render.workspace.no-such-cell",
         "serve.args.json-not-applicable",
         "serve.args.not-for-mode",
         "serve.args.required",

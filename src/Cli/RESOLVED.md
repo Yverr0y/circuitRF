@@ -7,6 +7,161 @@ what the design says.
 ---
 
 
+## RND-2 — `circuitrf render` (2026-09-07)
+
+`brief-render-2-render-verb.md`. One verb over a `.csch`, a `.csym` and a `.clay`, as `.svg`, `.pdf` or
+`.png`. `src/Cli/Render.cs` draws nothing: it parses arguments, computes a viewport, refuses, and
+reports, and every pixel comes out of the `CircuitRF.Render` the application draws each frame with.
+Gate file `tests/Ui.Tests/Render/RenderCliVerbTests.cs`.
+
+### Byte identity came out BETTER than RND-1 predicted, and the reason is worth knowing
+
+RND-1 recorded that Skia's SVG device numbers its `clipPath` elements from a counter it does not reset
+per canvas, and that this made in-process SVG byte comparison unavailable for the LAYOUT (`cl_3` vs
+`cl_4`). **Across processes it did not bite at all**: the layout, the schematic and the symbol all came
+back byte-identical, raw, and so did the PDF — no id normalisation, no date stripper, no exclusion of
+any kind. Each process starts its own counter, and the first layout SVG a process draws lands on the
+same number on both sides.
+
+**That is a load-dependent property, not a guarantee**, and the gate is written accordingly: it
+compares raw first and normalises Skia's ids only where the bytes actually differ, reporting when it
+does. Other test classes in the same process emit SVGs and advance the shared counter, so a full-suite
+run can legitimately push the in-process side off by one. An exclusion that stops being needed stops
+being applied; one that is needed is named.
+
+### `--detail full` needed two LOD knobs to grow the "off" branch the other six already had
+
+R-rnd2-6 quotes `LayoutRenderOptions`' own contract — "a NEGATIVE value disables the tier outright,
+which is how an export pins exact vector geometry" — and it was true of six knobs and **not** of
+`LodPixelThreshold` or `MergeShapeCountThreshold`, which read `> 0 ? value : default`. A caller asking
+for those tiers to be off got the DEFAULT instead: silently, and in the one direction where the mistake
+produces a plausible picture of *less* geometry than the document holds. `LayoutRenderer` now has
+`EffectiveLodPixelThreshold` / `EffectiveMergeShapeCountThreshold`, which answer `-∞` / `int.MaxValue`
+for a negative. Nothing passed a negative before this verb, so no existing caller changed behaviour.
+
+### `verticesEmitted`, and what it deliberately does not count
+
+R-rnd2-6's whole claim is that `--detail` changes how much geometry comes out, and no existing counter
+could be asserted against it: `ShapesDrawn` is unchanged (the same shapes are drawn) and
+`PathsConstructed` is unchanged (the same paths are built). The new counter is on
+`PathsConstructed`'s own terms — counted only where a frame counter is threaded, so the ghost,
+selection, handle and marquee paths (which pass none) are excluded, and a shape served from
+`LayoutPathCache` contributes nothing because nothing was built.
+
+**A shape whose geometry is ANALYTIC contributes none.** A circle, a via annulus and a rounded rectangle
+are Skia primitives with no vertex list to thin; inventing a tessellated count for them would report a
+number the renderer never produced. A `Rect` contributes its four corners, which is literally what it
+is. A `PathShape` contributes its CENTRELINE's vertices, not its stroked outline's — the outline is
+generated, and counting it would report the stroker's fidelity rather than the document's.
+
+### One file had to move below the firewall beyond RND-1's measured closure
+
+`SvgFontNormalizer.cs`, from `src/Ui/Diagnostics` to `src/Render`. It is framework-free (string and
+regex only) and it was already on every SVG path in the repository — the three clipboard exports, the
+plot exporter and wBond's all pass Skia's output through `RepairPositionLists` on the way out, because
+Skia writes each text run's per-glyph position list with a trailing separator that Firefox reads as
+invalid and drops, putting every run a line above its baseline where the clip eats it.
+
+Leaving it in `src/Ui` would have meant the headless SVG and the application's differed by exactly that
+defect, in exactly the direction R-rnd0-2 forbids: correct in Chrome and Safari, unreadable in Firefox,
+and reported as a success. `SvgPostPass` stayed — it is the docs generator's size pass and reaches
+`System.Xml.Linq`, not a renderer's concern.
+
+### `tests/Ui.Tests` now LINKS `CircuitRF.Cli` as well as launching it
+
+Two of this brief's gates are about what happens inside ONE process and are unreachable by exec'ing a
+DLL that answers one command and exits:
+
+- **Gate 7 (cancellation).** A render cancelled through `RunHost`'s `RunControl` must exit 130 and leave
+  no output file. There is no signal a test can send a child process that means "cancel at a work
+  boundary".
+- **Gate 5 (the layer-selection leak).** `TechnologyCache` hands back a shared instance, so flipping
+  `LayerDef.Visible` on the resolved technology narrows every LATER render taken through that cache.
+  Across two processes the defect is invisible *by construction*, so a two-process test of it would
+  pass on the broken implementation.
+
+`CircuitRF.Cli` grants `InternalsVisibleTo("CircuitRF.Ui.Tests")` and the project reference lost its
+`ReferenceOutputAssembly="false"`. **Every byte-identity gate still launches the real DLL** — a
+same-process call cannot show a difference only a second process can have, which is the whole reason
+RND-1's own gate 2 was not constructible until this verb existed.
+
+### The layer clone lives in `src/Design`, not in the verb
+
+R-rnd2-8 asks for a CLONE. `TechnologyLayerSelection.WithVisibility` is beside `Technology` because it
+is data manipulation on the design model, RND-3's `explain --layers` wants the same answer, and a second
+copy would be free to disagree about what was actually drawn. **The copy is reflective rather than
+written out field by field**: a hand-written copy is correct on the day it is written and silently drops
+whatever is added to `LayerDef` afterwards, and the symptom would be a layer that renders differently
+only when a layer selection is in force.
+
+### Progress: measured, and the honest answer is "for `serve`, not for a terminal"
+
+R-rnd2-10 says whether a render is slow enough to need progress is a measurement. Taken on a synthetic
+board matched to `LayoutRenderDetail`'s own measured import (3,284 shapes, 764,032 vertices, 20 layers),
+Release build, whole board in view at 1600x1200:
+
+| format | `--detail` | wall | file | vertices emitted |
+|---|---|---|---|---|
+| svg | full | 1.44 s | 23.5 MB | 764,032 |
+| svg | screen | 0.36 s | 6.2 MB | 375,996 |
+| pdf | full | 1.22 s | 9.6 MB | 764,032 |
+| pdf | screen | 0.51 s | 2.6 MB | 375,996 |
+| png | full | 0.55 s | 1.4 MB | 764,032 |
+| png | screen | 0.35 s | 1.0 MB | 375,996 |
+
+Reading and parsing the 10.9 MB `.clay` and measuring its extents is ~0.26 s of every row (measured by
+windowing to a region containing nothing); process start is 0.02 s. So **the worst case is under a
+second and a half and nothing here needs a bar.** What the `RunControl` wiring buys is CANCELLATION for
+`serve` — a client that gave up at a timeout and retried would pay for the run twice — and the four
+stage labels, both of which come free through `RunHost` with no plumbing in the verb.
+
+**The vector/raster asymmetry is the number a caller actually needs.** An undecimated SVG of that board
+is 23.5 MB and its `--detail screen` counterpart is 6.2 MB; the PNG barely moves, because a raster's
+size is set by its pixels and not by the geometry behind them. `--detail screen` is the answer for
+anyone who wants the picture, `full` for anyone who wants the geometry, and RND-5's docs must say so
+plainly.
+
+**The 2.03x vertex ratio is this fixture's, not a universal one.** The brief's 7.6x comes from a real
+6-layer import decimated at half a device pixel; the ratio tracks how many stored vertices fall on one
+device pixel, so it rises with the board and falls with the page. What the gate asserts is the counter,
+not the ratio.
+
+### What has no CLI spelling, and what has one that could be argued with
+
+Reported rather than absorbed (§8):
+
+- **No spelling, and correctly so:** the EM mesh overlay, the plan-view current density, the reference
+  planes, the DRC markers, the PCell pin overlay, the snap glyph, the selection chrome. Every one of
+  them is a view of something that is not in the document — a run result or an editor state — and
+  `LayoutRenderOptions` defaults each to off, so this verb never sets one and draws none by
+  construction. The clipboard export's DRC-marker and mesh flags exist because a person had the panel
+  open; nothing headless has one.
+- **No spelling, and it is a real gap:** `ForceMergeTier`, `InstanceRasterMaxDevicePixels` and the other
+  five tier knobs are reachable only through `--detail`'s three settings. That is deliberate — a knob
+  nobody can explain is a knob nobody will set correctly — but a caller chasing a specific tier has no
+  way to. If one is ever wanted, it belongs as a named `--detail` mode, not as seven flags.
+- **Has a spelling and it is worth stating why:** `--no-rulers`. Rulers default ON because `ShowRulers`'
+  own remarks say a ruler is document CONTENT rather than overlay state — it is in the `.clay` and an
+  export that dropped it would contradict `layout-view.md` §9B.9. The flag exists because a picture for
+  a report is a case where the measurement is chrome, and it is the one overlay-shaped thing a caller
+  can turn off.
+
+### Two smaller things
+
+- **`ThemeResolver.Resolve` cannot fail**, so R-rnd2-9's "a theme name that resolves to nothing is a
+  refusal" had to be answered BEFORE the chain runs: the resolver's last step is `ColorTheme.BuiltIn`,
+  which always succeeds, so a misspelling would otherwise resolve to a differently-coloured picture and
+  be reported as a success — the same silent fallback R-rnd1-5 removed from the resolver itself. What
+  the verb adds is the answer to "did a step actually match", which the resolver does not return, and it
+  reports which one did in `theme.resolvedFrom`.
+- **The extents are the PAINTED box, not the stored one.** A `LabelShape`'s stored bbox is its anchor —
+  a point — an EM port paints a width bar and an arrow at the conductor end, and an instance's extent
+  resolves through its cell. Framing on the stored boxes is what cropped a pasted page's ports off the
+  bottom (`LayoutClipboard.ComputeSelectionBounds`' header records it), and the rulers still need
+  exactly two passes for the same reason that method does.
+
+---
+
 ## RC-7 — `history commit` and `history versions` (2026-09-06)
 
 `brief-revision-control-7-commit-and-history.md` R-rc7-22, §5.3d. Two nouns on the existing verb, each

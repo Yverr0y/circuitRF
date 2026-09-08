@@ -4,7 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 
-namespace CircuitRF.Ui.Diagnostics;
+namespace CircuitRF.Render;
 
 /// <summary>
 /// Makes the <c>font-family</c> and <c>font-weight</c> Skia writes into something a BROWSER resolves
@@ -37,6 +37,14 @@ namespace CircuitRF.Ui.Diagnostics;
 /// substitution is reported rather than quietly corrected.</para>
 ///
 /// <para>Framework-free (string and regex only) so it runs in the test suite with no UI platform.</para>
+///
+/// <para><b>Below the UI firewall since RND-2</b> (brief-render-2-render-verb.md), which is a move and
+/// not a rewrite. Every SVG this repository emits already went through
+/// <see cref="RepairPositionLists"/> on the way out of Skia's SVG device — the three clipboard
+/// exports, the plot exporter and wBond's — and <c>circuitrf render</c> writes the same files from
+/// <c>src/Cli</c>, which may not reference <c>src/Ui</c>. Leaving it up there would have meant the
+/// headless SVG and the application's differed by exactly the defect this class exists to fix: text a
+/// line above its baseline in Firefox, correct everywhere else, and reported as a success.</para>
 /// </summary>
 public static class SvgFontNormalizer
 {

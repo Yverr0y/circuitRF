@@ -351,7 +351,29 @@ public readonly record struct LayoutRenderResult(
     /// <see cref="LayoutRenderer.DefaultInstanceRasterMaxDevicePixels"/>). Deliberately separate from
     /// <see cref="DrawCalls"/>, which stays "what this frame issued to the canvas" — one blit per
     /// placement. Zero on a frame that hit the cache, which is every frame of a pan.</summary>
-    int InstanceRastersBuilt = 0);
+    int InstanceRastersBuilt = 0,
+    /// <summary>
+    /// Vertices of STORED vertex lists this frame emitted into committed-layer path geometry, AFTER
+    /// decimation (brief-render-2-render-verb.md R-rnd2-6).
+    ///
+    /// <para><b>Why it exists.</b> <c>--detail</c> on the <c>render</c> verb claims to change how much
+    /// geometry comes out of a document, and until this counter there was nothing that could be
+    /// asserted against: the tier's effect is invisible in <see cref="ShapesDrawn"/> (the same shapes
+    /// are drawn) and in <see cref="PathsConstructed"/> (the same paths are built). What changes is how
+    /// many vertices went into them, which is exactly this.</para>
+    ///
+    /// <para><b>On the same terms <see cref="PathsConstructed"/> already uses</b>: counted only where a
+    /// frame counter is threaded, so the ghost, selection, handle and marquee geometry — which pass
+    /// none — are excluded, and a shape served from <see cref="LayoutPathCache"/> contributes nothing
+    /// this frame because nothing was built. A one-shot export passes a null cache and therefore counts
+    /// every shape.</para>
+    ///
+    /// <para><b>A shape whose geometry is ANALYTIC contributes none</b> — a circle, a via annulus, a
+    /// rounded rectangle are Skia primitives with no vertex list to thin, and inventing a tessellated
+    /// count for them would report a number this renderer never produced. A <c>Rect</c> contributes its
+    /// four corners, which is literally what it is.</para>
+    /// </summary>
+    int VerticesEmitted = 0);
 
 /// <summary>Plain-field, no-dictionary per-frame work counters (L2a) — threaded through the private
 /// draw helpers below by reference. A class (not a struct) so passing it around never copies; fields
@@ -367,6 +389,7 @@ internal sealed class LayoutFrameCounters
     public int InstancesExamined;
     public int InstancesDrawn;
     public int FillPaintsBuilt;
+    public int VerticesEmitted;
 
     /// <summary>Cells rasterized this frame by the raster tier. Kept apart from
     /// <see cref="DrawCalls"/> deliberately: a build is amortized over every placement it serves and
@@ -782,7 +805,8 @@ public static partial class LayoutRenderer
                 InstancesDrawn: counters.InstancesDrawn,
                 MissingInstanceCellRefs: missingCellRefs.Count == 0 ? [] : missingCellRefs.ToArray(),
                 FillPaintsBuilt: counters.FillPaintsBuilt,
-                InstanceRastersBuilt: counters.InstanceRastersBuilt);
+                InstanceRastersBuilt: counters.InstanceRastersBuilt,
+                VerticesEmitted: counters.VerticesEmitted);
         }
         finally
         {
@@ -1178,8 +1202,8 @@ public static partial class LayoutRenderer
         // drill chart render half bright and half ghosted — see `substituteAlpha`.
         using var elided = new SKPath();
 
-        double lodThreshold = opts.LodPixelThreshold > 0 ? opts.LodPixelThreshold : DefaultLodPixelThreshold;
-        int mergeThreshold = opts.MergeShapeCountThreshold > 0 ? opts.MergeShapeCountThreshold : DefaultMergeShapeCountThreshold;
+        double lodThreshold = EffectiveLodPixelThreshold(opts);
+        int mergeThreshold = EffectiveMergeShapeCountThreshold(opts);
         bool layerMerges = opts.ForceMergeTier || shapes.Count > mergeThreshold;
         double devicePxPerDbu = scaleUm * ps.DbuToUm;
 
@@ -1794,6 +1818,52 @@ public static partial class LayoutRenderer
 
     // ── Shape -> path-space SKPath ───────────────────────────────────────────────
 
+    /// <summary>
+    /// <see cref="LayoutRenderOptions.LodPixelThreshold"/>, with the NEGATIVE branch the other six
+    /// tier knobs already had (brief-render-2-render-verb.md R-rnd2-6).
+    ///
+    /// <para>Every other tier documents that "a NEGATIVE value disables the tier outright, which is how
+    /// an export pins exact vector geometry"; these two read <c>&gt; 0 ? value : default</c>, so a
+    /// caller asking for the tier to be off got the DEFAULT instead — silently, and in the one
+    /// direction where the mistake produces a plausible picture of less geometry than the document
+    /// holds. Nothing passed a negative before <c>render --detail full</c>, so no existing caller
+    /// changes behaviour.</para>
+    /// </summary>
+    internal static double EffectiveLodPixelThreshold(LayoutRenderOptions opts) => opts.LodPixelThreshold switch
+    {
+        < 0 => double.NegativeInfinity,   // no on-screen extent is below this: the tier never fires
+        0   => DefaultLodPixelThreshold,
+        var v => v,
+    };
+
+    /// <summary><see cref="LayoutRenderOptions.MergeShapeCountThreshold"/>, on
+    /// <see cref="EffectiveLodPixelThreshold"/>'s terms — a negative value means no shape count can
+    /// reach it, so the layer never enters the batched-fill path.</summary>
+    internal static int EffectiveMergeShapeCountThreshold(LayoutRenderOptions opts) => opts.MergeShapeCountThreshold switch
+    {
+        < 0 => int.MaxValue,
+        0   => DefaultMergeShapeCountThreshold,
+        var v => v,
+    };
+
+    /// <summary>Records vertices emitted into committed-layer geometry — see
+    /// <see cref="LayoutRenderResult.VerticesEmitted"/> for what is and is not counted, and why the
+    /// null-counter guard is the whole of the exclusion rule.</summary>
+    private static void CountVertices(LayoutFrameCounters? counters, int n)
+    {
+        if (counters is not null) counters.VerticesEmitted += n;
+    }
+
+    /// <summary>Vertices across a shape's hole rings, which are stored geometry exactly as its outer
+    /// ring is and are decimated by the same tolerance.</summary>
+    private static int RingVertices(IReadOnlyList<long[]>? rings)
+    {
+        if (rings is null) return 0;
+        int n = 0;
+        foreach (var r in rings) n += r.Length / 2;
+        return n;
+    }
+
     /// <summary>Internal (not private) so <see cref="LayoutPathCache"/> can build a shape's path in
     /// LOCAL space (a <see cref="PathSpace"/> whose origin is the shape's own bbox min, not the
     /// per-frame one) — see that type's doc comment for why (R-L2c-3).</summary>
@@ -1815,13 +1885,16 @@ public static partial class LayoutRenderer
         {
             case RectShape r:
                 path.AddRect(NormalizedRect(ps.X(r.X1), ps.Y(r.Y1), ps.X(r.X2), ps.Y(r.Y2)));
+                CountVertices(counters, 4);
                 break;
 
             case PolygonShape p:
             {
                 var xy = LayoutRenderDetail.Decimate(p.Xy, detailDbu, minKeep: 3);
+                var holes = LayoutRenderDetail.DecimateRings(p.Holes, detailDbu);
                 AddPolygonPath(path, xy, ps);
-                AddHoleRings(path, xy, LayoutRenderDetail.DecimateRings(p.Holes, detailDbu), ps);
+                AddHoleRings(path, xy, holes, ps);
+                CountVertices(counters, xy.Length / 2 + RingVertices(holes));
                 break;
             }
 
@@ -1842,8 +1915,10 @@ public static partial class LayoutRenderer
                 // Only a curve with no per-edge arc data may be thinned — see the detailDbu param doc.
                 long curveTol = curve.Edges is null ? detailDbu : 0;
                 var cxy = LayoutRenderDetail.Decimate(curve.Xy, curveTol, minKeep: 3);
+                var choles = LayoutRenderDetail.DecimateRings(curve.Holes, curveTol);
                 AddEdgeListPath(path, cxy, curve.Edges, closed: true, ps);
-                AddHoleRings(path, cxy, LayoutRenderDetail.DecimateRings(curve.Holes, curveTol), ps);
+                AddHoleRings(path, cxy, choles, ps);
+                CountVertices(counters, cxy.Length / 2 + RingVertices(choles));
                 break;
             }
 
@@ -2071,6 +2146,10 @@ public static partial class LayoutRenderer
         using var centerline = new SKPath();
         if (counters is not null) counters.PathsConstructed++;
         AddEdgeListPath(centerline, xy, trace.Edges, closed: false, ps);
+        // The trace's own CENTRELINE is the stored vertex list `--detail` thins; the stroked outline
+        // Skia derives from it is generated geometry, not stored, and counting that instead would
+        // report the stroker's fidelity rather than the document's.
+        CountVertices(counters, xy.Length / 2);
 
         var cap = trace.End switch
         {

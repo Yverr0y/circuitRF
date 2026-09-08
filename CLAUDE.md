@@ -51,7 +51,7 @@ Instead, briefly paraphrase owner/user messages. Pre-existing quotes are ok.
 - Test:    `dotnet test`
 - Run CLI: `dotnet run --project src/Cli -- <args>`
   Verbs: `sparam`, `dc`, **`hb`**, **`lp`**, **`lpp`**, **`em`**, **`convert`**, **`new`**,
-  **`import`**, **`check`**, **`explain`**, **`history`**, `elab`. **The CLI has its own design doc —
+  **`import`**, **`check`**, **`explain`**, **`history`**, **`render`**, `elab`. **The CLI has its own design doc —
   `docs/design/cli.md`** — covering the five-step anatomy of a run verb, the stdout/stderr split, and
   the rules below; read it before adding a verb. `hb`/`lp`/`lpp` run the netlist's harmonic-balance,
   loadpull and loadpull-pursuit analyses, and each runs the whole sweep when a `parametric_sweep`
@@ -157,6 +157,31 @@ Instead, briefly paraphrase owner/user messages. Pre-existing quotes are ok.
   process that never returns. `pins`/`pin`/`unpin` need no repository — the pin lives in the consuming
   design's `.cws`, which is very often a workspace circuitRF has never kept a history for. Gates:
   `tests/Ui.Tests/Revision/CloneAndPinsTests.cs` and the RC-5/RC-7 files beside it.
+  **`render <path> -o out.{svg,pdf,png}` turns a `.csch`, `.csym` or `.clay` into a picture, and it
+  owns no rendering** (2026-09-07) — every pixel comes out of the three Skia renderers in
+  `CircuitRF.Render` that the application draws each frame with, which is the whole reason RND-1 put
+  that project below the firewall. `src/Cli/Render.cs` is argument parsing, viewport arithmetic,
+  refusals and reporting, on `Authoring.cs`' terms. **One verb over every document kind**, inferred
+  through `DocumentKinds.Classify` exactly as `check` infers it; a cell folder takes `--view` (more
+  than one view is a refusal LISTING them), a workspace takes `--cell`, and **a document belonging to
+  no workspace is a first-class input** — it resolves no technology, renders on the fallback palette
+  as the layout editor does, and says so as a NOTE rather than a warning. `-o` is required and its
+  extension picks the format: **there is no picture on stdout**, because stdout is the result document
+  and `--json` has to co-exist with the write. `--fit` (the default), `--window` and `--center/--span`
+  are **refused together rather than ordered**, and **on a layout every coordinate carries an SI unit —
+  a bare number is a refusal**, because `--window 0,0,500,300` could mean DBU, µm or mm and all three
+  are plausible. A window of a different aspect is **letterboxed, never cropped**. `--detail full`
+  (the default) turns every LOD tier off so what is STORED is what is drawn; `--detail screen` engages
+  them as a canvas would, and on a real board that is the difference between a **23.5 MB SVG in 1.44 s
+  and a 6.2 MB one in 0.36 s**. `--layers`/`--hide-layers` apply to a **CLONE** of the resolved
+  technology (`TechnologyLayerSelection`, in `src/Design`) — `TechnologyCache` hands back a shared
+  instance and mutating it would narrow every later render in the same process, which is the defect
+  that only appears on the second call. Rulers stay ON (document content, not overlay state); every
+  other overlay is off by construction. Progress and cancellation ride `RunHost`'s `RunControl` like
+  `em`'s, so a cancelled render exits 130 and **writes nothing**. Gate:
+  `tests/Ui.Tests/Render/RenderCliVerbTests.cs`, which compares the verb run as a PROCESS against the
+  in-process `CircuitRF.Render` call **byte for byte** — schematic, symbol and layout, SVG and PDF,
+  and all four came back identical with no exclusion at all.
 - Package: **exactly one script per platform, and each builds everything that platform ships** —
   `packaging/windows/build-windows.ps1` (9 files: `.msi` x64/arm64/x86 in both install scopes, plus
   the `.zip` the updater fetches), `packaging/macos/build-macos.sh` (2 `.dmg`s, both architectures;
@@ -384,7 +409,9 @@ Import Component call, not a headless copy of them, and **`Layout/Drc/` + `Layou
 DRC engine and the `.wasm` assembly rule model**, so design rules run with no display),
 **`src/Render`** (the Skia RENDERERS — `SchematicRenderer`, `SymbolEditorRenderer`,
 `LayoutRenderer` and its partials, `WBondRenderer`, their themes and caches, the colour-theme model
-and its `.ccolor` reader, and the hit-test/handle/snap/overlay geometry they share with the editors;
+and its `.ccolor` reader, the hit-test/handle/snap/overlay geometry they share with the editors,
+and `SvgFontNormalizer` — the repair every emitted SVG passes through on the way out of Skia's SVG
+device;
 below the firewall since 2026-09-07 and referenced by BOTH `src/Ui` and `src/Cli`, so a headless
 picture is drawn by the code the GUI draws with rather than by a second renderer that would drift
 invisibly),

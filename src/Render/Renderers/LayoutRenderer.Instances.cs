@@ -833,7 +833,7 @@ public static partial class LayoutRenderer
         LayoutFrameCounters counters, HashSet<string> missingCellRefs, bool drawOutlines = true)
     {
         string baseDir = opts.BaseDir ?? "";
-        double lodThreshold = opts.LodPixelThreshold > 0 ? opts.LodPixelThreshold : DefaultLodPixelThreshold;
+        double lodThreshold = EffectiveLodPixelThreshold(opts);
         double elisionThreshold = opts.StrokeElisionPixelThreshold != 0
             ? opts.StrokeElisionPixelThreshold : DefaultStrokeElisionDevicePixels;
         double coarseCoverage = opts.CoarseCoverageThreshold != 0

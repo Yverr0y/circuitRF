@@ -1209,4 +1209,236 @@ internal static class CliDiagnostics
     public static Diagnostic NoWorkspaceReferencesHere(string path) => Diagnostic.Create(
         "history.pins.none", DiagnosticSeverity.Info,
         "'{path}' does not reference any other workspace.", ("path", path));
+
+    // ── render (brief-render-2-render-verb.md) ────────────────────────────────────────────────────
+    //
+    // R-rnd0-6, unchanged from the authoring verbs: anything the GUI would have ASKED in a dialog is a
+    // refusal naming the flag that answers it, never a default chosen on the caller's behalf. Two of
+    // these are worth reading for the reason rather than the sentence:
+    //
+    //   * `render.viewport.unit-required` — R-rnd2-4. `--window 0,0,500,300` on a layout could mean
+    //     DBU, micrometres or millimetres. Those are three pictures six orders of magnitude apart and
+    //     all three are plausible, so the refusal prints what it WOULD have accepted rather than
+    //     guessing. This is `sweep-unit-scale-and-mark`'s failure class, and it is the same shape of
+    //     argument.
+    //   * `render.layers.unknown` — R-rnd2-7. A misspelled layer that was silently skipped produces a
+    //     picture without that layer, which a caller cannot tell apart from a layer that is genuinely
+    //     empty. The refusal names the verb that answers the question instead.
+    //
+    // And one that is deliberately NOT a warning: `render.tech.unresolved` is Info. An orphan `.clay`
+    // handed over by a converter has no workspace above it BY CONSTRUCTION and renders on the fallback
+    // palette exactly as the layout editor does — a first-class input, not a degraded one (R-rnd2-1).
+
+    public static Diagnostic RenderPathRequired() => new(
+        "render.args.path-required", DiagnosticSeverity.Error,
+        "render: a path is required — a .csch, .csym or .clay, a cell folder, or a workspace with --cell.");
+
+    public static Diagnostic RenderUnknownOption(string option) => Diagnostic.Create(
+        "render.args.unknown-option", DiagnosticSeverity.Error,
+        "render: unknown option '{option}'.", ("option", option));
+
+    public static Diagnostic RenderMultiplePaths() => new(
+        "render.args.multiple-paths", DiagnosticSeverity.Error,
+        "render: one path, please.");
+
+    public static Diagnostic RenderOutputRequired() => new(
+        "render.args.output-required", DiagnosticSeverity.Error,
+        "render: -o <file.svg|.pdf|.png> is required. There is no picture on stdout — stdout carries "
+      + "the result document, which has to be able to co-exist with the file that was written.");
+
+    public static Diagnostic RenderPathNotFound(string path) => Diagnostic.Create(
+        "render.path.not-found", DiagnosticSeverity.Error,
+        "No such file or folder: {path}", ("path", path));
+
+    /// <summary>A path circuitRF can read but cannot DRAW — a `.ctech`, a `.cnl`, a Touchstone. Named
+    /// rather than called unreadable: `check` reads all of those and this verb does not draw them.</summary>
+    public static Diagnostic RenderNotDrawable(string path, string kind) => Diagnostic.Create(
+        "render.path.not-drawable", DiagnosticSeverity.Error,
+        "'{path}' is {kind}, and render draws a schematic, a symbol or a layout. "
+      + "`circuitrf check` reads it; `circuitrf convert` reads an interchange file.",
+        ("path", path), ("kind", kind));
+
+    public static Diagnostic RenderUnknownOutputFormat(string path, string extension) => Diagnostic.Create(
+        "render.output.unknown-format", DiagnosticSeverity.Error,
+        "render: '{path}' has extension '{extension}', which this verb does not write — it writes "
+      + ".svg, .pdf and .png. Say --format svg|pdf|png to write one of those to that path anyway.",
+        ("path", path), ("extension", extension));
+
+    public static Diagnostic RenderUnknownFormatName(string text) => Diagnostic.Create(
+        "render.args.unknown-format", DiagnosticSeverity.Error,
+        "render: --format takes svg, pdf or png, got '{text}'.", ("text", text));
+
+    /// <summary>R-rnd2-1 / R-rnd0-6: a cell folder holding more than one view is the dialog's own
+    /// question, so it is a refusal that LISTS them and names the flag.</summary>
+    public static Diagnostic RenderViewRequired(string path, string views) => Diagnostic.Create(
+        "render.cell.view-required", DiagnosticSeverity.Error,
+        "'{path}' holds {views}. Say which with --view schematic|symbol|layout.",
+        ("path", path), ("views", views));
+
+    public static Diagnostic RenderNoSuchView(string path, string view) => Diagnostic.Create(
+        "render.cell.no-view", DiagnosticSeverity.Error,
+        "'{path}' has no {view} view.", ("path", path), ("view", view));
+
+    /// <summary>Primacy is <c>CellFolder.ResolvePrimary</c>'s answer and no other — a view sub-folder
+    /// holding several files with none named primary is the same question, asked of the `.ccell`.</summary>
+    public static Diagnostic RenderNoPrimary(string path, string view, string state) => Diagnostic.Create(
+        "render.cell.no-primary", DiagnosticSeverity.Error,
+        "'{path}': the {view} sub-folder does not resolve to one file ({state}). Name the file "
+      + "directly, or record a primary in its .ccell.",
+        ("path", path), ("view", view), ("state", state));
+
+    public static Diagnostic RenderCellRequired(string path) => Diagnostic.Create(
+        "render.workspace.cell-required", DiagnosticSeverity.Error,
+        "'{path}' is a workspace. Say which cell with --cell <name> — rendering \"the workspace\" is "
+      + "not a picture of anything.", ("path", path));
+
+    public static Diagnostic RenderNoSuchCell(string workspace, string cell, string known) => Diagnostic.Create(
+        "render.workspace.no-such-cell", DiagnosticSeverity.Error,
+        "'{workspace}' has no cell called '{cell}'. It holds: {known}",
+        ("workspace", workspace), ("cell", cell), ("known", known));
+
+    public static Diagnostic RenderAmbiguousCell(string cell, string paths) => Diagnostic.Create(
+        "render.workspace.ambiguous-cell", DiagnosticSeverity.Error,
+        "More than one cell is called '{cell}': {paths}. Give the cell folder's path instead.",
+        ("cell", cell), ("paths", paths));
+
+    /// <summary>R-rnd2-3: the three viewport modes are refused TOGETHER rather than ordered, because a
+    /// precedence nobody stated is an invention. <c>explain</c>'s own three questions do the same.</summary>
+    public static Diagnostic RenderViewportModes(string modes) => Diagnostic.Create(
+        "render.viewport.multiple-modes", DiagnosticSeverity.Error,
+        "render: {modes} ask for different viewports. Pass one of --fit, --window or --center/--span.",
+        ("modes", modes));
+
+    public static Diagnostic RenderWindowMalformed(string text) => Diagnostic.Create(
+        "render.viewport.malformed", DiagnosticSeverity.Error,
+        "render: --window expects x0,y0,x1,y1, got '{text}'.", ("text", text));
+
+    public static Diagnostic RenderCenterMalformed(string text) => Diagnostic.Create(
+        "render.viewport.center-malformed", DiagnosticSeverity.Error,
+        "render: --center expects x,y, got '{text}'.", ("text", text));
+
+    public static Diagnostic RenderSpanRequired() => new(
+        "render.viewport.span-required", DiagnosticSeverity.Error,
+        "render: --center needs --span <width>, and --span needs --center <x,y>. The height follows "
+      + "from the output's aspect.");
+
+    /// <summary>R-rnd2-4, and the place the unit rule bites.</summary>
+    public static Diagnostic RenderCoordinateNeedsUnit(string option, string text, string examples)
+        => Diagnostic.Create(
+            "render.viewport.unit-required", DiagnosticSeverity.Error,
+            "render: {option} '{text}' is a bare number, and a layout coordinate carries a unit — "
+          + "DBU, micrometres and millimetres differ by orders of magnitude on identical text. "
+          + "Write it as {examples}.",
+            ("option", option), ("text", text), ("examples", examples));
+
+    public static Diagnostic RenderCoordinateMalformed(string option, string text) => Diagnostic.Create(
+        "render.viewport.coordinate-malformed", DiagnosticSeverity.Error,
+        "render: {option} '{text}' is not a length — write a number with a unit (nm, um, mm, mil, in).",
+        ("option", option), ("text", text));
+
+    public static Diagnostic RenderWindowEmpty(string text) => Diagnostic.Create(
+        "render.viewport.empty", DiagnosticSeverity.Error,
+        "render: --window '{text}' has no area.", ("text", text));
+
+    public static Diagnostic RenderSizeMalformed(string text) => Diagnostic.Create(
+        "render.size.malformed", DiagnosticSeverity.Error,
+        "render: --size expects <width>x<height> in whole units, got '{text}'.", ("text", text));
+
+    public static Diagnostic RenderMarginMalformed(string text) => Diagnostic.Create(
+        "render.margin.malformed", DiagnosticSeverity.Error,
+        "render: --margin expects a fraction of the extent per side, between 0 and 0.45, got '{text}'.",
+        ("text", text));
+
+    /// <summary>A raster multiplier asked of a format that has no pixels to multiply.</summary>
+    public static Diagnostic RenderScaleOnVector(string option, string format) => Diagnostic.Create(
+        "render.scale.vector", DiagnosticSeverity.Error,
+        "render: {option} is a raster multiplier and {format} has no pixels to multiply. Use --size "
+      + "to change a vector page.", ("option", option), ("format", format));
+
+    public static Diagnostic RenderScaleAndDpi() => new(
+        "render.scale.conflict", DiagnosticSeverity.Error,
+        "render: --scale and --dpi are two spellings of one number (--dpi is relative to 96). Pass one.");
+
+    public static Diagnostic RenderScaleMalformed(string option, string text) => Diagnostic.Create(
+        "render.scale.malformed", DiagnosticSeverity.Error,
+        "render: {option} expects a positive number, got '{text}'.", ("option", option), ("text", text));
+
+    public static Diagnostic RenderLayersNotApplicable(string option, string kind) => Diagnostic.Create(
+        "render.layers.not-applicable", DiagnosticSeverity.Error,
+        "render: {option} selects drawing layers, which a {kind} does not have.",
+        ("option", option), ("kind", kind));
+
+    public static Diagnostic RenderLayersConflict() => new(
+        "render.layers.conflict", DiagnosticSeverity.Error,
+        "render: --layers and --hide-layers are the two directions of one choice. Pass one.");
+
+    /// <summary>R-rnd2-7. Not a silent skip, and it names the verb that answers the question.</summary>
+    public static Diagnostic RenderUnknownLayer(string name, string known) => Diagnostic.Create(
+        "render.layers.unknown", DiagnosticSeverity.Error,
+        "The resolved technology defines no layer called '{name}'. It defines: {known}. "
+      + "`circuitrf explain --layers` lists them for a document.",
+        ("name", name), ("known", known));
+
+    public static Diagnostic RenderNoTechnologyForLayers() => new(
+        "render.layers.no-technology", DiagnosticSeverity.Error,
+        "No technology resolved for this layout, so there are no layer names to select by. "
+      + "`circuitrf explain` reports the walk that found none.");
+
+    public static Diagnostic RenderDetailNotApplicable(string kind) => Diagnostic.Create(
+        "render.detail.not-applicable", DiagnosticSeverity.Error,
+        "render: --detail governs the layout renderer's level-of-detail tiers, which a {kind} does "
+      + "not use.", ("kind", kind));
+
+    public static Diagnostic RenderDetailMalformed(string text) => Diagnostic.Create(
+        "render.detail.malformed", DiagnosticSeverity.Error,
+        "render: --detail takes full, screen, or a pixel budget, got '{text}'.", ("text", text));
+
+    /// <summary>R-rnd2-9. <c>ThemeResolver.Resolve</c> cannot fail — its last step is the built-in
+    /// palette — so a name that resolves to NOTHING has to be detected before it, or a misspelling
+    /// silently produces a differently-coloured picture reported as a success.</summary>
+    public static Diagnostic RenderThemeUnresolved(string name, string lookedIn) => Diagnostic.Create(
+        "render.theme.unresolved", DiagnosticSeverity.Error,
+        "No theme called '{name}'. Looked in {lookedIn}.", ("name", name), ("lookedIn", lookedIn));
+
+    public static Diagnostic RenderThemeFileUnreadable(string path, string why) => Diagnostic.Create(
+        "render.theme.unreadable", DiagnosticSeverity.Error,
+        "'{path}' is not a readable .ccolor: {why}", ("path", path), ("why", why));
+
+    public static Diagnostic RenderUnknownVariant(string text) => Diagnostic.Create(
+        "render.args.unknown-variant", DiagnosticSeverity.Error,
+        "render: --variant takes light or dark, got '{text}'.", ("text", text));
+
+    public static Diagnostic RenderUnknownBackground(string text) => Diagnostic.Create(
+        "render.args.unknown-background", DiagnosticSeverity.Error,
+        "render: --background takes opaque or transparent, got '{text}'.", ("text", text));
+
+    public static Diagnostic RenderDocumentUnreadable(string path, string why) => Diagnostic.Create(
+        "render.document.unreadable", DiagnosticSeverity.Error,
+        "'{path}' could not be read: {why}", ("path", path), ("why", why));
+
+    /// <summary>Nothing to frame. A refusal rather than an empty page: a caller that got a blank
+    /// picture cannot tell "this document is empty" from "the viewport missed everything".</summary>
+    public static Diagnostic RenderNothingToDraw(string path) => Diagnostic.Create(
+        "render.document.empty", DiagnosticSeverity.Error,
+        "'{path}' has nothing in it to draw.", ("path", path));
+
+    public static Diagnostic RenderWriteFailed(string path, string why) => Diagnostic.Create(
+        "render.output.write-failed", DiagnosticSeverity.Error,
+        "Could not write '{path}': {why}", ("path", path), ("why", why));
+
+    /// <summary>R-rnd2-1: a NOTE. An orphan document is a first-class input.</summary>
+    public static Diagnostic RenderNoTechnology(string path) => Diagnostic.Create(
+        "render.tech.unresolved", DiagnosticSeverity.Info,
+        "No technology resolved for '{path}' — no workspace above it defines one, so it is drawn on "
+      + "the fallback palette, exactly as the layout editor draws it.", ("path", path));
+
+    public static Diagnostic RenderResolverNote(string path, string message) => Diagnostic.Create(
+        "render.tech.note", DiagnosticSeverity.Info,
+        "{path}: {message}", ("path", path), ("message", message));
+
+    /// <summary>§7's 130. A cancelled run abandons its result rather than publishing a partial one —
+    /// a half-written png that a caller reads as a finished one is the failure this prevents.</summary>
+    public static Diagnostic RenderCancelled() => new(
+        "render.cancelled", DiagnosticSeverity.Warning,
+        "Cancelled. Nothing was written.");
 }

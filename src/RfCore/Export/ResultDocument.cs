@@ -116,7 +116,9 @@ namespace RfCore.Export
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         ReferenceReportJson? Reference = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        HistoryReportJson? History = null);
+        HistoryReportJson? History = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        RenderReportJson? Render = null);
 
     /// <summary>
     /// One of circuitRF's own documents, read back verbatim.
@@ -591,6 +593,131 @@ namespace RfCore.Export
         PursuitOptimaJson?  Optima,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         GridSummaryJson?    Grid);
+
+    // ── render, on the wire (brief-render-2-render-verb.md R-rnd2-11) ────────
+
+    /// <summary>
+    /// What <c>render</c> DECIDED, which is the half a caller cannot see by looking at the file it got
+    /// back.
+    ///
+    /// <para><b>Every field here answers a question the picture itself cannot.</b> A caller that asked
+    /// for <c>--fit</c> has no way to know what was fitted; one that asked for a window has no way to
+    /// know whether it was letterboxed; one that misspelled a layer would otherwise see a picture
+    /// missing that layer and be unable to tell it from a layer that is genuinely empty. The refusals
+    /// close most of that (R-rnd2-7), and this closes the rest.</para>
+    ///
+    /// <para><b>There is no duration.</b> <see cref="Counters"/> is <c>LayoutRenderResult</c>'s own
+    /// work count — deterministic and machine-independent by construction — which is what lets a gate
+    /// assert about work done rather than about a shared runner's wall clock
+    /// (<c>feedback-no-new-timing-benchmark-tests</c>).</para>
+    /// </summary>
+    /// <param name="Kind">What the path was taken to be, spelled as <c>check</c> spells it.</param>
+    /// <param name="View">Which view of a cell folder was drawn, or absent for a file named directly.</param>
+    /// <param name="Layers">Layout only. Absent for a schematic or a symbol, which have no layers —
+    /// an empty list there would read as "this document defines none", which is a claim.</param>
+    /// <param name="Detail">Layout only, for the same reason: the LOD tiers <c>--detail</c> governs
+    /// are <c>LayoutRenderer</c>'s.</param>
+    /// <param name="Bytes">The size of the file written. Reported beside
+    /// <see cref="RenderCountersJson.VerticesEmitted"/> because those two together are the whole of
+    /// what <c>--detail</c> trades (R-rnd2-6): an undecimated vector export of a real board carries
+    /// ~7.6x the vertices of the on-screen one, and every one of them is in the file.</param>
+    public sealed record RenderReportJson(
+        string                          Path,
+        string                          Kind,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string?                         View,
+        string                          Format,
+        RenderViewportJson              Viewport,
+        RenderExtentsJson               Extents,
+        RenderSizeJson                  Size,
+        RenderThemeJson                 Theme,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<RenderLayerJson>? Layers,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        RenderDetailJson?               Detail,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        RenderCountersJson?             Counters,
+        long                            Bytes);
+
+    /// <param name="Mode"><c>fit</c>, <c>window</c> or <c>center</c> — which of the three the caller
+    /// asked for. The three are refused TOGETHER rather than ordered (R-rnd2-3), so exactly one is
+    /// ever in force and naming it costs nothing.</param>
+    /// <param name="Letterboxed">
+    /// True when the requested window's aspect differed from the output's and the extra was filled
+    /// rather than cropped (R-rnd2-5). <b>The four coordinates are the window AFTER that</b> — what
+    /// the picture actually shows. A caller that asked for a region and silently got less of it than
+    /// it asked for has no way to notice; one that got more can see it here.
+    /// </param>
+    /// <param name="Unit">
+    /// The BASE SI unit the four coordinates are in — <c>m</c> for a layout, <c>design-units</c> for a
+    /// schematic or a symbol, whose coordinates are dimensionless and are reported as what they are
+    /// rather than dressed up in metres (R-rnd0-5, R-rnd2-4).
+    /// </param>
+    /// <param name="Scale">
+    /// What multiplies the DOCUMENT's own display unit to reach <paramref name="Unit"/> — 1e-6 for a
+    /// layout drawn in micrometres, 2.54e-5 for one drawn in mils, 1 where the coordinates are
+    /// dimensionless. Carried for the reason <c>explain --analysis</c> carries it: a mark read without
+    /// its scale has already produced a run at 2 Hz that looked entirely normal.
+    /// </param>
+    /// <param name="Zoom">Output units per world unit — device pixels per DBU for a png, points per
+    /// DBU for an svg or a pdf.</param>
+    public sealed record RenderViewportJson(
+        string Mode,
+        double X0, double Y0, double X1, double Y1,
+        string Unit,
+        double Scale,
+        double Zoom,
+        bool   Letterboxed);
+
+    /// <summary>The whole document's extents, in the same base SI units
+    /// <see cref="RenderViewportJson"/> reports — so a caller that windowed can see how much of the
+    /// document it asked for, and one that fitted can see what was fitted.</summary>
+    public sealed record RenderExtentsJson(
+        double X0, double Y0, double X1, double Y1, string Unit, double Scale);
+
+    /// <param name="UnitKind"><c>device-pixels</c> for a png, <c>points</c> for an svg or a pdf. The
+    /// two are not interchangeable and a bare number would leave a caller to guess which it got.</param>
+    /// <param name="Scale">The raster multiplier <c>--scale</c>/<c>--dpi</c> resolved to. Always 1 for
+    /// a vector format, which has no pixels to multiply.</param>
+    public sealed record RenderSizeJson(int Width, int Height, string UnitKind, double Scale);
+
+    /// <param name="ResolvedFrom">
+    /// WHICH step of <c>ThemeResolver</c>'s chain answered — <c>file</c>, <c>workspace</c>,
+    /// <c>user</c>, <c>shipped</c>. The chain is four steps deep and its last step always succeeds, so
+    /// without this a theme that quietly fell through to the built-in palette is indistinguishable
+    /// from one that resolved (R-rnd2-9).
+    /// </param>
+    public sealed record RenderThemeJson(string Name, string Variant, string ResolvedFrom);
+
+    /// <param name="Rendered">Whether the layer was drawn. False for one the technology marks
+    /// invisible, and for one <c>--layers</c>/<c>--hide-layers</c> excluded.</param>
+    /// <param name="Shapes">Shapes on that layer in the document, drawn or not — so an empty layer
+    /// and an excluded one are two different answers.</param>
+    public sealed record RenderLayerJson(string Name, bool Rendered, int Shapes);
+
+    /// <param name="Mode"><c>full</c>, <c>screen</c>, or the pixel budget as written.</param>
+    /// <param name="ToleranceDbu">
+    /// The decimation tolerance the budget actually resolved to at this zoom, in DBU. Reported because
+    /// <c>LayoutRenderDetail</c> buckets it DOWN to a power of two — so the effective tolerance is not
+    /// the number the caller typed, and the difference is up to a factor of two. Absent where nothing
+    /// decimates.
+    /// </param>
+    public sealed record RenderDetailJson(
+        string Mode,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        long?  ToleranceDbu);
+
+    /// <summary><c>LayoutRenderResult</c>'s own per-frame work counters, forwarded unchanged. Layout
+    /// only — the schematic and symbol renderers keep none.</summary>
+    public sealed record RenderCountersJson(
+        int ShapesExamined,
+        int ShapesDrawn,
+        int VerticesEmitted,
+        int InstancesExamined,
+        int InstancesDrawn,
+        int PathsConstructed,
+        int DrawCalls,
+        int LayersVisited);
 
     // ── the document ─────────────────────────────────────────────────────────
 

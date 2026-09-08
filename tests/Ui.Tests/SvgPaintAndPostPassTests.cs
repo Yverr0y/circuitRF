@@ -3,6 +3,7 @@ using System.Linq;
 using Avalonia.Media;
 using CircuitRF.Ui.Diagnostics;
 using Xunit;
+using CircuitRF.Render;
 
 namespace CircuitRF.Ui.Tests;
 

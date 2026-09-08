@@ -10,6 +10,7 @@ using CircuitRF.Ui.Diagnostics;
 using CircuitRF.Ui.Schematic;
 using CircuitRF.Ui.Theming;
 using Xunit;
+using CircuitRF.Render;
 
 namespace CircuitRF.Ui.Tests;
 

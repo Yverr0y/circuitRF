@@ -115,6 +115,16 @@
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
       <_Parameter1>CircuitRF.Ui.Tests</_Parameter1>
     </AssemblyAttribute>
+    <!-- circuitrf render (RND-2) frames a picture the way the application frames one, which means
+         reading the same measurements: LayoutRenderer.MeasureLabelWorldBbox (a label's stored bbox is
+         its ANCHOR, and framing on that is what cropped ports off a pasted page) and
+         LayoutRenderDetail.ToleranceDbu (the effective decimation tolerance the `detail` flag resolves
+         to, which the verb REPORTS rather than leaving the caller to re-derive). Same grant src/Ui
+         already has, for the same reason: a second copy of either measurement is a copy free to
+         drift, silently. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>CircuitRF.Cli</_Parameter1>
+    </AssemblyAttribute>
   </ItemGroup>
 
 </Project>
