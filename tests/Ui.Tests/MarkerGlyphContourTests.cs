@@ -23,6 +23,8 @@ using Xunit;
 
 namespace CircuitRF.Ui.Tests;
 
+// Sets SkiaFonts.TestOverrideTypeface, so it is party to the typeface statics collection.
+[Collection(LayoutTextOutlineTypefaceCollection.Name)]
 public sealed class MarkerGlyphContourTests : IDisposable
 {
     private readonly SKTypeface? _previousTypeface = SkiaFonts.TestOverrideTypeface;

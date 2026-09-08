@@ -219,6 +219,40 @@ public sealed class ExplainQueryCliVerbTests(ITestOutputHelper output) : IDispos
         Assert.Equal(0, fromExplain["Silk"]);
     }
 
+    /// <summary>
+    /// The same agreement over the case the fixture above cannot reach: a document drawing on a layer
+    /// key the technology does NOT define.
+    ///
+    /// <para>That layer renders — on the generated fallback palette, which is what makes it a layer as
+    /// far as the picture is concerned. <c>explain --layers</c> listed it and <c>render --json</c> did
+    /// not, so the two verbs this series deliberately pointed at ONE walk disagreed about which layers
+    /// the document has, on exactly the documents where the state is ordinary: imports
+    /// (<c>layout-view.md</c> §2.4). The set comparison is the assertion; the vacuity guard is that
+    /// the generated name is in it.</para>
+    /// </summary>
+    [Fact]
+    public void Layers_ThatTheTechnologyDoesNotDefine_AreReportedByBothVerbs()
+    {
+        var ws = BuildWorkspace("Undefined");
+        var view = LayoutFixture();
+        view.Shapes.Add(new RectShape
+        {
+            Layer = new LayerKey(99, 0), X1 = 800 * Dbu, Y1 = 0, X2 = 900 * Dbu, Y2 = 100 * Dbu,
+        });
+        LayoutPersistence.SaveToFile(ws.Clay, view);
+
+        var fromExplain = ExplainJson(ws.Clay, "--layers")
+            .GetProperty("layers").GetProperty("layers").EnumerateArray()
+            .ToDictionary(l => l.GetProperty("name").GetString()!, l => l.GetProperty("shapes").GetInt64());
+
+        var fromRender = RenderJson(ws.Clay)
+            .GetProperty("layers").EnumerateArray()
+            .ToDictionary(l => l.GetProperty("name").GetString()!, l => l.GetProperty("shapes").GetInt64());
+
+        Assert.Equal(1, fromExplain["L99/0"]);      // vacuity guard: the case is actually present
+        Assert.Equal(fromRender, fromExplain);
+    }
+
     /// <summary>R-rnd3-5. On a <c>.ctech</c> alone there is no document to count against, so
     /// <c>shapes</c> is ABSENT — not zero, which would be a claim about a document that is not
     /// there.</summary>

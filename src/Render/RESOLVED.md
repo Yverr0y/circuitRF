@@ -226,6 +226,34 @@ its ANCHOR, and framing on that is what cropped ports off a pasted page) and
 of either measurement would be free to drift, silently.
 
 
+## Post-RND-5 review — the LOD budget disagreed with the renderer about an undeclared layer (2026-09-07)
+
+Found while reviewing the whole render series, not looked for. Older than the series: it moved here
+from `src/Ui/Renderers` unchanged.
+
+`LayoutRenderDetail.CanAffordOutlines` estimates a frame's outline cost by summing the vertices on
+layers that will be painted. It built a set of **visible** keys from the technology and skipped any
+shape whose key was not in that set — so a shape on a layer the technology **does not declare at all**
+was not counted.
+
+`LayoutRenderer.Draw` draws that shape. An undeclared key resolves through `FallbackPalette.For`,
+whose `Visible` is `true`, and it is painted like any other. So the two disagreed, in the direction
+that costs: the budget undercounted, and it undercounted **worst on exactly the documents where an
+undeclared key is ordinary** — an import, which is also the only kind of document dense enough for the
+budget to matter. The answer was "outlines are affordable" about a frame they were not affordable for,
+and the symptom is a slow frame rather than a wrong picture, which is why nothing reported it.
+
+It is `HiddenLayers` now — the keys the technology declares and hides — and the walk skips only those.
+Null still means "no technology resolved, so nothing is hidden", unchanged. The rule is the one
+`DocumentExtents.LayerVisibility` already followed and `LayoutRenderer.Draw` already implements: **a
+key the technology does not mention is visible**, in all three places.
+
+`src/Cli/RESOLVED.md`'s post-series section records the sibling defect this was found beside — the
+`render` verb's own layer report and layer selection could not see those layers either.
+
+---
+
+
 ## RND-4 — rendering a `.cdd` (2026-09-07)
 
 `docs/sonnet-briefs/brief-render-4-data-display.md`. `circuitrf render <path.cdd>` draws a data

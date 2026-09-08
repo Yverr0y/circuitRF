@@ -19,10 +19,25 @@ namespace CircuitRF.Ui.Tests;
 /// hazard.</para>
 ///
 /// <para>Not a blanket <c>DisableTestParallelization</c>: xUnit still parallelizes across other
-/// collections, and only the handful of classes named here pay for it.</para>
+/// collections, and only the classes named here pay for it.</para>
+///
+/// <para><b>It names the SAME collection as <see cref="LayoutTextOutlineTypefaceCollection"/>, and
+/// that is the fix for what RND-4 half-solved.</b> Two collections are two groups that xUnit runs
+/// in PARALLEL with each other, so protecting the Data Display's byte-identity gate here while
+/// RND-2's schematic, symbol and layout gates sat in the other collection left exactly the window
+/// this class was created to close — measured, not theorised: a full-solution run put
+/// <c>ScalarCubeTests</c>' Helvetica window across
+/// <c>RenderCliVerbTests.RenderingASchematicAsAProcess_WritesTheBytesTheRendererWrites</c>, which
+/// draws in this process and compares against a fresh CLI process that has no override to read.
+/// A class can be party to only one xUnit collection, so the two names resolve to one group. The
+/// two STATICS remain distinct and each type documents its own; what is shared is the schedule.</para>
+///
+/// <para>The membership rule is therefore wider than "sets the override": <b>a class that sets
+/// either typeface static, or that compares rendered TEXT bytes against another process, belongs
+/// here.</b> The second half is the one that is easy to miss, because such a class looks like it
+/// touches no global at all.</para>
 /// </summary>
-[CollectionDefinition(Name)]
 public class SkiaFontsTypefaceCollection
 {
-    public const string Name = "SkiaFonts.TestOverrideTypeface";
+    public const string Name = LayoutTextOutlineTypefaceCollection.Name;
 }

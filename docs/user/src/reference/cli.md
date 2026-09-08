@@ -863,9 +863,13 @@ which is what the editor honours, not "all layers regardless".
 the second one puts anything in the picture.
 <a href="#explain-layers"><code>explain --layers</code></a> gives you both at once: every layer the
 technology defines, with how many shapes this document has on it.</p>
-<p>A name the technology does not define is a <b>refusal</b> that lists the real ones. It is not a
-silent skip, because a misspelled layer and a genuinely empty layer produce the same picture and you
-would have no way to tell which you were looking at.</p>
+<p>A name that is neither in the technology nor drawn on by the document is a <b>refusal</b> that
+lists the real ones. It is not a silent skip, because a misspelled layer and a genuinely empty layer
+produce the same picture and you would have no way to tell which you were looking at. A layer the
+document draws on that the technology does <em>not</em> define — ordinary after an import — is
+accepted under the generated <code>L&lt;layer&gt;/&lt;datatype&gt;</code> name
+<code>explain --layers</code> prints for it, and is excluded like any other when you name a different
+one.</p>
 </div>
 
 | Option | What it does |
@@ -1188,7 +1192,8 @@ Two things it cannot tell you, both worth knowing:
   notionally on can report zero shapes.
 - **A layer the fallback palette invented is listed too, and marked.** A key the document draws on that
   the technology does not define is ordinary after an import, and it *renders*. Omitting those rows
-  would report a document as drawing on layers it does not and hide the ones it does.
+  would report a document as drawing on layers it does not and hide the ones it does. The generated
+  name is a name [`render --layers`](#render-layers) accepts.
 
 <h3 id="explain-extents">`--extents` — how big is it?</h3>
 

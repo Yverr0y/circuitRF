@@ -1493,6 +1493,13 @@ internal static class CliDiagnostics
         "render: --all-tabs writes one page per tab and {format} is a single-page format. Write a "
       + ".pdf, or pick one tab with --tab.", ("format", format));
 
+    /// <summary>Both spellings of "which tab", refused together rather than ordered — R-rnd2-3's rule
+    /// for the viewport modes, applied to the one other place this verb takes two answers to one
+    /// question.</summary>
+    public static Diagnostic RenderTabAndAllTabs() => Diagnostic.Create(
+        "render.tab.conflict", DiagnosticSeverity.Error,
+        "render: --tab names one tab and --all-tabs writes every one of them. Pass one or the other.");
+
     /// <summary>
     /// An option that means something for a drawing and nothing for a data display. Named rather
     /// than ignored: a caller that passed --window expecting a crop would otherwise get a full
@@ -1503,6 +1510,20 @@ internal static class CliDiagnostics
         "render: {option} describes a drawing — a viewport in world coordinates, a layer, a level of "
       + "detail — and a data display has none of those; its plots carry their own axis windows and "
       + "its page is laid out to fit them. Use --tab, --plot and --size.", ("option", option));
+
+    /// <summary>
+    /// A colour theme asked of a data display, whose colours do not come from a <c>.ccolor</c>.
+    ///
+    /// <para>Its own refusal rather than <see cref="RenderCddViewportUnsupported"/>'s because the
+    /// reason is different and the remedy is different: the flag is not describing a drawing, it is
+    /// naming a palette a plot does not read. A display's two palettes are the light and dark
+    /// <c>RenderTheme</c>s, chosen by <c>--variant</c>.</para>
+    /// </summary>
+    public static Diagnostic RenderCddThemeUnsupported(string name) => Diagnostic.Create(
+        "render.cdd.theme-not-applicable", DiagnosticSeverity.Error,
+        "render: a data display draws on its own plot palette, not on a .ccolor theme, so --theme "
+      + "'{name}' would have been ignored. Its two palettes are chosen with --variant light or "
+      + "--variant dark.", ("name", name));
 
     public static Diagnostic RenderMarginMalformed(string text) => Diagnostic.Create(
         "render.margin.malformed", DiagnosticSeverity.Error,

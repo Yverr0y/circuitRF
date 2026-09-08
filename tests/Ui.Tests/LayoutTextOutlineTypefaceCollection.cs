@@ -19,9 +19,14 @@ namespace CircuitRF.Ui.Tests;
 /// parallelizes across OTHER collections normally — this is not a blanket
 /// <c>DisableTestParallelization</c>, which would slow the whole ~2300-test suite for a race that only
 /// four classes are actually party to).
+/// <para><b>This is also <see cref="SkiaFontsTypefaceCollection"/>'s group</b> — that type's <c>Name</c>
+/// is this one, so the classes party to EITHER typeface static are serialized against each other. Read
+/// that type for why one group and not two: two collections run in parallel with one another, which is
+/// how RND-2's byte-identity gates ended up racing the Data Display's face swap. The two statics stay
+/// distinct; only the schedule is shared.</para>
 /// </summary>
 [CollectionDefinition(Name)]
 public class LayoutTextOutlineTypefaceCollection
 {
-    public const string Name = "LayoutTextOutline.TestOverrideTypeface";
+    public const string Name = "circuitRF typeface statics";
 }

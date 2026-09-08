@@ -179,12 +179,12 @@ internal static class LayoutRenderDetail
         // of visual lag rather than an exception on a thread with nothing to catch it.
         // (Caught by LayoutRenderThreadSafetyTests, which drives exactly that race.)
         var shapes = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(view.Shapes);
-        var visible = VisibleLayers(tech);
+        var hidden = HiddenLayers(tech);
         long total = 0;
         for (int i = 0; i < shapes.Length; i++)
         {
             if (shapes[i] is not { } shape) continue;
-            if (visible is not null && !visible.Contains(shape.Layer)) continue;
+            if (hidden is not null && hidden.Contains(shape.Layer)) continue;
             total += VertexCount(shape);
             if (total > allowance) return false;
         }
@@ -206,7 +206,7 @@ internal static class LayoutRenderDetail
         foreach (var inst in view.Instances)
         {
             long cells = (long)Math.Max(1, inst.Rows) * Math.Max(1, inst.Cols);
-            total += cells * CellVertices(inst, baseDir, visible, visiting, 0);
+            total += cells * CellVertices(inst, baseDir, hidden, visiting, 0);
             if (total > allowance) return false;
         }
         return true;
@@ -214,9 +214,10 @@ internal static class LayoutRenderDetail
 
     /// <summary>Vertices on visible layers inside one placement's cell, INCLUDING everything its own
     /// nested instances place, or 0 for a reference that does not resolve. Memoised per resolved
-    /// <see cref="LayoutView"/> and per visible-layer set.</summary>
+    /// <see cref="LayoutView"/>; <paramref name="hidden"/> is the set of keys the technology declares
+    /// and hides, so a key it does not declare at all counts — the renderer draws that shape.</summary>
     private static long CellVertices(
-        LayoutInstance inst, string baseDir, HashSet<LayerKey>? visible, HashSet<string> visiting, int depth)
+        LayoutInstance inst, string baseDir, HashSet<LayerKey>? hidden, HashSet<string> visiting, int depth)
     {
         if (depth > MaxCensusDepth) return 0;
 
@@ -226,7 +227,7 @@ internal static class LayoutRenderDetail
         var census = CensusOf(sub);
         long own = 0;
         foreach (var (key, n) in census.PerLayer)
-            if (visible is null || visible.Contains(key)) own += n;
+            if (hidden is null || !hidden.Contains(key)) own += n;
 
         if (sub.Instances.Count == 0) return own;
 
@@ -241,7 +242,7 @@ internal static class LayoutRenderDetail
             foreach (var nested in sub.Instances)
             {
                 long cells = (long)Math.Max(1, nested.Rows) * Math.Max(1, nested.Cols);
-                own += cells * CellVertices(nested, subBase, visible, visiting, depth + 1);
+                own += cells * CellVertices(nested, subBase, hidden, visiting, depth + 1);
             }
         }
         finally { visiting.Remove(cellDir); }
@@ -282,14 +283,25 @@ internal static class LayoutRenderDetail
         return census;
     }
 
-    /// <summary>Null means "no technology resolved, so nothing is hidden" — the same tolerant reading
-    /// <c>LayoutRenderer.Draw</c> takes when a layer key has no <see cref="LayerDef"/>.</summary>
-    private static HashSet<LayerKey>? VisibleLayers(Technology? tech)
+    /// <summary>
+    /// The keys this technology declares and HIDES. Null means "no technology resolved, so nothing is
+    /// hidden" — the same tolerant reading <c>LayoutRenderer.Draw</c> takes when a layer key has no
+    /// <see cref="LayerDef"/>.
+    ///
+    /// <para><b>Hidden keys rather than visible ones, because an undefined key is DRAWN.</b>
+    /// <c>LayoutRenderer.Draw</c> resolves a key the technology does not declare through
+    /// <see cref="FallbackPalette.For"/>, whose <see cref="LayerDef.Visible"/> is true, and paints it.
+    /// A set of visible keys treats that same shape as hidden here, so the budget below did not count
+    /// geometry the frame then drew — and it undercounted worst on exactly the documents where
+    /// undefined keys are ordinary, an import. The answer was "outlines are affordable" about a frame
+    /// they were not affordable for.</para>
+    /// </summary>
+    private static HashSet<LayerKey>? HiddenLayers(Technology? tech)
     {
         if (tech is null) return null;
         var set = new HashSet<LayerKey>();
         foreach (var l in tech.Layers)
-            if (l.Visible) set.Add(l.Key);
+            if (!l.Visible) set.Add(l.Key);
         return set;
     }
 

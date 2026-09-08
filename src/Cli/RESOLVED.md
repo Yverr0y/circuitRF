@@ -7,6 +7,98 @@ what the design says.
 ---
 
 
+## Post-RND-5 review — the layers a technology does not define (2026-09-07)
+
+A read-through of the whole `brief-render-0-overview.md` series against the code. One defect family,
+found by asking the question the series' own gates could not: **what happens on a document that draws
+on a layer key its technology does not declare?**
+
+That state is ordinary — it is what an import produces (`layout-view.md` §2.4) — and
+`LayoutRenderer` handles it: an undeclared key resolves through `FallbackPalette.For`, whose
+`Visible` is `true`, and the shape is PAINTED. `explain --layers` already reported such rows,
+deliberately and with a comment saying why. `render` did not know they existed, and that was wrong in
+three places at once:
+
+| | Was | Now |
+|---|---|---|
+| `render --json`'s `layers[]` | enumerated `tech.Layers` only, so the row was absent | the technology's table, then the generated rows — the same set `explain --layers` prints |
+| `--layers L99/0` | refused, "the resolved technology defines no layer called…", **naming `explain --layers`** — the verb that had just listed it | accepted, and the picture is that layer alone |
+| `--layers "Top Copper"` | drew Top Copper **and** L99/0 | draws Top Copper |
+
+**The third is the one that matters**, and it is R-rnd2-7's own failure mode with the sign reversed.
+That rule refuses a misspelling because "a picture with that layer missing is indistinguishable from a
+layer that is genuinely empty"; here a caller asked for ONE layer, got TWO, and the extra one is
+indistinguishable from a layer it forgot it had asked for. Verified before and after on a fixture
+drawing on 1/0 and 99/0 against a technology declaring eight layers and not 99/0: `shapesDrawn` was 2
+with `--layers "Top Copper"` and the reported `extents` still spanned the second rectangle.
+
+**Why the existing gates could not see it.** RND-3's gate 4 compares `explain --layers`' counts
+against `render --json`'s dictionary-for-dictionary — exactly the right assertion — but its fixture's
+technology declares every layer the fixture draws on, so the two sets were equal for a reason that had
+nothing to do with the code. The gate is now also run on a document with an undeclared key
+(`Layers_ThatTheTechnologyDoesNotDefine_AreReportedByBothVerbs`), with the generated name asserted
+present as a vacuity guard, and RND-2 gained
+`ALayerTheTechnologyDoesNotDefine_IsReportedAndSelectableAndExcludable`.
+
+**The fix is one idea in one place.** `TechnologyLayerSelection.WithVisibility` takes the generated
+definitions as `extraLayers` and the verb hands it `FallbackPalette.For(key)` for every counted key
+the technology does not declare — the palette's OWN definition, so with nothing selected the drawing
+is byte-for-byte what it was, and `Visible` becomes a field there is somewhere to write. A selection
+had nowhere to write it before, which is the whole of the bug.
+
+### Three flags a data display read and dropped
+
+`CddInapplicable` refuses an option that describes a drawing rather than ignoring it, and its own
+header gives the reason: a caller that passed a flag and got a full picture back has no way to learn
+the flag did nothing. Three were being read into `Options` and never reaching
+`RenderDataDisplay.Request`:
+
+- **`--theme`.** A display draws on `RenderTheme.Light`/`Dark`, which are not `.ccolor` themes at all
+  (that file's own `TODO 7.x` records that they are not wired to one). It is its own refusal —
+  `render.cdd.theme-not-applicable` — because the remedy is different from the others': `--variant`.
+  A test asserts the remedy actually changes the picture, so the refusal cannot be satisfied by a verb
+  with no colour control.
+- **`--margin`.** A fraction of an extent, and a display's page has no extent for it to be a fraction
+  of.
+- **`--tab` together with `--all-tabs`.** Two answers to "which tab", with `--tab` silently losing —
+  `render.tab.conflict` now, on R-rnd2-3's "refused together rather than ordered" terms.
+
+### One thing found in `src/Render` on the way, and it is older than this series
+
+`LayoutRenderDetail.CanAffordOutlines` built a set of VISIBLE layer keys and skipped any shape whose
+key was not in it — so a shape on a layer the technology does not declare was not counted, while
+`LayoutRenderer.Draw` draws it. The budget therefore undercounted worst on exactly the documents where
+undeclared keys are ordinary (an import), and answered "outlines are affordable" about a frame they
+were not affordable for. It is `HiddenLayers` now: skip what the technology declares and HIDES, count
+everything else. Detail in `src/Render/RESOLVED.md`.
+
+### The series' own byte-identity gates were flaky under full-suite load
+
+Three failures in a full `dotnet test`, all green in isolation, all the shared-static hazard RND-4
+recorded — and the reason is that RND-4's fix was applied to one half of the problem.
+`SkiaFontsTypefaceCollection` serialized the three Data Display classes; RND-2's schematic, symbol and
+layout gates were in `LayoutTextOutlineTypefaceCollection`. **Two collections is two groups xUnit runs
+in PARALLEL**, so `ScalarCubeTests`' Helvetica window still fell across
+`RenderCliVerbTests.RenderingASchematicAsAProcess_WritesTheBytesTheRendererWrites`, which draws in
+this process and compares against a CLI process that has no override to read. Five more classes set
+`SkiaFonts.TestOverrideTypeface` and were in NO collection at all.
+
+The two names now resolve to one collection, and the five loose setters joined it — except
+`ComponentPreviewTests`, which is in `CellStatGlobalsCollection` and cannot be in two. Its two tests
+set the override to `SKTypeface.Default` for a reason R-rnd1-4 removed (the embedded faces would not
+load without an Avalonia host), so they simply stopped writing the static. **That is the direction the
+rest of this should go**: RND-1 recorded that deleting the override entirely is the real end state,
+and every class still setting it to `SKTypeface.Default` is carrying a workaround for a limitation
+that no longer exists.
+
+**What the membership rule has to say, and did not:** a class belongs in that collection if it sets
+either typeface static **or compares rendered TEXT bytes against another process**. The second half is
+the one that is easy to miss, because such a class looks like it touches no global at all — which is
+precisely how RND-2's gates ended up outside it.
+
+---
+
+
 ## RND-5 — the protocol surface, and the user-docs chapter (2026-09-07)
 
 `brief-render-5-mcp-and-user-docs.md`. `render` as a tool, RND-3's three questions as arguments on the

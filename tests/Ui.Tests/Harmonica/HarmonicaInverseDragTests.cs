@@ -25,6 +25,8 @@ using Xunit.Abstractions;
 
 namespace CircuitRF.Ui.Tests.Harmonica;
 
+// Sets SkiaFonts.TestOverrideTypeface, so it is party to the typeface statics collection.
+[Collection(CircuitRF.Ui.Tests.LayoutTextOutlineTypefaceCollection.Name)]
 public sealed class HarmonicaInverseDragTests(ITestOutputHelper output)
 {
     // A big canvas on purpose: the Smith panel is a fraction of it (§7.1), and the whole point of

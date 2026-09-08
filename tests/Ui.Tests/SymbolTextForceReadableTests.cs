@@ -16,6 +16,8 @@ namespace CircuitRF.Ui.Tests;
 /// <see cref="TextPrimitive.ForceReadable"/> now. SDD, ZPort and the generic device box had the same
 /// defect and share the same helper.
 /// </summary>
+// Sets SkiaFonts.TestOverrideTypeface, so it is party to the typeface statics collection.
+[Collection(LayoutTextOutlineTypefaceCollection.Name)]
 public class SymbolTextForceReadableTests : IDisposable
 {
     public SymbolTextForceReadableTests()

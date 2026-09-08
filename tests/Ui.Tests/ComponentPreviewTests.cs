@@ -342,40 +342,37 @@ public class ComponentPreviewTests : IDisposable
     [InlineData(240, 400)]   // a pane taller than it is wide fits on the OTHER axis
     public void TheFootprintDrawing_FillsThePane_AndIsCentredInIt(int w, int h)
     {
-        SkiaFonts.TestOverrideTypeface = SkiaSharp.SKTypeface.Default;
-        try
-        {
-            var preview = ComponentPreview.Build(Widget9(), null, Dbu);
-            using var bmp = ComponentPreviewRaster.RasterFootprint(
-                preview.Layouts[0].View, preview.Technology, LayoutRenderTheme.Light, w, h, 1.0);
+        // No typeface override. It used to set SkiaFonts.TestOverrideTypeface to SKTypeface.Default
+        // because the embedded faces could not load without an Avalonia host; since R-rnd1-4 they load
+        // out of CircuitRF.Render's own manifest resources in any process, so the workaround was only
+        // still writing to a shared mutable static that other classes compare rendered bytes against.
+        // This class cannot join the typeface-statics collection — it is already in
+        // CellStatGlobalsCollection — so the fix here is to stop writing the static at all.
+        var preview = ComponentPreview.Build(Widget9(), null, Dbu);
+        using var bmp = ComponentPreviewRaster.RasterFootprint(
+            preview.Layouts[0].View, preview.Technology, LayoutRenderTheme.Light, w, h, 1.0);
 
-            Assert.NotNull(bmp);
-            var ink = InkBox(bmp!);
-            Assert.True(ink.Count > 0, "the pane is empty");
+        Assert.NotNull(bmp);
+        var ink = InkBox(bmp!);
+        Assert.True(ink.Count > 0, "the pane is empty");
 
-            AssertFramed(ink, w, h);
-        }
-        finally { SkiaFonts.TestOverrideTypeface = null; }
+        AssertFramed(ink, w, h);
     }
 
     /// <summary>The same, for the symbol half — a different renderer and a different handedness.</summary>
     [Fact]
     public void TheSymbolDrawing_FillsThePane_AndIsCentredInIt()
     {
-        SkiaFonts.TestOverrideTypeface = SkiaSharp.SKTypeface.Default;
-        try
-        {
-            var preview = ComponentPreview.Build(Widget9(), null, Dbu);
-            using var bmp = ComponentPreviewRaster.RasterSymbol(
-                preview.Symbol, SchematicRenderTheme.Light, 400, 240, 1.0);
+        // No typeface override — see the sibling test above.
+        var preview = ComponentPreview.Build(Widget9(), null, Dbu);
+        using var bmp = ComponentPreviewRaster.RasterSymbol(
+            preview.Symbol, SchematicRenderTheme.Light, 400, 240, 1.0);
 
-            Assert.NotNull(bmp);
-            var ink = InkBox(bmp!);
-            Assert.True(ink.Count > 0, "the pane is empty");
+        Assert.NotNull(bmp);
+        var ink = InkBox(bmp!);
+        Assert.True(ink.Count > 0, "the pane is empty");
 
-            AssertFramed(ink, 400, 240);
-        }
-        finally { SkiaFonts.TestOverrideTypeface = null; }
+        AssertFramed(ink, 400, 240);
     }
 
     // ── The list's search and type filter ───────────────────────────────────────────────────────

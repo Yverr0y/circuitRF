@@ -82,6 +82,12 @@ internal static class RenderDataDisplay
         if (req.AllTabs && req.Format != "pdf")
             return JsonRun.Fail(CliDiagnostics.RenderAllTabsNotMultiPage(req.Format));
 
+        // Two answers to "which tab", refused together rather than ordered — R-rnd2-3's rule for the
+        // viewport modes, and the same reason: a precedence nobody stated is an invention, and the
+        // one that would have lost is the one the caller typed LAST and most specifically.
+        if (req.AllTabs && req.Tab is not null)
+            return JsonRun.Fail(CliDiagnostics.RenderTabAndAllTabs());
+
         int tabIndex = 0;
         if (req.Tab is { } wanted)
         {

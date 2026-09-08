@@ -451,6 +451,12 @@ internal static class Render
             if (CddInapplicable(o) is { } inapplicable)
                 return JsonRun.Fail(CliDiagnostics.RenderCddViewportUnsupported(inapplicable));
 
+            // --theme is its own refusal because its reason is a different one: a display's colours
+            // are not a `.ccolor` at all. See CddInapplicable for why an ignored flag is refused
+            // rather than dropped.
+            if (o.Theme is { } themeName)
+                return JsonRun.Fail(CliDiagnostics.RenderCddThemeUnsupported(themeName));
+
             return RenderDataDisplay.Draw(o.Path!, new RenderDataDisplay.Request(
                 o.Output!, o.Format == Format.Pdf ? "pdf" : o.Format == Format.Png ? "png" : "svg",
                 o.Data, o.Tab, o.PlotIndex, o.AllTabs,
@@ -493,6 +499,10 @@ internal static class Render
         if (o.Detail != Detail.Full)  return "--detail";
         if (o.Grid)                   return "--grid";
         if (o.NoRulers)               return "--no-rulers";
+        // The fit margin is part of the same arithmetic: a display's page is laid out to its plots'
+        // own bounding box with a margin that scales with --size, and there is nothing here for a
+        // fraction of an extent to be a fraction OF.
+        if (o.Margin != DefaultMargin) return "--margin";
         return null;
     }
 
@@ -714,15 +724,42 @@ internal static class Render
         var counted = CellHierarchy.ShapeCountsByLayer(view, baseDir);
         var counts  = counted.Shapes;
 
+        // ── the layers the technology does NOT define, which are drawn anyway ─────────────────────
+        //
+        // A key the document draws on that the resolved technology does not declare is an ordinary
+        // and common state after an import (layout-view.md §2.4). `LayoutRenderer` resolves it
+        // through FallbackPalette.For and paints it, because that definition's Visible is true — so
+        // as far as the PICTURE is concerned the layer exists, and `explain --layers` lists it by
+        // that same generated name. Leaving it out of this verb's own report and out of the
+        // selection made all three of its answers wrong in the same direction:
+        //
+        //   * `render --json` reported a set of layers the drawing did not match, while
+        //     `explain --layers` reported the right one — the two verbs this series pointed at ONE
+        //     walk precisely so they could not disagree;
+        //   * `--layers L99/0` was refused NAMING `explain --layers`, which is the verb that had
+        //     just listed it;
+        //   * `--layers "Top Copper"` drew Top Copper AND L99/0, because the clone had no LayerDef
+        //     for the second to turn off. A caller that asked for one layer and silently got two has
+        //     no way to notice, which is R-rnd2-7's own failure mode with the sign reversed.
+        //
+        // The definitions handed over are the palette's own, so with nothing selected the drawing is
+        // byte-for-byte what it was.
+        HashSet<LayerKey> defined = tech is null ? [] : [.. tech.Layers.Select(l => l.Key)];
+        List<LayerDef> generated = tech is null
+            ? []
+            : [.. counts.Keys.Where(k => !defined.Contains(k))
+                             .OrderBy(k => k.Layer).ThenBy(k => k.Datatype)
+                             .Select(FallbackPalette.For)];
+
         string[]? named = o.OnlyLayers ?? o.HideLayers;
         if (named is null)
-            return (tech, LayerReport(tech, counts, static l => l.Visible), null);
+            return (tech, LayerReport(tech, generated, counts, static l => l.Visible), null);
 
         if (tech is null)
             return (null, null, JsonRun.Fail(CliDiagnostics.RenderNoTechnologyForLayers()));
 
         var known = new Dictionary<string, LayerKey>(StringComparer.OrdinalIgnoreCase);
-        foreach (var l in tech.Layers)
+        foreach (var l in tech.Layers.Concat(generated))
         {
             known[l.Name] = l.Key;
             known[l.Key.ToString()] = l.Key;   // a caller that has only the numeric key from an import
@@ -735,7 +772,8 @@ internal static class Render
             // indistinguishable from a layer that is genuinely empty.
             if (!known.TryGetValue(name, out var key))
                 return (null, null, JsonRun.Fail(CliDiagnostics.RenderUnknownLayer(
-                    name, Join([.. tech.Layers.Select(l => l.Name).Where(n => n.Length > 0).Distinct().Order(StringComparer.Ordinal)]))));
+                    name, Join([.. tech.Layers.Concat(generated).Select(l => l.Name)
+                                              .Where(n => n.Length > 0).Distinct().Order(StringComparer.Ordinal)]))));
             chosen.Add(key);
         }
 
@@ -744,12 +782,19 @@ internal static class Render
         // manipulation on the design model rather than a CLI concern, RND-3's `explain --layers` and
         // RND-4 both want it, and a second copy of it would be free to disagree about what was drawn.
         var clone = TechnologyLayerSelection.WithVisibility(
-            tech, l => only ? chosen.Contains(l.Key) : l.Visible && !chosen.Contains(l.Key));
-        return (clone, LayerReport(clone, counts, static l => l.Visible), null);
+            tech, l => only ? chosen.Contains(l.Key) : l.Visible && !chosen.Contains(l.Key), generated);
+        return (clone, LayerReport(clone, [], counts, static l => l.Visible), null);
     }
 
+    /// <summary>
+    /// One row per layer that would be reported by <c>explain --layers</c> for the same document —
+    /// the technology's own table, then the generated definitions for the keys it does not declare.
+    /// <paramref name="generated"/> is empty when the caller has already folded those into
+    /// <paramref name="tech"/>.
+    /// </summary>
     private static IReadOnlyList<RenderLayerJson>? LayerReport(
-        Technology? tech, IReadOnlyDictionary<LayerKey, long> counts, Func<LayerDef, bool> rendered)
+        Technology? tech, IReadOnlyList<LayerDef> generated,
+        IReadOnlyDictionary<LayerKey, long> counts, Func<LayerDef, bool> rendered)
     {
         if (tech is null)
         {
@@ -758,7 +803,7 @@ internal static class Render
             return [.. counts.OrderBy(kv => kv.Key.ToString(), StringComparer.Ordinal)
                              .Select(kv => new RenderLayerJson(kv.Key.ToString(), true, kv.Value))];
         }
-        return [.. tech.Layers.Select(l => new RenderLayerJson(
+        return [.. tech.Layers.Concat(generated).Select(l => new RenderLayerJson(
             l.Name.Length > 0 ? l.Name : l.Key.ToString(),
             rendered(l),
             counts.TryGetValue(l.Key, out long n) ? n : 0))];

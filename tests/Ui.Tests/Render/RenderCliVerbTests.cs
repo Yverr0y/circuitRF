@@ -332,6 +332,46 @@ public sealed class RenderCliVerbTests(ITestOutputHelper output) : IDisposable
         Assert.Matches(new Regex(@"""name"":\s*""Silk"",\s*""rendered"":\s*false,\s*""shapes"":\s*[0-9]"), json);
     }
 
+    // ── the layers a technology does NOT define, which are drawn anyway ───────
+
+    /// <summary>
+    /// <b>A key the document draws on that the technology does not declare is a first-class layer of
+    /// this verb, because the renderer paints it.</b> <c>LayoutRenderer</c> resolves such a key
+    /// through <c>FallbackPalette.For</c>, whose <c>Visible</c> is true — the ordinary state after an
+    /// import (<c>layout-view.md</c> §2.4).
+    ///
+    /// <para>Three things were wrong together before this, all one omission, and the third is the one
+    /// that produced a wrong PICTURE rather than a wrong report: the layer report left the generated
+    /// row out while <c>explain --layers</c> listed it; <c>--layers L99/0</c> was refused naming the
+    /// verb that had just listed it; and <c>--layers Metal1</c> drew Metal1 <i>and</i> the generated
+    /// layer, because the technology copy had no <c>LayerDef</c> for the second to turn off. A caller
+    /// that asked for one layer and silently got two has no way to notice — R-rnd2-7's own failure
+    /// mode with the sign reversed.</para>
+    /// </summary>
+    [Fact]
+    public void ALayerTheTechnologyDoesNotDefine_IsReportedAndSelectableAndExcludable()
+    {
+        var ws = BuildWorkspace(undefinedLayer: true);
+
+        // Reported, under the generated palette's own name — the same one `explain --layers` prints.
+        string all = RenderRawJson(ws.Clay, "--size", "400x300");
+        Assert.Matches(new Regex(@"""name"":\s*""L99/0"",\s*""rendered"":\s*true,\s*""shapes"":\s*1"), all);
+
+        // Selectable BY that name, rather than refused as one the technology does not define.
+        var only = RenderJson(ws.Clay, "--size", "400x300", "--layers", "L99/0");
+        Assert.Equal(1, only.ShapesDrawn);
+
+        // And excludable: a selection that names another layer must not leave it in the picture.
+        var metal = RenderJson(ws.Clay, "--size", "400x300", "--layers", "Metal1");
+        var whole = RenderJson(ws.Clay, "--size", "400x300");
+        output.WriteLine($"whole={whole.ShapesDrawn} metal1={metal.ShapesDrawn} generated={only.ShapesDrawn}");
+        Assert.True(metal.ShapesDrawn < whole.ShapesDrawn,
+            $"--layers Metal1 drew {metal.ShapesDrawn} shapes; the whole document draws {whole.ShapesDrawn}");
+        Assert.Matches(
+            new Regex(@"""name"":\s*""L99/0"",\s*""rendered"":\s*false"),
+            RenderRawJson(ws.Clay, "--size", "400x300", "--layers", "Metal1"));
+    }
+
     // ── gate 5: the layer selection does not leak ─────────────────────────────
 
     /// <summary>
@@ -525,7 +565,9 @@ public sealed class RenderCliVerbTests(ITestOutputHelper output) : IDisposable
     /// <param name="denseContour">Adds a machine-generated 4,000-vertex arc — what an imported
     /// Gerber's flattened copper looks like, and the only kind of geometry the decimation tier can
     /// engage on (it has a hard floor at 16 vertices, so an authored rectangle never decimates).</param>
-    private Workspace BuildWorkspace(bool denseContour = false)
+    /// <param name="undefinedLayer">Adds a shape on a layer key the technology does not declare —
+    /// what an import routinely produces, and what the fallback palette exists for.</param>
+    private Workspace BuildWorkspace(bool denseContour = false, bool undefinedLayer = false)
     {
         string root = Path.Combine(_root, "Demo");
         string cell = Path.Combine(root, "Stage1");
@@ -541,7 +583,7 @@ public sealed class RenderCliVerbTests(ITestOutputHelper output) : IDisposable
             Path.Combine(root, ".cws"), new CwsFile { DefaultTechRef = Path.Combine("tech", "Fixture.ctech") });
 
         string clay = Path.Combine(cell, "layout", "Stage1.clay");
-        LayoutPersistence.SaveToFile(clay, LayoutFixture(denseContour));
+        LayoutPersistence.SaveToFile(clay, LayoutFixture(denseContour, undefinedLayer));
 
         string csch = Path.Combine(cell, "schematic", "Stage1.csch");
         SchematicPersistence.SaveToFile(csch, SchematicFixture(), "Stage1");
@@ -564,7 +606,7 @@ public sealed class RenderCliVerbTests(ITestOutputHelper output) : IDisposable
         ],
     };
 
-    private static LayoutView LayoutFixture(bool denseContour = false)
+    private static LayoutView LayoutFixture(bool denseContour = false, bool undefinedLayer = false)
     {
         var view = new LayoutView { DbuPerMicron = Dbu, DisplayUnit = LayoutUnit.Um, SnapDbu = Dbu };
         view.Shapes.Add(new RectShape { Layer = Metal1, X1 = 0, Y1 = 0, X2 = 400 * Dbu, Y2 = 200 * Dbu });
@@ -572,6 +614,12 @@ public sealed class RenderCliVerbTests(ITestOutputHelper output) : IDisposable
         // Text on purpose: a picture with no glyphs in it cannot show a typeface substitution, which
         // is the one difference RND-1 fixed and gate 1 exists to keep fixed.
         view.Shapes.Add(new LabelShape { Layer = Metal1, X = 20 * Dbu, Y = 100 * Dbu, Text = "PAD 1", Height = 40 * Dbu });
+
+        if (undefinedLayer)
+            view.Shapes.Add(new RectShape
+            {
+                Layer = new LayerKey(99, 0), X1 = 800 * Dbu, Y1 = 0, X2 = 900 * Dbu, Y2 = 100 * Dbu,
+            });
 
         if (denseContour)
         {

@@ -311,11 +311,21 @@ public sealed class RenderDataDisplayCliTests(ITestOutputHelper output) : IDispo
         Assert.Contains("(1)", stderr);
     }
 
-    /// <summary>An option that describes a DRAWING is named, not ignored — R-rnd0-6's rule.</summary>
+    /// <summary>
+    /// An option that describes a DRAWING is named, not ignored — R-rnd0-6's rule.
+    ///
+    /// <para><c>--margin</c> and <c>--theme</c> were both being read, both being dropped and both
+    /// producing a picture with nothing said. They are here for the reason the others are: a caller
+    /// that passed a flag and got a full, correct-looking picture back has no way to learn its flag
+    /// did nothing. <c>--theme</c> refuses with its own sentence, because its reason is different —
+    /// a display's palette is not a <c>.ccolor</c> at all, and the remedy is <c>--variant</c>.</para>
+    /// </summary>
     [Theory]
     [InlineData("--window", "0,0,1,1")]
     [InlineData("--layers", "M1")]
     [InlineData("--detail", "screen")]
+    [InlineData("--margin", "0.3")]
+    [InlineData("--theme", "Default")]
     public async Task AnOptionThatMeansNothingForADisplay_IsRefusedByName(string option, string value)
     {
         var f = await BuildFixtureAsync();
@@ -324,6 +334,37 @@ public sealed class RenderDataDisplayCliTests(ITestOutputHelper output) : IDispo
         output.WriteLine(stderr);
         Assert.Equal(1, exit);
         Assert.Contains(option, stderr);
+        Assert.False(File.Exists(Path.Combine(_root, "c.svg")), "a refused render wrote a file");
+    }
+
+    /// <summary>Both spellings of "which tab" are refused TOGETHER, not ordered — R-rnd2-3's rule for
+    /// the viewport modes, and the same reason: silently honouring one of them writes a file the
+    /// caller did not ask for.</summary>
+    [Fact]
+    public async Task NamingATabAndAskingForAllOfThem_IsRefused()
+    {
+        var f = await BuildFixtureAsync(tabs: 2);
+        string outPath = Path.Combine(_root, "both.pdf");
+        var (exit, stdout, _) = RunCli("render", f.Cdd, "-o", outPath,
+                                       "--all-tabs", "--tab", "Tab 2", "--json");
+        Assert.Equal(1, exit);
+        Assert.Contains("\"id\": \"render.tab.conflict\"", stdout, StringComparison.Ordinal);
+        Assert.False(File.Exists(outPath));
+    }
+
+    /// <summary>The remedy the <c>--theme</c> refusal names actually works: a display HAS two
+    /// palettes and <c>--variant</c> is how they are chosen. Without this the refusal above would be
+    /// satisfied by a verb that simply had no colour control at all.</summary>
+    [Fact]
+    public async Task TheVariantTheThemeRefusalNames_ChangesThePicture()
+    {
+        var f = await BuildFixtureAsync();
+        string light = Path.Combine(_root, "light.png");
+        string dark  = Path.Combine(_root, "dark.png");
+
+        Assert.Equal(0, RunCli("render", f.Cdd, "-o", light, "--variant", "light").ExitCode);
+        Assert.Equal(0, RunCli("render", f.Cdd, "-o", dark,  "--variant", "dark").ExitCode);
+        Assert.NotEqual(File.ReadAllBytes(light), File.ReadAllBytes(dark));
     }
 
     // ── R-rnd4-6: the page is a parameter, and the composition survived it ────

@@ -15,6 +15,8 @@ using Xunit.Abstractions;
 
 namespace CircuitRF.Ui.Tests.Harmonica;
 
+// Sets SkiaFonts.TestOverrideTypeface, so it is party to the typeface statics collection.
+[Collection(CircuitRF.Ui.Tests.LayoutTextOutlineTypefaceCollection.Name)]
 public sealed class HarmonicaPowerSweepAndDcivTests(ITestOutputHelper output)
 {
     private static PowerSweepPanelData Fixture(GridMetric metric) => new()

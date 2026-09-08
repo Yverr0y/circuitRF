@@ -26,10 +26,23 @@ public static class TechnologyLayerSelection
     /// answer for it. The argument is the ORIGINAL <see cref="LayerDef"/>, so a predicate that wants
     /// "as before, minus these" can read <see cref="LayerDef.Visible"/> from it.
     /// </summary>
-    public static Technology WithVisibility(Technology tech, Func<LayerDef, bool> visible)
+    /// <param name="extraLayers">
+    /// Layers to append to the copy before the predicate runs — the <see cref="FallbackPalette"/>
+    /// definitions for keys the DOCUMENT draws on and this technology does not define.
+    ///
+    /// <para><b>Without them a selection cannot reach half of an imported design.</b>
+    /// <c>LayoutRenderer</c> resolves an undefined key through <see cref="FallbackPalette.For"/>,
+    /// whose <see cref="LayerDef.Visible"/> is <c>true</c> — so a shape on such a layer is drawn
+    /// whatever the technology says, and a copy that did not carry a <see cref="LayerDef"/> for it
+    /// would have nowhere to write the answer. The symptom is the worst kind: <c>--layers A</c>
+    /// produces a picture that also contains B, and nothing reports it. Passing exactly the palette's
+    /// own definition means the drawing is unchanged when the predicate leaves it visible.</para>
+    /// </param>
+    public static Technology WithVisibility(
+        Technology tech, Func<LayerDef, bool> visible, IEnumerable<LayerDef>? extraLayers = null)
     {
         var clone = ShallowCopy(tech);
-        clone.Layers = [.. tech.Layers.Select(l =>
+        clone.Layers = [.. tech.Layers.Concat(extraLayers ?? []).Select(l =>
         {
             var copy = ShallowCopy(l);
             copy.Visible = visible(l);
