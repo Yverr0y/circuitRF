@@ -29,7 +29,7 @@ and it is gated by the same firewall test. That is what the `em` verb (§8) runs
 
 | Verb | Input | Runs | Writes |
 |---|---|---|---|
-| `sparam` | `.cnl` | `SParameterEngine` | Touchstone `.sNp` (always; `-o` names it) |
+| `sparam` | `.cnl` | `SParameterEngine` | Touchstone `.sNp` by default; `-o`'s extension picks the format (`.sNp`, or `.npy`/`.mat`/`.txt` for the cubes) |
 | `dc` | `.cnl` | `NonlinearDcEngine` | node voltages + probe currents to stdout |
 | `hb` | `.cnl` | `HbEngine` (single- or multi-tone) | stdout tables; `-o .mat/.npy/.txt` |
 | `lp` | `.cnl` | `LoadpullEngine` + `LoadpullPostProcessor` | stdout grid table; `-o .mat/.npy/.txt/.spl/.lpcwave` |
@@ -68,14 +68,16 @@ The paths created ARE the result and go to stdout, because a caller's next step 
 read or rewrite one of them — the documents are the interface (`automation-architecture.md` §4), and
 there are deliberately no per-primitive edit verbs.
 
-Three flags are pulled out of the argument list before dispatch, so **every** verb takes them and no
+Some flags are pulled out of the argument list before dispatch, so **every** verb takes them and no
 verb's own argument loop has to learn about any of them:
 
 | Flag | What it does |
 |---|---|
 | `--kits <dir>` | makes an externally-supplied device model resolve headlessly, the way opening a workspace does in the GUI. Repeatable. |
 | `--json` | one JSON document on stdout and nothing else — §3.2 |
-| `--only`, `--group` | narrow that document's `result` — §3.2 |
+| `--only`, `--group` | narrow that document's `result` by cube and group name — §3.2 |
+| `--at`, `--range`, `--interp`, `--result` | narrow it by AXIS, or ask for the shape alone — §3.2 |
+| `--summary` | report the informational notes as counts rather than in full — §3.2b |
 
 ## 3. The anatomy of a run verb
 
@@ -135,7 +137,11 @@ The shape is one schema across every verb (`RfCore.Export.ResultDocument`):
   "status", "exitCode",
   "outputs":     [ {"kind","path"}, … ],      // every file written — for em, BOTH the .sNp and the .npy
   "diagnostics": [ {"id","severity","message","arguments"}, … ],
-  "result":      { "summary": …, "groups": { "<group>": { "<cube>": {"kind","axes","values"} } } } }
+  "diagnosticSummary": {"info","warning","error","omitted","full"},   // --summary only, §3.2b
+  "result":      { "summary":  …,
+                   "shape":    { "groups": { "<group>": { "<cube>": {"kind","unit","elements","axes"} } } },
+                   "narrowed": [ {"axis","unit","mode","asked","at","from","to","length","clamped","cubes"}, … ],
+                   "groups":   { "<group>": { "<cube>": {"kind","unit","axes","values"} } } } }
 ```
 
 (`result` also carries `check`, `explain` and `document` for the three verbs that produce one of
@@ -147,11 +153,90 @@ those instead of cubes — §10.5 and §11.4.)
   column widths are terminal concerns and none of them is encoded in the document. NaN and infinity
   are written as JSON's named literals (`"NaN"`), because a loadpull grid genuinely contains NaN
   wherever a point never converged and substituting a zero would turn "no measurement" into one.
+- **Every cube carries a `unit`**, and so does every entry in `shape` — see §3.2a.
 - **`result.summary`** is `lp`/`lpp`'s one-row-per-grid-point projection — the same one §6.3 prints,
   from the same code (`RfCore.Loadpull.LoadpullResultSummary`), so the table and the document cannot
   disagree. For those two verbs it is the DEFAULT and the cubes are omitted; `--all` adds them.
+- **`result.shape` is present on EVERY run and every `read` that produced a `DataSet`**, whether or
+  not the values are inline (AUT-9 R-aut9-10). `run sparam` returned its whole result inline while
+  `run lpp` returned a written path and nothing else, with nothing in either tool's schema to say
+  which a caller would get; the payload rule is still per-verb, but a caller always learns what the
+  run produced and can then decide what to ask for. It is O(cubes) rather than O(numbers) — a
+  four-port 551-point run's shape is under 2 KB — which is what lets it be unconditional.
 - **`--only <cube>,…` and `--group <name>,…`** narrow `result` and nothing else. An unknown name is
   skipped silently, matching `DataSetSubset.SelectGroups`.
+
+#### `--at`, `--range`, `--interp`, `--result` — narrowing by AXIS
+
+`--only` and `--group` narrow by cube NAME, which does nothing at all when the result has one cube.
+A 551-point two-port S-parameter run is **173 KB inline** to answer what one entry is at one
+frequency. So (AUT-9 R-aut9-9):
+
+| Flag | What it does |
+|---|---|
+| `--at <axis>=<value>` | one point of an axis, e.g. `--at freq=2GHz`. Nearest grid point. |
+| `--interp` | makes every `--at` interpolate between the bracketing points instead |
+| `--range <axis>=<lo>:<hi>` | a band of an axis, e.g. `--range freq=1GHz:3GHz` |
+| `--result full\|summary` | `summary` returns the shape, units and extents and **no values** |
+
+- **Values carry their own unit**, because a bare `2` could be 2 Hz or 2 GHz and this repo already
+  has the run that went out at 2 Hz because a scale was read without its mark. The axis's own unit is
+  stripped first and the SI prefix second, so `5mm` is five millimetres on a metre axis and `5m` is
+  five metres on the same one. A bare number is taken as already being in the axis's base unit.
+- **The axis is located by NAME**, never by position: a sweep prepends one axis per nesting level.
+- **A cube that does not HAVE the named axis is left whole** — a `Z0` cube has no frequency axis and
+  narrowing by frequency is not a claim about it. An axis **no** cube has is a refusal listing the
+  ones that exist (`narrow.axis.unknown`), and it fails the invocation: any file the run wrote is
+  still in `outputs` and the shape still comes back, but the caller must not receive the whole
+  un-narrowed result under the impression that it answers the question asked.
+- **`result.narrowed` says what happened**, per axis: the value asked for, the value returned, and
+  whether it was `nearest` or `interpolated`. `--at` keeps the axis at length 1 rather than
+  collapsing it, so the point returned is visible in the data as well.
+- **`--result`, not `--format`** — `render --format pdf` already exists and means the picture's file
+  format. AUT-9 suggested the name `format`; one word meaning two things across two verbs is what a
+  caller gets wrong once and forever.
+
+#### 3.2a Every cube says what its numbers are in
+
+The axes have carried a unit since they were written; the values did not. One loadpull-pursuit
+result carried `Efficiency` reading 65.84 and `MXE_Eff` reading 0.7087 at the same operating point —
+the cube in percent, the scalar as a fraction, with nothing anywhere saying which. Both "format
+`MXE_Eff` as a percentage" (0.7%) and "multiply `Efficiency` by 100" (6584%) are one plausible line
+of code.
+
+So **`unit` is always present on a cube, and never empty** (AUT-9 R-aut9-3):
+
+- SI symbols as they are written — `Hz`, `V`, `A`, `W`, `Ohm`, `F`, `H`, `S`, `K`, `m`, `s` — and the
+  logarithmic units as they are written, `dB` and `dBm`.
+- **`%`** for a ratio already scaled to a percentage, **`1`** for one that is not, **`index`** for a
+  flag or a count, and **`unknown`** where circuitRF genuinely cannot say — a designer's own
+  `measure` expression, most often. `unknown` is an answer; an empty string is not.
+- A cube's producer states it (`DataCube.Unit`) where the NAME cannot: `LoadpullPostProcessor.Enrich`
+  scales `PAE` from a fraction to a percentage **under its own name**, so two cubes called `PAE` mean
+  different things. Where the name IS the answer, `RfCore.Export.ResultUnits`' vocabulary supplies
+  it — annotating every cube in the engine would be a large change for a value already determined.
+  A stated unit survives the `.npy` and `.mat` round trip.
+- **Nothing is rescaled.** The loadpull summary's `columns` and the pursuit's optima each carry the
+  unit of the RAW value alongside `consoleScale` and `consoleUnit` — MXE's value is a fraction the
+  terminal prints as a percentage, and those used to be one field naming the terminal's unit.
+
+#### 3.2b `--summary`: the notes as counts
+
+`--summary` reports the **`info`** diagnostics as counts by severity instead of in full, and adds
+`diagnosticSummary` saying how many were omitted and what returns them. **Warnings and errors are
+never collapsed** — a caller that asked for less text did not ask to be told less about what went
+wrong — and stderr is untouched either way, so the full account is still on the terminal.
+
+It exists for the Gerber-shaped case (AUT-9 R-aut9-11): those diagnostics are the best-written text
+on the whole surface and are not weakened by this; they are simply not the right default payload for
+a listing call whose answer is one cell name, which measured **30 KB** over the wire.
+
+**A diagnostic is not emitted twice** (R-aut9-8). A large family here is templated `"{text}"` — the
+whole sentence is one substituted value forwarded from a reader or an elaborator — so `message` and
+`arguments.text` came out byte-identical on most of them; one Gerber import was ~15 KB of exact
+duplication in one response. `arguments.text` is now emitted only when it DIFFERS from `message`.
+The rule is by that one NAME rather than "any argument equal to the message", because
+`convert.cell.listed` is templated `"{cell}"` and its argument is the ANSWER the caller asked for.
 
 **§7A applies inside the document.** Every diagnostic carries `message` — always
 `Diagnostic.Render()`, always English, always culture-invariant — alongside its stable dotted `id`

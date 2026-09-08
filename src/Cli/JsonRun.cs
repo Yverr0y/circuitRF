@@ -41,6 +41,35 @@ internal static class JsonRun
     private static string[]? _onlyCubes;
     private static string[]? _onlyGroups;
 
+    /// <summary>AUT-9 R-aut9-9's axis narrowing, as typed. Resolved against the run's own axes at
+    /// <see cref="Finish"/>, because the axes do not exist until the run has produced them.</summary>
+    private static readonly List<AxisPick> _picks = [];
+    private static readonly List<AxisSpan> _spans = [];
+
+    /// <summary>True for <c>--result summary</c>: the shape, the extents and the loadpull
+    /// projection, and no cube values at all (R-aut9-9). The default is the full document.</summary>
+    private static bool _summaryOnly;
+
+    /// <summary>
+    /// True for <c>--summary</c> (R-aut9-11): the <c>info</c> diagnostics are collapsed into counts
+    /// and every warning and error still travels in full.
+    ///
+    /// <para><b>Warnings and errors are never collapsed</b>, and that is the difference between a
+    /// narrower payload and a quieter one. A caller that asked for less text did not ask to be told
+    /// less about what went wrong; what it asked to stop paying for is thirty notes describing
+    /// inferences that all went fine. stderr is untouched either way, so the full account is still
+    /// on the terminal.</para>
+    /// </summary>
+    private static bool _diagnosticsSummary;
+
+    /// <summary>
+    /// A narrowing flag whose SPELLING was wrong — refused before the run rather than after it,
+    /// because a caller that typed <c>--at freq</c> is going to have to type it again and there is
+    /// no reason to make them wait for a solve first. Read by <see cref="CliEntry"/> immediately
+    /// after <see cref="TakeFlags"/>; null when everything parsed.
+    /// </summary>
+    public static (string Option, string Text)? Malformed { get; private set; }
+
     /// <summary>Set by <c>lp</c>/<c>lpp</c> from their own <c>--all</c>. R-aut1-5: under
     /// <c>--json</c> a loadpull's default stays the one-row-per-grid-point summary — it is the useful
     /// projection, not a terminal compromise — and <c>--all</c> still means every cube.</summary>
@@ -122,6 +151,11 @@ internal static class JsonRun
         Reference           = null;
         History             = null;
         Render              = null;
+        _summaryOnly        = false;
+        _diagnosticsSummary = false;
+        Malformed           = null;
+        _picks.Clear();
+        _spans.Clear();
         Outputs.Clear();
         Diagnostics.Clear();
     }
@@ -139,6 +173,7 @@ internal static class JsonRun
     public static string[] TakeFlags(string[] args)
     {
         var rest = new List<string>(args.Length);
+        bool interpolate = args.Contains("--interp");
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -152,6 +187,47 @@ internal static class JsonRun
                     continue;
                 case "--group" when i + 1 < args.Length:
                     _onlyGroups = Split(args[++i]);
+                    continue;
+
+                // R-aut9-9. Taken here, with `--only` and `--group`, for the same reason those are:
+                // every verb that produces a DataSet gets them without its own argument loop
+                // learning about them, and `read` gets exactly the same spelling as `run`.
+                case "--at" when i + 1 < args.Length:
+                    foreach (string one in Split(args[++i]))
+                    {
+                        int eq = one.IndexOf('=');
+                        if (eq <= 0) { Malformed = ("--at", one); continue; }
+                        _picks.Add(new AxisPick(one[..eq].Trim(), one[(eq + 1)..].Trim(), interpolate));
+                    }
+                    continue;
+                case "--range" when i + 1 < args.Length:
+                    foreach (string one in Split(args[++i]))
+                    {
+                        int eq    = one.IndexOf('=');
+                        int colon = eq < 0 ? -1 : one.IndexOf(':', eq + 1);
+                        if (eq <= 0 || colon < 0) { Malformed = ("--range", one); continue; }
+                        _spans.Add(new AxisSpan(
+                            one[..eq].Trim(), one[(eq + 1)..colon].Trim(), one[(colon + 1)..].Trim()));
+                    }
+                    continue;
+                case "--interp":
+                    continue;   // read above, before the loop, because it governs every --at
+                // R-aut9-11. The Gerber import's notes are the best-written text on the surface and
+                // are not weakened — they are simply not the default payload for a listing call
+                // whose answer is one cell name. Global rather than per-verb, because the rule is
+                // "anywhere a verb routinely emits tens of notes" and the diagnostics are collected
+                // in one place already.
+                case "--summary":
+                    _diagnosticsSummary = true;
+                    continue;
+                // `--result`, not `--format`: `render --format pdf` already exists and means the
+                // picture's file format. One flag spelled two ways across two verbs is exactly the
+                // kind of thing a caller writes once and gets wrong forever, and this one governs
+                // the document's `result` section, which is what it is named after.
+                case "--result" when i + 1 < args.Length:
+                    string mode = args[++i].Trim();
+                    if (mode.Equals("summary", StringComparison.OrdinalIgnoreCase))   _summaryOnly = true;
+                    else if (!mode.Equals("full", StringComparison.OrdinalIgnoreCase)) Malformed = ("--result", mode);
                     continue;
             }
             rest.Add(args[i]);
@@ -230,21 +306,51 @@ internal static class JsonRun
     {
         if (!Enabled || _stdout is null) return exitCode;
 
+        var payload = BuildPayload(ref exitCode);
+        var (reported, tally) = ProjectDiagnostics();
+
         var doc = new ResultDocument(
             new ResultHeader(Version(), Verb),
             new ResultInput(InputPath, Analysis),
             ResultStatus.FromExitCode(exitCode),
             exitCode,
             Outputs,
-            Diagnostics,
-            BuildPayload());
+            reported,
+            payload,
+            tally);
 
         _stdout.WriteLine(ResultDocumentWriter.Serialize(doc));
         _stdout.Flush();
         return exitCode;
     }
 
-    private static ResultPayload? BuildPayload()
+    /// <summary>
+    /// The diagnostics as the document will carry them, and the tally when <c>--summary</c> asked
+    /// for one (R-aut9-11). Without the flag this is the identity: the same list, and no tally key.
+    /// </summary>
+    private static (IReadOnlyList<DiagnosticJson>, DiagnosticSummaryJson?) ProjectDiagnostics()
+    {
+        if (!_diagnosticsSummary) return (Diagnostics, null);
+
+        int info = 0, warning = 0, error = 0;
+        var kept = new List<DiagnosticJson>(Diagnostics.Count);
+        foreach (var d in Diagnostics)
+        {
+            switch (d.Severity)
+            {
+                case "info":    info++;    continue;   // collapsed
+                case "warning": warning++; break;
+                default:        error++;   break;
+            }
+            kept.Add(d);
+        }
+
+        return (kept, new DiagnosticSummaryJson(info, warning, error, info,
+            "the same call without --summary reports every diagnostic in full; stderr already " +
+            "carried all of them"));
+    }
+
+    private static ResultPayload? BuildPayload(ref int exitCode)
     {
         // check, explain, a read-back document and the reference surface carry no DataSet — the
         // first two run nothing (R-aut4-1), the third is a file rather than a result, and the fourth
@@ -256,18 +362,54 @@ internal static class JsonRun
 
         if (Data is not { } ds) return null;
 
+        // R-aut9-9's axis narrowing. It runs FIRST, so everything below — the shape, the loadpull
+        // projection and the cubes alike — describes what the caller asked for rather than what the
+        // run happened to produce. An axis nobody has is a refusal here and not a shrug: the whole
+        // result would be an answer to a different question, and the exit code has to say so or a
+        // script would act on it.
+        IReadOnlyList<NarrowingJson>? narrowed = null;
+        try
+        {
+            if (_picks.Count > 0 || _spans.Count > 0)
+            {
+                var (narrowedDs, applied) = DataSetNarrowing.Apply(ds, _picks, _spans);
+                ds       = narrowedDs;
+                narrowed = applied.Count > 0 ? applied : null;
+            }
+        }
+        catch (NarrowingException ex)
+        {
+            // The refusal is the one DataSetNarrowing authored — an id and typed arguments, not a
+            // sentence re-authored here. src/Cli holds no rule about which axes exist.
+            Report(ex.Diagnostic);
+            if (exitCode == 0) exitCode = 1;
+            // The SHAPE still goes back, because it is the answer to "what could I have asked for" —
+            // and returning the un-narrowed values instead would hand the caller a document it did
+            // not ask for, at exactly the size this requirement exists to avoid.
+            return new ResultPayload(null, null, Shape: ResultDocumentWriter.Shape(ds));
+        }
+
         var summary = ResultDocumentWriter.SummarizeLoadpull(ds);
 
         // R-aut1-5. For lp/lpp the cubes are [gridPoint x pinStep] and there are eight of them, so
         // the default document is the summary — the same projection the terminal prints, and for the
         // same reason. Asking for cubes is what --all, --only and --group do.
-        bool wantGroups = !SummaryIsTheDefault || AllCubes || _onlyCubes is not null || _onlyGroups is not null;
+        //
+        // R-aut9-9's `--result summary` overrides all of that for every verb: shape and extents,
+        // no values.
+        bool wantGroups = !_summaryOnly
+                       && (!SummaryIsTheDefault || AllCubes || _onlyCubes is not null || _onlyGroups is not null);
 
         var groups = wantGroups
             ? ResultDocumentWriter.ToJson(ds, _onlyGroups, _onlyCubes)
             : null;
 
-        return summary is null && groups is null ? null : new ResultPayload(summary, groups);
+        // R-aut9-10: the shape is uniform across every verb, present whether or not the values are.
+        // `run sparam` returned everything inline and `run lpp` returned nothing, with nothing in
+        // either schema to say which — so a caller now always learns what the run produced and can
+        // then decide what to ask for.
+        return new ResultPayload(summary, groups, Shape: ResultDocumentWriter.Shape(ds),
+                                 Narrowed: narrowed);
     }
 
     /// <summary>

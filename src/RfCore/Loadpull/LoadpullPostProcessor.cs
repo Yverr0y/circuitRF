@@ -52,14 +52,18 @@ namespace RfCore.Loadpull
 
             // Replace an existing real cube with f(value), preserving axes. Used for the
             // display-convention fixes (sign/scale) — no-op when the cube is absent.
-            void TransformInPlace(string name, Func<double, double> f)
+            void TransformInPlace(string name, Func<double, double> f, string? unit = null)
             {
                 if (!Has(name)) return;
                 var cube = ds[Q(name)];
                 var src  = cube.RealValues;
                 var dst  = new double[src.Length];
                 for (int i = 0; i < src.Length; i++) dst[i] = double.IsNaN(src[i]) ? double.NaN : f(src[i]);
-                AddCube(name, new DataCube(cube.Axes.ToArray(), dst));
+                // AUT-9 R-aut9-3: a cube whose NAME does not change but whose unit does must say so
+                // itself. PAE is the case — the same name means a fraction before this line and a
+                // percentage after it, and no name-keyed vocabulary can tell those apart.
+                AddCube(name, new DataCube(cube.Axes.ToArray(), dst)
+                    { Unit = unit ?? cube.Unit });
             }
 
             void Remove(string name) => ds.RemoveFromGroup(group.Length > 0 ? group : DataSet.DefaultGroup, name);
@@ -105,7 +109,7 @@ namespace RfCore.Loadpull
                 RenameRaw("Gp",  "Gp_dB");
                 RenameRaw("Pdc", "Pdc_W");
                 RenameScaled("DE", "Efficiency", 100.0);   // drain efficiency fraction → %
-                TransformInPlace("PAE", v => v * 100.0);   // power-added efficiency fraction → %
+                TransformInPlace("PAE", v => v * 100.0, "%");  // power-added efficiency fraction → %
                 TransformInPlace("BiasILoad", v => -v);    // drain quiescent current → positive (Idq)
                 TransformInPlace("BiasISrc",  v => -v);    // gate  quiescent current → positive
             }

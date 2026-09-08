@@ -419,10 +419,14 @@ namespace RfCore.Data
             var ds    = new DataSet();
             ds.Add("S", sCube);
 
-            // Uniform Z0 cube — every Touchstone-derived S DataSet carries one
-            // so consumers can always rely on "Z0" being present.
+            // Every Touchstone-derived S DataSet carries a Z0 cube so consumers can rely on "Z0"
+            // being present. The per-port references when the SNP knows them (AUT-9 R-aut9-2 — a
+            // file whose header note carries them, or a run that never went through a file), and
+            // the uniform value repeated otherwise, which is then the honest answer rather than a
+            // claim about ports nobody looked at.
             var z0Vals = new Complex[nPorts];
-            for (int p = 0; p < nPorts; p++) z0Vals[p] = snp.Z0;
+            for (int p = 0; p < nPorts; p++)
+                z0Vals[p] = snp.Z0PerPort is { } perPort && perPort.Length == nPorts ? perPort[p] : snp.Z0;
             ds.Add("Z0", BuildZ0Cube(z0Vals));
 
             return ds;
@@ -486,7 +490,8 @@ namespace RfCore.Data
             int dot = sSpec.LastIndexOf('.');
             string z0Spec = dot < 0 ? "Z0" : sSpec[..dot] + ".Z0";
 
-            Complex refZ0;
+            Complex   refZ0;
+            Complex[]? perPortZ0 = null;
             if (ds.Contains(z0Spec))
             {
                 var z0Cube = ds[z0Spec];
@@ -498,13 +503,28 @@ namespace RfCore.Data
                 // message. An empty reference is no reference: fall back the same way a DataSet with
                 // no Z0 cube at all does.
                 refZ0 = z0Vals.Length > 0 ? z0Vals[0] : new Complex(50, 0);
+
                 if (z0Kind == Z0Kind.NonUniform)
                 {
-                    // SNP/Touchstone is uniform-only; use port-1's value and warn.
+                    // AUT-9 R-aut9-2. SNP/Touchstone's option line carries ONE reference impedance,
+                    // so port-1's is used for it as before — but the per-port truth is now CARRIED
+                    // rather than discarded. Nothing is renormalized and no number changes: these
+                    // matrices are generalized w.r.t. these ports, and the point of this line is
+                    // that the SNP can finally SAY so, instead of being written and read back as
+                    // though every port were port 1's.
+                    //
+                    // Renormalizing to the uniform reference was tried and is the wrong fix here: on
+                    // a 50-to-10 transformer it turns a matched |S21| of ~0 dB into the -2.5 dB a
+                    // 50-ohm-referenced measurement of the same part reads. That is a different
+                    // question, and not the one the ports were declared to ask — this brief's whole
+                    // premise is that the reporting is wrong and the computation is not.
+                    perPortZ0 = z0Vals.Length == nPorts ? z0Vals : null;
+
                     RFNetwork.Warn(
-                        "ToSnp: DataSet has non-uniform per-port Z0 — SNP/Touchstone supports " +
-                        "only a single reference impedance; using port-1 value " +
-                        $"({refZ0} Ω). A cube-direct path is required for faithful non-uniform handling.");
+                        "ToSnp: DataSet has non-uniform per-port Z0 — SNP/Touchstone's option line " +
+                        "carries only a single reference impedance; using port-1 value " +
+                        $"({refZ0} \u03A9) for it. The per-port references travel with the SNP, and are " +
+                        "written to and read back from the file's own header note.");
                 }
             }
             else
@@ -512,7 +532,10 @@ namespace RfCore.Data
                 refZ0 = new Complex(50, 0);   // legacy .npy without Z0 cube
             }
 
-            return new SNP(freqs, mats, MatrixType.S, MatrixFormat.RI, refZ0);
+            return new SNP(freqs, mats, MatrixType.S, MatrixFormat.RI, refZ0)
+            {
+                Z0PerPort = perPortZ0,
+            };
         }
     }
 }

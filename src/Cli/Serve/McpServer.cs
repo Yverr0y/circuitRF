@@ -305,13 +305,30 @@ internal sealed class McpServer
 
         if (ToolCatalog.AttachmentAsked(arguments)) Attach(content, document);
 
-        _rpc.Result(id, new JsonObject
+        var result = new JsonObject
         {
             ["content"] = content,
             // The CLI's own 0-or-not split (cli.md §7), forwarded. The document carries the truth —
             // including the deliberate difference between "did not converge" and "could not run".
             ["isError"] = refusedCode != 0,
-        });
+        };
+
+        // AUT-9 R-aut9-12. The document is a JSON document, and putting it inside a JSON string made
+        // every client parse twice and every quote and em-dash arrive escaped. Where the protocol
+        // has a place for structured content it goes there as well — the text block STAYS, both
+        // because the protocol asks for it as the fallback and because the parity gate's whole
+        // premise is that `content[0].text` is the CLI's own bytes, unchanged.
+        //
+        // Parsed rather than re-serialized, for the same reason: nothing here reshapes the payload,
+        // and a document this cannot parse simply does not get a structured twin.
+        try
+        {
+            if (JsonNode.Parse(document) is JsonObject structured)
+                result["structuredContent"] = structured;
+        }
+        catch (JsonException) { /* a document that is not an object; the text block still carries it */ }
+
+        _rpc.Result(id, result);
     }
 
     // ── the picture, back through the protocol ───────────────────────────────

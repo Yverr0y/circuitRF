@@ -69,8 +69,28 @@ namespace RfCore.Export
     /// <paramref name="Values"/> holds: bare numbers for a real cube, <c>[re, im]</c> pairs for a
     /// complex one. There is no third encoding and the imaginary part is never dropped.
     /// </summary>
-    public sealed record CubeJson(string Kind, IReadOnlyList<AxisJson> Axes, object Values);
+    /// <param name="Unit">
+    /// What the VALUES are in (AUT-9 R-aut9-3) — always present, never omitted. The axes have
+    /// carried a unit since they were written and the values did not, which is how one result file
+    /// came to hold the same quantity twice in two units with nothing to say which was which.
+    /// <c>"1"</c> is a dimensionless quantity, <c>"index"</c> a flag or a count, and
+    /// <c>"unknown"</c> is circuitRF saying it cannot state this one — a designer's own
+    /// <c>measure</c> expression, most often. See <see cref="ResultUnits"/>.
+    /// </param>
+    public sealed record CubeJson(string Kind, string Unit, IReadOnlyList<AxisJson> Axes, object Values);
 
+    /// <param name="Shape">
+    /// What this result HOLDS, without the values: groups, cube names, kinds, units, axis names,
+    /// lengths and extents (AUT-9 R-aut9-10). Present on every run and every <c>read</c> that
+    /// produced a <see cref="DataSet"/> — including the ones whose <see cref="Groups"/> are
+    /// deliberately not inline — so "what may I ask for" is answerable without first paying for the
+    /// answer to a question the caller has not chosen yet.
+    /// </param>
+    /// <param name="Narrowed">
+    /// What <c>--at</c> and <c>--range</c> actually did, per axis: the value asked for, the value
+    /// returned, and whether it was the nearest grid point or an interpolation (R-aut9-9). Absent
+    /// when nothing was narrowed.
+    /// </param>
     /// <param name="Groups">
     /// The <see cref="DataSet"/> as it stands: groups, then named cubes. The default group's key is
     /// the empty string, which is the group's own name — the console renders it as "(default)", and
@@ -118,7 +138,44 @@ namespace RfCore.Export
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         HistoryReportJson? History = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        RenderReportJson? Render = null);
+        RenderReportJson? Render = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        ResultShapeJson? Shape = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<NarrowingJson>? Narrowed = null);
+
+    // ── the shape of a result, without its values (R-aut9-10) ────────────────
+
+    /// <summary>
+    /// One axis, as the shape reports it: no values, but its extents — which is what a caller needs
+    /// to write an <c>--at</c> or a <c>--range</c> that will land.
+    /// </summary>
+    public sealed record ShapeAxisJson(
+        string  Name,
+        string  Unit,
+        int     Length,
+        double? First,
+        double? Last);
+
+    /// <param name="Elements">How many numbers this cube holds. The size a caller is choosing
+    /// whether to pay for.</param>
+    public sealed record ShapeCubeJson(
+        string                          Kind,
+        string                          Unit,
+        long                            Elements,
+        IReadOnlyList<ShapeAxisJson>    Axes);
+
+    /// <summary>
+    /// Every group, every cube, and the shape of each — and no values at all.
+    ///
+    /// <para><b>Why it is always there.</b> <c>run sparam</c> returned its whole result inline while
+    /// <c>run lpp</c> returned <c>status: ok</c>, a written path and nothing else, with nothing in
+    /// either tool's schema to say which a caller would get. Whichever the payload rule is, the
+    /// SHAPE is uniform: a caller always learns what the run produced, and then decides what to ask
+    /// for.</para>
+    /// </summary>
+    public sealed record ResultShapeJson(
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, ShapeCubeJson>> Groups);
 
     /// <summary>
     /// One of circuitRF's own documents, read back verbatim.
@@ -720,15 +777,21 @@ namespace RfCore.Export
 
     // ── the loadpull summary, on the wire ────────────────────────────────────
 
+    /// <param name="Unit">What <c>value</c> itself is in (AUT-9 R-aut9-3). Read this one, not
+    /// <paramref name="ConsoleUnit"/>: MXE's value is a FRACTION that the terminal prints as a
+    /// percentage, and the two used to be reported under one field that named the terminal's.</param>
     /// <param name="ConsoleScale">What the TERMINAL multiplies <c>value</c> by. Carried so a reader
     /// can reproduce the printed table exactly; <c>value</c> itself is the engine's own number.</param>
+    /// <param name="ConsoleUnit">The unit that scaled number is in — what the terminal's own label
+    /// says.</param>
     public sealed record PursuitOptimumJson(
         string    Tag,
         bool      Converged,
         string    ValueCube,
         double    Value,
-        double    ConsoleScale,
         string    Unit,
+        double    ConsoleScale,
+        string    ConsoleUnit,
         double[]  ZLoad,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         double[]? ZSource);
@@ -740,11 +803,18 @@ namespace RfCore.Export
         double             Unscorable,
         double             Recommended);
 
+    /// <param name="Unit">What this column's RAW values are in — <c>%</c> out of an enriched run's
+    /// <c>Efficiency</c> cube and <c>1</c> out of a pursuit's unenriched <c>DE</c>, which is the
+    /// same quantity in two units under one column heading (AUT-9 R-aut9-3).</param>
+    /// <param name="ConsoleUnit">What the terminal's column header says, after
+    /// <paramref name="ConsoleScale"/>.</param>
     public sealed record FomColumnJson(
         string  Column,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string? SourceCube,
-        double  ConsoleScale);
+        string  Unit,
+        double  ConsoleScale,
+        string  ConsoleUnit);
 
     /// <param name="DriveIndex">The drive step the FOMs were read at; <c>-1</c> when this point has
     /// no converged, non-tickle step at all, which is what makes every FOM NaN.</param>
@@ -964,7 +1034,27 @@ namespace RfCore.Export
         IReadOnlyList<ResultOutput>   Outputs,
         IReadOnlyList<DiagnosticJson> Diagnostics,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        ResultPayload?                Result);
+        ResultPayload?                Result,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        DiagnosticSummaryJson?        DiagnosticSummary = null);
+
+    /// <summary>
+    /// The tally that replaces the <c>info</c> diagnostics under <c>--summary</c> (AUT-9 R-aut9-11),
+    /// and the sentence saying how to get them back.
+    ///
+    /// <para><b>Present only when the caller asked for it.</b> Without <c>--summary</c> there is no
+    /// such key, and <c>diagnostics</c> carries everything, exactly as it always has.</para>
+    /// </summary>
+    /// <param name="Omitted">How many diagnostics were left out of <c>diagnostics</c>. Never more
+    /// than <paramref name="Info"/>: a warning and an error are never collapsed.</param>
+    /// <param name="Full">In words, what returns the full text. There is no side file — nothing here
+    /// writes one — so the answer is the invocation that reports everything.</param>
+    public sealed record DiagnosticSummaryJson(
+        int    Info,
+        int    Warning,
+        int    Error,
+        int    Omitted,
+        string Full);
 
     /// <summary>
     /// Builds and writes a <see cref="ResultDocument"/>. Nothing here consults a culture, a console
@@ -999,13 +1089,42 @@ namespace RfCore.Export
 
         public static AxisJson ToJson(Axis a) => new(a.Name, a.Unit, a.Length, a.Values, a.Labels);
 
-        public static CubeJson ToJson(DataCube c)
+        /// <summary>The whole set's shape, values excluded. Cheap on any result — it is O(cubes),
+        /// not O(numbers) — which is why it is emitted unconditionally.</summary>
+        public static ResultShapeJson Shape(DataSet ds)
+        {
+            var outp = new Dictionary<string, IReadOnlyDictionary<string, ShapeCubeJson>>(StringComparer.Ordinal);
+            foreach (string g in ds.Groups)
+            {
+                var into = new Dictionary<string, ShapeCubeJson>(StringComparer.Ordinal);
+                foreach (var (name, cube) in ds.CubesIn(g))
+                {
+                    long elements = 1;
+                    foreach (var ax in cube.Axes) elements *= ax.Length;
+
+                    into[name] = new ShapeCubeJson(
+                        cube.DataKind == DataKind.Real ? "real" : "complex",
+                        ResultUnits.For(name, cube),
+                        elements,
+                        cube.Axes.Select(a => new ShapeAxisJson(
+                            a.Name, a.Unit, a.Length,
+                            a.Length > 0 ? a.Values[0]  : null,
+                            a.Length > 0 ? a.Values[^1] : null)).ToArray());
+                }
+                outp[g] = into;
+            }
+            return new ResultShapeJson(outp);
+        }
+
+        public static CubeJson ToJson(DataCube c, string name = "")
         {
             var axes = c.Axes.Select(ToJson).ToArray();
             object values = c.DataKind == DataKind.Real
                 ? c.RealValues
                 : c.ComplexValues.Select(z => new[] { z.Real, z.Imaginary }).ToArray();
-            return new CubeJson(c.DataKind == DataKind.Real ? "real" : "complex", axes, values);
+            return new CubeJson(
+                c.DataKind == DataKind.Real ? "real" : "complex",
+                ResultUnits.For(name, c), axes, values);
         }
 
         /// <summary>
@@ -1030,7 +1149,7 @@ namespace RfCore.Export
                 foreach (var (name, cube) in ds.CubesIn(g))
                 {
                     if (cubes is { Count: > 0 } && !cubes.Contains(name, StringComparer.Ordinal)) continue;
-                    into[name] = ToJson(cube);
+                    into[name] = ToJson(cube, name);
                 }
                 // A group narrowed to nothing is omitted rather than emitted empty: an empty object
                 // reads as "this group holds no cubes", which is a claim about the run.
@@ -1040,13 +1159,15 @@ namespace RfCore.Export
         }
 
         public static PursuitOptimumJson ToJson(PursuitOptimum o) => new(
-            o.Tag, o.Converged, o.ValueCube, o.Value, o.ValueScale, o.ValueUnit,
+            o.Tag, o.Converged, o.ValueCube, o.Value, o.ValueUnit, o.ValueScale, o.ConsoleUnit,
             [o.ZRe, o.ZIm],
             o.HasZsource ? [o.ZsourceRe, o.ZsourceIm] : null);
 
         public static GridSummaryJson ToJson(LoadpullGridSummary s)
         {
-            var columns = s.Columns.Select(c => new FomColumnJson(c.Column, c.SourceCube, c.Scale)).ToArray();
+            var columns = s.Columns
+                .Select(c => new FomColumnJson(c.Column, c.SourceCube, c.Unit, c.Scale, c.ConsoleUnit))
+                .ToArray();
             var rows = s.Rows.Select(r =>
             {
                 var fom = new Dictionary<string, double>(s.Columns.Count, StringComparer.Ordinal);

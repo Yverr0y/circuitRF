@@ -471,7 +471,20 @@ internal static class NpyWriter
             AppendJsonString(sb, m.CubeName);
             sb.Append("\",\"kind\":\"");
             sb.Append(cube.DataKind == DataKind.Complex ? "Complex" : "Real");
-            sb.Append("\",\"axes\":[");
+            sb.Append('"');
+
+            // AUT-9 R-aut9-3: the VALUES' unit, when the producer stated one. Written only then, so
+            // a file whose cubes say nothing about their units is byte-identical to what this writer
+            // produced before — and a cube whose unit is implied by its name is answered by
+            // ResultUnits' vocabulary rather than repeated in every file.
+            if (!string.IsNullOrEmpty(cube.Unit))
+            {
+                sb.Append(",\"unit\":\"");
+                AppendJsonString(sb, cube.Unit);
+                sb.Append('"');
+            }
+
+            sb.Append(",\"axes\":[");
 
             bool firstAxis = true;
             foreach (var ax in cube.Axes)

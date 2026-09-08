@@ -465,6 +465,11 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "cli.em.setup-unreadable",
         "cli.input.not-found",
         "cli.measurement.failed",
+        // AUT-9 R-aut9-9's axis narrowing, the half that is refused BEFORE the run: a malformed
+        // --at can be caught from the command line alone. The refusals that need a result to look
+        // at — narrow.axis.unknown and its three siblings — are RfCore.Export.NarrowingDiagnostics'
+        // own, so they are not in this file's set.
+        "cli.narrow.malformed",
         "cli.run.failed",
         "cli.verb.none",
         "cli.verb.unknown",
@@ -568,7 +573,13 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "import.refused",
         "import.source.not-found",
         "import.variant.not-found",
+        // AUT-9 R-aut9-4/5/6 — what the shape of a loadpull result says about the run. All three are
+        // warnings: a grid with dead points in it is an ordinary result, and these exist because
+        // `status` alone was not a diagnosis.
+        "lp.device-inert",
         "lp.export.no-surface",
+        "lp.nothing-converged",
+        "lp.tickle-gap",
         "new.args.cell-args-required",
         "new.args.cell-extra-argument",
         "new.args.directory-required",
@@ -614,6 +625,10 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "render.cdd.empty",
         "render.cdd.not-applicable",
         "render.cdd.selected-unbound",
+        // R-aut9-7: a source the DOCUMENT names could not be read. Distinct from
+        // render.cdd.unreadable, which is the display itself, and from render.data.unreadable,
+        // which is the caller's own --data argument — three problems, three sentences.
+        "render.cdd.source-unreadable",
         "render.cdd.source-unresolved",
         "render.cdd.theme-not-applicable",
         "render.cdd.unreadable",
@@ -677,6 +692,9 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "serve.tool.cancelled",
         "serve.tool.failed",
         "serve.tool.unknown",
+        // R-aut9-1: `sparam -o` honours the extension now, and one that names no format it writes is
+        // a refusal listing the ones it does — rather than a Touchstone written under that name.
+        "sparam.export.unsupported-format",
     ];
 
     private string[] Args(string argLine)

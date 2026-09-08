@@ -120,8 +120,26 @@ convergence notes still scroll past on screen. Redirect `2&gt;/dev/null` to sile
 | `--json` | Put **one JSON document** on stdout and nothing else — [see below](#json). stderr is untouched. |
 | `--only a,b` | Narrow that document's result to these cubes. |
 | `--group g,h` | Narrow that document's result to these groups. |
+| `--at axis=value` | Narrow it to **one point of an axis** — `--at freq=2GHz`. The nearest grid point, and the document says which one it gave you. |
+| `--interp` | Make every `--at` interpolate between the two bracketing points instead. Never the default: it returns a number the run did not compute, and the document says so. |
+| `--range axis=lo:hi` | Keep a band of an axis — `--range freq=1GHz:3GHz`. |
+| `--result full\|summary` | `summary` returns the result's **shape** — group and cube names, units, axis lengths and extents — and no values at all. |
+| `--summary` | Report the informational notes as counts by severity instead of in full. Warnings and errors always travel in full, and stderr is untouched. |
 
 Frequencies are written as `1GHz`, `100MHz`, or bare Hz (`1e9`) anywhere a frequency is accepted.
+
+<div class="callout">
+<span class="label">Ask for the part you want, not the whole result</span>
+<p><code>--only</code> and <code>--group</code> narrow by cube <i>name</i>, which does nothing when the
+result has one cube. A 551-point two-port S-parameter run is about 173&nbsp;kB of JSON; if the
+question is "what is S21 at 2&nbsp;GHz", <code class="nowrap">--at freq=2GHz --only S</code> is a few
+hundred bytes. Every value carries its own unit — a bare <code>2</code> could be 2&nbsp;Hz or
+2&nbsp;GHz — and an axis name nothing in the result has is refused, listing the ones that exist,
+rather than quietly handing you everything.</p>
+<p>Every run returns <code>result.shape</code> whether or not it returns the values, so
+<code class="nowrap">--result summary</code> is how you find out what a run produced before deciding
+what to ask for.</p>
+</div>
 
 <div class="callout">
 <span class="label">An option a verb does not take is refused, never ignored</span>
@@ -148,10 +166,22 @@ Wrote hero1.s2p
 | Option | What it does |
 |---|---|
 | `--freq start:stop:step` | Override the sweep. **Omit it and the netlist's own `sparam` analysis is used**, segments and all — which is almost always what you want, because it is the sweep the design was set up with. |
-| `-o`, `--output <path>` | Where the Touchstone goes. Omitted, it is the input file with its extension changed to `.sNp` for the port count found. |
+| `-o`, `--output <path>` | Where the result goes, and **its extension picks the format**: `.s1p`…`.s99p` for a Touchstone, or `.npy` / `.mat` / `.txt` for the cubes. Omitted, it is the input file with its extension changed to `.sNp` for the port count found. |
 
-`sparam` **always** writes a Touchstone; there is no stdout table. The port count in the extension
-comes from the network, so a circuit that grew a port writes `.s3p` without you editing the command.
+There is no stdout table. The port count in the default extension comes from the network, so a
+circuit that grew a port writes `.s3p` without you editing the command. An extension naming no format
+this verb writes is refused, listing the ones it does — you never get a Touchstone under a name that
+says otherwise.
+
+<div class="callout">
+<span class="label">Ports with different reference impedances</span>
+<p>A Touchstone file declares <b>one</b> reference impedance, and circuitRF writes port&nbsp;1's on
+the option line. When the ports differ, the file also carries a header note listing each port's own
+impedance and saying that the data is referenced to <i>those</i> — and circuitRF reads that note back,
+so <code>circuitrf read</code> on the file reports the real per-port references rather than the
+option line repeated. Nothing is renormalized: the numbers are the ones the solve produced. If you
+want the per-port references in a form every tool reads, write <code>.npy</code> instead.</p>
+</div>
 
 ## `dc` — the operating point {#dc}
 
@@ -1426,8 +1456,43 @@ One schema serves every verb:
 - **`result.explain`** gains `cells`, `layers` and `extents` for the three questions of the same name.
   `extents` carries `perLayer` boxes beside the whole; `layers` carries the resolved technology and
   the walk that found it.
+- **`result.shape` is always there**, on every run and every `read` that produced cubes, whether or
+  not the values are: the groups, the cube names, each cube's kind and unit, how many numbers it
+  holds, and every axis with its name, unit, length and end points. It is what lets you find out what
+  a run produced before deciding what to ask for, and it costs a couple of kilobytes on any result.
+- **`result.narrowed`** appears when you used `--at` or `--range`, and says per axis what you asked
+  for, what you got, and whether it was the `nearest` grid point or `interpolated`.
 - Numbers are raw, invariant and unrounded. `NaN` and infinity are written as JSON's named literals,
   because a loadpull grid genuinely contains NaN wherever a point never converged.
+
+### Every cube says what its numbers are in {#json-units}
+
+A cube's `unit` is always present and never empty. SI symbols as they are written — `Hz`, `V`, `A`,
+`W`, `Ohm`, `F`, `H`, `K`, `m`, `s` — and `dB` and `dBm` likewise; `%` for a ratio already scaled to a
+percentage, `1` for one that is not, `index` for a flag or a count, and **`unknown`** where circuitRF
+cannot say. A `measure` line you wrote yourself has whatever unit your expression has, and saying
+`unknown` is an answer where a guess would not be.
+
+<div class="callout">
+<span class="label">Why this is worth a field of its own</span>
+<p>One loadpull-pursuit result carried <code>Efficiency</code> reading 65.84 and <code>MXE_Eff</code>
+reading 0.7087 at the same operating point — the cube in percent, the scalar as a fraction. Reading
+the scalar and formatting it as a percentage gives 0.7%; multiplying the cube by 100 gives 6584%.
+Both are one plausible line of code, and until the unit was carried there was nothing anywhere to say
+which was which. Nothing was rescaled to fix it: the numbers are what the engine computed, and the
+document now says what they are.</p>
+</div>
+
+### `--summary`: the notes as counts {#json-summary}
+
+Some verbs are deliberately talkative. The Gerber import names every inference it made *as* an
+inference, which is exactly what lets you decide whether to trust the result — but it is not what you
+want back from `convert --list-cells`, whose answer is one cell name.
+
+`--summary` reports the informational notes as counts by severity and adds a `diagnosticSummary`
+block saying how many were left out. **Warnings and errors are never collapsed**, and stderr still
+carries everything, so nothing is hidden: what you stop paying for is thirty notes describing
+inferences that all went fine.
 
 ---
 

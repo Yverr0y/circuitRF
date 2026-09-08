@@ -439,3 +439,70 @@ byte-identical, which is what stops this touching the byte-for-byte export gates
 assign through the private field and copy the flag, because `FreqUnit = source.FreqUnit` would turn a
 unit that was only the type's default into a declaration — and a converted network would go straight
 back to announcing GHz over Hz data.
+
+
+## AUT-9 — units on values, per-port Z0, and asking a result for part of itself (2026-09-07)
+
+Three changes in this project, all reporting rather than computation.
+
+### `DataCube.Unit`, and why it is a fallback rather than the whole answer
+
+The axes have carried a unit since they were written; the values never did. One loadpull-pursuit
+result carried `Efficiency` at 65.84 and `MXE_Eff` at 0.7087 at the same operating point — the cube in
+percent, the scalar as a fraction — with nothing anywhere saying which.
+
+Annotating every cube every engine makes would be a large change for a value that is, for most names,
+already determined. So there are two layers and the split is deliberate:
+
+- **`RfCore.Export.ResultUnits`** is a name-keyed vocabulary covering the standard result names
+  (`Pout_dBm`, `Gt_dB`, `Z0`, `S`, `V`, `I`, the pursuit's scalars, the flags and counts). It answers
+  for a cube whose producer said nothing, which is nearly all of them.
+- **`DataCube.Unit`** is for the case a name cannot answer, and there is a real one:
+  `LoadpullPostProcessor.Enrich` scales `PAE` from a fraction to a percentage **under its own name**,
+  so two cubes called `PAE` mean different things and only the producer knows which. `Efficiency` does
+  not need it — `Enrich` renames `DE` on the way — which is exactly why the name-keyed table gets
+  most of the vocabulary for free.
+
+**A stated unit survives the file.** `NpyWriter` writes a `"unit"` key beside `"kind"` and `NpyReader`
+reads it; `MatWriter` writes a sibling `unit` dataset for the same reason its own directory's
+`CLAUDE.md` gives — the two writers serialize one logical payload and must track each other. Both
+write the key **only when the unit is non-empty**, so a file whose cubes say nothing about their units
+is byte-identical to what these writers produced before, and every committed fixture still reads.
+
+**`unknown` is a value, not a hole.** A designer's `measure Foo = dB(S(2,1))` has whatever unit that
+expression has, and circuitRF does not evaluate units through the expression engine. Saying `unknown`
+tells a caller not to guess; an empty string tells it nothing, which is the state this replaced.
+
+### `SNP.Z0PerPort` — carried, never applied
+
+`ToSnp` flattened a non-uniform per-port Z0 to port 1's value and discarded the rest, so a matrix
+generalized w.r.t. [50, 12] was written and read back as though every port were 50 Ω. The per-port
+values now travel on the SNP and through the Touchstone header note in both directions.
+
+**Renormalizing to the single declared reference was implemented first and reverted.** It makes the
+file self-consistent and it destroys the quantity the ports were declared to ask about: on a
+50-to-10 transformer a matched `|S21|` of ~0 dB becomes the -2.55 dB a uniform 50 Ω measurement of the
+same part reads. `Engine.Tests`' `MatchStampTests.ACnlContainingAMatch_RunsHeadlessUnderCliSparam` is
+what caught it, and it is worth knowing that gate exists: it is the only place in the tree that runs a
+deliberately non-uniform two-port end to end through the CLI. Detail in `src/Cli/RESOLVED.md`.
+
+### `DataSetNarrowing` — the unit rule that makes `--at freq=2GHz` unambiguous
+
+**The axis's unit is stripped before the SI prefix**, and that ordering is the whole of it: on a metre
+axis `5mm` is five millimetres and `5m` is five metres, where reading a trailing `m` as milli always
+would silently divide a length by a thousand. A bare number is taken as already being in the axis's
+base unit, so `2e9` and `2GHz` are the same request on a `Hz` axis.
+
+Two smaller decisions:
+
+- **`--at` keeps the axis at length 1 rather than collapsing it.** Collapsing would take the answer's
+  own location out of the document, and "which point did I actually get" is the question `nearest` has
+  to answer. `--interp` rewrites the axis value to the one asked for; `nearest` leaves the grid point
+  it landed on.
+- **A cube that does not HAVE the named axis is left whole.** A `Z0` cube has no frequency axis, and
+  narrowing by frequency is not a claim about it. An axis **no** cube has is a refusal — that is a
+  caller's typo, and answering it with everything would be answering a different question.
+
+Interpolation is linear on real and imaginary parts for a complex cube, which is what a linear
+interpolation of a complex quantity is. Nothing interpolates magnitude and phase separately: around a
+wrap that is a different and wrong answer.

@@ -250,6 +250,39 @@ and the reason for the line are in `src/Cli/RESOLVED.md`.
 converge", and that its test is chosen per verb rather than copied — is a machine-facing contract and
 becomes more important, not less, as the callers stop being human.
 
+### 5.1 What a result document has to SAY, beyond being structured
+
+**Status, 2026-09-07 (AUT-9, `brief-automation-9-result-documents.md`).** Structure was not enough on
+its own. An out-of-process client driving the surface end to end produced four ways a correctly
+structured document still said the wrong thing, and every one of them is now a rule:
+
+- **A quantity states its own unit.** One result carried the same efficiency twice — a cube in
+  percent and a scalar as a fraction — with nothing anywhere saying which. Every cube now carries a
+  `unit`, never empty, and `unknown` is a legitimate value: a designer's own `measure` expression has
+  a unit circuitRF cannot state, and saying so is an answer where guessing is not (`cli.md` §3.2a).
+- **A file is the format its name says.** `sparam -o out.npy` wrote a Touchstone under that name; the
+  extension is honoured now, and one naming no format the verb writes is a refusal listing the ones
+  it does. Writing format A to a path named B is the option worth removing.
+- **A description of a computation must not contradict it.** A two-port with a 12 Ω second port was
+  written and read back as though every port were 50 Ω, so a client renormalising from the reported
+  reference computed a wrong answer from a correct simulation. Touchstone 1.x declares one R; the
+  per-port references travel with the SNP and are written to, and read back from, the file's own
+  header note. **Nothing is renormalized** — the solve was never the problem.
+- **`status: ok` is not a diagnosis, and neither is `status: not-converged`.** A bench whose device
+  was inert returned the engine's floor sentinel at all 56 drive points and exited 0 with an empty
+  diagnostics array; on that evidence the client wrote up a working component as defective. A run
+  that converged nowhere returned exit 2, an empty diagnostics array and no result at all, while
+  stderr carried a full per-grid-point account. Three findings now say what the SHAPE of a loadpull
+  result implies (`RfCore.Loadpull.LoadpullRunFindings`), including the one a single parameter fixes:
+  a first drive step tens of dB above the tickle breaks the harmonic-balance warm start, and that is
+  worth naming rather than letting a blanket non-convergence look like a broken circuit.
+
+**R-aut-14. A refusal names the thing that failed, and two different problems get two different
+sentences.** A data display whose own source file could not be read was reported as an unreadable
+data display, naming the RESULT file's path inside that sentence — so a caller rewrote a `.cdd` that
+was never wrong. A bad `--data` argument, a bad reference inside the document, and a bad document are
+three problems and now three ids.
+
 ---
 
 ## 6. Economy: the interface has a size, and the size is a cost
@@ -265,6 +298,25 @@ well-chosen ones even when the forty are individually simpler.
 is one write. Understanding a result is the part that is unbounded — which is why R-aut-6's
 projection, and the ability to ask for a subset of it, do more for a client's cost than any authoring
 convenience.
+
+**Status, 2026-09-07 (AUT-9 R-aut9-8 through R-aut9-12).** The measured payloads that produced these
+requirements: `reference components` 297 KB, a 551-point two-port `run sparam` **173 KB returned
+inline**, and `import convert --list-cells`, **whose answer is one cell name**, 30 KB. Four
+structural amplifiers were behind those numbers and all four are addressed:
+
+| Amplifier | What it is now |
+|---|---|
+| every diagnostic emitted twice | `arguments.text` is emitted only when it differs from `message` |
+| results narrowable only by cube NAME | `--at`, `--range`, `--interp` narrow by AXIS; `--result summary` returns the shape alone |
+| a listing call paying for tens of notes | `--summary` reports the informational ones as counts; warnings and errors always travel |
+| JSON serialised inside a JSON string | `serve` emits `structuredContent` beside the text block, which stays as the protocol's own fallback |
+
+**And the payload rule is now UNIFORM even where the payload is not.** `run sparam` returned its whole
+result inline while `run lpp` returned a written path and nothing else, with nothing in either tool's
+schema to say which. Which verbs return values inline is still a per-verb decision — a loadpull's
+eight `[gridPoint x pinStep]` cubes are not what a caller wants by default — but **every** run now
+returns `result.shape`: the groups, cube names, units and axis extents it produced. A caller always
+learns what exists before deciding what to pay for, and the schema says so.
 
 **And R-aut-9 has a second channel to weigh against it now.** MCP **resources** cost a URI, a title
 and a size until they are read, where a tool description is paid every session whether or not

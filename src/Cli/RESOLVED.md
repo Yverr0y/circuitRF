@@ -1574,3 +1574,125 @@ Three things worth keeping:
   of the SOLVED circuit; asserting it inside a verb that does not solve would be the same overreach in
   the other direction, and the brief's own instruction is that the weaker claim stated honestly beats
   the stronger one stated wrongly.
+
+---
+
+## AUT-9 — result documents a caller can trust and afford (2026-09-07)
+
+Twelve requirements, none of which changes a computed value: every one is about the reporting of one.
+The evidence is `brief-automation-7-mcp-hardening.md` §1 — the whole surface driven end to end by an
+out-of-process client with the MCP server and nothing else. What follows is what turned out to be
+true while building against it.
+
+### The one requirement whose obvious fix was the wrong fix
+
+**R-aut9-2 (per-port Z0) was implemented twice.** A two-port whose second port was declared
+`Z=12 Ohm` wrote a Touchstone whose header said `Port 2: Z0 = <50; 0>` — the uniform value printed
+once per port, which is a *positive claim about ports nobody had looked at* — above a matrix
+generalized w.r.t. [50, 12] under an option line saying `R 50`. `read` on that file then reported a
+`Z0` cube of `[[50,0],[50,0]]`.
+
+The first attempt made the file self-consistent by **renormalizing** the data to the single reference
+it declares, through `RFNetwork.SToS`'s power-wave formula. That is defensible on paper and wrong
+here, and the thing that said so was an existing acceptance test:
+`Engine.Tests/Devices/MatchStampTests.ACnlContainingAMatch_RunsHeadlessUnderCliSparam` runs a 50-to-10
+transformer between a 50 Ω port and a **10 Ω** one and asserts `S21 > -0.2 dB` in band. Referenced to
+[50, 10] a matched transformer reads ~0 dB; renormalized to a uniform 50 Ω it reads **-2.55 dB**, which
+is `1 - |Γ|²` for `Γ = (10-50)/60` and is a correct answer to a different question. Renormalizing had
+quietly taken the quantity the ports were declared to ask about out of the file.
+
+So: **nothing is renormalized.** `SNP.Z0PerPort` carries the per-port references alongside the single
+`Z0` the option line declares; `TouchstoneIO` writes them as a header note saying *the data is
+referenced to THESE, not to the option line's single R*, and reads that note back; `FromSnp` builds
+the `Z0` cube from them when they are there. `run` was already right about the ports — measured, not
+assumed — and it was `read` and the header that were not.
+
+Two smaller things fell out of the same block, both recorded as unfixed in
+`src/Ui/DataDisplay/RESOLVED.md` and both now closed:
+
+- `! NOTE: Original data had complex Z0.` was emitted on **every** non-strict export regardless of the
+  actual Z0 — a false statement heading most Touchstone files circuitRF has ever written. It is
+  conditional now, and says which of the two things is true.
+- The option line's `R` keeps only the real part, so a complex reference lost its reactance on a round
+  trip. A `! NOTE: reference impedance is complex: <50; -10>` note carries it and is read back — and
+  honoured only when its real part agrees with the option line, so a note that has drifted from its
+  data is ignored rather than believed. The spelling is invariant (`"R"` round-trip format under
+  `InvariantCulture`), because a data file whose numbers change with the machine's locale is not one.
+
+### R-aut9-8's blanket rule was too blunt by exactly one diagnostic
+
+"Drop any string argument whose value equals `message`" is the obvious reading, and it broke
+`ConvertCliVerbTests.Json_ListCells_AnswersInTheDocument`. `convert.cell.listed` is templated
+`"{cell}"`: its argument is the **answer** — one cell name, the whole point of the call — which
+happens also to be the whole sentence. The rule is by NAME now (`text` only), which is what the brief
+literally says and which keeps every argument that is a value rather than prose. The volume it was
+written for is untouched: `elab.note`, `convert.note`, `import.note` and the Gerber diagnostics are
+all `"{text}"`.
+
+### `--format summary` could not be called that
+
+`render --format pdf` already exists and means the picture's file format. The brief suggests
+`format: "summary"` for the shape-only mode; taking it would have made one word mean two things
+across two verbs, which a caller gets wrong once and then forever. It is **`--result full|summary`**
+on the CLI and `result` in the tool catalog — named after the document section it governs, and the
+adapter's "every argument is named after the CLI flag it becomes" rule is kept.
+
+### Where the narrowing refusals live, and why not in `CliDiagnostics`
+
+`--at`/`--range` are taken before dispatch, but the axes they name do not exist until a run has
+produced them, so an unknown axis can only be refused at document-build time. The refusals are
+`RfCore.Export.NarrowingDiagnostics`' own — `narrow.axis.unknown` and three siblings — not
+`src/Cli`'s: the rule about which axes exist belongs where the axes do, and `Firewall.Tests`'
+`UserFacingTextGateTests` said so directly when they were plain strings. Only the SPELLING refusal
+(`cli.narrow.malformed`) is the CLI's, because `--at freq` with no value can be caught from the
+command line alone and there is no reason to make a caller wait for a solve to learn it.
+
+**An unhonourable narrowing fails the invocation** (exit 1), and the document then carries the
+result's `shape` and no `groups`. Returning the un-narrowed values instead would hand a caller the
+whole payload — at exactly the size the requirement exists to avoid — under the impression that it
+answers the question asked.
+
+### The three loadpull findings are read off the RESULT, not plumbed through the engine
+
+R-aut9-4/5/6 are all answerable from cubes the run already publishes (`Converged`, `IsTickle`,
+`PavlDbm`, `Pout`, `StopCode`), so `RfCore.Loadpull.LoadpullRunFindings` reads them and returns
+values; `CliEntry.ReportLoadpullFindings` only spells them. No engine signature changed, and the
+sweep path gets them for free — which a pre-run check plumbed through `LoadpullEngine.Resolve` would
+not have, since `ParametricSweepEngine` resolves per point inside itself.
+
+**R-aut9-6's warning is conditional on R-aut9-5's**, and that is not a shortcut. The tickle is
+*designed* to sit tens of dB below `PinStart` — the shipped default pair is -50 and -20, a 30 dB gap —
+so a warning that fired on the gap alone would fire on every loadpull ever run and mean nothing. It
+fires only where nothing past the tickle converged, which is exactly where lowering `PinStart` is the
+first thing to try; the exercise's own 44-point failure converged in 38 s at `PinStart = -45`.
+
+### R-aut9-11's "a path to the full text" is a sentence, not a file
+
+The brief asks `--summary` to return "counts by severity plus the outputs, and a path to the full
+text". Nothing here writes a side file: `--summary` collapses only the **`info`** diagnostics (every
+warning and error still travels in full), and `diagnosticSummary.full` names the invocation that
+returns everything. Writing a file the caller did not ask for to hold text stderr already carried
+would be a surprise, and on `--list-cells` there is no output directory to put it in. Recorded as a
+deliberate deviation rather than left to look like an oversight.
+
+### Structured content doubles the frame, and that is the protocol's own recommendation
+
+R-aut9-12's `structuredContent` sits **beside** the text block rather than replacing it. MCP says a
+tool returning structured content SHOULD also return the serialized JSON as text, and the parity gate's
+whole premise is that `content[0].text` is the CLI's own bytes. So the frame carries the document
+twice. The levers for size are `--at`, `--range`, `--result summary` and `--summary`, not this.
+
+### Measured
+
+`sparam` on `testdata/Hero1/hero1.cnl`, `--json`, as the byte-budget gate reports it:
+
+| Asked for | Bytes |
+|---|---|
+| the whole result | ~21,000 |
+| `--at freq=2GHz` | under a quarter of it |
+| `--result summary` | under 4,000, and under an eighth of the whole |
+| `convert --list-cells --summary` on a `.kicad_pcb` | under 4,000 |
+
+The gate asserts the ratios rather than the absolute figures — it is a tripwire for a structural
+regression (the duplicated diagnostic text coming back, a result becoming un-narrowable), not a
+benchmark of the serializer.

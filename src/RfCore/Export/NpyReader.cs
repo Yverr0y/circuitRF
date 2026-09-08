@@ -156,15 +156,23 @@ internal static class NpyReader
             var axesJson = cubeMeta.GetProperty("axes");
             var axes     = BuildAxes(axesJson, f.Name);
 
+            // AUT-9 R-aut9-3. Optional, and absent from every file written before it existed: a
+            // cube whose unit the writer did not state is answered by ResultUnits' name vocabulary,
+            // exactly as one that never went through a file is.
+            string unit = cubeMeta.TryGetProperty("unit", out var unitEl) &&
+                          unitEl.ValueKind == JsonValueKind.String
+                ? unitEl.GetString() ?? ""
+                : "";
+
             if (kind == DataKind.Complex)
             {
                 var data = ReadComplex(rawFields[f.Name], f.Shape);
-                ds.AddToGroup(group, cubeName, new DataCube(axes, data));
+                ds.AddToGroup(group, cubeName, new DataCube(axes, data) { Unit = unit });
             }
             else
             {
                 var data = ReadReal(rawFields[f.Name], f.Shape);
-                ds.AddToGroup(group, cubeName, new DataCube(axes, data));
+                ds.AddToGroup(group, cubeName, new DataCube(axes, data) { Unit = unit });
             }
         }
 

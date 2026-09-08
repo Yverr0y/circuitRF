@@ -99,6 +99,12 @@ internal static class MatWriter
                 target[h] = MakeCubeDataset(kvp.Value);
                 var cag   = new H5Group(); axesTarget[h] = cag;
                 cag["axes.json"] = new string[] { BuildAxesJson(kvp.Value) };
+                // AUT-9 R-aut9-3, and the sibling of NpyWriter's own `"unit"` key — this directory's
+                // CLAUDE.md: the two writers serialize one logical payload and must track each other.
+                // Written only when the producer stated one, so a file whose cubes say nothing about
+                // their units is unchanged.
+                if (!string.IsNullOrEmpty(kvp.Value.Unit))
+                    cag["unit"] = new string[] { kvp.Value.Unit };
             }
         }
 

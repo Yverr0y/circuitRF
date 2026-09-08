@@ -95,6 +95,24 @@ namespace RfCore.Data
         public int      Rank     => Axes.Count;
         public IReadOnlyList<Axis> Axes { get; }
 
+        /// <summary>
+        /// What this cube's VALUES are in — the axes have carried a unit since they were written and
+        /// the values never did (AUT-9 R-aut9-3).
+        ///
+        /// <para><b>Set it wherever the name alone cannot answer.</b>
+        /// <c>LoadpullPostProcessor.Enrich</c> scales <c>PAE</c> from a fraction to a percentage
+        /// under its own name, so two cubes called <c>PAE</c> mean different things and only the
+        /// producer knows which is which. Where the name IS the answer,
+        /// <see cref="RfCore.Export.ResultUnits"/>' vocabulary supplies it and this can stay empty —
+        /// annotating every cube in the engine would be a large change for a value already
+        /// determined.</para>
+        ///
+        /// <para>Empty means "unstated", never "dimensionless": a dimensionless quantity is
+        /// <c>"1"</c>, which is what <see cref="RfCore.Export.ResultUnits.Dimensionless"/>
+        /// spells.</para>
+        /// </summary>
+        public string Unit { get; set; } = "";
+
         // ---- Constructors --------------------------------------
 
         // Every constructor SNAPSHOTS `axes` once and derives both `Axes` and `_strides` from that one
@@ -284,7 +302,8 @@ namespace RfCore.Data
                 try { GatherComplex(axisRanges, buf); }
                 catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException)
                 { throw GatherWalkedOff(axisRanges, axArr, buf.Length, ex); }
-                return new SliceResult(new DataCube(axArr, buf, noCopy: true));
+                // A slice of a cube is the same quantity over fewer points, so it keeps the unit.
+                return new SliceResult(new DataCube(axArr, buf, noCopy: true) { Unit = Unit });
             }
             else
             {
@@ -292,7 +311,8 @@ namespace RfCore.Data
                 try { GatherReal(axisRanges, buf); }
                 catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException)
                 { throw GatherWalkedOff(axisRanges, axArr, buf.Length, ex); }
-                return new SliceResult(new DataCube(axArr, buf, noCopy: true));
+                // A slice of a cube is the same quantity over fewer points, so it keeps the unit.
+                return new SliceResult(new DataCube(axArr, buf, noCopy: true) { Unit = Unit });
             }
         }
 

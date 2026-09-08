@@ -193,6 +193,11 @@ hand-computed and reference-independent — `Γ = 0` at reference `Z0` is `conj(
   carries a single reference by design, so the per-port note cannot be made truthful without the
   caller's array. The option line also keeps only the real part (`# GHz S RI R 5`), so a Touchstone
   round-trip of a complex-referenced run silently loses the reactance.
+  **Both halves fixed 2026-09-07 (AUT-9 R-aut9-2).** `SNP` gained `Z0PerPort`, which is what "the
+  caller's array" turned out to mean; the note is conditional and says which of the two things is
+  true; and a complex reference now travels in a note of its own and is read back, so the reactance
+  survives the round trip. Nothing is renormalized — `src/RfCore/RESOLVED.md` records why the
+  obvious fix was the wrong one.
 - **`Trace.FormatImpedance` formats with `Marker.FormatComplex`, not `FormatImpedanceComplex`** — so
   the S-parameter impedance readout ignores `MatrixFormatImpedance` and can print an impedance as
   `40.01 dB ∠-87.14°`. The contour path (`Trace.cs`, `ContourImpedance`) uses the right one.

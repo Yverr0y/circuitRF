@@ -150,6 +150,58 @@ internal static class CliDiagnostics
         "Could not read '{path}': {message}",
         ("path", path), ("message", message));
 
+    // ── what the shape of a loadpull result says about the run (AUT-9 R-aut9-4/5/6) ──
+    //
+    // All three are WARNINGS and none of them changes an exit code. A loadpull grid with dead points
+    // in it is an ordinary, useful result (LoadpullExitCode says so and gives the reason), and these
+    // exist because `status` alone was not a diagnosis — not to turn a report into a failure.
+
+    /// <summary>
+    /// Every converged drive step delivered the engine's floor power (R-aut9-4).
+    ///
+    /// <para><b>This is the run that persuaded a client a working component was broken.</b> A
+    /// mis-wired tuner left the bias tee delivering nothing; the run returned
+    /// <c>Pout = -300.00 dBm</c> at all 56 drive points, exited <c>status: ok</c> with no
+    /// diagnostic, and the client wrote up the model as defective with a minimal reproduction case.
+    /// <c>-300 dBm</c> is a sentinel — what <c>10·log10(P)</c> is replaced by when P is zero — and
+    /// nothing in the document said so.</para>
+    /// </summary>
+    public static Diagnostic LoadpullDeviceInert(int steps) => Diagnostic.Create(
+        "lp.device-inert",
+        DiagnosticSeverity.Warning,
+        "The device delivered no power at any drive: all {steps} converged drive step(s) report the " +
+        "engine's floor (-300 dBm), which is a sentinel and not a measurement. That usually means " +
+        "the device is unbiased or off — check the bias network and the tuner/port wiring before " +
+        "reading these figures as a measurement of the device.",
+        ("steps", steps));
+
+    /// <summary>
+    /// Not one grid point converged a real drive step (R-aut9-5). The counts and the stop-code
+    /// distribution are what stderr already carried and the document did not.
+    /// </summary>
+    public static Diagnostic LoadpullNothingConverged(int attempted, int steps, string stops) => Diagnostic.Create(
+        "lp.nothing-converged",
+        DiagnosticSeverity.Warning,
+        "No grid point converged a drive step: {attempted} point(s) attempted, {steps} drive step(s) " +
+        "walked, 0 converged. Stop codes: {stops}.",
+        ("attempted", attempted), ("steps", steps), ("stops", stops));
+
+    /// <summary>
+    /// The first drive step is far above the tickle, on a run where nothing past the tickle
+    /// converged (R-aut9-6). A blanket non-convergence that one parameter fixes should not look
+    /// like a broken circuit.
+    /// </summary>
+    public static Diagnostic LoadpullTickleGap(double tickleDbm, double firstDbm) => Diagnostic.Create(
+        "lp.tickle-gap",
+        DiagnosticSeverity.Warning,
+        "The first drive step is {gap} dB above the tickle ({tickle} dBm to {first} dBm), and " +
+        "nothing past the tickle converged. A jump that large breaks the harmonic-balance warm " +
+        "start; lower PinStart towards the tickle (--pin <start>:<step>:<max>) and try again before " +
+        "concluding the circuit is at fault.",
+        ("gap",    (firstDbm - tickleDbm).ToString("G4", System.Globalization.CultureInfo.InvariantCulture)),
+        ("tickle", tickleDbm.ToString("G4", System.Globalization.CultureInfo.InvariantCulture)),
+        ("first",  firstDbm.ToString("G4",  System.Globalization.CultureInfo.InvariantCulture)));
+
     /// <summary>A <c>.spl</c>/<c>.lpcwave</c> asked of a result that carries no Γ surface.</summary>
     public static Diagnostic NoLoadpullSurface(string extension) => Diagnostic.Create(
         "lp.export.no-surface",
@@ -158,6 +210,44 @@ internal static class CliDiagnostics
         "A pursuit that found no optimum has no follow-on grid to export — use .npy/.mat to " +
         "keep what it did produce.",
         ("extension", extension));
+
+    /// <summary>
+    /// An <c>-o</c> whose extension names no format <c>sparam</c> can write (R-aut9-1).
+    ///
+    /// <para>The alternative this replaces was worse than a refusal: every <c>-o</c> was written as
+    /// Touchstone whatever it was called, so a caller who asked for <c>.npy</c> was handed a file
+    /// beginning <c>! NOTE:</c> under that name and learned about it only from a later reader's
+    /// accurate "expected magic \x93NUMPY". Writing format A to a path named B is the one option
+    /// worth removing.</para>
+    /// </summary>
+    public static Diagnostic SparamUnsupportedExportFormat(string path, string extension) => Diagnostic.Create(
+        "sparam.export.unsupported-format",
+        DiagnosticSeverity.Error,
+        "sparam: '{path}' — '{extension}' names no format this verb writes. Write a Touchstone " +
+        "(.s1p … .s99p, and the default with no -o), or .npy, .mat, .txt for the cubes.",
+        ("path", path), ("extension", extension));
+
+    /// <summary>
+    /// An <c>--at</c> or a <c>--range</c> whose SPELLING is wrong. Refused before the run, which is
+    /// the whole reason it is a separate diagnostic from the one below: the axis names cannot be
+    /// checked until there is a result, but <c>--at freq</c> with no value can be, and there is no
+    /// reason to make a caller wait for a solve to learn it.
+    /// </summary>
+    public static Diagnostic NarrowingMalformed(string option, string text) => Diagnostic.Create(
+        "cli.narrow.malformed",
+        DiagnosticSeverity.Error,
+        "{option} '{text}' is malformed. Write --at <axis>=<value> (--at freq=2GHz), " +
+        "--range <axis>=<lo>:<hi> (--range freq=1GHz:3GHz), or --format summary|full.",
+        ("option", option), ("text", text));
+
+    // A narrowing that could not be honoured against the result that came back — an axis no cube
+    // has, or a value that is not one — is NOT declared here: those are
+    // RfCore.Export.NarrowingDiagnostics' own (narrow.axis.unknown, narrow.value.malformed,
+    // narrow.value.missing, narrow.range.empty), because the rule about which axes exist belongs
+    // where the axes do. They fail the invocation: any file the run wrote is still named in
+    // `outputs` and the result's SHAPE still comes back, so nothing is lost — what a caller must
+    // not receive is the whole un-narrowed result under the impression that it answers the
+    // question asked.
 
     // ── forwarded, argument-free ─────────────────────────────────────────────
     //
@@ -1463,6 +1553,26 @@ internal static class CliDiagnostics
         "render.cdd.source-unresolved", DiagnosticSeverity.Error,
         "render: this display reads '{sourceRef}', which is not here (looked at {tried}). Name it with "
       + "--data <path>.", ("sourceRef", sourceRef), ("tried", tried));
+
+    /// <summary>
+    /// A source the DOCUMENT names was found and could not be read (AUT-9 R-aut9-7).
+    ///
+    /// <para><b>Three different problems, three different sentences.</b> This used to be reported
+    /// through <see cref="RenderCddUnreadable"/> — "'&lt;path&gt;' is not a readable data display" —
+    /// with the RESULT file's path substituted into it. A caller reasonably concluded the
+    /// <c>.cdd</c> it had just written was malformed and rewrote it, when the malformed file was the
+    /// <c>.npy</c> the display points at. So this one names the source, says which document
+    /// referenced it, and stays distinct from a bad <c>--data</c> argument
+    /// (<see cref="RenderDataUnreadable"/>) and from a bad document
+    /// (<see cref="RenderCddUnreadable"/>).</para>
+    /// </summary>
+    public static Diagnostic RenderCddSourceUnreadable(
+        string sourceRef, string sourcePath, string document, string reason) => Diagnostic.Create(
+        "render.cdd.source-unreadable", DiagnosticSeverity.Error,
+        "render: '{document}' reads '{sourceRef}', and that file could not be read — {reason} "
+      + "({sourcePath}). The data display itself is fine; name a readable result with --data <path>.",
+        ("sourceRef", sourceRef), ("sourcePath", sourcePath),
+        ("document", document), ("reason", reason));
 
     public static Diagnostic RenderDataNotFound(string path) => Diagnostic.Create(
         "render.data.not-found", DiagnosticSeverity.Error,

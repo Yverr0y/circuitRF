@@ -70,6 +70,11 @@ namespace RfCore
             var matrices = new List<Mat<Complex>>();
             var comments = new List<CommentEntry>();
 
+            // What circuitRF's own header notes said, when this file has them. Null / empty for
+            // every other Touchstone in the world, which is the point: neither is invented.
+            Complex?   noteZ0      = null;
+            var        perPortNote = new SortedDictionary<int, Complex>();
+
             // Accumulate numeric tokens for the current frequency block:
             //   [freq, re0, im0, re1, im1, …, re(N²−1), im(N²−1)]
             var blockTokens    = new List<double>();
@@ -84,6 +89,13 @@ namespace RfCore
                 // ---- Full-line comment ----
                 if (trimmed.StartsWith('!'))
                 {
+                    // Two of circuitRF's own header notes carry information the option line
+                    // structurally cannot (AUT-9 R-aut9-2), and they are read back BEFORE the
+                    // readComments guard: whether the comment TEXT is preserved is the caller's
+                    // choice, but the file's reference impedance is not a comment's worth of
+                    // decoration. A file from anywhere else simply has neither note.
+                    if (completedBlocks == 0) ReadZ0Note(trimmed, ref noteZ0, perPortNote);
+
                     if (readComments)
                     {
                         string text = trimmed.Length > 1
@@ -214,13 +226,76 @@ namespace RfCore
                 throw new FormatException(
                     "No valid frequency points found in Touchstone file.");
 
-            var z0= new Complex(z0Real, 0);
+            // The option line's R is a single REAL, so a complex reference cannot survive it and the
+            // reactance was silently lost on a circuitRF round trip. The note carries it; it is
+            // honoured only when its real part agrees with the option line, so a note that has
+            // drifted from the data it describes is ignored rather than believed.
+            var z0 = noteZ0 is { } n && Math.Abs(n.Real - z0Real) < 1e-9
+                ? n
+                : new Complex(z0Real, 0);
 
             var snp = new SNP(freqs.ToArray(), matrices.ToArray(), type, format, z0);
             snp.FreqUnit = freqUnit;
+
+            // The per-port references, when this file carries circuitRF's note for them. Honoured
+            // only when the note describes exactly the ports the data has — a note that has drifted
+            // from the matrix it heads is ignored rather than believed, the same rule the complex
+            // reference above is held to.
+            if (perPortNote.Count > 0 && perPortNote.Count == snp.Ports &&
+                perPortNote.Keys.First() == 1 && perPortNote.Keys.Last() == snp.Ports)
+                snp.Z0PerPort = perPortNote.Values.ToArray();
+
             if (readComments)
                 snp.Comments.AddRange(comments);
             return snp;
+        }
+
+        // ── circuitRF's own Z0 header notes ─────────────────────────────────
+
+        /// <summary>
+        /// The invariant spelling of a complex reference impedance in a header note —
+        /// <c>&lt;50; -10&gt;</c>. Round-trippable and culture-free, because a data file whose
+        /// numbers change spelling with the machine's locale is not a data file.
+        /// </summary>
+        internal static string FormatZ0(Complex z)
+        {
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            return $"<{z.Real.ToString("R", inv)}; {z.Imaginary.ToString("R", inv)}>";
+        }
+
+        private static readonly System.Text.RegularExpressions.Regex Z0NoteRe = new(
+            @"^!\s*NOTE:\s*reference impedance is complex:\s*(?<z><.*>)\s*$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        private static readonly System.Text.RegularExpressions.Regex PortZ0Re = new(
+            @"^!\s*Port\s+(?<p>\d+)\s*:\s*Z0\s*=\s*(?<z><.*>)\s*$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        private static void ReadZ0Note(string commentLine, ref Complex? uniform,
+                                       IDictionary<int, Complex> perPort)
+        {
+            var m = Z0NoteRe.Match(commentLine);
+            if (m.Success && TryParseZ0(m.Groups["z"].Value) is { } z) { uniform = z; return; }
+
+            m = PortZ0Re.Match(commentLine);
+            if (m.Success &&
+                int.TryParse(m.Groups["p"].Value, System.Globalization.NumberStyles.Integer,
+                             System.Globalization.CultureInfo.InvariantCulture, out int port) &&
+                TryParseZ0(m.Groups["z"].Value) is { } pz)
+                perPort[port] = pz;
+        }
+
+        private static Complex? TryParseZ0(string text)
+        {
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            string body = text.Trim();
+            if (body.Length < 2 || body[0] != '<' || body[^1] != '>') return null;
+            var parts = body[1..^1].Split(';');
+            if (parts.Length != 2) return null;
+            return double.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float, inv, out double re) &&
+                   double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float, inv, out double im)
+                ? new Complex(re, im)
+                : null;
         }
 
         // ============================================================
@@ -319,12 +394,30 @@ namespace RfCore
                 writer.WriteLine($"! {verb} {dateStr}");
             }
 
-            // ---- Warn in non-strict mode when Z0 is non-uniform or complex ----
+            // ---- Say what the option line cannot: a complex or a renormalized reference ----
+            //
+            // AUT-9 R-aut9-2. This block used to run on EVERY non-strict write, announce "Original
+            // data had complex Z0" whether or not it was complex, and then print the ONE uniform
+            // value once per port — a per-port listing carrying no per-port information, which read
+            // as a positive statement that the ports were all 50 Ω on files where they were not.
+            // Both halves are conditional now, and each says only what is true of this file.
             if (!touchstone11Compatible)
             {
-                writer.WriteLine("! NOTE: Original data had complex Z0.");
-                for (int p = 0; p < snp.Ports; p++)
-                    writer.WriteLine($"!   Port {p + 1}: Z0 = {snp.Z0}");
+                if (Math.Abs(snp.Z0.Imaginary) > 0)
+                    writer.WriteLine($"! NOTE: reference impedance is complex: {FormatZ0(snp.Z0)}");
+
+                // Present only when the ports genuinely do NOT share a reference. The option line
+                // can declare one number and declares port 1's; these are what the data is actually
+                // referenced to, and the sentence says so in as many words, because the whole defect
+                // was a header that made a positive claim about ports it knew nothing about.
+                if (snp.Z0PerPort is { Length: > 0 } perPort)
+                {
+                    writer.WriteLine(
+                        "! NOTE: per-port reference impedances — the data is referenced to THESE, "
+                      + $"not to the option line's single R {z0Option:G}.");
+                    for (int p = 0; p < perPort.Length; p++)
+                        writer.WriteLine($"!   Port {p + 1}: Z0 = {FormatZ0(perPort[p])}");
+                }
             }
 
             // ---- Option line ----

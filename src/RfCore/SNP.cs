@@ -132,6 +132,26 @@ namespace RfCore
         /// </summary>
         public Complex Z0 { get; set; }
 
+        /// <summary>
+        /// The per-port reference impedances the matrices are ACTUALLY expressed in, when the ports
+        /// do not share one — null whenever <see cref="Z0"/> is the whole truth, which is almost
+        /// always (AUT-9 R-aut9-2).
+        ///
+        /// <para><b>Why an SNP needs this at all.</b> Touchstone 1.x declares one real R and this
+        /// type followed it, so a two-port whose second port was 12 Ω was written as a matrix
+        /// generalized w.r.t. [50, 12] under a header saying every port was 50 Ω — and read back the
+        /// same way. Nothing was wrong with the solve; the description of it was wrong in the one
+        /// direction that matters, because a client renormalising from the reported reference then
+        /// computes a wrong answer from a correct simulation.</para>
+        ///
+        /// <para><b>Nothing here renormalizes.</b> The matrices are untouched: this says what they
+        /// are referenced to, and <see cref="Z0"/> stays port 1's value, which is what the option
+        /// line declares and what a uniform-only reader will use. <see cref="TouchstoneIO"/> writes
+        /// these as a header note and reads them back from one, so a circuitRF round trip keeps
+        /// them.</para>
+        /// </summary>
+        public Complex[]? Z0PerPort { get; set; }
+
         /// <summary>Comments read from the source file (optional).</summary>
         public List<CommentEntry> Comments { get; } = new();
 

@@ -128,6 +128,40 @@ internal static class ToolCatalog
     private static readonly ToolOption Group = new("group", "--group", OptKind.StrList,
         "Narrow the result to these group names.");
 
+    // AUT-9 R-aut9-9. `only` and `group` narrow by cube NAME, which does nothing at all when the
+    // result has one cube — and a 551-point two-port S-parameter run is 173 KB inline to answer what
+    // one entry is at one frequency. These four narrow by AXIS, and they are offered on every tool
+    // that returns a DataSet because the flags are taken once, before dispatch, for exactly that
+    // reason.
+    private static readonly ToolOption At = new("at", "--at", OptKind.StrList,
+        "Pick one point per axis, as axis=value with the axis's own unit (freq=2GHz). Nearest grid "
+      + "point unless interp is set; the result says which point it returned.");
+
+    private static readonly ToolOption Range = new("range", "--range", OptKind.StrList,
+        "Keep a band of an axis, as axis=lo:hi with units (freq=1GHz:3GHz).");
+
+    private static readonly ToolOption Interp = new("interp", "--interp", OptKind.Flag,
+        "Make every 'at' interpolate between the bracketing grid points instead of snapping to the "
+      + "nearest. Returns a number the run did not compute, which is why it is never the default.");
+
+    // `result`, not `format`: `render`'s own `format` argument means the picture's file format, and
+    // one word meaning two things across two tools is what a caller gets wrong once and forever.
+    private static readonly ToolOption Result = new("result", "--result", OptKind.Str,
+        "full (default: the values) or summary (the shape, units and extents, and no values). The "
+      + "shape comes back either way.");
+
+    /// <summary>Every DataSet-returning tool's narrowing set, written once (R-aut9-9).</summary>
+    private static readonly ToolOption[] Narrowing = [Json, Group, At, Range, Interp, Result];
+
+    /// <summary>
+    /// R-aut9-11. The Gerber import's diagnostics are the best-written text on this surface and are
+    /// not weakened by this — they are simply not the right default payload for a listing call whose
+    /// answer is one cell name.
+    /// </summary>
+    private static readonly ToolOption Summary = new("summary", "--summary", OptKind.Flag,
+        "Report the notes as counts by severity instead of in full. Every warning and error still "
+      + "travels; only the informational notes are collapsed.");
+
     private static readonly ToolOption Set = new("set", "--set", OptKind.StrRepeat,
         "Override a global variable, as name=expr. Applied before elaboration.");
 
@@ -217,7 +251,15 @@ internal static class ToolCatalog
     public static readonly ToolSpec[] Tools =
     [
         new("run",
-            "Run one analysis on a netlist or an EM setup and return its result document.",
+            "Run one analysis on a netlist or an EM setup and return its result document. "
+          // R-aut9-10: whichever payload rule applies, the SHAPE is uniform — `sparam` returned its
+          // whole result inline while `lpp` returned a written path and nothing else, with nothing
+          // in this schema to say which a caller would get.
+          + "Every run returns result.shape — the groups, cubes, units and axis extents it produced. "
+          + "sparam, dc, hb and em return the values inline as well; lp and lpp return their "
+          + "one-row-per-grid-point summary instead, and hand over the cubes when asked with all, "
+          + "only or group. Narrow a large result with at, range or result=summary rather than "
+          + "receiving it whole.",
             "analysis",
             "Which analysis to run.",
             [
@@ -226,29 +268,32 @@ internal static class ToolCatalog
                 // a capability gap in the two oldest verbs rather than one this table may paper over.
                 new("sparam", ["sparam"],
                     [new("path", true, "The .cnl to run.")],
-                    [Output, Json, Group,
+                    [Output, .. Narrowing,
                      new("freq", "--freq", OptKind.Str, "Frequency sweep as start:stop:step (1GHz, 100MHz, 1e9).")],
-                    "S-parameters."),
+                    "S-parameters. -o writes a Touchstone (.s1p … .s99p) or the cubes (.npy, .mat, .txt); "
+                  + "an extension naming neither is refused."),
                 // Likewise no `--set`, and DcSettingsFrom's own three knobs rather than HB's.
                 new("dc", ["dc"],
                     [new("path", true, "The .cnl to run.")],
-                    [Json, Group, .. DcOptions],
+                    [.. Narrowing, .. DcOptions],
                     "DC operating point."),
                 new("hb", ["hb"],
                     [new("path", true, "The .cnl to run.")],
-                    [Analysis, Set, Output, All, Json, Group, .. SolverOptions],
+                    [Analysis, Set, Output, All, .. Narrowing, .. SolverOptions],
                     "Harmonic balance. Runs the parametric sweep when one wraps it."),
                 new("lp", ["lp"],
                     [new("path", true, "The .cnl to run.")],
-                    [Analysis, Set, Output, All, Json, Group, .. LoadpullSolverOptions, .. LoadpullOptions],
-                    "Loadpull over the directive's Gamma grid. The default result is one row per grid point."),
+                    [Analysis, Set, Output, All, .. Narrowing, .. LoadpullSolverOptions, .. LoadpullOptions],
+                    "Loadpull over the directive's Gamma grid. The default result is one row per grid point "
+                  + "plus the shape; ask for the cubes with all, only or group."),
                 new("lpp", ["lpp"],
                     [new("path", true, "The .cnl to run.")],
-                    [Analysis, Set, Output, All, Json, Group, .. LoadpullSolverOptions, .. LoadpullOptions],
-                    "Loadpull pursuit: searches for the MXP and MXE terminations."),
+                    [Analysis, Set, Output, All, .. Narrowing, .. LoadpullSolverOptions, .. LoadpullOptions],
+                    "Loadpull pursuit: searches for the MXP and MXE terminations. Returns the optima and the "
+                  + "result's shape; ask for the cubes with all, only or group."),
                 new("em", ["em"],
                     [new("path", true, "The .cem to run.")],
-                    [Output, Json, Group,
+                    [Output, .. Narrowing,
                      new("workspace", "--workspace", OptKind.Path,
                          "The .cws paths resolve against. Default: the nearest one above the .cem.")],
                     "Electromagnetic extraction of the layout the .cem names. Writes a Touchstone and a .npy."),
@@ -264,6 +309,7 @@ internal static class ToolCatalog
                         new("recursive", "--recursive", OptKind.Flag, "Descend a plain folder. A workspace always descends."),
                         new("severity",  "--severity",  OptKind.Str,
                             "What decides the exit code: warning or error. Default error; warnings are reported either way."),
+                        Summary,
                     ],
                     ""),
             ]),
@@ -340,6 +386,7 @@ internal static class ToolCatalog
                         new("listParts",  "--list-parts",  OptKind.Flag, "Report what the source holds and create nothing."),
                         new("tech",       "--tech",        OptKind.Path, "The .ctech the layers reconcile against."),
                         new("addLayers",  "--add-layers",  OptKind.Flag, "Write the part's new layers into that technology."),
+                        Summary,
                     ],
                     "A footprint and its symbol, as a cell."),
                 new("convert", ["convert"],
@@ -363,6 +410,7 @@ internal static class ToolCatalog
                         new("drillZeros", "--drill-zeros", OptKind.Str,  "leading or trailing suppression."),
                         new("acceptInferredDrillFormat", "--accept-inferred-drill-format", OptKind.Flag,
                             "Proceed on a guessed Excellon format. Unstated, it is refused: the two readings differ by four orders of magnitude."),
+                        Summary,
                     ],
                     "One import and one export, between any two interchange formats."),
             ]),
@@ -461,7 +509,7 @@ internal static class ToolCatalog
             [
                 new("", [ "read" ],
                     [new("path", true, "A .npy or Touchstone result, or a .cws .csch .csym .clay .ctech .cem .cnl document.")],
-                    [Json, Group],
+                    [.. Narrowing],
                     ""),
             ]),
 

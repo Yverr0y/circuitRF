@@ -132,8 +132,13 @@ internal sealed class CddSources : IPlotDataSources
                 if (!s._byPath.TryGetValue(abs, out var sel))
                 {
                     sel = new Loaded { Path = abs, Reference = sref, FromDataFlag = false };
+                    // R-aut9-7: the SOURCE could not be read, which is not the same problem as the
+                    // display being unreadable — and reporting it as one sent a caller off to
+                    // rewrite a `.cdd` that was never wrong. The selection is reported by the name
+                    // the document holds, since that is what a caller would have to change.
                     if (Read(sel) is { } why)
-                        return (null, JsonRun.Fail(CliDiagnostics.RenderCddUnreadable(abs, why)));
+                        return (null, JsonRun.Fail(CliDiagnostics.RenderCddSourceUnreadable(
+                            config.SelectedDataSource ?? sref, abs, cddPath, why)));
                     s._byPath[abs] = sel;
                 }
                 if (named.Count > 0) nextNamed = Math.Max(nextNamed, 1);
@@ -158,7 +163,8 @@ internal sealed class CddSources : IPlotDataSources
             {
                 entry = new Loaded { Path = found, Reference = sref, FromDataFlag = false };
                 if (Read(entry) is { } why)
-                    return (null, JsonRun.Fail(CliDiagnostics.RenderCddUnreadable(found, why)));
+                    return (null, JsonRun.Fail(CliDiagnostics.RenderCddSourceUnreadable(
+                        sref, found, cddPath, why)));
                 s._byPath[found] = entry;
             }
             s._refToPath[sref] = found;

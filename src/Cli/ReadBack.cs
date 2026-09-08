@@ -48,7 +48,9 @@ internal static class ReadBack
         if (path is null)
         {
             int code = JsonRun.Fail(CliDiagnostics.ReadPathRequired());
-            Console.Error.WriteLine("Usage: circuitrf read <file> [--only a,b] [--group g]");
+            Console.Error.WriteLine(
+                "Usage: circuitrf read <file> [--only a,b] [--group g] [--at axis=value] "
+              + "[--range axis=lo:hi] [--result summary]");
             return code;
         }
 
@@ -106,8 +108,10 @@ internal static class ReadBack
     /// <summary>
     /// Hands the loaded set to the document, and prints the human form: what the file holds, one
     /// line per cube. Deliberately NOT the numbers — a swept loadpull <c>.npy</c> is megabytes of
-    /// them, and <c>--json</c> with <c>--only</c> is how a caller asks for the ones it wants
-    /// (R-aut5-6). The two forms read the same <see cref="DataSet"/>, so they cannot disagree.
+    /// them, and <c>--json</c> with <c>--only</c>, <c>--at</c> or <c>--range</c> is how a caller asks
+    /// for the ones it wants (R-aut5-6, AUT-9 R-aut9-9). The two forms read the same
+    /// <see cref="DataSet"/>, so they cannot disagree — and the document's <c>result.shape</c> is
+    /// this listing, with the units and the axis extents the terminal has no room for.
     /// </summary>
     private static int Publish(DataSet ds, string path, string kind)
     {

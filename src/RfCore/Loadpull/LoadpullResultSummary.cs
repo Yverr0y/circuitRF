@@ -39,7 +39,17 @@ namespace RfCore.Loadpull
     /// <param name="SourceCube">The cube the values came from, or null when the run published
     /// neither spelling (every value in the column is then NaN).</param>
     /// <param name="Scale">What the console multiplies the raw value by.</param>
-    public sealed record LoadpullFomColumn(string Column, string? SourceCube, double Scale);
+    /// <param name="Unit">
+    /// What the RAW values in this column are in (AUT-9 R-aut9-3) — the unit of what is reported,
+    /// not of what the console prints. The efficiency column is the reason it exists: it reads a
+    /// percentage out of an enriched run's <c>Efficiency</c> and a fraction out of a pursuit's
+    /// unenriched <c>DE</c>, and until this was carried the only way to tell the two apart was to
+    /// notice which cube name <see cref="SourceCube"/> happened to name.
+    /// </param>
+    /// <param name="ConsoleUnit">What the terminal's column header says, after
+    /// <paramref name="Scale"/>.</param>
+    public sealed record LoadpullFomColumn(
+        string Column, string? SourceCube, double Scale, string Unit, string ConsoleUnit);
 
     /// <summary>
     /// One Γ grid point: where it was, how it stopped, and its figures of merit at the drive step it
@@ -75,9 +85,15 @@ namespace RfCore.Loadpull
         IReadOnlyList<LoadpullGridRow>     Rows);
 
     /// <summary>
-    /// One of a pursuit's two answers. <paramref name="Value"/> is raw and
-    /// <paramref name="ValueScale"/> is the console's ×100 for efficiency — same rule as
-    /// <see cref="LoadpullFomColumn"/>, and for the same reason.
+    /// One of a pursuit's two answers. <paramref name="Value"/> is raw,
+    /// <paramref name="ValueUnit"/> says what THAT number is in, and
+    /// <paramref name="ValueScale"/> with <paramref name="ConsoleUnit"/> are the console's ×100 and
+    /// its <c>%</c> — same rule as <see cref="LoadpullFomColumn"/>, and for the same reason.
+    ///
+    /// <para><b>Those used to be one field, and it was the wrong one</b> (AUT-9 R-aut9-3): the unit
+    /// reported beside MXE's value was <c>%</c> while the value itself was a fraction, so a client
+    /// that believed the label reported 0.7% for a 70.87% amplifier. The unit now describes the
+    /// number it sits beside.</para>
     ///
     /// <para>A NON-converged optimum still carries its <c>Z</c>: that is the last termination the
     /// search looked at, and it is worth reporting. Its <paramref name="Value"/> is not — the engine
@@ -90,8 +106,9 @@ namespace RfCore.Loadpull
         bool    Converged,
         string  ValueCube,
         double  Value,
-        double  ValueScale,
         string  ValueUnit,
+        double  ValueScale,
+        string  ConsoleUnit,
         double  ZRe,
         double  ZIm,
         bool    HasZsource,
@@ -184,15 +201,20 @@ namespace RfCore.Loadpull
             // engine's raw names with DE and PAE still as fractions. Reading only one set produces a
             // table of em dashes for the other — which looks like a run that produced no figures of
             // merit rather than like a naming mismatch.
-            double effScale = cubes.ContainsKey("Efficiency") ? 1.0 : 100.0;
+            bool   enriched = cubes.ContainsKey("Efficiency");
+            double effScale = enriched ? 1.0 : 100.0;
+            // The unit of the RAW value, which is the whole of what the two spellings differ by:
+            // Enrich has already multiplied by 100 and publishes a percentage, while the engine's
+            // own DE and PAE are fractions (R-aut9-3).
+            string effUnit  = enriched ? "%" : "1";
 
             var columns = new[]
             {
-                Column(cubes, "Pavl",       1.0,      "PavlDbm"),
-                Column(cubes, "Pout",       1.0,      "Pout_dBm",   "Pout"),
-                Column(cubes, "Gt",         1.0,      "Gt_dB",      "Gt"),
-                Column(cubes, "Efficiency", effScale, "Efficiency", "DE"),
-                Column(cubes, "PAE",        effScale, "PAE"),
+                Column(cubes, "Pavl",       1.0,      "dBm",   "dBm", "PavlDbm"),
+                Column(cubes, "Pout",       1.0,      "dBm",   "dBm", "Pout_dBm",   "Pout"),
+                Column(cubes, "Gt",         1.0,      "dB",    "dB",  "Gt_dB",      "Gt"),
+                Column(cubes, "Efficiency", effScale, effUnit, "%",   "Efficiency", "DE"),
+                Column(cubes, "PAE",        effScale, effUnit, "%",   "PAE"),
             };
             var sources = columns.Select(c => c.SourceCube is null ? null : Real(cubes, c.SourceCube)).ToArray();
 
@@ -240,8 +262,11 @@ namespace RfCore.Loadpull
             if (!HasPursuit(cubes)) return null;
 
             return new LoadpullPursuitSummary(
-                Optimum(cubes, "MXP", "MXP_PoutDbm", 1.0,   "dBm"),
-                Optimum(cubes, "MXE", "MXE_Eff",     100.0, "%"),
+                // MXP_PoutDbm is already in dBm, so the console scales by 1 and the two units agree.
+                // MXE_Eff is a FRACTION the console prints as a percentage, and saying so is
+                // R-aut9-3's whole point.
+                Optimum(cubes, "MXP", "MXP_PoutDbm", "dBm", 1.0,   "dBm"),
+                Optimum(cubes, "MXE", "MXE_Eff",     "1",   100.0, "%"),
                 Scalar(cubes, "CacheCount"),
                 Scalar(cubes, "UnscorableCount"),
                 Scalar(cubes, "RecommTermCount"));
@@ -251,14 +276,15 @@ namespace RfCore.Loadpull
 
         private static PursuitOptimum Optimum(
             IReadOnlyDictionary<string, DataCube> cubes,
-            string tag, string valueCube, double valueScale, string valueUnit)
+            string tag, string valueCube, string valueUnit, double valueScale, string consoleUnit)
             => new(
                 tag,
                 Scalar(cubes, $"{tag}_Converged") != 0.0,
                 valueCube,
                 Scalar(cubes, valueCube),
-                valueScale,
                 valueUnit,
+                valueScale,
+                consoleUnit,
                 Scalar(cubes, $"{tag}_ZRe"),
                 Scalar(cubes, $"{tag}_ZIm"),
                 Scalar(cubes, $"{tag}_HasZsource") != 0.0,
@@ -277,11 +303,17 @@ namespace RfCore.Loadpull
 
         /// <summary>The first spelling this run actually published, in preference order.</summary>
         private static LoadpullFomColumn Column(
-            IReadOnlyDictionary<string, DataCube> cubes, string column, double scale, params string[] spellings)
+            IReadOnlyDictionary<string, DataCube> cubes, string column, double scale,
+            string unit, string consoleUnit, params string[] spellings)
         {
             foreach (string s in spellings)
-                if (Real(cubes, s) is not null) return new LoadpullFomColumn(column, s, scale);
-            return new LoadpullFomColumn(column, null, scale);
+                if (Real(cubes, s) is { } c)
+                    // A cube that states its own unit outranks the caller's expectation of it — the
+                    // one that does is the enriched PAE, whose NAME is unchanged by the scaling that
+                    // turned it into a percentage.
+                    return new LoadpullFomColumn(
+                        column, s, scale, string.IsNullOrEmpty(c.Unit) ? unit : c.Unit, consoleUnit);
+            return new LoadpullFomColumn(column, null, scale, unit, consoleUnit);
         }
 
         /// <summary>

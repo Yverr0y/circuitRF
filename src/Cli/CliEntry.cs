@@ -75,7 +75,8 @@ CircuitRF.Render.RenderTypefaceInstaller.Install();
 
 // ── command dispatch ──────────────────────────────────────────────────────────
 
-// --json, --only and --group are taken FIRST, and before the empty-argument check, so that
+// --json, --only, --group and AUT-9's --at/--range/--interp/--format/--summary are taken FIRST, and
+// before the empty-argument check, so that
 // `circuitrf --json` with no verb still produces a document rather than a bare exit code — a caller
 // must never have to tell "no output" apart from "output I could not parse" (R-aut1-3). Taking them
 // here also means no verb's own argument loop has to learn about them, and `convert`'s
@@ -117,6 +118,13 @@ if (!_workerLogHooked)
 }
 
 JsonRun.Verb = args[0].ToLowerInvariant();
+
+// AUT-9 R-aut9-9: a narrowing flag whose SPELLING is wrong is refused here, before the verb runs
+// at all. The axis NAMES cannot be checked until a result exists (JsonRun.BuildPayload does that);
+// `--at freq` with no value can be, and making a caller wait for a solve to learn it would be
+// gratuitous.
+if (JsonRun.Malformed is { } bad)
+    return JsonRun.Finish(JsonRun.Fail(CliDiagnostics.NarrowingMalformed(bad.Option, bad.Text)));
 
 return JsonRun.Finish(JsonRun.Verb switch
 {
@@ -250,6 +258,24 @@ static int RunSparam(string[] args)
         PrintWarnings(nl, shown);
 
         JsonRun.Data = ds;
+
+        // R-aut9-1. The tool schema says the extension picks the format, and for `sparam` it did
+        // not: every -o wrote Touchstone whatever it was called, so `-o out.npy` produced a file
+        // beginning "! NOTE:" that `read` and `render --data` then refused as not-a-.npy — an
+        // accurate refusal of a file this verb had itself misnamed. The extension is honoured now,
+        // through the same DataSetExporter every other run verb writes through, and an extension
+        // that names no format this verb can write is a refusal that lists the ones it can.
+        if (output is not null && !IsTouchstonePath(output))
+        {
+            if (SparamDataFormat(output) is not { } format)
+                return JsonRun.Fail(CliDiagnostics.SparamUnsupportedExportFormat(
+                    output, Path.GetExtension(output)));
+
+            DataSetExporter.Export(ds, output, format, new ExportOptions(Format: format));
+            Console.WriteLine($"Wrote {output}");
+            JsonRun.AddOutput(JsonRun.KindOf(output), output);
+            return 0;
+        }
 
         var snp = RfCore.Data.DataSetBuilder.ToSnp(ds);
 
@@ -728,6 +754,11 @@ static int RunLoadpull(string[] args, bool pursuit)
         var fullDs   = measDs is { Cubes.Count: > 0 } ? MergeForExport(ds, measDs) : ds;
         JsonRun.Data = fullDs;
 
+        // AUT-9 R-aut9-4/5/6 — what the shape of the result says about the run, said out loud. A
+        // human reads all three off the log; a client reading `status: ok` and a document does not,
+        // and one of them wrote up a working component as defective on that evidence.
+        ReportLoadpullFindings(ds);
+
         Console.WriteLine($"Analysis: {top.Name}   ({input})");
         PrintLoadpullDataSet(ds, maxRows, allPoints);
         if (measDs is { Cubes.Count: > 0 })
@@ -753,6 +784,33 @@ static int RunLoadpull(string[] args, bool pursuit)
         return LoadpullExitCode(ds);
     }
     catch (Exception ex) { return JsonRun.Fail(CliDiagnostics.RunFailed(ex.Message)); }
+}
+
+/// <summary>
+/// Reports AUT-9's three loadpull findings, on stderr and in the document alike.
+///
+/// <para><b>The decisions are all in <see cref="RfCore.Loadpull.LoadpullRunFindings"/></b>, which
+/// reads the cubes the run published and returns values — this only spells them. A rule that lived
+/// here would be one the GUI and the protocol adapter could not reach (R-aut1-9).</para>
+/// </summary>
+static void ReportLoadpullFindings(DataSet ds)
+{
+    foreach (var f in RfCore.Loadpull.LoadpullRunFindings.For(ds))
+    {
+        var d = f.Kind switch
+        {
+            RfCore.Loadpull.LoadpullFindingKind.DeviceInert =>
+                CliDiagnostics.LoadpullDeviceInert(f.DriveSteps),
+            RfCore.Loadpull.LoadpullFindingKind.NothingConverged =>
+                CliDiagnostics.LoadpullNothingConverged(
+                    f.Attempted, f.DriveSteps,
+                    string.Join(", ", f.StopCodes.OrderBy(k => k.Key, StringComparer.Ordinal)
+                                                 .Select(k => $"{k.Key} {k.Value}"))),
+            _ => CliDiagnostics.LoadpullTickleGap(f.TickleDbm, f.FirstDriveDbm),
+        };
+        Console.Error.WriteLine($"warning: {d.Render()}");
+        JsonRun.Note(d);
+    }
 }
 
 /// <summary>
@@ -976,7 +1034,10 @@ static void PrintPursuitOptima(LoadpullPursuitSummary s)
     // "DID NOT converge" reads as a measured zero rather than as an absent number.
     void One(PursuitOptimum o, string title, string valueLabel)
     {
-        string shown = o.Converged ? $"{o.Value * o.ValueScale:G5} {o.ValueUnit}" : "—";
+        // ConsoleUnit, not ValueUnit — the terminal prints the SCALED number, so it must print the
+        // scaled number's unit (AUT-9 R-aut9-3 split the two apart; before that these were one
+        // field and the printed line was the one that happened to be right).
+        string shown = o.Converged ? $"{o.Value * o.ValueScale:G5} {o.ConsoleUnit}" : "—";
         Console.WriteLine(
             $"  {title,-26} {(o.Converged ? "converged" : "DID NOT converge")}   " +
             $"{valueLabel}={shown}   " +
@@ -1490,6 +1551,25 @@ static ExportFormat FormatFromExtension(string path) => Path.GetExtension(path).
     _               => ExportFormat.Mat,
 };
 
+/// <summary>Whether this path names a Touchstone file — <c>.s1p</c>, <c>.s2p</c>, … <c>.s99p</c> —
+/// read through <see cref="TouchstoneIO.ParsePortsFromExtension"/> so the CLI and the reader agree
+/// about what one is called.</summary>
+static bool IsTouchstonePath(string path) => TouchstoneIO.ParsePortsFromExtension(path) is not null;
+
+/// <summary>
+/// The cube-file format <c>sparam</c>'s <c>-o</c> names, or null for an extension it cannot write.
+/// Unlike <see cref="FormatFromExtension"/> there is NO default: `sparam` writing a <c>.mat</c>
+/// because it did not recognise <c>.s2p_old</c> is the defect R-aut9-1 is about, one extension
+/// along.
+/// </summary>
+static ExportFormat? SparamDataFormat(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+{
+    ".npy"           => ExportFormat.Npy,
+    ".mat"           => ExportFormat.Mat,
+    ".txt" or ".tsv" => ExportFormat.Tsv,
+    _                => null,
+};
+
 /// <summary>Reads the run's own Converged scalar; a run without one (a sweep) counts as converged.</summary>
 static bool Converged(DataSet ds)
 {
@@ -1857,7 +1937,8 @@ static int PrintHelp()
     Console.WriteLine("read options:");
     Console.WriteLine("  <path>                  a .npy or Touchstone result, read back as cubes, or");
     Console.WriteLine("                          one of circuitRF's own documents, returned verbatim.");
-    Console.WriteLine("                          --only / --group narrow a result. Writes nothing.");
+    Console.WriteLine("                          --only / --group / --at / --range / --result narrow");
+    Console.WriteLine("                          a result. Writes nothing.");
     Console.WriteLine();
     Console.WriteLine("reference options:");
     Console.WriteLine("  <no arguments>          the topic list, with each topic's size in bytes");
@@ -1882,6 +1963,16 @@ static int PrintHelp()
     Console.WriteLine("                      emits a document — the failure is the payload.");
     Console.WriteLine("  --only a,b          narrow the document's cubes to these");
     Console.WriteLine("  --group g,h         narrow the document's groups to these");
+    Console.WriteLine("  --at axis=value     narrow by AXIS: --at freq=2GHz. Nearest grid point, and");
+    Console.WriteLine("                      the document says which one it returned.");
+    Console.WriteLine("  --interp            make every --at interpolate between the bracketing");
+    Console.WriteLine("                      points instead. Never the default: it returns a number");
+    Console.WriteLine("                      the run did not compute.");
+    Console.WriteLine("  --range axis=lo:hi  keep a band of an axis: --range freq=1GHz:3GHz");
+    Console.WriteLine("  --result full|summary   summary returns the shape, units and extents and no");
+    Console.WriteLine("                      values. The shape comes back either way.");
+    Console.WriteLine("  --summary           report notes as counts by severity. Warnings and errors");
+    Console.WriteLine("                      still travel in full; stderr is untouched.");
     Console.WriteLine();
     Console.WriteLine("Frequency format: 1GHz, 100MHz, 1e9 (Hz bare)");
     Console.WriteLine("Example: circuitrf sparam hero1.cnl --freq 1GHz:3GHz:50MHz -o hero1.s4p");
@@ -1891,6 +1982,8 @@ static int PrintHelp()
     Console.WriteLine("Example: circuitrf em  Amp.cem -o /tmp/amp.s2p");
     Console.WriteLine("Example: circuitrf convert Filter.dxf -o gerbers/");
     Console.WriteLine("Example: circuitrf convert fab/ -o board.kicad_pcb");
+    Console.WriteLine("Example: circuitrf read run.npy --at freq=2GHz --only S --json");
+    Console.WriteLine("Example: circuitrf sparam hero1.cnl --result summary --json");
     Console.WriteLine("Example: circuitrf reference netlist");
     Console.WriteLine("Example: circuitrf reference components MLIN --json");
     Console.WriteLine("Example: circuitrf new workspace ~/designs/Amp --tech pcb-4layer_FR-4_62mil_1oz");
