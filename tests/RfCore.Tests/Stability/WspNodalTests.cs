@@ -300,45 +300,6 @@ public class WspNodalTests
         Assert.Empty(WspKurokawa.UnstableFrequencies(t, x));
     }
 
-    /// <summary>The normalised driving-point loci divide by a positive real, so they carry the same
-    /// start-up signature as the raw ones and are bounded by 1 (R-wsp2-14(i), overview D-12).</summary>
-    [Fact]
-    public void I_NormalizedLoci_AreBoundedAndReportTheSameKurokawaFrequencies()
-    {
-        // A series resonance in 1/Y0: 1/Y0 = ZG + ZL sweeps upward through the negative real axis.
-        var x  = Enumerable.Range(0, 201).Select(i => 5.0 + i * 0.05).ToArray();
-        var zg = new Complex[x.Length];
-        var zl = new Complex[x.Length];
-        var y0 = new Complex[x.Length];
-        var nz = new Complex[x.Length];
-        for (int i = 0; i < x.Length; i++)
-        {
-            zg[i] = new Complex(-2.0, 0.3 * (x[i] - 10.0));    // the active side
-            zl[i] = new Complex(1.0, 0.2 * (x[i] - 10.0));
-            y0[i] = Complex.One / (zg[i] + zl[i]);
-            nz[i] = WspNodal.NormalizedLocusSeries(zg[i], zl[i]);
-            Assert.True(nz[i].Magnitude <= 1.0 + 1e-12, $"|nZ| = {nz[i].Magnitude} > 1 at x = {x[i]}");
-        }
-
-        var fromY0 = WspKurokawa.UnstableFrequencies(y0, x);
-        var fromNz = WspKurokawa.UnstableFrequencies(nz.Select(v => Complex.One / v).ToArray(), x);
-        Assert.NotEmpty(fromY0);
-        Assert.Equal(fromY0.Length, fromNz.Length);
-        for (int i = 0; i < fromY0.Length; i++)
-            Assert.Equal(fromY0[i], fromNz[i], 9);
-    }
-
-    /// <summary>The reserved margin is registered and refuses, citing the paper (overview D-12).</summary>
-    [Fact]
-    public void I_StabilityMargin_IsRegisteredAndRefuses()
-    {
-        var q  = QuadFromY(new Complex(0.02, 0), new Complex(0, -1e-3), new Complex(0.05, 0), new Complex(0.01, 0));
-        var ex = Assert.Throws<NotSupportedException>(() => WspNodal.StabilityMargin(q));
-        Assert.Contains("wsprobe.margin-not-transcribed", ex.Message);
-        Assert.Contains("EuMIC", ex.Message);
-        Assert.Contains("10.23919/EuMIC61603.2024.10732614", ex.Message);
-    }
-
     // ══ (g) — the immittance models ══════════════════════════════════════════
 
     /// <summary>

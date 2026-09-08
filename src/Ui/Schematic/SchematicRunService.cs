@@ -464,7 +464,10 @@ public static class SchematicRunService
                 // back to the serial path inside the engine.
                 return SParameterEngine.Run(
                     nl, lib, tb, baseDirectory,
-                    spa.Expand(nl.ResolvedGlobals, nl.GlobalsWithExplicitUnit), null, control);
+                    spa.Expand(nl.ResolvedGlobals, nl.GlobalsWithExplicitUnit),
+                    AnalysisSettings.Default.WithMarginThreshold(
+                        Analysis.ParseMarginThresholdDb(spa.MarginThresholdExpr)),
+                    control);
 
             case HarmonicBalanceAnalysis hba:
             {

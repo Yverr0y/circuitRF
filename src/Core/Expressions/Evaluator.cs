@@ -385,6 +385,8 @@ public sealed partial class Evaluator
         //   SP1.idx("GATE")   the probe's idx, from __WspProbes (never guessed).
         //   SP1.H0("GATE") … SP1.F("GATE")   the per-probe default-output cubes, keyed by label
         //                     exactly as I("IP1") keys a branch — trailing sweep axes kept.
+        //   SP1.SM_Y0("GATE"), SP1.SM_H0("GATE")   the two stability margins (WSP-9 R-wsp9-1),
+        //                     Real over {freq}, resolved by the same route.
         if (accessorName == "wsp" && cl.Args.Length == 2)
         {
             var cube = ds["wsp"];
@@ -405,6 +407,7 @@ public sealed partial class Evaluator
         }
 
         if (accessorName is "idx" or "H0" or "Y0" or "ZG" or "ZL" or "LG" or "F"
+                         or "SM_Y0" or "SM_H0"
             && cl.Args.Length == 1)
         {
             var nameVal  = EvalExpr(cl.Args[0], scope);

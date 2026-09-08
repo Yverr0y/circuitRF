@@ -112,9 +112,18 @@ public sealed class CnlReader
                 if (existing is not null)
                 {
                     int idx = tb.Analyses.IndexOf(existing);
+                    // The merge rebuilds the analysis, so anything the directive carries besides
+                    // its sweeps has to be carried across explicitly — a second `type=sparam` line
+                    // for the same name would otherwise silently reset it to the default.
                     var merged = new SParameterAnalysis(
                         existing.Name,
-                        [.. existing.Sweeps, .. spAnalysis!.Sweeps]);
+                        [.. existing.Sweeps, .. spAnalysis!.Sweeps])
+                    {
+                        MarginThresholdExpr =
+                            spAnalysis.MarginThresholdExpr != Analysis.MarginThresholdDefault
+                                ? spAnalysis.MarginThresholdExpr
+                                : existing.MarginThresholdExpr,
+                    };
                     merged.Enabled = existing.Enabled;
                     tb.Analyses[idx] = merged;
                 }
@@ -1223,7 +1232,11 @@ public sealed class CnlReader
         }
 
         result = new CircuitRF.Core.Design.SParameterAnalysis(analysisName, freqSpec)
-            { Enabled = ParseEnabledToken(tokens) };
+        {
+            Enabled = ParseEnabledToken(tokens),
+            MarginThresholdExpr = kv.GetValueOrDefault(
+                "MarginThreshold", CircuitRF.Core.Design.Analysis.MarginThresholdDefault),
+        };
         return true;
     }
 
@@ -1525,6 +1538,8 @@ public sealed class CnlReader
             GuardHarmonicExpr = kv.GetValueOrDefault("GuardHarmonic",   "0"),
             LambdaExpr        = kv.GetValueOrDefault("Lambda",          "1"),
             MaxIterExpr       = kv.GetValueOrDefault("MaxIter",         "100"),
+            MarginThresholdExpr = kv.GetValueOrDefault(
+                "MarginThreshold", CircuitRF.Core.Design.Analysis.MarginThresholdDefault),
             Enabled           = ParseEnabledToken(tokens),
 #pragma warning disable CS0618
             SweepVarName      = sweepVar,

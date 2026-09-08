@@ -37,7 +37,9 @@ public sealed partial class Evaluator
         "wsp_bifurcate" or "wsp_YA" or "wsp_YF" or "wsp_ZA" or "wsp_ZF" or
         "wsp_loopgain_ohtomo" or "wsp_unstable_freq_loopgain" or
         "wsp_ymatrix" or "wsp_ndf" or
-        "wsp_terminate" or "wsp_loadpull" or "wsp_loadpull_unstable" => true,
+        "wsp_terminate" or "wsp_loadpull" or "wsp_loadpull_unstable" or
+        "wsp_loadpull_margin" or "wsp_loadpull_margin_env" or
+        "wsp_loadpull_ndf" or "wsp_loadpull_ndf_enc" => true,
         _ => false,
     };
 
@@ -64,6 +66,10 @@ public sealed partial class Evaluator
                 case "wsp_terminate":        return EvalTerminate(cl, scope);
                 case "wsp_loadpull":         return EvalLoadpull(cl, scope, unstable: false);
                 case "wsp_loadpull_unstable": return EvalLoadpull(cl, scope, unstable: true);
+                case "wsp_loadpull_margin":     return EvalLoadpullMargin(cl, scope, collapse: false);
+                case "wsp_loadpull_margin_env": return EvalLoadpullMargin(cl, scope, collapse: true);
+                case "wsp_loadpull_ndf":        return EvalLoadpullNdf(cl, scope, collapse: false);
+                case "wsp_loadpull_ndf_enc":    return EvalLoadpullNdf(cl, scope, collapse: true);
                 default: throw new UnknownFunctionException(cl.Name);
             }
         }
@@ -649,4 +655,156 @@ public sealed partial class Evaluator
             return new Value(new DataCube([.. outer, axS, axL, item], outv));
         }
     }
+
+    // ══ WSP-9 §5: the margin and the NDF over the same envelope ══════════════
+
+    /// <summary>The grid arguments every envelope function shares, checked once: the probe indices,
+    /// the two Γ grids, Z0, the frequency axis and the outer sweep axes, with the §6.1
+    /// termination precondition already applied to both sides.</summary>
+    private sealed record EnvelopeArgs(
+        WspArg W, int IdxS, int IdxL, Complex[] GS, Complex[] GL, Complex Z0,
+        Axis[] Outer, Axis FreqAxis, int NOuter, Axis AxS, Axis AxL);
+
+    private EnvelopeArgs EnvelopeArgsOf(CallExpr cl, Scope scope, WspArg w, int firstIdxArg)
+    {
+        int idxS = IdxOrZero(cl, scope, firstIdxArg,     w.Probes);
+        int idxL = IdxOrZero(cl, scope, firstIdxArg + 1, w.Probes);
+        var gS   = idxS > 0 ? GammaGridArg(cl, scope, firstIdxArg + 3, "gammaS") : [new Complex(double.NaN, double.NaN)];
+        var gL   = idxL > 0 ? GammaGridArg(cl, scope, firstIdxArg + 4, "gammaL") : [new Complex(double.NaN, double.NaN)];
+        var z0   = Z0Arg(cl, scope, firstIdxArg + 5);
+        if (idxS == 0 && idxL == 0)
+            throw new ExpressionException($"{cl.Name}: neither side is pulled (both probe indices are 0).");
+
+        int fa = FreqAxisIndex(w.Leading);
+        if (fa != w.Leading.Length - 1)
+            throw new ExpressionException(
+                $"{cl.Name}: the wsp cube's frequency axis must be the last axis before row/col; this cube's " +
+                $"axes are ({string.Join(", ", w.Cube.Axes.Select(a => a.Name))}). Pin the other axes with at(...).");
+
+        RequireTermination(cl, w, idxS, WspSide.G);
+        RequireTermination(cl, w, idxL, WspSide.L);
+
+        return new EnvelopeArgs(
+            w, idxS, idxL, gS, gL, z0,
+            [.. w.Leading.Take(fa)], w.Leading[fa], w.Blocks / w.Leading[fa].Length,
+            GammaAxis("gS", gS, idxS > 0), GammaAxis("gL", gL, idxL > 0));
+    }
+
+    /// <summary>The <c>nf</c> blocks of one outer sweep point, in frequency order.</summary>
+    private static Complex[][,] PerFreq(WspArg w, int outerIndex, int nf)
+    {
+        var per = new Complex[nf][,];
+        for (int fi = 0; fi < nf; fi++) per[fi] = w.Block(outerIndex * nf + fi);
+        return per;
+    }
+
+    /// <summary>
+    /// <c>wsp_loadpull_margin(wsp, idxS, idxL, idx, gammaS, gammaL [, Z0 = 50])</c> — the 2024
+    /// stability margin of the re-terminated circuit at probe <c>idx</c>, over the two Γ grids
+    /// (R-wsp9-5). Returns Real <c>{…, gS, gL, freq, env}</c> with <c>env</c> labelled
+    /// <c>SM_Y0env</c>, <c>SM_H0env</c>, <c>SM</c> (their elementwise minimum).
+    ///
+    /// <para><c>wsp_loadpull_margin_env(...)</c>, same arguments, is the same walk COLLAPSED over
+    /// frequency: Real <c>{…, gS, gL, item}</c> labelled <c>SMenv</c>, <c>SMenvHz</c>,
+    /// <c>SM_Y0min</c>, <c>SM_Y0minHz</c>, <c>SM_H0min</c>, <c>SM_H0minHz</c>. <c>SMenv</c> — one
+    /// number per termination — is what [E] Fig. 6–9 plot against phase. It is a second function
+    /// for the reason <c>wsp_loadpull_unstable</c> is: one call returns one cube, and these two
+    /// answers have different RANKS.</para>
+    /// </summary>
+    private Value EvalLoadpullMargin(CallExpr cl, Scope scope, bool collapse)
+    {
+        Arity(cl, 6, 7);
+        var w   = WspArgAt(cl, scope, 0);
+        var idx = IdxArg(cl, scope, 3, w.Probes);
+        var a   = EnvelopeArgsOf(cl, scope, w, firstIdxArg: 1);
+
+        int nf = a.FreqAxis.Length, ns = a.GS.Length, nl = a.GL.Length;
+        var results = new WspLoadpullMarginResult[a.NOuter];
+        for (int o = 0; o < a.NOuter; o++)
+            results[o] = WspEnvelope.LoadpullMargin(
+                PerFreq(w, o, nf), a.FreqAxis.Values, a.IdxS, a.IdxL, idx, a.GS, a.GL, a.Z0);
+
+        if (!collapse)
+        {
+            var outv = new double[a.NOuter * ns * nl * nf * 3];
+            for (int o = 0; o < a.NOuter; o++)
+                for (int s = 0; s < ns; s++)
+                    for (int l = 0; l < nl; l++)
+                        for (int fi = 0; fi < nf; fi++)
+                        {
+                            int k = ((((o * ns + s) * nl + l) * nf) + fi) * 3;
+                            outv[k]     = results[o].SmY0[s, l, fi];
+                            outv[k + 1] = results[o].SmH0[s, l, fi];
+                            outv[k + 2] = results[o].Sm  [s, l, fi];
+                        }
+            var env = new Axis("env", [0.0, 1.0, 2.0], "", ["SM_Y0env", "SM_H0env", "SM"]);
+            return new Value(new DataCube([.. a.Outer, a.AxS, a.AxL, a.FreqAxis, env], outv));
+        }
+
+        string[] labels = ["SMenv", "SMenvHz", "SM_Y0min", "SM_Y0minHz", "SM_H0min", "SM_H0minHz"];
+        var flat = new double[a.NOuter * ns * nl * labels.Length];
+        for (int o = 0; o < a.NOuter; o++)
+            for (int s = 0; s < ns; s++)
+                for (int l = 0; l < nl; l++)
+                {
+                    int k = ((o * ns + s) * nl + l) * labels.Length;
+                    var r = results[o];
+                    flat[k]     = r.SmEnv    [s, l]; flat[k + 1] = r.SmEnvHz  [s, l];
+                    flat[k + 2] = r.SmY0Min  [s, l]; flat[k + 3] = r.SmY0MinHz[s, l];
+                    flat[k + 4] = r.SmH0Min  [s, l]; flat[k + 5] = r.SmH0MinHz[s, l];
+                }
+        var item = new Axis("item", [.. Enumerable.Range(0, labels.Length).Select(q => (double)q)], "", labels);
+        return new Value(new DataCube([.. a.Outer, a.AxS, a.AxL, item], flat));
+    }
+
+    /// <summary>
+    /// <c>wsp_loadpull_ndf(wsp, wsp_passive, idxS, idxL, probes, gammaS, gammaL [, Z0 = 50])</c> —
+    /// the NDF of the re-terminated circuit over the probe set, per grid point (R-wsp9-6). Returns
+    /// Complex <c>{…, gS, gL, freq}</c>. <c>wsp_loadpull_ndf_enc(...)</c>, same arguments, returns
+    /// the Real <c>{…, gS, gL}</c> net clockwise encirclement count — a separate function because a
+    /// cube is single-kind and these two answers are a Complex locus and a Real count.
+    ///
+    /// <para>Exact: both matrices are the exact <c>wsp</c> of the re-terminated network, so [E]'s
+    /// blue curves need no re-simulation per grid point. The document's own caveat (p. 112–113)
+    /// applies — this is the <b>reduced</b> NDF over the probed nodes, complete only if the probe
+    /// set covers every node that can hide a pole.</para>
+    /// </summary>
+    private Value EvalLoadpullNdf(CallExpr cl, Scope scope, bool collapse)
+    {
+        Arity(cl, 7, 8);
+        var w  = WspArgAt(cl, scope, 0);
+        var wp = WspArgAt(cl, scope, 1);
+        if (w.N != wp.N || w.Blocks != wp.Blocks)
+            throw new ExpressionException(
+                $"{cl.Name}: the two wsp cubes must come from the same probed circuit over the same sweep " +
+                $"({w.N}×{w.N} × {w.Blocks} blocks vs {wp.N}×{wp.N} × {wp.Blocks}).");
+        var probes = ProbeListArg(cl, scope, 4, w);
+        var a      = EnvelopeArgsOf(cl, scope, w, firstIdxArg: 2);
+
+        int nf = a.FreqAxis.Length, ns = a.GS.Length, nl = a.GL.Length;
+        var results = new WspLoadpullNdfResult[a.NOuter];
+        for (int o = 0; o < a.NOuter; o++)
+            results[o] = WspEnvelope.LoadpullNdf(
+                PerFreq(w, o, nf), PerFreq(wp, o, nf), a.FreqAxis.Values,
+                a.IdxS, a.IdxL, probes, a.GS, a.GL, a.Z0);
+
+        if (!collapse)
+        {
+            var outv = new Complex[a.NOuter * ns * nl * nf];
+            for (int o = 0; o < a.NOuter; o++)
+                for (int s = 0; s < ns; s++)
+                    for (int l = 0; l < nl; l++)
+                        for (int fi = 0; fi < nf; fi++)
+                            outv[(((o * ns + s) * nl + l) * nf) + fi] = results[o].Ndf[s, l, fi];
+            return new Value(new DataCube([.. a.Outer, a.AxS, a.AxL, a.FreqAxis], outv));
+        }
+
+        var enc = new double[a.NOuter * ns * nl];
+        for (int o = 0; o < a.NOuter; o++)
+            for (int s = 0; s < ns; s++)
+                for (int l = 0; l < nl; l++)
+                    enc[(o * ns + s) * nl + l] = results[o].Encirclements[s, l];
+        return new Value(new DataCube([.. a.Outer, a.AxS, a.AxL], enc));
+    }
+
 }

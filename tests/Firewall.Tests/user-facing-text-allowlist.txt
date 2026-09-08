@@ -759,3 +759,8 @@ src/RfCore/Stability/WspMatrix.cs|probe index {probes[k]} is listed twice.
 src/RfCore/Stability/WspMatrix.cs|probe index {probes[k]} is outside 1..{total} (the wsp matrix is 2N × 2N for N probes).
 src/RfCore/Stability/WspMatrix.cs|the matrix is singular.
 src/RfCore/Stability/WspMatrix.cs|the probe list is empty.
+
+# WSP-9 (2026-09-08) — the stability margin and its envelope. Both are shape refusals on a
+# derived-metric call, the series' own convention (see the WSP-2/WSP-3 blocks above).
+src/Core/Expressions/Evaluator.Wsp.cs|{cl.Name}: the two immittance cubes must have the same shape — {what} is 
+src/RfCore/Stability/WspEnvelope.cs|the active and passive runs must cover the same sweep ({nf} vs {wspPassive.Count} points).

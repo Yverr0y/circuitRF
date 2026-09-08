@@ -154,7 +154,23 @@ namespace RfCore.Export
     /// because it depends on the other probes, and a caller building <c>wsp(2·idx−1, 2·idx)</c>
     /// from a guess would read the wrong probe's block in silence.
     /// </summary>
-    public sealed record WsProbeJson(string Label, int Idx);
+    /// <param name="SmY0Min">The smallest <c>SM_Y0</c> over the sweep, LINEAR — dB is a display
+    /// convention (<c>20·log10</c>) and a JSON document carries the number, not its rendering.
+    /// Null when the run reported no margin for this probe.</param>
+    /// <param name="SmY0MinHz">The frequency at which <paramref name="SmY0Min"/> sits, Hz.</param>
+    /// <param name="SmH0Min">The smallest <c>SM_H0</c> over the sweep, linear.</param>
+    /// <param name="SmH0MinHz">The frequency at which <paramref name="SmH0Min"/> sits, Hz.</param>
+    public sealed record WsProbeJson(
+        string Label,
+        int    Idx,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        double? SmY0Min = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        double? SmY0MinHz = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        double? SmH0Min = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        double? SmH0MinHz = null);
 
     // ── the shape of a result, without its values (R-aut9-10) ────────────────
 
@@ -359,7 +375,12 @@ namespace RfCore.Export
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         int?                  Ports = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        IReadOnlyList<ExplainWsProbeJson>? WsProbes = null);
+        IReadOnlyList<ExplainWsProbeJson>? WsProbes = null,
+        /// <summary>The effective <c>MarginThreshold=</c> in dB, or the string <c>"none"</c> when
+        /// the margin report is disabled (WSP-9 R-wsp9-4). Reported for the kinds that read it —
+        /// <c>sparam</c> and <c>hb</c> — because the default is not visible in the document.</summary>
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string?               MarginThreshold = null);
 
     /// <summary>
     /// One WSProbe as <c>explain --analysis</c> reports it for an S-parameter analysis

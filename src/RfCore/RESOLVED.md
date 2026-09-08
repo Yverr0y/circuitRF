@@ -755,3 +755,76 @@ closed form and prints the other.
   on the wrapper file.
 - The pair residual `wsp_yparam2_residual` and the side-explicit `wsp_bifurcate` are the only names
   here the document does not have; both carry the `wsp_` prefix so a reader finds them beside the rest.
+
+## WSP-9 — the stability margin (2026-09-08)
+
+`src/RfCore/Stability/WspMargin.cs`: the four bounded proxies of [M] §II and the two margins
+`SM_Y0`/`SM_H0` (M-Eq. 9/10), plus `WspEnvelope.LoadpullMargin`/`LoadpullNdf` — [E]'s envelope, as
+post-processing over WSP-3's rank-1 re-termination. Design note: `docs/design/stability-wsprobe.md`
+§9. Findings, in the order they cost time:
+
+### The paper's third case must be tested FIRST, and the boundary cases are conventions
+
+[M] prints `rY`'s `Re ZG + Re ZL ≤ 0 ⇒ 0` case last, after the two magnitude branches. Taken in that
+order it is unreachable: at `Re ZG = 5`, `Re ZL = −10` the magnitude branch answers 0.25 where
+Kurokawa's real-part condition holds and the margin must be 0. The sum is tested first (`ProxyReal`),
+and the gate asserts both values so the ordering cannot be "simplified" back.
+
+Three more the paper leaves open, all conventions and all gated (typo register T-18): equal
+magnitudes agree on both branches so `≥` is not a choice; **both parts exactly zero returns 0.5**,
+because the function is genuinely discontinuous at the origin (the limit is 1 along
+`Im ZL = Im ZG → 0`, 0 along `Im ZL = −Im ZG → 0`, 0.5 along either axis) and 0.5 is what one purely
+resistive side gives; and NaN propagates, so a degenerate node reads NaN and never a 0 that would be
+read as an instability.
+
+### The both-parts-zero convention makes a resistive side read a FLAT margin — twice
+
+The consequence of that convention is bigger than it looks, and it surfaced twice.
+
+- **WSP-1's own resonator cannot be the margin's fixture.** There the probe sits at the Term, so
+  `Im ZL = 0` at every frequency, `iY ≡ 0.5`, and `SM_Y0` is **flat at 0.375** for `R1 = −5 Ω` — no
+  resonance at all. `testdata/wsprobe/margin_split_resonator{,_neg20}.cnl` splits the reactance
+  across the probe instead, and the engine then matches the closed form to 2.5e-16 over 2001 points.
+- **The same thing happens at two points of every Γ circle.** On the margin envelope over
+  `|Γ| = 0.9` the pulled termination is purely resistive at `θ = 0°` and `θ = 180°`, so `SMenv`
+  floors at exactly `0.25` = −12.04 dB there instead of collapsing — one grid point of 24 on the
+  arc the closed form says is unstable. The brief's "below −40 dB on the arc" holds on the other 23,
+  and the gate exempts the resistive point by TESTING `Im ZS ≈ 0` rather than by widening a
+  tolerance.
+
+### "Below −40 dB" is a claim about a SWEEP, not about a circuit
+
+On `series_resonator_term.cnl`'s own 251-point grid the shallowest reactive arc point reads
+−33.5 dB, because the notch there is narrower than the 10 MHz step and the sampled minimum misses
+the bottom. At 2001 points the same point reads −58.7 dB. The gate asserts −30 dB on the shipped
+grid, prints both numbers, and re-runs refined to pin the cause as resolution rather than
+arithmetic — the same sampling caveat `WspKurokawa.UnstableFrequencies` already carries.
+
+### [E]'s reduction, rebuilt from the circuit rather than transcribed
+
+E-Eq. 1–4 build a core 4-port from the `wsp` entries; the paper's own matrix layout is not held
+here, so the oracle was derived: with the suspect probe's branch OPEN the circuit is a 4-port (source
+node, load node, suspect-G, suspect-L), four stimuli the `wsp` matrix already carries drive it, and
+stacking the port voltages and currents gives `I_mᵀ = Y·V_mᵀ`, hence **`Y = (V_m⁻¹ I_m)ᵀ`** — which
+is E-Eq. 4 including its transpose, arrived at independently. The two bookkeeping corrections are
+the ones WSP-3 §6 already needed (`vL = vP + vS` under the probe's own series stimulus; the branch
+current leaves port 3 and enters port 4). Measured against the rank-1 `wsp_terminate`: **2.7e-15**
+relative on all six quantities. **E-Eq. 11 as printed is off by 1.17 relative** (T-16 held by a test,
+not a note), and the un-transposed matrix differs from the core `Y` by 0.086 (D-9).
+
+### Two functions, not one, wherever the answers differ in rank or kind
+
+`wsp_loadpull_margin` returns the frequency-resolved margins; `wsp_loadpull_margin_env` returns
+`SMenv` — the minimum over frequency, the number [E] Fig. 6–9 plot against phase. `wsp_loadpull_ndf`
+returns a Complex locus; `wsp_loadpull_ndf_enc` returns a Real encirclement count. One call returns
+one cube, and a cube has one rank and one kind, so the brief's "returns A, B and C" is two names
+each — the split `wsp_loadpull_unstable` already is from `wsp_loadpull`.
+
+### The retirement of D-12's placeholders
+
+Removed: `wsp_nZ`, `wsp_nY`, `WspNodal.NormalizedLocusSeries`/`NormalizedLocusShunt`,
+`WspNodal.StabilityMargin`'s refusal, `MarginNotTranscribedKey`/`Message`, their allowlist line,
+their tests, and the docs rows. `wsp_stability_margin` answers with `min(SM_Y0, SM_H0)`. A
+comment-stripped source scan of `src/` plus a plain scan of `docs/design/` is the gate — which is
+why the design note's own §9.8 describes the retirement without printing the spellings, and this is
+the one place they are still written down.

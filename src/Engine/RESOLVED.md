@@ -1653,3 +1653,45 @@ physics or the code overrode, and two observations worth the next reader's time:
   resolved control branch; adding `−Z0` to each port branch's diagonal keeps the numbering and turns the
   0 V drive into a termination. A port with `Z0 = 0` exactly is a refusal (`wsprobe.port-short`), never
   a large conductance.
+
+## WSP-9 — the margin cubes, the threshold, and what a load-pull envelope cannot see (2026-09-08)
+
+- **Two more default cubes per probe**, `SM_Y0:<label>` and `SM_H0:<label>`, computed by
+  `WspMargin.Of` on the SAME `WspProbeQuad` the six existing defaults come from — one implementation,
+  so a run's cube and the built-in over the run's `wsp` cube are bit-identical (overview D-2, gated).
+- **`MarginThreshold=` had to reach the engine through `AnalysisSettings`**, because
+  `SParameterEngine.Run` takes a netlist and never sees the `SParameterAnalysis`. Three call sites map
+  it in (the CLI's `sparam`, `SchematicRunService`, `ParametricSweepEngine.RunSParam`); the sweep does
+  it PER POINT, since the threshold belongs to the inner analysis and not to whatever settings the
+  sweep was started with. `AnalysisSettings` is a plain class with ~25 init-only properties, so the
+  copy is an explicit `WithMarginThreshold` over `MemberwiseClone` rather than a `with` expression —
+  making it a record to gain `with` would change its equality from reference to structural for every
+  existing holder, which is a far larger change than the one knob being set.
+- **The diagnostic is an Info NOTE, not a warning** (`AddNoteOnce`,
+  `wsprobe.margin-below-threshold:<label>`). The −5 Ω split resonator is stable and fires it by
+  design: a node one negative-resistance step from oscillating genuinely has little margin, so the
+  message is "look here". A probe whose margin is NaN throughout (a degenerate node) never fires it —
+  that probe already has its own diagnostic.
+- **`MarginThreshold` had to be carried by three formats, not one.** `CnlReader`/`CnlWriter` (the
+  standing check of `src/Core/CLAUDE.md` — a field the writer cannot say is silently absent from
+  every GUI run, which writes a netlist and reads it back), the `.csch` DTO in
+  `src/Design/Schematic/AnalysisSerialization.cs`, and the multi-segment merge in `CnlReader`, which
+  REBUILDS the analysis: a second `type=sparam` line for the same name would otherwise reset the key
+  to its default in silence. The default is not written out, so a document that never mentioned it
+  round-trips byte-identically.
+
+### A source/load stability envelope is structurally blind to an odd-mode instability
+
+Measured on `testdata/wsprobe/ohtomo_type_a.cnl`, a redrawn Ohtomo Type-A (two devices in parallel,
+balancing resistor `Rb` across the gates). At `Rb = 30 Ω` it is stable at 50 Ω; at `Rb = 100 Ω` the
+odd mode starts up at 6.090 GHz and `SM_Y0` at the gate probe reads **−53.1 dB** there on the
+fixture's own 991-point grid (−80.5 dB at 1,981 points — the notch is narrower than the step). **No
+termination at `ρ = 0.9` on either side reaches it** — the odd mode sees both ports as virtual
+grounds, which is Ohtomo's own thesis and the reason such an amplifier needs `Rb` rather than a
+better match. An instability a VSWR sweep can expose has to live in a port-coupled path, so a
+margin envelope that finds nothing is not evidence a circuit is stable.
+
+The same fixture also demonstrates the document's p. 112–113 caveat rather than quoting it: the
+reduced NDF over the S/G/L probe set reads **zero** encirclements at that start-up, and adding a
+fourth probe on the *other* gate — nothing else changed — makes the same NDF read **2**. The odd mode
+is differential across the two gates and only one carried a probe.

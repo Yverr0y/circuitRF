@@ -29,7 +29,7 @@ and it is gated by the same firewall test. That is what the `em` verb (§8) runs
 
 | Verb | Input | Runs | Writes |
 |---|---|---|---|
-| `sparam` | `.cnl` or `.csch` | `SParameterEngine` | Touchstone `.sNp` by default; `-o`'s extension picks the format (`.sNp`, or `.npy`/`.mat`/`.txt` for the cubes). With a `WSProbe` in the netlist it also prints one line per probe (`WSProbe GATE idx=1 H0(f_lo)=… ZG(f_lo)=…`), evaluates the bench's `measure` lines, carries `wsprobes: [{label, idx}]` in `--json`, and — a probe with no port being legal — refuses a Touchstone of a run that has no `S`, naming the cube spellings (`docs/design/stability-wsprobe.md` §3) |
+| `sparam` | `.cnl` or `.csch` | `SParameterEngine` | Touchstone `.sNp` by default; `-o`'s extension picks the format (`.sNp`, or `.npy`/`.mat`/`.txt` for the cubes). With a `WSProbe` in the netlist it also prints one line per probe (`WSProbe GATE idx=1 H0(f_lo)=… ZG(f_lo)=… SM_Y0 min −18.1 dB @ 1.5913 GHz SM_H0 min −19.8 dB @ 1.7337 GHz` — each stability margin's minimum over the sweep and its frequency, in dB), evaluates the bench's `measure` lines, carries `wsprobes: [{label, idx, smY0Min, smY0MinHz, smH0Min, smH0MinHz}]` in `--json` (**linear**, because dB is a display convention and a document carries the number), reports a probe whose margin falls below the analysis line's `MarginThreshold=` (default −15 dB, `MarginThreshold=none` disables) as an Info diagnostic, and — a probe with no port being legal — refuses a Touchstone of a run that has no `S`, naming the cube spellings (`docs/design/stability-wsprobe.md` §3, §9) |
 | `dc` | `.cnl` or `.csch` | `NonlinearDcEngine` | node voltages + probe currents to stdout |
 | `hb` | `.cnl` or `.csch` | `HbEngine` (single- or multi-tone) | stdout tables; `-o .mat/.npy/.txt` |
 | `lp` | `.cnl` or `.csch` | `LoadpullEngine` + `LoadpullPostProcessor` | stdout grid table; `-o .mat/.npy/.txt/.spl/.lpcwave` |
@@ -661,7 +661,10 @@ as a step: what was being resolved, from where, to what, and by which rule.
   on different workspaces; that is deliberate (§8.1) and is exactly the thing a caller cannot
   otherwise see.
 - **`--analysis`** — every declared chain, whether it is runnable, which one would dispatch and for
-  which verb, and whether a named inner analysis would be **promoted** to its wrapper (§4). Chain
+  which verb, and whether a named inner analysis would be **promoted** to its wrapper (§4). For a
+  kind that reads one, it also prints the effective **`MarginThreshold`** in dB, or the word `none`
+  — the WSProbe stability-margin report threshold (`stability-wsprobe.md` §9.4). The default is not
+  written in the document, so it is reported rather than left to be assumed. Chain
   selection goes through `ChainSelector`, the same function the run verbs select with, so the report
   and the run cannot part company. A named analysis that comes back from selection but is not of that
   verb's kind is **not** reported as dispatched: `SelectTop` hands back `owner ?? named`, so

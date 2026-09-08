@@ -431,7 +431,11 @@ public static class ParametricSweepEngine
         // after RunInner has returned — so every chunk runs the same circuit this point is about.
         // A short inner grid falls back to serial on its own, which is what an outer sweep over a
         // handful of frequencies gets.
-        return SParameterEngine.Run(netlist, lib, tb, baseDirectory, freqs, settings, control);
+        // The margin threshold is the INNER analysis' own key, so it is applied per point rather
+        // than left on whatever settings the sweep was started with (WSP-9 R-wsp9-3).
+        var withMargin = (settings ?? AnalysisSettings.Default)
+            .WithMarginThreshold(Analysis.ParseMarginThresholdDb(spa.MarginThresholdExpr));
+        return SParameterEngine.Run(netlist, lib, tb, baseDirectory, freqs, withMargin, control);
     }
 
     private static DataSet RunDc(

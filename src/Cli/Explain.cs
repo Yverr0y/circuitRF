@@ -590,10 +590,29 @@ internal static class Explain
                 SweepOf(a),
                 unresolved.Count > 0 ? unresolved : null,
                 Ports:    isSparam ? ports : null,
-                WsProbes: isSparam ? wsProbes : null));
+                WsProbes: isSparam ? wsProbes : null,
+                MarginThreshold: MarginThresholdOf(a)));
         }
 
         return (rows, exit);
+    }
+
+    /// <summary>R-wsp9-4: the effective <c>MarginThreshold=</c> of an analysis that reads one, as
+    /// the number in dB or the word <c>none</c>. Null for a kind that has no such key, so the field
+    /// is absent rather than reported as a default nothing consults.</summary>
+    private static string? MarginThresholdOf(Analysis a)
+    {
+        string? expr = a switch
+        {
+            SParameterAnalysis sp      => sp.MarginThresholdExpr,
+            HarmonicBalanceAnalysis hb => hb.MarginThresholdExpr,
+            _                          => null,
+        };
+        if (expr is null) return null;
+        var db = Analysis.ParseMarginThresholdDb(expr);
+        return db is null
+            ? Analysis.MarginThresholdNone
+            : db.Value.ToString("G6", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static string NetName(ElaboratedNetlist nl, int node)
@@ -922,6 +941,13 @@ internal static class Explain
                     foreach (var w in probes)
                         Console.WriteLine($"      WSProbe {w.Label} idx={w.Idx}  G={w.G}  L={w.L}");
                 }
+
+                // R-wsp9-4: the effective margin threshold beside the probe list. The default is
+                // not written in the document, so it is reported rather than left to be assumed.
+                if (a.MarginThreshold is { } mt)
+                    Console.WriteLine(mt == "none"
+                        ? "      MarginThreshold: none (the stability-margin report is off)"
+                        : $"      MarginThreshold: {mt} dB");
             }
         }
     }

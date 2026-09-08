@@ -274,8 +274,10 @@ network-parameter paths accept it), or a scalar-per-frequency cube (`{…, freq}
 | `wsp_zop`, `wsp_yop` | Eq. 89, 90 (E.16) | `{…, freq}` Ω, S |
 | `wsp_loopgain(Y, kind [, Z0])` | Eq. 92, 97, 99–104 | `{…, freq}` |
 | `wsp_nodal_gamma(wsp, idx)` | E.7 | `{…, freq}` |
-| `wsp_nZ(wsp, idx)`, `wsp_nY(wsp, idx)` | circuitRF's own, §5.6 | `{…, freq}` |
-| `wsp_stability_margin(wsp, idx)` | — | **refused**, §5.6 |
+| `wsp_rY`, `wsp_iY`, `wsp_rH`, `wsp_iH` | M-rY … M-iH (§9) | `{…, freq}` Real, `[0, 1]` |
+| `wsp_SM_Y0(wsp, idx)`, `wsp_SM_H0(wsp, idx)` | M-Eq. 9, 10 (§9) | `{…, freq}` Real, `[0, 1]` |
+| `wsp_stability_margin(wsp, idx)` | `min(SM_Y0, SM_H0)` (§9) | `{…, freq}` Real |
+| `wsp_sm_z(ZG, ZL)`, `wsp_sm_y(YG, YL)` | M-Eq. 9, 10 over any pair (§9) | same shape as its arguments, Real |
 | `wsp_unstable_freq_kurokawa(T)` | Eq. 107/108 (E.12) | `{n}` Hz, possibly empty |
 | `encirculations(SP)`, `enc(SP)` | E.3 | `{…, freq}` Real, the running count |
 | `_dB(M)` | E.2 | `10·log10\|M\|` |
@@ -358,28 +360,7 @@ frequencies has no shape once there is more than one sweep point.
 the net count is the last value rounded. The minus makes a **clockwise** encirclement positive,
 which is the sign NDF and the Nyquist argument want (§8).
 
-### 5.6 What is circuitRF's own, and what is refused
-
-`wsp_stability_margin` is **registered and refused** (overview D-12) with
-`wsprobe.margin-not-transcribed` and the paper's DOI: the definition of T. A. Winslow, "A Novel
-Stability Margin for Transfer Functions", EuMIC 2024 (DOI 10.23919/EuMIC61603.2024.10732614) is not
-in the public abstract and **is not guessed**. The name and the Data Display slot exist so that the
-day the paper arrives the body replaces the refusal and nothing that referenced it is renamed.
-
-What ships in the meantime, under circuitRF's own name and labelled as such, are the two ingredients
-the abstract names — unitless, bounded proxies for the driving-point loci:
-
-```
-circuitRF normalized driving-point locus (series):  nZ = (ZG + ZL)/(|ZG| + |ZL|) = (1/Y0)/(|ZG|+|ZL|)
-circuitRF normalized driving-point locus (shunt):   nY = (YG + YL)/(|YG| + |YL|) = (1/H0)/(|YG|+|YL|)
-```
-
-Both are unitless with `|n| ≤ 1`. Kurokawa's three conditions are invariant under division by a
-positive real, so the search reports the **same frequencies** on `nZ` as on `Y0` and on `nY` as on
-`H0` — a gate, and the reason these are safe to offer beside the raw loci. Their doc-comments and
-Data Display descriptions carry the sentence **"not the published margin"**.
-
-### 5.7 Deliberate deviations from the document
+### 5.6 Deliberate deviations from the document
 
 - **Base SI, not pF/nH.** The document's `y_to_pc` returns picofarads (`1e12·…`) and `y_to_pl`
   nanohenries. circuitRF returns **farads and henries**. Every trace and every derived metric here
@@ -397,7 +378,7 @@ Data Display descriptions carry the sentence **"not the published margin"**.
   the Z0-override path's) rather than transcribing E.10's matrix expression. The transcription lives
   in the test, as the oracle, and nowhere else.
 
-### 5.8 Typo-register entries this half depends on
+### 5.7 Typo-register entries this half depends on
 
 - **T-6 — Eq. 100 sign.** The single-probe Hurst loop gain is printed `LG_H = −y21·y12/(y11·y22)`
   while the two-block Hurst form (Eq. 141/150) has no minus. The minus follows the convention of
@@ -409,7 +390,7 @@ Data Display descriptions carry the sentence **"not the published margin"**.
   denominator, and Eq. 198/200 agree. **The code is implemented**, and the gate asserts the answer
   is not 0 dB for exactly this reason. The document's `log` is `log10`.
 
-### 5.9 What `wsp_impedance` actually measures, and why the stimulus probe matters
+### 5.8 What `wsp_impedance` actually measures, and why the stimulus probe matters
 
 Off the diagonal the ratio is `V_j / iS_j` at the response probe. Whether that is the **load line**
 or a **one-port impedance** is decided by where the stimulus is, and the document's phrase "common
@@ -667,3 +648,223 @@ the load reactance detunes the resonator by up to a gigahertz and the closed for
 The `1/H0'` side also reports crossings at some loads, at frequencies of its own (at `θ = 130°`,
 0.6037 GHz beside `1/Y0'`'s 0.5906): the union is what the document's method takes, and the gate
 prints that side rather than asserting it.
+
+---
+
+## 9. The stability margin (WSP-9)
+
+The 2023 document's driving-point functions are the rigorous nodal stability metric, and they have
+**units**. Their absolute trajectory in the complex plane is set by the node's impedance level — two
+FETs of very different periphery tuned to the same Rollett `K` have loci differing by orders of
+magnitude — so `1/H0` on a polar chart gives a binary answer, a Kurokawa crossing or not, and no
+sense of *how close*. The published margin is the way out.
+
+> **[M]** T. A. Winslow, "A Novel Stability Margin for Transfer Functions," *Proc. 19th European
+> Microwave Integrated Circuits Conference (EuMIC)*, Paris, Sept. 2024, pp. 291–294,
+> DOI 10.23919/EuMIC61603.2024.10732614. Its equations are cited `(M-Eq. n)` and its four unnumbered
+> displays `(M-rY)`, `(M-iY)`, `(M-rH)`, `(M-iH)`.
+>
+> **[E]** T. A. Winslow, "Stability Envelope Using Nodal Transfer Functions," *Proc. 20th EuMIC*,
+> Utrecht, Sept. 2025, pp. 254–257, DOI 10.23919/EuMIC65284.2025.11233915. Cited `(E-Eq. n)`.
+
+### 9.1 The definitions
+
+Both driving-point functions are sums of bidirectional immittances — `1/H0 = YG + YL` (M-Eq. 1),
+`1/Y0 = ZG + ZL` (M-Eq. 2) — and Kurokawa's condition on each (M-Eq. 7, 8) is a statement about the
+**relative** size of the two halves: the real parts cancelling, the imaginary parts cancelling.
+Normalising each half against the other gives four bounded, unitless proxies:
+
+```
+rY = 0                                   if  Re ZG + Re ZL ≤ 0          (M-rY, third case — FIRST)
+   = ½ (1 + Re ZL / Re ZG)               if |Re ZG| ≥ |Re ZL|
+   = ½ (1 + Re ZG / Re ZL)               otherwise
+
+iY = ½ (1 + Im ZL / Im ZG)               if |Im ZG| ≥ |Im ZL|           (M-iY)
+   = ½ (1 + Im ZG / Im ZL)               otherwise
+
+rH, iH:  the same two functions over Re YG, Re YL and Im YG, Im YL      (M-rH, M-iH)
+
+SM_Y0 = ½ (rY + iY)                                                     (M-Eq. 9)
+SM_H0 = ½ (rH + iH)                                                     (M-Eq. 10)
+```
+
+Each proxy is in `[0, 1]`, so both margins are; the paper reads them in dB. `SM_Y0` is the margin on
+the **series** stimulus and `SM_H0` on the **shunt** one, and **both are required** ([M] §IV): a
+series-resonant instability is seen by one and a parallel-resonant one by the other, and "in rare
+exceptional circuits" one of them fails to detect. That is §4.10's pole masking in margin form, and
+§9.3 shows it on a circuit with one loop in it. `wsp_stability_margin` is their elementwise minimum.
+
+The library is `src/RfCore/Stability/WspMargin.cs`, called by the engine (the `SM_Y0:<label>` and
+`SM_H0:<label>` cubes) and by the built-ins through the same `WspMargin.Of`, so a run's cube and a
+trace card's function of the same probe are bit-identical (overview D-2).
+
+### 9.2 Conventions [M] leaves open — decided here, each held by a gate
+
+These are typo-register entry **T-18**. Every one of them is a convention, not a transcription.
+
+- **(a) The `≤ 0` case takes precedence.** [M] lists it third. With `Re ZG = 5`, `Re ZL = −10` the
+  magnitude branch alone gives `0.25`; the sum is `−5`, Kurokawa's real-part condition holds, and
+  the margin **must** be 0 there. The sum is tested first.
+- **(b) Equal magnitudes.** Both magnitude branches give the same value, so `≥` on the first branch
+  changes nothing.
+- **(c) Both parts exactly zero** is **0.5**. The function is genuinely discontinuous at the origin
+  (the limit is 1 along `Im ZL = Im ZG → 0`, 0 along `Im ZL = −Im ZG → 0`, 0.5 along either axis), so
+  any value is a convention; 0.5 is what one purely resistive side gives and is continuous with it.
+- **(d) NaN propagates.** A degenerate node (`wsprobe.degenerate-node`) gets a NaN margin, never a 0
+  that reads as an instability.
+- **(e) dB is `20·log10`** (overview D-16). The margin is a unitless ratio bounded by 1 and the Data
+  Display applies `20·log10` to every unitless magnitude, so the ordinary `dB(...)` is the one to
+  use and no `_dB` variant is added. [M] §IV's rule of thumb — investigate any sudden decrease below
+  **−15 dB** — is **0.178** linear under this convention (it would be 0.032 under `10·log10`, and
+  both numbers are printed so no reader is misled silently).
+- **(f) Kurokawa's third condition is not in the margin.** `∂Im/∂ω > 0` is what separates a start-up
+  from a benign crossing; the margin measures distance to the first two only.
+  `wsp_unstable_freq_kurokawa` stays the *detector* and the margin is the *distance*, and every
+  place one is reported the other is beside it.
+
+### 9.3 What the numbers mean
+
+Properties the definition guarantees, all gated:
+
+- **Unitless in the sense that matters:** scaling `ZG` and `ZL` by the same positive real leaves
+  `SM_Y0` unchanged. That is the cross-node comparability [M] §I wants.
+- **`SM_Y0 = 1` iff `ZL = ZG` with `Re > 0`.** A **conjugate match is not the top of the scale**:
+  `ZL = conj(ZG)` gives `rY = 1`, `iY = 0`, `SM_Y0 = 0.5 = −6.02 dB`. A designer who expects a
+  matched node to read 0 dB will read −6 dB as a problem, so this sentence belongs in the user docs.
+- **The −12 dB floor.** If `Re ZG > 0` and `Re ZL > 0` then `rY ∈ (0.5, 1]` and `SM_Y0 ≥ 0.25`
+  (−12.04 dB). Contrapositive, and the interpretive rule: **a margin below −12 dB certifies that one
+  side of the node presents negative resistance at that frequency.**
+- **`SM_Y0 = 0` iff `Re(ZG + ZL) ≤ 0` and `Im ZL = −Im ZG`** — the two static Kurokawa conditions on
+  `1/Y0`. At a frequency the search reports, `rY` is 0 exactly and `iY → 0` as the grid refines.
+- `SM_Y0` and `SM_H0` are **not** functions of each other, even with zero feedback.
+
+**The fixture that shows a resonance splits the reactance across the probe.** WSP-1's own resonator
+puts the probe at the Term, so `ZG` is purely real, `Im ZG = 0`, and `iY ≡ 0.5` by (c): the margin is
+**flat** (0.375 for `R1 = −5 Ω`) and shows no resonance at all. That is the definition, not a defect
+— the proxy normalises one reactance *by the other*, and a resistive side has none to offer, so **a
+probe against a purely resistive termination reads the resonance on the other side's margin only**.
+`testdata/wsprobe/margin_split_resonator.cnl` splits it:
+
+```
+Term RS = 10 Ω ── L1 = 1 nH ──[ WSProbe, G left ]── C1 = 10 pF ── R1 ── ground
+ZG = RS + jωL1      ZL = R1 − j/(ωC1)      f0 = 1/(2π√(L1C1)) = 1.5915 GHz
+```
+
+On its 0.5–3 GHz, 2001-point grid (measured; the engine matches the closed form to 2.5e-16):
+
+| `R1` | `rY` | `SM_Y0` min | `SM_H0` min | `Re(YG + YL) ≤ 0` |
+|---|---|---|---|---|
+| −5 Ω (stable at 10 Ω) | 0.25 | 0.12509 (−18.06 dB) at 1.5913 GHz | 0.10175 (−19.85 dB) at 1.7337 GHz | 1.7337–3.0 GHz |
+| −20 Ω (unstable) | 0 | 9.4e-5 (−80.53 dB) at 1.5913 GHz | 0.15852 (−16.00 dB) at 1.8600 GHz | 1.8613–3.0 GHz |
+
+Three things to read off. The `SM_Y0` notch sits at `f0` and its depth is set by `rY`, the
+negative-resistance ratio; at −20 Ω it is `½·iY` exactly and reaches the grid's own resolution of
+zero. `SM_H0`'s minimum is at a **different** frequency — the one where `Re(YG + YL)` changes sign,
+although the impedance sum is positive everywhere for −5 Ω — which is the pole masking, visible on
+one loop. And the **stable** −5 Ω case already sits below [M]'s −15 dB rule at `f0`: a node one
+negative-resistance step from oscillating *has* little margin, and the threshold message fires on it
+by design.
+
+### 9.4 What the engine and the verbs report
+
+- **Two more default cubes per probe**, beside the six of §2.2: `SM_Y0:<label>` and `SM_H0:<label>`,
+  Real over `{freq}`, from `WspMargin.Of` on the same `WspProbeQuad`. `SP1.SM_Y0("GATE")` resolves
+  like `SP1.H0("GATE")`, and a parametric sweep stacks them as it stacks `H0`.
+- **The run summary** (`circuitrf sparam`, and the GUI's own line) appends each margin's minimum over
+  the sweep and its frequency, in dB. `--json`'s `wsprobes[]` rows gain `smY0Min`, `smY0MinHz`,
+  `smH0Min`, `smH0MinHz` — **linear**, because dB is a display convention and a document carries the
+  number.
+- **`MarginThreshold=<dB>` on the analysis line** (default **−15**, [M]'s own rule;
+  `MarginThreshold=none` disables) produces one **Info** note per probe whose `min(SM_Y0, SM_H0)`
+  falls below it, `wsprobe.margin-below-threshold:<label>`. It is a note and not a warning because
+  the −5 Ω resonator above is stable and fires it: the message is "look here", not "this is wrong".
+  `explain --analysis` lists the effective value beside the probe list, since the default is not
+  written in the document; `check` says nothing new, because the margin is a run result and not a
+  document property.
+
+### 9.5 The envelope: margin and NDF under mismatch, with no re-simulation
+
+[E]'s thesis is that the margin swept over source and load VSWR is a stability envelope that tracks
+the NDF and is more informative than it, because the NDF is binary and the margin is a distance.
+WSP-3's rank-1 re-termination already gives the **complete** `wsp'` of the mismatched circuit, so
+both halves of that comparison are post-processing:
+
+| Function | Returns |
+|---|---|
+| `wsp_loadpull_margin(wsp, idxS, idxL, idx, gammaS, gammaL [, Z0])` | Real `{…, gS, gL, freq, env}`, `env` = `SM_Y0env`, `SM_H0env`, `SM` |
+| `wsp_loadpull_margin_env(…)` | Real `{…, gS, gL, item}` — `SMenv`, `SMenvHz`, `SM_Y0min`, `SM_Y0minHz`, `SM_H0min`, `SM_H0minHz` |
+| `wsp_loadpull_ndf(wsp, wsp_passive, idxS, idxL, probes, gammaS, gammaL [, Z0])` | Complex `{…, gS, gL, freq}` |
+| `wsp_loadpull_ndf_enc(…)` | Real `{…, gS, gL}`, the net clockwise encirclement count |
+
+**Each pair is two functions rather than one for a reason that is not style.** One call returns one
+cube; a cube is single-kind and has one rank. `SMenv` — the one number per termination [E]'s Fig. 6–9
+plot against phase — is a *minimum over frequency*, so it cannot share a cube with the
+frequency-resolved margins; and an NDF locus is Complex while its encirclement count is Real. This
+is the same split `wsp_loadpull_unstable` already is from `wsp_loadpull`.
+
+The immittances the margin is taken of are `Z^R_G`, `Z^R_L`, `Y^R_G`, `Y^R_L` of E-Eq. 11/12, **with
+T-16's correction**: E-Eq. 11 as printed swaps the G and L numerators (the same swap as T-4), and the
+gate asserts the printed form disagrees by O(1) rather than leaving that as a note.
+
+`wsp_loadpull_ndf` applies the same terminations to the active and the passivated matrix and takes
+the determinant ratio — exact, because both are the exact `wsp` of the re-terminated network.
+[E] re-ran a full NDF sweep per grid point; circuitRF does not have to. **The document's own caveat
+applies** (p. 112–113): this is the *reduced* NDF over the probed nodes, complete only if the probe
+set covers every node that can hide a pole. §9.7 shows what that costs when it is not.
+
+### 9.6 [E]'s reduction is the independent oracle for the rank-1 update
+
+E-Eq. 1–12 are implemented **in the test project only**, as a second derivation of WSP-3 §6's result
+from the other side. With the suspect probe's branch OPEN the circuit is a 4-port — port 1 the source
+probe's node, port 2 the load probe's node, ports 3 and 4 the suspect probe's two terminals — and
+four stimuli the `wsp` matrix already carries drive it. Stacking the port voltages and currents as
+`V_m` and `I_m` gives `I_mᵀ = Y·V_mᵀ`, hence `Y = (V_m⁻¹ I_m)ᵀ` (E-Eq. 4) — **the transpose is
+required**, which is overview D-9 arriving independently. E-Eq. 5 swaps the terminations on the
+diagonal exactly as Eq. 191 does, E-Eq. 6–8 reduce onto the suspect probe's two terminals (the two
+terminated ports carry no external current, so [E]'s `d_ij/D` cofactor spelling is the Schur
+complement), and E-Eq. 9–12 read the six quantities off the resulting 2×2 `R`, which is the reduced
+**admittance** two-port at the probe.
+
+Measured on the non-reciprocal two-stage amplifier at `ΓS = 0.5∠60°`, `ΓL = 0.3∠−120°`: the two
+routes agree to **2.7e-15** relative on all six quantities; **E-Eq. 11 as printed is off by 1.17
+relative** (T-16); and the un-transposed `V_m⁻¹ I_m` differs from the core `Y` by 0.086 (D-9).
+
+### 9.7 What the envelope can and cannot see — Ohtomo's Type-A
+
+`testdata/wsprobe/ohtomo_type_a.cnl` is the two-device parallel amplifier of M. Ohtomo, *IEEE Trans.
+MTT* vol. 41 no. 6/7, 1993 — the topology [E] sweeps — redrawn with circuitRF's own element values
+(overview D-15), probed S / G / L, with the balancing resistor `Rb` across the two gates. Measured:
+
+- At nominal 50 Ω with `Rb = 30 Ω`, the Kurokawa search finds nothing at the suspect probe, the
+  reduced NDF makes no encirclement, and `SM_Y0` bottoms out at −13.30 dB at 6.92 GHz.
+- **`Rb` is load-bearing.** Raising it to 100 Ω — weakening the odd-mode damping and changing nothing
+  else — makes the search report a start-up at **6.090 GHz**, and `SM_Y0` reads **−53.1 dB** there
+  on the fixture's own 991-point grid (−80.5 dB at 1,981 points: the notch is narrower than the step,
+  the same sampling caveat §9.3 carries).
+  That is §9.2(f)'s two halves, the detector and the distance, on one circuit.
+- **The reduced NDF over the S/G/L probe set reads zero encirclements at that start-up**, and adding
+  a fourth probe on the *other* gate — nothing else changed — makes the same NDF read 2. The odd mode
+  is differential across the two gates and only one carried a probe; this is the document's p. 112–113
+  caveat, demonstrated rather than quoted.
+- **No termination at `ρ = 0.9` on either side reaches it**, and the margin envelope moves by only
+  ~20 dB across the circle. That is not a defect in the envelope: **the odd mode sees both ports as
+  virtual grounds, so a source/load stability envelope is structurally blind to it** — which is
+  Ohtomo's own thesis and the reason a Type-A amplifier needs `Rb` rather than a better match. An
+  instability a VSWR sweep can expose has to live in a port-coupled path.
+
+The line values of [E] Fig. 4 and the eleven FET element values of [E] Fig. 5 are not held here, so
+this circuit is the same *topology* with different elements and its numbers were never going to be
+[E]'s. The ρ ladder is measured and printed by the gate rather than asserted.
+
+### 9.8 What was retired
+
+Overview D-12 promised that the published margin would replace circuitRF's own normalised
+driving-point loci the day it arrived. It has. The two placeholder built-ins, their library
+functions, the margin's own refusal and its diagnostic key are **gone**, along with their tests and
+the docs rows that described them. Two normalised stability quantities beside each other — one
+Winslow's, one ours — is exactly the confusion the notation rule of §1 exists to prevent, and the
+loci carried nothing the `1/H0`, `1/Y0` polar traces and the margin do not carry between them.
+
+**A source scan of `src/` and `docs/design/` for the retired spellings is a gate**, which is why
+this section does not print them; `src/RfCore/RESOLVED.md` names them once, for anyone reading a
+diff that still contains them.

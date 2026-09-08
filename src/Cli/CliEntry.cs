@@ -30,6 +30,7 @@
 
 using System.Linq;
 using System.Numerics;
+using System.Text;
 using CircuitRF.Core.Design;
 using CircuitRF.Core.Devices.External;
 using CircuitRF.Core.Elaboration;
@@ -266,7 +267,14 @@ static int RunSparam(string[] args)
                 $"{start/1e9:G4}–{stop/1e9:G4} GHz");
         }
 
-        var ds  = SParameterEngine.Run(nl, lib, tb, baseDirectory: null, freqs, control: RunHost.Control);
+        // R-wsp9-3: MarginThreshold= is a property of the DIRECTIVE, and the engine reads it off
+        // the settings, so it has to be mapped in here — a run with no typed analysis (--freq alone)
+        // keeps the default.
+        var settings = spa is null
+            ? null
+            : AnalysisSettings.Default.WithMarginThreshold(
+                  Analysis.ParseMarginThresholdDb(spa.MarginThresholdExpr));
+        var ds  = SParameterEngine.Run(nl, lib, tb, baseDirectory: null, freqs, settings, control: RunHost.Control);
 
         // AGAIN, AFTER THE RUN — the engine reports what it finds while assembling and solving, long
         // after the pass above. Without this a real problem is written to nl.Warnings and printed by
@@ -1760,12 +1768,46 @@ static void PrintWsProbes(DataSet ds, ElaboratedNetlist nl, double[] freqs)
     {
         var h0 = (Complex)ds[$"H0:{probe.Label}"][0];
         var zg = (Complex)ds[$"ZG:{probe.Label}"][0];
-        Console.WriteLine(
+        var line = new StringBuilder(
             $"WSProbe {probe.Label} idx={probe.Idx}  H0({freqs[0] / 1e9:G4} GHz)={FormatComplex(h0)}  " +
             $"ZG({freqs[0] / 1e9:G4} GHz)={FormatComplex(zg)}");
-        rows.Add(new WsProbeJson(probe.Label, probe.Idx));
+
+        // R-wsp9-2: each margin's minimum over the sweep and where it sits. In dB on the line
+        // (20·log10, overview D-16) and LINEAR in --json, because dB is a display convention and a
+        // document carries the number.
+        var (yMin, yHz) = MarginMinimum(ds, $"SM_Y0:{probe.Label}", freqs);
+        var (hMin, hHz) = MarginMinimum(ds, $"SM_H0:{probe.Label}", freqs);
+        if (yMin is not null) line.Append($"  SM_Y0 min {MarginDb(yMin.Value)} @ {yHz!.Value / 1e9:G6} GHz");
+        if (hMin is not null) line.Append($"  SM_H0 min {MarginDb(hMin.Value)} @ {hHz!.Value / 1e9:G6} GHz");
+        Console.WriteLine(line.ToString());
+
+        rows.Add(new WsProbeJson(probe.Label, probe.Idx, yMin, yHz, hMin, hHz));
     }
     JsonRun.Wsprobes = rows;
+}
+
+/// <summary>The smallest non-NaN value of a margin cube and the frequency it sits at, or two nulls
+/// when the run carried no such cube (or every point is NaN — a degenerate probe).</summary>
+static (double? Min, double? Hz) MarginMinimum(DataSet ds, string cube, double[] freqs)
+{
+    if (!ds.Contains(cube)) return (null, null);
+    var v = ds[cube].RealValues;
+    int best = -1;
+    for (int k = 0; k < v.Length && k < freqs.Length; k++)
+    {
+        if (double.IsNaN(v[k])) continue;
+        if (best < 0 || v[k] < v[best]) best = k;
+    }
+    return best < 0 ? (null, null) : (v[best], freqs[best]);
+}
+
+/// <summary>A margin in dB for the summary line: <c>20·log10</c> (overview D-16), with a
+/// typographic minus so it reads as the paper prints it.</summary>
+static string MarginDb(double linear)
+{
+    if (linear <= 0.0) return "\u2212inf dB";
+    string s = $"{20.0 * Math.Log10(linear):F1}";
+    return (s.StartsWith('-') ? "\u2212" + s[1..] : s) + " dB";
 }
 
 static string FormatComplex(Complex z)

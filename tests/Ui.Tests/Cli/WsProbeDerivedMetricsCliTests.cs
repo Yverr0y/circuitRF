@@ -43,7 +43,7 @@ public sealed class WsProbeDerivedMetricsCliTests(ITestOutputHelper output) : ID
     [
         "h0", "y0", "zg", "zl", "yg", "yl", "zop", "yop",
         "lgbi", "lguni", "lgfor", "lgrev", "lghst", "lgmb", "lgmbr", "lggft", "lggftr",
-        "ngam", "nz", "ny", "zrem", "zrems", "zmp", "zms",
+        "ngam", "zrem", "zrems", "zmp", "zms",
     ];
 
     /// <summary>Every measurement that is a Real cube over frequency alone.</summary>
@@ -51,6 +51,9 @@ public sealed class WsProbeDerivedMetricsCliTests(ITestOutputHelper output) : ID
     [
         "encl", "encf", "lgdb", "gdb",
         "rp", "cp", "lp", "rs", "cs", "ls", "zrp", "zcp", "zlp", "zrs", "zcs", "zls",
+        // WSP-9: the margin family is unitless and REAL — four proxies, two margins, their
+        // minimum, the two pair primitives, and one in dB.
+        "rY", "iY", "rH", "iH", "smy", "smh", "sm", "smz", "smy2", "smdb",
     ];
 
     /// <summary>Every measurement that is a 2-port matrix over frequency.</summary>
@@ -180,12 +183,11 @@ public sealed class WsProbeDerivedMetricsCliTests(ITestOutputHelper output) : ID
     }
 
     /// <summary>
-    /// The two refusals a caller meets first: a probe label that is not there lists the ones that
-    /// are, and the published stability margin refuses with its DOI rather than answering with
-    /// something plausible (overview D-12).
+    /// The refusal a caller meets first: a probe label that is not there lists the ones that are.
+    /// Beside it, WSP-9 gate (j) — <c>wsp_stability_margin</c> now ANSWERS, with a Real cube.
     /// </summary>
     [Fact]
-    public void AMisspelledProbe_ListsTheProbes_AndTheStabilityMarginRefusesWithThePaper()
+    public void AMisspelledProbe_ListsTheProbes_AndTheStabilityMarginAnswers()
     {
         var (ds, _) = RunAndEvaluate();
         var (lib, _) = CnlReader.ReadFile(Fixture("derived_metrics.cnl"));
@@ -206,11 +208,6 @@ public sealed class WsProbeDerivedMetricsCliTests(ITestOutputHelper output) : ID
         Assert.Contains("P1", bad);
         Assert.Contains("P2", bad);
 
-        string margin = Evaluate("wsp_stability_margin(SP1.wsp, 1)");
-        Assert.Contains("wsprobe.margin-not-transcribed", margin);
-        Assert.Contains("10.23919/EuMIC61603.2024.10732614", margin);
-        Assert.Contains("wsp_nZ", margin);
-        output.WriteLine(margin);
 
         // A probe index outside the matrix names the legal range rather than reading past it.
         Assert.Contains("outside 1..2", Evaluate("wsp_ZG(SP1.wsp, 3)"));

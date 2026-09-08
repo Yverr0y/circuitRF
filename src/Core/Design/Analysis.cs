@@ -15,6 +15,36 @@ public abstract class Analysis(string name)
     public string Name    { get; } = name;
     /// <summary>When false, the analysis stays configured but is skipped at run time.</summary>
     public bool   Enabled { get; set; } = true;
+
+    // ── The WSProbe stability-margin threshold (WSP-9 R-wsp9-3) ──────────────
+
+    /// <summary>The default <c>MarginThreshold=</c>, in dB — [M] §IV's own rule of thumb.</summary>
+    public const string MarginThresholdDefault = "-15";
+
+    /// <summary>The spelling that turns the margin diagnostic off.</summary>
+    public const string MarginThresholdNone = "none";
+
+    /// <summary>
+    /// <c>MarginThreshold=</c> as the engine wants it: a threshold in dB, or <b>null</b> for
+    /// <c>none</c> — the spelling that disables the report.
+    ///
+    /// <para>Deliberately a plain number rather than an expression: it is a fixed reporting
+    /// threshold, not a swept quantity, and one that varied over a sweep would make the run's notes
+    /// depend on which point produced them. Anything unreadable falls back to the default rather
+    /// than failing the run, because a mistyped REPORTING threshold must never stop a simulation
+    /// from producing its result.</para>
+    /// </summary>
+    public static double? ParseMarginThresholdDb(string? expr)
+    {
+        string t = (expr ?? MarginThresholdDefault).Trim();
+        if (t.Length == 0) t = MarginThresholdDefault;
+        if (t.Equals(MarginThresholdNone, StringComparison.OrdinalIgnoreCase) ||
+            t.Equals("off",               StringComparison.OrdinalIgnoreCase))
+            return null;
+        return double.TryParse(t, NumberStyles.Float, CultureInfo.InvariantCulture, out double db)
+            ? db
+            : double.Parse(MarginThresholdDefault, CultureInfo.InvariantCulture);
+    }
 }
 
 public sealed class DcAnalysis(string name) : Analysis(name);
@@ -43,6 +73,13 @@ public sealed class SParameterAnalysis : Analysis
     // ── Backward-compat: single-segment via the old Freq property ─────────────
     /// <summary>Returns the first segment. Use <see cref="Sweeps"/> when there may be multiple.</summary>
     public FrequencySpec Freq => Sweeps[0];
+
+    /// <summary>
+    /// <c>MarginThreshold=</c> from the directive, verbatim — the WSProbe stability margin in dB
+    /// below which the run notes a probe as worth looking at, or <c>none</c> to disable the note
+    /// (WSP-9 R-wsp9-3). Read through <see cref="Analysis.ParseMarginThresholdDb"/>.
+    /// </summary>
+    public string MarginThresholdExpr { get; init; } = MarginThresholdDefault;
 
     // ── Whole-analysis expand: union all segments into one sorted/deduped array ─
     /// <summary>
@@ -101,6 +138,14 @@ public sealed class HarmonicBalanceAnalysis(string name) : Analysis(name)
     public string LambdaExpr        { get; init; } = "1";
     /// <summary>Max Newton iterations per HB solve before continuation backoff. Default 100.</summary>
     public string MaxIterExpr       { get; init; } = "100";
+    /// <summary>
+    /// <c>MarginThreshold=</c>, as on a <c>sparam</c> directive — the WSProbe stability margin in dB
+    /// below which the run notes a probe as worth looking at, or <c>none</c> to disable the note.
+    /// It is read over the small-signal (<c>ssfreq</c>) sweep of a probed HB run, which is WSP-5's
+    /// work; it is declared here so the key is spelled once and a document written today survives
+    /// the round trip when that lands.
+    /// </summary>
+    public string MarginThresholdExpr { get; init; } = MarginThresholdDefault;
 
     // Sweep fields — deprecated. Use ParametricSweepAnalysis to sweep HB.
     // Retained as init-only for .cnl back-compat read; the engine ignores them.

@@ -1,0 +1,20 @@
+; margin_split_resonator.cnl — brief-wsprobe-9 §3: the SPLIT series resonator, the fixture that
+; shows a resonance in the stability margin.
+;
+;   Term RS = 10 Ohm -- L1 = 1 nH --[ WSProbe P, G left ]-- C1 = 10 pF -- R1 -- ground
+;
+;   ZG = RS + jwL1        ZL = R1 - j/(wC1)        f0 = 1/(2 pi sqrt(L1 C1)) = 1.5915 GHz
+;   YG = 1/ZG, YL = 1/ZL  (a single loop has no feedback across the probe: Eq. 89)
+;
+; WSP-1's own resonator will NOT do here: there the probe sits at the Term, so ZG is purely real,
+; Im ZG = 0, and iY is 0.5 at every frequency by the both-parts-zero convention — the margin is
+; FLAT. Splitting the reactance across the probe is what makes the notch appear, and the two
+; margins then collapse at DIFFERENT frequencies, which is §4.10's pole masking in margin form.
+;
+; R1 = -5 Ohm: stable at 10 Ohm (R1 + RS > 0), rY = 0.25 constant, SM_Y0 notches to -18.06 dB at f0.
+Term:T1     nS 0   Num=1 Z=10 Ohm
+L:L1        nS nG  L=1 nH
+WSProbe:P   nG nL
+C:C1        nL n2  C=10 pF
+R:R1        n2 0   R=-5 Ohm
+analysis SP1 type=sparam start=0.5 stop=3 npts=2001 Unit=GHz

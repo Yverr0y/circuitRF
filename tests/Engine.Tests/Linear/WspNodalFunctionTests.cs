@@ -195,62 +195,6 @@ public sealed class WspNodalFunctionTests(ITestOutputHelper output)
         Assert.Empty(WspKurokawa.UnstableFrequencies(ds["H0:P"].ComplexValues, freqs));
     }
 
-    /// <summary>
-    /// R-wsp2-14(i): circuitRF's own normalised driving-point loci divide the raw locus by a
-    /// POSITIVE REAL, and Kurokawa's three conditions are invariant under that — so the search
-    /// reports exactly the same frequencies on <c>nZ</c> as on <c>Y0</c> and on <c>nY</c> as on
-    /// <c>H0</c>, on the document's own resonators. That invariance is the whole reason these are
-    /// safe to offer beside the raw loci, and <c>|n| ≤ 1</c> is what makes them comparable across
-    /// nodes. They are <b>not</b> the published margin (overview D-12).
-    /// </summary>
-    [Theory]
-    [InlineData("series_resonator.cnl")]
-    [InlineData("parallel_resonator.cnl")]
-    public void I_TheNormalizedLoci_AreBoundedAndCarryTheSameStartUpSignature(string fixture)
-    {
-        var (ds, freqs) = RunFixture(fixture);
-
-        var nz = new Complex[freqs.Length];
-        var ny = new Complex[freqs.Length];
-        for (int fi = 0; fi < freqs.Length; fi++)
-        {
-            var q = WspProbeQuad.Of(Wsp(ds, fi), 1);
-            nz[fi] = WspNodal.NormalizedLocusSeries(q);
-            ny[fi] = WspNodal.NormalizedLocusShunt(WspReduction.YParam(q));
-            Assert.True(nz[fi].Magnitude <= 1.0 + 1e-12, $"|nZ| = {nz[fi].Magnitude:G6} at {freqs[fi] / 1e9:G6} GHz");
-            Assert.True(ny[fi].Magnitude <= 1.0 + 1e-12, $"|nY| = {ny[fi].Magnitude:G6} at {freqs[fi] / 1e9:G6} GHz");
-        }
-
-        // The search forms g = 1/T, so the locus itself is passed as 1/n.
-        static Complex[] Recip(Complex[] v) => [.. v.Select(z => Complex.One / z)];
-
-        // The SAME crossings, not the same doubles. Dividing by a positive real cannot move a zero
-        // of Im(g), so the exact answers coincide; what differs is where a LINEAR interpolation
-        // between two samples puts it, because the normaliser |ZG| + |ZL| is not constant across
-        // the interval. Measured on this fixture: 12 Hz on a 10 MHz grid — a millionth of a step,
-        // four orders below anything the sweep resolves. Asserting bit equality here would be
-        // asserting a property of the interpolator, not of the loci.
-        double step = freqs[1] - freqs[0];
-        foreach (var (raw, norm, what) in new (double[], double[], string)[]
-        {
-            (WspKurokawa.UnstableFrequencies(ds["Y0:P"].ComplexValues, freqs),
-             WspKurokawa.UnstableFrequencies(Recip(nz), freqs), "nZ vs Y0"),
-            (WspKurokawa.UnstableFrequencies(ds["H0:P"].ComplexValues, freqs),
-             WspKurokawa.UnstableFrequencies(Recip(ny), freqs), "nY vs H0"),
-        })
-        {
-            Assert.Equal(raw.Length, norm.Length);
-            for (int k = 0; k < raw.Length; k++)
-            {
-                double drift = Math.Abs(norm[k] - raw[k]) / step;
-                output.WriteLine($"{fixture} {what}: {raw[k] / 1e9:G9} vs {norm[k] / 1e9:G9} GHz " +
-                                 $"({drift:G3} of a sweep step)");
-                Assert.True(drift < 1e-4,
-                    $"{what}: the normalised locus moved the crossing by {drift:G3} of a sweep step.");
-            }
-        }
-    }
-
     // ══ (f) — the even-mode load line and the stage gain ═════════════════════
 
     /// <summary>

@@ -79,6 +79,9 @@ public sealed class CschAnalysis
     public string?   GuardHarmonicExpr { get; set; }
     public string?   LambdaExpr        { get; set; }
     public string?   MaxIterExpr       { get; set; }
+    /// <summary>The WSProbe stability-margin report threshold in dB, or "none" (WSP-9). Null /
+    /// absent → the default, so a file written before this key existed reads unchanged.</summary>
+    public string?   MarginThresholdExpr { get; set; }
     public string?   SweepVarName      { get; set; }
     public string?   SweepStartExpr    { get; set; }
     public string?   SweepStopExpr     { get; set; }
@@ -279,6 +282,8 @@ public static class AnalysisSerialization
             Name    = sp.Name,
             Enabled = sp.Enabled,
             Sweeps  = sp.Sweeps.Select(ToDto).ToList(),
+            MarginThresholdExpr = sp.MarginThresholdExpr != Analysis.MarginThresholdDefault
+                ? sp.MarginThresholdExpr : null,
         },
 
         HarmonicBalanceAnalysis hb => new CschAnalysis
@@ -299,6 +304,8 @@ public static class AnalysisSerialization
             GuardHarmonicExpr = hb.GuardHarmonicExpr,
             LambdaExpr        = hb.LambdaExpr,
             MaxIterExpr       = hb.MaxIterExpr,
+            MarginThresholdExpr = hb.MarginThresholdExpr != Analysis.MarginThresholdDefault
+                ? hb.MarginThresholdExpr : null,
 #pragma warning disable CS0618
             SweepVarName      = hb.SweepVarName,
             SweepStartExpr    = hb.SweepStartExpr,
@@ -419,7 +426,10 @@ public static class AnalysisSerialization
 
         "sp" when dto.Sweeps is { Count: > 0 } =>
             new SParameterAnalysis(dto.Name, dto.Sweeps.Select(FromDto).ToList())
-            { Enabled = dto.Enabled },
+            {
+                Enabled = dto.Enabled,
+                MarginThresholdExpr = dto.MarginThresholdExpr ?? Analysis.MarginThresholdDefault,
+            },
 
         "hb" => new HarmonicBalanceAnalysis(dto.Name)
         {
@@ -437,6 +447,7 @@ public static class AnalysisSerialization
             GuardHarmonicExpr = dto.GuardHarmonicExpr ?? "0",
             LambdaExpr        = dto.LambdaExpr        ?? "1",
             MaxIterExpr       = dto.MaxIterExpr        ?? "100",
+            MarginThresholdExpr = dto.MarginThresholdExpr ?? Analysis.MarginThresholdDefault,
 #pragma warning disable CS0618
             SweepVarName      = dto.SweepVarName,
             SweepStartExpr    = dto.SweepStartExpr,

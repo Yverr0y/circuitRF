@@ -311,4 +311,42 @@ public sealed class AnalysisSettings
     /// which stays bit-identical to the serial path at every degree.</para>
     /// </summary>
     public int MaxParallelism { get; init; } = 0;
+
+    // ── The WSProbe stability-margin threshold (WSP-9 R-wsp9-3) ─────────────────
+
+    /// <summary>
+    /// The stability margin, in dB, below which a run reports a WSProbe as worth looking at —
+    /// the <c>MarginThreshold=</c> key of a <c>sparam</c> directive. <b>null disables the
+    /// diagnostic</b> (<c>MarginThreshold=none</c>); the default is <b>−15 dB</b>, which is [M] §IV's
+    /// own rule of thumb ("find the root cause of any sudden decrease (below −15 dB)") and is
+    /// <c>0.178</c> linear under circuitRF's <c>20·log10</c> convention (overview D-16).
+    ///
+    /// <para>The diagnostic it produces is an <b>Info</b> note, not a warning
+    /// (<c>wsprobe.margin-below-threshold:&lt;label&gt;</c>): the −5 Ω split resonator of
+    /// brief-wsprobe-9 §3 is stable and fires it, because a node one negative-resistance step from
+    /// oscillating genuinely has little margin. The message is "look here", not "this is
+    /// wrong".</para>
+    /// </summary>
+    public double? WspMarginThresholdDb
+    {
+        get => _wspMarginThresholdDb;
+        init => _wspMarginThresholdDb = value;
+    }
+    private double? _wspMarginThresholdDb = -15.0;
+
+    /// <summary>
+    /// These settings with a different margin threshold — the one copy every caller that reads a
+    /// <c>MarginThreshold=</c> off a directive needs.
+    ///
+    /// <para>A method rather than a <c>with</c> expression because <see cref="AnalysisSettings"/> is
+    /// a plain class with ~25 init-only properties: making it a record to gain <c>with</c> would
+    /// change its equality from reference to structural for every existing holder, which is a much
+    /// larger change than the one knob being set here.</para>
+    /// </summary>
+    public AnalysisSettings WithMarginThreshold(double? thresholdDb)
+    {
+        var copy = (AnalysisSettings)MemberwiseClone();
+        copy._wspMarginThresholdDb = thresholdDb;
+        return copy;
+    }
 }

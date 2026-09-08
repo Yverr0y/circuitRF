@@ -1,0 +1,55 @@
+; ohtomo_type_a.cnl — a redrawn Type-A (two-device parallel) amplifier, the topology of
+; M. Ohtomo, "Stability Analysis and Numerical Simulation of Multidevice Amplifiers",
+; IEEE Trans. MTT vol. 41 no. 6/7, 1993, and the circuit the 2025 envelope paper sweeps.
+;
+; Two identical devices are driven in parallel from one input node and combined at one output
+; node. The EVEN mode is what the amplifier is for; the ODD mode — the two devices in antiphase —
+; sees the input and output nodes as virtual grounds and closes a loop through the two gates that
+; nothing in the matching network damps. Rb across the gates is the balancing resistor that damps
+; it, and it is the element the whole analysis is about: at Rb = 30 Ohm this circuit is stable at
+; 50 Ohm, and at Rb = 100 Ohm the odd mode starts up at 6.09 GHz. Because the odd mode sees both
+; ports as virtual grounds, NO source or load termination reaches it — which is why the fixture is
+; also the demonstration that a source/load stability ENVELOPE cannot see an odd-mode instability.
+;
+; Redrawn with circuitRF's own element values (overview D-15): no vendor kit, no part number,
+; no figure copied. The device is an eleven-element small-signal FET written out of primitives —
+; Rg, Ri, Cgs, Cgd, Cds, Rds, gm, and the gate/drain line inductances beside it — which is what
+; an eleven-element FET model is.
+;
+;   PS (idx 1) sits DIRECTLY at the source Term, G facing it — the envelope's source probe;
+;   PG (idx 2) is the suspect probe, in device 1's gate node, where the odd mode lives;
+;   PL (idx 3) sits directly at the load Term, L facing it — the envelope's load probe.
+; (idx is flattened netlist order, so it follows the order the three are WRITTEN below.)
+;
+; Passivating for the NDF is `G=0.40` -> `G=0` on both VCCS: the NDFgm pattern of WSP-6.
+Term:T1     p1 0    Num=1 Z=50 Ohm
+WSProbe:PS  p1 in
+L:LIN1  in g1    L=0.25 nH
+L:LIN2  in g2    L=0.25 nH
+R:RB    g1 g2    R=30 Ohm
+
+; ── device 1 ────────────────────────────────────────────────────────────────
+WSProbe:PG  g1 g1a
+R:RG1   g1a gi1  R=0.5 Ohm
+C:CGS1  gi1 s1   C=0.50 pF
+C:CGD1  gi1 d1   C=0.45 pF
+VCCS:M1 d1 s1  gi1 s1  G=0.40
+R:RDS1  d1 s1    R=1000 Ohm
+C:CDS1  d1 s1    C=0.08 pF
+L:LS1   s1 0     L=0.10 nH
+
+; ── device 2 ────────────────────────────────────────────────────────────────
+R:RG2   g2 gi2   R=0.5 Ohm
+C:CGS2  gi2 s2   C=0.50 pF
+C:CGD2  gi2 d2   C=0.45 pF
+VCCS:M2 d2 s2  gi2 s2  G=0.40
+R:RDS2  d2 s2    R=1000 Ohm
+C:CDS2  d2 s2    C=0.08 pF
+L:LS2   s2 0     L=0.10 nH
+
+; ── output combiner ─────────────────────────────────────────────────────────
+L:LO1   d1 out   L=0.40 nH
+L:LO2   d2 out   L=0.40 nH
+WSProbe:PL  out p2
+Term:T2     p2 0    Num=2 Z=50 Ohm
+analysis SP1 type=sparam start=0.2 stop=20 npts=991 Unit=GHz

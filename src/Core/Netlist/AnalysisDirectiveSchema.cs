@@ -108,6 +108,7 @@ public static class AnalysisDirectiveSchema
             new("stopUnit",  Default: "Hz",   Summary: "Unit for stop."),
             new("stepUnit",  Default: "Hz",   Summary: "Unit for step."),
             new("log",       Default: "false",Summary: "Logarithmic spacing. Also accepted as the bare word 'log'."),
+            new("MarginThreshold", Default: "-15", Summary: "WSProbe stability margin, in dB, below which the run reports a probe as worth looking at. 'none' disables the report."),
         ], BareWords: ["log"]),
 
         new("hb", ["harmonic_balance", "harmonicbalance"],
@@ -126,6 +127,7 @@ public static class AnalysisDirectiveSchema
             new("Lambda",     Default: "1",   Summary: "Newton damping factor."),
             new("MaxIter",    Default: "100", Summary: "Newton iteration cap."),
             new("Sweep",                      Summary: "DEPRECATED and ignored by the engine. Wrap the analysis in a parametric_sweep instead."),
+            new("MarginThreshold", Default: "-15", Summary: "WSProbe stability margin, in dB, below which the run reports a probe as worth looking at. 'none' disables the report. Read over the small-signal sweep of a probed HB run."),
         ], RequiredOneOf: [["Tone", "Tone[1]"]]),
 
         new("loadpull", ["lp"],

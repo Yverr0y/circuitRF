@@ -184,8 +184,18 @@ returns a `{n}` list of frequencies which is **empty** when none was sampled. `G
 
 `wsp_unstable_freq_kurokawa` and `enc` refuse swept data rather than guessing a shape for it; the
 refusal names `at(...)` as the way to pin the sweep first. A misspelled probe label lists the probes
-present, and `wsp_stability_margin` refuses with the paper's DOI rather than answering
-(`stability-wsprobe.md` §5.6).
+present.
+
+The six **stability-margin** metrics — `wsp_rY`, `wsp_iY`, `wsp_rH`, `wsp_iH`, `wsp_SM_Y0`,
+`wsp_SM_H0` — and `wsp_stability_margin` (their pairwise minimum) return **Real** `{…, freq}` cubes
+in `[0, 1]`; `wsp_sm_z(ZG, ZL)` / `wsp_sm_y(YG, YL)` take the margin of any two same-shaped
+immittance cubes, which is how a `Z_in` from a plain S-parameter source gets one. Read them in dB
+with the ordinary `dB(...)` — `20·log10`, so a conjugate-matched node reads −6 dB and a node with
+positive resistance on both sides never reads below −12 dB (`stability-wsprobe.md` §9).
+Under mismatch, `wsp_loadpull_margin` returns `{…, gS, gL, freq, env}` and
+`wsp_loadpull_margin_env` the collapsed `{…, gS, gL, item}`; `wsp_loadpull_ndf` returns the Complex
+NDF locus and `wsp_loadpull_ndf_enc` the Real encirclement count. The pairs are two functions rather
+than one because a cube is single-kind and the two answers of each pair differ in rank or kind.
 
 ## Current state (honest inventory)
 

@@ -337,6 +337,8 @@ public static class CnlWriter
         sb.Append($" GuardHarmonic={hb.GuardHarmonicExpr}");
         sb.Append($" Lambda={hb.LambdaExpr}");
         sb.Append($" MaxIter={hb.MaxIterExpr}");
+        if (hb.MarginThresholdExpr != Analysis.MarginThresholdDefault)
+            sb.Append($" MarginThreshold={hb.MarginThresholdExpr}");
 
 #pragma warning disable CS0618
         if (hb.SweepVarName is not null)
@@ -446,6 +448,10 @@ public static class CnlWriter
                 line.Append($" npts={f.NumPoints}");
             else
                 line.Append($" step=\"{f.StepExpr}\" stepUnit={f.StepUnit}");
+            // MarginThreshold belongs to the ANALYSIS, not to a segment, so it is written on the
+            // first line only — which is also what the reader's segment merge keeps (WSP-9).
+            if (lines.Length == 0 && sp.MarginThresholdExpr != Analysis.MarginThresholdDefault)
+                line.Append($" MarginThreshold={sp.MarginThresholdExpr}");
             if (lines.Length > 0) lines.Append('\n');
             lines.Append(line);
         }

@@ -30,7 +30,8 @@ public sealed partial class Evaluator
     {
         "wsp_yparam" or "wsp_zparam" or "wsp_H0" or "wsp_Y0" or "wsp_ZG" or "wsp_ZL" or
         "wsp_YG" or "wsp_YL" or "wsp_zop" or "wsp_yop" or "wsp_loopgain" or "wsp_nodal_gamma" or
-        "wsp_nZ" or "wsp_nY" or "wsp_stability_margin" or
+        "wsp_rY" or "wsp_iY" or "wsp_rH" or "wsp_iH" or "wsp_SM_Y0" or "wsp_SM_H0" or
+        "wsp_stability_margin" or "wsp_sm_z" or "wsp_sm_y" or
         "wsp_unstable_freq_kurokawa" or "encirculations" or "enc" or "_dB" or
         "wsp_zsrc" or "wsp_zprc" or "wsp_impedance" or "wsp_gain" or "GainDEFs" or
         "wsp_rc_renorm_s" or "wsp_zo_renorm_s" or
@@ -73,17 +74,17 @@ public sealed partial class Evaluator
             // ── The nodal conjugate reflection coefficient (E.7) ────────────
             case "wsp_nodal_gamma": return ScalarFromWsp(cl, scope, q => WspNodal.NodalGamma(q), "");
 
-            // ── circuitRF's normalised driving-point loci (overview D-12) ───
-            case "wsp_nZ": return ScalarFromWsp(cl, scope, q => WspNodal.NormalizedLocusSeries(q), "");
-            case "wsp_nY": return ScalarFromWsp(cl, scope,
-                                q => WspNodal.NormalizedLocusShunt(WspReduction.YParam(q)), "");
+            // ── The stability margin (M-rY … M-iH, M-Eq. 9, 10) ─────────────
+            case "wsp_rY": return RealFromWsp(cl, scope, q => WspMargin.Of(q).rY);
+            case "wsp_iY": return RealFromWsp(cl, scope, q => WspMargin.Of(q).iY);
+            case "wsp_rH": return RealFromWsp(cl, scope, q => WspMargin.Of(q).rH);
+            case "wsp_iH": return RealFromWsp(cl, scope, q => WspMargin.Of(q).iH);
+            case "wsp_SM_Y0": return RealFromWsp(cl, scope, q => WspMargin.Of(q).SmY0);
+            case "wsp_SM_H0": return RealFromWsp(cl, scope, q => WspMargin.Of(q).SmH0);
+            case "wsp_stability_margin": return RealFromWsp(cl, scope, q => WspMargin.Of(q).Sm);
 
-            case "wsp_stability_margin":
-                throw new ExpressionException(
-                    $"wsp_stability_margin: {WspNodal.MarginNotTranscribedKey}. " +
-                    WspNodal.MarginNotTranscribedMessage +
-                    " circuitRF's own unitless driving-point loci wsp_nZ and wsp_nY are available " +
-                    "in the meantime; they are not the published margin.");
+            case "wsp_sm_z": return EvalMarginOfPair(cl, scope, WspMargin.FromZ, "ZG", "ZL");
+            case "wsp_sm_y": return EvalMarginOfPair(cl, scope, WspMargin.FromY, "YG", "YL");
 
             case "wsp_loopgain":              return EvalWspLoopGain(cl, scope);
             case "wsp_unstable_freq_kurokawa": return EvalWspKurokawa(cl, scope);
@@ -213,6 +214,77 @@ public sealed partial class Evaluator
         for (int b = 0; b < blocks; b++)
             outv[b] = f(WspProbeQuad.Of(BlockAt(raw, b, n), idx));
         return LeadingCube(leading, outv, unit);
+    }
+
+    /// <summary><c>f(wsp, idx)</c> → one REAL value per frequency (and per sweep point) — the
+    /// shape every margin built-in returns, since all six of them are unitless numbers in
+    /// <c>[0, 1]</c> rather than immittances.</summary>
+    private Value RealFromWsp(CallExpr cl, Scope scope, Func<WspProbeQuad, double> f)
+    {
+        Arity(cl, 2, 2);
+        var cube = CubeArg(cl, scope, 0, "a wsp matrix cube ({…, freq, row, col})");
+        var (leading, n, raw) = MatrixCube(cube, cl.Name, "a wsp matrix");
+        int idx = IdxArg(cl, scope, 1, n / 2);
+
+        int blocks = raw.Length / (n * n);
+        var outv = new double[blocks];
+        for (int b = 0; b < blocks; b++)
+            outv[b] = f(WspProbeQuad.Of(BlockAt(raw, b, n), idx));
+        return LeadingCube(leading, outv, "");
+    }
+
+    /// <summary>
+    /// <c>wsp_sm_z(ZG, ZL)</c> / <c>wsp_sm_y(YG, YL)</c> — the margin of ANY two same-shaped
+    /// immittance cubes (M-Eq. 9, 10), which is what the per-probe built-ins above are written in
+    /// terms of.
+    ///
+    /// <para>They exist so the margin can be taken of a probe pair's in-situ blocks, of the
+    /// envelope's re-terminated immittances, or of a <c>Z_in</c> against a source impedance from a
+    /// plain S-parameter source in the Data Display — none of which is a <c>wsp</c> block. Either
+    /// argument may be a single number, which is then held against every point of the other.</para>
+    /// </summary>
+    private Value EvalMarginOfPair(
+        CallExpr cl, Scope scope,
+        Func<Complex, Complex, (double, double, double)> f, string gName, string lName)
+    {
+        Arity(cl, 2, 2);
+        var gv = EvalExpr(cl.Args[0], scope);
+        var lv = EvalExpr(cl.Args[1], scope);
+
+        if (gv.Kind != ValueKind.Cube && lv.Kind != ValueKind.Cube)
+            return new Value(f(gv.ToComplex(), lv.ToComplex()).Item3);
+
+        var shape = (gv.Kind == ValueKind.Cube ? gv : lv).AsCube();
+        var g = PairSide(cl, gv, shape, gName);
+        var l = PairSide(cl, lv, shape, lName);
+
+        var outv = new double[shape.BufferLength];
+        for (int k = 0; k < outv.Length; k++) outv[k] = f(g[k], l[k]).Item3;
+        return new Value(new DataCube([.. shape.Axes], outv));
+    }
+
+    /// <summary>One side of a margin pair as a flat complex array matching <paramref name="shape"/>
+    /// — a cube of the same shape, or a scalar broadcast over it. A cube of a DIFFERENT shape is an
+    /// error naming both axis lists, because <c>ZG</c> and <c>ZL</c> of one node are by construction
+    /// the same sweep and a silent truncation would pair the wrong frequencies.</summary>
+    private static Complex[] PairSide(CallExpr cl, Value v, DataCube shape, string what)
+    {
+        if (v.Kind != ValueKind.Cube)
+        {
+            var c = v.ToComplex();
+            var flat = new Complex[shape.BufferLength];
+            Array.Fill(flat, c);
+            return flat;
+        }
+        var cube = v.AsCube();
+        if (cube.Rank != shape.Rank || !cube.Axes.Select(a => a.Length).SequenceEqual(shape.Axes.Select(a => a.Length)))
+            throw new ExpressionException(
+                $"{cl.Name}: the two immittance cubes must have the same shape — {what} is " +
+                $"({string.Join(", ", cube.Axes.Select(a => $"{a.Name}[{a.Length}]"))}) against " +
+                $"({string.Join(", ", shape.Axes.Select(a => $"{a.Name}[{a.Length}]"))}). ZG and ZL of one " +
+                "node are the same sweep by construction; pairing two different ones would compare " +
+                "unrelated frequencies.");
+        return cube.ComplexValues;
     }
 
     /// <summary><c>f(wsp, idx)</c> → a 2×2 network per frequency, shaped exactly like the <c>S</c>

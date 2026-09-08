@@ -142,7 +142,8 @@ order. The full table — equations, arguments and return shapes — is in
 `docs/design/stability-wsprobe.md` §5.2; the names are
 
 `wsp_yparam`, `wsp_zparam`, `wsp_H0`, `wsp_Y0`, `wsp_ZG`, `wsp_ZL`, `wsp_YG`, `wsp_YL`, `wsp_zop`,
-`wsp_yop`, `wsp_loopgain`, `wsp_nodal_gamma`, `wsp_nZ`, `wsp_nY`, `wsp_stability_margin`,
+`wsp_yop`, `wsp_loopgain`, `wsp_nodal_gamma`, `wsp_rY`, `wsp_iY`, `wsp_rH`, `wsp_iH`, `wsp_SM_Y0`,
+`wsp_SM_H0`, `wsp_stability_margin`, `wsp_sm_z`, `wsp_sm_y`,
 `wsp_unstable_freq_kurokawa`, `encirculations`, `enc`, `_dB`, `wsp_zsrc`, `wsp_zprc`,
 `wsp_impedance`, `wsp_gain`, `GainDEFs`, `wsp_rc_renorm_s`, `wsp_zo_renorm_s`, and the twelve
 immittance conversions `z_to_pr/pc/pl/sr/sc/sl` and `y_to_pr/pc/pl/sr/sc/sl`.

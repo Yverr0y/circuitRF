@@ -82,7 +82,7 @@ public static class SParameterEngine
             prep.Mna.Factorizations + (prep.MnaTerminated?.Factorizations ?? 0),
             prep.BackSubstitutions,
             prep.Mna.PatternBuilds);
-        return (BuildDataSet(netlist, freqsHz, sMatrices, prep.Z0PerPort, prep.Probes, wsp), stats);
+        return (BuildDataSet(netlist, freqsHz, sMatrices, prep.Z0PerPort, prep.Probes, wsp, settings), stats);
     }
 
     // ── Frequency-parallel overload (SP-P3) ───────────────────────────────────
@@ -179,7 +179,7 @@ public static class SParameterEngine
             for (int i = 0; i < extras.Length; i++)
                 if (extras[i] is { } copy) netlist.MergeDiagnosticsFrom(copy);
 
-            return BuildDataSet(netlist, freqsHz, sMatrices, preps[0]!.Z0PerPort, preps[0]!.Probes, wsp);
+            return BuildDataSet(netlist, freqsHz, sMatrices, preps[0]!.Z0PerPort, preps[0]!.Probes, wsp, settings);
         }
         finally
         {
@@ -244,7 +244,8 @@ public static class SParameterEngine
         Mat<Complex>[]   sMatrices,
         Complex[]         z0PerPort,
         WspProbeSite[]    probes,
-        Complex[][,]?     wsp)
+        Complex[][,]?     wsp,
+        AnalysisSettings  settings)
     {
         DataSet ds;
         if (z0PerPort.Length > 0)
@@ -262,7 +263,7 @@ public static class SParameterEngine
             ds = new DataSet();
         }
 
-        if (wsp is not null) AddWspCubes(ds, netlist, freqsHz, probes, wsp);
+        if (wsp is not null) AddWspCubes(ds, netlist, freqsHz, probes, wsp, settings);
         return ds;
     }
 
@@ -277,7 +278,8 @@ public static class SParameterEngine
     /// every <c>__</c> cube.
     /// </summary>
     private static void AddWspCubes(
-        DataSet ds, ElaboratedNetlist netlist, double[] freqsHz, WspProbeSite[] probes, Complex[][,] wsp)
+        DataSet ds, ElaboratedNetlist netlist, double[] freqsHz, WspProbeSite[] probes, Complex[][,] wsp,
+        AnalysisSettings settings)
     {
         int nf = freqsHz.Length, m = probes.Length, size = 2 * m;
         var freqAxis = new Axis("freq", (double[])freqsHz.Clone(), "Hz");
@@ -303,11 +305,18 @@ public static class SParameterEngine
             var h0 = new Complex[nf]; var y0 = new Complex[nf];
             var zg = new Complex[nf]; var zl = new Complex[nf];
             var lg = new Complex[nf]; var f  = new Complex[nf];
+            // R-wsp9-1: the two margins beside the six defaults, through WspMargin.Of on the SAME
+            // quad — one implementation, so SM_Y0:<label> and wsp_SM_Y0(SP1.wsp, idx) are
+            // bit-identical (overview D-2).
+            var smY = new double[nf]; var smH = new double[nf];
             int firstDegenerate = -1;
             for (int fi = 0; fi < nf; fi++)
             {
-                var d = WspReduction.Defaults(WspProbeQuad.Of(wsp[fi], probe.Idx));
+                var q = WspProbeQuad.Of(wsp[fi], probe.Idx);
+                var d = WspReduction.Defaults(q);
                 h0[fi] = d.H0; y0[fi] = d.Y0; zg[fi] = d.ZG; zl[fi] = d.ZL; lg[fi] = d.LG; f[fi] = d.F;
+                var mg = WspMargin.Of(q);
+                smY[fi] = mg.SmY0; smH[fi] = mg.SmH0;
                 if (d.Degenerate && firstDegenerate < 0) firstDegenerate = fi;
             }
             if (firstDegenerate >= 0)
@@ -323,6 +332,10 @@ public static class SParameterEngine
             ds.Add($"ZL:{probe.Label}", new DataCube([freqAxis], zl) { Unit = "Ohm" });
             ds.Add($"LG:{probe.Label}", new DataCube([freqAxis], lg));
             ds.Add($"F:{probe.Label}",  new DataCube([freqAxis], f));
+            ds.Add($"SM_Y0:{probe.Label}", new DataCube([freqAxis], smY));
+            ds.Add($"SM_H0:{probe.Label}", new DataCube([freqAxis], smH));
+
+            ReportMarginThreshold(netlist, freqsHz, probe.Label, smY, smH, settings.WspMarginThresholdDb);
         }
 
         var pIdx   = new double[m];
@@ -344,6 +357,62 @@ public static class SParameterEngine
             [new Axis("probe", (double[])pIdx.Clone(), "", (string[])labels.Clone()),
              new Axis("side", [0.0, 1.0], "", ["G", "L"])],
             termZ) { Unit = "Ohm" });
+    }
+
+    /// <summary>
+    /// R-wsp9-3 — one <b>Info</b> note per probe whose <c>min(SM_Y0, SM_H0)</c> falls below
+    /// <paramref name="thresholdDb"/> over the sweep, keyed
+    /// <c>wsprobe.margin-below-threshold:&lt;label&gt;</c>. Silent when the threshold is null
+    /// (<c>MarginThreshold=none</c>) or nothing crossed it.
+    ///
+    /// <para><b>A note, not a warning.</b> The −5 Ω split resonator of brief-wsprobe-9 §3 is stable
+    /// and fires this by design: a node one negative-resistance step from oscillating genuinely has
+    /// little margin. It says "look here". A NaN margin (a degenerate node, overview D-7) never
+    /// fires it — that probe already has its own diagnostic.</para>
+    /// </summary>
+    private static void ReportMarginThreshold(
+        ElaboratedNetlist netlist, double[] freqsHz, string label,
+        double[] smY, double[] smH, double? thresholdDb)
+    {
+        if (thresholdDb is not { } dbLimit) return;
+
+        double limit = Math.Pow(10.0, dbLimit / 20.0);     // 20·log10 (overview D-16)
+        int    yi = ArgMin(smY), hi = ArgMin(smH);
+        if (yi < 0 && hi < 0) return;
+
+        double ym = yi < 0 ? double.PositiveInfinity : smY[yi];
+        double hm = hi < 0 ? double.PositiveInfinity : smH[hi];
+        if (Math.Min(ym, hm) >= limit) return;
+
+        netlist.AddNoteOnce($"wsprobe.margin-below-threshold:{label}",
+            $"WSProbe '{label}': stability margin below {Signed(dbLimit)} dB ({limit:G3}): " +
+            $"SM_Y0 = {Db(ym)} at {Ghz(freqsHz, yi)}, SM_H0 = {Db(hm)} at {Ghz(freqsHz, hi)}. " +
+            "A margin below \u221212 dB means one side of the node presents negative resistance there. " +
+            "Winslow (EuMIC 2024) \u00a7IV: find the root cause of any sudden decrease.");
+
+        static string Db(double v)
+            => double.IsPositiveInfinity(v) ? "n/a"
+             : v <= 0.0                     ? "\u2212inf dB"
+             : $"{Minus($"{20.0 * Math.Log10(v):F1}")} dB";
+
+        // A typographic minus, so the threshold and the margins read as the paper prints them.
+        static string Signed(double v) => Minus($"{v:G4}");
+
+        static string Minus(string s) => s.StartsWith('-') ? "\u2212" + s[1..] : s;
+
+        static string Ghz(double[] f, int i) => i < 0 ? "n/a" : $"{f[i] / 1e9:G6} GHz";
+    }
+
+    /// <summary>The index of the smallest non-NaN entry, or −1 when every entry is NaN.</summary>
+    private static int ArgMin(double[] v)
+    {
+        int best = -1;
+        for (int k = 0; k < v.Length; k++)
+        {
+            if (double.IsNaN(v[k])) continue;
+            if (best < 0 || v[k] < v[best]) best = k;
+        }
+        return best;
     }
 
     // ── Per-netlist setup ─────────────────────────────────────────────────────

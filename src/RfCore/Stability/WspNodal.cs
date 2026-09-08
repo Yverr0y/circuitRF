@@ -35,8 +35,13 @@ public enum WspLoopGainKind
 /// <summary>
 /// The single-probe nodal quantities of the reference document's function library — the
 /// bidirectional immittances (App. E.14), the open-port immittances (App. E.16), all eight loop
-/// gains (§4.6, §4.8), the nodal conjugate reflection coefficient (App. E.7), circuitRF's own
-/// normalised driving-point loci, and the slot reserved for the published stability margin.
+/// gains (§4.6, §4.8) and the nodal conjugate reflection coefficient (App. E.7).
+///
+/// <para>The published stability margin is <see cref="WspMargin"/>, and the normalised
+/// driving-point loci circuitRF shipped here as its placeholders are <b>gone</b>: overview D-12
+/// promised they would go the day the margin was published, and two normalised quantities beside
+/// each other — one Winslow's, one ours — is exactly the confusion the notation rule exists to
+/// prevent (brief-wsprobe-9 §7).</para>
 ///
 /// <para>Pure functions over <see cref="Complex"/> and the two reduced two-ports of
 /// <see cref="WspReduction"/>; nothing here touches a cube, a netlist or a solve (overview D-2).
@@ -276,66 +281,4 @@ public static class WspNodal
 
     /// <inheritdoc cref="NodalGamma(Complex, Complex)"/>
     public static Complex NodalGamma(in WspProbeQuad q) => NodalGamma(ZG(q), ZL(q));
-
-    // ── circuitRF's normalised driving-point loci (overview D-12) ───────────
-
-    /// <summary>
-    /// <b>circuitRF normalized driving-point locus (series)</b>:
-    /// <c>nZ = (ZG + ZL)/(|ZG| + |ZL|) = (1/Y0)/(|ZG| + |ZL|)</c>. Unitless, <c>|nZ| ≤ 1</c>.
-    ///
-    /// <para><b>This is not the published margin.</b> It is circuitRF's own, cited to
-    /// <c>docs/sonnet-briefs/brief-wsprobe-2-nodal-functions.md</c> §2.11 and to the abstract of
-    /// T. A. Winslow, "A Novel Stability Margin for Transfer Functions", EuMIC 2024
-    /// (DOI 10.23919/EuMIC61603.2024.10732614), whose definition is not public. What it offers is
-    /// the ingredient that abstract names: a unitless, bounded proxy for the driving-point locus
-    /// that can be compared across nodes. Kurokawa's three conditions are invariant under division
-    /// by a positive real, so <see cref="WspKurokawa"/> reports exactly the same frequencies on
-    /// <c>nZ</c> as on <c>Y0</c> — which is what makes it safe to offer beside the raw locus.</para>
-    /// </summary>
-    public static Complex NormalizedLocusSeries(Complex zg, Complex zl)
-    {
-        double d = zg.Magnitude + zl.Magnitude;
-        return d == 0.0 ? NaN : (zg + zl) / d;
-    }
-
-    /// <inheritdoc cref="NormalizedLocusSeries(Complex, Complex)"/>
-    public static Complex NormalizedLocusSeries(in WspProbeQuad q)
-        => NormalizedLocusSeries(ZG(q), ZL(q));
-
-    /// <summary>
-    /// <b>circuitRF normalized driving-point locus (shunt)</b>:
-    /// <c>nY = (YG + YL)/(|YG| + |YL|) = (1/H0)/(|YG| + |YL|)</c>. Unitless, <c>|nY| ≤ 1</c>.
-    /// <b>Not the published margin</b> — see <see cref="NormalizedLocusSeries(Complex, Complex)"/>.
-    /// Reports the same Kurokawa frequencies as <c>H0</c>.
-    /// </summary>
-    public static Complex NormalizedLocusShunt(Complex yg, Complex yl)
-    {
-        double d = yg.Magnitude + yl.Magnitude;
-        return d == 0.0 ? NaN : (yg + yl) / d;
-    }
-
-    /// <inheritdoc cref="NormalizedLocusShunt(Complex, Complex)"/>
-    public static Complex NormalizedLocusShunt(in WspTwoPortY y)
-        => NormalizedLocusShunt(YG(y), YL(y));
-
-    // ── The reserved margin (overview D-12) ────────────────────────────────
-
-    /// <summary>The diagnostic key <see cref="StabilityMargin"/> refuses with.</summary>
-    public const string MarginNotTranscribedKey = "wsprobe.margin-not-transcribed";
-
-    /// <summary>The sentence <see cref="StabilityMargin"/> refuses with.</summary>
-    public const string MarginNotTranscribedMessage =
-        "The stability margin of T. A. Winslow, 'A Novel Stability Margin for Transfer Functions', " +
-        "EuMIC 2024 (DOI 10.23919/EuMIC61603.2024.10732614) has not been transcribed into circuitRF; " +
-        "its definition is not in the public abstract.";
-
-    /// <summary>
-    /// The published stability margin — <b>registered and refused</b>, never guessed (overview
-    /// D-12). The name and the Data Display slot exist so that the day the paper is available the
-    /// body replaces this refusal and nothing that referenced it has to be renamed; the normalised
-    /// driving-point loci above are the inputs it will take.
-    /// </summary>
-    /// <exception cref="NotSupportedException">Always.</exception>
-    public static Complex StabilityMargin(in WspProbeQuad q)
-        => throw new NotSupportedException($"{MarginNotTranscribedKey}: {MarginNotTranscribedMessage}");
 }
