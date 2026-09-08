@@ -18,7 +18,7 @@ namespace CircuitRF.Design.Workspace;
 //
 // ── The per-user half lives elsewhere, since RC-1 ────────────────────────────
 // `CwsFile` is still the ONE shape callers hold, but five of its properties — DockLayout,
-// TreeViewState, OpenDocuments, ActiveDocumentPath and ColorSchemeName — are PERSISTED in a sibling
+// TreeViewState, HistoryFilter, OpenDocuments, ActiveDocumentPath and ColorSchemeName — are PERSISTED in a sibling
 // `.cwsuser` (see WorkspaceUserPersistence). They were ~98% of a real `.cws`, and none of them
 // describes the design: the file used to change on every session close for reasons that have nothing
 // to do with the project, which is wrong in an archive, wrong on a share, wrong in a read-only
@@ -130,6 +130,19 @@ public sealed class CwsFile
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public CwsTreeViewState? TreeViewState { get; set; }
+
+    /// <summary>
+    /// What the History panel's filter and search are set to, restored on open (RC-10 R-rc10-8).
+    /// Null means the default view — every entry somebody stated an intent for, with the
+    /// workspace-close entries hidden.
+    ///
+    /// <para><b>Persisted in the sibling <c>.cwsuser</c>, not in the <c>.cws</c></b> — see
+    /// <see cref="CwsUserFile"/>. It is view state, and deliberately not a Settings row: every row on
+    /// the Revision Control tab changes what is KEPT, and a filter a designer flips while hunting is
+    /// not a preference about what exists.</para>
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public CwsHistoryFilter? HistoryFilter { get; set; }
 
     /// <summary>
     /// Documents open in the main DocumentDock when the workspace was last saved.

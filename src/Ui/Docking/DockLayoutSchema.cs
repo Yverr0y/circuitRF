@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace CircuitRF.Ui.Docking;
@@ -289,36 +290,57 @@ public static class DockPanelIds
     public const string WBondInductance = "WBondInductance";
 
     /// <summary>
-    /// RC-5's restore points (<c>docs/design/revision-control.md</c> §5.1, R-rc5-4c).
+    /// RC-10's one history panel (<c>docs/design/revision-control.md</c> §5.10, R-rc10-1) — the
+    /// versions a designer kept AND the restore points circuitRF took, in one list with one filter.
     ///
-    /// <para><b>A dockable tool panel, because that is the application's own idiom for a place things
-    /// are listed</b> — it is where the Messages panel already lives, and rev 3 of the architecture
-    /// said checkpoints are "presented in the UI as restore points" without saying where. A boundary
-    /// with a test and no affordance is the gap that requirement was written for.</para>
+    /// <para><b>Named History, and deliberately not Versions.</b> That word has a precise meaning in
+    /// §5.2 — titled, permanent, travels with a copy — and it is the word that distinguishes the two
+    /// kinds of row. A panel in which everything is a version has no word left for the distinction,
+    /// and a designer who learns these are all versions and then finds half of them did not arrive
+    /// with a copy (§5.2a) has been told something false.</para>
     ///
-    /// <para>Absent from both shipped default layouts, deliberately: it is a safety net, looked at on
-    /// the days something went wrong, and a panel permanently occupying a strip of window for that
-    /// would be one most users close. It opens from View ▸ Panels and is then captured and restored
-    /// with every other panel.</para>
+    /// <para>Absent from both shipped default layouts, deliberately: it is looked at on the days
+    /// something went wrong, and a panel permanently occupying a strip of window for that is one most
+    /// users close. It opens from View ▸ Panels and is then captured and restored with every other
+    /// panel.</para>
     /// </summary>
-    public const string RestorePoints = "RestorePoints";
+    public const string History = "History";
 
     /// <summary>
-    /// RC-7's history browser — the versions a designer kept deliberately
-    /// (<c>docs/design/revision-control.md</c> §5.2, R-rc7-9).
+    /// <b>The two ids RC-10 retired, and they must keep resolving</b> (R-rc10-3).
     ///
-    /// <para><b>A panel of its own, beside <see cref="RestorePoints"/> and never merged with it.</b>
-    /// The two lists have different authors, different granularity and different audiences: this one
-    /// is what a designer wrote down on purpose and what gets shared; that one is the dense,
-    /// automatic, local safety net. Conflating them produces a log no human will read — which then
-    /// makes the safety net useless too, because nobody looks at it. They may sit side by side, and
-    /// the shipped layouts leave both closed for the reason the restore-point panel is closed.</para>
+    /// <para><c>RestorePoints</c> and <c>VersionHistory</c> are written into every <c>.cwsuser</c> in
+    /// existence. Both now resolve to <see cref="History"/>, and a layout that docked BOTH collapses to
+    /// one instance — not two tabs of the same panel, and not an empty pane. This is the one place the
+    /// merge can break a workspace somebody already has, and it is also the shape of every future panel
+    /// retirement: <see cref="DockLayoutRetirement"/> is where it is done, once, for the one builder
+    /// every arrangement in the application comes through.</para>
+    ///
+    /// <para><b>They are not in <see cref="All"/>.</b> Capture filters on that list, so a layout saved
+    /// after this build names only the merged panel and the mapping is needed for old files alone.</para>
     /// </summary>
+    public const string RestorePoints  = "RestorePoints";
     public const string VersionHistory = "VersionHistory";
 
     public static readonly string[] All =
     [
         ProjectTree, Palette, Properties, Analyses, Messages, Drc, WBondProfile, WBondInductance,
-        RestorePoints, VersionHistory,
+        History,
     ];
+
+    /// <summary>
+    /// <b>Retired ids and what they now resolve to</b> (R-rc10-3). Read by
+    /// <see cref="DockLayoutRetirement"/> and by <c>CircuitRfDockFactory</c>, so a menu command, a
+    /// toolbar toggle and a saved layout all agree without three copies of the mapping.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string> Retired =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [RestorePoints]  = History,
+            [VersionHistory] = History,
+        };
+
+    /// <summary>The id a caller's string actually names — itself, unless it is a retired one.</summary>
+    public static string Resolve(string? id)
+        => id is { Length: > 0 } && Retired.TryGetValue(id, out string? now) ? now : id ?? "";
 }

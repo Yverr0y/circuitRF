@@ -151,7 +151,8 @@ public class CommitAndHistoryTests
             // Exactly one entry names it, and the identifier in that entry is this commit's.
             var named = sink.Texts.Where(t => t.Contains("Its identity is", StringComparison.Ordinal)).ToList();
             Assert.Single(named);
-            Assert.Contains(kept.Version!.CommitId[..12], named[0], StringComparison.Ordinal);
+            // The WHOLE identity — one spelling everywhere it is shown, said, or copied.
+            Assert.Contains(kept.Version!.CommitId, named[0], StringComparison.Ordinal);
         }
     }
 
@@ -227,9 +228,10 @@ public class CommitAndHistoryTests
         // Nothing was written into their repository.
         Assert.Equal("", ws.Raw("rev-parse", "--verify", "--quiet", "HEAD").Out.Trim());
 
-        // The panel keeps its buttons and says why — R-rc6-8's shape, applied to the version list.
-        var tool = new VersionHistoryTool();
-        tool.SetRows([], hasWorkspace: true, recordingState: "History held");
+        // The panel keeps its actions and says why — R-rc6-8's shape. RE-POINTED at RC-10's merged
+        // panel rather than relaxed: what is asserted is unchanged.
+        var tool = new HistoryTool();
+        tool.SetRows(new HistoryList.Result([], 0), hasWorkspace: true, recordingState: "History held");
         Assert.True(tool.IsRecordingBlocked);
         Assert.Equal("History held", tool.RecordingState);
 
@@ -247,11 +249,15 @@ public class CommitAndHistoryTests
     /// <b>A checkpoint never appears in the version list, and a version never appears in the
     /// restore-point list.</b>
     ///
-    /// <para>They may sit side by side and must not interleave. Conflating them produces a log no
-    /// human will read — which then makes the safety net useless too, because nobody looks at it.
-    /// The separation is mechanical rather than a rendering choice: checkpoints live on references in
-    /// circuitRF's own namespace, versions on the line of work, and neither reader walks the
-    /// other.</para>
+    /// <para>The separation is mechanical rather than a rendering choice: checkpoints live on
+    /// references in circuitRF's own namespace, versions on the line of work, and neither reader walks
+    /// the other.</para>
+    ///
+    /// <para><b>NARROWED by RC-10, not withdrawn</b> (§5.10 rule 6, R-rc10-4). rev 6 merged the two
+    /// PANELS; it may not merge the two STORES, and the moment it does §5.2a's travel table stops
+    /// being true and §5.6's retention has a human-written commit in its scope. So this gate is now
+    /// about storage alone, and the presentation half — one list in which the two kinds stay visibly
+    /// distinct under one mark — is <c>OneHistoryPanelTests</c>' second gate.</para>
     /// </summary>
     [GitFact]
     public void CheckpointsAndVersionsAreSeparateLists()
@@ -322,9 +328,11 @@ public class CommitAndHistoryTests
         Assert.Contains("Recording was off", text, StringComparison.Ordinal);
         Assert.Contains("not in this history", text, StringComparison.Ordinal);
 
-        // And the browser row carries that sentence, so the panel cannot render it as a blank line.
-        var tool = new VersionHistoryTool();
-        tool.SetRows(rows, hasWorkspace: true);
+        // And the panel row carries that sentence, so it cannot render as a blank line. RC-10
+        // R-rc10-11: the gap row survives the merge, and it is now the only row in the list that is
+        // neither kind of entry.
+        var tool = new HistoryTool();
+        tool.SetRows(HistoryList.Read(git, HistoryFilter.Default), hasWorkspace: true);
         Assert.Contains(tool.Rows, r => r.IsGap && r.GapText.Contains("Recording was off", StringComparison.Ordinal));
     }
 
@@ -735,7 +743,7 @@ public class CommitAndHistoryTests
         foreach (string path in (string[])
                  ["src/Ui/ViewModels/WorkspaceViewModel.Revision.cs",
                   "src/Ui/Revision/WorkspaceHistoryService.cs",
-                  "src/Ui/ViewModels/Dock/VersionHistoryTool.cs",
+                  "src/Ui/ViewModels/Dock/HistoryTool.cs",
                   "src/Cli/History.cs"])
         {
             string source = RestorePointsTests.StripComments(RestorePointsTests.ReadSource(path));
@@ -870,7 +878,7 @@ public class CommitAndHistoryTests
 
         yield return "src/Ui/Revision/WorkspaceHistoryService.cs";
         yield return "src/Ui/ViewModels/WorkspaceViewModel.Revision.cs";
-        yield return "src/Ui/ViewModels/Dock/VersionHistoryTool.cs";
+        yield return "src/Ui/ViewModels/Dock/HistoryTool.cs";
         yield return "src/Cli/History.cs";
     }
 
@@ -884,8 +892,8 @@ public class CommitAndHistoryTests
     {
         yield return "src/Design/Revision/HistoryMessages.cs";
         yield return "src/Design/Revision/CommitMessage.cs";
-        yield return "src/Ui/ViewModels/Dock/VersionHistoryTool.cs";
-        yield return "src/Ui/Views/Revision/VersionHistoryToolView.axaml";
+        yield return "src/Ui/ViewModels/Dock/HistoryTool.cs";
+        yield return "src/Ui/Views/Revision/HistoryToolView.axaml";
         yield return "src/Ui/Views/Dialogs/KeepThisVersionDialog.axaml";
         yield return "src/Ui/Views/Dialogs/KeepThisVersionDialog.axaml.cs";
     }

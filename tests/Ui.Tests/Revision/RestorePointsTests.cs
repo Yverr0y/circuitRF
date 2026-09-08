@@ -458,8 +458,10 @@ public class RestorePointsTests
     {
         // The panel has a home in the dock schema — which is what makes it captured and restored with
         // every other panel rather than a window that appears once.
-        Assert.Contains(DockPanelIds.RestorePoints, DockPanelIds.All);
-        Assert.Equal(DockPanelIds.RestorePoints, new RestorePointsTool().Id);
+        // RE-POINTED at RC-10's merged panel (§5.10). What is asserted is unchanged: the list has a
+        // home in the dock schema, which is what makes it captured and restored with every other panel.
+        Assert.Contains(DockPanelIds.History, DockPanelIds.All);
+        Assert.Equal(DockPanelIds.History, new HistoryTool().Id);
 
         // The save-point is a command, and it reaches the boundary.
         var command = typeof(WorkspaceViewModel).GetProperty("KeepThisStateCommand");
@@ -471,7 +473,7 @@ public class RestorePointsTests
         // And both are reachable from the menus a user reads.
         string menu = ReadSource("src/Ui/Views/WorkspaceWindow.axaml");
         Assert.Contains("KeepThisStateCommand", menu, StringComparison.Ordinal);
-        Assert.Contains("CommandParameter=\"RestorePoints\"", menu, StringComparison.Ordinal);
+        Assert.Contains("CommandParameter=\"History\"", menu, StringComparison.Ordinal);
     }
 
     // ── Gate 25: a kept restore point is marked ──────────────────────────────────────────────────

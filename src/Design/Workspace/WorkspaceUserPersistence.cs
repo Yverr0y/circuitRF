@@ -30,6 +30,29 @@ namespace CircuitRF.Design.Workspace;
 // A future field that must survive that deletion belongs in the `.cws`.
 
 /// <summary>
+/// The History panel's filter and search, as one person has them set (RC-10 R-rc10-8, §5.10 rule 4).
+///
+/// <para><b>Every field defaults to what the panel opens on</b>, so a file written before this existed
+/// — which is every one of them — restores the default view rather than an empty list. The one field
+/// that is false by default is the workspace-close entries, which is the whole of §5.10 rule 3.</para>
+///
+/// <para>The search term is carried too, and deliberately: a designer who was mid-hunt when the
+/// workspace closed is the one person who wants it back. It is emptied by the magnifier, which is the
+/// gesture that means "I have finished looking".</para>
+/// </summary>
+public sealed class CwsHistoryFilter
+{
+    public bool Versions   { get; set; } = true;
+    public bool SavePoints { get; set; } = true;
+    public bool AiBatches  { get; set; } = true;
+    public bool Automatic  { get; set; }
+    public bool TidiedAway { get; set; } = true;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Search { get; set; }
+}
+
+/// <summary>
 /// The per-user half of a workspace — everything that is a property of one person's session rather
 /// than of the project. Written beside the <c>.cws</c> as <c>.cwsuser</c>, the same no-stem
 /// convention the <c>.cws</c> already uses.
@@ -96,10 +119,26 @@ public sealed class CwsUserFile
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ColorSchemeName { get; set; }
 
+    /// <summary>
+    /// RC-10 R-rc10-8. <b>What the History panel's filter and search are set to.</b>
+    ///
+    /// <para><b>Here rather than on the Settings tab, and the distinction is not a filing
+    /// preference.</b> Every row of §10A's tab changes what is KEPT; a filter a designer flips while
+    /// hunting for something is not a preference about what exists, and putting it there is the
+    /// category error that tab is most exposed to. It is view state, like the tree's own category
+    /// flags two fields up, and it belongs in the file whose deletion is a supported repair.</para>
+    ///
+    /// <para>Null means the default view — every entry somebody stated an intent for, with the
+    /// workspace-close entries hidden — which is also what a workspace opened for the first time
+    /// shows.</para>
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public CwsHistoryFilter? HistoryFilter { get; set; }
+
     /// <summary>True when this carries nothing worth a file — the state in which no sidecar is written.</summary>
     internal bool IsEmpty =>
         DockLayout is null && TreeViewState is null && OpenDocuments is null &&
-        ActiveDocumentPath is null && ColorSchemeName is null;
+        ActiveDocumentPath is null && ColorSchemeName is null && HistoryFilter is null;
 }
 
 /// <summary>
@@ -122,7 +161,7 @@ public static class WorkspaceUserPersistence
     ///
     /// <para><b>The <c>.cws</c> is stripped at the JSON level, not by copying a typed object.</b>
     /// A round trip through a hand-written field list drops any field the list forgot — silently,
-    /// and only for the workspaces of whoever hits it. Naming the five that LEAVE means a sixth
+    /// and only for the workspaces of whoever hits it. Naming the ones that LEAVE means the next
     /// field added to <see cref="CwsFile"/> keeps being written with no thought required, which is
     /// the direction the mistake should fall. Same reasoning as
     /// <c>WorkspaceArchiveWriter.RewriteCws</c>, which edits the parsed tree for the same reason.</para>
@@ -134,6 +173,7 @@ public static class WorkspaceUserPersistence
         // silently, which is the only way this list can go wrong.
         nameof(CwsFile.DockLayout),
         nameof(CwsFile.TreeViewState),
+        nameof(CwsFile.HistoryFilter),
         nameof(CwsFile.OpenDocuments),
         nameof(CwsFile.ActiveDocumentPath),
         nameof(CwsFile.ColorSchemeName),
@@ -144,6 +184,7 @@ public static class WorkspaceUserPersistence
     {
         DockLayout         = ws.DockLayout,
         TreeViewState      = ws.TreeViewState,
+        HistoryFilter      = ws.HistoryFilter,
         OpenDocuments      = ws.OpenDocuments,
         ActiveDocumentPath = ws.ActiveDocumentPath,
         ColorSchemeName    = ws.ColorSchemeName,
@@ -153,7 +194,7 @@ public static class WorkspaceUserPersistence
     /// Overlays a loaded sidecar onto the <c>.cws</c> half, giving callers the one merged
     /// <see cref="CwsFile"/> shape they already hold.
     ///
-    /// <para><b>The sidecar is authoritative for all five, including the ones it leaves null.</b>
+    /// <para><b>The sidecar is authoritative for all six, including the ones it leaves null.</b>
     /// Anything else would resurrect a stale copy left in an older <c>.cws</c> after the user had
     /// closed the tab it names.</para>
     /// </summary>
@@ -161,6 +202,7 @@ public static class WorkspaceUserPersistence
     {
         ws.DockLayout         = user.DockLayout;
         ws.TreeViewState      = user.TreeViewState;
+        ws.HistoryFilter      = user.HistoryFilter;
         ws.OpenDocuments      = user.OpenDocuments;
         ws.ActiveDocumentPath = user.ActiveDocumentPath;
         ws.ColorSchemeName    = user.ColorSchemeName;

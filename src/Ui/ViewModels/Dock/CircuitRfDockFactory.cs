@@ -81,12 +81,13 @@ public class CircuitRfDockFactory : Factory
     public PaletteTool?      PaletteTool      { get; private set; }
     public DrcTool?          DrcTool          { get; private set; }
 
-    /// <summary>RC-5's restore-point list (R-rc5-4c).</summary>
-    public RestorePointsTool? RestorePointsTool { get; private set; }
-
-    /// <summary>RC-7's version history — the narrative, which is never merged with the list above
-    /// (R-rc7-9).</summary>
-    public VersionHistoryTool? VersionHistoryTool { get; private set; }
+    /// <summary>
+    /// RC-10's one history panel (§5.10) — the versions and the restore points in one list.
+    /// <b>Replaces the two properties this factory carried before</b>, which is what makes "a layout
+    /// naming both retired ids collapses to one instance" true rather than aspirational: an id maps to
+    /// an INSTANCE here, so two surviving entries would put one dockable into two docks.
+    /// </summary>
+    public HistoryTool? HistoryTool { get; private set; }
 
     /// <summary>wbond.md §10.1 (WB39a/M3) — the two wBond panels, following the active layout.</summary>
     public WBondProfileTool?    WBondProfileTool    { get; private set; }
@@ -186,8 +187,7 @@ public class CircuitRfDockFactory : Factory
             PaletteTool     = new PaletteTool();
             MessagesTool    = new MessagesTool();
             DrcTool         = new DrcTool();
-            RestorePointsTool = new RestorePointsTool();
-            VersionHistoryTool = new VersionHistoryTool();
+            HistoryTool = new HistoryTool();
             WBondProfileTool    = new WBondProfileTool();
             WBondInductanceTool = new WBondInductanceTool();
         }
@@ -201,8 +201,7 @@ public class CircuitRfDockFactory : Factory
             PaletteTool     ??= new PaletteTool();
             MessagesTool    ??= new MessagesTool();
             DrcTool         ??= new DrcTool();
-            RestorePointsTool ??= new RestorePointsTool();
-            VersionHistoryTool ??= new VersionHistoryTool();
+            HistoryTool ??= new HistoryTool();
             WBondProfileTool    ??= new WBondProfileTool();
             WBondInductanceTool ??= new WBondInductanceTool();
         }
@@ -215,8 +214,7 @@ public class CircuitRfDockFactory : Factory
             DockPanelIds.Analyses    => AnalysesTool,
             DockPanelIds.Messages    => MessagesTool,
             DockPanelIds.Drc         => DrcTool,
-            DockPanelIds.RestorePoints  => RestorePointsTool,
-            DockPanelIds.VersionHistory => VersionHistoryTool,
+            DockPanelIds.History     => HistoryTool,
             DockPanelIds.WBondProfile    => WBondProfileTool,
             DockPanelIds.WBondInductance => WBondInductanceTool,
             _                        => null,
@@ -243,6 +241,14 @@ public class CircuitRfDockFactory : Factory
         }
         _documentDock  = documentDock;
         _projectTreeDock = null;
+
+        // RC-10 R-rc10-3. A panel the saved layout names that no longer exists resolves to the one that
+        // replaced it, and a layout naming BOTH retired ids collapses to one instance.
+        //
+        // BEFORE the fill below, and the order is load-bearing: filling first would add the merged
+        // panel at its default spot and then find it already placed, so a designer who had the old
+        // panel docked somewhere would get a second copy of it somewhere else.
+        state = DockLayoutRetirement.Apply(state);
 
         // A panel the saved layout never heard of (added in a later build) gets its default spot.
         state = DockLayoutDefaults.WithMissingPanelsFilled(state);
@@ -612,7 +618,7 @@ public class CircuitRfDockFactory : Factory
     /// tree's filter flags, the Messages log). Reopening one therefore restores the panel the user
     /// had, not a blank replacement.</para>
     /// </summary>
-    public ITool? ToolById(string? id) => id switch
+    public ITool? ToolById(string? id) => DockPanelIds.Resolve(id) switch
     {
         DockPanelIds.ProjectTree => ProjectTreeTool,
         DockPanelIds.Palette     => PaletteTool,
@@ -620,8 +626,7 @@ public class CircuitRfDockFactory : Factory
         DockPanelIds.Analyses    => AnalysesTool,
         DockPanelIds.Messages    => MessagesTool,
         DockPanelIds.Drc         => DrcTool,
-        DockPanelIds.RestorePoints  => RestorePointsTool,
-        DockPanelIds.VersionHistory => VersionHistoryTool,
+        DockPanelIds.History     => HistoryTool,
         DockPanelIds.WBondProfile    => WBondProfileTool,
         DockPanelIds.WBondInductance => WBondInductanceTool,
         _                        => null,

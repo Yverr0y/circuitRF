@@ -502,8 +502,8 @@ public class RestoreAndBatchTests
         [
             "src/Design/Revision/RestorePointMessages.cs",
             "src/Design/Revision/CheckpointMessage.cs",
-            "src/Ui/ViewModels/Dock/RestorePointsTool.cs",
-            "src/Ui/Views/Revision/RestorePointsToolView.axaml",
+            "src/Ui/ViewModels/Dock/HistoryTool.cs",
+            "src/Ui/Views/Revision/HistoryToolView.axaml",
             "src/Ui/Views/Dialogs/KeepThisStateDialog.axaml",
         ];
 

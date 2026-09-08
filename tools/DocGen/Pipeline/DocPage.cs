@@ -23,7 +23,19 @@ public sealed class DocPage
     /// <summary>Page title: the browser tab and the H1 if the body has none.</summary>
     public required string Title { get; init; }
 
-    /// <summary>"page" (HTML) or "slides" (a landscape PDF deck).</summary>
+    /// <summary>
+    /// <c>"page"</c> (HTML), <c>"slides"</c> (a landscape PDF deck), or <c>"retired"</c>.
+    ///
+    /// <para><b>A retired page is a slug that must not 404</b> — a chapter that merged into another
+    /// one, whose old address is in somebody's bookmarks and in every link anybody ever sent. It is
+    /// written like an ordinary page and is deliberately absent from the reading order and from the
+    /// search index: it is not a chapter, it is a signpost, and a reader browsing the site should
+    /// never arrive at one by following Next.</para>
+    ///
+    /// <para>Introduced when RC-10 merged <c>restore-points.html</c> and <c>versions.html</c> into one
+    /// chapter (<c>docs/design/revision-control.md</c> §5.10). It is the shape of every future chapter
+    /// merge, which is why it is a kind rather than a special case in that one build.</para>
+    /// </summary>
     public string Kind { get; init; } = "page";
 
     /// <summary>

@@ -1283,6 +1283,28 @@ internal static class CliDiagnostics
         "This workspace has no restore point {sequence}. 'history list' shows the ones it has.",
         ("sequence", sequence));
 
+    /// <summary>
+    /// RC-10 R-rc10-21. <c>--kinds</c> was given something that is not one of the five the panel's own
+    /// filter has. <b>Named, with the list</b>, rather than silently ignored: a caller who mistyped
+    /// <c>save-point</c> would otherwise get a shorter list and no reason for it, which is the same
+    /// wrong answer R-rc10-10 exists to prevent one panel over.
+    /// </summary>
+    public static Diagnostic HistoryUnknownKind(string kind) => Diagnostic.Create(
+        "history.list.unknown-kind", DiagnosticSeverity.Error,
+        "history list: there is nothing to show called '{kind}'. Known: versions, save-points, "
+      + "ai-batches, automatic, tidied-away.",
+        ("kind", kind));
+
+    /// <summary>
+    /// RC-10 R-rc10-10. <b>A search whose answer is incomplete says so.</b> Returning fewer results
+    /// than exist would be a wrong answer rather than a short one, and the caller would have no way to
+    /// tell the two apart.
+    /// </summary>
+    public static Diagnostic HistoryThinnedAlsoMatch(int count) => Diagnostic.Create(
+        "history.list.thinned-also-match", DiagnosticSeverity.Info,
+        "{count} entries that were tidied away also match. Add 'tidied-away' to --kinds to see them.",
+        ("count", count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+
     /// <summary>The list is empty. Not a failure — it is the ordinary state of a workspace no
     /// boundary has reached yet.</summary>
     public static Diagnostic HistoryNothingKeptYet(string path) => Diagnostic.Create(

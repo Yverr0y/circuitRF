@@ -1,0 +1,46 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="CircuitRF.Ui.Views.Dialogs.CorrectWhatYouWroteDialog"
+        Title="Correct What You Wrote"
+        Width="620" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False">
+
+  <StackPanel Margin="16" Spacing="10">
+
+    <!-- WHAT WAS RECORDED IS NEVER ALTERED; what a person wrote ABOUT it may be corrected by that
+         person, until it has been shared. The three cases differ only in this line and in the notice
+         below, which is why they are one dialog rather than three. -->
+    <TextBlock x:Name="LeadText" TextWrapping="Wrap" />
+
+    <StackPanel Spacing="4">
+      <TextBlock x:Name="FieldLabel" FontSize="11" Opacity="0.75" />
+      <TextBox x:Name="TextBox" AcceptsReturn="False" />
+    </StackPanel>
+
+    <!-- The original, shown beside the field rather than only in the panel: somebody correcting a
+         careless line needs to see what they are correcting while they type the replacement. -->
+    <Border x:Name="OriginalPanel" IsVisible="False"
+            Background="{DynamicResource SystemChromeLowColor}"
+            CornerRadius="3" Padding="10,8">
+      <TextBlock x:Name="OriginalText" TextWrapping="Wrap" FontSize="11" />
+    </Border>
+
+    <!-- R-rc11-14. THE SENTENCE THAT MAY NOT BE SOFTENED, on the shared case: a correction is an
+         annotation, and the original wording stays in the file where anyone holding the workspace can
+         still read it. A designer whose problem is embarrassment specifically needs to know that, and
+         a UI that hid it would cause the exact harm they came to it to avoid. It is not an expander
+         and not a tooltip: it is on the face of the dialog, above the button. -->
+    <Border x:Name="NoticePanel"
+            Background="{DynamicResource SystemChromeLowColor}"
+            CornerRadius="3" Padding="10,8">
+      <TextBlock x:Name="NoticeText" TextWrapping="Wrap" FontSize="11" />
+    </Border>
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button x:Name="RemoveButton" Content="Remove the correction" Click="OnRemove" IsVisible="False" />
+      <Button x:Name="CancelButton" Content="Cancel" Click="OnCancel" IsCancel="True" />
+      <Button x:Name="ApplyButton"  Content="Apply"  Click="OnApply"  IsDefault="True" />
+    </StackPanel>
+  </StackPanel>
+</Window>

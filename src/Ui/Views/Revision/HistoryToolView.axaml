@@ -1,0 +1,406 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:CircuitRF.Ui.ViewModels.Dock"
+             xmlns:mi="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+             x:Class="CircuitRF.Ui.Views.Revision.HistoryToolView"
+             x:DataType="vm:HistoryTool"
+             Background="{DynamicResource SystemChromeLowColor}">
+
+  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,Auto">
+
+    <!-- ── The header (RC-10 §5.10) ────────────────────────────────────────────────────────────────
+         TWO ACTIONS THAT CREATE SOMETHING, then the filter and the search. Everything that acts on a
+         ROW moved to the row's own right-click menu (R-rc10-17) — which is what keeps this a header
+         rather than a row of eight glyphs, and is the surface RC-11 adds to without having to build.
+
+         The two creating actions are deliberately still two, and the glyphs say why: the save-plus
+         keeps the state the workspace is in, and the tag records a titled version that travels. Both
+         were once labelled "Keep", which is what made them look like one operation done twice. -->
+    <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,*,Auto,Auto" Margin="4,4,4,2">
+
+      <Button Grid.Column="0" x:Name="SavePointButton" Click="OnSavePointClick"
+              IsEnabled="{Binding HasWorkspace}"
+              ToolTip.Tip="Keep this state — writes a restore point for the workspace as it stands, with a line saying what it is"
+              Padding="3,2" Background="Transparent" BorderThickness="0" Margin="0,0,1,0">
+        <mi:MaterialIcon Kind="ContentSavePlusOutline" Width="14" Height="14"
+                         Foreground="{DynamicResource SystemBaseMediumColor}"/>
+      </Button>
+
+      <Button Grid.Column="1" x:Name="KeepVersionButton" Click="OnKeepVersionClick"
+              IsEnabled="{Binding HasWorkspace}"
+              ToolTip.Tip="Keep this version — records the whole workspace under a title you write, so you can find it again and send it out"
+              Padding="3,2" Background="Transparent" BorderThickness="0">
+        <mi:MaterialIcon Kind="TagPlusOutline" Width="14" Height="14"
+                         Foreground="{DynamicResource SystemBaseMediumColor}"/>
+      </Button>
+
+      <!-- The search field, in the workspace-name's place and only while the magnifier is on
+           (R-rc10-9, ProjectTreeView's shape). A field that was always there would spend the panel's
+           width on a control most sessions never touch. -->
+      <Grid Grid.Column="2" IsVisible="{Binding IsSearchOpen}" Margin="6,0,4,0">
+        <TextBox x:Name="SearchBox"
+                 Text="{Binding SearchText, Mode=TwoWay}"
+                 PlaceholderText="Search titles and who kept them…"
+                 FontSize="12" Padding="6,2,22,2" MinHeight="0"
+                 VerticalContentAlignment="Center"/>
+        <Button HorizontalAlignment="Right" VerticalAlignment="Center"
+                Margin="2" Padding="2" Background="Transparent" BorderThickness="0"
+                IsVisible="{Binding HasSearchText}"
+                Click="OnClearSearchClick"
+                ToolTip.Tip="Clear search">
+          <mi:MaterialIcon Kind="Close" Width="10" Height="10"
+                           Foreground="{DynamicResource SystemBaseMediumColor}"/>
+        </Button>
+      </Grid>
+
+      <Button Grid.Column="3" x:Name="SearchButton" Click="OnToggleSearchClick"
+              ToolTip.Tip="Search — over the titles you wrote, what an assistant said it was about to do, and who kept each one"
+              Padding="3,2" Background="Transparent" BorderThickness="0" Margin="0,0,1,0">
+        <mi:MaterialIcon Kind="Magnify" Width="14" Height="14"
+                         Foreground="{DynamicResource SystemBaseMediumColor}"/>
+      </Button>
+
+      <!-- R-rc10-7's flyout, in ProjectTreeView's shape. THE DEFAULT HAS THE FOURTH ROW OFF and every
+           other on: the default view is every entry somebody stated an intent for, and the entry taken
+           because the workspace closed is the one that arrives three hundred times.
+
+           The three origins with no row of their own — before going back, and the two ends of an off
+           period — are ALWAYS shown. None of them is noise, and a checkbox nobody would think to tick
+           is how the reassurance R-rc10-20 protects leaves the place the promise was made. -->
+      <Button Grid.Column="4"
+              ToolTip.Tip="Filter what the list shows"
+              Padding="3,2" Background="Transparent" BorderThickness="0">
+        <mi:MaterialIcon Kind="Filter" Width="14" Height="14"
+                         Foreground="{DynamicResource SystemBaseMediumColor}"/>
+        <Button.Flyout>
+          <Flyout Placement="BottomEdgeAlignedRight">
+            <StackPanel Spacing="3" Margin="8">
+              <CheckBox IsChecked="{Binding ShowVersions,   Mode=TwoWay}" Content="Versions"           FontSize="12"/>
+              <CheckBox IsChecked="{Binding ShowSavePoints, Mode=TwoWay}" Content="States you kept"    FontSize="12"/>
+              <CheckBox IsChecked="{Binding ShowAiBatches,  Mode=TwoWay}" Content="Before an assistant" FontSize="12"/>
+              <CheckBox IsChecked="{Binding ShowAutomatic,  Mode=TwoWay}" Content="Kept automatically" FontSize="12"/>
+              <CheckBox IsChecked="{Binding ShowTidiedAway, Mode=TwoWay}" Content="Tidied away"        FontSize="12"/>
+            </StackPanel>
+          </Flyout>
+        </Button.Flyout>
+      </Button>
+    </Grid>
+
+    <!-- ── Three lines above the list, each absent unless it has something to say ──────────────── -->
+    <StackPanel Grid.Row="1">
+
+      <!-- R-rc6-8 / R-rc7-2. HELD MUST NOT LOOK LIKE ABSENT. With no git the panel is unreachable
+           entirely, because absent is harmless; held is a designer who may believe they are protected.
+           So the actions stay visible and refuse, and this line says why. The remedy is deliberately
+           not restated (R-rc6-9's second cadence) — it was said once, on open. -->
+      <TextBlock Margin="6,2" FontSize="11" TextWrapping="Wrap"
+                 IsVisible="{Binding IsRecordingBlocked}"
+                 Text="{Binding RecordingState}" />
+
+      <!-- R-rc10-18, §12 Q35. THE WAY FORWARD, offered where the way back was taken. It creates
+           nothing: the entry it names already exists, and going to it is an ordinary restore taking an
+           ordinary checkpoint of its own. Until the panels were merged this reassurance was filed in
+           the panel the designer had not opened. -->
+      <Border Margin="6,4" Padding="6,4" CornerRadius="3"
+              IsVisible="{Binding HasWayForward}"
+              Background="{DynamicResource SystemChromeMediumLowColor}"
+              BorderThickness="1" BorderBrush="{DynamicResource SystemAccentColor}">
+        <StackPanel Spacing="4">
+          <TextBlock Text="{Binding WayForwardText}" FontSize="11" TextWrapping="Wrap"/>
+          <Button x:Name="ComeForwardButton" Click="OnComeForwardClick"
+                  HorizontalAlignment="Left" Padding="6,2" FontSize="11"
+                  Content="Come forward again"/>
+        </StackPanel>
+      </Border>
+
+      <!-- RC-9 R-rc9-6. What a Pull actually brought in, said above the list as well as marked on each
+           row: the count is the answer to "did that do anything", and counting marked rows is not
+           something to ask of a reader. -->
+      <TextBlock Margin="6,2" FontSize="11" TextWrapping="Wrap"
+                 Foreground="{DynamicResource SystemAccentColor}"
+                 IsVisible="{Binding HasIncoming}"
+                 Text="{Binding IncomingText}" />
+    </StackPanel>
+
+    <!-- R-rc10-10. A search whose answer is INCOMPLETE says so, on a line of its own. Returning fewer
+         results than exist would be a wrong answer rather than a short one, and the designer would have
+         no way to tell the two apart. -->
+    <TextBlock Grid.Row="2" Margin="6,2" FontSize="11" FontStyle="Italic" TextWrapping="Wrap"
+               Opacity="0.85"
+               IsVisible="{Binding HasThinnedMatches}"
+               Text="{Binding ThinnedMatchText}" />
+
+    <ListBox Grid.Row="3"
+             x:Name="HistoryRows"
+             ItemsSource="{Binding Rows}"
+             SelectedItem="{Binding Selected}"
+             Background="Transparent"
+             BorderThickness="0">
+
+      <ListBox.Styles>
+        <!-- Every card the SAME WIDTH (owner, 2026-09-07). Each row was sizing to its own title, so a
+             list of one-word and one-sentence entries read as a ragged stack of different objects
+             rather than as one column of the same kind of thing. Both halves are needed: the item has
+             to be given the panel's width, and the Expander inside it has to spend it rather than
+             shrink back to its header's own content. -->
+        <Style Selector="ListBoxItem">
+          <Setter Property="HorizontalAlignment" Value="Stretch"/>
+          <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+          <Setter Property="Padding" Value="4,0"/>
+        </Style>
+
+        <!-- Alternating row bands, in ComponentImportChooserDialog's shape (owner, 2026-09-05 and
+             again here, 2026-09-07). A row is several lines of small text, and the band is what makes
+             each one read as one entry rather than as six lines running together.
+
+             Targets the ContentPresenter, because that is where this theme's ListBoxItem actually
+             paints its background — a Background set on the item itself is invisible. Excluding
+             :selected and :pointerover keeps the band UNDER those rather than over them: a style
+             declared here outranks the control theme's, so without the exclusion the even rows would
+             lose their selection highlight.
+
+             A neutral grey at low alpha rather than a theme brush: it darkens a light theme and
+             lightens a dark one by the same small amount, with nothing to keep in step. Deliberately
+             faint — the band only has to separate one row from the next. -->
+        <Style Selector="ListBoxItem:nth-child(2n):not(:selected):not(:pointerover) /template/ ContentPresenter">
+          <Setter Property="Background" Value="#0A808080"/>
+        </Style>
+      </ListBox.Styles>
+
+      <!-- R-rc10-17. THE ROW IS RIGHT-CLICKABLE, and that is what keeps the header a place for the two
+           actions that CREATE something. RC-11 adds to this menu and must not have to build it. -->
+      <ListBox.ContextMenu>
+        <ContextMenu>
+          <MenuItem Header="{Binding Selected.GoBackText}" Click="OnGoBackClick"
+                    IsEnabled="{Binding CanGoBack}">
+            <!-- R-rc10-16. NOT THE UNDO ARROW. Both panels used ArrowULeftTop — the application's own
+                 undo glyph — on the one action every line of the design note and both user chapters is
+                 at pains to distinguish from an undo. TimelineClock names a point in time on a
+                 sequence, and reads distinctly from the History clock the panel's own tab and menu
+                 entry carry. ONE glyph, at every site the action appears. -->
+            <MenuItem.Icon><mi:MaterialIcon Kind="TimelineClock" Width="14" Height="14"/></MenuItem.Icon>
+          </MenuItem>
+          <Separator/>
+
+          <!-- Owner, 2026-09-07: the old header was a sentence, and a sentence in a menu is read as
+               chrome and skipped. The short name goes on the item and the EXPLANATION goes in the
+               tip — which is also where the question "what does this even do" is answerable at all,
+               since no menu label of any length can say that this compares in ONE direction. -->
+          <MenuItem Header="Compare to Current" Click="OnCompareClick"
+                    IsEnabled="{Binding CanGoBack}"
+                    ToolTip.Tip="Lists the documents this entry holds that the workspace as it stands does not — what going back to it would bring in. Nothing is changed.">
+            <MenuItem.Icon><mi:MaterialIcon Kind="CompareHorizontal" Width="14" Height="14"/></MenuItem.Icon>
+          </MenuItem>
+
+          <MenuItem Header="Keep permanently" Click="OnKeepClick"
+                    IsEnabled="{Binding CanKeepPermanently}"
+                    ToolTip.Tip="Exempts this entry from the retention sweep, so tidying up will never put it away.">
+            <MenuItem.Icon><mi:MaterialIcon Kind="PinOutline" Width="14" Height="14"/></MenuItem.Icon>
+          </MenuItem>
+
+          <MenuItem Header="Bring this back" Click="OnBringBackClick"
+                    IsEnabled="{Binding CanBringBack}"
+                    ToolTip.Tip="Returns an entry that was tidied away to the ordinary list. The state itself never went anywhere.">
+            <MenuItem.Icon><mi:MaterialIcon Kind="ArchiveArrowUpOutline" Width="14" Height="14"/></MenuItem.Icon>
+          </MenuItem>
+
+          <Separator/>
+          <!-- RC-11 §5.11. WHAT WAS RECORDED IS NEVER ALTERED; what a person wrote about it is theirs
+               to correct until it has been shared. A restore point's label is always theirs — nothing
+               chains to it, no copy takes it, no send carries it. A version's title is theirs until it
+               has left the machine, and after that it takes a correction instead: ONE menu item over
+               both, because which of the two applies is a computation and not something a designer
+               should have to perform before choosing a menu entry. -->
+          <MenuItem Header="Rename this entry…" Click="OnRenameClick"
+                    IsEnabled="{Binding CanRename}"
+                    ToolTip.Tip="Changes the label on this entry. Nothing that was recorded is altered.">
+            <MenuItem.Icon><mi:MaterialIcon Kind="RenameBoxOutline" Width="14" Height="14"/></MenuItem.Icon>
+          </MenuItem>
+
+          <!-- Owner, 2026-09-07. "Correct what you wrote" described the MECHANISM — that a shared
+               version takes a correction beside its title rather than a rewrite of it — at the cost of
+               not naming the thing being edited. The dialog still says which of the two is happening
+               and why, on its own face, where a designer is actually deciding. -->
+          <MenuItem Header="Edit Comments…" Click="OnCorrectClick"
+                    IsEnabled="{Binding CanCorrect}"
+                    ToolTip.Tip="Edits the title you wrote on this version. Once it has left this machine the new wording is added beside the original rather than replacing it — the dialog says which.">
+            <MenuItem.Icon><mi:MaterialIcon Kind="CommentEditOutline" Width="14" Height="14"/></MenuItem.Icon>
+          </MenuItem>
+
+          <!-- Owner, 2026-09-07, having tried it and asked what it does: "let this entry go" named an
+               intention rather than an effect. IT IS NOT A DELETE and must not be dressed as one — it
+               is the same tidying the retention sweep performs (R-rc11-5): the entry stays in the list
+               marked tidied away, "Bring this back" above returns it, and nothing on disk is freed
+               until §5.6a's explicit reclaim. So the header now says tidy, the glyph is the archive
+               arrow that mirrors Bring this back's, and the tip states the reversal outright. A bin
+               glyph here would teach the wrong thing about the action and is exactly what R-rc11-5's
+               "no confirmation dialog" reasoning is written against. -->
+          <MenuItem Header="Tidy this away" Click="OnLetGoClick"
+                    IsEnabled="{Binding CanLetGo}"
+                    ToolTip.Tip="Puts this entry away, exactly as tidying up does — it stays in the list marked 'tidied away', 'Bring this back' returns it, and nothing is deleted.">
+            <MenuItem.Icon><mi:MaterialIcon Kind="ArchiveArrowDownOutline" Width="14" Height="14"/></MenuItem.Icon>
+          </MenuItem>
+
+          <Separator/>
+
+          <MenuItem Header="Copy the identifier" Click="OnCopyIdentityClick"
+                    IsEnabled="{Binding HasSelection}"
+                    ToolTip.Tip="Copies this entry's identity to the clipboard — the one string with which somebody helping you can ask a question this window cannot answer.">
+            <MenuItem.Icon><mi:MaterialIcon Kind="ContentCopy" Width="14" Height="14"/></MenuItem.Icon>
+          </MenuItem>
+        </ContextMenu>
+      </ListBox.ContextMenu>
+
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="vm:HistoryRowItem">
+          <Grid Margin="0,1">
+
+            <!-- R-rc10-11. An off period is a row with its reason on it and never an ordinary
+                 interval — and it is now the only row in the list that is neither kind. -->
+            <TextBlock Text="{Binding GapText}" IsVisible="{Binding IsGap}"
+                       FontSize="10" FontStyle="Italic" Opacity="0.7" TextWrapping="Wrap"
+                       Margin="0,4" />
+
+            <Expander IsVisible="{Binding !IsGap}" Padding="0" Margin="0"
+                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                      Background="Transparent" BorderThickness="0">
+              <Expander.Header>
+                <Grid ColumnDefinitions="Auto,*,Auto" HorizontalAlignment="Stretch"
+                      Opacity="{Binding RowOpacity}">
+                  <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                    <!-- No longer monospace: this cell holds WORDS for anything inside the last day
+                         ("7 minutes ago"), and a monospace face spends about a quarter more of a
+                         narrow panel's width on them — width the title column is trimming with an
+                         ellipsis. The face was there to line up HH:mm down the column, and a column
+                         that is now a mixture of phrases and clock times cannot line up anyway. -->
+                    <TextBlock Text="{Binding When}" Opacity="0.75" TextWrapping="NoWrap" />
+                    <!-- R-rc10-13. The YEAR whenever it is not the current one. Before this a version
+                         kept in December read in January as one kept this week. -->
+                    <TextBlock Text="{Binding Day}" FontSize="9" Opacity="0.5" />
+                  </StackPanel>
+
+                  <StackPanel Grid.Column="1">
+                    <!-- A GRID, not a horizontal StackPanel (owner, 2026-09-07). A StackPanel measures
+                         its children with INFINITE width along its own orientation, so the title's
+                         TextTrimming never engaged and a long one ran straight over the "tidied away"
+                         mark in the next column. The star column is what gives the text a width to be
+                         trimmed against; the ellipsis was there all along and had nothing to bite on. -->
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="4">
+                      <!-- R-rc10-2. ONE MARK carries the whole difference between the two kinds. It
+                           says titled, permanent, travels — three promises the unmarked rows do not
+                           make — and it is not an importance badge. One mark and one accent: a second
+                           colour scheme is noise on a list whose entire problem is noise. -->
+                      <mi:MaterialIcon Grid.Column="0" Kind="TagOutline" Width="11" Height="11"
+                                       VerticalAlignment="Center"
+                                       IsVisible="{Binding HasVersionMark}"
+                                       ToolTip.Tip="{Binding $parent[UserControl].((vm:HistoryTool)DataContext).VersionMarkMeans}"
+                                       Foreground="{DynamicResource SystemAccentColor}"/>
+                      <TextBlock Grid.Column="1" Text="{Binding Title}"
+                                 TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                 ToolTip.Tip="{Binding Title}" />
+                    </Grid>
+
+                    <TextBlock Text="{Binding Who}" FontSize="10" Opacity="0.6"
+                               IsVisible="{Binding ShowAuthor}" />
+                    <TextBlock Text="{Binding OtherCopyNote}" FontSize="10" FontStyle="Italic"
+                               Foreground="{DynamicResource SystemAccentColor}"
+                               IsVisible="{Binding OnTheOtherCopy}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding RestoredFrom}" FontSize="10" Opacity="0.9"
+                               IsVisible="{Binding WasRestored}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding LeftOutSummary}" FontSize="10" Opacity="0.9"
+                               IsVisible="{Binding IsIncomplete}" TextWrapping="Wrap" />
+                  </StackPanel>
+
+                  <TextBlock Grid.Column="2" Text="{Binding Mark}" FontSize="10" Opacity="0.6"
+                             VerticalAlignment="Center" IsVisible="{Binding HasMark}" />
+                </Grid>
+              </Expander.Header>
+
+              <!-- R-rc10-14. WHAT A ROW CANNOT CARRY. The row answers "which moment was this"; this
+                   answers "what exactly is this".
+
+                   R-rc10-15: the identity earns its place here and nowhere else. Nothing git-shaped
+                   appears unbidden, and what an EXPLICIT action produces may be named precisely —
+                   opening this expander is that action. It is the one string with which a designer, or
+                   somebody helping them, can ask a question circuitRF's own window cannot answer. -->
+              <StackPanel Margin="24,2,6,6" Spacing="2">
+                <TextBlock Text="{Binding FullWhen}"     FontSize="10" Opacity="0.75" TextWrapping="Wrap"/>
+                <TextBlock Text="{Binding Origin}"       FontSize="10" Opacity="0.75" TextWrapping="Wrap"/>
+                <TextBlock Text="{Binding Reach}"        FontSize="10" Opacity="0.75" TextWrapping="Wrap"/>
+                <!-- R-rc11-13, R-rc11-14. THE ORIGINAL IS ONE CLICK AWAY AND NEVER GONE. The row shows
+                     the correction because that is what the author wanted read; this line shows what
+                     it corrects, because the original wording is still in the history and anybody
+                     holding a copy of this workspace can still read it. The dialog that wrote the
+                     correction said so in a sentence that may not be softened, and this is that
+                     sentence's other half. -->
+                <TextBlock Text="{Binding OriginalTitleText}" FontSize="10" Opacity="0.75"
+                           TextWrapping="Wrap" IsVisible="{Binding IsCorrected}"/>
+                <TextBlock Text="{Binding SequenceText}" FontSize="10" Opacity="0.6"
+                           IsVisible="{Binding HasSequence}"/>
+                <TextBlock Text="{Binding KeptText}"     FontSize="10" Opacity="0.6"
+                           IsVisible="{Binding HasKeptText}"/>
+                <!-- WRAPS rather than trims: this is the whole identity now, and a trimmed one would
+                     put the same doubt back that showing twelve characters did — is what I copied what
+                     I read? An ellipsis is a shorter way of not saying it. -->
+                <TextBlock Text="{Binding Identity}"     FontSize="10" FontFamily="monospace"
+                           Opacity="0.6" IsVisible="{Binding HasIdentity}" TextWrapping="Wrap"
+                           ToolTip.Tip="The identity of this entry, in full — exactly what 'Copy the identifier' puts on the clipboard."/>
+              </StackPanel>
+            </Expander>
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+    <!-- The line that stops an empty panel reading as a broken one. FOUR different facts and four
+         different sentences (R-rc10-5's own completion question): no workspace, a workspace whose only
+         history is the automatic entries the default filter hides, a filter that is hiding everything,
+         and a workspace nothing has been recorded in at all. -->
+    <TextBlock Grid.Row="3" Margin="10" FontSize="11" Opacity="0.7" TextWrapping="Wrap"
+               VerticalAlignment="Top"
+               IsVisible="{Binding !Rows.Count}"
+               Text="{Binding EmptyText}" />
+
+    <!-- R-rc7-11. Comparison is the browser's real job, at the granularity of DOCUMENTS. -->
+    <Border Grid.Row="4" BorderThickness="0,1,0,0" MaxHeight="180"
+            BorderBrush="{DynamicResource SystemBaseLowColor}"
+            IsVisible="{Binding CanGoBack}">
+      <ScrollViewer>
+        <StackPanel Margin="6,4">
+          <TextBlock Text="{Binding ComparisonTitle}" FontSize="10" Opacity="0.6" Margin="0,0,0,2"/>
+
+          <!-- A comparison that finds nothing SAYS SO (owner, 2026-09-07). An empty list under a
+               changed heading is indistinguishable from a menu item that did nothing at all — and
+               "these are the same" is the answer this comparison gives most often, being what a
+               designer checks before deciding they need not go back at all. -->
+          <TextBlock Text="Nothing — this entry and the workspace as it stands hold the same files."
+                     FontSize="11" Opacity="0.75" TextWrapping="Wrap" Margin="0,2"
+                     IsVisible="{Binding NothingDiffers}"/>
+
+          <ItemsControl ItemsSource="{Binding Changes}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:VersionChangeRow">
+                <Grid ColumnDefinitions="70,*" Margin="0,1">
+                  <TextBlock Grid.Column="0" Text="{Binding Kind}" FontSize="10" Opacity="0.6" />
+                  <StackPanel Grid.Column="1">
+                    <TextBlock Text="{Binding Path}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Detail}" FontSize="9" Opacity="0.55"
+                               IsVisible="{Binding HasDetail}" />
+                  </StackPanel>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </ScrollViewer>
+    </Border>
+
+    <!-- R-rc5-14. Said where it could mislead: "restore my workspace" sounds more total than it is,
+         because content in a workspace this one refers to is not part of this workspace's history. -->
+    <!-- ONE LINE. A Text="…" attribute wrapped across source lines keeps the continuation line's
+         indentation as literal spaces — XML normalises the newline to a space and leaves the rest —
+         so the sentence rendered with a twenty-character gap in the middle of it. -->
+    <TextBlock Grid.Row="5" Margin="6,4" FontSize="10" Opacity="0.65" TextWrapping="Wrap"
+               Text="Going back brings back the files in this workspace. Anything in a workspace it refers to, and any simulation results, are left exactly as they are." />
+  </Grid>
+</UserControl>

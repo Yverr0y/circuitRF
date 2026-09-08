@@ -1,8 +1,10 @@
 # circuitRF — Revision Control (architecture)
 
-**Status:** Proposal — **rev 5**, owner decisions §12 Q1–Q17 taken and Q18–Q30 added; the mechanics a
-checkpoint, a restore and a thinning actually rest on are now specified, and two of rev 3's guarantees
-are re-founded on mechanisms that hold ·
+**Status:** Proposal — **rev 6**, owner decisions §12 Q1–Q31 taken and Q32–Q36 added. rev 5 settled the
+mechanics; **rev 6 is the first revision driven by looking at the shipped panels rather than by
+re-reading the document** (owner UX review, 2026-09-07), and it changes two things this document had
+settled: the safety net and the narrative are read in **one panel** (§5.10), and **what a person wrote
+about a state may be corrected by that person** (§5.11) ·
 **RC-1 (§3.1/§3.1a, the `.cwsuser` split) is BUILT** — 2026-09-06; the last "still open" item at the
 end of §12 was settled with it. **RC-2 (§7A.2/§7A.3, referenced workspaces read-only by default) is
 BUILT** — 2026-09-06, and it needs no git: it is the defect in the workspace model this investigation
@@ -153,6 +155,52 @@ concrete channel by which `serve` and the window exchange the two facts §5.3c n
 headless surface for every history operation (**§5.3d**); §4.7's remedy, supplied per invocation
 rather than left to a config write; and §5.5's fourth row, the explicit save-point, whose message the
 brief that creates it must own.
+
+**What changed in rev 6.** The first five revisions were reviews of this document against itself and
+against the briefs written from it. **rev 6 is a review of the shipped feature by the person it is
+for** — Stages 1–4 are built, and the owner opened the two panels and asked why there are two. That is
+a different kind of evidence and it found a different kind of defect: nothing here is unspecified or
+mechanically wrong. What it changes is **what the mechanisms are presented as**, and in one case a
+principle that was inherited rather than derived.
+
+Two of the five are decisions this document is reversing, and both reversals are stated as such rather
+than folded in quietly:
+
+- **§5's two histories were being read in two panels, and the second panel was never argued for.**
+  §5's opening argument is that the safety net and the narrative have different authors, granularity
+  and audiences — which is an argument for two *kinds of entry*, and it was silently spent as an
+  argument for two *windows*. The reason actually given for the split, in the user documentation, is
+  that a list of three hundred automatic entries with four deliberate ones among them is unreadable —
+  and that is **an argument for a filter**. **§5.10** merges the panels, keeps the two kinds visibly
+  distinct, and makes the default view the entries somebody stated an intent for. It supersedes RC-7
+  R-rc7-9, which said in terms that they are not merged.
+- **§8.3's refusal to rewrite history was imported from a situation circuitRF is not in.** The rule is
+  git's, and git's reason is that a rewrite invalidates every existing clone — which is true, and which
+  §8.3 states correctly. It is also irrelevant to the overwhelmingly common circuitRF workspace: one
+  designer, one machine, no clone, and a title typed thirty seconds ago with a word spelt wrong in it.
+  Applying the many-contributor constraint to the single-designer case inherits a cost with none of the
+  benefit, and it produces a designer who will not share a history they cannot tidy. **§5.11** replaces
+  the blanket rule with the line that actually holds: **what was recorded is never altered; what a
+  person wrote about it may be corrected by that person, until it has been shared — after which it can
+  only be annotated.** §8.3 keeps its own subject, which was never titles.
+
+The other three are smaller, and one of them is a defect in built code rather than in this document:
+
+- **The entry that makes *going back is never a one-way door* true is thinnable.** §5.8's pre-restore
+  checkpoint is what a designer comes forward to, and §5.6 rule 6's kept list does not include it —
+  `WorkspaceCheckpoints.IsAlwaysKept` covers a save-point and the two recording transitions and nothing
+  else. It is not data loss (the objects survive §4.5, and RC-6's journal brings the entry back), but
+  the one entry whose entire purpose is to undo a destructive operation can leave the list on its own.
+  **§5.6 rule 6 gains a fourth kind.**
+- **The reassurance lands in the panel the designer is not looking at.** A restore begun from the
+  Versions panel puts its pre-restore checkpoint in the Restore Points panel, so the window the
+  designer just acted in shows no evidence their afternoon survived. **§5.8** now requires the way
+  forward to be offered where the way back was taken — which §5.10's merge makes possible at all.
+- **The card says less than it knows, and one of the omissions is wrong rather than sparse.**
+  A version's date renders as `ddd d MMM` with no year, so a version kept last December reads as one
+  kept this week (`VersionHistoryTool.cs`). §5.10 states what a row carries, what its expander carries,
+  and that the *go back* action may not wear the undo glyph — the application's own undo arrow, on the
+  one action the documentation is at pains to say is not an undo.
 
 ---
 
@@ -760,6 +808,11 @@ reflog is the same idea.
 with a title the designer wrote. This is what a history browser shows, what is shared, and what is
 pushed.
 
+**Two histories, and — from rev 6 — one panel to read them in.** §5.10. The distinction above is a
+distinction between *entries*, and rev 2 spent it as an argument for two windows without saying so. It
+survives intact: what each kind promises, where it is stored, and which journeys it survives are
+unchanged, and §5.10 rule 6 forbids the merge from ever becoming a storage change.
+
 **Status: BUILT 2026-09-06** · `brief-revision-control-7-commit-and-history.md` · `WorkspaceCommit`,
 `CommitMessage`, `RestoreProvenance`, `HistoryBrowser` and `DocumentClash` in `src/Design/Revision/`,
 the Versions panel in `src/Ui`, `history commit`/`history versions` in `src/Cli`, gated by
@@ -1129,6 +1182,14 @@ produce the same class of fault, and all of them are ordinary.
    gap with no ends renders as the quiet interval §5.7 forbids; and any restore point the designer
    marks **keep** from the list. That third one is §10B.3's *"turn a restore point into something
    permanent"*, and it exists in Stage 2, before there is a Commit to turn it into.
+   **A fourth kind is added in rev 6 (§12 Q34): the pre-restore checkpoint** (§5.8; BUILT 2026-09-07
+   with §5.10 — `WorkspaceCheckpoints.IsAlwaysKept`). It is what makes
+   *going back is never a one-way door* true, and rev 5's list omitted it — `IsAlwaysKept` covers the
+   save-point and the two transitions and nothing else, so the one entry whose entire purpose is to
+   undo a destructive operation ages out of the list on its own while the designer keeps working. It is
+   not data loss, since §4.5 keeps the objects and rule 4's journal brings the entry back; it is the
+   promise leaving the place the promise was made. Restores are rare, so keeping them costs nothing
+   measurable.
 
 **When a sweep runs, which rule 3 needs and rev 3 did not say.** *"No single pass may remove more than a
 small fraction"* is not a guarantee until the passes are counted: a sweep on every checkpoint at one
@@ -1353,6 +1414,15 @@ in the documentation rather than left to be discovered.
   §8.2's answers, so a restore to before one was given would silently start including the file it
   excluded. Both are re-applied after the tree is written, and they are the only things a restore
   leaves as it found them.
+- **The way forward is offered where the way back was taken** *(new in rev 6, §12 Q35; BUILT
+  2026-09-07 with §5.10)*. The
+  pre-restore checkpoint is created, is kept (§5.6 rule 6) and is findable — and until §5.10 it was
+  findable in the *other panel*, so a designer who restored from the Versions panel was left looking at
+  a window showing no evidence that the afternoon they had just replaced still existed. A restore
+  therefore reports itself in the history panel, in one line, naming the state it went back to and the
+  entry the previous state was kept as, with the action that returns to it. **This is the most
+  reassuring control in the feature and it creates nothing** — it points at an entry that already
+  exists, and reaching it is an ordinary restore with an ordinary checkpoint of its own.
 - **An interrupted restore is detected on the next open, not discovered by simulating.** A restore over
   thousands of files on a share can be interrupted by a crash or a dropped connection, and what it
   leaves is §1.3's failure exactly: a workspace that opens, is well-formed, and is half of two states.
@@ -1380,6 +1450,193 @@ no folder, so it has no repository and cannot be given one.** Three consequences
 and its own recovery cache. A checkpoint is a boundary in a workspace's history, not a copy of unsaved
 bytes; conflating them would hand the safety net a second, differently-shaped job it is not built for
 and would make both worse.
+
+### 5.10 One panel, two kinds of entry *(new in rev 6, §12 Q32)*
+
+**Status: BUILT 2026-09-07** · `brief-revision-control-10-one-history-panel.md` ·
+`HistoryList`/`HistoryDates` in `src/Design/Revision/`, `HistoryTool` + `HistoryToolView` and
+`DockLayoutRetirement` in `src/Ui/`, gated by `tests/Ui.Tests/Revision/OneHistoryPanelTests.cs`.
+**Three things the build settled that this section left open:** three origins have no checkbox of
+their own and are always shown (before-restore and the two ends of an off period — none of them is
+noise, and a checkbox nobody would think to tick is how R-rc10-20's promise leaves the place the
+promise was made); the *tidied-away also match* line reports the entries the filter is HIDING rather
+than every thinned match, since a match that is in the list is not an incomplete answer; and
+**"stop keeping" was not built** — it writes a second commit object, which the brief's own gate 13
+forbids as an unnamed exception. `src/Ui/RESOLVED.md` has all three. **Supersedes RC-7 R-rc7-9.** §5 argues that the safety net and the narrative must not
+be *conflated*; rev 6 does not withdraw a word of that. It withdraws the step rev 2 took without
+arguing for it — from *two kinds of entry* to *two windows*.
+
+**The reason given for two panels is an argument for a filter.** It is stated in the user
+documentation, in these words: *a list with three hundred automatic entries and four deliberate ones
+mixed among them is a list nobody reads.* That is true, and a filter answers it completely, while
+being strictly better in the case the panels handle worst — because the default view can be the four
+deliberate entries with the three hundred one click away, and **the designer never has to know which
+panel to open.** That question is harder than it looks at the moment it is asked, which is the moment
+something has gone wrong.
+
+**And two panels produce a safety failure, not merely clutter.** §5.8's restore takes a checkpoint of
+the current state first, and that checkpoint lands in the *restore point* list. A restore begun from
+the Versions panel therefore leaves the designer looking at a window with no evidence that the
+afternoon they just replaced still exists. The reassurance is real, it is already implemented, and it
+is filed where the person who needs it is not looking. **§5.8 states the affordance; this section is
+what makes it possible to put it anywhere sensible.**
+
+**Six rules.**
+
+1. **One panel, named for the thing it lists: History.** Not *Versions* — that word already has a
+   precise meaning in this document (§5.2: titled, permanent, travels with a clone) and it is the word
+   that distinguishes the two kinds of row. A panel in which everything is called a version has no
+   word left for the distinction, and a designer who learns that these are all versions and then finds
+   half of them did not arrive with a clone (§5.2a) has been told something false.
+
+2. **The two kinds stay visibly distinct, and the distinction is what the mark means.** A version
+   carries the accent-coloured tag it carries today; a restore point carries none. **The mark is not
+   decoration and not importance** — it says *this one is titled, permanent and travels*, which are
+   three promises the unmarked rows do not make. One mark, one accent, and nothing further: a second
+   colour scheme is noise on a list whose whole problem is noise.
+
+3. **The default view is every entry somebody stated an intent for.** Versions, explicit save-points
+   and before-batch checkpoints (§5.3a rule 2 makes the batch's intent its label) are shown; workspace
+   close checkpoints are not. One toggle — *show automatic entries* — reveals them. This is the whole
+   of the answer to the close checkpoint being too much, and it is a display decision on purpose:
+   **the close checkpoint keeps being taken.** §5.3's argument for it is the strongest sentence in that
+   section — it is the one boundary that reliably exists in every session, including the ones where the
+   designer never thought about history at all, which is precisely the designer §1 is written for.
+   Stopping the capture to quieten a list would remove the safety net from exactly the population it
+   exists for. The list is quietened instead.
+
+4. **The filter state is per-user view state and lives in the `.cwsuser`** (§3.1), like every other
+   thing about how a person has arranged their view of a workspace. It is not a Settings row: a filter
+   a designer flips while looking for something is not a preference about what is kept, and putting it
+   on the tab in §10A — every other row of which changes what exists — would be the category error that
+   tab is most vulnerable to.
+
+5. **Search, over what a person wrote.** Titles, batch intents, and the author. §10B's *"I broke the
+   match network yesterday"* is a search, and a designer who has to scroll a year of entries to
+   perform it is being made to do the machine's work. A search that matches entries retention has
+   thinned says so on a line of its own rather than silently returning fewer results than exist —
+   RC-6's journal already knows them, and *three tidied-away entries also match* is the difference
+   between an incomplete answer and a wrong one.
+
+6. **Nothing about the merge changes what is recorded, where, or what travels.** Checkpoints stay on
+   §5.2a's per-checkpoint references and still do not clone; versions stay ordinary commits on the
+   branch. **This section is a presentation change and may not become a storage change** — the moment
+   the two are stored alike, §5.6's retention has a human-written commit in its scope and §5.2a's
+   table stops being true.
+
+**What a row carries, and what its expander carries.** The row is what a designer scans; the expander
+is what they open when scanning was not enough, and the split is between *which moment was this* and
+*what exactly is this*:
+
+| on the row | in the expander |
+|---|---|
+| the time, and the date **including the year whenever it is not the current year** | the full timestamp with its zone |
+| the title, or the origin sentence for an entry nobody titled | the origin, spelled out (§5.5) |
+| the tag mark, for a version | whether it is local-only or has been shared (§5.11 turns on this) |
+| who kept it, on a workspace with more than one author | the commit identity — short, with the full one copyable |
+| the restored-from line (§5.5) and the left-out-file line (§8.2b) | the sequence number (§5.6 rule 2), and the kept mark |
+
+**The year is a defect, not a sparseness.** `VersionHistoryTool.Day` renders `ddd d MMM` and
+`RestoredFrom` renders `d MMM HH:mm`; a version kept in December reads in January as one kept this
+week. Relative labels for the recent entries — *today*, *yesterday* — are welcome and are safe, because
+§5.6 rule 2 already establishes that the wall clock supplies the label and never the ordering.
+
+**The commit identity earns its place in the expander** under RC-7 R-rc7-4's rule: nothing git-shaped
+appears unbidden, and what an explicit action produces may be named precisely. Opening an expander on
+a row is that action, and the identity is the one string with which a designer, or somebody helping
+them, can ask git a question circuitRF's own window cannot answer (§4.1).
+
+**The action that goes back may not wear the undo glyph.** Both panels use `ArrowULeftTop` today,
+which is the application's own undo arrow, on the one action every line of this document and its user
+chapters is at pains to distinguish from an undo (§5.4). A glyph naming a *point in time* rather than a
+step backwards is the requirement; the same glyph in both places was right and stays right.
+
+**A row is right-clickable, and going back is one of several things on the menu.** Going back, copying
+the commit identity, keeping permanently (§5.6 rule 6), comparing with the current state (RC-7
+R-rc7-11), and §5.11's corrections. The menu is where the actions a header toolbar cannot hold live —
+and it is the surface that makes the header a place for the two or three that create something rather
+than a row of eight glyphs.
+
+### 5.11 Correcting what a person wrote *(new in rev 6, §12 Q33)*
+
+**Status: BUILT 2026-09-07** · `brief-revision-control-11-correcting-what-you-wrote.md` ·
+`VersionSharing`, `VersionCorrections` and `TitlesLeaving` in `src/Design/Revision/`,
+`CorrectWhatYouWroteDialog` and `TitlesLeavingDialog` in `src/Ui/`, five nouns on
+`circuitrf history`, gated by `tests/Ui.Tests/Revision/CorrectingWhatYouWroteTests.cs`.
+**Four things the build settled that this section left open.** `--amend` was permitted in one file and
+turned out to buy nothing — it needs the shared index and restamps the committer date, which are the
+two things a correction must not do, so a `commit-tree` over the recorded tree with the recorded
+identity does the job and RC-7 gate 11's scan stays absolute rather than narrowing. A rename needs an
+explicit SUBJECT, not only a label: four of the six origins write their own subject and ignore the
+label entirely, so a rename routed through the label alone would silently do nothing on the automatic
+entries a designer most wants to name. The annotation lives on `refs/notes/circuitrf`, not git's
+default `refs/notes/commits`, and it travels as a SEPARATE best-effort invocation on fetch, send and
+clone — a non-wildcard refspec naming a reference the remote does not have is fatal, and a workspace
+with no corrections in it is nearly all of them. And the clone journey's review is the SOURCE's titles,
+shown only when the source is a local repository this machine can read; an address cannot be enumerated
+before it is fetched. `src/Design/RESOLVED.md` and `src/Ui/RESOLVED.md` carry all four. ·
+Narrows §8.3, which keeps its own subject.
+
+**The question this answers is not typography.** A designer who believes a title they typed is
+permanent and uncorrectable will avoid typing an honest one, and will not share a history they cannot
+tidy — which costs this feature the whole of §5.2's motive. The failure the owner named is a designer
+who wrote something careless, or something with a customer's name in it, and now cannot show the
+history to anybody. **That is a real cost of a rule that was never argued for on circuitRF's own
+terms**, and §8.3's argument does not reach it: §8.3 is about *content* — a large file, a file that
+should never have left the machine — and a title is not content.
+
+**The line, and everything below follows from it:**
+
+> **What was recorded is never altered. What a person wrote *about* it may be corrected by that
+> person, until it has been shared — after which it can only be annotated.**
+
+Content, trees, times and the sequence: immutable, always, with no exception anywhere in this
+document. Titles and labels: commentary, and commentary is correctable by its author. The line is
+drawn at **sharing**, because sharing is the only event that creates a second reader — and the second
+reader is the entire reason git's own rule exists.
+
+**Three cases, and only the third is hard.**
+
+**(a) A restore point may be renamed, and may be deleted.** This is not history rewriting in any sense
+§8.3 is about, and the mechanism is already built for another purpose. §5.2b makes each checkpoint a
+**parentless** commit under circuitRF's own reference namespace: nothing chains to it, no clone takes
+it (§5.2a), no push carries it. Renaming is a new parentless commit over the identical tree with a
+corrected message and one reference update. Deleting is one reference delete — **which is exactly what
+§5.6's retention already does**, journalled and reversible by the same *bring this back* the thinning
+journal serves. A prohibition here guards nothing and costs a designer the ability to tidy their own
+machine's safety net.
+
+**(b) A version that has not been shared may have its title corrected.** A commit reachable from no
+remote-tracking reference has, by definition, no second reader; correcting it invalidates nothing,
+because there is nothing to invalidate. The newest such version is an amend. An older one is a rewrite
+of the unshared tail, which is safe for the same reason and is more work over a workspace with
+thousands of files — **so the requirement is the newest unshared version, and the tail is a follow-up
+that must not be assumed.** Nearly every bad title is noticed within a minute of being typed, which is
+the case this buys. §5.2a's checkpoint references are independent of the branch and a tail rewrite does
+not disturb them.
+
+**(c) A version that has been shared may be annotated, and may not be erased — and the difference is
+stated rather than hidden.** The string is on somebody else's disk. A delete offered here would be
+§5.3b rule 10's reassuring sentence about a protection that does not exist, told to the designer
+instead of by the agent. So: a **correction**, carried as an annotation git can attach to a commit
+without altering it, shown by the panel in place of the original with the original one click away, and
+pushed alongside the versions it annotates. **The dialog says plainly that the original wording stays
+in the file and can still be read by anyone holding the workspace.** A designer whose problem is
+embarrassment specifically needs to know that, and a UI that softened it would cause the exact harm
+they came to it to avoid — which is §1.4's false belief, in the one place where the belief is about
+other people rather than about their own data.
+
+**And the case that matters most is prevented rather than corrected.** §9 makes send, clone and
+archive the only three ways a history leaves this machine. **A review step in front of them, listing
+the version titles that are about to leave, is worth more than every correction mechanism above** — it
+catches the careless word, and it catches the far likelier and far more expensive version of the same
+fear, which is a customer's name or a part number in a title going to a different customer. It is one
+dialog, in front of an operation that is already deliberate, and §9A.3 already establishes that this is
+where a computation the user cannot perform belongs.
+
+**What does not change.** No content is ever altered; no version is ever deleted; no author is ever
+rewritten; nothing rewrites a shared chain; and circuitRF still offers no button for §8.3's rewrite.
+The scan that holds that shut (RC-7 gate 11) narrows rather than lifts — see §12 Q33.
 
 ---
 
@@ -1777,7 +2034,16 @@ summary is presented at the next interactive moment rather than at the door. Wha
 the silent version of either direction, and §10B.1 gains the row.
 
 **8.3 No cure, on purpose.** History rewriting is the only real remedy, and it invalidates every
-existing clone. **circuitRF must not offer a button for it.** A user who genuinely needs it has the
+existing clone. **circuitRF must not offer a button for it.**
+
+**This section is about content, and rev 6 narrows it to say so** *(§12 Q33)*. Its subject is a file
+in the history that must not be there — a large one, or one that should never have left the machine —
+and the remedy for that is a rewrite of every entry, which is why there is no button. **A title a
+designer typed is not content**, and §5.11 governs it on a different rule: what was recorded is never
+altered, what a person wrote about it may be corrected by that person until it has been shared. The
+two do not conflict, and the reason the distinction was not drawn earlier is that this section's rule
+was inherited from git rather than derived from circuitRF's own situation, in which the typical
+workspace has one designer, one machine and no clone at all. A user who genuinely needs it has the
 escape hatch of §4 and should be told so in plain language. Storing large files out-of-band via an
 extension is likewise excluded: it requires server infrastructure and relocates the problem rather
 than solving it.
@@ -1991,6 +2257,17 @@ Listed so that a later phase does not quietly adopt them:
   never a schedule, and never a side effect of packing.
 - **A stash UI.** §6.4.
 - **History rewriting.** §8.3 — including the "archive only the last N versions" shape of it, §9A.4.
+  **§5.11's corrections are not an exception to this and must not be read as one**: they alter what a
+  person wrote about a state and never the state, never an author, and never a shared chain.
+- **Deleting a version.** §5.11 — a restore point may be deleted because nothing else can ever have
+  seen it; a version is the designer's own record (§5.6 rule 5) and, once shared, is on somebody
+  else's disk. What is offered instead is a correction that says so.
+- **Erasing a title from a shared history.** §5.11 case (c) — the annotation is shown in place of the
+  original and the original is one click away, because a designer whose problem is embarrassment needs
+  to know what other people can still read.
+- **A Settings row for the history panel's filter.** §5.10 rule 4 — it is per-user view state in the
+  `.cwsuser`, and §10A's rows all change what is *kept*.
+- **Two panels.** §5.10 — superseded, and listed here so it is not reintroduced as a preference.
 - **A "delete all history" command.** §5.7 — removal is deleting one plainly-named folder, not a
   one-click irreversible action inside the application that exists to prevent loss.
 - **A commit per file save.** §5.3.
@@ -2103,6 +2380,10 @@ find in ten seconds and trust:
 | **panel layout, in a Save Workspace As copy** | n/a — the copy is your own | **yes**, and this is the one thing a copy keeps that an archive does not (§3.1a) |
 | a file left out of a restore point because it was unexpectedly large (§8.2b) | **not yet** — the entry says so and names it | no, until the question is answered; the file itself is still on disk |
 | a restore point that retention thinned | **no** — but its state is still in the repository until you reclaim it (§5.6a) | **yes**, from the same list, marked as thinned — until a reclaim, which asks first |
+| the title you typed on a version you have **not** shared | yes | **yes, and you can correct it** — §5.11 |
+| the title you typed on a version you **have** shared | yes | **no.** You can add a correction, which travels with it; the original stays in the file and can still be read |
+| the label on a restore point | yes | **yes** — rename it, or delete the whole entry. It never left this machine (§5.2a) |
+| the state you were in when you went back | **yes**, as a restore point taken before the restore | **yes**, and the panel offers it to you by name the moment you arrive (§5.8) |
 
 Wherever a row says no, the docs say **no** plainly. Softening any of them is how a designer ends up
 with a false belief.
@@ -2153,6 +2434,15 @@ and is not available afterwards.** The last three are the ones people get wrong:
    says so rather than listing configuration keys.
 15. **"My disk is full and it says the history is taking the space."** §5.6a — that thinning keeps the
    states, that reclaiming is the one action that does not, and exactly what it destroys.
+16. **"I typed the title wrong."** §5.11 — that a restore point's label and an unshared version's
+   title are yours to correct, that a shared one takes a correction instead, and the one sentence that
+   must not be softened: the original wording stays in the file. It exists because a designer who
+   believes a careless line is permanent will write a useless one instead.
+17. **"I went back and I want to come forward again."** §5.8 and §5.10 — that the state before the
+   restore was kept, that it is in the same list as everything else, and that coming forward is the
+   same action as going back rather than a different and scarier one. **Scenario 3 already covers
+   restore-then-keep-working; this is the twenty seconds before that**, and it is the moment a
+   designer is most likely to believe they have lost the day.
 
 ### 10B.3 AI checkpoints are documented separately
 
@@ -2231,8 +2521,19 @@ safety gate, the *choice* needs a history worth offering and the vocabulary to d
 Clone-as-workspace (§9), fetch/push with §9.1's credential posture, and the commit-pinned references of
 §7 — which is what turns §7A's read-only libraries from a restriction into a managed collection.
 
+**Stage 5 — the one panel, and the designer's own words.** *(new in rev 6.)* The merge of §5.10, its
+filter, its search, the row and expander it specifies, §5.8's way forward and §5.6 rule 6's fourth kept
+kind; then §5.11's corrections and §9's review before sending. **It comes last for the reason every
+other stage came in the order it did**: it changes nothing about what is stored, so it cannot be the
+thing that loses anything, and it can only be designed against panels that exist. Stage 5 is two
+briefs, RC-10 and RC-11, and the order between them is not arbitrary — RC-10 is display over data that
+is already there, RC-11 is the first thing in this document that writes to a reference a designer
+already read.
+
 **The user documentation of §10B is not a stage.** Each stage ships the part of it that stage makes
-true. A stage that lands mechanism without explanation has not landed.
+true. A stage that lands mechanism without explanation has not landed. **Stage 5 merges two chapters
+into one** for the same reason it merges two panels, and the merge is part of the stage rather than
+after it.
 
 ---
 
@@ -2537,6 +2838,36 @@ this machine*, so the row that answers that question is the one row that may nev
 remains right for every other affordance, and this is deliberately not §12 Q4's hold: held means
 circuitRF may not write to a repository that exists, and a designer may believe they are protected —
 here nothing has been promised, and the tab says so.
+
+**Q32. Two panels or one? DECIDED: one, named History, with the two kinds of row visibly distinct and
+a filter whose default hides the automatic entries.** §5.10 *(owner UX review, 2026-09-07)*. §5's
+argument is about kinds of entry and was spent as an argument for windows; the reason actually given
+for the split is unreadability, which a filter answers better. **The close checkpoint keeps being
+taken** — §5.3's argument for it is about the designer who never thought about history, and quietening
+a list is a display decision that must not become a capture decision. Supersedes RC-7 R-rc7-9.
+
+**Q33. May a designer correct what they wrote? DECIDED: yes — a restore point's label and an unshared
+version's title are correctable by their author, a shared version's title takes an annotation, and no
+content, author or shared chain is ever altered.** §5.11, narrowing §8.3. The blanket rule was git's,
+and git's reason — every clone is invalidated — does not reach the one-designer, no-clone workspace
+that is the common case. **RC-7 gate 11's source scan narrows rather than lifts**: `rebase`,
+`filter-branch`, `filter-repo`, `replace` and `reflog` stay forbidden everywhere, and `--amend` is
+permitted in exactly one named file, asserted by name so the exemption cannot spread — the same shape
+as R-rc7-4's exemption for the commit identity.
+
+**Q34. May retention thin the pre-restore checkpoint? DECIDED: no — §5.6 rule 6 gains a fourth kept
+kind.** §5.6, §5.8. It is the entry that makes the one-way-door promise true, and rev 5's list omitted
+it; the built `IsAlwaysKept` shows the omission rather than a disagreement.
+
+**Q35. Where is the way forward offered after a restore? DECIDED: in the history panel, on arrival, by
+name.** §5.8, §5.10. It was findable in the other panel, which is the two-panel split producing a
+safety failure rather than clutter.
+
+**Q36. Does the history leaving this machine get a review step? DECIDED: yes — send, clone and archive
+list the version titles that are about to leave.** §5.11, §9, §9A.3. It is worth more than every
+correction mechanism above, because the expensive case is not a careless word but a customer's name
+going to a different customer, and §9A.3 already establishes that a computation the user cannot perform
+belongs in front of the operation.
 
 **Still open from rev 5, and it is not small.** Two writers with different retention preferences on
 one shared workspace apply whichever closed last, bounded by rule 1's floor (§5.6). Whether the

@@ -69,12 +69,22 @@ public static class GitCheckpoint
     /// "nothing to commit" (R-rc3-4).</param>
     /// <param name="extraExclusions">Workspace-relative paths the caller is leaving out — RC-5's
     /// large-file boundary. Recorded by the caller in the commit's own metadata.</param>
+    /// <param name="alsoHeldTrees">
+    /// Other trees the history ALREADY holds. When the new tree is one of them, nothing is written —
+    /// for exactly <paramref name="previousTreeId"/>'s reason, over a set rather than one entry.
+    ///
+    /// <para>Null everywhere but the entry taken before a restore, where comparing against the newest
+    /// alone is not enough: going back and forth between two states leaves each one recorded already,
+    /// but never as the NEWEST, so every toggle wrote another copy of a state the history had
+    /// (owner, 2026-09-07).</para>
+    /// </param>
     public static CheckpointResult Record(
         GitCommand            git,
         string                reference,
         string                message,
         string?               previousTreeId   = null,
-        IReadOnlyList<string>? extraExclusions = null)
+        IReadOnlyList<string>? extraExclusions = null,
+        IReadOnlySet<string>?  alsoHeldTrees   = null)
     {
         // §4.4's first sentence, checked BEFORE the invocation rather than recognised from git's
         // English afterwards: if nobody can be named, the feature does not arm.
@@ -108,9 +118,12 @@ public static class GitCheckpoint
 
             string treeId = tree.Line;
 
-            // §5.3: a boundary whose tree equals the newest checkpoint's records nothing. Not a
-            // failure — the state is already recorded.
-            if (previousTreeId is { Length: > 0 } && string.Equals(previousTreeId, treeId, StringComparison.Ordinal))
+            // §5.3: a boundary whose tree is one the history already holds records nothing. Not a
+            // failure — the state is already recorded. The tree is computed above either way, so
+            // asking about a SET costs no more than asking about one entry.
+            if ((previousTreeId is { Length: > 0 }
+                 && string.Equals(previousTreeId, treeId, StringComparison.Ordinal))
+                || alsoHeldTrees?.Contains(treeId) == true)
                 return new CheckpointResult(null, treeId, false, nested, GitFailures.NothingToRecord());
 
             // PARENTLESS — no `-p`. See the type's own remarks; this is what makes thinning real.

@@ -73,14 +73,12 @@
         <DataTemplate DataType="{x:Type dockVm:DrcTool}">
             <drcv:DrcToolView/>
         </DataTemplate>
-        <!-- The two revision panels. RC-5's list had no template at all and rendered as nothing but
-             its own type name; both are here now, and the two are separate rows for the reason they
-             are separate panels (RC-7 R-rc7-9) — the narrative and the safety net are never merged. -->
-        <DataTemplate DataType="{x:Type dockVm:RestorePointsTool}">
-            <revv:RestorePointsToolView/>
-        </DataTemplate>
-        <DataTemplate DataType="{x:Type dockVm:VersionHistoryTool}">
-            <revv:VersionHistoryToolView/>
+        <!-- RC-10's one history panel (§5.10). It replaced two, and the merge is why there is one row
+             here: §5's argument is about two kinds of ENTRY and rev 2 spent it as an argument for two
+             WINDOWS. A panel with no template at all renders as nothing but its own type name, which
+             is how RC-5's list first shipped. -->
+        <DataTemplate DataType="{x:Type dockVm:HistoryTool}">
+            <revv:HistoryToolView/>
         </DataTemplate>
         <DataTemplate DataType="{x:Type dockVm:StubDocument}">
             <cv:StubContentView/>

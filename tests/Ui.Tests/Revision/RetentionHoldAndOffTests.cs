@@ -715,21 +715,33 @@ public class RetentionHoldAndOffTests
         Assert.Contains(sink.Texts, t => t.Contains("not circuitRF's to write to", StringComparison.Ordinal));
 
         // The panel keeps its actions and gains a line saying why — it does not empty itself.
-        var tool = new RestorePointsTool();
-        tool.SetPoints([], hasWorkspace: true,
-                       HoldMessages.IndicatorDetailFor(RecordingState.Held));
+        // RE-POINTED at RC-10's merged panel; the assertion is the one it always was.
+        var tool = new HistoryTool();
+        tool.SetRows(new HistoryList.Result([], 0), hasWorkspace: true,
+                     recordingState: HoldMessages.IndicatorDetailFor(RecordingState.Held));
 
         Assert.True(tool.HasWorkspace);
         Assert.True(tool.IsRecordingBlocked);
         Assert.NotEqual("", tool.RecordingState);
 
-        // And the view does not hide the three actions behind an IsVisible binding — which is the
-        // shape this gate exists to forbid, and is invisible from the view model alone.
-        string view = RestorePointsTests.ReadSource("src/Ui/Views/Revision/RestorePointsToolView.axaml");
-        foreach (string name in (string[])["SavePointButton", "RestoreButton", "KeepButton"])
+        // And the view does not hide the actions behind an IsVisible binding — which is the shape this
+        // gate exists to forbid, and is invisible from the view model alone. The two that CREATE
+        // something are header buttons; going back and keeping permanently moved to the row's own menu
+        // in RC-10 (R-rc10-17) and are asserted there.
+        string view = RestorePointsTests.ReadSource("src/Ui/Views/Revision/HistoryToolView.axaml");
+        foreach (string name in (string[])["SavePointButton", "KeepVersionButton"])
         {
             int at = view.IndexOf($"x:Name=\"{name}\"", StringComparison.Ordinal);
             Assert.True(at > 0, $"{name} is not in the view at all");
+            int end = view.IndexOf("</Button>", at, StringComparison.Ordinal);
+            Assert.DoesNotContain("IsVisible", view[at..end], StringComparison.Ordinal);
+        }
+
+        foreach (string header in (string[])
+                 ["Compare to Current", "Keep permanently", "Copy the identifier"])
+        {
+            int at = view.IndexOf($"Header=\"{header}\"", StringComparison.Ordinal);
+            Assert.True(at > 0, $"the '{header}' menu item is not in the view at all");
             int end = view.IndexOf("/>", at, StringComparison.Ordinal);
             Assert.DoesNotContain("IsVisible", view[at..end], StringComparison.Ordinal);
         }
@@ -1322,7 +1334,7 @@ public class RetentionHoldAndOffTests
 
         yield return "src/Ui/Revision/WorkspaceHistoryService.cs";
         yield return "src/Ui/ViewModels/WorkspaceViewModel.Revision.cs";
-        yield return "src/Ui/ViewModels/Dock/RestorePointsTool.cs";
+        yield return "src/Ui/ViewModels/Dock/HistoryTool.cs";
         yield return "src/Cli/History.cs";
     }
 

@@ -1586,7 +1586,7 @@ the process's own stdin and stdout.</p>
 | `import` | `import part` or `convert` |
 | `render` | `render` — one tool over every document kind, as the verb is |
 | `read` | `read` |
-| `history` | [`history checkpoint`, `list` or `restore`](restore-points.html) |
+| `history` | [`history checkpoint`, `list` or `restore`](history.html) — the correction nouns (`rename`, `retitle`, `correct`, `review`) are on the verb but not on this server |
 | `reference` | `reference` |
 | `batch` | The **only** tool with no verb behind it: it holds a restore-point batch open across several calls, which a process that exits after one command cannot |
 

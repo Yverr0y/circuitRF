@@ -75,7 +75,8 @@ public static class WorkspaceCheckpoints
         bool                   attended    = true,
         IReadOnlyList<string>? exclusions  = null,
         bool                   kept        = false,
-        bool                   forceRecord = false)
+        bool                   forceRecord   = false,
+        IReadOnlySet<string>?  alsoHeldTrees = null)
     {
         var newest       = RestorePoints.Newest(git);
         string? previous = forceRecord ? null : newest?.TreeId;
@@ -104,7 +105,7 @@ public static class WorkspaceCheckpoints
             kept: kept || alwaysKept,
             leftOut: leaveOut);
 
-        var result = GitCheckpoint.Record(git, reference, message, previous, leaveOut);
+        var result = GitCheckpoint.Record(git, reference, message, previous, leaveOut, alsoHeldTrees);
 
         foreach (string nested in result.ExcludedRepositories)
             notes.Add(GitFailures.NestedRepositoryExcluded(nested));
@@ -141,15 +142,27 @@ public static class WorkspaceCheckpoints
     };
 
     /// <summary>
-    /// The three origins retention may never thin, whatever the caller passes (R-rc5-1f, R-rc6-5a).
+    /// The four origins retention may never thin, whatever the caller passes (R-rc5-1f, R-rc6-5a,
+    /// <b>R-rc10-20</b>).
     ///
     /// <para>A save-point, because the user's judgement about what matters beats any heuristic and
     /// thinning it would discard exactly that judgement. And the pair that brackets an off period,
     /// because they are what gives the gap its ends — a pair retention could thin is a gap retention
     /// could erase.</para>
+    ///
+    /// <para><b>And the entry taken before a restore</b> (§5.6 rule 6's fourth kind, §12 Q34, added
+    /// 2026-09-07). It is what makes <i>going back is never a one-way door</i> true, and the list
+    /// omitted it — so the one entry whose entire purpose is to undo a destructive operation aged out
+    /// of the list on its own while the designer kept working. That is not data loss (§4.5 keeps the
+    /// objects and RC-6's journal brings the entry back); it is the promise leaving the place the
+    /// promise was made. Restores are rare, so keeping them costs nothing measurable.</para>
+    ///
+    /// <para><b>This is RC-10's one storage-visible change, and it is a keep rather than a delete.</b>
+    /// Everything else in that brief is presentation (§5.10 rule 6).</para>
     /// </summary>
     public static bool IsAlwaysKept(CheckpointOrigin origin)
         => origin is CheckpointOrigin.SavePoint
+                  or CheckpointOrigin.BeforeRestore
                   or CheckpointOrigin.RecordingOff
                   or CheckpointOrigin.RecordingOn;
 }

@@ -65,6 +65,15 @@ internal static class History
             "unpin"      => Pin(args[1..], clear: true),
             "fetch"      => Exchange(args[1..], send: false),
             "send"       => Exchange(args[1..], send: true),
+            // RC-11 §5.3d. Every revision-control operation has a spelling on this verb, and §5.11's
+            // corrections are operations: an agent that can write a careless intent into a checkpoint
+            // label must be able to correct one, and a designer whose only interface is a terminal
+            // must not have fewer of these than one with a window.
+            "rename"     => Rename(args[1..]),
+            "forget"     => Forget(args[1..]),
+            "retitle"    => Retitle(args[1..]),
+            "correct"    => Correct(args[1..]),
+            "review"     => Review(args[1..]),
             _            => UnknownNoun(noun),
         };
     }
@@ -160,13 +169,27 @@ internal static class History
     // ── history list ──────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The restore points, newest first. <b>Times and intents</b> — the same surface the panel shows,
-    /// and no object identity anywhere in it (R-rc5-2).
+    /// <b>The panel's list, headless</b> (RC-10 R-rc10-21, R-rc10-22) — versions, restore points and
+    /// off periods in one ordering, under the same filter and the same default the window opens on.
+    ///
+    /// <para><b>A verb that cannot express what the window shows means an agent and a designer are
+    /// reading two different histories.</b> Before RC-10 this listed the restore points alone, so an
+    /// agent asking what had happened to a workspace was told about the safety net and nothing about
+    /// the versions somebody had deliberately kept.</para>
+    ///
+    /// <para><b>The default is the panel's default</b>, which is one value —
+    /// <see cref="HistoryFilter.Default"/> — rather than two that agree today. Every entry somebody
+    /// stated an intent for is shown and the workspace-close entries are not;
+    /// <c>--include-automatic</c> is what reveals them.</para>
+    ///
+    /// <para><c>history versions</c> is unchanged and stays: it answers a different question,
+    /// narrowly.</para>
     /// </summary>
     private static int List(string[] args)
     {
         string? workspace = null;
         int     limit     = 0;
+        var     filter    = HistoryFilter.Default;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -174,6 +197,22 @@ internal static class History
             {
                 case "--limit" when i + 1 < args.Length && int.TryParse(args[i + 1], out int n):
                     limit = n; i++; break;
+
+                // R-rc10-21's first flag. The panel's toggle, spelled for a caller with no panel.
+                case "--include-automatic":
+                case "--all":
+                    filter = filter with { Automatic = true }; break;
+
+                // Its second: which kinds, by the same five names the flyout uses.
+                case "--kinds" when i + 1 < args.Length:
+                    if (ParseKinds(args[++i], ref filter) is { } bad)
+                        return JsonRun.Fail(CliDiagnostics.HistoryUnknownKind(bad));
+                    break;
+
+                // Its third. Over what a person wrote — titles, batch intents and the author.
+                case "--search" when i + 1 < args.Length:
+                    filter = filter with { Search = args[++i] }; break;
+
                 default:
                     if (args[i].StartsWith('-'))
                         return JsonRun.Fail(CliDiagnostics.RunUnknownOption("history list", args[i]));
@@ -187,35 +226,62 @@ internal static class History
         if (Bind(workspace, "history list", create: false, out string root, out var git, out int failure) is false)
             return failure;
 
-        // RC-6 R-rc6-4: the entries retention TIDIED AWAY are listed too, marked. Thinning drops a
-        // reference and leaves the objects, so those states are still there and still restorable — and
+        // ONE query, the panel's (R-rc10-22). RC-6 R-rc6-4's tidied-away entries are in it, marked —
         // a list that omitted them would make "thins, never prunes" invisible to the one caller who
         // cannot open a panel to check.
-        var points = RestorePoints.ListIncludingThinned(git!);
-        if (limit > 0 && points.Count > limit) points = [.. points.Take(limit)];
+        var result = HistoryList.Read(git!, filter);
+        var rows   = limit > 0 && result.Rows.Count > limit
+                   ? result.Rows.Take(limit).ToList()
+                   : result.Rows;
 
-        JsonRun.History = new HistoryReportJson(Points: [.. points.Select(ToJson)]);
+        JsonRun.History = new HistoryReportJson(
+            Points:   [.. rows.Where(r => r.Point is not null).Select(r => ToJson(r.Point!))],
+            Versions: [.. rows.Where(r => r.Version is not null).Select(r => ToJson(r.Version!))]);
 
-        if (points.Count == 0)
+        if (rows.Count == 0)
         {
             JsonRun.Report(CliDiagnostics.HistoryNothingKeptYet(root));
             return JsonRun.Finish(0);
         }
 
-        foreach (var p in points)
-            Console.WriteLine(Describe(p));
+        foreach (var row in rows)
+            Console.WriteLine(HistoryList.Line(row));
+
+        // R-rc10-10. A search whose answer is INCOMPLETE says so, and on stderr rather than in the
+        // list: stdout is the answer, and a caller piping it into something must not find a sentence
+        // among the rows.
+        if (result.ThinnedMatchesNotShown > 0)
+            JsonRun.Report(CliDiagnostics.HistoryThinnedAlsoMatch(result.ThinnedMatchesNotShown));
 
         return JsonRun.Finish(0);
     }
 
-    /// <summary>One line per entry: the ordering number, the time, the label, and the two things that
-    /// change what the entry means — kept, and incomplete.</summary>
-    private static string Describe(RestorePoint p)
+    /// <summary>
+    /// <c>--kinds versions,save-points,ai-batches,automatic,tidied-away</c> — the five the flyout has,
+    /// under the names a person would type. Anything named is on and everything else is off, so the
+    /// flag SETS the view rather than adding to a default a caller cannot see.
+    /// </summary>
+    /// <returns>The first unknown name, or null when every one was understood.</returns>
+    private static string? ParseKinds(string spec, ref HistoryFilter filter)
     {
-        string marks = (p.Thinned ? " [tidied away]" : p.Kept ? " [kept]" : "")
-                     + (p.IsIncomplete ? $" [incomplete: {string.Join(", ", p.LeftOut)}]" : "");
+        var next = new HistoryFilter(false, false, false, false, false, filter.Search);
 
-        return $"{p.Sequence,6}  {p.TakenUtc.ToLocalTime():yyyy-MM-dd HH:mm}  {p.Label}{marks}";
+        foreach (string raw in spec.Split(',', StringSplitOptions.RemoveEmptyEntries))
+        {
+            switch (raw.Trim().ToLowerInvariant())
+            {
+                case "versions":    case "version":    next = next with { Versions   = true }; break;
+                case "save-points": case "save-point": next = next with { SavePoints = true }; break;
+                case "ai-batches":  case "ai-batch":   next = next with { AiBatches  = true }; break;
+                case "automatic":                      next = next with { Automatic  = true }; break;
+                case "tidied-away": case "tidied":     next = next with { TidiedAway = true }; break;
+                case "":                                                                       break;
+                default: return raw.Trim();
+            }
+        }
+
+        filter = next;
+        return null;
     }
 
     // ── history restore ───────────────────────────────────────────────────────────────────────────
@@ -469,6 +535,266 @@ internal static class History
     private static string Describe(HistoryVersion v)
         => $"{v.WhenUtc.ToLocalTime():yyyy-MM-dd HH:mm}  {v.Title}"
          + (v.RestoredFrom is { } from ? $"  [brought back from '{from.Label}']" : "");
+
+    // ── history rename / forget / retitle / correct / review (RC-11 §5.11, §5.3d) ─────────────────
+
+    /// <summary>
+    /// §5.11 case (a). <b>Renames a restore point</b> — a new parentless commit over the identical
+    /// tree, one reference update, every trailer but the label preserved (R-rc11-3, R-rc11-4).
+    ///
+    /// <para>The entry is named by its SEQUENCE, as <c>history restore</c> names one: §5.6 rule 2's
+    /// number is the entry's own identity in every headless surface, and the wall clock is the label a
+    /// human reads and never what decides which entry is which.</para>
+    /// </summary>
+    private static int Rename(string[] args)
+    {
+        if (Entry(args, "history rename", out long sequence, out string? text,
+                  out var git, out int failure) is false)
+            return failure;
+
+        var point = RestorePoints.ListIncludingThinned(git!).FirstOrDefault(p => p.Sequence == sequence);
+        if (point is null) return JsonRun.Fail(CliDiagnostics.HistoryNoSuchPoint(sequence));
+
+        var outcome = RestorePoints.Rename(git!, point, text);
+        JsonRun.Report(outcome.Diagnostic ?? HistoryMessages.RestorePointRenamed(text ?? ""));
+        if (!outcome.Ok) return JsonRun.Finish(1);
+
+        JsonRun.History = new HistoryReportJson(Recorded: true, Point: ToJson(point with { Label = text! }));
+        Console.WriteLine($"renamed: {point.Sequence}  {text}");
+        return JsonRun.Finish(0);
+    }
+
+    /// <summary>
+    /// §5.11 case (a). <b>Lets a restore point go — and it goes exactly where retention sends one</b>
+    /// (R-rc11-5): journalled, still listed under <i>tidied away</i>, brought back by
+    /// <c>history restore</c>, and freeing nothing until an explicit reclaim.
+    ///
+    /// <para><b>There is no <c>--force</c> and nothing to confirm</b>, because nothing is destroyed. A
+    /// flag here would say otherwise, and the one thing this whole brief must not do is imply an
+    /// erasure it does not perform.</para>
+    /// </summary>
+    private static int Forget(string[] args)
+    {
+        if (Entry(args, "history forget", out long sequence, out _, out var git, out int failure,
+                  needsText: false) is false)
+            return failure;
+
+        var point = RestorePoints.ListIncludingThinned(git!).FirstOrDefault(p => p.Sequence == sequence);
+        if (point is null) return JsonRun.Fail(CliDiagnostics.HistoryNoSuchPoint(sequence));
+
+        var outcome = RestorePoints.Forget(git!, point);
+        JsonRun.Report(outcome.Diagnostic ?? HistoryMessages.RestorePointLetGo(point.Label));
+        if (!outcome.Ok) return JsonRun.Finish(1);
+
+        JsonRun.History = new HistoryReportJson(Recorded: true, Point: ToJson(point with { Thinned = true }));
+        Console.WriteLine($"tidied away: {point.Sequence}  {point.Label}");
+        return JsonRun.Finish(0);
+    }
+
+    /// <summary>
+    /// §5.11 case (b). <b>Corrects the newest unshared version's title</b> (R-rc11-7), and refuses by
+    /// naming why on anything else — a shared version, or an older one whose correction would rewrite
+    /// every version after it. Both refusals offer <c>history correct</c>, which applies to any version
+    /// at all.
+    /// </summary>
+    private static int Retitle(string[] args)
+    {
+        if (Version(args, "history retitle", out string? which, out string? text,
+                    out var git, out int failure) is false)
+            return failure;
+
+        if (Find(git!, which) is not { } version)
+            return JsonRun.Fail(CliDiagnostics.HistoryNoSuchVersion(which ?? ""));
+
+        var outcome = VersionCorrections.CorrectTitle(git!, version, text);
+        JsonRun.Report(outcome.Diagnostic);
+        if (!outcome.Ok) return JsonRun.Finish(1);
+
+        JsonRun.History = new HistoryReportJson(Recorded: true, Version: ToJson(outcome.Version!));
+        Console.WriteLine($"retitled: {outcome.Version!.Title}");
+        return JsonRun.Finish(0);
+    }
+
+    /// <summary>
+    /// §5.11 case (c). <b>Adds a correction to a version without altering it</b> (R-rc11-13) — shown in
+    /// place of the original with the original still there, and carried alongside the version when it
+    /// is sent.
+    ///
+    /// <para>An empty <c>--text</c> takes the correction back, which is not an erasure of anything: the
+    /// original was never altered, so removing the annotation puts the original wording back in
+    /// front.</para>
+    /// </summary>
+    private static int Correct(string[] args)
+    {
+        if (Version(args, "history correct", out string? which, out string? text,
+                    out var git, out int failure, needsText: false) is false)
+            return failure;
+
+        if (Find(git!, which) is not { } version)
+            return JsonRun.Fail(CliDiagnostics.HistoryNoSuchVersion(which ?? ""));
+
+        var outcome = VersionCorrections.Annotate(git!, version, text);
+        JsonRun.Report(outcome.Diagnostic);
+        if (!outcome.Ok) return JsonRun.Finish(1);
+
+        JsonRun.History = new HistoryReportJson(Recorded: true, Version: ToJson(version));
+        Console.WriteLine(text is { Length: > 0 } ? $"corrected: {text}" : "correction removed");
+
+        // R-rc11-14, headless. The sentence that may not be softened, said where a caller with no
+        // dialog would otherwise never meet it — and a caller with no dialog is very often an agent
+        // acting for somebody who believes a correction removes something.
+        Console.WriteLine(HistoryMessages.ACorrectionDoesNotErase);
+        return JsonRun.Finish(0);
+    }
+
+    /// <summary>
+    /// §5.11's review (R-rc11-16, §12 Q36) — <b>the version titles one journey would take off this
+    /// machine</b>, from the one function the three window journeys call.
+    ///
+    /// <para>It reads and writes nothing, so it runs on a read-only tree and on a workspace another
+    /// process has open, and it is the one noun here a build machine can put in front of a publishing
+    /// step of its own.</para>
+    /// </summary>
+    private static int Review(string[] args)
+    {
+        string? workspace = null;
+        var     journey   = LeavingJourney.Send;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--send":    journey = LeavingJourney.Send;    break;
+                case "--copy":    journey = LeavingJourney.Copy;    break;
+                case "--archive": journey = LeavingJourney.Archive; break;
+                default:
+                    if (args[i].StartsWith('-'))
+                        return JsonRun.Fail(CliDiagnostics.RunUnknownOption("history review", args[i]));
+                    if (workspace is not null)
+                        return JsonRun.Fail(CliDiagnostics.RunUnknownOption("history review", args[i]));
+                    workspace = args[i];
+                    break;
+            }
+        }
+
+        if (Bind(workspace, "history review", create: false, out _, out var git, out int failure) is false)
+            return failure;
+
+        var titles = TitlesLeaving.For(git!, journey);
+
+        JsonRun.History = new HistoryReportJson(
+            Versions: [.. titles.Select(t => new VersionJson(
+                t.CommitId,
+                t.WhenUtc.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                t.Shown, t.Who, null))]);
+
+        Console.WriteLine(HistoryMessages.TitlesLeaving(titles.Count, TitlesLeaving.Describe(journey)));
+        foreach (var t in titles) Console.WriteLine("  " + TitlesLeaving.Line(t));
+
+        return JsonRun.Finish(0);
+    }
+
+    /// <summary>
+    /// The two nouns that name a restore point: a workspace, a <c>--point</c> sequence and, for a
+    /// rename, the words. Shared so the two cannot parse their arguments differently.
+    /// </summary>
+    private static bool Entry(string[] args, string verb, out long sequence, out string? text,
+                              out GitCommand? git, out int failure, bool needsText = true)
+    {
+        string? workspace = null;
+        long?   wanted    = null;
+        text    = null;
+        git     = null;
+        failure = 0;
+        sequence = 0;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--point" when i + 1 < args.Length && long.TryParse(args[i + 1], out long n):
+                    wanted = n; i++; break;
+                case "--label" when i + 1 < args.Length: text = args[++i]; break;
+                case "--text"  when i + 1 < args.Length: text = args[++i]; break;
+                default:
+                    if (args[i].StartsWith('-') || workspace is not null)
+                    { failure = JsonRun.Fail(CliDiagnostics.RunUnknownOption(verb, args[i])); return false; }
+                    workspace = args[i];
+                    break;
+            }
+        }
+
+        if (Bind(workspace, verb, create: false, out _, out git, out failure) is false) return false;
+
+        if (wanted is not { } number)
+        {
+            JsonRun.Report(CliDiagnostics.HistoryRestoreNeedsAPoint());
+            failure = Usage();
+            return false;
+        }
+
+        if (needsText && text is not { Length: > 0 })
+        {
+            JsonRun.Report(HistoryMessages.ACorrectionNeedsWords());
+            failure = Usage();
+            return false;
+        }
+
+        sequence = number;
+        return true;
+    }
+
+    /// <summary>The same, for the two nouns that name a version.</summary>
+    private static bool Version(string[] args, string verb, out string? which, out string? text,
+                                out GitCommand? git, out int failure, bool needsText = true)
+    {
+        string? workspace = null;
+        which   = null;
+        text    = null;
+        git     = null;
+        failure = 0;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--version" when i + 1 < args.Length: which = args[++i]; break;
+                case "--title"   when i + 1 < args.Length: text  = args[++i]; break;
+                case "--text"    when i + 1 < args.Length: text  = args[++i]; break;
+                default:
+                    if (args[i].StartsWith('-') || workspace is not null)
+                    { failure = JsonRun.Fail(CliDiagnostics.RunUnknownOption(verb, args[i])); return false; }
+                    workspace = args[i];
+                    break;
+            }
+        }
+
+        if (Bind(workspace, verb, create: false, out _, out git, out failure) is false) return false;
+
+        if (needsText && text is not { Length: > 0 })
+        {
+            JsonRun.Report(HistoryMessages.ACorrectionNeedsWords());
+            failure = Usage();
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The version an identity names, or <b>the newest when none was given</b> — which is the entry
+    /// §5.11 case (b) is about, so <c>history retitle</c> with no <c>--version</c> does the thing
+    /// almost every caller means.
+    /// </summary>
+    private static HistoryVersion? Find(GitCommand git, string? which)
+    {
+        var versions = HistoryBrowser.Versions(git);
+        if (versions.Count == 0) return null;
+
+        return which is { Length: > 0 } wanted
+            ? versions.FirstOrDefault(v => v.CommitId.StartsWith(wanted, StringComparison.OrdinalIgnoreCase))
+            : versions[0];
+    }
 
     // ── history clone (RC-9 R-rc9-1, R-rc9-20) ────────────────────────────────────────────────────
 
@@ -814,7 +1140,9 @@ internal static class History
         Console.Error.WriteLine(
             "usage: circuitrf history checkpoint <workspace> [--intent <text>] [--leave-out <path>]\n"
           + "                                    [--include-large] [--unattended] [--create-repository]\n"
-          + "       circuitrf history list <workspace> [--limit <n>]\n"
+          + "       circuitrf history list <workspace> [--limit <n>] [--include-automatic]\n"
+          + "                                  [--kinds versions,save-points,ai-batches,automatic,tidied-away]\n"
+          + "                                  [--search <text>]\n"
           + "       circuitrf history restore <workspace> --point <number>\n"
           + "       circuitrf history commit <workspace> [--title <text>] [--leave-out <path>]\n"
           + "       circuitrf history versions <workspace> [--limit <n>] [--changes <version>]\n"
@@ -823,7 +1151,12 @@ internal static class History
           + "       circuitrf history pin <workspace> --alias <name> [--to <version>]\n"
           + "       circuitrf history unpin <workspace> --alias <name>\n"
           + "       circuitrf history fetch <workspace>\n"
-          + "       circuitrf history send <workspace>");
+          + "       circuitrf history send <workspace>\n"
+          + "       circuitrf history rename <workspace> --point <number> --label <text>\n"
+          + "       circuitrf history forget <workspace> --point <number>\n"
+          + "       circuitrf history retitle <workspace> [--version <id>] --title <text>\n"
+          + "       circuitrf history correct <workspace> [--version <id>] --text <text>\n"
+          + "       circuitrf history review <workspace> [--send | --copy | --archive]");
         return 2;
     }
 }

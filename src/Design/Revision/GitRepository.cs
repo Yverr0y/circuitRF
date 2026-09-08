@@ -5,7 +5,13 @@ namespace CircuitRF.Design.Revision;
 /// <summary>What an operation on a repository produced.</summary>
 /// <param name="Ok">Whether it did what was asked.</param>
 /// <param name="Diagnostic">The translated failure, or null. Info-severity on some successes.</param>
-public sealed record RevisionOutcome(bool Ok, Diagnostic? Diagnostic = null)
+/// <param name="CommitId">
+/// What the entry's identity is now, for the operations that REWRITE a commit rather than add one —
+/// a rename, a keep. Empty everywhere else. A caller holding a copy of the old title needs it to keep
+/// its link to the entry alive; without it, that link goes stale silently and a corrected title starts
+/// leaking again on the second correction rather than the first.
+/// </param>
+public sealed record RevisionOutcome(bool Ok, Diagnostic? Diagnostic = null, string CommitId = "")
 {
     public static readonly RevisionOutcome Success = new(true);
     public static RevisionOutcome Failed(Diagnostic d) => new(false, d);

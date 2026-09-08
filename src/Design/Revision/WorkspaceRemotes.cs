@@ -135,6 +135,8 @@ public static class WorkspaceRemotes
             return new ExchangeResult(false, remote, false,
                 [GitFailures.Translate(r, SharingMessages.BringingInChanges, git.WorkspaceRoot)]);
 
+        BringInCorrections(git, remote, ct);
+
         bool changed = !string.Equals(before, Fingerprint(git), StringComparison.Ordinal);
         return new ExchangeResult(true, remote, changed,
             [changed ? SharingMessages.BroughtInChanges(remote)
@@ -167,6 +169,8 @@ public static class WorkspaceRemotes
             return new ExchangeResult(false, remote, false,
                 [GitFailures.Translate(r, SharingMessages.SendingChanges, git.WorkspaceRoot)]);
 
+        SendCorrections(git, remote, ct);
+
         // --porcelain marks an up-to-date reference with '='; anything else moved.
         bool changed = r.StdOut
             .Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries)
@@ -177,14 +181,59 @@ public static class WorkspaceRemotes
             [changed ? SharingMessages.Sent(remote) : SharingMessages.NothingToSend(remote)]);
     }
 
+    // ── §5.11's corrections travel with the versions they annotate (RC-11 R-rc11-13) ──────────────
+
+    /// <summary>
+    /// Brings in the corrections the other copy holds, and <b>a failure here is not a failure of the
+    /// fetch</b>.
+    ///
+    /// <para><b>Why it is a second invocation rather than a second refspec.</b> A command-line refspec
+    /// REPLACES git's configured one rather than adding to it, so naming the notes reference in the
+    /// fetch above would mean spelling the default out as well — and worse, <b>a non-wildcard refspec
+    /// naming a reference the remote does not have is a fatal error</b>. Every workspace in which
+    /// nobody has ever written a correction is exactly that case, which is nearly all of them, so the
+    /// tidy-looking version would have broken Pull Changes for everybody in order to carry a string
+    /// almost nobody has written.</para>
+    ///
+    /// <para>So: best effort, ignored when it fails, and it only runs after a fetch that already
+    /// succeeded. Nothing about a correction is worth reporting a failed exchange for.</para>
+    /// </summary>
+    private static void BringInCorrections(GitCommand git, string remote, CancellationToken ct)
+        => git.Run(["fetch", "--", remote, VersionCorrections.NotesRefspec],
+                   new GitRunOptions(Network: true), ct);
+
+    /// <summary>
+    /// Sends the corrections alongside the versions they annotate (§9, R-rc11-13).
+    ///
+    /// <para><b>Only when there is one to send.</b> A push naming a source reference that does not
+    /// exist locally is a refusal, and a workspace with no corrections in it is the ordinary state —
+    /// so the reference is resolved first and the invocation skipped rather than made and forgiven.
+    /// This is also what keeps a send on a workspace with no corrections at exactly the cost it had
+    /// before RC-11.</para>
+    /// </summary>
+    private static void SendCorrections(GitCommand git, string remote, CancellationToken ct)
+    {
+        var exists = git.Run(["rev-parse", "--verify", "--quiet", VersionCorrections.NotesRef],
+                             new GitRunOptions(ReadOnly: true));
+        if (!exists.Ok || exists.Line.Length == 0) return;
+
+        git.Run(["push", "--porcelain", "--", remote, VersionCorrections.NotesRefspec],
+                new GitRunOptions(Network: true), ct);
+    }
+
     /// <summary>
     /// What the remote-tracking references point at, as one string. Comparing it before and after is
     /// how "did anything arrive" is answered without parsing git's progress output, which is written
     /// for a person and is not stable.
+    ///
+    /// <para><b>The notes reference is in it</b> (RC-11): a fetch that brought in nothing but a
+    /// colleague's correction did change something, and reporting "nothing new" for it would be the
+    /// silent-download defect R-rc9-6 exists to prevent, arriving by a different route.</para>
     /// </summary>
     private static string Fingerprint(GitCommand git)
     {
-        var r = git.Run(["for-each-ref", "--format=%(refname) %(objectname)", "refs/remotes/"],
+        var r = git.Run(["for-each-ref", "--format=%(refname) %(objectname)",
+                         "refs/remotes/", VersionCorrections.NotesRef],
                         new GitRunOptions(ReadOnly: true));
         return r.Ok ? r.StdOut.Trim() : "";
     }

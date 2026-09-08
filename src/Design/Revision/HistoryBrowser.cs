@@ -116,6 +116,23 @@ public static class HistoryBrowser
             ? Walk(git, [reference, "--not", "HEAD"], limit, onTheOtherCopy: true)
             : [];
 
+    /// <summary>
+    /// <b>Which versions have left this machine</b> (RC-10 R-rc10-14) — the identities reachable from
+    /// the copy this workspace exchanges with.
+    ///
+    /// <para>The expander says <i>local-only</i> or <i>shared</i>, and the distinction is the one
+    /// §5.11 turns on: a title nobody else has seen is the author's to correct, and one that has left
+    /// the machine is not.</para>
+    ///
+    /// <para><b>RC-11 moved the computation into <see cref="VersionSharing"/> and left this here as
+    /// the one caller's spelling of it</b> (R-rc11-2). The predicate the whole of §5.11 turns on is a
+    /// named function with its own tests rather than a condition three call sites each decide for
+    /// themselves — and one of the three states it distinguishes is invisible from a set alone: a
+    /// remote configured and never fetched answers <b>shared</b>, not <i>nothing is shared</i>, which
+    /// is what a bare empty set here used to say.</para>
+    /// </summary>
+    public static SharedVersions Shared(GitCommand git) => VersionSharing.Compute(git);
+
     private static IReadOnlyList<HistoryVersion> Walk(
         GitCommand git, IReadOnlyList<string> revisions, int limit, bool onTheOtherCopy)
     {
@@ -227,6 +244,73 @@ public static class HistoryBrowser
 
         changes.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
         return changes;
+    }
+
+    /// <summary>
+    /// <b>What one entry holds that the workspace does not, and the other way round</b> (RC-10
+    /// R-rc10-17, R-rc7-11) — the comparison the right-click menu offers, at the granularity of
+    /// documents like every other one here.
+    ///
+    /// <para><b>It writes nothing at all</b>, which is the constraint that decided the shape.
+    /// <see cref="GitCheckpoint"/>'s route to a tree of the current state is <c>add --all</c> followed
+    /// by <c>write-tree</c>, and that writes a blob for every changed file — permanently, since
+    /// §4.5's <c>gc.pruneExpire = never</c> forbids any pack from removing an unreachable object. A
+    /// comparison a designer opens out of curiosity would then grow the repository, which is the one
+    /// thing R-rc10-4 says this brief may not do.</para>
+    ///
+    /// <para>So the entry's tree is read into a PRIVATE index — no shared index is ever touched
+    /// (§5.2b) — and <c>status</c> reports the difference against the working files. That reads the
+    /// files and hashes them in memory; nothing reaches the object store. It also gets
+    /// <c>.gitignore</c> right for free, so results and generated artwork are absent from the answer
+    /// exactly as they are absent from the entry.</para>
+    /// </summary>
+    public static IReadOnlyList<DocumentChange> CompareWithWorkspace(GitCommand git, string treeOrCommit)
+    {
+        string index = GitCheckpoint.PrivateIndexPath(git.WorkspaceRoot) + "-compare";
+
+        try
+        {
+            try { File.Delete(index); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+
+            var options = new GitRunOptions(IndexFile: index);
+
+            var loaded = git.Run(["read-tree", treeOrCommit], options);
+            if (!loaded.Ok) return [];
+
+            var listed = git.Run(
+                ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"],
+                options with { ReadOnly = true });
+            if (!listed.Ok) return [];
+
+            List<DocumentChange> changes = [];
+            foreach (string field in listed.StdOut.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (field.Length < 4) continue;
+
+                string status = field[..2];
+                string path   = field[3..].Trim();
+                if (path.Length == 0) continue;
+
+                // The workspace's side is what the row is ABOUT, so the wording is from the entry's
+                // point of view: a file present now and not in the entry was "added" since it.
+                changes.Add(new DocumentChange(path, status switch
+                {
+                    "??"                       => DocumentChangeKind.Added,
+                    [_, 'D'] or ['D', _]       => DocumentChangeKind.Removed,
+                    [_, 'A'] or ['A', _]       => DocumentChangeKind.Added,
+                    _                          => DocumentChangeKind.Changed,
+                }));
+            }
+
+            changes.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
+            return changes;
+        }
+        finally
+        {
+            try { File.Delete(index); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
     }
 
     /// <summary>

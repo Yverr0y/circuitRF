@@ -103,8 +103,10 @@ public class IncomingVersionsTests
             Assert.False(rows[1].Version!.OnTheOtherCopy);
             Assert.Equal(1, service.IncomingCount(near));
 
-            var tool = new VersionHistoryTool();
-            tool.SetRows(rows, hasWorkspace: true);
+            // RE-POINTED at RC-10's merged panel. The default filter shows versions, so the two rows
+            // asserted below are the same two, in the same order, under the same marks.
+            var tool = new HistoryTool();
+            tool.SetRows(service.Entries(near, HistoryFilter.Default), hasWorkspace: true);
 
             Assert.True(tool.HasIncoming);
             Assert.Equal(1, tool.IncomingCount);
@@ -113,8 +115,8 @@ public class IncomingVersionsTests
             Assert.NotEqual("", tool.Rows[0].OtherCopyNote);
 
             // Our own version carries no mark and no note — the pair is what makes either readable.
-            Assert.False(tool.Rows[1].OnTheOtherCopy);
-            Assert.Equal("", tool.Rows[1].OtherCopyNote);
+            var ours = tool.Rows.First(r => r.IsVersion && !r.OnTheOtherCopy);
+            Assert.Equal("", ours.OtherCopyNote);
         }
         finally { Delete(near); }
     }

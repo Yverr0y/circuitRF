@@ -30,7 +30,15 @@ public partial class KeepThisVersionDialog : Window
     public KeepThisVersionDialog()
     {
         InitializeComponent();
-        RewritingText.Text = HistoryMessages.RewritingIsYoursToDo;
+
+        // RC-11 R-rc11-15. The escape-hatch paragraph keeps its subject — a FILE in the history that
+        // must not be there — and stops claiming the part §5.11 now governs, which is the line a
+        // person wrote. The second sentence is what makes the first read as the narrow rule it is:
+        // without it, a designer who came here worried about a careless title would read "circuitRF
+        // never alters what was recorded" and stop looking.
+        RewritingText.Text = HistoryMessages.RewritingIsYoursToDo
+                           + "\n\n"
+                           + HistoryMessages.TitlesAreYoursToCorrect;
     }
 
     /// <summary>Fills the dialog in. A null <paramref name="restoredFrom"/> leaves the notice

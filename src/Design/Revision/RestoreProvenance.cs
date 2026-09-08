@@ -8,9 +8,19 @@ namespace CircuitRF.Design.Revision;
 /// <param name="Label">The restore point's own line, as the designer read it when they chose it.</param>
 /// <param name="TakenUtc">When that state was kept — what tells two identically-labelled entries
 /// apart.</param>
+/// <param name="CommitId">
+/// <b>Which entry the label was copied from</b>, so a later correction can find this copy and replace
+/// it (owner, 2026-09-07). Without it the label here is an orphan: a designer who corrects a title
+/// and then keeps a version watches the wording they deleted get written into a brand-new commit.
+///
+/// <para>Empty for a file written before this field existed. <see cref="RestoreProvenance.Retitle"/>
+/// then matches nothing and leaves it alone, which is the safe direction — the alternative is
+/// guessing, on a string a designer has explicitly asked to be rid of.</para>
+/// </param>
 public sealed record RestoredState(
-    [property: JsonPropertyName("label")] string         Label,
-    [property: JsonPropertyName("taken")] DateTimeOffset TakenUtc);
+    [property: JsonPropertyName("label")]  string         Label,
+    [property: JsonPropertyName("taken")]  DateTimeOffset TakenUtc,
+    [property: JsonPropertyName("commit")] string         CommitId = "");
 
 /// <summary>
 /// <b>The one piece of state a restore leaves for the next commit</b>
@@ -85,6 +95,34 @@ public static class RestoreProvenance
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// <b>Follows a correction into the copy this file holds</b> (owner, 2026-09-07).
+    ///
+    /// <para>The reported defect: correct a version's title, edit on, press Keep This Version, and the
+    /// dialog offers "this version was brought back from '&lt;the wording you deleted&gt;'" — and then
+    /// writes it into the new commit, where it is permanent. The label here is a COPY taken at restore
+    /// time, and a copy nothing updates is a copy that outlives the original.</para>
+    ///
+    /// <para><b>Matched on identity, never on the text.</b> Matching on the old label would rewrite an
+    /// unrelated entry that happened to share a title, and titles collide constantly — <i>save-point</i>,
+    /// <i>workspace closed</i>. A correction that rewrites the commit passes its new identity so the
+    /// link survives; an annotation leaves the identity alone and passes the same one back.</para>
+    ///
+    /// <para>Does nothing when this file names a different entry, or when it predates
+    /// <see cref="RestoredState.CommitId"/> and so names none. A failure to write is not reported for
+    /// <see cref="Write"/>'s reason: the correction itself succeeded, and this is one line in a commit
+    /// message that may never be written.</para>
+    /// </summary>
+    public static bool Retitle(string workspaceRoot, string fromCommitId, string toCommitId, string label)
+    {
+        if (fromCommitId.Length == 0) return false;
+        if (Read(workspaceRoot) is not { } state) return false;
+        if (!string.Equals(state.CommitId, fromCommitId, StringComparison.Ordinal)) return false;
+
+        return Write(workspaceRoot,
+                     state with { Label = label.ReplaceLineEndings(" ").Trim(), CommitId = toCommitId });
     }
 
     /// <summary>Removes it, after the commit that named it succeeded.</summary>

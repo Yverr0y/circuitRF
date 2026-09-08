@@ -245,7 +245,10 @@ public sealed class DocGenRun
                           .ToDictionary(p => p.Slug, p => p.Title, StringComparer.Ordinal);
         if (nav is not null && !slidesOnly)
         {
-            var emitted = pages.Where(p => p.Kind != "slides").Select(p => p.Slug)
+            // A RETIRED page is deliberately not in the reading order: it is a slug that must not 404
+            // for somebody with a bookmark, not a chapter, and a reader following Next should never
+            // arrive at one. Excluded from `emitted` so the orphan check does not refuse it.
+            var emitted = pages.Where(p => p.Kind is not "slides" and not "retired").Select(p => p.Slug)
                                .Concat(CopiedThroughPages(pages))
                                .ToHashSet(StringComparer.Ordinal);
             nav.Validate(emitted);
@@ -297,7 +300,10 @@ public sealed class DocGenRun
             // already refused that case, so this only decides the shape of a run with no _nav.txt.
             int rank = nav is null ? int.MaxValue
                      : nav.Order.ToList().IndexOf(page.Slug) is var r && r >= 0 ? r : int.MaxValue;
-            search.Add(page, HtmlEmitter.BodyHtml(expanded), rank);
+
+            // A retired slug is a signpost and not an answer: indexing it would put a page saying
+            // "this moved" above the chapter it moved to, for the words they both contain.
+            if (page.Kind != "retired") search.Add(page, HtmlEmitter.BodyHtml(expanded), rank);
 
             string html = HtmlEmitter.Render(page, expanded, nav, titles);
 

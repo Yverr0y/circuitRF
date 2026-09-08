@@ -1,11 +1,11 @@
 # Sonnet Brief — Revision control: overview, findings and decisions
 
 **Read this first; it is the map for `brief-revision-control-1-workspace-file-split.md` through
-`-9-clone-and-pins.md`. It contains no work of its own.** It records what the tree says today, fixes
-the decisions the nine implementation briefs depend on, and maps the architecture's staging onto
-them.
+`-11-correcting-what-you-wrote.md`. It contains no work of its own.** It records what the tree says
+today, fixes the decisions the implementation briefs depend on, and maps the architecture's staging
+onto them.
 
-The architecture is `docs/design/revision-control.md` (**rev 5**, owner decisions Q1–Q30 taken).
+The architecture is `docs/design/revision-control.md` (**rev 6**, owner decisions Q1–Q36 taken).
 **This brief does not restate it.** rev 3 added nine sections after these briefs were first written —
 §4.5 (repository configuration and invocation environment), §4.6 (two processes, one repository), §4.7
 (the version floor and `safe.directory`), §5.2a (where checkpoints live and which journeys they
@@ -35,6 +35,19 @@ restore rules (§5.8), the unattended large-file boundary (§8.2b), the kept mar
 channel between `serve` and the window (§5.3c), the `history` verb (§5.3d), §5.5's fourth row, and
 nested-repository detection (§12 Q4). §3 and §5 below carry all of it. **Where a brief and rev 5
 disagree, rev 5 is right.**
+
+**rev 6 is the first revision driven by the shipped panels rather than by re-reading the document**
+(owner UX review, 2026-09-07), and it adds **two briefs, RC-10 and RC-11, as Stage 5**. Nothing in
+Stages 1–4 was found unspecified or mechanically wrong; what rev 6 changes is what the mechanisms are
+*presented as*, and one principle that was inherited rather than derived. Two decisions are reversals
+and both are stated as such: **§5.10 merges the two panels into one** (§12 Q32 — §5's argument is about
+kinds of entry and rev 2 spent it as an argument for windows; the reason actually given for the split
+is unreadability, which a filter answers better), which **supersedes RC-7 R-rc7-9**; and **§5.11 lets a
+designer correct what they wrote** (§12 Q33 — §8.3's blanket rule is git's, and git's reason is that a
+rewrite invalidates every clone, which does not reach a workspace with one designer and no clone).
+rev 6 also adds a fourth kept kind (§5.6 rule 6, §12 Q34 — the pre-restore checkpoint, which
+`IsAlwaysKept` omits today), the way forward after a restore (§5.8, §12 Q35), and a review of the
+titles about to leave the machine (§12 Q36). **Where a brief and rev 6 disagree, rev 6 is right.**
 
 Every requirement below is either a decision the architecture left to the briefs, or a fact read out
 of the tree with a file and line so a later reader can check it rather than trust it.
@@ -182,6 +195,8 @@ opposite situations.
 | **RC-7** commit and the history browser | 3 | RC-5, RC-6 | yes |
 | **RC-8** the archive's include-history option | 3 | RC-5, RC-7 | yes |
 | **RC-9** clone-as-workspace, fetch/push, pins | 4 | all | yes |
+| **RC-10** one history panel | 5 | RC-5, RC-6, RC-7, RC-9 | yes |
+| **RC-11** correcting what you wrote, and the review before sending | 5 | RC-10 | yes |
 
 **RC-1 and RC-2 can land in either order and neither waits for anything.** They are the two parts of
 Stage 1 the architecture says are worth doing on their own merits, and both must reach the users
@@ -384,6 +399,12 @@ the docs factory (`docs/design/user-docs-factory.md`).
 | §10B.1 row for *a restore point that retention thinned* | RC-6 |
 | §10B.2 scenario 15 — *"my disk is full and it says the history is taking the space"* | RC-6 (RC-4 owns the control it points at) |
 | §10B.3's "when the floor is not there" paragraph | RC-5 |
+| the two user chapters merged into one, and the retired slugs | RC-10 |
+| §10B.2 scenario 17 — *"I went back and I want to come forward again"* | RC-10 |
+| §10B.2 scenario 16 — *"I typed the title wrong"* | RC-11 |
+| §10B.1 rows for a title on a shared and an unshared version, and for a restore point's label | RC-11 |
+| §10B.1 row for *the state you were in when you went back* | RC-10 |
+| §8.3's sentence, re-pointed to content now that §5.11 governs titles | RC-11 |
 
 **§10B.3 stands on its own:** AI checkpoints are documented in their own chapter, never interleaved
 with the ordinary history material, because a safety device the user did not ask for and a statement

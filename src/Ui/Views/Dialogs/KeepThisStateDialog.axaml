@@ -15,9 +15,11 @@
     <StackPanel Spacing="4">
       <TextBlock Text="What is this state? (optional)" FontSize="11" Opacity="0.75" />
       <TextBox x:Name="LabelBox" PlaceholderText="Widen the output match" />
+      <!-- Same cut as KeepThisVersionDialog's, for the same reason and by the same instruction: the
+           "six weeks from now…" sentence is the dialog arguing for itself. What a designer needs here
+           is that the field is optional, which the label already says. -->
       <TextBlock FontSize="10" Opacity="0.6" TextWrapping="Wrap"
-                 Text="Without a line it is listed as a save-point with its time. Six weeks from now
-                       the line is the only thing that tells one from another." />
+                 Text="Without one it is listed as a save-point with its time." />
     </StackPanel>
 
     <!-- The large-file guard (revision-control.md §8.2). Present only when there is something over
@@ -26,9 +28,11 @@
     <StackPanel x:Name="LargeFilesPanel" Spacing="6" IsVisible="False">
       <Separator />
       <TextBlock x:Name="LargeFilesHeading" TextWrapping="Wrap" FontWeight="SemiBold" />
+      <!-- One line, not two: a multi-line Text="…" attribute keeps its own indentation as literal
+           spaces (see KeepThisVersionDialog's note), which is what put a gap in the middle of a
+           sentence. -->
       <TextBlock FontSize="11" Opacity="0.75" TextWrapping="Wrap"
-                 Text="These are much larger than a design document. Say what each one is — the
-                       question is what the file IS, not how it should be stored." />
+                 Text="These are much larger than a design document. Say what each one IS, not how it should be stored." />
       <ItemsControl x:Name="LargeFilesList">
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="d:LargeFileRow">

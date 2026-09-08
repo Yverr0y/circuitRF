@@ -8,16 +8,20 @@
 
   <StackPanel Margin="16" Spacing="10">
 
-    <TextBlock Text="Record this workspace as a version, under a title you write. It is what you
-                     come back to, and what you send out."
+    <!-- Owner, 2026-09-07: three sentences cut to one. "What you come back to, and what you send
+         out" and "six weeks from now the title is the only thing…" were the dialog explaining its own
+         value to somebody who has already chosen to use it — which is text a designer skips, and text
+         that gets skipped makes the field beneath it harder to find rather than easier.
+
+         The useful half of the deleted hint is now the FIELD LABEL: "what changed" is the whole of
+         "write what changed, not what you did", in two words, in the place a person is already
+         looking. -->
+    <TextBlock Text="Records this workspace as a version, under a title you write."
                TextWrapping="Wrap" />
 
     <StackPanel Spacing="4">
-      <TextBlock Text="What is this version?" FontSize="11" Opacity="0.75" />
+      <TextBlock Text="What changed?" FontSize="11" Opacity="0.75" />
       <TextBox x:Name="TitleBox" PlaceholderText="Output match retuned for 3.5 GHz" />
-      <TextBlock FontSize="10" Opacity="0.6" TextWrapping="Wrap"
-                 Text="Six weeks from now the title is the only thing that tells one version from
-                       another. Write what changed, not what you did." />
     </StackPanel>
 
     <!-- R-rc7-6. A restore since the last version is recorded in this one, and the designer is told

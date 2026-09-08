@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
 using CommunityToolkit.Mvvm.Input;
 using CircuitRF.Design.Revision;
 using CircuitRF.Ui.Messages;
@@ -18,10 +19,12 @@ namespace CircuitRF.Ui.ViewModels;
 /// going back, and the explicit commit (<c>docs/design/revision-control.md</c> §5.2, §5.3, §5.8;
 /// R-rc5-4c, R-rc5-12, R-rc5-21, R-rc5-22, R-rc7-1, R-rc7-17).
 ///
-/// <para><b>Two commands and two panels, never one of each</b> (R-rc7-9). Keep This State… writes a
-/// restore point; Keep This Version… writes a version the designer titled. They look similar and are
-/// not: one is a safety-net entry nobody else ever sees, the other is what gets shared. Merging the
-/// commands would merge the histories, which §5 exists to prevent.</para>
+/// <para><b>Two commands and ONE panel</b> (RC-10 R-rc10-1, §5.10 — superseding R-rc7-9's two).
+/// Keep This State… writes a restore point; Keep This Version… writes a version the designer titled.
+/// They look similar and are not: one is a safety-net entry nobody else ever sees, the other is what
+/// gets shared, and merging the COMMANDS would merge the histories, which §5 exists to prevent. The
+/// two kinds of ENTRY stay distinct in one list, under one mark — which is the distinction §5 was
+/// always about, and which rev 2 spent as an argument for two windows.</para>
 ///
 /// <para><b>Kept in its own file because none of it is about editing a design.</b> Everything that
 /// decides anything lives below the firewall in <see cref="WorkspaceHistoryService"/> and the
@@ -43,11 +46,11 @@ public partial class WorkspaceViewModel
             {
                 _history = new WorkspaceHistoryService(Messages);
 
-                // BOTH panels, not the restore-point one alone. Several of the operations that raise
-                // this change the versions list too — turning recording off and on puts a gap row in
-                // it (R-rc7-10), and a restore adds the entry it took first — and subscribing only one
-                // panel is how those arrived on screen in one list and not the other.
-                _history.Changed += RefreshHistoryPanels;
+                // ONE panel since RC-10, which is also the end of a whole class of defect: several of
+                // the operations that raise this change both kinds of entry — turning recording off and
+                // on puts a gap row in the list, and a restore adds the entry it took first — and every
+                // bug in this area so far was one of the two panels left out of a refresh.
+                _history.Changed += RefreshHistoryPanel;
             }
             return _history;
         }
@@ -101,7 +104,7 @@ public partial class WorkspaceViewModel
             LargeFileGuard.AppendIgnorePattern(root, pattern);
 
         History.TakeSavePoint(root, choice.Label);
-        RefreshRestorePointsPanel();
+        RefreshHistoryPanel();
     }
 
     /// <summary>
@@ -178,28 +181,211 @@ public partial class WorkspaceViewModel
     /// the panel holds no list of its own, because a stale one would offer a designer a way back to a
     /// state that is no longer there.
     /// </summary>
-    private void RefreshRestorePointsPanel()
+    private void RefreshHistoryPanel()
     {
-        if (_factory.RestorePointsTool is not { } tool) return;
+        if (_factory.HistoryTool is not { } tool) return;
 
-        tool.RestoreRequested    ??= point => _ = GoBackTo(point);
-        tool.KeepRequested       ??= point => { History.Keep(WorkspaceRootDir, point); };
-        tool.SavePointRequested  ??= () => _ = KeepThisState(Views.WorkspaceLocator.WindowFor(this));
-        tool.BringBackRequested  ??= point => { History.BringBackThinned(WorkspaceRootDir, point); };
+        // Wired PER INSTANCE, not once per session. A workspace switch goes through
+        // CircuitRfDockFactory.CreateDefaultLayout, which builds a FRESH HistoryTool — and the restore
+        // below performs exactly such a switch on its way back. A `bool _historyPanelWired` therefore
+        // stayed true across the replacement and left every callback on the new panel null, so each of
+        // its buttons became a control that draws and does nothing: reported against "come forward
+        // again", which is simply the one a designer is looking straight at the moment the reload ends.
+        //
+        // Comparing the instance is what makes this correct for the paths that do not exist yet, since
+        // any future caller that replaces the tools is covered without having to remember a flag.
+        if (!ReferenceEquals(_wiredHistoryTool, tool))
+        {
+            _wiredHistoryTool = tool;
+
+            // Both dialogs hand the keyboard BACK to this panel when they close — kept or cancelled
+            // alike (owner, 2026-09-07). The gesture started here, so this is where the next keystroke
+            // should land; a cancelled dialog dropping focus onto the workspace is the version that was
+            // reported, and confirming has exactly the same claim on it.
+            tool.SavePointRequested   = () => _ = ThenFocusThePanel(tool, KeepThisState);
+            tool.KeepVersionRequested = () => _ = ThenFocusThePanel(tool, KeepThisVersion);
+
+            // ONE go-back over both kinds of row. A version goes back through RC-5's restore, so there
+            // is no second restore implementation and everything R-rc5-12c guarantees applies to both.
+            tool.GoBackRequested = entry =>
+            {
+                if (entry.Version is { } version)  _ = GoBackToVersion(version);
+                else if (entry.Point is { } point) _ = GoBackTo(point);
+            };
+
+            tool.KeepRequested      = point => { History.Keep(WorkspaceRootDir, point); };
+
+            // Tidying away and bringing back are ONE reference write each, and both used to be followed
+            // by a full re-read of the repository on the UI thread — 18 ms of work behind 180 ms of
+            // stall, on a sixty-entry workspace, growing with the list. Neither can have changed the
+            // versions, the incoming set, the sharing set or the annotations; what changed is a boolean
+            // the panel is already holding. So the panel redraws itself, exactly as a filter checkbox
+            // does, and only a FAILED write takes the long way round.
+            tool.BringBackRequested = point =>
+            {
+                if (History.BringBackThinned(WorkspaceRootDir, point)) tool.MarkTidiedAway(point.CommitId, false);
+                else RefreshHistoryPanel();
+            };
+            tool.ComeForwardRequested  = point => _ = GoBackTo(point);
+            tool.CopyIdentityRequested = CopyToClipboard;
+
+            tool.SelectionChanged += version =>
+                tool.SetChanges(version is null ? [] : History.ChangesIn(WorkspaceRootDir, version));
+
+            tool.CompareRequested = entry =>
+                tool.SetChanges(History.CompareWithWorkspace(WorkspaceRootDir, entry));
+
+            // §5.11's three corrections, on the menu R-rc10-17 built for them.
+            tool.RenameRequested  = point => _ = RenameRestorePoint(point);
+            tool.LetGoRequested   = point => LetRestorePointGo(tool, point);
+            tool.CorrectRequested = version => _ = CorrectWhatYouWrote(version);
+
+            // R-rc10-8. The filter is per-USER view state, so a change to it is a change to the
+            // `.cwsuser` — written through the one workspace-save path, never by a second writer.
+            //
+            // RC-11: it does NOT re-read the repository. The panel has already re-filtered what it
+            // holds by the time this runs (HistoryTool.Redraw), so all that is left here is the save —
+            // which is what turned a checkbox that started a dozen git subprocesses into one that
+            // does not touch the repository at all.
+            tool.FilterChanged += ScheduleCwsSave;
+
+            tool.ApplyStoredFilter(_storedHistoryFilter);
+        }
 
         // RC-6 R-rc6-4. The list carries the entries retention TIDIED AWAY as well as the live ones,
         // each marked. A state that silently vanished from the list is indistinguishable to a designer
         // from one that was destroyed — and this one has not been, and can be brought back.
         //
-        // R-rc6-8/R-rc6-10: the buttons stay visible whatever the state, and this line is what makes a
-        // hold or an off state legible instead of looking like a feature that was never built.
+        // R-rc6-8/R-rc6-10: the actions stay visible whatever the state, and the sentence is what makes
+        // a hold or an off state legible instead of looking like a feature that was never built.
+        //
+        // RC-11: ONE read, handed to the panel whole. The panel filters it itself, so this runs at a
+        // boundary and a workspace switch and nowhere else — a filter toggle used to come through here
+        // and re-read everything, including a second full pass over the restore points for the empty
+        // line's count.
         var state = History.State(WorkspaceRootDir);
-        tool.SetPoints(
-            History.ListIncludingThinned(WorkspaceRootDir),
+        tool.SetSources(
+            History.ReadEntries(WorkspaceRootDir),
             WorkspaceRootDir is not null,
             state == RecordingState.On ? "" : HoldMessages.IndicatorDetailFor(state));
 
+        // R-rc10-18. The way forward, reported on arrival and by name. Cleared when the workspace
+        // changes, because it is a sentence about one restore in one session.
+        tool.WayForward = _wayForward;
+
         RefreshRecordingIndicator();
+    }
+
+    /// <summary>
+    /// The panel instance whose callbacks are already attached. <b>Which instance</b>, rather than
+    /// <b>whether</b> — handlers added on every refresh would fire once per refresh, which is silent
+    /// and gets worse the longer the session runs, while a session-wide flag misses the tool the next
+    /// workspace switch builds in its place.
+    /// </summary>
+    private ViewModels.Dock.HistoryTool? _wiredHistoryTool;
+
+    /// <summary>
+    /// Runs one of the two keep dialogs on this workspace's window and returns keyboard focus to the
+    /// History panel afterwards. <b>Only the panel's own buttons come through here</b> — the File menu
+    /// calls the same dialogs directly, and a menu command has no panel to go back to.
+    /// </summary>
+    private async Task ThenFocusThePanel(ViewModels.Dock.HistoryTool tool, Func<Window?, Task> keep)
+    {
+        await keep(Views.WorkspaceLocator.WindowFor(this));
+        tool.RequestActivationFocus();
+    }
+
+    /// <summary>
+    /// R-rc10-8's stored filter, read out of the <c>.cwsuser</c> on open and handed to the panel when
+    /// it is first wired. Held here because the panel instance outlives a workspace switch while the
+    /// filter does not.
+    /// </summary>
+    private HistoryFilter _storedHistoryFilter = HistoryFilter.Default;
+
+    /// <summary>
+    /// R-rc10-18's line, for this session and this workspace only. <b>Written nowhere</b> — a restore
+    /// is a moment rather than a state, and R-rc10-4 forbids this brief from changing what is stored
+    /// in any case.
+    /// </summary>
+    private WayForward? _wayForward;
+
+    /// <summary>
+    /// <b>A corrected title must not survive in this session's own sentence</b> (owner, 2026-09-07).
+    ///
+    /// <para>The way-forward line is built from a copy of the title taken at restore time. Correct that
+    /// title and the copy is an orphan — and it is displayed in the very panel the correction was made
+    /// in, which is the most conspicuous place for deleted wording to reappear. The record matches on
+    /// identity and returns itself unchanged when the correction is about some other entry.</para>
+    ///
+    /// <para><b>Re-pointed at the new identity as well</b>, because both correction paths that rewrite
+    /// a commit change it; a link left on the old id would silently stop matching, and the leak would
+    /// come back on the second correction rather than the first.</para>
+    /// </summary>
+    private void RetitleTheWayForward(string wasAt, string? nowAt, string title)
+    {
+        if (nowAt is null || _wayForward is not { } way) return;
+
+        var next = way.Retitled(wasAt, title);
+        if (ReferenceEquals(next, way)) return;
+
+        _wayForward = next with { WentBackToId = nowAt };
+    }
+
+    /// <summary>Which workspace <see cref="_wayForward"/> is about. A sentence describing one
+    /// afternoon in one workspace must not follow the designer into the next one.</summary>
+    private string? _wayForwardRoot;
+
+    /// <summary>
+    /// R-rc10-8. What the <c>.cwsuser</c> says the filter was, or the default — which is what a
+    /// workspace opened for the first time shows, and what every file written before this existed
+    /// means.
+    /// </summary>
+    private HistoryFilter ReadStoredHistoryFilter()
+    {
+        if (CurrentWorkspacePath is not { } cws) return HistoryFilter.Default;
+
+        var stored = TryLoadCws(cws).HistoryFilter;
+        return stored is null
+            ? HistoryFilter.Default
+            : new HistoryFilter(stored.Versions, stored.SavePoints, stored.AiBatches,
+                                stored.Automatic, stored.TidiedAway, stored.Search ?? "");
+    }
+
+    /// <summary>The panel's current filter, for the workspace write. Null when it is the default, so a
+    /// designer who never touched it gets no row in the file — the same rule every other per-user field
+    /// follows.</summary>
+    internal Design.Workspace.CwsHistoryFilter? HistoryFilterToPersist()
+    {
+        if (_factory.HistoryTool?.Filter is not { } f || f == HistoryFilter.Default) return null;
+
+        return new Design.Workspace.CwsHistoryFilter
+        {
+            Versions   = f.Versions,
+            SavePoints = f.SavePoints,
+            AiBatches  = f.AiBatches,
+            Automatic  = f.Automatic,
+            TidiedAway = f.TidiedAway,
+            Search     = f.Search.Length > 0 ? f.Search : null,
+        };
+    }
+
+    /// <summary>
+    /// R-rc10-17. The identity, on the clipboard.
+    ///
+    /// <para>The one string a designer can hand to somebody helping them when circuitRF's own window
+    /// cannot answer the question (§4.1). Silent on success: a message saying "copied" is a message
+    /// nobody needs twice.</para>
+    /// </summary>
+    private void CopyToClipboard(string text)
+    {
+        // THIS workspace's window first. The identifier being copied belongs to this workspace's
+        // history, and with two workspace windows open the first one the locator happens to enumerate
+        // is not reliably the one the designer right-clicked in. The fallback keeps the single-window
+        // case working before the window is located.
+        var clipboard = Views.WorkspaceLocator.WindowFor(this)?.Clipboard
+                     ?? Views.WorkspaceLocator.AllWindows().FirstOrDefault()?.Clipboard;
+
+        if (clipboard is not null) _ = clipboard.SetTextAsync(text);
     }
 
     // ── RC-7: keeping a version, and the browser (§5.2, §5.5, §6.3) ───────────────────────────────
@@ -234,38 +420,99 @@ public partial class WorkspaceViewModel
         if (choice is null) return;
 
         History.KeepVersion(root, choice.Title);
-        RefreshVersionHistoryPanel();
+        RefreshHistoryPanel();
+    }
+
+    // ── RC-11: correcting what you wrote (§5.11) ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// §5.11 case (a). <b>A restore point's label is its author's to correct</b> (R-rc11-3).
+    ///
+    /// <para>Not §8.3's rewriting in any sense, and the mechanism already exists for another purpose:
+    /// a checkpoint is parentless, nothing chains to it, no copy takes it and no send carries it — so
+    /// a rename is a new parentless commit over the identical tree and one reference update, exactly
+    /// what marking one <i>keep</i> has done since RC-5.</para>
+    /// </summary>
+    /// <param name="over">
+    /// What the dialog is modal over. Null takes this view model's own window, which is every caller
+    /// but §5.11's review — that one is <b>already</b> modal over the window, so a correction opened
+    /// against the window would be a modal behind the one blocking it.
+    /// </param>
+    private async Task RenameRestorePoint(RestorePoint point, Window? over = null)
+    {
+        if ((over ?? Views.WorkspaceLocator.WindowFor(this)) is not { } owner) return;
+
+        var dialog = new CorrectWhatYouWroteDialog(CorrectionCase.RestorePointLabel, point.Label, null);
+        if (await dialog.ShowDialog<CorrectionChoice?>(owner) is not { } choice) return;
+
+        // R-rc10-18's sentence holds its own COPY of the title, so it has to follow the correction or
+        // it goes on reading the deleted wording back to the designer in the same panel they corrected
+        // it in. See RestoreProvenance.Retitle for the copy bound for disk.
+        RetitleTheWayForward(point.CommitId,
+                             History.Rename(WorkspaceRootDir, point, choice.Text), choice.Text);
+
+        RefreshHistoryPanel();
     }
 
     /// <summary>
-    /// Rebuilds the version list. <b>Called whenever a version is kept and on every workspace
-    /// switch</b> — the panel holds no list of its own, for the reason the restore-point panel holds
-    /// none.
+    /// §5.11 case (a). <b>Letting an entry go is exactly what tidying up does</b> (R-rc11-5) —
+    /// journalled, reversible by the same <i>bring this back</i>, and freeing nothing until §5.6a's
+    /// explicit reclaim.
+    ///
+    /// <para><b>There is no confirmation dialog and that is deliberate.</b> A prompt would be asking a
+    /// designer to steel themselves for something that is not destructive: the entry stays in the list
+    /// under <i>tidied away</i>, the state is still there, and the message says so. A confirmation
+    /// here would teach the wrong thing about what the action does.</para>
     /// </summary>
-    private void RefreshVersionHistoryPanel()
+    private void LetRestorePointGo(ViewModels.Dock.HistoryTool tool, RestorePoint point)
     {
-        if (_factory.VersionHistoryTool is not { } tool) return;
-
-        tool.KeepVersionRequested ??= () => _ = KeepThisVersion(Views.WorkspaceLocator.WindowFor(this));
-        tool.GoBackRequested      ??= version => _ = GoBackToVersion(version);
-
-        if (!_versionSelectionWired)
-        {
-            _versionSelectionWired = true;
-            tool.SelectionChanged += version =>
-                tool.SetChanges(version is null ? [] : History.ChangesIn(WorkspaceRootDir, version));
-        }
-
-        var state = History.State(WorkspaceRootDir);
-        tool.SetRows(
-            History.VersionRows(WorkspaceRootDir),
-            WorkspaceRootDir is not null,
-            state == RecordingState.On ? "" : HoldMessages.IndicatorDetailFor(state));
+        // See the wiring note beside BringBackRequested: the write is the cheap half and the refresh
+        // was the whole of the stall. On success the panel redraws from what it holds; on failure it
+        // re-reads, because a panel that disagrees with the repository is the one that is wrong.
+        if (History.Forget(WorkspaceRootDir, point)) tool.MarkTidiedAway(point.CommitId, true);
+        else RefreshHistoryPanel();
     }
 
-    /// <summary>Subscribed once. A handler added on every refresh would fire once per refresh, which
-    /// is silent and gets worse the longer the session runs.</summary>
-    private bool _versionSelectionWired;
+    /// <summary>
+    /// §5.11 cases (b) and (c). <b>One action, and the computation decides which of the two it
+    /// is</b> (R-rc11-2, R-rc11-7, R-rc11-13).
+    ///
+    /// <para>A version nobody else has seen is retitled outright; one that has left the machine takes
+    /// a correction instead, with the sentence that may not be softened on the face of the dialog. The
+    /// designer is not asked to know which — <see cref="VersionSharing"/> is, and where it cannot
+    /// answer it says <i>shared</i>, because a correction refused is recoverable and an erasure
+    /// believed is not.</para>
+    /// </summary>
+    /// <inheritdoc cref="RenameRestorePoint" path="/param[@name='over']"/>
+    private async Task CorrectWhatYouWrote(HistoryVersion version, Window? over = null)
+    {
+        if ((over ?? Views.WorkspaceLocator.WindowFor(this)) is not { } owner) return;
+        if (WorkspaceRootDir is not { } root) return;
+
+        bool canRetitle = History.CanCorrectTitle(root, version);
+
+        // The correction already in place, if there is one — so case (c) opens on it rather than on a
+        // blank field, and shows the wording underneath it.
+        string? existing = History.CorrectionOn(root, version);
+
+        var dialog = canRetitle
+            ? new CorrectWhatYouWroteDialog(CorrectionCase.UnsharedTitle, version.Title, null)
+            : new CorrectWhatYouWroteDialog(CorrectionCase.SharedTitle,
+                                            existing ?? version.Title,
+                                            existing is null ? null : version.Title);
+
+        if (await dialog.ShowDialog<CorrectionChoice?>(owner) is not { } choice) return;
+
+        // An annotation leaves the commit alone, so the entry keeps its identity; a correction rewrites
+        // it and hands back the new one.
+        string? nowAt = canRetitle
+            ? History.CorrectTitle(root, version, choice.Text)
+            : History.Annotate(root, version, choice.Text) ? version.CommitId : null;
+
+        RetitleTheWayForward(version.CommitId, nowAt, choice.Text);
+
+        RefreshHistoryPanel();
+    }
 
     /// <summary>
     /// R-rc7-17. <b>Going back to a version is RC-5's restore with that version's tree as the
@@ -285,7 +532,12 @@ public partial class WorkspaceViewModel
             && !await PromptSaveBeforeClose(window, "going back to an earlier version", includeFloated: false))
             return;
 
-        if (History.GoBackToVersion(root, version) is not { Ok: true }) return;
+        if (History.GoBackToVersion(root, version) is not { Ok: true, PreRestore: { } kept }) return;
+
+        // R-rc10-18. Recorded BEFORE the reload, which replaces every panel instance — the refresh at
+        // the end of the switch is what puts it on screen.
+        _wayForward     = new WayForward(version.Title, kept, version.CommitId);
+        _wayForwardRoot = root;
 
         await ReloadWorkspaceAfterFilesChangedUnderneath();
     }
@@ -317,7 +569,17 @@ public partial class WorkspaceViewModel
             && !await PromptSaveBeforeClose(window, "going back to an earlier state", includeFloated: false))
             return;
 
-        if (History.Restore(root, point) is not { Ok: true }) return;
+        if (History.Restore(root, point) is not { Ok: true, PreRestore: { } kept }) return;
+
+        // R-rc10-18, §12 Q35. THE WAY FORWARD, offered where the way back was taken. It creates
+        // nothing — the entry already exists, because §5.8's restore takes it before it writes a single
+        // file — and going to it is an ordinary restore with an ordinary checkpoint of its own.
+        //
+        // Before RC-10 this reassurance existed, was correct, and was filed in the panel the designer
+        // had not opened: a restore begun from the Versions panel left them looking at a window with no
+        // evidence that the afternoon they had just replaced still existed.
+        _wayForward     = new WayForward(point.Label, kept, point.CommitId);
+        _wayForwardRoot = root;
 
         await ReloadWorkspaceAfterFilesChangedUnderneath();
     }
@@ -374,6 +636,20 @@ public partial class WorkspaceViewModel
     {
         History.ResetForWorkspace();
 
+        // R-rc10-18. The way forward survives the reload a restore performs — that reload switches to
+        // the SAME workspace — and must not survive opening a different one, where it would name two
+        // entries that are not in the list.
+        if (!string.Equals(_wayForwardRoot, WorkspaceRootDir, StringComparison.Ordinal))
+        {
+            _wayForward     = null;
+            _wayForwardRoot = null;
+        }
+
+        // R-rc10-8. The panel's filter is per-user view state, restored with everything else about how
+        // this designer had their view arranged.
+        _storedHistoryFilter = ReadStoredHistoryFilter();
+        _factory.HistoryTool?.ApplyStoredFilter(_storedHistoryFilter);
+
         // RC-6 R-rc6-9's first cadence, and R-rc6-14c's. One message saying what is NOT being kept and
         // why — for the ancestor row, the declined row, and a workspace whose own setting travelled
         // here switched off. It reads only.
@@ -398,7 +674,7 @@ public partial class WorkspaceViewModel
         // So on a freshly opened workspace the panel's own Keep-this-version button was DISABLED, and
         // the one thing that would have enabled it was keeping a version — which is what the button
         // does. File ▸ Keep This Version… still worked, which is why it went unnoticed.
-        RefreshHistoryPanels();
+        RefreshHistoryPanel();
 
         // RC-9 R-rc9-12/-16. Reads only, and reaches no network: the pin's state is a property of the
         // referenced workspace's repository AS IT ALREADY IS on this machine. Nothing in this series
@@ -436,8 +712,11 @@ public partial class WorkspaceViewModel
         // empty. Nothing here decides anything of its own — see the note on this partial's header.
         // RefreshRecordingIndicator also takes the toolbar's two history buttons away with it.
         RefreshRecordingIndicator();
-        RefreshRestorePointsPanel();
-        RefreshVersionHistoryPanel();
+        RefreshHistoryPanel();
+
+        // R-rc10-18. The sentence is about one restore in one session, so it goes with the workspace.
+        _wayForward     = null;
+        _wayForwardRoot = null;
     }
 
     /// <summary>The interrupted restore found on open, or null. Held so the two ways out — finish it,
@@ -528,18 +807,7 @@ public partial class WorkspaceViewModel
     public void RefreshRevisionSurfaces()
     {
         RefreshRecordingIndicator();
-        RefreshHistoryPanels();
-    }
-
-    /// <summary>
-    /// <b>The two history panels, always together.</b> They read different things and are never
-    /// combined (R-rc7-9), but almost nothing changes one without changing the other — and every bug
-    /// in this area so far has been one of the pair left out of a refresh.
-    /// </summary>
-    private void RefreshHistoryPanels()
-    {
-        RefreshRestorePointsPanel();
-        RefreshVersionHistoryPanel();
+        RefreshHistoryPanel();
     }
 
     /// <summary>
