@@ -512,6 +512,17 @@ internal static class CliDiagnostics
         "new.parent.not-found", DiagnosticSeverity.Error,
         "No such directory: {path}", ("path", path));
 
+    /// <summary>R-aut11-4: a missing parent is CREATED, and saying so is what keeps that from being
+    /// a surprise — a caller that mistyped a path gets a directory rather than a refusal, and the
+    /// note is where it finds out.</summary>
+    public static Diagnostic NewParentCreated(string path) => Diagnostic.Create(
+        "new.parent.created", DiagnosticSeverity.Info,
+        "Created the parent directory {path}.", ("path", path));
+
+    public static Diagnostic NewParentNotCreated(string path, string why) => Diagnostic.Create(
+        "new.parent.not-created", DiagnosticSeverity.Error,
+        "The parent directory {path} could not be created: {why}", ("path", path), ("why", why));
+
     /// <summary>R-aut3-6, and the read-only-parent refusal: the capability's own sentence, forwarded
     /// rather than re-worded, so the GUI and the verb refuse in the same words.</summary>
     public static Diagnostic NewRefused(string reason) => Diagnostic.Create(
@@ -1774,4 +1785,284 @@ internal static class CliDiagnostics
     public static Diagnostic RenderCancelled() => new(
         "render.cancelled", DiagnosticSeverity.Warning,
         "Cancelled. Nothing was written.");
+
+    // ── netlist (brief-automation-11-missing-verbs.md R-aut11-1) ─────────────
+
+    public static Diagnostic NetlistPathRequired() => new(
+        "netlist.args.path-required", DiagnosticSeverity.Error,
+        "netlist: a path is required. Give a .csch, a cell folder, or a workspace with --cell.");
+
+    public static Diagnostic NetlistUnknownOption(string option) => Diagnostic.Create(
+        "netlist.args.unknown-option", DiagnosticSeverity.Error,
+        "netlist: unknown option '{option}'", ("option", option));
+
+    public static Diagnostic NetlistMultiplePaths() => new(
+        "netlist.args.multiple-paths", DiagnosticSeverity.Error,
+        "netlist: one path at a time.");
+
+    public static Diagnostic NetlistPathNotFound(string path) => Diagnostic.Create(
+        "netlist.path.not-found", DiagnosticSeverity.Error,
+        "No such file or directory: {path}", ("path", path));
+
+    /// <summary>The extension picks the format everywhere else on this surface; here there is one
+    /// format, so an extension that is not it is a caller who meant a different verb.</summary>
+    public static Diagnostic NetlistOutputNotCnl(string path, string extension) => Diagnostic.Create(
+        "netlist.output.not-cnl", DiagnosticSeverity.Error,
+        "netlist: '{path}' has extension '{extension}', and this verb writes a .cnl. "
+      + "`circuitrf render` writes a picture.",
+        ("path", path), ("extension", extension));
+
+    public static Diagnostic NetlistNotASchematic(string path, string kind) => Diagnostic.Create(
+        "netlist.path.not-a-schematic", DiagnosticSeverity.Error,
+        "'{path}' is {kind}, and netlist extracts a schematic — a .csch, a cell folder, or a "
+      + "workspace with --cell.",
+        ("path", path), ("kind", kind));
+
+    /// <summary>Re-emitting a `.cnl` through the reader and the writer would hand back a file that
+    /// is not the one given — comments gone, directives reordered — and call it an extraction.</summary>
+    public static Diagnostic NetlistAlreadyANetlist(string path) => Diagnostic.Create(
+        "netlist.path.already-a-netlist", DiagnosticSeverity.Error,
+        "'{path}' is already a netlist. Run it directly, or `circuitrf read` it.", ("path", path));
+
+    public static Diagnostic NetlistCellRequired(string path) => Diagnostic.Create(
+        "netlist.workspace.cell-required", DiagnosticSeverity.Error,
+        "'{path}' is a workspace. Say which cell with --cell <name> — a workspace has no one "
+      + "netlist.", ("path", path));
+
+    public static Diagnostic NetlistNoSuchCell(string workspace, string cell, string known) => Diagnostic.Create(
+        "netlist.workspace.no-such-cell", DiagnosticSeverity.Error,
+        "'{workspace}' has no cell called '{cell}'. It holds: {known}",
+        ("workspace", workspace), ("cell", cell), ("known", known));
+
+    public static Diagnostic NetlistAmbiguousCell(string cell, string paths) => Diagnostic.Create(
+        "netlist.workspace.ambiguous-cell", DiagnosticSeverity.Error,
+        "More than one cell is called '{cell}': {paths}. Give the cell folder's path instead.",
+        ("cell", cell), ("paths", paths));
+
+    public static Diagnostic NetlistNoSchematicView(string path) => Diagnostic.Create(
+        "netlist.cell.no-schematic", DiagnosticSeverity.Error,
+        "'{path}' has no schematic view, and a netlist comes out of a schematic.", ("path", path));
+
+    /// <summary>Primacy is <c>CellFolder.ResolvePrimary</c>'s answer and no other.</summary>
+    public static Diagnostic NetlistNoPrimary(string path, string state) => Diagnostic.Create(
+        "netlist.cell.no-primary", DiagnosticSeverity.Error,
+        "'{path}': the schematic sub-folder does not resolve to one file ({state}). Name the file "
+      + "directly, or record a primary in its .ccell.",
+        ("path", path), ("state", state));
+
+    public static Diagnostic NetlistExtractionFailed(string path, string why) => Diagnostic.Create(
+        "netlist.extract.failed", DiagnosticSeverity.Error,
+        "'{path}' could not be extracted: {why}", ("path", path), ("why", why));
+
+    public static Diagnostic NetlistWriteFailed(string path, string why) => Diagnostic.Create(
+        "netlist.output.write-failed", DiagnosticSeverity.Error,
+        "Could not write '{path}': {why}", ("path", path), ("why", why));
+
+    /// <summary>
+    /// R-aut11-1's refusal BY KIND. A run verb takes a netlist or a schematic; anything else used to
+    /// be handed to <c>CnlReader</c>, which parsed a JSON layout as netlist text and reported its
+    /// first key as a missing cell name — a message that sent a caller looking for a library.
+    /// </summary>
+    public static Diagnostic RunWrongDocumentKind(string verb, string path, string kind) => Diagnostic.Create(
+        "cli.input.wrong-kind", DiagnosticSeverity.Error,
+        "{verb}: '{path}' is {kind}. {verb} takes a .cnl netlist or a .csch schematic — extract one "
+      + "with `circuitrf netlist`.",
+        ("verb", verb), ("path", path), ("kind", kind));
+
+    // ── plot (brief-automation-11-missing-verbs.md R-aut11-2) ────────────────
+
+    public static Diagnostic PlotResultRequired() => new(
+        "plot.args.result-required", DiagnosticSeverity.Error,
+        "plot: a result file is required — a .npy or a Touchstone .sNp.");
+
+    public static Diagnostic PlotOutputRequired() => new(
+        "plot.args.output-required", DiagnosticSeverity.Error,
+        "plot: -o is required. Its extension picks the format: .svg, .pdf or .png.");
+
+    /// <summary>R-rnd4-4's rule at the one place this verb could break it: a plot with no trace is a
+    /// valid picture that exports cleanly and looks exactly like a measurement that came back
+    /// empty.</summary>
+    public static Diagnostic PlotTraceRequired() => new(
+        "plot.args.trace-required", DiagnosticSeverity.Error,
+        "plot: at least one --trace is required. A spec is comma-separated key=value — "
+      + "cube=S,i=2,j=1,y=db.");
+
+    public static Diagnostic PlotUnknownOption(string option) => Diagnostic.Create(
+        "plot.args.unknown-option", DiagnosticSeverity.Error,
+        "plot: unknown option '{option}'", ("option", option));
+
+    public static Diagnostic PlotMultipleResults() => new(
+        "plot.args.multiple-results", DiagnosticSeverity.Error,
+        "plot: one result file at a time. Bind a second one by writing a .cdd and calling render.");
+
+    public static Diagnostic PlotResultNotFound(string path) => Diagnostic.Create(
+        "plot.result.not-found", DiagnosticSeverity.Error,
+        "No such file: {path}", ("path", path));
+
+    public static Diagnostic PlotResultUnreadable(string path, string why) => Diagnostic.Create(
+        "plot.result.unreadable", DiagnosticSeverity.Error,
+        "'{path}' could not be read as a result: {why}", ("path", path), ("why", why));
+
+    public static Diagnostic PlotUnknownOutputFormat(string path, string extension) => Diagnostic.Create(
+        "plot.output.unknown-format", DiagnosticSeverity.Error,
+        "plot: '{path}' has extension '{extension}', which this verb does not write — it writes "
+      + ".svg, .pdf and .png. Say --format to override the extension.",
+        ("path", path), ("extension", extension));
+
+    public static Diagnostic PlotUnknownFormatName(string name) => Diagnostic.Create(
+        "plot.output.unknown-format-name", DiagnosticSeverity.Error,
+        "plot: --format '{name}' is not one of svg, pdf, png.", ("name", name));
+
+    public static Diagnostic PlotUnknownType(string name) => Diagnostic.Create(
+        "plot.type.unknown", DiagnosticSeverity.Error,
+        "plot: --type '{name}' is not one of rect, smith, polar, table.", ("name", name));
+
+    public static Diagnostic PlotUnknownFreqUnit(string name) => Diagnostic.Create(
+        "plot.frequnit.unknown", DiagnosticSeverity.Error,
+        "plot: --freq-unit '{name}' is not one of Hz, kHz, MHz, GHz.", ("name", name));
+
+    public static Diagnostic PlotUnknownVariant(string name) => Diagnostic.Create(
+        "plot.variant.unknown", DiagnosticSeverity.Error,
+        "plot: --variant '{name}' is not light or dark.", ("name", name));
+
+    public static Diagnostic PlotUnknownBackground(string name) => Diagnostic.Create(
+        "plot.background.unknown", DiagnosticSeverity.Error,
+        "plot: --background '{name}' is not opaque or transparent.", ("name", name));
+
+    public static Diagnostic PlotSizeMalformed(string text) => Diagnostic.Create(
+        "plot.size.malformed", DiagnosticSeverity.Error,
+        "plot: --size '{text}' is not WxH within 8..20000.", ("text", text));
+
+    public static Diagnostic PlotScaleMalformed(string option, string text) => Diagnostic.Create(
+        "plot.scale.malformed", DiagnosticSeverity.Error,
+        "plot: {option} '{text}' is not a positive number in range.", ("option", option), ("text", text));
+
+    public static Diagnostic PlotScaleAndDpi() => new(
+        "plot.scale.and-dpi", DiagnosticSeverity.Error,
+        "plot: --scale and --dpi are two spellings of one multiplier. Give one.");
+
+    public static Diagnostic PlotScaleOnVector(string option, string format) => Diagnostic.Create(
+        "plot.scale.on-vector", DiagnosticSeverity.Error,
+        "plot: {option} multiplies raster pixels and {format} is a vector format.",
+        ("option", option), ("format", format));
+
+    public static Diagnostic PlotRangeMalformed(string option, string text) => Diagnostic.Create(
+        "plot.range.malformed", DiagnosticSeverity.Error,
+        "plot: {option} '{text}' is not lo:hi with hi greater than lo.",
+        ("option", option), ("text", text));
+
+    /// <summary>A Smith or Polar chart's window is the complex plane framed on the unit circle;
+    /// there is no X and no Y for a range to be a range of. Refused rather than dropped, for
+    /// <c>render</c>'s reason.</summary>
+    public static Diagnostic PlotWindowOnComplex(string type) => Diagnostic.Create(
+        "plot.window.on-complex", DiagnosticSeverity.Error,
+        "plot: --x/--y/--y2 do not apply to a {type} chart, whose window is the complex plane. "
+      + "Use --type rect, or leave them out.", ("type", type));
+
+    public static Diagnostic PlotWriteFailed(string path, string why) => Diagnostic.Create(
+        "plot.output.write-failed", DiagnosticSeverity.Error,
+        "Could not write '{path}': {why}", ("path", path), ("why", why));
+
+    // ── plot: one trace ──────────────────────────────────────────────────────
+
+    public static Diagnostic PlotTraceFieldMalformed(string trace, string field) => Diagnostic.Create(
+        "plot.trace.field-malformed", DiagnosticSeverity.Error,
+        "plot: in --trace '{trace}', '{field}' is not key=value.", ("trace", trace), ("field", field));
+
+    public static Diagnostic PlotTraceUnknownKey(string trace, string key) => Diagnostic.Create(
+        "plot.trace.unknown-key", DiagnosticSeverity.Error,
+        "plot: in --trace '{trace}', '{key}' is not one of cube, i, j, y, axis.",
+        ("trace", trace), ("key", key));
+
+    public static Diagnostic PlotTraceCubeRequired(string trace) => Diagnostic.Create(
+        "plot.trace.cube-required", DiagnosticSeverity.Error,
+        "plot: --trace '{trace}' names no cube. Add cube=<name>; `circuitrf read` lists what the "
+      + "result holds.", ("trace", trace));
+
+    public static Diagnostic PlotTracePortMalformed(string trace, string key, string value) => Diagnostic.Create(
+        "plot.trace.port-malformed", DiagnosticSeverity.Error,
+        "plot: in --trace '{trace}', {key}='{value}' is not a port number from 1.",
+        ("trace", trace), ("key", key), ("value", value));
+
+    public static Diagnostic PlotTraceAxisUnknown(string trace, string value) => Diagnostic.Create(
+        "plot.trace.axis-unknown", DiagnosticSeverity.Error,
+        "plot: in --trace '{trace}', axis='{value}' is not left or right.",
+        ("trace", trace), ("value", value));
+
+    /// <summary>Two ways of saying which entry, given at once. Refused rather than ordered, because
+    /// the one that would have lost is silently the caller's own slice.</summary>
+    public static Diagnostic PlotTracePortsWithSlice(string trace) => Diagnostic.Create(
+        "plot.trace.ports-with-slice", DiagnosticSeverity.Error,
+        "plot: --trace '{trace}' gives both a bracketed slice and i=/j=. Give one — i and j are the "
+      + "convenience over writing the slice.", ("trace", trace));
+
+    public static Diagnostic PlotNoSuchCube(string cube, string known) => Diagnostic.Create(
+        "plot.trace.no-such-cube", DiagnosticSeverity.Error,
+        "No cube '{cube}' in the result. It holds: {known}", ("cube", cube), ("known", known));
+
+    public static Diagnostic PlotNoPortAxis(string cube, string axis, string axes) => Diagnostic.Create(
+        "plot.trace.no-port-axis", DiagnosticSeverity.Error,
+        "Cube '{cube}' has no '{axis}' axis, so {axis}= means nothing on it. Its axes are: {axes}. "
+      + "Write the slice instead — cube={cube}[...].",
+        ("cube", cube), ("axis", axis), ("axes", axes));
+
+    /// <summary>The parser's OWN sentence, forwarded rather than re-worded — it is the same one the
+    /// trace card shows for the same text.</summary>
+    public static Diagnostic PlotTraceUnresolved(string trace, string spec, string why) => Diagnostic.Create(
+        "plot.trace.unresolved", DiagnosticSeverity.Error,
+        "plot: --trace '{trace}' resolved to the spec '{spec}', which does not read: {why}",
+        ("trace", trace), ("spec", spec), ("why", why));
+
+    public static Diagnostic PlotCubeIsScalar(string cube) => Diagnostic.Create(
+        "plot.trace.cube-is-scalar", DiagnosticSeverity.Error,
+        "Cube '{cube}' is one number, and a curve needs a swept axis. A scalar belongs on a table.",
+        ("cube", cube));
+
+    // ── find (brief-automation-11-missing-verbs.md R-aut11-3) ────────────────
+
+    public static Diagnostic FindRootRequired() => new(
+        "find.args.root-required", DiagnosticSeverity.Error,
+        "find: a root directory is required.");
+
+    public static Diagnostic FindUnknownOption(string option) => Diagnostic.Create(
+        "find.args.unknown-option", DiagnosticSeverity.Error,
+        "find: unknown option '{option}'", ("option", option));
+
+    public static Diagnostic FindMultipleRoots() => new(
+        "find.args.multiple-roots", DiagnosticSeverity.Error,
+        "find: one root at a time.");
+
+    public static Diagnostic FindRootNotFound(string path) => Diagnostic.Create(
+        "find.root.not-found", DiagnosticSeverity.Error,
+        "No such directory: {path}", ("path", path));
+
+    public static Diagnostic FindDepthMalformed(string text, int max) => Diagnostic.Create(
+        "find.depth.malformed", DiagnosticSeverity.Error,
+        "find: --depth '{text}' is not a whole number from 0 to {max}.",
+        ("text", text), ("max", max.ToString()));
+
+    /// <summary>A listing that quietly stopped short is read as "it is not here". Said out loud.</summary>
+    public static Diagnostic FindTruncated(int depth) => Diagnostic.Create(
+        "find.walk.truncated", DiagnosticSeverity.Warning,
+        "The walk stopped at --depth {depth} with directories still below it. Raise --depth to see "
+      + "further.", ("depth", depth.ToString()));
+
+    public static Diagnostic FindNothingHere(string path, int depth) => Diagnostic.Create(
+        "find.nothing", DiagnosticSeverity.Info,
+        "No workspace under '{path}' within {depth} level(s). A workspace is a directory holding "
+      + "a .cws; `circuitrf create` makes one.", ("path", path), ("depth", depth.ToString()));
+
+    /// <summary>A cell folder that belongs to no workspace is a real state, and an empty answer
+    /// would read as "there is nothing here". It is reported rather than invented into a workspace:
+    /// a workspace decides the default technology, and attributing a cell to one it is not in is
+    /// worse than not listing it.</summary>
+    public static Diagnostic FindRootIsACell(string path) => Diagnostic.Create(
+        "find.root.is-a-cell", DiagnosticSeverity.Info,
+        "'{path}' is a cell folder and no workspace is above it. `circuitrf check` and "
+      + "`circuitrf explain --cells` answer what is in one.", ("path", path));
+
+    public static Diagnostic FindCellUnreadable(string path, string why) => Diagnostic.Create(
+        "find.cell.unreadable", DiagnosticSeverity.Info,
+        "'{path}': its analyses could not be read ({why}), so none are listed for it. "
+      + "`circuitrf check` says why.", ("path", path), ("why", why));
 }

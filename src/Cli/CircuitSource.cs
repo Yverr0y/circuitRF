@@ -87,11 +87,70 @@ internal static class CircuitSource
     public static (Library Lib, TestBench Tb) FromSchematic(
         SchematicEditModel model, string testBenchName, string? sourceDir)
     {
-        var extracted = NetExtractor.Extract(model, testBenchName);
-        string cnl    = CnlWriter.Write(extracted.TestBench, extracted.Library,
-                                        $"check/explain — from {testBenchName}");
-        var (lib, tb) = new CnlReader().Read(cnl, testBenchName, sourceDir);
+        var (lib, tb) = new CnlReader().Read(CnlTextOf(model, testBenchName), testBenchName, sourceDir);
         return (lib, tb);
+    }
+
+    /// <summary>
+    /// The `.cnl` text a schematic extracts to — the FIRST half of the round trip above, on its own
+    /// (R-aut11-1).
+    ///
+    /// <para><b>There is one extraction and this is it.</b> <c>circuitrf netlist</c> writes exactly
+    /// this string and every run verb reads exactly this string, so the file a caller is handed is
+    /// not merely equivalent to what a run consumed — it is the same bytes. A second writer here,
+    /// with its own provenance line or its own ordering, would give a caller a netlist that runs
+    /// differently from the schematic it came out of, and nothing would say so.</para>
+    ///
+    /// <para>The provenance comment is deliberately constant: a timestamp or a verb name in it would
+    /// make two extractions of one schematic differ, which is precisely what the byte-for-byte gate
+    /// exists to detect.</para>
+    /// </summary>
+    public static string CnlTextOf(SchematicEditModel model, string testBenchName)
+    {
+        var extracted = NetExtractor.Extract(model, testBenchName);
+        return CnlWriter.Write(extracted.TestBench, extracted.Library,
+                               $"extracted from {testBenchName}");
+    }
+
+    /// <inheritdoc cref="CnlTextOf(SchematicEditModel, string)"/>
+    public static string CnlTextOf(string cschPath)
+    {
+        var (model, _, _) = SchematicPersistence.LoadFromFile(cschPath);
+        return CnlTextOf(model, Path.GetFileNameWithoutExtension(cschPath));
+    }
+
+    /// <summary>
+    /// A run verb's input: a `.cnl` read as itself, or a `.csch` EXTRACTED in memory (R-aut11-1).
+    ///
+    /// <para><b>Why a run verb takes a schematic at all.</b> Until this landed the automation
+    /// surface could not simulate any design a person had actually drawn — it ran hand-authored
+    /// netlists only, while <c>check</c> and <c>explain</c> both accepted a `.csch` happily, so the
+    /// surface read as though a run would too. What it did instead was hand the JSON document to
+    /// <c>CnlReader</c> and report its first key as a missing cell name.</para>
+    ///
+    /// <para><b>Any other kind is refused BY KIND</b>, naming what the path holds and what the verb
+    /// takes. Returns null having already reported; <paramref name="refusal"/> is the exit code.
+    /// Reader exceptions are NOT caught here — every caller already wraps its read in the try that
+    /// turns one into <c>RunFailed</c>.</para>
+    /// </summary>
+    public static (Library Lib, TestBench Tb)? ReadRunInput(string verb, string path, out int refusal)
+    {
+        refusal = 0;
+        var kind = DocumentKinds.Classify(path);
+
+        switch (kind)
+        {
+            case DocumentKind.Netlist:
+                return CnlReader.ReadFile(path);
+
+            case DocumentKind.Schematic:
+                return FromSchematic(path);
+
+            default:
+                refusal = JsonRun.Fail(CliDiagnostics.RunWrongDocumentKind(
+                    verb, path, DocumentKinds.Name(kind)));
+                return null;
+        }
     }
 
     /// <summary>

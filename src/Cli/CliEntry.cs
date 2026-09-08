@@ -156,6 +156,18 @@ return JsonRun.Finish(JsonRun.Verb switch
     // The inverse of a run verb: the DataSet a run wrote, loaded back through the same two readers
     // the GUI's own source library uses (brief-automation-5-protocol-adapter.md §3's `read`).
     "read"    => CircuitRF.Cli.ReadBack.Run(args[1..]),
+    // R-aut11-1, and by a wide margin the most valuable verb in the automation series: the
+    // extraction the GUI's own Simulate performs, as a document. Without it nothing headless could
+    // simulate a design anyone had actually drawn.
+    "netlist" => CircuitRF.Cli.Netlist.Run(args[1..]),
+    // R-aut11-2: one picture out of a result file, with no `.cdd` to hand-author first. It builds
+    // the document `render` consumes and hands it to `render`'s own half, so there is one plotting
+    // path rather than two.
+    "plot"    => CircuitRF.Cli.PlotVerb.Run(args[1..]),
+    // R-aut11-3: what is HERE. The server already knew how to read every one of these documents;
+    // it simply never offered to enumerate them, so locating a workspace meant searching the
+    // filesystem outside the surface entirely.
+    "find"    => CircuitRF.Cli.Find.Run(args[1..]),
     // What a client may WRITE, before it writes it (brief-automation-6-reference-and-components.md).
     // The one verb here that takes no path at all: a catalogue is about no document, which is also
     // why it is not a mode of `explain`.
@@ -217,7 +229,7 @@ static int RunSparam(string[] args)
     if (input is null)
     {
         int code = JsonRun.Fail(CliDiagnostics.InputRequired("sparam", ".cnl"));
-        Console.Error.WriteLine("Usage: circuitrf sparam <file.cnl> [--freq start:stop:step] [-o out.sNp]");
+        Console.Error.WriteLine("Usage: circuitrf sparam <file.cnl|.csch> [--freq start:stop:step] [-o out.sNp]");
         return code;
     }
     JsonRun.InputPath = input;
@@ -226,7 +238,11 @@ static int RunSparam(string[] args)
 
     try
     {
-        var (lib, tb) = CnlReader.ReadFile(input);
+        // R-aut11-1: a `.csch` is extracted IN MEMORY, through the one extraction `circuitrf netlist`
+        // writes; any other document kind is a refusal naming what the path holds.
+        if (CircuitSource.ReadRunInput("sparam", input, out int kindRefusal) is not { } source)
+            return kindRefusal;
+        var (lib, tb) = source;
         var nl = new Elaborator(lib).Elaborate(tb);
         var shown = PrintWarnings(nl);
 
@@ -319,7 +335,9 @@ static int RunDc(string[] args)
 
     try
     {
-        var (lib, tb) = CnlReader.ReadFile(input);
+        if (CircuitSource.ReadRunInput("dc", input, out int kindRefusal) is not { } source)
+            return kindRefusal;
+        var (lib, tb) = source;
         var nl = new Elaborator(lib).Elaborate(tb);
         var shown = PrintWarnings(nl);
 
@@ -441,7 +459,7 @@ static int RunHb(string[] args)
     {
         int code = JsonRun.Fail(CliDiagnostics.InputRequired("hb", ".cnl"));
         Console.Error.WriteLine(
-            "Usage: circuitrf hb <file.cnl> [-a name] [--set var=expr] [--maxharm K] [--maxmix M]");
+            "Usage: circuitrf hb <file.cnl|.csch> [-a name] [--set var=expr] [--maxharm K] [--maxmix M]");
         Console.Error.WriteLine(
             "                    [--tol t] [--max-iter N] [--rows N] [--all] [--diag] [-o out.{mat,npy,txt}]");
         return code;
@@ -451,7 +469,9 @@ static int RunHb(string[] args)
 
     try
     {
-        var (lib, tb) = CnlReader.ReadFile(input);
+        if (CircuitSource.ReadRunInput("hb", input, out int kindRefusal) is not { } source)
+            return kindRefusal;
+        var (lib, tb) = source;
 
         // --set lands in the netlist's own variable scope rather than being pushed at the engine, so
         // an override participates in expression evaluation like any other global: everything derived
@@ -657,7 +677,7 @@ static int RunLoadpull(string[] args, bool pursuit)
     {
         int code = JsonRun.Fail(CliDiagnostics.InputRequired(verb, ".cnl"));
         Console.Error.WriteLine(
-            $"Usage: circuitrf {verb} <file.cnl> [-a name] [--set var=expr] " +
+            $"Usage: circuitrf {verb} <file.cnl|.csch> [-a name] [--set var=expr] " +
             (pursuit ? "[--out-grid out.gam] " : "[--grid grid.gam] ") +
             "[--pin start:step:max]");
         Console.Error.WriteLine(
@@ -672,7 +692,9 @@ static int RunLoadpull(string[] args, bool pursuit)
 
     try
     {
-        var (lib, tb) = CnlReader.ReadFile(input);
+        if (CircuitSource.ReadRunInput(verb, input, out int kindRefusal) is not { } source)
+            return kindRefusal;
+        var (lib, tb) = source;
 
         // Same rule as `hb`: an override joins the netlist's own variable scope so everything derived
         // from it re-derives, rather than being pushed at one engine that reads it once.
@@ -1344,7 +1366,9 @@ static int RunElab(string[] args)
         return JsonRun.Fail(CliDiagnostics.InputRequired("elab", ".cnl"));
     try
     {
-        var (lib, tb) = CnlReader.ReadFile(args[0]);
+        if (CircuitSource.ReadRunInput("elab", args[0], out int kindRefusal) is not { } source)
+            return kindRefusal;
+        var (lib, tb) = source;
         var nl = new Elaborator(lib).Elaborate(tb);
         PrintWarnings(nl);
         Console.WriteLine($"{nl.Components.Count} component(s), {nl.Nodes.Count} node(s)");
@@ -1823,13 +1847,14 @@ static int PrintHelp()
     Console.WriteLine("circuitRF — headless RF simulator");
     Console.WriteLine();
     Console.WriteLine("Commands:");
-    Console.WriteLine("  sparam <file.cnl> [--freq start:stop:step] [-o out.sNp]");
-    Console.WriteLine("  dc     <file.cnl>   (DC operating point)");
-    Console.WriteLine("  hb     <file.cnl>   (harmonic balance; runs the sweep if one wraps it)");
-    Console.WriteLine("  lp     <file.cnl>   (loadpull over the directive's Gamma grid)");
-    Console.WriteLine("  lpp    <file.cnl>   (loadpull pursuit: searches for MXP / MXE)");
+    Console.WriteLine("  sparam <file.cnl|.csch> [--freq start:stop:step] [-o out.sNp]");
+    Console.WriteLine("  dc     <file.cnl|.csch>   (DC operating point)");
+    Console.WriteLine("  hb     <file.cnl|.csch>   (harmonic balance; runs the sweep if one wraps it)");
+    Console.WriteLine("  lp     <file.cnl|.csch>   (loadpull over the directive's Gamma grid)");
+    Console.WriteLine("  lpp    <file.cnl|.csch>   (loadpull pursuit: searches for MXP / MXE)");
     Console.WriteLine("  em     <file.cem>   (electromagnetic extraction of the layout it names)");
-    Console.WriteLine("  elab   <file.cnl>   (dump elaborated netlist)");
+    Console.WriteLine("  elab   <file.cnl|.csch>   (dump elaborated netlist)");
+    Console.WriteLine("  netlist <path.csch> [-o out.cnl]  (the extraction Simulate performs)");
     Console.WriteLine("  convert <in> -o <out>  (layout interchange: any format to any other)");
     Console.WriteLine("  new workspace <dir>    (a workspace, with a shipped technology copied in)");
     Console.WriteLine("  new cell <ws> <name>   (a cell folder with its view files)");
@@ -1838,6 +1863,8 @@ static int PrintHelp()
     Console.WriteLine("  explain <path>         (what did circuitRF resolve it to, and by which walk)");
     Console.WriteLine("  render  <path> -o out.svg  (a schematic, symbol or layout as a picture)");
     Console.WriteLine("  read    <path>         (a result file as cubes, or a document as its own text)");
+    Console.WriteLine("  plot    <result> -o out.svg --trace cube=S,i=2,j=1,y=db   (one picture, no .cdd)");
+    Console.WriteLine("  find    <root>         (what is here: workspaces, cells, views, analyses)");
     Console.WriteLine("  reference [topic] [type]  (what a caller may WRITE: the prose pages, and the");
     Console.WriteLine("                          generated component catalogue. Takes no path.)");
     Console.WriteLine("  serve   --root <dir>   (a protocol server on stdin/stdout, for an external client)");

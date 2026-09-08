@@ -464,6 +464,10 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "cli.args.unknown-option",
         "cli.em.setup-unreadable",
         "cli.input.not-found",
+        // AUT-11 R-aut11-1. The one id that changed an EXISTING verb: a run of a document that is
+        // neither a netlist nor a schematic is refused by KIND, where it used to be handed to
+        // CnlReader and come back as a missing cell name.
+        "cli.input.wrong-kind",
         "cli.measurement.failed",
         // AUT-9 R-aut9-9's axis narrowing, the half that is refused BEFORE the run: a malformed
         // --at can be caught from the command line alone. The refusals that need a result to look
@@ -537,6 +541,17 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "explain.ref.primary-missing",
         // RC-3's one headless spelling. R-rc0-19 fixes it as a VERB with nouns, so RC-5's `list` and
         // `restore` and RC-7's `commit` add ids here rather than a second verb.
+        // AUT-11 R-aut11-3: `find`. What is here — the workspaces, their cells, each cell's views
+        // and its analyses. The walk is bounded and says when it stopped short.
+        "find.args.multiple-roots",
+        "find.args.root-required",
+        "find.args.unknown-option",
+        "find.cell.unreadable",
+        "find.depth.malformed",
+        "find.nothing",
+        "find.root.is-a-cell",
+        "find.root.not-found",
+        "find.walk.truncated",
         "history.args.noun-required",
         "history.args.unknown-noun",
         // RC-9's three refusals of its own. `clone` takes two positions and derives neither: git would
@@ -582,6 +597,22 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "lp.export.no-surface",
         "lp.nothing-converged",
         "lp.tickle-gap",
+        // AUT-11 R-aut11-1: `netlist`, the extraction the GUI's own Simulate performs, as a
+        // document. Without it nothing headless could simulate a design anyone had drawn.
+        "netlist.args.multiple-paths",
+        "netlist.args.path-required",
+        "netlist.args.unknown-option",
+        "netlist.cell.no-primary",
+        "netlist.cell.no-schematic",
+        "netlist.extract.failed",
+        "netlist.output.not-cnl",
+        "netlist.output.write-failed",
+        "netlist.path.already-a-netlist",
+        "netlist.path.not-a-schematic",
+        "netlist.path.not-found",
+        "netlist.workspace.ambiguous-cell",
+        "netlist.workspace.cell-required",
+        "netlist.workspace.no-such-cell",
         "new.args.cell-args-required",
         "new.args.cell-extra-argument",
         "new.args.directory-required",
@@ -591,10 +622,45 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "new.args.unknown-option",
         "new.cell.exists",
         "new.name.invalid",
+        // AUT-11 R-aut11-4: `create` makes a missing parent rather than refusing, and says so.
+        "new.parent.created",
+        "new.parent.not-created",
         "new.parent.not-found",
         "new.refused",
         "new.tech.unknown",
         "new.views.unknown",
+        // AUT-11 R-aut11-2: `plot`. One picture from one result, building the same document
+        // `render --data` consumes — so there is one plotting path rather than two.
+        "plot.args.multiple-results",
+        "plot.args.output-required",
+        "plot.args.result-required",
+        "plot.args.trace-required",
+        "plot.args.unknown-option",
+        "plot.background.unknown",
+        "plot.frequnit.unknown",
+        "plot.output.unknown-format",
+        "plot.output.unknown-format-name",
+        "plot.output.write-failed",
+        "plot.range.malformed",
+        "plot.result.not-found",
+        "plot.result.unreadable",
+        "plot.scale.and-dpi",
+        "plot.scale.malformed",
+        "plot.scale.on-vector",
+        "plot.size.malformed",
+        "plot.trace.axis-unknown",
+        "plot.trace.cube-is-scalar",
+        "plot.trace.cube-required",
+        "plot.trace.field-malformed",
+        "plot.trace.no-port-axis",
+        "plot.trace.no-such-cube",
+        "plot.trace.port-malformed",
+        "plot.trace.ports-with-slice",
+        "plot.trace.unknown-key",
+        "plot.trace.unresolved",
+        "plot.type.unknown",
+        "plot.variant.unknown",
+        "plot.window.on-complex",
         "read.args.multiple-paths",
         "read.args.path-required",
         "read.args.unknown-option",

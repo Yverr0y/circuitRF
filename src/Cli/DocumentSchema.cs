@@ -59,7 +59,11 @@ internal static class DocumentSchema
 
     private const string CddPreamble = """
         A data display is a document, like a schematic. It is JSON, it is what `render` draws when
-        given a .cdd, and nothing in this surface creates one — so this is how to write one.
+        given a .cdd, and this is how to write one.
+
+        For ONE plot you do not need to write one at all: `circuitrf plot <result> -o out.svg
+        --trace cube=S,i=2,j=1,y=db` draws it, and `--write-cdd out.cdd` hands you the document it
+        built — which is a correct starting point to edit rather than a blank page.
 
         A display holds tabs; a tab holds plots; a plot holds traces; a trace names a cube in a
         result file and how to slice it. The result files themselves are NOT in the document: the

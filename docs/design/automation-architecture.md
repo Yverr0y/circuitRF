@@ -205,6 +205,8 @@ building the first adapter found that nothing could hand a file back (§8.1).
 | `explain <path>` | what did circuitRF DECIDE — which technology, which chain, what value, which cell? | `cli.md` §10.4 |
 | `read <path>` | what is IN this file — a result as cubes, a document as its own bytes | `cli.md` §11.4 |
 | `reference [topic] [type]` | what MAY be written — the reference pages, and every primitive with its terminals and parameters | `cli.md` §12 |
+| `netlist <path>` | what will actually RUN — the extraction Simulate performs, as a document | `cli.md` §14 |
+| `find <root>` | what EXISTS — the workspaces, cells, views and analyses under a directory | `cli.md` §16 |
 
 Three properties of that pair are what make it an architectural answer rather than two more verbs:
 
@@ -219,6 +221,23 @@ Three properties of that pair are what make it an architectural answer rather th
 
 The DRC engine crossed the UI firewall to make the third question answerable headlessly (R-aut4-3);
 `src/Design/RESOLVED.md` records what moved and what deliberately did not.
+
+**`netlist` and `find` joined them on 2026-09-08** (`brief-automation-11-missing-verbs.md`), and they
+close two holes that only exercise could have found:
+
+- **Nothing turned a schematic into something runnable.** `check` and `explain` both accepted a
+  `.csch`; a run verb handed the JSON to `CnlReader` and reported its first key as a missing cell
+  name. The surface could author a design, validate it, explain it and draw it — and could not
+  simulate it. Every run verb now extracts a `.csch` in memory, and `netlist` writes that extraction
+  out. It is also the REFERENCE ANSWER a client checks its own hand-authored `.cnl` against: AUT-7
+  §3's false defect report came from an instance line one look at a known-good extraction would have
+  settled.
+- **Nothing said what exists.** Locating a workspace holding a particular device meant searching the
+  filesystem outside the surface entirely — which a protocol client with only the server cannot do at
+  all. `find` enumerates what every other verb already knew how to read.
+
+Both follow R-aut3-1 unchanged: each calls the function the GUI's own command calls, and the gate
+scans `src/Cli` for a second copy rather than trusting that agreement today means one implementation.
 
 ---
 
@@ -317,6 +336,14 @@ well-chosen ones even when the forty are individually simpler.
 is one write. Understanding a result is the part that is unbounded — which is why R-aut-6's
 projection, and the ability to ask for a subset of it, do more for a client's cost than any authoring
 convenience.
+
+**The surface grew by three on 2026-09-08 and each was weighed against R-aut-9.** `netlist` and
+`find` are capabilities the surface did not have at all — one made it possible to simulate a drawn
+design, the other to discover one — and a capability a client cannot reach is not a capability. `plot`
+is the one that is a convenience over something already expressible, and it earns its description by
+removing the single largest piece of incidental work an exercise measured: authoring a whole data
+display to draw one trace. All three are ONE tool each, with the document kind inferred from the path
+rather than spelled as a mode, which is the same rule that kept `render` from being three.
 
 **Status, 2026-09-07 (AUT-9 R-aut9-8 through R-aut9-12).** The measured payloads that produced these
 requirements: `reference components` 297 KB, a 551-point two-port `run sparam` **173 KB returned

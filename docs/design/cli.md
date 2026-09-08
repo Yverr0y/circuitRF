@@ -29,15 +29,20 @@ and it is gated by the same firewall test. That is what the `em` verb (§8) runs
 
 | Verb | Input | Runs | Writes |
 |---|---|---|---|
-| `sparam` | `.cnl` | `SParameterEngine` | Touchstone `.sNp` by default; `-o`'s extension picks the format (`.sNp`, or `.npy`/`.mat`/`.txt` for the cubes) |
-| `dc` | `.cnl` | `NonlinearDcEngine` | node voltages + probe currents to stdout |
-| `hb` | `.cnl` | `HbEngine` (single- or multi-tone) | stdout tables; `-o .mat/.npy/.txt` |
-| `lp` | `.cnl` | `LoadpullEngine` + `LoadpullPostProcessor` | stdout grid table; `-o .mat/.npy/.txt/.spl/.lpcwave` |
-| `lpp` | `.cnl` | `LoadpullPursuitEngine` | stdout optima + follow-on grid; `-o` as `hb`; `--out-grid` writes the `.gam` |
+| `sparam` | `.cnl` or `.csch` | `SParameterEngine` | Touchstone `.sNp` by default; `-o`'s extension picks the format (`.sNp`, or `.npy`/`.mat`/`.txt` for the cubes) |
+| `dc` | `.cnl` or `.csch` | `NonlinearDcEngine` | node voltages + probe currents to stdout |
+| `hb` | `.cnl` or `.csch` | `HbEngine` (single- or multi-tone) | stdout tables; `-o .mat/.npy/.txt` |
+| `lp` | `.cnl` or `.csch` | `LoadpullEngine` + `LoadpullPostProcessor` | stdout grid table; `-o .mat/.npy/.txt/.spl/.lpcwave` |
+| `lpp` | `.cnl` or `.csch` | `LoadpullPursuitEngine` | stdout optima + follow-on grid; `-o` as `hb`; `--out-grid` writes the `.gam` |
 | `em` | `.cem` | `EmSetupResolver` + `EmRunService` (kernel chosen by `EmKernelRegistry`) | Touchstone `.sNp` + grouped `.npy` at the path Simulate writes; `-o` moves the Touchstone |
-| `elab` | `.cnl` | elaboration only | the elaborated netlist, for development |
+| `elab` | `.cnl` or `.csch` | elaboration only | the elaborated netlist, for development |
 
-Nine verbs run no analysis, so none of §3-§6 applies to them and §7's exit codes reduce to 0-or-1:
+**A run verb takes a SCHEMATIC as well as a netlist, and extracts it in memory** (§14). Any other
+document kind is a refusal naming what the path holds — `cli.input.wrong-kind`. It used to be handed
+to `CnlReader`, which parsed the JSON as netlist text and reported its first key as a missing cell
+name.
+
+Twelve verbs run no analysis, so none of §3-§6 applies to them and §7's exit codes reduce to 0-or-1:
 
 | Verb | Input | Does | Writes |
 |---|---|---|---|
@@ -49,6 +54,9 @@ Nine verbs run no analysis, so none of §3-§6 applies to them and §7's exit co
 | `explain` | the same, plus `--expr` / `--analysis` / `--ref` / `--cells` / `--layers` / `--extents` | reports what resolution DECIDED | **nothing** — §10 |
 | `render` | the same three view documents, a cell folder, a workspace + `--cell`, or a `.cdd` | draws it with the renderer the GUI draws with | one `.svg` / `.pdf` / `.png` — §13, and §13.7 for a data display |
 | `read` | a result file, or one of circuitRF's own documents | loads it back through the readers the GUI reads through | **nothing** — §11.4 |
+| `netlist` | a `.csch`, a cell folder, or a workspace + `--cell` | the extraction the GUI's own Simulate performs | one `.cnl`, or the text on stdout — §14 |
+| `plot` | a result file | builds a one-plot data display and draws it | one `.svg` / `.pdf` / `.png`, and the `.cdd` under `--write-cdd` — §15 |
+| `find` | a directory | enumerates the workspaces, cells, views and analyses under it | **nothing** — §16 |
 | `serve` | `--root <dir>` | a protocol server on stdin/stdout — §11 | whatever the tool it was asked for writes |
 | `reference` | **nothing at all** | reports what a caller may WRITE: the shipped reference pages, plus four topics generated from the live registries and readers — the component catalogue, the analysis directives, and the `.cdd` and `.ctech` formats | **nothing** — §12 |
 
@@ -1486,3 +1494,132 @@ application's own view models, saves it, and compares the verb's output as a PRO
 metric, an S→Z conversion, a stability circle, a loadpull contour and a summary-table column). The one
 normalisation is Skia's SVG element ids, whose counter is per process and in hex; the PDF is compared
 with none at all.
+
+---
+
+## 14. `netlist` — the extraction, as a document
+
+`brief-automation-11-missing-verbs.md` R-aut11-1.
+
+**The gap it closes is the largest one this surface had.** `run` on a `.csch` failed with
+`Error: Cell '"FormatVersion"' not found in libraries` — it had parsed the JSON document as netlist
+text and reported its first key as a missing cell name — while `check` and `explain` both accepted a
+`.csch` happily, so the surface read as though a run should too. The consequence was that **the
+automation surface could not simulate any design a user had actually drawn.** It ran hand-authored
+netlists only.
+
+Two things landed together, and neither is complete without the other:
+
+- **Every run verb takes a `.csch` and extracts it in memory** — the same round trip §10.3 describes,
+  through `CircuitSource.ReadRunInput`. A document that is neither is a refusal naming its kind.
+- **`circuitrf netlist <path> [-o out.cnl]`** writes that extraction as a file.
+
+```
+circuitrf netlist Stage1.csch -o stage1.cnl
+circuitrf netlist ./MyWorkspace --cell Stage1 -o stage1.cnl
+circuitrf netlist Stage1.csch                    # the text on stdout
+```
+
+**It owns no extraction.** Every byte comes from `CircuitSource.CnlTextOf` — `NetExtractor.Extract`
+followed by `CnlWriter.Write`, the first half of the round trip the GUI's own Simulate performs — so
+the file a caller is handed is not merely equivalent to what a run consumes, **it is the same bytes**.
+The provenance comment is deliberately constant for that reason: a timestamp or a verb name in it
+would make two extractions of one schematic differ. `tests/Ui.Tests/Cli/MissingVerbsCliTests.cs`
+compares the verb run as a PROCESS against the in-process call, and scans the whole of `src/Cli` for
+a second `CnlWriter.Write`.
+
+**It is also the reference answer.** AUT-7 §3's false defect report — a working component written up
+as broken — came from a one-net instance line that one look at a known-good extraction would have
+settled. A client that has written a `.cnl` by hand can now compare it against what the application
+produces for the equivalent drawing.
+
+**A cell folder and a workspace resolve as `render` resolves them** — the same `CellLookup` and
+`CellFolder.ResolvePrimary`, so the cell extracted is the cell that verb would have drawn. There is no
+`--view`: a netlist comes out of a schematic and out of nothing else. `-o` takes a `.cnl` and refuses
+any other extension, because there is one format here and `-o plot.svg` is a caller who meant `render`.
+A `.cnl` input is refused rather than re-emitted: passing it through the reader and the writer would
+hand back a file that is not the one given — comments gone, directives reordered — and call it an
+extraction.
+
+---
+
+## 15. `plot` — one picture, without authoring a display first
+
+`brief-automation-11-missing-verbs.md` R-aut11-2.
+
+Hand-authoring a `.cdd` to draw a single trace was the largest piece of incidental work in an
+otherwise short task: a document with a tab, a plot container, a placement, a source reference and a
+slice, every field of which has to be right before anything appears.
+
+```
+circuitrf plot lc.s2p -o s21.svg --trace cube=S,i=2,j=1,y=db --title "LC lowpass"
+circuitrf plot run.npy -o pae.png --trace cube=PAE --trace cube=Pout,axis=right --x 5:25
+```
+
+**There is ONE plotting path.** The verb builds a `DataDisplayConfig` — the document a `.cdd`
+deserializes to — and hands it to `RenderDataDisplay.Draw`, which is the same function §13.7's `.cdd`
+half calls. `--write-cdd` hands that document back, so a caller has a correct starting point to edit
+rather than a blank page, and so the claim is checkable: the gate renders the written display with
+`render` and compares the two pictures byte for byte, in all three formats.
+
+**A trace spec is the trace card's own.** `cube=` is parsed by `CubeTraceSpecParser`, which is what
+the spec box on a trace card parses, so `S[:,1,0]`, `Pout` and `mag(V[:,"X1.drain"])` mean here
+exactly what they mean there. The fields are split on TOP-LEVEL commas only, because the shorthand
+they carry is full of commas.
+
+| Key | Means |
+|---|---|
+| `cube` | the cube, bare or with a slice and a transform. Required. |
+| `i`, `j` | pin the cube's axes named `i` and `j` by **port number**. Refused alongside a bracketed slice. |
+| `y` | `db`, `db10`, `db20`, `mag`, `phase`, `real`, `imag`, `conj` — folded in as the transform prefix, so there is one table of those names and it is the parser's. |
+| `axis` | `left` (default) or `right`. |
+
+**An integer on an `i`/`j` axis is a PORT NUMBER, not an index** — `S[:,2,1]` is S21, which is what
+makes that spelling readable. Off by one here is the quietest possible wrong answer, since S12 and S21
+are both legal curves and on a reciprocal part they are the same one; the gate pins the slice indices.
+
+**A cube the result does not hold is refused BY NAME, listing what it holds.** The parser's own answer
+for a bare unrecognised name is "Missing `[`" — correct from where it stands and useless to a caller
+who mistyped a cube or is looking at the wrong run — so that one refusal is made here rather than
+forwarded. **A plot with no trace is refused rather than drawn**, for R-rnd4-4's reason: an empty plot
+is a valid picture that exports cleanly and looks exactly like a measurement that came back empty.
+
+`--x`/`--y`/`--y2` are optional and independent — an axis without one autoscales, which works because
+`Plot.RestoreAxesFromConfig` re-autoscales only the axes whose own flag is still set. They are refused
+on a Smith or Polar chart, whose window is the complex plane framed on the unit circle. **This is the
+convenience over `.cdd` authoring, not a replacement for it**: everything a display can express stays
+reachable by writing one and calling `render`.
+
+---
+
+## 16. `find` — what is here
+
+`brief-automation-11-missing-verbs.md` R-aut11-3.
+
+There was no way to ask the surface what exists; locating a workspace that holds a particular device
+meant searching the filesystem outside the automation surface entirely, which a protocol client with
+only the server cannot do at all. Every document below is one this program already knew how to read.
+
+```
+circuitrf find ./projects                    # workspaces, cells, views, analyses
+circuitrf find ./projects --depth 6 --json
+circuitrf find ./big-tree --no-analyses      # names only; each analysis costs an extraction
+```
+
+**It reads what the other verbs read**: a workspace is a directory holding a `.cws`
+(`DocumentKinds.Classify`), its cells are `CellLookup`'s answer, each view is
+`CellFolder.ResolvePrimary`'s, and the analyses are the ones the elaborator would see —
+`CircuitSource`'s extraction, which is the GUI's own Simulate path. A cell whose analyses could not be
+read reports `analyses` as ABSENT rather than empty, because "declares none" and "could not be read"
+are different answers and the second must not read as the first.
+
+**The walk is bounded and says when it stopped short.** A listing that quietly gave up is the one
+failure this verb must not have: a caller reads a short answer as "the workspace is not here" and goes
+elsewhere. So `--depth` is an argument (default 4, at most 12) and `truncated` is in the document,
+with a warning beside it. A workspace nested inside another is a leaf: two workspaces have different
+default technologies, and attributing the inner one's cells to the outer is worse than not listing
+them.
+
+**It never leaves the root.** A directory symbolic link is not followed — that is the one way a
+bounded walk stops being bounded and a confined one stops being confined. On `serve` the root is
+already `PathRoot`'s.

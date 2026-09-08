@@ -121,8 +121,25 @@ public static class Authoring
             return JsonRun.Fail(CliDiagnostics.NewUnknownTechnology(
                 techId, string.Join(", ", ShippedTechnologies.All.Select(e => e.Id))));
 
+        // R-aut11-4: a missing PARENT is created, rather than refused. The refusal it replaces was
+        // defensible and it was discovered by hitting it — `create` under a path whose parent does
+        // not exist failed with "No such directory", and a client with no file tools of its own had
+        // nowhere to go from there. Creating an intermediate directory is not the destructive act
+        // the refusal was guarding against: nothing is overwritten, and the workspace itself is
+        // still refused if it already exists.
+        //
+        // A failure here is reported as itself (a read-only ancestor, a file in the way), naming the
+        // directory that could not be made.
         if (!Directory.Exists(parentDir))
-            return JsonRun.Fail(CliDiagnostics.NewParentNotFound(parentDir));
+        {
+            try { Directory.CreateDirectory(parentDir); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
+                                          or NotSupportedException)
+                { return JsonRun.Fail(CliDiagnostics.NewParentNotCreated(parentDir, ex.Message)); }
+
+            Console.Error.WriteLine($"[circuitRF] created the parent directory {parentDir}");
+            JsonRun.Note(CliDiagnostics.NewParentCreated(parentDir));
+        }
 
         // R-sl2-13, and the same sentence the GUI shows: refuse HERE, naming the directory, rather
         // than part-way through — the steps below have no rollback.

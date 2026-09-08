@@ -63,6 +63,31 @@ internal static class RenderDataDisplay
         }
         if (config is null) return JsonRun.Fail(CliDiagnostics.RenderCddUnreadable(path, "it is not JSON"));
 
+        return Draw(path, config, req);
+    }
+
+    /// <summary>
+    /// The same render, over a document already in memory (R-aut11-2).
+    ///
+    /// <para><b>This is what makes `plot` one plotting path rather than two.</b> That verb builds a
+    /// <see cref="DataDisplayConfig"/> — the very document a `.cdd` deserializes to — and hands it
+    /// here, so every decision below (source binding, plot loading, placement, page, theme, encoding)
+    /// is made once, by this function, for a hand-authored display and a generated one alike. A
+    /// second composer in `plot` would have drifted, and a plausible picture is indistinguishable
+    /// from a right one.</para>
+    /// </summary>
+    /// <param name="path">
+    /// The document's own path for the purposes of resolving its sources — the directory a relative
+    /// reference is looked for beside. `plot` passes the RESULT file it was given, which is where
+    /// the source it names actually is.
+    /// </param>
+    /// <param name="reportKind">
+    /// What the report calls this input. A `.cdd` is a data display; `plot`'s input is a result file,
+    /// and calling it a data display in the document would be a claim about a file that is not one.
+    /// </param>
+    public static int Draw(string path, DataDisplayConfig config, Request req,
+                           string? reportKind = null)
+    {
         // A v1 file (or a clipboard fragment) carries its plots in the legacy top-level list; a v2
         // one carries tabs. Both are read here for the reason the application reads both — the
         // format is the contract, and a caller that has a `.cdd` did not choose its version.
@@ -205,7 +230,7 @@ internal static class RenderDataDisplay
 
         JsonRun.AddOutput(req.Format, req.Output);
         JsonRun.Render = new RenderReportJson(
-            path, DocumentKinds.Name(DocumentKind.DataDisplay), View: null, req.Format,
+            path, reportKind ?? DocumentKinds.Name(DocumentKind.DataDisplay), View: null, req.Format,
             Viewport: null, Extents: null,
             new RenderSizeJson(outW, outH, unitKind,
                                               req.Format == "png" ? req.Scale : 1.0),

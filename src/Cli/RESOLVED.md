@@ -7,6 +7,109 @@ what the design says.
 ---
 
 
+## AUT-11 — `netlist`, `plot`, `find`, and a `create` that makes its own parent (2026-09-08)
+
+`brief-automation-11-missing-verbs.md`. Four capabilities a client reached for and did not find.
+Additive: nothing existing changed behaviour except the two noted below, both of which replaced a
+wrong answer with a right one.
+
+### The automation surface could not simulate a design anyone had drawn
+
+**R-aut11-1, and it is the largest single gap the series found.** `run` on a `.csch` failed with
+`Error: Cell '"FormatVersion"' not found in libraries (referenced by '')` — it had handed the JSON
+document to `CnlReader`, which parsed it as netlist text and reported its first key as a missing cell
+name. There was no `extract` verb and no `netlist` verb, and `check` and `explain` both accepted a
+`.csch` happily, so the surface read as though a run should too.
+
+The consequence was not merely inconvenience: **the surface could author a design, validate it,
+explain it and draw it, and could not run it.** Every finding in AUT-8 and AUT-9 was reached only
+because a testbench had to be reconstructed from scratch instead of started from a known-good
+extraction.
+
+Two halves landed together and neither is complete alone: every run verb now reads its input through
+`CircuitSource.ReadRunInput`, which takes a `.cnl` as itself and a `.csch` through the extraction, and
+`circuitrf netlist` writes that extraction out.
+
+**The file the verb writes is the same BYTES a run consumes, not merely an equivalent netlist.** Both
+go through `CircuitSource.CnlTextOf`. That is why the provenance comment is a constant rather than a
+timestamp or the verb's name: two extractions of one schematic have to be comparable, and the gate
+compares them. `MissingVerbsCliTests` also scans the whole of `src/Cli` for a second
+`CnlWriter.Write` — **and the scan has to be on the WRITER, not on `NetExtractor.Extract`.** `check`
+legitimately calls the extractor on its own account, because extraction is where a naming conflict
+between two labels on one physical net is reported and nothing else in the tree reports it; it then
+goes through `CircuitSource` for the netlist half like everyone else. What must not exist twice is
+the write, because that is what decides the bytes.
+
+**It is also the reference answer a client checks its own authoring against.** AUT-7 §3's false defect
+report — a working `TunerModel` written up as broken — came from a one-net instance line. One look at
+a known-good extraction would have shown two nets on that line and the whole detour would not have
+happened.
+
+### `plot`: the trap was the port number, and it is silent
+
+**R-aut11-2.** The verb builds a `DataDisplayConfig` and hands it to `RenderDataDisplay.Draw`, which
+`render`'s own `.cdd` half calls — one plotting path, gated by rendering the `--write-cdd` document
+with `render` and comparing byte for byte in all three formats.
+
+**On an `i` or `j` axis the shorthand's integer token is a 1-based PORT NUMBER, not a 0-based index**
+(`SliceTokenParser.Parse` — `S[:,2,1]` is S21, which is what makes that spelling readable). The first
+implementation here mapped a port number to an array index and emitted that, which the parser then
+interpreted as a port number again. It was caught by a refusal (`Port 0 out of range`) only because
+port 1 maps to index 0; **for `i=2,j=1` it would have drawn S12 and said nothing**, and on a
+reciprocal part S12 and S21 are the same curve, so it would have been invisible in the obvious test.
+The gate asserts the slice indices in the written `.cdd` rather than only that a picture appeared.
+
+**Two smaller ones worth keeping:**
+
+- **`TracePropertiesConfig.LineColorIndex` is an index into `TraceProperties.LineColorOrder`, whose
+  first entry is 12 (red), not into the colour table directly.** Using the trace's ordinal gave the
+  first trace colour 0 — black — which is invisible on the dark variant and produces a correct-looking
+  picture on the light one.
+- **A PDF's metadata Title is taken from the OUTPUT path** (`PlotDocumentWriter.PdfTitleFor`, matching
+  the application's own Export). Two byte-comparison outputs must therefore share a file NAME and
+  differ by directory; `a.pdf` versus `b.pdf` differ in that one field and nowhere else, which is the
+  sort of difference that gets excluded from a gate rather than understood.
+
+**One refusal is made here rather than forwarded.** `CubeTraceSpecParser`'s answer for a bare name it
+does not recognise is `Missing '['` — correct from where it stands, and useless to a caller who
+mistyped a cube or is looking at the wrong run. `plot` extracts the bare cube name from the spec
+first and refuses with the list of cubes the file holds. Every other syntax error is the parser's own
+sentence, forwarded unchanged, because it is the same one the trace card shows for the same text.
+
+### `find`: a bounded walk has to say when it stopped
+
+**R-aut11-3.** There was no way to ask the surface what exists, so locating a workspace holding a
+particular device meant searching the filesystem outside the MCP entirely — which a client that has
+the server and nothing else cannot do at all.
+
+**A listing that quietly stopped short is the one failure this verb must not have**: a caller reads a
+short answer as "the workspace is not here" and goes elsewhere. So `truncated` is in the document with
+a warning beside it, and only a directory that still had children when the bound was reached counts —
+a leaf reached exactly at the limit did not stop short.
+
+**A directory symbolic link is where a bounded walk stops being bounded and a confined one stops being
+confined**, so one is never followed. That is also what makes "a path outside the root never appears"
+checkable: the gate plants a link to an outside workspace and asserts it is absent.
+
+**A cell whose analyses could not be read reports `analyses` as ABSENT, not empty.** "Declares none"
+and "could not be read" are different answers, and reporting the second as the first tells a caller a
+runnable cell is not runnable.
+
+### `create` refused what it could simply have done
+
+**R-aut11-4.** Creating a workspace under a path whose parent did not exist failed with
+`No such directory`. The refusal was defensible and it was discovered by hitting it — and a client
+with no file tools of its own had nowhere to go from there. Creating an intermediate directory is not
+the destructive act that refusal was guarding: nothing is overwritten, an existing workspace is still
+refused, and the creation is reported as an info diagnostic so a mistyped path is visible rather than
+silently materialised.
+
+The other half is the server's `instructions`, which now say plainly that **no tool here writes a file
+of the client's text** — the client supplies its own file writing, and what these tools write is what
+they produce. That was true before and was also discovered by hitting it.
+
+---
+
 ## AUT-10 — the generated reference (2026-09-08)
 
 `brief-automation-10-generated-reference.md`. Five requirements, all additive; nothing existing

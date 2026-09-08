@@ -767,7 +767,7 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
             .GetProperty("tools").EnumerateArray()
             .Select(t => t.GetProperty("name").GetString()!).ToArray();
 
-        // R-aut5-4: small and broad. TEN, and the count is asserted because the surface is a
+        // R-aut5-4: small and broad. THIRTEEN, and the count is asserted because the surface is a
         // standing cost paid on every interaction whether or not a tool is called. `reference` earns
         // its place by being reachable at all in a client that does not surface RESOURCES to the
         // model — which is where the same bytes are cheaper (R-aut6-4).
@@ -775,13 +775,18 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
         // `render` is RND-5's one addition, and it is ONE (R-rnd0-4): one tool over every document
         // kind, with the kind inferred from the path, rather than one per view type.
         //
+        // `netlist`, `plot` and `find` are AUT-11's, and each is one tool for the same reason: the
+        // document kind comes from the path. `netlist` is the one that changes what this surface can
+        // DO rather than what it costs — without it nothing here could simulate a design anyone had
+        // actually drawn.
+        //
         // The last two are RC-5's (revision-control.md §5.3d, §5.3b). `history` is the CLI's own verb
         // like every tool above it. `batch` is the ONE tool that is not a command line: it holds
         // SESSION state — opened before an agent's first modification, closed when it is done — and a
         // process that exits after one command cannot hold that, which is why the architecture puts
         // it on this server and leaves the other three history nouns as verbs.
-        Assert.Equal(["run", "check", "explain", "create", "import", "render", "read", "history",
-                      "reference", "batch"],
+        Assert.Equal(["run", "check", "explain", "create", "import", "render", "netlist", "plot",
+                      "find", "read", "history", "reference", "batch"],
                      tools);
 
         Assert.Equal(0, server.Close());
@@ -856,6 +861,11 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
             ["import/part"]       = ["path"],
             ["import/convert"]    = ["path"],
             ["read/"]             = ["path"],
+            // AUT-11's three. Single-mode for the same reason `render` is: each takes a path whose
+            // kind it infers, so there is no selector to key on.
+            ["netlist/"]          = ["path"],
+            ["plot/"]             = ["path"],
+            ["find/"]             = ["path"],
             // RND-5's one new tool. Single-mode for R-rnd5-2's reason: the document kind comes from
             // the path exactly as `check`'s does, so there is no selector to key on.
             ["render/"]           = ["path"],

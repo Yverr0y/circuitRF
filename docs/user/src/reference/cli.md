@@ -41,6 +41,9 @@ keywords: CLI, command line, command-line, terminal, shell, console, headless, b
   </ol>
 </li>
 <li><a href="#read"><code>read</code> — a result or a document, back</a></li>
+<li><a href="#netlist"><code>netlist</code> — the netlist a schematic runs as</a></li>
+<li><a href="#plot"><code>plot</code> — a picture of a result</a></li>
+<li><a href="#find"><code>find</code> — what is in this folder?</a></li>
 <li><a href="#reference"><code>reference</code> — what may I write?</a></li>
 <li><a href="#elab"><code>elab</code> — the elaborated netlist</a></li>
 <li><a href="#json"><code>--json</code> — one machine-readable document</a></li>
@@ -78,11 +81,11 @@ convention behind both.</p>
 
 | Verb | Takes | Runs | Writes |
 |---|---|---|---|
-| `sparam` | `.cnl` | The linear S-parameter engine over a frequency sweep | A Touchstone `.sNp`, always |
-| `dc` | `.cnl` | The nonlinear DC engine | Node voltages and probe currents, to stdout |
-| `hb` | `.cnl` | Harmonic balance, single- or multi-tone | Spectra tables to stdout; `-o .mat/.npy/.txt` |
-| `lp` | `.cnl` | Loadpull over the directive's Γ grid | A per-Γ-point table; `-o .mat/.npy/.txt/.spl/.lpcwave` |
-| `lpp` | `.cnl` | Loadpull **pursuit** — searches for the optima | Optima + the follow-on grid; `-o` as `hb`; `--out-grid` writes a `.gam` |
+| `sparam` | `.cnl` or `.csch` | The linear S-parameter engine over a frequency sweep | A Touchstone `.sNp`, always |
+| `dc` | `.cnl` or `.csch` | The nonlinear DC engine | Node voltages and probe currents, to stdout |
+| `hb` | `.cnl` or `.csch` | Harmonic balance, single- or multi-tone | Spectra tables to stdout; `-o .mat/.npy/.txt` |
+| `lp` | `.cnl` or `.csch` | Loadpull over the directive's Γ grid | A per-Γ-point table; `-o .mat/.npy/.txt/.spl/.lpcwave` |
+| `lpp` | `.cnl` or `.csch` | Loadpull **pursuit** — searches for the optima | Optima + the follow-on grid; `-o` as `hb`; `--out-grid` writes a `.gam` |
 | `em` | `.cem` | The EM kernel the setup resolves to | A Touchstone `.sNp` **and** a grouped `.npy`, where **Simulate** writes them |
 | `convert` | any layout format | The same importer and exporter **File ▸ Import/Export** runs | The layout in the format you asked for |
 | `new workspace` | a directory | The same code **File ▸ New Workspace** runs | A `.cws` and, unless you say otherwise, a copied technology |
@@ -92,12 +95,19 @@ convention behind both.</p>
 | `check` | a workspace, a cell folder, or one document | Every validator the application already uses | **Nothing** — findings to stdout |
 | `explain` | the same | Resolution only — no analysis | **Nothing** — the walk and the answer, to stdout |
 | `read` | a result file, or one of circuitRF's own documents | The same loaders the Data Display reads a file with | **Nothing** — what the file holds, to stdout |
+| `netlist` | a `.csch`, a cell folder, or a workspace | The same extraction **Simulate** performs | A `.cnl`, or the netlist text to stdout |
+| `plot` | a result file | Builds a one-plot data display and draws it | A `.svg`, `.pdf` or `.png`, where `-o` says |
+| `find` | a directory | Nothing — it reads documents | **Nothing** — the workspaces, cells, views and analyses under it |
 | `reference` | **nothing** | Nothing — it reads no file | **Nothing** — the reference pages, and every netlist primitive with its terminals and parameters |
-| `elab` | `.cnl` | Elaboration only, no analysis | The elaborated netlist, to stdout |
+| `elab` | `.cnl` or `.csch` | Elaboration only, no analysis | The elaborated netlist, to stdout |
 | `serve` | `--root <dir>` | An MCP server for an external client | Whatever the tool it is asked for writes |
 
 `hb`, `lp` and `lpp` all run **the whole parametric sweep** when one wraps the analysis — see
 [naming the wrapper](#wrapper).
+
+**Every run verb takes a schematic as well as a netlist.** Hand it a `.csch` and it extracts the
+netlist in memory first — the same extraction **Simulate** performs — so you do not have to write one
+out to run a design you drew. [`netlist`](#netlist) is how you see what it will run.
 
 ## Results on stdout, everything else on stderr {#channels}
 
@@ -155,7 +165,7 @@ different question with nothing to say so.</p>
 
 ## `sparam` — S-parameters {#sparam}
 
-<pre><code class="cmd"><span class="prompt">$ </span>circuitrf sparam &lt;file.cnl&gt; [--freq start:stop:step] [-o out.sNp]</code></pre>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf sparam &lt;file.cnl|.csch&gt; [--freq start:stop:step] [-o out.sNp]</code></pre>
 
 ```text
 $ circuitrf sparam hero1.cnl --freq 1GHz:3GHz:1GHz -o hero1.s2p
@@ -185,7 +195,7 @@ want the per-port references in a form every tool reads, write <code>.npy</code>
 
 ## `dc` — the operating point {#dc}
 
-<pre><code class="cmd"><span class="prompt">$ </span>circuitrf dc &lt;file.cnl&gt;</code></pre>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf dc &lt;file.cnl|.csch&gt;</code></pre>
 
 ```text
 $ circuitrf dc hero2.cnl
@@ -203,7 +213,7 @@ analysis is built on, so a non-converged DC is a failed run, not a partial one.
 
 ## `hb` — harmonic balance {#hb}
 
-<pre><code class="cmd"><span class="prompt">$ </span>circuitrf hb &lt;file.cnl&gt; [-a name] [--set var=expr] [-o out.npy]</code></pre>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf hb &lt;file.cnl|.csch&gt; [-a name] [--set var=expr] [-o out.npy]</code></pre>
 
 The same verb runs **single- and multi-tone** — which it is comes from the netlist's directive, not
 from a flag.
@@ -276,7 +286,7 @@ stderr and the run continues** — one bad expression does not throw away a run 
 
 ## `lp` — loadpull {#lp}
 
-<pre><code class="cmd"><span class="prompt">$ </span>circuitrf lp &lt;file.cnl&gt; [--grid grid.gam] [--pin start:step:max] [-o out.spl]</code></pre>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf lp &lt;file.cnl|.csch&gt; [--grid grid.gam] [--pin start:step:max] [-o out.spl]</code></pre>
 
 `lp` sweeps the load (or source) termination over the directive's Γ grid, runs a harmonic-balance
 drive ladder at each point, and reports the figures of merit.
@@ -327,7 +337,7 @@ post-processor a GUI run does, so the exported cubes carry the derived display m
 
 ## `lpp` — loadpull pursuit {#lpp}
 
-<pre><code class="cmd"><span class="prompt">$ </span>circuitrf lpp &lt;file.cnl&gt; [--out-grid found.gam] [-o out.npy]</code></pre>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf lpp &lt;file.cnl|.csch&gt; [--out-grid found.gam] [-o out.npy]</code></pre>
 
 A pursuit **searches** for the max-power (MXP) and max-efficiency (MXE) terminations rather than
 reading a grid, then runs a follow-on loadpull over the terminations it recommends.
@@ -1299,6 +1309,125 @@ With `--json`, `--only` and `--group` narrow what comes back — which matters, 
 
 ---
 
+## `netlist` — the netlist a schematic runs as {#netlist}
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf netlist &lt;path.csch | cell-folder | workspace --cell N&gt; [-o out.cnl]</code></pre>
+
+The extraction **Simulate** performs, as a file you can read. It takes a `.csch`, a cell folder, or a
+workspace with `--cell` — the same three inputs [`render`](#render) takes, resolved the same way.
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf netlist Example_SParam_LC.csch
+<span class="output">; extracted from Example_SParam_LC
+
+Port:Term1  n1  0  Num=1  Z=50 Ohm
+L:L1  n1  n2  L=2 nH
+C:C1  n2  0  C=0.8 pF
+Port:Term2  n2  0  Num=2  Z=50 Ohm
+
+analysis SP1 type=sparam start="1" startUnit=GHz stop="5" stopUnit=GHz npts=201</span></code></pre>
+
+Without `-o` the netlist goes to stdout, so `circuitrf netlist Stage1.csch &gt; stage1.cnl` is the file
+and nothing else. With `-o` it is written there, and the path is what goes to stdout.
+
+<div class="callout">
+<span class="label">This is the netlist a run actually consumes — the same bytes</span>
+<p>You do not need it to simulate a drawing: every run verb takes a <code>.csch</code> directly and
+extracts it in memory. What this verb is for is <b>seeing</b> that extraction — and checking a
+<code>.cnl</code> you wrote by hand against what circuitRF produces for the equivalent schematic.
+Both go through one function, so the file here is not merely equivalent to what a run reads, it is
+byte for byte the same text.</p>
+</div>
+
+`-o` takes a `.cnl` and refuses any other extension — there is one format here. A `.cnl` input is
+refused too: passing it through the reader and the writer would hand back a file that is not the one
+you gave (comments gone, directives reordered) and call it an extraction.
+
+---
+
+## `plot` — a picture of a result {#plot}
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf plot &lt;result.npy|.sNp&gt; -o &lt;out.svg|.pdf|.png&gt; --trace &lt;spec&gt; [--trace &lt;spec&gt;]…</code></pre>
+
+One plot, one axis pair, without writing a data display first.
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf plot lc.s2p -o match.png \
+<span class="prompt">    </span>--trace cube=S,i=1,j=1,y=db --trace cube=S,i=2,j=1,y=db \
+<span class="prompt">    </span>--title "LC lowpass" --ylabel dB --x 1:5 --y -40:5
+<span class="output">Wrote match.png (792x612 device-pixels, 19,785 bytes)
+  1 plot(s) on 1 page(s), 1 data source(s)</span></code></pre>
+
+**A trace spec is comma-separated `key=value`:**
+
+| Key | What it means |
+|---|---|
+| `cube` | Which cube. Required. It is the same shorthand the trace card's spec box takes, so `S`, `S[:,2,1]`, `Pout` and `mag(V[:,"X1.drain"])` all work. |
+| `i`, `j` | The **port numbers** of a matrix cube — `i=2,j=1` is S21. Refused together with a bracketed slice: they are the convenience over writing one. |
+| `y` | `db`, `db10`, `db20`, `mag`, `phase`, `real`, `imag` or `conj`. |
+| `axis` | `left` (the default) or `right`. |
+
+`circuitrf read <result>` lists the cubes a file holds and their axes, which is where the names come
+from. A cube the file does not hold is refused, listing the ones it does.
+
+| Option | What it does |
+|---|---|
+| `-o <path>` | Required. Its extension picks the format: `.svg`, `.pdf` or `.png`. |
+| `--type rect\|smith\|polar\|table` | Default `rect`. |
+| `--freq-unit Hz\|kHz\|MHz\|GHz` | Default GHz. It is also the unit `--x` is read in. |
+| `--title`, `--xlabel`, `--ylabel`, `--y2label` | Custom labels. Omitted, the plot labels itself. |
+| `--x lo:hi`, `--y lo:hi`, `--y2 lo:hi` | Axis windows. An axis you leave out autoscales. Refused on a Smith or Polar chart, whose window is the complex plane. |
+| `--size WxH`, `--scale`, `--dpi` | The page. Default 792×612 points — the same page **File ▸ Export** writes. `--scale`/`--dpi` are `.png` only. |
+| `--variant light\|dark`, `--background opaque\|transparent` | As `render`. |
+| `--write-cdd <path>` | Also write the data display this drew. |
+
+<div class="callout">
+<span class="label"><code>--write-cdd</code> is how you go further</span>
+<p>This verb draws one plot with one axis pair. Everything else a data display can do — several plots
+on a page, tabs, markers, contours, a summary table — is still done by writing a <code>.cdd</code> and
+calling <a href="#render"><code>render</code></a>. <code>--write-cdd</code> hands you the document
+this verb built, which is a correct starting point to edit rather than a blank page; the picture it
+draws and the picture <code>render</code> draws from that file are byte for byte the same, because
+they are the same code.</p>
+</div>
+
+A plot with no `--trace` is refused rather than drawn. An empty plot is a valid picture that exports
+cleanly and looks exactly like a measurement that came back empty.
+
+---
+
+## `find` — what is in this folder? {#find}
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf find &lt;root&gt; [--depth n] [--no-analyses]</code></pre>
+
+The workspaces under a directory, their cells, each cell's views, and the analyses each cell declares.
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf find ./projects
+<span class="output">/home/you/projects  (1 workspace(s), 2 cell(s), depth 4)
+  Amp  /home/you/projects/Amp  [tech tech/generic-mmic.ctech]
+    LC                       schematic: LC.csch
+                             analyses: SP1
+    Stage1                   schematic: Stage1.csch, layout: Stage1.clay
+                             analyses: HB1, SWEEP1</span></code></pre>
+
+It reads what the other verbs read, so a cell listed here is the cell `render` would draw and the
+analyses are the ones `hb` would dispatch. It writes nothing, so it runs on a read-only tree and on a
+workspace the application has open.
+
+| Option | What it does |
+|---|---|
+| `--depth n` | How many levels below the root a workspace is looked for. Default 4, at most 12. |
+| `--no-analyses` | Skip the analyses. Each one costs an extraction, which adds up on a large tree. |
+
+<div class="callout">
+<span class="label">The walk is bounded, and it says when it stopped</span>
+<p>A listing that quietly gave up reads as "the workspace is not here". So when the walk hits
+<code>--depth</code> with directories still below it, it says so — a warning on stderr and
+<code>truncated: true</code> in the <code>--json</code> document. Raise <code>--depth</code> and ask
+again. A directory symbolic link is never followed, so nothing outside the root you named can appear
+in the answer.</p>
+</div>
+
+---
+
 ## `reference` — what may I write? {#reference}
 
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference
@@ -1462,7 +1591,7 @@ parameter with its default, unit, dimension and visibility:
 
 ## `elab` — the elaborated netlist {#elab}
 
-<pre><code class="cmd"><span class="prompt">$ </span>circuitrf elab &lt;file.cnl&gt;</code></pre>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf elab &lt;file.cnl|.csch&gt;</code></pre>
 
 Elaborates and stops: flattens the hierarchy, resolves every parameter and expression top-down, and
 numbers the nodes, then prints [the elaborated netlist](netlist.html) — the exact thing the engines
@@ -1575,7 +1704,7 @@ tree the server will read or write, and a path escaping it is refused rather tha
 the process's own stdin and stdout.</p>
 </div>
 
-**Ten tools, and each is a verb you already have:**
+**Thirteen tools, and each is a verb you already have:**
 
 | Tool | Runs |
 |---|---|
@@ -1586,6 +1715,9 @@ the process's own stdin and stdout.</p>
 | `import` | `import part` or `convert` |
 | `render` | `render` — one tool over every document kind, as the verb is |
 | `read` | `read` |
+| `netlist` | `netlist` — the extraction a schematic runs as |
+| `plot` | `plot` — one picture from one result file. It takes `attachImage` too |
+| `find` | `find` — the workspaces, cells, views and analyses under a directory |
 | `history` | [`history checkpoint`, `list` or `restore`](history.html) — the correction nouns (`rename`, `retitle`, `correct`, `review`) are on the verb but not on this server |
 | `reference` | `reference` |
 | `batch` | The **only** tool with no verb behind it: it holds a restore-point batch open across several calls, which a process that exits after one command cannot |
@@ -1594,7 +1726,7 @@ the process's own stdin and stdout.</p>
 the verb rather than re-implementing it. Nothing is reachable through the server that is not
 reachable from your own shell, and nothing is reachable from your shell that the server cannot do.
 
-**`render` can hand the picture back, not just its path.** Pass `attachImage: true` and the result
+**`render` and `plot` can hand the picture back, not just its path.** Pass `attachImage: true` and the result
 carries the rendered file itself — a `.png` or `.svg` as image content, a `.pdf` as an embedded
 resource with its own type. It is **off by default**, because an image is expensive in a way a JSON
 document is not, and a client that only wanted the path should not pay for one.
@@ -1623,7 +1755,13 @@ be the adapter making a rendering decision, which is the one thing it does not d
 that escapes — through <code>../</code>, through an absolute path, or through a symbolic link — is
 <b>refused, naming the root</b>. It is never quietly clamped to something inside.</li>
 <li><b>Nothing deletes, and nothing overwrites an existing workspace.</b> There is no person at the
-other end to confirm with, so the answer is no. A client that wants a file gone deletes it itself.</li>
+other end to confirm with, so the answer is no. A client that wants a file gone deletes it itself.
+<code>create</code> does make a missing <i>parent</i> directory, because that overwrites nothing and
+a client with no file tools of its own had nowhere to go from the refusal.</li>
+<li><b>No tool writes a file of the client's own text.</b> circuitRF is driven by writing its
+documents, and the client supplies that half itself — what these tools write is what they
+<i>produce</i>: a created document, a result, a netlist, a picture. A general write tool would put an
+unbounded filesystem write behind the root, and it is deliberately not offered.</li>
 <li><b>No shell, and no program a client names.</b> Device workers and PCell generators still run as
 they always did; nothing new becomes launchable because something asked.</li>
 </ul>

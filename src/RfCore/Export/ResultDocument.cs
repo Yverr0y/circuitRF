@@ -140,6 +140,8 @@ namespace RfCore.Export
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         RenderReportJson? Render = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        FindReportJson? Find = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         ResultShapeJson? Shape = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         IReadOnlyList<NarrowingJson>? Narrowed = null);
@@ -217,6 +219,53 @@ namespace RfCore.Export
         int                                Warnings,
         int                                Notes,
         IReadOnlyList<CheckedDocumentJson> Documents);
+
+    // ── find, on the wire (brief-automation-11-missing-verbs.md R-aut11-3) ───
+
+    /// <param name="Type">schematic, symbol or layout.</param>
+    /// <param name="File">
+    /// The file the view resolves to, or null when the sub-folder does not resolve to one — which is
+    /// a state a caller has to be able to see, not an omission.
+    /// </param>
+    /// <param name="State"><c>CellFolder.ResolvePrimary</c>'s own five-branch answer, verbatim.</param>
+    public sealed record FoundViewJson(
+        string  Type,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? File,
+        string  State);
+
+    /// <param name="Analyses">
+    /// The analyses the cell's primary schematic declares, by name. Empty when it declares none;
+    /// absent when the extraction could not be performed at all, which is a different answer and is
+    /// reported as a note.
+    /// </param>
+    public sealed record FoundCellJson(
+        string                        Name,
+        string                        Path,
+        IReadOnlyList<FoundViewJson>  Views,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<string>?        Analyses);
+
+    /// <param name="Path">The workspace DIRECTORY — what every other verb takes.</param>
+    /// <param name="Technology">The `.cws`'s own default technology reference, or null for none.</param>
+    public sealed record FoundWorkspaceJson(
+        string                        Path,
+        string                        Name,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string?                       Technology,
+        IReadOnlyList<FoundCellJson>  Cells);
+
+    /// <param name="Depth">How deep the walk was allowed to go below the root.</param>
+    /// <param name="Truncated">
+    /// True when the walk stopped at its own bound rather than at the end of the tree. A listing that
+    /// silently stopped short is the one failure this verb must not have: a caller would conclude the
+    /// workspace it is looking for does not exist.
+    /// </param>
+    public sealed record FindReportJson(
+        string                              Root,
+        int                                 Depth,
+        bool                                Truncated,
+        IReadOnlyList<FoundWorkspaceJson>   Workspaces);
 
     /// <summary>
     /// One step of a resolution walk: what was being resolved, what it started from, what it landed

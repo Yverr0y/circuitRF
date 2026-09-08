@@ -185,9 +185,14 @@ internal sealed class McpServer
                 "circuitRF is driven by writing its documents and then running, checking or " +
                 "explaining them; the file formats are the interface and there are no per-primitive " +
                 "edit tools. What may be written is in the reference resources, and in the " +
-                "'reference' tool for the same bytes. Every path resolves under this server's root, " +
-                "and a path outside it is refused. Nothing here deletes or overwrites an existing " +
-                "workspace.\n" +
+                "'reference' tool for the same bytes. NO TOOL HERE WRITES A FILE OF YOUR TEXT — you " +
+                "supply your own file writing; what these tools write is what they produce " +
+                "(a created document, a result, a netlist, a picture). Every path resolves under " +
+                "this server's root, and a path outside it is refused. Nothing here deletes or " +
+                "overwrites an existing workspace; 'create' does make missing parent directories.\n" +
+                "\n" +
+                "'find' says what is already here. 'netlist' extracts the .cnl a schematic runs as, " +
+                "which is also the reference to check your own authoring against.\n" +
                 "\n" +
                 "End to end. Nothing here writes a document — use your own file tools for step 3.\n" +
                 "  1. create   what=workspace path=<root> name=demo      -> <root>/demo/.cws\n" +
@@ -205,7 +210,8 @@ internal sealed class McpServer
                 "On an instance line the NETS come first and every 'Key=value' after them; how many " +
                 "nets each type takes is the 'nets' field of reference components, which is not the " +
                 "same number as its symbol's pin count. render draws a .csch, .csym, .clay or .cdd " +
-                "— never a .cnl. An unknown analysis key or type= token is refused, not ignored.",
+                "— never a .cnl; 'plot' draws a result file. An unknown analysis key or type= token " +
+                "is refused, not ignored.",
         };
     }
 

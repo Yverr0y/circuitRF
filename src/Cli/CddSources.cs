@@ -213,11 +213,26 @@ internal sealed class CddSources : IPlotDataSources
     /// <summary>Loads one file. Returns null on success, or why it could not be read.</summary>
     private static string? Read(Loaded l)
     {
+        var (data, snp, why) = LoadResult(l.Path);
+        l.Data = data;
+        l.Snp  = snp;
+        return why;
+    }
+
+    /// <summary>
+    /// One result file as the Data Display sees it — the <c>DataSet</c>, and the narrow network view
+    /// that stands in for an SNP. Public so <c>plot</c> can read a result BEFORE it authors a
+    /// document about it (R-aut11-2): a cube spec has to be checked against the cubes that are
+    /// actually there, and a spec checked against a second loader would be checked against a
+    /// different file.
+    /// </summary>
+    public static (DataSet? Data, SNP? Snp, string? Error) LoadResult(string path)
+    {
         try
         {
-            if (string.Equals(Path.GetExtension(l.Path), ".npy", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(Path.GetExtension(path), ".npy", StringComparison.OrdinalIgnoreCase))
             {
-                (l.Data, _) = DataSetImporter.Import(l.Path);
+                var (data, _) = DataSetImporter.Import(path);
 
                 // The two things a loaded source GAINS before a trace can be resolved against it,
                 // and both were found missing by §5.2's per-kind gate. Without the first, a trace on
@@ -227,23 +242,21 @@ internal sealed class CddSources : IPlotDataSources
                 // design and this narrow view is what stands in for one.
                 //
                 // Both are the same functions the application's own source library calls.
-                DataSourceView.MaterializeNetworkParamCubes(l.Data);
-                l.Snp = DataSourceView.NetworkViewOf(l.Data);
-                return null;
+                DataSourceView.MaterializeNetworkParamCubes(data);
+                return (data, DataSourceView.NetworkViewOf(data), null);
             }
 
-            if (TouchstoneIO.ParsePortsFromExtension(l.Path) is not null)
+            if (TouchstoneIO.ParsePortsFromExtension(path) is not null)
             {
-                l.Snp  = TouchstoneIO.ReadFile(l.Path);
-                l.Data = DataSetBuilder.FromSnp(l.Snp);
-                return null;
+                var snp = TouchstoneIO.ReadFile(path);
+                return (DataSetBuilder.FromSnp(snp), snp, null);
             }
 
             // .spl / .lpcwave and anything else the importer recognizes.
-            (l.Data, _) = DataSetImporter.Import(l.Path);
-            return null;
+            var (other, _) = DataSetImporter.Import(path);
+            return (other, null, null);
         }
-        catch (Exception ex) { return ex.Message; }
+        catch (Exception ex) { return (null, null, ex.Message); }
     }
 
     // ── IPlotDataSources ─────────────────────────────────────────────────────

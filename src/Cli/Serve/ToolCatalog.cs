@@ -97,7 +97,7 @@ internal sealed record ToolSpec(
 /// <summary>
 /// The tool surface, and the ONLY thing that translates a tool call into a command line.
 ///
-/// <para><b>Small and broad (R-aut5-4, R-aut-9).</b> NINE tools, not one per verb — the eight here
+/// <para><b>Small and broad (R-aut5-4, R-aut-9).</b> TWELVE tools, not one per verb — the eleven here
 /// plus <c>HistoryBatch</c>'s, which is advertised beside them because it is the one tool that is not
 /// a command line. A client that discovers tools up front carries every description for the whole
 /// session whether or not it calls one, so the surface is a standing cost paid on every interaction.
@@ -246,7 +246,7 @@ internal static class ToolCatalog
         => arguments?[AttachImageArgument] is { } node
         && node.GetValue<JsonElement>().ValueKind == JsonValueKind.True;
 
-    // ── the eight tools ──────────────────────────────────────────────────────
+    // ── the eleven tools ─────────────────────────────────────────────────────
 
     public static readonly ToolSpec[] Tools =
     [
@@ -505,6 +505,104 @@ internal static class ToolCatalog
                   + "exceeds " + (AttachmentCapBytes / (1024 * 1024)) + " MB the result carries the PATH and "
                   + "no image, plus a warning naming the size and what to narrow (--detail screen, a window, "
                   + "fewer layers, or png instead of svg) — the call still succeeds and is not retried for you."),
+            ]),
+
+        // R-aut11-1, and the tool that unblocks the netlist half of this surface entirely: without it
+        // nothing here could simulate a design anyone had actually DRAWN. It is also the reference
+        // answer a client checks its own authoring against — AUT-7 §3's false defect report came
+        // from an instance line one look at a known-good extraction would have settled.
+        new("netlist",
+            "Extract the .cnl netlist a schematic simulates as — the same extraction Simulate "
+          + "performs, byte for byte. Without output the netlist comes back as text. Every run "
+          + "analysis also takes a .csch directly and extracts in memory; this is for reading what "
+          + "it will run, and for checking your own authoring against a known-good one.",
+            null, null,
+            [
+                new("", [ "netlist" ],
+                    [new("path", true, "A .csch, a cell folder, or a workspace with cell.")],
+                    [
+                        new("output", "-o", OptKind.Path,
+                            "Where the .cnl is written. Without it the text comes back in the result."),
+                        new("cell", "--cell", OptKind.Str, "Which cell, when the path is a workspace."),
+                    ],
+                    ""),
+            ]),
+
+        // R-aut11-2. Not a second plotting path: it builds the same document `render` consumes and
+        // hands it to the same composer, and `writeCdd` gives that document back so a caller can
+        // edit it and carry on with `render`.
+        new("plot",
+            "Draw one picture from one result file, with no data display to author first: .svg, "
+          + ".pdf or .png. Give a trace per curve. Ask read first for the cube names and their axes.",
+            null, null,
+            [
+                new("", [ "plot" ],
+                    [new("path", true, "The result to plot: a .npy or a Touchstone .sNp.")],
+                    [
+                        new("output", "-o", OptKind.Path,
+                            "Required. Where the picture is written; its extension picks the format: .svg, .pdf or .png."),
+                        new("format", "--format", OptKind.Str,
+                            "Override the format the extension implies: svg, pdf or png."),
+                        new("trace", "--trace", OptKind.StrRepeat,
+                            "One curve, as comma-separated key=value: cube=S,i=2,j=1,y=db. cube is the trace "
+                          + "card's own shorthand, so a bracketed slice (cube=S[:,1,0]) and a transform "
+                          + "(cube=mag(Pout)) work too; i and j pin the cube's i/j axes by PORT NUMBER and are "
+                          + "refused alongside a bracketed slice. y is db, db10, db20, mag, phase, real or imag. "
+                          + "axis is left (default) or right. At least one is required — a plot with no trace is "
+                          + "refused, not drawn empty."),
+                        new("type", "--type", OptKind.Str,
+                            "rect (default), smith, polar or table."),
+                        new("freqUnit", "--freq-unit", OptKind.Str,
+                            "Hz, kHz, MHz or GHz. Default GHz. It is also the unit x is read in."),
+                        new("title",   "--title",   OptKind.Str, "Plot title."),
+                        new("xlabel",  "--xlabel",  OptKind.Str, "X axis label."),
+                        new("ylabel",  "--ylabel",  OptKind.Str, "Left Y axis label."),
+                        new("y2label", "--y2label", OptKind.Str, "Right Y axis label."),
+                        new("x",  "--x",  OptKind.Str,
+                            "X window as lo:hi, in the plot's own units. Omit for autoscale. Refused on smith/polar."),
+                        new("y",  "--y",  OptKind.Str, "Left Y window as lo:hi. Omit for autoscale."),
+                        new("y2", "--y2", OptKind.Str, "Right Y window as lo:hi. Omit for autoscale."),
+                        new("size", "--size", OptKind.Str,
+                            "Page size as WxH. Device pixels for png, points for svg and pdf. Default 792x612."),
+                        new("scale", "--scale", OptKind.Number,
+                            "png only: raster multiplier. Refused on a vector format, and refused together with dpi."),
+                        new("dpi", "--dpi", OptKind.Number,
+                            "png only: the same multiplier spelled relative to 96 dpi."),
+                        new("variant", "--variant", OptKind.Str, "light or dark. Default light."),
+                        new("background", "--background", OptKind.Str, "opaque or transparent."),
+                        new("writeCdd", "--write-cdd", OptKind.Path,
+                            "Also write the data display this drew, so you can edit it and go on with render."),
+                    ],
+                    ""),
+            ],
+            Adapter:
+            [
+                new(AttachImageArgument, "", OptKind.Flag,
+                    "Return the rendered file itself in the result, as well as writing it. Off by default. "
+                  + "The file is written either way, and its path is always in outputs. If the written file "
+                  + "exceeds " + (AttachmentCapBytes / (1024 * 1024)) + " MB the result carries the PATH and "
+                  + "no image, plus a warning naming the size and what to narrow — the call still succeeds "
+                  + "and is not retried for you."),
+            ]),
+
+        // R-aut11-3: what EXISTS. Every document below is one this server already knew how to read;
+        // what was missing was any way to ask what is there, which sent a client outside the surface
+        // to search the filesystem.
+        new("find",
+            "List what is under a directory: the workspaces, their cells, each cell's views and the "
+          + "analyses it declares. The walk is bounded — the result says how deep it went and whether "
+          + "it stopped short. Reads no result and writes nothing.",
+            null, null,
+            [
+                new("", [ "find" ],
+                    [new("path", true, "The directory to look under. A workspace itself is fine.")],
+                    [
+                        new("depth", "--depth", OptKind.Integer,
+                            "How many levels below the root a workspace is looked for. Default 4, at most 12."),
+                        new("noAnalyses", "--no-analyses", OptKind.Flag,
+                            "Skip the analyses, which cost one extraction per cell."),
+                    ],
+                    ""),
             ]),
 
         new("read",

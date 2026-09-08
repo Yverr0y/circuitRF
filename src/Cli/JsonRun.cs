@@ -105,6 +105,11 @@ internal static class JsonRun
     /// (brief-automation-6-reference-and-components.md §5).</summary>
     public static ReferenceReportJson? Reference;
 
+    /// <summary>What <c>find</c> found — the workspaces under a root, their cells, each cell's views
+    /// and the analyses it declares (R-aut11-3). About no document and no analysis, which is why it is
+    /// its own payload.</summary>
+    public static FindReportJson? Find;
+
     /// <summary>What <c>history</c> answered — the restore-point list, or what one boundary or one
     /// restore did (R-rc5-23). About no analysis at all, which is why it is its own payload.</summary>
     public static HistoryReportJson? History;
@@ -150,6 +155,7 @@ internal static class JsonRun
         Document            = null;
         Reference           = null;
         History             = null;
+        Find                = null;
         Render              = null;
         _summaryOnly        = false;
         _diagnosticsSummary = false;
@@ -357,8 +363,9 @@ internal static class JsonRun
         // is about no document at all — so they are answered before the cube machinery, not folded
         // into it.
         if (Check is not null || Explain is not null || Document is not null || Reference is not null
-         || History is not null || Render is not null)
-            return new ResultPayload(null, null, Check, Explain, Document, Reference, History, Render);
+         || History is not null || Render is not null || Find is not null)
+            return new ResultPayload(null, null, Check, Explain, Document, Reference, History, Render,
+                                     Find: Find);
 
         if (Data is not { } ds) return null;
 
