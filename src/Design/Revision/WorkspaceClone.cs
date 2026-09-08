@@ -138,6 +138,17 @@ public static class WorkspaceClone
         try { isWorkspace = File.Exists(cws); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { isWorkspace = false; }
 
+        // RC-11 R-rc11-13. §5.11's corrections are attached to the versions this clone just took, and
+        // `refs/notes/` is not in git's default clone refspec — so a copy would otherwise arrive
+        // showing the wording its author had already corrected, which is the one outcome that feature
+        // exists to prevent. Best effort in its own invocation, for the reason
+        // `WorkspaceRemotes.BringInCorrections` states in full: a non-wildcard refspec naming a
+        // reference the source does not have is a fatal error, and a source with no corrections in it
+        // is the ordinary case.
+        new GitCommand(installation, dest)
+            .Run(["fetch", "--", "origin", VersionCorrections.NotesRefspec],
+                 new GitRunOptions(Network: true, SafeDirectories: safe), ct);
+
         if (!isWorkspace)
         {
             // Not a failure. Git did what was asked; the folder simply is not a circuitRF workspace,

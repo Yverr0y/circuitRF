@@ -1655,6 +1655,20 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         // that is the one moment R-rc3-14's "where it cannot be noticed" is deliberately suspended.
         if (await new ArchiveWorkspaceDialog(plan, Messages).ShowDialog<bool>(window) is not true) return;
 
+        // RC-11 R-rc11-16, R-rc11-18. §5.11's review, and ONLY when the history is actually going: an
+        // archive without it carries no titles off this machine, so a dialog listing them would be
+        // asking about something that is not happening.
+        //
+        // It carries §9A.3's own warning as well, and the two do not replace one another: that one is
+        // about FILES the history still holds after they were deleted from the workspace, this one is
+        // about TITLES. Both are true and they are about different things, which is why the archive is
+        // the one journey that shows both.
+        if (plan.IncludeHistory
+            && !await ReviewWhatIsLeaving(
+                    Design.Revision.LeavingJourney.Archive,
+                    plan.History is { } summary ? string.Join(Environment.NewLine, summary.Describe()) : null))
+            return;
+
         var suggested = Path.GetFileName(workspaceDir.TrimEnd(Path.DirectorySeparatorChar));
         var target = await window.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
@@ -1790,6 +1804,10 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             {
                 Messages.Warning($"Window layout was not saved: {ex.Message}");
             }
+
+            // RC-10 R-rc10-8. The History panel's filter, beside the tree's — both are per-user view
+            // state, and both go to the `.cwsuser` through this one write.
+            ws.HistoryFilter = HistoryFilterToPersist();
 
             if (_factory.ProjectTreeTool?.FilterState is { } fs)
             {

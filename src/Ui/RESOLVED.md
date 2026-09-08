@@ -1,5 +1,149 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## RC-10 — one history panel (2026-09-07)
+
+`docs/sonnet-briefs/brief-revision-control-10-one-history-panel.md`,
+`docs/design/revision-control.md` §5.10. Two panels became one, with a filter whose default hides the
+automatic entries. Everything below is a finding, not a summary of the brief.
+
+### What a `.cwsuser` naming BOTH retired panels actually restored to before R-rc10-3
+
+**A duplicate — one tool instance placed into two different tool docks — and the docking library does
+not refuse it.** Measured rather than assumed, by pointing both retired ids at one instance and
+building the layout before the merge logic existed: `CircuitRfDockFactory.BuildLayout` maps an id to a
+tool INSTANCE through `ToolFor`, so a file with `RestorePoints` on the right and `VersionHistory` at
+the bottom produced two `ToolDock`s whose `VisibleDockables` both contained the same object. Not an
+empty pane and not a silent drop.
+
+**That is the shape of every future panel retirement and it is why `DockLayoutRetirement` is a type.**
+A rename alone — mapping both ids to one const — would have produced exactly that duplicate on the
+population most affected by the merge, which is everyone who had both panels open. Three rules the
+build needed and a rename would not have supplied:
+
+- **The first mention wins.** A designer with both open is most likely looking at whichever is in
+  front; a fixed preference for one of the two ids would move the panel for half of them for no reason
+  anybody could see.
+- **A CLOSED entry does not consume the id.** The schema records a closed panel explicitly, so a file
+  with one of the two closed and the other open would otherwise have opened on whichever came first in
+  the file. Both cases are ordinary — the closed row is what View ▸ Panels writes when you close one.
+- **It runs BEFORE `DockLayoutDefaults.WithMissingPanelsFilled`.** Filling first adds the merged panel
+  at its default spot, and the merge then finds it already placed — so a designer who had the old panel
+  docked somewhere gets a second copy of it somewhere else. The ordering is one line and is invisible
+  when wrong.
+
+### The default filter DOES leave a workspace with an empty list, and the fix is wording
+
+**A workspace whose only history is workspace-close entries opens on an empty list under the default
+view** — and that is precisely the workspace §1 is written for, because its owner never thought about
+history at all. It is a real case, not a corner one: a designer who has never pressed Keep This State
+and never kept a version has nothing else.
+
+The empty line therefore counts them and names the control that reveals them
+(`HistoryMessages.OnlyAutomaticEntries`), rather than saying "nothing has been kept" — which would be
+false about a workspace holding a fortnight of recoverable states. There are four empty sentences, not
+one: no workspace, only-automatic, everything-filtered-out, and genuinely-nothing-yet. Collapsing them
+would have put the false one in front of the population that most needs the true one.
+
+### Three origins have no checkbox, and are always shown
+
+R-rc10-7 names five filter rows and the enum has six origins plus versions. `BeforeRestore`,
+`RecordingOff` and `RecordingOn` answer to no row and are never hidden. **None of them is noise** — a
+restore is rare and its entry is the whole content of §5.8's promise, and an off period has exactly two
+ends, which are what stop it rendering as the quiet fortnight §5.7 forbids. A checkbox nobody would
+think to tick is how R-rc10-20's promise leaves the place the promise was made, which is the defect that
+requirement exists to close.
+
+### "Tidied away also match" counts what is HIDDEN, not every thinned match
+
+R-rc10-10 reads naturally as "say how many thinned entries match". Built that way it fires on the
+DEFAULT view, where the tidied-away row is ON and the thinned entries are in the list, marked — so the
+line would have said *three tidied-away entries also match* about three rows the reader could see. The
+count is therefore the thinned matches the filter is **excluding**, which is exactly "the difference
+between an incomplete answer and a wrong one": with the row on, the answer is complete and there is no
+line. Gate 6 asserts both halves.
+
+### "Stop keeping" was NOT built, and the reason is the brief's own gate
+
+R-rc10-17 lists *keep permanently / stop keeping* on the row menu. **Un-keeping writes a second commit
+object** — `RestorePoints.MarkKept`'s mechanism in reverse, since a commit message cannot be edited in
+place — and gate 13 forbids this brief from adding "any call that writes a reference or a commit, the
+single exception being R-rc10-20's kept mark, named". §5.10's own list says only *keeping permanently*.
+The narrower, more specific rule wins: **keep permanently** is on the menu and un-keeping is not.
+Whoever wants it should add it with its own named exemption, the way R-rc7-4's identity has one.
+
+### Comparing an entry with the workspace writes nothing, and the shape was decided by that
+
+R-rc10-17's *compare with the current state* has no obvious implementation that does not grow the
+repository. `GitCheckpoint`'s route to a tree of the current state is `add --all` then `write-tree`,
+which writes a blob per changed file — permanently, since §4.5's `gc.pruneExpire = never` forbids any
+pack from removing an unreachable object. **A comparison a designer opens out of curiosity would then
+grow the repository**, which is the one thing R-rc10-4 says this brief may not do.
+
+`HistoryBrowser.CompareWithWorkspace` reads the entry's tree into a PRIVATE index and asks `status` for
+the difference against the working files. Nothing reaches the object store, no shared index is touched,
+and `.gitignore` is honoured for free — so results and generated artwork are absent from the answer
+exactly as they are absent from the entry. `diff-index` alone was tried first and is wrong: it reports
+only paths already in the tree, so a cell added since the entry does not appear at all.
+
+### Virtualisation was not needed, and here is the number
+
+`ListBox` is virtualising by default in Avalonia and the merged list is the sum of two that were
+already being drawn. At the sizes retention actually produces — `RetentionPolicy`'s shipped floor is 20
+unkept entries plus the kept ones plus the versions, so a workspace open daily for a year settles
+around 40-80 rows — the merged panel builds in the same frame the two separate ones did. **The largest
+list this build was driven with was 60 rows (12 close entries plus a restore, its pre-restore entry and
+a version, over a retention sweep) and the panel refresh is dominated by the two git processes
+underneath it, not by the rows.** The row work is one `HistoryRowItem` per entry, all of it string
+formatting. No measurement here justifies a virtualisation change; the number to watch is the git
+read, which is unchanged from RC-5's.
+
+### No RC-7 or RC-9 assertion was relaxed — all of them were re-pointed
+
+Seven assertions across five files moved from the retired panels to the merged one and **not one of
+them was weakened**, which matters because a relaxed assertion in this brief would be a storage change
+wearing a display change's clothes:
+
+- `CommitAndHistoryTests`' held-panel and gap-row assertions, and its vocabulary scan's source list.
+- `IncomingVersionsTests`' incoming-count assertion — re-pointed at `service.Entries` under the default
+  filter, which shows versions, so the same two rows are compared in the same order under the same
+  marks.
+- `PanelStateAfterCloseTests`' three panel-state assertions. One got STRONGER: the "both panels are
+  refreshed together" scan became "there is exactly one panel to reach", asserted by the ABSENCE of the
+  two old method names — which makes the class of defect unreachable rather than merely fixed.
+- `RetentionHoldAndOffTests`' held-panel scan, extended to cover the row menu's items as well as the
+  two header buttons, since three of the four actions it used to check moved to the menu.
+- `RestorePointsTests`' dock-schema assertion.
+
+### One storage-visible change, named
+
+`WorkspaceCheckpoints.IsAlwaysKept` gained `CheckpointOrigin.BeforeRestore` (§5.6 rule 6's fourth kind,
+§12 Q34). It is a keep and never a delete. **The gate for it needs a dirty tree**: `WorkspaceRestore`
+takes the pre-restore checkpoint through the ordinary boundary, and a boundary whose tree already
+matches the newest entry records nothing — so a fixture that restores immediately after a checkpoint
+gets `PreRestore == null` and the kept mark has nothing to be on. Write a file first.
+
+### The `.cwsuser` gained a field, and the split is what made that cheap
+
+`CwsHistoryFilter` follows the five that moved in RC-1 exactly: a property on `CwsFile`, a name in
+`WorkspaceUserPersistence.MovedFieldNames`, and a line each in `Extract` and `Merge`. The strip is at
+the JSON level rather than a typed copy, so the `.cws` keeps being written correctly with no thought
+required — which is the direction that mistake should fall.
+
+**It is not a Settings row, and that is a category distinction rather than a filing preference.** Every
+row on §10A's tab changes what is KEPT; a filter a designer flips while hunting for something is not a
+preference about what exists. Gate 5 asserts the absence in both `AppPreferences` and the tab's own
+code-behind.
+
+### DocGen gained a page kind, because a retired slug must not 404
+
+`SiteNav.Validate` refuses a generated page that is in no section of `_nav.txt` — correctly: a page
+nothing links to is invisible. A merged chapter leaves two addresses in people's bookmarks that must
+still resolve, so `kind: retired` is a page that is written, excluded from the reading order, and
+excluded from the search index (a signpost saying "this moved" would otherwise outrank the chapter it
+points at, for the words they both contain). It stays a valid link TARGET, since `AnchorIndex` reads
+every non-slides page. This is the shape of every future chapter merge.
+
+
 ## Three owner-reported bugs, and the one shape they share (2026-09-07)
 
 Unrelated on the surface — a stale Property Inspector, a selection that outstayed its welcome, a save
@@ -22565,3 +22709,240 @@ happens to a torn-off DOCUMENT when its window closes is a separate and already-
 (R-fgn-1/-2, answered for a workspace *switch* by `CloseFloatedDocumentsOwnedByWorkspace`), and answering
 it as a side effect of this fix would change an owner decision nobody asked about. A float holding both is
 left alone, because it holds a document.
+
+## RC-11 — the filter was re-reading the repository on every tick (2026-09-07)
+
+**Owner-reported, and it was not a threading problem.** The History panel's filter did not feel snappy.
+Every checkbox in §5.10's flyout raised `FilterChanged`, which called `RefreshHistoryPanel`, which
+re-read the whole workspace: the versions, the restore points, the thinning journal, the sharing set,
+RC-11's corrections and the incoming versions, **plus `HiddenAutomaticCount`'s second full pass over
+the same restore-point list** for the empty line's arithmetic. Roughly a dozen git subprocesses, on the
+UI thread, to decide which of the rows already in hand to draw.
+
+**Moving it off the UI thread would have been the wrong fix** and is worth recording as such, because
+it is the obvious one. It would still have been a dozen subprocesses and a visible delay before the
+list settled — a checkbox whose effect arrives 300 ms later is no more trusted than one that blocks —
+in exchange for threading a panel that refreshes at every boundary, against a repository another
+process may be holding.
+
+**A filter is not a question about the repository.** `HistoryList.Build` is pure, so the read was split
+out as `HistoryList.ReadSources` → `HistorySources.Under(filter)`: the panel is handed the read at a
+boundary and a workspace switch, and re-filters what it holds when a checkbox moves. `HistoryTool` keeps
+the last `HistorySources` and redraws from it **before** raising `FilterChanged`, so the rows and the
+checkbox change in the same frame and all the host has left to do is write the choice into the
+`.cwsuser`.
+
+`HistorySources.AutomaticCount` is counted from the list that read already produced, which removes the
+second pass outright. `WorkspaceHistoryService.HiddenAutomaticCount` stays as a spelling for a caller
+that wants the count alone, and now goes through the same one read.
+
+**Gated as a counter, not a duration** (R-rc0-8): `TogglingTheFilterReadsNothingFromTheRepository`
+moves `.git` out of the way and then toggles, so anything that tried to read would fail loudly rather
+than quietly succeeding from a cache.
+
+## RC-11 — three corrections on the menu RC-10 built (2026-09-07)
+
+`docs/design/revision-control.md` §5.11. Mechanism findings are in `src/Design/RESOLVED.md`; these are
+the window's.
+
+**One menu item over §5.11's cases (b) and (c), not two.** Which of them applies is a computation —
+has this version left the machine — and a designer looking at a bad line does not know the answer and
+should not have to. Two menu entries would make them perform it before choosing one. `CorrectionCase`
+is decided by the host from `VersionSharing`, and one dialog stands in for all three cases with the
+wording and one notice changing.
+
+**R-rc11-14's sentence is on the FACE of the dialog and the gate asserts that it is not in an
+expander.** §8.3's paragraph belongs in an expander — it answers a question most designers never ask.
+This one is the opposite: it answers the question the person who opened this dialog already has, and a
+UI that folded it away would cause the exact harm they came to it to avoid.
+
+**Letting a restore point go has no confirmation dialog, deliberately.** A prompt would ask a designer
+to steel themselves for something that is not destructive: the entry stays in the list under *tidied
+away*, the state is still there, and the message says so. A confirmation would teach the wrong thing
+about what the action does — which is the drift this whole brief's wording has to avoid.
+
+**The review before a send, a copy or an archive is not a confirmation prompt** (R-rc11-19). Its
+buttons are *Stop* and the operation's own name, and the line under the list points at the correction,
+because the useful response to reading a bad title is fixing it rather than abandoning the send. On the
+archive it shows §9A.3's file warning as well: that one is about files the history still holds after
+they were deleted, this one is about titles, and both are true.
+
+## The History panel, round 2 — eight reports, one of them four bugs (2026-09-07)
+
+Owner ran RC-11 as shipped and reported eight things. Three of them were **one defect**.
+
+**The panel's callbacks were wired once per SESSION, against a tool replaced per WORKSPACE SWITCH.**
+Reported separately as *come forward again does nothing*, *compare with the workspace as it is now does
+nothing*, and *copy the identifier left the clipboard holding unrelated text* — and *let this entry go
+does nothing* is the fourth. `RefreshHistoryPanel` guarded its wiring block with a `bool
+_historyPanelWired`, but `CircuitRfDockFactory.CreateDefaultLayout` builds a **fresh `HistoryTool`** on
+every workspace switch, and **going back performs exactly such a switch on its way home**. The flag
+stayed true across the replacement, so every callback on the new panel was left null while its rows,
+its filter and its way-forward line were filled in as usual — each button drew, was enabled, and did
+nothing. The clipboard report is the clearest signature: nothing was ever written, so it still held
+what it held before.
+
+The guard is now the tool INSTANCE (`ReferenceEquals(_wiredHistoryTool, tool)`). That is not a
+tidier spelling of the same thing — it is correct for the paths that do not exist yet, since any
+future caller replacing the tools is covered without having to remember a flag. The neighbouring
+`ProjectTreeTool` wiring is re-run explicitly at each switch site, which is why only this panel had
+it; a site that must remember is a site that will eventually forget.
+
+**Escape did not close the search field**, because there was no handler at all.
+`ProjectTreeView` had already solved this, including the trap: `handledEventsToo: true` is LOAD-BEARING,
+since `WorkspaceWindow.axaml` binds Escape to `DisarmPlacementCommand` and `Window.KeyBindings` are
+processed before visual-tree routing and always mark the event Handled. This panel is the fifth view to
+carry that argument. The CLEAR moved from `ToggleSearch` to `OnIsSearchOpenChanged` for the same reason
+`ProjectTreeTool` puts it there — the magnifier is no longer the only way the field is put away, and a
+filter still applied with nothing on screen to say so is the worst state this panel can be in.
+`ApplyStoredFilter` assigns `Filter` BEFORE `IsSearchOpen`, so restoring a filter with no search does
+not fire a spurious `FilterChanged`; that ordering is now load-bearing.
+
+**A comparison that found nothing was indistinguishable from a command that did nothing** — the same
+symptom as the dead panel above, on a panel that was working. `NothingDiffers` is gated on
+`IsShowingComparison` so it speaks only for an EXPLICIT comparison: a restore point selected in the
+ordinary way has no per-version change list, and calling that "no differences" would answer a question
+nobody asked.
+
+**"before going back" and "Go back to 'before going back'" were two defects in one row.** The name
+described a MOMENT rather than a thing, so the list read as an instruction; and quotation marks say
+*these are your words*, which on a label circuitRF generated is untrue. Now: the subject is *your work
+before you went back*, `GoBackText` says *Go back to this state* when nobody wrote the title, and
+`HistoryEntry.OriginalTitle` RE-RENDERS a generated label from the current vocabulary rather than
+reading the stored one back. That last part is what carries a reword to workspaces that already exist.
+It is safe because `RestorePoints.Rename` writes the corrected words to **both** the subject and the
+intent — so `Intent` non-empty is exactly "a person wrote this", and a renamed entry is never
+re-rendered over. Anything that reworded an origin subject without that property would silently discard
+renames.
+
+**"Let this entry go" is NOT a delete and must not be dressed as one.** Owner asked for a bin glyph if
+it was one. It calls `History.Forget`: the same tidying the retention sweep performs, the entry stays
+listed under *tidied away*, *Bring this back* returns it, and nothing is freed until §5.6a's explicit
+reclaim. It is now **Tidy this away**, with the archive-arrow glyph that mirrors *Bring this back*'s.
+A bin here would teach the wrong thing about the action and is what R-rc11-5's "no confirmation
+dialog" reasoning is written against. There is no per-entry delete anywhere in the product by design;
+the only thing that frees space is Settings ▸ Revision Control ▸ Reclaim space, which works by AGE over
+what is already tidied away.
+
+**Menu wording and glyphs.** *Compare with the workspace as it is now* was a sentence, and a sentence
+in a menu is read as chrome and skipped — now *Compare to Current*, with the explanation in the tip,
+which is also the only place the one-directionality of the comparison can be said at all. *Correct what
+you wrote…* named the mechanism at the cost of not naming the thing being edited — now *Edit
+Comments…*. Every item carries a glyph and a tip. The `Material.Icons` kind names were verified against
+the 3.0.2 enum by a scratch probe rather than assumed: a wrong `Kind` is a silent blank, not an error.
+
+**Every card the same width, and a band on alternate rows.** Each row was sizing to its own title.
+Both halves are needed — the `ListBoxItem` has to be GIVEN the panel's width and the `Expander` inside
+it has to SPEND it rather than shrink to its header's content. The band is
+`ComponentImportChooserDialog`'s shape exactly: on the ContentPresenter, because that is where this
+theme's `ListBoxItem` paints its background, and excluding `:selected`/`:pointerover` so it sits under
+those rather than over them — a style declared on the ListBox outranks the control theme's.
+
+**Relative times inside the last day.** `HistoryDates.Time` — *just now*, *N minutes ago*, *N hours
+ago*, then the clock time. An entry stamped in the FUTURE falls back to the clock time: a wall clock is
+user-writable state, and a relative phrase there would be a statement rather than a rendering. The time
+cell lost its monospace face, which existed to line up `HH:mm` down a column that is now a mixture.
+
+**`CopyToClipboard` took `AllWindows().FirstOrDefault()`.** With two workspace windows open that is not
+reliably the one the designer right-clicked in. It resolves `WindowFor(this)` first now.
+
+### Round 2 continued — the leak, the focus, and two things that were the same string twice
+
+**A corrected title leaked into the next commit, through a copy nothing updated.** Reported: correct a
+version's title, edit on, press Keep This Version, and the dialog offers *"this version was brought
+back from '&lt;the wording you deleted&gt;'"* — and then writes it into a brand-new commit, where it is
+permanent. `restored-from.json` holds a **copy** of the label, frozen at restore time, and R-rc11-7's
+whole promise for case (b) is that the old wording is gone.
+
+The close is `RestoreProvenance.Retitle`, called from all three paths that change a title — the two
+`VersionCorrections` cases and `RestorePoints.Rename` — plus `RestorePoints.Keep`, which changes no
+label but **does rewrite the commit**, so the link would otherwise go stale and the leak would return on
+the next correction rather than the first. Two properties are load-bearing:
+
+- **Matched on IDENTITY, never on the text.** Matching the old label would rewrite an unrelated entry
+  that happened to share a title, and titles here collide constantly (*save-point*, *workspace closed*).
+- **A provenance file predating `RestoredState.CommitId` names nothing and is left alone.** The
+  alternative is guessing, on a string a designer has explicitly asked to be rid of.
+
+`WayForward` had the identical defect in memory, and in the more conspicuous place — the panel the
+correction is made in. Same fix, same identity rule; `RevisionOutcome` gained a `CommitId` so the new
+identity is a fact the operation reports rather than something the caller re-derives (the first attempt
+guessed it from `RestorePoints.Newest`, which is not necessarily the entry that was renamed).
+
+**Case (c) — a shared version — also updates the pending provenance, and that is not a violation of
+§8.3.** §8.3 keeps the original in the HISTORY because it is on somebody else's disk. A commit not yet
+written is not history, and the row already shows the correction in place of the original (R-rc11-13),
+so the alternative was a sentence contradicting the row directly above it. **What cannot be made to go
+away is the original in a version already sent** — that is the design, and it is the one part of "gone
+forever" circuitRF cannot honour.
+
+**A multi-line `Text="…"` attribute renders a run of literal spaces.** XML attribute-value
+normalisation turns the newline into a space and leaves the continuation line's INDENTATION in place,
+so a sentence wrapped in the source shows with a twenty-character gap in the middle of it — reported as
+"huge white space gap between the words 'you' and 'come'". **Five places in the repo had it and all five
+were in this feature.** Gated by a scan, because it is invisible in the source and obvious on screen.
+
+**One identity, one spelling.** The row showed the first twelve characters, the Messages line showed
+twelve, and the clipboard got all forty — so a designer who pasted could not tell whether the copy was
+the right thing. Everything shows and copies the whole id now. The twelve-character form existed to be
+retypable; the menu item exists precisely so nobody retypes it, and a shown value differing from the
+copied one costs more trust than a long string costs space.
+
+**Both keep dialogs return focus to the panel.** `HistoryTool` is an `IActivatableTool` now, on the
+relay the Project Tree and Library palette already share. Only the panel's own buttons route through
+`ThenFocusThePanel` — the File menu calls the same two dialogs directly and has no panel to go back to.
+The focus grab is POSTED: the ask arrives as the dialog is closing, and grabbing before the window has
+finished handing focus back means grabbing something it then takes away again.
+
+**Dialog text cut.** "It is what you come back to, and what you send out" and "six weeks from now the
+title is the only thing that tells one version from another" were the dialog explaining its own value to
+somebody who had already chosen to use it. The useful half of the hint became the FIELD LABEL — *What
+changed?* is the whole of "write what changed, not what you did", in two words, where the designer is
+already looking. The sister dialog carried the same sentence and lost it too.
+
+### Round 2, part three — the stall, the overlap, and the ping-pong (2026-09-07)
+
+**"Tidy this away blocks the UI thread momentarily" — 18 ms of work behind 180 ms of stall.** Measured
+with a scratch harness on a sixty-entry workspace (not the Benchmark tier): `RestorePoints.Forget` is
+**18.5 ms** — one `update-ref -d` and a journal append — and the `RefreshHistoryPanel` that followed it
+is **179.6 ms**, because `HistoryList.ReadSources` re-reads the restore points, the versions, the
+incoming set, the sharing set and the annotations. Per-part: `ListIncludingThinned` 42.7 ms,
+`Versions` 40.2 ms, `Incoming` 37.5 ms, `Shared` 17.9 ms, `Annotations` 21.7 ms. **It grows with the
+list**, so the panel gets slower exactly as a designer accumulates the history the panel is for.
+
+None of what that read fetches can have changed: tidying away and bringing back each flip **one boolean
+the panel is already holding**. `HistorySources.WithThinned` + `HistoryTool.MarkTidiedAway` redraw from
+what is in hand, which is the shape RC-11 already established for the filter checkboxes. **Only a
+FAILED write refreshes for real** — a panel that disagrees with the repository is the one that is
+wrong, and that is the case where re-reading is the point rather than the cost.
+
+**A long title drew over the "tidied away" mark, and the ellipsis that should have stopped it had
+nothing to bite on.** The title carried `TextTrimming="CharacterEllipsis"` all along, inside a
+**horizontal StackPanel** — which measures its children with INFINITE width along its own orientation.
+A star-column Grid is what gives the text a width to be trimmed against. Worth remembering generally:
+`TextTrimming` inside a horizontal `StackPanel` is inert, silently.
+
+**Going back and forth between two states grew an entry per toggle, without limit.** §5.3's tree test
+was present and compared against the **newest** entry only — which on a ping-pong is the wrong entry
+every single time, because the tree being replaced is always the one BEFORE the newest. So the test
+said "changed" on every toggle. It now compares against the whole live list; the tree is computed
+before the comparison either way, so asking about a SET costs nothing.
+
+Two things this turned up that matter more than the count:
+
+- **`PreRestore` could be null, and that is silent and severe.** When the pre-restore checkpoint records
+  nothing, `before.Point` is null — and `WorkspaceViewModel.GoBackTo` pattern-matches
+  `{ Ok: true, PreRestore: { } kept }`, so it would have returned early and **never reloaded the
+  workspace after writing it**. `Restore` now resolves the entry that ALREADY holds the replaced state,
+  which is also the better way forward: the original row rather than a fresh duplicate.
+- **Thinned entries are deliberately NOT in the set.** A thinned entry is still restorable, so skipping
+  on a match would be defensible — but the way-forward sentence would then name a row the designer
+  cannot see, and an entry that is hidden is not a way back anyone can take.
+
+R-rc5-12a's "unconditionally" is about the PROMISE — the replaced state must be recoverable — not about
+writing a duplicate of a state the history already holds.
+
+**The convergence is to one entry per DISTINCT state, which is three here and not two.** Preserving the
+workspace's own recording setting across a restore (R-rc5-12c rule 4) rewrites that field in the
+`.cws`, so the tree the workspace started in differs by one line from the tree a restore puts back. The
+gate asserts convergence rather than a magic number, which is the property that was actually asked for.

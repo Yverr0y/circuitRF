@@ -128,8 +128,13 @@ public static class RestorePoints
         // From the INTENT, never from the label: a batch's label is "before: <intent>", so rebuilding
         // from the label would produce "before: before: …" — a well-formed entry with a slightly odd
         // line in it, which is exactly the kind of wrong nobody notices.
+        //
+        // And the SUBJECT is carried through as it stands (RC-11 R-rc11-4). On an entry nobody has
+        // renamed it is what SubjectFor would have produced anyway; on one somebody has, rebuilding it
+        // from the origin would quietly undo their correction the next time they marked it keep.
         string message = CheckpointMessage.Build(
-            point.Origin, point.Intent, point.Sequence, kept: true, leftOut: point.LeftOut);
+            point.Origin, point.Intent, point.Sequence, kept: true, leftOut: point.LeftOut,
+            subject: point.Label);
 
         var written = git.Run(["commit-tree", point.TreeId], new GitRunOptions(StandardInput: message));
         if (!written.Ok || written.Line.Length == 0)
@@ -137,9 +142,113 @@ public static class RestorePoints
                 GitFailures.Translate(written, "marking a restore point to keep", git.WorkspaceRoot));
 
         var moved = git.Run(["update-ref", point.Reference, written.Line, point.CommitId]);
+
+        // The LABEL does not change here, but the identity does — this rebuilds the commit to carry the
+        // kept mark. The pending restore provenance is re-pointed at the new one so a correction AFTER
+        // a "keep permanently" can still find its copy of the label. A link that quietly goes stale is
+        // how the leak this closes would come back on one particular ordering of two commands.
+        if (moved.Ok)
+            RestoreProvenance.Retitle(git.WorkspaceRoot, point.CommitId, written.Line, point.Label);
+
         return moved.Ok
             ? RevisionOutcome.Success
             : RevisionOutcome.Failed(GitFailures.Translate(moved, "marking a restore point to keep", git.WorkspaceRoot));
+    }
+
+    // ── Correcting the label, and letting an entry go (RC-11 §5.11 case (a)) ──────────────────────
+
+    /// <summary>
+    /// <b>Renames a restore point</b> (<c>revision-control.md</c> §5.11 case (a); R-rc11-3, R-rc11-4).
+    ///
+    /// <para><b>This is not §8.3's history rewriting in any sense, and the mechanism already exists for
+    /// another purpose.</b> §5.2b makes each checkpoint a PARENTLESS commit under circuitRF's own
+    /// reference namespace: nothing chains to it, no copy takes it (§5.2a), no send carries it. A
+    /// rename is therefore a new parentless commit over the <b>identical tree</b> with a corrected
+    /// message and one reference update — exactly the shape <see cref="MarkKept"/> has used since
+    /// RC-5, for exactly the same reason. A prohibition here would guard nothing and would cost a
+    /// designer the ability to tidy their own machine's safety net.</para>
+    ///
+    /// <para><b>Everything the message carries but the label survives</b> (R-rc11-4): the sequence, so
+    /// the entry keeps its place in the list and retention keeps its ordering; the origin, so the row
+    /// still says how it came about; the kept mark, so retention still may not thin it; and the
+    /// left-out record, so an incomplete entry still says it is incomplete with the names. Losing one
+    /// of those is silent and shows up weeks later as an entry retention thins that it should not
+    /// have.</para>
+    ///
+    /// <para><b>And it does not erase that a batch happened</b> (R-rc11-6). §1.2's checkpoint is the
+    /// floor under an AI edit; a label is a label. The origin trailer and its sentence are rebuilt
+    /// unchanged, so the row still reports that an assistant made the next change however the entry is
+    /// named.</para>
+    ///
+    /// <para>A thinned entry is refused rather than renamed: its reference is gone, so there is nothing
+    /// to move, and writing one back under a new name would list the same state twice. Bring it back
+    /// first — which is one reference update and is offered on the same menu.</para>
+    /// </summary>
+    public static RevisionOutcome Rename(GitCommand git, RestorePoint point, string? label)
+    {
+        string wanted = label?.ReplaceLineEndings(" ").Trim() ?? "";
+        if (wanted.Length == 0) return RevisionOutcome.Failed(HistoryMessages.ACorrectionNeedsWords());
+        if (point.Thinned)      return RevisionOutcome.Failed(HistoryMessages.TidiedAwayCannotBeRenamed());
+        if (string.Equals(wanted, point.Label, StringComparison.Ordinal)) return RevisionOutcome.Success;
+
+        // The SUBJECT is given explicitly and the INTENT becomes the corrected words. Both halves
+        // matter: four of the six origins ignore the label when they build their own subject, and the
+        // intent is what R-rc10-9's search reads — so a correction that left it behind would keep the
+        // careless wording findable in the one place a designer cannot see it.
+        string message = CheckpointMessage.Build(
+            point.Origin, wanted, point.Sequence, point.Kept, point.LeftOut, subject: wanted);
+
+        var written = git.Run(["commit-tree", point.TreeId], new GitRunOptions(StandardInput: message));
+        if (!written.Ok || written.Line.Length == 0)
+            return RevisionOutcome.Failed(
+                GitFailures.Translate(written, HistoryMessages.RenamingARestorePoint, git.WorkspaceRoot));
+
+        var moved = git.Run(["update-ref", point.Reference, written.Line, point.CommitId]);
+
+        // The renamed wording follows into the pending restore provenance, so a designer who went back
+        // to this entry and then renamed it does not watch the old label get written into the next
+        // version they keep. Same defect as VersionCorrections.CorrectTitle's, same close.
+        if (moved.Ok) RestoreProvenance.Retitle(git.WorkspaceRoot, point.CommitId, written.Line, wanted);
+
+        return moved.Ok
+            ? new RevisionOutcome(true, null, written.Line)
+            : RevisionOutcome.Failed(GitFailures.Translate(
+                  moved, HistoryMessages.RenamingARestorePoint, git.WorkspaceRoot));
+    }
+
+    /// <summary>
+    /// <b>Lets a restore point go</b> (§5.11 case (a); R-rc11-5) — and it goes exactly where retention
+    /// sends one.
+    ///
+    /// <para><b>It goes THROUGH RC-6's thinning journal, not around it.</b> One reference delete, then
+    /// one journal line: the same two operations <see cref="RetentionSweep.Run"/> performs, in the same
+    /// order and for the same reason. So the entry is still listed, marked <i>tidied away</i>, it comes
+    /// back through the same <see cref="RestoreThinned"/>, and <b>it frees nothing until §5.6a's
+    /// explicit reclaim</b>. That last is the part worth stating: a designer tidying a label should not
+    /// be the one path in this document that destroys a state.</para>
+    ///
+    /// <para><b>Reference first, journal second</b>, which is not arbitrary — journalling first would
+    /// list the same state twice on a crash, once live and once thinned, which is the one thing a list
+    /// a designer trusts must not do. The reference delete names the object it expects, so a reference
+    /// another process moved between the read and the delete is left alone by git rather than dropped
+    /// blind.</para>
+    /// </summary>
+    public static RevisionOutcome Forget(GitCommand git, RestorePoint point,
+                                         DateTimeOffset? now = null)
+    {
+        if (point.Thinned) return RevisionOutcome.Success;
+
+        var dropped = git.Run(["update-ref", "-d", point.Reference, point.CommitId]);
+        if (!dropped.Ok)
+            return RevisionOutcome.Failed(
+                GitFailures.Translate(dropped, HistoryMessages.LettingARestorePointGo, git.WorkspaceRoot));
+
+        var entry = new ThinnedState(point.CommitId, now ?? DateTimeOffset.UtcNow,
+                                     point.Reference, point.Sequence, point.Label);
+
+        return ThinningJournal.Append(git.WorkspaceRoot, entry)
+            ? RevisionOutcome.Success
+            : RevisionOutcome.Failed(HoldMessages.ThinningJournalUnwritable());
     }
 
     // ── Thinned entries (RC-6 R-rc6-4) ────────────────────────────────────────────────────────────

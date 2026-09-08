@@ -53,7 +53,12 @@ public static class CheckpointMessage
             CheckpointOrigin.SavePoint       => trimmed.Length > 0 ? trimmed : UnnamedSavePoint,
             CheckpointOrigin.WorkspaceClosed => "workspace closed",
             CheckpointOrigin.BeforeBatch     => "before: " + (trimmed.Length > 0 ? trimmed : UnnamedBatch),
-            CheckpointOrigin.BeforeRestore   => "before going back",
+            // Owner, 2026-09-07: "before going back" named a MOMENT and not a thing, so the list read
+            // as an instruction and the menu built from it read "Go back to 'before going back'".
+            // This entry is the designer's own work as it stood a second before a restore replaced it
+            // — the single most reassuring row in the panel — and naming the work is what makes that
+            // legible. See HistoryRowItem.GoBackText, which no longer quotes a generated label at all.
+            CheckpointOrigin.BeforeRestore   => "your work before you went back",
             CheckpointOrigin.RecordingOff    => "recording turned off",
             CheckpointOrigin.RecordingOn     => "recording turned back on",
             _                                => UnnamedSavePoint,
@@ -91,15 +96,32 @@ public static class CheckpointMessage
     /// <param name="kept">Whether retention may never thin this one (R-rc5-1f).</param>
     /// <param name="leftOut">Workspace-relative paths left out at an unattended boundary
     /// (R-rc5-15a). Recorded here because the entry has to be able to say it is incomplete.</param>
+    /// <param name="subject">
+    /// The line the list shows, when the caller has one that <see cref="SubjectFor"/> would not produce
+    /// (RC-11 R-rc11-3, R-rc11-4). Null takes the origin's own wording, which is every path but a
+    /// rename.
+    ///
+    /// <para><b>Four of the six origins ignore <paramref name="label"/> entirely</b> — a
+    /// workspace-close entry is "workspace closed" whatever anybody types — so a rename that went
+    /// through the label alone would silently do nothing on exactly the entries a designer is most
+    /// likely to want to name, which are the automatic ones they are trying to find again. The origin,
+    /// the sequence, the kept mark and the left-out record are unaffected either way: the label is the
+    /// only thing a rename moves.</para>
+    /// </param>
     public static string Build(
         CheckpointOrigin       origin,
         string?                label,
         long                   sequence,
         bool                   kept        = false,
-        IReadOnlyList<string>? leftOut     = null)
+        IReadOnlyList<string>? leftOut     = null,
+        string?                subject     = null)
     {
+        string line = subject?.ReplaceLineEndings(" ").Trim() is { Length: > 0 } given
+                    ? given
+                    : SubjectFor(origin, label);
+
         var text = new StringBuilder();
-        text.Append(SubjectFor(origin, label)).Append('\n').Append('\n');
+        text.Append(line).Append('\n').Append('\n');
         text.Append(Explanation(origin)).Append('\n').Append('\n');
 
         text.Append(SequenceKey).Append(": ").Append(sequence).Append('\n');
@@ -118,8 +140,13 @@ public static class CheckpointMessage
     }
 
     /// <summary>The one-line explanation under the subject — §5.5's "a line recording how it came
-    /// about", in circuitRF's words rather than git's.</summary>
-    private static string Explanation(CheckpointOrigin origin) => origin switch
+    /// about", in circuitRF's words rather than git's.
+    ///
+    /// <para><b>Public rather than private since RC-10</b>: §5.10's expander spells the origin out,
+    /// and the sentence a designer reads there must be the same one the entry itself carries. Two
+    /// wordings of one fact is how a panel and a record come to disagree about what happened.</para>
+    /// </summary>
+    public static string Explanation(CheckpointOrigin origin) => origin switch
     {
         CheckpointOrigin.SavePoint       => "You asked circuitRF to keep this state.",
         CheckpointOrigin.WorkspaceClosed => "circuitRF kept this state because the workspace was closed.",

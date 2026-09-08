@@ -84,18 +84,45 @@ public static class WorkspaceRestore
         List<Diagnostic> notes = [];
 
         // ── 1. The state being replaced, first and unconditionally (R-rc5-12a) ────────────────────
+        //
+        // "Unconditionally" is about the PROMISE, not about writing a duplicate. R-rc5-12a exists so
+        // the state being replaced is recoverable; a state the history already holds is already
+        // recoverable, and recording it again buys nothing and costs an entry.
+        //
+        // Owner, 2026-09-07: going back and forth between two states "a bunch of times" grew an entry
+        // every single toggle. Comparing against the NEWEST entry alone could never catch it — on a
+        // ping-pong the tree being replaced is always the one BEFORE the newest, so the test looked at
+        // the wrong entry every time and always said "changed". Compared against the whole live list it
+        // matches from the third operation on, which is the first one that is genuinely a repeat.
+        //
+        // THINNED entries are deliberately not in the set. One is still restorable, so skipping on a
+        // match would be defensible — but the way forward below would then name a row the designer
+        // cannot see in the list, and an entry that is hidden is not a way back anyone can take.
+        var live      = RestorePoints.List(git);
+        var heldTrees = new HashSet<string>(live.Select(p => p.TreeId), StringComparer.Ordinal);
+
         var before = WorkspaceCheckpoints.Take(git, CheckpointOrigin.BeforeRestore, label: null,
-                                               attended: false);
+                                               attended: false, alsoHeldTrees: heldTrees);
         foreach (var d in before.Diagnostics)
             if (d.Severity == DiagnosticSeverity.Error) notes.Add(d);
 
         if (notes.Count > 0)
             return new RestoreResult(false, 0, 0, null, notes);
 
-        // The tree the workspace is in RIGHT NOW — recorded a moment ago, or identical to the newest
-        // entry because nothing had changed. Either way it is the set of files a removal may act on.
+        // The tree the workspace is in RIGHT NOW — recorded a moment ago, or identical to an entry the
+        // history already had. Either way it is the set of files a removal may act on.
         string? currentTree = before.TreeId;
-        var     fallback    = before.Point ?? RestorePoints.Newest(git);
+
+        // THE ENTRY HOLDING THE STATE BEING REPLACED: the one just taken, or — when nothing was taken
+        // because the state was already held — the entry that holds it. This is what the way forward
+        // names, so it has to be a real entry either way. Pointing at the ORIGINAL rather than at a
+        // fresh duplicate is also the better answer: it is the row the designer already knows.
+        var replaced = before.Point
+                    ?? (currentTree is { Length: > 0 }
+                        ? live.FirstOrDefault(p => string.Equals(p.TreeId, currentTree, StringComparison.Ordinal))
+                        : null);
+
+        var fallback = replaced ?? RestorePoints.Newest(git);
 
         // ── 2. What survives the write (R-rc5-12c, rule 4) ────────────────────────────────────────
         bool?  flag       = preserveRevisionFlag
@@ -110,7 +137,7 @@ public static class WorkspaceRestore
             DateTimeOffset.UtcNow);
 
         if (!RestoreMarker.Write(git.WorkspaceRoot, inFlight))
-            return new RestoreResult(false, 0, 0, before.Point, [
+            return new RestoreResult(false, 0, 0, replaced, [
                 RestorePointMessages.CouldNotTake(
                     "going back to an earlier state",
                     "circuitRF could not write inside this workspace's history folder, and it will not "
@@ -185,11 +212,13 @@ public static class WorkspaceRestore
             // are different decisions. A failure to write it is not a reason to fail the restore —
             // the workspace holds what was asked for, and all that is lost is one line in a message
             // that may never be written.
+            // The identity goes with it so a later correction to this entry's title can find this copy
+            // and replace it — see RestoreProvenance.Retitle, and the leak it exists to close.
             RestoreProvenance.Write(git.WorkspaceRoot,
-                                    new RestoredState(target.Label, target.TakenUtc));
+                                    new RestoredState(target.Label, target.TakenUtc, target.CommitId));
 
             notes.Add(RestorePointMessages.Restored(target.Label, written, removed));
-            return new RestoreResult(true, written, removed, before.Point, notes);
+            return new RestoreResult(true, written, removed, replaced, notes);
         }
         finally
         {
@@ -197,7 +226,7 @@ public static class WorkspaceRestore
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
 
-        RestoreResult Fail(Diagnostic d) => new(false, 0, 0, before.Point, [d]);
+        RestoreResult Fail(Diagnostic d) => new(false, 0, 0, replaced, [d]);
 
         // The same failure, from a point where the working tree is untouched — so the marker goes with
         // it. See the comment at step 4.

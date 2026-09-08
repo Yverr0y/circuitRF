@@ -48,6 +48,24 @@ public class DocsFactoryTests
         => Directory.EnumerateFiles(DocsRoot(), "*.html", SearchOption.AllDirectories);
 
     /// <summary>
+    /// <b>Addresses that must not 404 and are not chapters</b> — <c>kind: retired</c> pages
+    /// (<c>DocPage.Kind</c>), left behind when two chapters merged into one.
+    ///
+    /// <para>They are deliberately in no section of <c>_nav.txt</c> and deliberately not in the search
+    /// index: a page whose whole content is "this moved" would otherwise outrank the chapter it points
+    /// at, for the words they both contain. Named here rather than detected, so retiring a chapter is
+    /// a decision somebody takes rather than a check that quietly stops applying.</para>
+    ///
+    /// <para>RC-10 merged Restore Points and Versions into History
+    /// (<c>docs/design/revision-control.md</c> §5.10).</para>
+    /// </summary>
+    private static readonly HashSet<string> RetiredSlugs = new(StringComparer.Ordinal)
+    {
+        "reference/restore-points.html",
+        "reference/versions.html",
+    };
+
+    /// <summary>
     /// <b>No shipped figure may carry a trailing separator on a per-glyph <c>x</c>/<c>y</c> list.</b>
     ///
     /// <para>Owner-reported, 2026-08-21: figure text "missing or else really small" in Firefox on
@@ -816,6 +834,7 @@ public class DocsFactoryTests
 
         var expected = AllPages()
             .Select(p => Path.GetRelativePath(DocsRoot(), p).Replace(Path.DirectorySeparatorChar, '/'))
+            .Where(p => !RetiredSlugs.Contains(p))
             .ToList();
 
         var missing = expected.Where(p => !indexed.Contains(p)).ToList();

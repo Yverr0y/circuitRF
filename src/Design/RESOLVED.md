@@ -4273,3 +4273,85 @@ circuitRF's memory of it had. The rejections are memoised with the answer now.
 (Detect also invalidates the cache before asking, which is a separate point and not a substitute for
 this one: it is the button somebody presses **because** they just installed git or fixed a `PATH`, and a
 memoised "no" answers for the machine as it was before they did.)
+
+## RC-11 — correcting what you wrote (2026-09-07)
+
+`docs/design/revision-control.md` §5.11, `brief-revision-control-11-correcting-what-you-wrote.md`.
+Gates: `tests/Ui.Tests/Revision/CorrectingWhatYouWroteTests.cs`.
+
+### `--amend` was permitted in one file and buys nothing — the exemption is unspent
+
+R-rc11-9 permits `git commit --amend` at exactly one site, asserted by name so it cannot spread. It is
+not used, and the reason is not tidiness: **`--amend` needs the repository's shared index and restamps
+the committer date**, which are precisely the two things a title correction must not do. §4.6 keeps
+circuitRF off the shared index deliberately, and R-rc11-10 says a correction does not restamp the
+version — a title correction that quietly moved a version's date would make §5.6 rule 2's ordering
+argument false in the one list a designer reads it from, and that is `--amend`'s DEFAULT behaviour.
+
+`commit-tree` over the recorded tree, with the recorded parents and the recorded identity handed back
+through `GIT_AUTHOR_*`/`GIT_COMMITTER_*`, does the job with neither. **So RC-7 gate 11's scan stays
+absolute rather than narrowing**, and `--amend` is still forbidden everywhere.
+
+That needed one new thing: `GitRunOptions.Environment`, applied AFTER `GitEnvironment.Apply` so a
+caller can override the identity that type sets. It is the only interface git offers for writing an
+object with a time other than now. **The date is passed on in git's own raw spelling**
+(`1700000000 +0100`) rather than through a `DateTimeOffset` — reformatting would lose the recorded zone
+offset, and R-rc11-10 is about the time as it was recorded, offset included.
+
+### Only the SUBJECT LINE is replaced; the message is otherwise carried through verbatim
+
+Rebuilding the message through `CommitMessage.Build` would be correct for a commit circuitRF wrote and
+a **lie** about anything else on the line of work — somebody's own `git commit`, an import, a script —
+because it would add circuitRF's own *"You asked circuitRF to keep this version"* line and its origin
+trailer to a commit that never carried them. Replacing one line preserves every trailer, including
+R-rc7-6's restored-from pair, without the correction having to know which of them exist.
+
+### A rename needs an explicit SUBJECT, not only a label — four of six origins ignore the label
+
+`CheckpointMessage.SubjectFor` derives the subject from the ORIGIN for four of the six: a
+workspace-close entry is *"workspace closed"* whatever anybody types, and the same is true of
+before-restore and the two off-period ends. A rename routed through the label alone would therefore
+have **silently done nothing** on exactly the entries a designer most wants to name — the automatic
+ones they are trying to find again. `Build` grew an optional `subject`, and `MarkKept` had to start
+passing `point.Label` through it: without that, marking a renamed entry *keep* would quietly rebuild
+the subject from the origin and undo the correction, weeks later and with nothing to see.
+
+The rename sets the INTENT to the corrected words as well as the subject. R-rc10-9's search reads the
+intent, so a correction that left it behind would keep the careless wording findable in the one place
+a designer cannot see it — which is the whole failure §5.11 exists to prevent, arriving by a side door.
+
+### The annotation lives in circuitRF's own notes namespace, and travels as a SEPARATE invocation
+
+`refs/notes/circuitrf`, not git's default `refs/notes/commits`. A designer with their own notes on the
+default reference would otherwise find circuitRF replacing them, silently, with no way back that is not
+`git fsck`. Same rule as the checkpoint namespace (§5.2a).
+
+**It travels as a second, best-effort git call on fetch, send and clone — never as a second refspec on
+the first one**, and the reason is a trap: a command-line refspec REPLACES git's configured one rather
+than adding to it, and worse, **a non-wildcard refspec naming a reference the remote does not have is a
+fatal error**. Every workspace in which nobody has written a correction is exactly that case, which is
+nearly all of them — so the tidy-looking version would have broken Pull Changes for everybody in order
+to carry a string almost nobody has written. The send resolves the local reference first and skips the
+call when there is none, for the same reason in the other direction.
+
+`WorkspaceRemotes.Fingerprint` gained the notes reference: a fetch that brought in nothing but a
+colleague's correction did change something, and reporting *"nothing new"* for it is R-rc9-6's
+silent-download defect by another route.
+
+### "Shared" has THREE states, and a bare set could only express two
+
+`HistoryBrowser.Shared` returned an empty `HashSet` both for *no other copy* and for *a remote
+configured and never fetched* — which are opposite situations. R-rc11-2 says the second answers
+**shared**, because a correction refused is recoverable and an erasure believed is not (§9A.1's rule).
+`VersionSharing` returns a `SharedVersions` carrying the reach, and `Contains` answers true for every
+version in the unknown state. Computed **once per list read** and handed to every row: a per-row
+`merge-base --is-ancestor` would be one subprocess per entry on a panel that refreshes at every
+boundary.
+
+### The clone journey's review is the SOURCE's titles, and only for a local source
+
+§5.11 names clone as one of the three ways a history leaves the machine, but circuitRF's own Clone
+Workspace brings one IN from an address. What can honestly be reviewed first is a source this machine
+can already read — §7A's librarian case, one workspace on this machine copied out of another. A source
+behind an address cannot be enumerated before it has been fetched, so the list is empty and the dialog
+is not shown; an empty review is a review that teaches people to click through the next one.

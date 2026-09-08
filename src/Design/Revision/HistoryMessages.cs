@@ -59,7 +59,7 @@ public static class HistoryMessages
         DiagnosticSeverity.Info,
         "Kept this version of the workspace as '{title}'. Its identity is {id}, which is what to give "
       + "anyone helping you look at it outside circuitRF.",
-        ("title", (object?)title), ("id", Short(commitId)));
+        ("title", (object?)title), ("id", commitId));
 
     /// <summary>
     /// Nothing changed since the version already on the line of work. <b>Info, not a failure</b> — the
@@ -202,17 +202,280 @@ public static class HistoryMessages
     ///
     /// <para>One sentence for each of the three things they need: that it is possible, that it is not
     /// circuitRF's to do, and why — which is the part that decides whether they should.</para>
+    ///
+    /// <para><b>Re-pointed by RC-11, not deleted</b> (R-rc11-15, §12 Q33). It used to open by saying
+    /// circuitRF <i>will not alter</i> a kept version, full stop — which after §5.11 is untrue of its
+    /// title and remains true of its content. §8.3's subject is a FILE in the history that must not be
+    /// there, and that is what this keeps; what a person wrote about a version is §5.11's, and this no
+    /// longer claims it. The two do not conflict, and the sentence that used to imply they were one
+    /// rule is the one sentence here that changed.</para>
     /// </summary>
     public const string RewritingIsYoursToDo =
-        "Something already kept stays in the history for good — a version you kept is a record, and "
-      + "circuitRF will not alter one after the fact. If a file is in there that must not be (a large "
-      + "one you regret, or something that should never have left your machine), the git command line "
-      + "can rewrite a history to remove it. circuitRF deliberately offers no button for that: "
-      + "rewriting replaces every entry, so every copy anyone else has taken of this workspace stops "
-      + "matching and cannot be brought back into line. It is worth doing when it is worth that.";
+        "The FILES in a version stay in the history for good — circuitRF never alters what was "
+      + "recorded. (What you wrote about it is a different matter: see below.) If a file is in there "
+      + "that must not be (a large one you regret, or something that should never have left your "
+      + "machine), the git command line can rewrite a history to remove it. circuitRF deliberately "
+      + "offers no button for that: rewriting replaces every entry, so every copy anyone else has "
+      + "taken of this workspace stops matching and cannot be brought back into line. It is worth "
+      + "doing when it is worth that.";
 
-    /// <summary>The whole identity, shortened to what a person can retype without transcribing it
-    /// wrongly. Long enough to be unambiguous in any workspace a designer will ever have.</summary>
-    private static string Short(string commitId)
-        => commitId.Length > 12 ? commitId[..12] : commitId;
+    /// <summary>
+    /// The other half of R-rc11-15, said beside it: what a designer CAN do, so the paragraph above is
+    /// read as the narrow rule it is rather than as a blanket one.
+    /// </summary>
+    public const string TitlesAreYoursToCorrect =
+        "A title is not a file. The line you wrote on a version is yours to correct until you have "
+      + "shared it, and a restore point's label is yours to correct at any time — right-click the "
+      + "entry in the History panel. Once a version has gone to another copy, you can add a "
+      + "correction to it instead, which travels with it.";
+
+
+    // ── RC-10: the merged panel (§5.10) ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// R-rc10-1. <b>The panel's name, in one place.</b> Not <i>Versions</i>: that word has a precise
+    /// meaning in §5.2 — titled, permanent, travels with a copy — and it is the word that distinguishes
+    /// the two kinds of row. A panel in which everything is a version has no word left for the
+    /// distinction, and a designer who learns these are all versions and then finds half of them did
+    /// not arrive with a copy (§5.2a) has been told something false.
+    /// </summary>
+    public const string PanelTitle = "History";
+
+    /// <summary>
+    /// R-rc10-2. <b>What the mark on a version row means</b>, said in the tooltip that carries it.
+    /// Three promises the unmarked rows do not make — and it is not an importance badge.
+    /// </summary>
+    public const string VersionMarkMeans =
+        "A version: you gave it a title, nothing tidies it away, and it travels with a copy of this "
+      + "workspace. The unmarked entries are this machine's own safety net and do none of those things.";
+
+    /// <summary>
+    /// R-rc10-5's empty list, and <b>the wording is the whole of it</b>.
+    ///
+    /// <para>A workspace whose only history is workspace-close entries opens on an empty list under the
+    /// default filter — which is exactly the workspace §1 is written for, since its owner never thought
+    /// about history at all. A line saying "nothing kept yet" would be false, so this one says what is
+    /// there and where it is.</para>
+    /// </summary>
+    public static string OnlyAutomaticEntries(int count) => count == 1
+        ? "One entry was kept automatically when this workspace was closed. Automatic entries are "
+        + "hidden until you ask for them — turn on 'kept automatically' in the filter to see it."
+        : $"{count} entries were kept automatically when this workspace was closed. Automatic entries "
+        + "are hidden until you ask for them — turn on 'kept automatically' in the filter to see them.";
+
+    /// <summary>
+    /// R-rc10-5's empty list when the filter really is hiding everything a designer asked to see. Says
+    /// which control is responsible, because an empty list with no explanation reads as a broken panel.
+    /// </summary>
+    public const string EverythingIsFilteredOut =
+        "Nothing here matches what the filter is set to show. Widen it, or clear the search.";
+
+    /// <summary>
+    /// R-rc10-1's empty list on a workspace with no history at all — neither kind. It explains the
+    /// feature rather than reading as a failure, because this is the ordinary state of a workspace
+    /// nobody has recorded anything in yet.
+    /// </summary>
+    public const string NothingRecordedYet =
+        "Nothing has been kept for this workspace yet. circuitRF keeps the whole workspace when you "
+      + "close it, when you ask it to, and before an assistant changes anything — and you can keep a "
+      + "titled version of your own at any time.";
+
+    /// <summary>The same empty panel with no workspace open, which is a different fact.</summary>
+    public const string NoWorkspaceOpenForHistory =
+        "No workspace is open. A history belongs to one workspace; open one to see it.";
+
+    /// <summary>
+    /// R-rc10-10. <b>A search whose answer is incomplete says so, on a line of its own.</b>
+    ///
+    /// <para>RC-6's journal already knows the entries retention tidied away, so returning fewer results
+    /// than exist would be a wrong answer rather than a short one — and the designer would have no way
+    /// to tell the two apart. The same reasoning as R-rc9-6's incoming-versions line, which is already
+    /// in this panel.</para>
+    /// </summary>
+    public static string ThinnedAlsoMatch(int count) => count == 1
+        ? "One entry that was tidied away also matches. Turn on 'tidied away' in the filter to see it."
+        : $"{count} entries that were tidied away also match. Turn on 'tidied away' in the filter to "
+        + "see them.";
+
+    /// <summary>
+    /// R-rc10-18, §5.8, §12 Q35. <b>The way forward, offered where the way back was taken.</b>
+    ///
+    /// <para>This is the most reassuring control in the feature and <b>it creates nothing</b>: the entry
+    /// it names already exists, and reaching it is an ordinary restore with an ordinary checkpoint of
+    /// its own. Until the panels were merged it was findable only in the other one, so a designer who
+    /// went back from the Versions panel was left looking at a window showing no evidence that the
+    /// afternoon they had just replaced still existed — the reassurance was implemented, correct, and
+    /// in the room the designer was not in.</para>
+    /// </summary>
+    public static string WayForward(string wentBackTo, string keptAs) =>
+        $"This workspace went back to '{wentBackTo}'. What you had before that was kept as '{keptAs}' "
+      + "— go to it to come forward again.";
+
+    // ── RC-11: correcting what you wrote (§5.11) ──────────────────────────────────────────────────
+
+    /// <summary>What a git failure during a title correction was being attempted for.</summary>
+    public const string CorrectingATitle = "correcting what you wrote about this version";
+
+    /// <summary>The same, for a restore point's label.</summary>
+    public const string RenamingARestorePoint = "renaming this entry";
+
+    /// <summary>The same, for letting one go.</summary>
+    public const string LettingARestorePointGo = "letting this entry go";
+
+    /// <summary>A correction with nothing in it. Refused rather than applied: an entry whose title
+    /// somebody cleared would list under circuitRF's own placeholder, which is not what anyone who
+    /// opened this dialog meant.</summary>
+    public static Diagnostic ACorrectionNeedsWords() => new(
+        "revision.correction.empty",
+        DiagnosticSeverity.Error,
+        "Write the line it should say. Leaving it blank does not remove the entry — "
+      + "use 'let this entry go' for that.");
+
+    /// <summary>
+    /// <b>The refusal case (c) exists for</b> (R-rc11-2, R-rc11-12) — and it offers the annotation by
+    /// name, because a refusal that only says no leaves the designer with the problem they came with.
+    ///
+    /// <para>It covers the state where sharing <i>cannot be computed</i> as well as the one where it is
+    /// known: a remote configured and never fetched answers "shared", because a correction refused is
+    /// recoverable and an erasure believed is not.</para>
+    /// </summary>
+    public static Diagnostic TitleHasBeenShared(string title) => Diagnostic.Create(
+        "revision.correction.shared",
+        DiagnosticSeverity.Error,
+        "'{title}' has already gone to another copy of this workspace, so its title is no longer "
+      + "yours alone to change. Add a correction to it instead — the correction travels with it, and "
+      + "shows in place of the original.",
+        ("title", (object?)title));
+
+    /// <summary>
+    /// R-rc11-8's refusal. <b>It names why rather than saying no</b>, and offers case (c) — the tail
+    /// correction is a follow-up that must not be assumed, and this sentence is what most designers
+    /// who meet this feature at all will actually read.
+    /// </summary>
+    public static Diagnostic OnlyTheNewestTitleCorrects(string title) => Diagnostic.Create(
+        "revision.correction.not-newest",
+        DiagnosticSeverity.Error,
+        "Only the newest version's title can be corrected in place — changing an older one would "
+      + "rewrite every version kept after it. Add a correction to '{title}' instead: it travels with "
+      + "the version and shows in place of the original.",
+        ("title", (object?)title));
+
+    /// <summary>The entry's own object could not be read. Rare, and it is a repository fault rather
+    /// than anything the designer did.</summary>
+    public static Diagnostic EntryCouldNotBeRead() => new(
+        "revision.correction.unreadable",
+        DiagnosticSeverity.Error,
+        "That entry could not be read out of this workspace's history, so nothing was changed.");
+
+    /// <summary>What a title correction did.</summary>
+    public static Diagnostic TitleCorrected(string title) => Diagnostic.Create(
+        "revision.correction.title",
+        DiagnosticSeverity.Info,
+        "That version is now called '{title}'. What it holds is untouched — the files, who kept it "
+      + "and when are the ones already recorded.",
+        ("title", (object?)title));
+
+    /// <summary>What an annotation did.</summary>
+    public static Diagnostic CorrectionAdded(string correction) => Diagnostic.Create(
+        "revision.correction.added",
+        DiagnosticSeverity.Info,
+        "Correction added: '{text}'. It shows in place of the original and travels with the version.",
+        ("text", (object?)correction));
+
+    /// <summary>And what taking one back did. Not an erasure of anything: the original was never
+    /// altered, so removing the correction simply puts the original back in front.</summary>
+    public static Diagnostic CorrectionRemoved(string title) => Diagnostic.Create(
+        "revision.correction.removed",
+        DiagnosticSeverity.Info,
+        "The correction on '{title}' is gone, and the original wording shows again.",
+        ("title", (object?)title));
+
+    /// <summary>A renamed entry.</summary>
+    public static Diagnostic RestorePointRenamed(string label) => Diagnostic.Create(
+        "revision.correction.renamed",
+        DiagnosticSeverity.Info,
+        "That entry is now called '{label}'. The state it holds is exactly the state it held.",
+        ("label", (object?)label));
+
+    /// <summary>An entry retention has already tidied away has no reference to rename. The remedy is
+    /// on the same menu and is one action.</summary>
+    public static Diagnostic TidiedAwayCannotBeRenamed() => new(
+        "revision.correction.tidied-away",
+        DiagnosticSeverity.Error,
+        "That entry has been tidied away. Bring it back first, then rename it.");
+
+    /// <summary>
+    /// R-rc11-5. <b>Letting an entry go is the same thing tidying up does</b>, and the sentence says
+    /// so — because a designer who thought they had destroyed a state, and then found it listed, would
+    /// trust the list less rather than more.
+    /// </summary>
+    public static Diagnostic RestorePointLetGo(string label) => Diagnostic.Create(
+        "revision.correction.let-go",
+        DiagnosticSeverity.Info,
+        "'{label}' has been tidied away, exactly as tidying up would have done it. It is still "
+      + "listed under 'tidied away' and you can bring it back; nothing is freed until you ask "
+      + "circuitRF to reclaim space.",
+        ("label", (object?)label));
+
+    // ── R-rc11-14: the sentence that may not be softened ──────────────────────────────────────────
+
+    /// <summary>
+    /// <b>The one sentence in this feature that may not be softened</b> (R-rc11-14, §5.11 case (c)).
+    ///
+    /// <para>A correction is an annotation. The original wording stays in the file and can still be
+    /// read by anyone holding the workspace. <b>A designer whose problem is embarrassment specifically
+    /// needs to know that</b>, and a UI that hid it would cause the exact harm they came to it to
+    /// avoid — which is §1.4's false belief, in the one place where the belief is about other people
+    /// rather than about their own data. A delete offered here would be §5.3b rule 10's reassuring
+    /// sentence about a protection that does not exist, told to the designer this time instead of by
+    /// an agent.</para>
+    ///
+    /// <para>Held by this brief's gate 7, in the shape RC-7 gate 11 uses on
+    /// <see cref="RewritingIsYoursToDo"/>.</para>
+    /// </summary>
+    public const string ACorrectionDoesNotErase =
+        "This adds a correction; it does not change what was written. The original wording stays in "
+      + "the history and can still be read by anyone holding a copy of this workspace, including the "
+      + "copies already sent. What the correction buys is that your wording is what they see first.";
+
+    /// <summary>The same fact for the entry a designer CAN correct outright, so the two dialogs read
+    /// as one feature with a line drawn through it rather than as two unrelated controls.</summary>
+    public const string ThisOneHasNotLeftTheMachine =
+        "This has not left this machine, so correcting it changes nothing for anybody else. What the "
+      + "version holds — the files, who kept it and when — is untouched either way.";
+
+    // ── R-rc11-16: the review before a history leaves the machine ─────────────────────────────────
+
+    /// <summary>
+    /// The heading over §5.11's review, for each of the three journeys (R-rc11-16, §12 Q36).
+    ///
+    /// <para><b>It is worth more than every correction mechanism</b> (R-rc11-17): the expensive case is
+    /// not a careless word, it is a customer's name or a part number in a title going to a different
+    /// customer, and nobody can recall from memory what forty titles say. §9A.3 already establishes
+    /// that a computation the user cannot perform belongs in front of the operation.</para>
+    /// </summary>
+    public static string TitlesLeaving(int count, string journey) => count switch
+    {
+        0 => $"No titles are {journey}.",
+        1 => $"One title is {journey}. Read it before you go on.",
+        _ => $"{count} titles are {journey}. Read them before you go on.",
+    };
+
+    /// <summary>
+    /// R-rc11-19. <b>It is not a confirmation prompt with a checkbox</b>, and the line under the list
+    /// says so — the useful response to reading a bad title is fixing it, not abandoning the send.
+    /// </summary>
+    public const string TitlesLeavingWhatToDo =
+        "A title is what the other side reads first. If one of these says something it should not, "
+      + "close this and correct it from the History panel — the newest one can be retitled outright, "
+      + "and any of them can take a correction.";
+
+    /// <summary>The three journeys, spelled once so the same sentence serves all three. <b>Noun
+    /// phrases with no verb of their own</b>, because the count supplies it — "one title <i>is</i>",
+    /// "four titles <i>are</i>" — and a journey carrying its own verb reads wrong at one of the
+    /// two.</summary>
+    public const string JourneySend    = "about to be sent to the other copy";
+    public const string JourneyCopy    = "about to be copied";
+    public const string JourneyArchive = "in the history this archive would carry";
+
 }

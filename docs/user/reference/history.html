@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>circuitRF — History</title>
+<link rel="icon" href="../assets/img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../assets/css/circuitrf-docs.css">
+<!--
+  GENERATED FILE - do not edit. Edit the Markdown source named below and re-run:
+      dotnet run [project tools/DocGen] [flag out] docs/user
+  (XML comments cannot contain a double hyphen; the flags are ordinary ones.)
+  Source: docs/user/src/reference/history.md
+-->
+</head>
+<body>
+
+<header class="doc-header">
+  <a class="brand" href="../index.html"><img class="logo" src="../assets/img/favicon.svg" alt="circuitRF"><span class="wordmark">circuitRF</span></a>
+  <span class="doc-kind">Reference Guide</span>
+  <div class="doc-search" data-crf-search data-root="../" hidden>
+    <input type="search" class="search-input" autocomplete="off" spellcheck="false"
+           aria-label="Search the documentation" placeholder="Search docs"
+           role="combobox" aria-expanded="false" aria-autocomplete="list">
+    <div class="search-panel" role="listbox" hidden></div>
+  </div>
+</header>
+<hr class="doc-headrule">
+
+<main class="page">
+  <p class="breadcrumb"><a href="../index.html">Docs</a> › <a href="index.html">Reference</a> › History</p>
+
+  <h1>History</h1>
+  <p class="lede">Everything circuitRF has kept of a workspace, in one list — the states it kept for you automatically, and the versions you kept on purpose. What is in it, how to find something, and how to go back.</p>
+
+<nav class="toc">
+<h2>On this page</h2>
+<ol>
+<li><a href="#two-kinds">Two kinds of entry, one list</a></li>
+<li><a href="#when">When circuitRF keeps a state</a></li>
+<li><a href="#keeping">"I want to keep this one — it's what I'm sending out"</a></li>
+<li><a href="#panel">The History panel</a></li>
+<li><a href="#going-back">Going back — "I broke the match network yesterday"</a></li>
+<li><a href="#forward">"I went back and I want to come forward again"</a></li>
+<li><a href="#comparing">What changed between two versions</a></li>
+<li><a href="#titles">"I typed the title wrong"</a></li>
+<li><a href="#restore-then">"I went back to an old version, then kept working"</a></li>
+<li><a href="#gaps">Gaps in the list</a></li>
+<li><a href="#results">"My results are gone"</a></li>
+<li><a href="#started">"circuitRF says it started keeping a history"</a></li>
+<li><a href="#copy">"I saved a copy and my history didn't come with it"</a></li>
+<li><a href="#customer">"I'm sending this workspace to a customer"</a></li>
+<li><a href="#other-copy">Exchanging versions with another copy</a></li>
+<li><a href="#two-of-you">"Two of us are editing the same workspace"</a></li>
+<li><a href="#kept">What is kept, and what is not</a></li>
+<li><a href="#tidying">Tidying up — "I can't get back to last month"</a></li>
+<li><a href="#enclosing">"My workspace is inside another version-controlled folder"</a></li>
+<li><a href="#already">"This workspace already had version control and circuitRF asked me something"</a></li>
+<li><a href="#off">Turning it off, and getting rid of it entirely</a></li>
+<li><a href="#disk">"My disk is full and it says the history is taking the space"</a></li>
+<li><a href="#rewriting">"Something went in that shouldn't have"</a></li>
+<li><a href="#assistants">History and AI assistants</a></li>
+</ol>
+</nav>
+<h2 id="two-kinds">Two kinds of entry, one list</h2>
+<p><strong>circuitRF records what you did and never edits it. What you <em>wrote about</em> it is yours until you have
+shared it.</strong> Those are two different promises and it is worth having both of them in mind from the
+start: the files, the times and the order they happened in are fixed for good, and the line you typed
+on an entry is a label you can correct. Nobody writes a careful title if they believe a careless one is
+permanent, so <a href="#titles">it is not</a> — and the moment a version leaves your machine, the line is drawn
+and a correction sits beside the original instead of replacing it.</p>
+<p>circuitRF keeps two different things about a workspace, and the History panel shows both.</p>
+<p>A <strong>restore point</strong> is the whole workspace as it stood at one moment: every cell, every schematic,
+every layout, the workspace's own configuration. circuitRF takes them mostly by itself — when you
+close the workspace, when you ask for one, and before an assistant changes anything. They are a safety
+net, and they never leave this machine.</p>
+<p>A <strong>version</strong> is a statement. You decide on it, you give it a title, and it is what you come back to
+six weeks later and what goes with the workspace when it leaves your machine.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>restore points</th>
+<th>versions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>who makes them</td>
+<td>circuitRF, mostly automatically</td>
+<td>you, on purpose</td>
+</tr>
+<tr>
+<td>how many</td>
+<td>dozens, thinned as they age</td>
+<td>as few as you decide</td>
+</tr>
+<tr>
+<td>what they are for</td>
+<td>getting back from something that went wrong</td>
+<td>saying &quot;this one is finished&quot;</td>
+</tr>
+<tr>
+<td>do they travel?</td>
+<td>no — they belong to this machine</td>
+<td>yes — they go with a copy or a clone</td>
+</tr>
+</tbody>
+</table>
+<p><strong>They are still two kinds of thing, and the list says which is which.</strong> A version carries a small
+coloured tag; a restore point does not. The tag is not a mark of importance — it means <em>this one has a
+title, nothing tidies it away, and it travels with a copy</em>, which are three promises the unmarked
+entries do not make.</p>
+<p><strong>They are in one list because the alternative was worse.</strong> A list with three hundred automatic
+entries and four deliberate ones mixed among them is a list nobody reads — so the panel opens showing
+only the entries somebody stated an intent for, and the automatic ones are one click away in the
+filter. Two separate panels answered the same problem by making you decide which one to open, and that
+question is hardest at the moment you have to ask it, which is the moment something has gone wrong.</p>
+<p>It is not undo either. <strong>Undo</strong> is per-editor and per-keystroke, it covers the last few minutes inside the
+document you are looking at, and it ends when you close the window. A restore point is
+workspace-wide, action-grained and durable — it is still there next week. The two are deliberately
+unrelated, and between them they cover the whole range: undo for the last few minutes in one view,
+restore points for everything else.</p>
+<div class="callout note">
+<span class="label">Going back is never a one-way door</span>
+<p>Before it replaces anything, circuitRF keeps a restore point of the state you are in right now —
+including work you have done since the last one. So if you go back and it was the wrong moment, you
+can come forward again. That entry appears in the list like any other, the panel offers it to you by
+name the moment you arrive, and tidying up never removes it.</p>
+</div>
+<h2 id="when">When circuitRF keeps a state</h2>
+<p>Three moments, and no others:</p>
+<table>
+<thead>
+<tr>
+<th>moment</th>
+<th>why this one</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>you ask for one</strong> — File ▸ Keep This State…</td>
+<td>your judgement about what matters beats any rule circuitRF could invent</td>
+</tr>
+<tr>
+<td><strong>the workspace closes</strong></td>
+<td>the one moment that reliably arrives in every session, including the ones where you never thought about history</td>
+</tr>
+<tr>
+<td><strong>before an assistant changes anything</strong></td>
+<td>so anything an AI assistant did can be undone in one action</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Not on every save.</strong> One thing you do — widening a match network — writes a layout, a schematic and
+the workspace file, so a restore point per file save would keep fragments of an edit, some of them
+half-finished. And a list with three hundred entries in it is a list nobody reads, which would make it
+useless exactly when you needed it.</p>
+<p><strong>Not on a simulation run, and not on a timer.</strong> Runs are frequent and usually change nothing; a sweep
+would leave dozens of near-identical entries. And an entry made because you went to lunch is one you
+cannot predict, at a moment that meant nothing, labelled with a time instead of a reason.</p>
+<p><strong>A moment where nothing changed keeps nothing.</strong> Close a workspace you only looked at, or press Keep
+This State twice, and there is one entry, not two.</p>
+<div class="callout note">
+<span class="label">Nothing is created until something is worth keeping</span>
+<p>Opening a workspace to look at it writes nothing at all — which matters most for a workspace on a
+shared drive that belongs to somebody else. circuitRF starts keeping a history at the first moment that
+would actually record something, and tells you once when it does.</p>
+</div>
+<h2 id="keeping">&quot;I want to keep this one — it's what I'm sending out&quot;</h2>
+<p><strong>File ▸ Keep This Version…</strong>, or the tag button at the top of the History panel.</p>
+<p>One field: a title. Write what the design <em>is</em> at this moment, not what you did to it —
+<em>&quot;Output match retuned for 3.5 GHz&quot;</em>, not <em>&quot;changed some stuff&quot;</em>. Six weeks from now that line is the
+only thing that tells one version from another, and it is what anyone you send the workspace to will
+read first.</p>
+<p>What is recorded is <strong>the whole workspace as it stands</strong>: every cell, every schematic, every layout, the
+technology, the workspace's own configuration. Not just the document you have open.</p>
+<div class="callout note">
+<span class="label">Nothing changed means nothing is kept</span>
+<p>If the workspace is exactly as it was when you kept the last version, circuitRF says so and keeps
+nothing. Two entries holding identical content would be two entries you could not tell apart.</p>
+</div>
+<p>Afterwards, one line appears in the Messages panel saying what was kept <strong>and giving the version's
+identity</strong> — a short string of letters and digits. You will almost certainly never need it. It is there
+for the day you do: it is what to give someone helping you look at the workspace with tools other than
+circuitRF.</p>
+<p>Simulation results are not kept in a version, for the same reason they are not kept in a restore point:
+a result is a function of the design and the engine, so the design is the thing worth recording. See
+<a href="#kept">what is kept, and what is not</a> — the same table applies.</p>
+<h2 id="panel">The History panel</h2>
+<p><strong>View ▸ Panels ▸ History</strong>, or the clock button on the workspace toolbar. A list, newest first.</p>
+<p><strong>Each row is what you scan</strong>: the time, the date — with the year on it whenever the entry is not from
+this year — the title you wrote, or a short line saying how the entry came about for one nobody
+titled. A version carries its tag. On a workspace more than one person works in, the row says who kept
+it. And a row says the three things that change what it <em>means</em>: that it was brought back from an
+earlier state, that a file was left out of it, or that tidying up has tidied it away.</p>
+<p><strong>Open a row</strong> for what a row cannot carry: the full date and time with its time zone, a sentence
+spelling out how the entry came about, whether it has left this machine or is still only here, its
+ordering number, and its identifier — a short string of letters and digits you will almost certainly
+never need. It is there for the day you do: it is what to give someone helping you look at the
+workspace with tools other than circuitRF.</p>
+<p><strong>Right-click a row</strong> for everything you can do to it:</p>
+<ul>
+<li><strong>Go back to &quot;…&quot;</strong> — see <a href="#going-back">going back</a> below.</li>
+<li><strong>Compare with the workspace as it is now</strong> — lists the documents that differ between that entry and
+what you have on disk this minute.</li>
+<li><strong>Keep permanently</strong> — marks an entry so circuitRF's own tidying-up will never remove it. Ones you
+asked for, and the one taken before you went back, are already marked.</li>
+<li><strong>Bring this back</strong> — on an entry marked <em>tidied away</em>, puts it back in the list as an ordinary one.
+See <a href="#tidying">tidying up</a>.</li>
+<li><strong>Rename this entry…</strong>, <strong>Correct what you wrote…</strong> and <strong>Let this entry go</strong> — the label or the
+title, and what happens to a version you have already sent. See
+<a href="#titles">&quot;I typed the title wrong&quot;</a>.</li>
+<li><strong>Copy the identifier</strong>.</li>
+</ul>
+<p>Two buttons at the top of the panel <em>create</em> something: <strong>keep this state</strong> writes a restore point, and
+<strong>keep this version</strong> records a titled version. They are the same two things File ▸ Keep This State…
+and File ▸ Keep This Version… do.</p>
+<h3 id="the-filter">The filter</h3>
+<p>The funnel opens five tick boxes: <strong>versions</strong>, <strong>states you kept</strong>, <strong>before an assistant</strong>, <strong>kept
+automatically</strong>, and <strong>tidied away</strong>. Everything is on except <em>kept automatically</em> — the entries
+circuitRF takes when you close the workspace, which are the ones that arrive three hundred at a time.</p>
+<p><strong>Those entries are still being taken.</strong> Closing the workspace is the one moment that reliably happens
+in every session, including the ones where you never thought about history at all, so hiding them from
+a list is a decision about the list and never about what is kept. Tick the box and they are there.</p>
+<p>The setting is yours and it belongs to this workspace: it is remembered next time you open it, and it
+is not something anybody else inherits.</p>
+<h3 id="search">Search</h3>
+<p>The magnifier opens a field, and it searches <strong>what a person wrote</strong> — the titles you gave your
+versions, what an assistant said it was about to do, and who kept each entry. <em>&quot;I broke the match
+network yesterday&quot;</em> is a search, and scrolling a year of entries to perform it is doing the machine's
+work for it.</p>
+<p>If entries that circuitRF has <strong>tidied away</strong> also match and the filter is hiding them, the panel says
+so on a line of its own with a count. An incomplete answer that says it is incomplete is a very
+different thing from a wrong one.</p>
+<p>If a title has been <a href="#titles">corrected</a>, the search finds the entry under <strong>both</strong> wordings — the one
+in front of you and the one it replaced. Looking for a line you have already corrected is very often
+exactly why you are searching.</p>
+<h3 id="the-same-list-without-the-window">The same list, without the window</h3>
+<p><code>circuitrf history list &lt;workspace&gt;</code> prints what this panel shows, with the same default: every entry
+somebody stated an intent for, and the automatic ones hidden. <code>--include-automatic</code> reveals them,
+<code>--kinds versions,save-points,ai-batches,automatic,tidied-away</code> picks what to show, and <code>--search &lt;text&gt;</code> searches the same three fields the magnifier does. See the <a href="cli.html">command line</a>.</p>
+<div class="callout note">
+<span class="label">If circuitRF is not recording</span>
+<p>History is off for this workspace, or the workspace sits inside another version-controlled folder:
+the buttons stay where they are and say why rather than disappearing, and a strip at the foot of the
+window says so for as long as the workspace is open. A button that quietly vanished would look exactly
+like a feature that had never been built.</p>
+</div>
+<h2 id="going-back">Going back — &quot;I broke the match network yesterday&quot;</h2>
+<p>Open <strong>View ▸ Panels ▸ History</strong>, find the entry — the titles and the dates are what you are looking
+for, and the <a href="#panel">search</a> is faster than scrolling — then right-click it and choose <strong>Go back
+to &quot;…&quot;</strong>.</p>
+<p>What happens, in order:</p>
+<ol>
+<li>If anything is unsaved, circuitRF asks about it, in the same words it asks when you close a
+workspace. A restore is built from what is on disk, so unsaved edits sitting on top of it would
+leave you with a workspace matching neither state.</li>
+<li>The state you are in now is kept, so you can come forward again.</li>
+<li>The files go back. Anything created since is taken away, because yesterday's files plus today's new
+cell is a workspace that never existed.</li>
+<li>Open documents are re-opened from the files that are now there.</li>
+</ol>
+<div class="callout warning">
+<span class="label">Undo does not survive going back</span>
+<p>Every open document's undo history is cleared, deliberately. An undo after going back would re-apply
+the last few minutes of the state you <i>replaced</i> onto the file you just brought <i>back</i> —
+producing a document that never existed at any moment: perfectly well-formed, and wrong.</p>
+</div>
+<p>Going back covers <strong>this workspace's files</strong>. Anything in a workspace this one refers to is not part of
+this workspace's history and is left exactly as it is.</p>
+<h2 id="forward">&quot;I went back and I want to come forward again&quot;</h2>
+<p>You went back to Tuesday. It was the wrong Tuesday, or you only wanted to look. <strong>The afternoon you
+just replaced is not gone</strong>, and this is the twenty seconds in which people believe it is.</p>
+<p><strong>The panel tells you, at the top of the list, on arrival.</strong> One line, naming the entry you went back
+to and the entry your previous state was kept as, with a button that returns to it. Press it and you
+are back where you were.</p>
+<p>It is not a different or a scarier operation than the one that brought you here — it is the same one.
+Coming forward keeps a restore point of <em>this</em> state first, exactly as going back did, so there is no
+step in this that you cannot undo by taking it again.</p>
+<p><strong>Nothing was created to make this possible.</strong> The entry the line points at is the one circuitRF wrote
+before it replaced a single file, and it is in the list with everything else. Tidying up never removes
+it.</p>
+<h2 id="comparing">What changed between two versions</h2>
+<p>Select a version and the panel lists <strong>the documents that differ</strong> between it and the one before it:
+which cells changed, which were added, which were removed. Right-click any entry — a version or a
+restore point — and choose <strong>Compare with the workspace as it is now</strong> to ask the other question:
+what that entry holds that your files no longer do.</p>
+<p>That is deliberately where it stops. circuitRF does not show you a line-by-line comparison of what is
+inside a schematic or a layout — open both and look, or go back to one of them. A list of changed
+coordinates is not a picture of what moved.</p>
+<h2 id="titles">&quot;I typed the title wrong&quot;</h2>
+<p>Right-click the entry. What you get depends on which of three things it is, and the difference is only
+ever about <strong>who else has already read it</strong>.</p>
+<table>
+<thead>
+<tr>
+<th>the entry</th>
+<th>what you can do</th>
+<th>why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>a restore point</strong></td>
+<td><strong>Rename this entry…</strong> — change the label to anything. You can also <strong>Let this entry go</strong>.</td>
+<td>Nothing chains to a restore point, no copy takes one and no send carries one. It is your machine's own safety net and the label is yours alone.</td>
+</tr>
+<tr>
+<td><strong>a version you have not shared</strong></td>
+<td><strong>Correct what you wrote…</strong> — the title changes, and that is the end of it.</td>
+<td>Nobody else has seen it, so there is nothing to put out of step.</td>
+</tr>
+<tr>
+<td><strong>a version you have sent to another copy</strong></td>
+<td><strong>Correct what you wrote…</strong> — this adds a correction <em>beside</em> the original.</td>
+<td>The original string is on somebody else's disk. circuitRF can put your wording in front of it; it cannot reach into their copy and take the old one out.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Correcting a title never changes what the version holds.</strong> The files, who kept it and when are the
+ones already recorded, in all three cases. A correction is about the sentence, never the design.</p>
+<p>circuitRF works out which case applies — you do not have to know whether a version has been sent. If it
+cannot tell (there is another copy configured and this machine has never heard from it), it takes the
+cautious reading and offers you the correction rather than the rename.</p>
+<div class="callout warning">
+<span class="label">A correction does not erase the original</span>
+<p>On a version that has been shared, <b>the original wording stays in the history and can still be read
+by anyone holding a copy of this workspace, including the copies already sent.</b> What the correction
+buys you is that your wording is what they see first. If a title contains something that must never have
+left your machine at all, that is a different problem and it has a
+<a href="#rewriting">different answer</a>.</p>
+</div>
+<p><strong>Letting a restore point go is the same thing tidying up does.</strong> It stops appearing in the main list,
+it is still there under <em>tidied away</em> in the filter, you can bring it back, and it frees no disk space
+until you <a href="#disk">reclaim</a> — which you have to ask for. There is nothing here that destroys a state.</p>
+<p><strong>Where a correction goes.</strong> It travels with the version it is attached to: whoever pulls or clones
+this workspace next sees your corrected wording in their own History panel, with the original one click
+away in the entry's expander, exactly as you see it here.</p>
+<p><strong>Headless:</strong> <code>circuitrf history rename &lt;workspace&gt; --point &lt;n&gt; --label &quot;…&quot;</code>,
+<code>circuitrf history forget &lt;workspace&gt; --point &lt;n&gt;</code>,
+<code>circuitrf history retitle &lt;workspace&gt; --title &quot;…&quot;</code> (the newest version) and
+<code>circuitrf history correct &lt;workspace&gt; --version &lt;id&gt; --text &quot;…&quot;</code>.</p>
+<h2 id="restore-then">&quot;I went back to an old version, then kept working&quot;</h2>
+<p>This is one line of work, not two, and there is nothing to manage.</p>
+<ol>
+<li>You go back to Tuesday's version. The state you were in a moment ago is kept first, so nothing is
+lost — it is in the History list like any other entry, and <a href="#forward">the panel offers it to you by
+name</a> if you picked the wrong moment.</li>
+<li>You keep working. The files on disk are Tuesday's, plus whatever you do next.</li>
+<li>You keep a version. <strong>That version records that it was brought back from Tuesday's</strong>, naming it and
+the date it was kept.</li>
+</ol>
+<p>That last part is the one worth knowing about. Without it, the list would show two versions in a row
+where the second undoes most of the first, and there would be nothing anywhere saying why — it would
+read as a change of mind. The line says what actually happened, and it appears <strong>only</strong> on the version
+that followed a going-back. The next one after that is your own work again and carries no such line.</p>
+<div class="callout note">
+<span class="label">Going back is still not a one-way door, even after you keep a version</span>
+<p>The restore point taken just before you went back survives everything you do afterwards, including
+keeping a version on top of the mistake. If you went back to the wrong moment and only noticed later,
+that entry is still in the History list.</p>
+</div>
+<h2 id="gaps">Gaps in the list</h2>
+<p>If history was <a href="#off">switched off</a> for a stretch, the list shows that
+stretch <strong>as a gap</strong>, with its dates and the reason — <em>&quot;Recording was off from 3 Mar to 17 Mar. Anything
+done in between is not in this history.&quot;</em></p>
+<p>It is not shown as a quiet fortnight in which you happened not to keep anything. Those are completely
+different situations and only one of them means the work is recoverable.</p>
+<h2 id="results">&quot;My results are gone&quot;</h2>
+<p>They were never kept, and that is deliberate — go back to a restore point and your <code>.npy</code>, <code>.spl</code>,
+<code>.lpcwave</code> and <code>.mat</code> files are still sitting exactly where they were.</p>
+<p><strong>A result is a function of the design and the engine</strong>, so the design is the thing worth keeping: run
+the analysis again and you have the results back. It is not about disk space. It is also why going back
+does <em>not</em> delete them: bringing back last Tuesday's design should not destroy the hours of simulation
+sitting beside it.</p>
+<h2 id="started">&quot;circuitRF says it started keeping a history&quot;</h2>
+<p>The first time a workspace reaches one of the <a href="#when">three moments</a>, circuitRF creates a small folder
+inside the workspace to keep restore points in, and says so once in the Messages panel.</p>
+<ul>
+<li><strong>Where the setting is</strong> — Settings ▸ Revision Control. You can turn it off entirely, or off for one
+workspace.</li>
+<li><strong>It cannot harm your design.</strong> The folder is called <code>.git</code>; it sits beside your cells and holds only
+copies of them. Deleting it removes every restore point and touches nothing else.</li>
+<li><strong>Nothing was created before that moment.</strong> If you only opened the workspace and looked, nothing was
+written at all.</li>
+</ul>
+<h2 id="copy">&quot;I saved a copy and my history didn't come with it&quot;</h2>
+<p><strong>File ▸ Save Workspace As</strong> makes a copy of your design and <strong>the copy starts a history of its own.</strong>
+The original keeps every restore point it had.</p>
+<p>That is on purpose. A history holds <em>every earlier version of every file it ever kept</em>, including files
+you deleted long ago — so a copy made for one customer must not carry another customer's deleted
+artwork inside it, invisibly. Save Workspace As says so on the message it posts when the copy is made.</p>
+<p>If you want the history to travel, use <strong>File ▸ Archive Workspace</strong> and include history — read the
+next section first.</p>
+<h2 id="customer">&quot;I'm sending this workspace to a customer&quot;</h2>
+<p><strong>File ▸ Archive Workspace…</strong> puts the workspace into one <code>.zip</code>: every cell, every technology, the
+workspace file, and whatever else you tick — kits, referenced files, results. <strong>The history is not in
+it unless you say so</strong>, and there is a tickbox for saying so.</p>
+<h3 id="the-one-sentence-that-matters">The one sentence that matters</h3>
+<p><strong>A file you deleted from the workspace is still in the history.</strong></p>
+<p>A history holds every earlier version of every file it ever kept, and that includes files that are not
+in the workspace any more. If you imported one customer's artwork, finished with it, deleted it, and
+then archived this workspace for a <em>different</em> customer, <strong>including the history would send that
+artwork with it</strong> — and nothing in the visible file tree would show it.</p>
+<p>That is why the tickbox starts unticked. Everything else circuitRF is careful about here is a <em>loss</em>
+you can recover from; this one is the opposite, and nobody can undo it afterwards.</p>
+<h3 id="what-each-choice-sends">What each choice sends</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>what the recipient gets</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>history left out</strong> <em>(the default)</em></td>
+<td>a working workspace with no history. Completely normal — it opens, everything is present and current, and if they switch recording on they start a history of their own.</td>
+</tr>
+<tr>
+<td><strong>history included</strong></td>
+<td>the same workspace, <strong>plus every earlier version of every file it ever kept, and every restore point</strong> — so they can go back to any of them.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Including it is often the right thing to do.</strong> A design handed to a partner <em>with</em> its history is a
+far better handover than a snapshot, and inside your own organisation it is usually what you want. The
+point of the default is only that it should be a decision, not something that happens by itself.</p>
+<h3 id="what-circuitrf-tells-you-when-you-tick-it">What circuitRF tells you when you tick it</h3>
+<p>Before you press Archive, the dialog states — for this workspace, not in general:</p>
+<ul>
+<li><strong>how much larger</strong> the archive becomes;</li>
+<li><strong>how many versions and restore points</strong> it carries;</li>
+<li>and <strong>how many files are in the history that are not in the workspace now, and what they are
+called.</strong></li>
+</ul>
+<p>That last line is the one to read. If you recognise a filename on it, you have found the problem while
+you can still do something about it.</p>
+<h3 id="and-it-shows-you-every-title-that-is-about-to-leave">And it shows you every title that is about to leave</h3>
+<p>Before the archive is written, circuitRF lists <strong>the version titles the recipient will read</strong> — all of
+them, with their dates, and with any <a href="#titles">corrections</a> you have made shown in place of what they
+correct.</p>
+<p><strong>This is worth more than any of the correction mechanisms above</strong>, and it is not really about careless
+wording. The expensive version of this problem is a customer's name, or a part number, sitting in a
+title that is about to go to a <em>different</em> customer. Nobody can catch that from memory — forty titles
+written over six months are not something anyone can recall — and it takes about ten seconds to read.</p>
+<p>It is not a box to tick. If a title says something it should not, there is a <strong>Correct…</strong> button on
+its own row — the list re-reads itself afterwards, so what you are looking at is what is actually about
+to leave. The newest version can be retitled outright and any of them can take a correction; see
+<a href="#titles">&quot;I typed the title wrong&quot;</a>.</p>
+<p><strong>The same list appears in front of Push Changes and in front of copying a workspace</strong>, for the same
+reason and from the same computation. In front of a send it shows only the versions the other copy does
+not have yet, because those are the ones actually going.</p>
+<div class="callout note">
+<span class="label">An archive is the only way a restore point travels</span>
+<p>A copy of a workspace (<b>File ▸ Save Workspace As</b>) carries no history at all. An archive with
+history included carries the whole of it — your versions <i>and</i> your restore points. It is the
+strongest handover circuitRF can make.</p>
+</div>
+<h3 id="there-is-no-just-the-last-few-versions">There is no &quot;just the last few versions&quot;</h3>
+<p>It sounds like the best of both, and it is not offered, deliberately. It cannot be done without
+changing every entry in the history, so the copy you sent could never be compared with the one you
+kept. Worse, it would invite exactly the wrong belief: having chosen &quot;the last ten&quot;, you would assume
+the thing you were worried about was gone — and a filter that missed one file, or a file renamed before
+it was deleted, would be a leak you had explicitly tried to prevent and been told was handled.</p>
+<p><strong>Two honest choices are better than a third that is nearly true.</strong> If something must never leave your
+machine, take it out of the history before you send it — that is
+<a href="#rewriting">yours to do, with <code>git</code></a> — or send the archive without the history.</p>
+<h2 id="other-copy">Exchanging versions with another copy</h2>
+<p>If this workspace was brought here with
+<a href="workspace.html#copying-a-library">File ▸ Clone Workspace…</a>, two more items on the File menu apply
+to it.</p>
+<ul>
+<li><strong>Pull Changes</strong> brings down what is new on the copy it came from and <strong>lists it</strong>. The versions
+waiting for you appear at the top of the History panel, marked <em>on the copy this came from — not
+here yet</em>, with a line above the list saying how many. <strong>Nothing in your own files is touched by the
+pull itself.</strong> Select one to see which documents it changes; <strong>Go back to this</strong> puts those files
+into your workspace — and, like every other way back, keeps what you have now as a restore point
+first, so it is not a one-way door.</li>
+<li><strong>Push Changes</strong> sends the versions <em>you</em> have kept back to that copy. Your restore points stay here:
+they are your machine's safety net and mean nothing on anybody else's.</li>
+</ul>
+<p><strong>Neither happens by itself.</strong> circuitRF never contacts anything without being asked, and it holds no
+sign-in of its own — it uses whatever your machine's <code>git</code> is already set up with. If a sign-in is
+needed that cannot be supplied, the operation stops and says what was wanted rather than waiting.</p>
+<p>If the other side has moved on since you last brought its changes in, <strong>Push Changes</strong> says so and
+sends nothing. Bring the changes in first, choose where the two disagree, and send again.</p>
+<h2 id="two-of-you">&quot;Two of us are editing the same workspace&quot;</h2>
+<p>If two people change the same document and the changes come together, circuitRF shows you <strong>both
+versions and asks which one you want</strong>. Who wrote each, when, and what else changed alongside it. You
+pick one, and that document becomes that version <strong>whole</strong> — exactly the bytes that person wrote.</p>
+<p><strong>circuitRF will not combine them, and that is a statement about geometry and connectivity rather than
+about effort.</strong> Interleaving two sets of edits to a polygon's outline can produce a shape that is
+invalid, or valid and <em>wrong</em>, in a file that opens without a word of complaint. The same is true of a
+schematic's connections: two people's wires merged line by line can produce a netlist that elaborates,
+simulates, and is not the circuit either of them drew. <strong>A design that is silently wrong is worse than
+being asked a question</strong>, because at least the question is visible.</p>
+<p>This is also why the big centralised design-management systems in this industry lock a cellview while
+someone has it open rather than merging afterwards. When merging is not possible, keeping two people out
+of one file is the only strategy left. circuitRF does not run a lock server — but it is why
+<a href="workspace.html">referenced workspaces are read-only by default</a>, which is the cheapest version of the
+same idea.</p>
+<div class="callout warning">
+<span class="label">Choose, do not reconcile</span>
+<p>If both versions contain work you need, the answer is not to hand-merge the file. Keep one, open the
+other version's copy of the document beside it, and redo the changes you want in the editor — where the
+tool can tell you whether the result is a valid design.</p>
+</div>
+<h2 id="kept">What is kept, and what is not</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>in a restore point?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>cells, schematics, symbols, layouts, technologies</td>
+<td><strong>yes</strong></td>
+</tr>
+<tr>
+<td>the workspace file — analyses, references, configuration</td>
+<td><strong>yes</strong></td>
+</tr>
+<tr>
+<td>simulation results (<code>.npy</code>, <code>.spl</code>, <code>.lpcwave</code>, <code>.mat</code>)</td>
+<td>no — re-run the analysis</td>
+</tr>
+<tr>
+<td>your own panel layout, open tabs and colour theme</td>
+<td>no — they are yours, not the design's</td>
+</tr>
+<tr>
+<td>generated PCell artwork</td>
+<td>no — it is rebuilt from the layout</td>
+</tr>
+<tr>
+<td>a folder inside the workspace that keeps a history of its own</td>
+<td>no — it is left entirely alone</td>
+</tr>
+<tr>
+<td>a file you answered <strong>&quot;never include files like this&quot;</strong> about</td>
+<td>no — <strong>and it is not in a restore, and not in a copy anyone takes</strong></td>
+</tr>
+<tr>
+<td>a file left out because nobody was there to be asked</td>
+<td><strong>not yet</strong> — the entry says so and names it, and circuitRF asks the next time you keep a state yourself</td>
+</tr>
+<tr>
+<td>anything saved while history is switched <strong>off</strong> for the workspace</td>
+<td>no — <strong>but everything recorded before you switched it off is still there</strong></td>
+</tr>
+<tr>
+<td>anything at all, when your workspace sits inside another version-controlled folder</td>
+<td>no — circuitRF records nothing there, and says so</td>
+</tr>
+<tr>
+<td>the history, in a <strong>workspace archive</strong></td>
+<td><strong>not unless you tick it</strong> — and you still have it either way. It is the only way a restore point ever travels: see <a href="#customer">sending a workspace to a customer</a></td>
+</tr>
+<tr>
+<td>restore points, in a workspace <strong>copied from an address</strong> (File ▸ Clone Workspace…)</td>
+<td>no — <strong>and not recoverable.</strong> The versions its author kept do come; their restore points belong to the machine they were taken on, and yours start here. See <a href="workspace.html#copying-a-library">using a library another team maintains</a></td>
+</tr>
+<tr>
+<td><strong>which version of a referenced library</strong> your design uses</td>
+<td><strong>yes</strong> — so going back brings the library back with your files, not just the files. See <a href="workspace.html#pinning-restore">going back, with the library included</a></td>
+</tr>
+<tr>
+<td>the <strong>title</strong> you typed on a version you have not shared</td>
+<td><strong>yes — and it is yours to correct.</strong> See <a href="#titles">&quot;I typed the title wrong&quot;</a></td>
+</tr>
+<tr>
+<td>the <strong>title</strong> you typed on a version you have already sent</td>
+<td><strong>yes, and it stays.</strong> You can add a correction that shows in place of it and travels with it; the original wording stays in the history and can still be read by anyone holding a copy</td>
+</tr>
+<tr>
+<td>the <strong>label</strong> on a restore point</td>
+<td><strong>yes — and it is yours to correct, or to let go of, at any time.</strong> It never left this machine</td>
+</tr>
+<tr>
+<td>a restore point circuitRF <strong>tidied away</strong></td>
+<td><strong>yes, still</strong> — it stays in the list marked <em>tidied away</em>, and you can bring it back, until you reclaim the space (which asks first)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="unusually-large-files">Unusually large files</h3>
+<p>The first time something much larger than a design document would go into the history — an imported
+artwork file, a whole fabrication set — circuitRF asks what it is:</p>
+<ul>
+<li><strong>Include it</strong> — this is design input. It is kept: one copy now, and one more only when it changes.</li>
+<li><strong>Leave it out this time</strong> — nothing is written, and you will be asked again.</li>
+<li><strong>Never include files like this</strong> — it is a by-product. Files matching it are not kept, so they are
+<strong>not in a restore and not in a copy</strong>. They stay on disk exactly as they are.</li>
+</ul>
+<p>There is deliberately no &quot;keep it once, then ignore it&quot;: it cannot be made to work honestly. Either
+nothing would change while the button said it had, or your history would hold one stale version of a
+file that is missing from every copy anyone else takes.</p>
+<p><strong>At a moment nobody is at</strong> — a workspace closing, or an assistant working — circuitRF does not stop
+to ask. It leaves the file out, records that it did, shows the entry as incomplete with the file's
+name, and asks you the next time you keep a state yourself. Leaving a file out can be undone; putting
+one in cannot.</p>
+<h2 id="tidying">Tidying up — &quot;I can't get back to last month&quot;</h2>
+<p>circuitRF thins the automatic restore points as they get old, so a workspace you have had open every
+day for two years does not carry two years of entries. <strong>Two rules decide what goes</strong>, and the first
+one is the one worth knowing:</p>
+<ul>
+<li><strong>The newest ones are always kept, however old they are.</strong> Settings ▸ Revision Control ▸ <em>Always keep
+at least</em> sets how many. This is not a nicety: a computer's clock is something anyone can change, and
+a machine that wakes up believing it is 2140 would otherwise think every restore point had expired.
+The count floor means a wrong clock costs you nothing at all, which is also why the field will not go
+below its minimum.</li>
+<li><strong>After that, age.</strong> Settings ▸ Revision Control ▸ <em>Keep them for</em> sets how long.</li>
+</ul>
+<p><strong>Ones you asked for are never thinned.</strong> Nor is anything you marked <strong>Keep permanently</strong>, nor the
+entries that mark where you switched history off and on again.</p>
+<div class="callout note">
+<span class="label">Thinned is not deleted, and the list still shows it</span>
+<p>A restore point circuitRF tidies away stays in the list, marked <b>tidied away</b> and shown a little
+dimmer. Select it and press <b>Bring this back</b> and it is an ordinary entry again. Thinning stops
+circuitRF <i>offering</i> a state; it does not destroy it, and nothing destroys it until you ask —
+see <a href="#disk">"my disk is full"</a> below.</p>
+</div>
+<p><strong>So turning the retention setting down is not the door it looks like.</strong> If you set it to seven days
+and then want last month back, the entries are still there and still marked; bring one back and go to
+it. The only thing that ever actually removes them is <strong>Reclaim Space</strong>, which asks first and says
+exactly what it will destroy.</p>
+<p><strong>If circuitRF ever tells you it was about to tidy away far more than usual and did not</strong>, that is the
+safety catch working: it means the dates it is reading do not make sense — almost always a clock that
+has jumped. <strong>Nothing was removed.</strong> Check the machine's date and time, and the next tidy-up will be
+ordinary.</p>
+<h2 id="enclosing">&quot;My workspace is inside another version-controlled folder&quot;</h2>
+<p>If your workspace folder sits <em>inside</em> a folder that already has a version history of its own — a
+project repository, a shared checkout — <strong>circuitRF stops. It keeps no history for that workspace</strong>, it
+says so once when you open it, and a strip at the foot of the window says <strong>History held</strong> for as long
+as the workspace is open.</p>
+<p><strong>Why it stops rather than joining in.</strong> A restore point captures <em>everything</em> in the workspace,
+including files you never opened — that is the whole point of it. Doing that inside a folder somebody
+is also using for something else would sweep up work in progress that was nothing to do with circuitRF,
+under a message circuitRF wrote. And circuitRF will not add its own settings files to a folder that
+belongs to someone else's project.</p>
+<p><strong>What is therefore not being kept:</strong> nothing at all. No restore points are taken, none of the three
+moments records anything, and an AI assistant is stopped rather than allowed to edit with no floor
+under it.</p>
+<p><strong>How to fix it:</strong> move or copy the workspace to a folder that is <em>not</em> inside the other one. As soon
+as it is on its own, circuitRF starts keeping restore points at the next moment worth keeping, and says
+so.</p>
+<div class="callout note">
+<span class="label">A folder inside your workspace is a different thing</span>
+<p>A library somebody cloned <i>into</i> your workspace keeps its own history and is left entirely
+alone — circuitRF excludes it, tells you once which folder it skipped, and everything else in the
+workspace is kept normally. That is not the held state.</p>
+</div>
+<h2 id="already">&quot;This workspace already had version control and circuitRF asked me something&quot;</h2>
+<p>If the workspace folder <em>itself</em> already has a version history — you set one up, or you were given one
+— circuitRF does not take it over. It asks, once, and remembers your answer.</p>
+<table>
+<thead>
+<tr>
+<th>your answer</th>
+<th>what happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Use circuitRF's settings</strong> <em>(recommended)</em></td>
+<td>circuitRF keeps restore points here and applies its own settings for how the history is looked after. Everything already in the history stays exactly as it is.</td>
+</tr>
+<tr>
+<td><strong>Keep my settings</strong></td>
+<td>circuitRF keeps restore points here under your existing settings. See below for what that costs.</td>
+</tr>
+<tr>
+<td><strong>Don't keep a history here</strong></td>
+<td>circuitRF records nothing for this workspace, and the window says <strong>History held</strong>. You can change your mind in Settings ▸ Revision Control.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>What &quot;keep my settings&quot; actually costs.</strong> Two things, and both are about <em>getting work back</em>, not
+about tidiness:</p>
+<ul>
+<li><strong>A restore point circuitRF tidies away is destroyed permanently after a fortnight</strong>, instead of
+staying recoverable for as long as you leave it. The whole reason the recovery window is measured in
+weeks is that a design that is wrong but well-formed often is not noticed for weeks — so a fortnight
+is inside the window this feature exists to cover.</li>
+<li><strong>The way back from a mistaken reset or rewrite of your own work disappears after thirty days.</strong></li>
+</ul>
+<p>Everything already in your history survives whichever answer you give. <strong>And one thing is circuitRF's
+either way:</strong> it records under the name in Settings ▸ Revision Control, and it never runs the scripts
+your own tools attach to a change. A restore point that fired somebody's build hook — or that a hook
+could refuse — would not be a safety net.</p>
+<h2 id="off">Turning it off, and getting rid of it entirely</h2>
+<p>These are two different things and it matters which one you mean.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>what circuitRF does</th>
+<th>what happens to the history you already have</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Off</strong></td>
+<td>writes nothing at all</td>
+<td><strong>kept, listed, and still restorable</strong></td>
+</tr>
+<tr>
+<td><strong>Removed</strong></td>
+<td>not something circuitRF does — you delete one folder</td>
+<td>gone, permanently</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Off — Settings ▸ Revision Control ▸ <em>Keep a history of this workspace</em>.</strong> Untick it and circuitRF
+stops writing. <strong>It deletes nothing.</strong> Every restore point you already have stays in the list and you
+can still go back to any of them; tick it again and it carries on where it left off. There is no
+checkbox anywhere in circuitRF that destroys a history, and there is no &quot;delete all history&quot; command,
+deliberately.</p>
+<p>The setting belongs to the workspace, not to you, so:</p>
+<ul>
+<li><strong>The stretch while it was off is shown as a gap</strong>, with an entry at each end saying that recording
+stopped and started. It is not shown as a quiet week in which you happened not to save anything.</li>
+<li><strong>It travels.</strong> A copy or an archive of a workspace that was switched off arrives switched off,
+whatever the person opening it prefers — and they are told, with the setting one click away.</li>
+<li><strong>An AI assistant is stopped</strong>, told plainly that no restore point can be kept, and offered the
+switch — before anything is changed. See <a href="#assistants">below</a>.</li>
+</ul>
+<p><strong>Removed — delete the <code>.git</code> folder.</strong> That is the whole of it: one folder, plainly named, sitting
+beside your cells, using your file manager. It removes every restore point and touches nothing else.</p>
+<div class="callout note">
+<span class="label">Removing the history cannot harm your design</span>
+<p>Your design was never <i>inside</i> the history in any meaningful sense. A workspace is ordinary
+files in a folder; the <code>.git</code> folder sits beside them and holds copies. Delete it and the
+workspace opens exactly as it did, with every file present and current. Nothing you can do to the
+history can damage the design.</p>
+</div>
+<h2 id="disk">&quot;My disk is full and it says the history is taking the space&quot;</h2>
+<p>Two settings answer this, and they do completely different things.</p>
+<p><strong>Compact — Settings ▸ Revision Control ▸ <em>Compact Now</em>.</strong> Stores the same history in less space.
+Nothing is discarded, nothing becomes unavailable, and it is safe to press at any time. Try this first;
+on a workspace with large layouts in it, it very often is the whole answer.</p>
+<p><strong>Reclaim Space — the same tab, below it.</strong> This is the one destructive control in the feature, and it
+exists because thinning frees a restore point's <em>listing</em> and not its <em>contents</em>: a large file you once
+included and later regretted goes on taking space for as long as you leave it. Reclaiming frees that
+space for good.</p>
+<p>It destroys <strong>only states that were already tidied away</strong>, and only ones tidied away longer ago than
+the age you set. It asks first, tells you how many, and says in plain words that after it nobody can
+bring them back. <strong>Every restore point still listed, and every change you recorded yourself, survives
+it untouched, and your design files are never touched at all.</strong></p>
+<p><strong>Nothing reclaims on a schedule.</strong> circuitRF never destroys a state on its own; the age field on its
+own does nothing until you press the button.</p>
+<h2 id="rewriting">&quot;Something went in that shouldn't have&quot;</h2>
+<p><strong>This section is about a <em>file</em>.</strong> If it is a <em>title</em> you want to change, that is
+<a href="#titles">a different thing entirely and you can do it</a> — the two rules are separate on purpose.</p>
+<p>The <strong>files</strong> in a version are a record, and <strong>circuitRF never alters what was recorded.</strong> That is the
+whole value of it: a version whose contents could be quietly edited later is not something you can
+point at and say &quot;this is what I sent&quot;.</p>
+<p>So if something is in the history that must not be — a very large file you regret including, or
+something that should never have left your machine — circuitRF has no button for it, deliberately, and
+this is the honest answer rather than a dead end:</p>
+<p><strong>It is possible, and it is yours to do, with <code>git</code> on the command line.</strong> The history circuitRF keeps
+is an ordinary git repository sitting in a folder called <code>.git</code> beside your cells; every standard tool
+reads it, including whatever your IT department already supports. Rewriting a history to remove
+something is a well-documented operation and there are good guides to it.</p>
+<p><strong>Why circuitRF will not do it for you:</strong> rewriting replaces every entry in the history, so every copy
+anyone else has taken of this workspace stops matching and cannot be brought back into line. That is a
+consequence nobody should trigger from a menu item, and it is worth doing when it is worth that.</p>
+<p>If it is only about disk space, it probably is not what you want —
+<a href="#disk">Compact and Reclaim Space</a> do that without breaking anything.</p>
+<h2 id="assistants">History and AI assistants</h2>
+<p><strong>Before an AI assistant changes anything in your workspace, circuitRF keeps a restore point</strong>, labelled
+with what the assistant said it was about to do — <em>&quot;before: widen the output match&quot;</em>. Going back to that
+entry undoes everything the assistant did, in one action.</p>
+<p>This is automatic, you do not have to ask for it, and it happens <strong>before</strong> the first change rather than
+after the last: an assistant that stopped halfway still leaves the restore point exactly where it should
+be.</p>
+<p>It is also a floor the assistant cannot go around. If circuitRF cannot keep a restore point first —
+history is off for this workspace, the workspace sits inside another version-controlled folder, the
+workspace has not been saved anywhere yet, or you have unsaved changes open — <strong>the assistant is
+stopped and told, and nothing is changed.</strong></p>
+<p><strong>Switching history off switches this off too</strong>, which is the one case where two settings pull against
+each other. That is a perfectly reasonable thing to choose and a bad thing to discover by accident, so
+circuitRF says it out loud at the moment it matters: an AI edit asked for while history is off is
+refused <strong>before anything is modified</strong>, with a button offering to turn history back on. Being stopped is the
+feature working, not failing: it is not permitted to make its own backup arrangements instead, because
+you would then be told you were protected by something you could not go back through.</p>
+<p>An assistant's restore points are subject to the same tidying-up as the automatic ones. If one of them
+matters, select it and press <strong>Keep permanently</strong>.</p>
+
+<nav class="page-nav">
+  <a class="prev" href="file-formats.html"><span class="dir">Previous</span><span class="name">File Formats</span></a>
+  <a class="next" href="schematic-editor.html"><span class="dir">Next</span><span class="name">The Schematic Editor</span></a>
+</nav>
+</main>
+
+<footer class="doc-footer">
+  <img src="../assets/img/circuitRF-mark.svg" alt="">
+  <span>circuitRF — RF circuit simulator</span>
+  <span class="spacer"></span>
+  <a href="../index.html">Documentation home</a>
+</footer>
+
+<script src="../assets/js/search-index.js" defer></script>
+<script src="../assets/js/docs-search.js" defer></script>
+</body>
+</html>

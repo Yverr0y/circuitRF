@@ -80,6 +80,16 @@ public partial class WorkspaceViewModel
         if (dialog.Source is not { Length: > 0 } source
          || dialog.Destination is not { Length: > 0 } destination) return;
 
+        // RC-11 R-rc11-16. The titles about to be copied, listed first — and it is the SOURCE's titles,
+        // not this window's, because a copy carries the history of the thing being copied.
+        //
+        // It shows on a source this machine can read, which is §7A's librarian scenario: one workspace
+        // on this machine copied out of another one on it. A source behind an address cannot be
+        // enumerated before it has been fetched, so there is nothing to compute and nothing is shown —
+        // an empty list is the answer, and `ReviewWhatIsLeaving` goes straight on rather than
+        // presenting a dialog with nothing in it.
+        if (!await ReviewWhatIsLeaving(LeavingJourney.Copy, sourceRoot: source)) return;
+
         var result = Sharing.Copy(source, destination);
         if (result is not { Ok: true, WorkspaceCwsPath: { } cws }) return;
 
@@ -119,7 +129,7 @@ public partial class WorkspaceViewModel
     private void BringInChanges()
     {
         Sharing.BringInChanges(WorkspaceRootDir);
-        RefreshVersionHistoryPanel();
+        RefreshHistoryPanel();
     }
 
     /// <summary>
@@ -131,9 +141,89 @@ public partial class WorkspaceViewModel
     ///
     /// <para>A refusal because the other side moved is RC-3's translated row (R-rc9-7), and its remedy
     /// is bring-in-then-choose, <b>never a merge</b>.</para>
+    ///
+    /// <para><b>The titles about to leave are listed first</b> (RC-11 R-rc11-16, §12 Q36). One dialog,
+    /// in front of an operation that is already deliberate — and it is worth more than every
+    /// correction mechanism §5.11 offers, because the expensive case is not a careless word but a
+    /// customer's name in a title going to a different customer, and nobody can catch that from
+    /// memory.</para>
     /// </summary>
     [RelayCommand(CanExecute = nameof(CanExchangeWithOtherCopy))]
-    private void SendChanges() => Sharing.SendChanges(WorkspaceRootDir);
+    private async Task SendChanges()
+    {
+        if (!await ReviewWhatIsLeaving(LeavingJourney.Send)) return;
+
+        Sharing.SendChanges(WorkspaceRootDir);
+        RefreshHistoryPanel();
+    }
+
+    /// <summary>
+    /// §5.11's review, for whichever of the three journeys is about to happen (R-rc11-16 … R-rc11-19).
+    ///
+    /// <para><b>One function and one dialog for all three</b>, over
+    /// <see cref="Design.Revision.TitlesLeaving.For"/>'s one list. Three call sites each working out
+    /// what leaves would be three chances for one of them to be wrong, and the wrong one would be the
+    /// one nobody checked.</para>
+    ///
+    /// <para><b>Nothing to show is nothing to ask.</b> A workspace with no versions kept — the safety
+    /// net without the narrative, which is a great many of them — goes straight on: a dialog listing
+    /// nothing is a dialog that teaches people to click through this one.</para>
+    ///
+    /// <para>Returns whether to go on. Cancelling is a stop, not a failure, and reports nothing.</para>
+    /// </summary>
+    internal async Task<bool> ReviewWhatIsLeaving(LeavingJourney journey, string? fileWarning = null,
+                                                 string? sourceRoot = null)
+    {
+        if (Views.WorkspaceLocator.WindowFor(this) is not { } owner) return true;
+
+        string? root = sourceRoot ?? WorkspaceRootDir;
+
+        var titles = History.TitlesLeaving(root, journey);
+        if (titles.Count == 0) return true;
+
+        // R-rc11-19. The correction is reachable FROM the list, and the list is re-read afterwards —
+        // a review that went on showing the wording somebody had just fixed would be the one failure
+        // this dialog exists to prevent, produced by the dialog itself.
+        //
+        // Offered only on this workspace's own history: on the copy journey the list is the SOURCE's,
+        // which is another workspace circuitRF has not opened and whose history is not this window's
+        // to write to (R-rc0-5 — circuitRF writes to exactly one repository).
+        Views.Dialogs.TitlesLeavingDialog? review = null;
+
+        Func<LeavingTitle, Task<IReadOnlyList<LeavingTitle>>>? correct =
+            sourceRoot is null
+                ? async title =>
+                  {
+                      await CorrectFromTheReview(root, title, review!);
+                      return History.TitlesLeaving(root, journey);
+                  }
+                : null;
+
+        review = new Views.Dialogs.TitlesLeavingDialog(journey, titles, fileWarning, correct);
+        return await review.ShowDialog<bool?>(owner) is true;
+    }
+
+    /// <summary>
+    /// One row of the review, corrected in place — <b>through the same two commands the History panel's
+    /// own menu invokes</b>, so this surface holds no third spelling of §5.11.
+    ///
+    /// <para>The correction dialog is owned by the REVIEW rather than by the window. The review is
+    /// already modal over the window, so a second dialog owned by the window would be a modal opened
+    /// behind the one blocking it.</para>
+    /// </summary>
+    private async Task CorrectFromTheReview(string? root, LeavingTitle title, Window owner)
+    {
+        if (title.Sequence is { } sequence)
+        {
+            if (History.ListIncludingThinned(root).FirstOrDefault(p => p.Sequence == sequence) is { } point)
+                await RenameRestorePoint(point, owner);
+            return;
+        }
+
+        if (History.Versions(root).FirstOrDefault(
+                v => string.Equals(v.CommitId, title.CommitId, StringComparison.Ordinal)) is { } version)
+            await CorrectWhatYouWrote(version, owner);
+    }
 
     // ── The pin (R-rc9-8 … R-rc9-16) ──────────────────────────────────────────────────────────────
 

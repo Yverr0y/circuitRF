@@ -150,8 +150,7 @@ public partial class WorkspaceViewModel
         OnPropertyChanged(nameof(IsLibraryPanelShowing));
         OnPropertyChanged(nameof(IsPropertiesPanelShowing));
         OnPropertyChanged(nameof(IsMessagesPanelShowing));
-        OnPropertyChanged(nameof(IsRestorePointsPanelShowing));
-        OnPropertyChanged(nameof(IsVersionsPanelShowing));
+        OnPropertyChanged(nameof(IsHistoryPanelShowing));
 
         ToolPanelVisibilityChanged?.Invoke();
     }
@@ -173,11 +172,9 @@ public partial class WorkspaceViewModel
     /// <summary>Whether the Messages panel is on screen — the toolbar toggle's state.</summary>
     public bool IsMessagesPanelShowing => IsToolPanelShowing(DockPanelIds.Messages);
 
-    /// <summary>Whether the Restore Points panel is on screen — its toolbar toggle's state.</summary>
-    public bool IsRestorePointsPanelShowing => IsToolPanelShowing(DockPanelIds.RestorePoints);
-
-    /// <summary>Whether the Versions panel is on screen — its toolbar toggle's state.</summary>
-    public bool IsVersionsPanelShowing => IsToolPanelShowing(DockPanelIds.VersionHistory);
+    /// <summary>Whether the History panel is on screen — its toolbar toggle's state. <b>One panel and
+    /// one toggle since RC-10</b> (§5.10): the designer never has to know which one to open.</summary>
+    public bool IsHistoryPanelShowing => IsToolPanelShowing(DockPanelIds.History);
 
     /// <summary>
     /// Whether <paramref name="panelId"/> is <b>in view</b> right now — in the tree, docked in the shell

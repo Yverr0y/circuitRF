@@ -233,7 +233,7 @@ Two things are worth knowing before you press the button:
   has something to record here.
 
 Once a workspace has been cloned this way, **File ▸ Pull Changes** brings down what is new on the copy
-it came from and lists it at the top of the Versions panel — marked, and applied to your files only if
+it came from and lists it at the top of the History panel — marked, and applied to your files only if
 you choose one. **File ▸ Push Changes** sends the versions you have kept back, if you are allowed to.
 Neither happens by itself: circuitRF never contacts anything without being asked.
 
@@ -283,7 +283,7 @@ editing through it. What you would be editing is circuitRF's copy of that one ve
 
 This is the reason the feature is worth the bother.
 
-[Restore points](restore-points.html) and [versions](versions.html) record your workspace — which now
+[Restore points and versions](history.html) record your workspace — which now
 includes *which version of the library it uses*. So going back to last Tuesday brings back last
 Tuesday's files **and** last Tuesday's library. Without that, a restore hands you your own files back
 and silently keeps today's library, which is a state nobody asked for and nothing tells you about.
@@ -300,7 +300,7 @@ which is precisely what fixing a version exists to prevent.
 
 If you need the library's *content* to travel with your design — to a customer, to an archive, to a
 machine that will never reach the library — that is a
-[workspace archive](restore-points.html#customer), which is a different tool for a different problem.
+[workspace archive](history.html#customer), which is a different tool for a different problem.
 
 ## Sharing a workspace with other people {#shared}
 
@@ -362,8 +362,8 @@ undoes exactly as it did while docked — and where you left it is recorded in t
 
 ## The tool panels {#panels}
 
-Eight panels can be on screen; **View ▸ Panels** lists all of them, and the three used most often
-have toolbar buttons of their own.
+Nine panels can be on screen; **View ▸ Panels** lists all of them, and the four used most often have
+toolbar buttons of their own.
 
 <table class="param-table">
 <thead><tr><th>Panel</th><th>Shows</th></tr></thead>
@@ -374,12 +374,13 @@ have toolbar buttons of their own.
 <tr><td class="nowrap"><b>Analyses</b></td><td>The analyses the open test bench will run, and the Run button that runs them. See <a href="simulations.html">Simulations</a>.</td></tr>
 <tr><td class="nowrap"><b>Messages</b></td><td>What the application did, with warnings and errors. Each message links back to the file or object it is about.</td></tr>
 <tr><td class="nowrap"><b>DRC</b></td><td>Design-rule violations from the last check, each one selectable in the layout it came from.</td></tr>
+<tr><td class="nowrap"><b>History</b></td><td>Everything circuitRF has kept of this workspace — the states it kept for you and the versions you kept on purpose — with a filter and a search. See <a href="history.html">History</a>.</td></tr>
 <tr><td class="nowrap"><b>Wire Profile</b></td><td>Bond wires seen from the side — loop height and span. See <a href="wbond.html">wBond</a>.</td></tr>
 <tr><td class="nowrap"><b>Array Inductance</b></td><td>The inductance computed for the selected bond-wire array.</td></tr>
 </tbody>
 </table>
 
-The toolbar's three panel buttons are **toggles**, not "open it" buttons: press once to bring the
+The toolbar's panel buttons are **toggles**, not "open it" buttons: press once to bring the
 panel back where you last had it in this workspace, press again to close it. The menu items under
 **View ▸ Panels** only ever show a panel — a menu item named after a panel must not close it.
 

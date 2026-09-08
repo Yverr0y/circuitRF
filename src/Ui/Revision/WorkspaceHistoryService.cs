@@ -619,11 +619,168 @@ public sealed class WorkspaceHistoryService
     }
 
     /// <summary>
+    /// <b>RC-10's one list</b> (§5.10; R-rc10-1, R-rc10-5, R-rc10-21) — versions, restore points and
+    /// off periods in one ordering, filtered as the panel is filtering.
+    ///
+    /// <para>It reads through <see cref="HistoryList.Read"/> and holds no logic of its own, which is
+    /// what makes <c>circuitrf history list</c> and the panel the same answer rather than two
+    /// implementations that agree today.</para>
+    /// </summary>
+    public HistoryList.Result Entries(string? workspaceRoot, HistoryFilter filter)
+        => ReadEntries(workspaceRoot).Under(filter);
+
+    /// <summary>
+    /// <b>The repository read, once, with the filter left out of it</b> — and the reason it is a
+    /// separate step is that a filter toggle is not a question about the repository.
+    ///
+    /// <para>Every checkbox in §5.10's flyout used to re-read the whole workspace: the versions, the
+    /// restore points and the thinning journal, the sharing set, the corrections and the incoming
+    /// versions, plus <see cref="HiddenAutomaticCount"/>'s second full read of the same restore-point
+    /// list — <b>a dozen git subprocesses on the UI thread for a decision that changes nothing but
+    /// which rows are shown</b>. A checkbox that pauses is a checkbox a designer stops trusting, and
+    /// on a large history it was well past the threshold where a control stops feeling attached to
+    /// the pointer.</para>
+    ///
+    /// <para><b>Moving it off the UI thread would have been the wrong fix</b> and is worth saying so
+    /// here rather than in a note: it would still have been a dozen subprocesses and a visible delay
+    /// before the list settled, with a repository another process may be holding, in exchange for
+    /// threading a panel that refreshes at every boundary. What the filter actually needs is
+    /// <see cref="HistoryList.Build"/>, which is pure — so the read happens when the history CHANGES
+    /// and the filter runs over what is already in hand.</para>
+    ///
+    /// <para><b>It is deliberately not a cache with a lifetime.</b> The caller re-reads on every
+    /// boundary and every workspace switch, exactly as it did before; this type holds nothing between
+    /// calls, because a stale list would offer a designer a way back to a state that is no longer
+    /// there.</para>
+    /// </summary>
+    public HistorySources ReadEntries(string? workspaceRoot)
+        => Bind(workspaceRoot) is { } git ? HistoryList.ReadSources(git) : HistorySources.Nothing;
+
+    /// <summary>
+    /// R-rc10-5's empty-state arithmetic: <b>how many entries the default filter is hiding</b> on a
+    /// workspace whose history is nothing but workspace-close entries.
+    ///
+    /// <para>That workspace opens on an empty list, and it is exactly the one §1 is written for — its
+    /// owner never thought about history at all. A panel that said "nothing kept yet" there would be
+    /// saying something false about a workspace that has a fortnight of recoverable states in it.</para>
+    /// </summary>
+    /// <para><b>The panel does not call this</b> — it reads
+    /// <see cref="HistorySources.AutomaticCount"/> off the list it already has, which is the same
+    /// number counted from the same read rather than from a second one. This spelling stays for a
+    /// caller that wants the count alone.</para>
+    public int HiddenAutomaticCount(string? workspaceRoot) => ReadEntries(workspaceRoot).AutomaticCount;
+
+    /// <summary>
     /// How many versions a Pull has brought in that are not here yet — <b>what the panel says above the
     /// list</b>, so the count is legible without counting marked rows.
     /// </summary>
     public int IncomingCount(string? workspaceRoot)
         => Bind(workspaceRoot) is { } git ? HistoryBrowser.Incoming(git).Count : 0;
+
+    /// <summary>
+    /// RC-10 R-rc10-17. <b>What one entry holds that the workspace does not</b> — the comparison the
+    /// row's own menu offers, and the one a designer wants when deciding whether to go back at all.
+    /// Writes nothing; see <see cref="HistoryBrowser.CompareWithWorkspace"/> for why that mattered.
+    /// </summary>
+    public IReadOnlyList<DocumentChange> CompareWithWorkspace(string? workspaceRoot, HistoryEntry entry)
+    {
+        if (Bind(workspaceRoot) is not { } git) return [];
+
+        string? tree = entry.Version?.TreeId ?? entry.Point?.TreeId;
+        return tree is { Length: > 0 } ? HistoryBrowser.CompareWithWorkspace(git, tree) : [];
+    }
+
+    // ── RC-11: correcting what a person wrote (§5.11) ─────────────────────────────────────────────
+
+    /// <summary>
+    /// §5.11 case (a). <b>Renames a restore point</b> — a new parentless commit over the identical
+    /// tree, one reference update, and every trailer but the label preserved (R-rc11-3, R-rc11-4).
+    /// </summary>
+    /// <returns>
+    /// The entry's identity AFTER the rename, or null if it did not happen. A rename rewrites the
+    /// commit, so the caller cannot assume the id it passed in still names anything — and the one
+    /// caller that holds a copy of the old title needs the new id to keep its link alive.
+    /// </returns>
+    public string? Rename(string? workspaceRoot, RestorePoint point, string? label)
+    {
+        if (Bind(workspaceRoot) is not { } git) return null;
+
+        var outcome = RestorePoints.Rename(git, point, label);
+        _messages.PostDiagnostic(outcome.Diagnostic ?? HistoryMessages.RestorePointRenamed(label ?? ""));
+
+        Changed?.Invoke();
+        return outcome.Ok ? outcome.CommitId : null;
+    }
+
+    /// <summary>
+    /// §5.11 case (a). <b>Lets a restore point go, through RC-6's thinning journal rather than around
+    /// it</b> (R-rc11-5) — so it is still listed, still comes back, and frees nothing until §5.6a's
+    /// explicit reclaim.
+    /// </summary>
+    public bool Forget(string? workspaceRoot, RestorePoint point)
+    {
+        if (Bind(workspaceRoot) is not { } git) return false;
+
+        var outcome = RestorePoints.Forget(git, point);
+        _messages.PostDiagnostic(outcome.Diagnostic ?? HistoryMessages.RestorePointLetGo(point.Label));
+
+        Changed?.Invoke();
+        return outcome.Ok;
+    }
+
+    /// <summary>
+    /// §5.11 case (b). <b>Corrects the newest unshared version's title</b>, and refuses by naming why
+    /// on anything else (R-rc11-7, R-rc11-8).
+    /// </summary>
+    /// <inheritdoc cref="Rename" path="/returns"/>
+    public string? CorrectTitle(string? workspaceRoot, HistoryVersion version, string? title)
+    {
+        if (Bind(workspaceRoot) is not { } git) return null;
+
+        var outcome = VersionCorrections.CorrectTitle(git, version, title);
+        _messages.PostDiagnostic(outcome.Diagnostic);
+
+        Changed?.Invoke();
+        return outcome.Ok ? outcome.Version?.CommitId : null;
+    }
+
+    /// <summary>
+    /// R-rc11-2's predicate, asked once for the entry a designer just right-clicked. <b>Whether this
+    /// version can be retitled in place</b> — which decides which of §5.11's two version dialogs
+    /// opens, and is never a question put to the designer.
+    /// </summary>
+    public bool CanCorrectTitle(string? workspaceRoot, HistoryVersion version)
+        => Bind(workspaceRoot) is { } git
+        && VersionCorrections.CanCorrectTitle(git, version, VersionSharing.Compute(git));
+
+    /// <summary>The correction already on a version, or null. What case (c)'s dialog opens on, so a
+    /// designer refining one does not have to retype it.</summary>
+    public string? CorrectionOn(string? workspaceRoot, HistoryVersion version)
+        => Bind(workspaceRoot) is { } git
+        && VersionCorrections.Annotations(git).TryGetValue(version.CommitId, out string? c)
+            ? c : null;
+
+    /// <summary>
+    /// §5.11 case (c). <b>Adds a correction to a version, without altering it</b> (R-rc11-13) —
+    /// available for any version at all, which is what lets the two refusals above name it.
+    /// </summary>
+    public bool Annotate(string? workspaceRoot, HistoryVersion version, string? correction)
+    {
+        if (Bind(workspaceRoot) is not { } git) return false;
+
+        var outcome = VersionCorrections.Annotate(git, version, correction);
+        _messages.PostDiagnostic(outcome.Diagnostic);
+
+        Changed?.Invoke();
+        return outcome.Ok;
+    }
+
+    /// <summary>
+    /// §5.11's review (R-rc11-16, §12 Q36). <b>The version titles one journey is about to take off
+    /// this machine</b>, from the one function all three call.
+    /// </summary>
+    public IReadOnlyList<LeavingTitle> TitlesLeaving(string? workspaceRoot, LeavingJourney journey)
+        => Bind(workspaceRoot) is { } git ? Design.Revision.TitlesLeaving.For(git, journey) : [];
 
     /// <summary>R-rc7-11. What differs between two versions, at the granularity of documents.</summary>
     public IReadOnlyList<DocumentChange> Compare(string? workspaceRoot, HistoryVersion from,

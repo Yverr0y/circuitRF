@@ -543,6 +543,8 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "history.input.not-a-workspace",
         "history.large-files.unanswered",
         "history.list.empty",
+        "history.list.thinned-also-match",
+        "history.list.unknown-kind",
         "history.pin.alias-required",
         "history.pins.none",
         "history.repository.absent",

@@ -28,192 +28,26 @@
 <hr class="doc-headrule">
 
 <main class="page">
-  <p class="breadcrumb"><a href="../index.html">Docs</a> › <a href="index.html">Reference</a> › Versions</p>
+  <p class="breadcrumb"><a href="../index.html">Docs</a> › <a href="index.html">Reference</a> › History</p>
 
   <h1>Versions</h1>
-  <p class="lede">Recording a version of a workspace on purpose, under a title you write — what you come back to, what you send out, and what happens when two of you edit the same design.</p>
+  <p class="lede">This chapter is now part of History, which covers both the versions you keep on purpose and the states circuitRF keeps for you.</p>
 
-<nav class="toc">
-<h2>On this page</h2>
-<ol>
-<li><a href="#what">A version is something you decide</a></li>
-<li><a href="#keeping">"I want to keep this one — it's what I'm sending out"</a></li>
-<li><a href="#panel">The Versions panel</a></li>
-<li><a href="#comparing">What changed between two versions</a></li>
-<li><a href="#restore-then">"I went back to an old version, then kept working"</a></li>
-<li><a href="#gaps">Gaps in the list</a></li>
-<li><a href="#other-copy">Exchanging versions with another copy</a></li>
-<li><a href="#two-of-you">"Two of us are editing the same workspace"</a></li>
-<li><a href="#rewriting">"Something went in that shouldn't have"</a></li>
-</ol>
-</nav>
-<h2 id="what">A version is something you decide</h2>
-<p>circuitRF keeps two kinds of history, and they are deliberately not the same list.</p>
-<table>
-<thead>
-<tr>
-<th></th>
-<th><a href="restore-points.html">Restore points</a></th>
-<th>Versions</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>who makes them</td>
-<td>circuitRF, mostly automatically</td>
-<td>you, on purpose</td>
-</tr>
-<tr>
-<td>how many</td>
-<td>dozens, thinned as they age</td>
-<td>as few as you decide</td>
-</tr>
-<tr>
-<td>what they are for</td>
-<td>getting back from something that went wrong</td>
-<td>saying &quot;this one is finished&quot;</td>
-</tr>
-<tr>
-<td>do they travel?</td>
-<td>no — they belong to this machine</td>
-<td>yes — they go with a copy or a clone</td>
-</tr>
-</tbody>
-</table>
-<p>A restore point is a safety net. It is taken when you close the workspace, when you ask for one, and
-before an assistant changes anything, and nobody else ever sees it. <strong>A version is a statement.</strong> It has
-a title you wrote, it is what you come back to six weeks later, and it is what goes with the workspace
-when it leaves your machine.</p>
-<p>They are kept in separate panels for the same reason. A list with three hundred automatic entries in it
-and four deliberate ones mixed among them is a list nobody reads — and then the safety net stops working
-too, because nobody looks at it either.</p>
-<h2 id="keeping">&quot;I want to keep this one — it's what I'm sending out&quot;</h2>
-<p><strong>File ▸ Keep This Version…</strong>, or the button at the top of the Versions panel.</p>
-<p>One field: a title. Write what the design <em>is</em> at this moment, not what you did to it —
-<em>&quot;Output match retuned for 3.5 GHz&quot;</em>, not <em>&quot;changed some stuff&quot;</em>. Six weeks from now that line is the
-only thing that tells one version from another, and it is what anyone you send the workspace to will
-read first.</p>
-<p>What is recorded is <strong>the whole workspace as it stands</strong>: every cell, every schematic, every layout, the
-technology, the workspace's own configuration. Not just the document you have open.</p>
-<div class="callout note">
-<span class="label">Nothing changed means nothing is kept</span>
-<p>If the workspace is exactly as it was when you kept the last version, circuitRF says so and keeps
-nothing. Two entries holding identical content would be two entries you could not tell apart.</p>
-</div>
-<p>Afterwards, one line appears in the Messages panel saying what was kept <strong>and giving the version's
-identity</strong> — a short string of letters and digits. You will almost certainly never need it. It is there
-for the day you do: it is what to give someone helping you look at the workspace with tools other than
-circuitRF.</p>
-<p>Simulation results are not kept in a version, for the same reason they are not kept in a restore point:
-a result is a function of the design and the engine, so the design is the thing worth recording. See
-<a href="restore-points.html#kept">what is kept, and what is not</a> — the same table applies.</p>
-<h2 id="panel">The Versions panel</h2>
-<p><strong>View ▸ Panels ▸ Versions.</strong> A list, newest first: when, the title you wrote, and who kept it.</p>
-<p>Two actions:</p>
+<h2 id="this-chapter-moved">This chapter moved</h2>
+<p>Versions and restore points are described together now, in <strong><a href="history.html">History</a></strong> — because
+circuitRF shows them together, in one panel with one filter.</p>
+<p>Nothing about versions changed. The parts of this chapter you were probably looking for:</p>
 <ul>
-<li><strong>Keep this version</strong> — the same thing File ▸ Keep This Version… does.</li>
-<li><strong>Go back to this</strong> — puts the whole workspace back to that version. It works exactly like
-<a href="restore-points.html#going-back">going back to a restore point</a>, and everything on that page applies:
-unsaved work is asked about first, <strong>the state you are in now is kept first so you can come forward
-again</strong>, files created since are taken away, your results are left alone, and every open document's
-undo history is cleared.</li>
+<li><a href="history.html#two-kinds">Two kinds of entry, one list</a> — what a version is, and how it differs from a
+restore point</li>
+<li><a href="history.html#keeping">&quot;I want to keep this one — it's what I'm sending out&quot;</a></li>
+<li><a href="history.html#comparing">What changed between two versions</a></li>
+<li><a href="history.html#restore-then">&quot;I went back to an old version, then kept working&quot;</a></li>
+<li><a href="history.html#other-copy">Exchanging versions with another copy</a></li>
+<li><a href="history.html#two-of-you">&quot;Two of us are editing the same workspace&quot;</a></li>
+<li><a href="history.html#rewriting">&quot;Something went in that shouldn't have&quot;</a></li>
 </ul>
-<p><strong>If circuitRF is not recording</strong> — history is off for this workspace, or the workspace sits inside
-another version-controlled folder — the buttons stay where they are and say why rather than
-disappearing.</p>
-<h2 id="comparing">What changed between two versions</h2>
-<p>Select a version and the panel lists <strong>the documents that differ</strong> between it and the one before it:
-which cells changed, which were added, which were removed.</p>
-<p>That is deliberately where it stops. circuitRF does not show you a line-by-line comparison of what is
-inside a schematic or a layout — open both and look, or go back to one of them. A list of changed
-coordinates is not a picture of what moved.</p>
-<h2 id="restore-then">&quot;I went back to an old version, then kept working&quot;</h2>
-<p>This is one line of work, not two, and there is nothing to manage.</p>
-<ol>
-<li>You go back to Tuesday's version. The state you were in a moment ago is kept first, so nothing is
-lost — it is in the <a href="restore-points.html">restore points</a> list like any other entry, and you can go
-forward again if you picked the wrong moment.</li>
-<li>You keep working. The files on disk are Tuesday's, plus whatever you do next.</li>
-<li>You keep a version. <strong>That version records that it was brought back from Tuesday's</strong>, naming it and
-the date it was kept.</li>
-</ol>
-<p>That last part is the one worth knowing about. Without it, the list would show two versions in a row
-where the second undoes most of the first, and there would be nothing anywhere saying why — it would
-read as a change of mind. The line says what actually happened, and it appears <strong>only</strong> on the version
-that followed a going-back. The next one after that is your own work again and carries no such line.</p>
-<div class="callout note">
-<span class="label">Going back is still not a one-way door, even after you keep a version</span>
-<p>The restore point taken just before you went back survives everything you do afterwards, including
-keeping a version on top of the mistake. If you went back to the wrong moment and only noticed later,
-that entry is still in the Restore Points panel.</p>
-</div>
-<h2 id="gaps">Gaps in the list</h2>
-<p>If history was <a href="restore-points.html#off">switched off</a> for a stretch, the Versions list shows that
-stretch <strong>as a gap</strong>, with its dates and the reason — <em>&quot;Recording was off from 3 Mar to 17 Mar. Anything
-done in between is not in this history.&quot;</em></p>
-<p>It is not shown as a quiet fortnight in which you happened not to keep anything. Those are completely
-different situations and only one of them means the work is recoverable.</p>
-<h2 id="other-copy">Exchanging versions with another copy</h2>
-<p>If this workspace was brought here with
-<a href="workspace.html#copying-a-library">File ▸ Clone Workspace…</a>, two more items on the File menu apply
-to it.</p>
-<ul>
-<li><strong>Pull Changes</strong> brings down what is new on the copy it came from and <strong>lists it</strong>. The versions
-waiting for you appear at the top of the Versions panel, marked <em>on the copy this came from — not
-here yet</em>, with a line above the list saying how many. <strong>Nothing in your own files is touched by the
-pull itself.</strong> Select one to see which documents it changes; <strong>Go back to this</strong> puts those files
-into your workspace — and, like every other way back, keeps what you have now as a restore point
-first, so it is not a one-way door.</li>
-<li><strong>Push Changes</strong> sends the versions <em>you</em> have kept back to that copy. Your restore points stay here:
-they are your machine's safety net and mean nothing on anybody else's.</li>
-</ul>
-<p><strong>Neither happens by itself.</strong> circuitRF never contacts anything without being asked, and it holds no
-sign-in of its own — it uses whatever your machine's <code>git</code> is already set up with. If a sign-in is
-needed that cannot be supplied, the operation stops and says what was wanted rather than waiting.</p>
-<p>If the other side has moved on since you last brought its changes in, <strong>Push Changes</strong> says so and
-sends nothing. Bring the changes in first, choose where the two disagree, and send again.</p>
-<h2 id="two-of-you">&quot;Two of us are editing the same workspace&quot;</h2>
-<p>If two people change the same document and the changes come together, circuitRF shows you <strong>both
-versions and asks which one you want</strong>. Who wrote each, when, and what else changed alongside it. You
-pick one, and that document becomes that version <strong>whole</strong> — exactly the bytes that person wrote.</p>
-<p><strong>circuitRF will not combine them, and that is a statement about geometry and connectivity rather than
-about effort.</strong> Interleaving two sets of edits to a polygon's outline can produce a shape that is
-invalid, or valid and <em>wrong</em>, in a file that opens without a word of complaint. The same is true of a
-schematic's connections: two people's wires merged line by line can produce a netlist that elaborates,
-simulates, and is not the circuit either of them drew. <strong>A design that is silently wrong is worse than
-being asked a question</strong>, because at least the question is visible.</p>
-<p>This is also why the big centralised design-management systems in this industry lock a cellview while
-someone has it open rather than merging afterwards. When merging is not possible, keeping two people out
-of one file is the only strategy left. circuitRF does not run a lock server — but it is why
-<a href="workspace.html">referenced workspaces are read-only by default</a>, which is the cheapest version of the
-same idea.</p>
-<div class="callout warning">
-<span class="label">Choose, do not reconcile</span>
-<p>If both versions contain work you need, the answer is not to hand-merge the file. Keep one, open the
-other version's copy of the document beside it, and redo the changes you want in the editor — where the
-tool can tell you whether the result is a valid design.</p>
-</div>
-<h2 id="rewriting">&quot;Something went in that shouldn't have&quot;</h2>
-<p>A version you kept is a record, and <strong>circuitRF will not alter one after the fact.</strong> That is the whole
-value of it: a version that could be quietly edited later is not something you can point at and say
-&quot;this is what I sent&quot;.</p>
-<p>So if something is in the history that must not be — a very large file you regret including, or
-something that should never have left your machine — circuitRF has no button for it, deliberately, and
-this is the honest answer rather than a dead end:</p>
-<p><strong>It is possible, and it is yours to do, with <code>git</code> on the command line.</strong> The history circuitRF keeps
-is an ordinary git repository sitting in a folder called <code>.git</code> beside your cells; every standard tool
-reads it, including whatever your IT department already supports. Rewriting a history to remove
-something is a well-documented operation and there are good guides to it.</p>
-<p><strong>Why circuitRF will not do it for you:</strong> rewriting replaces every entry in the history, so every copy
-anyone else has taken of this workspace stops matching and cannot be brought back into line. That is a
-consequence nobody should trigger from a menu item, and it is worth doing when it is worth that.</p>
-<p>If it is only about disk space, it probably is not what you want —
-<a href="restore-points.html#disk">Compact and Reclaim Space</a> do that without breaking anything.</p>
 
-<nav class="page-nav">
-  <a class="prev" href="restore-points.html"><span class="dir">Previous</span><span class="name">Restore Points</span></a>
-  <a class="next" href="schematic-editor.html"><span class="dir">Next</span><span class="name">The Schematic Editor</span></a>
-</nav>
 </main>
 
 <footer class="doc-footer">

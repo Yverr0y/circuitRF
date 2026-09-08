@@ -44,13 +44,24 @@ public sealed record GitResult(
 /// path, the source repository — and git's ownership check applies to each of them separately. Named
 /// individually, never <c>*</c>, exactly as the root itself is.
 /// </param>
+/// <param name="Environment">
+/// Variables set for this one invocation, <b>applied after <see cref="GitEnvironment.Apply"/> so a
+/// caller can override what it sets</b> (RC-11 R-rc11-10).
+///
+/// <para>Its one use is a correction that must not restamp the version it corrects: the author, the
+/// committer and both recorded times are handed back to <c>commit-tree</c> through git's own
+/// <c>GIT_AUTHOR_*</c> and <c>GIT_COMMITTER_*</c> variables, which is the only interface git offers
+/// for writing an object with a time other than now. <b>Nothing here may carry a credential</b>
+/// (§9.1) — circuitRF holds none and supplies none.</para>
+/// </param>
 public sealed record GitRunOptions(
     string?   StandardInput = null,
     bool      ReadOnly      = false,
     bool      Network       = false,
     string?   IndexFile     = null,
     TimeSpan? Timeout       = null,
-    IReadOnlyList<string>? SafeDirectories = null);
+    IReadOnlyList<string>? SafeDirectories = null,
+    IReadOnlyDictionary<string, string>? Environment = null);
 
 /// <summary>
 /// <b>The one type that starts a git process.</b> Every git invocation circuitRF makes goes through
@@ -152,6 +163,11 @@ public sealed class GitCommand
         GitEnvironment.Apply(psi.Environment, Identity);
         if (options.ReadOnly)  psi.Environment["GIT_OPTIONAL_LOCKS"] = "0";
         if (options.IndexFile is { Length: > 0 } index) psi.Environment["GIT_INDEX_FILE"] = index;
+
+        // LAST, so a caller that has to write an object with a recorded identity and a recorded time
+        // (RC-11 R-rc11-10) overrides what Apply set from `Identity` rather than being overridden by it.
+        foreach (var (key, value) in options.Environment ?? new Dictionary<string, string>())
+            psi.Environment[key] = value;
 
         TimeSpan bound = options.Timeout
                       ?? (options.Network ? NetworkInactivityTimeout : LocalTimeout);

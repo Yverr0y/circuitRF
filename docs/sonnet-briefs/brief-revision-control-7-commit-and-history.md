@@ -63,8 +63,15 @@ list, which is where someone looking for one looks.
 
 ## 3. The browser
 
-**R-rc7-9. The browser shows the narrative; the restore-point list shows the safety net; they are not
-merged.** Conflating them produces a log no human will read, which then makes the safety net useless
+**R-rc7-9. SUPERSEDED BY rev 6 (§5.10, §12 Q32) — RC-10 merges the two panels into one.** What
+survives is the sentence's subject: the two *kinds of entry* stay distinct, distinctly marked, and
+distinctly stored, and §5.10 rule 6 forbids the merge from becoming a storage change. What is
+withdrawn is the second window. Gate 5 below narrows with it — checkpoints and commits still may not
+be confused for one another, and they are now confusable in one list, which is what the mark and the
+filter are for. The original text follows.
+
+*The browser shows the narrative; the restore-point list shows the safety net; they are not
+merged.* Conflating them produces a log no human will read, which then makes the safety net useless
 too because nobody looks at it. They may sit side by side and must not interleave.
 
 **R-rc7-10. An "off" period renders as a gap, with its reason** (RC-6 R-rc6-13). Rendering it as an

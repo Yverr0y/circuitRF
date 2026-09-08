@@ -134,10 +134,12 @@ public class PanelStateAfterCloseTests
         int end = source.IndexOf("\n    }", closed, StringComparison.Ordinal);
         string body = source[closed..end];
 
-        Assert.Contains("History.ResetForWorkspace()",      body, StringComparison.Ordinal);
-        Assert.Contains("RefreshRecordingIndicator()",      body, StringComparison.Ordinal);
-        Assert.Contains("RefreshRestorePointsPanel()",      body, StringComparison.Ordinal);
-        Assert.Contains("RefreshVersionHistoryPanel()",     body, StringComparison.Ordinal);
+        Assert.Contains("History.ResetForWorkspace()", body, StringComparison.Ordinal);
+        Assert.Contains("RefreshRecordingIndicator()", body, StringComparison.Ordinal);
+
+        // ONE panel since RC-10 (§5.10), so one call. What is asserted is unchanged: the surfaces that
+        // describe a workspace are emptied when there is no longer a workspace for them to be about.
+        Assert.Contains("RefreshHistoryPanel()", body, StringComparison.Ordinal);
     }
 
     // ══ 3. A settings change reaches the window it describes ══════════════════════════════════════
@@ -202,8 +204,8 @@ public class PanelStateAfterCloseTests
     }
 
     /// <summary>
-    /// And the broadcast reaches <b>all three</b> surfaces. Refreshing the indicator alone would fix
-    /// the reported sentence and leave both panels stating the old answer beside it.
+    /// And the broadcast reaches <b>every</b> surface. Refreshing the indicator alone would fix the
+    /// reported sentence and leave the list stating the old answer beside it.
     /// </summary>
     [Fact]
     public void TheBroadcastRefreshesAllThreeSurfaces()
@@ -213,11 +215,12 @@ public class PanelStateAfterCloseTests
         int start = source.IndexOf("public void RefreshRevisionSurfaces()", StringComparison.Ordinal);
         Assert.True(start >= 0, "RefreshRevisionSurfaces has been renamed or removed.");
 
-        // The indicator, plus the pair — RefreshHistoryPanels is what guarantees both lists, and
-        // OpeningAWorkspaceFillsBothHistoryPanels below asserts what it contains.
+        // The indicator, plus the list. RC-10 merged the two panels, so "all three surfaces" is now
+        // two calls — and the pairing bug this gate was written after is unreachable rather than
+        // merely fixed (OpeningAWorkspaceFillsTheHistoryPanel below asserts that directly).
         string body = source[start..source.IndexOf("\n    }", start, StringComparison.Ordinal)];
         Assert.Contains("RefreshRecordingIndicator()", body, StringComparison.Ordinal);
-        Assert.Contains("RefreshHistoryPanels()",      body, StringComparison.Ordinal);
+        Assert.Contains("RefreshHistoryPanel()",       body, StringComparison.Ordinal);
 
         // And it goes to every open workspace: the per-user switch changes what all of them say, and
         // the dialog is not modal, so the others are on screen at the time.
@@ -235,59 +238,71 @@ public class PanelStateAfterCloseTests
     // ══ 4. The panels with no workspace ═══════════════════════════════════════════════════════════
 
     /// <summary>
-    /// <b>An empty Versions panel says which empty it is.</b> "You have not kept a version of this
-    /// workspace yet" is a confident claim about a workspace, and with none open there is no workspace
-    /// for it to be about — the same defect as the indicator, one panel over.
+    /// <b>An empty History panel says which empty it is.</b> "Nothing has been kept for this workspace
+    /// yet" is a confident claim about a workspace, and with none open there is no workspace for it to
+    /// be about — the same defect as the indicator, one panel over.
+    ///
+    /// <para>RE-POINTED at RC-10's merged panel, not relaxed: the assertion is the same one and the
+    /// sentences are the merged panel's.</para>
     /// </summary>
     [Fact]
-    public void TheVersionsPanelDoesNotTalkAboutAWorkspaceThatIsNotOpen()
+    public void TheHistoryPanelDoesNotTalkAboutAWorkspaceThatIsNotOpen()
     {
-        var tool = new VersionHistoryTool();
+        var tool = new HistoryTool();
 
-        tool.SetRows([], hasWorkspace: false);
-        Assert.Equal(HistoryMessages.NoWorkspaceOpen, tool.EmptyText);
+        tool.SetRows(Empty, hasWorkspace: false);
+        Assert.Equal(HistoryMessages.NoWorkspaceOpenForHistory, tool.EmptyText);
 
-        tool.SetRows([], hasWorkspace: true);
-        Assert.Equal(HistoryMessages.NothingKeptYet, tool.EmptyText);
+        tool.SetRows(Empty, hasWorkspace: true);
+        Assert.Equal(HistoryMessages.NothingRecordedYet, tool.EmptyText);
     }
 
+    /// <summary>An empty result, spelled once.</summary>
+    private static HistoryList.Result Empty => new([], 0);
+
     /// <summary>
-    /// The two restore-point actions that need a row have one before they are live. <b>This is not the
-    /// greying R-rc6-8 forbids</b>: that rule is about held, off and failing, where a greyed control
-    /// says nothing about why. "Nothing is selected" needs no sentence — the list is beside the button.
+    /// The row actions that need a row have one before they are live. <b>This is not the greying
+    /// R-rc6-8 forbids</b>: that rule is about held, off and failing, where a greyed control says
+    /// nothing about why. "Nothing is selected" needs no sentence — the list is beside the menu.
     /// </summary>
     [Fact]
-    public void TheRestorePointActionsThatNeedARowAreLiveOnlyWithOne()
+    public void TheRowActionsThatNeedARowAreLiveOnlyWithOne()
     {
-        var tool = new RestorePointsTool();
+        var tool = new HistoryTool();
         Assert.False(tool.HasSelection);
         Assert.False(tool.CanKeepPermanently);
 
-        tool.SetPoints([Point(1, kept: false), Point(2, kept: true)], hasWorkspace: true);
+        tool.SetRows(Rows(Point(1, kept: false), Point(2, kept: true)), hasWorkspace: true);
 
-        tool.Selected = tool.Points[0];
+        tool.Selected = tool.Rows.First(r => r.Entry.Sequence == 1);
         Assert.True(tool.HasSelection);
         Assert.True(tool.CanKeepPermanently);
 
-        // Already pinned: the operation would do nothing, so neither does the button.
-        tool.Selected = tool.Points[1];
+        // Already pinned: the operation would do nothing, so neither does the menu item.
+        tool.Selected = tool.Rows.First(r => r.Entry.Sequence == 2);
         Assert.True(tool.HasSelection);
         Assert.False(tool.CanKeepPermanently);
     }
 
+    /// <summary>Restore points as the merged list would carry them, with no versions and no gaps.</summary>
+    private static HistoryList.Result Rows(params RestorePoint[] points)
+        => HistoryList.Build([], points, SharedVersions.Local, HistoryFilter.Default);
+
     /// <summary>
-    /// <b>Opening a workspace fills BOTH history panels, and the Versions one was missing.</b>
+    /// <b>Opening a workspace fills the history panel, and it once did not.</b>
     ///
     /// <para>Owner-reported, 2026-09-07: the Versions panel said <i>No workspace open</i> with a
     /// workspace open. The wrong sentence was the visible half; the consequential half is that
-    /// <see cref="VersionHistoryTool.HasWorkspace"/> starts false and is set only by
-    /// <c>SetRows</c> — so the panel's own <b>Keep this version</b> button was disabled on every
-    /// freshly opened workspace, and the only thing that would have enabled it was keeping a version,
-    /// which is what the button does. File ▸ Keep This Version… still worked, which is why nobody
-    /// caught it.</para>
+    /// <c>HasWorkspace</c> starts false and is set only by <c>SetRows</c> — so the panel's own
+    /// <b>Keep this version</b> button was disabled on every freshly opened workspace, and the only
+    /// thing that would have enabled it was keeping a version, which is what the button does. File ▸
+    /// Keep This Version… still worked, which is why nobody caught it.</para>
+    ///
+    /// <para><b>RC-10 removed the class of defect rather than the instance.</b> The bug was always one
+    /// of a PAIR of panels left out of a refresh; there is one panel now, so there is one call.</para>
     /// </summary>
     [Fact]
-    public void OpeningAWorkspaceFillsBothHistoryPanels()
+    public void OpeningAWorkspaceFillsTheHistoryPanel()
     {
         string source = Strip(File.ReadAllText(SourcePath("ViewModels/WorkspaceViewModel.Revision.cs")));
 
@@ -295,16 +310,12 @@ public class PanelStateAfterCloseTests
         Assert.True(opened >= 0, "OnWorkspaceOpenedForRevision has been renamed; this gate must follow it.");
 
         string body = source[opened..source.IndexOf("\n    }", opened, StringComparison.Ordinal)];
-        Assert.Contains("RefreshHistoryPanels()", body, StringComparison.Ordinal);
+        Assert.Contains("RefreshHistoryPanel()", body, StringComparison.Ordinal);
 
-        // And the pair really is a pair: one helper, so a caller cannot reach one panel and miss the
-        // other — which is what every bug in this area has been.
-        int pair = source.IndexOf("private void RefreshHistoryPanels()", StringComparison.Ordinal);
-        Assert.True(pair >= 0, "RefreshHistoryPanels has been renamed or removed.");
-
-        string pairBody = source[pair..source.IndexOf("\n    }", pair, StringComparison.Ordinal)];
-        Assert.Contains("RefreshRestorePointsPanel()",  pairBody, StringComparison.Ordinal);
-        Assert.Contains("RefreshVersionHistoryPanel()", pairBody, StringComparison.Ordinal);
+        // And there is exactly ONE panel to reach, which is what makes the pairing bug unreachable
+        // rather than merely fixed.
+        Assert.DoesNotContain("RefreshRestorePointsPanel", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("RefreshVersionHistoryPanel", source, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -312,16 +323,16 @@ public class PanelStateAfterCloseTests
     /// commands on. <b>The default is off and one method is the only way out of it.</b>
     /// </summary>
     [Fact]
-    public void TheVersionsPanelStartsWithNoWorkspaceAndOnlyARefreshChangesThat()
+    public void TheHistoryPanelStartsWithNoWorkspaceAndOnlyARefreshChangesThat()
     {
-        var tool = new VersionHistoryTool();
+        var tool = new HistoryTool();
 
         Assert.False(tool.HasWorkspace);
-        Assert.Equal(HistoryMessages.NoWorkspaceOpen, tool.EmptyText);
+        Assert.Equal(HistoryMessages.NoWorkspaceOpenForHistory, tool.EmptyText);
 
-        tool.SetRows([], hasWorkspace: true);
+        tool.SetRows(Empty, hasWorkspace: true);
         Assert.True(tool.HasWorkspace);
-        Assert.Equal(HistoryMessages.NothingKeptYet, tool.EmptyText);
+        Assert.Equal(HistoryMessages.NothingRecordedYet, tool.EmptyText);
     }
 
     // ══ 5. Closing the WINDOW, not the workspace ══════════════════════════════════════════════════

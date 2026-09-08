@@ -211,8 +211,7 @@
                                     <NativeMenuItem Header="Analyses"     Command="{Binding ShowToolPanelCommand}" CommandParameter="Analyses"/>
                                     <NativeMenuItem Header="Messages"     Command="{Binding ShowToolPanelCommand}" CommandParameter="Messages"/>
                                     <NativeMenuItem Header="DRC"          Command="{Binding ShowToolPanelCommand}" CommandParameter="Drc"/>
-                                    <NativeMenuItem Header="Restore Points" Command="{Binding ShowToolPanelCommand}" CommandParameter="RestorePoints"/>
-                                    <NativeMenuItem Header="Versions"     Command="{Binding ShowToolPanelCommand}" CommandParameter="VersionHistory"/>
+                                    <NativeMenuItem Header="History"      Command="{Binding ShowToolPanelCommand}" CommandParameter="History"/>
                                     <NativeMenuItem Header="Wire Profile"     Command="{Binding ShowToolPanelCommand}" CommandParameter="WBondProfile"/>
                                     <NativeMenuItem Header="Array Inductance" Command="{Binding ShowToolPanelCommand}" CommandParameter="WBondInductance"/>
                                 </NativeMenu>
@@ -786,18 +785,16 @@
                               Command="{Binding ShowToolPanelCommand}" CommandParameter="Drc">
                         <MenuItem.Icon><mi:MaterialIcon Kind="ShieldCheckOutline" Width="16" Height="16"/></MenuItem.Icon>
                     </MenuItem>
-                    <!-- revision-control.md §5.1, R-rc5-4c. Not in either shipped default layout: it
-                         is a safety net, looked at on the days something went wrong. -->
-                    <MenuItem Header="Restore _Points"
-                              Command="{Binding ShowToolPanelCommand}" CommandParameter="RestorePoints">
+                    <!-- revision-control.md §5.10, RC-10 R-rc10-1. ONE panel, replacing Restore Points
+                         and Versions. §5's argument is about two kinds of ENTRY and rev 2 spent it as
+                         an argument for two WINDOWS; the reason actually given for the split is
+                         unreadability, which a filter answers better — and the designer never has to
+                         know which panel to open, which is the question that is hardest at the moment
+                         it is asked. Not in either shipped default layout: it is looked at on the days
+                         something went wrong. -->
+                    <MenuItem Header="_History"
+                              Command="{Binding ShowToolPanelCommand}" CommandParameter="History">
                         <MenuItem.Icon><mi:MaterialIcon Kind="History" Width="16" Height="16"/></MenuItem.Icon>
-                    </MenuItem>
-                    <!-- revision-control.md §5.2, RC-7 R-rc7-9. A panel of its own beside the restore
-                         points and never merged with it: the narrative and the safety net have
-                         different authors, different granularity and different audiences. -->
-                    <MenuItem Header="_Versions"
-                              Command="{Binding ShowToolPanelCommand}" CommandParameter="VersionHistory">
-                        <MenuItem.Icon><mi:MaterialIcon Kind="SourceCommit" Width="16" Height="16"/></MenuItem.Icon>
                     </MenuItem>
                     <!-- wbond.md §10.1 — the two wBond panels, which follow the active layout. Not in
                          either shipped default layout: most designs have no wirebonds. -->
@@ -994,16 +991,16 @@
                     <mi:MaterialIcon Kind="MessageTextOutline" Width="18" Height="18"/>
                 </ToggleButton>
 
-                <!-- ── The two history panels (owner, 2026-09-07) ──────────────────────────
-                     Same three-state toggle as the three above, and the same glyphs the View menu
-                     already uses for these two panels — a button and a menu item that open the same
-                     panel under different pictures are two things to learn.
+                <!-- ── The history panel (owner, 2026-09-07; ONE of them since RC-10, §5.10) ──────
+                     Same three-state toggle as the three above, and the same glyph the View menu uses
+                     for it — a button and a menu item that open the same panel under different
+                     pictures are two things to learn.
 
                      PRESENT ONLY WHEN THERE IS A HISTORY TO LOOK AT: a workspace is open, there is a
                      usable git, and "keep a history" is on for this workspace (CanShowRevisionButtons).
                      Absent rather than greyed, which is RC-3's rule — a designer who never turns this
-                     on should not carry two dead buttons across the toolbar for the life of the
-                     application. The View menu still opens both panels whatever the toolbar shows, so
+                     on should not carry a dead button across the toolbar for the life of the
+                     application. The View menu still opens the panel whatever the toolbar shows, so
                      nothing becomes unreachable.
 
                      The separator is inside the same visibility, or a machine with no git would keep a
@@ -1011,18 +1008,11 @@
                 <Border Width="1" Margin="3,2" Background="{DynamicResource SystemBaseMediumLowColor}"
                         IsVisible="{Binding CanShowRevisionButtons}"/>
                 <ToggleButton Classes="PanelToggle"
-                              Command="{Binding ToggleToolPanelCommand}" CommandParameter="RestorePoints"
-                              IsChecked="{Binding IsRestorePointsPanelShowing, Mode=OneWay}"
+                              Command="{Binding ToggleToolPanelCommand}" CommandParameter="History"
+                              IsChecked="{Binding IsHistoryPanelShowing, Mode=OneWay}"
                               IsVisible="{Binding CanShowRevisionButtons}"
-                              ToolTip.Tip="Restore Points — states of this whole workspace that circuitRF kept for you, so you can put it back the way it was. Kept automatically, and whenever you ask.">
+                              ToolTip.Tip="History — the states of this workspace circuitRF kept for you and the versions you kept on purpose, in one list. Go back to any of them; what you have now is kept first.">
                     <mi:MaterialIcon Kind="History" Width="18" Height="18"/>
-                </ToggleButton>
-                <ToggleButton Classes="PanelToggle"
-                              Command="{Binding ToggleToolPanelCommand}" CommandParameter="VersionHistory"
-                              IsChecked="{Binding IsVersionsPanelShowing, Mode=OneWay}"
-                              IsVisible="{Binding CanShowRevisionButtons}"
-                              ToolTip.Tip="Versions — the states of this workspace you kept on purpose and gave a title to. These are what travel with a copy and what you send out.">
-                    <mi:MaterialIcon Kind="SourceCommit" Width="18" Height="18"/>
                 </ToggleButton>
 
             </StackPanel>
