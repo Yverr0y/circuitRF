@@ -51,7 +51,8 @@ Instead, briefly paraphrase owner/user messages. Pre-existing quotes are ok.
 - Test:    `dotnet test`
 - Run CLI: `dotnet run --project src/Cli -- <args>`
   Verbs: `sparam`, `dc`, **`hb`**, **`lp`**, **`lpp`**, **`em`**, **`convert`**, **`new`**,
-  **`import`**, **`check`**, **`explain`**, **`history`**, **`render`**, `elab`. **The CLI has its own design doc —
+  **`import`**, **`check`**, **`explain`**, **`history`**, **`render`**, **`netlist`**, **`plot`**,
+  **`find`**, `elab`. **The CLI has its own design doc —
   `docs/design/cli.md`** — covering the five-step anatomy of a run verb, the stdout/stderr split, and
   the rules below; read it before adding a verb. `hb`/`lp`/`lpp` run the netlist's harmonic-balance,
   loadpull and loadpull-pursuit analyses, and each runs the whole sweep when a `parametric_sweep`
@@ -182,6 +183,22 @@ Instead, briefly paraphrase owner/user messages. Pre-existing quotes are ok.
   `tests/Ui.Tests/Render/RenderCliVerbTests.cs`, which compares the verb run as a PROCESS against the
   in-process `CircuitRF.Render` call **byte for byte** — schematic, symbol and layout, SVG and PDF,
   and all four came back identical with no exclusion at all.
+  **`netlist <path.csch> [-o out.cnl]` writes the extraction Simulate performs, and every run verb
+  now takes a `.csch` too** (2026-09-08) — until then nothing headless could simulate a design anyone
+  had DRAWN: a run handed the JSON to `CnlReader`, which reported its first key as a missing cell
+  name. Both halves go through `CircuitSource.CnlTextOf`, so the file written is the same BYTES a run
+  consumes; the provenance comment is a constant for that reason, and the gate scans `src/Cli` for a
+  second `CnlWriter.Write` — the WRITER, not `NetExtractor.Extract`, which `check` calls on its own
+  account. Any other document kind is a refusal BY KIND.
+  **`plot <result> -o out.svg --trace cube=S,i=2,j=1,y=db` is one picture with no `.cdd` to author
+  first**, and not a second plotting path: it builds the document `render --data` consumes and hands
+  it to the same composer (`--write-cdd` gives that document back). `cube=` is the trace card's own
+  shorthand. **An integer on an `i`/`j` axis is a 1-based PORT NUMBER, not an index** — converting it
+  draws S12 for `i=2,j=1` in silence, which is invisible on a reciprocal part.
+  **`find <root> [--depth n]` says what is here** — workspaces, cells, views, declared analyses. The
+  walk is bounded and **says when it stopped short**; a directory symlink is never followed. Gate for
+  all three: `tests/Ui.Tests/Cli/MissingVerbsCliTests.cs`; detail in `src/Cli/RESOLVED.md` and
+  `cli.md` §14-16. `new workspace` also creates missing PARENT directories now.
 - Package: **exactly one script per platform, and each builds everything that platform ships** —
   `packaging/windows/build-windows.ps1` (9 files: `.msi` x64/arm64/x86 in both install scopes, plus
   the `.zip` the updater fetches), `packaging/macos/build-macos.sh` (2 `.dmg`s, both architectures;
