@@ -109,6 +109,9 @@ public static class AnalysisDirectiveSchema
             new("stepUnit",  Default: "Hz",   Summary: "Unit for step."),
             new("log",       Default: "false",Summary: "Logarithmic spacing. Also accepted as the bare word 'log'."),
             new("MarginThreshold", Default: "-15", Summary: "WSProbe stability margin, in dB, below which the run reports a probe as worth looking at. 'none' disables the report."),
+            new("NDF", Default: "no", Summary: "yes emits the normalized determinant function over the sweep, and with it the right-half-plane pole count of the whole network. Refuses, naming the instance, on any device circuitRF cannot render passive."),
+            new("PassiveVars", Summary: "Global variables the passive (Delta-0) assembly re-elaborates at 0 — how an SDD declares which of its terms is the controlled source. Comma- or space-separated."),
+            new("PassiveParams", Summary: "Instance parameters, spelled <instance>.<parameter>, that the passive assembly re-elaborates at 0 — the only route into a compiled or external model."),
         ], BareWords: ["log"]),
 
         new("hb", ["harmonic_balance", "harmonicbalance"],

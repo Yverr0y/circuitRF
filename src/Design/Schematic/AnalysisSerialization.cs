@@ -82,6 +82,11 @@ public sealed class CschAnalysis
     /// <summary>The WSProbe stability-margin report threshold in dB, or "none" (WSP-9). Null /
     /// absent → the default, so a file written before this key existed reads unchanged.</summary>
     public string?   MarginThresholdExpr { get; set; }
+    /// <summary>The NDF knob and its two passivation lists (brief-wsprobe-6). All null / absent on a
+    /// file written before they existed, which reads back as the run that file always had.</summary>
+    public string?   NdfExpr           { get; set; }
+    public string?   PassiveVarsExpr   { get; set; }
+    public string?   PassiveParamsExpr { get; set; }
     // The small-signal (probe-tickle) sweep — WSP-5 R-wsp5-1. All null on a file written before it,
     // which reads back as "no small-signal sweep" and therefore as the run that file always had.
     public string?   SsStartExpr       { get; set; }
@@ -297,6 +302,9 @@ public static class AnalysisSerialization
             Sweeps  = sp.Sweeps.Select(ToDto).ToList(),
             MarginThresholdExpr = sp.MarginThresholdExpr != Analysis.MarginThresholdDefault
                 ? sp.MarginThresholdExpr : null,
+            NdfExpr = sp.NdfExpr != Analysis.NdfDefault ? sp.NdfExpr : null,
+            PassiveVarsExpr   = sp.PassiveVarsExpr.Length   > 0 ? sp.PassiveVarsExpr   : null,
+            PassiveParamsExpr = sp.PassiveParamsExpr.Length > 0 ? sp.PassiveParamsExpr : null,
         },
 
         HarmonicBalanceAnalysis hb => new CschAnalysis
@@ -449,6 +457,9 @@ public static class AnalysisSerialization
             {
                 Enabled = dto.Enabled,
                 MarginThresholdExpr = dto.MarginThresholdExpr ?? Analysis.MarginThresholdDefault,
+                NdfExpr           = dto.NdfExpr           ?? Analysis.NdfDefault,
+                PassiveVarsExpr   = dto.PassiveVarsExpr   ?? "",
+                PassiveParamsExpr = dto.PassiveParamsExpr ?? "",
             },
 
         "hb" => new HarmonicBalanceAnalysis(dto.Name)

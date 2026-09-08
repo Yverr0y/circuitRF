@@ -35,6 +35,7 @@ using CircuitRF.Core.Design;
 using CircuitRF.Core.Devices.External;
 using CircuitRF.Core.Elaboration;
 using CircuitRF.Core.Netlist;
+using CircuitRF.Core.Stability;
 using CircuitRF.Engine;
 using CircuitRF.Engine.HarmonicBalance;
 using CircuitRF.Engine.Loadpull;
@@ -274,7 +275,29 @@ static int RunSparam(string[] args)
             ? null
             : AnalysisSettings.Default.WithMarginThreshold(
                   Analysis.ParseMarginThresholdDb(spa.MarginThresholdExpr));
-        var ds  = SParameterEngine.Run(nl, lib, tb, baseDirectory: null, freqs, settings, control: RunHost.Control);
+
+        // brief-wsprobe-6 R-wsp6-2: NDF= is a property of the DIRECTIVE too, and the passive
+        // assembly may need a second elaboration — which is why the request carries a factory bound
+        // to this run's own library and testbench rather than a netlist.
+        NdfRequest? ndfReq = null;
+        if (spa is not null && Analysis.ParseNdf(spa.NdfExpr))
+        {
+            var pv = NdfPassivation.ParseList(spa.PassiveVarsExpr);
+            var pp = NdfPassivation.ParseList(spa.PassiveParamsExpr);
+            ndfReq = new NdfRequest
+            {
+                PassiveVars    = pv,
+                PassiveParams  = pp,
+                PassiveNetlist = () => NdfPassivation.BuildPassiveNetlist(lib, tb, null, pv, pp),
+            };
+            Console.Error.WriteLine(
+                "NDF: on" +
+                (pv.Length > 0 ? $", PassiveVars={string.Join(",", pv)}" : "") +
+                (pp.Length > 0 ? $", PassiveParams={string.Join(",", pp)}" : ""));
+        }
+
+        var ds  = SParameterEngine.Run(nl, lib, tb, baseDirectory: null, freqs, settings,
+                                       control: RunHost.Control, ndf: ndfReq);
 
         // AGAIN, AFTER THE RUN — the engine reports what it finds while assembling and solving, long
         // after the pass above. Without this a real problem is written to nl.Warnings and printed by
@@ -284,6 +307,10 @@ static int RunSparam(string[] args)
         // R-wsp1-12(a): one line per WSProbe after the S summary, and the label ↔ idx pairs in the
         // document — the idx depends on the other probes, so it is reported, never left to be guessed.
         PrintWsProbes(ds, nl, freqs);
+
+        // R-wsp6-2: the whole point of the knob, on one line — and the property findings beside it,
+        // because a count read off a sweep that has not reached its asymptote is not a count.
+        PrintNdf(ds, nl, freqs);
 
         // R-wsp1-11: the TestBench's measure lines, through the one evaluator the GUI uses, so a
         // measurement of a probe output (SP1.ZG("P1")) answers the same headlessly as when opened.
@@ -1786,6 +1813,57 @@ static void PrintWsProbes(DataSet ds, ElaboratedNetlist nl, double[] freqs)
     JsonRun.Wsprobes = rows;
 }
 
+/// <summary>
+/// The NDF summary of an <c>NDF=yes</c> run: <c>NDF: N right-half-plane pole(s)</c>, the unrounded
+/// encirclement it was rounded from, and the <c>ndf.*</c> property findings the engine raised
+/// (brief-wsprobe-6 R-wsp6-2). Silent on a run that carried no NDF.
+/// </summary>
+static void PrintNdf(DataSet ds, ElaboratedNetlist nl, double[] freqs)
+{
+    if (!ds.Contains("NDF") || !ds.Contains("NDF_poles")) return;
+
+    int    poles = (int)ds["NDF_poles"].RealValues[0];
+    var    enc   = ds["NDF_enc"].RealValues;
+    double net   = enc.Length > 0 ? enc[^1] : 0.0;
+    var    ndf   = ds["NDF"].ComplexValues;
+
+    Console.WriteLine(
+        $"NDF: {poles} right-half-plane pole(s)  " +
+        $"(net clockwise encirclement {net:G4}; NDF({freqs[^1] / 1e9:G4} GHz)={FormatComplex(ndf[^1])})");
+
+    var findings = FindingKeys(nl);
+    foreach (var f in findings) Console.WriteLine($"  NDF finding: {f}");
+
+    JsonRun.Ndf = new NdfReportJson(
+        poles, net,
+        AtFmax: [ndf[^1].Real, ndf[^1].Imaginary],
+        AtFmin: [ndf[0].Real,  ndf[0].Imaginary],
+        Findings: findings.Count > 0 ? findings : null);
+}
+
+/// <summary>
+/// The <c>ndf.*</c> diagnostic KEYS a run raised, deduplicated and in order — the keys rather than
+/// the sentences, because the sentences are already printed as warnings and a JSON consumer wants
+/// something it can branch on.
+///
+/// <para>Read from the START of each message only. Matching a key ANYWHERE in the text picks up the
+/// ones a message quotes in its own advice — the counter-clockwise note tells the reader to go and
+/// look at the passivation notes, and that sentence was being reported as a passivation note.</para>
+/// </summary>
+static List<string> FindingKeys(ElaboratedNetlist nl)
+{
+    var keys = new List<string>();
+    foreach (string w in nl.Warnings)
+    {
+        if (!w.StartsWith("ndf.", StringComparison.Ordinal)) continue;
+        int end = 0;
+        while (end < w.Length && (char.IsLetterOrDigit(w[end]) || w[end] is '.' or '-')) end++;
+        string key = w[..end].TrimEnd('.');
+        if (!keys.Contains(key)) keys.Add(key);
+    }
+    return keys;
+}
+
 /// <summary>The smallest non-NaN value of a margin cube and the frequency it sits at, or two nulls
 /// when the run carried no such cube (or every point is NaN — a degenerate probe).</summary>
 static (double? Min, double? Hz) MarginMinimum(DataSet ds, string cube, double[] freqs)
@@ -1930,6 +2008,8 @@ static int PrintHelp()
     Console.WriteLine();
     Console.WriteLine("Commands:");
     Console.WriteLine("  sparam <file.cnl|.csch> [--freq start:stop:step] [-o out.sNp]");
+    Console.WriteLine("           (NDF=yes on the directive adds the normalized determinant function");
+    Console.WriteLine("            and the network's right-half-plane pole count)");
     Console.WriteLine("  dc     <file.cnl|.csch>   (DC operating point)");
     Console.WriteLine("  hb     <file.cnl|.csch>   (harmonic balance; runs the sweep if one wraps it)");
     Console.WriteLine("  lp     <file.cnl|.csch>   (loadpull over the directive's Gamma grid)");

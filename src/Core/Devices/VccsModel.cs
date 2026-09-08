@@ -53,6 +53,19 @@ public sealed class VccsModel : ComponentModel
 
     public override string[] TerminalNames => ["out+", "out-", "ctrl+", "ctrl-"];
 
+    /// <summary>
+    /// The whole element IS a dependent source, so <c>Δ0</c> holds none of it (brief-wsprobe-6 §3).
+    /// </summary>
+    public override Activity Activity => Activity.ActiveExact;
+
+    /// <inheritdoc/>
+    public override string? PassivationNote => "G → 0";
+
+    /// <summary><c>G → 0</c>: an ideal current source with zero transconductance is an open circuit,
+    /// and an open circuit is no stamp at all. It allocates no branch, so the passive assembly's
+    /// row and column numbering is unchanged.</summary>
+    public override void StampPassive(IMnaContext mna, ElaboratedComponent c, double omega) { }
+
     public override void Stamp(IMnaContext mna, ElaboratedComponent c, double omega)
     {
         if (c.Nodes.Length < 4)

@@ -1875,3 +1875,119 @@ rides through unstacked, so the Data Display draws the fan and the line it was j
 the drive level to the note's text would have been inert, so it was not added. Propagating per-point
 diagnostics out of the sweep would be a real improvement and a broad behaviour change for every
 analysis — out of this brief's scope, and it belongs to whoever next touches that engine.
+
+## WSP-6 — the normalized determinant function, native to the engine (2026-09-08)
+
+The design note (`docs/design/stability-wsprobe.md` §11) carries the contract, the passivation table
+and the derivations. What follows is only what cost time to find and is still surprising.
+
+### Reading a count off half a contour: the factor of two, and where it is NOT applied
+
+The argument principle counts turns around the CLOSED Nyquist contour; a sweep runs `ω ≥ 0`. Property
+4 (`NDF(−ω) = conj NDF(ω)`) makes the missing arm turn through exactly the same angle — writing
+`φ(ω) = arg NDF(ω)`, the negative arm runs `−φ(∞) → −φ(0)` and contributes `φ(∞) − φ(0)`, the same as
+the positive one — so **right-half-plane poles = 2 × (the swept locus's own net turn)**, referred to
+the sweep's first sample.
+
+This is not a convention that could have gone either way, and gate (a) is what settles it: the
+analytic single-loop stage has a single REAL right-half-plane pole, and under the doubling it reads
+exactly 1. Counting the swept locus's turns literally would make it read one half. A conjugate PAIR —
+what an oscillator actually has — reads 2, which is why the document's own two resonators read 2 and
+not the 1 the brief expected.
+
+**`WspEnvelope.LoadpullNdf`'s `Encirclements` field carries the UNDOUBLED count**, as WSP-9 shipped
+it, and is not referred to the sweep's first sample either. Correcting it was tried and reverted: it
+flips WSP-9's own gate (i) at one grid point of the Ohtomo fixture, where the REDUCED NDF over an
+incomplete probe set wanders by about half a turn without ever going round — a number that is not a
+count in the first place. The two agree about *whether* a point is unstable, which is all R-wsp9-5's
+threshold reads, and WSP-6's gate (k) asserts both the verdict and the factor of two at 288 grid
+points. **Reconciling them is an owner decision**, recorded in `src/RfCore/RESOLVED.md` too.
+
+### Passivating a NEGATIVE RESISTANCE puts a constant factor in the NDF, and it is not a bug
+
+A dependent source contributes ADDITIVELY to the network determinant, so removing it leaves every
+constant factor alone and the ratio tends to exactly 1. `R → |R|` does not: it changes an element
+VALUE, and an element value can be a *factor* of the determinant. The document's series resonator is
+the clean example — its determinant is `g·g_S·[s²LC + 1 + sC(R1 + RS)]`, with `R1` appearing both in
+the prefactor and in the bracket, so `Δ/Δ0 = (g/g0)·(bracket ratio) = −1 × (bracket ratio)` for all ω.
+
+Consequences, all real:
+
+- The NDF tends to −1 rather than 1. **The pole count is unaffected** — a constant turns through no
+  angle — and the count was measured correct (2) with the locus sitting on the negative real axis.
+- Platzker's property 3 is stated for a `Δ0` that differs from `Δ` by removed dependent sources
+  alone, and a plain `|NDF(f_max) − 1| > tol` check therefore fires on a correct answer, telling the
+  user to extend a sweep that is already long enough. The check now asks whether the locus is still
+  CLOSING on 1 (its distance from 1, against the same distance a decade lower) before deciding which
+  of two messages to give — `ndf.no-asymptote` or `ndf.constant-asymptote`, the second quoting the
+  extrapolated limit.
+- A Richardson extrapolation of the `1/ω` tail was tried first as the discriminator and abandoned:
+  the residual is `−a/(ω₀ω₁)` from the `1/ω²` term, and on a five-decade sweep whose resonance sits
+  three decades up, the second (validating) extrapolation lands ON the resonance rather than in the
+  tail. It survives only as the number the message quotes.
+- There is no passivation of a negative resistor that avoids this. Decomposing it into `+|g|` plus a
+  VCCS of `−2|g|` leaves the same total conductance in `Δ`'s prefactor, so the same −1.
+
+### A VCCS across its own control is a conductance, and passivating a SERIES one opens the branch
+
+`G → 0` removes the element. That is right for a SHUNT negative conductance (the parallel resonator)
+and wrong for a SERIES one: the branch becomes an open, two nodes float, and `Δ0` is a different
+topology. It shows up as the NDF diverging linearly with ω instead of tending to a constant — which
+is Platzker's property 3 catching a bad `Δ0` exactly as it is meant to, and is why
+`testdata/ndf/series_resonator_negr.cnl` uses a plain negative resistor and only the parallel fixture
+uses the VCCS the brief describes.
+
+### Property 2 forbids a counter-clockwise ENCIRCLEMENT, not a counter-clockwise stretch of phase
+
+The first threshold was half a turn, on the reasoning that the unwrap already assumes better than
+half a turn per step. That fires on the Ohtomo two-device amplifier, which backtracks by 0.74 of an
+encirclement near the top of a seven-decade sweep with a `Δ0` that is provably passive — every
+element of it is an ordinary R, L or C once the two transconductances are zeroed. A locus is free to
+wander as long as it does not go round; the threshold is a whole encirclement.
+
+### The passivity guard earns its keep on the first real device it met
+
+Hero 2's SDD FET at its own quiescent bias has a slightly NEGATIVE output conductance — the model's
+`_v2*th` drain-induced-barrier-lowering term makes increasing `Vds` raise the effective threshold —
+so the PASSIVATED block fails `Y + Yᴴ ⪰ 0` by 4.7e-4 of its own scale, at every bias point tried. The
+run reports it and still emits the NDF, with the count declared unreliable. That is the honest answer
+and it is the check §8 p. 113 asks for.
+
+The minimum eigenvalue is read off an SVD by shifting: `H = Y + Yᴴ` is Hermitian, so its singular
+values are the magnitudes of its eigenvalues and cannot tell a negative one from a positive one, but
+`H + σ_max(H)·I` is positive semidefinite and ITS singular values ARE its eigenvalues. Hence
+`λ_min(H) = σ_min(H + σ_max(H)·I) − σ_max(H)`, at the cost of one extra SVD of a matrix at most a
+handful of ports wide. NumFlat has no Hermitian eigendecomposition; this needs none.
+
+### Hero 2's own testbench cannot be used for a stability analysis, and the reason is instructive
+
+Its per-harmonic `Z_Port` terminations are `1e-6 Ω` outside the tone bands — a dead short at both
+ports — so neither node can develop a voltage and the stage is unconditionally stable: its NDF is 1
+to eight decimal places at every frequency, whatever the transconductance is. `testdata/ndf/
+hero2_sdd_stage.cnl` therefore keeps the DEVICE and its bias and gives it ordinary 50 Ω terminations.
+
+Even then it will not oscillate, and no lead inductance changes that: Hero 2's SDD is a pure
+transconductance with **no charge storage at all**, so `∂I_g/∂V_d = 0` and the stage is strictly
+unilateral. A unilateral stage has no loop to close. Adding `Cgd` gives it one, but through a 50 Ω
+load that path is inverting and therefore stabilising; source degeneration needs a `Cgs` the model
+also lacks. What does oscillate is the classical MEISSNER arrangement — a tuned tank at the drain, a
+feedback winding at the gate, mutual inductance between them, each coil doubling as its own DC feed —
+whose start-up threshold is one parameter and sits between `k = 0.6` and `0.7`.
+
+**Kurokawa's start-up signature is absent at both probed nodes of that oscillator**, while the NDF
+counts two right-half-plane poles and the reduced NDF over the same probes agrees with it. That is
+§4.4 (p. 50) the other way round: a node-local test is not a fundamental circuit quantity and is "not
+a rigorous stability measurement". A Meissner oscillator's negative resistance lives in the
+transformer loop, not at either terminal. It is printed by the gate, not asserted away — it is
+exactly the situation WSP-6 exists for.
+
+### Two traps in the fixtures themselves
+
+**A variable that declares a unit makes the site unit be skipped** (var-unit-wins), so
+`Mk = 9 nH` with `M=Mk nH` is 9 nH — and an override written as `9e-9` with no unit is read AS nH and
+lands nine orders of magnitude out. The oscillator fixture states `Mk` in henries with no unit for
+that reason. This is the same trap the sweep-scale note records.
+
+**A WSProbe hung off a large resistor reports that resistor.** The probe must sit IN a node,
+splitting it, with real circuit on both sides; only then is `1/Y0 = ZG + ZL` the loop impedance the
+start-up condition is about.

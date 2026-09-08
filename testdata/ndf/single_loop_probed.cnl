@@ -1,0 +1,18 @@
+; single_loop_probed.cnl — brief-wsprobe-6 R-wsp6-9(f): the analytic single-loop stage of
+; single_loop_stage.cnl with a WSProbe at EVERY non-ground node, so that
+;     wsp_ndf(SP1.wsp, SP1.wsp_passive, all)      (Eq. 186)
+; can be compared against the engine's own native NDF. Over every node the reduced determinant IS
+; the full one, so the two must agree; over a SUBSET it is the reduced NDF the reference document
+; describes (§8, pp. 112–113), correct only if the omitted nodes hide no pole.
+;
+; A probe splits the node it sits in, so each one adds a net: `g` becomes g/gp and `d` becomes d/dp.
+; The probe is a 0 V short and perturbs nothing (§4, p. 33).
+gm = -0.062
+Term:T1     g 0   Num=1 Z=1000 Ohm
+WSProbe:PG  g gp
+R:Rf        dp gp  R=5000 Ohm
+VCCS:G1     dp 0 gp 0   G=gm
+WSProbe:PD  d dp
+R:RL        d 0   R=200 Ohm
+C:CL        d 0   C=1 pF
+analysis SP1 type=sparam start=1 stop=1e5 npts=201 log Unit=MHz NDF=yes

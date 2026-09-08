@@ -5,6 +5,7 @@ using CircuitRF.Core.Design;
 using CircuitRF.Core.Devices;
 using CircuitRF.Core.Devices.External;
 using CircuitRF.Core.Elaboration;
+using CircuitRF.Core.Stability;
 using CSparse.Complex.Factorization;
 using NumFlat;
 using RfCore;
@@ -46,15 +47,21 @@ public static class SParameterEngine
     /// per FREQUENCY POINT — never inside a factorization or a port back-substitution. Null keeps the
     /// pre-cancellation behaviour exactly.
     /// </param>
+    /// <param name="ndf">
+    /// brief-wsprobe-6: when non-null the run also emits the normalized determinant function, from a
+    /// SECOND assembly of the same terminated network with every dependent source passivated. Null
+    /// keeps a run byte-identical to one made before the knob existed (R-wsp6-9(j)).
+    /// </param>
     public static DataSet Run(
         ElaboratedNetlist netlist,
         double[]          freqsHz,
         AnalysisSettings? settings = null,
-        RunControl?       control  = null)
+        RunControl?       control  = null,
+        NdfRequest?       ndf      = null)
     {
         settings ??= AnalysisSettings.Default;
 
-        return RunWithStats(netlist, freqsHz, settings, control).Data;
+        return RunWithStats(netlist, freqsHz, settings, control, ndf).Data;
     }
 
     /// <summary>
@@ -70,20 +77,40 @@ public static class SParameterEngine
         ElaboratedNetlist netlist,
         double[]          freqsHz,
         AnalysisSettings? settings = null,
-        RunControl?       control  = null)
+        RunControl?       control  = null,
+        NdfRequest?       ndf      = null)
     {
         settings ??= AnalysisSettings.Default;
 
-        var prep      = Prepare(netlist, freqsHz, settings);
+        var prep      = Prepare(netlist, freqsHz, settings, ndf);
         var sMatrices = new Mat<Complex>[freqsHz.Length];
         var wsp       = prep.Probes.Length > 0 ? new Complex[freqsHz.Length][,] : null;
-        RunRange(prep, freqsHz, settings, 0, freqsHz.Length, sMatrices, wsp, control, abort: null);
+        var nd        = NewNdfOutput(prep, freqsHz.Length);
+        RunRange(prep, freqsHz, settings, 0, freqsHz.Length, sMatrices, wsp, nd, control, abort: null);
         var stats = new RunStats(
-            prep.Mna.Factorizations + (prep.MnaTerminated?.Factorizations ?? 0),
+            prep.Mna.Factorizations + (prep.MnaTerminated?.Factorizations ?? 0)
+                                    + (prep.MnaPassive?.Factorizations ?? 0),
             prep.BackSubstitutions,
             prep.Mna.PatternBuilds);
-        return (BuildDataSet(netlist, freqsHz, sMatrices, prep.Z0PerPort, prep.Probes, wsp, settings), stats);
+        return (BuildDataSet(netlist, freqsHz, sMatrices, prep.Z0PerPort, prep.Probes, wsp, nd, settings), stats);
     }
+
+    /// <summary>The NDF's own per-frequency outputs, allocated only when the knob is on — the
+    /// emptiness is what keeps a no-knob run on exactly its old path (R-wsp6-9(j)).</summary>
+    private sealed class NdfOutput
+    {
+        internal Complex[]     Ndf        = [];
+        /// <summary>WSP-1's probe solves against the PASSIVE assembly (<c>wsp_passive</c>, §5) —
+        /// null when the run has no probes.</summary>
+        internal Complex[][,]? WspPassive;
+    }
+
+    private static NdfOutput? NewNdfOutput(Prepared p, int freqCount)
+        => p.Ndf is null ? null : new NdfOutput
+        {
+            Ndf        = new Complex[freqCount],
+            WspPassive = p.Probes.Length > 0 ? new Complex[freqCount][,] : null,
+        };
 
     // ── Frequency-parallel overload (SP-P3) ───────────────────────────────────
 
@@ -121,13 +148,14 @@ public static class SParameterEngine
         double[]          freqsHz,
         AnalysisSettings? settings = null,
         RunControl?       control  = null,
-        int               maxDegreeOfParallelism = 0)
+        int               maxDegreeOfParallelism = 0,
+        NdfRequest?       ndf      = null)
     {
         settings ??= AnalysisSettings.Default;
 
         int requested = maxDegreeOfParallelism > 0 ? maxDegreeOfParallelism : settings.MaxParallelism;
         int degree    = PlanDegree(netlist, freqsHz.Length, requested);
-        if (degree <= 1) return Run(netlist, freqsHz, settings, control);
+        if (degree <= 1) return Run(netlist, freqsHz, settings, control, ndf);
 
         int freqCount = freqsHz.Length;
         var sMatrices = new Mat<Complex>[freqCount];
@@ -141,13 +169,16 @@ public static class SParameterEngine
         {
             // Elaborated SERIALLY, before any worker starts: the Elaborator reads the TestBench's
             // global-variable list, which a parametric sweep is mutating around this very call.
-            preps[0] = Prepare(netlist, freqsHz, settings);
+            // A passive netlist (R-wsp6-4) is a second elaboration and is made here for the same
+            // reason, once per worker.
+            preps[0] = Prepare(netlist, freqsHz, settings, ndf);
             for (int i = 1; i < degree; i++)
             {
                 var copy = new Elaborator(lib) { BaseDirectory = baseDirectory }.Elaborate(tb);
                 extras[i - 1] = copy;
-                preps[i]      = Prepare(copy, freqsHz, settings);
+                preps[i]      = Prepare(copy, freqsHz, settings, ndf);
             }
+            var nd = NewNdfOutput(preps[0], freqCount);
 
             // A chunk that fails records WHERE and stops; the others notice and stop too, so a
             // cancelled or singular run does not go on solving points nobody will read.
@@ -160,7 +191,7 @@ public static class SParameterEngine
                 var (lo, hi) = ChunkRange(freqCount, degree, c);
                 try
                 {
-                    RunRange(preps[c], freqsHz, settings, lo, hi, sMatrices, wsp, control, abort);
+                    RunRange(preps[c], freqsHz, settings, lo, hi, sMatrices, wsp, nd, control, abort);
                 }
                 catch (Exception ex)
                 {
@@ -179,11 +210,15 @@ public static class SParameterEngine
             for (int i = 0; i < extras.Length; i++)
                 if (extras[i] is { } copy) netlist.MergeDiagnosticsFrom(copy);
 
-            return BuildDataSet(netlist, freqsHz, sMatrices, preps[0]!.Z0PerPort, preps[0]!.Probes, wsp, settings);
+            return BuildDataSet(netlist, freqsHz, sMatrices, preps[0]!.Z0PerPort, preps[0]!.Probes,
+                                wsp, nd, settings);
         }
         finally
         {
             foreach (var copy in extras) copy?.Dispose();
+            foreach (var prep in preps)
+                if (prep?.PassiveNetlist is { } pn && !ReferenceEquals(pn, prep.Netlist))
+                    pn.Dispose();
         }
     }
 
@@ -245,6 +280,7 @@ public static class SParameterEngine
         Complex[]         z0PerPort,
         WspProbeSite[]    probes,
         Complex[][,]?     wsp,
+        NdfOutput?        ndf,
         AnalysisSettings  settings)
     {
         DataSet ds;
@@ -264,6 +300,30 @@ public static class SParameterEngine
         }
 
         if (wsp is not null) AddWspCubes(ds, netlist, freqsHz, probes, wsp, settings);
+
+        if (ndf is not null)
+        {
+            var axis = new Axis("freq", (double[])freqsHz.Clone(), "Hz");
+            NdfCubePacker.Add(ds, netlist, axis, freqsHz, ndf.Ndf, axisWhat: "");
+
+            // §5 — the probe route's other half. WSP-3's wsp_ndf(wsp, wsp_passive, probes) over a
+            // probe at every non-ground node must equal this run's own NDF, and it can only be
+            // asked for if the passive assembly's probe solves are published too.
+            if (ndf.WspPassive is { } wp)
+            {
+                int m = probes.Length, size = 2 * m;
+                var rc = new double[size];
+                for (int k = 0; k < size; k++) rc[k] = k + 1;
+                var data = new Complex[freqsHz.Length * size * size];
+                for (int fi = 0; fi < freqsHz.Length; fi++)
+                    for (int r = 0; r < size; r++)
+                        for (int c = 0; c < size; c++)
+                            data[(fi * size + r) * size + c] = wp[fi][r, c];
+                ds.Add("wsp_passive", new DataCube(
+                    [new Axis("freq", (double[])freqsHz.Clone(), "Hz"),
+                     new Axis("row", rc), new Axis("col", (double[])rc.Clone())], data));
+            }
+        }
         return ds;
     }
 
@@ -317,6 +377,34 @@ public static class SParameterEngine
 
         /// <summary>Back-substitutions performed so far, for <see cref="RunStats"/>.</summary>
         internal int                BackSubstitutions;
+
+        // ── NDF (brief-wsprobe-6) ─────────────────────────────────────────────
+
+        /// <summary>The run's NDF request, or null when the knob is off — and when it is off,
+        /// every field below is null and no code below is entered.</summary>
+        internal NdfRequest?        Ndf;
+
+        /// <summary>The netlist the PASSIVE assembly is stamped from: this run's own when every
+        /// active model passivates itself, and a second elaboration with the user's scaling
+        /// quantities at 0 when one does not (R-wsp6-4).</summary>
+        internal ElaboratedNetlist? PassiveNetlist;
+
+        /// <summary>The passive terminated assembly's own <see cref="MnaSystem"/>, so the active
+        /// assembly's pattern cache is untouched.</summary>
+        internal MnaSystem?         MnaPassive;
+
+        /// <summary>
+        /// The matrix columns the active devices control, in NETLIST order — the preferred column
+        /// order for the return-difference matrix, so its LU pivots are Struble's sequential return
+        /// differences (Eq. 17). A column that turns out not to differ is dropped; a differing
+        /// column not listed here is appended in ascending order, so the ordering is a preference
+        /// and never a filter.
+        /// </summary>
+        internal int[]              NdfColumnOrder = [];
+
+        /// <summary>Every ActiveExact/ActiveUserScaled component of the PASSIVE netlist, for
+        /// R-wsp6-5's per-frequency passivity guard.</summary>
+        internal ElaboratedComponent[] NdfGuarded = [];
     }
 
     /// <summary>One WSProbe as the engine addresses it: the component, the document's label and
@@ -329,7 +417,7 @@ public static class SParameterEngine
         int ComponentIndex, string Label, int Idx, int GNode, int LNode, Complex? TermZG, Complex? TermZL);
 
     private static Prepared Prepare(
-        ElaboratedNetlist netlist, double[] freqsHz, AnalysisSettings settings)
+        ElaboratedNetlist netlist, double[] freqsHz, AnalysisSettings settings, NdfRequest? ndf = null)
     {
         // ── Identify ports + build branch-label map ───────────────────────────
         int nonGroundNodes = netlist.Nodes.Count - 1;
@@ -350,7 +438,10 @@ public static class SParameterEngine
                 TermAt(netlist.Components[w.ComponentIndex].Nodes[1])))
             .ToArray();
 
-        if (ports.Count == 0 && probes.Length == 0)
+        // R-wsp1-6 (a probe) and brief-wsprobe-6 (an NDF) are both legitimate reasons to run a
+        // port-less network: the reference document's own NDF fixtures have no ports, and the
+        // determinant of a terminated network does not need a driven one.
+        if (ports.Count == 0 && probes.Length == 0 && ndf is null)
             throw new InvalidOperationException(
                 "S-parameter analysis requires at least one Port, Term, or P1Tone component at the testbench top level. " +
                 "Place Term or P1Tone components (Num=1, Z=50 Ohm) directly in the testbench, not inside sub-cells.");
@@ -443,7 +534,7 @@ public static class SParameterEngine
         // Must happen before the frequency loop — the SDD reads ControlBranchIndices when it stamps.
         ResolveSParamControlBranches(netlist, freqsHz, allPortsResistive, ports, N, dcNodeVoltages, settings);
 
-        return new Prepared
+        var prep = new Prepared
         {
             Netlist           = netlist,
             Ports             = ports,
@@ -455,8 +546,83 @@ public static class SParameterEngine
             CanRetry          = canRetry,
             DcNodeVoltages    = dcNodeVoltages,
             Probes            = probes,
-            MnaTerminated     = probes.Length > 0 && !allPortsResistive ? new MnaSystem(nonGroundNodes) : null,
+            // The terminated assembly is needed by the probes on the legacy path, and by the NDF on
+            // that path too — the network whose determinant Eq. 181 is about is the terminated one.
+            MnaTerminated     = (probes.Length > 0 || ndf is not null) && !allPortsResistive
+                                ? new MnaSystem(nonGroundNodes) : null,
+            Ndf               = ndf,
         };
+
+        if (ndf is not null) PrepareNdf(prep, netlist, freqsHz, settings, ndf, nonGroundNodes);
+        return prep;
+    }
+
+    /// <summary>
+    /// Everything the NDF needs before the first frequency: the passivation survey and its refusal,
+    /// the second elaboration when a user-scaled device makes one necessary, the passive assembly's
+    /// own <see cref="MnaSystem"/>, the device-order column preference and the list of blocks the
+    /// per-frequency passivity guard checks (brief-wsprobe-6 R-wsp6-3, R-wsp6-4, R-wsp6-5).
+    ///
+    /// <para>The refusal is raised HERE, before the frequency loop, so a design that cannot yield an
+    /// NDF says so once and names every offending instance — rather than at whichever frequency the
+    /// first offending stamp is reached, where nothing on the stack could list the others.</para>
+    /// </summary>
+    private static void PrepareNdf(
+        Prepared prep, ElaboratedNetlist netlist, double[] freqsHz, AnalysisSettings settings,
+        NdfRequest ndf, int nonGroundNodes)
+    {
+        var survey = NdfPassivation.Survey(netlist, freqsHz, ndf.PassiveVars, ndf.PassiveParams);
+        if (survey.Refusal is { } refusal) throw new InvalidOperationException(refusal);
+
+        ElaboratedNetlist passive = netlist;
+        if (survey.NeedsPassiveNetlist)
+        {
+            if (ndf.PassiveNetlist is null)
+                throw new InvalidOperationException(
+                    $"{NdfPassivation.CannotPassivateKey}: this design has a user-scaled active " +
+                    "device, so Δ0 needs a second elaboration with the named scaling quantities at " +
+                    "0, and this caller supplied no way to make one. Run the analysis through a " +
+                    "path that carries the library and testbench (the CLI, the GUI, or " +
+                    "SParameterEngine's parallel overload).");
+            passive = ndf.PassiveNetlist();
+
+            // R-wsp6-4: ΔM is formed by subtracting the two assemblies entry by entry, so the two
+            // netlists must agree about every row and column before a single one is compared.
+            if (passive.Nodes.Count != netlist.Nodes.Count ||
+                passive.Components.Count != netlist.Components.Count)
+                throw new InvalidOperationException(
+                    $"ndf.assembly-mismatch: the passive elaboration has {passive.Nodes.Count} node(s) " +
+                    $"and {passive.Components.Count} component(s) against the active one's " +
+                    $"{netlist.Nodes.Count} and {netlist.Components.Count}. Setting a scaling variable " +
+                    "to 0 must not change the TOPOLOGY — a PassiveVars global that also sizes a " +
+                    "component out of existence, or that a conditional branches on, does exactly that.");
+            for (int k = 0; k < passive.Components.Count; k++)
+                if (passive.Components[k].InstancePath != netlist.Components[k].InstancePath)
+                    throw new InvalidOperationException(
+                        $"ndf.assembly-mismatch: component {k} is '{netlist.Components[k].InstancePath}' " +
+                        $"in the active netlist and '{passive.Components[k].InstancePath}' in the " +
+                        "passive one. The two elaborations must emit the same components in the same " +
+                        "order, or the branch numbering they hand the matrix is not the same numbering.");
+        }
+
+        prep.PassiveNetlist = passive;
+        prep.MnaPassive     = new MnaSystem(nonGroundNodes);
+        prep.NdfGuarded     = [.. passive.Components.Where(ec =>
+            ec.ActivityFor(freqsHz) is Activity.ActiveExact or Activity.ActiveUserScaled)];
+
+        // The control columns of the active devices, in netlist order: every node column an active
+        // device touches, plus every branch column it owns. A superset of the columns that actually
+        // differ, which is exactly what a column PREFERENCE may be — DeltaColumns drops the ones
+        // that do not differ and appends any that differ and are not listed.
+        var order = new List<int>();
+        var seen  = new HashSet<int>();
+        foreach (var ec in netlist.Components)
+        {
+            if (ec.ActivityFor(freqsHz) is Activity.Passive) continue;
+            foreach (int node in ec.Nodes)
+                if (node > 0 && seen.Add(node - 1)) order.Add(node - 1);
+        }
+        prep.NdfColumnOrder = [.. order];
     }
 
     /// <summary>Solves the half-open frequency range [lo, hi) into <paramref name="sMatrices"/>,
@@ -469,13 +635,14 @@ public static class SParameterEngine
         int              hi,
         Mat<Complex>[]  sMatrices,
         Complex[][,]?    wspOut,
+        NdfOutput?       ndfOut,
         RunControl?      control,
         Func<bool>?      abort)
     {
         if (p.AllPortsResistive)
-            RunWavePath(p, freqsHz, settings, lo, hi, sMatrices, wspOut, control, abort);
+            RunWavePath(p, freqsHz, settings, lo, hi, sMatrices, wspOut, ndfOut, control, abort);
         else
-            RunLegacyPath(p, freqsHz, settings, lo, hi, sMatrices, wspOut, control, abort);
+            RunLegacyPath(p, freqsHz, settings, lo, hi, sMatrices, wspOut, ndfOut, control, abort);
     }
 
     // ── Wave path (Re(Z0) > 0 for every port) ─────────────────────────────────
@@ -488,6 +655,7 @@ public static class SParameterEngine
         int              hi,
         Mat<Complex>[]  sMatrices,
         Complex[][,]?    wspOut,
+        NdfOutput?       ndfOut,
         RunControl?      control,
         Func<bool>?      abort)
     {
@@ -520,6 +688,7 @@ public static class SParameterEngine
             ApplyRegularization(mna, netlist, nonGroundNodes, settings, applyIfNecessary: false);
 
             SparseLU lu;
+            bool regularized = false;
             try
             {
                 lu = mna.Factorize(nodeNamer: nodeNamer, branchNamer: branchNamer);
@@ -537,6 +706,7 @@ public static class SParameterEngine
                 StampPortConductances(mna, ports, N);
                 ApplyRegularization(mna, netlist, nonGroundNodes, settings, applyIfNecessary: true);
                 lu = mna.Factorize(nodeNamer: nodeNamer, branchNamer: branchNamer);
+                regularized = true;
             }
 
             // N = 0 (a port-less probe run, R-wsp1-6): nothing to extract, and the entry stays default.
@@ -577,7 +747,15 @@ public static class SParameterEngine
             // R-wsp1-3/R-wsp1-4: the probe injections, against the SAME factorisation — on this path
             // the assembly on the stack is already the terminated network (every port stamps its
             // 1/Z0, sources are off, nonlinear devices are linearised at the operating point).
-            if (wspOut is not null) wspOut[fi] = SolveProbes(p, lu, xBuf, bBuf);
+            if (wspOut is not null) wspOut[fi] = SolveProbes(p, p.Netlist, lu, xBuf, bBuf);
+
+            // The NDF, against the SAME terminated assembly the probes just saw (R-wsp6-1). The
+            // wave path's assembly already IS that network — every port stamps its 1/Z0, the
+            // sources are off and the nonlinear devices are linearised at the operating point — so
+            // the only new work is the passive assembly and its one factorisation.
+            if (ndfOut is not null)
+                SolveNdf(p, netlist, settings, freqsHz[fi], omega, fi, mna, ndfOut,
+                         nonGroundNodes, regularized, skipPorts: true, ports, N, ref xBuf, ref bBuf);
         }
     }
 
@@ -608,10 +786,16 @@ public static class SParameterEngine
     /// test:</b> with −1 a zero-feedback cascade gives <c>vP/vS = −ZG/(ZG + ZL)</c> (Eq. 67, 69);
     /// with +1 it gives the negative and ZG comes out negated. R-wsp1-14(a) holds it.</para>
     /// </summary>
-    private static Complex[,] SolveProbes(Prepared p, SparseLU lu, Complex[] x, Complex[] b)
+    /// <param name="from">
+    /// The netlist whose models carry the branch index of THIS assembly. Normally the run's own; the
+    /// PASSIVE assembly of an NDF run may have been stamped from a second elaboration
+    /// (R-wsp6-4), and a branch index is a property of one assembly.
+    /// </param>
+    private static Complex[,] SolveProbes(
+        Prepared p, ElaboratedNetlist from, SparseLU lu, Complex[] x, Complex[] b)
     {
         var probes = p.Probes;
-        var comps  = p.Netlist.Components;
+        var comps  = from.Components;
         int m      = probes.Length;
 
         // The branch index of THIS assembly, read off the model after the stamp — the wave and
@@ -678,6 +862,7 @@ public static class SParameterEngine
         int              hi,
         Mat<Complex>[]  sMatrices,
         Complex[][,]?    wspOut,
+        NdfOutput?       ndfOut,
         RunControl?      control,
         Func<bool>?      abort)
     {
@@ -763,7 +948,7 @@ public static class SParameterEngine
             // V(n0) − V(n1) − Z0·I = 0: the port terminated in its own Z0 with no drive. It is
             // factored on its own MnaSystem, so the main assembly's pattern cache is untouched, and
             // it takes the regularisation the main assembly needed at this frequency.
-            if (wspOut is not null)
+            if (wspOut is not null || ndfOut is not null)
             {
                 var mnaT = p.MnaTerminated!;
                 StampAll(mnaT, netlist, omega, dcNodeVoltages: dcNodeVoltages);
@@ -772,10 +957,75 @@ public static class SParameterEngine
                 ApplyRegularization(mnaT, netlist, nonGroundNodes, settings, applyIfNecessary: regularized);
                 var luT = mnaT.Factorize(nodeNamer: nodeNamer, branchNamer: branchNamer);
                 if (xBuf.Length != mnaT.Size) { xBuf = new Complex[mnaT.Size]; bBuf = new Complex[mnaT.Size]; }
-                wspOut[fi] = SolveProbes(p, luT, xBuf, bBuf);
+                if (wspOut is not null) wspOut[fi] = SolveProbes(p, p.Netlist, luT, xBuf, bBuf);
+                if (ndfOut is not null)
+                    SolveNdf(p, netlist, settings, hz, omega, fi, mnaT, ndfOut,
+                             nonGroundNodes, regularized, skipPorts: false, ports, N, ref xBuf, ref bBuf);
             }
         }
     }
+
+    /// <summary>
+    /// One frequency's NDF (brief-wsprobe-6 R-wsp6-1), plus R-wsp6-5's passivity guard and, when the
+    /// run has probes, the passive assembly's own probe solves (<c>wsp_passive</c>, §5).
+    ///
+    /// <para><paramref name="mnaActive"/> is the ALREADY-STAMPED terminated active assembly — the
+    /// wave path's own, or the legacy path's terminated second one. It is read, never re-stamped;
+    /// its factorisation is not needed here at all, because the lemma factors only <c>M0</c>.</para>
+    ///
+    /// <para><b>The passive assembly is linearised at the ACTIVE circuit's operating point.</b>
+    /// <c>Δ</c> and <c>Δ0</c> are two determinants of ONE network — the second with its dependent
+    /// sources removed — so linearising the passive one about its own (different) bias would make
+    /// the ratio a comparison of two different circuits rather than Bode's return difference.</para>
+    /// </summary>
+    private static void SolveNdf(
+        Prepared p, ElaboratedNetlist netlist, AnalysisSettings settings,
+        double hz, double omega, int fi, MnaSystem mnaActive, NdfOutput ndfOut,
+        int nonGroundNodes, bool regularized, bool skipPorts, List<PortEntry> ports, int N,
+        ref Complex[] xBuf, ref Complex[] bBuf)
+    {
+        var mnaP     = p.MnaPassive!;
+        var passive  = p.PassiveNetlist!;
+
+        StampAllPassive(mnaP, passive, omega, skipPorts, p.DcNodeVoltages);
+        if (skipPorts) StampPortConductances(mnaP, ports, N);
+        else
+            for (int j = 0; j < N; j++)
+                mnaP.AddBranchConstraint(ports[j].BranchIndex, ports[j].BranchIndex, -p.Z0PerPort[j]);
+        ApplyRegularization(mnaP, passive, nonGroundNodes, settings, applyIfNecessary: regularized);
+
+        var luP = mnaP.Factorize(nodeNamer: p.NodeNamer, branchNamer: p.BranchNamer);
+        if (xBuf.Length != mnaP.Size) { xBuf = new Complex[mnaP.Size]; bBuf = new Complex[mnaP.Size]; }
+
+        var (cols, u) = NdfCalculator.DeltaColumns(
+            mnaActive.LiveCsc(), mnaP.LiveCsc(), p.NdfColumnOrder);
+        var (value, solves) = NdfCalculator.Evaluate(luP, cols, u, xBuf, bBuf);
+        ndfOut.Ndf[fi]     = value;
+        p.BackSubstitutions += solves;
+
+        if (ndfOut.WspPassive is { } wp)
+            wp[fi] = SolveProbes(p, passive, luP, xBuf, bBuf);
+
+        // R-wsp6-5: the guard, per device, per frequency. A failure does not stop the run — the NDF
+        // is still emitted, with the count declared unreliable — because the message is the useful
+        // half and a refusal here would hide the locus the user came for.
+        foreach (var ec in p.NdfGuarded)
+        {
+            var y = ec.Model.LinearisedPortAdmittance(
+                ec, omega, BuildBias(ec, p.DcNodeVoltages), passivated: true);
+            if (y is null) continue;
+            double? margin = NdfCalculator.PassivityMargin(y);
+            if (margin is { } m && m < -PassivityGuardTol)
+                NdfCubePacker.ReportPassivationNotPassive(netlist, ec.InstancePath, hz, m, axisWhat: "");
+        }
+    }
+
+    /// <summary>
+    /// How far below zero the smallest eigenvalue of <c>Y + Yᴴ</c> may sit, relative to the block's
+    /// own scale, before R-wsp6-5's guard reports it. The brief's <c>1e-12·‖Y_dev‖</c>, expressed as
+    /// the relative quantity <see cref="NdfCalculator.PassivityMargin"/> returns.
+    /// </summary>
+    private const double PassivityGuardTol = 1e-12;
 
     // ── Assembly helpers ───────────────────────────────────────────────────────
 
@@ -790,12 +1040,25 @@ public static class SParameterEngine
     /// <paramref name="skipPorts"/>: when true (wave path), top-level Port/Term/P1Tone are also
     /// skipped — they contribute conductances directly in RunWavePath instead of 0 V branches.
     /// </summary>
+    /// <summary>
+    /// The same assembly with every dependent source rendered passive — the <c>Δ0</c> of Eq. 181
+    /// (brief-wsprobe-6 R-wsp6-1). It differs from <see cref="StampAll"/> in exactly two calls, and
+    /// is written as the same method with a flag rather than as a copy for that reason: the two
+    /// assemblies are subtracted from each other, so any divergence in the stamp SEQUENCE — an
+    /// ordering, a skip, a buried-port rule — would appear as a determinant ratio rather than as an
+    /// error.
+    /// </summary>
+    private static void StampAllPassive(
+        MnaSystem mna, ElaboratedNetlist netlist, double omega, bool skipPorts, double[]? dcNodeVoltages)
+        => StampAll(mna, netlist, omega, skipPorts, dcNodeVoltages, passive: true);
+
     private static void StampAll(
         MnaSystem         mna,
         ElaboratedNetlist netlist,
         double            omega,
         bool              skipPorts      = false,
-        double[]?         dcNodeVoltages = null)
+        double[]?         dcNodeVoltages = null,
+        bool              passive        = false)
     {
         mna.Reset();
         foreach (var ec in netlist.Components)
@@ -825,17 +1088,21 @@ public static class SParameterEngine
             // Never IsSParamPort, so they fall through the port skips above to here.
             if (ec.Model.Kind == ModelKind.Nonlinear)
             {
-                ec.StampLinearized(mna, omega, BuildBias(ec, dcNodeVoltages));
+                var bias = BuildBias(ec, dcNodeVoltages);
+                if (passive) ec.StampLinearizedPassive(mna, omega, bias);
+                else         ec.StampLinearized(mna, omega, bias);
                 continue;
             }
 
-            ec.Stamp(mna, omega);
+            if (passive) ec.StampPassive(mna, omega);
+            else         ec.Stamp(mna, omega);
             netlist.DrainModelWarnings(ec.Model);
         }
         foreach (var ec in netlist.Components)
             if (ec.Model is MutualInductanceModel)
             {
-                ec.Stamp(mna, omega);
+                if (passive) ec.StampPassive(mna, omega);
+                else         ec.Stamp(mna, omega);
                 netlist.DrainModelWarnings(ec.Model);
             }
     }

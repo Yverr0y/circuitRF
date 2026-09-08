@@ -1,0 +1,75 @@
+; ============================================================
+; hero2_sdd_stage.cnl — brief-wsprobe-6 R-wsp6-9(c): Platzker's properties on a REAL device.
+;
+; Hero 2's SDD FET, verbatim, at Hero 2's own bias — and nothing else of Hero 2. Its testbench
+; terminates every harmonic band in 1e-6 Ohm, which is a dead short at both ports: the stage is
+; then unconditionally stable because neither node can develop a voltage, and its NDF is 1 to eight
+; decimal places at every frequency. A stability analysis needs a circuit that can ring, so this
+; fixture keeps the DEVICE and its bias and gives it ordinary 50 Ohm terminations, a gate-lead
+; inductance and the two gate capacitances the SDD itself does not model.
+;
+; THE PASSIVATION (R-wsp6-4). Every `_v1` of the DRAIN current equation is replaced by
+;     NDFgm*_v1 + (1 - NDFgm)*Vgs0
+; so that at NDFgm = 0 the drain current no longer responds to the gate voltage at all while staying
+; evaluated at the same bias: dId/dVgs -> 0, with dId/dVds, the gate conductance and every
+; capacitance kept — exactly what a built-in FET's ActiveExact passivation does. The GATE equation
+; I[1,0] = _v1/50 is a two-terminal conductance and is left alone, because a conductance is passive.
+;
+; The SHAPE matters. `I[2,0] = NDFgm*Ids(_v1,_v2)` would be wrong: it scales the whole drain current,
+; output conductance included, so Delta-0 would be a DIFFERENT circuit rather than the same one with
+; its controlled source removed. What is frozen is the CONTROLLING VOLTAGE.
+;
+; Lg is the gate-lead inductance: 0 for the stable stage, and large enough to make it oscillate for
+; the second half of R-wsp6-9(c).
+; ============================================================
+
+; ---- Hero 2's FET model parameters, verbatim ----
+Sv=-0.837
+Sc=0.71
+TV0=4.268
+TC=1.507
+th=0.001
+a=0.176
+g=0.089
+lam=0.0012
+B=1130
+
+; ---- Hero 2's bias ----
+Vgg = -3.05
+Vdd = 48
+
+; ---- the NDF passivation ----
+Vgs0  = -3.05                 ; the gate voltage the drain current is frozen at when NDFgm = 0
+NDFgm = 1                     ; 1 in the ordinary assembly; the passive one re-elaborates it at 0
+
+; ---- the parasitics Hero 2's SDD does not carry ----
+Cgs   = 1.0 pF                ; gate-source capacitance
+Cgd   = 0.3 pF                ; gate-drain capacitance — the FEEDBACK path. Without it the stage is
+                              ; strictly unilateral and no lead inductance can destabilise it.
+Lg    = 0 nH                  ; gate-lead series inductance
+Ls    = 1e-6 nH               ; source-lead inductance (a short at 0)
+
+; ---- gate: 50 Ohm source, DC bias through a choke ----
+V_1Tone:Vgate    n_gbias 0       Vdc=Vgg
+L:Lchoke_g       n_gbias n_gate  L=1 uH
+C:Cblock_g       n_gate  n_gin   C=1 uF
+L:Lgate          n_gin   n_g50   L=Lg
+R:Rs             n_g50   0       R=50 Ohm
+
+; ---- the device ----
+SDD:M1  n_gate n_s  n_drain n_s  \
+  I[1,0]=_v1/50  \
+  I[2,0]=(B*TC*tanh(_v2*a*(tanh(g*(TV0 - (NDFgm*_v1+(1-NDFgm)*Vgs0) + _v2*th + Sc*ln(exp(-(Sv - (NDFgm*_v1+(1-NDFgm)*Vgs0))/Sc) + 1))) + 1))*ln(exp(-(2*TV0 - 2*(NDFgm*_v1+(1-NDFgm)*Vgs0) + 2*_v2*th + 2*Sc*ln(exp(-(Sv - (NDFgm*_v1+(1-NDFgm)*Vgs0))/Sc) + 1))/TC) + 1)*(_v2*lam + 1))/2
+C:Cgs            n_gate n_s      C=Cgs
+C:Cgd            n_gate n_drain  C=Cgd
+L:Lsource        n_s 0           L=Ls
+
+; ---- drain: 50 Ohm load, DC supply through a choke ----
+C:Cblock_d       n_drain n_dout  C=1 uF
+R:RL             n_dout 0        R=50 Ohm
+L:Lchoke_d       n_drain n_dbias L=1 uH
+V_1Tone:Vdrain   n_dbias 0       Vdc=Vdd
+
+; A wide LOG sweep: Platzker's properties 3 and 5 are statements about the limits, and a count read
+; off a sweep that reaches neither is not a count.
+analysis SP1 type=sparam start=1e-3 stop=1e6 npts=4001 log Unit=MHz NDF=yes PassiveVars="NDFgm"

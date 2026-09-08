@@ -2044,3 +2044,24 @@ twice. The levers for size are `--at`, `--range`, `--result summary` and `--summ
 The gate asserts the ratios rather than the absolute figures — it is a tripwire for a structural
 regression (the duplicated diagnostic text coming back, a result becoming un-narrowable), not a
 benchmark of the serializer.
+
+## WSP-6 — `NDF=yes`, and reading a diagnostic key off a message that quotes another (2026-09-08)
+
+`sparam` prints `NDF: N right-half-plane pole(s)` with the unrounded net encirclement beside it, and
+`--json` carries the same under `ndf` together with the `ndf.*` findings the run raised.
+`explain --analysis` lists the passivation each instance will use and the whole refusal if the run
+would be refused — which is how a caller sees a refusal coming without running, and it is the SAME
+`NdfPassivation.Survey` the engine calls before its first factorisation, so the sentence is the one a
+run raises, word for word.
+
+**The findings list first matched `ndf.` ANYWHERE in a warning**, which picked up the keys a message
+quotes in its own advice: the counter-clockwise note ends by telling the reader to go and look at the
+`ndf.passivation-not-passive` notes, and that sentence was being reported as a passivation note on a
+run that had none. Every `ndf.*` message now begins with its own key, and the parser reads the
+LEADING token only.
+
+Two smaller notes. The listing prints only instances that are NOT plainly passive, because a hundred
+resistors saying "passive" is noise — and each `ActiveExact` model supplies its own one-line
+`PassivationNote` (`R → |R|, which is its ordinary stamp unless R < 0`) so the line says something
+rather than restating the enum. A refused instance carries its measurement into the listing too
+(`σ_max = 5.097 > 1 at 2.7 GHz`), so the reason is visible without reading the refusal block below it.

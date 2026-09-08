@@ -52,12 +52,95 @@ public sealed class ZPortModel : ComponentModel
         for (int k = 0; k < portCount; k++) PortBranchIndices[k] = -1;
     }
 
+    /// <summary>
+    /// <see cref="Core.Activity.ActiveExact"/> at the TYPE level, for the same reason
+    /// <c>ResistorModel</c> is: a <c>Z(ω)</c> whose real part goes negative somewhere in the sweep
+    /// is a negative resistance, which the reference document's §8 (p. 111) requires the passive
+    /// determinant to render passive — and the class cannot know its own expressions' values here.
+    /// For a block that is passive at every frequency the two stamps are identical entry for entry.
+    /// </summary>
+    public override Activity Activity => Activity.ActiveExact;
+
+    /// <inheritdoc/>
+    public override string? PassivationNote =>
+        "Re Z → |Re Z| on the diagonal, which is its ordinary stamp unless some Re Z < 0";
+
+    /// <summary><c>Re Z → |Re Z|</c> per entry of the impedance matrix's DIAGONAL, which is where a
+    /// driving-point negative resistance lives; the off-diagonal transfer terms are untouched, being
+    /// the block's own reciprocity rather than a source.</summary>
+    public override void StampPassive(IMnaContext mna, ElaboratedComponent c, double omega)
+        => StampZ(mna, c, omega, passive: true);
+
     public override void Stamp(IMnaContext mna, ElaboratedComponent c, double omega)
+        => StampZ(mna, c, omega, passive: false);
+
+    /// <summary>
+    /// <c>Y = Z⁻¹</c> of the block's own impedance matrix, passivated or not — so R-wsp6-5's
+    /// <c>Y + Yᴴ ⪰ 0</c> guard covers the one <see cref="Core.Activity.ActiveExact"/> passivation
+    /// that is NOT passive by construction: taking <c>|Re Z|</c> on the diagonal says nothing about
+    /// the off-diagonal transfer terms, which are left as written.
+    /// </summary>
+    public override Complex[,]? LinearisedPortAdmittance(
+        ElaboratedComponent c, double omega, in PortVoltages bias, bool passivated)
+    {
+        var z = EvaluateZ(omega / (2.0 * Math.PI));
+        var a = new Complex[_portCount, _portCount];
+        for (int p = 0; p < _portCount; p++)
+            for (int q = 0; q < _portCount; q++) a[p, q] = z[p, q];
+        if (passivated)
+            for (int p = 0; p < _portCount; p++)
+                if (a[p, p].Real < 0.0) a[p, p] = new Complex(-a[p, p].Real, a[p, p].Imaginary);
+        return Invert(a);
+    }
+
+    /// <summary>Gauss-Jordan with partial pivoting on a small dense complex matrix; null when
+    /// singular (an impedance matrix with no admittance form is not a passivity failure, and the
+    /// guard skips it rather than reporting a NaN).</summary>
+    private static Complex[,]? Invert(Complex[,] a)
+    {
+        int n = a.GetLength(0);
+        var m = (Complex[,])a.Clone();
+        var inv = new Complex[n, n];
+        for (int i = 0; i < n; i++) inv[i, i] = Complex.One;
+
+        for (int k = 0; k < n; k++)
+        {
+            int piv = k; double best = m[k, k].Magnitude;
+            for (int i = k + 1; i < n; i++)
+                if (m[i, k].Magnitude > best) { best = m[i, k].Magnitude; piv = i; }
+            if (best == 0.0) return null;
+            if (piv != k)
+                for (int j = 0; j < n; j++)
+                {
+                    (m[k, j], m[piv, j])     = (m[piv, j], m[k, j]);
+                    (inv[k, j], inv[piv, j]) = (inv[piv, j], inv[k, j]);
+                }
+
+            var d = m[k, k];
+            for (int j = 0; j < n; j++) { m[k, j] /= d; inv[k, j] /= d; }
+            for (int i = 0; i < n; i++)
+            {
+                if (i == k) continue;
+                var f = m[i, k];
+                if (f == Complex.Zero) continue;
+                for (int j = 0; j < n; j++) { m[i, j] -= f * m[k, j]; inv[i, j] -= f * inv[k, j]; }
+            }
+        }
+        return inv;
+    }
+
+    private void StampZ(IMnaContext mna, ElaboratedComponent c, double omega, bool passive)
     {
         double freqHz = omega / (2.0 * Math.PI);
 
         // Evaluate Z[i,j] at this frequency (memoized — see EvaluateZ).
         var z = EvaluateZ(freqHz);
+        if (passive)
+        {
+            z = (Complex[,])z.Clone();
+            for (int p = 0; p < _portCount; p++)
+                if (z[p, p].Real < 0.0) z[p, p] = new Complex(-z[p, p].Real, z[p, p].Imaginary);
+        }
 
         // 2N nets: Nodes[2p] = port p+, Nodes[2p+1] = port p−. Per-port reference.
         var branches = new int[_portCount];

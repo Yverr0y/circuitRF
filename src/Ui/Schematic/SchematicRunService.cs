@@ -6,6 +6,7 @@ using CircuitRF.Core.Design;
 using CircuitRF.Core.Elaboration;
 using CircuitRF.Core.Expressions;
 using CircuitRF.Core.Netlist;
+using CircuitRF.Core.Stability;
 using CircuitRF.Engine;
 using CircuitRF.Engine.HarmonicBalance;
 using CircuitRF.Engine.Loadpull;
@@ -447,6 +448,30 @@ public static class SchematicRunService
 
     // ── Typed analysis dispatch ───────────────────────────────────────────────
 
+    /// <summary>
+    /// The <c>NDF=yes</c> half of an S-parameter directive (brief-wsprobe-6 R-wsp6-2), or null when
+    /// the knob is off — and when it is off the engine takes exactly the path it took before the
+    /// knob existed.
+    ///
+    /// <para>The passive netlist is supplied as a FACTORY bound to this run's own library and
+    /// testbench, because the frequency-parallel path needs one per worker; the engine calls it
+    /// serially, before any worker starts, and only when some device actually needs it.</para>
+    /// </summary>
+    private static NdfRequest? NdfRequestFor(
+        SParameterAnalysis spa, Library lib, TestBench tb, string? baseDirectory)
+    {
+        if (!Analysis.ParseNdf(spa.NdfExpr)) return null;
+
+        var vars   = NdfPassivation.ParseList(spa.PassiveVarsExpr);
+        var pars   = NdfPassivation.ParseList(spa.PassiveParamsExpr);
+        return new NdfRequest
+        {
+            PassiveVars    = vars,
+            PassiveParams  = pars,
+            PassiveNetlist = () => NdfPassivation.BuildPassiveNetlist(lib, tb, baseDirectory, vars, pars),
+        };
+    }
+
     private static DataSet? RunTypedAnalysis(
         Analysis          analysis,
         ElaboratedNetlist nl,
@@ -467,7 +492,8 @@ public static class SchematicRunService
                     spa.Expand(nl.ResolvedGlobals, nl.GlobalsWithExplicitUnit),
                     AnalysisSettings.Default.WithMarginThreshold(
                         Analysis.ParseMarginThresholdDb(spa.MarginThresholdExpr)),
-                    control);
+                    control,
+                    ndf: NdfRequestFor(spa, lib, tb, baseDirectory));
 
             case HarmonicBalanceAnalysis hba:
             {

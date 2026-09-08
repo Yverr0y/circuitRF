@@ -774,3 +774,16 @@ src/Engine/HarmonicBalance/HbEngine.cs|wsprobe.hb-tones-unsupported: the WSProbe
 src/Engine/HarmonicBalance/HbSmallSignal.cs|WSProbe '{probes[i].Label}' allocated no branch in the harmonic-balance 
 src/Engine/HarmonicBalance/HbSmallSignal.cs|the mixing product {MixingLattice.Label(lattice.ToneOf(m))} of the run's own 
 src/Engine/HarmonicBalance/HbSmallSignal.cs|wsprobe.hb-ss-mixorder-too-high: the small-signal conversion matrix needs the 
+
+# WSP-6 (2026-09-08) — the normalized determinant function. All four are SETUP refusals raised
+# before the frequency loop. `ndf.cannot-passivate` is the one a user actually meets, and it is
+# already a keyed, multi-line report naming every offending instance and what would fix it — the
+# Messages window can group on that key today. The three `ndf.assembly-mismatch` sentences are
+# engine invariants: they fire only when the passive elaboration disagrees with the active one
+# about the node map, the component order or the matrix size, which no document can ask for
+# directly.
+src/Core/Stability/NdfPassivation.cs|{CannotPassivateKey}: PassiveParams names '{entry}', whose instance lives 
+src/Engine/NdfCalculator.cs|ndf.assembly-mismatch: the active assembly is {m.RowCount}×{m.ColumnCount} and the 
+src/Engine/SParameterEngine.cs|ndf.assembly-mismatch: component {k} is '{netlist.Components[k].InstancePath}' 
+src/Engine/SParameterEngine.cs|ndf.assembly-mismatch: the passive elaboration has {passive.Nodes.Count} node(s) 
+src/Engine/SParameterEngine.cs|{NdfPassivation.CannotPassivateKey}: this design has a user-scaled active 

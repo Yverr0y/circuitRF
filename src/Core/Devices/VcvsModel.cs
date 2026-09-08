@@ -53,6 +53,36 @@ public sealed class VcvsModel : ComponentModel
     /// </summary>
     public int LastBranchIndex { get; private set; } = -1;
 
+    /// <summary>The E element is a dependent source outright (brief-wsprobe-6 §3).</summary>
+    public override Activity Activity => Activity.ActiveExact;
+
+    /// <inheritdoc/>
+    public override string? PassivationNote => "E → 0; the branch stays, as a short";
+
+    /// <summary>
+    /// <c>E → 0</c>. The branch and its constraint row STAY — a zero-gain controlled voltage source
+    /// is a 0 V source, i.e. a short across the output pair — because the passive assembly is
+    /// subtracted from the active one entry by entry and dropping a branch here would shift every
+    /// later row and column.
+    /// </summary>
+    public override void StampPassive(IMnaContext mna, ElaboratedComponent c, double omega)
+    {
+        if (c.Nodes.Length < 4)
+            throw new InvalidOperationException(
+                $"VCVS '{c.InstancePath}': expected 4 nets (out+, out−, ctrl+, ctrl−); "
+                + $"got {c.Nodes.Length}.");
+
+        int op = c.Nodes[0], om = c.Nodes[1];
+
+        int br = mna.AddBranch();
+        LastBranchIndex = br;
+
+        mna.AddBranchCurrent(br, op, om);
+        mna.AddConstraint(br, op, new Complex(+1, 0));
+        mna.AddConstraint(br, om, new Complex(-1, 0));
+        mna.AddSourceValue(br, Complex.Zero);
+    }
+
     public override void Stamp(IMnaContext mna, ElaboratedComponent c, double omega)
     {
         if (c.Nodes.Length < 4)

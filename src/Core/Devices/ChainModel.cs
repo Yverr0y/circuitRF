@@ -57,6 +57,72 @@ public sealed class ChainModel : ComponentModel
         _name      = name;
     }
 
+    // ── The NDF passivation contract (brief-wsprobe-6 §3) ────────────────────
+
+    /// <summary>
+    /// <see cref="Core.Activity.BlackBox"/> at the TYPE level: a user-written ABCD can express gain
+    /// as freely as an S-parameter file can, and there is no transconductance in it to zero.
+    /// <see cref="ActivityFor"/> measures the block instead.
+    /// </summary>
+    public override Activity Activity => Activity.BlackBox;
+
+    /// <inheritdoc/>
+    public override string? PassivationNote => _passivationNote;
+    private string? _passivationNote;
+
+    /// <summary>
+    /// σ_max of the block's own S at every frequency the run will visit — the same test
+    /// <c>SnpModel</c> applies to its file, over this block's evaluated ABCD instead. At or below
+    /// <c>1 + 1e-6</c> the block is passive; above it, the run is refused by name.
+    ///
+    /// <para>Over the RUN's grid, not a file's, because a Chain has no grid of its own: its ABCD is
+    /// a function of <c>freq</c> and is only defined where it is asked.</para>
+    /// </summary>
+    public override Activity ActivityFor(ElaboratedComponent c, IReadOnlyList<double> freqsHz)
+    {
+        const double Tol = 1e-6, Z0 = 50.0;
+        double worst = 0.0, at = double.NaN;
+        foreach (double hz in freqsHz)
+        {
+            var (a, b, cc, d) = Evaluate(hz);
+            // ABCD → S at a common real reference (Pozar Table 4.2). The reference cancels out of
+            // the "is σ_max ≤ 1" question — a passive block is passive at every reference.
+            Complex den = a + b / Z0 + cc * Z0 + d;
+            if (den == Complex.Zero) { worst = double.PositiveInfinity; at = hz; break; }
+            Complex s11 = (a + b / Z0 - cc * Z0 - d) / den;
+            Complex s12 = 2.0 * (a * d - b * cc) / den;
+            Complex s21 = 2.0 / den;
+            Complex s22 = (-a + b / Z0 - cc * Z0 + d) / den;
+            double  sig = LargestSingularValue2x2(s11, s12, s21, s22);
+            if (sig > worst) { worst = sig; at = hz; }
+        }
+
+        if (worst <= 1.0 + Tol)
+        {
+            _passivationNote = $"σ_max = {worst:G4} ≤ 1 over the swept band";
+            return Activity.Passive;
+        }
+        _passivationNote =
+            $"σ_max = {worst:G4} > 1 at {at / 1e9:G6} GHz — an ABCD block with gain hides its " +
+            "dependent sources exactly as an S-parameter file with gain does";
+        return Activity.BlackBox;
+    }
+
+    /// <summary>
+    /// σ_max of a 2×2 complex matrix, from the closed form for the eigenvalues of <c>SᴴS</c> — a
+    /// 2×2 needs no SVD and this keeps <c>src/Core</c> free of a dense-linear-algebra dependency it
+    /// otherwise has no use for.
+    /// </summary>
+    private static double LargestSingularValue2x2(Complex s11, Complex s12, Complex s21, Complex s22)
+    {
+        // trace and determinant of SᴴS, both real
+        double tr = s11.Magnitude * s11.Magnitude + s12.Magnitude * s12.Magnitude
+                  + s21.Magnitude * s21.Magnitude + s22.Magnitude * s22.Magnitude;
+        double det = (s11 * s22 - s12 * s21).Magnitude;
+        double disc = Math.Max(0.0, tr * tr - 4.0 * det * det);
+        return Math.Sqrt(0.5 * (tr + Math.Sqrt(disc)));
+    }
+
     public override void Stamp(IMnaContext mna, ElaboratedComponent comp, double omega)
     {
         double freqHz = omega / (2.0 * Math.PI);

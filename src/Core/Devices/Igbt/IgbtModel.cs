@@ -209,6 +209,15 @@ public sealed class IgbtModel : ComponentModel
     private int PortRc => _rc > 0 ? IntrinsicPorts + (_rg > 0 ? 1 : 0) : -1;
     private int PortRe => _re > 0 ? IntrinsicPorts + (_rg > 0 ? 1 : 0) + (_rc > 0 ? 1 : 0) : -1;
 
+    /// <summary>Two dependent sources: the insulated-gate channel's <c>gm</c> and the wide-base
+    /// bipolar's transport current (brief-wsprobe-6 §3).</summary>
+    public override Activity Activity => Activity.ActiveExact;
+
+    /// <summary><c>∂I_ds/∂V_ge → 0</c> and the bipolar's <c>α·g_e</c> transport source → 0; every
+    /// junction conductance, <c>gce</c> and every capacitance stay.</summary>
+    public override IReadOnlyList<(int P, int Q)> ControlledConductances =>
+        [(PMos, PGe), (PMos, PGc), (PCe, PBase)];
+
     public override int       PortCount => IntrinsicPorts
         + (HasGateResistance ? 1 : 0) + (HasCollectorResistance ? 1 : 0) + (HasEmitterResistance ? 1 : 0);
     public override ModelKind Kind      => ModelKind.Nonlinear;

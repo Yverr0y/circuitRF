@@ -828,3 +828,35 @@ their tests, and the docs rows. `wsp_stability_margin` answers with `min(SM_Y0, 
 comment-stripped source scan of `src/` plus a plain scan of `docs/design/` is the gate — which is
 why the design note's own §9.8 describes the retirement without printing the spellings, and this is
 the one place they are still written down.
+
+## The encirclement count is over a HALF contour, and two consumers disagree about it (2026-09-08)
+
+`WspEnvelope.LoadpullNdf`'s `Encirclements` field and `SParameterEngine`'s `NDF_poles` cube both call
+themselves encirclement counts of the same NDF, and **they differ by exactly two**.
+
+The argument principle counts turns around the CLOSED Nyquist contour, `ω` from −∞ to +∞. A sweep
+runs `ω ≥ 0`, and Platzker's property 4 (`NDF(−ω) = conj NDF(ω)`, §8 p. 112) makes the missing arm
+turn through the same angle: with `φ(ω) = arg NDF(ω)`, the negative arm runs `−φ(∞) → −φ(0)` and
+contributes `φ(∞) − φ(0)`, the same as the positive one. So
+
+```
+right-half-plane poles = 2 × (the swept locus's own net turn)
+```
+
+`NDF_poles` (WSP-6) carries the doubled count, referred to the sweep's first sample. `Encirclements`
+(WSP-9) carries the swept locus's own turn and is not referred to the first sample. A single REAL
+right-half-plane pole is half a turn: `NDF_poles` reads 1, `Encirclements` reads 0 or 1 depending on
+where the locus started. A conjugate PAIR — what an oscillator has — is a whole turn: 2 against 1.
+
+**Which is right is not a matter of taste.** WSP-6's gate (a) has a closed form with a single real
+right-half-plane pole, and only the doubled count reads 1 there.
+
+**It was corrected and reverted.** Doubling `Encirclements` flips WSP-9's own gate (i) at one grid
+point of the Ohtomo fixture, where the REDUCED NDF over a probe set that provably cannot see the odd
+mode wanders about half a turn without ever going round — a number that is not a count at all, and
+one the `≥ 1` threshold then catches. Changing a shipped WSP-9 output on the strength of a fixture
+whose reduced NDF is documented as incomplete is an owner decision, not WSP-6's to make.
+
+What holds meanwhile, and is asserted at 288 grid points by WSP-6's gate (k): the two agree about
+**whether** a point is unstable — which is all R-wsp9-5's `≥ 1` threshold reads — and
+`NDF_poles == 2 × Encirclements` wherever both are clean.

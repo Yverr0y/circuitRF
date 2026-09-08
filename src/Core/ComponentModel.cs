@@ -255,8 +255,17 @@ public abstract class ComponentModel
     /// Base default suits every nonlinear device (NonlinearC, SDD); override only for special cases.
     /// </summary>
     public virtual void StampLinearized(IMnaContext mna, ElaboratedComponent c, double omega, in PortVoltages bias)
+        => StampAdmittanceBlock(mna, c, omega, Evaluate(bias));
+
+    /// <summary>
+    /// The stamping half of <see cref="StampLinearized"/>, over an ALREADY-EVALUATED result — so the
+    /// passivated path (<see cref="StampLinearizedPassive"/>) writes its masked Jacobian through the
+    /// same six lines the ordinary path uses, rather than through a second copy of them that could
+    /// drift.
+    /// </summary>
+    protected void StampAdmittanceBlock(
+        IMnaContext mna, ElaboratedComponent c, double omega, in NonlinearResult r)
     {
-        var r = Evaluate(bias);
         int P = PortCount;
         for (int p = 0; p < P; p++)
         {
@@ -277,6 +286,160 @@ public abstract class ComponentModel
                 mna.AddBlockAdmittance(nm, qm,  y);
             }
         }
+    }
+
+    // ── The NDF passivation contract (brief-wsprobe-6 R-wsp6-3) ───────────────
+
+    /// <summary>
+    /// Whether this model carries a dependent source, and if so whether circuitRF can render it
+    /// passive exactly — see <see cref="Core.Activity"/> for what each answer means and
+    /// <c>docs/design/stability-wsprobe.md</c> §11 for the table every model in this repository
+    /// appears in.
+    ///
+    /// <para><b>Answered by TYPE, and conservatively.</b> A model whose activity depends on DATA it
+    /// has not read yet answers <see cref="Core.Activity.BlackBox"/> here and refines it in
+    /// <see cref="ActivityFor"/>, where the component and the run's frequency grid are available:
+    /// default-deny, so a model that never looks is refused rather than assumed harmless.</para>
+    /// </summary>
+    public virtual Activity Activity => Activity.Passive;
+
+    /// <summary>
+    /// <see cref="Activity"/> for one placed instance over the frequencies a run will visit — the
+    /// hook a DATA-dependent model (an <c>SnP</c> file, a <c>Chain</c>'s ABCD expressions) uses to
+    /// upgrade its conservative type-level answer to <see cref="Core.Activity.Passive"/> once it has
+    /// measured itself. Everything else inherits the type-level answer unchanged.
+    /// </summary>
+    public virtual Activity ActivityFor(ElaboratedComponent c, IReadOnlyList<double> freqsHz) => Activity;
+
+    /// <summary>
+    /// What a refusal or an <c>explain --analysis</c> listing should add to the bare enum value —
+    /// the measured σ_max of an S-parameter block, say. Null on every model whose answer speaks for
+    /// itself. Set by <see cref="ActivityFor"/> where the answer is measured.
+    /// </summary>
+    public virtual string? PassivationNote => null;
+
+    /// <summary>
+    /// The LINEAR contribution with every dependent source in it rendered passive — the stamp that
+    /// builds <c>Δ0</c> (Eq. 181). The default forwards to <see cref="Stamp"/>, which is correct by
+    /// definition for a <see cref="Core.Activity.Passive"/> model and for one whose passivation is
+    /// applied by re-elaborating the netlist (<see cref="Core.Activity.ActiveUserScaled"/>).
+    ///
+    /// <para><b>The branch count must not change.</b> The active and passive assemblies are
+    /// subtracted entry by entry, so a passivated model that allocates a different number of branch
+    /// unknowns shifts every later row and column. A controlled voltage source passivates to a
+    /// <i>zero-gain</i> source — a 0 V branch, i.e. a short — not to no branch at all.</para>
+    /// </summary>
+    public virtual void StampPassive(IMnaContext mna, ElaboratedComponent c, double omega)
+        => Stamp(mna, c, omega);
+
+    /// <summary>
+    /// The linearised contribution of a nonlinear device with its controlled sources removed. The
+    /// default forwards to <see cref="StampLinearized"/>; an <see cref="Core.Activity.ActiveExact"/>
+    /// nonlinear family overrides <see cref="ControlledConductances"/> instead of this, and gets the
+    /// masking below for free.
+    /// </summary>
+    public virtual void StampLinearizedPassive(
+        IMnaContext mna, ElaboratedComponent c, double omega, in PortVoltages bias)
+    {
+        var ctl = ControlledConductances;
+        if (ctl.Count == 0 && !PassivatesTranscapacitance)
+        {
+            StampLinearized(mna, c, omega, bias);
+            return;
+        }
+        StampAdmittanceBlock(mna, c, omega, PassivateBlock(Evaluate(bias)));
+    }
+
+    /// <summary>
+    /// The <c>(p, q)</c> entries of the linearised conductance block <c>∂I_p/∂V_q</c> that ARE the
+    /// model's dependent sources — a FET's <c>gm = ∂I_d/∂V_gs</c>, a BJT's transport current, a
+    /// MOSFET's <c>gm</c> and <c>gmbs</c>. Zeroed by <see cref="PassivateBlock"/>; everything else
+    /// (every junction conductance, every <c>gds</c>) is kept, because a two-terminal nonlinearity
+    /// linearises to a conductance and a conductance is passive.
+    ///
+    /// <para>Empty on every model that has none, which is the default.</para>
+    /// </summary>
+    public virtual IReadOnlyList<(int P, int Q)> ControlledConductances => [];
+
+    /// <summary>
+    /// Whether <see cref="PassivateBlock"/> should also remove the ANTISYMMETRIC part of the charge
+    /// Jacobian <c>∂Q_p/∂V_q</c> — the transcapacitance.
+    ///
+    /// <para><b>Why the antisymmetric part is exactly the transcapacitance.</b> A two-terminal
+    /// <c>C(V)</c> between the port-<c>p</c> pair and the port-<c>q</c> pair contributes
+    /// <c>dc[p,q] = dc[q,p]</c>: it is reciprocal, and it is the "capacitances evaluated at bias"
+    /// the document says to keep. A charge at <c>p</c> that responds to <c>V_q</c> WITHOUT a matching
+    /// response of <c>Q_q</c> to <c>V_p</c> is not a capacitor at all — it is a controlled source,
+    /// and it is the half of <c>dc</c> that survives <c>dc − dcᵀ</c>. Dropping it is what makes
+    /// <c>Y + Yᴴ ⪰ 0</c> attainable at every ω: the Hermitian part of <c>Dg + jω·Dc</c> is
+    /// <c>(Dg + Dgᵀ) + jω(Dc − Dcᵀ)</c>, whose imaginary half grows without bound while a passive
+    /// block's does not.</para>
+    ///
+    /// <para>True wherever <see cref="ControlledConductances"/> is non-empty by default, because the
+    /// two travel together; the built-in FET family happens to have a symmetric <c>dc</c> already,
+    /// so for it this changes nothing at all.</para>
+    /// </summary>
+    public virtual bool PassivatesTranscapacitance => ControlledConductances.Count > 0;
+
+    /// <summary>
+    /// <paramref name="r"/> with <see cref="ControlledConductances"/> zeroed and, when
+    /// <see cref="PassivatesTranscapacitance"/>, the charge Jacobian symmetrised. Currents and
+    /// charges are carried through untouched — the passive assembly has every independent source off
+    /// and reads only the Jacobian.
+    /// </summary>
+    /// <summary>
+    /// The device's own linearised port-admittance block <c>Y_dev(ω)</c> at a bias — <c>P × P</c>,
+    /// in the model's own port coordinates — with (<paramref name="passivated"/>) or without its
+    /// dependent sources. <b>Null when the model has no port-admittance form at all</b>, which is
+    /// every linear model but the two that override this.
+    ///
+    /// <para>R-wsp6-5's passivity guard is taken of this: the passivated block must satisfy
+    /// <c>Y + Yᴴ ⪰ 0</c> at every frequency, and the ACTIVE block of a biased transistor must NOT —
+    /// otherwise the check distinguishes nothing. The eigenvalue arithmetic lives in the engine,
+    /// which has the dense linear algebra; this only supplies the block.</para>
+    /// </summary>
+    public virtual Complex[,]? LinearisedPortAdmittance(
+        ElaboratedComponent c, double omega, in PortVoltages bias, bool passivated)
+    {
+        if (Kind != ModelKind.Nonlinear) return null;
+
+        var r = Evaluate(bias);
+        if (passivated) r = PassivateBlock(r);
+
+        int P = PortCount;
+        var y = new Complex[P, P];
+        for (int p = 0; p < P; p++)
+            for (int q = 0; q < P; q++)
+            {
+                Complex v = new Complex(r.Dg[p, q], omega * r.Dc[p, q]);
+                foreach (var term in r.Terms) v += Weight(term.W, omega) * term.Jac[p, q];
+                y[p, q] = v;
+            }
+        return y;
+    }
+
+    protected NonlinearResult PassivateBlock(in NonlinearResult r)
+    {
+        int P = PortCount;
+        var dg = (double[,])r.Dg.Clone();
+        foreach (var (p, q) in ControlledConductances)
+            if (p >= 0 && p < P && q >= 0 && q < P) dg[p, q] = 0.0;
+
+        var dc = r.Dc;
+        if (PassivatesTranscapacitance)
+        {
+            dc = (double[,])r.Dc.Clone();
+            for (int p = 0; p < P; p++)
+                for (int q = p + 1; q < P; q++)
+                {
+                    double m = 0.5 * (dc[p, q] + dc[q, p]);
+                    dc[p, q] = m;
+                    dc[q, p] = m;
+                }
+        }
+
+        return new NonlinearResult(r.I, r.Q, dg, dc, r.Terms, r.DControl, r.DControlCharge,
+                                   r.BranchResidual, r.DBranchV, r.DBranchC);
     }
 }
 

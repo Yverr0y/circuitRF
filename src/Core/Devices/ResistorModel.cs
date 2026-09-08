@@ -59,14 +59,38 @@ public sealed class ResistorModel : ComponentModel, IReportsWarnings
         return drained;
     }
 
+    /// <summary>
+    /// <see cref="Core.Activity.ActiveExact"/>, unconditionally at the TYPE level, because a
+    /// resistor with <c>R &lt; 0</c> is exactly the "negative resistance … rendered passive" of
+    /// the reference document's §8 (p. 111) and the class cannot know its own value here.
+    ///
+    /// <para>The EFFECT is conditional and costs nothing: for an ordinary positive resistor
+    /// <see cref="StampPassive"/> stamps the same conductance <see cref="Stamp"/> does, so the
+    /// active and passive assemblies differ in no entry and the resistor contributes no column to
+    /// the determinant ratio at all.</para>
+    /// </summary>
+    public override Activity Activity => Activity.ActiveExact;
+
+    /// <inheritdoc/>
+    public override string? PassivationNote =>
+        "R → |R|, which is its ordinary stamp unless R < 0";
+
+    /// <summary><c>R → |R|</c> (Eq. 181's <c>Y_passive</c>; §8 p. 111). Identical to
+    /// <see cref="Stamp"/> for every resistor that was already passive.</summary>
+    public override void StampPassive(IMnaContext mna, ElaboratedComponent c, double omega)
+        => StampConductance(mna, c, passive: true);
+
     public override void Stamp(IMnaContext mna, ElaboratedComponent c, double omega)
+        => StampConductance(mna, c, passive: false);
+
+    private void StampConductance(IMnaContext mna, ElaboratedComponent c, bool passive)
     {
         double r = c.Parameters["R"].AsReal() * _temperatureFactor;
 
         double g;
         if (r == 0.0)
         {
-            if (!_warned)
+            if (!_warned && !passive)
             {
                 _pending.Add(($"resistor.short:{c.InstancePath}",
                     $"R:{c.InstancePath}: R=0 Ω — stamping Gmax={DefaultGmax:G4} S " +
@@ -77,14 +101,16 @@ public sealed class ResistorModel : ComponentModel, IReportsWarnings
         }
         else if (r < 0.0)
         {
-            if (!_warned)
+            if (!_warned && !passive)
             {
                 _pending.Add(($"resistor.negative:{c.InstancePath}",
                     $"R:{c.InstancePath}: R={r:G4} Ω < 0 — non-physical/active element; " +
                     "stamping 1/R with its sign and proceeding."));
                 _warned = true;
             }
-            g = 1.0 / r;   // negative conductance — intentional
+            // The passive assembly takes |R| — the document's "negative resistances … rendered
+            // passive" (§8, p. 111). Everywhere else the sign is stamped as written, deliberately.
+            g = passive ? 1.0 / -r : 1.0 / r;   // negative conductance — intentional
         }
         else
         {

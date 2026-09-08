@@ -50,6 +50,20 @@ public sealed class ElaboratedComponent(
     public void StampLinearized(IMnaContext mna, double omega, in PortVoltages bias)
         => Model.StampLinearized(HasMultiplier ? Wrap(mna) : mna, this, omega, bias);
 
+    /// <summary>
+    /// The linear contribution with every dependent source rendered passive — the <c>Δ0</c> half of
+    /// the NDF (brief-wsprobe-6 R-wsp6-3), through the same multiplier seam as <see cref="Stamp"/>.
+    /// </summary>
+    public void StampPassive(IMnaContext mna, double omega)
+        => Model.StampPassive(HasMultiplier ? Wrap(mna) : mna, this, omega);
+
+    /// <inheritdoc cref="StampPassive"/>
+    public void StampLinearizedPassive(IMnaContext mna, double omega, in PortVoltages bias)
+        => Model.StampLinearizedPassive(HasMultiplier ? Wrap(mna) : mna, this, omega, bias);
+
+    /// <summary>This component's NDF activity over the frequencies a run will visit (R-wsp6-3).</summary>
+    public Activity ActivityFor(IReadOnlyList<double> freqsHz) => Model.ActivityFor(this, freqsHz);
+
     /// <summary>Nonlinear evaluation, with the device multiplier applied to all four blocks.</summary>
     public NonlinearResult Evaluate(in PortVoltages v)
         => Scale(Model.Evaluate(v));

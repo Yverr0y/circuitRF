@@ -204,6 +204,20 @@ public abstract class FetModelBase : ComponentModel
         return (q0 + c0 * dv + 0.5 * dc0 * dv * dv, c0 + dc0 * dv);
     }
 
+    /// <summary>
+    /// The transconductance is a dependent source and circuitRF wrote it, so the passivation is
+    /// exact (brief-wsprobe-6 §3; overview D-11).
+    /// </summary>
+    public override Activity Activity => Activity.ActiveExact;
+
+    /// <summary>
+    /// <c>gm = ∂I_d/∂V_gs → 0</c>, and nothing else. <c>gds = ∂I_d/∂V_ds</c> stays (a two-terminal
+    /// conductance), the gate diode's conductance stays, and the gate capacitances stay evaluated at
+    /// bias — this family's <c>dc</c> is already symmetric (<c>dc[0,1] = dc[1,0] = −Cgd</c>), so
+    /// there is no transcapacitance to remove and the symmetrisation is the identity here.
+    /// </summary>
+    public sealed override IReadOnlyList<(int P, int Q)> ControlledConductances => [(1, 0)];
+
     public sealed override NonlinearResult Evaluate(in PortVoltages v)
     {
         var i = new double[2];

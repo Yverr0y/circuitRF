@@ -123,6 +123,12 @@ public sealed class CnlReader
                             spAnalysis.MarginThresholdExpr != Analysis.MarginThresholdDefault
                                 ? spAnalysis.MarginThresholdExpr
                                 : existing.MarginThresholdExpr,
+                        NdfExpr = spAnalysis.NdfExpr != Analysis.NdfDefault
+                            ? spAnalysis.NdfExpr : existing.NdfExpr,
+                        PassiveVarsExpr = spAnalysis.PassiveVarsExpr.Length > 0
+                            ? spAnalysis.PassiveVarsExpr : existing.PassiveVarsExpr,
+                        PassiveParamsExpr = spAnalysis.PassiveParamsExpr.Length > 0
+                            ? spAnalysis.PassiveParamsExpr : existing.PassiveParamsExpr,
                     };
                     merged.Enabled = existing.Enabled;
                     tb.Analyses[idx] = merged;
@@ -1236,6 +1242,9 @@ public sealed class CnlReader
             Enabled = ParseEnabledToken(tokens),
             MarginThresholdExpr = kv.GetValueOrDefault(
                 "MarginThreshold", CircuitRF.Core.Design.Analysis.MarginThresholdDefault),
+            NdfExpr = kv.GetValueOrDefault("NDF", CircuitRF.Core.Design.Analysis.NdfDefault),
+            PassiveVarsExpr   = kv.GetValueOrDefault("PassiveVars", ""),
+            PassiveParamsExpr = kv.GetValueOrDefault("PassiveParams", ""),
         };
         return true;
     }

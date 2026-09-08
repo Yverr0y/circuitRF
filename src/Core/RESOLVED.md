@@ -2811,3 +2811,62 @@ own ground-plane refusal names the array and the missing return).
 
 **The lesson is the one the table's own doc comment states, arriving twice more:** `PortCount` is not
 a net count, and it is not off by a constant either. There is no formula — only a per-model statement.
+
+## WSP-6 — the NDF passivation contract on `ComponentModel` (2026-09-08)
+
+`docs/design/stability-wsprobe.md` §11.3 carries the contract and the per-model table; `data-model.md`
+§5 states the rule for anyone adding a device. What follows is what the shape of the API cost.
+
+### `Activity` is a TYPE-level property, and three models needed more than that
+
+The brief specifies `public virtual Activity Activity => Activity.Passive;` — a property, and the
+reflection gate reads it as one. Three cases do not fit a property:
+
+- **`R` and `Z_Port`.** Whether a resistor is active depends on its VALUE, which lives on the
+  `ElaboratedComponent`. Both are declared `ActiveExact` unconditionally and passivate by
+  `Re → |Re|`, which is the identity for anything already passive: the two stamps then agree entry
+  for entry and the instance contributes no column to the determinant ratio at all. The type-level
+  answer is unconditional; the effect is not, and it costs nothing.
+- **`SnP` and `Chain`.** Whether they are active depends on their DATA. They answer `BlackBox` at the
+  type level and refine it in a second hook, `ActivityFor(c, freqsHz)`, which measures `σ_max`.
+  **Default-deny is the point**: a model that never looks is refused, not assumed harmless.
+
+`PassivationNote` rides beside it so a refusal can quote the measurement (`σ_max = 5.097 > 1 at
+2.7 GHz`) rather than only the enum value; `explain --analysis` prints the same line.
+
+### Nobody overrides `StampLinearized`, which is what made the nonlinear half cheap
+
+Every nonlinear model in the repository (except the SDD, whose override is about its branch rows)
+goes through the base implementation, which builds `Y` from `Evaluate`'s `Dg`/`Dc`. So passivating a
+nonlinear device needed no per-model stamping code at all — only a list of the `(p, q)` entries of
+`Dg` that ARE the controlled source. `StampLinearized` was split into an evaluate half and a
+`StampAdmittanceBlock` half so the passive path writes its masked Jacobian through the same six lines
+rather than a second copy of them.
+
+**Both orientations' port indices are listed** for the MOSFET, VDMOS and JFET families, because which
+port carries the effective gate voltage depends on `forward` and therefore on the bias; the other
+entry is already zero, so zeroing it costs nothing and takes the bias-dependence out of a static
+list.
+
+### The transcapacitance rule, and why it is a symmetrisation
+
+A two-terminal `C(V)` between two port pairs contributes `dc[p,q] = dc[q,p]`: reciprocal, and exactly
+the "capacitances evaluated at bias" the reference document says to keep. A charge at `p` that
+responds to `V_q` WITHOUT a matching response of `Q_q` to `V_p` is not a capacitor — it is a
+controlled source, and it is precisely the half of `dc` that survives `dc − dcᵀ`. So "the
+transcapacitance is zeroed" is the antisymmetric part being dropped, i.e. `dc ← ½(dc + dcᵀ)`.
+
+That is not merely a reading of the words: the Hermitian part of `Dg + jω·Dc` is
+`(Dg + Dgᵀ) + jω(Dc − Dcᵀ)`, whose imaginary half grows without bound with ω. Leaving an unmatched
+transcapacitance in `Δ0` makes `Y + Yᴴ ⪰ 0` unattainable at high frequency, so the passivity guard
+would fire on every charge-based device. The built-in FET family's `dc` is already symmetric, so for
+it the rule is the identity; the MOSFET's Meyer charge and the BJT's Early effect are where it bites.
+
+### `BuildPassiveNetlist` mutates the TestBench and restores it
+
+`PassiveVars` is applied exactly as `--set` is, which means writing `tb.GlobalVariables` — the
+elaborator reads the TestBench's own lists and there is no other door. The call is made serially,
+before any frequency-parallel worker starts, for the same reason SP-P3 already elaborates its copies
+there. `PassiveParams` overrides an instance parameter, which means replacing the `Instance` in
+`tb.Instances`; **a dotted path into a sub-cell is a refusal**, because adding an override there would
+mean editing a shared `Cell` and would change every other instance of it in the same run.

@@ -1,0 +1,26 @@
+; series_resonator_negr.cnl — brief-wsprobe-6 R-wsp6-9(b): WSP-1's series unstable resonator
+; (the reference document's Fig. 31, Eq. 109–118).
+;
+;   G side: R1 + L1 + C1 in series to ground.   L side: RS to ground.
+;   The probe is a 0 V short, so the two sides meet at one node and
+;       Y(s) = sC/(s^2 LC + s R1 C + 1) + 1/RS,
+;   whose zeros — the network's poles — solve  s^2 LC + s C (R1 + RS) + 1 = 0.
+;   With R1 = -20 and RS = 10 the sum of the roots is +10/L: a CONJUGATE PAIR in the right half
+;   plane, i.e. TWO right-half-plane poles, which is what an oscillator has. The passive assembly
+;   takes R1 -> |R1| (§8 p. 111), whose roots are both in the left half plane.
+;   f0 = 1/(2 pi sqrt(L1 C1)) = 1.5915 GHz.
+;
+; R1 = -20 Ohm is the unstable value; +20 Ohm is the stable one.
+;
+; NOTE — why R1 is a RESISTOR here and a VCCS in parallel_resonator_vccs.cnl. A VCCS across its own
+; control pair IS a conductance, and passivating it (G -> 0) removes that conductance — which is
+; right for a SHUNT element and wrong for a SERIES one, where it opens the branch and changes the
+; topology. The NDF then diverges instead of tending to 1, which is Platzker's property 3 catching
+; a bad Delta-0 exactly as it is meant to.
+Rneg = -20
+R:R1        nG n1  R=Rneg
+L:L1        n1 n2  L=1 nH
+C:C1        n2 0   C=10 pF
+WSProbe:P   nG nL
+R:RS        nL 0   R=10 Ohm
+analysis SP1 type=sparam start=1 stop=1e5 npts=2001 log Unit=MHz NDF=yes

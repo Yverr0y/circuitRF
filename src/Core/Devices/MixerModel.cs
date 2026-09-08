@@ -126,6 +126,22 @@ public sealed class MixerModel : ComponentModel
 
     public override string[] TerminalNames => ["rf+", "rf-", "lo+", "lo-", "if+", "if-"];
 
+    /// <summary>The conversion is a dependent source and this repository wrote it
+    /// (brief-wsprobe-6 §3).</summary>
+    public override Activity Activity => Activity.ActiveExact;
+
+    /// <summary>
+    /// Every off-diagonal of the linearised block → 0: the two conversion terms (the IF port's
+    /// response to RF and to LO) and the LO-to-RF leak alike. The brief's table names the conversion
+    /// gain; the leak is a dependent source by exactly the same argument, and passivating MORE is
+    /// the safe direction — <c>Δ0</c> must have no right-half-plane zeros, and an unpassivated
+    /// dependent source is what would put one there. What is left is three matched port
+    /// conductances.
+    /// </summary>
+    public override IReadOnlyList<(int P, int Q)> ControlledConductances =>
+        [(0, 1), (0, 2), (1, 0), (1, 2), (2, 0), (2, 1)];
+
+
     // Nonlinear device: the linear engines call StampLinearized instead (base implementation).
     public override void Stamp(IMnaContext mna, ElaboratedComponent c, double omega) { }
 

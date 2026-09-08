@@ -336,6 +336,31 @@ public abstract class IdealSBlockModel : ComponentModel
     }
 
     /// <summary>
+    /// The same stamp with <see cref="PassivateS"/> applied first — the <c>Δ0</c> half of the NDF
+    /// (brief-wsprobe-6 §3). Every block in this family whose S is passive by construction (the
+    /// attenuator, the switch, the circulator, the coupler, the balun, the filter, the duplexer)
+    /// overrides nothing and stamps exactly what <see cref="Stamp"/> stamps.
+    ///
+    /// <para><b>The circulator is passive and stays as it is.</b> Platzker's construction zeroes
+    /// DEPENDENT SOURCES, not non-reciprocity: a circulator's <c>σ_max</c> is 1 and it can no more
+    /// hold a right-half-plane pole than a length of line can.</para>
+    /// </summary>
+    public override void StampPassive(IMnaContext mna, ElaboratedComponent c, double omega)
+    {
+        if (Kind is ModelKind.Nonlinear) return;
+        var s = (Complex[,])SAt(omega).Clone();
+        PassivateS(s);
+        StampWaveConstraints(mna, c.Nodes, s, Z0At(omega), PortBranchIndices);
+    }
+
+    /// <summary>
+    /// Removes the block's dependent sources from a COPY of its S. The default does nothing, which
+    /// is correct for every block whose <see cref="ComponentModel.Activity"/> is
+    /// <see cref="Core.Activity.Passive"/>; the amplifier overrides it.
+    /// </summary>
+    protected virtual void PassivateS(Complex[,] s) { }
+
+    /// <summary>
     /// The wave-constraint stamp itself, as a free function over an EXPLICIT node list rather than
     /// over a component's own.
     ///

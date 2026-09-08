@@ -75,7 +75,14 @@ public sealed class WspLoadpullNdfResult
     /// <summary><c>NDF</c> of the re-terminated circuit, <c>[gS, gL, freq]</c>.</summary>
     public required Complex[,,] Ndf { get; init; }
     /// <summary>The net clockwise encirclement count of the origin, rounded, <c>[gS, gL]</c>.
-    /// Non-zero is the NDF's own verdict of instability.</summary>
+    /// Non-zero is the NDF's own verdict of instability.
+    ///
+    /// <para><b>This is the SWEPT LOCUS's own turn count, which is HALF the right-half-plane pole
+    /// count</b> that <c>SParameterEngine</c>'s <c>NDF_poles</c> reports — see
+    /// <c>src/RfCore/RESOLVED.md</c> §"the encirclement count is over a half contour". The two agree
+    /// about whether a point is unstable, which is all R-wsp9-5's threshold reads, and differ by
+    /// exactly two in magnitude. Left as WSP-9 shipped it; the reconciliation is an owner
+    /// decision.</para></summary>
     public required double[,] Encirclements { get; init; }
 }
 

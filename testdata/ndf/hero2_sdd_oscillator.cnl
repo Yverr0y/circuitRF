@@ -1,0 +1,93 @@
+; ============================================================
+; hero2_sdd_oscillator.cnl — brief-wsprobe-6 R-wsp6-9(c), second half: the same Hero 2 SDD FET, at
+; the same bias and with the same passivation, in a circuit that OSCILLATES.
+;
+; The stage of hero2_sdd_stage.cnl is unconditionally stable and no lead inductance changes that:
+; Hero 2's SDD is a pure transconductance with no charge storage, so the only feedback path is the
+; Cgd this fixture adds, and through a 50 Ohm load that path is inverting and therefore stabilising.
+; What oscillates is the classical MEISSNER arrangement — a tuned tank at the drain, a feedback
+; winding at the gate, and mutual inductance between them, each coil doubling as its own DC feed.
+; The loop closes on the transformer rather than on a parasitic, so the start-up threshold is one
+; parameter (Mk) and it is between 6 and 7 nH, i.e. k between 0.6 and 0.7.
+;
+; The pole count is TWO, not one: a real circuit oscillates on a CONJUGATE PAIR of right-half-plane
+; poles, and Platzker's construction counts both. A single right-half-plane pole is a real one — the
+; analytic stage of R-wsp6-9(a) has exactly that, and it reads 1.
+;
+; A WSProbe at the gate gives the independent confirmation: Kurokawa's start-up signature on 1/Y0
+; (Eq. 108) is a different quantity computed by a different route, and it must agree.
+;
+; THE PASSIVATION is hero2_sdd_stage.cnl's, verbatim — see that file for why the controlling
+; VOLTAGE is what NDFgm freezes.
+; ============================================================
+
+; ---- Hero 2's FET model parameters, verbatim ----
+Sv=-0.837
+Sc=0.71
+TV0=4.268
+TC=1.507
+th=0.001
+a=0.176
+g=0.089
+lam=0.0012
+B=1130
+
+; ---- Hero 2's bias ----
+Vgg = -3.05
+Vdd = 48
+
+; ---- the NDF passivation ----
+Vgs0  = -3.05                 ; the gate voltage the drain current is frozen at when NDFgm = 0
+NDFgm = 1                     ; 1 in the ordinary assembly; the passive one re-elaborates it at 0
+
+; ---- the parasitics Hero 2's SDD does not carry ----
+Cgs   = 1.0 pF                ; gate-source capacitance
+Cgd   = 0.3 pF                ; gate-drain capacitance — the FEEDBACK path. Without it the stage is
+                              ; strictly unilateral and no lead inductance can destabilise it.
+Lgate = 20 nH
+Rgate = 2000 Ohm
+Ldrain= 5 nH
+Cdrain= 1 pF
+Rload = 500 Ohm
+Mk    = 9e-9                  ; mutual inductance IN HENRIES, and deliberately without a unit: a
+                              ; variable that declares one makes the site unit on `M=Mk nH` be
+                              ; skipped (var-unit-wins), so an override written without a unit would
+                              ; be read AS nH and land nine orders of magnitude out. 0 is the stable
+                              ; stage; 9 nH oscillates, and the threshold is between 6 and 7 nH.                  ; gate-lead series inductance
+Ls    = 1e-6 nH               ; source-lead inductance (a short at 0)
+
+; ---- gate: the feedback winding, which is also the DC bias path ----
+V_1Tone:Vgate    n_gbias 0       Vdc=Vgg
+L:Lg             n_gbias n_gfb   L=Lgate
+R:Rg             n_gbias n_gfb    R=Rgate
+
+; The WSProbe sits IN the gate node, splitting it: the feedback winding on the G side, the device
+; on the L side. That placement is what makes 1/Y0 = ZG + ZL the LOOP impedance at that node, and
+; therefore what makes Kurokawa's start-up signature (Eq. 108) an independent answer to the same
+; question the NDF answers. A probe hung off a large resistor instead would report that resistor.
+WSProbe:GATE     n_gfb n_gate
+
+; ---- the device ----
+SDD:M1  n_gate n_s  n_drain n_s  \
+  I[1,0]=_v1/50  \
+  I[2,0]=(B*TC*tanh(_v2*a*(tanh(g*(TV0 - (NDFgm*_v1+(1-NDFgm)*Vgs0) + _v2*th + Sc*ln(exp(-(Sv - (NDFgm*_v1+(1-NDFgm)*Vgs0))/Sc) + 1))) + 1))*ln(exp(-(2*TV0 - 2*(NDFgm*_v1+(1-NDFgm)*Vgs0) + 2*_v2*th + 2*Sc*ln(exp(-(Sv - (NDFgm*_v1+(1-NDFgm)*Vgs0))/Sc) + 1))/TC) + 1)*(_v2*lam + 1))/2
+C:Cgs            n_gate n_s      C=Cgs
+C:Cgd            n_gate n_drain  C=Cgd
+L:Lsource        n_s 0           L=Ls
+
+
+; ---- drain: the tank, which is also the DC feed ----
+L:Ld             n_dbias n_dtank L=Ldrain
+C:Cd             n_dtank 0       C=Cdrain
+R:Rd             n_dtank 0       R=Rload
+
+; A SECOND probe, splitting the DRAIN node between the tank (G side) and the device (L side): the
+; tank is where this oscillator's energy is stored, so it is the node whose loop impedance shows
+; Kurokawa's start-up signature.
+WSProbe:DRAIN    n_dtank n_drain
+V_1Tone:Vdrain   n_dbias 0       Vdc=Vdd
+Mutual:M1        M=Mk  Inductor1="Lg"  Inductor2="Ld"
+
+; A wide LOG sweep: Platzker's properties 3 and 5 are statements about the limits, and a count read
+; off a sweep that reaches neither is not a count.
+analysis SP1 type=sparam start=1e-3 stop=1e6 npts=4001 log Unit=MHz NDF=yes PassiveVars="NDFgm"

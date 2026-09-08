@@ -1,0 +1,25 @@
+; hero1_ndf_passive.cnl — brief-wsprobe-6 R-wsp6-9(d): Hero 1 with NDF=yes. Its embedded 2-port
+; `passive_pad.s2p` is a matched 6 dB pad: sigma_max = 0.5 <= 1, so the block is PASSIVE and
+; the run proceeds. Same circuit, one file changed.
+Port:Term1  p1 0  Num=1 Z=50 Ohm
+Port:Term2  p2 0  Num=2 Z=50 Ohm
+Port:Term3  p3 0  Num=3 Z=50 Ohm
+Port:Term4  p4 0  Num=4 Z=50 Ohm
+
+L:L1   p1   a1   L=3.3 nH
+C:C1   a1   0    C=1.5 pF
+
+SnP:X1  a1 a2  NumPorts=2 File="passive_pad.s2p" Type="touchstone" InterpMode="linear" InterpDomain="RI" ExtrapMode="clamp"
+
+L:L2   a2   p2   L=2.7 nH
+C:C2   p2   0    C=1.0 pF
+
+C:C3   p3   a1   C=1.5 pF
+R:R3   p3   0    R=200 Ohm
+
+L:L4   p4   a2   L=1.8 nH
+R:R4   p4   0    R=150 Ohm
+
+C:C5   a1   a2   C=0.2 pF
+
+analysis SP1 type=sparam start=1 stop=3 npts=51 Unit=GHz NDF=yes

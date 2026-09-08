@@ -252,6 +252,22 @@ readonly struct NonlinearResult { double[] I; double[] Q; double[,] Dg; double[,
 
 Guidance, not a restriction: for models that must stay smooth for tough convergence, prefer **soft switching** (e.g. `tanh`) over a hard `if`; hard conditionals remain allowed, with AD differentiating the active branch. The AD scheme and FD option are detailed in `expressions.md`.
 
+**Every new model declares its `Activity`.** The normalized determinant function (`NDF=yes` on an S-parameter analysis) is `Δ/Δ0`, where `Δ0` is the same network with **every dependent source, negative resistance and non-Foster element rendered passive** — and the whole reason circuitRF can compute it is that it owns its own device models and therefore knows their controlled sources exactly. So `ComponentModel` carries one more contract:
+
+```csharp
+enum Activity { Passive, ActiveExact, ActiveUserScaled, BlackBox }
+
+virtual Activity Activity => Activity.Passive;                       // answered by TYPE
+virtual Activity ActivityFor(ElaboratedComponent c, IReadOnlyList<double> freqsHz) => Activity;
+virtual void     StampPassive(IMnaContext mna, ElaboratedComponent c, double omega);
+virtual void     StampLinearizedPassive(IMnaContext mna, ElaboratedComponent c, double omega, in PortVoltages bias);
+virtual IReadOnlyList<(int P, int Q)> ControlledConductances => [];   // the dg entries that ARE sources
+```
+
+A model with no dependent source needs no code — `Passive` is the default and the base forwarding is correct by definition. A model that HAS one declares `ActiveExact` and either overrides a passivation stamp or names its `ControlledConductances`; a **reflection test over every `ComponentModel` subclass** (`tests/Engine.Tests/Linear/NdfTests.cs`, gate (h)) asserts that, and asserts that the subclass appears in the passivation table of `stability-wsprobe.md` §11.3 — so a new device cannot be added without deciding its passivation, and cannot leave `Δ0` quietly active. A model whose activity lives in user equations or a compiled binary declares `ActiveUserScaled` and is passivated through a quantity the user names; anything else is a `BlackBox` and the run is **refused by name**.
+
+Two rules that are easy to get wrong: the passivated stamp must allocate the **same number of branch unknowns** (the two assemblies are subtracted entry by entry), and a model whose activity depends on DATA answers `BlackBox` at the type level and refines it in `ActivityFor` — default-deny, so a model that never looks is refused rather than assumed harmless. See `stability-wsprobe.md` §11 for the full contract and the table.
+
 ### 5.1 Concrete models (illustrative, not exhaustive)
 
 | Category | Models | Notes |

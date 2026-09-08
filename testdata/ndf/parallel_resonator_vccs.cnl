@@ -1,0 +1,15 @@
+; parallel_resonator_vccs.cnl — brief-wsprobe-6 R-wsp6-9(b): WSP-1's parallel unstable resonator
+; (the reference document's Fig. 34, Eq. 119–128) with R1 realised as a VCCS across its own control.
+;
+;   G side: [VCCS G1] || L1 || C1 to ground.   L side: RS to ground, through the probe's short.
+;   Y(s) = Gr + 1/(sL) + sC + 1/RS, whose zeros solve  s^2 C + s (Gr + 1/RS) + 1/L = 0.
+;   A parallel negative resistance starts up only when its conductance exceeds the load's, so
+;   Gr = -0.2 S (-5 Ohm) against RS = 10 Ohm is unstable — a conjugate pair in the right half
+;   plane, TWO poles — while Gr = -0.05 S (-20 Ohm) is not (WSP-1's own note).
+Gr = -0.2
+VCCS:G1     nG 0 nG 0  G=Gr
+L:L1        nG 0   L=1 nH
+C:C1        nG 0   C=10 pF
+WSProbe:P   nG nL
+R:RS        nL 0   R=10 Ohm
+analysis SP1 type=sparam start=1 stop=1e5 npts=2001 log Unit=MHz NDF=yes

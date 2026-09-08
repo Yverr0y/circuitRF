@@ -93,6 +93,10 @@ internal static class JsonRun
     /// the run had none, so the key is absent rather than an empty list.</summary>
     public static IReadOnlyList<WsProbeJson>? Wsprobes;
 
+    /// <summary>What an <c>NDF=yes</c> S-parameter run found (brief-wsprobe-6 R-wsp6-2). Null when
+    /// the knob was off, so the key is absent rather than a zero count that reads as "stable".</summary>
+    public static NdfReportJson? Ndf;
+
     /// <summary>What <c>check</c> found, in counts (R-aut4-10). The findings themselves travel as
     /// diagnostics; this is the tally that tells "checked nothing" from "checked everything".</summary>
     public static CheckReportJson? Check;
@@ -155,6 +159,7 @@ internal static class JsonRun
         Analysis            = null;
         Data                = null;
         Wsprobes            = null;
+        Ndf                 = null;
         Check               = null;
         Explain             = null;
         Document            = null;
@@ -421,7 +426,7 @@ internal static class JsonRun
         // either schema to say which — so a caller now always learns what the run produced and can
         // then decide what to ask for.
         return new ResultPayload(summary, groups, Shape: ResultDocumentWriter.Shape(ds),
-                                 Narrowed: narrowed, Wsprobes: Wsprobes);
+                                 Narrowed: narrowed, Wsprobes: Wsprobes, Ndf: Ndf);
     }
 
     /// <summary>

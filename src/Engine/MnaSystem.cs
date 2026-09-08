@@ -640,6 +640,21 @@ public sealed class MnaSystem : IMnaContext
     /// safe — both build from the same accumulated entries. The returned matrix is a COPY the
     /// caller owns: the internal one is zeroed and refilled by the next <see cref="Reset"/>.
     /// </summary>
+    /// <summary>
+    /// The LIVE compressed-column matrix, without the copy <see cref="BuildCsc"/> makes — valid
+    /// until the next <see cref="Reset"/> and owned by this system, so the caller must only read it.
+    ///
+    /// <para>Exists for the NDF (brief-wsprobe-6 R-wsp6-1), which subtracts the active assembly from
+    /// the passive one at every frequency of a sweep. A per-point clone of both matrices is real
+    /// allocation on a circuit big enough to want an NDF at all, and the difference is read once and
+    /// discarded.</para>
+    /// </summary>
+    internal CompressedColumnStorage<Complex> LiveCsc()
+    {
+        EnsurePattern();
+        return _csc!;
+    }
+
     public CompressedColumnStorage<Complex> BuildCsc()
     {
         EnsurePattern();

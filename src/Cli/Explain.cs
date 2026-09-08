@@ -1,6 +1,7 @@
 using CircuitRF.Core.Devices;
 using CircuitRF.Core.Design;
 using CircuitRF.Core.Elaboration;
+using CircuitRF.Core.Stability;
 using CircuitRF.Core.Expressions;
 using CircuitRF.Core.Netlist;
 using CircuitRF.Design.Cells;
@@ -489,6 +490,10 @@ internal static class Explain
         // what resolved, and elaboration failures are `check`'s to report.
         int? ports = null;
         IReadOnlyList<ExplainWsProbeJson>? wsProbes = null;
+        // brief-wsprobe-6 §2: "explain --analysis lists the passivation each instance will use,
+        // which is the way to see a refusal coming without running". One survey per S-parameter
+        // analysis, because the two passivation lists are the directive's own.
+        var ndfByAnalysis = new Dictionary<string, ExplainNdfJson>(StringComparer.Ordinal);
         if (tb.Analyses.Any(a => a is SParameterAnalysis))
         {
             try
@@ -502,6 +507,9 @@ internal static class Explain
                         var ec = nl.Components[w.ComponentIndex];
                         return new ExplainWsProbeJson(w.Label, w.Idx, NetName(nl, ec.Nodes[0]), NetName(nl, ec.Nodes[1]));
                     }).ToList();
+
+                foreach (var spa in tb.Analyses.OfType<SParameterAnalysis>())
+                    ndfByAnalysis[spa.Name] = SurveyNdf(spa, nl);
             }
             catch (Exception) { /* reported by check; nothing to explain here */ }
         }
@@ -591,11 +599,49 @@ internal static class Explain
                 unresolved.Count > 0 ? unresolved : null,
                 Ports:    isSparam ? ports : null,
                 WsProbes: isSparam ? wsProbes : null,
-                MarginThreshold: MarginThresholdOf(a)));
+                MarginThreshold: MarginThresholdOf(a),
+                Ndf: isSparam && ndfByAnalysis.TryGetValue(a.Name, out var ndfRow) ? ndfRow : null));
         }
 
         return (rows, exit);
     }
+
+    /// <summary>
+    /// What every placed component's passivation would do under this analysis' own <c>PassiveVars</c>
+    /// and <c>PassiveParams</c>, and the refusal the run would raise if it would raise one
+    /// (brief-wsprobe-6 §2). Reported whether or not <c>NDF=yes</c> is actually set, because
+    /// "could this design yield an NDF at all" is worth answering before the knob is turned on.
+    ///
+    /// <para>Nothing here solves or stamps: it is the same <c>NdfPassivation.Survey</c> the engine
+    /// calls before its first factorisation, so a refusal seen here is the refusal a run raises,
+    /// word for word — a listing built independently would eventually disagree with it.</para>
+    /// </summary>
+    private static ExplainNdfJson SurveyNdf(SParameterAnalysis spa, ElaboratedNetlist nl)
+    {
+        double[] freqs;
+        try { freqs = spa.Expand(nl.ResolvedGlobals, nl.GlobalsWithExplicitUnit); }
+        catch (Exception) { freqs = []; }
+
+        var survey = NdfPassivation.Survey(
+            nl, freqs,
+            NdfPassivation.ParseList(spa.PassiveVarsExpr),
+            NdfPassivation.ParseList(spa.PassiveParamsExpr));
+
+        return new ExplainNdfJson(
+            Analysis.ParseNdf(spa.NdfExpr),
+            survey.Refusal,
+            [.. survey.Instances.Select(i => new ExplainNdfInstanceJson(
+                i.InstancePath, i.ComponentType, ActivityWord(i.Activity), i.Passivation, i.Refusal))]);
+    }
+
+    /// <summary>The enum, in the JSON's own camelCase — a stable token a caller can branch on.</summary>
+    private static string ActivityWord(CircuitRF.Core.Activity a) => a switch
+    {
+        CircuitRF.Core.Activity.Passive          => "passive",
+        CircuitRF.Core.Activity.ActiveExact      => "activeExact",
+        CircuitRF.Core.Activity.ActiveUserScaled => "activeUserScaled",
+        _                                        => "blackBox",
+    };
 
     /// <summary>R-wsp9-4: the effective <c>MarginThreshold=</c> of an analysis that reads one, as
     /// the number in dB or the word <c>none</c>. Null for a kind that has no such key, so the field
@@ -948,6 +994,30 @@ internal static class Explain
                     Console.WriteLine(mt == "none"
                         ? "      MarginThreshold: none (the stability-margin report is off)"
                         : $"      MarginThreshold: {mt} dB");
+
+                // brief-wsprobe-6 §2: the passivation each instance will use, which is the way to
+                // see an NDF refusal coming without running. Reported whether or not NDF=yes is
+                // set — "could this design yield an NDF at all" is worth answering before the knob
+                // is turned on — but only the instances that are NOT plainly passive are listed,
+                // because a hundred resistors saying "passive" is noise.
+                if (a.Ndf is { } ndf)
+                {
+                    var interesting = ndf.Instances
+                        .Where(i => i.Activity != "passive" || i.Refusal is not null)
+                        .ToList();
+                    Console.WriteLine(
+                        $"      NDF: {(ndf.Enabled ? "yes" : "no")}" +
+                        (ndf.Refusal is null
+                            ? $"; {ndf.Instances.Count} instance(s), " +
+                              $"{interesting.Count} carrying activity to passivate"
+                            : "; WOULD BE REFUSED"));
+                    foreach (var i in interesting)
+                        Console.WriteLine(
+                            $"      NDF {i.Instance} ({i.Type}) {i.Activity}: {i.Passivation}");
+                    if (ndf.Refusal is { } why)
+                        foreach (var line in why.Split('\n'))
+                            Console.WriteLine($"      {line.TrimEnd()}");
+                }
             }
         }
     }

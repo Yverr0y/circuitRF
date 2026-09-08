@@ -34,6 +34,26 @@ public abstract class Analysis(string name)
     /// than failing the run, because a mistyped REPORTING threshold must never stop a simulation
     /// from producing its result.</para>
     /// </summary>
+    // ── The NDF knob (brief-wsprobe-6 R-wsp6-2) ──────────────────────────────
+
+    /// <summary>The default <c>NDF=</c> — off, so nothing about an existing analysis changes.</summary>
+    public const string NdfDefault = "no";
+
+    /// <summary>
+    /// <c>NDF=</c> as a flag. <c>yes</c>/<c>true</c>/<c>on</c>/<c>1</c> turn the normalized
+    /// determinant function on; anything else leaves it off, because a mistyped flag must not make a
+    /// run do EXTRA work the user did not ask for — the failure direction that matters here is the
+    /// one that produces an unexpected refusal on a design that was simulating happily.
+    /// </summary>
+    public static bool ParseNdf(string? expr)
+    {
+        string t = (expr ?? NdfDefault).Trim();
+        return t.Equals("yes",  StringComparison.OrdinalIgnoreCase)
+            || t.Equals("true", StringComparison.OrdinalIgnoreCase)
+            || t.Equals("on",   StringComparison.OrdinalIgnoreCase)
+            || t == "1";
+    }
+
     public static double? ParseMarginThresholdDb(string? expr)
     {
         string t = (expr ?? MarginThresholdDefault).Trim();
@@ -80,6 +100,27 @@ public sealed class SParameterAnalysis : Analysis
     /// (WSP-9 R-wsp9-3). Read through <see cref="Analysis.ParseMarginThresholdDb"/>.
     /// </summary>
     public string MarginThresholdExpr { get; init; } = MarginThresholdDefault;
+
+    /// <summary>
+    /// <c>NDF=</c> from the directive, verbatim — <c>yes</c> makes the engine emit the normalized
+    /// determinant function over the sweep (brief-wsprobe-6). Read through
+    /// <see cref="Analysis.ParseNdf"/>.
+    /// </summary>
+    public string NdfExpr { get; init; } = NdfDefault;
+
+    /// <summary>
+    /// <c>PassiveVars=</c> — globals the passive assembly re-elaborates at 0, the route by which a
+    /// user-defined device (an SDD) declares which of its terms is the controlled source
+    /// (R-wsp6-4). Verbatim; split by <c>NdfPassivation.ParseList</c>.
+    /// </summary>
+    public string PassiveVarsExpr { get; init; } = "";
+
+    /// <summary>
+    /// <c>PassiveParams=</c> — instance parameters (<c>X1.gmscale</c>) the passive assembly
+    /// re-elaborates at 0, the only route into a compiled model. Verbatim; split by
+    /// <c>NdfPassivation.ParseList</c>.
+    /// </summary>
+    public string PassiveParamsExpr { get; init; } = "";
 
     // ── Whole-analysis expand: union all segments into one sorted/deduped array ─
     /// <summary>

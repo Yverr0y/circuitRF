@@ -1,0 +1,25 @@
+; single_loop_stage.cnl — brief-wsprobe-6 R-wsp6-9(a): the analytic single-loop stage.
+;
+;   Term T1 (Rs) at the control node g; Rf from the output d back to g; a VCCS whose output
+;   pair is (d, 0) and whose control pair is (g, 0); RL and CL from d to ground.
+;
+; Nodal Y over (g, d), with Gs = 1/Rs, Gf = 1/Rf, GL = 1/RL:
+;
+;   Y = [[ Gs + Gf ,        -Gf              ]
+;        [ gm - Gf , GL + Gf + jw*CL         ]]
+;
+; and Y_passive is the same with gm = 0, so
+;
+;   NDF = |Y| / |Y_passive| = 1 + Gf*gm / [ (Gs+Gf)(GL+Gf+jw*CL) - Gf^2 ]
+;
+; which is a bilinear function of jw. The pole of the closed loop sits at
+;   s = -[ (Gs+Gf)(GL+Gf) - Gf^2 + Gf*gm ] / [ (Gs+Gf)*CL ]
+; so the circuit has one right-half-plane pole exactly when
+;   gm < g_crit = [ Gf^2 - (Gs+Gf)(GL+Gf) ] / Gf.
+gm = -0.02
+Term:T1     g 0   Num=1 Z=1000 Ohm
+R:Rf        d g   R=5000 Ohm
+VCCS:G1     d 0 g 0   G=gm
+R:RL        d 0   R=200 Ohm
+C:CL        d 0   C=1 pF
+analysis SP1 type=sparam start=1 stop=1e5 npts=201 log Unit=MHz

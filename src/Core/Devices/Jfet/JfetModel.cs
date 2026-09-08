@@ -171,6 +171,14 @@ public sealed class JfetModel : ComponentModel
     private int PortRd => _rd > 0 ? IntrinsicPorts : -1;
     private int PortRs => _rs > 0 ? IntrinsicPorts + (_rd > 0 ? 1 : 0) : -1;
 
+    /// <summary>The channel's <c>gm</c> is a dependent source this repository wrote
+    /// (brief-wsprobe-6 §3).</summary>
+    public override Activity Activity => Activity.ActiveExact;
+
+    /// <summary><c>∂I_ds/∂V_gs → 0</c>; <c>gds</c> and both gate junctions stay. Both orientations'
+    /// gate ports are listed — see <c>MosfetModelBase</c> for why.</summary>
+    public override IReadOnlyList<(int P, int Q)> ControlledConductances => [(PDs, PGs), (PDs, PGd)];
+
     public override int       PortCount => IntrinsicPorts + InternalNodeCount;
     public override ModelKind Kind      => ModelKind.Nonlinear;
 

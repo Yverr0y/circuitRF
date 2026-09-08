@@ -88,6 +88,16 @@ public sealed class ExternalDeviceModel : ComponentModel, IDisposable
     public override ModelKind Kind      => ModelKind.Nonlinear;
 
     /// <summary>
+    /// A compiled model is the black box the reference document's §5.4 (pp. 95–99) is about: its
+    /// transconductance is inside a binary this repository did not write. The one way in is an
+    /// instance parameter the model itself exposes, named in <c>PassiveParams=</c>
+    /// (<c>X1.gmscale</c>) — so <see cref="Core.Activity.ActiveUserScaled"/>, and with no such entry
+    /// reaching the instance the run is refused, which is the black-box outcome stated as a
+    /// remediable one (brief-wsprobe-6 §3).
+    /// </summary>
+    public override Activity Activity => Activity.ActiveUserScaled;
+
+    /// <summary>
     /// Descriptor-supplied labels, so branch-current cube keys read meaningfully. Falls back to the
     /// node index when a provider supplies no label.
     /// </summary>

@@ -130,6 +130,58 @@ public sealed class SnpModel : ComponentModel
     internal static string Describe(string instancePath)
         => string.IsNullOrWhiteSpace(instancePath) ? "SnP" : $"SnP '{instancePath}'";
 
+    // ── The NDF passivation contract (brief-wsprobe-6 §3) ────────────────────
+
+    /// <summary>
+    /// <see cref="Core.Activity.BlackBox"/> at the TYPE level, because "an S-parameter block with
+    /// gain hides its dependent sources": there is no transconductance to zero, only data. The
+    /// answer is refined by <see cref="ActivityFor"/>, which measures the FILE.
+    /// </summary>
+    public override Activity Activity => Activity.BlackBox;
+
+    /// <inheritdoc/>
+    public override string? PassivationNote => _passivationNote;
+    private string? _passivationNote;
+
+    /// <summary>
+    /// σ_max(S) at every sampled frequency of the file: at or below <c>1 + 1e-6</c> the block is
+    /// passive and contributes nothing to <c>Δ − Δ0</c>; above it, the block has gain somewhere and
+    /// the run is refused by name.
+    ///
+    /// <para><b>The FILE's own grid, not the run's</b> (which is why <paramref name="freqsHz"/> is
+    /// unread here). Interpolating between two passive points cannot manufacture gain, and a file
+    /// with gain outside the swept band still has it — a block that is an amplifier at 12 GHz is not
+    /// made passive by sweeping to 6.</para>
+    /// </summary>
+    public override Activity ActivityFor(ElaboratedComponent c, IReadOnlyList<double> freqsHz)
+    {
+        const double Tol = 1e-6;
+        try
+        {
+            var sig = RFNetwork.Passivity(LoadSnp(c));
+            double worst = 0.0; int at = -1;
+            for (int k = 0; k < sig.Length; k++)
+                if (sig[k] > worst) { worst = sig[k]; at = k; }
+
+            if (worst <= 1.0 + Tol)
+            {
+                _passivationNote = $"σ_max = {worst:G4} ≤ 1 over its {sig.Length} sampled point(s)";
+                return Activity.Passive;
+            }
+
+            double hz = at >= 0 ? LoadSnp(c).Frequencies[at] : double.NaN;
+            _passivationNote =
+                $"σ_max = {worst:G4} > 1 at {hz / 1e9:G6} GHz — the file has gain there, and an " +
+                "S-parameter block with gain hides its dependent sources";
+            return Activity.BlackBox;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or FormatException)
+        {
+            _passivationNote = $"its Touchstone file could not be read ({ex.Message})";
+            return Activity.BlackBox;
+        }
+    }
+
     public override void Stamp(IMnaContext mna, ElaboratedComponent c, double omega)
     {
         var snp    = LoadSnp(c);

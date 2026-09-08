@@ -14,6 +14,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- brief-wsprobe-6 R-wsp6-9(g): the passivity guard's eigenvalue arithmetic is engine-internal
+         (NdfCalculator), and the gate that gives it teeth has to call it directly against a device
+         block rather than through a whole S-parameter run. -->
+    <InternalsVisibleTo Include="CircuitRF.Engine.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="CSparse"   Version="4.3.0" />
     <PackageReference Include="NumFlat"   Version="1.3.0" />
     <PackageReference Include="FftFlat"   Version="1.0.1" />

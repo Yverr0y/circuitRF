@@ -1088,3 +1088,274 @@ the same two-tone path, by the growth of the pump's own **image** of a tickle, w
 the direct response to 95% of it over the pump range in which the crossing appears. (The direct
 response is measurably the wrong observable there: the tank's resonance moves with the pump's average
 capacitance and pulls the tickle off resonance, hiding the parametric gain underneath.)
+
+---
+
+## 11. The normalized determinant function (WSP-6)
+
+`NDF = Δ / Δ0 = |Y| / |Y_passive|` (Eq. 181; Bode Eq. 16), where `Y` is the network's admittance
+matrix with every termination, bias network and bypass included and every independent source off,
+and `Y_passive` is the same matrix with **every dependent source, negative resistance and non-Foster
+element rendered passive** (§8, p. 111). `Δ0` then has no right-half-plane zeros by construction, so
+by the argument principle the clockwise encirclements of the origin by `NDF(jω)` count the network's
+right-half-plane poles (§8, p. 112).
+
+**circuitRF can build `Δ0` and the document's designer usually cannot.** §8 (p. 113) and §5.4
+(pp. 95–99): the passive determinant "requires having precise access to the transconductance
+elements in all active devices", which a black-box vendor model withholds. Every built-in active
+model in `src/Core/Devices` is circuitRF's own, and each knows its controlled sources exactly.
+
+The knob is on the S-parameter directive:
+
+```
+analysis SP1 type=sparam start=1 stop=100000 npts=2001 log Unit=MHz  NDF=yes  [PassiveVars="NDFgm"] [PassiveParams="X1.gmscale"]
+```
+
+`circuitrf sparam` prints `NDF: N right-half-plane pole(s)` and the property findings; `--json`
+carries them under `ndf`; **`explain --analysis` lists the passivation each instance will use**,
+which is how to see a refusal coming without running.
+
+### 11.1 The determinant ratio without determinants
+
+`ΔM = M − M0` holds only the dependent-source entries, and every one of them lives in a **control
+column** — a controlled current source writes into the columns of its sensing pair, a controlled
+voltage source into the columns of its control pair, a linearised FET's `gm` into the gate columns.
+With `c₁ … c_r` those columns, `U = ΔM[:, c]` (`n × r`) and `E = [e_{c₁} … e_{c_r}]`:
+
+```
+ΔM     = U·Eᵀ
+det(M) = det(M0 + U·Eᵀ) = det(M0)·det(I_r + Eᵀ·M0⁻¹·U)          (matrix determinant lemma)
+NDF    = det(I_r + Eᵀ·M0⁻¹·U)
+```
+
+which is `r` sparse solves against the **passive** factorisation, the `r` rows at `c` of the result,
+plus `I_r`, and one dense `r × r` determinant. `r` is the number of control columns in the whole
+circuit — two or three per transistor, not the size of the network — so there is no large
+determinant, no overflow, no underflow and no tiny ratio of two huge numbers, which are exactly the
+numerical troubles the document reports for the NDF (pp. 95, 112). **`M` itself is never factored**;
+the S-parameter solves of the same run use their own factorisation of it as before.
+
+`I_r + Eᵀ M0⁻¹ U` is Bode's **return-difference matrix** of the dependent sources, and its LU pivots
+taken in **device order** are Struble's sequential return differences `F_i = 1 + T_i` (Eq. 17) —
+which is why `NdfCalculator.DeltaColumns` takes a device-ordered column preference rather than
+sorting ascending. It is a free cross-check, not a feature.
+
+**MNA versus nodal.** The document writes `|Y|` for the nodal matrix; circuitRF's `M` carries branch
+rows as well. `M` and `M0` have identical branch blocks — a controlled voltage source passivates to a
+*zero-gain* source, which is still a 0 V branch, and a source that is off, an `IProbe` or a `WSProbe`
+merges two rows in both alike — so eliminating the branches multiplies both determinants by the same
+factor and the ratio is the nodal one. `NdfTests` gate (e) asserts it against explicit determinants
+of both assemblies, taken by a different route.
+
+**Which assembly.** The TERMINATED one, which is the network Eq. 181 is about. On the wave path that
+is the assembly the S-parameter solve already built; on the legacy path it is the second, terminated
+assembly the WSProbes already needed. The passive assembly is linearised at the **active** circuit's
+operating point: `Δ` and `Δ0` are two determinants of ONE network, so linearising the passive one
+about its own (different) bias would make the ratio a comparison of two circuits rather than Bode's
+return difference.
+
+**Cost, as counters** (owner rule, 2026-08-23): per frequency, one extra assembly, one extra
+factorisation (of `M0`) and `r` extra back-substitutions. Frequency-parallel exactly as SP-P3 —
+chunks write `NDF[f]` by index, and each worker gets its own passive netlist.
+
+### 11.2 Reading a count off half a contour — the factor of two
+
+The argument principle counts turns around the **closed** Nyquist contour, `ω` from −∞ to +∞. A
+sweep runs `ω ≥ 0`, and Platzker's property 4 (`NDF(−ω) = conj NDF(ω)`) says the missing half turns
+through the same angle: writing `φ(ω) = arg NDF(ω)`, the negative-frequency arm runs from `−φ(∞)` to
+`−φ(0)` and contributes `φ(∞) − φ(0)`, the same as the positive arm. So
+
+```
+right-half-plane poles = 2 × (the swept locus's own net clockwise turn)
+```
+
+and **`NDF_enc` carries that doubled count**, referred to the sweep's first sample so it starts at
+zero. A single REAL right-half-plane pole is half a turn of the swept locus and reads 1 (the analytic
+stage of gate (a) is exactly that); a conjugate PAIR — what an oscillator has — is a whole turn and
+reads 2. The reference document's Fig. 37 calls a locus whose phase "passes through π" one
+encirclement, which is the same statement about the swept half.
+
+> **`WspEnvelope.LoadpullNdf`'s `Encirclements` field does NOT carry the factor of two.** It is the
+> swept locus's own turn count, as WSP-9 shipped it, so it is exactly half `NDF_poles`. The two agree
+> about *whether* a point is unstable, which is all R-wsp9-5's threshold reads, and gate (k) asserts
+> both the verdict and the factor. Reconciling them is an owner decision — see
+> `src/RfCore/RESOLVED.md`.
+
+### 11.3 The passivation contract
+
+`ComponentModel` carries:
+
+```csharp
+public enum Activity { Passive, ActiveExact, ActiveUserScaled, BlackBox }
+public virtual Activity Activity => Activity.Passive;
+public virtual Activity ActivityFor(ElaboratedComponent c, IReadOnlyList<double> freqsHz) => Activity;
+public virtual void StampPassive(IMnaContext mna, ElaboratedComponent c, double omega) => Stamp(...);
+public virtual void StampLinearizedPassive(IMnaContext mna, ElaboratedComponent c, double omega, in PortVoltages bias);
+public virtual IReadOnlyList<(int P, int Q)> ControlledConductances => [];
+```
+
+**`Activity` is answered by TYPE and conservatively.** A model whose activity depends on DATA it has
+not read answers `BlackBox` and refines it in `ActivityFor`, where the component and the run's
+frequency grid are available — default-deny, so a model that never looks is refused rather than
+assumed harmless. An `ActiveExact` model **must** override `StampPassive`/`StampLinearizedPassive` or
+name its `ControlledConductances`; a reflection test over every `ComponentModel` subclass asserts it,
+**and asserts that every subclass appears in the table below** — so the next active device cannot be
+added without deciding its passivation.
+
+**The passivated branch count must not change.** The two assemblies are subtracted entry by entry, so
+a model that allocates a different number of branch unknowns when passivated shifts every later row
+and column. A controlled voltage source passivates to a *zero-gain* source (a short), never to no
+branch at all.
+
+| Model(s) | Activity | Passivation |
+|---|---|---|
+| `C`, `L`, `SRLC`, `PRLC`, `Bead`, `Mutual`, `TLIN`, the microstrips, `Short`, `IProbe`, `WSProbe`, `Port`, `Term`, `wBond`, `Match` | Passive | as-is — the ordinary stamp already IS the passive stamp |
+| `Vdc`, `V_1Tone`/`V_nTone`, `I_1Tone`/`I_nTone`, `P1Tone`, `PnTone`, `Tuner` | Passive | sources are off in this assembly already; `P1Tone` and `Tuner` stamp their impedances |
+| `Atten`, `Switch`, `Circulator`, `Coupler`, `Balun`, `Filter`, `Duplexer` | Passive | as-is. **The circulator is non-reciprocal and passive** — Platzker zeroes dependent sources, not non-reciprocity, and a `σ_max` of 1 can no more hold a right-half-plane pole than a length of line can |
+| `Diode`, `NonlinearC`, `SemiC` | Passive | a two-terminal nonlinearity linearises to a positive conductance or capacitance at any bias |
+| `R` | ActiveExact | `R → \|R\|` (§8 p. 111's "negative resistances … rendered passive"). The TYPE-level answer is unconditional and the EFFECT is not: for a positive resistor the two stamps are identical entry for entry and it contributes no column at all |
+| `Z_Port` | ActiveExact | `Re Z → \|Re Z\|` on the diagonal, where a driving-point negative resistance lives; the off-diagonal transfer terms are the block's own reciprocity and are untouched |
+| `VCCS` | ActiveExact | `G → 0` — no stamp, and it allocates no branch, so the numbering is unchanged |
+| `VCVS` | ActiveExact | `E → 0`; **the branch and its constraint row stay** (a zero-gain controlled voltage source is a short) |
+| `Amp` (system) | ActiveExact | forward gain → 0. What is left is what the other three entries already say — matched terminations and the reverse isolation, kept. With compression on it is nonlinear and the same term is `∂I_out/∂V_in` |
+| `Mixer` (system) | ActiveExact | **every off-diagonal** of its linearised block → 0: the two conversion terms and the LO-to-RF leak alike. The brief names the conversion gain; the leak is a dependent source by the same argument, and passivating MORE is the safe direction |
+| `FET_*`, `PFET_*` | ActiveExact | `gm = ∂I_d/∂V_gs → 0`. `gds`, the gate diode's conductance and both gate capacitances stay at bias; this family's `dc` is already symmetric, so there is no transcapacitance to remove |
+| `JFET_*` | ActiveExact | `∂I_ds/∂V_gs → 0`; `gds` and both gate junctions stay |
+| `BJT_*` | ActiveExact | the transport current source `I_ct → 0` in both directions, **and** the base-resistance modulation `∂I_rb/∂V_be`, `∂I_rb/∂V_bc` where `Rb` is modelled — a dependent source by the same argument even though §8 names only `I_ct`. Every junction conductance and charge is kept; the Early effect's `∂Q_be/∂V_bc` is removed as a transcapacitance |
+| `MOS*` | ActiveExact | `∂I_ds/∂V_gs → 0` and `∂I_ds/∂V_bs → 0`; `∂I_ds/∂V_ds` and both bulk junctions stay. Meyer's gate charge is genuinely non-reciprocal here and its antisymmetric part goes |
+| `VDMOS_*` | ActiveExact | `∂I_ds/∂V_gs → 0`; `gds`, the body diode and both gate capacitances stay |
+| `IGBT_*` | ActiveExact | the channel's `gm` and the wide-base bipolar's `α·g_e` transport source → 0 |
+| `SDD` | ActiveUserScaled | a global named in `PassiveVars=`, re-elaborated at 0 (§11.4) |
+| `VerilogA`, `ExtDevice` | ActiveUserScaled | an instance parameter the model exposes, named in `PassiveParams=` (`X1.gmscale`). With no entry reaching it the run is refused, which is the black-box outcome stated as a remediable one |
+| `SnP` | data-dependent | **Passive** when `σ_max(S) ≤ 1 + 1e-6` at every sampled frequency **of the file**; otherwise **BlackBox** — "an S-parameter block with gain hides its dependent sources". The FILE's own grid, not the run's: interpolating between two passive points cannot manufacture gain, and a block that is an amplifier at 12 GHz is not made passive by sweeping to 6 |
+| `Chain` | data-dependent | the same test over the block's own evaluated ABCD, at every frequency the run will visit — a `Chain` has no grid of its own |
+
+**Two deviations from brief-wsprobe-6 §3's table, both stated rather than silent.** `wBond` is
+grouped there with the `SnP`-backed blocks; in this repository it stamps a physically-derived R/L/M
+impedance reduction and reads no data file, so it is Passive by construction. And the `Mixer`'s LO
+leak is passivated alongside its conversion terms, for the reason the table gives.
+
+**The transcapacitance rule, stated once.** A two-terminal `C(V)` between the port-`p` pair and the
+port-`q` pair contributes `dc[p,q] = dc[q,p]`: it is reciprocal, and it is the "capacitances
+evaluated at bias" the document says to keep. A charge at `p` that responds to `V_q` *without* a
+matching response of `Q_q` to `V_p` is not a capacitor — it is a controlled source, and it is exactly
+the half of `dc` that survives `dc − dcᵀ`. Removing it is what makes `Y + Yᴴ ⪰ 0` attainable at every
+ω: the Hermitian part of `Dg + jω·Dc` is `(Dg + Dgᵀ) + jω(Dc − Dcᵀ)`, whose imaginary half grows
+without bound while a passive block's does not.
+
+### 11.4 The user-scaled route, and the shape that works
+
+`PassiveVars` is applied exactly as `--set var=expr` is — before elaboration — producing a second
+`ElaboratedNetlist` for the passive assembly. Both must produce the same node map, the same component
+order and the same branch order, and the engine asserts all three: a `PassiveVars` global that also
+sizes a component out of existence, or that a conditional branches on, changes the topology and is
+refused by name rather than subtracted. A name that is not a global, or that no device reads, is a
+refusal too — **a scaling variable that scales nothing is the classic silent failure of a hand-built
+NDF.**
+
+**The SHAPE of the SDD equation matters.** `I[2,0] = NDFgm*Ids(_v1,_v2)` is the wrong shape: it
+scales the whole drain current, output conductance included, so `Δ0` would be a *different circuit*
+rather than the same one with its controlled source removed. What is frozen is the **controlling
+voltage**:
+
+```
+I[2,0] = Ids(NDFgm*_v1 + (1 − NDFgm)*Vgs0, _v2)
+```
+
+At `NDFgm = 0` the drain current no longer responds to the gate voltage at all while staying
+evaluated at the same bias — `∂I_d/∂V_gs → 0` with `∂I_d/∂V_ds`, every junction conductance and every
+capacitance kept, which is exactly what a built-in FET's `ActiveExact` passivation does.
+`testdata/ndf/hero2_sdd_stage.cnl` is the worked example.
+
+`PassiveParams` names a **top-level** instance (`X1.gmscale`). A dotted path into a sub-cell is a
+refusal, not a silent no-op: adding an override there would mean editing a shared `Cell` and would
+change every other instance of it in the same run.
+
+### 11.5 The five properties, checked on the engine's own output
+
+Properties 1 (the NDF has zeros only) and 4 (`NDF(−ω) = conj NDF(ω)`) hold by construction — the
+denominators of `Δ` and `Δ0` are the same branch-elimination factor and cancel, and a real-valued
+netlist gives a conjugate-symmetric `M(jω)` — so there is nothing for a check to catch. The other
+three are run diagnostics:
+
+- **`ndf.no-asymptote`** — `|NDF(f_max) − 1| > 0.05` *and* the locus is still closing on 1 (its
+  distance from 1 has shrunk by more than three between a decade lower and the top). Extend the sweep
+  upward.
+- **`ndf.constant-asymptote`** — the same distance, but the locus is **not** closing. The limit is
+  then simply not 1, and it is quoted (extrapolated by Richardson elimination of the `1/ω` tail).
+  **A constant factor is what passivating a NEGATIVE RESISTANCE does:** `R → |R|` changes an element
+  VALUE, and an element value can be a *factor* of the network determinant where a dependent source
+  is only ever a *term* in it. The series resonator of gate (b) reads exactly −1 for that reason.
+  The pole count is unaffected — a constant turns through no angle.
+- **`ndf.dc-imaginary`** — `|Im NDF(f_min)| / |NDF(f_min)| > 0.05`. Extend the sweep downward.
+- **`ndf.counterclockwise`** — the running count falls back a **whole encirclement** below its own
+  maximum. Property 2 forbids a counter-clockwise *encirclement*, not a counter-clockwise stretch of
+  phase: a locus may wander back and forth as long as it does not go round, and the Ohtomo amplifier
+  of gate (k) backtracks by 0.74 of one with a perfectly passive `Δ0`.
+
+**The passivity guard (R-wsp6-5).** For every `ActiveExact`/`ActiveUserScaled` device that has a
+port-admittance form, the passivated block `Y_dev(ω)` is checked for `Y + Yᴴ ⪰ 0` at every frequency;
+a failure is `ndf.passivation-not-passive`, naming the device and the frequency, and the NDF is still
+emitted with the count declared unreliable. The minimum eigenvalue is read off an SVD by shifting:
+`H = Y + Yᴴ` is Hermitian, so `H + σ_max(H)·I` is positive semidefinite and its singular values ARE
+its eigenvalues, giving `λ_min(H) = σ_min(H + σ_max(H)·I) − σ_max(H)`. This is the check §8 p. 113
+wishes for ("great care must be taken when constructing the NDF"), and it earns its keep: Hero 2's
+SDD FET at its own quiescent bias has a slightly NEGATIVE output conductance — the model's `_v2*th`
+drain-induced-barrier-lowering term — so its passivated block fails by 4.7e-4 of its own scale, and
+the run says so.
+
+Blocks with no port-admittance form are covered elsewhere rather than skipped in silence: `SnP` and
+`Chain` are measured for `σ_max ≤ 1` at setup, and `VCCS → 0`, `VCVS →` short and `R → |R|` are
+passive by construction. `Z_Port` overrides the hook (`Y = Z_passive⁻¹`), because taking `|Re Z|` on
+the diagonal says nothing about the off-diagonal transfer terms.
+
+### 11.6 Large-signal NDF — deliberately not built
+
+`det(J_ss) / det(J_ss,passive)` over WSP-5's conversion matrix is the natural extension and is not in
+scope here. The passivated device spectra it needs are exactly the ones §11.3 defines, applied per
+harmonic: the conversion matrix's blocks are built from the same `Dg`/`Dc` this contract masks, so
+the passivation carries over unchanged and what is missing is only the plumbing.
+
+### 11.7 Gates
+
+`tests/Engine.Tests/Linear/NdfTests.cs`; fixtures under `testdata/ndf/`.
+
+- **(a)** an analytic single-loop stage — a `VCCS` driving `R_L ∥ C_L` with `R_f` back to the control
+  node — against `NDF = 1 + Gf·gm / [(Gs+Gf)(GL+Gf+jωCL) − Gf²]` at 201 log-spaced points, to 1e-12
+  relative, and the pole count either side of the closed form's own `g_crit`. **This is what pins the
+  factor of two of §11.2**: the stage has a single real right-half-plane pole and reads exactly 1.
+  (The inequality runs the other way from the brief's, because a positive `G` sinks current from the
+  output node and positive feedback through `Rf` therefore takes a negative `gm`. The closed form is
+  computed in the test rather than quoted.)
+- **(b)** the document's two resonators (Fig. 31 and Fig. 34), each unstable and stable, reading 2
+  and 0; and the phase passing through π within 5 % of 1.5915 GHz on both — asserted on the locus
+  referred to its own asymptote, so that the series fixture's −1 constant does not rotate the
+  crossing off the axis being tested.
+- **(c)** Hero 2's SDD FET at Hero 2's bias, passivated through `PassiveVars`: properties 3, 5 and 2,
+  and a zero count; then the same device in a Meissner oscillator reading 2, cross-checked by the
+  reduced NDF over its own probes.
+- **(d)** the refusals: an `SnP` with `σ_max = 5.1`, named, and the same circuit with a passive pad
+  proceeding; an SDD with nothing passivating it; a `PassiveVars` name that is not a global, and one
+  that is a global no device reads.
+- **(e)** the lemma against explicit LU determinants of both assemblies, by a different route, 1e-10.
+- **(f)** the probe route (Eq. 186) over a probe at every non-ground node, against the native NDF,
+  1e-9 — which is also what `wsp_passive` exists for.
+- **(g)** the guard has teeth: for the FET, BJT, MOSFET and JFET families at three bias points and
+  three frequencies, the passivated block passes `Y + Yᴴ ⪰ 0` and the ACTIVE block fails it. Each
+  family's bias vector is written in **its own port coordinates** — a vector written for one family
+  and handed to another is a device biased OFF, which would pass for the wrong reason.
+- **(h)** the contract is complete, by reflection over every `ComponentModel` subclass.
+- **(i)** K is not enough: a two-port whose terminal S-parameters are a 6 dB pad — `K > 1`,
+  `|Δ| < 1` across the band — wrapped around an internal loop that oscillates. The NDF reads 2. And
+  the demonstration is kept from being circular: the stable and unstable versions' terminal
+  S-parameters agree to 1e-4, so the two-port metrics were not simply given different data.
+- **(j)** a no-knob run is byte-identical, and the counters are §11.1's: `2n` factorisations against
+  `n`, and `r` extra back-substitutions.
+- **(k)** `Category=Benchmark`, ~20 s. WSP-9's Ohtomo Type-A at `ρ = 0.9` over a 12×12 grid — 144
+  real re-runs per balancing resistance — against `wsp_loadpull_ndf`. Both the verdict and the factor
+  of two hold at all 288 comparisons. At `Rb = 30 Ω`, 25 of 144 terminations are unstable and every
+  one has `SMenv < −30 dB`; two more have a collapsed margin and no encirclement, which is [E]'s own
+  point, printed rather than asserted. At `Rb = 100 Ω` all 144 are unstable, because the odd mode is
+  differential and no source or load termination reaches it. The fixture carries a probe on **both**
+  gates: the envelope's NDF is the *reduced* one over the probe set, and WSP-9's own gate (i) shows a
+  set covering one gate cannot see that mode.

@@ -173,6 +173,29 @@ public sealed class AmplifierModel : IdealSBlockModel
     /// <summary>Unilateral, so the two ports are NOT interchangeable and are named rather than numbered.</summary>
     public override string[] TerminalNames => ["in+", "in-", "out+", "out-"];
 
+    /// <summary>The forward gain is a dependent source: an ideal amplifier IS one
+    /// (brief-wsprobe-6 §3).</summary>
+    public override Activity Activity => Activity.ActiveExact;
+
+    /// <inheritdoc/>
+    public override string? PassivationNote =>
+        "forward gain → 0; matched terminations and the reverse isolation kept";
+
+    /// <summary>
+    /// Forward gain → 0. What is left is what the block's other three entries already say — matched
+    /// terminations at both ports and the reverse isolation, kept — so the passivated block is an
+    /// attenuator in the reverse direction and nothing in the forward one, whose <c>σ_max</c> is
+    /// <c>|S12| ≤ 1</c>.
+    /// </summary>
+    protected override void PassivateS(Complex[,] s) => s[1, 0] = Complex.Zero;
+
+    /// <summary>
+    /// The compressing amplifier's own dependent source, in the linearised block: the forward
+    /// transfer <c>∂I_out/∂V_in</c>. The reverse term <c>∂I_in/∂V_out</c> is the isolation and stays,
+    /// exactly as <c>S12</c> does above.
+    /// </summary>
+    public override IReadOnlyList<(int P, int Q)> ControlledConductances => [(1, 0)];
+
     protected override void FillS(double omega, Complex[,] s)
     {
         s[0, 0] = _s11;  s[0, 1] = _s12;

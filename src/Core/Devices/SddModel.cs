@@ -185,6 +185,24 @@ public sealed class SddModel : ComponentModel
     public override int       PortCount => _portCount;
     public override ModelKind Kind      => ModelKind.Nonlinear;
 
+    /// <summary>
+    /// The SDD's activity lives in equations the USER wrote, so nothing here can identify its
+    /// controlled sources — <see cref="Core.Activity.ActiveUserScaled"/> (brief-wsprobe-6 §3).
+    ///
+    /// <para><b>The passivation is a re-elaboration, not a stamp.</b> The user multiplies each
+    /// controlled term by a global and names it in <c>PassiveVars=</c>; the passive assembly is
+    /// built from a second <c>ElaboratedNetlist</c> in which those globals are 0, so this model's
+    /// <c>StampLinearizedPassive</c> is deliberately the inherited one — it stamps the equations it
+    /// was given, which in the passive netlist are already the passive equations. An SDD with no
+    /// <c>PassiveVars</c> entry reaching it is a REFUSAL, never a silently active <c>Δ0</c>.</para>
+    ///
+    /// <para><b>The shape that works.</b> The controlled source is the dependence on the OTHER
+    /// port, so <c>I[2,0] = NDFgm*Ids(_v1,_v2)</c> is the wrong shape — it scales the whole drain
+    /// current, output conductance included. Write the transconductive term separately, or freeze
+    /// the controlling voltage: <c>Ids(NDFgm*_v1 + (1−NDFgm)*Vgs0, _v2)</c>.</para>
+    /// </summary>
+    public override Activity Activity => Activity.ActiveUserScaled;
+
     // SDD gate=port0, drain=port1 for a 2-port FET; 3-port adds source; 4-port adds thermal.
     // Names match the common equation-defined-device convention so hero references stay transcribable.
     private static readonly string[][] _termNames =

@@ -303,6 +303,23 @@ public abstract class MosfetModelBase : ComponentModel
     private int PortRd => _rd > 0 ? IntrinsicPorts : -1;
     private int PortRs => _rs > 0 ? IntrinsicPorts + (_rd > 0 ? 1 : 0) : -1;
 
+    /// <summary>The channel's <c>gm</c> and <c>gmbs</c> are dependent sources this repository
+    /// wrote, so the passivation is exact (brief-wsprobe-6 §3).</summary>
+    public sealed override Activity Activity => Activity.ActiveExact;
+
+    /// <summary>
+    /// <c>∂I_ds/∂V_gs → 0</c> and <c>∂I_ds/∂V_bs → 0</c>; <c>∂I_ds/∂V_ds</c> is kept, as are both
+    /// bulk junctions. BOTH orientations' gate and bulk ports are listed because which of them
+    /// carries the effective voltage depends on the bias (<c>forward</c>), and the other entry is
+    /// already zero — zeroing a zero costs nothing and removes the bias-dependence from the list.
+    ///
+    /// <para>Meyer's gate charge is genuinely non-reciprocal here (<c>dc[PGs, PDs]</c> has no
+    /// matching <c>dc[PDs, PGs]</c>), which is the transcapacitance
+    /// <see cref="ComponentModel.PassivatesTranscapacitance"/> removes.</para>
+    /// </summary>
+    public sealed override IReadOnlyList<(int P, int Q)> ControlledConductances =>
+        [(PDs, PGs), (PDs, PGd), (PDs, PBs), (PDs, PBd)];
+
     public sealed override int       PortCount => IntrinsicPorts + InternalNodeCount;
     public sealed override ModelKind Kind      => ModelKind.Nonlinear;
 

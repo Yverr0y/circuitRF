@@ -146,7 +146,33 @@ namespace RfCore.Export
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         IReadOnlyList<NarrowingJson>? Narrowed = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        IReadOnlyList<WsProbeJson>? Wsprobes = null);
+        IReadOnlyList<WsProbeJson>? Wsprobes = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        NdfReportJson? Ndf = null);
+
+    /// <summary>
+    /// What an <c>NDF=yes</c> run found (brief-wsprobe-6 R-wsp6-2): the right-half-plane pole count
+    /// of the WHOLE network, the net encirclement it was rounded from, and the property findings the
+    /// engine raised on its own output.
+    /// </summary>
+    /// <param name="Poles">Clockwise encirclements of the origin by <c>NDF(jω)</c> over the closed
+    /// Nyquist contour, rounded — the number of right-half-plane poles (Platzker, §8 p. 112).</param>
+    /// <param name="Encirclements">The unrounded net count, so a caller can see how far from an
+    /// integer the sweep actually got. A value well away from one says the grid is too coarse or
+    /// stops too low, and the findings say which.</param>
+    /// <param name="AtFmax">The NDF at the top of the sweep, which must tend to 1 (property 3).</param>
+    /// <param name="AtFmin">The NDF at the bottom, whose imaginary part must tend to 0 (property 5).</param>
+    /// <param name="Findings">The <c>ndf.*</c> diagnostic keys the run raised, in the order raised.
+    /// Empty when every property held.</param>
+    public sealed record NdfReportJson(
+        int      Poles,
+        double   Encirclements,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        double[]? AtFmax = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        double[]? AtFmin = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<string>? Findings = null);
 
     /// <summary>
     /// One WSProbe of an S-parameter run: the document's Label and its <c>idx</c>
@@ -380,7 +406,35 @@ namespace RfCore.Export
         /// the margin report is disabled (WSP-9 R-wsp9-4). Reported for the kinds that read it —
         /// <c>sparam</c> and <c>hb</c> — because the default is not visible in the document.</summary>
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        string?               MarginThreshold = null);
+        string?               MarginThreshold = null,
+        /// <summary>What each placed component's passivation would do if this analysis were run
+        /// with <c>NDF=yes</c>, and why the run would be refused when it would (brief-wsprobe-6
+        /// R-wsp6-2). Null when the analysis is not one that can carry the knob.</summary>
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        ExplainNdfJson?       Ndf = null);
+
+    /// <summary>
+    /// <c>explain --analysis</c>'s answer to "what would the NDF do here" — the way to see a
+    /// refusal coming without running (brief-wsprobe-6 §2).
+    /// </summary>
+    /// <param name="Enabled">Whether the directive actually carries <c>NDF=yes</c>. The listing is
+    /// reported either way, because the question "could this design yield an NDF" is worth asking
+    /// before the knob is turned on.</param>
+    /// <param name="Refusal">The whole refusal the run would raise, or null when it would proceed.</param>
+    /// <param name="Instances">One row per placed component, in netlist order.</param>
+    public sealed record ExplainNdfJson(
+        bool Enabled,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Refusal,
+        IReadOnlyList<ExplainNdfInstanceJson> Instances);
+
+    /// <param name="Activity">The model's own answer: <c>passive</c>, <c>activeExact</c>,
+    /// <c>activeUserScaled</c> or <c>blackBox</c>.</param>
+    /// <param name="Passivation">What the passive assembly does with it, in one line.</param>
+    public sealed record ExplainNdfInstanceJson(
+        string Instance, string Type, string Activity, string Passivation,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Refusal = null);
 
     /// <summary>
     /// One WSProbe as <c>explain --analysis</c> reports it for an S-parameter analysis

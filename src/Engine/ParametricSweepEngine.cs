@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Numerics;
 using CircuitRF.Core.Design;
 using CircuitRF.Core.Elaboration;
+using CircuitRF.Core.Stability;
 using CircuitRF.Core.Expressions;
 using CircuitRF.Engine.HarmonicBalance;
 using CircuitRF.Engine.Loadpull;
@@ -435,7 +436,22 @@ public static class ParametricSweepEngine
         // than left on whatever settings the sweep was started with (WSP-9 R-wsp9-3).
         var withMargin = (settings ?? AnalysisSettings.Default)
             .WithMarginThreshold(Analysis.ParseMarginThresholdDb(spa.MarginThresholdExpr));
-        return SParameterEngine.Run(netlist, lib, tb, baseDirectory, freqs, withMargin, control);
+        // NDF= is the inner analysis' own key too, and for the same reason: the passive netlist is
+        // built from THIS point's TestBench, so a swept variable that also scales the passivation
+        // is honoured per point rather than frozen at the sweep's first (brief-wsprobe-6 R-wsp6-4).
+        NdfRequest? ndf = null;
+        if (Analysis.ParseNdf(spa.NdfExpr))
+        {
+            var vars = NdfPassivation.ParseList(spa.PassiveVarsExpr);
+            var pars = NdfPassivation.ParseList(spa.PassiveParamsExpr);
+            ndf = new NdfRequest
+            {
+                PassiveVars    = vars,
+                PassiveParams  = pars,
+                PassiveNetlist = () => NdfPassivation.BuildPassiveNetlist(lib, tb, baseDirectory, vars, pars),
+            };
+        }
+        return SParameterEngine.Run(netlist, lib, tb, baseDirectory, freqs, withMargin, control, ndf: ndf);
     }
 
     private static DataSet RunDc(

@@ -1,0 +1,79 @@
+; ohtomo_type_a_ndf.cnl — brief-wsprobe-6 R-wsp6-9(k). WSP-9's Ohtomo Type-A fixture with the two
+; terminations and the balancing resistor made variables, a FOURTH probe on the second gate, and
+; NDF=yes.
+;
+; The fourth probe is the point of the gate. The odd mode is DIFFERENTIAL across g1 and g2, so a
+; probe set covering only g1 cannot see it (the reference document's own caveat, pp. 112–113, and
+; WSP-9's gate (i)) — and `wsp_loadpull_ndf` is the REDUCED NDF over the probe set, while the
+; S-parameter engine's own NDF_poles is the FULL network determinant and is not reduced at all.
+; With both gates probed the two are comparable, which is what this fixture exists to make possible.
+;
+; The two counts also differ in CONVENTION by exactly two: the engine reports right-half-plane
+; POLES (the closed Nyquist contour), the library reports the swept locus's own turns. See
+; src/RfCore/RESOLVED.md.
+;
+; A redrawn Type-A (two-device parallel) amplifier, the topology of
+; M. Ohtomo, "Stability Analysis and Numerical Simulation of Multidevice Amplifiers",
+; IEEE Trans. MTT vol. 41 no. 6/7, 1993, and the circuit the 2025 envelope paper sweeps.
+;
+; Two identical devices are driven in parallel from one input node and combined at one output
+; node. The EVEN mode is what the amplifier is for; the ODD mode — the two devices in antiphase —
+; sees the input and output nodes as virtual grounds and closes a loop through the two gates that
+; nothing in the matching network damps. Rb across the gates is the balancing resistor that damps
+; it, and it is the element the whole analysis is about: at Rb = 30 Ohm this circuit is stable at
+; 50 Ohm, and at Rb = 100 Ohm the odd mode starts up at 6.09 GHz. Because the odd mode sees both
+; ports as virtual grounds, NO source or load termination reaches it — which is why the fixture is
+; also the demonstration that a source/load stability ENVELOPE cannot see an odd-mode instability.
+;
+; Redrawn with circuitRF's own element values (overview D-15): no vendor kit, no part number,
+; no figure copied. The device is an eleven-element small-signal FET written out of primitives —
+; Rg, Ri, Cgs, Cgd, Cds, Rds, gm, and the gate/drain line inductances beside it — which is what
+; an eleven-element FET model is.
+;
+;   PS (idx 1) sits DIRECTLY at the source Term, G facing it — the envelope's source probe;
+;   PG (idx 2) is the suspect probe, in device 1's gate node, where the odd mode lives;
+;   PL (idx 3) sits directly at the load Term, L facing it — the envelope's load probe.
+; (idx is flattened netlist order, so it follows the order the three are WRITTEN below.)
+;
+; Passivating for the NDF is `G=0.40` -> `G=0` on both VCCS: the NDFgm pattern of WSP-6.
+ZS = 50
+ZL = 50
+Rb = 30
+
+Term:T1     p1 0    Num=1 Z=ZS
+WSProbe:PS  p1 in
+L:LIN1  in g1    L=0.25 nH
+L:LIN2  in g2    L=0.25 nH
+R:RB    g1 g2    R=Rb
+
+; ── device 1 ────────────────────────────────────────────────────────────────
+WSProbe:PG  g1 g1a
+R:RG1   g1a gi1  R=0.5 Ohm
+C:CGS1  gi1 s1   C=0.50 pF
+C:CGD1  gi1 d1   C=0.45 pF
+VCCS:M1 d1 s1  gi1 s1  G=0.40
+R:RDS1  d1 s1    R=1000 Ohm
+C:CDS1  d1 s1    C=0.08 pF
+L:LS1   s1 0     L=0.10 nH
+
+; ── device 2 ────────────────────────────────────────────────────────────────
+WSProbe:PG2 g2 g2a
+R:RG2   g2a gi2   R=0.5 Ohm
+C:CGS2  gi2 s2   C=0.50 pF
+C:CGD2  gi2 d2   C=0.45 pF
+VCCS:M2 d2 s2  gi2 s2  G=0.40
+R:RDS2  d2 s2    R=1000 Ohm
+C:CDS2  d2 s2    C=0.08 pF
+L:LS2   s2 0     L=0.10 nH
+
+; ── output combiner ─────────────────────────────────────────────────────────
+L:LO1   d1 out   L=0.40 nH
+L:LO2   d2 out   L=0.40 nH
+WSProbe:PL  out p2
+Term:T2     p2 0    Num=2 Z=ZL
+; The sweep is LOGARITHMIC and reaches 10 THz. The NDF must tend to 1 (Platzker's property 3), and
+; this circuit's own time constants — Rg = 0.5 Ohm against Cgs = 0.5 pF — put that limit near a
+; terahertz: WSP-9's own 0.2-20 GHz window leaves the NDF at 64, where a count is not a count. It
+; also starts at 1 MHz, because property 5 is the same statement at the other end. 2001 log points
+; over seven decades give ~0.8 % spacing, which is 50 MHz at the 6.09 GHz odd mode.
+analysis SP1 type=sparam start=1 stop=1e7 npts=2001 log Unit=MHz NDF=yes

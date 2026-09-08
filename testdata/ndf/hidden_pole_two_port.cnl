@@ -1,0 +1,35 @@
+; hidden_pole_two_port.cnl — brief-wsprobe-6 R-wsp6-9(i): K is not enough.
+;
+; A two-port whose terminal S-parameters are those of a well-behaved 6 dB pad — K > 1 and |Delta| < 1
+; at every frequency in the band, so every two-port stability factor says "unconditionally stable" —
+; wrapped around an internal loop that oscillates. The loop is WSP-1's parallel unstable resonator
+; (the reference document's Fig. 34): a negative conductance across an LC tank, whose poles solve
+;     s^2 C + s (Gr + 1/RS) + 1/L = 0
+; and are a conjugate pair in the right half plane whenever |Gr| > 1/RS. TWO right-half-plane poles.
+;
+; The loop is coupled to the through path by Cc = 1 fF, which is 0.1 % of the tank capacitance: far
+; too weak to move the terminal S-parameters measurably, and entirely irrelevant to whether the loop
+; oscillates, because an oscillator's start-up condition is a property of the loop and not of what
+; is watching it. That is Platzker's whole point (INMMC 1994; the reference document's §3.2): K and
+; |Delta| are computed from the REDUCED two-port and can say nothing about a pole the reduction
+; hides. The NDF is computed from the network determinant and cannot miss it.
+;
+; Gr = -0.2 S (-5 Ohm) is the unstable value; +0.2 S is the stable one, and the terminal
+; S-parameters are indistinguishable between them.
+Gr = -0.2
+
+; ---- the innocuous two-port: a resistive 6 dB pad ----
+Port:P1     p1 0   Num=1 Z=50 Ohm
+Port:P2     p2 0   Num=2 Z=50 Ohm
+R:Ra        p1 mid  R=25 Ohm
+R:Rb        mid 0   R=100 Ohm
+R:Rc        mid p2  R=25 Ohm
+
+; ---- the internal loop nothing at the ports can see ----
+C:Cc        mid nG   C=1 fF
+VCCS:G1     nG 0 nG 0  G=Gr
+L:L1        nG 0   L=1 nH
+C:C1        nG 0   C=10 pF
+R:RS        nG 0   R=10 Ohm
+
+analysis SP1 type=sparam start=1 stop=1e5 npts=2001 log Unit=MHz NDF=yes

@@ -465,6 +465,14 @@ public static class CnlWriter
             // first line only — which is also what the reader's segment merge keeps (WSP-9).
             if (lines.Length == 0 && sp.MarginThresholdExpr != Analysis.MarginThresholdDefault)
                 line.Append($" MarginThreshold={sp.MarginThresholdExpr}");
+            // The NDF knob and its two passivation lists ride the same first line, for the same
+            // reason (brief-wsprobe-6 R-wsp6-2). Quoted, because a list may carry commas.
+            if (lines.Length == 0 && sp.NdfExpr != Analysis.NdfDefault)
+                line.Append($" NDF={sp.NdfExpr}");
+            if (lines.Length == 0 && sp.PassiveVarsExpr.Length > 0)
+                line.Append($" PassiveVars=\"{sp.PassiveVarsExpr}\"");
+            if (lines.Length == 0 && sp.PassiveParamsExpr.Length > 0)
+                line.Append($" PassiveParams=\"{sp.PassiveParamsExpr}\"");
             if (lines.Length > 0) lines.Append('\n');
             lines.Append(line);
         }

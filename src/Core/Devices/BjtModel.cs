@@ -289,6 +289,28 @@ public sealed class BjtModel : ComponentModel
     private int PortRb => _rb > 0 ? IntrinsicPorts + (_rc > 0 ? 1 : 0) : -1;
     private int PortRe => _re > 0 ? IntrinsicPorts + (_rc > 0 ? 1 : 0) + (_rb > 0 ? 1 : 0) : -1;
 
+    /// <summary>The transport current source is a dependent source this repository wrote
+    /// (brief-wsprobe-6 §3).</summary>
+    public override Activity Activity => Activity.ActiveExact;
+
+    /// <summary>
+    /// The transport current source <c>I_ct → 0</c> in BOTH directions (its forward and reverse
+    /// conductances <c>gictE</c>, <c>gictC</c>), and — when the base resistance is modelled — the
+    /// MODULATION of that resistance by the junction voltages, which is a dependent source by the
+    /// same argument even though the reference document's §8 names only <c>I_ct</c>: the ohmic base
+    /// port's current genuinely responds to <c>V_be</c> and <c>V_bc</c>. Every junction conductance
+    /// and every charge is kept; the Early effect's <c>∂Q_be/∂V_bc</c> has no matching
+    /// <c>∂Q_bc/∂V_be</c> and is removed as a transcapacitance
+    /// (<see cref="ComponentModel.PassivatesTranscapacitance"/>).
+    ///
+    /// <para>Erring toward MORE passivation is the safe direction: <c>Δ0</c> must have no
+    /// right-half-plane zeros, and an unpassivated dependent source is what would put one there.</para>
+    /// </summary>
+    public override IReadOnlyList<(int P, int Q)> ControlledConductances =>
+        PortRb >= 0
+            ? [(PCe, PBe), (PCe, PBc), (PortRb, PBe), (PortRb, PBc)]
+            : [(PCe, PBe), (PCe, PBc)];
+
     public override int       PortCount => IntrinsicPorts + InternalNodeCount;
     public override ModelKind Kind      => ModelKind.Nonlinear;
 
