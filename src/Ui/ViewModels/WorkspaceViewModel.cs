@@ -9819,6 +9819,55 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             DiscardLayoutSessionIfUnreferenced(path);
     }
 
+    /// <summary>
+    /// The schematic and layout sessions living at or under <paramref name="path"/>, captured BEFORE
+    /// a removal — <see cref="IsPathOrUnder"/> asks the filesystem whether the root is a directory, so
+    /// once the folder is in the Trash it can no longer tell what was inside it.
+    /// </summary>
+    private (List<string> Schematic, List<string> Layout) CaptureSessionsUnder(string path)
+        => (SessionPathsUnder(_registry.AllPaths, path),
+            SessionPathsUnder(_layoutRegistry.AllPaths, path));
+
+    /// <summary>
+    /// The session paths a removal of <paramref name="removedRoot"/> takes with it — the whole subtree
+    /// for a cell folder, the one file for a single document.
+    ///
+    /// <c>internal</c> (not <c>private</c>) solely so <c>CircuitRF.Ui.Tests</c> can exercise this
+    /// directly via <c>InternalsVisibleTo</c> — <see cref="WorkspaceViewModel"/> itself cannot be
+    /// constructed headlessly, but this needs no instance state.
+    /// </summary>
+    internal static List<string> SessionPathsUnder(IEnumerable<string> sessionPaths, string removedRoot)
+        => sessionPaths.Where(p => IsPathOrUnder(p, removedRoot)).ToList();
+
+    /// <summary>
+    /// Drops the captured sessions and their unsaved state — what a REMOVAL owes, as distinct from
+    /// what a tab close owes.
+    ///
+    /// <para>Owner report, 2026-09-07: edit a cell's schematic, remove the cell from the Project Tree,
+    /// then close the workspace — and it asks whether to save the schematic of the cell that is now in
+    /// the Trash. Answering Save would write the file back out and un-remove half the cell.</para>
+    ///
+    /// <para>The cause is that both removal paths retired their sessions, and
+    /// <see cref="SchematicSessionRegistry.RetireIfUnreferenced"/> deliberately refuses to drop a DIRTY
+    /// one — correctly, for a tab close, where the file still exists and reopening the tab must bring
+    /// the unsaved work back. A removal is the case that rule does not cover: the file is gone, so
+    /// there is nothing left for the state to be unsaved work FOR, and leaving it behind is orphaned
+    /// dirty work that <see cref="HasAnyDirtyWork"/> and <c>PromptSaveBeforeClose</c> both count. Note
+    /// that the session outliving its TAB is the ordinary case here, not an edge one: closing a dirty
+    /// schematic keeps its session precisely so reopening restores the edit, so the sessions this has
+    /// to reach are not only the documents the removal just force-closed.</para>
+    ///
+    /// <para>Called only AFTER the trash succeeds. A removal that failed leaves the file where it was,
+    /// so its unsaved work is still worth something and the ordinary retire is the right outcome.
+    /// Still unreferenced-guarded: a torn-off window showing the same path holds a live session that is
+    /// not ours to discard.</para>
+    /// </summary>
+    private void DiscardRemovedSessions((List<string> Schematic, List<string> Layout) captured)
+    {
+        foreach (string path in captured.Schematic) DiscardSessionIfUnreferenced(path);
+        foreach (string path in captured.Layout)    DiscardLayoutSessionIfUnreferenced(path);
+    }
+
     /// <summary>Layout counterpart of <see cref="DiscardSessionIfUnreferenced"/>.</summary>
     private void DiscardLayoutSessionIfUnreferenced(string absClayPath)
     {
@@ -12037,6 +12086,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         if (dlg.Result != SaveChangesResult.Save) return;
 
         var cellPath = cellNode.AbsolutePath;
+        var doomedSessions = CaptureSessionsUnder(cellPath);
 
         // Close any open tabs/sessions under the cell dir.
         var keysToClose = _openDocsByPath
@@ -12058,6 +12108,8 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             Messages.Error($"Remove cell failed: {err}");
             return;
         }
+
+        DiscardRemovedSessions(doomedSessions);
 
         Messages.Info($"Removed cell (moved to Trash): {cellPath}");
         _factory.ProjectTreeTool?.Refresh();
@@ -12167,6 +12219,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         if (dlg.Result != SaveChangesResult.Save) return;
 
         var path = node.AbsolutePath;
+        var doomedSessions = CaptureSessionsUnder(path);
 
         // Close any open tabs that reference this path (file) or a path under it (directory).
         // ForceCloseDockable bypasses the dirty-save prompt — the file is going away.
@@ -12187,6 +12240,8 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             Messages.Error($"Remove failed: {err}");
             return;
         }
+
+        DiscardRemovedSessions(doomedSessions);
 
         Messages.Info($"Removed (moved to Trash): {path}");
 

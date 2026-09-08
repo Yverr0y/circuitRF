@@ -1,5 +1,81 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## Three owner-reported bugs, and the one shape they share (2026-09-07)
+
+Unrelated on the surface — a stale Property Inspector, a selection that outstayed its welcome, a save
+prompt for a file in the Trash. All three are the same omission: **a piece of state that had to be told
+about an event, and was not on the list.** Each fix is a subscription or a call, not new logic.
+
+### 1. The layout Property Inspector did not follow the display unit
+
+Change um → mil with a shape selected and every dimension row went on showing the old unit's numbers.
+
+`LayoutShapePropertiesViewModel.OnVmPropertyChanged` refreshed on the editor's `Overlay` and
+`Technology` notifications only, and a `DisplayUnit` change is neither. It now refreshes on
+`DisplayUnit` too, and that is the whole fix — the panel holds NO unit state of its own: every row is
+`LayoutUnits.Format(dbu, _vm.DisplayUnit, …)` on the way out and `LayoutUnits.TryParse(text,
+_vm.DisplayUnit, …)` on the way back, so re-running the ordinary refresh reformats shape, instance,
+ruler, vertex and materialized PCell-parameter rows together.
+
+**The part that made it more than cosmetic:** a commit re-parses in the CURRENT unit. The field said
+`254` (µm), the unit became mil, and committing the untouched field the user could see would have
+re-read that 254 as *mil* — a 254 µm edge silently becoming 6.45 mm. `LayoutInspectorUnitChangeTests`
+pins that path specifically, not only the displayed text.
+
+The focus guard needed nothing: `SetTextIfNotFocused` already leaves a half-typed field alone, and a
+unit change is not special enough to override it.
+
+### 2. Arming Pin/Term/GND from the schematic toolbar left the selection live
+
+`SchematicViewModel.BeginPlacement` — the Pin/Term/GND toolbar buttons and their P / T / Shift+G
+shortcuts — set `_placementSymbol` and `ActiveTool` directly and never cleared the selection.
+
+The keybindings were already right, which is why this looked like a keybinding bug and is not one.
+`RotateSelection`/`MirrorSelection` fall back to the ARMED ghost's own rotation when nothing is
+selected; that is the correct rule, and the toolbar was the one path breaking its precondition. So R
+over a selected resistor rotated the resistor. **Delete is the sharper case**: the key that should
+discard a ghost deleted real components instead.
+
+`BeginPlacement` now clears the selection. Deliberately NOT extended to the palette-armed path
+(`OnSvcPropertyChanged`): `PlacementService` is app-level and every subscribed canvas hears it, so
+clearing there would wipe selections in schematics the user is not even looking at. The palette also
+has an R path of its own through `PlacementService.Rotate`, so it never had the rotation half of this.
+
+**Note the standing inconsistency this did not fix**: `BeginCellPlacement`'s doc comment says "there is
+one armed state in the application and this is not a second one" — and `BeginPlacement` *is* a second
+one. Routing it through `PlacementService` would fix that and would also make arming app-wide, which is
+a behaviour change well past a bug fix.
+
+### 3. Removing a cell left its dirty session behind, so closing the workspace asked to save it
+
+Edit a cell's schematic, remove the cell from the Project Tree, close the workspace — and it offers to
+save the schematic of a cell already in the Trash. Answering Save writes the file back out and
+un-removes half the cell.
+
+Both removal paths (`RemoveCellAsync`, `RemoveNodeToTrashAsync`) RETIRED their sessions, and
+`SchematicSessionRegistry.RetireIfUnreferenced` refuses on purpose to drop a DIRTY one. That refusal is
+correct for a tab close — the file still exists and reopening the tab must bring the edit back — and it
+is the one case a removal does not fit: the file is gone, so there is nothing left for the state to be
+unsaved work *for*. What survived was an orphaned dirty session, exactly what `HasAnyDirtyWork` and
+`PromptSaveBeforeClose` count.
+
+Both now call `DiscardRemovedSessions`, the same `DiscardIfUnreferenced` the workspace-close path uses,
+and two details are load-bearing:
+
+- **Capture BEFORE the trash, discard after.** `IsPathOrUnder` asks `Directory.Exists` of the root, so
+  once the cell folder is in the Trash it can no longer say what was inside it — a discard written
+  after the move silently matches nothing but the exact path. `CaptureSessionsUnder` runs before the
+  move; the discard runs only if the move succeeded, because a removal that FAILED leaves the file
+  where it was and its unsaved work is worth keeping.
+- **The session outliving its tab is the ordinary case, not the edge one.** Closing a dirty schematic
+  keeps its session precisely so reopening restores the edit — so scoping the discard to the documents
+  the removal just force-closed would have missed the "edited it, closed the tab, then removed the
+  cell" sequence entirely. It walks the registries' own path lists instead.
+
+`WorkspaceViewModel` cannot be constructed headlessly, so `RemovedCellDirtySessionTests` drives the two
+halves the fix is made of — the `internal static SessionPathsUnder` scope and the registry decision it
+feeds — the same split `DirtySessionDiscardOnCloseTests` already uses.
+
 ## RND-1 — what changed on THIS side when the renderers moved out (2026-09-07)
 
 `docs/sonnet-briefs/brief-render-1-render-layer-below-the-firewall.md`. The findings about the move

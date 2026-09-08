@@ -21,7 +21,7 @@ public class PaletteFilterOrderingTests
         string[] expected =
         [
             "R", "GND", "L", "M", "C", "NonlinearC",
-            "Term", "TermG", "VAR", "MEAS", "Vdc", "IProbe", "VProbe",
+            "Term", "TermG", "VAR", "MEAS", "IProbe", "VProbe", "Vdc",
             "P1Tone", "VTone", "ITone",
             "S2P", "S3P", "SPICE", "TLIN", "MLIN",
             "SourceTuner", "LoadTuner", "Z1P", "wBond",
@@ -48,7 +48,12 @@ public class PaletteFilterOrderingTests
         // pinned or unpinned; Match was the 23rd (2026-08-19), ITone the 24th (2026-08-29),
         // SpiceModel the 25th (2026-09-01), pinned next to SnP because it is the same gesture —
         // placing a file the user already has — and VProbe the 26th, pinned next to IProbe for the
-        // same reason.
+        // same reason. (Vdc moved BELOW that IProbe/VProbe pair on 2026-09-07; the count is
+        // unchanged, only the sequence asserted above.)
+        //
+        // The tail is the automatic order EXCEPT for LibraryCatalog's declared positional swaps —
+        // Bead <-> SRLC, 2026-09-07 — which the expectation applies here rather than exempting the
+        // rows from the check: a swap that silently became a third change would otherwise pass.
         const int PinnedRows = 26;
         var pinned      = LibraryCatalog.AllItemsPinnedOrder();
         var pinnedSet   = pinned.Take(PinnedRows).Select(i => (i.Kind, i.PortCount)).ToHashSet();
@@ -58,7 +63,47 @@ public class PaletteFilterOrderingTests
             .Select(i => (i.Kind, i.PortCount))
             .ToList();
 
+        int iBead = restInAllItems.IndexOf((SymbolKind.Bead, 0));
+        int iSrlc = restInAllItems.IndexOf((SymbolKind.Srlc, 0));
+        Assert.True(iBead >= 0 && iSrlc >= 0);
+        (restInAllItems[iBead], restInAllItems[iSrlc]) = (restInAllItems[iSrlc], restInAllItems[iBead]);
+
         Assert.Equal(restInAllItems, restActual);
+    }
+
+    /// <summary>
+    /// Owner request, 2026-09-07: Bead and SRLC trade places in the "All" filter. Asserted as a
+    /// SWAP — the two reverse, and the row that sits BETWEEN them stays put — so the test says what
+    /// was asked for rather than freezing absolute indices that any new Lumped registry entry shifts.
+    /// </summary>
+    [Fact]
+    public void AllItemsPinnedOrder_BeadAndSrlc_TradePlaces()
+    {
+        var order = LibraryCatalog.AllItemsPinnedOrder().Select(i => i.Kind).ToList();
+        var plain = LibraryCatalog.AllItems.Select(i => i.Kind).ToList();
+
+        int beadWas = plain.IndexOf(SymbolKind.Bead), srlcWas = plain.IndexOf(SymbolKind.Srlc);
+        int beadNow = order.IndexOf(SymbolKind.Bead), srlcNow = order.IndexOf(SymbolKind.Srlc);
+
+        // Category-then-name puts Bead ahead of SRLC (both Lumped); the swap reverses exactly that.
+        Assert.True(beadWas < srlcWas, "AllItems' own order should still put Bead ahead of SRLC.");
+        Assert.True(srlcNow < beadNow, "SRLC should now sit where Bead used to.");
+
+        // PRLC is the one tail row between them, and it stays put — a swap, not a re-sort of the
+        // run. (The whole tail is compared against AllItems' own order by the sibling test above;
+        // this one only has to say that PRLC did not travel with the pair.)
+        Assert.True(beadWas < plain.IndexOf(SymbolKind.Prlc) && plain.IndexOf(SymbolKind.Prlc) < srlcWas);
+        Assert.Equal([SymbolKind.Prlc], order.GetRange(srlcNow + 1, beadNow - srlcNow - 1));
+    }
+
+    /// <summary>Owner request, 2026-09-07: Vdc moves down to sit directly after VProbe.</summary>
+    [Fact]
+    public void AllItemsPinnedOrder_VdcSitsDirectlyAfterVProbe()
+    {
+        var names = LibraryCatalog.AllItemsPinnedOrder().Select(i => i.DisplayName).ToList();
+        int vProbe = names.IndexOf("VProbe");
+        Assert.True(vProbe >= 0);
+        Assert.Equal("Vdc", names[vProbe + 1]);
     }
 
     [Fact]

@@ -1849,6 +1849,17 @@ public sealed partial class LayoutShapePropertiesViewModel : ObservableObject
     {
         if (e.PropertyName is nameof(LayoutEditorViewModel.Overlay))
             RefreshFromVm();
+        else if (e.PropertyName is nameof(LayoutEditorViewModel.DisplayUnit))
+            // Every dimension row here is FORMATTED through the editor's display unit
+            // (LayoutUnits.Format(..., _vm.DisplayUnit, ...)) and PARSED back through it on commit.
+            // Changing um -> mil with a shape already selected therefore left the panel showing the
+            // old unit's numbers under the new unit's meaning — 500 stayed "500" when it had become
+            // 19.685 mil — and the next commit of any untouched field would have written that stale
+            // number back as mil. The panel holds no unit state of its own, so re-running the ordinary
+            // refresh is the whole fix: it reformats every row (shape, instance, ruler, vertex list and
+            // the materialized PCell parameter rows) from the DBU the model actually holds. A field the
+            // user is mid-edit in is left alone, as it is on any other refresh (SetTextIfNotFocused).
+            RefreshFromVm();
         else if (e.PropertyName is nameof(LayoutEditorViewModel.Technology))
         {
             OnPropertyChanged(nameof(AvailableLayers));

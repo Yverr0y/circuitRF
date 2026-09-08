@@ -670,12 +670,25 @@ public sealed partial class SchematicViewModel : ObservableObject
         Execute(new MoveLabelsCommand(EditModel, snaps, "Reset Label Position"));
     }
 
+    /// <summary>
+    /// Arms a click-to-place of a built-in symbol — the Pin / Term / GND toolbar buttons and their
+    /// P / T / Shift+G shortcuts.
+    ///
+    /// <para>Clears the selection, because arming and having a selection are two claims on the same
+    /// keys and the selection wins every one of them (owner report, 2026-09-07). R and M route to
+    /// <see cref="RotateSelection"/>/<see cref="MirrorSelection"/>, and those act on the ARMED ghost
+    /// only when nothing is selected — so arming a pin over a selected resistor and pressing R
+    /// silently rotated the resistor instead of the ghost. Delete is worse: it would have deleted the
+    /// selection outright. Nothing about a placement about to happen refers to what was selected
+    /// before it, so the selection has no work left to do here.</para>
+    /// </summary>
     public void BeginPlacement(SymbolKind symbol)
     {
         _placementSymbol  = symbol;
         _placementRot     = SymbolRotation.R0;
         _placementMirrorX = false;
         ActiveTool = Tool.Place;
+        Selection.Clear();
         CancelCurrentOp();
     }
 

@@ -127,9 +127,9 @@ public static class LibraryCatalog
         (SymbolKind.TermG,       0),
         (SymbolKind.Var,         0),
         (SymbolKind.Meas,        0),
-        (SymbolKind.Vdc,         0),
         (SymbolKind.IProbe,      0),
         (SymbolKind.VProbe,      0),
+        (SymbolKind.Vdc,         0),
         (SymbolKind.P1Tone,      0),
         (SymbolKind.ToneSource,  0),   // "V1Tone" — the single-tone voltage source, displayed as VTone.
         (SymbolKind.CurrentToneSource, 0), // "I_1Tone" — its current-source dual, displayed as ITone.
@@ -145,6 +145,27 @@ public static class LibraryCatalog
         (SymbolKind.Match,       0),
     ];
 
+    /// <summary>
+    /// Positional swaps applied to <see cref="AllItemsPinnedOrder"/> after the pinned block and the
+    /// automatic tail have been concatenated (owner request, 2026-09-07: Bead and SRLC trade places).
+    ///
+    /// <para>A swap rather than two more rows in <see cref="AllFilterPinnedOrder"/>, because both of
+    /// these sit in the AUTOMATIC tail: pinning them would hoist them out of the tail's
+    /// category-then-name run and up next to the curated head, which is a much bigger move than the
+    /// one asked for. It also leaves untouched the property that makes the tail worth having — a new
+    /// registry entry still appears there on its own, in its category, with nothing to edit here.</para>
+    ///
+    /// <para>Each pair names two (Kind, PortCount) keys whose FINAL positions exchange; everything
+    /// between them stays where it was. A pair naming a row that does not resolve is skipped, for the
+    /// same reason a pinned row that no longer resolves is — a future SymbolKind rename degrades to
+    /// the ordinary order rather than crashing the palette.</para>
+    /// </summary>
+    private static readonly ((SymbolKind Kind, int PortCount) A, (SymbolKind Kind, int PortCount) B)[]
+        AllFilterSwaps =
+    [
+        ((SymbolKind.Bead, 0), (SymbolKind.Srlc, 0)),
+    ];
+
     /// <summary>Built-ins in <see cref="AllFilterPinnedOrder"/> order, then everything else in the
     /// ordinary <see cref="AllItems"/> order. Never throws on a pinned row that does not (or no
     /// longer) resolve — it is just skipped, so a future SymbolKind rename degrades gracefully rather
@@ -158,7 +179,18 @@ public static class LibraryCatalog
                 pinned.Add(item);
 
         var pinnedSet = new HashSet<PaletteItem>(pinned);
-        return [.. pinned, .. AllItems.Where(i => !pinnedSet.Contains(i))];
+        var ordered = new List<PaletteItem>(pinned);
+        ordered.AddRange(AllItems.Where(i => !pinnedSet.Contains(i)));
+
+        foreach (var (a, b) in AllFilterSwaps)
+        {
+            int ia = ordered.FindIndex(i => (i.Kind, i.PortCount) == a);
+            int ib = ordered.FindIndex(i => (i.Kind, i.PortCount) == b);
+            if (ia < 0 || ib < 0) continue;
+            (ordered[ia], ordered[ib]) = (ordered[ib], ordered[ia]);
+        }
+
+        return ordered;
     }
 
     /// <summary>Built-ins sorted purely alphabetically by <see cref="PaletteItem.DisplayName"/>, with
