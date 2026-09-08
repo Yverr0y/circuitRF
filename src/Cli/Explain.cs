@@ -57,13 +57,40 @@ internal static class Explain
     public static int Run(string[] args)
     {
         string? path = null, expr = null, reference = null, analysisName = null;
-        bool wantAnalyses = false;
+        bool wantAnalyses = false, wantCells = false, wantLayers = false, wantExtents = false, all = false;
+        ViewType? askedView = null;
         var sets = new List<(string Name, string Expr)>();
 
         for (int i = 0; i < args.Length; i++)
         {
             switch (args[i])
             {
+                // RND-3's three. They are OPTIONS and not verbs for R-rnd3-1's reason, and they join
+                // the one-question rule below rather than getting an exception from it (R-rnd3-2).
+                case "--cells":   wantCells   = true; continue;
+                case "--layers":  wantLayers  = true; continue;
+                case "--extents": wantExtents = true; continue;
+                case "--all":     all         = true; continue;
+                case "--view" when i + 1 < args.Length:
+                {
+                    // Only ever a disambiguator for a cell folder, and spelled exactly as `render`
+                    // spells it — the two verbs are used together and a second spelling of one idea is
+                    // a trap.
+                    string v = args[++i];
+                    askedView = v.ToLowerInvariant() switch
+                    {
+                        "schematic" => ViewType.Schematic,
+                        "symbol"    => ViewType.Symbol,
+                        "layout"    => ViewType.Layout,
+                        _           => null,
+                    };
+                    if (askedView is null)
+                    {
+                        JsonRun.Report(CliDiagnostics.ExplainViewUnknown(v));
+                        return Usage();
+                    }
+                    continue;
+                }
                 case "--expr" when i + 1 < args.Length:
                     expr = args[++i];
                     continue;
@@ -103,8 +130,10 @@ internal static class Explain
         if (path is null) { JsonRun.Report(CliDiagnostics.ExplainPathRequired()); return Usage(); }
         JsonRun.InputPath = path;
 
-        int asked = (expr is null ? 0 : 1) + (reference is null ? 0 : 1) + (wantAnalyses ? 1 : 0);
+        int asked = (expr is null ? 0 : 1) + (reference is null ? 0 : 1) + (wantAnalyses ? 1 : 0)
+                  + (wantCells ? 1 : 0) + (wantLayers ? 1 : 0) + (wantExtents ? 1 : 0);
         if (asked > 1) { JsonRun.Report(CliDiagnostics.ExplainOneQuestion()); return Usage(); }
+        if (all && !wantCells) { JsonRun.Report(CliDiagnostics.ExplainAllNeedsCells()); return Usage(); }
 
         if (!File.Exists(path) && !Directory.Exists(path))
             return JsonRun.Fail(CliDiagnostics.ExplainPathNotFound(path));
@@ -116,6 +145,9 @@ internal static class Explain
         IReadOnlyList<ExplainAnalysisJson>? analyses = null;
         ExplainExpressionJson?              value    = null;
         ExplainReferenceJson?               refRes   = null;
+        IReadOnlyList<ExplainCellJson>?     cells    = null;
+        ExplainLayersJson?                  layers   = null;
+        ExplainExtentsJson?                 extents  = null;
 
         // The document's OWN resolution always runs, whatever was asked: "which workspace, which
         // technology" is context for every other answer, and a report that omitted it would leave a
@@ -156,6 +188,27 @@ internal static class Explain
             exit  |= refExit;
         }
 
+        if (wantCells)
+        {
+            var (rows, cellExit) = ExplainQueries.Cells(path, kind, all);
+            cells = rows.Count > 0 || cellExit == 0 ? rows : null;
+            exit |= cellExit;
+        }
+
+        if (wantLayers)
+        {
+            var (report, layerExit) = ExplainQueries.Layers(path, kind, askedView, walks);
+            layers = report;
+            exit  |= layerExit;
+        }
+
+        if (wantExtents)
+        {
+            var (report, extentExit) = ExplainQueries.Extents(path, kind, askedView);
+            extents = report;
+            exit   |= extentExit;
+        }
+
         if (expr is not null || wantAnalyses)
         {
             var circuit = ReadCircuit(path, kind);
@@ -186,9 +239,9 @@ internal static class Explain
         }
 
         JsonRun.Explain = new ExplainReportJson(
-            path, DocumentKinds.Name(kind), walks, analyses, value, refRes);
+            path, DocumentKinds.Name(kind), walks, analyses, value, refRes, cells, layers, extents);
 
-        Print(path, kind, walks, analyses, value, refRes);
+        Print(path, kind, walks, analyses, value, refRes, cells, layers, extents);
         return exit;
     }
 
@@ -196,6 +249,7 @@ internal static class Explain
     {
         Console.Error.WriteLine("Usage: circuitrf explain <path> [--expr \"<expression>\"] [--set var=expr]");
         Console.Error.WriteLine("                            [--analysis [<name>]] [--ref <relative-ref>]");
+        Console.Error.WriteLine("                            [--cells [--all]] [--layers] [--extents] [--view <name>]");
         return 1;
     }
 
@@ -605,7 +659,10 @@ internal static class Explain
         IReadOnlyList<ResolutionStepJson> walks,
         IReadOnlyList<ExplainAnalysisJson>? analyses,
         ExplainExpressionJson? value,
-        ExplainReferenceJson? reference)
+        ExplainReferenceJson? reference,
+        IReadOnlyList<ExplainCellJson>? cells = null,
+        ExplainLayersJson? layers = null,
+        ExplainExtentsJson? extents = null)
     {
         Console.WriteLine($"{path}  ({DocumentKinds.Name(kind)})");
 
@@ -629,6 +686,55 @@ internal static class Explain
 
         if (value is not null)
             Console.WriteLine($"  {value.Expression} = {value.Text}   ({value.Kind})");
+
+        if (cells is not null)
+        {
+            Console.WriteLine($"  cells: {cells.Count}");
+            foreach (var c in cells)
+            {
+                Console.WriteLine($"    {c.Name,-20} {c.Folder}"
+                                  + (c.OutsideWorkspace == true ? "  (outside its workspace)" : "")
+                                  + (c.Generated == true ? "  (generated)" : ""));
+                foreach (var v in c.Views)
+                {
+                    // A view that does not exist is a row too — "this cell has no symbol" is an answer
+                    // a caller composing with `render --view` needs, and an omitted row reads as an
+                    // oversight rather than as a fact.
+                    Console.WriteLine($"      {v.Type,-10} {v.State,-22} {v.Primary ?? "(none)"}"
+                                      + (v.Candidates.Count > 1 ? $"   of {v.Candidates.Count}: {string.Join(", ", v.Candidates)}" : ""));
+                    if (v.Defect is { } d) Console.WriteLine($"      {"",-10} defect: {d}");
+                }
+            }
+        }
+
+        if (layers is not null)
+        {
+            // No heading here: the `layers` walk step above already named the technology, where it
+            // came from and how it was found. Repeating it would be the one thing R-aut4-7's walk
+            // format exists to avoid — the same fact twice, in two wordings.
+            foreach (var l in layers.Layers)
+                Console.WriteLine(
+                    $"    {l.Name,-20} {l.Number}/{l.Datatype,-6} {l.Color}  {l.Fill,-10}"
+                    + (l.Visible ? "" : " hidden") + (l.Selectable ? "" : " locked")
+                    + (l.Purpose is { } p ? $"  purpose={p}" : "")
+                    + (l.Shapes is { } n ? $"   {n} shape(s)" : "")
+                    + (l.InstancesUsing is > 0 and { } u ? $", {u} instance(s)" : ""));
+            if (layers.Truncated == true)
+                Console.WriteLine("    (counts are a floor — the hierarchy is larger than this walk)");
+        }
+
+        if (extents is not null)
+        {
+            if (extents.Empty)
+                Console.WriteLine($"  extents      (empty)   unit {extents.Unit}, scale {extents.Scale:G6}");
+            else
+                Console.WriteLine(
+                    $"  extents      {extents.X0:G6} {extents.Y0:G6} .. {extents.X1:G6} {extents.Y1:G6}"
+                    + $"  ({extents.Width:G6} x {extents.Height:G6} {extents.Unit}, scale {extents.Scale:G6})");
+            if (extents.Note is { } en) Console.WriteLine($"  {"",-12} note: {en}");
+            foreach (var pl in extents.PerLayer ?? [])
+                Console.WriteLine($"    {pl.Name,-20} {pl.X0:G6} {pl.Y0:G6} .. {pl.X1:G6} {pl.Y1:G6}");
+        }
 
         if (analyses is not null)
         {

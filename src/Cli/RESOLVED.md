@@ -7,6 +7,161 @@ what the design says.
 ---
 
 
+## RND-3 — `explain --cells`, `--layers`, `--extents` (2026-09-07)
+
+`brief-render-3-query-surface.md`. The three questions a caller has to be able to ask before `render`
+is usable, as options on `explain` rather than three new verbs. Everything below is what turned out to
+be true while building it.
+
+### `--extents` and `--fit` genuinely share one function, and making that true moved code
+
+R-rnd3-9 asked whether the two share a function or merely agree today. Before this brief they merely
+agreed — `src/Cli/Render.cs` held its own `LayoutExtents`, `SchematicExtents`, `SymbolBodyBox`,
+`SymbolPinMarksSolved`, `FitZoom`, `LayerVisibility` and `WorldRect`, ~200 lines of measurement inside
+a CLI verb. All of it is now **`src/Render/DocumentExtents.cs`**, below the firewall, called by both;
+`Render.cs` keeps the viewport arithmetic and none of the measurement. The gate compares the two verbs'
+`--json` numbers **as raw text**, so a difference of one ulp fails rather than passing an epsilon test.
+
+**It hands back two boxes, and that distinction is the finding.** Some of what a frame paints is
+measured in PIXELS at render time and has no world extent until a page size is chosen — a symbol pin's
+name (a size with a floor) and a `RulerSizeMode.Fixed` ruler's readout (n screen points, so its world
+width depends on the scale, which depends on the bounds). A zoom-independent verb cannot report those,
+which is R-rnd3-10's own instruction for the symbol case. So:
+
+- `LayoutBox` / `SymbolBox` — the geometry. **What both verbs now report as `extents`.**
+- `LayoutFitBox` / `SymbolFitBox` — that box plus the room those marks need at this page. **What a fit
+  is framed on**, and still exactly what RND-2 framed on.
+
+This CHANGED `render --json`'s reported `extents` for a symbol, and for a layout carrying a Fixed
+ruler: RND-2 reported the solved box there. Nothing gated it, and the new value is the better one —
+"how big is the document" and "how big a page does it need" are two questions, and the second is
+already answered by `viewport`. The gate asserts a fitted symbol page is genuinely WIDER than the
+reported geometry, so the two boxes agreeing could never be mistaken for there being only one.
+
+### `render`'s instance base directory was one level too shallow, silently
+
+Found while moving the extents measurement, not looked for. `DrawLayout` computed
+`Path.GetDirectoryName(Path.GetDirectoryName(full))` — the CELL folder — where the editor's own
+`InstanceBaseDir` (which the canvas passes as `LayoutRenderOptions.BaseDir`) is the directory the
+`.clay` itself lives in, the `layout/` sub-folder. An instance's `CellRef` is written by
+`Path.GetRelativePath` FROM that directory, so every reference resolved one level too shallow and the
+instance drew as a broken-reference placeholder rather than as its content — with nothing reported,
+because an unresolved reference is an ordinary state.
+
+RND-2's own gate could not catch it: its fixture has no instances, and the in-process call it compares
+against copies the same arithmetic. It is now `CellHierarchy.BaseDirOfDocument`, named beside
+`LayoutBaseDirOf`, whose remarks already described the trap from the other end.
+
+### Gate 4 cannot be run against `counters.shapesDrawn`, and the field it IS run against changed
+
+§5's gate 4 asks that `--layers`' per-layer `shapes` equal what `render --layers <that layer> --json`
+reports as `shapesDrawn`. Measured on a hierarchical fixture — a top cell drawing one rectangle and
+placing a 2x3 array of a cell drawing one more — `explain` says 7 and `shapesDrawn` says **1**. That is
+not a disagreement to fix: `LayoutRenderResult.ShapesDrawn` counts the top-level shapes a frame issued
+a draw call for, and an instance's interior is accounted in `InstancesDrawn` instead. The two count
+different things by design.
+
+The field that answers the same question is `render --json`'s `layers[].shapes` — and **that one was
+top-level-only too**, from a private `foreach (var s in view.Shapes)` counter in
+`ApplyLayerSelection`. So the two verbs would have reported 1 and 7 for the same layer of the same
+document. Both now go through **`CellHierarchy.ShapeCountsByLayer`**, added for this, and the gate
+compares them dictionary against dictionary: a disagreement means R-rnd3-6's "do not write a second
+walk" was violated. `RenderLayerJson.Shapes` widened to `long` on the way, because a via field placed
+in an array crosses `int` sooner than one expects.
+
+**The count is visibility-INDEPENDENT**, deliberately, and that is not a contradiction of R-rnd3-6's
+"what would be RENDERED". `RenderLayerJson.Shapes`' own remarks already say the field is "shapes on
+that layer in the document, drawn or not — so an empty layer and an excluded one are two different
+answers", and `visible` beside it is the other half. R-rnd3-6's sentence is about HIERARCHY: its own
+continuation is "a layer used only inside a placed sub-cell is used".
+
+`ShapeCountsByLayer` is not `OccupiedLayerKeys` with a counter, and the difference is worth stating: a
+UNION dedupes on the cell folder because a cell reached twice contributes the same keys twice, and a
+COUNT must not, because a cell placed twice draws its shapes twice. It multiplies by `Rows*Cols`,
+dedupes on nothing but the DFS path, and carries a budget — a generated via field is a six-figure shape
+count per placement, and a walk that quietly stopped counting would hand back a floor a caller would
+read as a total. Exceeding it reports `explain.layers.count-truncated` and sets `truncated`.
+
+### `WorkspaceScanner` was NOT moved below the firewall, and the rule it enforces was
+
+R-rnd3-4 says `--cells` uses the workspace's own scanner so a folder the GUI hides is hidden here too.
+Taking that literally means moving `WorkspaceScanner` (~950 lines) plus `ProjectTreeNode`/`NodeKind`
+plus their `GeneratedCellStore` dependency out of `src/Ui` — a closure far larger than the sentence
+predicts, for a listing that needs none of the tree's referenced-library, Known-Files or carried-subtree
+machinery. `brief-render-0-overview.md` §4.1 says to report a closure bigger than measured rather than
+absorb it, so:
+
+- The **rule** moved: `src/Design/Workspace/ReservedFolders.cs` holds `.generated-cells` and `.git`
+  and the two predicates over them. `WorkspaceScanner.IsReservedTreeDir` and
+  `GeneratedCellStore.ReservedFolderName`/`IsUnderGeneratedCellsFolder` now delegate to it, so there is
+  exactly one place either name is written down and the GUI and the CLI cannot drift.
+- The **enumeration** is `CellLookup`, which already existed and whose own header says it is the answer
+  `explain --cells` gives — it is what `render --cell` resolves through, so a cell this lists is a cell
+  that verb can draw. A second enumeration would have been free to disagree with the one that draws.
+
+`--all` lifts the generated-cells exclusion only; `.git` is never walked whatever it says, because it
+is a history and nothing in it is a cell.
+
+### There are no shipped example workspaces, so gate 1 builds its own
+
+§5's gate 1 asks for the comparison "on the shipped example workspaces". The repo ships none — nothing
+under `testdata/` carries a `.cws`, and every workspace in the test suite is built by the test that
+uses it. The gate is therefore run on a fixture holding six cells whose primacy resolves five different
+ways, one of them a folder deep and one under the reserved folder, with a **vacuity guard** on both
+sides: an empty set satisfies both set assertions and proves nothing.
+
+Its answer to the brief's "report any cell state that is not clean": there is nothing to report,
+because there is nothing to look at. That is a fact about the repo rather than a clean bill of health.
+
+**The comparison is against `--cells --all`, not the default**, and that is the honest direction:
+`check`'s folder walk descends into `.generated-cells` — it is a folder like any other to a validator,
+and a generated cell holding a defect is a defect — while `--cells` hides it. Comparing against the
+default would assert the exclusion twice and the agreement not at all.
+
+### `unit` is `design-units`, not `null`, and it is a deliberate departure
+
+R-rnd3-8 asks for `unit: null` on a schematic or a symbol, "said to be dimensionless". RND-2 already
+ships `"unit": "design-units"` in `render --json` for the same coordinates, with a test pinning it. Two
+spellings of one fact across two verbs is precisely the drift this series exists to prevent, and `null`
+is the LESS explicit of the two — it says the field was not filled in, where the string says the
+coordinates are dimensionless. The gate compares the two verbs' `unit` field for equality, so they
+cannot part company later.
+
+### What the layer report cannot say, and a caller would want
+
+The brief asks for the gaps. Three, all real:
+
+- **A via spanning two levels is reported on one.** `ViaShape` carries `Layer` (the barrel) and
+  `LandingLayer` (the pad), deliberately two fields — and `LayoutRenderer` draws the whole annulus on
+  the barrel layer, in that layer's colour, never reading `LandingLayer` at all. So `shapes` counts a
+  via once, on its barrel layer, and a caller asking "is the landing layer empty" is told yes about a
+  layer a via field's pads are notionally on. `CellHierarchy.OccupiedLayerKeys` unions both keys and is
+  right to, because it answers a different question; the count matches the renderer because R-rnd3-6
+  says it must, and the two now differ on purpose with a comment saying so at both ends.
+- **A layer distinguished only by its purpose is reported twice.** `LayerDef`'s identity is its
+  `LayerKey` — the (layer, datatype) pair — and `Purpose` is a free-text field beside it. A technology
+  that declares two `LayerDef`s with one key and two purposes gets two rows carrying the SAME shape
+  count, in both this verb and `render`'s own layer report, because the count is keyed on the pair.
+  Nothing validates against it and nothing this brief added could.
+- **A layer the fallback palette invented is now reported, and marked.** A key the document draws on
+  that the technology does not define is common after an import (`layout-view.md` §2.4) and it RENDERS,
+  on the generated palette. Omitting it would report a document as drawing on layers it does not and
+  hide the ones it does, so those rows are appended with `FallbackPalette.For`'s deterministic colour
+  and its `L<n>/<d>` name. What a caller cannot tell from a row alone is which kind it is looking at —
+  the tell is `technology`, and where nothing resolved at all `resolvedBy` names the palette outright
+  (R-rnd3-7).
+
+### `perLayer` covers the document's own shapes, and says so
+
+An instance's extent comes back from `CellHierarchy.InstanceBbox` as ONE box for the whole placement.
+Splitting it per layer needs a second walk, free to disagree with the first about what it measured, for
+an answer that is genuinely about "where is my metal in this file". So `perLayer` is the top-level
+shapes only, documented in the field rather than left for a caller to discover from a number that does
+not add up.
+
+---
+
+
 ## RND-2 — `circuitrf render` (2026-09-07)
 
 `brief-render-2-render-verb.md`. One verb over a `.csch`, a `.csym` and a `.clay`, as `.svg`, `.pdf` or

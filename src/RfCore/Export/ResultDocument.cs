@@ -258,6 +258,167 @@ namespace RfCore.Export
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string? Redirect);
 
+    // ── the three questions a caller asks BEFORE it can render (RND-3) ───────
+    //
+    // R-rnd3-1: options on `explain`, never three new verbs. Each is asking what circuitRF DECIDED —
+    // which file is a cell's schematic, which layers the resolved technology defines, how big the
+    // document is — which is the question this verb exists for, and `serve`'s tool count is capped
+    // deliberately (cli.md §11.3).
+
+    /// <summary>
+    /// One VIEW of one cell, reported as a RESOLUTION rather than as a directory listing (R-rnd3-3).
+    /// </summary>
+    /// <param name="Type"><c>schematic</c>, <c>symbol</c> or <c>layout</c>.</param>
+    /// <param name="Primary">The file <c>CellFolder.ResolvePrimary</c> chose, or absent where it chose
+    /// none — which is a real, ordinary state and not an error.</param>
+    /// <param name="State">
+    /// <c>PrimaryState</c>, spelled the way this document spells every enum. The five stay five:
+    /// <c>sole-file</c>, <c>named-present</c>, <c>missing-named-primary</c>, <c>no-primary</c>,
+    /// <c>no-view</c>. <b>Collapsing them is what makes this worth more than <c>ls</c></b> — a cell
+    /// whose schematic folder holds three files and names no primary is listed WITH its ambiguity, not
+    /// omitted and not silently resolved to the alphabetically first one.
+    /// </param>
+    /// <param name="Candidates">Every view file in the sub-folder, so an ambiguity says what it is
+    /// ambiguous between.</param>
+    /// <param name="Defect"><c>CellViewFileValidator.DescribeDefect</c>'s own sentence about the
+    /// primary — the same one <c>check</c> reports. Absent when there is nothing wrong with it.</param>
+    public sealed record ExplainCellViewJson(
+        string                Type,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string?               Primary,
+        string                State,
+        IReadOnlyList<string> Candidates,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string?               Defect);
+
+    /// <param name="Folder">The cell folder itself — what <c>render --cell</c> ends up drawing from,
+    /// and what makes this listing composable with that verb.</param>
+    /// <param name="OutsideWorkspace">True when the cell folder is not under the workspace the path
+    /// resolves through. Null when there is no workspace to be outside of.</param>
+    /// <param name="Generated">
+    /// True for a cell under the reserved <c>.generated-cells</c> folder — one content-addressed cell
+    /// per distinct PCell placement, which the project tree hides and this listing hides with it
+    /// (R-rnd3-4). Only ever present when <c>--all</c> asked for them, because a listing that does not
+    /// contain them has nothing to mark.
+    /// </param>
+    public sealed record ExplainCellJson(
+        string                             Name,
+        string                             Folder,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        bool?                              OutsideWorkspace,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        bool?                              Generated,
+        IReadOnlyList<ExplainCellViewJson> Views);
+
+    /// <param name="Number">The drawing layer's own number and <paramref name="Datatype"/> — the pair
+    /// that IS the layer's identity in every interchange format, and the spelling a caller that came
+    /// from a GDSII import has.</param>
+    /// <param name="Color">Literal <c>#rrggbb</c>. A layer's colour is process data rather than a
+    /// themeable role (<c>layout-view.md</c> §2.2), so it comes from the technology, not the theme.</param>
+    /// <param name="Fill">The fill pattern's name, or <c>solid</c> — which is what every layer said
+    /// before stipples existed and still renders as.</param>
+    /// <param name="Shapes">
+    /// <b>The field that makes this worth having</b> (R-rnd3-5). How many shapes this document draws
+    /// on the layer, hierarchy included and arrays multiplied (R-rnd3-6) — a technology defines every
+    /// layer a process has and a given <c>.clay</c> draws on a handful, so a caller told only the
+    /// technology's list will ask <c>render --layers</c> for empty layers and conclude the render is
+    /// broken.
+    ///
+    /// <para><b>Absent, not zero, where there is no document to count against</b> — a <c>.ctech</c> or
+    /// a workspace on its own. Zero would be a claim, and it would be a false one.</para>
+    /// </param>
+    /// <param name="InstancesUsing">How many of the document's own top-level instance PLACEMENTS
+    /// contribute geometry on this layer. An array counts once — it is one placement, and its
+    /// multiplication is already in <paramref name="Shapes"/>. Absent with <paramref name="Shapes"/>.</param>
+    public sealed record ExplainLayerJson(
+        string  Name,
+        int     Number,
+        int     Datatype,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Purpose,
+        bool    Visible,
+        bool    Selectable,
+        string  Color,
+        string  Fill,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        long?   Shapes,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        int?    InstancesUsing);
+
+    /// <param name="Technology">The resolved technology's name, or absent where nothing resolved —
+    /// which is an answer, not a gap (R-rnd3-7).</param>
+    /// <param name="ResolvedFrom">The <c>.ctech</c> the layers came from. Absent where nothing did.</param>
+    /// <param name="ResolvedBy">The RULE that answered, in the same words the walk uses. Where nothing
+    /// resolved this names the FALLBACK PALETTE, because that is what <c>render</c> will actually draw
+    /// with (R-rnd2-1) and a caller needs to know the colours it gets are not the process's.</param>
+    /// <param name="Truncated">True when the hierarchical shape count hit its budget and the numbers
+    /// are a floor rather than a total. Never silently absorbed.</param>
+    public sealed record ExplainLayersJson(
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string?                          Technology,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string?                          ResolvedFrom,
+        string                           ResolvedBy,
+        IReadOnlyList<ExplainLayerJson>  Layers,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        bool?                            Truncated = null);
+
+    /// <param name="Name">The layer's name, as <see cref="ExplainLayerJson.Name"/> spells it.</param>
+    public sealed record ExplainLayerExtentJson(
+        string Name, double X0, double Y0, double X1, double Y1);
+
+    /// <summary>
+    /// How big the document is — <b>the same box <c>render --fit</c> frames on, from the same function</b>
+    /// (R-rnd3-9). If these two could disagree the number would be worse than useless, because a
+    /// caller uses this one to compute a <c>--window</c> for that one.
+    /// </summary>
+    /// <param name="Empty">
+    /// True when the document holds no geometry at all. <b>Then there are no coordinates</b> —
+    /// <c>(0,0,0,0)</c> is a point at the origin, which is a different fact and one a caller would
+    /// happily divide by (R-rnd3-10).
+    /// </param>
+    /// <param name="Unit">
+    /// The BASE SI unit the coordinates are in — <c>m</c> for a layout; <c>design-units</c> for a
+    /// schematic or a symbol, whose coordinates are dimensionless and are said to be, rather than
+    /// dressed up in metres (R-rnd0-5). <b>The same spelling <c>render</c> uses</b>: two spellings of
+    /// one fact across two verbs is the drift this series exists to prevent.
+    /// </param>
+    /// <param name="Scale">What multiplies the DOCUMENT's own display unit to reach
+    /// <paramref name="Unit"/> — 1e-6 for a layout drawn in micrometres, 2.54e-5 for one drawn in
+    /// mils, 1 where the coordinates are dimensionless. Reading a mark without its scale has already
+    /// produced a run at 2 Hz that looked entirely normal (R-aut4-9).</param>
+    /// <param name="PerLayer">
+    /// Layout only, and only the layers that have geometry. <b>The document's OWN shapes</b> — an
+    /// instance's content is measured as ONE box for the whole placement and cannot be split per layer
+    /// without a second walk free to disagree with the first.
+    /// </param>
+    /// <param name="Note">
+    /// What a FIT adds that this box does not carry, where the document has any: a symbol pin's name
+    /// and a Fixed-mode ruler's readout are drawn in PIXELS at a size with a floor, so they have no
+    /// world extent until a page is chosen. Reporting a zoom-dependent number from a zoom-independent
+    /// verb is the mistake this field exists instead of.
+    /// </param>
+    public sealed record ExplainExtentsJson(
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        double? X0,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        double? Y0,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        double? X1,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        double? Y1,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        double? Width,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        double? Height,
+        string  Unit,
+        double  Scale,
+        bool    Empty,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<ExplainLayerExtentJson>? PerLayer,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Note = null);
+
     public sealed record ExplainReportJson(
         string                              Path,
         string                              Kind,
@@ -267,7 +428,13 @@ namespace RfCore.Export
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         ExplainExpressionJson?              Expression,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        ExplainReferenceJson?               Reference);
+        ExplainReferenceJson?               Reference,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<ExplainCellJson>?     Cells = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        ExplainLayersJson?                  Layers = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        ExplainExtentsJson?                 Extents = null);
 
     // ── reference, on the wire (brief-automation-6-reference-and-components.md) ──
 
@@ -691,9 +858,18 @@ namespace RfCore.Export
 
     /// <param name="Rendered">Whether the layer was drawn. False for one the technology marks
     /// invisible, and for one <c>--layers</c>/<c>--hide-layers</c> excluded.</param>
-    /// <param name="Shapes">Shapes on that layer in the document, drawn or not — so an empty layer
-    /// and an excluded one are two different answers.</param>
-    public sealed record RenderLayerJson(string Name, bool Rendered, int Shapes);
+    /// <param name="Shapes">
+    /// Shapes on that layer in the document, drawn or not — so an empty layer and an excluded one are
+    /// two different answers.
+    ///
+    /// <para><b>Hierarchy included and arrays multiplied</b> (RND-3 R-rnd3-6): a layer used only inside
+    /// a placed sub-cell is used, and a 2x3 array of a cell drawing one rectangle contributes six. The
+    /// same number <c>explain --layers</c> reports, from the same walk — <b>and deliberately NOT
+    /// <see cref="RenderCountersJson.ShapesDrawn"/></b>, which counts only the top-level shapes this
+    /// frame issued a draw call for; an instance's interior is accounted in
+    /// <see cref="RenderCountersJson.InstancesDrawn"/> instead.</para>
+    /// </param>
+    public sealed record RenderLayerJson(string Name, bool Rendered, long Shapes);
 
     /// <param name="Mode"><c>full</c>, <c>screen</c>, or the pixel budget as written.</param>
     /// <param name="ToleranceDbu">

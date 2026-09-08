@@ -52,16 +52,6 @@ internal static class Render
 
     private enum Detail { Full, Screen, Budget }
 
-    /// <summary>
-    /// A world-space rectangle as the caller wrote it, in the document's own coordinate space —
-    /// integer DBU for a layout, dimensionless design units for a schematic or symbol.
-    /// </summary>
-    private readonly record struct WorldRect(double X0, double Y0, double X1, double Y1)
-    {
-        public double W => X1 - X0;
-        public double H => Y1 - Y0;
-    }
-
     /// <summary>Everything the run decided, gathered so the report and the picture cannot disagree
     /// about what was drawn.</summary>
     private sealed class Options
@@ -102,9 +92,9 @@ internal static class Render
     private const int DefaultHeight = 1200;
 
     /// <summary><c>LayoutViewport.ZoomToFit</c>'s own default, which is the margin the application's
-    /// Zoom to Fit uses. The schematic and symbol halves take the same number so a fitted picture of
-    /// one document kind is framed like a fitted picture of another.</summary>
-    private const double DefaultMargin = 0.10;
+    /// Zoom to Fit uses. Named in <see cref="DocumentExtents"/>, beside the fit arithmetic it belongs
+    /// to, so <c>explain --extents</c> and this verb cannot frame a page differently.</summary>
+    private const double DefaultMargin = DocumentExtents.DefaultMargin;
 
     // ── entry ────────────────────────────────────────────────────────────────
 
@@ -451,7 +441,12 @@ internal static class Render
         catch (Exception ex) { return JsonRun.Fail(CliDiagnostics.RenderDocumentUnreadable(t.File, ex.Message)); }
 
         string full    = Path.GetFullPath(t.File);
-        string baseDir = Path.GetDirectoryName(Path.GetDirectoryName(full)!) ?? "";
+        // The directory the `.clay` ITSELF lives in — a cell folder's `layout/` sub-folder — which is
+        // what an instance's CellRef was written relative to and what the canvas passes as
+        // LayoutRenderOptions.BaseDir. Named through CellHierarchy so this cannot drift from the
+        // editor's answer; taking the CELL folder instead resolves every reference one level too
+        // shallow and draws a placeholder where the sub-cell should be, with nothing reported.
+        string baseDir = CellHierarchy.BaseDirOfDocument(full);
         var cache      = new TechnologyCache();
         var (resolved, _) = TechnologyResolver.ResolveForDocument(view.TechRef, full, null, cache);
 
@@ -468,7 +463,7 @@ internal static class Render
         // and flipping LayerDef.Visible on it would leak into the next render in the same process —
         // which is not hypothetical, because `serve` runs many calls in one. This is the class of
         // defect that only ever appears on the SECOND call.
-        var (drawTech, layerReport, layerRefusal) = ApplyLayerSelection(tech, view, o);
+        var (drawTech, layerReport, layerRefusal) = ApplyLayerSelection(tech, view, baseDir, o);
         if (layerRefusal is { } lr) return lr;
 
         RunHost.Cancellation.ThrowIfCancellationRequested();
@@ -478,14 +473,20 @@ internal static class Render
         int pxW = (int)Math.Round(o.Width  * o.Scale);
         int pxH = (int)Math.Round(o.Height * o.Scale);
 
-        var extents = LayoutExtents(view, drawTech, baseDir, pxW, pxH);
+        // R-rnd3-9: ONE measurement, in CircuitRF.Render, called by this verb and by
+        // `explain --extents`. Two boxes, not two functions — `extents` is the document's own
+        // zoom-independent size (what the report says, and what `explain` answers with), `fitBox` adds
+        // the room a Fixed-mode ruler's screen-point readout needs AT THIS PAGE, which is what a fit
+        // has to be solved against. On a document with no Fixed ruler in it they are the same box.
+        var extents = DocumentExtents.LayoutBox(view, drawTech, baseDir);
         if (extents.IsEmpty) return JsonRun.Fail(CliDiagnostics.RenderNothingToDraw(t.File));
+        var fitBox = DocumentExtents.LayoutFitBox(view, drawTech, baseDir, pxW, pxH, o.Margin);
 
         Console.Error.WriteLine(
             $"[circuitRF] {view.Shapes.Count} shape(s), {view.Instances.Count} instance placement(s), " +
             $"{(drawTech?.Layers.Count ?? 0)} layer(s)");
 
-        var (vp, letterboxed, vpRefusal) = LayoutViewportFor(o, view, extents, pxW, pxH);
+        var (vp, letterboxed, vpRefusal) = LayoutViewportFor(o, view, fitBox, pxW, pxH);
         if (vpRefusal is { } vr) return vr;
 
         var (theme, themeName, themeFrom, themeRefusal) = ResolveTheme(o, full);
@@ -584,100 +585,6 @@ internal static class Render
         };
     }
 
-    /// <summary>
-    /// What will actually be PAINTED, which is not the same as what is stored.
-    ///
-    /// <para>Three of the contributions are not <c>LayoutGeometry.BboxOf</c>, and each of them is a
-    /// framing bug someone has already shipped: a <c>LabelShape</c>'s stored bbox is its ANCHOR (a
-    /// point), an EM port additionally paints a width bar and an arrow at the conductor end, and an
-    /// instance's extent has to be resolved through its cell. Framing on the stored boxes is exactly
-    /// what cropped a pasted page's ports off the bottom — see
-    /// <c>LayoutClipboard.ComputeSelectionBounds</c>, whose header records it.</para>
-    ///
-    /// <para><b>Rulers in exactly two passes</b>, for the reason that method also records: a Fixed-mode
-    /// ruler's readout is n screen POINTS, so its world extent depends on the scale, which depends on
-    /// these bounds. Pass one takes everything that does not depend on the scale; pass two measures the
-    /// Fixed text at the scale pass one chose. The iteration is monotone, so a second pass cannot make
-    /// it worse — do not iterate to a fixed point, and do not skip pass two.</para>
-    /// </summary>
-    private static Bbox LayoutExtents(LayoutView view, Technology? tech, string baseDir, double pxW, double pxH)
-    {
-        var bbox = Bbox.Empty;
-        var conductorAt = LayoutPortDirection.LookupFor(view.Shapes);
-        var visible = LayerVisibility(tech);
-
-        foreach (var s in view.Shapes)
-        {
-            if (!visible(s.Layer)) continue;
-            bbox = bbox.Union(LayoutGeometry.BboxOf(s));
-
-            if (s is not LabelShape label) continue;
-            if (LayoutRenderer.MeasureLabelWorldBbox(label, label.IsPort) is { } textBb)
-                bbox = bbox.Union(textBb);
-            if (LayoutPortDirection.Resolve(conductorAt, label) is { } hint)
-            {
-                long rad = Math.Max(hint.WidthDbu, label.Height);
-                bbox = bbox.Union(new Bbox(hint.PlaneX - rad, hint.PlaneY - rad,
-                                           hint.PlaneX + rad, hint.PlaneY + rad));
-            }
-        }
-
-        foreach (var inst in view.Instances)
-        {
-            var ib = CellHierarchy.InstanceBbox(inst, baseDir, visible);
-            if (!ib.IsEmpty) bbox = bbox.Union(ib);
-        }
-
-        foreach (var ruler in view.Rulers)
-        {
-            bbox = bbox.Union(new Bbox(Math.Min(ruler.X1, ruler.X2), Math.Min(ruler.Y1, ruler.Y2),
-                                       Math.Max(ruler.X1, ruler.X2), Math.Max(ruler.Y1, ruler.Y2)));
-            if (ruler.SizeMode == RulerSizeMode.Scaled)
-                bbox = bbox.Union(LayoutRenderer.MeasureRulerWorldBbox(
-                    ruler, view.DisplayUnit, view.DbuPerMicron, 0));
-        }
-
-        if (bbox.IsEmpty) return bbox;
-
-        // A legitimately ONE-DIMENSIONAL document is not an empty one — a purely horizontal ruler, or a
-        // single zero-height trace, has no extent on one axis and would otherwise be refused outright.
-        bbox = InflateDegenerateAxes(bbox);
-
-        if (view.Rulers.Any(r => r.SizeMode == RulerSizeMode.Fixed))
-        {
-            var pass1 = LayoutViewport.ZoomToFit(bbox, pxW, pxH, marginFrac: DefaultMargin);
-            if (pass1.Zoom > 0)
-                foreach (var ruler in view.Rulers)
-                    if (ruler.SizeMode == RulerSizeMode.Fixed)
-                        bbox = bbox.Union(LayoutRenderer.MeasureRulerWorldBbox(
-                            ruler, view.DisplayUnit, view.DbuPerMicron, pass1.Zoom));
-        }
-
-        return bbox;
-    }
-
-    private static Bbox InflateDegenerateAxes(Bbox bb)
-    {
-        long w = bb.MaxX - bb.MinX, h = bb.MaxY - bb.MinY;
-        if (w >= 1 && h >= 1) return bb;
-
-        long span = Math.Max(Math.Max(w, h), 1);
-        long padX = w >= 1 ? 0 : Math.Max(1, span / 8);
-        long padY = h >= 1 ? 0 : Math.Max(1, span / 8);
-        return new Bbox(bb.MinX - padX, bb.MinY - padY, bb.MaxX + padX, bb.MaxY + padY);
-    }
-
-    /// <summary>Which layers the page may be sized by — <c>LayerDef.Visible</c>, the same flag
-    /// <c>LayoutRenderer.Draw</c> gates each layer on. Sizing a page from geometry nothing then paints
-    /// produces a mostly-empty picture with the visible content too small to read.</summary>
-    private static Func<LayerKey, bool> LayerVisibility(Technology? tech)
-    {
-        if (tech is null) return static _ => true;
-        var map = new Dictionary<LayerKey, bool>();
-        foreach (var l in tech.Layers) map[l.Key] = l.Visible;
-        return key => !map.TryGetValue(key, out bool v) || v;
-    }
-
     private static (LayoutViewport Vp, bool Letterboxed, int? Refusal) LayoutViewportFor(
         Options o, LayoutView view, Bbox extents, int pxW, int pxH)
     {
@@ -724,11 +631,18 @@ internal static class Render
     /// would be a layer that renders differently only when <c>--layers</c> is passed.
     /// </summary>
     private static (Technology? Tech, IReadOnlyList<RenderLayerJson>? Report, int? Refusal)
-        ApplyLayerSelection(Technology? tech, LayoutView view, Options o)
+        ApplyLayerSelection(Technology? tech, LayoutView view, string baseDir, Options o)
     {
-        var counts = new Dictionary<LayerKey, int>();
-        foreach (var s in view.Shapes)
-            counts[s.Layer] = counts.TryGetValue(s.Layer, out int n) ? n + 1 : 1;
+        // HIERARCHY INCLUDED, arrays multiplied (RND-3 R-rnd3-6) — and through CellHierarchy's own
+        // walk, which is also what `explain --layers` counts with. Counting `view.Shapes` alone here
+        // reported 1 where the picture drew 7, and a caller comparing the two verbs' answers for the
+        // same layer would have had to choose which to believe.
+        //
+        // No visibility filter: this field is "shapes on that layer in the document, DRAWN OR NOT",
+        // which is what makes an empty layer and an excluded one two different answers. Whether it was
+        // painted is the `rendered` flag beside it.
+        var counted = CellHierarchy.ShapeCountsByLayer(view, baseDir);
+        var counts  = counted.Shapes;
 
         string[]? named = o.OnlyLayers ?? o.HideLayers;
         if (named is null)
@@ -765,7 +679,7 @@ internal static class Render
     }
 
     private static IReadOnlyList<RenderLayerJson>? LayerReport(
-        Technology? tech, Dictionary<LayerKey, int> counts, Func<LayerDef, bool> rendered)
+        Technology? tech, IReadOnlyDictionary<LayerKey, long> counts, Func<LayerDef, bool> rendered)
     {
         if (tech is null)
         {
@@ -777,7 +691,7 @@ internal static class Render
         return [.. tech.Layers.Select(l => new RenderLayerJson(
             l.Name.Length > 0 ? l.Name : l.Key.ToString(),
             rendered(l),
-            counts.TryGetValue(l.Key, out int n) ? n : 0))];
+            counts.TryGetValue(l.Key, out long n) ? n : 0))];
     }
 
     // ── schematic ────────────────────────────────────────────────────────────
@@ -799,7 +713,7 @@ internal static class Render
         Progress("measure");
 
         var (rm, idx) = model.BuildRenderModel();
-        var extents = SchematicExtents(model, rm);
+        var extents = DocumentExtents.SchematicBox(model, rm);
         if (extents is not { } bb) return JsonRun.Fail(CliDiagnostics.RenderNothingToDraw(t.File));
 
         Console.Error.WriteLine(
@@ -830,38 +744,6 @@ internal static class Render
             null, null, null, pxW, pxH);
     }
 
-    /// <summary>
-    /// What the schematic renderer will paint. The render model's own bbox covers components and
-    /// wires; bitmaps and net labels are unioned separately because neither contributes to it — a
-    /// bitmap-only selection otherwise sizes to a dummy extent, and a long net label near the edge is
-    /// clipped. <c>SchematicClipboard.BuildSelectionModel</c> is where both were learned.
-    /// </summary>
-    private static WorldRect? SchematicExtents(SchematicEditModel model, SchematicModel rm)
-    {
-        bool hasCompWire = model.Components.Count > 0 || model.Wires.Count > 0;
-        double x0, y0, x1, y1;
-        if (hasCompWire) { x0 = rm.BbMinX; y0 = rm.BbMinY; x1 = rm.BbMaxX; y1 = rm.BbMaxY; }
-        else             { x0 = y0 = double.MaxValue; x1 = y1 = double.MinValue; }
-
-        foreach (var bm in rm.Bitmaps)
-        {
-            x0 = Math.Min(x0, bm.X);              y0 = Math.Min(y0, bm.Y);
-            x1 = Math.Max(x1, bm.X + bm.Width);   y1 = Math.Max(y1, bm.Y + bm.Height);
-        }
-
-        foreach (var nl in rm.NetLabels)
-        {
-            x0 = Math.Min(x0, nl.X);
-            y0 = Math.Min(y0, nl.Y - 55.0);
-            x1 = Math.Max(x1, nl.X + Math.Max(1, nl.Name.Length) * 40.0);
-            y1 = Math.Max(y1, nl.Y + 20.0);
-        }
-
-        if (x0 == double.MaxValue) return null;
-        if (x1 - x0 < 1 || y1 - y0 < 1) return null;
-        return new WorldRect(x0, y0, x1, y1);
-    }
-
     // ── symbol ───────────────────────────────────────────────────────────────
 
     private static int DrawSymbol(Options o, Target t)
@@ -886,17 +768,20 @@ internal static class Render
         int pxW = (int)Math.Round(o.Width  * o.Scale);
         int pxH = (int)Math.Round(o.Height * o.Scale);
 
-        var bodyBb = SymbolBodyBox(symbol);
+        // TWO boxes, and the difference is R-rnd3-10's whole point: `body` is the GEOMETRY — the
+        // primitives and the pin anchors, zoom-independent, and what the report says the document's
+        // size is. `fitBox` is that SOLVED for the pin NAMES, which are drawn in pixels at a size with
+        // a floor and therefore have no world extent until a zoom is chosen. A fit is framed on the
+        // second; a zoom-independent answer is the first.
+        var bodyBb = DocumentExtents.SymbolBox(symbol);
         if (bodyBb is not { } body) return JsonRun.Fail(CliDiagnostics.RenderNothingToDraw(t.File));
 
-        // The SOLVED box — pin marks folded in. See SymbolPinMarksSolved for why this is an iteration
-        // rather than a computation, and for the two errors that pass has already made once.
-        var extents = SymbolPinMarksSolved(symbol, body, pxW, pxH, o.Margin);
+        var fitBox = DocumentExtents.SymbolFitBox(symbol, body, pxW, pxH, o.Margin);
 
         Console.Error.WriteLine(
             $"[circuitRF] {symbol.Primitives.Count} primitive(s), {symbol.Pins.Count} pin(s)");
 
-        var (pan, zoom, letterboxed, refusal) = ScreenSenseViewport(o, extents, pxW, pxH, null);
+        var (pan, zoom, letterboxed, refusal) = ScreenSenseViewport(o, fitBox, pxW, pxH, null);
         if (refusal is { } f) return f;
 
         var (theme, themeName, themeFrom, themeRefusal) = ResolveTheme(o, Path.GetFullPath(t.File));
@@ -921,90 +806,10 @@ internal static class Render
 
         return Publish(o, t, DocumentKind.Symbol, bytes,
             ScreenSenseViewportJson(o, pan, zoom, pxW, pxH, letterboxed),
-            new RenderExtentsJson(extents.X0, extents.Y0, extents.X1, extents.Y1, DesignUnits, 1.0),
+            new RenderExtentsJson(body.X0, body.Y0, body.X1, body.Y1, DesignUnits, 1.0),
             new RenderThemeJson(themeName, o.Variant == ColorVariant.Dark ? "dark" : "light", themeFrom),
             null, null, null, pxW, pxH);
     }
-
-    private static WorldRect? SymbolBodyBox(Symbol symbol)
-    {
-        double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
-        if (symbol.Primitives.Count > 0)
-        {
-            var (p0, q0, p1, q1) = SymbolGeometry.ComputeBb(symbol.Primitives);
-            minX = p0; minY = q0; maxX = p1; maxY = q1;
-        }
-        foreach (var pin in symbol.Pins)
-        {
-            minX = Math.Min(minX, pin.LocalX); minY = Math.Min(minY, pin.LocalY);
-            maxX = Math.Max(maxX, pin.LocalX); maxY = Math.Max(maxY, pin.LocalY);
-        }
-        if (minX == double.MaxValue) return null;
-        if (maxX - minX < 1e-9) { minX -= 50; maxX += 50; }
-        if (maxY - minY < 1e-9) { minY -= 50; maxY += 50; }
-        return new WorldRect(minX, minY, maxX, maxY);
-    }
-
-    /// <summary>
-    /// The pin marks are drawn in PIXELS and cannot be put in a world-space box, so the fit is SOLVED
-    /// rather than computed: each pass measures the marks at the current zoom, widens the box by what
-    /// they need, and re-fits at the smaller zoom that results. It converges downward in two or three
-    /// passes and is capped.
-    ///
-    /// <para><b>The two errors this pass has already made once</b>, both recorded on
-    /// <c>ComponentPreviewRaster.RasterSymbol</c> and both available to make again here:</para>
-    /// <list type="number">
-    /// <item><b>Reserving room on the wrong side.</b> A name drawn on the LEFT with room reserved on
-    /// the right is the off-centre error made twice — room where nothing is drawn AND none where
-    /// something is. The side comes from the pin's own <c>NameAlign</c>, measured, never assumed.</item>
-    /// <item><b>Reserving the widest label at the rightmost pin.</b> Wrong the moment the longest name
-    /// is not the rightmost pin, which is the ordinary case — a THERMAL pad among pads called 1..8.
-    /// Each pin is measured AT ITS OWN POSITION.</item>
-    /// </list>
-    /// </summary>
-    private static WorldRect SymbolPinMarksSolved(
-        Symbol symbol, WorldRect body, int pxW, int pxH, double margin)
-    {
-        double x0 = body.X0, y0 = body.Y0, x1 = body.X1, y1 = body.Y1;
-        double zoom = FitZoom(x1 - x0, y1 - y0, pxW, pxH, margin);
-        if (zoom <= 0 || symbol.Pins.Count == 0) return body;
-
-        for (int pass = 0; pass < 3; pass++)
-        {
-            float fontSize = (float)Math.Max(8.0, zoom * 12.0);
-            float dot      = (float)Math.Max(3.0, zoom * 5.0);
-            using var font = new SKFont(SkiaFonts.PlexBold, fontSize);
-
-            double a0 = x0, b0 = y0, a1 = x1, b1 = y1;
-            foreach (var pin in symbol.Pins)
-            {
-                string label = pin.Name is { Length: > 0 } n ? n : $"P{pin.PortIndex + 1}";
-                double text = font.MeasureText(label);
-                var (left, right, up, down) = pin.NameAlign switch
-                {
-                    SymbolPinNameAlign.Right  => (dot + 2 + text, (double)dot, (double)dot, (double)(fontSize * 0.85)),
-                    SymbolPinNameAlign.Center => (text / 2, text / 2, (double)dot, (double)(fontSize * 0.85)),
-                    SymbolPinNameAlign.Top    => ((double)(fontSize * 0.85), (double)(fontSize * 0.85), (double)dot, dot + 2 + text),
-                    SymbolPinNameAlign.Bottom => ((double)(fontSize * 0.85), (double)(fontSize * 0.85), dot + 2 + text, (double)dot),
-                    _                         => ((double)dot, dot + 2 + text, (double)dot, (double)(fontSize * 0.85)),
-                };
-                a0 = Math.Min(a0, pin.LocalX - left  / zoom);
-                b0 = Math.Min(b0, pin.LocalY - up    / zoom);
-                a1 = Math.Max(a1, pin.LocalX + right / zoom);
-                b1 = Math.Max(b1, pin.LocalY + down  / zoom);
-            }
-
-            double next = FitZoom(a1 - a0, b1 - b0, pxW, pxH, margin);
-            x0 = a0; y0 = b0; x1 = a1; y1 = b1;
-            if (next <= 0) break;
-            if (Math.Abs(next - zoom) / zoom < 0.01) break;
-            zoom = next;
-        }
-        return new WorldRect(x0, y0, x1, y1);
-    }
-
-    private static double FitZoom(double w, double h, int pxW, int pxH, double margin)
-        => Math.Min(pxW / Math.Max(w, 1e-9), pxH / Math.Max(h, 1e-9)) * (1.0 - 2.0 * margin);
 
     // ── the schematic/symbol viewport, which is Y-DOWN ───────────────────────
 
@@ -1043,7 +848,7 @@ internal static class Render
             }
             default:
             {
-                double zoom = FitZoom(extents.W, extents.H, pxW, pxH, o.Margin);
+                double zoom = DocumentExtents.FitZoom(extents.W, extents.H, pxW, pxH, o.Margin);
                 double panX = (extents.X0 + extents.X1) * 0.5 - pxW / (2.0 * zoom);
                 double panY = (extents.Y0 + extents.Y1) * 0.5 - pxH / (2.0 * zoom);
                 return ((panX, panY), zoom, false, null);

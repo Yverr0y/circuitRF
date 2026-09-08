@@ -843,12 +843,20 @@ internal static class CliDiagnostics
         "explain.args.multiple-paths", DiagnosticSeverity.Error,
         "explain: one path, please.");
 
-    /// <summary>More than one of <c>--expr</c>, <c>--analysis</c> and <c>--ref</c>. Refused rather
-    /// than ordered: each asks a different question and a document answering two of them at once
-    /// would have to invent a precedence nobody stated.</summary>
+    /// <summary>More than one of the SIX questions this verb answers. Refused rather than ordered:
+    /// each asks something different and a document answering two of them at once would have to invent
+    /// a precedence nobody stated. RND-3's three join the rule rather than getting an exception from it
+    /// (R-rnd3-2).</summary>
     public static Diagnostic ExplainOneQuestion() => new(
         "explain.args.one-question", DiagnosticSeverity.Error,
-        "explain: --expr, --analysis and --ref ask different questions — pass one.");
+        "explain: --expr, --analysis, --ref, --cells, --layers and --extents ask different " +
+        "questions — pass one.");
+
+    /// <summary><c>--all</c> is <c>--cells</c>' own modifier and means nothing beside anything else.
+    /// Named rather than ignored, on §3.3's terms.</summary>
+    public static Diagnostic ExplainAllNeedsCells() => new(
+        "explain.args.all-needs-cells", DiagnosticSeverity.Error,
+        "explain: --all includes generated cells in --cells, and applies to nothing else.");
 
     public static Diagnostic ExplainPathNotFound(string path) => Diagnostic.Create(
         "explain.path.not-found", DiagnosticSeverity.Error,
@@ -868,6 +876,55 @@ internal static class CliDiagnostics
         "explain.option.not-applicable", DiagnosticSeverity.Error,
         "{option} asks about analyses and expressions, which a {kind} does not hold.",
         ("option", option), ("kind", kind));
+
+    /// <summary>
+    /// The question is about geometry, drawing layers or cell folders and the path names none.
+    ///
+    /// <para>Separate from <see cref="ExplainNotApplicable"/> because the two name different reasons:
+    /// that one is "a technology holds no analyses", this one is "a Touchstone file has no extents".
+    /// One sentence covering both would have to say neither.</para>
+    /// </summary>
+    public static Diagnostic ExplainOptionNotApplicable(string option, string kind, string appliesTo) =>
+        Diagnostic.Create(
+            "explain.option.wrong-kind", DiagnosticSeverity.Error,
+            "{option} does not apply to a {kind} — it asks about {appliesTo}.",
+            ("option", option), ("kind", kind), ("appliesTo", appliesTo));
+
+    /// <summary><c>--cells</c> or <c>--extents</c> on a cell folder whose views resolve to nothing.
+    /// The folder IS the answer; there is simply no document under it to measure.</summary>
+    public static Diagnostic ExplainCellHasNoView(string cellDir, string view) => Diagnostic.Create(
+        "explain.cell.no-view", DiagnosticSeverity.Error,
+        "'{cellDir}' holds no {view} view to measure.", ("cellDir", cellDir), ("view", view));
+
+    /// <summary>A cell folder holding more than one view, asked a question about ONE of them.
+    /// R-rnd0-6's rule: the dialog's own question becomes a refusal LISTING the choices and naming the
+    /// flag that answers it.</summary>
+    public static Diagnostic ExplainViewRequired(string cellDir, string views) => Diagnostic.Create(
+        "explain.cell.view-required", DiagnosticSeverity.Error,
+        "'{cellDir}' holds more than one view ({views}) — name one with --view.",
+        ("cellDir", cellDir), ("views", views));
+
+    /// <summary>A <c>--view</c> naming a view the cell folder does not hold.</summary>
+    public static Diagnostic ExplainNoSuchView(string cellDir, string view) => Diagnostic.Create(
+        "explain.cell.no-such-view", DiagnosticSeverity.Error,
+        "'{cellDir}' has no {view} view.", ("cellDir", cellDir), ("view", view));
+
+    /// <summary>A <c>--view</c> that is not one of the three view types at all.</summary>
+    public static Diagnostic ExplainViewUnknown(string view) => Diagnostic.Create(
+        "explain.args.view-unknown", DiagnosticSeverity.Error,
+        "explain: --view takes schematic, symbol or layout — not '{view}'.", ("view", view));
+
+    /// <summary>
+    /// A hierarchical shape count that stopped before it finished.
+    ///
+    /// <para>Reported rather than absorbed for <c>sweep-unit-scale-and-mark</c>'s reason: a number
+    /// that quietly stopped counting is indistinguishable from one that finished, and a caller would
+    /// read a floor as a total.</para>
+    /// </summary>
+    public static Diagnostic ExplainLayerCountTruncated(string path) => Diagnostic.Create(
+        "explain.layers.count-truncated", DiagnosticSeverity.Warning,
+        "{path}: the hierarchy is larger than this count walks — the per-layer shape counts are a " +
+        "floor, not a total.", ("path", path));
 
     /// <summary>The expression would not evaluate. The engine's own message — an unresolved name, a
     /// cycle, a parse error — which is the whole content of the answer.</summary>

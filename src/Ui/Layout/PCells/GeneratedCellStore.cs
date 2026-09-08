@@ -25,8 +25,13 @@ public static class GeneratedCellStore
 {
     /// <summary>Dot-prefixed (circuitRF-internal, matching <c>.cws</c>/<c>.ccell</c>/<c>.ctech</c>
     /// convention) workspace-root folder holding every generated cell, across every generator and
-    /// every placement in the workspace.</summary>
-    public const string ReservedFolderName = ".generated-cells";
+    /// every placement in the workspace.
+    ///
+    /// <para><b>The name itself lives in <see cref="ReservedFolders.GeneratedCells"/></b>, below the
+    /// UI firewall, because the headless verbs have to hide the same folder the project tree hides and
+    /// a second copy of the string would be free to drift (RND-3 R-rnd3-4). This stays as the spelling
+    /// every PCell call site already uses.</para></summary>
+    public const string ReservedFolderName = ReservedFolders.GeneratedCells;
 
     /// <summary>
     /// Returns the absolute cell folder for a PCell generated at <paramref name="parameters"/> against
@@ -204,8 +209,7 @@ public static class GeneratedCellStore
     /// the independent gate that catches it.
     /// </summary>
     public static bool IsUnderGeneratedCellsFolder(string absolutePath)
-        => Path.GetFullPath(absolutePath).Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            .Any(seg => string.Equals(seg, ReservedFolderName, StringComparison.OrdinalIgnoreCase));
+        => ReservedFolders.IsUnderGeneratedCells(absolutePath);
 
     /// <summary>True when a generated cell for this exact key already exists on disk — lets a caller
     /// check reuse-vs-create without invoking the generator (used by tests asserting R-L5-1's "one

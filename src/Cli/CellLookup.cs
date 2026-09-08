@@ -1,3 +1,5 @@
+using CircuitRF.Design.Workspace;
+
 namespace CircuitRF.Cli;
 
 /// <summary>
@@ -16,6 +18,14 @@ namespace CircuitRF.Cli;
 /// one tree is a real state — a library folder and a design folder both holding <c>Stage1</c> — and
 /// picking one silently renders a picture of the wrong cell.</para>
 ///
+/// <para><b>A folder the GUI hides is hidden here too</b> (RND-3 R-rnd3-4), through
+/// <see cref="ReservedFolders"/> — the one place those names are written down, shared with the project
+/// tree's own scanner. <c>.generated-cells</c> is the case that matters: it holds one
+/// content-addressed cell folder per distinct PCell placement, it can hold hundreds, and none of them
+/// is a cell anyone authored. It is a DEFAULT, not a wall — <c>includeGenerated</c> is what
+/// <c>explain --cells --all</c> passes, because a caller debugging a PCell genuinely does want to
+/// reach one.</para>
+///
 /// <para>Separate from <c>Render</c> because it is the answer <c>explain --cells</c> gives (RND-3),
 /// and a second copy of it there would be free to disagree with what <c>render</c> actually drew.</para>
 /// </summary>
@@ -27,10 +37,12 @@ internal static class CellLookup
     private const int MaxDepth = 6;
 
     /// <summary>Every cell folder path under <paramref name="root"/>, in a stable order.</summary>
-    public static IReadOnlyList<string> All(string root)
+    /// <param name="includeGenerated">Whether to descend into the reserved <c>.generated-cells</c>
+    /// folder. False everywhere but <c>explain --cells --all</c>.</param>
+    public static IReadOnlyList<string> All(string root, bool includeGenerated = false)
     {
         var found = new List<string>();
-        Walk(root, 0, found);
+        Walk(root, 0, found, includeGenerated);
         found.Sort(StringComparer.Ordinal);
         return found;
     }
@@ -43,10 +55,10 @@ internal static class CellLookup
     /// <summary>Every cell folder called <paramref name="name"/>. Zero, one or several — all three are
     /// answers the caller has to be told apart.</summary>
     public static IReadOnlyList<string> Find(string root, string name)
-        => [.. All(root).Where(p => string.Equals(
+        => [.. All(root, includeGenerated: true).Where(p => string.Equals(
                 Path.GetFileName(Path.TrimEndingDirectorySeparator(p)), name, StringComparison.OrdinalIgnoreCase))];
 
-    private static void Walk(string dir, int depth, List<string> found)
+    private static void Walk(string dir, int depth, List<string> found, bool includeGenerated)
     {
         if (depth > MaxDepth) return;
 
@@ -57,8 +69,15 @@ internal static class CellLookup
         foreach (var sub in subs)
         {
             if (File.Exists(Path.Combine(sub, DocumentKinds.CwsFileName))) continue;
+            if (ReservedFolders.IsReserved(sub) && !(includeGenerated && !IsGit(sub))) continue;
             if (DocumentKinds.LooksLikeCellFolder(sub)) { found.Add(sub); continue; }
-            Walk(sub, depth + 1, found);
+            Walk(sub, depth + 1, found, includeGenerated);
         }
     }
+
+    /// <summary><c>.git</c> is never walked, whatever <c>--all</c> says: it is a history, not a design,
+    /// and nothing in it is a cell. <c>--all</c> lifts the generated-cells exclusion only.</summary>
+    private static bool IsGit(string dir) => string.Equals(
+        Path.GetFileName(Path.TrimEndingDirectorySeparator(dir)),
+        ReservedFolders.Git, StringComparison.OrdinalIgnoreCase);
 }

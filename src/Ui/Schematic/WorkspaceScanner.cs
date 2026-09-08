@@ -187,15 +187,10 @@ public static class WorkspaceScanner
     /// outside circuitRF: there is no "delete all history" command at any stage, and a tree node with
     /// a Delete on its context menu would be one.</para>
     /// </summary>
-    private static bool IsReservedTreeDir(string dir)
-    {
-        string name = Path.GetFileName(
-            dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-
-        return string.Equals(name, CircuitRF.Ui.Layout.PCells.GeneratedCellStore.ReservedFolderName,
-                             StringComparison.OrdinalIgnoreCase)
-            || string.Equals(name, ".git", StringComparison.OrdinalIgnoreCase);
-    }
+    /// <para><b>Both names live in <see cref="ReservedFolders"/></b>, below the UI firewall, so the
+    /// headless verbs hide what this tree hides — <c>explain --cells</c> is the caller that made the
+    /// duplication matter (RND-3 R-rnd3-4).</para>
+    private static bool IsReservedTreeDir(string dir) => ReservedFolders.IsReserved(dir);
 
     /// <summary>Every absolute path the tree already renders, as <see cref="PathKey"/> keys.</summary>
     private static HashSet<string> CollectAbsolutePaths(ProjectTreeNode node)

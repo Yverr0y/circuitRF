@@ -60,6 +60,22 @@ public static class CellHierarchy
     /// </summary>
     internal static string LayoutBaseDirOf(string resolvedCellDir) => CellFolder.SubFolderPath(resolvedCellDir, ViewType.Layout);
 
+    /// <summary>
+    /// The base directory an OPEN <c>.clay</c>'s own instance <c>CellRef</c>s resolve against: the
+    /// directory the file itself lives in, which for a cell folder is its <c>layout/</c> sub-folder.
+    ///
+    /// <para><b>This is the one-level trap <see cref="LayoutBaseDirOf"/>'s own remarks describe, seen
+    /// from the other end.</b> A <c>CellRef</c> is written by <c>Path.GetRelativePath</c> FROM this
+    /// directory (the layout editor's <c>InstanceBaseDir</c>, which is what the canvas passes as
+    /// <c>LayoutRenderOptions.BaseDir</c>), so a caller that hands over the CELL folder instead
+    /// resolves every reference one level too shallow — and the failure is quiet: <c>../Sibling</c>
+    /// simply does not resolve, and the instance draws as a broken-reference placeholder rather than
+    /// as its content. Named here so a headless caller has the same answer the editor has, rather than
+    /// re-deriving it with one <c>GetDirectoryName</c> too many.</para>
+    /// </summary>
+    public static string BaseDirOfDocument(string layoutFilePath)
+        => Path.GetDirectoryName(Path.GetFullPath(layoutFilePath)) ?? "";
+
     /// <summary>A placeholder half-extent (DBU) used when an unresolved/broken instance has no real
     /// geometry to measure — keeps it a small but non-degenerate, clickable/selectable target rather
     /// than a zero-size point (R-L3a-1: "stays fully selectable and movable").</summary>
@@ -427,6 +443,146 @@ public static class CellHierarchy
 
         _ownLayerKeysCache.AddOrUpdate(view, new StrongBoxKeys(own));
         return own;
+    }
+
+    /// <summary>
+    /// <b>How many shapes would be DRAWN on each layer</b>, hierarchy included (RND-3 R-rnd3-6) —
+    /// keyed by <see cref="LayerKey"/>, with the number of top-level instance PLACEMENTS that
+    /// contribute anything to each.
+    ///
+    /// <para><b>Why this is not <see cref="OccupiedLayerKeys"/> with a counter.</b> That method answers
+    /// a UNION question and dedupes on the cell folder, because a cell reached twice contributes the
+    /// same keys twice and the second visit is free. A COUNT is the opposite: a cell placed twice draws
+    /// its shapes twice, and a 20x20 array draws them four hundred times. So this walk multiplies by
+    /// <c>Rows*Cols</c> and dedupes on nothing but the DFS path, which is the cycle guard.</para>
+    ///
+    /// <para><b>The cost this buys is real and is the reason for <paramref name="budget"/>.</b> A design
+    /// placing a generated via field a dozen times has a six-figure shape count per placement, and a
+    /// caller asking "what layers does this use" does not want to pay for a full expansion of it.
+    /// Exceeding the budget stops the walk and reports <c>Truncated</c> — the same strict-direction
+    /// answer <see cref="OccupiedLayerKeys"/> gives when depth runs out, and for the same reason: a
+    /// number that silently stopped counting is worse than one that says it did.</para>
+    ///
+    /// <para>An instance that does not resolve contributes nothing rather than failing the walk. Its
+    /// content is unknowable, and it is already reported as a broken reference by every other
+    /// consumer.</para>
+    /// </summary>
+    /// <param name="view">The cell's own layout view.</param>
+    /// <param name="viewBaseDir">The directory <paramref name="view"/>'s own <c>CellRef</c>s resolve
+    /// against — the <c>layout/</c> sub-folder holding its <c>.clay</c>, per <see cref="LayoutBaseDirOf"/>.</param>
+    /// <param name="layerVisible">Optional per-layer filter, the same one
+    /// <see cref="InstanceBbox"/> takes: null counts every layer, and a filter counts what a render
+    /// with that visibility would actually paint.</param>
+    /// <param name="budget">The largest total this walk will count to before giving up. The default is
+    /// generous enough for any authored design and small enough that a pathological one answers in
+    /// well under a second.</param>
+    public static LayerShapeCounts ShapeCountsByLayer(
+        LayoutView view, string viewBaseDir, Func<LayerKey, bool>? layerVisible = null,
+        long budget = DefaultCountBudget)
+    {
+        var counts = new Dictionary<LayerKey, long>();
+        var placements = new Dictionary<LayerKey, int>();
+        var visiting = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        long total = 0;
+        bool truncated = false;
+
+        CountOwnShapes(view, layerVisible, 1, counts, ref total, budget, ref truncated);
+
+        foreach (var inst in view.Instances)
+        {
+            var step = ResolveForWalk(inst, viewBaseDir, visiting, 0);
+            if (step.State != InstanceResolutionState.Resolved) continue;
+
+            // Per PLACEMENT, so the caller can say "this layer comes from two of the four instances"
+            // — which is the question `explain --layers` is actually asked, and the one a bare shape
+            // total cannot answer.
+            var mine = new Dictionary<LayerKey, long>();
+            long ignored = 0;
+            visiting.Add(step.ResolvedCellDir!);
+            CountCell(step.SubView!, LayoutBaseDirOf(step.ResolvedCellDir!), visiting, 1, layerVisible,
+                      mine, ref ignored, budget, ref truncated);
+            visiting.Remove(step.ResolvedCellDir!);
+
+            long multiplier = (long)Math.Max(1, inst.Rows) * Math.Max(1, inst.Cols);
+            foreach (var (key, n) in mine)
+            {
+                counts[key] = (counts.TryGetValue(key, out long have) ? have : 0) + n * multiplier;
+                placements[key] = (placements.TryGetValue(key, out int p) ? p : 0) + 1;
+                total += n * multiplier;
+            }
+            if (total > budget) truncated = true;
+            if (truncated) break;
+        }
+
+        return new LayerShapeCounts(counts, placements, truncated);
+    }
+
+    /// <summary>How much <see cref="ShapeCountsByLayer"/> will count before it gives up. Chosen the way
+    /// <see cref="MaxDepth"/> was: past any authored design, short of a runaway.</summary>
+    public const long DefaultCountBudget = 20_000_000;
+
+    /// <param name="Shapes">Shapes per layer, hierarchy expanded and arrays multiplied.</param>
+    /// <param name="Placements">How many of the view's OWN top-level instance placements contribute
+    /// anything to each layer. An array counts once, because it is one placement — the array's
+    /// multiplication is in <paramref name="Shapes"/>, where it belongs.</param>
+    /// <param name="Truncated">True when the walk hit its budget and the counts are a floor rather than
+    /// a total. Never silently absorbed: a count that stopped counting must say so.</param>
+    public readonly record struct LayerShapeCounts(
+        IReadOnlyDictionary<LayerKey, long> Shapes,
+        IReadOnlyDictionary<LayerKey, int>  Placements,
+        bool                                Truncated);
+
+    private static void CountCell(
+        LayoutView view, string viewBaseDir, HashSet<string> visiting, int depth,
+        Func<LayerKey, bool>? layerVisible, Dictionary<LayerKey, long> counts,
+        ref long total, long budget, ref bool truncated)
+    {
+        CountOwnShapes(view, layerVisible, 1, counts, ref total, budget, ref truncated);
+        if (truncated) return;
+
+        foreach (var nested in view.Instances)
+        {
+            var step = ResolveForWalk(nested, viewBaseDir, visiting, depth);
+            if (step.State != InstanceResolutionState.Resolved) continue;
+
+            var mine = new Dictionary<LayerKey, long>();
+            long nestedTotal = 0;
+            visiting.Add(step.ResolvedCellDir!);
+            CountCell(step.SubView!, LayoutBaseDirOf(step.ResolvedCellDir!), visiting, depth + 1,
+                      layerVisible, mine, ref nestedTotal, budget, ref truncated);
+            visiting.Remove(step.ResolvedCellDir!);
+
+            long multiplier = (long)Math.Max(1, nested.Rows) * Math.Max(1, nested.Cols);
+            foreach (var (key, n) in mine)
+            {
+                counts[key] = (counts.TryGetValue(key, out long have) ? have : 0) + n * multiplier;
+                total += n * multiplier;
+            }
+            if (total > budget) truncated = true;
+            if (truncated) return;
+        }
+    }
+
+    private static void CountOwnShapes(
+        LayoutView view, Func<LayerKey, bool>? layerVisible, long multiplier,
+        Dictionary<LayerKey, long> counts, ref long total, long budget, ref bool truncated)
+    {
+        foreach (var shape in view.Shapes)
+        {
+            // <b>The shape's OWN layer, and that layer alone</b> — deliberately NOT what
+            // OwnLayerKeys does. That method unions a via's LandingLayer as well, because it answers
+            // "which layer keys does this design occupy" and a via's pads land on a second key. This
+            // counts what would be DRAWN, and LayoutRenderer draws a via wholly on its barrel layer:
+            // the annulus is built once, in that layer's colour, and LandingLayer is interchange
+            // metadata the renderer never reads. Counting it on two layers would report a shape on a
+            // layer no render puts one on, which is exactly the disagreement R-rnd3-6 exists to
+            // prevent.
+            if (layerVisible is not null && !layerVisible(shape.Layer)) continue;
+
+            counts[shape.Layer] = (counts.TryGetValue(shape.Layer, out long have) ? have : 0) + multiplier;
+            total += multiplier;
+            if (total > budget) { truncated = true; return; }
+        }
     }
 
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<LayoutView, StrongBoxKeys>

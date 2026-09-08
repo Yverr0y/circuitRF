@@ -677,8 +677,10 @@ public sealed class CheckAndExplainCliVerbTests(ITestOutputHelper output) : IDis
             Assert.Empty(Json(run).RootElement.GetProperty("outputs").EnumerateArray());
     }
 
-    /// <summary>The three questions are refused together rather than ordered — each asks something
-    /// different and a precedence nobody stated would be an invention.</summary>
+    /// <summary>The questions are refused together rather than ordered — each asks something
+    /// different and a precedence nobody stated would be an invention. RND-3 took the count from three
+    /// to six and they all obey the same rule (R-rnd3-2); the three new ones are gated in
+    /// <c>Render/ExplainQueryCliVerbTests</c>.</summary>
     [Fact]
     public void Explain_MoreThanOneQuestion_IsRefused()
     {

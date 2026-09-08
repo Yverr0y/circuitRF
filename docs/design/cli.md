@@ -46,7 +46,7 @@ Nine verbs run no analysis, so none of §3-§6 applies to them and §7's exit co
 | `new cell` | a workspace + a name | `CellCreate.Create` | a cell folder and one empty-but-valid file per `--views` |
 | `import part` | a component file or folder | `ComponentRead` + `ComponentImport.Import` | a cell folder holding the land patterns and the symbol |
 | `check` | a workspace, a cell folder, or one document | the validators that already exist | **nothing** — §10 |
-| `explain` | the same, plus `--expr` / `--analysis` / `--ref` | reports what resolution DECIDED | **nothing** — §10 |
+| `explain` | the same, plus `--expr` / `--analysis` / `--ref` / `--cells` / `--layers` / `--extents` | reports what resolution DECIDED | **nothing** — §10 |
 | `render` | the same three view documents, a cell folder, or a workspace + `--cell` | draws it with the renderer the GUI draws with | one `.svg` / `.pdf` / `.png` — §13 |
 | `read` | a result file, or one of circuitRF's own documents | loads it back through the readers the GUI reads through | **nothing** — §11.4 |
 | `serve` | `--root <dir>` | a protocol server on stdin/stdout — §11 | whatever the tool it was asked for writes |
@@ -569,8 +569,53 @@ as a step: what was being resolved, from where, to what, and by which rule.
   three-state result (`resolved` / `not-found` / `primary-missing`), whether it leaves the workspace,
   and whether it only resolved through a recorded move.
 
-The three questions are **refused together rather than ordered** — each asks something different, and
-a precedence nobody stated would be an invention.
+RND-3 (`brief-render-3-query-surface.md`) adds **the three questions a caller has to be able to ask
+before `render` is usable** — *what cells does this hold and which views does each have*, *what layers
+can I ask for*, *how big is this*. They are options here and not three new verbs (R-rnd3-1): they are
+all asking what circuitRF DECIDED, which is what this verb is for, and `serve`'s tool count is capped
+deliberately (§11.3).
+
+- **`--cells`** *(a workspace, a folder, or one cell folder)* — every cell reachable from the path
+  and, for each, the three views with the file primacy resolved to and the **state** it resolved in.
+  It reports the RESOLUTION, not a directory listing (R-rnd3-3): `state` is `CellFolder.ResolvePrimary`'s
+  own five-way answer and `defect` is `CellViewFileValidator.DescribeDefect`'s, both of which `check`
+  already surfaces, so a cell whose schematic sub-folder holds three files and names no primary is
+  **listed with its ambiguity**, not omitted and not silently resolved to the alphabetically first one.
+  The enumeration is `CellLookup` — the same one `render --cell` resolves through, so a cell this lists
+  is a cell that verb can draw. **`.generated-cells` is excluded by default and `--all` includes it**
+  (R-rnd3-4): the project tree hides that folder deliberately, and the name lives once in
+  `ReservedFolders`, below the firewall, shared with the tree's own scanner. On a cell folder it
+  reports that one cell, in the same shape — which is what makes it composable with `render`.
+- **`--layers`** *(a `.clay`, a `.ctech`, a cell or a workspace)* — the resolved technology's layers,
+  each with its number/datatype pair, purpose, visibility, selectability, colour and fill, **and how
+  many shapes this document draws on it**. That last field is what makes this worth having (R-rnd3-5):
+  a technology defines every layer a process has and a given `.clay` draws on a handful, so a caller
+  told only the technology's list will ask `render --layers` for empty layers and conclude the render
+  is broken. The count is **hierarchy-inclusive and array-multiplied** (R-rnd3-6), through
+  `CellHierarchy.ShapeCountsByLayer` — the same walk `render --json`'s own `layers[].shapes` now uses,
+  so the two verbs cannot disagree. On a `.ctech` or a workspace there is no document to count against
+  and the field is **absent, not zero**. The technology walk is reported as a walk (R-rnd3-7), and
+  where it resolves to nothing that is the answer, with the **fallback palette named** — that is what
+  `render` will draw with, and a caller needs to know the colours it gets are not the process's.
+- **`--extents`** *(a `.clay`, `.csch`, `.csym` or a cell)* — how big the document is, **from the same
+  function `render --fit` frames on** (R-rnd3-9): `CircuitRF.Render.DocumentExtents`. If the two could
+  disagree the number would be worse than useless, because a caller uses this one to compute a
+  `--window` for that one. **Base SI with the unit AND the scale named** (R-rnd3-8) — a layout's
+  numbers in metres with the DBU scale that produced them, a schematic's and a symbol's as
+  `design-units`, said to be dimensionless rather than dressed up in metres. A document with no
+  geometry reports `empty: true` **and no coordinates** (R-rnd3-10): `(0,0,0,0)` is a point at the
+  origin, which is a different fact and one a caller would happily divide by. `perLayer` is layout-only
+  and covers the document's own shapes on the layers that have geometry.
+
+  What this box does NOT carry is the room a FIT adds for marks measured in PIXELS at render time — a
+  symbol pin's name and a Fixed-mode ruler's readout, neither of which has a world extent until a page
+  size is chosen. That is the stable, zoom-independent answer a zoom-independent verb owes, and the
+  `note` field says so.
+
+The six questions are **refused together rather than ordered** (R-rnd3-2) — each asks something
+different, and a precedence nobody stated would be an invention. `--all` is `--cells`' own modifier and
+is refused beside anything else; `--view` is only ever a cell folder's disambiguator, spelled exactly
+as `render` spells it, and a cell folder holding more than one view is a refusal LISTING them.
 
 **R-aut4-8: `explain` never guesses and never falls back silently.** Where resolution fails, that is
 the answer — a diagnostic naming what was looked for and where it was looked, because a caller uses
@@ -593,8 +638,25 @@ Per §3.2, with `diagnostics` carrying the findings and `result` carrying the re
                          "analyses":[{"name","kind","enabled","runnable","isRoot","chain",
                                       "dispatched","promotedFrom","sweep"}],
                          "expression":{"expression","kind","text","real","complex","boolean"},
-                         "reference":{"ref","from","resolvedPath","state","outsideWorkspace","redirect"} } }
+                         "reference":{"ref","from","resolvedPath","state","outsideWorkspace","redirect"},
+
+                         "cells":[{"name","folder","outsideWorkspace","generated",
+                                   "views":[{"type","primary","state","candidates","defect"}]}],
+
+                         "layers":{"technology","resolvedFrom","resolvedBy","truncated",
+                                   "layers":[{"name","number","datatype","purpose","visible",
+                                              "selectable","color","fill","shapes","instancesUsing"}]},
+
+                         "extents":{"x0","y0","x1","y1","width","height","unit","scale","empty",
+                                    "note","perLayer":[{"name","x0","y0","x1","y1"}]} } }
 ```
+
+Exactly one of `analyses` / `expression` / `reference` / `cells` / `layers` / `extents` is ever
+present — the six are refused together. `walks` is always present, because "which workspace, which
+technology" is the context every other answer is read against; `--layers` adds a `layers` STEP to it
+carrying the technology and the defined/used counts, so the block below needs no heading of its own.
+Coordinates and shape counts are **absent rather than zero** wherever there is nothing to measure or
+nothing to count — a zero there would be a claim.
 
 `read` uses the same two halves the run verbs do — `result.groups` for a result file it loaded back —
 plus one field of its own for a document returned verbatim:
@@ -942,6 +1004,13 @@ way to notice. The resolved window, after letterboxing, is in the document.
 **What is fitted is the PAINTED box, not the stored one.** A label's stored bbox is its anchor, an EM
 port paints a width bar and an arrow beyond it, and an instance's extent resolves through its cell.
 
+That measurement lives in **`CircuitRF.Render.DocumentExtents`**, not in this verb, because
+`explain --extents` reports the same box and the two must not be able to disagree (R-rnd3-9). It hands
+back TWO: the document's own **zoom-independent** box, which is what the `--json` document reports as
+`extents`, and that box **solved for the marks measured in pixels at render time** — a symbol pin's
+name, a Fixed-mode ruler's readout — which is what a fit is framed on. On a document carrying neither
+they are the same box, which is most of them.
+
 ### 13.4 Size, resolution and detail
 
 ```
@@ -1005,7 +1074,9 @@ than the bar.
 
 `--json` carries `outputs` with the file written and `result.render` with what was decided — the
 viewport (including `letterboxed`), the document's extents, the size, the theme and WHICH step of the
-chain resolved it, the layers with whether each was drawn and how many shapes the document has on it,
+chain resolved it, the layers with whether each was drawn and how many shapes the document has on it (hierarchy included
+and arrays multiplied, from the walk `explain --layers` counts with — deliberately **not**
+`counters.shapesDrawn`, which counts only the top-level shapes this frame issued a draw call for),
 the detail mode with its effective tolerance in DBU, and `counters`. **There is no duration**:
 `counters` is `LayoutRenderResult`'s own work count — deterministic and machine-independent by
 construction — which is what lets a gate assert about work done rather than about a shared runner's
