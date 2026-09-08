@@ -3,8 +3,8 @@ title: The Command Line
 slug: reference/cli.html
 doc-kind: Reference Guide
 breadcrumb: Docs > Reference > The command line
-lede: circuitRF runs without the GUI — not just its engines, but authoring, validation and resolution too. One executable, fourteen verbs — S-parameters, DC, harmonic balance, loadpull, loadpull pursuit, electromagnetic extraction, layout interchange, creating a workspace or a cell, importing a part, checking a design, explaining what it resolved to, reading a result back, an elaborated-netlist dump, and an MCP server. Every one of them answers --json. This chapter is the operational reference for all of them, including a worked EM run from an empty folder.
-keywords: CLI, command line, command-line, terminal, shell, console, headless, batch, script, scripting, automation, verbs, exit code, stdout, circuitrf, MCP, Model Context Protocol, agent, AI, LLM, JSON-RPC, stdio, tool server, integration
+lede: circuitRF runs without the GUI — not just its engines, but authoring, validation, resolution and drawing too. One executable, fifteen verbs — S-parameters, DC, harmonic balance, loadpull, loadpull pursuit, electromagnetic extraction, layout interchange, creating a workspace or a cell, importing a part, rendering a document as a picture, checking a design, explaining what it resolved to, reading a result back, an elaborated-netlist dump, and an MCP server. Every one of them answers --json. This chapter is the operational reference for all of them, including a worked EM run and a worked render, each from an empty folder.
+keywords: CLI, command line, command-line, terminal, shell, console, headless, batch, script, scripting, automation, verbs, exit code, stdout, circuitrf, MCP, Model Context Protocol, agent, AI, LLM, JSON-RPC, stdio, tool server, integration, render, image, SVG, PNG, PDF, export, picture, screenshot, plot, viewport, layers, extents, thumbnail
 ---
 
 <nav class="toc">
@@ -23,8 +23,23 @@ keywords: CLI, command line, command-line, terminal, shell, console, headless, b
 <li><a href="#convert"><code>convert</code> — layout interchange</a></li>
 <li><a href="#new"><code>new</code> — a workspace or a cell</a></li>
 <li><a href="#import"><code>import part</code> — a footprint and its symbol</a></li>
+<li><a href="#render"><code>render</code> — a picture of a document</a>
+  <ol>
+  <li><a href="#render-viewport">The viewport, and the unit rule</a></li>
+  <li><a href="#render-detail">Size, and what <code>--detail</code> costs</a></li>
+  <li><a href="#render-layers">Layers and colour</a></li>
+  <li><a href="#render-cdd">A data display</a></li>
+  <li><a href="#render-example">A worked example, from an empty folder</a></li>
+  </ol>
+</li>
 <li><a href="#check"><code>check</code> — is it sound?</a></li>
-<li><a href="#explain"><code>explain</code> — what did it resolve to?</a></li>
+<li><a href="#explain"><code>explain</code> — what did it resolve to?</a>
+  <ol>
+  <li><a href="#explain-cells">What cells are in here?</a></li>
+  <li><a href="#explain-layers">What layers may I ask for?</a></li>
+  <li><a href="#explain-extents">How big is it?</a></li>
+  </ol>
+</li>
 <li><a href="#read"><code>read</code> — a result or a document, back</a></li>
 <li><a href="#reference"><code>reference</code> — what may I write?</a></li>
 <li><a href="#elab"><code>elab</code> — the elaborated netlist</a></li>
@@ -73,6 +88,7 @@ convention behind both.</p>
 | `new workspace` | a directory | The same code **File ▸ New Workspace** runs | A `.cws` and, unless you say otherwise, a copied technology |
 | `new cell` | a workspace + a name | The same code **New Cell** runs | A cell folder and one empty-but-valid file per view |
 | `import part` | a component file or folder | The same code **Import Component** runs | A cell folder holding the land patterns and the symbol |
+| `render` | a `.csch`, `.csym`, `.clay` or `.cdd`, a cell folder, or a workspace | The same Skia renderers the editors draw every frame with | A `.svg`, `.pdf` or `.png`, where `-o` says |
 | `check` | a workspace, a cell folder, or one document | Every validator the application already uses | **Nothing** — findings to stdout |
 | `explain` | the same | Resolution only — no analysis | **Nothing** — the walk and the answer, to stdout |
 | `read` | a result file, or one of circuitRF's own documents | The same loaders the Data Display reads a file with | **Nothing** — what the file holds, to stdout |
@@ -732,6 +748,250 @@ the same behaviour and not a headless restriction.
 
 ---
 
+## `render` — a picture of a document {#render}
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf render &lt;path&gt; -o &lt;out.svg|.pdf|.png&gt; [options]</code></pre>
+
+Turns a schematic, a symbol, a layout or a data display into a file you can look at, put in a report,
+or diff between two commits. **Every pixel comes out of the renderers the editors draw each frame
+with** — the same Skia that produces the picture on the canvas — so the file is what the window would
+have shown, not an approximation of it.
+
+**One verb over every document kind**, inferred from the path exactly as `check` and `explain` infer
+it. There is no `render-schematic`.
+
+| Path | Resolved by |
+|---|---|
+| a `.csch`, `.csym`, `.clay` or `.cdd` | directly — **including one in a folder with no workspace above it** |
+| a cell folder | `--view`, or the one view it holds. More than one is a refusal listing them |
+| a workspace | `--cell <name>` — rendering "the workspace" is not a picture of anything |
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf render ~/designs/Amp/Stage1/layout/Stage1.clay -o stage1.png
+<span class="output">Wrote stage1.png (1600x1200 device-pixels, 11,540 bytes)
+  4 of 4 shape(s) drawn, 12 vertices emitted, 7 draw call(s)</span></code></pre>
+
+**`-o` is required and its extension picks the format** — `.svg`, `.pdf` or `.png`; `--format`
+overrides it. There is no picture on stdout: stdout is the *result*, and `--json` has to be able to
+co-exist with the write.
+
+<div class="callout note">
+<span class="label">A document with no workspace above it renders</span>
+<p>It resolves no technology, draws on the generated fallback palette exactly as the layout editor
+does with an unresolved technology, and says so as a <b>note</b> — not a warning and never a refusal.
+A <code>.clay</code> a converter just handed you has no workspace by construction, and treating that
+as a problem would teach you to skip the warnings that <em>are</em> problems.</p>
+</div>
+
+<h3 id="render-viewport">The viewport, and the unit rule</h3>
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf render &lt;path&gt; -o out.png --fit [--margin 0.10]
+<span class="prompt">$ </span>circuitrf render &lt;path&gt; -o out.png --window x0,y0,x1,y1
+<span class="prompt">$ </span>circuitrf render &lt;path&gt; -o out.png --center x,y --span w</code></pre>
+
+The three are **refused together rather than ordered**. A precedence nobody stated is an invention, so
+`--fit --window …` stops rather than quietly picking one.
+
+<div class="callout warn">
+<span class="label">On a layout, every coordinate carries a unit — zero included</span>
+<p><code>--window 0,0,500,300</code> is <b>refused</b>. It could mean database units, micrometres or
+millimetres, and those are three pictures six orders of magnitude apart — all of which come back
+looking entirely reasonable. Write <code class="nowrap">--window 0um,0um,500um,300um</code>; the
+suffixes are <code>nm</code>, <code>um</code> (or <code>µm</code>, or <code>u</code>),
+<code>mm</code>, <code>mil</code> and <code>in</code>. The refusal prints the same number spelled
+the two ways you most plausibly meant, plus the document's own display unit when it is neither.</p>
+<p>A schematic or a symbol takes <b>bare numbers</b>, because its coordinates really are dimensionless
+design units — and <code>--json</code> says <code>"unit": "design-units"</code> rather than leaving you
+to assume metres.</p>
+</div>
+
+**A window of a different shape from the page is letterboxed, never cropped and never stretched.** You
+get the whole region you asked for, with bars; the resolved window is in the `--json` document with
+`letterboxed` beside it. Silently giving you less of a region than you asked for is not something you
+could notice from the picture.
+
+**`--fit` frames the box that gets *painted*, not the box that is stored.** A label's stored extent is
+its anchor point, an EM port paints a width bar and an arrow past its own geometry, and an instance's
+extent resolves through the cell it places. On a **symbol** the two genuinely differ: pin names are
+drawn in pixels, at a size with a floor, so they have no world extent until a page size is chosen — a
+fitted symbol page is therefore wider than the box [`explain --extents`](#explain-extents) reports,
+which is the box you want when you are sizing a `--window` yourself.
+
+<h3 id="render-detail">Size, and what `--detail` costs</h3>
+
+| Option | What it does |
+|---|---|
+| `--size WxH` | Device pixels for `.png`, points for `.svg`/`.pdf`. Default `1600x1200`. |
+| `--scale n` | Raster multiplier — `2` is "@2x". **`.png` only**; a refusal on a vector format, which has no pixels to multiply. |
+| `--dpi n` | The same number spelled relative to 96 dpi. Refused together with `--scale`. |
+| `--detail` | `full`, `screen`, or a pixel budget. How much geometry comes out. Layout only. |
+
+**`--detail full` is the default, and it is not free.** `full` turns every level-of-detail tier off, so
+what is *stored* is what is *drawn*; `screen` engages the tiers exactly as a canvas does at that zoom,
+which is the picture a person actually looks at. Measured on a real six-layer board — 3,284 shapes and
+**764,032 vertices** — framed whole at `1600x1200`:
+
+| Format | `--detail full` | `--detail screen` |
+|---|---|---|
+| `.svg` | **23.5 MB**, 1.44 s | 6.2 MB, 0.36 s |
+| `.pdf` | 9.6 MB, 1.22 s | 2.6 MB, 0.51 s |
+| `.png` | 1.4 MB, 0.55 s | 1.0 MB, 0.35 s |
+
+A vector file stores every vertex, so `full` is nearly four times the SVG for a picture that cannot
+show the difference at that zoom. A raster barely moves, because its size is set by its pixels and not
+by the geometry behind them.
+
+**So: `--detail screen` when you want the picture. `--detail full` when you want the geometry** — a
+plot you will zoom into, an SVG something downstream will read the paths out of, a diff between two
+revisions of the artwork. A pixel budget (`--detail 0.5`) sits between them; `--json` reports the
+`toleranceDbu` it actually resolved to, which is bucketed by octave and so is rarely the number you
+asked for.
+
+The verb prints the vertex count and the file size it produced, and `--json` carries both, so you find
+this out from the answer rather than from a 23 MB file.
+
+<h3 id="render-layers">Layers and colour</h3>
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf render Stage1.clay -o top.png --layers "Top Copper,Silk Top"
+<span class="prompt">$ </span>circuitrf render Stage1.clay -o nosilk.png --hide-layers "Silk Top,Silk Bottom"</code></pre>
+
+Layout only, mutually exclusive, and the default is every layer the resolved technology marks visible —
+which is what the editor honours, not "all layers regardless".
+
+<div class="callout note">
+<span class="label">Ask <code>explain --layers</code> before <code>render --layers</code></span>
+<p>A technology's layer list and the layers a <em>document</em> draws on are different sets, and only
+the second one puts anything in the picture.
+<a href="#explain-layers"><code>explain --layers</code></a> gives you both at once: every layer the
+technology defines, with how many shapes this document has on it.</p>
+<p>A name the technology does not define is a <b>refusal</b> that lists the real ones. It is not a
+silent skip, because a misspelled layer and a genuinely empty layer produce the same picture and you
+would have no way to tell which you were looking at.</p>
+</div>
+
+| Option | What it does |
+|---|---|
+| `--theme` | A theme *name*, or the path to a `.ccolor` file. Default: the workspace's own recorded theme, else the shipped one. A name that resolves to nothing is a refusal listing where it looked. |
+| `--variant` | `light` or `dark`. Default `light`. |
+| `--background` | `opaque` or `transparent`. Default `opaque`. |
+| `--grid` | Draw the grid. Off by default, as every export is. |
+| `--no-rulers` | Leave the rulers out. |
+
+**Rulers are on by default and everything else is off.** A ruler is *document content* — it is in the
+`.clay` and the layout editor treats it that way — so an export that dropped it would be showing you a
+different document. Selection chrome, handles, the marquee, PCell pin overlays, snap glyphs and the
+EM/DRC overlays are all views of editor state rather than of the file, and none of them can appear here
+at all.
+
+<h3 id="render-cdd">A data display — the same verb, a different anatomy</h3>
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf render Amp.cdd -o amp.pdf [--data run.npy]... [--tab name|n] [--plot n] [--all-tabs]</code></pre>
+
+A `.cdd` is the fourth document kind, and the one that is not a drawing: **it holds no data.** Its
+traces name a *source* — a file, or the sentinel meaning "whatever this display has selected" — and
+every curve is re-resolved from a file on disk each time it opens.
+
+<div class="callout warn">
+<span class="label">A source that does not resolve is a refusal, never an empty plot</span>
+<p>This is the rule the whole <code>.cdd</code> path is arranged around. An empty plot is a valid
+picture: it draws, it exports cleanly, and it looks exactly like a measurement that genuinely came back
+empty. So every source the pages you asked for reference is resolved <b>before anything is drawn</b>,
+and one that cannot be is a refusal naming <code>--data</code>.</p>
+<p><code>--data</code> may be repeated and binds in order; the first one satisfies the document's own
+selected source. <b>A <code>--data</code> that binds nothing is a refusal too</b> — handing over last
+week's run must not silently get you a picture drawn from whatever was lying beside the document.</p>
+</div>
+
+A reference is looked for beside the `.cdd`, then under the nearest ancestor workspace's `results/`.
+`--tab` takes a name or a 1-based number (a tab literally called `2` beats the second tab), `--plot` a
+1-based number within it, and the default is the tab the display opens on. **`--all-tabs` is PDF's
+alone** — a PDF is a multi-page format and SVG and PNG are not, and inventing `out-1.svg`,
+`out-2.svg` from one `-o` would be this tool naming your files for you. On those it is a refusal
+naming `--tab`.
+
+**`--size` replaces the page and nothing else about the composition changes.** The default is the
+792×612 pt landscape page with 36 pt margins, and the plots, axis label strips and any marker info
+boxes you dragged are fitted to it as one group — so a box you moved lands in the file where it sits on
+screen. The options that describe a *drawing* — `--window`, `--center`, `--span`, `--fit`, `--layers`,
+`--hide-layers`, `--detail`, `--view`, `--cell`, `--grid`, `--no-rulers` — are each a refusal naming
+themselves, because a display has no world coordinates and no layers, and a `--window` that silently
+did nothing would give you a full picture you believed was a crop.
+
+With `--json`, `result.render.dataDisplay` names **every source and the file it actually resolved to**,
+and which of `--data` or the document bound it. That is the part the picture cannot tell you: "the plot
+is empty" and "the plot read the wrong run" look identical.
+
+<h3 id="render-example">A worked example, from an empty folder</h3>
+
+Two commands to set it up, three questions, one picture. The point of the sequence is that the three
+questions are what make the last command *writable*: you cannot name a layer or size a window without
+first asking what the document has.
+
+<pre><code class="cmd"><span class="prompt">$ </span>mkdir work &amp;&amp; cd work
+<span class="prompt">$ </span>circuitrf new workspace Amp --tech pcb-2layer_FR-4_70mil_1oz
+<span class="prompt">$ </span>circuitrf new cell Amp Stage1 --views layout</code></pre>
+
+That is a correct, empty layout. Give it some artwork — a 20 mm line on the top copper, a ground plane
+under it, and a label on the top silk:
+
+```json
+{
+  "FormatVersion": 1,
+  "DbuPerMicron": 1000,
+  "DisplayUnit": "Um",
+  "Shapes": [
+    { "$type": "Rect",  "Layer": { "Layer": 1, "Datatype": 0 },
+      "X1": 0, "Y1": 0, "X2": 20000000, "Y2": 2900000 },
+    { "$type": "Rect",  "Layer": { "Layer": 2, "Datatype": 0 },
+      "X1": 2000000, "Y1": -3000000, "X2": 18000000, "Y2": -1000000 },
+    { "$type": "Label", "Layer": { "Layer": 5, "Datatype": 0 },
+      "X": 400000, "Y": 3400000, "Text": "STAGE 1", "Height": 500000 }
+  ]
+}
+```
+
+**Which cells are in here, and which views does each have?**
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain Amp --cells
+<span class="output">Amp  (workspace)
+  workspace    /home/you/work/Amp/.cws
+               via nearest ancestor .cws
+  cells: 1
+    Stage1               /home/you/work/Amp/Stage1
+      schematic  no-view                (none)
+      symbol     no-view                (none)
+      layout     sole-file              Stage1.clay</span></code></pre>
+
+**What may I ask for with `--layers`?** The technology defines eight; this document uses three.
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain Amp/Stage1/layout/Stage1.clay --layers
+<span class="output">  layers       PCB 2-Layer FR-4 (70mil, 1oz) — 8 defined, 3 used
+    Top Copper           1/0      #c87a3e  solid       purpose=drawing   1 shape(s)
+    Bottom Copper        2/0      #8a5028  solid       purpose=drawing   1 shape(s)
+    Soldermask Top       3/0      #1e6b3c  solid       purpose=drawing   0 shape(s)
+    …
+    Silk Top             5/0      #f2f2f2  solid       purpose=drawing   1 shape(s)
+    …</span></code></pre>
+
+**How big is it, so I can write a window?** In base SI, with the unit and the scale named.
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain Amp/Stage1/layout/Stage1.clay --extents
+<span class="output">  extents      0 -0.003 .. 0.02 0.00376719  (0.02 x 0.00676719 m, scale 1E-06)
+    Top Copper           0 0 .. 0.02 0.0029
+    Bottom Copper        0.002 -0.003 .. 0.018 -0.001
+    Silk Top             0.0004 0.00338437 .. 0.00234306 0.00376719</span></code></pre>
+
+The line is 20 mm long and 2.9 mm wide, on `Top Copper`. Now the left 6 mm of it, that layer only:
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf render Amp --cell Stage1 --layers "Top Copper" \
+                        --window 0um,0um,6000um,3000um -o stage1-top.png
+<span class="output">Wrote stage1-top.png (1600x1200 device-pixels, 10,399 bytes)
+  1 of 2 shape(s) drawn, 4 vertices emitted, 2 draw call(s)</span></code></pre>
+
+Three options and one verb, not five commands — because all three questions are the one question
+`explain` already exists for: *what did circuitRF decide?*
+
+---
+
 ## `check` — is it well formed, does it resolve, is it sound? {#check}
 
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf check &lt;path&gt; [--recursive] [--severity warning|error]</code></pre>
@@ -790,11 +1050,16 @@ What each finding means, and the limits of the causality measurement, are on the
 ## `explain` — what did circuitRF decide? {#explain}
 
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain &lt;path&gt; [--expr "&lt;expression&gt;"] [--set var=expr]
-                            [--analysis [&lt;name&gt;]] [--ref &lt;relative-ref&gt;]</code></pre>
+                            [--analysis [&lt;name&gt;]] [--ref &lt;relative-ref&gt;]
+                            [--cells [--all]] [--layers] [--extents] [--view &lt;name&gt;]</code></pre>
 
 `check` answers "is something wrong". `explain` answers the question that is **not** a failure: which
 technology did this layout get, which analysis would actually run, what does this expression evaluate
-to here, and what does this cell reference point at?
+to here, what does this cell reference point at, what cells and layers are in here, and how big is it?
+
+**Six questions, and they are refused together rather than ordered** — one per run. A precedence
+nobody stated is an invention, and it would answer a question you did not ask while looking like it
+answered the one you did.
 
 It reports **the walk as well as the answer**, and that is the useful half. Resolution in circuitRF is
 a series of walk-ups — a document's ancestor workspace, a layout's technology, a `.cem`'s two
@@ -858,6 +1123,95 @@ Through the one expression engine, in the design's own resolved scope — never 
 
 Where resolution fails, **that is the answer** — a sentence naming what was looked for and where it
 was looked. You are usually running this verb precisely because something did not resolve.
+
+<h3 id="explain-cells">`--cells` — what cells are in here?</h3>
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain ~/designs/Amp --cells
+<span class="output">Amp  (workspace)
+  workspace    /home/you/designs/Amp/.cws
+               via nearest ancestor .cws
+  cells: 2
+    Balun                /home/you/designs/Amp/Balun
+      schematic  named-present          Balun.csch   of 2: alt.csch, Balun.csch
+      symbol     no-view                (none)
+      layout     missing-named-primary  Balun_rev3.clay   of 2: Balun.clay, Balun_rev2.clay
+    Stage1               /home/you/designs/Amp/Stage1
+      schematic  sole-file              Stage1.csch
+      symbol     sole-file              Stage1.csym
+      layout     sole-file              Stage1.clay</span></code></pre>
+
+**It reports the resolution, not a directory listing**, and that is the whole reason to run it rather
+than `ls`. The interesting rows are the ones where the answer is not obvious, and there are five
+states, never collapsed into fewer:
+
+| State | Means |
+|---|---|
+| `sole-file` | One file in the sub-folder; it is primary by being the only one. |
+| `named-present` | Several files, and the cell names one of them. |
+| `missing-named-primary` | Several files, and the cell names one that **is not there**. A flat contradiction, and the state you most need to see — the name it looked for is printed. |
+| `no-primary` | Several files and none named. Not an error; nothing has chosen yet. |
+| `no-view` | The sub-folder is empty, or there is none. |
+
+Each is listed **with its state** — never omitted, and never quietly resolved to the alphabetically
+first file, which is the answer that would look right and be wrong.
+
+Point it at a **cell folder** and you get that one cell in the same shape, which is what makes it
+compose with `render`: ask what views a cell has, then render one. `--all` includes generated cells,
+which are hidden by default exactly as the project tree hides them. This is the same enumeration
+`render --cell` resolves through, so a cell listed here is a cell that verb can draw.
+
+<h3 id="explain-layers">`--layers` — what may I ask for?</h3>
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain Stage1.clay --layers
+<span class="output">  technology   /home/you/designs/Amp/tech/pcb-2layer_FR-4_70mil_1oz.ctech
+               via the workspace's DefaultTechRef — the layout states none
+  layers       PCB 2-Layer FR-4 (70mil, 1oz) — 8 defined, 3 used
+    Top Copper           1/0      #c87a3e  solid       purpose=drawing   1 shape(s)
+    Bottom Copper        2/0      #8a5028  solid       purpose=drawing   1 shape(s)
+    Soldermask Top       3/0      #1e6b3c  solid       purpose=drawing   0 shape(s)
+    Silk Top             5/0      #f2f2f2  solid       purpose=drawing   1 shape(s)
+    …</span></code></pre>
+
+**Two different sets, side by side, and the second is the one that draws anything.** The technology's
+layer table is what [`render --layers`](#render-layers) will accept; the shape count is what this
+document actually has on each. A layer with a colour, a purpose and **0 shapes** is a name you may pass
+that will produce nothing.
+
+The count walks the **hierarchy**: a layer used only inside a placed sub-cell counts, and an array
+placement counts its shapes once per element. It is deliberately not `render --json`'s
+`counters.shapesDrawn`, which counts only the top-level shapes one frame issued a draw call for.
+
+Two things it cannot tell you, both worth knowing:
+
+- **A via is reported on its barrel layer only.** A via carries a barrel layer and a landing layer, and
+  the renderer draws the whole annulus on the barrel one — so a landing layer a via field's pads are
+  notionally on can report zero shapes.
+- **A layer the fallback palette invented is listed too, and marked.** A key the document draws on that
+  the technology does not define is ordinary after an import, and it *renders*. Omitting those rows
+  would report a document as drawing on layers it does not and hide the ones it does.
+
+<h3 id="explain-extents">`--extents` — how big is it?</h3>
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain Stage1.clay --extents
+<span class="output">  extents      0 -0.003 .. 0.02 0.00376719  (0.02 x 0.00676719 m, scale 1E-06)
+    Top Copper           0 0 .. 0.02 0.0029
+    Bottom Copper        0.002 -0.003 .. 0.018 -0.001
+    Silk Top             0.0004 0.00338437 .. 0.00234306 0.00376719</span></code></pre>
+
+**In base SI, with the unit *and* the scale named** — the rule `--analysis` already follows, for the
+reason it follows it: reading a mark without its scale has already produced a run at 2 Hz that looked
+entirely normal. A schematic or a symbol reports `design-units` at scale 1, because its coordinates are
+dimensionless and dressing them up in metres would be a lie.
+
+This is **the same function `render --fit` frames on**, which is why you can size a `--window` from it
+and get exactly the region you expected. The per-layer boxes are the document's own shapes; an
+instance's extent arrives as one box for the whole placement.
+
+An **empty** document says so rather than reporting a zero box, because a zero box is a point at the
+origin and that is a different fact. On a **symbol**, or on a layout carrying a fixed-size ruler, the
+report adds a note: the fit adds room for marks that are drawn in *pixels* — a pin's name, a ruler's
+readout — which have no world extent until a page size is chosen. Those marks are why a fitted symbol
+page is wider than the box reported here.
 
 ---
 
@@ -1032,7 +1386,18 @@ One schema serves every verb:
   reworded freely, and the sentence is always English and culture-invariant.
 - **`result` holds cubes** (`groups`) for a run, a **summary** for `lp`/`lpp` — the same one-row-per-Γ-
   point projection the table prints, and `--all` adds the cubes — a **check** or **explain** report for
-  those two verbs, a **document** for `read`, and a **reference** report for `reference`.
+  those two verbs, a **document** for `read`, a **reference** report for `reference`, and a **render**
+  report for `render`.
+- **`result.render`** is everything the picture cannot say about itself: `viewport` (with
+  `letterboxed`), the document's `extents`, the `size`, the `theme` and **which step of the chain
+  resolved it**, the `layers` with whether each was drawn and how many shapes the document has on it,
+  `detail` with its effective tolerance, `counters`, and `bytes`. Extents and viewport come back in
+  base SI **with the unit and the scale named**. A `.cdd` adds `dataDisplay`, naming every source and
+  the file it resolved to. **There is no duration** — `counters` is a work count, deterministic and
+  machine-independent, so it is something a build can assert on; a wall clock is not.
+- **`result.explain`** gains `cells`, `layers` and `extents` for the three questions of the same name.
+  `extents` carries `perLayer` boxes beside the whole; `layers` carries the resolved technology and
+  the walk that found it.
 - Numbers are raw, invariant and unrounded. `NaN` and infinity are written as JSON's named literals,
   because a loadpull grid genuinely contains NaN wherever a point never converged.
 
@@ -1060,21 +1425,46 @@ tree the server will read or write, and a path escaping it is refused rather tha
 the process's own stdin and stdout.</p>
 </div>
 
-**Seven tools, and each is a verb you already have:**
+**Ten tools, and each is a verb you already have:**
 
 | Tool | Runs |
 |---|---|
 | `run` | `sparam`, `dc`, `hb`, `lp`, `lpp` or `em`, chosen by an argument |
 | `check` | `check` |
-| `explain` | `explain` |
+| `explain` | `explain`, including `--cells`, `--layers` and `--extents` |
 | `create` | `new workspace` or `new cell` |
 | `import` | `import part` or `convert` |
+| `render` | `render` — one tool over every document kind, as the verb is |
 | `read` | `read` |
+| `history` | [`history checkpoint`, `list` or `restore`](restore-points.html) |
 | `reference` | `reference` |
+| `batch` | The **only** tool with no verb behind it: it holds a restore-point batch open across several calls, which a process that exits after one command cannot |
 
 **Every tool returns exactly the document `--json` writes**, byte for byte, because the server calls
 the verb rather than re-implementing it. Nothing is reachable through the server that is not
 reachable from your own shell, and nothing is reachable from your shell that the server cannot do.
+
+**`render` can hand the picture back, not just its path.** Pass `attachImage: true` and the result
+carries the rendered file itself — a `.png` or `.svg` as image content, a `.pdf` as an embedded
+resource with its own type. It is **off by default**, because an image is expensive in a way a JSON
+document is not, and a client that only wanted the path should not pay for one.
+
+<div class="callout note">
+<span class="label">Over 4 MB it hands back the path and says what to narrow</span>
+<p>The file is still written and still named in <code>outputs</code>; only the attachment is withheld,
+and the answer says how large it came to and which argument would bring it under —
+<code>--detail screen</code>, <code>--layers</code>, <code>--window</code>, a smaller
+<code>--size</code>, or <code>.png</code> instead of a vector format. It is never truncated and never
+dropped in silence: half a PNG is not a smaller PNG, and a request that comes back empty with no
+explanation just gets sent again.</p>
+<p>The number is the <a href="#render-detail">measured one</a>. A whole six-layer board is 1.4 MB as a PNG and
+23.5 MB as an undecimated SVG, so the cap admits every raster this verb plausibly produces and refuses
+exactly the case where you should have narrowed the render.</p>
+</div>
+
+**The attached bytes are the bytes on disk.** The server attaches the file the verb wrote; it never
+draws a second time, and it never converts one format into another to make it attachable — that would
+be the adapter making a rendering decision, which is the one thing it does not do.
 
 <div class="callout note">
 <span class="label">What it will not do</span>
@@ -1160,6 +1550,26 @@ on one bad point would make the exit code useless in a script.
 
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain Amp.cem</code></pre>
 
+**Put a picture of every cell into a build's artefacts**, at the size a report reads at:
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain ~/designs/Amp --cells --json \
+    | jq -r '.result.explain.cells[].name' \
+    | while read -r c; do
+<span class="prompt">  </span>    circuitrf render ~/designs/Amp --cell "$c" --detail screen -o "artefacts/$c.png"
+<span class="prompt">  </span>  done</code></pre>
+
+**Watch a layout change across two revisions**, without opening either:
+
+<pre><code class="cmd"><span class="prompt">$ </span>git show HEAD~1:Stage1/layout/Stage1.clay &gt; Stage1/layout/before.clay
+<span class="prompt">$ </span>circuitrf render Stage1/layout/before.clay -o before.png --window 0um,0um,6000um,3000um
+<span class="prompt">$ </span>circuitrf render Stage1/layout/Stage1.clay -o after.png  --window 0um,0um,6000um,3000um</code></pre>
+
+Two things make those two pictures comparable, and both are easy to lose. The explicit `--window`:
+`--fit` frames each file's own extents, so a change in size would move everything in the frame and the
+diff would be of the framing rather than of the artwork. And the older revision written **inside the
+workspace**: a `.clay` somewhere else resolves no technology and draws on the fallback palette, so the
+whole picture would change colour.
+
 **Re-extract every EM setup in a workspace** after a technology edit — the layout and stackup
 references resolve themselves, so the loop needs nothing but the file names:
 
@@ -1172,6 +1582,7 @@ extracted Touchstones picks the new results up with no further action.
 
 <p class="small">See also: <a href="simulations.html">Simulations</a> (what each analysis computes) ·
   <a href="netlist.html">The netlist format</a> · <a href="em-setup.html">EM Setup</a> ·
+  <a href="layout-editor.html">The layout editor</a> · <a href="data-display.html">The Data Display</a> ·
   <a href="mom-engine.html">The MoM engine</a> ·
   <a href="npy-export.html">Results &amp; data export</a> ·
   <a href="pdk-integration.html">Kits and external device models</a>.</p>

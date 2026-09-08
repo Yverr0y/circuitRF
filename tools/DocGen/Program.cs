@@ -57,7 +57,7 @@ public static class Program
         string? outDir = null, slidesDir = null;
         bool lintDiag = false;
         HashSet<string>? decks = null;
-        List<CircuitRF.Ui.Theming.ColorVariant>? variants = null;
+        List<CircuitRF.Render.ColorVariant>? variants = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -75,11 +75,11 @@ public static class Program
                     {
                         switch (t.ToLowerInvariant())
                         {
-                            case "light": variants.Add(CircuitRF.Ui.Theming.ColorVariant.Light); break;
-                            case "dark":  variants.Add(CircuitRF.Ui.Theming.ColorVariant.Dark);  break;
+                            case "light": variants.Add(CircuitRF.Render.ColorVariant.Light); break;
+                            case "dark":  variants.Add(CircuitRF.Render.ColorVariant.Dark);  break;
                             case "both":
-                                variants.Add(CircuitRF.Ui.Theming.ColorVariant.Light);
-                                variants.Add(CircuitRF.Ui.Theming.ColorVariant.Dark);
+                                variants.Add(CircuitRF.Render.ColorVariant.Light);
+                                variants.Add(CircuitRF.Render.ColorVariant.Dark);
                                 break;
                             default:
                                 Console.Error.WriteLine($"Unknown theme '{t}'. Known: light, dark, both.\n");

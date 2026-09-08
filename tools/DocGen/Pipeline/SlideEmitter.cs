@@ -8,6 +8,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using CircuitRF.Ui.Diagnostics;
+using CircuitRF.Render;
 using CircuitRF.Ui.Theming;
 using SkiaSharp;
 

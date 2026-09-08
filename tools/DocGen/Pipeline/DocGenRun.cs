@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using CircuitRF.Ui.Diagnostics;
 using CircuitRF.Ui.Diagnostics.Fixtures;
+using CircuitRF.Render;
 using CircuitRF.Ui.Theming;
 
 namespace CircuitRF.DocGen.Pipeline;
@@ -462,7 +463,7 @@ public sealed class DocGenRun
             sb.AppendLine();
             sb.AppendLine($"{_fontSubstitutions.Count} text run(s) used a character NO circuitRF font");
             sb.AppendLine("covers, so Skia substituted a PLATFORM font and baked its name in. Each has been");
-            sb.AppendLine($"redirected to {CircuitRF.Ui.Diagnostics.SvgFontNormalizer.GlyphFallbackFamily}, which is shipped — but the interface is drawing a");
+            sb.AppendLine($"redirected to {CircuitRF.Render.SvgFontNormalizer.GlyphFallbackFamily}, which is shipped — but the interface is drawing a");
             sb.AppendLine("glyph its own typefaces do not have, which is worth fixing at the source:");
             foreach (var f in _fontSubstitutions.Distinct()) sb.AppendLine("  " + f);
         }

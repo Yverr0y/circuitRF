@@ -598,6 +598,9 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "reference.component.unknown",
         "reference.resource.unknown",
         "reference.topic.unknown",
+        // RND-4's `.cdd` half (brief-render-4-data-display.md), recorded here late: they were added
+        // with the verb and this list was not, so the first change after them is what found it.
+        "render.all-tabs.single-page",
         // brief-render-2-render-verb.md — `circuitrf render`. Every one of these is a question
         // the GUI would have asked in a dialog (R-rnd0-6), refused rather than defaulted past.
         "render.args.multiple-paths",
@@ -608,9 +611,17 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "render.args.unknown-option",
         "render.args.unknown-variant",
         "render.cancelled",
+        "render.cdd.empty",
+        "render.cdd.not-applicable",
+        "render.cdd.selected-unbound",
+        "render.cdd.source-unresolved",
+        "render.cdd.unreadable",
         "render.cell.no-primary",
         "render.cell.no-view",
         "render.cell.view-required",
+        "render.data.binds-nothing",
+        "render.data.not-found",
+        "render.data.unreadable",
         "render.detail.malformed",
         "render.detail.not-applicable",
         "render.document.empty",
@@ -624,10 +635,13 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "render.output.write-failed",
         "render.path.not-drawable",
         "render.path.not-found",
+        "render.plot.malformed",
+        "render.plot.not-found",
         "render.scale.conflict",
         "render.scale.malformed",
         "render.scale.vector",
         "render.size.malformed",
+        "render.tab.not-found",
         "render.tech.note",
         "render.tech.unresolved",
         "render.theme.unreadable",
@@ -649,6 +663,13 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "serve.args.unknown-option",
         "serve.args.unknown-value",
         "serve.args.wrong-type",
+        // RND-5. The adapter's OWN two, and the only ids here that are about the ENVELOPE rather
+        // than about a run: a picture too large to hand back inside a tool result, and one the
+        // adapter could not read back to attach. Neither ever enters a `--json` document — both
+        // travel as their own content block, which is what keeps the parity gate meaning what it
+        // means (src/Cli/RESOLVED.md, RND-5).
+        "serve.image.too-large",
+        "serve.image.unreadable",
         "serve.path.outside-root",
         "serve.root.not-found",
         "serve.tool.cancelled",

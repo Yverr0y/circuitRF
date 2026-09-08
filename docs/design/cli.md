@@ -716,24 +716,37 @@ was checked rather than assumed.
 
 ### 11.3 The tool surface
 
-**Seven tools, and the count is the point** (R-aut-9). A client that discovers tools up front carries
+**Ten tools, and the count is the point** (R-aut-9). A client that discovers tools up front carries
 every description for the whole session whether or not it calls one, so the surface is a standing
-cost paid on every interaction.
+cost paid on every interaction. Nine come out of `ToolCatalog`'s one table; the tenth, `batch`, is
+advertised beside them by `HistoryBatch` because it is the only one that is not a command line.
 
 | Tool | Becomes |
 |---|---|
 | `run` | `sparam` / `dc` / `hb` / `lp` / `lpp` / `em`, selected by an argument — one tool, not six |
 | `check` | `check` |
-| `explain` | `explain` |
+| `explain` | `explain`, including RND-3's `--cells` / `--layers` / `--extents` |
 | `create` | `new workspace` / `new cell` |
 | `import` | `import part` / `convert` |
+| `render` | `render` — **one tool over every document kind**, as the verb is (R-rnd0-4/R-rnd5-2). The kind comes from the path, so there is no selector; making the view type one would advertise three modes where there is one verb |
 | `read` | `read` |
+| `history` | `history checkpoint` / `list` / `restore` (RC-5, `revision-control.md` §5.3d) |
 | `reference` | `reference` — the same bytes the resources below serve, for a client that does not surface resources to the model |
+| `batch` | none. Session state this process holds; see §11.6 |
 
 `ToolCatalog` is one table, and **the JSON schema is generated from the same rows that build the
 command line**. A description that says an argument exists and a translation that drops it cannot
 happen, because there is one list; adding a flag is one row. Every argument is named after the CLI
 flag it becomes.
+
+**Two option kinds exist for `render` alone and both are about confinement.** `PathRepeat` is a
+repeated flag whose items are files (`--data a.npy --data b.npy`), which no existing kind was.
+`PathOrName` is `--theme`, which is genuinely two things: a theme NAME resolved through a chain of
+directories the server root has nothing to do with, or a `.ccolor` file the caller points at.
+Confining the first would turn `dark` into `<root>/dark`, which resolves to no theme at all; not
+confining the second would let a client name a file outside the root and learn from the refusal
+whether it exists. The split — an extension, a separator or a root means a path — is
+`Render.ResolveTheme`'s own, one step earlier, and each end names the other.
 
 `--only` and `--group` are reachable as tool arguments (R-aut5-6) — reading is the expensive
 direction, and a client that receives eight full loadpull cubes when it wanted one number is the
@@ -751,6 +764,45 @@ absent from the schema's `required`. Because argv is positional, an argument giv
 one missing is REFUSED rather than promoted into the empty slot: `{"type": "MLIN"}` with no topic
 would otherwise have asked for a topic called `MLIN`, which is a different question answered in
 silence.
+
+### 11.3b The one argument that is NOT a flag: `render`'s image attachment
+
+**R-rnd5-4.** `attachImage` is advertised on `render` and becomes no command line at all. It is the
+single deliberate exception to "every argument is named after the CLI flag it becomes", and it is
+carried in its own list (`ToolSpec.Adapter`) rather than as a flavour of `ToolOption`, so the
+invariant stays checkable by reading: everything in `Modes` becomes argv, and the only things that do
+not are there.
+
+**Why it has no CLI spelling and must not get one.** A command line writes the file and the person
+opens it. A protocol client may have no way to read the path it was handed — and an agent that cannot
+*see* the picture it asked for has gained nothing over `--json`. So it is a property of the ENVELOPE,
+not of the render.
+
+Three constraints, and they matter more than the feature:
+
+- **The same bytes the verb wrote, read back — never a second render.** §11.1 applies to drawing most
+  of all: the adapter attaches the file `outputs` names and decides no viewport, no page and no
+  format. `ServeProtocolAdapterTests` decodes the attachment and compares it to the file on disk.
+- **Opt-in, and capped at `ToolCatalog.AttachmentCapBytes` (4 MiB).** The number is derived from
+  §13.4's measured table, not from taste: a real six-layer board is 1.4 MB as a PNG and 23.5 MB as an
+  undecimated SVG, so the cap admits every raster this verb plausibly produces and refuses exactly the
+  case where the caller should have narrowed. Base64 adds a third on top, which is why the cap is on
+  the file rather than on the frame. **Over it, the answer is the path plus a diagnostic naming the
+  size and what would narrow it** — never truncated and never dropped in silence, because a client
+  that asked for a picture and got nothing with no explanation simply asks again.
+- **Each format is attached as itself or not at all.** A `.png`/`.svg` is `image` content; a `.pdf` is
+  an embedded `resource` with a `blob`, because a PDF is not an image. It is never transcoded to make
+  it attachable — that would be the adapter making a rendering decision.
+
+**The document is untouched, always.** Everything the attachment produces is an ADDITIONAL content
+block, so block 0 stays byte-identical to what `circuitrf render --json` writes and §11.7's parity gate
+keeps meaning what it means. The cap's diagnostic rides as its own text block rather than as a
+diagnostic inside a document the CLI would not have written it into.
+
+**Nothing here becomes a resource** (R-rnd5-5). §11.3a's rule is that a resource is right for a
+standing catalogue whose bytes do not change. A rendered image is per-call and ephemeral, and
+advertising one would mean advertising a URI whose content depends on arguments the URI does not
+carry.
 
 ### 11.3a Resources — the cheaper channel for the same bytes
 

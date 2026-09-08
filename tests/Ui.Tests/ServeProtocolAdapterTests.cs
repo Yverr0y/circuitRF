@@ -46,6 +46,7 @@ using CircuitRF.Design.Layout.Em;
 using CircuitRF.Design.Workspace;
 using CircuitRF.Core.Design;
 using CircuitRF.Ui.Layout;
+using CircuitRF.Cli.Serve;
 using Xunit.Abstractions;
 
 namespace CircuitRF.Ui.Tests;
@@ -149,6 +150,219 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
                         {
                             ["path"] = cnl, ["analysis"] = "NoSuchChain",
                         })));
+    }
+
+    /// <summary>
+    /// RND-3's three questions, each through both adapters (R-rnd5-1, gate 1). They are OPTIONS on
+    /// <c>explain</c> rather than three new tools, so a client that could not pass them would have
+    /// three CLI capabilities with no protocol spelling — which is exactly the asymmetry R-aut-13
+    /// forbids in the direction that is hardest to notice.
+    ///
+    /// <para><c>--all</c> and <c>--view</c> travel with them for the same reason: they are the
+    /// arguments that ANSWER these three questions' own refusals, and a client handed
+    /// "a cell folder holding two views — name one with --view" could not act on it otherwise.</para>
+    /// </summary>
+    [Theory]
+    [InlineData("cells")]
+    [InlineData("layers")]
+    [InlineData("extents")]
+    public void ExplainsThreeQueries_ThroughTheServer_AreTheDocumentsTheCliWrites(string question)
+    {
+        string clay = LayoutFixture();
+        string dir  = Path.GetDirectoryName(clay)!;
+
+        // --cells wants a workspace; --layers and --extents want the document itself.
+        string path = question == "cells" ? dir : clay;
+
+        using var server = Start(Root);
+        string mine = server.Call("explain", new JsonObject { ["path"] = path, [question] = true });
+
+        AssertSameDocument(mine, Cli("explain", path, "--" + question, "--json"));
+
+        // Vacuity guard: a document with no payload at all would satisfy the comparison above.
+        Assert.Contains($"\"{question}\"", mine, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <c>render</c> — RND-5's one new tool, through both adapters (gate 1). A layout, because it is
+    /// the kind that carries a technology, a layer selection and a unit rule, so its document has the
+    /// most in it to disagree about.
+    ///
+    /// <para>Both sides are told to write the SAME file. That is deliberate: the document names its
+    /// output, so two destinations would have to be substituted out and the substitution is exactly
+    /// where a path bug hides. The second write overwrites the first, which is what a re-render does
+    /// anyway.</para>
+    /// </summary>
+    [Fact]
+    public void Render_ThroughTheServer_IsTheDocumentTheCliWrites()
+    {
+        string clay = LayoutFixture();
+        string png  = Path.Combine(Dir("pictures"), "line.png");
+
+        using var server = Start(Root);
+        string mine = server.Call("render", new JsonObject { ["path"] = clay, ["output"] = png });
+
+        AssertSameDocument(mine, Cli("render", clay, "-o", png, "--json"));
+
+        var doc = JsonDocument.Parse(mine).RootElement;
+        Assert.Equal("ok", doc.GetProperty("status").GetString());
+        Assert.Equal("png", doc.GetProperty("outputs")[0].GetProperty("kind").GetString());
+        Assert.True(File.Exists(png));
+    }
+
+    /// <summary>
+    /// The other half of <c>render</c>'s surface: the viewport, the layer selection and the detail
+    /// tier, each named the way the CLI names it. One call rather than three, because what is being
+    /// pinned is the TRANSLATION and the verb only has to agree with itself once per argument.
+    ///
+    /// <para>The layout coordinates carry their SI unit (R-rnd0-5) and are passed through verbatim —
+    /// a client that wrote <c>500um</c> must get the picture <c>500um</c> means, and the adapter has
+    /// no business converting it to anything.</para>
+    /// </summary>
+    [Fact]
+    public void RendersViewportLayersAndDetail_ThroughTheServer_AreTheCliDocument()
+    {
+        string clay = LayoutFixture();
+        string svg  = Path.Combine(Dir("pictures"), "region.svg");
+
+        var arguments = new JsonObject
+        {
+            ["path"]   = clay,
+            ["output"] = svg,
+            ["window"] = "0um,0um,500um,300um",
+            ["layers"] = new JsonArray("Top Copper"),
+            ["detail"] = "screen",
+            ["size"]   = "640x480",
+        };
+
+        using var server = Start(Root);
+        string mine = server.Call("render", arguments);
+
+        AssertSameDocument(mine, Cli("render", clay, "-o", svg, "--window", "0um,0um,500um,300um",
+                                     "--layers", "Top Copper", "--detail", "screen", "--size", "640x480",
+                                     "--json"));
+
+        var render = JsonDocument.Parse(mine).RootElement.GetProperty("result").GetProperty("render");
+        Assert.Equal("window", render.GetProperty("viewport").GetProperty("mode").GetString());
+        Assert.Equal("screen", render.GetProperty("detail").GetProperty("mode").GetString());
+    }
+
+    // ══ R-rnd5-4 — the picture, back through the protocol ════════════════════════════════════════
+
+    /// <summary>
+    /// Gate 3. <b>The bytes the client receives, decoded, ARE the file on disk.</b>
+    ///
+    /// <para>That is the whole claim of R-rnd5-4's first constraint: the adapter attaches what the
+    /// verb wrote and does not draw a second time. A re-render would pass a "looks the same"
+    /// assertion and fail this one the moment anything about the second call's viewport, theme or
+    /// page differed from the first — which is precisely the drift the render series exists to
+    /// prevent, in the one place it would be invisible.</para>
+    ///
+    /// <para>And it is OPT-IN: the same call without the argument comes back with the document
+    /// alone. An image is expensive in a way a JSON document is not, and a client that wanted a path
+    /// must not be charged for a picture.</para>
+    /// </summary>
+    [Fact]
+    public void TheAttachedPicture_IsTheFileOnDisk_ByteForByte()
+    {
+        string clay = LayoutFixture();
+        string png  = Path.Combine(Dir("pictures"), "attached.png");
+
+        using var server = Start(Root);
+
+        var without = server.CallRaw("render", new JsonObject { ["path"] = clay, ["output"] = png });
+        Assert.Equal(1, without.Count);
+        Assert.Equal("text", without[0]!["type"]!.GetValue<string>());
+
+        var with = server.CallRaw("render", new JsonObject
+        {
+            ["path"] = clay, ["output"] = png, ["attachImage"] = true,
+        });
+
+        Assert.Equal(2, with.Count);
+        var image = with[1]!.AsObject();
+        Assert.Equal("image",     image["type"]!.GetValue<string>());
+        Assert.Equal("image/png", image["mimeType"]!.GetValue<string>());
+
+        Assert.Equal(File.ReadAllBytes(png), Convert.FromBase64String(image["data"]!.GetValue<string>()));
+
+        // The document is untouched by the attachment — it is an ADDITIONAL block, which is what
+        // keeps the parity gate above meaning what it means.
+        AssertSameDocument(with[0]!["text"]!.GetValue<string>(), Cli("render", clay, "-o", png, "--json"));
+    }
+
+    /// <summary>
+    /// A PDF is attached as a PDF or not at all (R-rnd5-4's third constraint). It is not an image and
+    /// is not transcoded into one to make it attachable — that would be the adapter making a
+    /// rendering decision, which is the one thing <c>cli.md</c> §11.1 says it never does.
+    /// </summary>
+    [Fact]
+    public void APdf_IsAttachedAsAPdf_NotRasterizedIntoAnImage()
+    {
+        string clay = LayoutFixture();
+        string pdf  = Path.Combine(Dir("pictures"), "line.pdf");
+
+        using var server = Start(Root);
+        var content = server.CallRaw("render", new JsonObject
+        {
+            ["path"] = clay, ["output"] = pdf, ["attachImage"] = true,
+        });
+
+        Assert.Equal(2, content.Count);
+        var resource = content[1]!.AsObject();
+        Assert.Equal("resource", resource["type"]!.GetValue<string>());
+
+        var inner = resource["resource"]!.AsObject();
+        Assert.Equal("application/pdf", inner["mimeType"]!.GetValue<string>());
+        Assert.Equal(File.ReadAllBytes(pdf), Convert.FromBase64String(inner["blob"]!.GetValue<string>()));
+    }
+
+    /// <summary>
+    /// Gate 4. <b>Over the cap it refuses; it never truncates and never drops the attachment in
+    /// silence.</b>
+    ///
+    /// <para>Half a PNG is not a smaller PNG, and a client that asked for a picture and received
+    /// nothing with nothing said simply asks again — paying for the render twice and learning nothing
+    /// the second time. So the answer is the path (which the document already carries) plus a
+    /// sentence naming the size, the cap, and at least one argument that would bring it under.</para>
+    ///
+    /// <para>The fixture is a real render rather than a stubbed size: a 40,000-vertex contour at
+    /// <c>--detail full</c> in a vector format is exactly the case the cap exists for, and it is the
+    /// same shape as the measured 23.5 MB board in <c>src/Cli/RESOLVED.md</c>.</para>
+    /// </summary>
+    [Fact]
+    public void APictureOverTheCap_ComesBackAsItsPath_WithSomethingToNarrow()
+    {
+        string clay = HugeLayoutFixture();
+        string svg  = Path.Combine(Dir("pictures"), "huge.svg");
+
+        using var server = Start(Root);
+        var content = server.CallRaw("render", new JsonObject
+        {
+            ["path"] = clay, ["output"] = svg, ["detail"] = "full", ["attachImage"] = true,
+        });
+
+        long size = new FileInfo(svg).Length;
+        output.WriteLine($"the fixture rendered {size:N0} bytes; the cap is {4L * 1024 * 1024:N0}");
+        Assert.True(size > 4L * 1024 * 1024,
+                    $"the fixture is only {size:N0} bytes, so this gate measured nothing");
+
+        // The document, then the refusal — and NO image block of any kind.
+        Assert.Equal(2, content.Count);
+        Assert.DoesNotContain(content, c => c!["type"]!.GetValue<string>() is "image" or "resource");
+
+        string note = content[1]!["text"]!.GetValue<string>();
+        Assert.Contains("serve.image.too-large", note, StringComparison.Ordinal);
+        Assert.Contains(size.ToString(System.Globalization.CultureInfo.InvariantCulture), note,
+                        StringComparison.Ordinal);
+        Assert.Contains("--detail screen", note, StringComparison.Ordinal);
+
+        // The picture itself was still written, and the document still names it: the cap is about the
+        // ENVELOPE, never about the render.
+        var outputs = JsonDocument.Parse(content[0]!["text"]!.GetValue<string>()).RootElement
+            .GetProperty("outputs");
+        Assert.Equal(svg, outputs[0].GetProperty("path").GetString());
+        Assert.True(File.Exists(svg));
     }
 
     /// <summary>
@@ -406,6 +620,15 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
                 ["what"] = "convert", ["path"] = clay, ["output"] = Path.Combine(Dir("more"), "line.gds"),
             });
             server.Call("read",    new JsonObject { ["path"] = csch });
+            // RND-5's new capabilities, on the channel that would break first: a renderer that wrote
+            // a progress line to Console.Out would corrupt the frame it prefixed and nothing else
+            // would notice (gate 5). The attachment is asked for, because base64 is the largest
+            // single thing this surface ever puts in a frame.
+            server.Call("render",  new JsonObject
+            {
+                ["path"] = clay, ["output"] = Path.Combine(Dir("more"), "line.png"), ["attachImage"] = true,
+            });
+            server.Call("explain", new JsonObject { ["path"] = clay, ["extents"] = true });
             // The largest single write this surface makes, on both of its channels. A reference read
             // is exactly the shape that finds a framing bug (§6.7).
             server.Call("reference", new JsonObject());
@@ -425,7 +648,7 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
             }
 
             // …and the audit must actually have had something to audit.
-            Assert.True(server.StdoutLines.Count >= 12,
+            Assert.True(server.StdoutLines.Count >= 14,
                 $"expected a frame per call; got {server.StdoutLines.Count}");
 
             // The proof the loud paths really were loud, and that all of it went to stderr where
@@ -544,17 +767,21 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
             .GetProperty("tools").EnumerateArray()
             .Select(t => t.GetProperty("name").GetString()!).ToArray();
 
-        // R-aut5-4: small and broad. Nine, and the count is asserted because the surface is a
+        // R-aut5-4: small and broad. TEN, and the count is asserted because the surface is a
         // standing cost paid on every interaction whether or not a tool is called. `reference` earns
         // its place by being reachable at all in a client that does not surface RESOURCES to the
         // model — which is where the same bytes are cheaper (R-aut6-4).
+        //
+        // `render` is RND-5's one addition, and it is ONE (R-rnd0-4): one tool over every document
+        // kind, with the kind inferred from the path, rather than one per view type.
         //
         // The last two are RC-5's (revision-control.md §5.3d, §5.3b). `history` is the CLI's own verb
         // like every tool above it. `batch` is the ONE tool that is not a command line: it holds
         // SESSION state — opened before an agent's first modification, closed when it is done — and a
         // process that exits after one command cannot hold that, which is why the architecture puts
         // it on this server and leaves the other three history nouns as verbs.
-        Assert.Equal(["run", "check", "explain", "create", "import", "read", "history", "reference", "batch"],
+        Assert.Equal(["run", "check", "explain", "create", "import", "render", "read", "history",
+                      "reference", "batch"],
                      tools);
 
         Assert.Equal(0, server.Close());
@@ -629,6 +856,9 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
             ["import/part"]       = ["path"],
             ["import/convert"]    = ["path"],
             ["read/"]             = ["path"],
+            // RND-5's one new tool. Single-mode for R-rnd5-2's reason: the document kind comes from
+            // the path exactly as `check`'s does, so there is no selector to key on.
+            ["render/"]           = ["path"],
             // `reference` has no REQUIRED positional at all: its no-argument form is the topic list,
             // which is a real answer rather than a usage error. Both of its positionals are therefore
             // probed as arguments below, which is what this gate is for.
@@ -645,6 +875,7 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
 
         var covered = new HashSet<string>(StringComparer.Ordinal);
         int probes = 0;
+        int adapterArguments = 0;
 
         foreach (var tool in tools)
         {
@@ -675,6 +906,15 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
                 {
                     if (argument == selector.Key || required!.Contains(argument)) continue;
 
+                    // The one deliberate exemption, and it is by NAME rather than by a pattern
+                    // (ToolSpec.Adapter). `attachImage` asks whether the tool result carries the
+                    // rendered file back as protocol content — a property of the envelope, not of the
+                    // render, with no CLI spelling and no business having one. Its own gates are
+                    // TheAttachedPicture_IsTheFileOnDisk_ByteForByte and the cap test beside it;
+                    // exempting it here would be free if it were never asserted anywhere, so it is
+                    // counted and the count is checked below.
+                    if (argument == ToolCatalog.AttachImageArgument) { adapterArguments++; continue; }
+
                     var arguments = new JsonObject();
                     if (selector.Key is not null) arguments[selector.Key] = mode;
                     foreach (string p in required!)
@@ -696,6 +936,7 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
                     // The other half of the same defect: the value taken as a second input path.
                     Assert.DoesNotContain("cli.args.multiple-inputs", ids);
                     Assert.DoesNotContain("convert.args.multiple-inputs", ids);
+                    Assert.DoesNotContain("render.args.multiple-paths", ids);
                 }
             }
         }
@@ -705,6 +946,22 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
 
         // Not vacuous: a loop that advertised nothing would pass every assertion above.
         Assert.True(probes > 60, $"only {probes} arguments were probed");
+
+        // R-rnd5-1, gate 2: the new rows are covered by this gate AUTOMATICALLY, which is the point
+        // of the table — so assert it actually exercised them rather than trusting that it would.
+        // `render` alone is ~24 arguments, and `explain` gained five.
+        var renderRow = ToolCatalog.Tools.Single(t => t.Name == "render");
+        Assert.True(probes >= 60 + renderRow.Modes[0].Options.Length,
+                    $"{probes} probes cannot have covered render's {renderRow.Modes[0].Options.Length} arguments");
+        foreach (string flag in new[] { "--cells", "--layers", "--extents", "--all", "--view" })
+            Assert.Contains(ToolCatalog.Tools.Single(t => t.Name == "explain").Modes[0].Options,
+                            o => o.Cli == flag);
+
+        // …and the exemption was used exactly as often as there are adapter arguments to exempt: one
+        // per mode of the one tool that has one. An exemption that silently grew would be a flag the
+        // verb does not read, back again by the other door.
+        Assert.Equal(ToolCatalog.Tools.Sum(t => (t.Adapter?.Length ?? 0) * Math.Max(1, t.Modes.Length)),
+                     adapterArguments);
     }
 
     /// <summary>A syntactically valid value of the schema's own type. It does not have to be
@@ -955,6 +1212,41 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
     }
 
     /// <summary>
+    /// A layout whose vector rendering is comfortably past the attachment cap — one polygon of
+    /// 250,000 vertices, which at <c>--detail full</c> an SVG stores every one of.
+    ///
+    /// <para>It is a REAL render rather than a stubbed file size, because the cap is about what this
+    /// verb actually produces: <c>src/Cli/RESOLVED.md</c> measures a real 6-layer board at 23.5 MB of
+    /// SVG at <c>--detail full</c> and 6.2 MB at <c>--detail screen</c>, and the point of the cap is
+    /// that both of those are past it while every PNG of the same board is not.</para>
+    /// </summary>
+    private string HugeLayoutFixture()
+    {
+        string dir = Dir("bigart");
+        TechPersistence.SaveToFile(Path.Combine(dir, "pcb.ctech"), StarterTechnologies.Pcb2Layer());
+        WorkspacePersistence.SaveToFile(Path.Combine(dir, ".cws"), new CwsFile { DefaultTechRef = "pcb.ctech" });
+
+        var view = new LayoutView { DbuPerMicron = 1000 };
+
+        const int n = 250_000;
+        var xy = new long[2 * n];
+        for (int i = 0; i < n; i++)
+        {
+            double a = 2 * Math.PI * i / n;
+            // A slowly wandering radius, so no two consecutive vertices coincide once the coordinates
+            // are quantized — a degenerate ring would decimate to nothing and measure the decimator.
+            double r = 9_000_000 + 900_000 * Math.Sin(37 * a);
+            xy[2 * i]     = (long)(10_000_000 + r * Math.Cos(a));
+            xy[2 * i + 1] = (long)(10_000_000 + r * Math.Sin(a));
+        }
+        view.Shapes.Add(new PolygonShape { Layer = new(1, 0), Xy = xy });
+
+        string clay = Path.Combine(dir, "Huge.clay");
+        LayoutPersistence.SaveToFile(clay, view);
+        return clay;
+    }
+
+    /// <summary>
     /// A workspace holding a line and the `.cem` that extracts it — EmCliVerbTests' own fixture
     /// shape.
     ///
@@ -1166,15 +1458,16 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
 
         /// <summary>Calls a tool and returns the document it handed back — which is the whole of what
         /// a tool returns (R-aut5-5).</summary>
-        public string Call(string tool, JsonObject arguments)
-        {
-            var result = JsonNode.Parse(Request("tools/call", new JsonObject
-            {
-                ["name"] = tool, ["arguments"] = arguments,
-            }))!;
+        public string Call(string tool, JsonObject arguments) => CallRaw(tool, arguments)[0]!["text"]!.GetValue<string>();
 
-            return result["content"]![0]!["text"]!.GetValue<string>();
-        }
+        /// <summary>Calls a tool and returns its whole <c>content</c> array. RND-5's attachment is an
+        /// ADDITIONAL block beside the document, so a caller that only ever reads block 0 cannot see
+        /// it — nor see that it was not sent.</summary>
+        public JsonArray CallRaw(string tool, JsonObject arguments)
+            => JsonNode.Parse(Request("tools/call", new JsonObject
+               {
+                   ["name"] = tool, ["arguments"] = arguments,
+               }))!["content"]!.AsArray();
 
         /// <summary>Closes stdin — a client disconnecting — and waits for the process to end.</summary>
         public int Close(TimeSpan? within = null)

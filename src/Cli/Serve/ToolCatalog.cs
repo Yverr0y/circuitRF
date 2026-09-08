@@ -18,6 +18,25 @@ internal enum OptKind
     StrList,
     /// <summary>An array emitted as the flag repeated — <c>--set a=1 --set b=2</c>.</summary>
     StrRepeat,
+    /// <summary>As <see cref="StrRepeat"/>, with every item resolved and confined by
+    /// <see cref="PathRoot"/> — <c>render --data a.npy --data b.npy</c>. A repeated flag whose items
+    /// are FILES needs both halves; neither existing kind has both.</summary>
+    PathRepeat,
+    /// <summary>
+    /// A string that is confined by <see cref="PathRoot"/> only when it names a FILE.
+    ///
+    /// <para><c>render --theme</c> is the case, and it is genuinely two things: a theme NAME resolved
+    /// through a chain of directories the server root has nothing to do with (the workspace, the user
+    /// themes folder, the shipped themes), or a <c>.ccolor</c> file the caller points at. Confining
+    /// the first would turn <c>dark</c> into <c>&lt;root&gt;/dark</c>, which resolves to no theme at
+    /// all; not confining the second would let a client name a file outside the root and learn from
+    /// the refusal whether it exists.</para>
+    ///
+    /// <para>The split is <c>Render.ResolveTheme</c>'s own — a value carrying an extension, a
+    /// directory separator or a root is a path — and the two must agree, which is why this comment
+    /// names the other end.</para>
+    /// </summary>
+    PathOrName,
     /// <summary>A string whose flag takes its value OPTIONALLY: an empty string becomes the bare
     /// flag. <c>explain --analysis</c> is the case — with a name it asks about one chain, without
     /// one it asks about all of them, and passing "" as a value asks about a chain called "".
@@ -52,21 +71,39 @@ internal sealed record ToolMode(
     string                        Description);
 
 /// <param name="SelectorName">The argument that chooses the mode, or null for a single-mode tool.</param>
+/// <param name="Adapter">
+/// Arguments the ADAPTER itself consumes and never forwards. Advertised like any other, translated
+/// into nothing.
+///
+/// <para><b>This is the one deliberate exception to "every argument is named after the CLI flag it
+/// becomes", and it exists for exactly one thing</b> (R-rnd5-4): whether a tool result carries the
+/// rendered picture back as protocol content. There is no CLI spelling of it and there should not be
+/// — a command line writes the file and the person opens it, where a protocol client may have no way
+/// to read the path it was handed. So it is a property of the ENVELOPE, not of the render.</para>
+///
+/// <para>Kept as its own list rather than as a flavour of <see cref="ToolOption"/> so that the
+/// invariant stays checkable by reading: everything in <c>Modes</c> becomes argv, and the only things
+/// that do not are here, where <c>ServeProtocolAdapterTests</c>'
+/// <c>EveryAdvertisedArgument_IsAFlagTheVerbActuallyReads</c> exempts them by name.</para>
+/// </param>
 internal sealed record ToolSpec(
     string        Name,
     string        Description,
     string?       SelectorName,
     string?       SelectorDescription,
-    ToolMode[]    Modes);
+    ToolMode[]    Modes,
+    ToolOption[]? Adapter = null);
 
 /// <summary>
 /// The tool surface, and the ONLY thing that translates a tool call into a command line.
 ///
-/// <para><b>Small and broad (R-aut5-4, R-aut-9).</b> Seven tools, not one per verb. A client that
-/// discovers tools up front carries every description for the whole session whether or not it calls
-/// one, so the surface is a standing cost paid on every interaction. <c>run</c> selects its analysis
-/// with an argument rather than being six tools; <c>create</c> and <c>import</c> each carry the
-/// noun the CLI verb already takes.</para>
+/// <para><b>Small and broad (R-aut5-4, R-aut-9).</b> NINE tools, not one per verb — the eight here
+/// plus <c>HistoryBatch</c>'s, which is advertised beside them because it is the one tool that is not
+/// a command line. A client that discovers tools up front carries every description for the whole
+/// session whether or not it calls one, so the surface is a standing cost paid on every interaction.
+/// <c>run</c> selects its analysis with an argument rather than being six tools; <c>create</c>,
+/// <c>import</c> and <c>history</c> each carry the noun the CLI verb already takes; and RND-5's
+/// <c>render</c> is one tool over every document kind rather than one per view (R-rnd0-4).</para>
 ///
 /// <para><b>The schema is GENERATED from the same table that builds the command line.</b> That is
 /// the point of the table: a description that says an argument exists and a translation that drops
@@ -148,7 +185,34 @@ internal static class ToolCatalog
         new("outGrid",     "--out-grid",    OptKind.Path,    "lpp only: where found terminations are written."),
     ];
 
-    // ── the seven tools ──────────────────────────────────────────────────────
+    /// <summary>
+    /// The largest rendered file handed back inside a tool result (R-rnd5-4).
+    ///
+    /// <para><b>The number comes from the measured table in <c>src/Cli/RESOLVED.md</c> (RND-2), not
+    /// from taste.</b> A real 6-layer board at the default 1600x1200 page is 1.4 MB as a PNG, 9.6 MB
+    /// as a <c>--detail full</c> PDF and 23.5 MB as a <c>--detail full</c> SVG; the same board at
+    /// <c>--detail screen</c> is 1.0 MB / 2.6 MB / 6.2 MB. Four mebibytes therefore admits every
+    /// raster this verb plausibly produces — which is the format an agent wants when it wants to LOOK
+    /// at something — and every schematic and symbol in any format, while refusing exactly the two
+    /// cases where a caller genuinely should have narrowed: a whole dense board as vector geometry.
+    /// Base64 adds a third on top, which is why the cap is on the file rather than on the frame.</para>
+    ///
+    /// <para>A file over it is not truncated and not dropped in silence — see
+    /// <c>CliDiagnostics.ServeImageTooLarge</c>.</para>
+    /// </summary>
+    public const long AttachmentCapBytes = 4L * 1024 * 1024;
+
+    /// <summary>The adapter argument that asks for the rendered file back in the result. Named here
+    /// so the row that advertises it and the code that reads it cannot part company.</summary>
+    public const string AttachImageArgument = "attachImage";
+
+    /// <summary>Whether this call asked for the picture. False for every tool that has no such
+    /// argument, and false for the one that does unless the client said so — R-rnd5-4's default.</summary>
+    public static bool AttachmentAsked(JsonObject? arguments)
+        => arguments?[AttachImageArgument] is { } node
+        && node.GetValue<JsonElement>().ValueKind == JsonValueKind.True;
+
+    // ── the eight tools ──────────────────────────────────────────────────────
 
     public static readonly ToolSpec[] Tools =
     [
@@ -220,6 +284,23 @@ internal static class ToolCatalog
                         new("analysis", "--analysis", OptKind.StrOptional,
                             "Report the analysis chains. A name asks about that one; an empty string asks about all of them."),
                         new("ref",      "--ref",      OptKind.Str, "What a relative cell reference resolves to from this document."),
+
+                        // RND-3's three, and the two arguments that ANSWER their refusals. The
+                        // brief asks for three; `--all` and `--view` are here because R-aut-13 says
+                        // nothing reachable from the command line may be unreachable here, and
+                        // without them a client that asks `--extents` of a cell folder holding two
+                        // views is handed a refusal naming a flag it cannot pass. See
+                        // src/Cli/RESOLVED.md, RND-5.
+                        new("cells",   "--cells",   OptKind.Flag,
+                            "List the cells and, for each, which file each view resolves to and in what state."),
+                        new("layers",  "--layers",  OptKind.Flag,
+                            "List the layers of the resolved technology, with how many shapes the document draws on each."),
+                        new("extents", "--extents", OptKind.Flag,
+                            "The document's bounding box, in base SI with its unit and scale — what render --fit frames on."),
+                        new("all",     "--all",     OptKind.Flag,
+                            "Only with cells: include generated cells, which are hidden by default. On its own it is refused."),
+                        new("view",    "--view",    OptKind.Str,
+                            "Which view of a cell folder: schematic, symbol or layout. Spelled as render spells it."),
                     ],
                     ""),
             ]),
@@ -284,6 +365,94 @@ internal static class ToolCatalog
                             "Proceed on a guessed Excellon format. Unstated, it is refused: the two readings differ by four orders of magnitude."),
                     ],
                     "One import and one export, between any two interchange formats."),
+            ]),
+
+        // RND-5's one new tool, and it is one (R-rnd0-4 / R-rnd5-1): the document kind comes from the
+        // path exactly as `check`'s does, so there is no `render-schematic` and no selector. Making
+        // the view type a selector would advertise three modes where there is one verb.
+        //
+        // `output` is a Path like every other, and nothing about the confinement changes because this
+        // is the first tool whose PURPOSE is to write a file: it writes only where the caller named,
+        // and there is still no tool that deletes (cli.md 11.5).
+        new("render",
+            "Draw a schematic, a symbol, a layout or a data display as a picture: .svg, .pdf or .png. "
+          + "The document kind comes from the path. Ask explain --extents and --layers first if you "
+          + "need a window or a layer name.",
+            null, null,
+            [
+                new("", [ "render" ],
+                    [new("path", true,
+                         "The .csch .csym .clay or .cdd, a cell folder, or a workspace with cell.")],
+                    [
+                        new("output", "-o", OptKind.Path,
+                            "Required. Where the picture is written; its extension picks the format: .svg, .pdf or .png."),
+                        new("format", "--format", OptKind.Str,
+                            "Override the format the extension implies: svg, pdf or png."),
+                        new("view", "--view", OptKind.Str,
+                            "Which view of a cell folder: schematic, symbol or layout. More than one is refused, not ordered."),
+                        new("cell", "--cell", OptKind.Str,
+                            "Which cell, when the path is a workspace."),
+
+                        // The three viewport modes. They are REFUSED together rather than ordered
+                        // (R-rnd2-3), so all three are advertised and the verb decides.
+                        new("fit", "--fit", OptKind.Flag,
+                            "Frame the whole document. The default."),
+                        new("window", "--window", OptKind.Str,
+                            "An explicit world rectangle, x0,y0,x1,y1. ON A LAYOUT EVERY COORDINATE CARRIES AN SI UNIT, "
+                          + "zero included (0um,0um,500um,300um): a bare number is refused, because DBU, um and mm are "
+                          + "three plausible pictures. A schematic or a symbol takes bare design units."),
+                        new("center", "--center", OptKind.Str,
+                            "The centre of the window, x,y. Same unit rule. Needs span."),
+                        new("span", "--span", OptKind.Str,
+                            "The width of the window; the height follows the output aspect. Same unit rule."),
+                        new("margin", "--margin", OptKind.Number,
+                            "Fraction of the page left around a fit. 0 to 0.45."),
+
+                        new("size", "--size", OptKind.Str,
+                            "Output size as WxH. Device pixels for png, points for svg and pdf. Default 1600x1200."),
+                        new("scale", "--scale", OptKind.Number,
+                            "png only: raster multiplier. Refused on a vector format, and refused together with dpi."),
+                        new("dpi", "--dpi", OptKind.Number,
+                            "png only: the same multiplier spelled relative to 96 dpi."),
+
+                        new("layers", "--layers", OptKind.StrList,
+                            "Layout only: draw only these layers. An undefined name is refused — ask explain --layers."),
+                        new("hideLayers", "--hide-layers", OptKind.StrList,
+                            "Layout only: draw everything but these. Refused together with layers."),
+                        new("detail", "--detail", OptKind.Str,
+                            "full (default: every level-of-detail tier off, what is stored is what is drawn), screen "
+                          + "(the tiers as a canvas engages them), or a pixel budget. A vector file is several times "
+                          + "larger at full."),
+
+                        new("theme", "--theme", OptKind.PathOrName,
+                            "A colour theme name, or a .ccolor file. Default: the workspace's own, else the shipped one."),
+                        new("variant", "--variant", OptKind.Str, "light or dark. Default light."),
+                        new("background", "--background", OptKind.Str, "opaque or transparent. Default opaque."),
+                        new("grid", "--grid", OptKind.Flag, "Draw the grid. Off by default, as every export is."),
+                        new("noRulers", "--no-rulers", OptKind.Flag,
+                            "Leave the rulers out. They are on by default because a ruler is in the document."),
+
+                        // The .cdd half (RND-4). Options of the one verb, not a second tool: a data
+                        // display is a document kind like the other three.
+                        new("data", "--data", OptKind.PathRepeat,
+                            ".cdd only: a result file to bind. The first binds the document's own selected source. "
+                          + "A .cdd whose sources do not resolve is a refusal, not an empty plot."),
+                        new("tab", "--tab", OptKind.Str, ".cdd only: which tab, by name or by number."),
+                        new("plot", "--plot", OptKind.Integer, ".cdd only: which plot on that tab, from 1."),
+                        new("allTabs", "--all-tabs", OptKind.Flag,
+                            ".cdd only: every tab, one page each. pdf only."),
+                    ],
+                    ""),
+            ],
+            // R-rnd5-4, and the whole point of this tool for an agent: a client that receives only a
+            // path has to be able to READ that path, and many cannot. Default OFF because an image is
+            // expensive in a way a JSON document is not.
+            Adapter:
+            [
+                new(AttachImageArgument, "", OptKind.Flag,
+                    "Return the rendered file itself in the result, as well as writing it. Off by default; "
+                  + "a file over " + (AttachmentCapBytes / (1024 * 1024)) + " MB comes back as its path with a "
+                  + "note saying what to narrow."),
             ]),
 
         new("read",
@@ -442,6 +611,14 @@ internal static class ToolCatalog
         {
             if (name == spec.SelectorName) continue;
             if (mode.Positionals.Any(p => p.Json == name)) continue;
+            // An adapter argument becomes nothing. It is still TYPE-checked, because a client that
+            // wrote `"attachImage": "yes"` and was handed a picture-less result with nothing said
+            // would have no way to find its own mistake.
+            if (spec.Adapter?.FirstOrDefault(o => o.Json == name) is { } own)
+            {
+                if (node is not null && !Emit(null, own, node, tool, root, ref refusal)) return null;
+                continue;
+            }
             if (node is null) continue;
 
             if (mode.Options.FirstOrDefault(o => o.Json == name) is not { } opt)
@@ -468,7 +645,14 @@ internal static class ToolCatalog
     private static string LastMissingBefore(ToolMode mode, ToolPositional given)
         => mode.Positionals.TakeWhile(p => p.Json != given.Json).Last().Json;
 
-    private static bool Emit(List<string> argv, ToolOption opt, JsonNode node, string tool,
+    /// <summary>
+    /// Appends one argument's flag and value to <paramref name="argv"/>, or refuses.
+    ///
+    /// <para><paramref name="argv"/> is null for an ADAPTER argument (<see cref="ToolSpec.Adapter"/>),
+    /// which becomes no command line at all: the call then does the type check and nothing else, so
+    /// there is one place a JSON type is decided rather than two that could disagree.</para>
+    /// </summary>
+    private static bool Emit(List<string>? argv, ToolOption opt, JsonNode node, string tool,
                              PathRoot root, ref Diagnostic? refusal)
     {
         switch (opt.Kind)
@@ -480,7 +664,7 @@ internal static class ToolCatalog
                     refusal = CliDiagnostics.ServeArgumentWrongType(tool, opt.Json, "a boolean");
                     return false;
                 }
-                if (node.GetValue<bool>()) argv.Add(opt.Cli);
+                if (node.GetValue<bool>()) argv?.Add(opt.Cli);
                 return true;
             }
 
@@ -491,10 +675,10 @@ internal static class ToolCatalog
                     refusal = CliDiagnostics.ServeArgumentWrongType(tool, opt.Json, "a number");
                     return false;
                 }
-                argv.Add(opt.Cli);
+                argv?.Add(opt.Cli);
                 // Invariant, because the CLI parses it invariantly (cli.md §7A) — a decimal comma
                 // here would be a number the verb cannot read, on one machine only.
-                argv.Add(node.GetValue<JsonElement>().GetRawText());
+                argv?.Add(node.GetValue<JsonElement>().GetRawText());
                 return true;
             }
 
@@ -502,39 +686,63 @@ internal static class ToolCatalog
             {
                 string? optional = AsString(node, tool, opt.Json, ref refusal);
                 if (optional is null) return false;
-                argv.Add(opt.Cli);
-                if (optional.Length > 0) argv.Add(optional);
+                argv?.Add(opt.Cli);
+                if (optional.Length > 0) argv?.Add(optional);
                 return true;
             }
 
-            case OptKind.Str or OptKind.Path:
+            case OptKind.Str or OptKind.Path or OptKind.PathOrName:
             {
                 string? text = AsString(node, tool, opt.Json, ref refusal);
                 if (text is null) return false;
-                if (opt.Kind == OptKind.Path)
+                if (opt.Kind == OptKind.Path || (opt.Kind == OptKind.PathOrName && NamesAFile(text)))
                 {
                     text = root.Resolve(text, out refusal);
                     if (text is null) return false;
                 }
-                argv.Add(opt.Cli);
-                argv.Add(text);
+                argv?.Add(opt.Cli);
+                argv?.Add(text);
                 return true;
             }
 
-            case OptKind.StrList or OptKind.StrRepeat:
+            case OptKind.StrList or OptKind.StrRepeat or OptKind.PathRepeat:
             {
                 var items = AsStrings(node, tool, opt.Json, ref refusal);
                 if (items is null) return false;
                 if (items.Count == 0) return true;
 
-                if (opt.Kind == OptKind.StrList) { argv.Add(opt.Cli); argv.Add(string.Join(',', items)); }
-                else foreach (string item in items) { argv.Add(opt.Cli); argv.Add(item); }
+                if (opt.Kind == OptKind.StrList) { argv?.Add(opt.Cli); argv?.Add(string.Join(',', items)); }
+                else foreach (string item in items)
+                {
+                    string value = item;
+                    if (opt.Kind == OptKind.PathRepeat)
+                    {
+                        string? resolved = root.Resolve(value, out refusal);
+                        if (resolved is null) return false;
+                        value = resolved;
+                    }
+                    argv?.Add(opt.Cli);
+                    argv?.Add(value);
+                }
                 return true;
             }
 
             default: return true;
         }
     }
+
+    /// <summary>
+    /// Whether a <see cref="OptKind.PathOrName"/> value is a FILE rather than a name.
+    ///
+    /// <para>The rule is <c>Render.ResolveTheme</c>'s, one step earlier: a value carrying an
+    /// extension, a directory separator or a drive/root is a path and is confined; anything else is a
+    /// bare name that resolves through a chain of directories the server root has nothing to do with.
+    /// Both ends have to make the same split, which is why each names the other.</para>
+    /// </summary>
+    private static bool NamesAFile(string value)
+        => Path.IsPathRooted(value)
+        || value.Contains('/') || value.Contains('\\')
+        || Path.GetExtension(value).Length > 0;
 
     private static string? AsString(JsonNode node, string tool, string name, ref Diagnostic? refusal)
     {
@@ -601,6 +809,11 @@ internal static class ToolCatalog
                     properties[o.Json] ??= Describe(o);
             }
 
+            // The adapter's own, advertised beside the rest because a client cannot tell — and does
+            // not need to — which side of the translation an argument is read on.
+            foreach (var o in spec.Adapter ?? [])
+                properties[o.Json] ??= Describe(o);
+
             if (spec.SelectorName is null)
                 foreach (var p in spec.Modes[0].Positionals.Where(p => p.Required)) required.Add(p.Json);
 
@@ -624,7 +837,7 @@ internal static class ToolCatalog
         OptKind.Flag    => new JsonObject { ["type"] = "boolean", ["description"] = o.Description },
         OptKind.Number  => new JsonObject { ["type"] = "number",  ["description"] = o.Description },
         OptKind.Integer => new JsonObject { ["type"] = "integer", ["description"] = o.Description },
-        OptKind.StrList or OptKind.StrRepeat => new JsonObject
+        OptKind.StrList or OptKind.StrRepeat or OptKind.PathRepeat => new JsonObject
         {
             ["type"]        = "array",
             ["items"]       = new JsonObject { ["type"] = "string" },

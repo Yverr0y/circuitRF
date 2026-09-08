@@ -297,18 +297,126 @@ internal sealed class McpServer
 
         // The document, unchanged (R-aut5-5). The text block is the protocol's own envelope, not a
         // reshaping of the payload: these bytes are the CLI's `--json` bytes.
+        var content = new JsonArray(new JsonObject
+        {
+            ["type"] = "text",
+            ["text"] = document,
+        });
+
+        if (ToolCatalog.AttachmentAsked(arguments)) Attach(content, document);
+
         _rpc.Result(id, new JsonObject
         {
-            ["content"] = new JsonArray(new JsonObject
-            {
-                ["type"] = "text",
-                ["text"] = document,
-            }),
+            ["content"] = content,
             // The CLI's own 0-or-not split (cli.md §7), forwarded. The document carries the truth —
             // including the deliberate difference between "did not converge" and "could not run".
             ["isError"] = refusedCode != 0,
         });
     }
+
+    // ── the picture, back through the protocol ───────────────────────────────
+
+    /// <summary>
+    /// Appends the files the run wrote to the result, as protocol content (R-rnd5-4).
+    ///
+    /// <para><b>This is the point of the whole render series for an agent.</b> A client that receives
+    /// only a path has to be able to READ that path, and many cannot — an agent that cannot SEE the
+    /// picture it asked for has gained nothing over <c>--json</c>.</para>
+    ///
+    /// <para><b>The same bytes the verb wrote, read back. Never a second render.</b> R-aut-1: the
+    /// adapter calls the verb and does not re-implement it, and that applies to drawing most of all.
+    /// What is attached is the file <c>outputs</c> names, opened and base64'd; nothing here decides a
+    /// viewport, a page size or a format, and a PDF is never transcoded to a PNG to make it
+    /// attachable — that would be the adapter making a rendering decision, which is the one thing
+    /// §11.1 says it never does.</para>
+    ///
+    /// <para><b>The document itself is untouched, always.</b> Everything this method produces is an
+    /// ADDITIONAL content block, so the first block stays byte-identical to what
+    /// <c>circuitrf render --json</c> writes and the parity gate keeps meaning what it means. A file
+    /// too large to attach is reported here, in a block of its own, rather than as a diagnostic
+    /// inside a document the CLI would not have written it into.</para>
+    /// </summary>
+    private static void Attach(JsonArray content, string document)
+    {
+        JsonNode? parsed;
+        try   { parsed = JsonNode.Parse(document); }
+        catch { return; }        // a refusal document with no outputs; nothing to attach
+
+        if (parsed?["outputs"] is not JsonArray outputs) return;
+
+        foreach (var entry in outputs)
+        {
+            if (entry?["path"]?.GetValue<JsonElement>().ValueKind != JsonValueKind.String) continue;
+            string path = entry["path"]!.GetValue<string>();
+            if (MimeOf(path) is not { } mime) continue;
+
+            long size;
+            try
+            {
+                var info = new FileInfo(path);
+                if (!info.Exists) continue;
+                size = info.Length;
+            }
+            catch (Exception ex) { Note(content, CliDiagnostics.ServeImageUnreadable(path, ex.Message)); continue; }
+
+            // Opt-in was not enough on its own: an image is expensive in a way a JSON document is
+            // not, and base64 adds a third on top. Over the cap the PATH is the answer, with a
+            // sentence saying how large it came to and what would narrow it — never truncated, and
+            // never dropped in silence, because a client that asked for a picture and got nothing
+            // with no explanation simply asks again.
+            if (size > ToolCatalog.AttachmentCapBytes)
+            {
+                Note(content, CliDiagnostics.ServeImageTooLarge(path, size, ToolCatalog.AttachmentCapBytes));
+                continue;
+            }
+
+            byte[] bytes;
+            try { bytes = File.ReadAllBytes(path); }
+            catch (Exception ex) { Note(content, CliDiagnostics.ServeImageUnreadable(path, ex.Message)); continue; }
+
+            string data = Convert.ToBase64String(bytes);
+
+            // An `image` block for an image MIME type, an embedded `resource` for anything else. A
+            // PDF is not an image and saying it is would be a lie a client acts on; the alternative —
+            // rasterizing it — is the rendering decision this adapter does not make.
+            content.Add(mime.StartsWith("image/", StringComparison.Ordinal)
+                ? new JsonObject { ["type"] = "image", ["data"] = data, ["mimeType"] = mime }
+                : new JsonObject
+                {
+                    ["type"] = "resource",
+                    ["resource"] = new JsonObject
+                    {
+                        ["uri"]      = new Uri(path).AbsoluteUri,
+                        ["mimeType"] = mime,
+                        ["blob"]     = data,
+                    },
+                });
+        }
+    }
+
+    /// <summary>
+    /// The MIME type of a file this adapter will attach, or null for one it will not.
+    ///
+    /// <para>Deliberately a SHORT list rather than a general extension map: the three formats
+    /// <c>render</c> writes and nothing else. A Touchstone or an <c>.npy</c> from an <c>em</c> run
+    /// stays a path — those are read by a program, not looked at, and a client that wants one calls
+    /// <c>read</c>.</para>
+    /// </summary>
+    private static string? MimeOf(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+    {
+        ".png" => "image/png",
+        ".svg" => "image/svg+xml",
+        ".pdf" => "application/pdf",
+        _      => null,
+    };
+
+    /// <summary>A sentence about the attachment, as its own text block. Its <c>id</c> travels in it,
+    /// because the id is the contract and the message is not (cli.md §3.2).</summary>
+    private static void Note(JsonArray content, Diagnostic d) => content.Add(new JsonObject
+    {
+        ["type"] = "text",
+        ["text"] = d.Id + ": " + d.Render(),
+    });
 
     /// <summary>
     /// Runs one argument vector and returns the document it wrote.

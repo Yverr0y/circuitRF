@@ -7,6 +7,170 @@ what the design says.
 ---
 
 
+## RND-5 — the protocol surface, and the user-docs chapter (2026-09-07)
+
+`brief-render-5-mcp-and-user-docs.md`. `render` as a tool, RND-3's three questions as arguments on the
+`explain` tool, and `docs/user/src/reference/cli.md` rewritten around both. No new behaviour on either
+side — a discoverability brief that changes what a verb does has stopped being one.
+
+### The brief's tool count was two short, and the count is load-bearing
+
+R-rnd5-1 says "eight tools, up from seven", and `cli.md` §11.3 said seven too. **`tools/list` was
+already advertising nine**: `ToolCatalog` holds `run`, `check`, `explain`, `create`, `import`, `read`,
+`history` and `reference`, and `McpServer` appends `HistoryBatch`'s `batch` beside them. RC-5 and RC-9
+added the last two and neither updated the number. `render` makes **ten**.
+
+That is not pedantry about a sentence: §11.3's whole argument is that the count IS the cost, so a
+design note that undercounts by 22% is arguing from the wrong number. §11.3's table and the
+`TheServer_StartsAdvertisesAndShutsDownCleanly` assertion now list all ten, in order.
+
+### `explain` gained FIVE arguments, not three, and R-aut-13 is why
+
+R-rnd5-1 asks for `--cells`, `--layers` and `--extents`. The verb also reads `--all` and `--view`, and
+both are the arguments that **answer these three questions' own refusals**: `--extents` on a cell
+folder holding two views is refused naming `--view`, and `--cells` hides generated cells unless
+`--all` says otherwise. A client handed a refusal naming a flag it cannot pass is exactly the
+asymmetry R-aut-13 forbids, in the direction that is hardest to notice — the capability is there, the
+refusal is correct, and the caller is stuck.
+
+`EveryAdvertisedArgument_IsAFlagTheVerbActuallyReads` could never have caught it: it checks that every
+ADVERTISED argument is a flag the verb reads, not that every flag the verb reads is advertised. The
+gate now also asserts the five rows exist by their CLI spelling.
+
+### The image attachment is the one argument that is not a flag, and it needed a place to live
+
+R-rnd5-4 asks for an explicit tool argument, default off. There is no CLI spelling of it and there
+must not be — a command line writes the file and the person opens it; a protocol client may have no
+way to read the path it was handed. So it is a property of the ENVELOPE, not of the render.
+
+`ToolSpec.Adapter` is a separate list rather than a flavour of `ToolOption`, so the invariant stays
+checkable **by reading**: everything in `Modes` becomes argv, and the only things that do not are
+there. `ToArgv` type-checks them through the same `Emit` with a null `argv`, so a client that wrote
+`"attachImage": "yes"` is refused by name rather than handed a picture-less result with nothing said.
+The parity gate exempts it by name and **counts the exemptions**, so one that quietly grew would be a
+flag the verb does not read arriving by the other door.
+
+### The document had to stay byte-identical, so nothing about the attachment is in it
+
+The attachment and its cap refusal are ADDITIONAL content blocks. Block 0 is still exactly what
+`circuitrf render --json` writes, which is what keeps §11.7's parity gate meaning what it means — and
+putting the cap's diagnostic into the document instead would have been the adapter authoring a
+diagnostic the CLI never writes, which is the thing §11.1 exists to prevent.
+
+`isError` stays the verb's own exit code, too. A render that succeeded and was too large to attach is
+not a failed run.
+
+### The cap is 4 MiB, and it comes from RND-2's measured table
+
+The brief asks whether the number is right "from the measured sizes RND-2 §7.4 produced rather than
+from a guess". From that table, at the default 1600x1200 page on a real six-layer board:
+
+| | `--detail full` | `--detail screen` |
+|---|---|---|
+| `.png` | 1.4 MB | 1.0 MB |
+| `.pdf` | 9.6 MB | 2.6 MB |
+| `.svg` | 23.5 MB | 6.2 MB |
+
+4 MiB admits **every PNG that board can produce** — which is the format an agent wants when it wants
+to LOOK at something — and every schematic and symbol in any format, while refusing exactly the four
+cases where a caller genuinely should have narrowed: a whole dense board as vector geometry. Base64
+adds a third on top, which is why the cap is on the FILE rather than on the frame. The gate renders a
+250,000-vertex polygon and measures **8,339,447 bytes** of SVG, so it is a real render past a real cap
+rather than a stubbed size.
+
+### A PDF is attached as a PDF, which is not an `image` content block
+
+R-rnd5-4's third constraint forbids transcoding, and MCP's `image` content means an image. So `.png`
+and `.svg` go as `image` with their own MIME type and `.pdf` goes as an embedded `resource` with a
+base64 `blob` — one rule, two envelopes, and the gate decodes both against the file on disk.
+
+### Two option kinds had to exist, and the second is a confinement hole that was already open
+
+`PathRepeat` is a repeated flag whose items are FILES (`--data a.npy --data b.npy`); `StrRepeat`
+repeats and `Path` confines, and neither did both.
+
+`PathOrName` is `--theme`, and it is the more interesting one. It takes a theme NAME resolved through
+a chain of directories the server root has nothing to do with, OR a `.ccolor` file the caller points
+at. `OptKind.Path` would turn `dark` into `<root>/dark`, which resolves to no theme at all — the
+capability would be unreachable. `OptKind.Str` would let a client name any path on the machine and
+learn from the refusal whether it exists, and `ColorThemeIo.LoadFile` would open it. So the value is
+confined **when it names a file** — an extension, a directory separator or a root — which is
+`Render.ResolveTheme`'s own split one step earlier, and each end now names the other.
+
+**This is reported rather than absorbed**, per the brief's last bullet: a flag that has to be
+explained by describing where its value is resolved is a flag whose shape is arguable. If `--theme`
+were ever split into `--theme <name>` and `--theme-file <path>`, this kind would go with it.
+
+### The chapter: what could not be explained without an implementation detail
+
+The brief asks for these. Two:
+
+- **`--detail`'s pixel budget.** `--detail 0.5` is not the tolerance you get: `LayoutRenderDetail`
+  buckets by octave, so the number a caller asks for and the `toleranceDbu` reported back routinely
+  differ. The chapter says so and points at the `--json` field, which is the only honest thing to do,
+  but "pass a number, get a different number" is a flag explaining itself by describing its
+  implementation. The three named modes need no such paragraph.
+- **`--window` on a `.cdd`.** The refusal is right and its sentence is good, but the reason a caller
+  reaches for it — "I want a crop of this plot" — has no answer at all: a display's plots carry their
+  own axis windows, which are in the document and not on the command line. The chapter states the
+  refusal and does not pretend there is a workaround.
+
+Neither is this brief's to fix.
+
+### The chapter's own worked example is a TEST, and it reads the chapter
+
+Gate B.4.3 asks for the worked example executed end to end from an empty directory.
+`tests/Ui.Tests/Render/DocumentedWalkthroughTests.cs` parses the commands, the `.clay` fence and the
+expected transcript **out of `cli.md` itself** and runs them with the child's working directory set to
+an empty temp folder. A test that re-typed the sequence would prove that something someone once wrote
+still works and say nothing about the PAGE, which is the artefact a reader runs.
+
+Three kinds of documented line are excluded from the comparison and each for a stated reason: a line
+carrying an absolute path (the chapter anonymizes those to the SHAPE of a path), the chapter's own `…`
+elision, and the one number that belongs to the machine — an encoded file's LENGTH. The render's
+counters are compared in full, because §13.6 says they are deterministic and machine-independent by
+construction, which is what makes them worth printing in a manual.
+
+The second test in that file is gate B.4.2: every option the two verbs' own USAGE text prints appears
+somewhere in the chapter. All 30 did.
+
+### `tools/DocGen` did not build, and it is not in `circuitrf.slnx`
+
+Found on the way to §B.3, not looked for. RND-1 moved `ColorVariant` to `CircuitRF.Render` and
+`SvgFontNormalizer` out of `CircuitRF.Ui.Diagnostics`, and DocGen names both by their old namespaces.
+**Nothing caught it**: DocGen is deliberately outside the solution (its own `.csproj` says so, for the
+same reason `tools/IconGen` is), so a plain `dotnet build` and a plain `dotnet test` never compile it.
+
+Three files, six lines, no behaviour. But the shape is worth keeping: **the docs generator can be
+broken by a refactor for as long as nobody regenerates the docs**, and the only thing that would catch
+it earlier is a build that compiles it. `tools/DocGen/check-docs-current.sh` exists; whether CI runs
+it is a separate question this brief did not answer.
+
+### The DocGen diff, classified
+
+Three runs of the same tree (§B.3's own instruction, plus one more after a table fix):
+
+- **Pages genuinely changed: 1** — `reference/cli.html`, 462 lines added and 7 removed, which is this
+  brief's own chapter. `assets/js/search-index.js` changed by one line, being one line.
+- **Figures genuinely changed: 0.**
+- **Figure churn: 2, both the known rotation family** (`docgen-nondeterministic-figure`).
+  `analysis-editor-hb-dark.svg` differed between run 1 and run 2 of the SAME tree
+  (`matrix(0.9975 0.07055 …)` against `translate(113 365)`), and run 3 produced a third value
+  (`matrix(0.8581 0.5134 …)`); `em-setup-loaded-dark.svg` joined it on run 3, flipping between
+  `translate` and a rotation matrix. Both were restored, along with the two pages that inline them
+  (`schematic-editor.html`, `em-setup.html`).
+- **Id churn: 0.** No `cl_`/`img_`/`gr_`/`fp_` id appears anywhere in the retained diff.
+
+### A pre-existing rendering defect in the docs' markdown tables, avoided rather than fixed
+
+A `\|` inside a code span in a markdown table renders as the literal two characters, not as a pipe —
+`derived-metrics.html` has shipped `<code>\|Z\|</code>` for as long as that page has existed. The new
+tables were written to avoid the escape (`--variant` | "`light` or `dark`") rather than to add four
+more instances of it. Reported, not fixed: it is the docs pipeline's, not this chapter's.
+
+---
+
+
 ## RND-3 — `explain --cells`, `--layers`, `--extents` (2026-09-07)
 
 `brief-render-3-query-surface.md`. The three questions a caller has to be able to ask before `render`

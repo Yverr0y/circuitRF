@@ -1120,6 +1120,36 @@ internal static class CliDiagnostics
         "serve.tool.cancelled", DiagnosticSeverity.Error,
         "{tool} was cancelled.", ("tool", tool));
 
+    /// <summary>
+    /// The picture was drawn and written, and it is too large to hand back inside the tool result
+    /// (R-rnd5-4).
+    ///
+    /// <para><b>It is a refusal and never a truncation, and never a silent omission.</b> Half a PNG
+    /// is not a smaller PNG, and a client that asked for a picture and got nothing back with nothing
+    /// said simply asks again — so the useful answer is the size it came to, the cap it passed, and
+    /// the arguments that would bring it under. The FILE is still written and still named in
+    /// <c>outputs</c>; only the attachment is withheld.</para>
+    ///
+    /// <para>The four named arguments are the ones that actually move the number, in the order they
+    /// move it by: on a real board an SVG is 23.5 MB at <c>--detail full</c> and 6.2 MB at
+    /// <c>--detail screen</c>, and a PNG of the same board is 1.4 MB because a raster's size is set
+    /// by its pixels rather than by the geometry behind them (<c>src/Cli/RESOLVED.md</c>, RND-2).
+    /// </para>
+    /// </summary>
+    public static Diagnostic ServeImageTooLarge(string path, long bytes, long cap) => Diagnostic.Create(
+        "serve.image.too-large", DiagnosticSeverity.Warning,
+        "'{path}' is {bytes} bytes, over the {cap}-byte attachment cap, so it is not attached — the " +
+        "file is written and named in outputs. Narrow it with --detail screen, --layers, --window " +
+        "or a smaller --size, or ask for .png rather than a vector format.",
+        ("path", path), ("bytes", bytes), ("cap", cap));
+
+    /// <summary>The run said it wrote a file and the adapter could not read it back. Reported rather
+    /// than swallowed: the alternative is a result that silently carries no picture and looks exactly
+    /// like one that was never asked for an attachment.</summary>
+    public static Diagnostic ServeImageUnreadable(string path, string message) => Diagnostic.Create(
+        "serve.image.unreadable", DiagnosticSeverity.Warning,
+        "'{path}' could not be read back to attach: {message}", ("path", path), ("message", message));
+
     // ── history (RC-3) ────────────────────────────────────────────────────────────────────────────
 
     public static Diagnostic HistoryNounRequired() => new(
