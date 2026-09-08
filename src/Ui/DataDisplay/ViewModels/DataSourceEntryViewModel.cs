@@ -87,28 +87,10 @@ public partial class DataSourceEntryViewModel : ViewModelBase
         }
     }
 
-    private void MaterializeNetworkParamCubes()
-    {
-        if (_data is not { } ds) return;
-
-        foreach (var group in ds.Groups)
-        {
-            if (group == RfCore.Data.DataSet.DefaultGroup) continue;
-
-            var cubes = ds.CubesIn(group);
-            if (!cubes.TryGetValue(NetworkMetrics.SCubeName, out var sCube)) continue;
-            if (!cubes.TryGetValue(NetworkMetrics.Z0CubeName, out var z0Cube)) continue;
-            if (cubes.ContainsKey("Z") || cubes.ContainsKey("Y")) continue;   // don't clobber
-            if (sCube.Rank < 3) continue;                                     // not [.., i, j]-shaped
-
-            int nPorts = sCube.Axes[sCube.Rank - 1].Length;
-            var z0PerPort = z0Cube.ComplexValues;
-            if (z0PerPort.Length != nPorts) continue;   // not a genuine per-port Z0 for this S cube
-
-            ds.AddToGroup(group, "Z", NetworkMetrics.ConvertSCube(sCube, z0PerPort, MatrixType.Z));
-            ds.AddToGroup(group, "Y", NetworkMetrics.ConvertSCube(sCube, z0PerPort, MatrixType.Y));
-        }
-    }
+    // The conversion itself is CircuitRF.Render.DataDisplay's since RND-4 — `circuitrf render` has
+    // to materialize the same virtual cubes or a trace on "SP1.Z" resolves to nothing, which is a
+    // plot that draws and is missing a curve. What stays here is the lazy/memoized WRAPPER above.
+    private void MaterializeNetworkParamCubes() => DataSourceView.MaterializeNetworkParamCubes(_data);
 
     private SNP? _networkView;
     private bool _networkViewBuilt;
@@ -133,12 +115,10 @@ public partial class DataSourceEntryViewModel : ViewModelBase
             if (_snp is not null) return _snp;
             if (_networkViewBuilt) return _networkView;
             _networkViewBuilt = true;
-            if (_data is { } ds && NetworkMetrics.IsNetworkShaped(ds)
-                                && NetworkMetrics.FindSCubeSpec(ds) is { } spec)
-            {
-                try { _networkView = DataSetBuilder.ToSnp(ds, spec); }
-                catch { _networkView = null; }
-            }
+            // Built by CircuitRF.Render.DataDisplay since RND-4, for the same reason: without it
+            // every DERIVED trace on a simulated run (Max Gain, µ, a stability circle) is dropped
+            // as the display opens, because a simulated run has no SNP by design.
+            _networkView = DataSourceView.NetworkViewOf(_data);
             return _networkView;
         }
     }

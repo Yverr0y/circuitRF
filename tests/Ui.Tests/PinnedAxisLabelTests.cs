@@ -26,7 +26,7 @@ public sealed class PinnedAxisLabelTests
     {
         var (ds, trace) = BuildDcSweep(vdsIndex: 3, branchIndex: 1);
 
-        PlotInspectorViewModel.ApplyPinnedAxisDisplay(trace, ds);
+        TraceResolve.ApplyPinnedAxisDisplay(trace, ds);
 
         // The fixture steps VDS by 2 V precisely so value and index differ: index 3 is 6 V, so a
         // test that passed on the old index-printing behaviour cannot also pass on this one.
@@ -38,7 +38,7 @@ public sealed class PinnedAxisLabelTests
     {
         var (ds, trace) = BuildDcSweep(vdsIndex: 0, branchIndex: 1);
 
-        PlotInspectorViewModel.ApplyPinnedAxisDisplay(trace, ds);
+        TraceResolve.ApplyPinnedAxisDisplay(trace, ds);
 
         // "branch=IDS" would say the same thing twice — the label already names the quantity.
         Assert.Equal("IDS", trace.PinnedAxisDisplay("branch"));
@@ -56,7 +56,7 @@ public sealed class PinnedAxisLabelTests
             new AxisSlice("harmonic", AxisRole.PinToIndex, 2),
             new AxisSlice("freq", AxisRole.KeepAsX, 0));
 
-        PlotInspectorViewModel.ApplyPinnedAxisDisplay(t, ds);
+        TraceResolve.ApplyPinnedAxisDisplay(t, ds);
 
         Assert.Equal("harmonic=2", t.PinnedAxisDisplay("harmonic"));
     }
@@ -75,7 +75,7 @@ public sealed class PinnedAxisLabelTests
             new AxisSlice("i", AxisRole.PinToIndex, 0),
             new AxisSlice("j", AxisRole.PinToIndex, 1));
 
-        PlotInspectorViewModel.ApplyPinnedAxisDisplay(t, ds);
+        TraceResolve.ApplyPinnedAxisDisplay(t, ds);
 
         Assert.Null(t.PinnedAxisDisplay("i"));
         Assert.Null(t.PinnedAxisDisplay("j"));
@@ -87,7 +87,7 @@ public sealed class PinnedAxisLabelTests
     public void TheRenderedLabel_ShowsTheValueAndTheBranchName_NotTwoIndices()
     {
         var (ds, trace) = BuildDcSweep(vdsIndex: 3, branchIndex: 1);
-        PlotInspectorViewModel.ApplyPinnedAxisDisplay(trace, ds);
+        TraceResolve.ApplyPinnedAxisDisplay(trace, ds);
 
         string label = LabelOf(trace);
 
@@ -125,7 +125,7 @@ public sealed class PinnedAxisLabelTests
             new AxisSlice("i", AxisRole.PinToIndex, 1),
             new AxisSlice("j", AxisRole.PinToIndex, 0));
 
-        PlotInspectorViewModel.ApplyPinnedAxisDisplay(t, ds);
+        TraceResolve.ApplyPinnedAxisDisplay(t, ds);
 
         Assert.Equal("S(Pin=10 dBm,2,1)", LabelOf(t));
     }
@@ -136,7 +136,7 @@ public sealed class PinnedAxisLabelTests
     public void SettingNewCubeData_ClearsTheResolution_SoItCannotOutliveItsCube()
     {
         var (ds, trace) = BuildDcSweep(vdsIndex: 3, branchIndex: 1);
-        PlotInspectorViewModel.ApplyPinnedAxisDisplay(trace, ds);
+        TraceResolve.ApplyPinnedAxisDisplay(trace, ds);
         Assert.NotNull(trace.PinnedAxisDisplay("VDS"));
 
         trace.SetCubeData([0, 1], null, [1.0, 2.0], "freq", "Hz", PlotType.Rect, FreqUnit.GHz);

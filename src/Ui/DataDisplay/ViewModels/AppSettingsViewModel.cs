@@ -57,7 +57,10 @@ public partial class AppSettingsViewModel : ViewModelBase
     // ── Constructor ──────────────────────────────────────────────────────
     private AppSettingsViewModel()
     {
-        _model = AppSettings.Load();
+        // AppSettings.Current, not a fresh Load(): the renderers and the exporter read the model
+        // directly now that both live below the UI firewall (RND-4), so a second instance here
+        // would mean the Settings dialog changed one object and the drawing read another.
+        _model = AppSettings.Current;
 
         _exportTheme                    = _model.ExportTheme;
         _exportTransparentBackground    = _model.ExportTransparentBackground;
@@ -170,22 +173,15 @@ public partial class AppSettingsViewModel : ViewModelBase
 
     // ── Public helpers called by renderers / exporters ───────────────────
 
-    /// <summary>
-    /// Returns the <see cref="RenderTheme"/> to use for export / copy,
-    /// applying the <see cref="ExportTheme"/> override against the live system theme.
-    /// </summary>
-    public RenderTheme GetExportRenderTheme(RenderTheme systemTheme) => ExportTheme switch
-    {
-        ExportThemeMode.ForceLightTheme => RenderTheme.Light,
-        ExportThemeMode.ForceDarkTheme  => RenderTheme.Dark,
-        _                               => systemTheme
-    };
+    // Both decisions moved to AppSettings itself in RND-4 — the renderers and the exporter are
+    // their callers and cannot reach a view model. These forward so the existing call sites and
+    // the XAML bindings are unchanged.
 
-    /// <summary>
-    /// Returns the effective show-file-prefix flag.
-    /// Always true when <see cref="AlwaysDisplayDataSourcePrefix"/> is set;
-    /// otherwise mirrors the library-count heuristic supplied by the caller.
-    /// </summary>
+    /// <inheritdoc cref="AppSettings.GetExportRenderTheme"/>
+    public RenderTheme GetExportRenderTheme(RenderTheme systemTheme) =>
+        _model.GetExportRenderTheme(systemTheme);
+
+    /// <inheritdoc cref="AppSettings.EffectiveShowFilePrefix"/>
     public bool EffectiveShowFilePrefix(bool libraryHasMultiple) =>
-        AlwaysDisplayDataSourcePrefix || libraryHasMultiple;
+        _model.EffectiveShowFilePrefix(libraryHasMultiple);
 }

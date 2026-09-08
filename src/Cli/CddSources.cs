@@ -1,0 +1,286 @@
+using CircuitRF.Design.Results;
+using CircuitRF.Design.Workspace;
+using CircuitRF.Render.DataDisplay;
+using RfCore;
+using RfCore.Data;
+using RfCore.Export;
+
+namespace CircuitRF.Cli;
+
+/// <summary>
+/// The data behind a headless <c>.cdd</c> render: <see cref="IPlotDataSources"/> over the files a
+/// caller named with <c>--data</c> plus the ones the document resolves beside itself
+/// (brief-render-4-data-display.md R-rnd4-4).
+///
+/// <para><b>It reads through the readers the GUI reads through</b> — <c>DataSetImporter</c> for an
+/// <c>.npy</c>, <c>TouchstoneIO</c> plus <c>DataSetBuilder.FromSnp</c> for a Touchstone. That is
+/// exactly the pair <c>circuitrf read</c> uses and exactly the pair
+/// <c>DataSourceEntryViewModel</c> uses; a third loader here would be a file the CLI and the GUI
+/// could disagree about.</para>
+///
+/// <para><b>Every source is resolved before anything is drawn, and an unresolved one is a
+/// refusal.</b> R-rnd4-4 — and the reason is worth repeating at the point where it is enforced: an
+/// empty plot is a valid picture that exports cleanly and looks exactly like a measurement that
+/// came back empty. The sentinel <c>run.npy</c> means "whatever this document has SELECTED", and
+/// headlessly there is no selection and no window to make one in, so a display bound to it with no
+/// <c>--data</c> is refused NAMING the sentinel and the flag.</para>
+/// </summary>
+internal sealed class CddSources : IPlotDataSources
+{
+    private readonly Dictionary<string, Loaded> _byPath = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _refToPath = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _aliases = new(StringComparer.OrdinalIgnoreCase);
+    private          string? _selected;
+
+    private sealed class Loaded
+    {
+        public required string   Path;
+        public required string   Reference;
+        public required bool     FromDataFlag;
+        public          DataSet? Data;
+        public          SNP?     Snp;
+    }
+
+    // ── binding ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Resolves every source the chosen pages' traces reference, and refuses if any cannot be.
+    /// </summary>
+    /// <param name="cddPath">The document, whose folder and whose workspace's <c>results/</c> are
+    /// the two places a relative reference is looked for.</param>
+    public static (CddSources? Sources, int? Refusal) Bind(
+        string                       cddPath,
+        DataDisplayConfig            config,
+        IReadOnlyList<TabConfig>     tabs,
+        IReadOnlyList<int>           pages,
+        IReadOnlyList<string>        data)
+    {
+        var s = new CddSources();
+
+        foreach (var kv in config.SourceAliases) s._aliases[kv.Key] = kv.Value;
+
+        // ── the files the caller named ───────────────────────────────────────
+        //
+        // Loaded eagerly and in order: an unreadable --data is the caller's own mistake and must be
+        // reported as itself, not later as "this display reads something that is not here".
+        var named = new List<Loaded>();
+        foreach (string raw in data)
+        {
+            string abs = Path.GetFullPath(raw);
+            if (!File.Exists(abs))
+                return (null, JsonRun.Fail(CliDiagnostics.RenderDataNotFound(raw)));
+
+            var loaded = new Loaded { Path = abs, Reference = Path.GetFileName(abs), FromDataFlag = true };
+            if (Read(loaded) is { } why)
+                return (null, JsonRun.Fail(CliDiagnostics.RenderDataUnreadable(raw, why)));
+
+            named.Add(loaded);
+            s._byPath[abs] = loaded;
+        }
+
+        // ── what the document asks for ───────────────────────────────────────
+
+        var wanted = new List<string>();
+        void Want(string? sref)
+        {
+            if (sref is null) return;
+            if (!wanted.Contains(sref, StringComparer.Ordinal)) wanted.Add(sref);
+        }
+
+        foreach (int ti in pages)
+        foreach (var pc in tabs[ti].Plots)
+        foreach (var tc in pc.Traces)
+        {
+            Want(tc.SourcePath);
+            if (!string.IsNullOrEmpty(tc.XSourcePath)) Want(tc.XSourcePath);
+        }
+        // The selected source is wanted even when no trace names the sentinel: a loadpull SUMMARY
+        // column has no per-trace source of its own and reads it.
+        bool needsSelected = wanted.Contains(DataSourceRef.Selected, StringComparer.Ordinal)
+                          || pages.Any(ti => tabs[ti].Plots.Any(p => p.Traces.Any(t => t.SummaryColumn is not null)));
+        if (needsSelected) Want(DataSourceRef.Selected);
+
+        // ── where a reference can be found ───────────────────────────────────
+
+        string cddDir      = Path.GetDirectoryName(Path.GetFullPath(cddPath)) ?? ".";
+        string? wsDir      = WorkspaceRootFinder.FindAncestorCws(cddDir) is { } cws
+                           ? Path.GetDirectoryName(cws)
+                           : null;
+        string? resultsDir = wsDir is not null ? ResultsWriter.ResultsDirectory(wsDir) : null;
+
+        var searched = new List<string> { cddDir };
+        if (resultsDir is not null) searched.Add(resultsDir);
+        string tried = string.Join(", ", searched);
+
+        int nextNamed = 0;
+
+        foreach (string sref in wanted)
+        {
+            // The sentinel: the document's own SelectedDataSource first, then --data. A caller that
+            // named a file has said which run to draw, and that overrides a stale selection.
+            if (sref == DataSourceRef.Selected)
+            {
+                // config.SelectedDataSource is a FILE NAME, and the flat results/ convention means
+                // the most-recent run is literally called "run.npy" — the same string as the
+                // sentinel. So it is located as a name, never short-circuited as the sentinel; a
+                // display whose selection is that file must resolve to that file.
+                string? abs = named.Count > 0 ? named[0].Path
+                            : LocateFile(config.SelectedDataSource, cddDir, resultsDir);
+                if (abs is null)
+                    return (null, JsonRun.Fail(CliDiagnostics.RenderCddSelectedUnbound(DataSourceRef.Selected)));
+
+                if (!s._byPath.TryGetValue(abs, out var sel))
+                {
+                    sel = new Loaded { Path = abs, Reference = sref, FromDataFlag = false };
+                    if (Read(sel) is { } why)
+                        return (null, JsonRun.Fail(CliDiagnostics.RenderCddUnreadable(abs, why)));
+                    s._byPath[abs] = sel;
+                }
+                if (named.Count > 0) nextNamed = Math.Max(nextNamed, 1);
+                s._refToPath[sref] = abs;
+                s._selected        = abs;
+                continue;
+            }
+
+            // A concrete reference: beside the `.cdd`, then under the workspace's results/, then a
+            // --data file whose NAME matches, then the next unclaimed --data in order.
+            string? found = LocateOnDisk(sref, cddDir, resultsDir)
+                         ?? named.FirstOrDefault(n => string.Equals(
+                                Path.GetFileName(n.Path), Path.GetFileName(sref),
+                                StringComparison.OrdinalIgnoreCase))?.Path;
+
+            if (found is null && nextNamed < named.Count) found = named[nextNamed++].Path;
+
+            if (found is null)
+                return (null, JsonRun.Fail(CliDiagnostics.RenderCddSourceUnresolved(sref, tried)));
+
+            if (!s._byPath.TryGetValue(found, out var entry))
+            {
+                entry = new Loaded { Path = found, Reference = sref, FromDataFlag = false };
+                if (Read(entry) is { } why)
+                    return (null, JsonRun.Fail(CliDiagnostics.RenderCddUnreadable(found, why)));
+                s._byPath[found] = entry;
+            }
+            s._refToPath[sref] = found;
+        }
+
+        s._selected ??= s._refToPath.Count > 0 ? s._refToPath.Values.First() : null;
+
+        // R-rnd4-4's last clause: a --data that binds nothing is a refusal, not a shrug. A caller
+        // that misspelled a path, or handed over last week's run, must not get a picture drawn from
+        // whatever happened to be lying beside the document.
+        foreach (var n in named)
+        {
+            if (s._refToPath.ContainsValue(n.Path)) continue;
+            return (null, JsonRun.Fail(CliDiagnostics.RenderDataBindsNothing(
+                n.Path, wanted.Count == 0 ? "nothing" : string.Join(", ", wanted.Select(w => $"'{w}'")))));
+        }
+
+        return (s, null);
+    }
+
+    /// <summary>
+    /// A reference as a path on disk: rooted as itself, otherwise beside the `.cdd` and then under
+    /// the workspace's <c>results/</c> — which is the flat, shared directory the application's own
+    /// library resolves a bare <c>&lt;name&gt;.npy</c> against.
+    /// </summary>
+    private static string? LocateOnDisk(string? sref, string cddDir, string? resultsDir)
+        => sref == DataSourceRef.Selected ? null : LocateFile(sref, cddDir, resultsDir);
+
+    /// <summary>The same walk, with no sentinel short-circuit — see the caller for why that matters.</summary>
+    private static string? LocateFile(string? sref, string cddDir, string? resultsDir)
+    {
+        if (string.IsNullOrEmpty(sref)) return null;
+        if (Path.IsPathRooted(sref)) return File.Exists(sref) ? Path.GetFullPath(sref) : null;
+
+        string beside = Path.GetFullPath(Path.Combine(cddDir, sref));
+        if (File.Exists(beside)) return beside;
+
+        if (resultsDir is not null)
+        {
+            string inResults = Path.GetFullPath(Path.Combine(resultsDir, sref));
+            if (File.Exists(inResults)) return inResults;
+        }
+        return null;
+    }
+
+    /// <summary>Loads one file. Returns null on success, or why it could not be read.</summary>
+    private static string? Read(Loaded l)
+    {
+        try
+        {
+            if (string.Equals(Path.GetExtension(l.Path), ".npy", StringComparison.OrdinalIgnoreCase))
+            {
+                (l.Data, _) = DataSetImporter.Import(l.Path);
+
+                // The two things a loaded source GAINS before a trace can be resolved against it,
+                // and both were found missing by §5.2's per-kind gate. Without the first, a trace on
+                // "SP1.Z" — a VIRTUAL cube, converted from S and Z0 on first read — resolves to
+                // nothing. Without the second, every DERIVED trace (Max Gain, µ, a stability
+                // circle) is dropped as the display opens, because a simulated run has no SNP by
+                // design and this narrow view is what stands in for one.
+                //
+                // Both are the same functions the application's own source library calls.
+                DataSourceView.MaterializeNetworkParamCubes(l.Data);
+                l.Snp = DataSourceView.NetworkViewOf(l.Data);
+                return null;
+            }
+
+            if (TouchstoneIO.ParsePortsFromExtension(l.Path) is not null)
+            {
+                l.Snp  = TouchstoneIO.ReadFile(l.Path);
+                l.Data = DataSetBuilder.FromSnp(l.Snp);
+                return null;
+            }
+
+            // .spl / .lpcwave and anything else the importer recognizes.
+            (l.Data, _) = DataSetImporter.Import(l.Path);
+            return null;
+        }
+        catch (Exception ex) { return ex.Message; }
+    }
+
+    // ── IPlotDataSources ─────────────────────────────────────────────────────
+
+    public string? ResolveAbs(string? sourceRef)
+    {
+        if (string.IsNullOrEmpty(sourceRef) || sourceRef == DataSourceRef.Selected) return _selected;
+        return _refToPath.TryGetValue(sourceRef, out var p) ? p
+             : Path.IsPathRooted(sourceRef) && _byPath.ContainsKey(sourceRef) ? sourceRef
+             : null;
+    }
+
+    public bool     Contains(string absPath)       => _byPath.ContainsKey(absPath);
+    public SNP?     NetworkFor(string absPath)     => _byPath.TryGetValue(absPath, out var e) ? e.Snp  : null;
+    public DataSet? DataFor(string absPath)        => _byPath.TryGetValue(absPath, out var e) ? e.Data : null;
+    public string?  DisplayNameFor(string absPath) => _byPath.ContainsKey(absPath) ? Path.GetFileName(absPath) : null;
+
+    public string? AliasFor(string absPath)
+    {
+        if (!_byPath.TryGetValue(absPath, out var e)) return null;
+        // Aliases are stored in the `.cdd` keyed the way a trace's own reference is — a bare file
+        // name relative to the results root. The reference this entry answered to is that key.
+        if (_aliases.TryGetValue(e.Reference, out var a) && a.Length > 0) return a;
+        if (_aliases.TryGetValue(Path.GetFileName(absPath), out var b) && b.Length > 0) return b;
+        return null;
+    }
+
+    /// <summary>
+    /// True when more than one source carrying a NETWORK is loaded — the same test the application
+    /// makes, and the reason it is that test rather than a plain count: a trace label carries its
+    /// source's name to tell two S-parameter curves apart.
+    /// </summary>
+    public bool HasMultipleSources => _byPath.Values.Count(e => e.Snp is { IsEmpty: false }) > 1;
+
+    public DataSet? SelectedData => _selected is not null ? DataFor(_selected) : null;
+
+    // ── reporting ────────────────────────────────────────────────────────────
+
+    public IReadOnlyList<RenderSourceJson> Report()
+        => _refToPath
+           .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+           .Select(kv => new RenderSourceJson(
+               kv.Key, kv.Value,
+               _byPath.TryGetValue(kv.Value, out var e) && e.FromDataFlag ? "--data" : "document"))
+           .ToList();
+}

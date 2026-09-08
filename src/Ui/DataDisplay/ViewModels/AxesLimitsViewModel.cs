@@ -156,14 +156,14 @@ public partial class AxesLimitsViewModel : ViewModelBase
         }
 
         var w = _plot.Axes.Window;
-        _plot.Axes.Window      = new Rect(Math.Min(xMin, xMax), w.Y, Math.Abs(xMax - xMin), w.Height);
+        _plot.Axes.Window      = new PlotRect(Math.Min(xMin, xMax), w.Y, Math.Abs(xMax - xMin), w.Height);
         _plot.Axes.WindowState = _plot.Axes.Window;
 
         // On Rect plots the secondary axis shares the X range.
         if (IsRect && _plot.Axes.ShowSecondary)
         {
             var ws = _plot.Axes.WindowSecondary;
-            _plot.Axes.WindowSecondary      = new Rect(Math.Min(xMin, xMax), ws.Y, Math.Abs(xMax - xMin), ws.Height);
+            _plot.Axes.WindowSecondary      = new PlotRect(Math.Min(xMin, xMax), ws.Y, Math.Abs(xMax - xMin), ws.Height);
             _plot.Axes.WindowSecondaryState = _plot.Axes.WindowSecondary;
         }
 
@@ -183,7 +183,7 @@ public partial class AxesLimitsViewModel : ViewModelBase
         }
 
         var w = _plot.Axes.Window;
-        _plot.Axes.Window      = new Rect(w.X, Math.Min(yMin, yMax), w.Width, Math.Abs(yMax - yMin));
+        _plot.Axes.Window      = new PlotRect(w.X, Math.Min(yMin, yMax), w.Width, Math.Abs(yMax - yMin));
         _plot.Axes.WindowState = _plot.Axes.Window;
         RaiseRedraw();
     }
@@ -200,8 +200,8 @@ public partial class AxesLimitsViewModel : ViewModelBase
     private void ApplySquareFromEditedAxis(double lo, double hi, bool editedIsX)
     {
         var edited = editedIsX
-            ? new Rect(Math.Min(lo, hi), 0, Math.Abs(hi - lo), 0)
-            : new Rect(0, Math.Min(lo, hi), 0, Math.Abs(hi - lo));
+            ? new PlotRect(Math.Min(lo, hi), 0, Math.Abs(hi - lo), 0)
+            : new PlotRect(0, Math.Min(lo, hi), 0, Math.Abs(hi - lo));
 
         var square = Plot.SquareCentredOnOrigin(edited);
         _plot.Axes.Window      = square;
@@ -219,7 +219,7 @@ public partial class AxesLimitsViewModel : ViewModelBase
         if (Math.Abs(y2Max - y2Min) < 1e-15) return;
 
         var ws = _plot.Axes.WindowSecondary;
-        _plot.Axes.WindowSecondary      = new Rect(ws.X, Math.Min(y2Min, y2Max), ws.Width, Math.Abs(y2Max - y2Min));
+        _plot.Axes.WindowSecondary      = new PlotRect(ws.X, Math.Min(y2Min, y2Max), ws.Width, Math.Abs(y2Max - y2Min));
         _plot.Axes.WindowSecondaryState = _plot.Axes.WindowSecondary;
         RaiseRedraw();
     }

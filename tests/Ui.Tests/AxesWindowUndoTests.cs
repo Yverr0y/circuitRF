@@ -31,8 +31,8 @@ public sealed class AxesWindowUndoTests
         var display = new DataDisplayViewModel(new DataSourceLibraryViewModel(), addEmptyPlot: false);
         display.CanvasSizeProvider = () => (800.0, 600.0);
         var container = display.AddPlot(PlotType.Rect);
-        container.PlotVM.Plot.Axes.Window          = new Rect(1.0, -40.0, 4.0, 40.0);
-        container.PlotVM.Plot.Axes.WindowSecondary = new Rect(1.0, -180.0, 4.0, 360.0);
+        container.PlotVM.Plot.Axes.Window          = new PlotRect(1.0, -40.0, 4.0, 40.0);
+        container.PlotVM.Plot.Axes.WindowSecondary = new PlotRect(1.0, -180.0, 4.0, 360.0);
         display.UndoRedo.Clear();                 // discard the AddPlot entry
         return (display, container);
     }
@@ -48,7 +48,7 @@ public sealed class AxesWindowUndoTests
 
         var before = plot.PlotVM.Plot.Axes.Window;
         var beforeSecondary = plot.PlotVM.Plot.Axes.WindowSecondary;
-        plot.PlotVM.Plot.Axes.Window = new Rect(2.0, -40.0, 4.0, 40.0);
+        plot.PlotVM.Plot.Axes.Window = new PlotRect(2.0, -40.0, 4.0, 40.0);
         plot.PushAxesWindowChange(before, beforeSecondary);
 
         Assert.True(dirtied > 0);
@@ -79,7 +79,7 @@ public sealed class AxesWindowUndoTests
         var axes = plot.PlotVM.Plot.Axes;
 
         var before = axes.Window;
-        var panned = new Rect(2.5, -37.0, 4.0, 40.0);
+        var panned = new PlotRect(2.5, -37.0, 4.0, 40.0);
         axes.Window = panned;
         plot.PushAxesWindowChange(before, axes.WindowSecondary);
 
@@ -104,8 +104,8 @@ public sealed class AxesWindowUndoTests
         var beforePrimary   = axes.Window;
         var beforeSecondary = axes.WindowSecondary;
 
-        axes.Window          = new Rect(2.0, -38.0, 4.0, 40.0);
-        axes.WindowSecondary = new Rect(2.0, -150.0, 4.0, 360.0);
+        axes.Window          = new PlotRect(2.0, -38.0, 4.0, 40.0);
+        axes.WindowSecondary = new PlotRect(2.0, -150.0, 4.0, 360.0);
         plot.PushAxesWindowChange(beforePrimary, beforeSecondary);
 
         display.UndoRedo.Undo();
@@ -123,7 +123,7 @@ public sealed class AxesWindowUndoTests
         var axes = plot.PlotVM.Plot.Axes;
 
         var before = axes.Window;
-        axes.Window = new Rect(2.5, -37.0, 4.0, 40.0);
+        axes.Window = new PlotRect(2.5, -37.0, 4.0, 40.0);
         plot.PushAxesWindowChange(before, axes.WindowSecondary);
 
         display.UndoRedo.Undo();
@@ -146,7 +146,7 @@ public sealed class AxesWindowUndoTests
         for (int i = 1; i <= 5; i++)
         {
             var before = axes.Window;
-            axes.Window = new Rect(before.X + 0.1, before.Y + 1.0, before.Width, before.Height);
+            axes.Window = new PlotRect(before.X + 0.1, before.Y + 1.0, before.Width, before.Height);
             plot.PushAxesWindowChange(before, axes.WindowSecondary, coalesce: true);
         }
         var afterRun = axes.Window;
@@ -169,12 +169,12 @@ public sealed class AxesWindowUndoTests
         var start = axes.Window;
 
         var beforePan = axes.Window;
-        axes.Window = new Rect(2.0, -40.0, 4.0, 40.0);
+        axes.Window = new PlotRect(2.0, -40.0, 4.0, 40.0);
         plot.PushAxesWindowChange(beforePan, axes.WindowSecondary);      // a pan — never coalesces
         var afterPan = axes.Window;
 
         var beforeZoom = axes.Window;
-        axes.Window = new Rect(2.2, -39.0, 3.6, 36.0);
+        axes.Window = new PlotRect(2.2, -39.0, 3.6, 36.0);
         plot.PushAxesWindowChange(beforeZoom, axes.WindowSecondary, coalesce: true);
 
         display.UndoRedo.Undo();
@@ -193,12 +193,12 @@ public sealed class AxesWindowUndoTests
         var start = axes.Window;
 
         var first = axes.Window;
-        axes.Window = new Rect(2.0, -40.0, 4.0, 40.0);
+        axes.Window = new PlotRect(2.0, -40.0, 4.0, 40.0);
         plot.PushAxesWindowChange(first, axes.WindowSecondary);
         var afterFirst = axes.Window;
 
         var second = axes.Window;
-        axes.Window = new Rect(3.0, -40.0, 4.0, 40.0);
+        axes.Window = new PlotRect(3.0, -40.0, 4.0, 40.0);
         plot.PushAxesWindowChange(second, axes.WindowSecondary);
 
         display.UndoRedo.Undo();
@@ -213,7 +213,7 @@ public sealed class AxesWindowUndoTests
     {
         var (display, first) = Fixture();
         var second = display.AddPlot(PlotType.Rect);
-        second.PlotVM.Plot.Axes.Window = new Rect(1.0, -40.0, 4.0, 40.0);
+        second.PlotVM.Plot.Axes.Window = new PlotRect(1.0, -40.0, 4.0, 40.0);
         display.UndoRedo.Clear();
 
         var a = first.PlotVM.Plot.Axes;
@@ -222,11 +222,11 @@ public sealed class AxesWindowUndoTests
         var bStart = b.Window;
 
         var beforeA = a.Window;
-        a.Window = new Rect(2.0, -40.0, 4.0, 40.0);
+        a.Window = new PlotRect(2.0, -40.0, 4.0, 40.0);
         first.PushAxesWindowChange(beforeA, a.WindowSecondary, coalesce: true);
 
         var beforeB = b.Window;
-        b.Window = new Rect(2.0, -40.0, 4.0, 40.0);
+        b.Window = new PlotRect(2.0, -40.0, 4.0, 40.0);
         second.PushAxesWindowChange(beforeB, b.WindowSecondary, coalesce: true);
 
         display.UndoRedo.Undo();

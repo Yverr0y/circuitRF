@@ -398,7 +398,7 @@ public sealed class ContourPlotRendererTests
             Primary    = (400.0, -400.0, 200.0, 200.0),
             Secondary  = (400.0, -400.0, 200.0, 200.0),
             CanvasSize = (400, 400),
-            Viewport   = new Avalonia.Rect(0, 0, 1, 1),
+            Viewport   = new PlotRect(0, 0, 1, 1),
         };
         // Use empty scatter — no drawing happens, but signature is verified.
         var scatter = new ScatterReduction(
@@ -419,7 +419,7 @@ public sealed class ContourPlotRendererTests
             Primary    = (400.0, -400.0, 200.0, 200.0),
             Secondary  = (400.0, -400.0, 200.0, 200.0),
             CanvasSize = (400, 400),
-            Viewport   = new Avalonia.Rect(0, 0, 1, 1),
+            Viewport   = new PlotRect(0, 0, 1, 1),
         };
         // DisplayMxp/Mxe = false — no drawing, no SkiaFonts load needed; signature verified.
         var cd = new ContourData { DisplayMxp = false, DisplayMxe = false };

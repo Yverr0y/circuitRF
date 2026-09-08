@@ -69,7 +69,7 @@ public sealed class TraceResolveContainmentTests
     {
         var t = CubeTrace();
 
-        PlotInspectorViewModel.SetCubeDataFrom(t, CorruptedRunDataSet(),
+        TraceResolve.SetCubeDataFrom(t, CorruptedRunDataSet(),
                                                PlotType.Smith, FreqUnit.GHz);
 
         Assert.Empty(t.Points);
@@ -89,7 +89,7 @@ public sealed class TraceResolveContainmentTests
             AppDataRoot.RedirectTo(root);
             CrashReporter.Install("circuitRF");
 
-            PlotInspectorViewModel.SetCubeDataFrom(CubeTrace(), CorruptedRunDataSet(),
+            TraceResolve.SetCubeDataFrom(CubeTrace(), CorruptedRunDataSet(),
                                                    PlotType.Smith, FreqUnit.GHz);
 
             string trail = string.Join("\n", Directory
@@ -164,7 +164,7 @@ public sealed class TraceResolveContainmentTests
         ds.AddToGroup("SP1", "Z0", DataSetBuilder.BuildZ0Cube(new[] { new Complex(50, 0) }));
 
         var t = CubeTrace();
-        PlotInspectorViewModel.SetCubeDataFrom(t, ds, PlotType.Smith, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(t, ds, PlotType.Smith, FreqUnit.GHz);
 
         Assert.Equal(3, t.Points.Count);
         Assert.Null(t.InvalidSpecText);

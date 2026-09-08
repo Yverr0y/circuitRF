@@ -183,7 +183,7 @@ public sealed class HarmonicaRenderTheme
     /// role table happens to give the same value — they are separate roles so a user can part
     /// them.</para>
     /// </summary>
-    public DataDisplay.RenderTheme ToPlotTheme(bool darkMode) => new(
+    public RenderTheme ToPlotTheme(bool darkMode) => new(
         GridColor       : SmithGrid,
         MinorGridColor  : GridLine,
         TickColor       : AxisLine,

@@ -63,7 +63,7 @@ public sealed class PlotAutoscaleCommandTests
         var plot = PlotWithATrace();
         plot.AutoscaleX = plot.AutoscaleY = plot.AutoscaleRightY = false;
 
-        var strayed = new Avalonia.Rect(90.0, 900.0, 4.0, 40.0);   // nowhere near the data
+        var strayed = new PlotRect(90.0, 900.0, 4.0, 40.0);   // nowhere near the data
         plot.Axes.Window = strayed;
 
         plot.Autoscale();                       // unforced: gated off, changes nothing
@@ -96,7 +96,7 @@ public sealed class PlotAutoscaleCommandTests
     {
         var a = PlotWithATrace();
         var b = PlotWithATrace();
-        a.Axes.Window = b.Axes.Window = new Avalonia.Rect(90.0, 900.0, 4.0, 40.0);
+        a.Axes.Window = b.Axes.Window = new PlotRect(90.0, 900.0, 4.0, 40.0);
 
         a.Autoscale();
         b.Autoscale(force: true);

@@ -127,7 +127,7 @@ public sealed class PlotVersusTests
         var ds = MakeSweptDs();
         var t  = MakeVersusTrace("Gain", "Pout", new AxisSlice("Pin", AxisRole.KeepAsX, 0));
 
-        PlotInspectorViewModel.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
 
         Assert.Null(t.ExpressionError);
         Assert.Equal(PoutVals, t.CubeXValues!.ToArray());
@@ -161,7 +161,7 @@ public sealed class PlotVersusTests
                                          new[] { 1.0, 2.0, 3.0 }));
 
         var t = MakeVersusTrace("Gain", "PoutShort", new AxisSlice("Pin", AxisRole.KeepAsX, 0));
-        PlotInspectorViewModel.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
 
         Assert.NotNull(t.ExpressionError);
         Assert.Contains("3 point", t.ExpressionError);
@@ -177,7 +177,7 @@ public sealed class PlotVersusTests
         ds.Add("Vout", new DataCube(new[] { pin }, PinVals.Select(v => new Complex(v, 1.0)).ToArray()));
 
         var t = MakeVersusTrace("Gain", "Vout", new AxisSlice("Pin", AxisRole.KeepAsX, 0));
-        PlotInspectorViewModel.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
 
         Assert.NotNull(t.ExpressionError);
         Assert.Contains("must be real", t.ExpressionError);
@@ -186,7 +186,7 @@ public sealed class PlotVersusTests
         // …and the named remedy actually works.
         t.XSpec = "mag(Vout)";
         t.ExpressionError = null;
-        PlotInspectorViewModel.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
         Assert.Null(t.ExpressionError);
         Assert.Equal(PinVals.Length, t.Points.Count);
     }
@@ -198,7 +198,7 @@ public sealed class PlotVersusTests
         foreach (var pt in new[] { PlotType.Smith, PlotType.Polar })
         {
             var t = MakeVersusTrace("Gain", "Pout", new AxisSlice("Pin", AxisRole.KeepAsX, 0));
-            PlotInspectorViewModel.SetCubeDataFrom(t, ds, pt, FreqUnit.GHz);
+            TraceResolve.SetCubeDataFrom(t, ds, pt, FreqUnit.GHz);
             Assert.NotNull(t.ExpressionError);
             Assert.Contains("Rect and Table", t.ExpressionError);
             Assert.Empty(t.Points);
@@ -210,7 +210,7 @@ public sealed class PlotVersusTests
     {
         var ds = MakeSweptDs();
         var t  = MakeVersusTrace("Gain", "Pout", new AxisSlice("Pin", AxisRole.PinToIndex, 2));
-        PlotInspectorViewModel.SetCubeDataFrom(t, ds, PlotType.Table, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(t, ds, PlotType.Table, FreqUnit.GHz);
 
         Assert.NotNull(t.ExpressionError);
         Assert.Contains("swept Y", t.ExpressionError);
@@ -221,7 +221,7 @@ public sealed class PlotVersusTests
     {
         var ds = MakeSweptDs();
         var t  = MakeVersusTrace("Gain", "dB10(Pout)", new AxisSlice("Pin", AxisRole.KeepAsX, 0));
-        PlotInspectorViewModel.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
 
         Assert.Null(t.ExpressionError);
         for (int i = 0; i < PoutVals.Length; i++)
@@ -238,7 +238,7 @@ public sealed class PlotVersusTests
                     new AxisSlice("Pin",    AxisRole.KeepAsX,       0),
                     new AxisSlice("RFfreq", AxisRole.FamilyIterate, 0));
 
-        PlotInspectorViewModel.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
 
         Assert.Null(t.ExpressionError);
         Assert.True(t.IsFamily);
@@ -273,7 +273,7 @@ public sealed class PlotVersusTests
                     new AxisSlice("RFfreq", AxisRole.FamilyIterate, 0));
         Assert.Equal("Gain[:, ~] vs Pout", t.CubeShorthand);
 
-        PlotInspectorViewModel.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
         Assert.Null(t.ExpressionError);
         Assert.Equal(2, t.FamilyCurves.Count);
     }
@@ -286,7 +286,7 @@ public sealed class PlotVersusTests
                     new AxisSlice("Pin",    AxisRole.KeepAsX,       0),
                     new AxisSlice("RFfreq", AxisRole.FamilyIterate, 0));
 
-        PlotInspectorViewModel.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
 
         Assert.NotNull(t.ExpressionError);
         Assert.Contains("RFfreq", t.ExpressionError);
@@ -305,7 +305,7 @@ public sealed class PlotVersusTests
             new AxisSlice("Pin",    AxisRole.KeepAsX,       0),
             new AxisSlice("RFfreq", AxisRole.FamilyIterate, 0),
         };
-        PlotInspectorViewModel.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
 
         Assert.Equal(2, t.FamilyCurves.Count);
         Assert.All(t.FamilyCurves, fc => Assert.Null(fc.RawX));
@@ -326,7 +326,7 @@ public sealed class PlotVersusTests
         xDs.Add("Pout", new DataCube(new[] { new Axis("Pin", PinVals, "dBm") }, measured));
 
         var t = MakeVersusTrace("Gain", "Pout", new AxisSlice("Pin", AxisRole.KeepAsX, 0));
-        PlotInspectorViewModel.SetCubeDataFrom(t, yDs, PlotType.Rect, FreqUnit.GHz, xDs);
+        TraceResolve.SetCubeDataFrom(t, yDs, PlotType.Rect, FreqUnit.GHz, xDs);
 
         Assert.Null(t.ExpressionError);
         Assert.Equal(measured, t.CubeXValues!.ToArray());   // the X file's values, not the Y file's
@@ -341,7 +341,7 @@ public sealed class PlotVersusTests
                                      new[] { 1.0, 2.0 }));
 
         var t = MakeVersusTrace("Gain", "Pout", new AxisSlice("Pin", AxisRole.KeepAsX, 0));
-        PlotInspectorViewModel.SetCubeDataFrom(t, yDs, PlotType.Rect, FreqUnit.GHz, xDs);
+        TraceResolve.SetCubeDataFrom(t, yDs, PlotType.Rect, FreqUnit.GHz, xDs);
 
         Assert.NotNull(t.ExpressionError);
         Assert.Contains("2 point", t.ExpressionError);
@@ -357,7 +357,7 @@ public sealed class PlotVersusTests
         var plot = new Plot(PlotType.Rect, FreqUnit.GHz);
 
         var vsPout = MakeVersusTrace("Gain", "Pout", new AxisSlice("Pin", AxisRole.KeepAsX, 0));
-        PlotInspectorViewModel.SetCubeDataFrom(vsPout, ds, PlotType.Rect, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(vsPout, ds, PlotType.Rect, FreqUnit.GHz);
         plot.Traces.Add(vsPout);
 
         Assert.Equal("Pout", plot.XLabel);
@@ -367,7 +367,7 @@ public sealed class PlotVersusTests
         var vsPin = MakeTrace();
         vsPin.CubeName = "Gain";
         vsPin.Slice    = new[] { new AxisSlice("Pin", AxisRole.KeepAsX, 0) };
-        PlotInspectorViewModel.SetCubeDataFrom(vsPin, ds, PlotType.Rect, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(vsPin, ds, PlotType.Rect, FreqUnit.GHz);
         plot.Traces.Add(vsPin);
 
         Assert.True(plot.XLabelsDiffer);
@@ -377,7 +377,7 @@ public sealed class PlotVersusTests
         // Two traces sharing an X quantity keep the single centred label.
         plot.Traces.Remove(vsPin);
         var alsoPout = MakeVersusTrace("Gain", "Pout", new AxisSlice("Pin", AxisRole.KeepAsX, 0));
-        PlotInspectorViewModel.SetCubeDataFrom(alsoPout, ds, PlotType.Rect, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(alsoPout, ds, PlotType.Rect, FreqUnit.GHz);
         plot.Traces.Add(alsoPout);
         Assert.False(plot.XLabelsDiffer);
     }
@@ -391,13 +391,13 @@ public sealed class PlotVersusTests
         var swept = MakeTrace();
         swept.CubeName = "Gain";
         swept.Slice    = new[] { new AxisSlice("Pin", AxisRole.KeepAsX, 0) };
-        PlotInspectorViewModel.SetCubeDataFrom(swept, ds, PlotType.Rect, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(swept, ds, PlotType.Rect, FreqUnit.GHz);
         plot.Traces.Add(swept);
         Assert.Equal("(dBm)", plot.XAxisUnitLabel);      // was hardcoded "(GHz)" for every Rect plot
 
         plot.Traces.Clear();
         var vs = MakeVersusTrace("Gain", "Pout", new AxisSlice("Pin", AxisRole.KeepAsX, 0));
-        PlotInspectorViewModel.SetCubeDataFrom(vs, ds, PlotType.Rect, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(vs, ds, PlotType.Rect, FreqUnit.GHz);
         plot.Traces.Add(vs);
         Assert.Equal("", plot.XAxisUnitLabel);           // a versus X has no unit to claim
     }
@@ -413,7 +413,7 @@ public sealed class PlotVersusTests
         ds.Add("PoutFold", new DataCube(new[] { new Axis("Pin", PinVals, "dBm") }, folded));
 
         var t = MakeVersusTrace("Gain", "PoutFold", new AxisSlice("Pin", AxisRole.KeepAsX, 0));
-        PlotInspectorViewModel.SetCubeDataFrom(t, ds, PlotType.Table, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(t, ds, PlotType.Table, FreqUnit.GHz);
 
         var plot = new Plot(PlotType.Table, FreqUnit.GHz);
         plot.Traces.Add(t);
@@ -438,7 +438,7 @@ public sealed class PlotVersusTests
         var t  = MakeVersusTrace("Gain", "Pout",
                     new AxisSlice("Pin",    AxisRole.KeepAsX,       0),
                     new AxisSlice("RFfreq", AxisRole.FamilyIterate, 0));
-        PlotInspectorViewModel.SetCubeDataFrom(t, ds, PlotType.Table, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(t, ds, PlotType.Table, FreqUnit.GHz);
 
         var plot = new Plot(PlotType.Table, FreqUnit.GHz);
         plot.Traces.Add(t);
@@ -471,7 +471,7 @@ public sealed class PlotVersusTests
     {
         var ds = MakeSweptDs();
         var t  = MakeVersusTrace("Gain", "Pout", new AxisSlice("Pin", AxisRole.KeepAsX, 0));
-        PlotInspectorViewModel.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
 
         var m = new Marker(t, freq: 0.0, isMulti: false, isDelta: false, index: 1)
         {
@@ -493,7 +493,7 @@ public sealed class PlotVersusTests
         var t  = MakeVersusTrace("Gain", "Pout",
                     new AxisSlice("Pin",    AxisRole.KeepAsX,       0),
                     new AxisSlice("RFfreq", AxisRole.FamilyIterate, 0));
-        PlotInspectorViewModel.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(t, ds, PlotType.Rect, FreqUnit.GHz);
 
         // Marker on curve 1 (2.4 GHz), sample 3: its Pout is 1 dB below curve 0's.
         var m = new Marker(t, freq: 0.0, isMulti: false, isDelta: false, index: 1)

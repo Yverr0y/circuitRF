@@ -486,7 +486,7 @@ public sealed class PlotTypeIntegrityTests
         vm.XMinText = "-1";   // asymmetric about the origin
         vm.XMaxText = "3";
 
-        var expected = Plot.SquareCentredOnOrigin(new Avalonia.Rect(-1, 0, 4, 0));
+        var expected = Plot.SquareCentredOnOrigin(new PlotRect(-1, 0, 4, 0));
         var actual   = plot.Axes.Window;
         Assert.Equal(expected.X,      actual.X,      6);
         Assert.Equal(expected.Y,      actual.Y,      6);

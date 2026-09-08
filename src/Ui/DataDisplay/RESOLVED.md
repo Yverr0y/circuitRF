@@ -2092,3 +2092,56 @@ reads `dB(S(1,1)) ≤ -250.00`. Sixteen `$"{name}={value}"` sites in `Trace.cs` 
 that carries no operator still gets the `=`, so every non-floored row is unchanged.
 
 Gate: `tests/Ui.Tests/DbFloorTests.cs`, whose fixture is the reporter's own |S11| samples verbatim.
+
+
+## RND-4 — half of this folder moved below the UI firewall (2026-09-07)
+
+`docs/sonnet-briefs/brief-render-4-data-display.md`. The **measurement, the extraction rationale and
+every trap** are in `src/Render/RESOLVED.md`'s RND-4 entry — this is the note for someone working in
+`src/Ui/DataDisplay` who needs to know where a type went and what is still theirs.
+
+### Where things are now
+
+**`CircuitRF.Render.DataDisplay` (`src/Render/DataDisplay/`)** — reached through the `global using` in
+`src/Ui/GlobalUsings.cs`, so no `using` line changed anywhere:
+
+- `Models/` — `Plot`, `Trace`, `Axes`, `Marker`, `Misc`/`TraceProperties`, `ContourData`,
+  `DataDisplayConfig`, `EngineeringFormat`, `LoadpullRecognition`, `SummaryColumn*`, `TraceLabeler`,
+  `AppSettings`, and the new `PlotGeometry` (`PlotRect`/`PlotPoint`).
+- `Renderers/` — all eight, `AxesRenderer` through `TraceRenderer_MarkerRenderer`.
+- The spec grammar — `CubeTraceSpecParser`, `SliceTokenParser`, `TraceExpression`, `VersusResolver`,
+  `VersusSpec`, `DbFloor`, `DataSourceRef`, `ComplexStringHelper`.
+- The four extractions — `TraceResolve`, `ContourResolve`, `SummaryResolve`, `PlotConfigLoader` — plus
+  `DataSourceView`, `PlotComposer`, `PlotDocumentWriter`, `PlotCanvasGeometry`, `PlotLabelStrips`,
+  `DataDisplayJson`, `IPlotDataSources`, `DataDisplayDiagnostics`.
+
+**Still here, and still the only half that may name Avalonia:** every view model, `Controls/`,
+`Converters/`, `Models/UndoRedo.cs`, `DataDisplayDocument`, `Gesture`, `NpyFileDragPayload`,
+`PlotExporter`'s dialog and clipboard plumbing, and two new files —
+`PlotAccentColor` (was `RenderTheme.GetTransparentAccent`) and `LibraryDataSources`
+(`IPlotDataSources` over the live library).
+
+### What this means when you change something here
+
+- **A resolver is not yours to change alone.** `TrySetCubeData`, `RebuildContour` and `RebuildSummary`
+  are now thin: they find the source and refresh the pickers, then call the shared function.
+  `circuitrf render` calls the same one, and its gate compares bytes — so a rule added on this side
+  only will fail `tests/Ui.Tests/Render/RenderDataDisplayCliTests.cs` rather than drift silently,
+  which is the point.
+- **`PlotExporter` no longer composes.** `Place(container)` turns a `PlotContainerViewModel` into the
+  six numbers `PlotComposer` lays out; everything else is `CircuitRF.Render.DataDisplay`'s. Adding
+  something to an export means adding it to `PlacedPlot`, not to a second copy of the fit.
+- **`PlotContainerViewModel`'s three canvas-extent properties forward** to `PlotCanvasGeometry`. They
+  mirror formulas inside `AxesRenderer.DrawComplexXLabels` and `PlotRenderer.ComputeViewport` term for
+  term — that mirroring is exactly why there must be one copy.
+- **Which traces get a label strip is `PlotLabelStrips.For`.** This view model still builds the
+  `LabelStripViewModel`s (they carry the strip width, the live theme and the on-screen `AutoLabel` the
+  export does not use), but the SELECTION rule is shared, because R-rnd4-7 makes the strips content.
+- **`AppSettingsViewModel` wraps `AppSettings.Current`**, not a private `Load()`. A setting changed in
+  the dialog is the setting a renderer reads.
+- **`TraceProperties`' colours are `SKColor`.** `ColorItem` converts once, at the binding boundary, for
+  the swatch. The palette is explicit ARGB and must stay so — `src/Render/RESOLVED.md` says why.
+- **A failed trace resolve still reaches the crash trail**, through
+  `DataDisplayDiagnostics.NoteSink`, installed by `DataDisplayDiagnosticsInstaller` (a module
+  initializer, because this assembly has three entry points). Unset — in the CLI, or a unit test —
+  the failure still ends as `<invalid>` on the trace, which is what the user sees either way.

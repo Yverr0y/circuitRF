@@ -537,109 +537,13 @@ public partial class TraceRowViewModel : ViewModelBase
         var cd = _trace.ContourData;
         if (cd is null) return;
 
-        if (!EnsureLoadpullSurface()) { ClearContourGrid(cd); return; }
+        // The lookup and the pickers are this view model's; the geometry is ContourResolve's
+        // (RND-4 R-rnd4-2) — the same function `circuitrf render` calls, so a headless contour is
+        // the contour on screen rather than one that resembles it.
+        if (!EnsureLoadpullSurface()) { ContourResolve.ClearGrid(cd); return; }
 
-        var surface = _loadpullSurface!;
-        int freqIdx = Math.Clamp(cd.FreqIndex, 0, Math.Max(0, surface.Frequencies.Count - 1));
-
-        ConstraintSpec constraint = cd.ContourConstraintKind == ConstraintKind.Compression
-            ? ConstraintSpec.AtCompression(cd.ConstraintValue)
-            : ConstraintSpec.AtConstantMetric(cd.ConstraintMetricName, cd.ConstraintValue);
-
-        var plane = (_parent.PlotType is PlotType.Smith or PlotType.Polar)
-            ? SurfacePlane.Gamma
-            : SurfacePlane.Z;
-
-        // brief-dd-z0-renormalization.md §5: Γ plane only — a Z-plane contour has no reference
-        // impedance concept (the impedance grid does not move), so z0 stays null there and cannot
-        // leak into that fit even if the trace's Z0 field holds a stale override from a prior
-        // Smith/Polar view.
-        System.Numerics.Complex? z0 = plane == SurfacePlane.Gamma ? _trace.Z0 : (System.Numerics.Complex?)null;
-
-        var fit = surface.Fit(freqIdx, cd.MetricName, constraint, plane, z0,
-            kernel: cd.InterpKernel, smooth: cd.Smoothing, epsilon: cd.Epsilon);
-        if (fit is null) { ClearContourGrid(cd); return; }
-
-        var grid    = surface.Resample(fit);
-        // §1: for Smith/Polar compute a disk-covering fill grid over [-1,1]×[-1,1]
-        // at higher resolution so the TopoMap fill reaches the circular-clip edge.
-        var fillGrid = (plane == SurfacePlane.Gamma)
-            ? surface.Resample(fit, new ViewBox(-1.0, 1.0, -1.0, 1.0), 80)
-            : null;
-        var scatter = surface.Reduce(freqIdx, cd.MetricName, constraint, plane, z0);
-
-        ContourLevelSet levels;
-        if (cd.LevelMode == ContourLevelMode.Range)
-        {
-            double step = cd.LevelStep > 0 ? cd.LevelStep : 0.5;
-            var    raw  = ContourExtractor.LevelsByStep(grid, step, cd.LevelStart);
-            double lo   = Math.Min(cd.LevelStart, cd.LevelStop);
-            double hi   = Math.Max(cd.LevelStart, cd.LevelStop);
-            double[] filtered = Array.FindAll(raw.Levels, l => l >= lo && l <= hi);
-            levels = new ContourLevelSet(filtered);
-        }
-        else
-        {
-            levels = ContourExtractor.LevelsBetween(grid, Math.Max(1, cd.LevelCount));
-        }
-
-        cd.Grid       = grid;
-        cd.FillGrid   = fillGrid;
-        cd.Scatter    = scatter;
-        cd.Levels     = levels;
-        cd.GammaPlane = plane == SurfacePlane.Gamma;
-
-        // Cache MXP / MXE for the renderer (surface stays out of renderer path).
-        // MXP/MXE markers are the compression-based recommended terminations — independent of this
-        // contour's metric/constraint (so they stay put when plotting e.g. Efficiency at Constant Pout).
-        var (mxpR, mxeR) = surface.RecommendedMxx(fit);
-        cd.MxpCoord = mxpR?.Measured;
-        cd.MxeCoord = mxeR?.Measured;
-
-        // Marker surface-evaluation hooks — capture locals so the closures are stable.
-        var      evalSurface = surface;
-        int      evalFreq    = freqIdx;
-        string   evalMetric  = cd.MetricName;
-        var      evalConstr  = constraint;
-        var      evalPlane   = plane;
-        var      evalZ0      = z0;
-        RbfKernel evalKernel = cd.InterpKernel;
-        double   evalSmooth  = cd.Smoothing;
-        double?  evalEps     = cd.Epsilon;
-
-        cd.EvaluateMetric = (coord, snapped) =>
-            evalSurface.MetricAtCoord(evalFreq, evalMetric, coord, evalConstr, evalPlane, evalZ0,
-                nearest: snapped, kernel: evalKernel, smooth: evalSmooth, epsilon: evalEps);
-
-        var nodeCoords = scatter.Coords;
-        cd.NearestNode = coord =>
-        {
-            if (nodeCoords is null || nodeCoords.Length == 0) return coord;
-            int best = 0; double bestD2 = double.PositiveInfinity;
-            for (int i = 0; i < nodeCoords.Length; i++)
-            {
-                double dx = nodeCoords[i].Real - coord.Real;
-                double dy = nodeCoords[i].Imaginary - coord.Imaginary;
-                double d2 = dx * dx + dy * dy;
-                if (d2 < bestD2) { bestD2 = d2; best = i; }
-            }
-            return nodeCoords[best];
-        };
-
+        ContourResolve.Rebuild(_trace, _loadpullSurface!, _parent.PlotType);
         _parent.Notify();
-    }
-
-    private static void ClearContourGrid(ContourData cd)
-    {
-        cd.Grid           = null;
-        cd.FillGrid       = null;
-        cd.Scatter        = null;
-        cd.Levels         = new ContourLevelSet(Array.Empty<double>());
-        cd.MxpCoord       = null;
-        cd.MxeCoord       = null;
-        cd.EvaluateMetric = null;
-        cd.NearestNode    = null;
-        cd.GammaPlane     = false;
     }
 
     private bool EnsureLoadpullSurface()
@@ -3041,7 +2945,7 @@ public partial class TraceRowViewModel : ViewModelBase
             RefreshSourceZ0PreservingOverride(match.Entry);
         }
         else if (match?.Entry.Data is { } matchDs && match.CubeName is { } matchCube
-                 && PlotInspectorViewModel.StampSourceZ0FromCube(matchDs, _trace, matchCube))
+                 && TraceResolve.StampSourceZ0FromCube(matchDs, _trace, matchCube))
         {
             _sourceZ0Kind = null;   // network-path stash only; the cube path reads SourceZ0PerPort
             // With Override off, Trace.Z0 is documented as a read-only MIRROR of the source's port-1

@@ -388,9 +388,9 @@ public sealed class HarmonicaRenderBudgetTests : IDisposable
             }
         }
         if (minX < maxX && minY < maxY)
-            plot.Axes.Window = new Avalonia.Rect(minX, minY, maxX - minX, maxY - minY);
+            plot.Axes.Window = new PlotRect(minX, minY, maxX - minX, maxY - minY);
         if (minY2 < maxY2 && minX < maxX)
-            plot.Axes.WindowSecondary = new Avalonia.Rect(minX, minY2, maxX - minX, maxY2 - minY2);
+            plot.Axes.WindowSecondary = new PlotRect(minX, minY2, maxX - minX, maxY2 - minY2);
     }
 
     private static void DrawPanel(SKCanvas canvas, Plot plot, SKRect rect, RenderTheme theme)

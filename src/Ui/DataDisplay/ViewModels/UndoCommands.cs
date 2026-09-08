@@ -232,16 +232,16 @@ internal sealed class ResizePlotCommand : IUndoableCommand
 internal sealed class AxesWindowCommand : IUndoableCommand
 {
     private readonly PlotContainerViewModel _vm;
-    private readonly Avalonia.Rect _oldWindow, _oldSecondary;
+    private readonly PlotRect _oldWindow, _oldSecondary;
 
     // Not readonly: consecutive wheel-zoom steps EXTEND the entry already on the stack rather than
     // pushing one per notch — see ExtendTo.
-    private Avalonia.Rect _newWindow, _newSecondary;
+    private PlotRect _newWindow, _newSecondary;
 
     public AxesWindowCommand(
         PlotContainerViewModel vm,
-        Avalonia.Rect oldWindow, Avalonia.Rect oldSecondary,
-        Avalonia.Rect newWindow, Avalonia.Rect newSecondary,
+        PlotRect oldWindow, PlotRect oldSecondary,
+        PlotRect newWindow, PlotRect newSecondary,
         bool coalescable = false)
     {
         _vm            = vm;
@@ -270,7 +270,7 @@ internal sealed class AxesWindowCommand : IUndoableCommand
     /// <summary>Moves this entry's "after" state forward, keeping its original "before". Folds a
     /// run of wheel-zoom steps into ONE undo entry, so a single undo returns to where the run
     /// started rather than unwinding it a notch at a time.</summary>
-    public void ExtendTo(Avalonia.Rect newWindow, Avalonia.Rect newSecondary)
+    public void ExtendTo(PlotRect newWindow, PlotRect newSecondary)
     {
         _newWindow    = newWindow;
         _newSecondary = newSecondary;
@@ -279,7 +279,7 @@ internal sealed class AxesWindowCommand : IUndoableCommand
     public void Execute() => Apply(_newWindow, _newSecondary);
     public void Undo()    => Apply(_oldWindow, _oldSecondary);
 
-    private void Apply(Avalonia.Rect window, Avalonia.Rect secondary)
+    private void Apply(PlotRect window, PlotRect secondary)
     {
         var axes = _vm.PlotVM.Plot.Axes;
         axes.Window          = window;

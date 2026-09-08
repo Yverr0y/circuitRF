@@ -1288,7 +1288,8 @@ internal static class CliDiagnostics
 
     public static Diagnostic RenderPathRequired() => new(
         "render.args.path-required", DiagnosticSeverity.Error,
-        "render: a path is required — a .csch, .csym or .clay, a cell folder, or a workspace with --cell.");
+        "render: a path is required — a .csch, .csym, .clay or .cdd, a cell folder, or a workspace "
+      + "with --cell.");
 
     public static Diagnostic RenderUnknownOption(string option) => Diagnostic.Create(
         "render.args.unknown-option", DiagnosticSeverity.Error,
@@ -1400,6 +1401,78 @@ internal static class CliDiagnostics
     public static Diagnostic RenderSizeMalformed(string text) => Diagnostic.Create(
         "render.size.malformed", DiagnosticSeverity.Error,
         "render: --size expects <width>x<height> in whole units, got '{text}'.", ("text", text));
+
+    // ── render, a `.cdd` (RND-4) ─────────────────────────────────────────────
+    //
+    // R-rnd4-4's rule runs through all of these: an UNRESOLVED source is a refusal naming --data,
+    // never an empty plot. An empty plot is the single most dangerous output in this brief — it is a
+    // valid picture, it exports cleanly, and it looks exactly like a measurement that came back
+    // empty.
+
+    public static Diagnostic RenderPlotMalformed(string text) => Diagnostic.Create(
+        "render.plot.malformed", DiagnosticSeverity.Error,
+        "render: --plot expects a 1-based plot number, got '{text}'.", ("text", text));
+
+    public static Diagnostic RenderCddUnreadable(string path, string reason) => Diagnostic.Create(
+        "render.cdd.unreadable", DiagnosticSeverity.Error,
+        "render: '{path}' is not a readable data display — {reason}.",
+        ("path", path), ("reason", reason));
+
+    public static Diagnostic RenderCddEmpty(string path) => Diagnostic.Create(
+        "render.cdd.empty", DiagnosticSeverity.Error,
+        "render: '{path}' holds no plots.", ("path", path));
+
+    /// <summary>The sentinel with nothing bound to it. Names BOTH the sentinel and the flag, because
+    /// a caller reading only the flag would not know which of its sources the document wanted.</summary>
+    public static Diagnostic RenderCddSelectedUnbound(string sentinel) => Diagnostic.Create(
+        "render.cdd.selected-unbound", DiagnosticSeverity.Error,
+        "render: this display's traces read the selected dataset ('{sentinel}'), and headlessly there "
+      + "is no selection to read. Name the file with --data <path>.", ("sentinel", sentinel));
+
+    public static Diagnostic RenderCddSourceUnresolved(string sourceRef, string tried) => Diagnostic.Create(
+        "render.cdd.source-unresolved", DiagnosticSeverity.Error,
+        "render: this display reads '{sourceRef}', which is not here (looked at {tried}). Name it with "
+      + "--data <path>.", ("sourceRef", sourceRef), ("tried", tried));
+
+    public static Diagnostic RenderDataNotFound(string path) => Diagnostic.Create(
+        "render.data.not-found", DiagnosticSeverity.Error,
+        "render: --data '{path}' does not exist.", ("path", path));
+
+    public static Diagnostic RenderDataUnreadable(string path, string reason) => Diagnostic.Create(
+        "render.data.unreadable", DiagnosticSeverity.Error,
+        "render: --data '{path}' could not be read — {reason}.", ("path", path), ("reason", reason));
+
+    /// <summary>R-rnd4-4's last clause: a <c>--data</c> that binds nothing is a refusal, not a shrug.</summary>
+    public static Diagnostic RenderDataBindsNothing(string path, string referenced) => Diagnostic.Create(
+        "render.data.binds-nothing", DiagnosticSeverity.Error,
+        "render: --data '{path}' matches nothing this display reads. It reads {referenced}.",
+        ("path", path), ("referenced", referenced));
+
+    public static Diagnostic RenderNoSuchTab(string asked, string available) => Diagnostic.Create(
+        "render.tab.not-found", DiagnosticSeverity.Error,
+        "render: no tab '{asked}'. This display has {available}.", ("asked", asked), ("available", available));
+
+    public static Diagnostic RenderNoSuchPlot(int asked, int count) => Diagnostic.Create(
+        "render.plot.not-found", DiagnosticSeverity.Error,
+        "render: --plot {asked} — this tab has {count} plot(s).", ("asked", asked), ("count", count));
+
+    /// <summary>R-rnd4-5: multi-page is PDF's alone. SVG and PNG are single-page formats, and
+    /// inventing out-1.svg, out-2.svg from one -o is a filename this tool made up (R-rnd0-6).</summary>
+    public static Diagnostic RenderAllTabsNotMultiPage(string format) => Diagnostic.Create(
+        "render.all-tabs.single-page", DiagnosticSeverity.Error,
+        "render: --all-tabs writes one page per tab and {format} is a single-page format. Write a "
+      + ".pdf, or pick one tab with --tab.", ("format", format));
+
+    /// <summary>
+    /// An option that means something for a drawing and nothing for a data display. Named rather
+    /// than ignored: a caller that passed --window expecting a crop would otherwise get a full
+    /// picture back with no hint that its flag did nothing.
+    /// </summary>
+    public static Diagnostic RenderCddViewportUnsupported(string option) => Diagnostic.Create(
+        "render.cdd.not-applicable", DiagnosticSeverity.Error,
+        "render: {option} describes a drawing — a viewport in world coordinates, a layer, a level of "
+      + "detail — and a data display has none of those; its plots carry their own axis windows and "
+      + "its page is laid out to fit them. Use --tab, --plot and --size.", ("option", option));
 
     public static Diagnostic RenderMarginMalformed(string text) => Diagnostic.Create(
         "render.margin.malformed", DiagnosticSeverity.Error,

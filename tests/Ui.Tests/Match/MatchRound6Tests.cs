@@ -1112,7 +1112,7 @@ public sealed class MatchRound6Tests(ITestOutputHelper output)
     {
         var (_, _, d) = Open();
 
-        var labels = DataDisplay.TraceLabeler.ComputeMinimalLabels(d.MagnitudePlot.Traces);
+        var labels = TraceLabeler.ComputeMinimalLabels(d.MagnitudePlot.Traces);
         output.WriteLine(string.Join(" | ", labels));
 
         Assert.Equal(["S(1,1) dB20", "S(2,1) dB20"], labels);

@@ -138,7 +138,7 @@ public partial class DataDisplayViewModel : ViewModelBase, IDisposable
     /// </param>
     internal void PushAxesWindowChange(
         PlotContainerViewModel container,
-        Rect oldWindow, Rect oldSecondary,
+        PlotRect oldWindow, PlotRect oldSecondary,
         bool coalesce = false)
     {
         var axes = container.PlotVM.Plot.Axes;
@@ -290,27 +290,16 @@ public partial class DataDisplayViewModel : ViewModelBase, IDisposable
     private void PlaceInfoBoxInLogicalCoords(
         Marker marker, Trace trace, Plot plot, PlotContainerViewModel container)
     {
-        // PlotControl fills the container, so its size in screen pixels is ViewWidth × ViewHeight.
+        // PlotControl fills the container, so its size in screen pixels is ViewWidth x ViewHeight.
         double cW = container.ViewWidth  > 0 ? container.ViewWidth  : container.Width;
         double cH = container.ViewHeight > 0 ? container.ViewHeight : container.Height;
 
-        var tf = PlotRenderer.BuildTransforms(plot, (cW, cH));
-        var dl = trace.GetMarkerDataLocation(marker);
-        var px = tf.ToCanvas(dl.X, dl.Y, trace.UseSecondaryAxis);
-
-        // Offset 15/10 px from symbol, clamped inside the container bounds.
-        double sxPx = Math.Clamp((double)px.X + 15, 0, Math.Max(0, cW - 80));
-        double syPx = Math.Clamp((double)px.Y + 10, 0, Math.Max(0, cH - 50));
-
-        // Convert PlotControl-local screen pixels → DataDisplay logical coordinates:
-        //   DataDisplay screen X = container.ViewLeft + sxPx
-        //                        = container.Left * zoom + offsetX + sxPx
-        //   DataDisplay logical X = (screen X − offsetX) / zoom
-        //                        = container.Left + sxPx / zoom
-        double zoom = _zoomLevel > 0 ? _zoomLevel : 1.0;
-        marker.InfoBoxPos = new Point(
-            container.Left + sxPx / zoom,
-            container.Top  + syPx / zoom);
+        // The placement rule itself is PlotCanvasGeometry's since RND-4: an export draws a
+        // never-dragged info box exactly like a dragged one, so a headless render has to put it in
+        // the same place or it would move a box that is on screen.
+        marker.InfoBoxPos = PlotCanvasGeometry.DefaultInfoBoxPosition(
+            marker, trace, plot, cW, cH, container.Left, container.Top,
+            _zoomLevel > 0 ? _zoomLevel : 1.0);
     }
 
     private void RemoveMarkerInfoBoxesForContainer(PlotContainerViewModel container)
@@ -1281,11 +1270,10 @@ public partial class DataDisplayViewModel : ViewModelBase, IDisposable
 
     // ---- Save / Load helpers ----------------------------------------
 
-    internal static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        WriteIndented = true,
-        Converters    = { new JsonStringEnumConverter() },
-    };
+    // One copy, in CircuitRF.Render.DataDisplay since RND-4, because `circuitrf render` reads the
+    // same files: without the enum converter every PlotType/FreqUnit/MatrixType in a `.cdd` falls
+    // back to its default, and a Smith plot opens as a Rect one — a display that draws and is wrong.
+    internal static JsonSerializerOptions JsonOpts => DataDisplayJson.Options;
 
     /// <summary>
     /// Builds a <see cref="TabConfig"/> snapshot of this DataDisplay —
@@ -1337,260 +1325,19 @@ public partial class DataDisplayViewModel : ViewModelBase, IDisposable
     // to _plots, including SNP-library lookup, broken-entry fallback, and
     // marker restoration.  Returns the added container so callers such as
     // PasteFromConfigAsync can collect pasted containers.
+    // Loads a single PlotContainerConfig and appends the resulting container to _plots. Returns the
+    // added container so callers such as PasteFromConfigAsync can collect pasted containers.
+    //
+    // RND-4 (R-rnd4-2) split this in three. What is HERE is the two halves that need a library or a
+    // view model: making every referenced source ready (an await, and a broken-entry placeholder for
+    // one that is gone), and building the view models around the finished Plot. The middle — read the
+    // config, build and resolve the traces, restore the markers and the axis window — is
+    // PlotConfigLoader, below the UI firewall, which is what `circuitrf render` opens a `.cdd` with.
     private async Task<PlotContainerViewModel> LoadPlotContainerConfigAsync(PlotContainerConfig pc, string configDir)
     {
-        var plot = new Plot(pc.PlotType, pc.FreqUnit);
+        await EnsureSourcesLoadedAsync(pc);
 
-        plot.CustomTitle     = pc.CustomTitle;
-        plot.CustomTitleOn   = pc.CustomTitleOn;
-        plot.CustomXLabel    = pc.CustomXLabel;
-        plot.CustomXLabelOn  = pc.CustomXLabelOn;
-        plot.CustomYLabel    = pc.CustomYLabel;
-        plot.CustomYLabelOn  = pc.CustomYLabelOn;
-        plot.CustomY2Label   = pc.CustomY2Label;
-        plot.CustomY2LabelOn = pc.CustomY2LabelOn;
-        plot.TableViewAscendingSortOrder = pc.TableViewAscendingSortOrder;
-        plot.TableViewScrollIndex        = pc.TableViewScrollIndex;
-        plot.FontSize                    = pc.FontSize > 0 ? pc.FontSize : 12;
-        plot.ColumnWidth                 = pc.FreqColumnWidth > 0 ? pc.FreqColumnWidth : 115;
-        plot.TableOptimum                = pc.TableOptimum;
-        plot.TableReadMode               = pc.TableReadMode;
-        plot.TableCompression            = pc.TableCompression > 0 ? pc.TableCompression : 3.0;
-        plot.SummaryLoadpullGroup        = pc.SummaryLoadpullGroup;
-
-        foreach (var traceConfig in pc.Traces)
-        {
-            if (traceConfig.SourcePath is null) continue;
-
-            // traceConfig.SourcePath now stores the logical SourceRef (not an absolute/relative path).
-            string? sref        = traceConfig.SourcePath;
-            string? resolvedPath = Library?.ResolveAbs(sref);
-
-            // For cross-schematic refs or abs Touchstone: resolve and lazy-load that specific file.
-            if (resolvedPath is not null &&
-                !string.IsNullOrEmpty(sref) && sref != DataSourceRef.Selected &&
-                Library is not null)
-            {
-                await Library.LoadFileAsync(resolvedPath);
-            }
-
-            // Look up the library entry; also grab the SNP for network-bound traces.
-            DataSourceEntryViewModel? libEntry = null;
-            SNP? snp = null;
-
-            if (Library is not null && resolvedPath is not null)
-            {
-                libEntry = Library.Entries
-                    .FirstOrDefault(e => string.Equals(e.FilePath, resolvedPath,
-                                         StringComparison.OrdinalIgnoreCase));
-
-                if (libEntry is null && File.Exists(resolvedPath))
-                {
-                    await Library.LoadFileAsync(resolvedPath);
-                    libEntry = Library.Entries
-                        .FirstOrDefault(e => string.Equals(e.FilePath, resolvedPath,
-                                             StringComparison.OrdinalIgnoreCase));
-                }
-                else if (libEntry is null)
-                {
-                    Library.AddBrokenEntry(resolvedPath);
-                    libEntry = Library.Entries
-                        .FirstOrDefault(e => string.Equals(e.FilePath, resolvedPath,
-                                             StringComparison.OrdinalIgnoreCase));
-                }
-
-                // NetworkView first, Snp as the fallback — the SAME order the picker's own bind uses
-                // (`value.Entry.NetworkView ?? value.Entry.Snp`), so a trace restored from a .cdd and
-                // a trace picked in the card end up holding the SAME object for the same source.
-                //
-                // Reading Snp alone meant a SIMULATED source — which has no Snp by design — produced
-                // `snp == null`, and the `snp is null` guard just below dropped every DERIVED trace
-                // (stability circles, MaxGain, µ, …) as the display opened. Its S(i,j) traces are
-                // cube-bound and never went through this branch, which is why only the metrics were
-                // affected. For a Touchstone or a broken entry NetworkView IS Snp, so nothing about
-                // those two paths changes — including the broken-entry placeholder the guard below
-                // deliberately accepts.
-                snp = libEntry?.NetworkView ?? libEntry?.Snp;
-            }
-
-            bool isCubeBound    = (traceConfig.CubeName is not null && traceConfig.CubeSlice.Count > 0)
-                               || traceConfig.Expression is not null;
-            bool isContourTrace = traceConfig.ContourTrace is not null;
-            bool isSummaryTrace = traceConfig.SummaryColumn is not null;
-
-            // Network-bound: must have a valid SNP. Cube-bound/contour/summary: must have a library entry.
-            if (!isCubeBound && !isContourTrace && !isSummaryTrace && snp is null) continue;
-            if (isCubeBound  && libEntry is null) continue;
-            if (isContourTrace && libEntry is null) continue;
-            if (isSummaryTrace && libEntry is null) continue;
-
-            void RestoreMarkers(Trace tr, TraceConfig tcfg)
-            {
-                foreach (var mc in tcfg.Markers)
-                {
-                    var marker = new Marker(tr, mc.Freq, mc.IsMulti, mc.IsDelta, mc.Index, mc.FreqUnits)
-                    {
-                        Name                   = mc.Name,
-                        MatrixFormat           = mc.MatrixFormat,
-                        Style                  = mc.Style,
-                        UseNormalizedImpedance = mc.UseNormalizedImpedance,
-                        MaximumFractionDigits  = mc.MaximumFractionDigits,
-                        InfoBoxPos             = new Avalonia.Point(mc.InfoBoxX, mc.InfoBoxY),
-                        PositionStatic         = new System.Numerics.Vector2(mc.PositionStaticX, mc.PositionStaticY),
-                        MarkerKind             = mc.MarkerKind,
-                        ShowInfoBox            = mc.ShowInfoBox,
-                        ContourSnapped         = mc.ContourSnapped,
-                        VswrEnabled            = mc.VswrEnabled,
-                        VswrValue              = mc.VswrValue,
-                    };
-                    tr.Markers.Add(marker);
-                }
-            }
-
-            Trace trace;
-            if (isSummaryTrace)
-            {
-                var sc = traceConfig.SummaryColumn!;
-                var placeholder = new SNP(new double[] { 1e9 }, 1);
-                trace = new Trace(placeholder, MatrixType.S, 0, 0, DependentVarFormat.Db, false);
-                trace.SummaryColumn = new SummaryColumnData
-                {
-                    Kind           = sc.Kind,
-                    MetricName     = sc.MetricName,
-                    Header         = sc.Header,
-                    FractionDigits = sc.FractionDigits,
-                    ColumnWidth    = sc.ColumnWidth,
-                };
-                ApplyProperties(traceConfig.Properties, trace.Properties);
-                trace.SourceRef  = sref;
-                trace.SourcePath = resolvedPath;
-                RestoreMarkers(trace, traceConfig);
-                plot.Traces.Add(trace);
-                continue;
-            }
-            else if (isContourTrace)
-            {
-                var ct = traceConfig.ContourTrace!;
-                var placeholder = new SNP(new double[] { 1e9 }, 1);
-                trace = new Trace(placeholder, MatrixType.S, 0, 0, DependentVarFormat.Db, false);
-                trace.ContourData = new ContourData
-                {
-                    MetricName            = ct.MetricName,
-                    ContourConstraintKind = ct.ConstraintKind,
-                    ConstraintMetricName  = ct.ConstraintMetricName,
-                    ConstraintValue       = ct.ConstraintValue,
-                    FreqIndex             = ct.FreqIndex,
-                    LoadpullGroup         = ct.LoadpullGroup,
-                    LevelMode             = ct.LevelMode,
-                    LevelStart            = ct.LevelStart,
-                    LevelStep             = ct.LevelStep,
-                    LevelStop             = ct.LevelStop,
-                    LevelCount            = ct.LevelCount,
-                    ShowIsoLines          = ct.ShowIsoLines,
-                    ShowFill              = ct.ShowFill,
-                    DrawLabels            = ct.DrawLabels,
-                    SelectedFillKind      = ct.SelectedFillKind,
-                    ColorMap              = ct.ColorMap,
-                    LabelSpacing          = ct.LabelSpacing,
-                    DisplayMxp            = ct.DisplayMxp,
-                    DisplayMxe            = ct.DisplayMxe,
-                    DisplayGridPoints     = ct.DisplayGridPoints,
-                    GridPointColor        = new SKColor(ct.GridPointColor),
-                    LabelForeground       = new SKColor(ct.LabelForeground),
-                    LineColor             = new SKColor(ct.LineColor),
-                    StrokeWidth           = ct.StrokeWidth,
-                    LineColorOverridden   = ct.LineColorOverridden,
-                    LabelBackground       = new SKColor(ct.LabelBackground),
-                    GridPointSize         = ct.GridPointSize,
-                    LevelFontSize         = ct.LevelFontSize,
-                    FadeLineOpacity       = ct.FadeLineOpacity,
-                    InterpKernel          = ct.InterpKernel,
-                    Smoothing             = ct.Smoothing,
-                    Epsilon               = ct.Epsilon,
-                };
-                ApplyProperties(traceConfig.Properties, trace.Properties);
-                trace.SourceRef  = sref;
-                trace.SourcePath = resolvedPath;
-                RestoreMarkers(trace, traceConfig);
-                plot.Traces.Add(trace);
-                continue;
-            }
-            else if (isCubeBound)
-            {
-                // Use a placeholder SNP (or the actual SNP if the file has one).
-                var placeholderSnp = snp ?? new SNP(new double[] { 1e9 }, 2);
-                trace = new Trace(placeholderSnp, MatrixType.S, 0, 0,
-                                  DependentVarFormat.Db, traceConfig.UseSecondaryAxis);
-                trace.CubeName   = traceConfig.CubeName;
-                trace.Transform  = traceConfig.CubeTransform;
-                trace.Slice      = traceConfig.CubeSlice.Count > 0
-                    ? traceConfig.CubeSlice.Select(s => s.ToSlice()).ToArray()
-                    : null;
-                trace.Expression = traceConfig.Expression;
-            }
-            else
-            {
-                trace = new Trace(snp!, traceConfig.MatrixType, traceConfig.Row,
-                                  traceConfig.Col, traceConfig.YAxis, traceConfig.UseSecondaryAxis);
-                trace.Derived = traceConfig.Derived;
-            }
-
-            // Ordered port selection for network metrics (R-stb-3a) — restored for every trace
-            // kind, since a .cdd may carry a derived trace on either source path.
-            trace.InputPort             = traceConfig.InputPort;
-            trace.OutputPort            = traceConfig.OutputPort;
-            trace.PassivityWholeNetwork = traceConfig.PassivityWholeNetwork;
-            trace.PassiveExtraction     = traceConfig.PassiveExtraction;
-
-            trace.SourceRef             = sref;
-            trace.SourcePath            = resolvedPath;
-
-            // "Plot versus" (Y vs X). XSourcePath is persisted the same logical way a source alias
-            // is — relative to the results root when it lives there — and names a CONCRETE file
-            // (never the "Selected" sentinel: an X side belongs to one dataset, not to whichever
-            // source happens to be selected).
-            trace.XSpec = traceConfig.XSpec;
-            if (!string.IsNullOrEmpty(traceConfig.XSourcePath))
-            {
-                string? xAbs = Library?.ResolveAbs(traceConfig.XSourcePath);
-                if (xAbs is not null && Library is not null) await Library.LoadFileAsync(xAbs);
-                trace.XSourcePath = xAbs;
-            }
-            trace.MatrixFormat          = traceConfig.MatrixFormat;
-            trace.ColumnWidth           = traceConfig.ColumnWidth > 0 ? traceConfig.ColumnWidth : 115;
-            trace.XColumnWidth          = traceConfig.XColumnWidth;
-            foreach (var kvp in traceConfig.FamilyColumnWidths)
-                trace.FamilyColumnWidths[kvp.Key] = kvp.Value;
-            trace.FormatString          = traceConfig.FormatString;
-            trace.MaximumFractionDigits = traceConfig.MaximumFractionDigits;
-
-            if (ComplexStringHelper.TryParse(traceConfig.Z0, out System.Numerics.Complex z0))
-                trace.Z0 = z0;
-            trace.Z0OverrideEnabled = traceConfig.Z0Override;
-
-            ApplyProperties(traceConfig.Properties, trace.Properties);
-
-            if (isCubeBound)
-                PlotInspectorViewModel.TrySetCubeData(trace, Library, pc.PlotType, pc.FreqUnit);
-            else if (snp is not null && !snp.IsEmpty)
-                trace.BuildPath(pc.PlotType, pc.FreqUnit);
-
-            if (isCubeBound) { RestoreMarkers(trace, traceConfig); plot.Traces.Add(trace); continue; }
-
-            RestoreMarkers(trace, traceConfig);
-            plot.Traces.Add(trace);
-        }
-
-        if (pc.Axes is { } savedAxes)
-            plot.RestoreAxesFromConfig(
-                savedAxes.AutoscaleX, savedAxes.AutoscaleY,
-                savedAxes.AutoscaleRightY, savedAxes.AutoscaleMag,
-                new Rect(savedAxes.WindowX, savedAxes.WindowY,
-                         savedAxes.WindowWidth, savedAxes.WindowHeight),
-                new Rect(savedAxes.WindowSecondaryX, savedAxes.WindowSecondaryY,
-                         savedAxes.WindowSecondaryWidth, savedAxes.WindowSecondaryHeight));
-        else
-            plot.Autoscale();  // no axes config — old file, default to full autoscale
+        var plot = PlotConfigLoader.LoadPlot(pc, new LibraryDataSources(Library));
 
         var plotVm    = new PlotViewModel(plot);
         var inspector = new PlotInspectorViewModel(plot, () => { }, Library);
@@ -1607,6 +1354,50 @@ public partial class DataDisplayViewModel : ViewModelBase, IDisposable
         _plots.Add(container);
         RebuildMarkerInfoBoxesForContainer(container);
         return container;
+    }
+
+    /// <summary>
+    /// Makes every source this plot's traces reference resolvable BEFORE the plot is built: a
+    /// cross-schematic ref or an absolute Touchstone is lazily loaded, a file that no longer exists
+    /// becomes a broken-entry placeholder (which the trace guards deliberately accept, so the trace
+    /// survives to be re-pointed rather than being silently dropped).
+    ///
+    /// <para>Separated from the build in RND-4. It is idempotent per path and touches only the
+    /// library, so doing it for every trace first and building afterwards leaves exactly the library
+    /// state — and therefore exactly the lookups — the interleaved version produced.</para>
+    /// </summary>
+    private async Task EnsureSourcesLoadedAsync(PlotContainerConfig pc)
+    {
+        if (Library is null) return;
+
+        foreach (var traceConfig in pc.Traces)
+        {
+            if (traceConfig.SourcePath is null) continue;
+
+            string? sref         = traceConfig.SourcePath;
+            string? resolvedPath = Library.ResolveAbs(sref);
+
+            if (resolvedPath is not null &&
+                !string.IsNullOrEmpty(sref) && sref != DataSourceRef.Selected)
+            {
+                await Library.LoadFileAsync(resolvedPath);
+            }
+
+            if (resolvedPath is not null && !Library.Entries.Any(e =>
+                    string.Equals(e.FilePath, resolvedPath, StringComparison.OrdinalIgnoreCase)))
+            {
+                if (File.Exists(resolvedPath)) await Library.LoadFileAsync(resolvedPath);
+                else                          Library.AddBrokenEntry(resolvedPath);
+            }
+
+            // "Plot versus" may take its X from a DIFFERENT loaded file, which is a concrete path
+            // and never the "Selected" sentinel.
+            if (!string.IsNullOrEmpty(traceConfig.XSourcePath) &&
+                Library.ResolveAbs(traceConfig.XSourcePath) is { } xAbs)
+            {
+                await Library.LoadFileAsync(xAbs);
+            }
+        }
     }
 
     /// <summary>
@@ -1933,15 +1724,4 @@ public partial class DataDisplayViewModel : ViewModelBase, IDisposable
         return pastedContainers;
     }
 
-    private static void ApplyProperties(TracePropertiesConfig src, TraceProperties dst)
-    {
-        dst.LineEnabled      = src.LineEnabled;
-        dst.LineWidth        = src.LineWidth;
-        dst.LineColorIndex   = src.LineColorIndex;
-        dst.LineType         = src.LineType;
-        dst.MarkerEnabled    = src.MarkerEnabled;
-        dst.MarkerSize       = src.MarkerSize;
-        dst.MarkerColorIndex = src.MarkerColorIndex;
-        dst.MarkerType       = src.MarkerType;
-    }
 }

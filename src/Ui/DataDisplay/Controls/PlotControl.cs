@@ -187,8 +187,8 @@ namespace CircuitRF.Ui.DataDisplay.Controls
         // The axis windows as they were when the current pan began — the "before" half of the undo
         // entry pushed on release. Kept separately from Axes.WindowState, which the pan itself
         // rewrites as it goes.
-        private Avalonia.Rect _panUndoWindow;
-        private Avalonia.Rect _panUndoSecondary;
+        private PlotRect _panUndoWindow;
+        private PlotRect _panUndoSecondary;
 
         /// <summary>Pointer travel below which a press-release is a CLICK rather than a pan, in
         /// canvas pixels. Matches <c>PlotContainerView.DragThreshold</c> deliberately: the two
@@ -750,7 +750,7 @@ namespace CircuitRF.Ui.DataDisplay.Controls
 
             var selectedMarkers = SelectedMarkersProvider?.Invoke()?.ToHashSet();
             SkiaSharp.SKColor selColor = selectedMarkers?.Count > 0
-                ? RenderTheme.GetTransparentAccent(RenderTheme.SelectionAlpha)
+                ? PlotAccentColor.GetTransparentAccent(RenderTheme.SelectionAlpha)
                 : default;
 
             float zoom = (float)(ContainerProvider?.Invoke()?.ZoomLevel ?? 1.0);
@@ -1580,13 +1580,13 @@ namespace CircuitRF.Ui.DataDisplay.Controls
         //  Private helpers
         // ============================================================
 
-        private static Rect ZoomedWindow(Rect window, double wx, double wy, double factor)
+        private static PlotRect ZoomedWindow(PlotRect window, double wx, double wy, double factor)
         {
             double newW = window.Width  * factor;
             double newH = window.Height * factor;
             if (newW < 1e-12 || newH < 1e-12) return window;
 
-            return new Rect(
+            return new PlotRect(
                 wx - (wx - window.Left) * factor,
                 wy - (wy - window.Top)  * factor,
                 newW, newH);

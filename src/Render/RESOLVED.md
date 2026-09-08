@@ -224,3 +224,151 @@ fixtures, and its own piece of work.
 its ANCHOR, and framing on that is what cropped ports off a pasted page) and
 `LayoutRenderDetail.ToleranceDbu` (the effective decimation tolerance the verb REPORTS). A second copy
 of either measurement would be free to drift, silently.
+
+
+## RND-4 — rendering a `.cdd` (2026-09-07)
+
+`docs/sonnet-briefs/brief-render-4-data-display.md`. `circuitrf render <path.cdd>` draws a data
+display, and the Data Display's models, renderers and trace resolution live in
+`CircuitRF.Render.DataDisplay`. The verb's own half is `src/Cli/RenderDataDisplay.cs` +
+`src/Cli/CddSources.cs`; `docs/design/cli.md` §13.7 and `docs/design/data-display.md` §2.9 are the
+standing description.
+
+### R-rnd4-1's measurement, in full — the finding this brief existed to produce
+
+The brief's §2 predicted "the models and renderers can come down; the view models must not", and asked
+whether trace resolution lives inside the 3,738-line `TraceRowViewModel`. **It does not, and that is
+the whole answer to the question of whether this was bounded.**
+
+**Where trace resolution actually lived, measured before any code moved:**
+
+| Kind of trace | Resolver | Where it was |
+|---|---|---|
+| plain cube, expression, versus, network-parameter substitution, family | `SetCubeDataFrom` + `SetCubeDataFromCore` and ~12 private helpers | `PlotInspectorViewModel`, **all `static`, all taking a `DataSet`** |
+| network element (S/Z/Y), derived scalar, stability circle | `Trace.BuildPath` → `BuildCubePath`/`BuildMatrixPath`/`BuildDerivedPath` | `Models/Trace.cs` — **a model, not a view model** |
+| loadpull contour | `RebuildContour` (~90 lines) | `TraceRowViewModel`, entangled with a library lookup and three picker lists |
+| summary table column | `RebuildSummary` + two column builders (~150 lines) | `PlotInspectorViewModel`, same shape |
+
+So the 3,738-line view model is the trace CARD — pickers, combo synchronisation, undo — and it holds
+exactly one resolver, whose ~90 lines of arithmetic are separable from the ~40 that find the surface.
+`SetCubeDataFrom` was already cut as a static seam for harmonicaRF (R-h7-5). **The extraction was
+bounded, and nothing in it required `DataDisplayViewModel` or `DisplayWindowViewModel` to come down.**
+
+**The Avalonia surface, re-measured (the brief's own numbers were one round stale):**
+
+| File | What it named |
+|---|---|
+| `Models/Plot.cs` | `Rect` × 47, `Size` × 1 |
+| `Models/Trace.cs` | `Rect` × 27 |
+| `Models/Axes.cs` | `Rect` × 14, `Color` × 5 |
+| `Models/Misc.cs` | `Color`/`Colors.` × 35 |
+| `Models/Marker.cs` | `Avalonia.Point` × 2, fully qualified |
+| `Renderers/PlotRenderer.cs` | `Avalonia.Rect` × 7, fully qualified |
+| `Renderers/RenderTheme.cs` | `Media.Color`, `Styling.ThemeVariant`, `Threading.Dispatcher`, `Application.Current` |
+
+`TraceLabeler` and `AxesRenderer` named Avalonia only in COMMENTS — the brief counted them. Everything
+else is `Rect`, `Point` and `Color`: value types with framework-free equivalents.
+
+### What moved, and the four extractions
+
+Fourteen `Models`, eight `Renderers`, eight parsers/resolvers, and `ComplexStringHelper` moved whole,
+namespace `CircuitRF.Ui.DataDisplay` → `CircuitRF.Render.DataDisplay`, with a single `global using` in
+`src/Ui/GlobalUsings.cs` and its mirror in `tests/Ui.Tests` — RND-1's precedent, and the reason the
+~200 files that name these types were not touched. **All 12,885 `Ui.Tests` passed unchanged after the
+move**, which is the evidence that it was mechanical.
+
+Then four extractions, each a function BOTH sides now call: `TraceResolve`, `ContourResolve`,
+`SummaryResolve`, `PlotConfigLoader` — plus `DataSourceView`, `PlotComposer`, `PlotDocumentWriter`,
+`PlotCanvasGeometry`, `PlotLabelStrips`, `DataDisplayJson`. `PlotExporter` is now ~40 lines of
+`Place(container)` plus its dialog and clipboard plumbing; `ExportAsync` had its own single-container
+copy of the bounding-box fit and calls the shared composition instead.
+
+### Five things that had to change, and why each was load-bearing
+
+1. **`PlotRect`/`PlotPoint`, not `Rect`/`Point`.** src/Ui consumes this namespace through a global
+   using and is full of `Avalonia.Rect`; a same-named type would have turned every one of those files
+   into CS0104. The prefix is what keeps them apart, and a plot rectangle is not a control rectangle.
+   The semantics are Avalonia's exactly — **including `Union`'s empty-operand special case**, which
+   `Plot.Autoscale` depends on (it starts from `default(PlotRect)`) and which
+   `tests/Ui.Tests/Render/PlotGeometryParityTests.cs` holds over all 49 ordered pairs of a fixture set.
+
+2. **The trace-colour LUT is written out as explicit ARGB, not swapped for `SKColors.*`.** The two
+   libraries disagree on one name: Avalonia's `Transparent` is `#00FFFFFF`, Skia's is `#00000000`. That
+   is invisible while the colour is transparent — and not invisible at all once
+   `RenderTheme.ToSKColor` overrides the alpha with the trace's own opacity, where the same stored
+   choice renders white on one and black on the other. Only the colour INDEX is persisted, so no
+   `.cdd` moved.
+
+3. **`RenderTheme.GetTransparentAccent` did NOT come down.** It reads `Application.Current`'s resource
+   dictionary on the UI thread — and the measurement is why it stayed: no renderer ever called it. Its
+   three callers are `PlotControl`, `DragSelectOverlay` and `MarkerInfoBoxView`, all drawing SELECTION,
+   which R-rnd4-7 lists among the things that do not come out in an export. It is
+   `src/Ui/DataDisplay/PlotAccentColor.cs`.
+
+4. **`AppSettings` came down and gained `Current`.** `AxesRenderer` read
+   `AppSettingsViewModel.Instance.AlwaysDisplayDataSourcePrefix` and `PlotExporter` read three more.
+   `AppSettingsViewModel` now wraps `AppSettings.Current` rather than its own `Load()`, so the Settings
+   dialog and a headless render read one object. It has no disk persistence today, which is what keeps
+   a CLI run reproducible; **if that changes, `RenderDataDisplay.Draw` is where a headless render would
+   start depending on a preference file, and must not.**
+
+5. **`DataDisplayJson`.** The `.cdd` serializer options were `DataDisplayViewModel.JsonOpts`. A second
+   copy without `JsonStringEnumConverter` would read every `PlotType`, `FreqUnit`, `MatrixType` and
+   `ContourColorMap` as its default — a Smith plot opening as a Rect one, which draws and is wrong.
+
+### Two things the per-kind gate found that reading would not have
+
+§5.2 asks for one fixture per trace kind. Two of the eight failed, and both were the same shape: a plot
+that draws, exports cleanly, and is missing a curve.
+
+- **The virtual `Z`/`Y` cubes** are materialized on the first read of a source's `DataSet`, inside
+  `DataSourceEntryViewModel.Data`. A simulated S-parameter run carries `S` and `Z0` and no `Z` at all,
+  so a trace on `SP1.Z` resolved to nothing headlessly.
+- **The `NetworkView` SNP** is built from a grouped run's own S cube, likewise in the view model. A
+  simulated run has no SNP by design, so `PlotConfigLoader`'s `snp is null → continue` guard dropped
+  **every derived trace** — Max Gain, µ, µ′, |Δ|, passivity, and every stability circle — as the
+  display opened.
+
+Both are `DataSourceView` now, called by the library entry and by `CddSources`.
+
+### What the gates measured
+
+- **Byte identity against `PlotExporter`**, SVG and PDF, over eight trace kinds: a cube slice, an
+  expression, a "plot versus", a derived metric, an S→Z conversion, a stability circle, a loadpull
+  contour and a summary-table column. **The only normalisation is Skia's SVG element id counter**,
+  which is per PROCESS and in hex — the test process has emitted other SVGs, so its ids are past
+  `cl_29` while a freshly started CLI's start at `cl_3`, and they are not the same LENGTH. The PDF is
+  compared with **no exclusion at all**: `PlotDocumentWriter` writes no CreationDate, so two runs of
+  one composition are identical. (The written PDF's metadata `Title` is the output file's own name,
+  which is what the GUI's Export writes; the test renders the application's side through the same
+  writer with the same title rather than excluding bytes.)
+- **The composition survived being parameterised** (R-rnd4-6): rendering one display at 792×612 and at
+  1584×1224 puts every path coordinate at exactly 2×, which a re-fit would not — a re-fit changes the
+  pad, and the pad is what would move a dragged marker info box away from its place.
+- **The firewall row still passes.** `CircuitRF.Render.dll` references no Avalonia.
+
+### A trap worth naming: `run.npy` is both a file name and the sentinel
+
+`DataSourceRef.Selected` is the literal string `"run.npy"`, and `DataSourceLibraryViewModel.ResolveAbs`
+short-circuits on it. So a results file actually CALLED `run.npy` cannot be selected — `ResolveAbs`
+returns the (still null) `SelectedDataSourceAbs` instead of the path, `SelectedEntry` stays null, and
+Add Trace silently does nothing. The flat results directory names a run after its schematic, so this
+does not arise in practice; it cost an afternoon in a test fixture, and `CddSources` locates the
+document's recorded `SelectedDataSource` as a NAME rather than through the sentinel branch for exactly
+this reason.
+
+### And one that only a byte-identity gate could have found: `SkiaFonts.TestOverrideTypeface`
+
+`ScalarCubeTests` swaps the face every Data Display renderer draws text with, for one test, and
+restores it in a `finally`. That is correct within its own class and no protection at all against a
+class running CONCURRENTLY in another xUnit collection — and the window is invisible until something
+compares rendered BYTES. `RenderDataDisplayCliTests` draws the same display in this process and in a
+fresh CLI process, and the CLI has no override to read, so a plot drawn inside that window comes back
+in **Helvetica** on one side and **IBM Plex Sans** on the other. Reliably green alone, reliably red
+beside its neighbours — the shape of every shared-static hazard.
+
+`tests/Ui.Tests/SkiaFontsTypefaceCollection.cs` is the sibling of RND-1's
+`LayoutTextOutlineTypefaceCollection` (they are *different* statics: one is the face a layout LABEL
+is flattened with, the other the face a PLOT draws with). `ScalarCubeTests`,
+`PanAndMarkerLabelTests` — which renders pixels and was silently party to it — and
+`RenderDataDisplayCliTests` are in it.

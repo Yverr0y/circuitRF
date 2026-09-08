@@ -234,7 +234,7 @@ public partial class MarkerInfoBoxView : UserControl
         // on the compositor thread where Dispatcher.UIThread.Invoke can deadlock.
         bool    isSelected = Vm.IsSelected;
         SKColor selColor   = isSelected
-            ? RenderTheme.GetTransparentAccent(RenderTheme.SelectionAlpha)
+            ? PlotAccentColor.GetTransparentAccent(RenderTheme.SelectionAlpha)
             : default;
         context.Custom(new InfoBoxDrawOperation(
             new Rect(Bounds.Size),

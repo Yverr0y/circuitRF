@@ -44,3 +44,12 @@ global using CircuitRF.Design.Symbol;
 // canvases and commands all stayed here, as did AppPreferences and ClipboardRenderPolicy, which read
 // a per-USER preference store.
 global using CircuitRF.Render;
+
+// The Data Display's MODELS and RENDERERS, which crossed the same wall in RND-4
+// (brief-render-4-data-display.md R-rnd4-1/R-rnd4-2) so `circuitrf render` can draw a `.cdd` with
+// the code the window draws it with. What moved is Plot/Trace/Axes/Marker and their config model,
+// the eight Skia renderers, and the parsers and resolvers a trace is resolved through. What stayed
+// is every VIEW MODEL, every control, the undo stack and the exporter's file dialog — this
+// namespace draws and resolves; it does not edit. The measurement that decided the line is in
+// src/Render/RESOLVED.md.
+global using CircuitRF.Render.DataDisplay;

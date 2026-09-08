@@ -17,6 +17,7 @@ internal enum DocumentKind
     EmSetup,
     Netlist,
     AssemblyRules,
+    DataDisplay,
     Touchstone,
     Interchange,
     Unknown,
@@ -48,6 +49,7 @@ internal static class DocumentKinds
         DocumentKind.EmSetup       => "em-setup",
         DocumentKind.Netlist       => "netlist",
         DocumentKind.AssemblyRules => "assembly-rules",
+        DocumentKind.DataDisplay   => "data-display",
         DocumentKind.Touchstone    => "touchstone",
         DocumentKind.Interchange   => "interchange",
         _                          => "unknown",
@@ -92,6 +94,9 @@ internal static class DocumentKinds
             ".cem"   => DocumentKind.EmSetup,
             ".cnl"   => DocumentKind.Netlist,
             ".wasm"  => DocumentKind.AssemblyRules,
+            // A data display. `render` draws one (RND-4); `check`/`explain` do not read it yet, and
+            // classify it rather than calling it unknown so the refusal names what it IS.
+            ".cdd"   => DocumentKind.DataDisplay,
             _        => DocumentKind.Unknown,
         };
 

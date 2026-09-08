@@ -28,6 +28,7 @@ using Xunit;
 
 namespace CircuitRF.Ui.Tests;
 
+[Collection(CircuitRF.Ui.Tests.SkiaFontsTypefaceCollection.Name)]
 public sealed class ScalarCubeTests
 {
     // ── Helpers ──────────────────────────────────────────────────────────────

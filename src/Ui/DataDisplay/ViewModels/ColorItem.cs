@@ -1,4 +1,5 @@
 using Avalonia.Media;
+using SkiaSharp;
 
 namespace CircuitRF.Ui.DataDisplay.ViewModels;
 
@@ -8,17 +9,19 @@ namespace CircuitRF.Ui.DataDisplay.ViewModels;
 /// </summary>
 public sealed class ColorItem
 {
-    public int    Index { get; }
-    public Color  Color { get; }
-    public string Name  { get; }
-    public IBrush Brush { get; }
+    public int     Index { get; }
+    public SKColor Color { get; }
+    public string  Name  { get; }
+    public IBrush  Brush { get; }
 
-    public ColorItem(int index, Color color, string name)
+    // The LUT is SKColor since RND-4 moved TraceProperties below the UI firewall; the swatch this
+    // item paints is still an Avalonia brush, so the conversion happens once, here, at the boundary.
+    public ColorItem(int index, SKColor color, string name)
     {
         Index = index;
         Color = color;
         Name  = name;
-        Brush = new SolidColorBrush(color);
+        Brush = new SolidColorBrush(Avalonia.Media.Color.FromArgb(color.Alpha, color.Red, color.Green, color.Blue));
     }
 
     public override string ToString() => Name;

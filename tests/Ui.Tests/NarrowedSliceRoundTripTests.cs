@@ -153,7 +153,7 @@ public sealed class NarrowedSliceRoundTripTests
         var t = NarrowedTrace();
         t.Slice = back.CubeSlice.Select(s => s.ToSlice()).ToArray();
 
-        PlotInspectorViewModel.SetCubeDataFrom(t, SweptS(), PlotType.Smith, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(t, SweptS(), PlotType.Smith, FreqUnit.GHz);
 
         Assert.Equal(40, t.Points.Count);   // [10, 50) — not all 101
     }

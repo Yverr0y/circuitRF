@@ -86,93 +86,12 @@ public partial class PlotContainerViewModel : ViewModelBase
     public double ViewTop =>
         (Top - TopLabelExtraLogical) * _parent.ZoomLevel + _parent.ViewOffsetY;
 
-    /// <summary>
-    /// Logical (pre-zoom) width of one label strip.
-    /// Proportional to plot height so the strip and its font scale with both
-    /// user resize and zoom — identical behaviour to Rect Y-axis margin labels.
-    /// </summary>
-    private double StripLogicalWidth => Math.Max(Height * 0.05, 10.0);
+    // The three canvas-extent formulas moved to PlotCanvasGeometry in RND-4 so the headless
+    // composition frames a Smith plot the way this container does. These forward.
 
-    /// <summary>
-    /// Extra logical height added below the chart to accommodate overflow
-    /// X-axis label rows on Smith / Polar plots with multiple traces.
-    ///
-    /// Mirrors the font-size and row-height formulas in
-    /// AxesRenderer.DrawComplexXLabels so the canvas is always
-    /// exactly tall enough for every label row without clipping.
-    ///
-    /// Uses PlotRenderer public margin constants so that
-    /// changing a margin in one place automatically keeps this in sync.
-    ///
-    /// Returns 0 for Rect plots (their X labels live inside the Skia margin).
-    /// </summary>
-    private double BottomLabelExtraLogical
-    {
-        get
-        {
-            if (!PlotVM.Plot.PlotType.IsComplex()) return 0;
-            var plot = PlotVM.Plot;
-
-            bool hasCustomX = plot.CustomXLabelOn && !string.IsNullOrEmpty(plot.CustomXLabel);
-            int  n          = hasCustomX ? 1 : Math.Max(1, plot.Traces.Count);
-
-            // Mirror DrawComplexXLabels: lw = min(W,H)/200.  Once extra height
-            // is added H > W, so effectiveH = W → lw = W/200.
-            double lw         = Width / 200.0;
-            // Must match DrawComplexXLabels: FontSizeLabel * lw = 8 * lw = h * 0.04
-            // (mirrors AxisLabelControl's formula for the Y-axis strip labels).
-            double fontSizePx = plot.Axes.FontSizeLabel * lw;
-            if (fontSizePx < 4.0) return 0;   // matches DrawComplexXLabels guard
-
-            double lineH = fontSizePx * 1.2;
-            // Bottom edge of the last label row — must mirror DrawComplexXLabels exactly.
-            // The 2.0 * lw term matches the downward nudge applied in the renderer;
-            // change it here whenever you change the "+ 2f * lw" constant there.
-            double rowsH = lineH * (n - 0.2) + fontSizePx * 0.5 + 2.0 * lw;
-
-            // Compute the natural bottom space below the chart circle for a square canvas.
-            // Mirrors ComputeViewport exactly using the public margin constants.
-            // Circle is always sized with ComplexTopMarginBase regardless of title.
-            double availW  = Width * (1.0 - 2.0 * PlotRenderer.ComplexSideMargin);
-            double availH  = Width * (1.0 - PlotRenderer.ComplexTopMarginBase - PlotRenderer.ComplexBottomMargin);
-            double side    = Math.Min(availW, availH);
-            double natural = Width * (1.0 - PlotRenderer.ComplexTopMarginBase) - side;
-
-            return Math.Max(0, rowsH - natural);
-        }
-    }
-
-    /// <summary>
-    /// Extra logical height added above the chart circle so the plot title
-    /// is never clipped at the canvas top.
-    ///
-    /// When ViewHeight is grown by this amount,
-    /// PlotRenderer.ComputeViewport shifts the chart circle DOWN
-    /// by the same number of pixels (via the topExtra calculation), leaving the
-    /// extra canvas pixels above the title text.  The chart circle is never
-    /// resized — only the container height changes.
-    ///
-    /// Returns 0 when there is no title or the title fits in the natural
-    /// PlotRenderer.ComplexTopMarginBase space.
-    /// </summary>
-    private double TopLabelExtraLogical
-    {
-        get
-        {
-            if (!PlotVM.Plot.PlotType.IsComplex()) return 0;
-            if (string.IsNullOrEmpty(PlotVM.Plot.Title)) return 0;
-
-            // Title is drawn at vpTop/2 + titleSz*0.35 (baseline).
-            // Top of glyph: vpTop/2 − titleSz*0.65.
-            // For no canvas clipping: vpTop ≥ titleSz * 1.3.
-            // Natural top space = ComplexTopMarginBase * Width (same constant used
-            // for circle sizing — no shrink, pure upward growth).
-            double lw       = Width / 200.0;
-            double titleSz  = PlotVM.Plot.Axes.FontSizeLabel * 1.4 * lw;
-            double vpTopNat = PlotRenderer.ComplexTopMarginBase * Width;
-            return Math.Max(0, titleSz * 1.3 - vpTopNat);
-        }
-    }
+    private double StripLogicalWidth        => PlotCanvasGeometry.StripLogicalWidth(Height);
+    private double BottomLabelExtraLogical  => PlotCanvasGeometry.BottomLabelExtraLogical(PlotVM.Plot, Width);
+    private double TopLabelExtraLogical     => PlotCanvasGeometry.TopLabelExtraLogical(PlotVM.Plot, Width);
 
     /// <summary>
     /// Total screen width including per-trace Y-axis label strips on both sides.
@@ -545,9 +464,6 @@ public partial class PlotContainerViewModel : ViewModelBase
 
             if (isComplex)
             {
-                bool hasCustomY  = plot.CustomYLabelOn;
-                bool hasCustomY2 = plot.CustomY2LabelOn;
-
                 // Show filename prefix when settings force it, or when multiple SNPs are loaded.
                 // "Show the source prefix" is a LIBRARY-level convention: more than one source
                 // loaded (or the setting forcing it). It must reach ComputeMinimalLabels — the
@@ -565,40 +481,29 @@ public partial class PlotContainerViewModel : ViewModelBase
                 for (int i = 0; i < plot.Traces.Count; i++)
                     labelMap[plot.Traces[i]] = allLabels[i];
 
-                var leftTraces  = plot.LeftAxisTraces.Where(t => !t.IsContourTrace).ToList();
-                var rightTraces = plot.RightAxisTraces.Where(t => !t.IsContourTrace).ToList();
+                // WHICH traces get a strip, on which side, and whether the strip carries a
+                // custom label is PlotLabelStrips' rule since RND-4 — the export places the same
+                // strips from the same function, so a Smith plot's label column cannot be one thing
+                // on screen and another in the file. What is added here is what only the on-screen
+                // control uses: the strip width, the live theme, and the AutoLabel (the export
+                // renders the trace's own description instead, which is what it always did).
+                var (left, right) = PlotLabelStrips.For(plot, showFilePrefix);
 
-                // Custom Y label: one strip showing the custom text — no per-trace strips.
-                // No custom label: one strip per trace, AutoLabel set to the computed minimal label.
-                if (hasCustomY && leftTraces.Count > 0)
-                {
-                    LeftLabelStrips.Add(new LabelStripViewModel(leftTraces[0], false, sw, th)
-                        { CustomLabel = plot.CustomYLabel, ShowFilePrefix = showFilePrefix });
-                }
-                else if (!hasCustomY)
-                {
-                    foreach (var t in leftTraces)
-                        LeftLabelStrips.Add(new LabelStripViewModel(t, false, sw, th)
-                        {
-                            ShowFilePrefix = showFilePrefix,
-                            AutoLabel      = labelMap.GetValueOrDefault(t)
-                        });
-                }
+                foreach (var s in left)
+                    LeftLabelStrips.Add(new LabelStripViewModel(s.Trace, false, sw, th)
+                    {
+                        CustomLabel    = s.CustomLabel,
+                        ShowFilePrefix = s.ShowFilePrefix,
+                        AutoLabel      = s.CustomLabel is null ? labelMap.GetValueOrDefault(s.Trace) : null,
+                    });
 
-                if (hasCustomY2 && rightTraces.Count > 0)
-                {
-                    RightLabelStrips.Add(new LabelStripViewModel(rightTraces[0], true, sw, th)
-                        { CustomLabel = plot.CustomY2Label, ShowFilePrefix = showFilePrefix });
-                }
-                else if (!hasCustomY2)
-                {
-                    foreach (var t in rightTraces)
-                        RightLabelStrips.Add(new LabelStripViewModel(t, true, sw, th)
-                        {
-                            ShowFilePrefix = showFilePrefix,
-                            AutoLabel      = labelMap.GetValueOrDefault(t)
-                        });
-                }
+                foreach (var s in right)
+                    RightLabelStrips.Add(new LabelStripViewModel(s.Trace, true, sw, th)
+                    {
+                        CustomLabel    = s.CustomLabel,
+                        ShowFilePrefix = s.ShowFilePrefix,
+                        AutoLabel      = s.CustomLabel is null ? labelMap.GetValueOrDefault(s.Trace) : null,
+                    });
             }
         }
         else
@@ -717,7 +622,7 @@ public partial class PlotContainerViewModel : ViewModelBase
     /// gesture; the current ones are read here. See
     /// <see cref="DataDisplayViewModel.PushAxesWindowChange"/> for <paramref name="coalesce"/>.
     /// </summary>
-    public void PushAxesWindowChange(Rect oldWindow, Rect oldSecondary, bool coalesce = false)
+    public void PushAxesWindowChange(PlotRect oldWindow, PlotRect oldSecondary, bool coalesce = false)
         => _parent.PushAxesWindowChange(this, oldWindow, oldSecondary, coalesce);
 
     /// <summary>

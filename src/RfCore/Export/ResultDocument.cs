@@ -794,8 +794,13 @@ namespace RfCore.Export
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string?                         View,
         string                          Format,
-        RenderViewportJson              Viewport,
-        RenderExtentsJson               Extents,
+        // Both absent for a data display, which has no world coordinates at all: its plots carry
+        // their own axis windows and the page is laid out by a bounding-box fit over them. Reporting
+        // a made-up viewport there would be worse than reporting none — see DataDisplay below.
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        RenderViewportJson?             Viewport,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        RenderExtentsJson?              Extents,
         RenderSizeJson                  Size,
         RenderThemeJson                 Theme,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -804,7 +809,38 @@ namespace RfCore.Export
         RenderDetailJson?               Detail,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         RenderCountersJson?             Counters,
-        long                            Bytes);
+        long                            Bytes,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        RenderDataDisplayJson?          DataDisplay = null);
+
+    /// <summary>
+    /// What <c>render</c> decided about a <c>.cdd</c> (RND-4), which is a different set of questions
+    /// from a drawing's: WHICH tab and which plots were drawn, and — the one that matters most —
+    /// WHERE each of the document's data sources came from.
+    ///
+    /// <para><b>The sources are the point.</b> A `.cdd` holds no data; every curve in the picture was
+    /// re-resolved from a file this run had to find. A caller looking at the picture cannot tell
+    /// which file each trace read, and "the plot is empty" and "the plot read the wrong run" look
+    /// identical. R-rnd4-4 makes an UNRESOLVED source a refusal; this reports the resolved ones.</para>
+    /// </summary>
+    /// <param name="Pages">1 for a single tab, or the tab count under <c>--all-tabs</c>.</param>
+    public sealed record RenderDataDisplayJson(
+        string                            Tab,
+        int                               TabIndex,
+        int                               TabCount,
+        int                               Pages,
+        int                               Plots,
+        IReadOnlyList<RenderSourceJson>   Sources);
+
+    /// <param name="Reference">The logical reference as the document spells it — the
+    /// <c>run.npy</c> sentinel, a name relative to the results root, or an absolute path.</param>
+    /// <param name="Path">The file it resolved to.</param>
+    /// <param name="BoundBy">
+    /// <c>--data</c> when the caller named the file, <c>document</c> when the reference resolved
+    /// beside the `.cdd` on its own. Reported because those are two very different provenances for
+    /// the same picture.
+    /// </param>
+    public sealed record RenderSourceJson(string Reference, string Path, string BoundBy);
 
     /// <param name="Mode"><c>fit</c>, <c>window</c> or <c>center</c> — which of the three the caller
     /// asked for. The three are refused TOGETHER rather than ordered (R-rnd2-3), so exactly one is

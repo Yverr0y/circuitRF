@@ -31,6 +31,7 @@ using Xunit;
 
 namespace CircuitRF.Ui.Tests;
 
+[Collection(CircuitRF.Ui.Tests.SkiaFontsTypefaceCollection.Name)]
 public sealed class PanAndMarkerLabelTests : IDisposable
 {
     // Restored on dispose. The field is a shared mutable static and xunit runs test classes in
@@ -50,8 +51,8 @@ public sealed class PanAndMarkerLabelTests : IDisposable
     private static Plot TwoAxisPlot()
     {
         var plot = new Plot(PlotType.Rect, FreqUnit.GHz);
-        plot.Axes.Window          = new Avalonia.Rect(1e9, -40.0, 4e9,  40.0);
-        plot.Axes.WindowSecondary = new Avalonia.Rect(1e9, -180.0, 4e9, 360.0);
+        plot.Axes.Window          = new PlotRect(1e9, -40.0, 4e9,  40.0);
+        plot.Axes.WindowSecondary = new PlotRect(1e9, -180.0, 4e9, 360.0);
         plot.Axes.ShowSecondary   = true;
         plot.Axes.LockedPanning   = false;   // a new plot starts LOCKED; these tests pan it
         return plot;
@@ -160,7 +161,7 @@ public sealed class PanAndMarkerLabelTests : IDisposable
             tf.Secondary.XScale, tf.Secondary.YScale);
 
         Assert.Equal(w20, plot.Axes.WindowSecondary);
-        Assert.NotEqual(new Avalonia.Rect(1e9, -40.0, 4e9, 40.0), plot.Axes.Window);
+        Assert.NotEqual(new PlotRect(1e9, -40.0, 4e9, 40.0), plot.Axes.Window);
     }
 
     // ---- the sub-pixel shimmer -------------------------------------
@@ -183,8 +184,8 @@ public sealed class PanAndMarkerLabelTests : IDisposable
         plot.Traces.Add(left);
         plot.Traces.Add(right);
         plot.SetAxesViewport();
-        plot.Axes.Window          = new Avalonia.Rect(1.0, -40.0, 4.0, 40.0);
-        plot.Axes.WindowSecondary = new Avalonia.Rect(1.0, -180.0, 4.0, 360.0);
+        plot.Axes.Window          = new PlotRect(1.0, -40.0, 4.0, 40.0);
+        plot.Axes.WindowSecondary = new PlotRect(1.0, -180.0, 4.0, 360.0);
         plot.Axes.ShowSecondary   = true;
         plot.Axes.LockedPanning   = false;   // a new plot starts LOCKED; these tests pan it
         return plot;
@@ -336,12 +337,12 @@ public sealed class PanAndMarkerLabelTests : IDisposable
     [Fact]
     public void Ticks_NoMinorLandsOnAMajorsPixel()
     {
-        var axes = new Axes { Window = new Avalonia.Rect(1.0, -40.0, 4.0, 40.0) };
+        var axes = new Axes { Window = new PlotRect(1.0, -40.0, 4.0, 40.0) };
         const double xScale = 630.0 / 4.0, yScale = 420.0 / 40.0;
 
         for (int k = 0; k <= 400; k++)
         {
-            axes.WindowState = new Avalonia.Rect(1.0, -40.0, 4.0, 40.0);
+            axes.WindowState = new PlotRect(1.0, -40.0, 4.0, 40.0);
             axes.Translate(k / xScale, 0);
             var t = axes.Ticks(minorTicks: true);
 
@@ -364,13 +365,13 @@ public sealed class PanAndMarkerLabelTests : IDisposable
     [Fact]
     public void Ticks_SameGridlineHasTheSameValueAtEveryPanOffset()
     {
-        var axes = new Axes { Window = new Avalonia.Rect(1.0, -40.0, 4.0, 40.0) };
+        var axes = new Axes { Window = new PlotRect(1.0, -40.0, 4.0, 40.0) };
         const double xScale = 630.0 / 4.0;
         var seen = new Dictionary<long, double>();
 
         for (int k = 0; k <= 400; k++)
         {
-            axes.WindowState = new Avalonia.Rect(1.0, -40.0, 4.0, 40.0);
+            axes.WindowState = new PlotRect(1.0, -40.0, 4.0, 40.0);
             axes.Translate(k / xScale, 0);
             foreach (var tx in axes.Ticks(minorTicks: true).MinorX.Concat(axes.Ticks(true).MajorX))
             {
@@ -392,10 +393,10 @@ public sealed class PanAndMarkerLabelTests : IDisposable
     [InlineData(1.0,  4.0, -180.0, 360.0)]
     public void Ticks_NeverLeaveTheWindow(double x0, double w, double y0, double h)
     {
-        var axes = new Axes { Window = new Avalonia.Rect(x0, y0, w, h) };
+        var axes = new Axes { Window = new PlotRect(x0, y0, w, h) };
         for (int k = 0; k <= 200; k++)
         {
-            axes.WindowState = new Avalonia.Rect(x0, y0, w, h);
+            axes.WindowState = new PlotRect(x0, y0, w, h);
             axes.Translate(w * k / 2000.0, h * k / 2000.0);
             var t   = axes.Ticks(minorTicks: true);
             var win = axes.Window;
@@ -566,7 +567,7 @@ public sealed class PanAndMarkerLabelTests : IDisposable
     /// <summary>Counts pixels that differ between two renders OUTSIDE the plot box. A differential
     /// render is the only honest oracle here — the margins already carry tick labels and axis
     /// text, so "is there ink out there" cannot separate the marker from the chrome.</summary>
-    private static int PixelsDifferingOutsideViewport(SKBitmap a, SKBitmap b, Avalonia.Rect viewport)
+    private static int PixelsDifferingOutsideViewport(SKBitmap a, SKBitmap b, PlotRect viewport)
     {
         var clip = PlotRenderer.ViewportClipRect(viewport, Canvas);
         int n = 0;
@@ -595,7 +596,7 @@ public sealed class PanAndMarkerLabelTests : IDisposable
         plot.Traces.Add(trace);
 
         // The X axis is in the plot's own FreqUnit (GHz), so the window is in GHz — not Hz.
-        plot.Axes.Window = new Avalonia.Rect(3.15, -20.0, 1.85, 40.0);
+        plot.Axes.Window = new PlotRect(3.15, -20.0, 1.85, 40.0);
 
         var marker = new Marker(trace, Freqs[2], isMulti: false, isDelta: false, index: 1);
         var glyphAt = PlotRenderer.BuildTransforms(plot, Canvas)
@@ -622,7 +623,7 @@ public sealed class PanAndMarkerLabelTests : IDisposable
         var plot = new Plot(PlotType.Rect, FreqUnit.GHz);
         var trace = SweptTrace(PlotType.Rect);
         plot.Traces.Add(trace);
-        plot.Axes.Window = new Avalonia.Rect(1.0, -20.0, 4.0, 40.0);   // 1..5 GHz, -6 dB mid-box
+        plot.Axes.Window = new PlotRect(1.0, -20.0, 4.0, 40.0);   // 1..5 GHz, -6 dB mid-box
 
         using var withoutMarker = Render(plot);
         trace.Markers.Add(new Marker(trace, Freqs[2], isMulti: false, isDelta: false, index: 1));

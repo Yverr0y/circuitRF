@@ -212,7 +212,7 @@ public partial class MarkerInfoBoxViewModel : ViewModelBase
     {
         if (!_isDragging) return;
         _isDragging        = false;
-        Marker.InfoBoxPos  = new Point(_logicalLeft, _logicalTop);
+        Marker.InfoBoxPos  = new PlotPoint(_logicalLeft, _logicalTop);
     }
 
     /// <summary>
@@ -223,7 +223,7 @@ public partial class MarkerInfoBoxViewModel : ViewModelBase
     {
         _logicalLeft      = left;
         _logicalTop       = top;
-        Marker.InfoBoxPos = new Point(left, top);
+        Marker.InfoBoxPos = new PlotPoint(left, top);
         OnPropertyChanged(nameof(ViewLeft));
         OnPropertyChanged(nameof(ViewTop));
     }
@@ -289,7 +289,7 @@ public partial class MarkerInfoBoxViewModel : ViewModelBase
     {
         _logicalLeft += dx;
         _logicalTop  += dy;
-        Marker.InfoBoxPos = new Point(_logicalLeft, _logicalTop);
+        Marker.InfoBoxPos = new PlotPoint(_logicalLeft, _logicalTop);
         OnPropertyChanged(nameof(ViewLeft));
         OnPropertyChanged(nameof(ViewTop));
     }

@@ -150,7 +150,7 @@ public partial class WorkspaceViewModel
         timer.Stop();
 
         LastCloseCheckpointMs = timer.Elapsed.TotalMilliseconds;
-        Trace.WriteLine($"[circuitRF] close restore point: {timer.Elapsed.TotalMilliseconds:F0} ms");
+        System.Diagnostics.Trace.WriteLine($"[circuitRF] close restore point: {timer.Elapsed.TotalMilliseconds:F0} ms");
 
         // RC-6 R-rc6-4a. The one housekeeping pass — a retention sweep and then packing — AFTER the
         // close entry and in the same window. It is here rather than at each of this method's three

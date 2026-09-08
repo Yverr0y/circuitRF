@@ -39,8 +39,8 @@ public sealed class RestoreAxesFromConfigTests
     public void RestoreAxesFromConfig_ValidWindow_WindowUnchanged()
     {
         var plot       = MakeRectPlotWithData();
-        var savedWin   = new Rect(0, -40, 10, 50);   // 0..10 GHz x -40..10 dB (valid)
-        var savedWin2  = new Rect(0, -40, 10, 50);
+        var savedWin   = new PlotRect(0, -40, 10, 50);   // 0..10 GHz x -40..10 dB (valid)
+        var savedWin2  = new PlotRect(0, -40, 10, 50);
 
         plot.RestoreAxesFromConfig(
             autoscaleX: true, autoscaleY: true, autoscaleRightY: true, autoscaleMag: true,
@@ -63,7 +63,7 @@ public sealed class RestoreAxesFromConfigTests
         // A degenerate (zero-size) saved window: autoscale should run and frame the data.
         plot.RestoreAxesFromConfig(
             autoscaleX: true, autoscaleY: true, autoscaleRightY: false, autoscaleMag: true,
-            window: new Rect(0, 0, 0, 0), windowSecondary: new Rect(0, 0, 0, 0));
+            window: new PlotRect(0, 0, 0, 0), windowSecondary: new PlotRect(0, 0, 0, 0));
 
         // After autoscale the window must have positive extent that covers the data range.
         Assert.True(plot.Axes.Window.Width  > 0, "Width must be positive after autoscale");
@@ -87,7 +87,7 @@ public sealed class RestoreAxesFromConfigTests
         // Smith with a degenerate saved window should still get the unit circle.
         plot.RestoreAxesFromConfig(
             autoscaleX: false, autoscaleY: false, autoscaleRightY: false, autoscaleMag: true,
-            window: new Rect(0, 0, 0, 0), windowSecondary: new Rect(0, 0, 0, 0));
+            window: new PlotRect(0, 0, 0, 0), windowSecondary: new PlotRect(0, 0, 0, 0));
 
         // Window must be the unit circle: approximately centred on origin, side ≥ 2.
         Assert.True(plot.Axes.Window.Width  >= 2,  $"Width={plot.Axes.Window.Width}");
@@ -100,7 +100,7 @@ public sealed class RestoreAxesFromConfigTests
     public void Autoscale_NoData_ValidWindow_WindowPreserved()
     {
         var plot       = MakeRectPlotNoData();
-        var savedWin   = new Rect(0, -40, 10, 50);
+        var savedWin   = new PlotRect(0, -40, 10, 50);
         plot.Axes.Window = savedWin;
 
         // Force autoscale with no data points in the trace.

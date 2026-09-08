@@ -45,7 +45,7 @@ public sealed record HarmonicaPickedTrace(string Spec, string PanelId, string? L
 /// §7.7's "plots anything harmonicaRF solved", over the §5 <c>DataSet</c>.
 ///
 /// <para><b>Nothing here parses or slices.</b> <see cref="CubeTraceSpecParser"/> reads the spec and
-/// <see cref="PlotInspectorViewModel.SetCubeDataFrom"/> does the slicing — the same two calls the
+/// <see cref="TraceResolve.SetCubeDataFrom"/> does the slicing — the same two calls the
 /// <c>.cdd</c> trace card makes. What this type adds is the harmonicaRF-specific part: which cubes are
 /// worth offering, and what a sensible default spec for each one is.</para>
 /// </summary>
@@ -127,7 +127,7 @@ public static class HarmonicaTracePicker
     /// <c>DataSet</c>, or reports why not.
     ///
     /// <para>The parse is <see cref="CubeTraceSpecParser"/>'s and the slicing is
-    /// <see cref="PlotInspectorViewModel.SetCubeDataFrom"/>'s — this method only carries the values
+    /// <see cref="TraceResolve.SetCubeDataFrom"/>'s — this method only carries the values
     /// between them and applies harmonicaRF's palette.</para>
     /// </summary>
     public static Plot? TryBuild(HarmonicaPickedTrace picked, DataSet? ds,
@@ -161,12 +161,11 @@ public static class HarmonicaTracePicker
         };
 
         var colour = theme.GainTrace;
-        trace.Properties.LineColorStorage =
-            Avalonia.Media.Color.FromArgb(colour.Alpha, colour.Red, colour.Green, colour.Blue);
+        trace.Properties.LineColorStorage = colour;
         trace.Properties.LineWidth   = 1.6;
         trace.Properties.LineEnabled = true;
 
-        PlotInspectorViewModel.SetCubeDataFrom(trace, ds, PlotType.Rect, FreqUnit.GHz);
+        TraceResolve.SetCubeDataFrom(trace, ds, PlotType.Rect, FreqUnit.GHz);
 
         if (trace.ExpressionError is { Length: > 0 } exprError) { error = exprError; return null; }
         if (trace.Points.Count == 0 && trace.FamilyCurves.Count == 0)

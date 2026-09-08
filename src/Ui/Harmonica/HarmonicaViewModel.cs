@@ -307,11 +307,11 @@ public sealed partial class HarmonicaViewModel : ObservableObject
     // ── published frame happened to store — see those methods' own remark for why that distinction
     // ── is the actual fix for "the axis shifts when Locked is turned on".
 
-    private static Avalonia.Rect NaturalDcivWindow(HarmonicaFrame frame, HarmonicaSettings s, HarmonicaRenderTheme theme)
+    private static PlotRect NaturalDcivWindow(HarmonicaFrame frame, HarmonicaSettings s, HarmonicaRenderTheme theme)
         => Renderers.HarmonicaPanelRenderer.BuildLoadlinePlot(
             frame.Loadline, theme, Renderers.HarmonicaPanelRenderer.DcivLimits(s) with { Autoscale = true }).Axes.Window;
 
-    private static (Avalonia.Rect Window, Avalonia.Rect Window2) NaturalPowerSweepWindow(
+    private static (PlotRect Window, PlotRect Window2) NaturalPowerSweepWindow(
         HarmonicaFrame frame, HarmonicaSettings s, HarmonicaRenderTheme theme)
     {
         var axes = Renderers.HarmonicaPanelRenderer.BuildPowerSweepPlot(
@@ -319,7 +319,7 @@ public sealed partial class HarmonicaViewModel : ObservableObject
         return (axes.Window, axes.WindowSecondary);
     }
 
-    private static (Avalonia.Rect Window, Avalonia.Rect Window2) NaturalTimeDomainWindow(
+    private static (PlotRect Window, PlotRect Window2) NaturalTimeDomainWindow(
         HarmonicaFrame frame, HarmonicaSettings s, HarmonicaRenderTheme theme)
     {
         var axes = Renderers.HarmonicaPanelRenderer.BuildTimeDomainPlot(

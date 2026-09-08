@@ -213,7 +213,7 @@ public sealed class ContourMarkerReadoutTests
         container.PlotVM.Plot.Traces.Add(pout);
         container.PlotVM.Plot.Traces.Add(pae);
         var marker = ContourMarker(pout, Complex.Zero);
-        marker.InfoBoxPos = new Avalonia.Point(0, 0);
+        marker.InfoBoxPos = new PlotPoint(0, 0);
 
         display.OnContainerPlotChanged(container);
 

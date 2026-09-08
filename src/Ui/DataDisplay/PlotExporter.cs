@@ -4,28 +4,20 @@
 //  Paper: 8.5" × 11" landscape = 792 × 612 pts at 72 pts/in.
 //  Margins: 0.5" (36 pts) each side → usable area 720 × 540 pts.
 //
-//  Layout strategy — bounding-box fit:
-//    All positioned objects (plot canvas, axis label strips, marker
-//    info boxes) share the DataDisplay screen-pixel coordinate space
-//    via their View* properties.  The export:
-//      1. Collects all objects' screen-space rectangles.
-//      2. Computes their union (bounding box).
-//      3. Derives a single uniform scale S = min(usableW, usableH)
-//         relative to the bounding-box dimensions, then centres the
-//         result on the page.
-//      4. Positions every object with the same linear mapping:
-//           page_coord = Margin + pad + (screen_coord − bndOrigin) × S
+//  ── The composition moved out in RND-4 ───────────────────────────
 //
-//    This guarantees that the relative position of any info box to
-//    the plot axes is identical in the export and on screen, regardless
-//    of zoom level, aspect ratio, or whether the box was dragged
-//    outside the plot area.
+//  The bounding-box fit and the three encoders are
+//  CircuitRF.Render.DataDisplay's PlotComposer and PlotDocumentWriter
+//  now (brief-render-4-data-display.md R-rnd4-2), so `circuitrf render`
+//  writes the same bytes rather than a picture that resembles them. The
+//  arithmetic is unchanged and its description lives with it.
 //
-//  Rendering order:
-//    1. Background fill.
-//    2. Axis label strips (Smith/Polar only).
-//    3. PlotRenderer.Draw — grid, traces, axis labels, marker symbols.
-//    4. Marker info boxes.
+//  What is left here is what needs a WINDOW: the save dialog, the
+//  clipboard's four representations and their Windows bypass, the
+//  tab-delimited text a Table plot can also be written as, and
+//  `Place(container)` — the one method that turns a live
+//  PlotContainerViewModel into the six numbers the composition lays out.
+//  That method is the boundary; nothing view-model-shaped crosses it.
 // ================================================================
 
 using System;
@@ -117,139 +109,33 @@ namespace CircuitRF.Ui.DataDisplay
             bool   isTsv  = path.EndsWith(".txt",  StringComparison.OrdinalIgnoreCase)
                          || path.EndsWith(".tsv",  StringComparison.OrdinalIgnoreCase);
 
-            // ---- Usable area -------------------------------------------
-
-            float usableW = PageW - 2f * Margin;   // 720 pts
-            float usableH = PageH - 2f * Margin;   // 540 pts
-
-            // Pre-gather info boxes once (they live on the UI thread).
-            IReadOnlyList<MarkerInfoBoxViewModel> markerBoxes =
-                container?.GetMarkerInfoBoxes() ?? Array.Empty<MarkerInfoBoxViewModel>();
-
-            float plotX, plotY, plotW, plotH, stripW, exportScale;
-
-            if (container is not null)
-            {
-                int    nLeft  = container.LeftLabelStrips.Count;
-                int    nRight = container.RightLabelStrips.Count;
-                double sw     = container.LabelStripViewWidth;
-
-                double bndL = container.ViewLeft  - nLeft  * sw;
-                double bndT = container.ViewTop;
-                double bndR = container.ViewLeft  + container.ViewWidth + nRight * sw;
-                double bndB = container.ViewTop   + container.ViewHeight;
-
-                foreach (var boxVm in markerBoxes)
-                {
-                    bndL = Math.Min(bndL, boxVm.ViewLeft);
-                    bndT = Math.Min(bndT, boxVm.ViewTop);
-                    bndR = Math.Max(bndR, boxVm.ViewLeft + boxVm.BoxWidth);
-                    bndB = Math.Max(bndB, boxVm.ViewTop  + boxVm.BoxHeight);
-                }
-
-                double bndW = bndR - bndL;
-                double bndH = bndB - bndT;
-
-                exportScale = (bndW > 0 && bndH > 0)
-                    ? (float)Math.Min(usableW / bndW, usableH / bndH)
-                    : 1f;
-
-                float padX = (usableW - (float)bndW * exportScale) / 2f;
-                float padY = (usableH - (float)bndH * exportScale) / 2f;
-
-                plotX  = Margin + padX + (float)(container.ViewLeft - bndL) * exportScale;
-                plotY  = Margin + padY + (float)(container.ViewTop  - bndT) * exportScale;
-                plotW  = (float)container.ViewWidth  * exportScale;
-                plotH  = (float)container.ViewHeight * exportScale;
-                stripW = (float)sw * exportScale;
-            }
-            else
-            {
-                exportScale = 1f;
-                stripW      = 0f;
-                plotX = Margin;
-                plotY = Margin;
-                plotW = usableW;
-                plotH = usableH;
-            }
-
-            bool hasStrips = (container?.LeftLabelStrips.Count ?? 0) +
-                             (container?.RightLabelStrips.Count ?? 0) > 0;
-
-            // ---- Draw callback -----------------------------------------
+            // ONE composition, shared with Copy and with `circuitrf render` (RND-4 R-rnd4-2).
+            // This method used to carry its own single-container copy of the bounding-box fit; for
+            // one container it computed exactly what PlotComposer computes for a list of one, and
+            // `showFilePrefix` above is the same expression PlotComposer.Place evaluates — so
+            // nothing about the written file changes, and there is no longer a second place for it
+            // to drift from.
+            //
+            // A null container is still a first-class case (Export from a plot with no container
+            // provider): it becomes one PlacedPlot filling the usable area exactly, which is the
+            // same page position the old fallback branch wrote — S resolves to 1 and both pads to
+            // zero, so plotX == Margin as before.
+            var page = PagePlacement.Letter;
+            PlacedPlot placed = container is not null
+                ? Place(container)
+                : new PlacedPlot
+                  {
+                      Plot         = plot,
+                      ViewLeft     = 0,
+                      ViewTop      = 0,
+                      ViewWidth    = page.UsableWidth,
+                      ViewHeight   = page.UsableHeight,
+                      LogicalWidth = page.UsableWidth,
+                      ShowFilePrefix = showFilePrefix,
+                  };
 
             void Render(SKCanvas canvas)
-            {
-                var appSettings    = AppSettingsViewModel.Instance;
-                var effectiveTheme = appSettings.GetExportRenderTheme(theme);
-                theme = effectiveTheme;
-
-                canvas.Clear(appSettings.ExportTransparentBackground
-                    ? SKColors.Transparent
-                    : theme.BackgroundColor);
-
-                if (container is not null && hasStrips)
-                {
-                    var tf      = PlotRenderer.BuildTransforms(plot, (plotW, plotH));
-                    float vpTop    = (float)(tf.Viewport.Y * plotH);
-                    float vpBottom = (float)((tf.Viewport.Y + tf.Viewport.Height) * plotH);
-                    float chartH   = vpBottom - vpTop;
-                    float chartY   = plotY + vpTop;
-
-                    int nLeft  = container.LeftLabelStrips.Count;
-                    int nRight = container.RightLabelStrips.Count;
-
-                    for (int i = 0; i < nLeft; i++)
-                    {
-                        var strip = container.LeftLabelStrips[i];
-                        float sx  = plotX - (i + 1) * stripW;
-                        DrawAxisLabelStrip(canvas, sx, chartY, stripW, chartH,
-                            strip.Trace, false, theme, strip.CustomLabel, strip.ShowFilePrefix);
-                    }
-
-                    for (int i = 0; i < nRight; i++)
-                    {
-                        var strip = container.RightLabelStrips[i];
-                        float sx  = plotX + plotW + i * stripW;
-                        DrawAxisLabelStrip(canvas, sx, chartY, stripW, chartH,
-                            strip.Trace, true, theme, strip.CustomLabel, strip.ShowFilePrefix);
-                    }
-                }
-
-                float tableZoom = (plot.PlotType == PlotType.Table && container is not null)
-                    ? plotW / (float)container.Width
-                    : 1f;
-
-                canvas.Save();
-                canvas.Translate(plotX, plotY);
-                PlotRenderer.Draw(canvas, (plotW, plotH), plot, PlotDetail.Full, theme, showFilePrefix,
-                    zoomLevel: tableZoom,
-                    aliasFor: container?.Library is { } exLib ? t => exLib.AliasFor(t.EffectiveSourcePath) : null,
-                    alwaysShowSource: AppSettingsViewModel.Instance.EffectiveShowFilePrefix(
-                        container?.Library?.HasMultipleSources ?? false));
-                canvas.Restore();
-
-                if (container is not null && markerBoxes.Count > 0)
-                {
-                    foreach (var boxVm in markerBoxes)
-                    {
-                        float bx = plotX + (float)(boxVm.ViewLeft - container.ViewLeft) * exportScale;
-                        float by = plotY + (float)(boxVm.ViewTop  - container.ViewTop)  * exportScale;
-                        float bw = (float)boxVm.BoxWidth  * exportScale;
-                        float bh = (float)boxVm.BoxHeight * exportScale;
-
-                        canvas.Save();
-                        canvas.Translate(bx, by);
-                        MarkerRenderer.DrawInfoBox(
-                            canvas, (bw, bh),
-                            boxVm.Marker, boxVm.Trace, boxVm.FreqUnit,
-                            theme, showFilePrefix,
-                            transparentBackground: appSettings.MarkerBoxTransparentBackground,
-                            plotTraces: boxVm.PlotTraces);
-                        canvas.Restore();
-                    }
-                }
-            }
+                => PlotComposer.Render(canvas, [placed], theme, AppSettings.Current, page);
 
             // ---- Write file --------------------------------------------
 
@@ -362,30 +248,14 @@ namespace CircuitRF.Ui.DataDisplay
 
         // ---- In-memory PDF / SVG builders ---------------------------
 
+        // Both writers moved to CircuitRF.Render.DataDisplay.PlotDocumentWriter in RND-4 so
+        // `circuitrf render` emits the same bytes rather than its own. These forward; the page size
+        // is this exporter's own Letter landscape, unchanged. harmonicaRF and wBond call them too.
         internal static byte[] BuildPdfBytes(Action<SKCanvas> render)
-        {
-            var metadata = new SKDocumentPdfMetadata { Creator = "circuitRF" };
-            using var skStream = new SKDynamicMemoryWStream();
-            using var doc      = SKDocument.CreatePdf(skStream, metadata);
-            var canvas = doc.BeginPage(PageW, PageH);
-            render(canvas);
-            doc.EndPage();
-            doc.Close();
-            return skStream.DetachAsData().ToArray();
-        }
+            => PlotDocumentWriter.BuildPdfBytes(render, PagePlacement.Letter);
 
         internal static string BuildSvgString(Action<SKCanvas> render)
-        {
-            using var skStream = new SKDynamicMemoryWStream();
-            using (var canvas = SKSvgCanvas.Create(new SKRect(0, 0, PageW, PageH), skStream))
-                render(canvas);
-            // Skia writes each text run's per-glyph x/y list with a trailing separator, which Firefox
-            // reads as invalid and drops - putting every run a line above its baseline, where the
-            // clip eats it. Correct in Illustrator, Inkscape, Chrome and Safari; unreadable in
-            // Firefox. See SvgFontNormalizer.RepairPositionLists.
-            return SvgFontNormalizer.RepairPositionLists(
-                       Encoding.UTF8.GetString(skStream.DetachAsData().ToArray()));
-        }
+            => PlotDocumentWriter.BuildSvgString(render, PagePlacement.Letter);
 
         // ---- Multi-plot renderer ------------------------------------
 
@@ -393,131 +263,46 @@ namespace CircuitRF.Ui.DataDisplay
             SKCanvas                              canvas,
             IReadOnlyList<PlotContainerViewModel> containers,
             RenderTheme                           theme)
+            => PlotComposer.Render(canvas, containers.Select(Place).ToList(),
+                                   theme, AppSettings.Current, PagePlacement.Letter);
+
+        /// <summary>
+        /// A live container as the six numbers <see cref="PlotComposer"/> lays out — RND-4's
+        /// R-rnd4-2 boundary in one method. Everything the composition needs is READ here, on the
+        /// UI thread, and nothing view-model-shaped crosses.
+        /// </summary>
+        internal static PlacedPlot Place(PlotContainerViewModel c)
         {
-            float usableW = PageW - 2f * Margin;
-            float usableH = PageH - 2f * Margin;
+            var    lib            = c.Library;
+            bool   showFilePrefix = AppSettings.Current.EffectiveShowFilePrefix(
+                                        (lib?.Entries.Count(e => e.Snp is not null && !e.Snp.IsEmpty) ?? 0) > 1);
 
-            var appSettings = AppSettingsViewModel.Instance;
-            theme = appSettings.GetExportRenderTheme(theme);
-
-            canvas.Clear(appSettings.ExportTransparentBackground
-                ? SKColors.Transparent
-                : theme.BackgroundColor);
-            if (containers.Count == 0) return;
-
-            // ---- Bounding box in DataDisplay screen-pixel space --------
-
-            double bndL = double.PositiveInfinity;
-            double bndT = double.PositiveInfinity;
-            double bndR = double.NegativeInfinity;
-            double bndB = double.NegativeInfinity;
-
-            foreach (var c in containers)
+            return new PlacedPlot
             {
-                double sw     = c.LabelStripViewWidth;
-                int    nLeft  = c.LeftLabelStrips.Count;
-                int    nRight = c.RightLabelStrips.Count;
-
-                bndL = Math.Min(bndL, c.ViewLeft - nLeft  * sw);
-                bndT = Math.Min(bndT, c.ViewTop);
-                bndR = Math.Max(bndR, c.ViewLeft + c.ViewWidth + nRight * sw);
-                bndB = Math.Max(bndB, c.ViewTop  + c.ViewHeight);
-
-                foreach (var boxVm in c.GetMarkerInfoBoxes())
-                {
-                    bndL = Math.Min(bndL, boxVm.ViewLeft);
-                    bndT = Math.Min(bndT, boxVm.ViewTop);
-                    bndR = Math.Max(bndR, boxVm.ViewLeft + boxVm.BoxWidth);
-                    bndB = Math.Max(bndB, boxVm.ViewTop  + boxVm.BoxHeight);
-                }
-            }
-
-            if (double.IsInfinity(bndL)) return;
-
-            double bndW = bndR - bndL;
-            double bndH = bndB - bndT;
-
-            float S    = (bndW > 0 && bndH > 0)
-                ? (float)Math.Min(usableW / bndW, usableH / bndH)
-                : 1f;
-            float padX = (usableW - (float)bndW * S) / 2f;
-            float padY = (usableH - (float)bndH * S) / 2f;
-
-            // ---- Draw each container -----------------------------------
-
-            foreach (var c in containers)
-            {
-                var  plot           = c.PlotVM.Plot;
-                var  markerBoxes    = c.GetMarkerInfoBoxes();
-                bool showFilePrefix = appSettings.EffectiveShowFilePrefix(
-                    (c.Library?.Entries.Count(e => e.Snp is not null && !e.Snp.IsEmpty) ?? 0) > 1);
-
-                double sw     = c.LabelStripViewWidth;
-                int    nLeft  = c.LeftLabelStrips.Count;
-                int    nRight = c.RightLabelStrips.Count;
-
-                float plotX  = Margin + padX + (float)(c.ViewLeft - bndL) * S;
-                float plotY  = Margin + padY + (float)(c.ViewTop  - bndT) * S;
-                float plotW  = (float)c.ViewWidth  * S;
-                float plotH  = (float)c.ViewHeight * S;
-                float stripW = (float)sw * S;
-
-                // Label strips (Smith / Polar only)
-                if (nLeft + nRight > 0)
-                {
-                    var   tf       = PlotRenderer.BuildTransforms(plot, (plotW, plotH));
-                    float vpTop    = (float)(tf.Viewport.Y * plotH);
-                    float vpBottom = (float)((tf.Viewport.Y + tf.Viewport.Height) * plotH);
-                    float chartH   = vpBottom - vpTop;
-                    float chartY   = plotY + vpTop;
-
-                    for (int i = 0; i < nLeft; i++)
-                    {
-                        var s = c.LeftLabelStrips[i];
-                        DrawAxisLabelStrip(canvas, plotX - (i + 1) * stripW, chartY,
-                            stripW, chartH, s.Trace, false, theme, s.CustomLabel, s.ShowFilePrefix);
-                    }
-                    for (int i = 0; i < nRight; i++)
-                    {
-                        var s = c.RightLabelStrips[i];
-                        DrawAxisLabelStrip(canvas, plotX + plotW + i * stripW, chartY,
-                            stripW, chartH, s.Trace, true, theme, s.CustomLabel, s.ShowFilePrefix);
-                    }
-                }
-
-                // Main plot content
-                float cTableZoom = (plot.PlotType == PlotType.Table)
-                    ? plotW / (float)c.Width
-                    : 1f;
-
-                canvas.Save();
-                canvas.Translate(plotX, plotY);
-                PlotRenderer.Draw(canvas, (plotW, plotH), plot, PlotDetail.Full, theme, showFilePrefix,
-                    zoomLevel: cTableZoom,
-                    aliasFor: c.Library is { } cLib ? t => cLib.AliasFor(t.EffectiveSourcePath) : null,
-                    alwaysShowSource: AppSettingsViewModel.Instance.EffectiveShowFilePrefix(
-                        c.Library?.HasMultipleSources ?? false));
-                canvas.Restore();
-
-                // Marker info boxes
-                foreach (var boxVm in markerBoxes)
-                {
-                    float bx = Margin + padX + (float)(boxVm.ViewLeft - bndL) * S;
-                    float by = Margin + padY + (float)(boxVm.ViewTop  - bndT) * S;
-                    float bw = (float)boxVm.BoxWidth  * S;
-                    float bh = (float)boxVm.BoxHeight * S;
-
-                    canvas.Save();
-                    canvas.Translate(bx, by);
-                    MarkerRenderer.DrawInfoBox(
-                        canvas, (bw, bh),
-                        boxVm.Marker, boxVm.Trace, boxVm.FreqUnit,
-                        theme, showFilePrefix,
-                        transparentBackground: appSettings.MarkerBoxTransparentBackground,
-                        plotTraces: boxVm.PlotTraces);
-                    canvas.Restore();
-                }
-            }
+                Plot                = c.PlotVM.Plot,
+                ViewLeft            = c.ViewLeft,
+                ViewTop             = c.ViewTop,
+                ViewWidth           = c.ViewWidth,
+                ViewHeight          = c.ViewHeight,
+                LogicalWidth        = c.Width,
+                LabelStripViewWidth = c.LabelStripViewWidth,
+                LeftLabelStrips     = c.LeftLabelStrips
+                                       .Select(s => new PlacedLabelStrip(s.Trace, s.CustomLabel, s.ShowFilePrefix))
+                                       .ToList(),
+                RightLabelStrips    = c.RightLabelStrips
+                                       .Select(s => new PlacedLabelStrip(s.Trace, s.CustomLabel, s.ShowFilePrefix))
+                                       .ToList(),
+                MarkerBoxes         = c.GetMarkerInfoBoxes()
+                                       .Select(b => new PlacedMarkerBox(
+                                           b.Marker, b.Trace, b.FreqUnit,
+                                           b.ViewLeft, b.ViewTop, b.BoxWidth, b.BoxHeight,
+                                           b.PlotTraces))
+                                       .ToList(),
+                ShowFilePrefix      = showFilePrefix,
+                AlwaysShowSource    = AppSettings.Current.EffectiveShowFilePrefix(
+                                          lib?.HasMultipleSources ?? false),
+                AliasFor            = lib is { } l ? t => l.AliasFor(t.EffectiveSourcePath) : null,
+            };
         }
 
         // ---- Clipboard write ----------------------------------------
@@ -625,73 +410,15 @@ namespace CircuitRF.Ui.DataDisplay
         }
 
         // ---- PDF / SVG writers -----------------------------------------
+        //
+        // Both moved to PlotDocumentWriter in RND-4, along with the axis-label-strip drawing that
+        // used to sit at the bottom of this file — `circuitrf render` writes through the same three
+        // and so writes the same bytes (§5.1).
 
         private static void WritePdf(string path, Action<SKCanvas> render)
-        {
-            var metadata = new SKDocumentPdfMetadata
-            {
-                Title   = Path.GetFileNameWithoutExtension(path),
-                Creator = "circuitRF",
-            };
+            => PlotDocumentWriter.WritePdf(path, render, PagePlacement.Letter);
 
-            using var skStream = new SKFileWStream(path);
-            using var doc      = SKDocument.CreatePdf(skStream, metadata);
-            var canvas = doc.BeginPage(PageW, PageH);
-            render(canvas);
-            doc.EndPage();
-            doc.Close();
-        }
-
-        /// <remarks>
-        /// Built in memory and then written, rather than straight to the file: the document has to be
-        /// complete before <see cref="SvgFontNormalizer.RepairPositionLists"/> can run over it, and an
-        /// exported plot is a few hundred kilobytes at most.
-        /// </remarks>
         private static void WriteSvg(string path, Action<SKCanvas> render)
-            => File.WriteAllText(path, BuildSvgString(render), new UTF8Encoding(false));
-
-        // ---- Axis label strip (mirrors AxisLabelControl.LabelDrawOperation.Render) ----
-
-        private static void DrawAxisLabelStrip(
-            SKCanvas    canvas,
-            float       x,
-            float       y,
-            float       w,
-            float       h,
-            Trace       trace,
-            bool        isRight,
-            RenderTheme theme,
-            string?     customLabel,
-            bool        showFilePrefix)
-        {
-            float cap        = w * 0.85f;
-            float fontSizePx = MathF.Min(MathF.Max(h * 0.04f, MathF.Min(6f, cap)), cap);
-
-            bool    useCustom   = !string.IsNullOrEmpty(customLabel);
-            string  displayText = useCustom ? customLabel!
-                                : (showFilePrefix ? trace.Description : trace.ShortDescription);
-            SKColor textColor   = useCustom ? theme.TextColor
-                                : RenderTheme.ToSKColor(trace.Properties.LineColor);
-
-            using var font  = new SKFont(SkiaFonts.PlexRegular, fontSizePx);
-            using var paint = new SKPaint { Color = textColor, IsAntialias = true };
-
-            string text   = displayText;
-            float  maxLen = h - 12f;
-            while (text.Length > 1 && font.MeasureText(text) > maxLen)
-                text = text[..^1];
-            if (text.Length < displayText.Length)
-                text = text.TrimEnd() + "…";
-
-            float tw = font.MeasureText(text);
-            float cx = x + w / 2f;
-            float cy = y + h / 2f;
-
-            canvas.Save();
-            canvas.Translate(cx, cy);
-            canvas.RotateDegrees(isRight ? 90f : -90f);
-            canvas.DrawText(text, -tw / 2f, font.Size * 0.35f, SKTextAlign.Left, font, paint);
-            canvas.Restore();
-        }
+            => PlotDocumentWriter.WriteSvg(path, render, PagePlacement.Letter);
     }
 }

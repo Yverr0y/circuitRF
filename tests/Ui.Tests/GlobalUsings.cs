@@ -22,3 +22,9 @@ global using CircuitRF.Design.Symbol;
 // renderers' existing tests keep passing; this line is what makes "unchanged" literally true for
 // them too.
 global using CircuitRF.Render;
+
+// And the Data Display's models and renderers, which moved to CircuitRF.Render.DataDisplay in RND-4
+// (brief-render-4-data-display.md). Same reason again: this project's ~100 Data Display test files
+// state their expectations about Plot/Trace/Axes/Marker and the renderers, and none of those
+// expectations changed — so the move must not show up in a single one of them.
+global using CircuitRF.Render.DataDisplay;

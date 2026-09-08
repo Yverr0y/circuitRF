@@ -1,0 +1,326 @@
+// ================================================================
+//  TraceExpression.cs  —  Evaluates element-wise expressions over
+//  one or more DataCube slices using the circuitRF expression engine.
+//
+//  Pipeline:
+//    1. Scan the expression string for CubeName[...] refs
+//    2. Slice each ref to a rank-1 array
+//    3. Validate dimensions (same X length)
+//    4. Substitute refs with __c0, __c1, … placeholders
+//    5. Parse the result with Parser.Parse
+//    6. Evaluate per X-sample via Evaluator.InjectResolved
+//    7. Return (xVals, complexValues?, realValues?, xAxisName, xUnit)
+// ================================================================
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Numerics;
+using CircuitRF.Core.Expressions;
+using RfCore;
+using RfCore.Data;
+
+namespace CircuitRF.Render.DataDisplay;
+
+public static class TraceExpression
+{
+    /// <summary>
+    /// Evaluates a trace expression string against <paramref name="ds"/> and produces
+    /// the 1-D arrays that <c>Trace.SetCubeData</c> expects.
+    /// Returns false and sets <paramref name="error"/> on any failure.
+    /// </summary>
+    public static bool TryEvaluate(
+        string      expression,
+        DataSet     ds,
+        PlotType    plotType,
+        out double[]   xValues,
+        out Complex[]? complexValues,
+        out double[]?  realValues,
+        out string     xAxisName,
+        out string?    xUnit,
+        out string[]?  xLabels,
+        out string     error)
+    {
+        xValues       = Array.Empty<double>();
+        complexValues = null;
+        realValues    = null;
+        xLabels       = null;
+        xAxisName     = "";
+        xUnit         = null;
+        error         = "";
+
+        expression = expression.Trim();
+        if (string.IsNullOrEmpty(expression))
+        {
+            error = "Empty expression.";
+            return false;
+        }
+
+        // ── Step 1: Extract cube refs ─────────────────────────────────────────
+        // Candidate names: analysis-group cubes qualified ("HB1.V"); default- and measurements-group
+        // cubes BARE ("V", "IMD2") — these bare-resolve via DataSet.BareResolve. Sorted longest-first so
+        // a longer name matches before a shorter one it contains (e.g. "HB1.V" before "V").
+        var cubeNames = ds.Groups
+            .SelectMany(g => ds.CubesIn(g).Keys.Select(c =>
+                (g == DataSet.DefaultGroup || g == DataSet.MeasurementsGroup) ? c : $"{g}.{c}"))
+            .Distinct(StringComparer.Ordinal)
+            .OrderByDescending(n => n.Length)
+            .ToList();
+
+        // refMap:   originalRefStr → placeholder index
+        // uniqueRefs: in order of first appearance
+        var refMap      = new Dictionary<string, int>(StringComparer.Ordinal);
+        var uniqueRefs  = new List<CubeRefInfo>();
+        var substitutions = new List<(int start, int end, int pIdx)>();
+
+        static bool IsIdent(char c) => char.IsLetterOrDigit(c) || c == '_' || c == '.';
+
+        int pos = 0;
+        while (pos < expression.Length)
+        {
+            bool matched = false;
+            foreach (var name in cubeNames)
+            {
+                if (pos + name.Length > expression.Length) continue;
+                if (!expression.AsSpan(pos, name.Length).SequenceEqual(name.AsSpan())) continue;
+
+                // Left word boundary: the char before must not continue an identifier, so "V" never
+                // matches inside "Vout"/"RFfreq" and a qualified "HB1.V" matches whole.
+                if (pos > 0 && IsIdent(expression[pos - 1])) continue;
+
+                int after = pos + name.Length;
+
+                string refStr, body;
+                if (after < expression.Length && expression[after] == '[')
+                {
+                    // Bracketed reference CubeName[…].
+                    int closeBracket = expression.IndexOf(']', after + 1);
+                    if (closeBracket < 0) continue;        // unterminated — let a later candidate try
+                    refStr = expression[pos..(closeBracket + 1)];
+                    body   = expression[(after + 1)..closeBracket];
+                }
+                else if (after >= expression.Length || (!IsIdent(expression[after]) && expression[after] != '('))
+                {
+                    // Bare reference CubeName (e.g. a measurement like "IMD2"): keep every axis (all ':')
+                    // and reuse the bracketed slicing path. A trailing '(' is excluded (call-like, not a cube).
+                    refStr = name;
+                    body   = string.Join(", ", Enumerable.Repeat(":", ds[name].Rank));
+                }
+                else
+                {
+                    continue;   // 'name' is a prefix of a longer identifier we don't recognize
+                }
+
+                if (!refMap.TryGetValue(refStr, out int pIdx))
+                {
+                    pIdx = uniqueRefs.Count;
+                    refMap[refStr] = pIdx;
+                    uniqueRefs.Add(new CubeRefInfo(name, refStr, body));
+                }
+                substitutions.Add((pos, pos + refStr.Length, pIdx));
+                pos += refStr.Length;
+                matched = true;
+                break;
+            }
+            if (!matched) pos++;
+        }
+
+        if (uniqueRefs.Count == 0)
+        {
+            error = "No cube references found. Use a cube name (e.g. IMD2) or the form CubeName[:, 0, …].";
+            return false;
+        }
+
+        // ── Step 2: Slice each unique ref to a rank-1 array ──────────────────
+        foreach (var info in uniqueRefs)
+        {
+            if (!ds.Contains(info.CubeName))
+            {
+                error = $"No cube '{info.CubeName}' in dataset.";
+                return false;
+            }
+            var cube   = ds[info.CubeName];
+            var tokens = SliceTokenParser.SplitTokens(info.SliceTokensStr);
+
+            if (tokens.Length != cube.Rank)
+            {
+                error = $"'{info.RefStr}': expected {cube.Rank} axis token(s), got {tokens.Length}.";
+                return false;
+            }
+
+            int xDim = -1;
+            var args = new object[cube.Rank];
+            for (int d = 0; d < tokens.Length; d++)
+            {
+                var axis = cube.Axes[d];
+                var t = SliceTokenParser.Parse(tokens[d], axis.Length, axis.Labels, axis.Name, out error);
+                switch (t.Kind)
+                {
+                    case SliceTokenParser.Kind.KeepWhole:
+                        args[d] = Range.All;
+                        if (xDim >= 0) { error = $"'{info.RefStr}': more than one X axis."; return false; }
+                        xDim = d; break;
+                    case SliceTokenParser.Kind.KeepRange:
+                        args[d] = new Range(t.RangeStart, t.RangeEndExclusive);
+                        if (xDim >= 0) { error = $"'{info.RefStr}': more than one X axis."; return false; }
+                        xDim = d; break;
+                    case SliceTokenParser.Kind.PinIndex:
+                        args[d] = t.Index; break;
+                    case SliceTokenParser.Kind.Family:
+                        error = $"'{info.RefStr}': the family marker '~' is only valid in single-cube picker specs, not multi-cube expressions."; return false;
+                    default:
+                        error = $"'{info.RefStr}': {error}"; return false;
+                }
+            }
+
+            if (xDim < 0)
+            {
+                error = $"'{info.RefStr}': no X axis — use ':', 'All', or a range.";
+                return false;
+            }
+
+            var result = cube[args];
+            if (!result.IsCube || result.Cube!.Rank != 1)
+            {
+                error = $"'{info.RefStr}' did not yield a rank-1 slice.";
+                return false;
+            }
+
+            var sliced = result.Cube!;
+            info.XAxis = sliced.Axes[0];
+            info.Data  = sliced.DataKind == DataKind.Complex
+                ? sliced.ComplexValues
+                : sliced.RealValues.Select(v => new Complex(v, 0)).ToArray();
+        }
+
+        // ── Step 3: Validate dimensions ───────────────────────────────────────
+        int n = uniqueRefs[0].Data!.Length;
+        for (int k = 1; k < uniqueRefs.Count; k++)
+        {
+            int nk = uniqueRefs[k].Data!.Length;
+            if (nk != n)
+            {
+                error = $"'{uniqueRefs[k].RefStr}' has {nk} point(s) but '{uniqueRefs[0].RefStr}' has {n} — slices must share the same swept axis.";
+                return false;
+            }
+        }
+
+        // ── Step 4: Substitute placeholders ──────────────────────────────────
+        var sb = new System.Text.StringBuilder(expression);
+        // Replace from right to left to preserve positions.
+        foreach (var (start, end, pIdx) in substitutions.OrderByDescending(s => s.start))
+            sb.Remove(start, end - start).Insert(start, $"__c{pIdx}");
+        string substituted = sb.ToString();
+
+        // ── Step 5: Parse ─────────────────────────────────────────────────────
+        Expr ast;
+        try
+        {
+            ast = Parser.Parse(substituted);
+        }
+        catch (ParseException ex)
+        {
+            error = $"Couldn't parse '{expression}': {ex.Message}";
+            return false;
+        }
+        catch (Exception ex)
+        {
+            error = $"Parse error: {ex.Message}";
+            return false;
+        }
+
+        // Scope with dummy bindings for each placeholder (allows Lookup to succeed;
+        // InjectResolved sets the real value in the memo cache before evaluation).
+        var scope = new Scope("te");
+        for (int k = 0; k < uniqueRefs.Count; k++)
+            scope.Bind($"__c{k}", "0");
+
+        // ── Step 6: Evaluate per X-sample ─────────────────────────────────────
+        var results    = new Value[n];
+        bool anyComplex = false;
+
+        for (int i = 0; i < n; i++)
+        {
+            var ev = new Evaluator();
+            for (int k = 0; k < uniqueRefs.Count; k++)
+                ev.InjectResolved("te", $"__c{k}", new Value(uniqueRefs[k].Data![i]));
+
+            try
+            {
+                results[i] = ev.EvalExpr(ast, scope);
+            }
+            catch (UnknownFunctionException ex)
+            {
+                error = $"Unknown function '{ex.Name}' in '{expression}'.";
+                return false;
+            }
+            catch (ExpressionException ex)
+            {
+                error = ex.Message;
+                return false;
+            }
+
+            if (results[i].Kind == ValueKind.Complex) anyComplex = true;
+        }
+
+        // ── Step 7: Build output ──────────────────────────────────────────────
+        if (anyComplex)
+        {
+            // If every result has Im == 0 (e.g. source cube was Real and wrapped as Complex(v,0)),
+            // demote to realValues so BuildCubePath treats the trace as scalar.
+            bool allImagZero = results.All(v =>
+                v.Kind != ValueKind.Complex || v.AsComplex().Imaginary == 0.0);
+            if (allImagZero)
+            {
+                realValues    = results.Select(v =>
+                    v.Kind == ValueKind.Complex ? v.AsComplex().Real : v.AsReal()).ToArray();
+                complexValues = null;
+            }
+            else
+            {
+                complexValues = results.Select(v =>
+                    v.Kind == ValueKind.Complex ? v.AsComplex() : new Complex(v.AsReal(), 0)).ToArray();
+                realValues = null;
+            }
+        }
+        else
+        {
+            realValues    = results.Select(v => v.AsReal()).ToArray();
+            complexValues = null;
+        }
+
+        // Only the complex-locus plots (Smith / Polar) require a complex result; Rect and Table accept real.
+        if (plotType.IsComplex() && realValues != null)
+        {
+            error = "Smith/Polar needs a complex expression; result is real-valued.";
+            return false;
+        }
+
+        xValues   = uniqueRefs[0].XAxis!.Values;
+        xAxisName = uniqueRefs[0].XAxis!.Name;
+        xUnit     = string.IsNullOrEmpty(uniqueRefs[0].XAxis!.Unit)
+            ? null
+            : uniqueRefs[0].XAxis!.Unit;
+        xLabels   = uniqueRefs[0].XAxis!.Labels;   // e.g. the two-tone "(k1,k2)" mix-product labels
+        return true;
+    }
+
+    // ── Private helper type ───────────────────────────────────────────────────
+
+    private sealed class CubeRefInfo
+    {
+        public string    CubeName      { get; }
+        public string    RefStr        { get; }  // full original, e.g. "V[:, 0, 0]"
+        public string    SliceTokensStr { get; } // content between [ and ], e.g. ":, 0, 0"
+
+        public Complex[]? Data  { get; set; }
+        public Axis?      XAxis { get; set; }
+
+        public CubeRefInfo(string cubeName, string refStr, string sliceTokensStr)
+        {
+            CubeName       = cubeName;
+            RefStr         = refStr;
+            SliceTokensStr = sliceTokensStr;
+        }
+    }
+}

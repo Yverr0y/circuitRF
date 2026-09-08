@@ -64,8 +64,8 @@ public sealed class RectYAxisLabelSpacingTests
     public void RightYAxis_SharedGridInterpolatedTicks_ReservesTheWidestDrawnLabel_NotJustEndpoints()
     {
         var axes = new Axes { ShowSecondary = true };
-        axes.Window          = new Rect(0, -100, 10, 200);   // primary ticks at -80,-40,0,40,80
-        axes.WindowSecondary = new Rect(0,    0, 10,   7);   // → secondary 0.7, 2.1, 3.5, 4.9, 6.3
+        axes.Window          = new PlotRect(0, -100, 10, 200);   // primary ticks at -80,-40,0,40,80
+        axes.WindowSecondary = new PlotRect(0,    0, 10,   7);   // → secondary 0.7, 2.1, 3.5, 4.9, 6.3
 
         using var f = TickFont();
 
@@ -84,7 +84,7 @@ public sealed class RectYAxisLabelSpacingTests
     public void LeftYAxis_HalfStepTicks_ReservesTheWidestDrawnLabel_NotJustEndpoints()
     {
         var axes = new Axes();
-        axes.Window = new Rect(0, -100, 10, 200);
+        axes.Window = new PlotRect(0, -100, 10, 200);
         axes.YTick  = 6.25; axes.MajorY = 2;                 // 12.5 step → …, -87.5, -75, …
         // NOTE: YTick must be assigned AFTER Window — the Window setter calls SetTicks(),
         // which recomputes YTick from the window height and would overwrite it.
@@ -108,8 +108,8 @@ public sealed class RectYAxisLabelSpacingTests
     public void YLabelColumns_ClearEveryDrawnTickNumber_OnBothAxes(double secTop, double secBottom)
     {
         var axes = new Axes { ShowSecondary = true };
-        axes.Window          = new Rect(0, -100, 10, 200);
-        axes.WindowSecondary = new Rect(0, secTop, 10, secBottom - secTop);
+        axes.Window          = new PlotRect(0, -100, 10, 200);
+        axes.WindowSecondary = new PlotRect(0, secTop, 10, secBottom - secTop);
 
         using var f = TickFont();
         const float vpLeft = 100f, vpRight = 500f, lw = 2f;
@@ -136,8 +136,8 @@ public sealed class RectYAxisLabelSpacingTests
     public void ZeroHeightWindow_StillReservesNonZeroWidth_LabelNeverFlushAgainstTheAxis()
     {
         var axes = new Axes { ShowSecondary = true };
-        axes.Window          = new Rect(0, 5, 10, 0);
-        axes.WindowSecondary = new Rect(0, 5, 10, 0);
+        axes.Window          = new PlotRect(0, 5, 10, 0);
+        axes.WindowSecondary = new PlotRect(0, 5, 10, 0);
 
         using var f = TickFont();
         Assert.True(AxesRenderer.MaxYTickLabelWidth(f, axes, secondary: false) > 0f);

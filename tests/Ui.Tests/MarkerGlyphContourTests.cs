@@ -42,7 +42,7 @@ public sealed class MarkerGlyphContourTests : IDisposable
             Primary    = (1.0, 1.0, 500.0, 500.0),
             Secondary  = (1.0, 1.0, 500.0, 500.0),
             CanvasSize = (1000.0, 1000.0),
-            Viewport   = new Avalonia.Rect(0, 0, 1, 1),
+            Viewport   = new PlotRect(0, 0, 1, 1),
         };
         return (trace, tf, RenderTheme.Light);
     }

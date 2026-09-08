@@ -1022,7 +1022,7 @@ public static class HarmonicaPanelRenderer
     /// power-sweep plots so their DATA rectangles are identical at every window size, not by
     /// coincidence of two independently-derived margins happening to agree.
     /// </summary>
-    private static Avalonia.Rect PowerSweepShapedViewport()
+    private static PlotRect PowerSweepShapedViewport()
     {
         var probe = new Plot(PlotType.Rect, FreqUnit.GHz);
         probe.Traces.Add(NewRectTrace([0, 1], [0, 1], SKColors.Black, width: 1));
@@ -1280,11 +1280,11 @@ public static class HarmonicaPanelRenderer
         var w = plot.Axes.Window;
         if (w.Width <= 0) return;
         double extra = w.Width * XHeadroomFraction;
-        plot.Axes.Window = new Avalonia.Rect(w.X, w.Y, w.Width + extra, w.Height);
+        plot.Axes.Window = new PlotRect(w.X, w.Y, w.Width + extra, w.Height);
 
         var w2 = plot.Axes.WindowSecondary;
         if (w2.Width > 0)
-            plot.Axes.WindowSecondary = new Avalonia.Rect(w2.X, w2.Y, w2.Width + extra, w2.Height);
+            plot.Axes.WindowSecondary = new PlotRect(w2.X, w2.Y, w2.Width + extra, w2.Height);
     }
 
     /// <summary>
@@ -1307,11 +1307,11 @@ public static class HarmonicaPanelRenderer
         if (!(hi > lo)) return;
 
         var w = plot.Axes.Window;
-        plot.Axes.Window = new Avalonia.Rect(lo, w.Y, hi - lo, w.Height);
+        plot.Axes.Window = new PlotRect(lo, w.Y, hi - lo, w.Height);
 
         var w2 = plot.Axes.WindowSecondary;
         if (w2.Width > 0)
-            plot.Axes.WindowSecondary = new Avalonia.Rect(lo, w2.Y, hi - lo, w2.Height);
+            plot.Axes.WindowSecondary = new PlotRect(lo, w2.Y, hi - lo, w2.Height);
     }
 
     private static double DbmToWatts(double dbm) => Math.Pow(10.0, (dbm - 30.0) / 10.0);
@@ -1467,8 +1467,7 @@ public static class HarmonicaPanelRenderer
     {
         var t = new Trace(new SNP([1e9], 1), MatrixType.S, 0, 0, DependentVarFormat.Real,
                           secondaryAxis: secondary);
-        t.Properties.LineColorStorage =
-            Avalonia.Media.Color.FromArgb(colour.Alpha, colour.Red, colour.Green, colour.Blue);
+        t.Properties.LineColorStorage = colour;
         t.Properties.LineWidth   = width;
         t.Properties.LineEnabled = true;
         t.SetCubeData(x, null, y, "x", null, PlotType.Rect, FreqUnit.GHz);
@@ -1498,11 +1497,11 @@ public static class HarmonicaPanelRenderer
             plot.Axes.WindowSecondary = Pad(minX, minY2, maxX, maxY2);
     }
 
-    private static Avalonia.Rect Pad(double x0, double y0, double x1, double y1)
+    private static PlotRect Pad(double x0, double y0, double x1, double y1)
     {
         double w = x1 - x0, h = y1 - y0;
         if (w <= 0) w = 1; if (h <= 0) h = 1;
-        return new Avalonia.Rect(x0, y0 - h * 0.05, w, h * 1.10);
+        return new PlotRect(x0, y0 - h * 0.05, w, h * 1.10);
     }
 
     // ── brief-harmonicarf-r6e §2 — persisted axis limits + autoscale, one mechanism, three plots ──
@@ -1553,24 +1552,24 @@ public static class HarmonicaPanelRenderer
         if (limits.XMin is { } xMin && limits.XMax is { } xMax && xMax > xMin)
         {
             var w = plot.Axes.Window;
-            plot.Axes.Window = new Avalonia.Rect(xMin, w.Y, xMax - xMin, w.Height);
+            plot.Axes.Window = new PlotRect(xMin, w.Y, xMax - xMin, w.Height);
             if (hasSecondary)
             {
                 var w2 = plot.Axes.WindowSecondary;
-                plot.Axes.WindowSecondary = new Avalonia.Rect(xMin, w2.Y, xMax - xMin, w2.Height);
+                plot.Axes.WindowSecondary = new PlotRect(xMin, w2.Y, xMax - xMin, w2.Height);
             }
         }
 
         if (limits.YMin is { } yMin && limits.YMax is { } yMax && yMax > yMin)
         {
             var w = plot.Axes.Window;
-            plot.Axes.Window = new Avalonia.Rect(w.X, yMin, w.Width, yMax - yMin);
+            plot.Axes.Window = new PlotRect(w.X, yMin, w.Width, yMax - yMin);
         }
 
         if (hasSecondary && limits.Y2Min is { } y2Min && limits.Y2Max is { } y2Max && y2Max > y2Min)
         {
             var w2 = plot.Axes.WindowSecondary;
-            plot.Axes.WindowSecondary = new Avalonia.Rect(w2.X, y2Min, w2.Width, y2Max - y2Min);
+            plot.Axes.WindowSecondary = new PlotRect(w2.X, y2Min, w2.Width, y2Max - y2Min);
         }
     }
 }

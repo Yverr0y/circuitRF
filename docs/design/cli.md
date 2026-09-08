@@ -47,7 +47,7 @@ Nine verbs run no analysis, so none of §3-§6 applies to them and §7's exit co
 | `import part` | a component file or folder | `ComponentRead` + `ComponentImport.Import` | a cell folder holding the land patterns and the symbol |
 | `check` | a workspace, a cell folder, or one document | the validators that already exist | **nothing** — §10 |
 | `explain` | the same, plus `--expr` / `--analysis` / `--ref` / `--cells` / `--layers` / `--extents` | reports what resolution DECIDED | **nothing** — §10 |
-| `render` | the same three view documents, a cell folder, or a workspace + `--cell` | draws it with the renderer the GUI draws with | one `.svg` / `.pdf` / `.png` — §13 |
+| `render` | the same three view documents, a cell folder, a workspace + `--cell`, or a `.cdd` | draws it with the renderer the GUI draws with | one `.svg` / `.pdf` / `.png` — §13, and §13.7 for a data display |
 | `read` | a result file, or one of circuitRF's own documents | loads it back through the readers the GUI reads through | **nothing** — §11.4 |
 | `serve` | `--root <dir>` | a protocol server on stdin/stdout — §11 | whatever the tool it was asked for writes |
 | `reference` | **nothing at all** | reports what a caller may WRITE: the shipped reference pages, and the component catalogue generated from the live registries | **nothing** — §12 |
@@ -1095,3 +1095,68 @@ GUI's own clipboard export by RND-1. Measured, **all four came back byte-identic
 all**: RND-1's `clipPath` id counter is per process and does not differ between the two here, and the
 `SKDocumentPdfMetadata` date §5.2 predicted never appeared. Both normalisations are written and applied
 only where the raw bytes differ, so an exclusion that stops being needed stops being applied.
+
+### 13.7 A `.cdd` — the same verb, a different anatomy
+
+`brief-render-4-data-display.md`. A data display is the fourth document kind this verb draws, and it is
+the one that is not a drawing:
+
+```
+circuitrf render <path.cdd> -o <out.svg|.pdf|.png> [--data file]... [--tab name|n] [--plot n] [--all-tabs]
+```
+
+**It holds no data.** Its traces name a source — a path, or the sentinel `run.npy` meaning "whatever
+this document has SELECTED" — and every curve in the picture is re-resolved from a file on disk each
+time it opens. So rendering one is three jobs, not one: resolve the sources to `DataSet`s, resolve each
+trace against its cube, then compose and draw. Only the first is this verb's;
+`src/Cli/RenderDataDisplay.cs` and `src/Cli/CddSources.cs` are argument parsing, source binding,
+refusals and reporting, on §13.1's terms.
+
+**Where the other two live, and why they moved.** `CircuitRF.Render.DataDisplay` — the Data Display's
+models and its eight Skia renderers, plus four functions that were view models' until RND-4 and are now
+called by BOTH sides: `TraceResolve` (spec → cube → points), `ContourResolve`, `SummaryResolve` and
+`PlotConfigLoader` (a saved `PlotContainerConfig` → a live `Plot`), with `PlotComposer`,
+`PlotDocumentWriter`, `PlotCanvasGeometry` and `PlotLabelStrips` carrying the page layout out of
+`PlotExporter`. See `docs/design/data-display.md` §"Where the resolution lives". A CLI that
+re-implemented any of it would produce a plot that is subtly different from the one on screen, which is
+the worst possible output of this series, because nobody can see that it is wrong.
+
+**An unresolvable source is a refusal naming `--data`, never an empty plot.** This is the rule the whole
+verb is arranged around: an empty plot is a valid picture, it exports cleanly, and it looks exactly like
+a measurement that came back empty. So every source the chosen pages reference is resolved BEFORE
+anything is drawn. A reference is looked for beside the `.cdd` and then under the nearest ancestor
+workspace's `results/`; the sentinel takes the document's own recorded selection, or the first `--data`.
+`--data` may be repeated, it overrides a path that does not resolve, and **one that binds nothing is a
+refusal too** — a caller that handed over last week's run must not get a picture drawn from whatever
+happened to be lying beside the document.
+
+**Selection and pages.** `--tab` takes a name or a 1-based number (a tab literally called "2" wins over
+the second tab), `--plot` takes a 1-based number within it, and the default is the tab the document
+opens on. **`--all-tabs` writes one page per tab and is PDF's alone** — `SKDocument` is a multi-page
+format and SVG and PNG are not, and writing `out-1.svg`, `out-2.svg` from one `-o` is a filename this
+tool invented, which §13.2's rule forbids. On those it is a refusal naming `--tab`.
+
+**`--size` replaces the page; everything else about the composition is unchanged.** The default stays
+`PlotExporter`'s own 792×612 pt landscape with 36 pt margins, so an unadorned render writes the
+byte-identical file the GUI's own **Export** does. The bounding-box fit — plots, axis label strips and
+marker info boxes scaled uniformly to fill the usable area and centred on it — is what makes a marker
+info box the user dragged land in the file exactly where it sits on screen, and it was kept verbatim;
+only the page became a parameter, and the margin scales with it.
+
+**`--theme`/`--variant`/`--background` apply**, and the options that describe a DRAWING do not:
+`--window`, `--center`, `--span`, `--fit`, `--layers`, `--hide-layers`, `--detail`, `--view`, `--cell`,
+`--grid` and `--no-rulers` are each a refusal naming themselves. A display has no world coordinates and
+no layers — its plots carry their own axis windows — and a caller that passed `--window` expecting a
+crop would otherwise get a full picture back with no hint that its flag did nothing.
+
+**`--json`** reports `result.render.dataDisplay`: the tab drawn and how many there are, the page count,
+the plot count, and **every source with the file it resolved to and whether `--data` or the document
+bound it**. That last is the part a caller cannot get from the picture: "the plot is empty" and "the
+plot read the wrong run" look identical.
+
+The gate is `tests/Ui.Tests/Render/RenderDataDisplayCliTests.cs`, which authors a display through the
+application's own view models, saves it, and compares the verb's output as a PROCESS against
+`PlotExporter`'s — for eight trace kinds (a cube slice, an expression, a "plot versus", a derived
+metric, an S→Z conversion, a stability circle, a loadpull contour and a summary-table column). The one
+normalisation is Skia's SVG element ids, whose counter is per process and in hex; the PDF is compared
+with none at all.

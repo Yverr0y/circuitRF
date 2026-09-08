@@ -891,7 +891,7 @@ public sealed class HarmonicaPanelTests : IDisposable
         };
 
         var plot = HarmonicaPanelRenderer.BuildPowerSweepPlot(d, theme);
-        var rects = CircuitRF.Ui.DataDisplay.AxesRenderer.ComputeLabelHitRects(plot, (W, H));
+        var rects = CircuitRF.Render.DataDisplay.AxesRenderer.ComputeLabelHitRects(plot, (W, H));
         Assert.True(rects.Y2Label.Width > 0 || rects.Y2Label.Height > 0, "expected a Y2 label rect");
 
         using var surface = SKSurface.Create(new SKImageInfo(W, H));
@@ -940,8 +940,8 @@ public sealed class HarmonicaPanelTests : IDisposable
         };
 
         var plot = HarmonicaPanelRenderer.BuildPowerSweepPlot(d, theme);
-        var tf    = CircuitRF.Ui.DataDisplay.PlotRenderer.BuildTransforms(plot, (W, H));
-        var rects = CircuitRF.Ui.DataDisplay.AxesRenderer.ComputeLabelHitRects(plot, (W, H));
+        var tf    = CircuitRF.Render.DataDisplay.PlotRenderer.BuildTransforms(plot, (W, H));
+        var rects = CircuitRF.Render.DataDisplay.AxesRenderer.ComputeLabelHitRects(plot, (W, H));
 
         var topRight = tf.PrimaryToCanvas(plot.Axes.Window.Right, plot.Axes.Window.Top);
         var botRight = tf.PrimaryToCanvas(plot.Axes.Window.Right, plot.Axes.Window.Bottom);
@@ -1007,8 +1007,8 @@ public sealed class HarmonicaPanelTests : IDisposable
         // §1's fix applies here too: the right axis must never carry the ordinary AxisLine colour —
         // it is drawn ONCE, in Harmonica.Loadline, through the SAME colour-parametrized overlay.
         var plot  = HarmonicaPanelRenderer.BuildTimeDomainPlot(d, theme);
-        var tf    = CircuitRF.Ui.DataDisplay.PlotRenderer.BuildTransforms(plot, (W, H));
-        var rects = CircuitRF.Ui.DataDisplay.AxesRenderer.ComputeLabelHitRects(plot, (W, H));
+        var tf    = CircuitRF.Render.DataDisplay.PlotRenderer.BuildTransforms(plot, (W, H));
+        var rects = CircuitRF.Render.DataDisplay.AxesRenderer.ComputeLabelHitRects(plot, (W, H));
         var topRight = tf.PrimaryToCanvas(plot.Axes.Window.Right, plot.Axes.Window.Top);
         var botRight = tf.PrimaryToCanvas(plot.Axes.Window.Right, plot.Axes.Window.Bottom);
 

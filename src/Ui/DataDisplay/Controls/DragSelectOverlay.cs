@@ -38,8 +38,8 @@ internal sealed class DragSelectOverlay : Control
         // Resolve accent colour on the UI thread — same source as plot/InfoBox highlights.
         // Fill uses low alpha so content behind the rect remains readable.
         // Stroke uses a higher alpha so the border is clearly visible.
-        var skFill   = RenderTheme.GetTransparentAccent(40);
-        var skStroke = RenderTheme.GetTransparentAccent(170);
+        var skFill   = PlotAccentColor.GetTransparentAccent(40);
+        var skStroke = PlotAccentColor.GetTransparentAccent(170);
 
         var fill   = new ImmutableSolidColorBrush(
             new Color(skFill.Alpha,   skFill.Red,   skFill.Green,   skFill.Blue));

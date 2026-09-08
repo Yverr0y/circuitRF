@@ -155,12 +155,59 @@ The Data Display's property editor **merges two existing UIs** (locked direction
   mirroring how the Analyses editor is available both docked and as its own window. Author the inspector as a
   self-contained `UserControl` + VM so neither host owns it; both just present it.
 
-### 2.6 Architectural firewall (unchanged, applies here)
-The Data Display is **UI** — it lives in `src/Ui` and may use Avalonia/Skia. `DataSet`/`DataCube`/
-`DataSetImporter` are RfCore (no Avalonia). Any contour/spline **math** is framework-free and belongs in
-RfCore or `src/Engine` (consumable headless, testable, and potentially shared with splotRF), **not** in
-the UI. The in-process `DataSet`/`DataCube` API remains lockstep with splotRF (`src/Core/Data/CLAUDE.md`
-→ "Change carefully").
+### 2.6 Architectural firewall (revised by RND-4, 2026-09-07)
+`DataSet`/`DataCube`/`DataSetImporter` are RfCore (no Avalonia). Any contour/spline **math** is
+framework-free and belongs in RfCore or `src/Engine`. The in-process `DataSet`/`DataCube` API remains
+lockstep with splotRF (`src/Core/Data/CLAUDE.md` → "Change carefully").
+
+**What changed:** the Data Display is no longer wholly UI. `brief-render-4-data-display.md` moved its
+MODELS and its RENDERERS to `src/Render`, namespace `CircuitRF.Render.DataDisplay`, so `circuitrf
+render` can draw a `.cdd` — see §2.9. Its VIEW MODELS, controls and undo stack stayed in `src/Ui` and
+are still the only half that may name Avalonia.
+
+### 2.9 Where the resolution lives (RND-4, 2026-09-07)
+
+**The rule: a trace resolves the same way whether a window or a build machine asked.** A `.cdd` holds no
+data — its traces name a source and every curve is re-derived on open — so a headless render that
+resolved traces its own way would produce a plot that is *plausible* and different from the one on
+screen, which nobody can see is wrong. So the resolution moved rather than being re-implemented.
+
+**In `CircuitRF.Render.DataDisplay`** (`src/Render/DataDisplay/`):
+
+| | was | why it had to come |
+|---|---|---|
+| `Models/*` (14 files) | `src/Ui/DataDisplay/Models` | `Plot`, `Trace`, `Axes`, `Marker`, `ContourData`, `DataDisplayConfig`, `TraceProperties`, `TraceLabeler`, `SummaryColumn*`, `AppSettings` — the whole document model |
+| `Renderers/*` (8 files) | `src/Ui/DataDisplay/Renderers` | every pixel a plot draws |
+| `CubeTraceSpecParser`, `SliceTokenParser`, `TraceExpression`, `VersusResolver`, `VersusSpec`, `DbFloor`, `DataSourceRef`, `ComplexStringHelper` | beside them | the spec grammar a trace is authored in |
+| `TraceResolve` | `PlotInspectorViewModel` | spec → cube → points, including the versus X side and the network-parameter substitution |
+| `ContourResolve` | `TraceRowViewModel.RebuildContour` | the fit, the grid, the levels, MXP/MXE and the marker hooks |
+| `SummaryResolve` | `PlotInspectorViewModel.RebuildSummary` | every cell of a loadpull summary table |
+| `PlotConfigLoader` | `DataDisplayViewModel.LoadPlotContainerConfigAsync` | a saved `PlotContainerConfig` → a live `Plot` |
+| `DataSourceView` | `DataSourceEntryViewModel` | the virtual Z/Y cubes, and the SNP view a derived trace needs |
+| `PlotComposer`, `PlotDocumentWriter`, `PlotCanvasGeometry`, `PlotLabelStrips` | `PlotExporter`, `PlotContainerViewModel` | the page layout and the three encoders |
+| `DataDisplayJson` | `DataDisplayViewModel.JsonOpts` | without the enum converter every `PlotType` in a `.cdd` defaults — a Smith plot opens as a Rect one |
+
+**Still in `src/Ui`, deliberately:** every view model, every control and converter, the undo stack,
+`DataDisplayDocument` (a Dock document), `PlotExporter`'s file dialog and clipboard plumbing,
+`PlotAccentColor` (it reads `Application.Current`'s resources — and no renderer ever called it), and
+`AppSettingsViewModel`, which now wraps the `AppSettings` that came down.
+
+**The seam a headless caller implements is `IPlotDataSources`** — resolve a reference to a path, and a
+path to a `DataSet` or an `SNP`. `src/Ui` implements it over the library
+(`LibraryDataSources`); `src/Cli` implements it over the files a caller named (`CddSources`).
+
+**Two things that were view-model-only and had to move, both found by the per-kind gate rather than by
+reading:** the virtual `Z`/`Y` cubes (materialized on first read of a source's `DataSet`, so a trace on
+`SP1.Z` resolved to nothing without them) and the `NetworkView` SNP (built from a grouped run's S cube,
+so every *derived* trace — Max Gain, µ, a stability circle — was dropped as the display opened without
+it). Both are `DataSourceView` now. Each was a plot that drew, exported cleanly, and was missing a curve.
+
+**Avalonia's `Rect` and `Point` became `PlotRect` and `PlotPoint`**, with Avalonia's exact semantics —
+including `Union`'s empty-operand behaviour, which `Plot.Autoscale` depends on and which
+`tests/Ui.Tests/Render/PlotGeometryParityTests.cs` holds. `TraceProperties`' colours became `SKColor`,
+with the palette written out as explicit ARGB: Avalonia's `Transparent` is `#00FFFFFF` and Skia's is
+`#00000000`, and `RenderTheme.ToSKColor` overrides the alpha with the trace's own opacity — so the same
+stored choice would have rendered white on one and black on the other.
 
 ---
 

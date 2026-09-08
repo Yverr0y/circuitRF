@@ -82,8 +82,25 @@ internal static class Render
         public string?      Theme;
         public ColorVariant Variant = ColorVariant.Light;
         public bool         Transparent;
+        /// <summary>Whether <c>--background</c> was TYPED. A `.cdd` otherwise takes the
+        /// application's own export default rather than this verb's, which is what makes an
+        /// unadorned render byte-identical to the GUI's Export (R-rnd4-6 / §5.1).</summary>
+        public bool         BackgroundStated;
         public bool         Grid;
         public bool         NoRulers;
+
+        // ── .cdd only (RND-4) ────────────────────────────────────────────────
+        /// <summary>Files bound with <c>--data</c>, in the order given. R-rnd4-4: the FIRST binds the
+        /// document's `run.npy` sentinel, and every one of them can satisfy a path the document names
+        /// but that does not resolve here.</summary>
+        public List<string> Data = new();
+        public string?      Tab;
+        public int?         PlotIndex;
+        public bool         AllTabs;
+        /// <summary>Whether <c>--size</c> was TYPED. A `.cdd` defaults to the 792x612 pt page the
+        /// application's own Export writes (R-rnd4-6) rather than this verb's 1600x1200, and without
+        /// this flag those two defaults cannot be told apart.</summary>
+        public bool         SizeStated;
     }
 
     /// <summary>R-rnd2-3's default page. Points for a vector format, device pixels for a raster one —
@@ -137,7 +154,8 @@ internal static class Render
             "                        [--margin f] [--size WxH] [--scale n | --dpi n]\n" +
             "                        [--layers a,b | --hide-layers a,b] [--detail full|screen|<px>]\n" +
             "                        [--theme name|file.ccolor] [--variant light|dark]\n" +
-            "                        [--background opaque|transparent] [--grid] [--no-rulers]");
+            "                        [--background opaque|transparent] [--grid] [--no-rulers]\n" +
+            "  a .cdd adds:          [--data file]... [--tab name|n] [--plot n] [--all-tabs]");
         return 1;
     }
 
@@ -196,7 +214,7 @@ internal static class Render
                         || !int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int h)
                         || w < 8 || h < 8 || w > 20000 || h > 20000)
                         return JsonRun.Fail(CliDiagnostics.RenderSizeMalformed(args[i]));
-                    o.Width = w; o.Height = h;
+                    o.Width = w; o.Height = h; o.SizeStated = true;
                     continue;
                 }
 
@@ -256,9 +274,21 @@ internal static class Render
                         case "transparent": o.Transparent = true;  break;
                         default: return JsonRun.Fail(CliDiagnostics.RenderUnknownBackground(args[i]));
                     }
+                    o.BackgroundStated = true;
                     continue;
                 case "--grid":      o.Grid = true;     continue;
                 case "--no-rulers": o.NoRulers = true; continue;
+
+                // ── .cdd only (RND-4) ─────────────────────────────────────────
+                case "--data" when i + 1 < args.Length: o.Data.Add(args[++i]); continue;
+                case "--tab"  when i + 1 < args.Length: o.Tab = args[++i];     continue;
+                case "--plot" when i + 1 < args.Length:
+                    if (!int.TryParse(args[++i], NumberStyles.Integer, CultureInfo.InvariantCulture, out int pi)
+                        || pi < 1)
+                        return JsonRun.Fail(CliDiagnostics.RenderPlotMalformed(args[i]));
+                    o.PlotIndex = pi;
+                    continue;
+                case "--all-tabs": o.AllTabs = true; continue;
 
                 default:
                     if (a.StartsWith('-'))
@@ -412,6 +442,23 @@ internal static class Render
         control?.BeginStage("resolve");
         Progress("resolve");
 
+        // A `.cdd` is a different document with a different anatomy — it holds no geometry, it names
+        // its data, and it lays out several plots on a page rather than framing one drawing in a
+        // viewport. It is still THIS verb (R-rnd0-4), inferred through the same classifier, but it
+        // branches before ResolveTarget, which is about a cell's views.
+        if (File.Exists(o.Path!) && DocumentKinds.Classify(o.Path!) == DocumentKind.DataDisplay)
+        {
+            if (CddInapplicable(o) is { } inapplicable)
+                return JsonRun.Fail(CliDiagnostics.RenderCddViewportUnsupported(inapplicable));
+
+            return RenderDataDisplay.Draw(o.Path!, new RenderDataDisplay.Request(
+                o.Output!, o.Format == Format.Pdf ? "pdf" : o.Format == Format.Png ? "png" : "svg",
+                o.Data, o.Tab, o.PlotIndex, o.AllTabs,
+                o.SizeStated ? o.Width  : null,
+                o.SizeStated ? o.Height : null,
+                o.Scale, o.BackgroundStated ? o.Transparent : null, o.Variant == ColorVariant.Dark));
+        }
+
         var (target, refusal) = ResolveTarget(o);
         if (refusal is { } r) return r;
         var t = target!.Value;
@@ -424,6 +471,29 @@ internal static class Render
             ViewType.Symbol => DrawSymbol(o, t),
             _               => DrawSchematic(o, t),
         };
+    }
+
+    /// <summary>
+    /// The options that mean something for a DRAWING and nothing for a data display, named rather
+    /// than ignored (R-rnd0-6). A caller that passed <c>--window</c> expecting a crop, or
+    /// <c>--layers</c> expecting a filter, would otherwise get a full picture back and no hint that
+    /// its flag did nothing — which is the same failure mode as a plausible-but-wrong picture.
+    /// Returns the first one typed, or null.
+    /// </summary>
+    private static string? CddInapplicable(Options o)
+    {
+        if (o.WindowText is not null) return "--window";
+        if (o.CenterText is not null) return "--center";
+        if (o.SpanText   is not null) return "--span";
+        if (o.FitStated)              return "--fit";
+        if (o.OnlyLayers is not null) return "--layers";
+        if (o.HideLayers is not null) return "--hide-layers";
+        if (o.View       is not null) return "--view";
+        if (o.Cell       is not null) return "--cell";
+        if (o.Detail != Detail.Full)  return "--detail";
+        if (o.Grid)                   return "--grid";
+        if (o.NoRulers)               return "--no-rulers";
+        return null;
     }
 
     /// <summary>
