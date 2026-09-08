@@ -1,9 +1,10 @@
 # Sonnet Brief — WSProbe series, 0: overview, the equation register, and the decisions
 
 **Read this first; it is the map for `brief-wsprobe-1-probe-and-wsp-matrix.md` through
-`brief-wsprobe-8-hb-performance.md`. It contains no implementation work of its own.** It
-records what the reference document says, what in it was checked and found wrong, how its notation maps
-onto circuitRF's own conventions, and the decisions the seven implementation briefs depend on.
+`brief-wsprobe-8-hb-performance.md` and `brief-wsprobe-9-stability-margin.md`. It contains no
+implementation work of its own.** It records what the reference documents say, what in them was
+checked and found wrong, how their notation maps onto circuitRF's own conventions, and the decisions
+the eight implementation briefs depend on.
 
 ---
 
@@ -48,22 +49,34 @@ lines.
 
 ### 1.1 Follow-on literature (public), and what each contributes
 
-Found on the open indexes (Crossref, OpenAlex) on 2026-09-08. The full texts are behind the
-publishers' paywalls; only the abstracts were readable, and the briefs say so wherever a formula could
-not be transcribed.
+Found on the open indexes (Crossref, OpenAlex) on 2026-09-08. The full texts of [M] and [E] are held
+by the owner (§1.2); the rest are behind the publishers' paywalls and only their abstracts were
+readable.
 
 | Citation | What it adds | Where it lands |
 |---|---|---|
 | T. A. Winslow, "A Novel CAD Probe for Bidirectional Impedance and Stability Analysis," *2018 IEEE/MTT-S IMS*, DOI 10.1109/MWSYM.2018.8439210 | The original probe paper (the four-Γ dependent-source construction the 2023 document supersedes mathematically). Historical citation only. | user docs appendix |
-| T. A. Winslow, "A Novel Stability Margin for Transfer Functions," *2024 19th European Microwave Integrated Circuits Conference (EuMIC)*, DOI 10.23919/EuMIC61603.2024.10732614 | **The stability margin the owner remembered.** Abstract (OpenAlex): the driving-point functions "have units of impedance or admittance whose values are very circuit design dependent"; because they "are fundamentally composed of bidirectional looking impedances or admittances," a "unitless, normalized proxy function" is constructed "that can be successfully used for stability margin assessment," demonstrated on a parametric oscillation in a measured amplifier that simulation had called stable. **The formula itself is not in the abstract.** See §6, decision D-12. | WSP-2 (slot), WSP-4 (display) |
-| T. A. Winslow, "Stability Envelope Using Nodal Transfer Functions," *2025 20th EuMIC*, DOI 10.23919/EuMIC65284.2025.11233915 | Abstract: the envelope concept (the 2023 document's §9) combined with the 2024 margin, applied to driving-point impedance and admittance; compared against a two-device amplifier under source/load VSWR mismatch; "perfectly tracks NDF, yet is more informative." Confirms §9 is the intended envelope method and that the margin is meant to be swept over the envelope. | WSP-3 (envelope), WSP-4 |
+| **[M]** T. A. Winslow, "A Novel Stability Margin for Transfer Functions," *Proc. 19th EuMIC*, Paris, 2024, pp. 291–294, DOI 10.23919/EuMIC61603.2024.10732614 | **The stability margin — full text held since 2026-09-08** (§1.2). The driving-point functions have units and a circuit-dependent trajectory, so they give a binary answer; each is a sum of two bidirectional immittances (M-Eq. 1, 2), and normalising the real parts and the imaginary parts of the pair against each other gives four bounded proxies `rY, iY, rH, iH` whose means `SM_Y0` (M-Eq. 9) and `SM_H0` (M-Eq. 10) are unitless margins in `[0, 1]`, read in dB. Demonstrated on a K-band amplifier that simulated stable and oscillated at 1.16 GHz: the margin showed −50 dB at 1.06 GHz in the original small-signal simulation. | **WSP-9** (library, engine defaults, summary, threshold), WSP-4 (display), WSP-5 (over `ssfreq`) |
+| **[E]** T. A. Winslow, "Stability Envelope Using Nodal Transfer Functions," *Proc. 20th EuMIC*, Utrecht, 2025, pp. 254–257, DOI 10.23919/EuMIC65284.2025.11233915 | **Full text held since 2026-09-08** (§1.2). Builds the core 4-port `Y` of a circuit from the S, L and suspect probes' `wsp` entries (E-Eq. 1–4, with the transpose D-9 already states), adds pulled terminations (E-Eq. 5), reduces to the suspect probe's terminals (E-Eq. 6–8) and reads `H0`, `Y0`, `ZG`, `ZL`, `YG`, `YL` under mismatch (E-Eq. 9–12); sweeps the 2024 margin over source/load phase at fixed `ρ` on Ohtomo's Type-A amplifier against a full NDF sweep — the two agree at `ρ = 0.9` and `0.875`, and at `0.874` NDF reads stable while the margin still reads −40 dB. circuitRF reaches the same `wsp'` by WSP-3's rank-1 update; [E]'s reduction becomes the independent oracle for it. | **WSP-9** (margin envelope, NDF envelope, the oracle gate), WSP-4, WSP-6 (gate (k)), WSP-7 (fixture) |
 | T. A. Winslow, "Introduction to the WSProbe," *2025 IEEE BCICTS*, DOI 10.1109/BCICTS63111.2025.11211431 | Abstract restates the 2023 document's thesis: the 2N×2N WSP matrix, precise bidirectional impedances, driving-point immittances "properly and accurately under any level of feedback." Nothing new to implement; cite in the user docs. | user docs |
 | T. A. Winslow, IMS 2024 keynote abstract, *Stability Analysis Methods for Microwave Power Amplifiers: A Modern Perspective* (public PDF on the IMS site) | The 14-reference bibliography the user-docs appendix should follow; "4 transfer functions per node, two of which are essentially novel." | user docs appendix |
 | F. Wiedmann, public forum thread implementing the 2018 probe in a free SPICE-class simulator (2023) | Independent confirmation that the probe reduces to Tian's dual-injection equations, and that the **bidirectional admittances** `Ysrc`/`Yload` (the document's `YG`/`YL`, Eq. 76) are a useful derived output the original paper did not print. | WSP-2 (`wsp_YG`/`wsp_YL` are first-class, not "not an output") |
 
-Not found: any public source giving the EuMIC-2024 margin formula, or any published circuitRF-usable
-"dB stability margin" for the WSProbe by another author. The briefs therefore **do not invent one under
-Winslow's name** — see D-12.
+### 1.2 The two EuMIC papers, held in full (2026-09-08)
+
+The owner supplied both papers after WSP-3 was built: `<owner>/claude/Stability/
+A_Novel_Stability_Margin_for_Transfer_Functions.pdf` ([M], 4 pages) and
+`…/Stability_Envelope_Using_Nodal_Transfer_Functions.pdf` ([E], 4 pages), outside the repository like
+the 2023 document. **Citation convention:** the 2023 document's equations stay bare, `(Eq. 44)`; [M]'s
+are `(M-Eq. n)` and its four unnumbered proxy displays `(M-rY)`, `(M-iY)`, `(M-rH)`, `(M-iH)`; [E]'s are
+`(E-Eq. n)`. Code doc-comments and the user docs use the same prefixes, and WSP-7's citation check
+accepts all three forms. Their equations are in the register (§4) and their two printed errors in the
+typo register (T-16, T-17), both found numerically while writing WSP-9. Both papers name the
+commercial simulator, and [E] Fig. 5 prints a transistor **part number** beside its element values —
+the numbers are public and usable, the name is not.
+
+The earlier statement here that the margin formula was not public, and decision D-12's refusal, are
+superseded: **WSP-9 implements the margin** and retires the placeholders D-12 introduced.
 
 ---
 
@@ -182,6 +195,18 @@ given in the typo register.
 | 203–208 | `Γin`, `Γout`, `GP`, `GA`, `GT`, `Gmax` (`GainDEFs`) | ✓ (textbook) | WSP-2 |
 | 17 | NDF as the sequential product of return differences (Struble) | ✓ | WSP-6 cross-check |
 | 5–8, 11–16, 20–25 | K, B, Barkhausen, Bode's `F = Δ/Δ0`, Jackson, Middlebrook, Tian | textbook | user docs appendix |
+| M-Eq. 1–2 | `1/H0 = YG + YL`, `1/Y0 = ZG + ZL` (= Eq. 93/95) | ✓ | WSP-9 |
+| M-Eq. 3–4 | `ZG = z11 − z12 = (y12 + y22)/|Y|`, `ZL = z22 − z21 = (y21 + y11)/|Y|` (= Eq. 65–68) | ✓ | WSP-9 |
+| M-Eq. 5–6 | `YG = y11 + y12`, `YL = y22 + y21` (= Eq. 72–77) and their Z-forms | Y-forms ✓; Z-forms ✗ (`z12`/`z21` swapped; T-17) | WSP-9 |
+| M-Eq. 7–8 | Kurokawa on `1/H0` and `1/Y0` (= Eq. 107/108) | ✓ | WSP-2, WSP-9 |
+| M-rY, M-iY, M-rH, M-iH | the four bounded proxies (three-branch real, two-branch imaginary) | ≈ (definitional; precedence and the zero cases are conventions — T-18) | WSP-9 |
+| M-Eq. 9–10 | `SM_Y0 = ½(rY + iY)`, `SM_H0 = ½(rH + iH)` | ≈ (definitional); bounds and the −12 dB floor ✓ | WSP-9 |
+| E-Eq. 1–4 | `V_m`, `I_m` from the three probes' `wsp` entries; `Y = (V_m⁻¹ I_m)ᵀ` | ✓ (random non-reciprocal 4-port, 2e-15; the transpose is required — D-9) | WSP-9 gate (f) |
+| E-Eq. 5–8 | `Ȳ` with pulled `ȲS`, `ȲL`; the `d_ij` cofactor expansions and `D`; `R = d/D` | ✓ (equals the Schur complement to 1e-15) | WSP-9 gate (f) |
+| E-Eq. 9–10 | `1/H0 = Σ r_ij`, `1/Y0 = Σ r_ij / |R|` | ✓ | WSP-9 |
+| E-Eq. 11 | `Z^R_G`, `Z^R_L` under mismatch | ✗ (numerators swapped between G and L; T-16) | WSP-9 |
+| E-Eq. 12 | `Y^R_G = r11 + r12`, `Y^R_L = r22 + r21` | ✓ | WSP-9 |
+| E-Appendix | the `wsp(2·G − 1, 2·S)`… mapping of the twelve transfer functions | ✓ (consistent with Eq. 33) | WSP-9 gate (f) |
 
 ---
 
@@ -244,6 +269,23 @@ form; never the printed one.** Each brief repeats the entries it depends on.
 - **T-15 — Eq. 163–168 and 175–176 (not a typo, a convention).** Written for a symmetric Y; for a
   non-reciprocal network they and the §6 code yield the transpose. See D-9 and WSP-3 §3.
 
+- **T-16 — [E] Eq. 11.** Printed `Z^R_G = (r11 + r12)/(r11r22 − r12r21)`, `Z^R_L = (r22 + r21)/(…)`.
+  The 2023 document's Eq. 65/66 (and [M] Eq. 3/4) have `ZG = (y12 + y22)/|Y|`, `ZL = (y21 + y11)/|Y|`;
+  numerically, on a random non-reciprocal 4-port reduced per E-Eq. 5–8, the printed form is off by
+  O(1) and `Z^R_G = (r12 + r22)/|R|`, `Z^R_L = (r21 + r11)/|R|` is right to 1e-15. The same G/L swap
+  as T-4. **Use the corrected form; WSP-9 gate (f) asserts the printed one fails.**
+- **T-17 — [M] Eq. 5 and 6, Z-forms.** Printed `YG = (z22 − z21)/|Z|`, `YL = (z11 − z12)/|Z|`. From
+  `Y = Z⁻¹`, `y11 + y12 = (z22 − z12)/|Z|` and `y22 + y21 = (z11 − z21)/|Z|`. The off-diagonals are
+  swapped; invisible on a reciprocal network, O(1) on a non-reciprocal one (verified). The Y-forms
+  `YG = y11 + y12`, `YL = y22 + y21` are right and are what is implemented.
+- **T-18 — [M]'s proxy displays (not a typo; conventions the paper leaves open).** The `rY`/`rH`
+  third case (`Re sum ≤ 0 ⇒ 0`) is listed last but must be tested **first** — at `Re ZG = 5`,
+  `Re ZL = −10` the magnitude branch alone gives 0.25 where Kurokawa's real-part condition holds; the
+  equal-magnitude boundary is harmless (both branches agree); a pair with both parts exactly zero is
+  undefined (the function is discontinuous at the origin) and circuitRF returns 0.5, the value one
+  purely-resistive side gives; the dB convention is not stated and circuitRF uses `20·log10` (D-16).
+  WSP-9 §2.1 states each with its gate.
+
 Things that *look* like typos and are not: the `+1` sits in `A(1,1)` but in `B(2,2)` in Eq. 138/139 —
 that asymmetry is the probe-pair orientation (derived in WSP-3 §2); Eq. 130's 4×4 matches Eq. 129's
 row/column order; `wsp(1::2::N, 2::2::N)` in the §6 code is the odd-rows/even-columns block.
@@ -252,11 +294,14 @@ row/column order; `wsp(1::2::N, 2::2::N)` in the §6 code is the odd-rows/even-c
 
 ## 6. Decisions the seven briefs depend on
 
-**D-1. Order is WSP-1 → WSP-2 → WSP-3 → WSP-4, then WSP-5 → WSP-8 and WSP-6 in either order, then
-WSP-7.** WSP-1 (the probe and the `wsp` cube in the S-parameter engine) is independent and lands
-alone. WSP-2 (single-probe functions) needs only WSP-1's cube. WSP-3 (pairs, bifurcation, Ohtomo,
-envelope) needs WSP-2's reduction functions. WSP-4 (symbol, palette, Data Display) needs WSP-1–3's
-outputs to have something to draw, but its symbol/palette half can start alongside WSP-1. WSP-5
+**D-1. Order is WSP-1 → WSP-2 → WSP-3 → WSP-9 → WSP-4, then WSP-5 → WSP-8 and WSP-6 in either
+order, then WSP-7.** WSP-1 (the probe and the `wsp` cube in the S-parameter engine) is independent and
+lands alone. WSP-2 (single-probe functions) needs only WSP-1's cube. WSP-3 (pairs, bifurcation,
+Ohtomo, envelope) needs WSP-2's reduction functions. **WSP-9 (the stability margin and its envelope)
+needs WSP-2's immittances and WSP-3's `wsp_terminate`, and lands before WSP-4** so the Data Display
+draws the published margin rather than the placeholders it retires. WSP-4 (symbol, palette, Data
+Display) needs WSP-1–3 and WSP-9's outputs to have something to draw, but its symbol/palette half can
+start alongside WSP-1. WSP-5
 (harmonic balance) reuses every function unchanged over a differently-produced `wsp`, and **WSP-8
 (performance under harmonic balance) is its fast path** — WSP-5's straightforward implementation is
 the oracle WSP-8 is measured against, so WSP-5 lands first and keeps that path available to the
@@ -336,16 +381,28 @@ instance** — never a silently passive-looking NDF. The determinant ratio is co
 determinant lemma over the low-rank difference between the active and passive assemblies, not by two
 large determinants, so it neither overflows nor cancels.
 
-**D-12. The stability margin.** The EuMIC-2024 definition is not public and **is not guessed.** WSP-2
-reserves the function name and the Data Display slot (`wsp_stability_margin`, "Stability margin
-(Winslow 2024)") and ships them **disabled with a diagnostic that cites the paper** until the owner
-supplies the formula (the paper is 4 pages; the owner offered help with source material). What *does*
-ship now, under circuitRF's own name and clearly labelled as such, are the two ingredients the
-abstract names: the polar loci of `1/H0` and `1/Y0` (the document's own primary metrics) and their
-normalised, unitless forms `(ZG + ZL)/(|ZG| + |ZL|)` and `(YG + YL)/(|YG| + |YL|)` — Kurokawa's
-condition is unchanged under a positive real scaling, so these carry the same start-up signature with
-a bounded modulus that can be compared across nodes. They are named `circuitRF normalized driving-point
-locus` and cite nothing but this brief; the moment the published margin arrives it replaces them.
+**D-12. The stability margin is Winslow's, transcribed from [M], and it is a first-class output.**
+(Rewritten 2026-09-08; the original D-12 reserved `wsp_stability_margin` as a refusal and shipped
+circuitRF's own normalised loci `nZ`/`nY` as placeholders because the formula was not public. It is
+now — §1.2.) WSP-9 implements `rY, iY, rH, iH` (M-rY…M-iH), `SM_Y0` (M-Eq. 9) and `SM_H0`
+(M-Eq. 10) as pure functions over `ZG, ZL, YG, YL`, under the paper's names; the engine emits
+`SM_Y0:<label>` and `SM_H0:<label>` beside the six defaults of D-4 through the same library call;
+`wsp_stability_margin(wsp, idx)` answers with `min(SM_Y0, SM_H0)`; the run summary prints each probe's
+minimum and its frequency; an Info diagnostic fires below `MarginThreshold` (default −15 dB, the paper's
+own rule); and the margin is swept over the WSP-3 envelope (`wsp_loadpull_margin`) beside an NDF over the
+same envelope (`wsp_loadpull_ndf`), which is [E]'s comparison as post-processing. **The placeholders are
+retired** — `wsp_nZ`, `wsp_nY` and the refusal go, per the original D-12's own promise — so that the
+only normalised stability quantity in circuitRF is the published one. Conventions the paper leaves
+open are fixed in WSP-9 §2.1 and T-18, each held by a gate.
+
+**D-16. The margin's dB is `20·log10(SM)`.** [M] labels its axes "Stability Margin (dB)" and never
+states the convention; the margin is a unitless ratio bounded by 1, circuitRF's Data Display applies
+`20·log10` to every unitless magnitude, and adding a special case for one quantity would be the
+surprise. Consequences the docs state: a conjugate-matched node reads −6 dB, not 0; a node with
+positive resistance on both sides never reads below −12 dB, so anything below that certifies negative
+resistance on one side; the paper's −15 dB rule is `0.178` linear (it would be `0.032` under
+`10·log10`, and the docs print both so no reader is misled silently). The owner may overrule this by
+changing one constant and one sentence; nothing else depends on it.
 
 **D-13. Nothing in this series changes an existing number.** An S-parameter run with no probe is
 byte-identical to before (the probe path is not entered). An HB run with no `ssfreq` sweep is
@@ -368,8 +425,9 @@ Each brief ends with its own gates. Series-wide:
 
 - Findings go to the relevant `RESOLVED.md` (`src/Engine/RESOLVED.md`, `src/RfCore/RESOLVED.md`,
   `src/Ui/RESOLVED.md`, `src/Cli/RESOLVED.md`); **never to any `CLAUDE.md`**.
-- `docs/design/stability-wsprobe.md` is created by WSP-1 (the engine half) and extended by WSP-2/3/5/6;
-  it is the design note the user docs and the code cite alongside the document.
+- `docs/design/stability-wsprobe.md` is created by WSP-1 (the engine half) and extended by
+  WSP-2/3/9/5/6/8 (§9 is WSP-9's, §10 WSP-5's, §11 WSP-6's, §12 WSP-8's); it is the design note the
+  user docs and the code cite alongside the documents.
 - Before any commit the owner makes, grep the diff for the vendor names of §1 — the reference document
   makes them easy to type by accident.
 - The user docs are regenerated only by WSP-7; the other briefs edit `docs/user/src/reference/*.md`

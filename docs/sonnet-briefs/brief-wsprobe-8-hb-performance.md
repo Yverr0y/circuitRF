@@ -209,6 +209,6 @@ each worker's counters sum to the serial counters.
 
 ## On completion
 
-Findings and the measurement table to `src/Engine/RESOLVED.md`; **never a `CLAUDE.md`**. Append §11
-"Performance under HB" to `docs/design/stability-wsprobe.md`, and one paragraph to the user page's
+Findings and the measurement table to `src/Engine/RESOLVED.md`; **never a `CLAUDE.md`**. Append **§12**
+"Performance under HB" to `docs/design/stability-wsprobe.md` (§9 margin, §10 HB, §11 NDF), and one paragraph to the user page's
 §9 (WSP-7) saying what an aligned tickle grid and `SSMaxHarm` buy.

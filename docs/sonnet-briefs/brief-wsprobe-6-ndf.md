@@ -223,10 +223,18 @@ stages with a hidden right-half-plane pole whose two-port `K > 1` and `|Δ| < 1`
 
 **(j) — no-knob runs untouched;** counters: one factorisation and `r` solves per frequency.
 
+**(k) — the envelope agrees with a re-run** ([E] Fig. 6/7 as a test; WSP-9 R-wsp9-6). On WSP-9's
+Ohtomo Type-A fixture at `ρ = 0.9`, a **coarse** grid (30° steps on both sides, 144 runs — the fine
+grid is WSP-9's post-processing job, not this gate's): the native `NDF_poles` of a re-run with the
+Terms set to each `(ΓS, ΓL)` equals `wsp_loadpull_ndf`'s `NDFenc` at every grid point, and the
+`wsp_passive` this brief emits (§5) is what that function takes. Every point with `NDF_poles ≥ 1` has
+`SMenv < −30 dB` (WSP-9 R-wsp9-5); the converse is **printed, not asserted** — [E]'s own point is that
+the margin collapses before NDF encircles.
+
 ## On completion
 
 Findings to `src/Engine/RESOLVED.md` and `src/Core/RESOLVED.md` (the passivation table is standing
-knowledge and belongs in the design note, not a `CLAUDE.md`). Append §10 "NDF" to
-`docs/design/stability-wsprobe.md` with the table of §3 and the lemma of §2; add `Activity` to
+knowledge and belongs in the design note, not a `CLAUDE.md`). Append **§11** "NDF" to
+`docs/design/stability-wsprobe.md` (§9 is WSP-9's, §10 WSP-5's) with the table of §3 and the lemma of §2; add `Activity` to
 `docs/design/data-model.md` §5 ("How to add a component type" must say every new model declares
 it).

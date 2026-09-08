@@ -1,7 +1,7 @@
 # Sonnet Brief — WSP-4: the WSProbe symbol, its placement, and the derived metrics in the Data Display
 
 **Read `brief-wsprobe-0-overview.md` first**; depends on WSP-1 (the cube and the accessors) and on
-WSP-2/WSP-3 (the functions this brief only *surfaces*). Reference: T. A. Winslow, *General Circuit
+WSP-2/WSP-3/**WSP-9** (the functions this brief only *surfaces* — WSP-9 lands before this brief, D-1). Reference: T. A. Winslow, *General Circuit
 Analysis Using The WSProbe* (2023), Fig. 13 (the default outputs), Fig. 14 (the Kurokawa signature on
 a polar chart), Fig. 15 (the symbol and G/L orientation), Fig. 33/36 (polar plots of `1/H0`, `1/Y0`),
 Fig. 37 (NDF encirclements).
@@ -58,7 +58,7 @@ cubes and, beneath them, the derived metrics (`DerivedParameters`). When the sel
 | Bidirectional | `ZG`, `ZL` (impedances, series stimulus), `YG`, `YL` (admittances, shunt stimulus), `Zop`, `Yop` (open-port) | Smith, Polar, Rect |
 | Loop gain | `LG` (bilateral, Tian), `F = 1 − LG`, `LGF` (forward circulator), `LGR` (reverse circulator), `LG_H`, `LG_MF`, `LG_MR`, `LG_MGF`, `LG_MGR` | Polar, Rect (dB/phase) |
 | Match | nodal Γ (`wsp_nodal_gamma`), its dB | Smith, Polar, Rect |
-| Normalised | `nZ`, `nY` (*circuitRF normalized driving-point locus — not the published margin*), `Stability margin (Winslow 2024)` **disabled** with the D-12 reason | Polar, Rect |
+| Stability margin | `SM_Y0`, `SM_H0` ([M] Eq. 9/10), `SM` (= their minimum, `wsp_stability_margin`), and the four proxies `rY`, `iY`, `rH`, `iH` (WSP-9 §4.2) | Rect only (linear or dB, D-16); disabled-with-reason on Polar and Smith |
 | Reduced two-port | `[Y]`, `[Z]` at the probe as a **network source** (see R-wsp4-8) | — |
 
 The circulator kinds carry a `Z0` field (default: the source group's port-1 `Re(Z0)`, else 50 Ω).
@@ -80,6 +80,13 @@ supports placing at a frequency). For a loop-gain trace the same readout uses
 Polar plots of these traces draw the origin **and the `+1` point** as reference marks, since the two
 families have different critical points.
 
+For a **margin** trace (`SM_Y0`, `SM_H0`, `SM`) the readout is **"minimum −18.1 dB at 1.5913 GHz"**
+plus the Kurokawa frequencies of the *matching* driving-point function (`SM_Y0` ↔ `1/Y0`,
+`SM_H0` ↔ `1/H0`; WSP-9 §2.1f — the margin is the distance, the search is the detector, both on one
+card), and the rect plot draws two horizontal reference lines: the analysis' `MarginThreshold`
+(dashed; default −15 dB) and the **−12 dB floor** (lighter), whose tooltip carries WSP-9 §2.2's
+sentence — below it one side of the node presents negative resistance.
+
 **R-wsp4-8. The reduced two-port as a network source.** The `DataSourceView` mechanism that adds
 virtual `Z`/`Y` cubes to a group is the precedent: expose `[Y]` (Eq. 44) of a chosen probe, and the
 pair blocks of R-wsp4-6, as a *virtual network group* (`S` at the group's reference plus `Z0`), so the
@@ -88,10 +95,15 @@ the source tree as `<analysis> ▸ WSProbe <label> ▸ reduced 2-port`. This is 
 capability in the series and it is the document's "two-port network reduction" (§4.2) made visible.
 
 **R-wsp4-9. The envelope card.** With a source probe, a load probe and a suspect probe chosen, an
-**Envelope** sub-card takes `|ΓS|`, `|ΓL|` (each with an "off" state = 0), `θ` step, and `Z0`, and
-adds two families of traces per θ (`1/H0'`, `1/Y0'`) on a polar plot plus a **stability map**
-(`wsp_loadpull_unstable`) drawn as a θS × θL grid coloured by the unstable count. It calls
-`wsp_loadpull`/`wsp_loadpull_unstable` and nothing else; the refusal
+**Envelope** sub-card takes `|ΓS|`, `|ΓL|` (each with an "off" state = 0, and accepting a **ladder**
+`0.9, 0.875, 0.874` — [E]'s own — so the ρ at which encirclements first appear is read off one card),
+`θ` step, and `Z0`, and adds two families of traces per θ (`1/H0'`, `1/Y0'`) on a polar plot plus a
+**stability map** (`wsp_loadpull_unstable`) drawn as a θS × θL grid coloured by the unstable count.
+**The margin envelope** (WSP-9 R-wsp9-5): `SMenv` in dB against `θS` (one curve per `θL`, the family
+mechanism) and against `θL`, with the threshold line; and when the source group carries a passive `wsp`
+(`wsp_passive`, WSP-6, or a second run named on the card), **`NDFenc` overlaid as a step curve on the
+same axes** (WSP-9 R-wsp9-6) — [E] Fig. 6–9, redrawn. It calls `wsp_loadpull`,
+`wsp_loadpull_unstable`, `wsp_loadpull_margin`, `wsp_loadpull_ndf` and nothing else; the refusal
 `wsprobe.envelope-probe-not-at-termination` shows on the card with its text.
 
 **R-wsp4-10. Sweeps.** A swept `wsp` (`[Pin, freq, row, col]`, or `[Pin, ssfreq, …]` under WSP-5)
@@ -105,15 +117,16 @@ its options; `.cdd` round-trips them (append-only ordinals, as `DerivedParameter
 path is built by one function that calls the library; **the gate is that a trace's samples equal the
 library function's cube for the same inputs, bit for bit** (the same rule `NetworkMetrics` is under).
 
-**R-wsp4-12. `plot` verb.** Extend the trace shorthand: `--trace cube=wsp,probe=GATE,metric=invH0,y=polar`
-and `--trace cube=wsp,probe=GATE,with=DRAIN,metric=LGM`. The document the verb builds is the same
+**R-wsp4-12. `plot` verb.** Extend the trace shorthand: `--trace cube=wsp,probe=GATE,metric=invH0,y=polar`,
+`--trace cube=wsp,probe=GATE,metric=SM_Y0,y=db` and `--trace cube=wsp,probe=GATE,with=DRAIN,metric=LGM`. The document the verb builds is the same
 `.cdd` the GUI writes, so the byte-identity gate of the `plot` verb (`MissingVerbsCliTests`) extends
 to probe traces with no new plotting path.
 
-**R-wsp4-13. Messages.** The run diagnostics WSP-1/2/3 emit (`wsprobe.degenerate-node`,
-`wsprobe.margin-not-transcribed`, `wsprobe.envelope-probe-not-at-termination`, `wsprobe.shorted`)
-reach the Messages pane through the existing warnings channel; nothing new to build, but assert each
-one lands.
+**R-wsp4-13. Messages.** The run diagnostics WSP-1/2/3/9 emit (`wsprobe.degenerate-node`,
+`wsprobe.envelope-probe-not-at-termination`, `wsprobe.shorted`, and WSP-9's Info-severity
+`wsprobe.margin-below-threshold`) reach the Messages pane through the existing warnings channel;
+nothing new to build, but assert each one lands — and that the margin message, being Info, does not
+turn the run's status indicator amber.
 
 ---
 
@@ -134,8 +147,11 @@ after each of the four rotations and both flips (the *drawing* rotates, the pin 
 `render --data`.
 **(f)** — the Kurokawa readout on WSP-1's series resonator run reads `1.5915 GHz` on `1/Y0` and
 `none` on `1/H0`; "Mark crossings" places exactly one marker at that frequency.
-**(g)** — the disabled margin item carries the D-12 reason text; a rect plot lists the polar-only
-items disabled with a reason, never absent.
+**(g)** — the margin group is Rect-only and appears on Polar/Smith disabled with a reason, never
+absent; a rect plot lists the polar-only items the same way. On WSP-9's split resonator (`R1 = −5 Ω`)
+the `SM_Y0` readout reads **−18.06 dB at 1.5913 GHz** and the `SM_H0` readout **−19.85 dB at
+1.7337 GHz** (WSP-9 §3's table); the threshold and −12 dB lines are present in the rendered SVG; the
+envelope card on WSP-3's terminated resonator draws `SMenv` with the flagged arc below −40 dB.
 **(h)** — the docs factory renders a symbol pair and the trace-card fixture with the WSProbe section
 open (`FigureCatalog` entry `plot-inspector-wsprobe`), for WSP-7.
 

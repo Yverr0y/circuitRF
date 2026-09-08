@@ -286,6 +286,12 @@ for Transfer Functions', EuMIC 2024 (DOI 10.23919/EuMIC61603.2024.10732614) has 
 into circuitRF; its definition is not in the public abstract."* The moment the owner supplies the
 paper, the body replaces the refusal and the D-12 loci become its inputs.
 
+> **Superseded 2026-09-08 (after this brief was built and committed).** The paper arrived; overview
+> D-12 is rewritten and **`brief-wsprobe-9-stability-margin.md` implements the margin** from it —
+> `rY, iY, rH, iH`, `SM_Y0`, `SM_H0` as functions of the `ZG`/`ZL`/`YG`/`YL` this brief built. WSP-9
+> also **retires** `wsp_nZ`, `wsp_nY` and the refusal above (its §7), so gate (i)'s normalised-locus
+> and refusal cases go with them. Nothing else in this brief changes.
+
 ---
 
 ## 3. What the reduced two-port makes possible for free

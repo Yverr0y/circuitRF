@@ -50,7 +50,8 @@ analysis HB1 type=hb Tone=RFfreq MaxHarm=7 Sweep="Pavl_dbm: -20 .. 20 step 1" \
 ```
 
 `SSStart`/`SSStop` with `SSStep` or `SSNpts`, `SSUnit` applying to all three; `SSLog` for a log
-grid. Absent ⇒ no small-signal solve and the run is byte-identical to today (R-wsp5-9(a)). `SSMaxHarm`
+grid; `MarginThreshold=<dB>|none` exactly as on the S-parameter line (WSP-9 R-wsp9-3), applied per
+operating point. Absent ⇒ no small-signal solve and the run is byte-identical to today (R-wsp5-9(a)). `SSMaxHarm`
 truncates the sideband order (`K_ss ≤ K`, default `K`) and is reported in the run summary whenever it
 is below `K`. `HarmonicBalanceAnalysis` gains the matching `*Expr` fields; `CnlReader`/`CnlWriter`
 round-trip them; the Analysis Setup dialog gets a **Small-signal** group with the same fields and the
@@ -127,8 +128,9 @@ Fill `wsp(2p−1, ·)` from the series injection and `wsp(2p, ·)` from the shun
 R-wsp1-5 does. The factorisations at `ω_ss` and the dense factorisation of `J_ss` are shared by all
 `2N` right-hand sides of that `ω_ss`.
 
-**R-wsp5-6. Cubes.** Per operating point: `wsp {ssfreq, row, col}` and the six per-probe defaults
-`{ssfreq}`, computed through the same `WspReduction` functions (D-2); `__WspProbes` as in WSP-1.
+**R-wsp5-6. Cubes.** Per operating point: `wsp {ssfreq, row, col}` and the **eight** per-probe
+defaults `{ssfreq}` — WSP-1's six through `WspReduction` and WSP-9's `SM_Y0`/`SM_H0` through
+`WspMargin` (D-2); `__WspProbes` as in WSP-1.
 Under a drive sweep, `ParametricSweepEngine` stacks them to `{Pin, ssfreq, row, col}`. The `ssfreq`
 axis carries unit `Hz` and the actual frequencies (not indices — this is a genuine frequency axis, not
 a harmonic-order axis; `HbSpectrum` is not involved).
@@ -152,6 +154,12 @@ The design note and the user docs state, with Fig. 30 redrawn:
 - The steady-state condition `1/H0 = 0` (Fig. 30, p. 70) is reached only by an autonomous solution
   the HB analysis was not asked for; the `wsp` of a *converged, non-oscillating* HB solution
   answers whether that solution is stable, not what it would become.
+- **The margin under drive.** [M]'s own amplifier lost its margin in the *small-signal* simulation —
+  the linear `SM_Y0`/`SM_H0` of WSP-9 already catch that case. The drive-swept fan of
+  `SM_Y0(ssfreq)` is the large-signal extension: a margin that collapses only above some `Pin` is a
+  drive-dependent instability, and the parametric case at `ω0/2` reads as a notch in the fan that is
+  absent at low drive. The run summary prints the per-operating-point minimum, and the threshold
+  diagnostic names the drive level as well as the frequency.
 
 ---
 
@@ -196,7 +204,7 @@ the `jω_k` factor and the `Y_NN` placement in one comparison.
 
 **(c) — low drive tends to the linear `wsp`.** Hero 2 at `Pavl = −60 dBm`, `SSStart..SSStop` over
 0.5–4 GHz: `wsp(ssfreq)` equals the S-parameter `wsp(freq)` of the same netlist (DC-linearised, WSP-1)
-to 1e-6 relative at every point. Then at `+10 dBm` assert they **differ** (by more than 1e-2 relative
+to 1e-6 relative at every point, and `SM_Y0`/`SM_H0` equal the S-parameter margins to 1e-6 absolute. Then at `+10 dBm` assert they **differ** (by more than 1e-2 relative
 somewhere) — the analysis must see the drive.
 
 **(d) — the independent oracle: two-tone HB.** Take a single-tone operating point at `f0 = 2 GHz`,
@@ -233,8 +241,8 @@ counts against the same fixture.
 
 ## On completion
 
-Findings to `src/Engine/RESOLVED.md`; **never a `CLAUDE.md`**. Append §9 "Large-signal small-signal
-solve" to `docs/design/stability-wsprobe.md` and a pointer in `docs/design/harmonic-balance.md` §7
+Findings to `src/Engine/RESOLVED.md`; **never a `CLAUDE.md`**. Append **§10** "Large-signal small-signal
+solve" to `docs/design/stability-wsprobe.md` (§9 is WSP-9's margin section) and a pointer in `docs/design/harmonic-balance.md` §7
 (the Jacobian section) noting that the conversion matrix now has a second consumer. Update
 `src/Engine/HarmonicBalance/CLAUDE.md`'s convention list with the two-sided coefficient rule of
 R-wsp5-2 (a frozen convention, like the FFT sign).

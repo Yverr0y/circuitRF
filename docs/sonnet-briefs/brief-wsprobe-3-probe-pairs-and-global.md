@@ -283,6 +283,14 @@ the set of `(ΓS, ΓL, frequency, which)` that meet the start-up conditions — 
 "stability envelope": the terminations a circuit can be presented with before an internal node shows
 Kurokawa's signature. The envelope over `|Γ|` at fixed `θ` steps is what WSP-4 draws.
 
+> **Added 2026-09-08, after this brief was built.** T. A. Winslow's 2025 EuMIC paper ([E] in the
+> overview §1.2) reaches the same re-terminated `H0'`/`Y0'`/`ZG'`/`ZL'`/`YG'`/`YL'` by an explicit
+> 4-port reduction (E-Eq. 1–12) rather than a rank-1 update. **WSP-9 implements that reduction in the
+> test project only, as an independent oracle for `wsp_terminate`** (its gate (f)), and adds the
+> stability margin and an NDF over this envelope (`wsp_loadpull_margin`, `wsp_loadpull_ndf`) — the
+> paper's own comparison, with no re-simulation. E-Eq. 11 as printed has its G/L numerators swapped
+> (T-16); nothing here depends on it.
+
 ---
 
 ## 7. Gates
