@@ -1,0 +1,39 @@
+; ============================================================
+; hb_varactor_divider.cnl — brief-wsprobe-5 gate (e): the textbook DEGENERATE
+; parametric (period-doubling) case, and the one instability no linear analysis
+; can see.
+;
+; A parallel LC tank tuned to f0/2 whose capacitance is a pumped varactor. The
+; pump at f0 modulates C(v) = C0·(1 + kk·v), and the +f0/2 and −f0/2 sidebands it
+; couples are the SAME frequency — which is what makes the case degenerate and
+; what puts the instability at exactly f0/2 rather than anywhere else.
+;
+; Everything about the fixture is chosen so the threshold is CROSSED by an
+; ordinary pump sweep: the tank's own Q is deliberately modest (Rtank), so its
+; bandwidth is wide enough that a probe frequency a few tens of MHz off f0/2 still
+; sees the resonance — the analysis reports NaN AT f0/2 itself, because there the
+; sideband family is closed under negation (see HbSmallSignal.DegeneracyNote).
+;
+;   Ltank ∥ (C0 + Cc) resonates at f0/2 = 1 GHz:  C0 + Cc = 1/(ω²L)
+; ============================================================
+
+f0    = 2e9
+Vpump = 2.0            ; swept by the gate: below then above the threshold
+kk    = 0.15           ; varactor modulation coefficient, per volt
+C0    = 10.67e-12      ; varactor zero-bias capacitance
+Cc    = 2e-12          ; pump coupling capacitance (part of the tank)
+Ltank = 2e-9
+Rt    = 200            ; tank loss — sets the threshold
+
+L:Ltank   n_t 0    L=Ltank
+R:Rtank   n_t 0    R=Rt
+C:Cc      n_p n_t  C=Cc
+V_1Tone:Vpump  n_p 0  Freq=f0  V=Vpump
+
+; The probe splits the tank node: G faces the tank and the pump, L faces the varactor.
+WSProbe:TANK  n_t n_v
+
+; The varactor: charge only, q(v) = C0·v + ½·C0·kk·v²  →  C(v) = C0·(1 + kk·v).
+SDD:Cvar  n_v 0  I[1,1]=C0*_v1 + 0.5*C0*kk*_v1^2
+
+analysis HB1 type=hb Tone=f0 MaxHarm=6 Tol=1e-12

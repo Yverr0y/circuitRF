@@ -166,6 +166,82 @@
                 </Grid>
             </StackPanel>
 
+            <!-- ── Separator before Small-signal ──────────────────────────── -->
+            <Separator Opacity="0.3"/>
+
+            <!-- ── Small-signal (WSProbe probe-tickle sweep, brief-wsprobe-5 R-wsp5-1) ──
+                 Empty start/stop = no small-signal solve at all, which is why nothing here is
+                 pre-filled; the live point count says which of the two states the analysis is in. -->
+            <Expander Header="Small-signal (WSProbe)"
+                      IsExpanded="{Binding SmallSignalExpanded, Mode=TwoWay}"
+                      FontSize="11">
+
+                <StackPanel Spacing="8" Margin="0,8,0,0">
+
+                    <!-- Row 1: Start + Stop + unit -->
+                    <Grid ColumnDefinitions="*,*,Auto" ColumnSpacing="10">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Probe freq. start"
+                                       FontSize="10" Opacity="0.6"/>
+                            <TextBox Text="{Binding SsStartExpr, Mode=TwoWay}"
+                                     FontSize="11"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock Text="Stop"
+                                       FontSize="10" Opacity="0.6"/>
+                            <TextBox Text="{Binding SsStopExpr, Mode=TwoWay}"
+                                     FontSize="11"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Bottom">
+                            <TextBlock Text="Unit" FontSize="10" Opacity="0.6"/>
+                            <ComboBox Classes="unit-combo"
+                                      ItemsSource="{x:Static vm:HbBodyViewModel.FreqUnits}"
+                                      SelectedItem="{Binding SsUnit, Mode=TwoWay}"
+                                      FontSize="11"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Row 2: Step OR points, log, sideband order -->
+                    <Grid ColumnDefinitions="*,*,Auto" ColumnSpacing="10">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Step" FontSize="10" Opacity="0.6"/>
+                            <TextBox Text="{Binding SsStepExpr, Mode=TwoWay}"
+                                     FontSize="11"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock Text="Points (wins over Step)"
+                                       FontSize="10" Opacity="0.6"/>
+                            <TextBox Text="{Binding SsNptsExpr, Mode=TwoWay}"
+                                     FontSize="11"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Bottom">
+                            <CheckBox IsChecked="{Binding SsLog, Mode=TwoWay}"
+                                      Content="Log" FontSize="11"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <TextBlock Text="{Binding SmallSignalPreview}"
+                               FontSize="10" Opacity="0.55" TextWrapping="Wrap"/>
+
+                    <!-- Row 3: sideband order + margin threshold -->
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Sideband order (default = Max harmonics)"
+                                       FontSize="10" Opacity="0.6"/>
+                            <TextBox Text="{Binding SsMaxHarmExpr, Mode=TwoWay}"
+                                     FontSize="11"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock Text="Margin threshold, dB (or none)"
+                                       FontSize="10" Opacity="0.6"/>
+                            <TextBox Text="{Binding MarginThresholdExpr, Mode=TwoWay}"
+                                     FontSize="11"/>
+                        </StackPanel>
+                    </Grid>
+
+                </StackPanel>
+            </Expander>
+
             <!-- ── Separator before Advanced ──────────────────────────────── -->
             <Separator Opacity="0.3"/>
 

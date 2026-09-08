@@ -128,6 +128,35 @@ positive carriers). Consequences:
   math deliberately and add a unit test that pins the DC bin and the first few harmonics to known
   values before trusting the solver.
 
+## Two-sided device spectra — the conversion matrix's own convention (WSP-5, 2026-09-08)
+
+**Frozen, like the FFT sign.** `HbFft` and `HbApft` report FULL-AMPLITUDE one-sided phasors — the DC
+bin divided by `N`, an AC bin by `N/2` — so an AC bin is **twice** the two-sided Fourier coefficient
+of the real waveform. The conversion matrix is written in two-sided coefficients:
+
+```
+G⁽²⁾[0] = G[0]        G⁽²⁾[k] = G[k] / 2  (k > 0)        G⁽²⁾[−k] = conj(G[k]) / 2
+```
+
+and likewise `C⁽²⁾` and every `w ≥ 2` bucket `Dw⁽²⁾`. `HbNewton.BuildJ`'s `ConversionWeight` is this
+same rule expressed in the one-sided real-split form; `HbSmallSignal` applies it directly.
+
+- **Getting the factor of two wrong is invisible at low drive** (where every `k ≠ 0` bin is zero) and
+  doubles every mixing term at high drive. `HbSmallSignal.FoldToRealSplit` folds the two-sided matrix
+  at `ω_ss = 0` back onto `BuildJ`'s and the two agree exactly (0 relative deviation) — that is the
+  gate, and it is the only thing pinning this convention.
+- **The spectra a small-signal solve uses are the SOLVE's own arrays**, carried on
+  `HbNewton.SolveResult` (`G`, `C`, `Buckets`) rather than recomputed. Re-evaluating the devices to
+  get them back would linearise at whatever `V` the caller happens to hold — the same iterate in the
+  happy case, and a silently different one after a drive ramp.
+- **`H[w](ω)` and `Y_NN(ω)` at a negative sideband frequency are the conjugate of `|ω|`'s**, never a
+  model call at a negative argument — the same contract as the section above.
+- **A probe frequency commensurate with the fundamental at order 2** (`2·f_ss/f0` an exact integer:
+  `0`, `f0/2`, `f0`, `3f0/2`, …) is where the sideband family is closed under negation, so the `±ω_ss`
+  responses are conjugates rather than independent and the one-family formulation carries half the
+  stimulus. Reported as NaN with one warning; `ω_ss = 0` is the `n = 0` case of it, and is exactly the
+  case `BuildJ` handles by folding. Design note: `docs/design/stability-wsprobe.md` §10.6.
+
 ## Single-tone vs two-tone
 - **Single-tone:** uniform-sample FFT. Build and validate this fully first.
 - **Two-tone is qualitatively harder.** Spectrum is `{k₁f₁ + k₂f₂}`. Required:

@@ -399,6 +399,50 @@ public sealed class HbLinearExtractor
         return (entry.YNN, ISrcFromVoc(entry.YNN, xSrc));
     }
 
+    /// <summary>
+    /// The factored linear partition at one frequency as a HANDLE a caller may back-solve against
+    /// repeatedly — one stamp, one factorisation-or-cache-hit, then as many back-substitutions as it
+    /// likes (WSP-5 R-wsp5-5).
+    ///
+    /// <para><b>Why this exists rather than a loop over <see cref="SolveFullNetwork"/>.</b> The
+    /// WSProbe small-signal solve performs <c>4N</c> back-substitutions against ONE matrix at each
+    /// probe frequency — two per injection, of which there are two per probe. Every call to
+    /// <see cref="Extract"/> or <see cref="SolveFullNetwork"/> re-stamps the whole network to compare
+    /// it against the cache, so routing those <c>4N</c> solves through them would stamp the network
+    /// <c>4N</c> times for a matrix that cannot have changed in between. The handle stamps once and
+    /// the cache-validity certificate is checked once, which is the same guarantee at 1/4N the
+    /// stamping.</para>
+    /// </summary>
+    public sealed class LinearPartition
+    {
+        private readonly SparseLU _lu;
+        internal LinearPartition(SparseLU lu, int size, Complex[,] yNN)
+        { _lu = lu; Size = size; YNN = yNN; }
+
+        /// <summary>Full MNA size — the length every right-hand side must have.</summary>
+        public int Size { get; }
+
+        /// <summary>The interface admittance matrix at this frequency. The extractor's own array —
+        /// do not mutate.</summary>
+        public Complex[,] YNN { get; }
+
+        /// <summary>One back-substitution. <paramref name="x"/> is filled with the solution.</summary>
+        public void Solve(Complex[] b, Complex[] x) => _lu.Solve(b, x);
+    }
+
+    /// <summary>
+    /// The linear partition at <paramref name="omega"/> — one stamp, one factorisation-or-cache-hit,
+    /// <c>Y_NN</c> included. See <see cref="LinearPartition"/> for why a caller wanting many
+    /// back-solves at one frequency takes this rather than calling <see cref="SolveFullNetwork"/>
+    /// repeatedly.
+    /// </summary>
+    public LinearPartition LinearPartitionAt(double omega)
+    {
+        var entry = EnsureFactorization(omega, StampAt(omega));
+        entry.YNN ??= InvertNN(ZColumns(entry.Lu, entry.Size).ZNN, _N);
+        return new LinearPartition(entry.Lu, entry.Size, entry.YNN);
+    }
+
     // ── Factorization cache ───────────────────────────────────────────────────
 
     /// <summary>
@@ -448,7 +492,14 @@ public sealed class HbLinearExtractor
     public void InvalidateLinear(double omega)
     {
         _luCache.Remove(omega);
-        if (Math.Abs(omega) < 1e-12) _dcRegEntry = null;
+        // The stamped MnaSystem for that frequency goes with it. Reusing the instance is what keeps
+        // its sparsity-pattern and AMD caches alive across solves (see StampAt), which is worth
+        // holding for a frequency that recurs — and pure cost for one that will not. The WSProbe
+        // small-signal sweep visits 2·K_ss + 2 frequencies PER probe frequency and revisits none of
+        // them, so a cache never released would hold the whole network's assembled matrix once for
+        // every sideband of every point.
+        _mnaCache.Remove(omega);
+        if (Math.Abs(omega) < 1e-12) { _dcRegEntry = null; _mnaDcReg = null; }
     }
 
     /// <summary>

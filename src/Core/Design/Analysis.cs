@@ -147,6 +147,63 @@ public sealed class HarmonicBalanceAnalysis(string name) : Analysis(name)
     /// </summary>
     public string MarginThresholdExpr { get; init; } = MarginThresholdDefault;
 
+    // ── The small-signal (probe-tickle) sweep — WSP-5 R-wsp5-1 ────────────────
+    //
+    // Spelled like the S-parameter sweep and honouring its unit rules (cli.md §10A.3): SSStart /
+    // SSStop with either SSStep or SSNpts, SSUnit applying to all three, SSLog for a log grid.
+    // ABSENT means no small-signal solve at all and a run byte-identical to one from before WSP-5
+    // (R-wsp5-9(a)) — which is why every field defaults to the empty string rather than to a
+    // number: a default of "0.1" would silently give every existing HB document a sweep.
+
+    /// <summary><c>SSStart=</c>. Empty ⇒ no small-signal sweep.</summary>
+    public string SsStartExpr    { get; init; } = "";
+    /// <summary><c>SSStop=</c>. Empty ⇒ no small-signal sweep.</summary>
+    public string SsStopExpr     { get; init; } = "";
+    /// <summary><c>SSStep=</c> — the step-size spelling. Mutually exclusive with SSNpts.</summary>
+    public string SsStepExpr     { get; init; } = "";
+    /// <summary><c>SSNpts=</c> — the point-count spelling. Mutually exclusive with SSStep.</summary>
+    public string SsNptsExpr     { get; init; } = "";
+    /// <summary><c>SSUnit=</c>, applied to SSStart/SSStop/SSStep alike (the AUT-8 lesson: one unit
+    /// for the whole sweep, never a bare coefficient read as base SI).</summary>
+    public string SsUnit         { get; init; } = "Hz";
+    /// <summary><c>SSLog=</c> — <c>true</c>/<c>yes</c>/<c>1</c> for a logarithmic grid.</summary>
+    public string SsLogExpr      { get; init; } = "";
+    /// <summary><c>SSMaxHarm=</c> — the sideband order K_ss ≤ K. Empty ⇒ K.</summary>
+    public string SsMaxHarmExpr  { get; init; } = "";
+
+    /// <summary>True when the directive asked for a small-signal sweep at all.</summary>
+    public bool HasSsSweep
+        => SsStartExpr.Trim().Length > 0 && SsStopExpr.Trim().Length > 0;
+
+    /// <summary>
+    /// The small-signal sweep as the ordinary <see cref="FrequencySpec"/> every other frequency
+    /// sweep in circuitRF is — so <c>SSUnit</c> resolves through <see cref="FreqUnit.ResolveHz"/>
+    /// with the same var-unit-wins rule, and <c>SSLog</c> reaches the same log grid. Null when the
+    /// directive declared none.
+    /// </summary>
+    public FrequencySpec? SsSweep()
+    {
+        if (!HasSsSweep) return null;
+        var kind = ParseBool(SsLogExpr) ? SweepKind.Log : SweepKind.Linear;
+        string npts = SsNptsExpr.Trim();
+        if (npts.Length > 0 &&
+            int.TryParse(npts, NumberStyles.Integer, CultureInfo.InvariantCulture, out int n) && n >= 1)
+            return new FrequencySpec(SsStartExpr, SsStopExpr, n, kind, SsUnit, SsUnit);
+        string step = SsStepExpr.Trim();
+        if (step.Length == 0) return new FrequencySpec(SsStartExpr, SsStopExpr, 1, kind, SsUnit, SsUnit);
+        return new FrequencySpec(SsStartExpr, SsStopExpr, step, kind, SsUnit, SsUnit, SsUnit);
+    }
+
+    /// <summary><c>true</c>/<c>yes</c>/<c>on</c>/<c>1</c>, case-insensitively; anything else false.</summary>
+    public static bool ParseBool(string? s)
+    {
+        string t = (s ?? "").Trim();
+        return t.Equals("true", StringComparison.OrdinalIgnoreCase)
+            || t.Equals("yes",  StringComparison.OrdinalIgnoreCase)
+            || t.Equals("on",   StringComparison.OrdinalIgnoreCase)
+            || t == "1";
+    }
+
     // Sweep fields — deprecated. Use ParametricSweepAnalysis to sweep HB.
     // Retained as init-only for .cnl back-compat read; the engine ignores them.
     [Obsolete("Deprecated — wrap the HB analysis in a ParametricSweepAnalysis to sweep. " +

@@ -128,6 +128,13 @@ public static class AnalysisDirectiveSchema
             new("MaxIter",    Default: "100", Summary: "Newton iteration cap."),
             new("Sweep",                      Summary: "DEPRECATED and ignored by the engine. Wrap the analysis in a parametric_sweep instead."),
             new("MarginThreshold", Default: "-15", Summary: "WSProbe stability margin, in dB, below which the run reports a probe as worth looking at. 'none' disables the report. Read over the small-signal sweep of a probed HB run."),
+            new("SSStart",                    Summary: "First probe (tickle) frequency of the small-signal sweep around the converged HB operating point. Absent means no small-signal solve at all."),
+            new("SSStop",                     Summary: "Last probe frequency, same spelling rules as SSStart."),
+            new("SSStep",                     Summary: "Probe-frequency step size. Mutually exclusive with SSNpts; SSNpts wins when both are given."),
+            new("SSNpts",                     Summary: "Probe-frequency point count. Selects the point-count sweep mode."),
+            new("SSUnit",     Default: "Hz",  Summary: "Unit for SSStart, SSStop and SSStep alike."),
+            new("SSLog",      Default: "false", Summary: "Logarithmic probe-frequency spacing."),
+            new("SSMaxHarm",                  Summary: "Sideband order K_ss retained in the conversion matrix. Defaults to MaxHarm; a lower value is reported in the run summary."),
         ], RequiredOneOf: [["Tone", "Tone[1]"]]),
 
         new("loadpull", ["lp"],

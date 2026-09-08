@@ -334,6 +334,24 @@ The DC harmonic carries no imaginary degree of freedom (the signal is real), so 
 ### 7.4 Stamping
 The Jacobian is assembled by the deck's slide-26 loop, generalized to add the `C` (charge) and `Y_{N×N}` (linear) contributions the slide omitted: for each `(k, i, n, m)`, compute the three 2×2 contributions, sum them, and stamp into the block at the row/col the index map assigns to `(n,k)` and `(m,i)`. For multi-tone the `(k)`/`(i)` scalar harmonic indices become the diamond's `mixIndex`, and the `k−i`/`k+i` difference/sum frequencies become **tone-pair vector** differences/sums `(k₁−i₁, k₂−i₂)` / `(k₁+i₁, k₂+i₂)`, looked up in the rectangular FFT spectrum (which is why the corner bins must be computed even though they are not unknowns).
 
+### 7.5 The conversion matrix has a second consumer (2026-09-08)
+
+Since WSP-5 the conversion matrix is built in **two** places, for two different frequencies, from the
+same `G`/`C`/bucket spectra — and the second one is the general case of the first.
+
+`HbNewton.BuildJ` is this matrix at **`ω_ss = 0`**: a perturbation of a real periodic waveform, so the
+`+k` and `−k` sideband unknowns are conjugates of each other and the system folds onto the one-sided
+real-split form §7.1–§7.3 describes, `G_{k−i}` and `G_{k+i}` in one 2×2 block. `HbSmallSignal.BuildJss`
+is the same matrix at an arbitrary probe frequency `ω_ss`, where the two families are disjoint, every
+sideband is an ordinary complex unknown and the block reduces to a single `G⁽²⁾[k−l]` with no sum term
+and no real split. `HbSmallSignal.FoldToRealSplit` performs the folding, and its agreement with
+`BuildJ` — exact, 0 relative deviation on every entry — is what pins the two-sided coefficient
+convention, the `jω_k` factor and the `Y_NN` placement all at once.
+
+Neither is a copy of the other and neither may drift: the small-signal solve consumes the spectra the
+Newton solve produced, at the iterate the run reports. Design note:
+`docs/design/stability-wsprobe.md` §10; conventions: `src/Engine/HarmonicBalance/CLAUDE.md`.
+
 ---
 
 ## 8. Solving the Newton update — dense

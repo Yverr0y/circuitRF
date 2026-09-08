@@ -40,10 +40,31 @@ public sealed record HbAnalysisParams(
     /// Owner can supply &lt;1 via the cnl Lambda= key or by constructing with Lambda: x.
     /// B2.
     /// </summary>
-    double   Lambda  = 1.0)
+    double   Lambda  = 1.0,
+    /// <summary>
+    /// The small-signal (probe-tickle) frequencies in Hz — the <c>ssfreq</c> axis of a probed run
+    /// (WSP-5 R-wsp5-1). <b>Empty means no small-signal solve at all</b>, and an HB run with an
+    /// empty grid is byte-identical to one from before WSP-5 (R-wsp5-9(a)).
+    /// </summary>
+    double[]? SsFreqsHz = null,
+    /// <summary>The sideband order K_ss of the conversion matrix. Null ⇒ MaxHarmonic; clamped to
+    /// it, since a sideband above the retained spectrum has no operating point to sit on.</summary>
+    int?     SsMaxHarm = null,
+    /// <summary>The WSProbe stability-margin report threshold in dB, or null for
+    /// <c>MarginThreshold=none</c> (WSP-9 R-wsp9-3, applied per operating point).</summary>
+    double?  MarginThresholdDb = -15.0)
 {
     /// <summary>Convenience: fundamental frequency for single-tone runs.</summary>
     public double ToneHz      => ToneFreqsHz[0];
+
+    /// <summary>The small-signal grid, never null.</summary>
+    public double[] SsGrid    => SsFreqsHz ?? [];
+
+    /// <summary>True when the directive asked for a small-signal sweep.</summary>
+    public bool HasSsSweep    => SsGrid.Length > 0;
+
+    /// <summary>K_ss as the solve uses it: the requested order clamped to the retained K.</summary>
+    public int SsOrder        => Math.Clamp(SsMaxHarm ?? MaxHarmonic, 0, MaxHarmonic);
     /// <summary>True when two or more independent tones are declared.</summary>
     public bool   IsMultiTone => ToneFreqsHz.Length > 1;
     public bool   HasSweep    => SweepVarName is not null;
@@ -328,9 +349,32 @@ public sealed class HbEngine
         }
 #pragma warning restore CS0618
 
+        // ── The small-signal (probe-tickle) sweep — WSP-5 R-wsp5-1 ───────────
+        // Expanded through the ordinary FrequencySpec, so SSUnit honours the var-unit-wins rule and
+        // SSLog reaches the same log grid the S-parameter sweep does. An UNRESOLVABLE sweep is
+        // refused rather than dropped: a run that silently carried no wsp would look exactly like a
+        // run whose directive had no SS* keys, and the design's own question would go unanswered.
+        double[]? ssGrid = null;
+        if (hba.SsSweep() is { } ssSpec)
+        {
+            try { ssGrid = ssSpec.Expand(globals, globalsWithUnit); }
+            catch (ExpressionException ex)
+            {
+                throw new InvalidOperationException(
+                    $"HB '{hba.Name}': the small-signal sweep (SSStart/SSStop) could not be " +
+                    $"resolved — {ex.Message}", ex);
+            }
+            if (ssGrid.Length == 0) ssGrid = null;
+        }
+        int? ssMaxHarm = hba.SsMaxHarmExpr.Trim().Length > 0
+            ? Math.Max(0, (int)Num(hba.SsMaxHarmExpr, maxH))
+            : null;
+
         return new HbAnalysisParams(toneFreqsHz, maxH, maxMixOrder, osamp, tol, driveStepping, guard,
             sweepVar, sweepStart, sweepStop, sweepStep,
-            MaxIter: maxIter, Lambda: lambda);
+            MaxIter: maxIter, Lambda: lambda,
+            SsFreqsHz: ssGrid, SsMaxHarm: ssMaxHarm,
+            MarginThresholdDb: Analysis.ParseMarginThresholdDb(hba.MarginThresholdExpr));
     }
 
     private static Scope BuildScope(IReadOnlyDictionary<string, Value> globals)
@@ -663,6 +707,29 @@ public sealed class HbEngine
             Vfull, INlfull, namesFull, f0, K, PointOutcome.Of(solveResult.Converged, solveResult.IterTrace), portCurrentsByBranch,
             _netlist.Nodes.LabeledNames, probeCurrents, opVars);
 
+        // ── The WSProbe small-signal sweep (brief-wsprobe-5) ──────────────────
+        // The conversion-matrix solve linearises THIS converged periodic steady state, which is why
+        // it takes the solve's own G/C spectra rather than re-evaluating the devices: after a drive
+        // ramp, a second evaluation would linearise at whichever iterate happened to be in V.
+        LastLinearizedPoint = solveResult.G is not null && solveResult.C is not null
+            ? new LinearizedPoint(yNN, iSrc, solveResult.G, solveResult.C,
+                                  solveResult.Buckets ?? [], V, N, K, omega0)
+            : null;
+
+        var wspProbes = WspProbeSites();
+        if (wspProbes.Length > 0 && p.HasSsSweep && solveResult.G is not null && solveResult.C is not null)
+        {
+            var sidebands = new HbSmallSignal.ToneSidebands(
+                solveResult.G, solveResult.C, solveResult.Buckets, p.SsOrder, omega0);
+            NoteSidebandTruncation(p, sidebands.Count);
+            AddWspSmallSignalCubes(ds, p, extractor, sidebands, wspProbes, yNN[0],
+                commensurateWith: $"the fundamental {f0 / 1e9:G6} GHz");
+        }
+        else
+        {
+            NoteNoSmallSignalSweep(wspProbes.Length);
+        }
+
         // V holds the converged interface spectrum [N, K+1]; expose it so a parametric sweep can
         // warm-start the next point (continuation — §11). Only propagate a converged seed.
         return new HbRunResult(ds, backSolver, solveResult.Converged, V, trace);
@@ -977,6 +1044,20 @@ public sealed class HbEngine
             Vfull, INlfull, namesFull, grid, f1, f2, PointOutcome.Of(solveResult.Converged, solveResult.IterTrace), portCurrentsByBranch,
             _netlist.Nodes.LabeledNames, probeCurrents, opVars2);
 
+        // The WSProbe small-signal sweep lives on the LATTICE two-tone path (R-wsp5-7), which is the
+        // default; this is the rectangular-FFT path AnalysisSettings.HbTwoToneOnLattice = false
+        // selects, and its Jacobian keeps its own frozen goldens. Said rather than silently skipped:
+        // a probed run that produced no wsp with SS* keys present would look like a bug.
+        var wspProbes2 = WspProbeSites();
+        if (wspProbes2.Length > 0 && p.HasSsSweep)
+            _netlist.AddWarningOnce("wsprobe.hb-ss-two-tone-grid-path",
+                "WSProbe small-signal sweep: this two-tone run took the rectangular-FFT path " +
+                "(HbTwoToneOnLattice = false), which the small-signal solve does not serve — it is " +
+                "built on the mixing lattice. Leave HbTwoToneOnLattice at its default to compute the " +
+                "probes' large-signal transfer functions.");
+        else
+            NoteNoSmallSignalSweep(wspProbes2.Length);
+
         // V holds the converged interface spectrum [N, M]; expose it so a parametric sweep can
         // warm-start the next point (§11 — the chain is shape-agnostic, so it works at any tone count).
         return (ds2, solveResult.Converged, V, trace);
@@ -1245,6 +1326,43 @@ public sealed class HbEngine
         var dsNd = BuildMultiToneDataSet(
             Vfull, INlfull, namesFull, lattice, f, PointOutcome.Of(solveResult.Converged, solveResult.IterTrace), portCurrentsByBranch,
             _netlist.Nodes.LabeledNames, probeCurrents, opVarsNd);
+
+        // ── The WSProbe small-signal sweep over the mixing lattice (R-wsp5-7) ──
+        var wspProbesNd = WspProbeSites();
+        if (wspProbesNd.Length > 0 && p.HasSsSweep)
+        {
+            // v1 supports one and two tones. The APFT path's conversion blocks are a separate piece
+            // of work, and the refusal states the size it would have to carry so the number is the
+            // user's rather than a shrug.
+            if (T >= 3)
+            {
+                int wouldNeed = MixingLattice.CountFor(T, 2 * p.MaxMixOrder);
+                throw new InvalidOperationException(
+                    $"wsprobe.hb-tones-unsupported: the WSProbe small-signal sweep supports one and " +
+                    $"two tones; this analysis declares {T}. The conversion matrix would need the " +
+                    $"device spectra over {wouldNeed} retained products at mixing order " +
+                    $"{2 * p.MaxMixOrder}, which is a separate piece of work on the APFT path. Run " +
+                    "the small-signal sweep on a one- or two-tone operating point.");
+            }
+
+            int ssOrder = Math.Clamp(p.SsMaxHarm ?? p.MaxMixOrder, 0, p.MaxMixOrder);
+            var (diffLattice, gSpec, cSpec) = HbSmallSignal.LatticeSpectra(
+                V, apft, _settings.HbApftOversample, N, _netlist, ifNodes);
+            var sidebandsNd = new HbSmallSignal.LatticeSidebands(
+                lattice, diffLattice, gSpec, cSpec, omegas, ssOrder);
+            if (ssOrder < p.MaxMixOrder)
+                _netlist.AddNoteOnce("wsprobe.hb-ss-maxharm",
+                    $"WSProbe small-signal sweep: SSMaxHarm = {ssOrder} truncates the sideband set " +
+                    $"to mixing order {ssOrder} ({sidebandsNd.Count} sidebands), below the " +
+                    $"MaxMixOrder = {p.MaxMixOrder} the operating point retains. The wsp entries are " +
+                    "the cheaper answer.");
+            AddWspSmallSignalCubes(dsNd, p, extractor, sidebandsNd, wspProbesNd, yNN[0],
+                commensurateWith: $"the tone lattice ({string.Join(", ", f.Select(x => $"{x / 1e9:G6} GHz"))})");
+        }
+        else
+        {
+            NoteNoSmallSignalSweep(wspProbesNd.Length);
+        }
 
         return (dsNd, solveResult.Converged, V, trace);
     }
@@ -1772,6 +1890,105 @@ public sealed class HbEngine
 
         return HbNewton.CompareJacobianNumerical(Vstar, yNN, iSrc, f0, K, N, _netlist, ifNodes, gridN,
             cc, useControlJacobian);
+    }
+
+    // ── The WSProbe small-signal sweep (brief-wsprobe-5) ─────────────────────
+
+    /// <summary>
+    /// The probes as the small-signal solve addresses them, in the <c>idx</c> order the elaborator
+    /// assigned (overview D-3). Empty for every unprobed netlist, and the emptiness is what keeps
+    /// such a run byte-identical to one from before WSP-5 (R-wsp5-9(a)).
+    /// </summary>
+    private HbSmallSignal.ProbeSite[] WspProbeSites() =>
+        _netlist.WspProbes
+            .Select(w => new HbSmallSignal.ProbeSite(
+                w.ComponentIndex, w.Label, w.Idx,
+                _netlist.Components[w.ComponentIndex].Nodes[0],
+                _netlist.Components[w.ComponentIndex].Nodes[1]))
+            .ToArray();
+
+    /// <summary>
+    /// R-wsp5-1's "not an error" case: a WSProbe with no <c>SS*</c> keys. The probe is transparent
+    /// (R-wsp1-1) and the run simply carries no <c>wsp</c> — said ONCE, because a designer who
+    /// placed a probe and got no transfer functions has no other way to learn why.
+    /// </summary>
+    private void NoteNoSmallSignalSweep(int probeCount)
+    {
+        if (probeCount == 0) return;
+        _netlist.AddNoteOnce("wsprobe.hb-no-ss-sweep",
+            $"{probeCount} WSProbe{(probeCount == 1 ? "" : "s")} present; add SSStart/SSStop to the " +
+            "HB analysis to compute their large-signal transfer functions.");
+    }
+
+    /// <summary>
+    /// The whole small-signal half of a probed HB run: build the sideband family's conversion matrix
+    /// at every probe frequency, solve the two injections per probe against it, and write the cubes
+    /// (R-wsp5-5, R-wsp5-6). Shared by the single-tone and lattice paths — everything that differs
+    /// between them is inside <paramref name="sidebands"/>.
+    /// </summary>
+    private void AddWspSmallSignalCubes(
+        DataSet ds, HbAnalysisParams p, HbLinearExtractor extractor,
+        HbSmallSignal.ISidebands sidebands, HbSmallSignal.ProbeSite[] probes,
+        Complex[,] yDc, string commensurateWith)
+    {
+        var counters = new HbSmallSignal.Counters();
+        var wsp = HbSmallSignal.SolveProbes(
+            _netlist, extractor, sidebands, probes, p.SsGrid, yDc, counters, commensurateWith);
+
+        LastSmallSignalCounters = counters;
+
+        WspCubePacker.Add(
+            ds, _netlist,
+            new Axis("ssfreq", (double[])p.SsGrid.Clone(), "Hz"), p.SsGrid,
+            probes.Select(x => new WspCubePacker.Probe(
+                x.Label, x.Idx,
+                WspCubePacker.TermZAt(_netlist, x.GNode),
+                WspCubePacker.TermZAt(_netlist, x.LNode))).ToArray(),
+            wsp, p.MarginThresholdDb,
+            axisWhat: "a probe frequency of ");
+    }
+
+    /// <summary>
+    /// The linearisation of the most recent single-tone <see cref="Run"/>'s converged operating
+    /// point: the interface admittances and Norton sources per harmonic, the one-sided
+    /// full-amplitude device spectra, the <c>w ≥ 2</c> buckets, and the converged interface
+    /// spectrum itself.
+    ///
+    /// <para>Exposed because these are exactly the pieces <see cref="HbNewton.BuildJ"/> and
+    /// <see cref="HbSmallSignal.BuildJss"/> are each built from, and R-wsp5-9(b) compares the two
+    /// matrices — the one comparison that pins the two-sided coefficient convention, the
+    /// <c>jω_k</c> factor and the <c>Y_NN</c> placement all at once. Null after a run that produced
+    /// no linearisation (a multi-tone run, or one whose solve reported none).</para>
+    /// </summary>
+    public sealed record LinearizedPoint(
+        Complex[][,] YNN, Complex[][] ISrc, Complex[,,] G, Complex[,,] C,
+        IReadOnlyList<HigherWeightBucket> Buckets, Complex[,] V,
+        int InterfaceCount, int MaxHarmonic, double Omega0);
+
+    /// <inheritdoc cref="LinearizedPoint"/>
+    public LinearizedPoint? LastLinearizedPoint { get; private set; }
+
+    /// <summary>
+    /// The structural counters of the most recent small-signal solve — R-wsp5-9(i), which asserts
+    /// the SHAPE of the work rather than its wall clock (overview D-14). Null when the run performed
+    /// no small-signal solve. WSP-8 lowers these against the same fixture.
+    /// </summary>
+    public HbSmallSignal.Counters? LastSmallSignalCounters { get; private set; }
+
+    /// <summary>
+    /// R-wsp5-1's <c>SSMaxHarm</c> report: a truncated sideband order is stated whenever it is below
+    /// the retained <c>K</c>, because a <c>wsp</c> computed over fewer sidebands than the operating
+    /// point has harmonics is a different (cheaper, and less accurate) answer and nothing else in
+    /// the result says so.
+    /// </summary>
+    private void NoteSidebandTruncation(HbAnalysisParams p, int sidebandCount)
+    {
+        if (p.SsOrder >= p.MaxHarmonic) return;
+        _netlist.AddNoteOnce("wsprobe.hb-ss-maxharm",
+            $"WSProbe small-signal sweep: SSMaxHarm = {p.SsOrder} truncates the conversion matrix " +
+            $"to {sidebandCount} sidebands, below the {p.MaxHarmonic} harmonics the operating point " +
+            "retains. The wsp entries are the cheaper answer; raise SSMaxHarm to MaxHarm to remove " +
+            "the truncation.");
     }
 
     // ── DataSet builders (5-3) ────────────────────────────────────────────────

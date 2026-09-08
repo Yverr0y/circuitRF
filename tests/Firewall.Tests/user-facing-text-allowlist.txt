@@ -764,3 +764,13 @@ src/RfCore/Stability/WspMatrix.cs|the probe list is empty.
 # derived-metric call, the series' own convention (see the WSP-2/WSP-3 blocks above).
 src/Core/Expressions/Evaluator.Wsp.cs|{cl.Name}: the two immittance cubes must have the same shape — {what} is 
 src/RfCore/Stability/WspEnvelope.cs|the active and passive runs must cover the same sweep ({nf} vs {wspPassive.Count} points).
+
+# WSP-5 (2026-09-08) — the large-signal small-signal (conversion-matrix) solve. Every one of these
+# is a SETUP refusal thrown before any probe frequency is solved, on the same terms as the WSProbe
+# refusals above: it names a directive key the caller controls (SSStart/SSStop, MaxMixOrder, the
+# tone count) or an engine invariant that cannot be reached from a document at all.
+src/Engine/HarmonicBalance/HbEngine.cs|HB '{hba.Name}': the small-signal sweep (SSStart/SSStop) could not be 
+src/Engine/HarmonicBalance/HbEngine.cs|wsprobe.hb-tones-unsupported: the WSProbe small-signal sweep supports one and 
+src/Engine/HarmonicBalance/HbSmallSignal.cs|WSProbe '{probes[i].Label}' allocated no branch in the harmonic-balance 
+src/Engine/HarmonicBalance/HbSmallSignal.cs|the mixing product {MixingLattice.Label(lattice.ToneOf(m))} of the run's own 
+src/Engine/HarmonicBalance/HbSmallSignal.cs|wsprobe.hb-ss-mixorder-too-high: the small-signal conversion matrix needs the 

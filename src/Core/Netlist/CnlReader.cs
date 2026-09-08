@@ -1540,6 +1540,15 @@ public sealed class CnlReader
             MaxIterExpr       = kv.GetValueOrDefault("MaxIter",         "100"),
             MarginThresholdExpr = kv.GetValueOrDefault(
                 "MarginThreshold", CircuitRF.Core.Design.Analysis.MarginThresholdDefault),
+            // The small-signal (probe-tickle) sweep — WSP-5 R-wsp5-1. Every default is EMPTY, so a
+            // document written before WSP-5 declares no sweep and its run is untouched.
+            SsStartExpr       = kv.GetValueOrDefault("SSStart",         ""),
+            SsStopExpr        = kv.GetValueOrDefault("SSStop",          ""),
+            SsStepExpr        = kv.GetValueOrDefault("SSStep",          ""),
+            SsNptsExpr        = kv.GetValueOrDefault("SSNpts",          ""),
+            SsUnit            = kv.GetValueOrDefault("SSUnit",          "Hz"),
+            SsLogExpr         = kv.GetValueOrDefault("SSLog",           ""),
+            SsMaxHarmExpr     = kv.GetValueOrDefault("SSMaxHarm",       ""),
             Enabled           = ParseEnabledToken(tokens),
 #pragma warning disable CS0618
             SweepVarName      = sweepVar,

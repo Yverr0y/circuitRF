@@ -268,160 +268,19 @@ public static class SParameterEngine
     }
 
     /// <summary>
-    /// The <c>wsp</c> matrix and the six default outputs per probe, as cubes (R-wsp1-10):
-    /// <c>wsp</c> over <c>{freq, row, col}</c> with 1-based integer <c>row</c>/<c>col</c> values so
-    /// the document's <c>wsp(r, c)</c> is <c>wsp[f, r, c]</c> with no index arithmetic between;
-    /// <c>H0:&lt;label&gt;</c> … <c>F:&lt;label&gt;</c> over <c>{freq}</c>, computed through
-    /// <see cref="WspReduction"/> — the same functions every derived metric calls, so a run's cube
-    /// and a trace card's function of the same probe are one implementation (overview D-2); and
-    /// <c>__WspProbes</c>, the label ↔ idx metadata, which a sweep passes through unstacked like
-    /// every <c>__</c> cube.
+    /// The <c>wsp</c> matrix, the eight per-probe defaults and the metadata cubes — written by
+    /// <see cref="WspCubePacker"/>, which the harmonic-balance engine's <c>ssfreq</c> sweep calls
+    /// too (brief-wsprobe-5 R-wsp5-6), so the two analyses cannot disagree about a cube name, a
+    /// unit, the NaN policy or a diagnostic's wording.
     /// </summary>
     private static void AddWspCubes(
         DataSet ds, ElaboratedNetlist netlist, double[] freqsHz, WspProbeSite[] probes, Complex[][,] wsp,
         AnalysisSettings settings)
-    {
-        int nf = freqsHz.Length, m = probes.Length, size = 2 * m;
-        var freqAxis = new Axis("freq", (double[])freqsHz.Clone(), "Hz");
-
-        var rc = new double[size];
-        for (int k = 0; k < size; k++) rc[k] = k + 1;
-        var rowAxis = new Axis("row", rc);
-        var colAxis = new Axis("col", (double[])rc.Clone());
-
-        var data = new Complex[nf * size * size];
-        for (int fi = 0; fi < nf; fi++)
-        {
-            var w = wsp[fi];
-            for (int r = 0; r < size; r++)
-            for (int c = 0; c < size; c++)
-                data[(fi * size + r) * size + c] = w[r, c];
-        }
-        ds.Add("wsp", new DataCube([freqAxis, rowAxis, colAxis], data));
-
-        for (int pi = 0; pi < m; pi++)
-        {
-            var probe = probes[pi];
-            var h0 = new Complex[nf]; var y0 = new Complex[nf];
-            var zg = new Complex[nf]; var zl = new Complex[nf];
-            var lg = new Complex[nf]; var f  = new Complex[nf];
-            // R-wsp9-1: the two margins beside the six defaults, through WspMargin.Of on the SAME
-            // quad — one implementation, so SM_Y0:<label> and wsp_SM_Y0(SP1.wsp, idx) are
-            // bit-identical (overview D-2).
-            var smY = new double[nf]; var smH = new double[nf];
-            int firstDegenerate = -1;
-            for (int fi = 0; fi < nf; fi++)
-            {
-                var q = WspProbeQuad.Of(wsp[fi], probe.Idx);
-                var d = WspReduction.Defaults(q);
-                h0[fi] = d.H0; y0[fi] = d.Y0; zg[fi] = d.ZG; zl[fi] = d.ZL; lg[fi] = d.LG; f[fi] = d.F;
-                var mg = WspMargin.Of(q);
-                smY[fi] = mg.SmY0; smH[fi] = mg.SmH0;
-                if (d.Degenerate && firstDegenerate < 0) firstDegenerate = fi;
-            }
-            if (firstDegenerate >= 0)
-                netlist.AddWarningOnce($"wsprobe.degenerate-node:{probe.Label}",
-                    $"WSProbe '{probe.Label}': the reduced two-port is undefined at " +
-                    $"{freqsHz[firstDegenerate] / 1e9:G6} GHz (H0 = 0 is an exact short from the G " +
-                    $"node to ground; Y0 = 0 is an exact open in the probe branch). The affected " +
-                    $"outputs are NaN there; no epsilon was added to a denominator.");
-
-            ds.Add($"H0:{probe.Label}", new DataCube([freqAxis], h0) { Unit = "Ohm" });
-            ds.Add($"Y0:{probe.Label}", new DataCube([freqAxis], y0) { Unit = "S" });
-            ds.Add($"ZG:{probe.Label}", new DataCube([freqAxis], zg) { Unit = "Ohm" });
-            ds.Add($"ZL:{probe.Label}", new DataCube([freqAxis], zl) { Unit = "Ohm" });
-            ds.Add($"LG:{probe.Label}", new DataCube([freqAxis], lg));
-            ds.Add($"F:{probe.Label}",  new DataCube([freqAxis], f));
-            ds.Add($"SM_Y0:{probe.Label}", new DataCube([freqAxis], smY));
-            ds.Add($"SM_H0:{probe.Label}", new DataCube([freqAxis], smH));
-
-            ReportMarginThreshold(netlist, freqsHz, probe.Label, smY, smH, settings.WspMarginThresholdDb);
-        }
-
-        var pIdx   = new double[m];
-        var labels = new string[m];
-        for (int pi = 0; pi < m; pi++) { pIdx[pi] = pi; labels[pi] = probes[pi].Label; }
-        var idxVals = probes.Select(p => (double)p.Idx).ToArray();
-        ds.Add("__WspProbes", new DataCube([new Axis("probe", pIdx, "", labels)], idxVals));
-
-        // __WspTermZ {probe, side}: the declared Z of the Term directly at each probe terminal, NaN
-        // where there is none. Metadata like __WspProbes — a sweep passes it through unstacked.
-        var nan   = new Complex(double.NaN, double.NaN);
-        var termZ = new Complex[2 * m];
-        for (int pi = 0; pi < m; pi++)
-        {
-            termZ[2 * pi]     = probes[pi].TermZG ?? nan;
-            termZ[2 * pi + 1] = probes[pi].TermZL ?? nan;
-        }
-        // __WspMarginThreshold: the run's own MarginThreshold, in dB, so the Data Display can draw
-        // the line the run actually judged against rather than the published default (WSP-4
-        // R-wsp4-7). NaN when the knob is `none`. Metadata like __WspProbes — a sweep passes it
-        // through unstacked, and the trace picker skips every `__` cube.
-        ds.Add("__WspMarginThreshold",
-            new DataCube([new Axis("one", [0.0])],
-                         new[] { settings.WspMarginThresholdDb ?? double.NaN }));
-
-        ds.Add("__WspTermZ", new DataCube(
-            [new Axis("probe", (double[])pIdx.Clone(), "", (string[])labels.Clone()),
-             new Axis("side", [0.0, 1.0], "", ["G", "L"])],
-            termZ) { Unit = "Ohm" });
-    }
-
-    /// <summary>
-    /// R-wsp9-3 — one <b>Info</b> note per probe whose <c>min(SM_Y0, SM_H0)</c> falls below
-    /// <paramref name="thresholdDb"/> over the sweep, keyed
-    /// <c>wsprobe.margin-below-threshold:&lt;label&gt;</c>. Silent when the threshold is null
-    /// (<c>MarginThreshold=none</c>) or nothing crossed it.
-    ///
-    /// <para><b>A note, not a warning.</b> The −5 Ω split resonator of brief-wsprobe-9 §3 is stable
-    /// and fires this by design: a node one negative-resistance step from oscillating genuinely has
-    /// little margin. It says "look here". A NaN margin (a degenerate node, overview D-7) never
-    /// fires it — that probe already has its own diagnostic.</para>
-    /// </summary>
-    private static void ReportMarginThreshold(
-        ElaboratedNetlist netlist, double[] freqsHz, string label,
-        double[] smY, double[] smH, double? thresholdDb)
-    {
-        if (thresholdDb is not { } dbLimit) return;
-
-        double limit = Math.Pow(10.0, dbLimit / 20.0);     // 20·log10 (overview D-16)
-        int    yi = ArgMin(smY), hi = ArgMin(smH);
-        if (yi < 0 && hi < 0) return;
-
-        double ym = yi < 0 ? double.PositiveInfinity : smY[yi];
-        double hm = hi < 0 ? double.PositiveInfinity : smH[hi];
-        if (Math.Min(ym, hm) >= limit) return;
-
-        netlist.AddNoteOnce($"wsprobe.margin-below-threshold:{label}",
-            $"WSProbe '{label}': stability margin below {Signed(dbLimit)} dB ({limit:G3}): " +
-            $"SM_Y0 = {Db(ym)} at {Ghz(freqsHz, yi)}, SM_H0 = {Db(hm)} at {Ghz(freqsHz, hi)}. " +
-            "A margin below \u221212 dB means one side of the node presents negative resistance there. " +
-            "Winslow (EuMIC 2024) \u00a7IV: find the root cause of any sudden decrease.");
-
-        static string Db(double v)
-            => double.IsPositiveInfinity(v) ? "n/a"
-             : v <= 0.0                     ? "\u2212inf dB"
-             : $"{Minus($"{20.0 * Math.Log10(v):F1}")} dB";
-
-        // A typographic minus, so the threshold and the margins read as the paper prints them.
-        static string Signed(double v) => Minus($"{v:G4}");
-
-        static string Minus(string s) => s.StartsWith('-') ? "\u2212" + s[1..] : s;
-
-        static string Ghz(double[] f, int i) => i < 0 ? "n/a" : $"{f[i] / 1e9:G6} GHz";
-    }
-
-    /// <summary>The index of the smallest non-NaN entry, or −1 when every entry is NaN.</summary>
-    private static int ArgMin(double[] v)
-    {
-        int best = -1;
-        for (int k = 0; k < v.Length; k++)
-        {
-            if (double.IsNaN(v[k])) continue;
-            if (best < 0 || v[k] < v[best]) best = k;
-        }
-        return best;
-    }
+        => WspCubePacker.Add(
+            ds, netlist,
+            new Axis("freq", (double[])freqsHz.Clone(), "Hz"), freqsHz,
+            probes.Select(p => new WspCubePacker.Probe(p.Label, p.Idx, p.TermZG, p.TermZL)).ToArray(),
+            wsp, settings.WspMarginThresholdDb, axisWhat: "");
 
     // ── Per-netlist setup ─────────────────────────────────────────────────────
 
@@ -481,14 +340,7 @@ public static class SParameterEngine
         // The Term (if any) shunting each probe terminal to ground is recorded with the probe, so
         // the envelope's precondition — "the probe sits directly at its termination" — can be
         // checked against the declared Z rather than guessed from ZG (R-wsp3 §6.1).
-        Complex? TermAt(int node)
-        {
-            if (node == 0) return null;
-            foreach (var port in ports)
-                if ((port.Node0 == node && port.Node1 == 0) || (port.Node1 == node && port.Node0 == 0))
-                    return port.Z0;
-            return null;
-        }
+        Complex? TermAt(int node) => WspCubePacker.TermZAt(netlist, node);
         var probes = netlist.WspProbes
             .Select(w => new WspProbeSite(
                 w.ComponentIndex, w.Label, w.Idx,

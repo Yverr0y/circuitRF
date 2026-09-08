@@ -199,6 +199,20 @@ public sealed class LoadpullEngine
     /// </summary>
     public PursuitContext PrepareContext(LoadpullAnalysisParams p)
     {
+        // brief-wsprobe-5 §6: a probed loadpull is not refused, and it is not silently probe-less
+        // either. The small-signal sweep belongs to the `hb` analysis; running it at every grid
+        // point would multiply the cost by the ssfreq count, and the document's own replacement for
+        // a stability loadpull is the rank-1 re-termination of ONE wsp (brief-wsprobe-3 §6).
+        int probeCount = _netlist.WspProbes.Count;
+        if (probeCount > 0)
+            _netlist.AddNoteOnce("wsprobe.loadpull-no-ss-sweep",
+                $"{probeCount} WSProbe{(probeCount == 1 ? "" : "s")} present; the small-signal " +
+                "(SS*) sweep applies to the hb analysis only — at every termination of a loadpull " +
+                "grid it would multiply the run by the ssfreq count. Run the hb analysis with " +
+                "SSStart/SSStop to get the probes' large-signal transfer functions, then sweep the " +
+                "terminations with wsp_terminate / wsp_loadpull_margin, which re-terminate that one " +
+                "wsp for no further HB solves.");
+
         if (string.IsNullOrEmpty(p.LoadTunerName))
             throw new InvalidOperationException("LoadpullAnalysis: LoadTuner= is required.");
         if (string.IsNullOrEmpty(p.SourceTunerName))

@@ -1,0 +1,29 @@
+; ============================================================
+; hb_pumped_two_port_unprobed.cnl — hb_pumped_two_port.cnl with both WSProbes
+; replaced by the direct connections they short. The pair is the transparency
+; gate (brief-wsprobe-1 R-wsp1-1, restated for harmonic balance): a probe is a
+; 0 V series element and must change no solved voltage.
+; ============================================================
+
+f0    = 2e9
+Vpump = 0.45
+Vg    = 0.30
+Vd    = 3.0
+
+SDD:D1  n_p1 0  n_p2 0  \
+  I[1,0]=0.02*_v1 + 0.05*_v1^2 + 0.002*_v2 + 0.001*_v1*_v2  \
+  I[2,0]=0.03*_v2 + 0.04*_v1*_v2 + 0.01*_v1^2  \
+  I[1,1]=0.5e-12*_v1 + 0.15e-12*(_v1 - _v2)  \
+  I[2,1]=0.3e-12*_v2 + 0.2e-12*_v1*_v2 + 0.15e-12*(_v2 - _v1)
+
+V_1Tone:Vin  n_s 0     Freq=f0  V=Vpump  Vdc=Vg
+R:Rs         n_s n_gg  R=50
+L:Lg         n_gg n_p1 L=1 nH
+
+L:Ld          n_p2 n_dr  L=2 nH
+R:Rd          n_dr n_sup R=200
+V_1Tone:Vsup  n_sup 0    Vdc=Vd
+C:Cout        n_p2 n_out C=10 pF
+R:Rl          n_out 0    R=50
+
+analysis HB1 type=hb Tone=f0 MaxHarm=4 Tol=1e-10

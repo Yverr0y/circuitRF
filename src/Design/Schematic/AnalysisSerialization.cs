@@ -82,6 +82,15 @@ public sealed class CschAnalysis
     /// <summary>The WSProbe stability-margin report threshold in dB, or "none" (WSP-9). Null /
     /// absent → the default, so a file written before this key existed reads unchanged.</summary>
     public string?   MarginThresholdExpr { get; set; }
+    // The small-signal (probe-tickle) sweep — WSP-5 R-wsp5-1. All null on a file written before it,
+    // which reads back as "no small-signal sweep" and therefore as the run that file always had.
+    public string?   SsStartExpr       { get; set; }
+    public string?   SsStopExpr        { get; set; }
+    public string?   SsStepExpr        { get; set; }
+    public string?   SsNptsExpr        { get; set; }
+    public string?   SsUnit            { get; set; }
+    public string?   SsLogExpr         { get; set; }
+    public string?   SsMaxHarmExpr     { get; set; }
     public string?   SweepVarName      { get; set; }
     public string?   SweepStartExpr    { get; set; }
     public string?   SweepStopExpr     { get; set; }
@@ -272,6 +281,10 @@ public static class AnalysisSerialization
 
     // ── Domain → DTO ─────────────────────────────────────────────────────────
 
+    /// <summary>An omitted key rather than an empty string, so a document that declared nothing
+    /// writes nothing and reads back identical.</summary>
+    private static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
+
     public static CschAnalysis ToDto(Analysis a) => a switch
     {
         DcAnalysis => new CschAnalysis { Type = "dc", Name = a.Name, Enabled = a.Enabled },
@@ -306,6 +319,13 @@ public static class AnalysisSerialization
             MaxIterExpr       = hb.MaxIterExpr,
             MarginThresholdExpr = hb.MarginThresholdExpr != Analysis.MarginThresholdDefault
                 ? hb.MarginThresholdExpr : null,
+            SsStartExpr       = NullIfBlank(hb.SsStartExpr),
+            SsStopExpr        = NullIfBlank(hb.SsStopExpr),
+            SsStepExpr        = NullIfBlank(hb.SsStepExpr),
+            SsNptsExpr        = NullIfBlank(hb.SsNptsExpr),
+            SsUnit            = hb.SsUnit != "Hz" ? hb.SsUnit : null,
+            SsLogExpr         = NullIfBlank(hb.SsLogExpr),
+            SsMaxHarmExpr     = NullIfBlank(hb.SsMaxHarmExpr),
 #pragma warning disable CS0618
             SweepVarName      = hb.SweepVarName,
             SweepStartExpr    = hb.SweepStartExpr,
@@ -448,6 +468,13 @@ public static class AnalysisSerialization
             LambdaExpr        = dto.LambdaExpr        ?? "1",
             MaxIterExpr       = dto.MaxIterExpr        ?? "100",
             MarginThresholdExpr = dto.MarginThresholdExpr ?? Analysis.MarginThresholdDefault,
+            SsStartExpr       = dto.SsStartExpr       ?? "",
+            SsStopExpr        = dto.SsStopExpr        ?? "",
+            SsStepExpr        = dto.SsStepExpr        ?? "",
+            SsNptsExpr        = dto.SsNptsExpr        ?? "",
+            SsUnit            = dto.SsUnit            ?? "Hz",
+            SsLogExpr         = dto.SsLogExpr         ?? "",
+            SsMaxHarmExpr     = dto.SsMaxHarmExpr     ?? "",
 #pragma warning disable CS0618
             SweepVarName      = dto.SweepVarName,
             SweepStartExpr    = dto.SweepStartExpr,

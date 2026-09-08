@@ -1,0 +1,43 @@
+; ============================================================
+; hb_pumped_two_port.cnl — brief-wsprobe-5's own fixture: a pumped two-port
+; nonlinear device with two WSProbes, one on each side of it.
+;
+; Deliberately NOT one of the heroes. Every termination here is frequency-flat
+; (plain R, L and C), so the small-signal network is well behaved at ANY probe
+; frequency — hero2's per-harmonic Z_Port bands collapse to near-shorts off the
+; fundamental, which would make every vP entry compare two numbers near zero.
+;
+; The device carries a time-varying conductance AND a time-varying capacitance
+; with cross terms in both, so the conversion matrix's G, C, sideband and node-pair
+; indices are all exercised rather than only its diagonal.
+; ============================================================
+
+f0    = 2e9
+Vpump = 0.45
+Vg    = 0.30
+Vd    = 3.0
+
+; ── The device: port 1 (input) and port 2 (output), source grounded ──────────
+;   I[1,0] / I[2,0]  conduction, with a _v1-controlled transconductance
+;   I[1,1] / I[2,1]  charge (H[1] = jw), with a _v1-controlled output capacitance
+SDD:D1  n_p1 0  n_p2 0  \
+  I[1,0]=0.02*_v1 + 0.05*_v1^2 + 0.002*_v2 + 0.001*_v1*_v2  \
+  I[2,0]=0.03*_v2 + 0.04*_v1*_v2 + 0.01*_v1^2  \
+  I[1,1]=0.5e-12*_v1 + 0.15e-12*(_v1 - _v2)  \
+  I[2,1]=0.3e-12*_v2 + 0.2e-12*_v1*_v2 + 0.15e-12*(_v2 - _v1)
+
+; ── Input network, on the GENERATOR side of the GATE probe ───────────────────
+V_1Tone:Vin  n_s 0     Freq=f0  V=Vpump  Vdc=Vg
+R:Rs         n_s n_gg  R=50
+L:Lg         n_gg n_gl L=1 nH
+WSProbe:GATE n_gl n_p1
+
+; ── Output network, on the LOAD side of the DRAIN probe ──────────────────────
+WSProbe:DRAIN n_p2 n_dl
+L:Ld          n_dl n_dr  L=2 nH
+R:Rd          n_dr n_sup R=200
+V_1Tone:Vsup  n_sup 0    Vdc=Vd
+C:Cout        n_dl n_out C=10 pF
+R:Rl          n_out 0    R=50
+
+analysis HB1 type=hb Tone=f0 MaxHarm=4 Tol=1e-10

@@ -868,3 +868,223 @@ loci carried nothing the `1/H0`, `1/Y0` polar traces and the margin do not carry
 **A source scan of `src/` and `docs/design/` for the retired spellings is a gate**, which is why
 this section does not print them; `src/RfCore/RESOLVED.md` names them once, for anyone reading a
 diff that still contains them.
+
+---
+
+## 10. Large-signal small-signal solve (WSP-5)
+
+Everything above computes `wsp` from an **S-parameter** analysis, which linearises the nonlinear
+devices at their DC operating point. That answers whether the design is stable when nothing is
+driving it. It cannot answer the question a power-amplifier designer actually asks — *is it stable at
+the drive level it ships at* — and it cannot see a **parametric** instability at all, because that one
+lives at `ω0/2` and an unpumped circuit has no `ω0`.
+
+The 2023 document says the probe serves harmonic balance as it serves a linear analysis (§4.2, p. 43:
+"Linear analysis, harmonic balance, or AC analysis can all be accommodated"; §7, p. 111: Ohtomo's
+loop gains "extended into the nonlinear regime using Harmonic Balance"). What that takes is one new
+engine capability, and **every derived metric of §5–§9 then applies to the resulting cube with no
+change at all**, because they map over the leading axes and neither knows nor cares which analysis
+produced the matrix.
+
+> **Method references.** S. A. Maas, *Nonlinear Microwave and RF Circuits*, 2nd ed., ch. 3 (the
+> conversion matrix); A. Suarez, *Analysis and Design of Autonomous Microwave Circuits* (2009),
+> ch. 1–2 (large-signal stability as a small-signal perturbation of the periodic steady state) —
+> the document's own [11], [24], [25].
+
+### 10.1 What is computed
+
+The circuit is driven hard by its HB tones. At the converged operating point the nonlinear devices
+are **periodically time-varying** conductances and capacitances, and the probe injects a vanishingly
+small series voltage or shunt current at a frequency `ω_ss` that is in general **not** on the HB grid.
+Because the linearisation is time-varying, a stimulus at `ω_ss` produces a response at every sideband
+`ω_k = ω_ss + k·ω0`, `k = −K_ss … K_ss`; the `wsp` entries are the responses **at `ω_ss` itself** —
+the `k = 0` sideband — which is the large-signal counterpart of the S-parameter `wsp`.
+
+The directive spells the sweep like the S-parameter one and honours its unit rules
+(`cli.md` §10A.3):
+
+```
+analysis HB1 type=hb Tone=RFfreq MaxHarm=7 \
+     SSStart=0.1 SSStop=10 SSNpts=991 SSUnit=GHz  [SSStep=…] [SSLog=true] [SSMaxHarm=K_ss] \
+     [MarginThreshold=<dB>|none]
+```
+
+`SSUnit` applies to start, stop and step alike — the one-unit-for-the-whole-sweep rule, because a
+bare coefficient read as base SI is how a sweep once ran at 2 Hz and looked entirely normal.
+**Absent `SSStart`/`SSStop` means no small-signal solve at all**, and the run is byte-identical to one
+from before this existed; a WSProbe with no `SS*` keys is not an error — the probe is transparent
+(§1) and the run says once that it carried no transfer functions.
+
+### 10.2 The conversion matrix
+
+`N_int` interface nodes (the nonlinear-facing nodes), `K_ss ≤ K` sidebands, unknowns the interface
+voltages at every sideband, `n_c = N_int·(2K_ss + 1)` complex:
+
+```
+J_ss[(n,k), (m,l)] = δ_kl · Y_NN(ω_k)[n,m]
+                   + G⁽²⁾[n,m, k−l]
+                   + j·ω_k · C⁽²⁾[n,m, k−l]
+                   + Σ_w H[w](ω_k) · Dw⁽²⁾[n,m, k−l]
+```
+
+No half-amplitude weights, no real-split, no DC special cases: at `ω_ss ≠ 0` every sideband is an
+ordinary complex unknown. `src/Engine/HarmonicBalance/HbSmallSignal.cs`.
+
+**The two-sided coefficient rule is a frozen convention.** `HbFft` and `HbApft` report FULL-amplitude
+one-sided phasors — the DC bin divided by `N`, an AC bin by `N/2` — so an AC bin is *twice* the
+two-sided Fourier coefficient of the real waveform the conversion matrix is written in:
+
+```
+G⁽²⁾[0] = G[0]        G⁽²⁾[k] = G[k]/2  (k > 0)        G⁽²⁾[−k] = conj(G[k])/2
+```
+
+and likewise `C` and every `w ≥ 2` bucket. Getting the factor of two wrong is **invisible at low
+drive** and doubles every mixing term at high drive. It is also why the spectra are the solve's own
+arrays rather than a re-evaluation: after a drive ramp, re-evaluating the devices would linearise at
+whichever iterate happened to be left in `V`, not at the one the run is reporting.
+
+`Y_NN(ω_k)` comes from the linear extractor at `ω_k`; for `ω_k < 0` it is the **complex conjugate** of
+`|ω_k|`'s, because the linear network is real in the time domain — a theorem, not an approximation —
+and no model in circuitRF is ever evaluated at a negative frequency
+(`src/Engine/HarmonicBalance/CLAUDE.md`). `ω_k = 0` exactly takes the DC formulation.
+
+### 10.3 The probe injections
+
+Per probe and per injection — a unit `vS` in its branch (`−` at G, `+` at L) and a unit `iP` into its
+G node, §3's exact stamps, with every independent source OFF because this is a perturbation of an
+already-solved operating point:
+
+1. the linear partition at `ω_ss` with the injection alone gives the open-circuit interface voltages,
+   and `I_src = −Y_NN(ω_ss)·V_oc` is the Norton excitation the conversion system takes at its `k = 0`
+   block and nowhere else;
+2. `J_ss·V = −RHS` for the interface voltages at every sideband;
+3. `I_nl,0 = −(Y_NN(ω_ss)·V[·,0] + I_src)`, the balance `Y·V + I_src + I_nl = 0` read at `k = 0`;
+4. the linear partition again with the injection **and** `I_nl,0` at the interface, read at every
+   probe as `iS_j = x[br_j]` and `vP_j = x[nG_j − 1]`.
+
+The factorisation at `ω_ss` and the dense factorisation of `J_ss` are shared by all `2N` right-hand
+sides of that probe frequency. Per probe frequency, structurally: `2K_ss + 2` linear-partition
+extractions (one per sideband plus the handle the back-solves share — factorisations *or* cache
+hits), one dense factorisation, `2N` dense solves, `4N` sparse back-solves. WSP-8 lowers those; this
+path is its oracle, so it stays available.
+
+### 10.4 The cubes
+
+Per operating point: `wsp {ssfreq, row, col}` and the eight per-probe defaults over `{ssfreq}` —
+§2's six through `WspReduction` and §9's `SM_Y0`/`SM_H0` through `WspMargin`, the same library calls
+the S-parameter path makes (`src/Engine/WspCubePacker.cs` is one implementation serving both, so the
+two analyses cannot disagree about a cube name, a unit, the NaN policy or a diagnostic's wording).
+Under a drive sweep `ParametricSweepEngine` stacks them to `{Pin, ssfreq, row, col}` exactly as it
+stacks `V` and `S`.
+
+**The `ssfreq` axis carries frequencies in Hz, not indices** — it is a genuine frequency axis, not a
+harmonic-order axis, and `HbSpectrum` is not involved. `HB1.wsp`, `HB1.idx("GATE")`, `HB1.H0("GATE")`
+resolve exactly as `SP1.*` do.
+
+### 10.5 Where a large-signal instability shows up
+
+- **At low drive the HB `wsp` tends to the S-parameter `wsp`** linearised at the DC operating point.
+  The two analyses answer the same question at the two ends of the drive sweep, and that limit is a
+  gate to 1e-6 relative.
+- **A right-half-plane pole** of the linearised periodic system is seen at `ω_ss` near its imaginary
+  part, with Kurokawa's start-up signature on `1/H0(ω_ss)` and `1/Y0(ω_ss)` (Eq. 107/108, Fig. 30) —
+  the same `wsp_unstable_freq_kurokawa`, on a different cube.
+- **A parametric (sub-harmonic) instability** is seen at `ω_ss ≈ ω0/2`, and at its images
+  `ω0/2 + kω0`. **This is the case no linear analysis can see**, and the reason to run the sweep
+  across the drive rather than at one drive level.
+- **The steady-state condition `1/H0 = 0`** (Fig. 30, p. 70) is reached only by an autonomous solution
+  the HB analysis was not asked for. The `wsp` of a *converged, non-oscillating* HB solution answers
+  whether **that** solution is stable — not what the circuit would become if it is not.
+- **The margin under drive.** [M]'s own amplifier lost its margin in the *small-signal* simulation,
+  which §9's linear `SM_Y0`/`SM_H0` already catch. The drive-swept fan of `SM_Y0(ssfreq)` is the
+  large-signal extension: a margin that collapses only above some `Pin` is a drive-dependent
+  instability, and the parametric case reads as a notch at `ω0/2` that is absent at low drive.
+  `MarginThreshold` is applied at each operating point.
+
+  **The threshold NOTE, however, does not survive a sweep, and the number does.**
+  `ParametricSweepEngine` re-elaborates per point and disposes each point's netlist, and it has never
+  propagated a per-point engine diagnostic out of the loop — an HB non-convergence warning inside a
+  sweep vanishes the same way, and has since long before this. So a single-point run prints each
+  probe's minimum and its frequency, and a drive-swept run does not print anything: what it produces
+  is the `SM_Y0`/`SM_H0` cubes over `{Pin, ssfreq}` plus `__WspMarginThreshold`, which is what the
+  Data Display draws the fan and its threshold line from. Reading the fan is the intended workflow
+  either way; the sentence is the thing that is missing, not the answer.
+
+### 10.6 The one frequency this analysis refuses to answer
+
+`ω_ss` **commensurate with the fundamental at order 2** — `2·f_ss / f0` an exact integer, so
+`f_ss = 0`, `f0/2`, `f0`, `3f0/2`, … — is reported as NaN with one warning, never as a plausible
+number.
+
+There the sideband family `{ω_ss + kω0}` and its negation are the **same set of frequencies**, so the
+responses at `+ω_ss` and `−ω_ss` are conjugates of each other rather than independent. The
+formulation solves one family with the stimulus at that family's own zero sideband, which is the
+whole stimulus only while the two families are disjoint; at a half-multiple of the fundamental it is
+half of it, and the answer would be wrong in a way that is not wrong one grid step away. `ω_ss = 0`
+is the `n = 0` case of the same rule — and it is the case `HbNewton.BuildJ` handles by folding the
+`±k` unknowns into a one-sided real-split form, which is why **the HB Jacobian is this analysis at
+`ω_ss = 0`** and why that folding is the gate that pins the whole convention (R-wsp5-9(b); measured
+agreement is exact, 0 relative deviation on every entry).
+
+The consequence to state plainly, because it is a property of the method and not a defect: **a
+parametric instability at `ω0/2` is found by the grid points either side of it.** The pole pair
+approaching the imaginary axis at `ω0/2` shows Kurokawa's crossing at the samples that bracket it,
+which is what the sweep is for; a grid that lands on `ω0/2` exactly loses that one sample and nothing
+else. An odd point count over the same span usually avoids it, and the warning says so.
+
+The lattice form of the same test asks whether `2·ω_ss` is a retained mixing frequency.
+
+### 10.7 Two-tone, and what is refused
+
+With `T ≥ 2` tones the sidebands are `ω_ss + k₁ω₁ + … + k_Tω_T` over the retained mixing lattice —
+each half-space representative and its negation, DC once, `2M − 1` of them — and the device spectra
+are looked up at the difference of two mixing vectors, which reaches order `2·MaxMixOrder` exactly as
+`k − i` reaches `2K` single-tone. `SSMaxHarm` truncates the sideband diamond there rather than a
+scalar harmonic.
+
+**Getting those spectra costs one extra device pass per operating point, and cannot not.** The T-tone
+Newton path never forms a derivative spectrum at all: `HbApft.AccumulateTripleProducts` consumes the
+derivative waveforms as raw time samples, which is exactly what makes it tone-count-general. Those
+samples live on the order-`O` torus and cannot resolve an order-`2O` coefficient, so the converged
+operating point is re-synthesised onto the wider torus — an exact embedding, since the lattice
+enumerates by ascending total order — and the devices are evaluated there once.
+
+v1 supports **one and two tones**. `T ≥ 3` is refused by name, with the count of retained products
+the conversion matrix would have needed, because the APFT path's conversion blocks are a separate
+piece of work. The rectangular-FFT two-tone path (`HbTwoToneOnLattice = false`) is likewise not
+served and says so; the lattice path is the default.
+
+`J_ss` is dense, so it costs `16·n_c²` bytes and is factored once per probe frequency. Above
+`n_c = 2000` the analysis refuses by name and states which of `SSMaxHarm`, `MaxHarm` and
+`MaxMixOrder` binds — the alternative is a run that allocates gigabytes and is killed with nothing
+said.
+
+### 10.8 Loadpull, and the envelope instead
+
+`LoadpullEngine` and `LoadpullPursuitEngine` own their own HB loops and do **not** run the
+small-signal solve: at every termination of a grid it would multiply the run by the `ssfreq` count.
+A probed loadpull is not refused — it says once where the small-signal sweep lives, and points at
+§8's rank-1 re-termination, which is the document's own replacement for a stability loadpull and
+gives a large-signal stability envelope for no HB solves at all beyond the nominal one. It works on
+an HB `wsp` exactly as on a linear one.
+
+### 10.9 Gates
+
+`tests/Engine.Tests/HarmonicBalance/WSProbeHbTests.cs`. The two that carry the weight are independent
+of each other: the fold onto `HbNewton.BuildJ` at `ω_ss = 0`, and a **two-tone HB oracle** — the same
+operating point driven with a small second tone at the probe's own terminals, read at the `(0, 1)`
+mixing product, through a code path that shares no linearisation with the conversion matrix. Where
+the series source goes in that oracle is a derivation and not a choice: only a source on the probe's
+**L** side, first net facing the load, reproduces both `iS` **and** `vP` of the probe's own branch
+injection, because the probe's own source sits between the two terminals and `vP` is read at one of
+them. The oracle's own accuracy is bounded from both sides — an absolute floor of ≈7e-10 A from the
+APFT's conditioning below, the tickle's smallness against the pump above — which is what sets that
+gate's tolerance rather than a wish.
+
+Gate (e) is the parametric case: a pumped varactor divider whose tank sits at `f0/2`. Below the pump
+threshold there is no Kurokawa crossing anywhere in `[0.3 f0, 0.7 f0]`; above it there is one within a
+grid step of `f0/2`. The threshold is not asserted from a textbook formula — it is confirmed through
+the same two-tone path, by the growth of the pump's own **image** of a tickle, which runs from 18% of
+the direct response to 95% of it over the pump range in which the crossing appears. (The direct
+response is measurably the wrong observable there: the tank's resonance moves with the pump's average
+capacitance and pulls the tickle off resonance, hiding the parametric gain underneath.)

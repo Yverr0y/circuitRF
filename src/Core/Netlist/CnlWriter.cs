@@ -340,6 +340,19 @@ public static class CnlWriter
         if (hb.MarginThresholdExpr != Analysis.MarginThresholdDefault)
             sb.Append($" MarginThreshold={hb.MarginThresholdExpr}");
 
+        // The small-signal (probe-tickle) sweep — WSP-5 R-wsp5-1. Written only when the directive
+        // declared one, so an HB line with no SS* keys round-trips to the same bytes it always did
+        // (R-wsp5-9(a) is about the run; this is the same promise about the file).
+        if (hb.HasSsSweep)
+        {
+            sb.Append($" SSStart=\"{hb.SsStartExpr}\" SSStop=\"{hb.SsStopExpr}\"");
+            if (hb.SsStepExpr.Trim().Length > 0) sb.Append($" SSStep=\"{hb.SsStepExpr}\"");
+            if (hb.SsNptsExpr.Trim().Length > 0) sb.Append($" SSNpts={hb.SsNptsExpr}");
+            sb.Append($" SSUnit={hb.SsUnit}");
+            if (hb.SsLogExpr.Trim().Length     > 0) sb.Append($" SSLog={hb.SsLogExpr}");
+            if (hb.SsMaxHarmExpr.Trim().Length > 0) sb.Append($" SSMaxHarm={hb.SsMaxHarmExpr}");
+        }
+
 #pragma warning disable CS0618
         if (hb.SweepVarName is not null)
             sb.Append($" Sweep=\"{hb.SweepVarName}: {hb.SweepStartExpr} .. {hb.SweepStopExpr} step {hb.SweepStepExpr}\"");

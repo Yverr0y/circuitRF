@@ -1695,3 +1695,183 @@ The same fixture also demonstrates the document's p. 112–113 caveat rather tha
 reduced NDF over the S/G/L probe set reads **zero** encirclements at that start-up, and adding a
 fourth probe on the *other* gate — nothing else changed — makes the same NDF read **2**. The odd mode
 is differential across the two gates and only one carried a probe.
+
+## The WSProbe under harmonic balance — WSP-5, the conversion-matrix small-signal solve (2026-09-08)
+
+Findings from building `HbSmallSignal`, the `SS*` sweep on the `hb` directive, and the gates in
+`tests/Engine.Tests/HarmonicBalance/WSProbeHbTests.cs`. Design note:
+`docs/design/stability-wsprobe.md` §10; the frozen conventions are in
+`src/Engine/HarmonicBalance/CLAUDE.md`.
+
+### One probe frequency has no answer, and it is exactly the one the feature is about
+
+`ω_ss` **commensurate with the fundamental at order 2** — `2·f_ss/f0` an exact integer, so `0`,
+`f0/2`, `f0`, `3f0/2`, … — is the case the formulation cannot answer, and `f0/2` is precisely where a
+parametric instability lives.
+
+The reason is structural rather than numerical. The unknowns are one sideband family
+`{ω_ss + kω0}`, and solving that family alone with the stimulus at its own zero sideband is complete
+only while the family and its negation are **disjoint**. They coincide exactly when `2ω_ss` is a
+multiple of `ω0`: there the response at `−ω_ss` is the conjugate of a retained unknown rather than a
+separate one, and half of a real stimulus is silently dropped. Verified by construction — the map
+`k ↦ −k−1` at `ω_ss = ω0/2` sends the sideband set into itself, and the injection's own conjugate
+lands on sideband `−1`, which the right-hand side leaves empty.
+
+The engine returns NaN across the `wsp` row there, with one warning naming the remedy. It does **not**
+nudge the frequency, because a nudged sweep point silently reports a different circuit than the one
+asked for, and it does not refuse the run, because a plausible round-numbers grid (`0.5 .. 3 GHz` step
+`0.1` at `f0 = 2 GHz`) hits three of them.
+
+**Consequence to know before reading a result:** a parametric instability at `f0/2` is found by the
+grid points **either side** of it, where the pole pair approaching the imaginary axis shows Kurokawa's
+crossing. Gate (e) measures this — 40 points over `[0.3 f0, 0.7 f0]` with none landing on `f0/2` finds
+the crossing to within one 20.5 MHz step. A folded (real-split) formulation at exactly `f0/2` would be
+the right answer there and is not built; `HbNewton.BuildJ` is that folding at `ω_ss = 0` and nothing
+generalises it to a half-integer sideband yet.
+
+### The Jacobian comparison is exact, not merely within tolerance
+
+R-wsp5-9(b) folds `J_ss` at `ω_ss = 0` back onto `HbNewton.BuildJ`'s real-split matrix and the two
+agree with **0 relative deviation on every entry** of a 20×20 Jacobian — not 1e-12, zero. That is
+worth knowing because it makes the gate a genuine tripwire: any future change to `ConversionWeight`,
+to `SafeGet`'s conjugation, or to the `jkω₀` charge rotation breaks it immediately rather than
+drifting under a tolerance.
+
+The fold itself is short but every factor in it is load-bearing: the residual scales by `2` on an AC
+row (`F_k = 2·R_k`), the unknown by `½` on an AC column (`δV[k] = ΔV_k/2`), and the Maas §7.3 DC rules
+**fall out** of those two scalings rather than being applied on top.
+
+### `wsprobe.hb-device-no-spectra` is unreachable and was not built
+
+R-wsp5-4 asks for a refusal naming an external device that cannot report spectra. There is no such
+device: `HbNewton.BuildJ` needs `dg`/`dc` from every nonlinear device on every iteration, so a device
+that could not supply them would have failed the Newton solve long before any small-signal solve —
+and `ExternalDeviceModel` returns `Conductance`/`Capacitance` unconditionally because the worker
+protocol requires them. A refusal that cannot fire is a claim the code does not make.
+
+### The two-tone path has no derivative spectrum at all, so the lattice form costs a device pass
+
+`HbNewtonNd` builds its Jacobian from `HbApft.AccumulateTripleProducts`, which consumes the derivative
+waveforms as **raw time samples** — that is exactly what makes it tone-count-general, and it means
+there is no `G[n,m,k]` to reuse. The conversion matrix needs coefficients at the DIFFERENCE of two
+sidebands, which reaches order `2·MaxMixOrder`, and the order-`O` torus cannot resolve one.
+
+So `HbSmallSignal.LatticeSpectra` re-synthesises the converged operating point onto an order-`2O`
+torus and evaluates the devices there once per operating point. The embedding is exact —
+`MixingLattice` enumerates by ascending total order, so every representative of the narrow lattice is
+one of the wide lattice — but it is **looked up rather than assumed to be the identity**, because that
+ordering is a locked contract about one lattice and not a promise about the pair.
+
+`J_ss` is dense at `N_int·(2M − 1)` square, which is what makes a ceiling necessary: `MaxMixOrder = 15`
+at two tones would ask for a 3,722² complex matrix (221 MB) factored once per probe frequency. The
+refusal at `n_c = 2000` names which of `SSMaxHarm`, `MaxHarm` and `MaxMixOrder` binds.
+
+### The two-tone oracle's own accuracy is bounded from both sides, and the bound is what sets the gate
+
+Gate (d) drives the same operating point with a small second tone at the probe's terminals and reads
+the `(0, 1)` mixing product — a path sharing no linearisation with the conversion matrix. Its accuracy
+was measured over five decades of tickle amplitude and does **not** improve monotonically:
+
+| tickle | series (V) injection | shunt (A) injection |
+|---|---|---|
+| 1e-2  | (non-convergent) | 4.4e0 |
+| 3e-3  | 1.1e-5 | 1.3e-2 |
+| 1e-3  | 2.9e-5 | 1.3e-3 |
+| 3e-4  | 9.5e-5 | 1.2e-4 |
+| 1e-4  | 2.9e-4 | 1.4e-5 |
+| 3e-5  | 9.6e-4 | 1.8e-5 |
+
+Two mechanisms, opposite in amplitude: an **absolute floor of ≈7e-10 A** on a mixing-product current
+(the APFT's least-squares conditioning against a ‖F‖ = 1e-14 residual) makes a smaller tickle worse,
+and the tickle's own size against the pump makes a larger one worse. The two optima differ by a
+factor of fifty because this probe's `iS/iP` is fifty times its `iS/vS` — the shunt injection is a
+CURRENT compared against ~10 mA of pump current, the series one a VOLTAGE compared against ~0.17 V.
+`HbApftOversample = 3` halves the floor. **A single "small enough" amplitude does not exist**; the gate
+uses 3 mV and 0.1 mA and asserts 5e-5.
+
+The floor is also additive, not relative, so a cross term forty times smaller than its row's largest
+entry is resolved forty times worse **in relative terms**. The gate therefore scales each comparison
+against the largest entry of the same kind in that row. Scaling every entry against itself would
+demand of the smallest one an accuracy the oracle has nowhere.
+
+### Where the oracle's series source goes is a derivation, and two of the three placements are wrong
+
+The probe's own series source sits BETWEEN its terminals, so `vP = v_G` is set by the generator branch
+alone: `iS = vS/(Z_G + Z_L)` and `vP/vS = −Z_G/(Z_G + Z_L)`. An external source between the generator
+network and the probe's G node reproduces `iS` but gives `vP/vS = +Z_L/(Z_G + Z_L)` — a different
+number, because the measurement node then sits on the far side of the inserted EMF. Only a source on
+the probe's **L** side with its first net facing the load (`V(load) − V(nL) = A`) reproduces both.
+
+The first attempt used the G-side placement and disagreed with the conversion matrix by O(1) with the
+`iS/vP` RATIO within 0.1% — which is the tell: a placement error preserves the ratio and moves the
+absolute values, so a gate on `Y0` alone would have passed it.
+
+### A pumped varactor divider's direct response is the wrong observable for its own threshold
+
+Gate (e) needed the parametric threshold confirmed independently of the Kurokawa signature.
+The obvious observable — the two-tone response at the tickle frequency — is measurably useless
+(171 → 182 → 181 → 166 Ω over a 1 → 5 V pump sweep, non-monotone): the tank's resonance moves as the
+pump's average capacitance shifts, pulling the tickle off resonance and hiding the parametric gain
+underneath.
+
+The pump's own **image** of the tickle — the `(1, −1)` product at `f0 − f_tickle` — has no competing
+effect, since it exists only because the pump converts. It runs 31 → 101 → 136 → 158 Ω over the same
+sweep, and the honest statement of approaching a **degenerate** threshold is the ratio: signal and
+idler grow equal, 18% of the direct response at 1 V and 95% at 5 V, over exactly the pump range in
+which the Kurokawa crossing appears (none at 3 V, one at 6 V).
+
+### Two shared implementations came out of this, both to stop a second copy drifting
+
+- **`src/Engine/WspCubePacker.cs`** — the `wsp` cube, the eight per-probe defaults, the three `__`
+  metadata cubes, the degenerate-node warning and the margin-threshold note, written once for both
+  the S-parameter `freq` axis and the HB `ssfreq` axis. Overview D-2 makes the derived metrics one
+  implementation; the second half of that promise is that the two ANALYSES agree with each other, and
+  a cube name or a NaN policy that existed twice would show up as an HB result the Data Display draws
+  differently from the S-parameter result of the same design. `SParameterEngine`'s own `TermAt` now
+  delegates to `WspCubePacker.TermZAt` for the same reason.
+- **`HbLinearExtractor.LinearPartitionAt`** — the factored linear partition as a handle. Every call to
+  `Extract` or `SolveFullNetwork` re-stamps the whole network to compare it against the cache, and the
+  small-signal solve performs `4N` back-substitutions against ONE matrix per probe frequency; routing
+  those through the existing entry points would have stamped the network `4N` times for a matrix that
+  cannot have changed in between.
+
+**A Tuner is deliberately NOT a termination in `__WspTermZ`.** Its impedance is set per harmonic BAND
+against the run's own tone ruler, so it has no single declared `Z` that `ZG` could be required to equal
+at every point of a small-signal sweep — which is exactly the precondition `wsp_terminate` checks.
+Reporting its tone-band value would let the envelope re-terminate a shunt whose real value is a
+different number at every `ssfreq`. A `Term`, `Port` or `P1Tone` shunting a probe terminal is
+frequency-flat and does qualify, which is the common case in an HB testbench.
+
+### hero2 is a poor small-signal fixture and the brief's own gates use a new one
+
+`hero2.cnl`'s per-harmonic `Z_Port` bands collapse to near-shorts (1e-6 Ω) everywhere except the
+fundamental, so a `wsp` computed at any other probe frequency compares two numbers near zero on both
+sides of the gate — a comparison that passes for the wrong reason. `testdata/wsprobe/hb_pumped_two_port.cnl`
+is frequency-flat by construction (plain R, L, C) and carries a time-varying conductance AND
+capacitance with feedback in both, so the conversion matrix's `G`, `C`, sideband and node-pair indices
+are all exercised rather than only its diagonal. Its unprobed twin is the transparency gate.
+
+The transparency and byte-identity gates are also NOT what the brief's words suggest: a WSProbe SPLITS
+a node, so a probed netlist genuinely has more nodes than an unprobed one and its `V` cube has more
+rows — the two cannot be byte-identical in shape. What is asserted instead is the pair of claims that
+matter: the same PROBED netlist with and without `SS*` keys is byte-identical in `V`, `I` and `INl`
+(the small-signal solve does not perturb the Newton solve), and the probe's two terminals carry the
+same spectrum as each other and as the merged node of the unprobed netlist.
+
+### A per-point engine diagnostic does not survive a parametric sweep, and never has
+
+`ParametricSweepEngine` re-elaborates the netlist **per point** and disposes it (a correctness
+requirement — an external provider's device lives in a worker process and re-elaborating is the only
+thing that hands the instances back), and it never copies that netlist's `Warnings`/`Notes` anywhere.
+`SchematicRunService` drains the OUTER netlist, which no point ever wrote to.
+
+So R-wsp5-1's `MarginThreshold` note and §4's "the threshold diagnostic names the drive level as well
+as the frequency" cannot be delivered through the note channel under a drive sweep — which is exactly
+the case the drive-swept margin fan is for. An HB non-convergence warning inside a sweep has always
+vanished the same way; this is not new and not specific to the WSProbe.
+
+What IS delivered is the number: `SM_Y0`/`SM_H0` stack over `{Pin, ssfreq}` and `__WspMarginThreshold`
+rides through unstacked, so the Data Display draws the fan and the line it was judged against. Adding
+the drive level to the note's text would have been inert, so it was not added. Propagating per-point
+diagnostics out of the sweep would be a real improvement and a broad behaviour change for every
+analysis — out of this brief's scope, and it belongs to whoever next touches that engine.

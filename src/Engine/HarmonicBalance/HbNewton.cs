@@ -157,7 +157,22 @@ public static class HbNewton
     public record SolveResult(bool Converged, int Iterations,
         IReadOnlyList<HbConvergenceTrace.IterRecord> IterTrace,
         Complex[,] INl,
-        PortTermTimes[]? PortTerms = null);
+        PortTermTimes[]? PortTerms = null,
+        /// <summary>
+        /// The LINEARISATION at the reported iterate: the one-sided conductance and capacitance
+        /// spectra <c>G[n,m,k]</c>/<c>C[n,m,k]</c> and the <c>w ≥ 2</c> buckets that
+        /// <see cref="BuildJ"/> was built from, <c>k = 0 … 2K</c>.
+        ///
+        /// <para>Returned rather than recomputed because they belong to the iterate the solve is
+        /// reporting and nothing else: the WSProbe small-signal solve (WSP-5) linearises the
+        /// converged periodic steady state, and re-evaluating the devices to get them back would
+        /// linearise at whatever <c>V</c> the caller happens to hold — the same iterate in the happy
+        /// case, and a silently different one after a drive ramp. They are the solve's own arrays;
+        /// a consumer must not mutate them.</para>
+        /// </summary>
+        Complex[,,]? G = null,
+        Complex[,,]? C = null,
+        IReadOnlyList<HigherWeightBucket>? Buckets = null);
 
     /// <summary>
     /// Run Newton loop. V is modified in-place ([N, K+1] complex).
@@ -217,7 +232,8 @@ public static class HbNewton
             {
                 trace.Add(new HbConvergenceTrace.IterRecord(iter, fN));
                 return new SolveResult(true, iter + 1, trace,
-                    TotalInjection(iNl, qNl, higherBuckets, N, K, omega0), portITime);
+                    TotalInjection(iNl, qNl, higherBuckets, N, K, omega0), portITime,
+                    G, C, higherBuckets);
             }
 
             // ── 2. Jacobian J (real-split 2×2 blocks, §7.2 + Maas §7.3) ───────
@@ -233,7 +249,8 @@ public static class HbNewton
                 trace.Add(new HbConvergenceTrace.IterRecord(iter, fN));
                 Console.Error.WriteLine($"[HB] Jacobian singular at iter {iter}, ‖F‖={fN:E3}");
                 return new SolveResult(false, iter + 1, trace,
-                    TotalInjection(iNl, qNl, higherBuckets, N, K, omega0), portITime);
+                    TotalInjection(iNl, qNl, higherBuckets, N, K, omega0), portITime,
+                    G, C, higherBuckets);
             }
 
             // ── 4. Update V[k=0..K] += λ·ΔV, λ from the backtracking line search ──
@@ -259,7 +276,8 @@ public static class HbNewton
         // computed it — so the tail costs no evaluation of its own.
         trace.Add(new HbConvergenceTrace.IterRecord(settings.HbMaxIter, fN));
         return new SolveResult(false, settings.HbMaxIter, trace,
-            TotalInjection(iNl, qNl, higherBuckets, N, K, omega0), portITime);
+            TotalInjection(iNl, qNl, higherBuckets, N, K, omega0), portITime,
+            G, C, higherBuckets);
     }
 
     // ── Backtracking line search (HB-P3 M1) ──────────────────────────────────

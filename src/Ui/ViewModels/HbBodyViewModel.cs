@@ -129,6 +129,81 @@ public sealed partial class HbBodyViewModel : ObservableObject
         }
     }
 
+    // ── Small-signal (the WSProbe probe-tickle sweep — brief-wsprobe-5 R-wsp5-1) ──
+    //
+    // EMPTY start/stop means no small-signal solve at all, and a run byte-identical to one from
+    // before WSP-5. That is why nothing here is pre-filled with a plausible number: a default of
+    // "0.1 .. 10 GHz" would silently add a sweep to every HB analysis anyone opened.
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SmallSignalPreview))]
+    private string _ssStartExpr = "";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SmallSignalPreview))]
+    private string _ssStopExpr = "";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SmallSignalPreview))]
+    private string _ssStepExpr = "";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SmallSignalPreview))]
+    private string _ssNptsExpr = "";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SmallSignalPreview))]
+    private string _ssUnit = "GHz";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SmallSignalPreview))]
+    private bool _ssLog;
+
+    [ObservableProperty] private string _ssMaxHarmExpr = "";
+
+    /// <summary>Expanded when the analysis carries a sweep, so an existing one is visible on open
+    /// and an empty group stays out of the way.</summary>
+    [ObservableProperty] private bool _smallSignalExpanded;
+
+    /// <summary>
+    /// The live point count beside the sweep fields (R-wsp5-1) — the same readout the S-parameter
+    /// sweep gets, and for the same reason the mixing-product count is shown: the cost of this
+    /// analysis is (points × sidebands) linear solves per operating point, so the number that sets
+    /// it belongs next to the knob.
+    /// </summary>
+    public string SmallSignalPreview
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(SsStartExpr) || string.IsNullOrWhiteSpace(SsStopExpr))
+                return "no small-signal sweep — the WSProbes carry no transfer functions";
+            var spec = new HarmonicBalanceAnalysis("preview")
+            {
+                SsStartExpr = SsStartExpr, SsStopExpr = SsStopExpr,
+                SsStepExpr  = SsStepExpr,  SsNptsExpr = SsNptsExpr,
+                SsUnit      = SsUnit,      SsLogExpr  = SsLog ? "true" : "",
+            }.SsSweep();
+            if (spec is null) return "";
+            try
+            {
+                // No globals dictionary: the point count needs only the numbers, and a field that
+                // is an expression the dialog cannot evaluate falls through to the empty preview
+                // rather than to a wrong count.
+                int n = spec.Expand().Length;
+                return $"{n:N0} probe {(n == 1 ? "frequency" : "frequencies")}" +
+                       (SsLog ? ", logarithmic" : "");
+            }
+            catch { return ""; }     // an expression the dialog cannot resolve yet
+        }
+    }
+
+    /// <summary>
+    /// <c>MarginThreshold=</c> in dB, or <c>none</c> — the WSProbe stability margin below which the
+    /// run notes a probe as worth looking at (WSP-9 R-wsp9-3). It lives in this group because on an
+    /// HB analysis it is read over the small-signal sweep and nowhere else.
+    /// </summary>
+    [ObservableProperty] private string _marginThresholdExpr = Analysis.MarginThresholdDefault;
+
     // ── Advanced: Newton / convergence ────────────────────────────────────────
     [ObservableProperty] private bool   _advancedExpanded    = false;
     [ObservableProperty] private string _fftOverSampleExpr   = "1";
@@ -348,6 +423,14 @@ public sealed partial class HbBodyViewModel : ObservableObject
                 GuardHarmonicExpr = GuardHarmonicExpr,
                 LambdaExpr        = LambdaExpr,
                 MaxIterExpr       = MaxIterExpr,
+                SsStartExpr       = SsStartExpr,
+                SsStopExpr        = SsStopExpr,
+                SsStepExpr        = SsStepExpr,
+                SsNptsExpr        = SsNptsExpr,
+                SsUnit            = SsUnit,
+                SsLogExpr         = SsLog ? "true" : "",
+                SsMaxHarmExpr     = SsMaxHarmExpr,
+                MarginThresholdExpr = MarginThresholdExpr,
             }
             : new HarmonicBalanceAnalysis(name)
             {
@@ -360,11 +443,21 @@ public sealed partial class HbBodyViewModel : ObservableObject
                 GuardHarmonicExpr = GuardHarmonicExpr,
                 LambdaExpr        = LambdaExpr,
                 MaxIterExpr       = MaxIterExpr,
+                SsStartExpr       = SsStartExpr,
+                SsStopExpr        = SsStopExpr,
+                SsStepExpr        = SsStepExpr,
+                SsNptsExpr        = SsNptsExpr,
+                SsUnit            = SsUnit,
+                SsLogExpr         = SsLog ? "true" : "",
+                SsMaxHarmExpr     = SsMaxHarmExpr,
+                MarginThresholdExpr = MarginThresholdExpr,
             };
 
         analysis.Enabled = enabled;
         return analysis;
     }
+
+
 
     // ── FromAnalysis ──────────────────────────────────────────────────────────
 
@@ -421,6 +514,17 @@ public sealed partial class HbBodyViewModel : ObservableObject
         vm.GuardHarmonicExpr = hb.GuardHarmonicExpr;
         vm.LambdaExpr        = hb.LambdaExpr;
         vm.MaxIterExpr       = hb.MaxIterExpr;
+
+        // Small-signal
+        vm.SsStartExpr          = hb.SsStartExpr;
+        vm.SsStopExpr           = hb.SsStopExpr;
+        vm.SsStepExpr           = hb.SsStepExpr;
+        vm.SsNptsExpr           = hb.SsNptsExpr;
+        vm.SsUnit               = string.IsNullOrEmpty(hb.SsUnit) ? "GHz" : hb.SsUnit;
+        vm.SsLog                = HarmonicBalanceAnalysis.ParseBool(hb.SsLogExpr);
+        vm.SsMaxHarmExpr        = hb.SsMaxHarmExpr;
+        vm.MarginThresholdExpr  = hb.MarginThresholdExpr;
+        vm.SmallSignalExpanded  = hb.HasSsSweep;
 
         return vm;
     }
