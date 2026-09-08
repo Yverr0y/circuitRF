@@ -1,0 +1,35 @@
+; three_probe.cnl — brief-wsprobe-3 R-wsp3-9(b), (c), (d): three probes all oriented the same way,
+; so the network bifurcates cleanly (§6, "all oriented in the same direction").
+;
+;   G side (the ACTIVE subnetwork): nodes n1 n2 n3 — a shunt R/C at each, and three one-way VCCS
+;     couplings, so Y_G is NON-reciprocal and known:
+;       Y_G[k,k] = 1/RAk + jw·CAk,   Y_G[2,1] = 0.02,   Y_G[3,2] = 0.015,   Y_G[1,3] = 0.004,
+;       every other off-diagonal 0 — in particular Y_G[1,2] = 0 while Y_G[2,1] = gm.
+;   L side (the PASSIVE subnetwork): nodes m1 m2 m3 — a termination at each, and three reciprocal
+;     couplings (a resistor, a capacitor, an inductor):
+;       Y_L = diag(1/RLk) + RM12 between 1–2, CM23 between 2–3, LM13 between 1–3.
+;
+; Because both sides hang off the same three nodes, the reduced admittance matrix at the probe
+; nodes (Eq. 185) is Y_G + Y_L — the closed form gate (c) uses beside the Term-based one.
+; No ports.
+R:RA1   n1 0   R=150 Ohm
+C:CA1   n1 0   C=0.3 pF
+R:RA2   n2 0   R=250 Ohm
+C:CA2   n2 0   C=0.5 pF
+R:RA3   n3 0   R=100 Ohm
+C:CA3   n3 0   C=0.2 pF
+VCCS:GA21  n2 0  n1 0  G=0.02
+VCCS:GA32  n3 0  n2 0  G=0.015
+VCCS:GA13  n1 0  n3 0  G=0.004
+
+WSProbe:P1  n1 m1
+WSProbe:P2  n2 m2
+WSProbe:P3  n3 m3
+
+R:RL1   m1 0   R=60 Ohm
+R:RL2   m2 0   R=80 Ohm
+R:RL3   m3 0   R=45 Ohm
+R:RM12  m1 m2  R=300 Ohm
+C:CM23  m2 m3  C=0.3 pF
+L:LM13  m1 m3  L=3 nH
+analysis SP1 type=sparam start=0.5 stop=6 npts=12 Unit=GHz

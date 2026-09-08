@@ -729,3 +729,33 @@ src/Core/Expressions/Evaluator.Wsp.cs|{fn}: {what} must be square; its last two 
 src/Core/Expressions/Evaluator.Wsp.cs|{fn}: {what} must have its two matrix axes last; this cube has rank {c.Rank}.
 src/RfCore/Stability/WspNodal.cs|wsp_loopgain: unknown kind '{kind}'. Kinds are BI (bilateral/Tian), UNI (forward 
 src/RfCore/Stability/WspRenorm.cs|{NegativeReferenceKey}: {what} has Re = {z.Real:G6} Ω. A reference impedance must have 
+src/Core/Expressions/Evaluator.WspGlobal.cs|{cl.Name}: a wsp matrix is 2N × 2N; this cube is {n} × {n}.
+src/Core/Expressions/Evaluator.WspGlobal.cs|{cl.Name}: argument {i + 1} is a probe list — an integer idx, or a quoted string of 
+src/Core/Expressions/Evaluator.WspGlobal.cs|{cl.Name}: argument {i + 1} is {what}, a quoted string.
+src/Core/Expressions/Evaluator.WspGlobal.cs|{cl.Name}: needs a single loop gain over frequency ({{freq}}); this cube has {cube.Rank} axes 
+src/Core/Expressions/Evaluator.WspGlobal.cs|{cl.Name}: neither side is pulled (both probe indices are 0).
+src/Core/Expressions/Evaluator.WspGlobal.cs|{cl.Name}: no WSProbe named '{tok}'
+src/Core/Expressions/Evaluator.WspGlobal.cs|{cl.Name}: probe index {idx} is outside 1..{w.Probes} (the wsp matrix is 2N × 2N for N probes).
+src/Core/Expressions/Evaluator.WspGlobal.cs|{cl.Name}: the fourth argument selects one block as a 2-port — \"inner\" ([Y], between 
+src/Core/Expressions/Evaluator.WspGlobal.cs|{cl.Name}: the two probes must differ (both are {i1}).
+src/Core/Expressions/Evaluator.WspGlobal.cs|{cl.Name}: the two wsp cubes must come from the same probed circuit over the same sweep 
+src/Core/Expressions/Evaluator.WspGlobal.cs|{cl.Name}: the wsp cube's frequency axis must be the last axis before row/col; this cube's 
+src/Core/Expressions/Evaluator.WspGlobal.cs|{cl.Name}: {what} as a string is a constant-|Γ| circle, \"|Γ|:count\" (e.g. \"0.8:24\" — 24 
+src/Core/Expressions/Evaluator.WspGlobal.cs|{cl.Name}: {what} must be a reflection coefficient, a cube of them, or \"|Γ|:count\".
+src/RfCore/Stability/WspBifurcation.cs|'{name}' is not one of wsp_YA, wsp_YF, wsp_ZA, wsp_ZF.
+src/RfCore/Stability/WspBifurcation.cs|form must be \"Y\" (from the series stimuli, Eq. 161–168) or \"Z\" (from the shunt 
+src/RfCore/Stability/WspBifurcation.cs|side must be \"G\" (the generator side, at vP) or \"L\" (the load side, at vP + vS), not '{side}'.
+src/RfCore/Stability/WspEnvelope.cs|a circle needs at least one point.
+src/RfCore/Stability/WspEnvelope.cs|a Γ grid is empty.
+src/RfCore/Stability/WspEnvelope.cs|probe index {idx} is outside 1..{probes}.
+src/RfCore/Stability/WspEnvelope.cs|{NotAtTerminationKey}: WSProbe '{label}' has no Term on its {which} node. The 
+src/RfCore/Stability/WspEnvelope.cs|{NotAtTerminationKey}: WSProbe '{label}' is not directly at its termination — {imm} = {z}
+src/RfCore/Stability/WspEnvelope.cs|{freqsHz.Length} frequencies for {nf} wsp matrices.
+src/RfCore/Stability/WspEnvelope.cs||Γ| must be in [0, 1); {magnitude} is not.
+src/RfCore/Stability/WspMatrix.cs|LU needs a square matrix.
+src/RfCore/Stability/WspMatrix.cs|a wsp matrix is 2N × 2N; this one is {n} × {wsp.GetLength(1)}.
+src/RfCore/Stability/WspMatrix.cs|cannot multiply {r}×{k} by {b.GetLength(0)}×{c}.
+src/RfCore/Stability/WspMatrix.cs|probe index {probes[k]} is listed twice.
+src/RfCore/Stability/WspMatrix.cs|probe index {probes[k]} is outside 1..{total} (the wsp matrix is 2N × 2N for N probes).
+src/RfCore/Stability/WspMatrix.cs|the matrix is singular.
+src/RfCore/Stability/WspMatrix.cs|the probe list is empty.

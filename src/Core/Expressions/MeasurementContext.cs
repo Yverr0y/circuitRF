@@ -29,6 +29,25 @@ public sealed class MeasurementContext
                $"No analysis named '{name}' in measurement context. Available: [{string.Join(", ", _results.Keys)}]");
 
     /// <summary>
+    /// The analysis whose <c>wsp</c> cube IS <paramref name="wsp"/> (reference equality — a cube
+    /// handed out by <c>SP1.wsp</c> is the DataSet's own object), so a multi-probe function can
+    /// read that run's probe labels (<c>__WspProbes</c>) and termination metadata
+    /// (<c>__WspTermZ</c>) without a second argument naming the analysis. A cube that has been
+    /// sliced or re-shaped is a new object and is not found; the caller says what that costs.
+    /// </summary>
+    public bool TryFindWspOwner(DataCube wsp, out DataSet? owner)
+    {
+        foreach (var ds in _results.Values)
+            if (ds.Contains("wsp") && ReferenceEquals(ds["wsp"], wsp))
+            {
+                owner = ds;
+                return true;
+            }
+        owner = null;
+        return false;
+    }
+
+    /// <summary>
     /// Try to get the linear back-solver for the named analysis.
     /// Returns false (and null solver) when no back-solver is available.
     /// </summary>

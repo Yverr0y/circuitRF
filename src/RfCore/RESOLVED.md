@@ -647,3 +647,111 @@ of the document's resonators: **12 Hz on a 10 MHz grid, 1.19e-6 of a sweep step*
 anything the sweep resolves. The gate asserts the same COUNT and agreement to 1e-4 of a step, and
 prints the drift; asserting bit equality would be asserting a property of the interpolator rather
 than of the loci.
+
+## WSP-3 — `Stability/`, probe pairs, bifurcation, Ohtomo, the reduced matrices and the envelope (2026-09-08)
+
+Six files beside the WSP-2 set (`WspMatrix`, `WspPair`, `WspBifurcation`, `WspOhtomo`, `WspGlobal`,
+`WspEnvelope`), the cube glue in `src/Core/Expressions/Evaluator.WspGlobal.cs`, and one engine
+addition (`__WspTermZ`). The design note `docs/design/stability-wsprobe.md` §6–§8 is the reference;
+what follows is what was *found* while building it.
+
+### The document's bifurcation code returns TRANSPOSES, and its two forms disagree about which side is "active"
+
+Future readers of the document will rediscover this, so it is written down once. Its §6 matrix
+equations (Eq. 163–168, 175–176) are written for a symmetric `Y`; for a non-reciprocal network the
+products its code forms — `−inverse(VV)·VI` and the three siblings — are the **transpose** of the
+subnetwork's true Y or Z, because `wsp` is stimulus-major (rows are the stimulus probe) and a
+network matrix is response-major. And its Y-form puts the G-side network in `Y` (`wsp_YA`) while its
+Z-form puts the **L-side** network in `Z` (`wsp_ZA`) — so `wsp_YA` and `wsp_ZA` describe opposite
+subnetworks, and `wsp_YA = inverse(wsp_ZF)`, not `inverse(wsp_ZA)`. Every use the document makes of
+these matrices is transpose-invariant (determinants, principal minors, a diagonal cofactor), so its
+results stand; a designer reading `y21` of a block from them would be reading `y12`. circuitRF's
+primitive is `wsp_bifurcate(wsp, form, side)` with the transpose applied, and the document's four
+names are aliases whose doc-comments state their side. The gate that catches both a lost transpose and
+a swapped side is `Y form of a side == inverse(Z form of the same side)` on a NON-reciprocal fixture —
+a reciprocal one hides both.
+
+### The rank-1 update at the LOAD probe needs two corrections the brief's formula does not have
+
+The brief states the Sherman–Morrison update for a shunt admittance at a probe's **G** node and says
+to apply it "likewise" at the load probe, whose Term faces its **L** terminal. The two terminals are
+one node, so every node voltage and every other probe's current respond identically to an injection
+at either — but two entries do not: under the probe's own series stimulus the L-node voltage is
+`vP + vS` (one more than `wsp(2S−1, 2S)`), and a current injected at the L node does not flow through
+the probe branch (the probe's own `iS` response is one less than `wsp(2S, 2S−1)`). Without the two
+`δ`s the load probe's own row and column come out wrong and nothing else does — which is exactly the
+kind of error a test that reads only `H0'` would never see. Gate (e) compares **all 36 entries**
+against a re-run with the Terms changed: 4.6e-14 worst relative error.
+
+### The engine records each probe's neighbouring Term, so the precondition compares against a declared number
+
+`wsp_terminate` refuses (`wsprobe.envelope-probe-not-at-termination`) unless the source probe's `ZG`
+(or the load probe's `ZL`) equals the declared `Z` of a top-level `Term`/`Port` shunting that
+terminal to ground, to 1e-6 at every frequency. The engine now writes `__WspTermZ` `{probe, side}`
+(NaN where there is no such Term) beside `__WspProbes`. The evaluator finds it through the analysis
+that OWNS the wsp cube — `MeasurementContext.TryFindWspOwner`, reference equality on the cube object
+`SP1.wsp` hands out — because a function argument is a cube, not an analysis name. A sliced cube
+(`at(SP1.wsp, …)`) is a new object; the envelope functions refuse it and say what to pass, rather
+than skipping the check. Probe LABELS on the `i`/`j` axes of every multi-probe result come from the
+same lookup, and fall back to idx numbers when it fails.
+
+### Three brief premises the arithmetic overrode
+
+- **"A resistor from an inner node to ground" does not raise the pair residual** (4.7e-16). Ground is
+  not a coupling path (the WSP-1 finding again): a shunt at an inner node is part of the inner block's
+  own `y11`, and both stimulus sets agree on it. What the residual detects is a path from the region
+  between the probes to the rest of the network AROUND them — a resistor from inner node `a` to outer
+  node `d` gives 0.37. The gate asserts both, because the distinction is the point of the diagnostic.
+- **At `|Γ| = 0.8` the whole load-pull circle is stable** on the series resonator with `R1 = −5 Ω`:
+  the smallest `Re ZS` on that circle is `50·(1 − 0.64)/(1 + 0.8)² = 5.56 Ω`, above the 5 Ω the
+  negative resistance can overcome. The gate uses `|Γ| = 0.9` (min 2.63 Ω), and the instability arc is
+  then exactly where `Re ZS(θ) < 5 Ω`. And the reported frequency tracks `f0` only at `θ = 180°`
+  where `Im ZS = 0`; elsewhere the load reactance detunes the resonator by up to a gigahertz and what
+  it tracks, to four digits, is the closed form `X(ω) = −Im ZS(θ)`.
+- **Terms at `1e9 Ω` do not give an S → Y that agrees to 1e-8**, and subtracting the Term's `1e-9 S`
+  (the brief's suggestion) is not why. `S → Y` at a reference impedance yields the network's own
+  admittance — the reference is the generator's, not part of the network — so nothing is subtracted.
+  What fails is conditioning: with `Y ~ 0.1 S` and `Z0 = 1e9`, the port waves sit at `1 + S ≈ 1e-8`
+  and the conversion loses eight digits (measured 1.5e-8, on the entries the 3 nH inductor joins, in
+  a run with NO regularisation warning). At `1e6 Ω` the two agree to 1e-8.
+
+### `wsp_block_design` is `wsp_zo_renorm_s` up to a known port phase, not equal to it
+
+E.8 absorbs the parallel capacitance of each side into the network and renormalises to the real
+parallel resistance; `wsp_zo_renorm_s` renormalises to the complex `Z = R ∥ 1/jωC` with power waves.
+Writing `Z_r = 1/(G + jB)`: `V + Z_r·I = (V + R·I'')/(1 + jBR)` with `I'' = I + jBV` the current into
+the augmented network, and `Re Z_r = R/(1 + B²R²)`, so the two incident waves differ by `e^{−jφ}`,
+`φ = atan(BR)`, and the reflected by `e^{+jφ}`. Hence `S_rc = D*·S_zo·D*`, `D = diag(e^{jφ_k})`:
+equal magnitudes, phases that differ per port. The brief's "equals to 1e-12" holds for the magnitudes;
+the gate holds the full identity with the factor put back.
+
+### Two derivations of the same loop gain make `1 − {9} == {13}` a test rather than a tautology
+
+`wsp_block_calc`'s `{9}` (the synthetic-FET return difference `FB = |Y + Yf| / |Yo + Yf|`, Eq. 159)
+and `{10}` (the same with the feedback block passivated, `yf12 → yf21`) are computed as determinant
+ratios, while `{13}` and `{14}` are Eq. 148 and Eq. 149 transcribed literally; `{11}`/`{12}` are
+`1 − {15}`, `1 − {16}` by definition. On random blocks and on the real circuit the two derivations
+agree to 1e-10. On `two_block.cnl` `LGf` is identically zero (reciprocal feedback, `yf12 = yf21`, is
+unchanged by its own passivation), which is why those comparisons use a scale floor of 1.
+
+### The `1/H0'` side of the envelope reports crossings of its own under a complex load
+
+On the series resonator with a Term, the document's own §4.10 says the zero masks the pole in
+`1/H0` — true at the nominal real load. Under a complex pulled load the `1/H0'` locus crosses the
+negative real axis clockwise at frequencies of its own (θ = 130°: 0.6037 GHz beside `1/Y0'`'s
+0.5906), and at one load only `1/H0'` fires because `1/Y0'`'s crossing sits at the sweep's edge.
+`wsp_loadpull_unstable` reports both sides separately (`unstable_H0`, `unstable_Y0`) and the union
+(`unstable`), as the document's method takes the union; the gate asserts the `1/Y0'` side against the
+closed form and prints the other.
+
+### What the expression language could not say, and what was chosen
+
+- A measurement is ONE cube, so a function the document returns two things from returns a labelled
+  axis: `wsp_yparam2` is the document's own `YP(1..8)` on `k`, with a fourth argument
+  (`"inner"`/`"feedback"`) for one block as a 2-port; `wsp_loadpull` puts `H0env`/`Y0env` on `env`;
+  `wsp_loadpull_unstable` puts the counts and the frequencies on `item`, NaN-padded.
+- There is no list literal, so a probe list is an integer or a quoted comma-separated string of idx
+  numbers or labels, and a Γ grid is a scalar, a cube, or `"|Γ|:count[@start]"`. Both are documented
+  on the wrapper file.
+- The pair residual `wsp_yparam2_residual` and the side-explicit `wsp_bifurcate` are the only names
+  here the document does not have; both carry the `wsp_` prefix so a reader finds them beside the rest.

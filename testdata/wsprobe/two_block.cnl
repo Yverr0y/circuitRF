@@ -1,0 +1,27 @@
+; two_block.cnl — brief-wsprobe-3 R-wsp3-9(a), (g), (h): a constructed two-block circuit for the
+; probe-pair reduction (Fig. 40, Eq. 137–139), GEN → LOAD.
+;
+;   probe 1: G = c (the feedback side), L = a (the inner side)
+;   probe 2: G = b (the inner side),    L = d (the feedback side)
+;
+; The INNER block between P1's L terminal (a) and P2's G terminal (b) is a VCCS with a shunt R/C at
+; each port, so y21 = gm = 0.03 S and y12 = 0 — non-reciprocal and known, which is what makes a
+; lost transpose visible. The FEEDBACK block, everything else between P1's G terminal (c) and P2's
+; L terminal (d), is a series R–C between the outer nodes plus the two terminations:
+;
+;   [Y]  = [[ 1/200 + jw·0.4p,  0 ], [ 0.03,  1/300 + jw·0.25p ]]
+;   [Yf] = [[ 1/50 + yS,  −yS ], [ −yS,  1/75 + yS ]],   yS = 1/(400 + 1/(jw·0.2p))
+;
+; No ports: the terminations are resistors, so the network the probes see is the whole network.
+R:RtS   c 0   R=50 Ohm
+WSProbe:P1  c a
+R:Ra    a 0   R=200 Ohm
+C:Ca    a 0   C=0.4 pF
+VCCS:M1 b 0  a 0  G=0.03
+R:Rb    b 0   R=300 Ohm
+C:Cb    b 0   C=0.25 pF
+WSProbe:P2  b d
+R:RtL   d 0   R=75 Ohm
+R:Rf    c m   R=400 Ohm
+C:Cf    m d   C=0.2 pF
+analysis SP1 type=sparam start=1 stop=5 npts=9 Unit=GHz

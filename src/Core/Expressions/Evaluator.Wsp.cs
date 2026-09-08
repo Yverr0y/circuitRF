@@ -36,7 +36,7 @@ public sealed partial class Evaluator
         "wsp_rc_renorm_s" or "wsp_zo_renorm_s" or
         "z_to_pr" or "z_to_pc" or "z_to_pl" or "z_to_sr" or "z_to_sc" or "z_to_sl" or
         "y_to_pr" or "y_to_pc" or "y_to_pl" or "y_to_sr" or "y_to_sc" or "y_to_sl" => true,
-        _ => false,
+        _ => IsWspGlobalBuiltin(name),
     };
 
     private Value EvalWspCall(CallExpr cl, Scope scope)
@@ -114,7 +114,8 @@ public sealed partial class Evaluator
             case "z_to_pl": return ImmittanceElement(cl, scope, ImmittanceModels.ZToPl, needsFreq: true, "H");
             case "z_to_sl": return ImmittanceElement(cl, scope, ImmittanceModels.ZToSl, needsFreq: true, "H");
 
-            default: throw new UnknownFunctionException(cl.Name);
+            // The multi-probe functions (brief-wsprobe-3) live in Evaluator.WspGlobal.cs.
+            default: return EvalWspGlobalCall(cl, scope);
         }
     }
 

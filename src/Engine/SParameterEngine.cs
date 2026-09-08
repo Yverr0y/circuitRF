@@ -330,6 +330,20 @@ public static class SParameterEngine
         for (int pi = 0; pi < m; pi++) { pIdx[pi] = pi; labels[pi] = probes[pi].Label; }
         var idxVals = probes.Select(p => (double)p.Idx).ToArray();
         ds.Add("__WspProbes", new DataCube([new Axis("probe", pIdx, "", labels)], idxVals));
+
+        // __WspTermZ {probe, side}: the declared Z of the Term directly at each probe terminal, NaN
+        // where there is none. Metadata like __WspProbes — a sweep passes it through unstacked.
+        var nan   = new Complex(double.NaN, double.NaN);
+        var termZ = new Complex[2 * m];
+        for (int pi = 0; pi < m; pi++)
+        {
+            termZ[2 * pi]     = probes[pi].TermZG ?? nan;
+            termZ[2 * pi + 1] = probes[pi].TermZL ?? nan;
+        }
+        ds.Add("__WspTermZ", new DataCube(
+            [new Axis("probe", (double[])pIdx.Clone(), "", (string[])labels.Clone()),
+             new Axis("side", [0.0, 1.0], "", ["G", "L"])],
+            termZ) { Unit = "Ohm" });
     }
 
     // ── Per-netlist setup ─────────────────────────────────────────────────────
@@ -370,9 +384,13 @@ public static class SParameterEngine
     }
 
     /// <summary>One WSProbe as the engine addresses it: the component, the document's label and
-    /// idx, and its two nodes (G first). The branch index is read off the model at solve time,
-    /// because the wave and legacy assemblies number branches differently.</summary>
-    internal readonly record struct WspProbeSite(int ComponentIndex, string Label, int Idx, int GNode, int LNode);
+    /// idx, its two nodes (G first), and the declared <c>Z</c> of a top-level <c>Term</c>/<c>Port</c>
+    /// sitting directly between each of those nodes and ground, if there is one — what
+    /// <c>wsp_terminate</c>'s precondition compares the probe's <c>ZG</c>/<c>ZL</c> against
+    /// (brief-wsprobe-3 §6.1). The branch index is read off the model at solve time, because the
+    /// wave and legacy assemblies number branches differently.</summary>
+    internal readonly record struct WspProbeSite(
+        int ComponentIndex, string Label, int Idx, int GNode, int LNode, Complex? TermZG, Complex? TermZL);
 
     private static Prepared Prepare(
         ElaboratedNetlist netlist, double[] freqsHz, AnalysisSettings settings)
@@ -383,11 +401,24 @@ public static class SParameterEngine
 
         // R-wsp1-2/R-wsp1-6: the probes, in the idx order the elaborator assigned. A port-less run is
         // legal when there is at least one — the document's own fixtures have no ports.
+        // The Term (if any) shunting each probe terminal to ground is recorded with the probe, so
+        // the envelope's precondition — "the probe sits directly at its termination" — can be
+        // checked against the declared Z rather than guessed from ZG (R-wsp3 §6.1).
+        Complex? TermAt(int node)
+        {
+            if (node == 0) return null;
+            foreach (var port in ports)
+                if ((port.Node0 == node && port.Node1 == 0) || (port.Node1 == node && port.Node0 == 0))
+                    return port.Z0;
+            return null;
+        }
         var probes = netlist.WspProbes
             .Select(w => new WspProbeSite(
                 w.ComponentIndex, w.Label, w.Idx,
                 netlist.Components[w.ComponentIndex].Nodes[0],
-                netlist.Components[w.ComponentIndex].Nodes[1]))
+                netlist.Components[w.ComponentIndex].Nodes[1],
+                TermAt(netlist.Components[w.ComponentIndex].Nodes[0]),
+                TermAt(netlist.Components[w.ComponentIndex].Nodes[1])))
             .ToArray();
 
         if (ports.Count == 0 && probes.Length == 0)

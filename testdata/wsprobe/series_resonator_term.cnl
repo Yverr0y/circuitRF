@@ -1,0 +1,13 @@
+; series_resonator_term.cnl — brief-wsprobe-3 R-wsp3-9(f): the document's series resonator
+; (Fig. 31) with RS replaced by a Term at ZSo = 10 Ohm and R1 = −5 Ohm, so it is STABLE at 10 Ohm
+; (R1 + RS > 0) and the load-pull decides where it stops being so. The Term is on the probe's L
+; side, so it is the LOAD probe of wsp_loadpull (idxL = 1) and the source side is not pulled.
+;
+; Closed form (Eq. 109 with RS → ZS(θ)): 1/Y0' = (R1 + jX) + ZS, X = wL1 − 1/(wC1). Kurokawa's
+; signature on 1/Y0' is at X = −Im ZS with Re(1/Y0') = R1 + Re ZS ≤ 0, i.e. Re ZS(θ) ≤ 5 Ohm.
+R:R1        nG n1  R=-5 Ohm
+L:L1        n1 n2  L=1 nH
+C:C1        n2 0   C=10 pF
+WSProbe:P   nG nL
+Term:T1     nL 0   Num=1 Z=10 Ohm
+analysis SP1 type=sparam start=0.5 stop=3 npts=251 Unit=GHz

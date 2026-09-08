@@ -432,3 +432,238 @@ ratios cancel the same common stimulus at the same response probe. They differ o
 where the series form is `−ZG` and the shunt form is `1/YL`. The `stimulus` argument therefore exists
 for the diagonal case and for fidelity to the document, not because the two disagree where the
 function is normally used.
+
+---
+
+## 6. Multi-probe functions (WSP-3)
+
+Everything the document derives from **two or more** probes: the probe pair (§5.1–5.4, E.5, E.6,
+E.8, E.9), network bifurcation (§6), Ohtomo's global loop gains (§7), the reduced admittance
+matrix and the probe-based NDF (§8), and the stability envelope (§9). Same home as WSP-2
+(`src/RfCore/Stability/`), same registration discipline (`src/Core/Expressions/Evaluator.WspGlobal.cs`
+computes nothing; it maps the scalar core over the cube's leading axes), same rule that every
+function's doc-comment cites the document by equation.
+
+| File | Contents |
+|---|---|
+| `WspMatrix.cs` | the four `N×N` blocks `VV`, `VI`, `IV`, `II` over a probe subset (§1 of the brief), and the small dense algebra the rest needs — products, an explicit partial-pivot LU, the determinant **in log form** |
+| `WspPair.cs` | `wsp_yparam2` (+ its shunt-stimulus twin and the residual), `wsp_block_calc`, `wsp_block_breakout`, `wsp_fb_breakout`, `wsp_block_design`, `wsp_fb_design` |
+| `WspBifurcation.cs` | `wsp_bifurcate(wsp, form, side [, probes])` and the four document aliases |
+| `WspOhtomo.cs` | `wsp_loopgain_ohtomo`, `wsp_unstable_freq_loopgain` |
+| `WspGlobal.cs` | `wsp_ymatrix`, `wsp_ndf` |
+| `WspEnvelope.cs` | the rank-1 update, `wsp_terminate`, `wsp_loadpull`, `wsp_loadpull_unstable` |
+
+### 6.1 Notation
+
+`wsp` is stimulus-major. Writing the four `N×N` blocks, each indexed `[stimulus i, response j]`:
+
+```
+VV[i,j] = wsp(2i−1, 2j)      voltage at j  per series voltage at i        (Eq. 164)
+VI[i,j] = wsp(2i−1, 2j−1)    current at j  per series voltage at i        (Eq. 166)
+IV[i,j] = wsp(2i,   2j)      voltage at j  per shunt current at i         (Eq. 174)
+II[i,j] = wsp(2i,   2j−1)    current at j  per shunt current at i         (Eq. 172)
+```
+
+A probe subset is the corresponding sub-blocks. **Sides:** for probe `i` the **G side** is the
+network at node `vP_i` (current into it `−iS_i` under a series stimulus, `δ_ii·iP − iS_i` under a
+shunt one) and the **L side** is the network at `vP_i + vS_i` (current into it `+iS_i`).
+
+### 6.2 The two argument spellings the single-probe file did not need
+
+The expression language has no list literal, so a **probe list** is an integer (one probe) or a
+quoted string of comma-separated idx numbers or probe labels — `"1,3"`, `"GATE,DRAIN"` — and
+defaults to every probe in idx order. Labels resolve through the `__WspProbes` metadata of the
+analysis that produced the cube, which the evaluator finds by **reference equality** on the `wsp`
+cube (`MeasurementContext.TryFindWspOwner`): `SP1.wsp` hands out the DataSet's own object. A sliced
+or derived cube is a new object, so labels fall back to numbers and the envelope functions — which
+need that same lookup for their precondition — refuse and say to pass the analysis' own cube.
+
+A **Γ grid** is a single reflection coefficient, a cube of them, or the common case as a string
+`"|Γ|:count"` (`"0.8:24"` — 24 points on the `|Γ| = 0.8` circle from `θ = 0°`, `"0.8:24@15"` to
+start at 15°).
+
+### 6.3 What each returns
+
+| Function | Equation | Returns |
+|---|---|---|
+| `wsp_yparam2(wsp, idx1, idx2)` | Eq. 137–139 | `{…, freq, k}`, `k = 1…8` labelled `y11 … yf22` — the document's own `YP(1..8)` |
+| `wsp_yparam2(wsp, idx1, idx2, "inner"\|"feedback")` | | that block as a 2-port `{…, freq, i, j}` |
+| `wsp_yparam2_residual(wsp, idx1, idx2)` | — (circuitRF's) | `{…, freq}` Real |
+| `wsp_block_calc(wsp, idx1, idx2 [, Z0])` | Eq. 142–151 | `{…, freq, k}`, `k = 1…16` labelled `s11 … LGM` |
+| `wsp_block_breakout`, `wsp_fb_breakout(wsp, idx1, idx2 [, Z0])` | E.5, E.6 | 2-port |
+| `wsp_block_design`, `wsp_fb_design(wsp, idx1, idx2 [, Z0 [, freq]])` | E.8, E.9 | 2-port |
+| `wsp_bifurcate(wsp, form, side [, probes])` | Eq. 167/168/175/176 | `{…, freq, i, j}`, port axes valued by idx and labelled by probe |
+| `wsp_YA`, `wsp_YF`, `wsp_ZA`, `wsp_ZF(wsp [, probes])` | §6 | same, with the document's sides (§7 below) |
+| `wsp_loopgain_ohtomo(wsp, probes [, active = "G", Z0 = 50])` | Eq. 177–180 | `{…, freq, node}` |
+| `wsp_unstable_freq_loopgain(G)` | p. 110 | `{n}` Hz, possibly empty |
+| `wsp_ymatrix(wsp [, probes])` | Eq. 184–185 | `{…, freq, i, j}` S |
+| `wsp_ndf(wsp_active, wsp_passive [, probes])` | Eq. 186 | `{…, freq}` |
+| `wsp_terminate(wsp, idxS, YS, idxL, YL [, YSo, YLo])` | §9 | the re-terminated `wsp`, same shape |
+| `wsp_loadpull(wsp, idxS, idxL, idx, gammaS, gammaL [, Z0])` | §9 | `{…, gS, gL, freq, env}`, `env` = `H0env`, `Y0env` |
+| `wsp_loadpull_unstable(…)` | §9 + Eq. 107/108 | Real `{…, gS, gL, item}`: `unstable`, `unstable_H0`, `unstable_Y0`, `f1 … fK` |
+
+A function the document returns two things from returns **one labelled axis** here, for the same
+reason `GainDEFs` does: a measurement is one cube. `wsp_yparam2` is the document's own eight-vector;
+the fourth argument is the way to get one block as a network. An index of 0 on either side of the
+envelope leaves that side unpulled (its grid axis is one row labelled `unpulled`).
+
+### 6.4 The probe pair
+
+Two probes in the GEN → LOAD orientation of Fig. 40: the inner block `[Y]` between probe 1's **L**
+terminal and probe 2's **G** terminal, the feedback block `[Yf]` between probe 1's **G** and probe 2's
+**L**. From Kirchhoff on that configuration with the two series stimuli:
+
+```
+A = [[ VV11 + 1, VV12 ], [ VV21, VV22 ]]        B = [[ VV11, VV12 ], [ VV21, VV22 + 1 ]]
+A·[y11; y12]   = [ VI11;  VI21 ]                A·[y21; y22]   = [ −VI12; −VI22 ]
+B·[yf11; yf12] = [ −VI11; −VI21 ]               B·[yf21; yf22] = [  VI12;  VI22 ]
+```
+
+The `+1` on `A(1,1)` and on `B(2,2)` is the orientation, not a typo. Each unknown pair is a **row**,
+so the true matrices come out with no transpose; on `two_block.cnl` `y21 = +gm` sits at (2,1) and
+`(1,2)` is 0.
+
+**The residual** (`wsp_yparam2_residual`, not in the document) solves the same two blocks from the
+two **shunt** stimuli — the independent second set of equations with the same side bookkeeping —
+and reports `max|Y_series − Y_shunt|` relative. Round-off (5e-16) when the pair brackets a two-port;
+0.37 when a resistor joins the inner region to the outside around the probes. **A shunt from an
+inner node to ground does not raise it** (4.7e-16): ground is not a coupling path, and such an
+element is simply part of the inner block's own `y11`. The brief's suggested test was that shunt; the
+gate uses the bypass and asserts the shunt small, because the distinction is the finding.
+
+`wsp_block_calc`'s `{9}` and `{10}` are computed as the **determinant ratios** of §5.4 — `FB = |Y +
+Yf| / |Yo + Yf|` with the inner block's controlled source zeroed (`y21 → y12`), and the same with the
+feedback block passivated (`yf12 → yf21`, typo register T-7) — while `{13}` and `{14}` are Eq. 148
+and Eq. 149 transcribed literally. `1 − {9} == {13}` and `1 − {10} == {14}` are therefore
+identities between two derivations, held to 1e-10 on random blocks and on the real circuit, rather
+than definitions. `{16}` is Eq. 151's right-hand side (T-8).
+
+**E.8/E.9 and `wsp_zo_renorm_s` are not the same number.** `wsp_block_design` absorbs the parallel
+capacitance of each side into the network and renormalises to the real parallel resistance;
+`wsp_zo_renorm_s` renormalises to the complex `Z = R ∥ 1/jωC` with power waves. Their waves differ
+per port by `e^{∓jφ}`, `φ = atan(ωCR)`, so `S_rc = D*·S_zo·D*` with `D = diag(e^{jφ})`: **equal
+magnitudes, phases that differ by a known port factor**, held to 1e-12 with the factor put back. The
+brief's "equals to 1e-12" is true of the magnitudes only.
+
+## 7. Bifurcation and sides
+
+With `N` probes all oriented the same way the network splits into the G-side and the L-side
+subnetwork, and each is an `N`-port recoverable from `wsp`. From the bookkeeping of §6.1, stacking
+the stimuli as columns:
+
+```
+Y-form (series stimuli):   Y_G = −( VV⁻¹ · VI )ᵀ            Y_L = ( (VV + I)⁻¹ · VI )ᵀ
+Z-form (shunt stimuli):    Z_L =  ( II⁻¹ · IV )ᵀ            Z_G = ( (I − II)⁻¹ · IV )ᵀ     (T-12/T-13)
+```
+
+**The trap (overview T-9, T-15).** The document's §6 code computes the bracketed products **without
+the transpose**, and its Y-form and Z-form put the "active" network on **opposite sides** of the
+probes. For a non-reciprocal network the document's `wsp_YA` is therefore `Y_Gᵀ`, and its `wsp_ZA`
+is `Z_Lᵀ` — a different subnetwork from `wsp_YA`'s. Every use the document makes of these matrices
+(determinants, principal minors, a diagonal cofactor) is transpose-invariant, so its results stand; a
+designer reading `y21` of a block is not. circuitRF's primitive is **side-explicit**,
+`wsp_bifurcate(wsp, "Y"|"Z", "G"|"L")`, returns the true matrix, and registers the document's names
+as aliases with the document's sides:
+
+| Document name | = | side |
+|---|---|---|
+| `wsp_YA` | `wsp_bifurcate(wsp, "Y", "G")` | G |
+| `wsp_YF` | `wsp_bifurcate(wsp, "Y", "L")` | L |
+| `wsp_ZA` | `wsp_bifurcate(wsp, "Z", "L")` | **L** |
+| `wsp_ZF` | `wsp_bifurcate(wsp, "Z", "G")` | **G** |
+
+The gate that catches both a lost transpose and a swapped side is **same side, both forms, must
+agree**: `Y form of G == inverse(Z form of G)` and likewise L, on a non-reciprocal fixture
+(`three_probe.cnl`: three VCCS couplings one way on the G side, `Y_G[2,1] = gm`, `Y_G[1,2] = 0`),
+held to 1e-10 at every frequency, and on random non-reciprocal synthetic pairs. The one-probe case
+reduces to WSP-2 (`Y_G = YG`, `Y_L = YL`, `Z_G = ZG`, `Z_L = ZL`).
+
+**A subnetwork is well defined only when every listed probe has it on the same side** (§6, p. 100).
+Nothing can check that from `wsp`; two probes whose named sides meet give a singular system or a
+matrix describing nothing. Two probes whose same-side terminals share a node give a singular
+`Y` for that side (two ports on one node have no admittance matrix), which is why the three-probe
+fixture puts each probe on its own node.
+
+**`wsp_ymatrix` is different in kind from a bifurcation**: `Z = IVᵀ` (Eq. 184; the transpose is
+overview D-9) is the impedance matrix of the **whole** network at the probe nodes under shunt
+stimuli with the probes closed, so it contains both sides of every probe — on the three-probe
+fixture it is `Y_G + Y_L` exactly, both sides in parallel at the same nodes. It is the matrix the NDF
+wants and the matrix the envelope modifies. Gate (c) also compares it against the engine's own
+`S → Y` with Terms at the same nodes: **at `Z = 1e9 Ω` the two disagree at 1.5e-8**, not because of
+the Term's `1e-9 S` (nothing is subtracted; `S → Y` at a reference yields the network's own
+admittance) but because the port waves then sit at `1 + S ≈ 1e-8` and lose eight digits. At `1e6 Ω`
+they agree to 1e-8 with the same conversion.
+
+**Ohtomo** (§7): `M = SP·SA − I` from the two sides as scattering matrices at `Z0`, and
+`G_i = 1 + |M_{N−i+1}| / |M_{N−i}|` with `M_{N−i+1}` the trailing principal submatrix on rows and
+columns `i … N` (Eq. 180 corrected, T-10; `M_0 ≡ 1`). Telescoping gives `Π(G_i − 1) = det(M)`, and
+since `det(M)` is the Nyquist determinant of the closed loop of travelling waves, **the sum of the
+encirclements of `+1` by the `G_i` equals the encirclements of the origin by `det(M)`** whatever the
+probe order or the choice of active side — measured on the three-probe fixture over 801 points:
+0.04047 turns forward, 0.04047 reversed, 0.04047 for `det(M)`, with the individual `G_i` different
+in the two orders. `N = 1` gives `ΓP·ΓA`, Jackson's index, and on the series resonator
+`wsp_unstable_freq_loopgain(G_1)` reports 1.59155 GHz for `R1 = −20 Ω` and nothing for `+20 Ω`.
+The oscillation test on a loop gain is `|G| ≥ 1` with `∠G = 0` crossed **clockwise** — `Im(G)` from
+positive to negative — the mirror of the Kurokawa search's rule around the critical point `+1`.
+Ohtomo assumes each subnetwork is stable on its own (§7, p. 108: one side purely active with no
+terminations that could form a loop, the other purely passive); nothing here can check that, and the
+doc-comment says so.
+
+`wsp_ndf` takes the determinant of `Z = IVᵀ` from an ordinary run and from a passivated one in
+**log form** — the sum of the logs of the LU pivots plus `π` per row swap — and exponentiates only
+the ratio, so a 30-probe matrix at 1,000 frequencies neither overflows nor underflows. It is the
+probe-based route to NDF and the cross-check for WSP-6's native one.
+
+## 8. Envelope by rank-1 update
+
+The document's §9 reads the starting source and load terminations from probes placed at them, swaps
+them for pulled ones in the 3×3 reduced `Y` and recomputes `H0` at a suspect node through a
+cofactor (Eq. 187–191, with Eq. 191's denominator garbled as printed — T-11). The same physics gives
+more with less algebra: **adding a shunt admittance `ΔY` at a probe node is a rank-1 update of the
+whole `wsp`**, because every response to an injection there is already in the matrix. With
+`h = wsp(2S, 2S) = H0_S`, for every row `r` and column `c`:
+
+```
+G node:  wsp'(r, c) = wsp(r, c) − wsp(r, 2S) · ΔY · wsp(2S, c) / (1 + ΔY·h)                    (Sherman–Morrison)
+L node:  wsp'(r, c) = wsp(r, c) − [wsp(r, 2S) + δ(r, 2S−1)] · ΔY · [wsp(2S, c) − δ(c, 2S−1)] / (1 + ΔY·h)
+```
+
+**The L-node form is the brief's G-node statement plus two corrections the physics requires**, and
+it is needed because the load probe faces its Term with **L**. Under the probe's own series stimulus
+(row `2S−1`) the L-node voltage is `vP + vS`, one more than `wsp(2S−1, 2S)`; and a current injected
+at the L node does not flow through the probe, so the probe's own branch-current response (column
+`2S−1`) is one less than the G-node injection's. Every other entry is identical, because the two
+terminals are one node. Applied once for the source probe (`ΔY_S = YS − YSo`, G node) and once, on
+the result, for the load probe (`ΔY_L = YL − YLo`, L node), this yields the **complete `wsp` of the
+re-terminated circuit** — every `H0'`, `Y0'`, `ZG'`, `ZL'`, loop gain and Ohtomo gain — with no
+cofactor bookkeeping and no assumption about which node is "suspect". Gate (e) compares it against a
+**re-run with the Terms changed** (`ΓS = 0.5∠60°`, `ΓL = 0.3∠−120°`) on a two-stage amplifier with
+global feedback: **4.6e-14 worst relative entry error over all 36 entries**, the load probe's own row
+and column included, and Eq. 191's cofactor form of `H03'` (T-11) equals `wsp'(6, 6)` to 1e-10.
+
+`YSo`/`YLo` default to `1/ZG` of the source probe and `1/ZL` of the load probe (§9: "either known
+or determined using the bidirectional impedance calculations provided directly from the source and
+load WSProbes"). **Precondition, checked** (`wsprobe.envelope-probe-not-at-termination`): the source
+probe must sit directly at its termination with G facing it, the load probe with L facing it, so
+that the termination is a pure shunt at that node and the bidirectional impedance on that side
+equals the `Term`'s declared `Z` to `1e-6` relative at every frequency. The engine records each
+probe's neighbouring top-level `Term`/`Port` — one shunting the G node to ground, one shunting the L
+node — in a **`__WspTermZ` `{probe, side}` metadata cube** (NaN where there is none), which passes
+through a sweep unstacked like `__WspProbes`. A probe with nothing at that node refuses; a probe
+whose `ZG` differs from the declared `Z` refuses naming both numbers — which is what feedback across
+the probe (§9, p. 119) or a series element between the probe and its Term produces, and is the
+intended outcome.
+
+`wsp_loadpull` runs the update over two Γ grids and reads `H0'` and `Y0'` at the suspect probe —
+both, because §4.10's pole masking applies under mismatch as much as at nominal.
+`wsp_loadpull_unstable` runs WSP-2's Kurokawa search on `1/H0'` and `1/Y0'` at every grid point.
+On the series resonator with a Term at 10 Ω and `R1 = −5 Ω` (stable at 10 Ω): a load-pull over
+`|Γ| = 0.9` finds exactly the arc on which `Re ZS(θ) < 5 Ω` unstable on the `1/Y0'` side, at the
+frequency where `X(ω) = −Im ZS(θ)` — Eq. 109 with `RS → ZS(θ)` — to four digits, and nothing on the
+rest of the circle. Two things the brief stated that the arithmetic overrides: at `|Γ| = 0.8` the
+**whole circle is stable** (min `Re ZS` is 5.56 Ω at `Γ = −0.8`, above the 5 Ω the negative
+resistance can overcome), and the reported frequency tracks `f0` only where `Im ZS ≈ 0`; elsewhere
+the load reactance detunes the resonator by up to a gigahertz and the closed form is what it tracks.
+The `1/H0'` side also reports crossings at some loads, at frequencies of its own (at `θ = 130°`,
+0.6037 GHz beside `1/Y0'`'s 0.5906): the union is what the document's method takes, and the gate
+prints that side rather than asserting it.
