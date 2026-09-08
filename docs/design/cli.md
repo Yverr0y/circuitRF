@@ -1688,6 +1688,25 @@ NAME with the run's own list**, in the library's own sentence, and a `probe=` wi
 refused naming the flag that answers it: a probe alone would draw the raw matrix entry and look like
 an answer. A `probe=` on a cube that is not a `wsp` matrix is refused by kind, for the same reason.
 
+**The stability envelope has its own five keys** (R-wsp4-9), and they are the card's own: `src=` and
+`load=` name the probe each side is pulled at, `gammaS=`/`gammaL=` take a `|Γ|` **ladder** —
+semicolon separated, because a comma is the field separator — `theta=` is the angular step in
+degrees, and `passive=` names the passivated run `NDFenc` is taken against.
+
+```
+circuitrf plot run.npy -o env.svg \
+  --trace cube=SP1.wsp,probe=P3,src=PS,load=PL,gammaS=0.9;0.875;0.874,theta=15,metric=SMenv,y=db20
+circuitrf plot run.npy -o ndf.svg \
+  --trace cube=SP1.wsp,probe=P3,src=PS,gammaS=0.875,passive=SP2.wsp,metric=NDFenc
+```
+
+An omitted side, an empty ladder or a single `0` leaves that side unpulled, and both sides unpulled is
+a refusal. **A pulled probe must sit directly at its `Term`** — the library's
+`wsprobe.envelope-probe-not-at-termination` refusal is forwarded verbatim rather than drawn as an
+empty picture. The slice the verb writes is the ENVELOPE's own axes (`rhoS`, `thetaS`, `rhoL`,
+`thetaL`, and `freq` for the two loci), with the pulled side's **phase** as the x axis when there is
+no frequency axis, because that is the axis [E] Fig. 6–9 read the margin against.
+
 `--x`/`--y`/`--y2` are optional and independent — an axis without one autoscales, which works because
 `Plot.RestoreAxesFromConfig` re-autoscales only the axes whose own flag is still set. They are refused
 on a Smith or Polar chart, whose window is the complex plane framed on the unit circle. **This is the

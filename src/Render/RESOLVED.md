@@ -464,3 +464,85 @@ S-parameters in every metric that takes one. The groups are therefore materializ
 **The scattering conversion is `WspMatrix.ScatteringOfY`**, the same one WSP-3 scatters a probe pair's
 blocks with (Eq. 142/143) — not a second S-from-Y — so a circle read off the reduction and a pair
 block's own S-parameters agree by construction.
+
+---
+
+## WSP-4 (finished) — the Envelope sub-card, and the rest of the virtual network groups (2026-09-08)
+
+R-wsp4-9 and the second half of R-wsp4-6, the two things the entry above records as absent. Four
+findings.
+
+### 1. A virtual network group must FILE the matrix the library returned, not a round trip of it
+
+`AddNetworkGroup` first built `S` from whatever it was handed and then derived `Y` and `Z` back out of
+that `S`. For a group whose source quantity IS `Y` — `wsp_ymatrix` over a probe set (Eq. 185) — that
+puts a Y→S→Y round trip between the library call and the cube, and the group's own `Y` then differs
+from `WspGlobal.Ymatrix` in the last few digits: measured `0.02666666666666666` against
+`0.026666666666666717`.
+
+The failure is not the error, it is what the error invites. R-wsp4-14(a)'s gate is **bit identity with
+the library**, so a test comparing the group against `WspGlobal.Ymatrix` fails, and the only fix
+available to it is a tolerance — which then hides a second implementation for good. The cube the
+function returned is now filed unconverted and only the other two are derived, so the gate can stay
+exact. `wsp_block_breakout` returns S and is filed as S by the same rule.
+
+### 2. The pair blocks cannot be materialized eagerly, and the brief's own sentence says so
+
+The reduced two-port is one group per probe: N groups. A probe PAIR is `N(N−1)` ORDERED pairs and four
+blocks each, so eager materialization is `4N(N−1)` groups of four cubes — on the 30-probe matrices §8's
+NDF work contemplates, thousands of cubes nobody asked for, each the size of the sweep.
+
+R-wsp4-6 reads "a second picker (\"with probe\") **enables** the pair group", and that is the design
+rather than a phrasing: `DataSourceView.EnsureWspPairBlockGroups` is called when the card's picker
+names a pair, and a `.cdd` that names one re-creates it by the same call. It is idempotent, so changing
+the pair adds the new blocks and leaves the old ones — which are still true. The FULL probe set's `[Y]`
+is materialized eagerly, because it is the one set that needs no picker at all.
+
+**The arrow is part of the identity.** `A→B` and `B→A` bracket two different two-ports (Fig. 40 is
+GEN → LOAD), so they are two groups; the gate asserts their `S` actually differs, rather than trusting
+the naming.
+
+### 3. `wsp_block_design` is INVARIANT to the frequency it is given, on the default RC pair
+
+Written expecting the opposite. `WspPair.BlockDesign` turns each side's bidirectional impedance into a
+parallel RC pair at `freqHz` (`ImmittanceModels.ZToPc`) and then renormalises to that pair **at the
+same `freqHz`** — so the frequency cancels and the reference is the impedance it came from, whatever
+was passed. A test written to catch a frozen frequency therefore passed under the frozen frequency too,
+which is how this was found.
+
+It stops cancelling the moment the design use the document describes is taken up (p. 88: "any RC pair
+may be replaced by the user's own"), so each point is still handed its own frequency. The consequence
+worth carrying forward is the other way round: **a wrong frequency here would be invisible on this
+path**, so nothing downstream may take the frequency broadcast on trust. `FreqPerBlock` is written to
+broadcast along the freq axis's own POSITION for that reason, rather than assuming it is outermost.
+
+### 4. The envelope cube has four grid axes, always, and θ is in degrees
+
+The expression engine returns `{…, gS, gL, …}` — one flat, index-valued Γ axis per side, labelled
+`0.9@60`. The card cannot use that shape: [E] Fig. 6–9 read the margin **against phase**, and an
+ordinal axis cannot be read that way. So `WspEnvelopeSource` lays the same flat grid out over `rhoS`,
+`thetaS`, `rhoL`, `thetaL`, with θ carried in degrees and ρ as the ladder's own magnitudes. The samples
+underneath are the library's, in the library's own grid order, which is what the gate asserts.
+
+**All four axes are present whichever side is pulled** — an off side contributes two length-1 axes
+rather than disappearing. A trace's slice is matched by axis NAME, so a rank that changed when a ladder
+was typed would leave the slice describing a cube that no longer exists. That also decided
+`TraceRowViewModel.SyncWspSlice`: a probe metric whose axis NAMES differ from the trace's current slice
+re-authors it, and only then — an ordinary edit (a different probe, a new Z0) leaves a slice the reader
+has arranged exactly as it was.
+
+**The `plot` verb had the same defect and it was the same one line.** It built the slice from
+`WspSource.LeadingAxes`, which for an envelope metric pins `freq` — an axis `SMenv` does not have —
+and leaves the four grid axes unpinned. It now slices against the cube the resolve already produced,
+and picks the pulled side's θ as x when there is no frequency axis.
+
+### Not built, deliberately: the θS × θL grid as a COLOURED map
+
+R-wsp4-9 asks for the stability map "drawn as a θS × θL grid coloured by the unstable count". The count
+is produced and is an ordinary real cube over the grid axes, so it draws through the family mechanism
+(one curve per θL) and reads in the Table. A filled raster of the grid would need the Data Display's
+**heatmap fill**, which `brief-dd-loadpull-contour-ux-round8` §3 deliberately withholds from the UI as
+experimental — the picker offers only None/Topography, and the machinery is kept only so a saved
+`.cdd` still loads. Adding a second, rectangular-grid raster path beside a withheld one is not this
+brief's call to make. The readout names the first flagged termination and how many there are, which is
+the reading the map exists for.

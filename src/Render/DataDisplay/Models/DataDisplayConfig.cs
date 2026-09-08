@@ -316,6 +316,31 @@ public sealed class WspTraceConfig
     public RfCore.Stability.WspSide ActiveSide { get; set; } = RfCore.Stability.WspSide.G;
 
     public int SetIndex { get; set; } = 1;
+
+    // ── The Envelope sub-card (R-wsp4-9) ─────────────────────────────────────
+    //
+    //  Absent in a `.cdd` written before it, and every default below is the card's own "off" —
+    //  so an older file loads with an envelope that is not being asked for, rather than one
+    //  asking for a grid nobody authored.
+
+    /// <summary>The probe whose G-side termination the source ladder replaces. Empty = unpulled.</summary>
+    public string SourceProbe { get; set; } = "";
+
+    /// <summary>The probe whose L-side termination the load ladder replaces. Empty = unpulled.</summary>
+    public string LoadProbe { get; set; } = "";
+
+    /// <summary>The source ladder, one |ΓS| per rung. Empty is the side's off state.</summary>
+    public List<double> GammaSMags { get; set; } = new();
+
+    /// <inheritdoc cref="GammaSMags"/>
+    public List<double> GammaLMags { get; set; } = new();
+
+    /// <summary>The angular step of both Γ grids, in degrees.</summary>
+    public double ThetaStepDeg { get; set; } = 15.0;
+
+    /// <summary>The passivated run <c>NDFenc</c> is taken against — a cube spec in the same source.
+    /// Empty reads the <c>wsp_passive</c> beside this group's own <c>wsp</c>.</summary>
+    public string PassiveSource { get; set; } = "";
 }
 
 /// <summary>Persisted authoring state for one summary-table column (Phase 7.5).

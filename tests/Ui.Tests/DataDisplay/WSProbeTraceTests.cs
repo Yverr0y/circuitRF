@@ -96,6 +96,10 @@ public sealed class WSProbeTraceTests(ITestOutputHelper output)
             // The probe-SET group needs a set, and the single-probe fixture has one probe: it is
             // covered by its own test below rather than skipped silently.
             if (info.Group == WspMetricGroup.ProbeSet) continue;
+            // The ENVELOPE group needs a source probe, a load probe and a Γ ladder — a grid this
+            // fixture cannot supply, and one whose own bit-identity gate is the whole of
+            // WSProbeEnvelopeTests. Named here so it is an exclusion rather than an omission.
+            if (info.Group == WspMetricGroup.Envelope) continue;
             foreach (var pt in new[] { PlotType.Rect, PlotType.Polar })
                 d.Add(info.Metric, pt);
         }

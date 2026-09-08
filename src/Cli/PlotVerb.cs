@@ -58,6 +58,16 @@ internal static class PlotVerb
         public string? Z0;
         public string? Side;
         public int?    Gi;
+
+        // The Envelope sub-card (R-wsp4-9). Its four quantities are metrics like any other; what
+        // they need beyond a metric name is the GRID — which probe each side is pulled at, the two
+        // |Gamma| ladders and the angular step.
+        public string? SrcProbe;
+        public string? LoadProbe;
+        public string? GammaS;
+        public string? GammaL;
+        public double? Theta;
+        public string? Passive;
     }
 
     private sealed class Options
@@ -186,7 +196,9 @@ internal static class PlotVerb
             "  a trace spec is comma-separated key=value: cube=S i=2 j=1 y=db axis=left|right\n" +
             "  cube= takes the trace card's own shorthand — S[:,1,0], Pout, mag(V[:,\"X1.drain\"])\n" +
             "  a WSProbe quantity: cube=<analysis>.wsp probe=<label> metric=<name> [with=<label>]\n" +
-            "                      [set=A;B] [z0=50] [side=G|L] [gi=1]");
+            "                      [set=A;B] [z0=50] [side=G|L] [gi=1]\n" +
+            "  its stability envelope: add src=<label> and/or load=<label> with gammaS=/gammaL=\n" +
+            "                      a |Gamma| ladder (0.9;0.875;0.874), [theta=15] [passive=SP2.wsp]");
         return 1;
     }
 
@@ -377,6 +389,19 @@ internal static class PlotVerb
                         return (null, JsonRun.Fail(CliDiagnostics.PlotWspSideUnknown(raw, value)));
                     spec.Side = value.ToUpperInvariant();
                     break;
+                case "src":     spec.SrcProbe  = value; break;
+                case "load":    spec.LoadProbe = value; break;
+                case "gammas":  spec.GammaS    = value; break;
+                case "gammal":  spec.GammaL    = value; break;
+                case "passive": spec.Passive   = value; break;
+                case "theta":
+                {
+                    if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double th)
+                        || !(th > 0.0) || th > 360.0)
+                        return (null, JsonRun.Fail(CliDiagnostics.PlotTracePortMalformed(raw, key, value)));
+                    spec.Theta = th;
+                    break;
+                }
                 case "gi":
                 {
                     if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int gi) || gi < 1)
@@ -393,6 +418,22 @@ internal static class PlotVerb
             return (null, JsonRun.Fail(CliDiagnostics.PlotTraceCubeRequired(raw)));
 
         return (spec, null);
+    }
+
+    /// <summary>
+    /// One side's <c>|\u0393|</c> ladder, semicolon separated as <c>set=</c> is (a comma is the field
+    /// separator). An unparsable rung is DROPPED rather than refusing the trace: the ladder as a
+    /// whole still has to leave the side pulled, and an empty result is that side's off state, which
+    /// the resolve then names.
+    /// </summary>
+    private static List<double> Ladder(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return [];
+        var outp = new List<double>();
+        foreach (string tok in text.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            if (double.TryParse(tok, NumberStyles.Float, CultureInfo.InvariantCulture, out double v))
+                outp.Add(v);
+        return outp;
     }
 
     /// <summary>Top-level commas only — a comma inside <c>[…]</c> or <c>"…"</c> is part of a cube
@@ -444,7 +485,10 @@ internal static class PlotVerb
         //  writes, so there is no second probe path here any more than there is a second plotting
         //  one. The refusals are the library's own sentences, which name the run's probes.
         if (spec.Probe is not null || spec.Metric is not null || spec.With is not null
-            || spec.Set is not null || spec.Side is not null || spec.Gi is not null)
+            || spec.Set is not null || spec.Side is not null || spec.Gi is not null
+            || spec.SrcProbe is not null || spec.LoadProbe is not null
+            || spec.GammaS is not null || spec.GammaL is not null
+            || spec.Theta is not null || spec.Passive is not null)
         {
             if (text.Contains('['))
                 return (null, JsonRun.Fail(CliDiagnostics.PlotTracePortsWithSlice(spec.Raw)));
@@ -471,12 +515,18 @@ internal static class PlotVerb
                          : System.Numerics.Complex.Zero,
                 ActiveSide = spec.Side == "L" ? RfCore.Stability.WspSide.L : RfCore.Stability.WspSide.G,
                 SetIndex   = spec.Gi ?? 1,
+                SourceProbe   = spec.SrcProbe  ?? "",
+                LoadProbe     = spec.LoadProbe ?? "",
+                GammaSMags    = Ladder(spec.GammaS),
+                GammaLMags    = Ladder(spec.GammaL),
+                ThetaStepDeg  = spec.Theta ?? 15.0,
+                PassiveSource = spec.Passive ?? "",
             };
 
             // Resolved HERE rather than at draw time, for the reason every other refusal in this
             // verb is made here: "this run has no probe named GATE, it has DRAIN and SOURCE" is an
             // answer a caller can act on, and a picture with no curve in it is not.
-            if (!WspSource.TryEvaluate(data, text, wspSpec, out _, out string wspErr))
+            if (!WspSource.TryEvaluate(data, text, wspSpec, out var wspCube, out string wspErr))
                 return (null, JsonRun.Fail(CliDiagnostics.PlotWspUnresolved(spec.Raw, wspErr)));
 
             // `y=` on a probe trace is the ordinary transform over the metric's own values — the
@@ -494,15 +544,28 @@ internal static class PlotVerb
                       + "They are: db20, db10, db, mag, phase, real, imag, conj, none.")));
             }
 
-            int xIdx = 0;
-            for (int d = 0; d < leading.Length; d++)
-                if (leading[d].Name == "freq") { xIdx = d; break; }
+            // The slice is authored against the METRIC cube's own axes, not the wsp matrix's leading
+            // ones: an envelope metric carries the four grid axes (rhoS, thetaS, rhoL, thetaL) and
+            // SMenv has no freq axis at all, so slicing against `leading` would pin axes the cube
+            // does not have and leave its own unpinned. `wspCube` is what the resolve above produced,
+            // which is exactly what the display will read.
+            var wspAxes = wspCube!.Axes;
+            int wspRank = wspAxes.Count;
+            int xIdx = WspMetrics.NeedsEnvelope(metric) ? -1 : 0;
+            for (int d = 0; d < wspRank; d++)
+                if (wspAxes[d].Name == "freq") { xIdx = d; break; }
+            if (xIdx < 0)
+                // An envelope quantity with no frequency axis is read AGAINST PHASE ([E] Fig. 6-9);
+                // the pulled side's theta is the x axis, and a length-1 axis is not one.
+                for (int d = 0; d < wspRank; d++)
+                    if (wspAxes[d].Name is "thetaS" or "thetaL" && wspAxes[d].Length > 1) { xIdx = d; break; }
+            if (xIdx < 0) xIdx = 0;
 
-            var wspSlice = new AxisSlice[leading.Length];
-            for (int d = 0; d < leading.Length; d++)
+            var wspSlice = new AxisSlice[wspRank];
+            for (int d = 0; d < wspRank; d++)
                 wspSlice[d] = d == xIdx
-                    ? new AxisSlice(leading[d].Name, AxisRole.KeepAsX, 0)
-                    : new AxisSlice(leading[d].Name, AxisRole.PinToIndex, 0);
+                    ? new AxisSlice(wspAxes[d].Name, AxisRole.KeepAsX, 0)
+                    : new AxisSlice(wspAxes[d].Name, AxisRole.PinToIndex, 0);
 
             return (new TraceConfig
             {
@@ -520,6 +583,12 @@ internal static class PlotVerb
                     Z0         = wspSpec.Z0.Real.ToString("G6", CultureInfo.InvariantCulture),
                     ActiveSide = wspSpec.ActiveSide,
                     SetIndex   = wspSpec.SetIndex,
+                    SourceProbe   = wspSpec.SourceProbe,
+                    LoadProbe     = wspSpec.LoadProbe,
+                    GammaSMags    = [.. wspSpec.GammaSMags],
+                    GammaLMags    = [.. wspSpec.GammaLMags],
+                    ThetaStepDeg  = wspSpec.ThetaStepDeg,
+                    PassiveSource = wspSpec.PassiveSource,
                 },
                 Properties       = new TracePropertiesConfig
                 {

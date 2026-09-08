@@ -37,6 +37,7 @@ public enum WspMetricGroup
     Margin,
     Pair,
     ProbeSet,
+    Envelope,
 }
 
 /// <summary>
@@ -73,6 +74,9 @@ public enum WspMetric
 
     // ── Probe set — Ohtomo's global loop gains (Eq. 177–180) ─────────────────
     OhtomoG,
+
+    // ── Envelope — the re-terminated circuit over a Γ grid (§9; [E] Fig. 6–9) ─
+    EnvInvH0, EnvInvY0, EnvUnstable, SMenv, NDFenc,
 }
 
 /// <summary>What the trace card needs to know about one metric, in one row.</summary>
@@ -147,6 +151,17 @@ public static class WspMetrics
 
         new(WspMetric.OhtomoG, "G", "Ohtomo global loop gain G_i over the probe set (Eq. 179)",
                                                                              WspMetricGroup.ProbeSet, false, false, ""),
+
+        new(WspMetric.EnvInvH0,    "1/H0env",  "Kurokawa's locus on H0' of the re-terminated circuit (Eq. 187-191)",
+                                                                             WspMetricGroup.Envelope, false, false, "S"),
+        new(WspMetric.EnvInvY0,    "1/Y0env",  "Kurokawa's locus on Y0' of the re-terminated circuit (Eq. 187-191)",
+                                                                             WspMetricGroup.Envelope, false, false, "Ohm"),
+        new(WspMetric.EnvUnstable, "unstable", "Kurokawa start-up frequencies found at each termination, counted",
+                                                                             WspMetricGroup.Envelope, true,  false, ""),
+        new(WspMetric.SMenv,       "SMenv",    "the stability margin's minimum over frequency, per termination ([E] Fig. 6-9)",
+                                                                             WspMetricGroup.Envelope, true,  false, ""),
+        new(WspMetric.NDFenc,      "NDFenc",   "NDF origin encirclements at each termination, from a passivated run ([E] Fig. 6-9)",
+                                                                             WspMetricGroup.Envelope, true,  false, ""),
     ];
 
     private static readonly Dictionary<WspMetric, WspMetricInfo> ByMetric =
@@ -223,6 +238,8 @@ public static class WspMetrics
             "ny" => WspMetric.InvY0,
             "gamma" or "nodalgamma" or "wspnodalgamma" => WspMetric.NodalGamma,
             "ohtomo" or "ohtomog" or "gi" => WspMetric.OhtomoG,
+            "invh0env" or "1h0env" => WspMetric.EnvInvH0,
+            "invy0env" or "1y0env" => WspMetric.EnvInvY0,
             "stabilitymargin" or "sm" => WspMetric.SM,
             _ => WspMetric.None,
         };
@@ -246,6 +263,11 @@ public static class WspMetrics
     /// <summary>True when the metric needs an ordered probe SET.</summary>
     public static bool NeedsProbeSet(WspMetric m) => Info(m)?.Group == WspMetricGroup.ProbeSet;
 
+    /// <summary>True when the metric is read off the stability ENVELOPE — a source probe, a load
+    /// probe and the two Γ ladders on the card's Envelope sub-card, rather than the one probe every
+    /// other metric needs (R-wsp4-9).</summary>
+    public static bool NeedsEnvelope(WspMetric m) => Info(m)?.Group == WspMetricGroup.Envelope;
+
     /// <summary>
     /// True when the metric reads the <c>Z0</c> field on the card: the two synthetic-circulator loop
     /// gains normalise by it (Eq. 96–99), every pair metric scatters its two blocks at it
@@ -254,7 +276,7 @@ public static class WspMetrics
     /// </summary>
     public static bool UsesZ0(WspMetric m)
         => m is WspMetric.LGF or WspMetric.LGR
-        || Info(m)?.Group is WspMetricGroup.Pair or WspMetricGroup.ProbeSet;
+        || Info(m)?.Group is WspMetricGroup.Pair or WspMetricGroup.ProbeSet or WspMetricGroup.Envelope;
 
     /// <summary>
     /// Whether <paramref name="m"/> can be drawn on <paramref name="plotType"/>, and why not when it
@@ -275,6 +297,15 @@ public static class WspMetrics
             return complexPlane
                 ? "The stability margin is a real number in [0, 1] versus frequency — add it to a "
                 + "rectangular (or table) plot. (Winslow, EuMIC 2024.)"
+                : null;
+
+        // Every OTHER real envelope quantity is a number per termination, not a point in a plane:
+        // the same rule as the margin, stated in its own terms so the reason names the quantity the
+        // reader picked rather than a family they did not.
+        if (info.Group == WspMetricGroup.Envelope && info.IsReal)
+            return complexPlane
+                ? $"{info.Name} is one real number per termination, not a point in a plane — add it "
+                + "to a rectangular (or table) plot against \u03b8S or \u03b8L. (Winslow, EuMIC 2025.)"
                 : null;
 
         if (!complexPlane) return null;                       // every complex quantity reads on Rect
@@ -309,6 +340,28 @@ public static class WspMetrics
                 _ => 0,
             };
             return $"wsp_block_calc({wsp}, {idx}, {idx2}){{{one}}}";
+        }
+
+        if (NeedsEnvelope(spec.Metric))
+        {
+            string idxS = spec.SourceProbe.Length > 0
+                ? (group.Length > 0 ? $"{group}.idx(\"{spec.SourceProbe}\")" : $"idx(\"{spec.SourceProbe}\")")
+                : "0";
+            string idxL = spec.LoadProbe.Length > 0
+                ? (group.Length > 0 ? $"{group}.idx(\"{spec.LoadProbe}\")" : $"idx(\"{spec.LoadProbe}\")")
+                : "0";
+            string gS = GammaGridText(spec.GammaSMags, spec.ThetaStepDeg);
+            string gL = GammaGridText(spec.GammaLMags, spec.ThetaStepDeg);
+            string args = $"{wsp}, {idxS}, {idxL}, {idx}, {gS}, {gL}";
+            return spec.Metric switch
+            {
+                WspMetric.EnvInvH0    => $"1 / wsp_loadpull({args}){{H0env}}",
+                WspMetric.EnvInvY0    => $"1 / wsp_loadpull({args}){{Y0env}}",
+                WspMetric.EnvUnstable => $"wsp_loadpull_unstable({args}){{unstable}}",
+                WspMetric.SMenv       => $"wsp_loadpull_margin_env({args})",
+                _                     => $"wsp_loadpull_ndf_enc({wsp}, {PassiveText(spec, wsp)}, {idxS}, {idxL}, "
+                                       + $"\"all\", {gS}, {gL})",
+            };
         }
 
         if (spec.Metric == WspMetric.OhtomoG)
@@ -351,6 +404,41 @@ public static class WspMetrics
         };
     }
 
+    /// <summary>The <c>"|\u0393|:count@start"</c> grid spelling <c>wsp_loadpull</c>'s own argument
+    /// takes, for one side's ladder — one term per rung, since a ladder is several circles rather
+    /// than one. An empty ladder is the side's "off" state and spells as <c>0</c>.</summary>
+    private static string GammaGridText(IReadOnlyList<double> mags, double thetaStepDeg)
+    {
+        if (mags.Count == 0) return "0";
+        int count = ThetaCount(thetaStepDeg);
+        return mags.Count == 1
+            ? $"\"{mags[0].ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)}:{count}\""
+            : "[" + string.Join(", ", mags.Select(m =>
+                $"\"{m.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)}:{count}\"")) + "]";
+    }
+
+    /// <summary>The passivated run a <c>NDFenc</c> trace reads, as the measure line would name it.</summary>
+    private static string PassiveText(WspTraceSpec spec, string wsp)
+        => spec.PassiveSource.Length > 0 ? spec.PassiveSource : PassiveCubeSpecOf(wsp);
+
+    /// <summary>The <c>wsp_passive</c> cube beside a group's own <c>wsp</c> — the default a
+    /// <c>NDFenc</c> trace reads when the card names no second run (WSP-6's own emission).</summary>
+    public static string PassiveCubeSpecOf(string wspCubeSpec)
+    {
+        int dot = wspCubeSpec.LastIndexOf('.');
+        return dot < 0 ? "wsp_passive" : $"{wspCubeSpec[..dot]}.wsp_passive";
+    }
+
+    /// <summary>The number of \u03b8 steps a step size gives over one full turn, at least 1. A step
+    /// that does not divide 360 is rounded to the nearest whole number of points rather than
+    /// refused, and the axis carries the angles it actually used.</summary>
+    public static int ThetaCount(double stepDeg)
+    {
+        if (!(stepDeg > 0.0) || double.IsNaN(stepDeg)) return 1;
+        int n = (int)Math.Round(360.0 / stepDeg);
+        return Math.Max(1, n);
+    }
+
     /// <summary>
     /// The driving-point function whose Kurokawa search PAIRS with a margin trace: <c>SM_Y0</c> is
     /// the distance and <c>1/Y0</c> is the detector, so the card reads both on one line (WSP-9
@@ -368,6 +456,11 @@ public static class WspMetrics
     public static CubeTransform DefaultTransform(WspMetric m, PlotType plotType)
     {
         if (plotType is PlotType.Smith or PlotType.Polar) return CubeTransform.None;
-        return Info(m)?.Group == WspMetricGroup.Margin ? CubeTransform.dB20 : CubeTransform.Mag;
+        // A COUNT is drawn as it stands: |x| would fold a negative encirclement count (a
+        // counter-clockwise net, which is a real answer) onto the positive one silently.
+        if (m is WspMetric.EnvUnstable or WspMetric.NDFenc) return CubeTransform.None;
+        return Info(m)?.Group is WspMetricGroup.Margin || m == WspMetric.SMenv
+            ? CubeTransform.dB20
+            : CubeTransform.Mag;
     }
 }

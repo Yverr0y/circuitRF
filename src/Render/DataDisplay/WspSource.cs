@@ -59,15 +59,53 @@ public sealed class WspTraceSpec
     /// metric.</summary>
     public int SetIndex { get; set; } = 1;
 
+    // ── The Envelope sub-card (R-wsp4-9) ─────────────────────────────────────
+    //
+    //  Three probes, not one: the SOURCE probe whose G-side termination is pulled, the LOAD probe
+    //  whose L-side termination is pulled, and `Probe` — the SUSPECT node the pulled circuit is
+    //  read at. All three are on the same wsp matrix, because a termination change is a rank-1
+    //  update of it (WspEnvelope) rather than a second simulation.
+
+    /// <summary>The probe whose <b>G</b>-side termination the source ladder replaces. Empty leaves
+    /// the source side unpulled.</summary>
+    public string SourceProbe { get; set; } = "";
+
+    /// <summary>The probe whose <b>L</b>-side termination the load ladder replaces. Empty leaves
+    /// the load side unpulled.</summary>
+    public string LoadProbe { get; set; } = "";
+
+    /// <summary>The source ladder: one <c>|\u0393S|</c> per rung, each swept over the full turn at
+    /// <see cref="ThetaStepDeg"/>. EMPTY is the side's "off" state ([E]'s own ladder is
+    /// <c>0.9, 0.875, 0.874</c> — the point of a ladder is to read the \u03c1 at which
+    /// encirclements first appear off ONE card).</summary>
+    public List<double> GammaSMags { get; set; } = [];
+
+    /// <inheritdoc cref="GammaSMags"/>
+    public List<double> GammaLMags { get; set; } = [];
+
+    /// <summary>The angular step of both grids, in degrees.</summary>
+    public double ThetaStepDeg { get; set; } = 15.0;
+
+    /// <summary>The passivated run <c>NDFenc</c> is taken against — a cube spec in the SAME source
+    /// (a second analysis of the same netlist with its devices passivated). Empty reads the
+    /// <c>wsp_passive</c> cube beside this group's own <c>wsp</c>, which is what WSP-6 emits.</summary>
+    public string PassiveSource { get; set; } = "";
+
     public WspTraceSpec Clone() => new()
     {
-        Probe      = Probe,
-        With       = With,
-        Set        = [.. Set],
-        Metric     = Metric,
-        Z0         = Z0,
-        ActiveSide = ActiveSide,
-        SetIndex   = SetIndex,
+        Probe        = Probe,
+        With         = With,
+        Set          = [.. Set],
+        Metric       = Metric,
+        Z0           = Z0,
+        ActiveSide   = ActiveSide,
+        SetIndex     = SetIndex,
+        SourceProbe  = SourceProbe,
+        LoadProbe    = LoadProbe,
+        GammaSMags   = [.. GammaSMags],
+        GammaLMags   = [.. GammaLMags],
+        ThetaStepDeg = ThetaStepDeg,
+        PassiveSource = PassiveSource,
     };
 
     public bool IsActive => Metric != WspMetric.None;
@@ -76,7 +114,7 @@ public sealed class WspTraceSpec
 /// <summary>
 /// The <c>wsp</c> cube of one analysis group, its probe table, and the metric evaluation over them.
 /// </summary>
-public static class WspSource
+public static partial class WspSource
 {
     /// <summary>The metadata cube the S-parameter engine writes beside <c>wsp</c>: one entry per
     /// probe, the axis LABEL its document "Label" and the VALUE its 1-based <c>idx</c>
@@ -171,6 +209,13 @@ public static class WspSource
         var cube = ds[cubeSpec];
         if (cube.Rank < 3 || cube.Axes[^1].Length != cube.Axes[^2].Length)
         { error = $"'{cubeSpec}' is not a wsp matrix ({{…, freq, row, col}}, square)."; return false; }
+
+        // An envelope metric is not a metric of ONE probe over the run's own axes: it is a metric of
+        // the RE-TERMINATED circuit over a Γ grid, and it therefore has grid axes of its own. It gets
+        // its own evaluation for that reason and for no other — the samples still come from
+        // src/RfCore/Stability/ and from nowhere else.
+        if (WspMetrics.NeedsEnvelope(spec.Metric))
+            return TryEvaluateEnvelope(ds, cubeSpec, spec, cube, out result, out error);
 
         int size = cube.Axes[^1].Length;
         int nProbes = size / 2;
@@ -279,18 +324,22 @@ public static class WspSource
     public static DataCube ScatteringOf(DataCube yCube, Complex z0)
     {
         var raw   = yCube.ComplexValues;
-        int nMats = raw.Length / 4;
+        // The port count is READ from the cube rather than assumed to be 2: the same conversion
+        // serves the reduced two-port and wsp_ymatrix's N x N reduction over a probe set (Eq. 185),
+        // and a hard-coded 2 would have silently produced the first four entries of an N-port.
+        int n     = yCube.Axes[^1].Length;
+        int nMats = raw.Length / (n * n);
         var outv  = new Complex[raw.Length];
         for (int k = 0; k < nMats; k++)
         {
-            var y = new Complex[2, 2]
-            {
-                { raw[k * 4 + 0], raw[k * 4 + 1] },
-                { raw[k * 4 + 2], raw[k * 4 + 3] },
-            };
+            var y = new Complex[n, n];
+            for (int r = 0; r < n; r++)
+            for (int c = 0; c < n; c++)
+                y[r, c] = raw[k * n * n + r * n + c];
             var s = WspMatrix.ScatteringOfY(y, z0);
-            outv[k * 4 + 0] = s[0, 0]; outv[k * 4 + 1] = s[0, 1];
-            outv[k * 4 + 2] = s[1, 0]; outv[k * 4 + 3] = s[1, 1];
+            for (int r = 0; r < n; r++)
+            for (int c = 0; c < n; c++)
+                outv[k * n * n + r * n + c] = s[r, c];
         }
         return new DataCube([.. yCube.Axes], outv);
     }

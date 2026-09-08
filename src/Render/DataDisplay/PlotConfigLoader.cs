@@ -208,6 +208,12 @@ public static class PlotConfigLoader
                         Z0         = ComplexStringHelper.TryParse(wc.Z0, out var wz0) ? wz0 : System.Numerics.Complex.Zero,
                         ActiveSide = wc.ActiveSide,
                         SetIndex   = wc.SetIndex,
+                        SourceProbe   = wc.SourceProbe,
+                        LoadProbe     = wc.LoadProbe,
+                        GammaSMags    = [.. wc.GammaSMags],
+                        GammaLMags    = [.. wc.GammaLMags],
+                        ThetaStepDeg  = wc.ThetaStepDeg,
+                        PassiveSource = wc.PassiveSource,
                     };
             }
             else

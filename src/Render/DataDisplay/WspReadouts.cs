@@ -96,6 +96,40 @@ public static class WspReadouts
             return new WspReadout(text, hits);
         }
 
+        // ── an envelope quantity: the WORST termination on the axis drawn ────
+        //
+        //  [E] Fig. 6-9 are read for the phase at which the margin collapses, and for the phase at
+        //  which the NDF first encircles — so what the card says about them is WHERE the extreme is,
+        //  in the units of whatever axis the trace is against (θ in degrees, or freq when the loci
+        //  are drawn). The complex loci fall through to the encirclement count below, which is the
+        //  other half of the same reading.
+        if (info.Group == WspMetricGroup.Envelope && info.IsReal)
+        {
+            var v = t.CubeReal;
+            if (v is null || v.Count == 0) return null;
+
+            if (spec.Metric == WspMetric.SMenv)
+            {
+                int at = ArgMin(v);
+                return at < 0 ? null
+                     : new WspReadout($"SMenv minimum {Db(v[at])} at {AxisPoint(t, x, at)}", []);
+            }
+
+            // A count: the interesting reading is the FIRST point at which it becomes non-zero, and
+            // how many points carry it — "the ρ at which encirclements first appear", read off the
+            // curve rather than counted off the picture.
+            int first = -1, flagged = 0;
+            for (int i = 0; i < v.Count; i++)
+                if (double.IsFinite(v[i]) && v[i] != 0.0) { flagged++; if (first < 0) first = i; }
+
+            string what = spec.Metric == WspMetric.NDFenc ? "NDF encircles" : "unstable";
+            return new WspReadout(
+                first < 0
+                    ? $"{what} at no termination on this axis"
+                    : $"{what} first at {AxisPoint(t, x, first)} — {flagged} of {v.Count} terminations",
+                []);
+        }
+
         // ── a loop gain: the same search about the critical point +1 ─────────
         if (info.Group is WspMetricGroup.LoopGain or WspMetricGroup.Pair or WspMetricGroup.ProbeSet)
         {
@@ -144,6 +178,21 @@ public static class WspReadouts
         if (enc.Length == 0) return "encirclements: —";
         double last = enc[^1];
         return $"encirclements: {Math.Round(last):0} (net {last.ToString("0.00", CultureInfo.InvariantCulture)})";
+    }
+
+    /// <summary>One point of whatever axis the trace is drawn against, in that axis's own terms —
+    /// a frequency in GHz, a phase in degrees, anything else as a bare number beside its axis
+    /// name. Reading a phase as a frequency is exactly the mistake this exists to prevent.</summary>
+    private static string AxisPoint(Trace t, IReadOnlyList<double> x, int i)
+    {
+        if (i < 0 || i >= x.Count) return "—";
+        string axis = t.CubeXAxisName ?? "";
+        if (axis is "freq" or "ssfreq") return Ghz(x[i]);
+        if (axis is "thetaS" or "thetaL")
+            return $"{(axis == "thetaS" ? "\u03b8S" : "\u03b8L")} = "
+                 + x[i].ToString("0.##", CultureInfo.InvariantCulture) + "\u00b0";
+        return $"{(axis.Length > 0 ? axis + " = " : "")}"
+             + x[i].ToString("0.####", CultureInfo.InvariantCulture);
     }
 
     private static int ArgMin(IReadOnlyList<double> v)

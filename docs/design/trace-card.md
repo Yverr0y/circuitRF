@@ -327,6 +327,8 @@ ones `wsp_H0(SP1.wsp, idx)` resolves to in a `measure` line. The gate is bit ide
 | Stability margin | `SM_Y0`, `SM_H0`, `SM`, and the proxies `rY`, `iY`, `rH`, `iH` | Rect only |
 | Probe pair | `F_LGa`, `F_LGf`, `F_LGH`, `F_LGM`, `LGa`, `LGf`, `LGH`, `LGM` | Polar, Rect |
 | Probe set | Ohtomo's `G_i` | Polar, Rect |
+| Envelope | `1/H0env`, `1/Y0env` | Polar, Rect |
+| Envelope | `unstable`, `SMenv`, `NDFenc` | Rect only |
 
 A metric that does not fit the plot type is offered **disabled with a reason**, never removed — the
 rule the derived metrics already follow, for the same reason: a metric that vanishes reads as one
@@ -353,16 +355,65 @@ places one marker per reported frequency. A margin on a rect plot also draws two
 lines: the run's own `MarginThreshold` (dashed, from the `__WspMarginThreshold` cube) and the −12 dB
 floor, below which one side of the node presents negative resistance.
 
-**The reduced two-port is a virtual NETWORK group.** `DataSourceView` adds
+### The Envelope sub-card (R-wsp4-9)
+
+An envelope quantity is not read at one probe: it is read at a SUSPECT probe, on a circuit whose
+SOURCE and LOAD terminations have been replaced. So the section grows three more rows.
+
+- **source** and **load** each name a probe plus a **|Γ| ladder** — one magnitude per rung, comma
+  separated. `(not pulled)`, a blank ladder, or a single `0` is that side's off state; a `0` rung
+  *beside* others is kept, because there it is the matched termination the rest are read against.
+  [E]'s own ladder is `0.9, 0.875, 0.874`, which is how the ρ at which encirclements first appear is
+  read off one card rather than off three runs.
+- **θ step** is the angular step of both grids, in degrees, and the line beside it counts the
+  terminations the card is asking for before anything is computed — each is a rank-1 update per
+  frequency, so halving the step quadruples a two-sided sweep.
+- **passive** appears only for `NDFenc`: the passivated run the NDF is taken against, named as a cube
+  in the same source (`SP2.wsp`). Blank reads the `wsp_passive` beside this group's own `wsp`.
+
+The pulled probe must sit **directly at its `Term`** with the named side facing it — §9's own
+precondition, checked against the run's `__WspTermZ` metadata. A probe with feedback across it fails
+it, and the card shows the library's `wsprobe.envelope-probe-not-at-termination` sentence on its
+error line rather than drawing a curve computed from a shunt update that is not the physics.
+
+**The cube has four grid axes, always all four**: `rhoS`, `thetaS`, `rhoL`, `thetaL`, plus `freq` for
+the two loci. A side that is off contributes two length-1 axes rather than disappearing, so the rank
+is constant and a slice authored against it survives an edit to either ladder. **θ is carried in
+DEGREES**, not as an ordinal — `SMenv` against `θS` with one curve per `θL` (or per rung) is [E]
+Fig. 6–9, and an index axis could not be read that way. `SMenv` carries the margin's own two
+reference lines, because it is the margin.
+
+**Not built: the θS × θL grid as a COLOURED map.** `unstable` is a real number per termination and is
+drawn through the ordinary family mechanism (one curve per `θL`); a filled raster of the grid would
+need the Data Display's heatmap fill, which `brief-dd-loadpull-contour-ux-round8` §3 deliberately
+withholds from the UI as experimental. The numbers are all there, and the readout names the first
+flagged termination and how many of them there are.
+
+**The reduced two-port and the pair blocks are virtual NETWORK groups.** `DataSourceView` adds
 `<analysis> ▸ WSProbe <label> ▸ reduced 2-port` carrying `S`, `Y`, `Z` and a per-port `Z0` of the
 reduction at that probe (Eq. 44), so µ, µ′, K, |Δ|, MAG/MSG and both stability circles apply to it
 through the code that already computes them. It is appended AFTER the analysis groups, because
 `FindCubeSpec` answers with the first group carrying an `S` and that has to keep being the run's own.
 
+The same mechanism carries R-wsp4-6's second half:
+
+- `<analysis> ▸ WSProbe A→B ▸ inner block` / `▸ feedback block` — `wsp_block_calc`'s `{1..4}` and
+  `{5..8}` (Eq. 142/143);
+- `… ▸ inner block (design)` / `▸ feedback block (design)` — `wsp_block_design` and `wsp_fb_design`,
+  the blocks "as if broken out and terminated with your target loadlines" (E.8/E.9);
+- `<analysis> ▸ WSProbes A, B, C ▸ [Y]` — `wsp_ymatrix` over an ordered probe set (Eq. 185).
+
+**The pair blocks arrive when the pair is PICKED, not eagerly.** N probes have N(N−1) ordered pairs
+and four blocks each; materializing them all would be thousands of cubes nobody asked for on the
+matrices §8's NDF work contemplates. The arrow is part of the identity — `A→B` and `B→A` bracket two
+different two-ports, because Fig. 40's orientation is GEN → LOAD. The full probe set's `[Y]` is the
+one set that needs no picker and is materialized eagerly; any subset arrives from the card's own
+ordered set, and its order is part of its identity too.
+
 **The `plot` verb** takes the same trace: `--trace cube=SP1.wsp,probe=GATE,metric=invH0,y=polar`,
-with `with=`, `set=A;B`, `z0=`, `side=G|L` and `gi=` for the metrics that read them. It writes the
-same `.cdd` the window writes, so the byte-identity gate covers probe traces with no new plotting
-path.
+with `with=`, `set=A;B`, `z0=`, `side=G|L` and `gi=` for the metrics that read them, and
+`src=`/`load=`/`gammaS=`/`gammaL=`/`theta=`/`passive=` for the envelope. It writes the same `.cdd`
+the window writes, so the byte-identity gate covers probe traces with no new plotting path.
 
 ---
 

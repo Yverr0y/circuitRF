@@ -737,10 +737,16 @@ namespace CircuitRF.Render.DataDisplay
         /// True when this trace is a margin on a rectangular plot — the one state the two horizontal
         /// reference lines belong on. A margin drawn linear gets them at the same MARGINS, converted
         /// through the trace's own transform, rather than at the dB numbers (overview D-16).
+        ///
+        /// <para><c>SMenv</c> is included and is not in the Margin group: it IS the margin, minimised
+        /// over frequency and drawn against phase ([E] Fig. 6-9), so the threshold it is judged
+        /// against and the −12 dB floor mean exactly what they mean on a margin-versus-frequency
+        /// plot. Leaving them off would be the one case where a reader has to remember the number.</para>
         /// </summary>
         public bool ShowsWspMarginReferenceLines
             => IsWspTrace
-            && WspMetrics.Info(Wsp!.Metric)?.Group == WspMetricGroup.Margin
+            && (WspMetrics.Info(Wsp!.Metric)?.Group == WspMetricGroup.Margin
+                || Wsp!.Metric == WspMetric.SMenv)
             && _lastPlotType == PlotType.Rect;
 
         /// <summary>

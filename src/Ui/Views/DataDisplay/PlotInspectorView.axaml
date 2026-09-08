@@ -1130,6 +1130,82 @@
                                                           ToolTip.Tip="Which side of every probe is the ACTIVE subnetwork (G = generator side, L = load side)."/>
                                             </Grid>
 
+                                            <!-- ── Envelope (R-wsp4-9) ───────────────────────
+                                                 The five quantities read off the RE-TERMINATED
+                                                 circuit. The `probe` row above is the SUSPECT node;
+                                                 these two are where the pulling happens, and each
+                                                 takes a LADDER of |Γ| so the ρ at which
+                                                 encirclements first appear is read off one card
+                                                 rather than off three runs. -->
+                                            <StackPanel Spacing="2"
+                                                        IsVisible="{Binding ShowWspEnvelope}"
+                                                        Margin="0,2,0,0">
+
+                                                <Grid ColumnDefinitions="46,*,Auto,72">
+                                                    <TextBlock Grid.Column="0" Text="source" Classes="label"
+                                                               VerticalAlignment="Center"/>
+                                                    <ComboBox Grid.Column="1"
+                                                              ItemsSource="{Binding WspSideProbeItems}"
+                                                              SelectedItem="{Binding SelectedWspSourceItem, Mode=TwoWay}"
+                                                              HorizontalAlignment="Stretch"
+                                                              ToolTip.Tip="The probe whose G-side termination the |ΓS| ladder replaces. It must sit directly at that Term — a probe with feedback across it cannot isolate one, and the card says so."/>
+                                                    <TextBlock Grid.Column="2" Text="|ΓS|" Classes="label"
+                                                               VerticalAlignment="Center" Margin="6,0,4,0"/>
+                                                    <TextBox Grid.Column="3"
+                                                             Text="{Binding WspGammaSText, Mode=TwoWay}"
+                                                             FontSize="{StaticResource FontSize}"
+                                                             PlaceholderText="off"
+                                                             ToolTip.Tip="One |ΓS| per rung, comma separated (0.9, 0.875, 0.874). Blank or 0 leaves the source side unpulled."/>
+                                                </Grid>
+
+                                                <Grid ColumnDefinitions="46,*,Auto,72">
+                                                    <TextBlock Grid.Column="0" Text="load" Classes="label"
+                                                               VerticalAlignment="Center"/>
+                                                    <ComboBox Grid.Column="1"
+                                                              ItemsSource="{Binding WspSideProbeItems}"
+                                                              SelectedItem="{Binding SelectedWspLoadItem, Mode=TwoWay}"
+                                                              HorizontalAlignment="Stretch"
+                                                              ToolTip.Tip="The probe whose L-side termination the |ΓL| ladder replaces."/>
+                                                    <TextBlock Grid.Column="2" Text="|ΓL|" Classes="label"
+                                                               VerticalAlignment="Center" Margin="6,0,4,0"/>
+                                                    <TextBox Grid.Column="3"
+                                                             Text="{Binding WspGammaLText, Mode=TwoWay}"
+                                                             FontSize="{StaticResource FontSize}"
+                                                             PlaceholderText="off"
+                                                             ToolTip.Tip="One |ΓL| per rung, comma separated. Blank or 0 leaves the load side unpulled."/>
+                                                </Grid>
+
+                                                <Grid ColumnDefinitions="46,Auto,*">
+                                                    <TextBlock Grid.Column="0" Text="θ step" Classes="label"
+                                                               VerticalAlignment="Center"/>
+                                                    <NumericUpDown Grid.Column="1"
+                                                                   Value="{Binding WspThetaStepDeg, Mode=TwoWay}"
+                                                                   Minimum="0.1" Maximum="360" Increment="5"
+                                                                   ShowButtonSpinner="True"
+                                                                   Width="96"
+                                                                   FontSize="{StaticResource FontSize}"
+                                                                   ToolTip.Tip="The angular step of both Γ grids, in degrees. Every grid point is a rank-1 update per frequency — halving the step quadruples a two-sided sweep."/>
+                                                    <TextBlock Grid.Column="2"
+                                                               Text="{Binding WspEnvelopeGridText}"
+                                                               Classes="label"
+                                                               VerticalAlignment="Center"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               Margin="6,0,0,0"
+                                                               ToolTip.Tip="{Binding WspEnvelopeGridText}"/>
+                                                </Grid>
+
+                                                <Grid ColumnDefinitions="46,*" IsVisible="{Binding ShowWspPassive}">
+                                                    <TextBlock Grid.Column="0" Text="passive" Classes="label"
+                                                               VerticalAlignment="Center"/>
+                                                    <TextBox Grid.Column="1"
+                                                             Text="{Binding WspPassiveText, Mode=TwoWay}"
+                                                             FontSize="{StaticResource FontSize}"
+                                                             HorizontalAlignment="Stretch"
+                                                             PlaceholderText="this run's wsp_passive"
+                                                             ToolTip.Tip="The passivated run the NDF is taken against — a second analysis of the same netlist with its devices passivated, named as a cube (SP2.wsp). Blank reads the wsp_passive beside this group's own wsp."/>
+                                                </Grid>
+                                            </StackPanel>
+
                                             <!-- The reading: Kurokawa's start-up frequencies, the
                                                  encirclement count, or a margin's minimum together
                                                  with the search that pairs with it. "none" is a real

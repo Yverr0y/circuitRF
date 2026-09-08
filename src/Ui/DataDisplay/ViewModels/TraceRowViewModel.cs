@@ -1387,6 +1387,11 @@ public partial class TraceRowViewModel : ViewModelBase
                 Z0OverrideEnabled = false;
                 _applyingSource   = false;
             }
+            // WSP-4: an ENVELOPE metric is shaped over grid axes of its own, not over the run's
+            // leading axes the picker item's slice was built from. Re-author it here, by name, so a
+            // freshly picked SMenv is sliced against rhoS/thetaS/rhoL/thetaL rather than against
+            // freq — which would pin an axis the cube does not have.
+            SyncWspSlice();
             RebuildAxisRoles();
         }
         else

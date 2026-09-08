@@ -21,6 +21,7 @@
 // ================================================================
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using RfCore;
@@ -121,7 +122,113 @@ public static class DataSourceView
                 ds.AddToGroup(reduced, NetworkMetrics.Z0CubeName,
                               new DataCube([new Axis("port", [1.0, 2.0])], z0PerPort));
             }
+
+            // wsp_ymatrix over EVERY probe, in idx order (Eq. 185) — the one probe set that needs no
+            // picker, and the only one materialized eagerly. Every other set is the card's own
+            // ordered multi-select and arrives through EnsureWspProbeSetGroup.
+            var allLabels = WspSource.Probes(ds, group).Select(p => p.Label).ToList();
+            if (allLabels.Count > 0) EnsureWspProbeSetGroup(ds, group, allLabels);
         }
+    }
+
+    /// <summary>
+    /// The virtual network group holding one of a probe PAIR's two-ports (R-wsp4-6's second half).
+    /// The arrow is the orientation and is part of the identity: probe 1 is the generator side of
+    /// Fig. 40, so <c>GATE\u2192DRAIN</c> and <c>DRAIN\u2192GATE</c> are two different pairs of
+    /// blocks, not one written twice.
+    /// </summary>
+    public static string PairBlockGroup(
+        string analysisGroup, string label1, string label2, WspBlockKind kind)
+    {
+        string body = $"WSProbe {label1}\u2192{label2} \u25b8 {WspSource.BlockKindName(kind)}";
+        return analysisGroup == DataSet.DefaultGroup ? body : $"{analysisGroup} \u25b8 {body}";
+    }
+
+    /// <summary>The virtual network group holding <c>wsp_ymatrix</c> over an ordered probe set
+    /// (Eq. 185). The set is in the name because it is in the answer — the matrix is indexed in the
+    /// set's own order.</summary>
+    public static string ProbeSetYGroup(string analysisGroup, IReadOnlyList<string> labels)
+    {
+        string body = $"WSProbes {string.Join(", ", labels)} \u25b8 [Y]";
+        return analysisGroup == DataSet.DefaultGroup ? body : $"{analysisGroup} \u25b8 {body}";
+    }
+
+    /// <summary>
+    /// Materializes the four block groups of one ordered probe pair, if they are not already there.
+    ///
+    /// <para><b>On demand rather than eagerly, and that is the whole reason this is a method.</b>
+    /// A run with N probes has N(N-1) ordered pairs and four blocks each; materializing them all
+    /// would be 4N(N-1) network groups of four cubes, which on the 30-probe matrix WSP-3's NDF work
+    /// contemplates is thousands of cubes nobody asked for. The card's own "with probe" picker is
+    /// what enables the pair (R-wsp4-6), so picking it is what creates them — and a <c>.cdd</c> that
+    /// names one re-creates it by the same call when it loads.</para>
+    /// </summary>
+    /// <returns>False, with no change, when the pair does not resolve on this source.</returns>
+    public static bool EnsureWspPairBlockGroups(DataSet? ds, string analysisGroup, string label1, string label2)
+    {
+        if (ds is null || label1.Length == 0 || label2.Length == 0 || label1 == label2) return false;
+
+        string wspSpec = WspSource.WspCubeSpec(analysisGroup);
+        if (!ds.Contains(wspSpec)) return false;
+        var z0 = ReferenceOf(ds, analysisGroup);
+        bool any = false;
+
+        foreach (var kind in WspSource.BlockKinds)
+        {
+            string name = PairBlockGroup(analysisGroup, label1, label2, kind);
+            if (ds.Groups.Contains(name)) { any = true; continue; }
+            if (!WspSource.TryPairBlock(ds, wspSpec, label1, label2, kind, z0, out var sCube, out _)) continue;
+            AddNetworkGroup(ds, name, sCube!, z0, fromScattering: true);
+            any = true;
+        }
+        return any;
+    }
+
+    /// <summary>
+    /// Materializes <c>wsp_ymatrix</c> over an ordered probe set as a virtual network group, if it
+    /// is not already there. On demand for the same reason the pair blocks are: a set is what the
+    /// card's ordered multi-select names, and the number of sets is not bounded by anything.
+    /// </summary>
+    public static bool EnsureWspProbeSetGroup(DataSet? ds, string analysisGroup, IReadOnlyList<string> labels)
+    {
+        if (ds is null || labels.Count == 0) return false;
+
+        string wspSpec = WspSource.WspCubeSpec(analysisGroup);
+        if (!ds.Contains(wspSpec)) return false;
+
+        string name = ProbeSetYGroup(analysisGroup, labels);
+        if (ds.Groups.Contains(name)) return true;
+        if (!WspSource.TrySetYMatrix(ds, wspSpec, labels, out var yCube, out _)) return false;
+
+        AddNetworkGroup(ds, name, yCube!, ReferenceOf(ds, analysisGroup), fromScattering: false);
+        return true;
+    }
+
+    /// <summary>
+    /// One virtual network group from either an S or a Y cube: <c>S</c>, <c>Y</c>, <c>Z</c> and a
+    /// per-port <c>Z0</c>, all at the analysis group's own reference so a circle read off a block
+    /// and one read off the run agree about what 50 ohms is.
+    ///
+    /// <para><b>The cube it was GIVEN is filed unconverted.</b> A library function returns exactly
+    /// one of these two matrices — <c>wsp_block_breakout</c> returns S, <c>wsp_ymatrix</c> returns Y
+    /// — and round-tripping that one through the other loses the last few digits for nothing. A test
+    /// comparing the group against the library call would then fail on the very quantity the group
+    /// exists to expose, and the only fix available to it would be a tolerance.</para>
+    /// </summary>
+    private static void AddNetworkGroup(DataSet ds, string name, DataCube cube, Complex z0, bool fromScattering)
+    {
+        int nPorts = cube.Axes[^1].Length;
+        var z0PerPort = Enumerable.Repeat(z0, nPorts).ToArray();
+        var sCube = fromScattering ? cube : WspSource.ScatteringOf(cube, z0);
+
+        ds.AddToGroup(name, "S", sCube);
+        ds.AddToGroup(name, "Y", fromScattering
+            ? NetworkMetrics.ConvertSCube(sCube, z0PerPort, MatrixType.Y)
+            : cube);
+        ds.AddToGroup(name, "Z", NetworkMetrics.ConvertSCube(sCube, z0PerPort, MatrixType.Z));
+        ds.AddToGroup(name, NetworkMetrics.Z0CubeName,
+                      new DataCube([new Axis("port", [.. Enumerable.Range(1, nPorts).Select(k => (double)k)])],
+                                   z0PerPort));
     }
 
     /// <summary>The analysis group's own port-1 reference, else 50 ohms — real, because every

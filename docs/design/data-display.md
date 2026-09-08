@@ -683,3 +683,15 @@ resize handle auto-fits the column.
   analysis groups so `FindCubeSpec` still answers with the run's own `S` — which is what makes µ, K,
   |Δ|, MAG/MSG and the stability circles apply to the reduction through the code that already
   computes them.
+
+  **The stability ENVELOPE and the rest of the virtual network groups landed 2026-09-08**, completing
+  the brief. The Envelope sub-card takes a source probe, a load probe and a suspect probe with a
+  **ladder** of `|Γ|` per side and one θ step, and offers `1/H0env`, `1/Y0env`, the unstable-frequency
+  count, `SMenv` and `NDFenc` — all five straight out of `WspEnvelope`, which reaches every one of
+  them by a rank-1 update of `wsp` rather than by re-simulating. Its cube carries four grid axes
+  (`rhoS`, `thetaS`, `rhoL`, `thetaL`) with **θ in degrees**, so `SMenv` against phase with one curve
+  per rung is [E] Fig. 6–9 through the family mechanism that already exists. The same virtual-network
+  mechanism now also carries a probe PAIR's four two-ports (`inner`/`feedback` block, and their
+  in-situ renormalised design forms) and `wsp_ymatrix` over an ordered probe set — the pair blocks on
+  demand when the card's "with probe" picker names the pair, because N probes have N(N−1) ordered
+  pairs. Detail and the traps in `trace-card.md` §9a and `src/Render/RESOLVED.md`.

@@ -132,6 +132,69 @@ public sealed class WsProbePlotVerbTests(ITestOutputHelper output) : IDisposable
         Assert.DoesNotContain(thresholdAlpha, plainText);
     }
 
+    // ══ the stability envelope (R-wsp4-9) ════════════════════════════════════
+
+    /// <summary>
+    /// The envelope's own spelling — <c>src=</c>/<c>load=</c> with a <c>|Γ|</c> LADDER and a θ step
+    /// — writes the same document the Envelope sub-card writes and renders to the same bytes. This
+    /// is the only quantity in the series whose cube is not shaped over the run's own axes, so it is
+    /// also the one place a second slice could have been authored without anyone noticing.
+    /// </summary>
+    [Fact]
+    public void AnEnvelopePlot_IsTheSameBytesAsRenderingTheDisplayItBuilt()
+    {
+        string dir = Dir("env");
+        string npy = ProbedRun(dir, "series_resonator_term.cnl");
+
+        string viaPlot   = Path.Combine(Dir("env-a"), "one.svg");
+        string viaRender = Path.Combine(Dir("env-b"), "one.svg");
+        string cdd       = Path.Combine(dir, "one.cdd");
+
+        var plot = RunCli("plot", npy, "-o", viaPlot, "--write-cdd", cdd,
+                          "--trace", "cube=wsp,probe=P,load=P,gammaL=0.9;0.875;0.874,"
+                                   + "theta=15,z0=50,metric=SMenv,y=db20",
+                          "--title", "margin envelope");
+        Assert.True(plot.ExitCode == 0, plot.StdErr + plot.StdOut);
+
+        var render = RunCli("render", cdd, "--data", npy, "-o", viaRender);
+        Assert.True(render.ExitCode == 0, render.StdErr + render.StdOut);
+        AssertSameBytes(viaPlot, viaRender);
+
+        var config = JsonSerializer.Deserialize<DataDisplayConfig>(File.ReadAllText(cdd))!;
+        var trace  = config.Tabs[0].Plots[0].Traces[0];
+        Assert.Equal(WspMetric.SMenv, trace.WsProbe!.Metric);
+        Assert.Equal("P", trace.WsProbe.LoadProbe);
+        Assert.Equal("",  trace.WsProbe.SourceProbe);
+        Assert.Equal([0.9, 0.875, 0.874], trace.WsProbe.GammaLMags);
+        Assert.Equal(15.0, trace.WsProbe.ThetaStepDeg);
+
+        // The slice is the ENVELOPE's own axes, and the x axis is the pulled side's PHASE — [E]
+        // Fig. 6-9's own axis. Slicing against the run's leading axes would have pinned `freq`,
+        // which this cube does not have, and left the grid axes unpinned.
+        Assert.Equal(["rhoS", "thetaS", "rhoL", "thetaL"],
+                     trace.CubeSlice.Select(a => a.AxisName).ToArray());
+        Assert.Equal(AxisRole.KeepAsX, trace.CubeSlice[3].Role);
+        Assert.All(trace.CubeSlice.Take(3), a => Assert.Equal(AxisRole.PinToIndex, a.Role));
+
+        // The margin's own reference lines are drawn under SMenv, because SMenv IS the margin.
+        Assert.Contains("stroke-opacity=\"0.27450982\"", File.ReadAllText(viaPlot));
+    }
+
+    /// <summary>A probe that is not directly at its termination is the library's own refusal,
+    /// forwarded by the verb rather than drawn as an empty picture.</summary>
+    [Fact]
+    public void AnEnvelopeOnAProbeNotAtItsTermination_IsRefusedWithTheLibrarysOwnText()
+    {
+        string dir = Dir("env-refuse");
+        string npy = ProbedRun(dir, "two_stage_terms.cnl");
+
+        var run = RunCli("plot", npy, "-o", Path.Combine(dir, "x.svg"),
+                         "--trace", "cube=wsp,probe=P3,src=P3,gammaS=0.5,theta=90,metric=SMenv");
+        output.WriteLine(run.StdErr + run.StdOut);
+        Assert.NotEqual(0, run.ExitCode);
+        Assert.Contains("envelope-probe-not-at-termination", run.StdErr + run.StdOut);
+    }
+
     // ══ the refusals ═════════════════════════════════════════════════════════
 
     /// <summary>A probe this run does not have is named, with the run's own list beside it — the

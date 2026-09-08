@@ -1537,6 +1537,12 @@ public partial class DataDisplayViewModel : ViewModelBase, IDisposable
                     Z0         = ComplexStringHelper.Format(w.Z0),
                     ActiveSide = w.ActiveSide,
                     SetIndex   = w.SetIndex,
+                    SourceProbe   = w.SourceProbe,
+                    LoadProbe     = w.LoadProbe,
+                    GammaSMags    = new List<double>(w.GammaSMags),
+                    GammaLMags    = new List<double>(w.GammaLMags),
+                    ThetaStepDeg  = w.ThetaStepDeg,
+                    PassiveSource = w.PassiveSource,
                 }
                 : null,
             CubeName      = t.CubeName,

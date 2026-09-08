@@ -115,6 +115,163 @@ public partial class TraceRowViewModel
     public bool ShowWspSet  => ShowWspSection && WspSpecGroup == WspMetricGroup.ProbeSet;
     public bool ShowWspZ0   => ShowWspSection && WspSpec is { } s && WspMetrics.UsesZ0(s.Metric);
 
+    /// <summary>The Envelope sub-card (R-wsp4-9): shown for the five quantities that are read off
+    /// the RE-TERMINATED circuit, and for nothing else.</summary>
+    public bool ShowWspEnvelope => ShowWspSection && WspSpecGroup == WspMetricGroup.Envelope;
+
+    // ── the Envelope sub-card ────────────────────────────────────────────────
+    //
+    //  Three probes and two ladders. The `probe` row above is the SUSPECT node — the one the pulled
+    //  circuit is read at — and these two are where the pulling happens; naming them apart is the
+    //  document's own §9 arrangement and it is what makes "a probe not at its termination" a
+    //  question that can be asked at all.
+
+    /// <summary>The probe rows plus an explicit OFF row at the top. A side is turned off by picking
+    /// that row, which is R-wsp4-9's "an off state" made a choice rather than an empty combo box
+    /// that reads as "not filled in yet".</summary>
+    public ObservableCollection<string> WspSideProbeItems { get; } = new();
+
+    /// <summary>The off row's text. Not a label any probe can have — a probe label comes from a
+    /// schematic instance name.</summary>
+    public const string WspSideOffItem = "(not pulled)";
+
+    private string? _selectedWspSourceItem;
+    public string? SelectedWspSourceItem
+    {
+        get => _selectedWspSourceItem;
+        set
+        {
+            if (_selectedWspSourceItem == value) return;
+            _selectedWspSourceItem = value;
+            OnPropertyChanged();
+            if (_syncingWsp || WspSpec is null) return;
+            WspSpec.SourceProbe = value == WspSideOffItem ? "" : LabelOfItem(value);
+            ApplyWspEdit();
+        }
+    }
+
+    private string? _selectedWspLoadItem;
+    public string? SelectedWspLoadItem
+    {
+        get => _selectedWspLoadItem;
+        set
+        {
+            if (_selectedWspLoadItem == value) return;
+            _selectedWspLoadItem = value;
+            OnPropertyChanged();
+            if (_syncingWsp || WspSpec is null) return;
+            WspSpec.LoadProbe = value == WspSideOffItem ? "" : LabelOfItem(value);
+            ApplyWspEdit();
+        }
+    }
+
+    /// <summary>
+    /// The source ladder as the card edits it: one <c>|ΓS|</c> per rung, comma separated.
+    ///
+    /// <para><b>A ladder rather than one magnitude, because that is the reading.</b> [E]'s own
+    /// <c>0.9, 0.875, 0.874</c> is three rungs on either side of the ρ at which encirclements first
+    /// appear, and the point of the card is to see all three at once rather than to re-run twice
+    /// and remember what the last picture looked like.</para>
+    /// </summary>
+    public string WspGammaSText
+    {
+        get => WspSpec is null ? "" : LadderText(WspSpec.GammaSMags);
+        set => SetLadder(value, s => s.GammaSMags, nameof(WspGammaSText));
+    }
+
+    /// <inheritdoc cref="WspGammaSText"/>
+    public string WspGammaLText
+    {
+        get => WspSpec is null ? "" : LadderText(WspSpec.GammaLMags);
+        set => SetLadder(value, s => s.GammaLMags, nameof(WspGammaLText));
+    }
+
+    private static string LadderText(IReadOnlyList<double> mags)
+        => string.Join(", ", mags.Select(m => m.ToString("0.####",
+                                                System.Globalization.CultureInfo.InvariantCulture)));
+
+    private void SetLadder(string? text, Func<WspTraceSpec, List<double>> pick, string propertyName)
+    {
+        if (WspSpec is not { } spec) return;
+        var wanted = new List<double>();
+        foreach (string tok in (text ?? "").Split(
+                     [',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            if (double.TryParse(tok, System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out double v))
+                wanted.Add(v);
+
+        var current = pick(spec);
+        if (wanted.SequenceEqual(current)) { OnPropertyChanged(propertyName); return; }
+        current.Clear();
+        current.AddRange(wanted);
+        OnPropertyChanged(propertyName);
+        ApplyWspEdit();
+    }
+
+    /// <summary>The angular step of both Γ grids, in degrees.</summary>
+    public double WspThetaStepDeg
+    {
+        get => WspSpec?.ThetaStepDeg ?? 15.0;
+        set
+        {
+            if (WspSpec is null) return;
+            double v = value;
+            if (!(v > 0.0) || v > 360.0 || double.IsNaN(v)) { OnPropertyChanged(); return; }
+            if (v == WspSpec.ThetaStepDeg) return;
+            WspSpec.ThetaStepDeg = v;
+            OnPropertyChanged();
+            ApplyWspEdit();
+        }
+    }
+
+    /// <summary>Which cube of this source the NDF is taken against — a second analysis of the same
+    /// netlist, run with its devices passivated. Blank reads the <c>wsp_passive</c> beside this
+    /// group's own <c>wsp</c>, which is what WSP-6 will emit.</summary>
+    public string WspPassiveText
+    {
+        get => WspSpec?.PassiveSource ?? "";
+        set
+        {
+            if (WspSpec is null) return;
+            string v = (value ?? "").Trim();
+            if (v == WspSpec.PassiveSource) { OnPropertyChanged(); return; }
+            WspSpec.PassiveSource = v;
+            OnPropertyChanged();
+            ApplyWspEdit();
+        }
+    }
+
+    /// <summary>Only <c>NDFenc</c> reads the passivated run; the field is hidden rather than shown
+    /// inert beside the four quantities that do not.</summary>
+    public bool ShowWspPassive => ShowWspEnvelope && WspSpec?.Metric == WspMetric.NDFenc;
+
+    /// <summary>
+    /// How many terminations this card is asking for, counted before anything is computed — the one
+    /// number that decides whether the grid is a second or a minute. Each grid point is a rank-1
+    /// update per frequency, so the cost is the product of the two sides and the sweep.
+    /// </summary>
+    public string WspEnvelopeGridText
+    {
+        get
+        {
+            if (WspSpec is not { } spec) return "";
+            int nT = WspMetrics.ThetaCount(spec.ThetaStepDeg);
+            string Side(string name, string probe, IReadOnlyList<double> mags)
+                => probe.Length == 0 || mags.Count == 0 || (mags.Count == 1 && mags[0] == 0.0)
+                    ? $"{name} not pulled"
+                    : $"{name} {mags.Count} \u00d7 {nT}";
+            int nS = Count(spec.SourceProbe, spec.GammaSMags, nT);
+            int nL = Count(spec.LoadProbe,   spec.GammaLMags, nT);
+            return $"{Side("source", spec.SourceProbe, spec.GammaSMags)}, "
+                 + $"{Side("load", spec.LoadProbe, spec.GammaLMags)} \u2014 {nS * nL} terminations";
+
+            static int Count(string probe, IReadOnlyList<double> mags, int nT)
+                => probe.Length == 0 || mags.Count == 0 || (mags.Count == 1 && mags[0] == 0.0)
+                    ? 1
+                    : mags.Count * nT;
+        }
+    }
+
     // ── Z0, side, set index ──────────────────────────────────────────────────
 
     /// <summary>The reference the circulator, pair and Ohtomo metrics normalise by. Blank means
@@ -222,9 +379,83 @@ public partial class TraceRowViewModel
     /// One place, so a control added later cannot forget half of it.</summary>
     private void ApplyWspEdit()
     {
+        EnsureWspVirtualGroups();
         _trace.Expression = _trace.BuildPickerExpression();
+        SyncWspSlice();
         _parent.RebuildAndNotify();
         RefreshDescription();   // itself refreshes this section — see RefreshDescription
+    }
+
+    /// <summary>
+    /// Materializes the virtual NETWORK groups the pair and set pickers enable (R-wsp4-6's second
+    /// half): the four two-ports a probe pair brackets, and <c>wsp_ymatrix</c> over an ordered set.
+    ///
+    /// <para><b>Picking the pair is what creates them, and that is the design.</b> A run with N
+    /// probes has N(N-1) ordered pairs and four blocks each; materializing all of them so they could
+    /// be browsed would be thousands of cubes on the 30-probe matrices §8's NDF work contemplates.
+    /// The brief's own sentence is "a second picker enables the pair group" — so the picker is the
+    /// gesture, and <see cref="DataSourceView.EnsureWspPairBlockGroups"/> is idempotent, so
+    /// changing the pair adds the new blocks and leaves the old ones (which are still true).</para>
+    /// </summary>
+    private void EnsureWspVirtualGroups()
+    {
+        if (WspSpec is not { } spec || _trace.CubeName is not { } cn) return;
+        if (ResolveTraceSourceEntry()?.Data is not { } ds) return;
+
+        string group = WspSource.GroupOf(cn);
+        bool added = false;
+        if (spec.With.Length > 0 && spec.Probe.Length > 0)
+            added |= DataSourceView.EnsureWspPairBlockGroups(ds, group, spec.Probe, spec.With);
+        if (spec.Set.Count > 0)
+            added |= DataSourceView.EnsureWspProbeSetGroup(ds, group, spec.Set);
+
+        // The item picker lists a source's GROUPS, so a group that appeared after it was built is a
+        // group nobody can select. Rebuilding it is what puts the blocks in front of the reader who
+        // just asked for the pair.
+        if (added) RebuildSignals();
+    }
+
+    /// <summary>
+    /// Re-authors the trace's slice when the metric it now draws has DIFFERENT axes from the one it
+    /// drew before.
+    ///
+    /// <para>Every ordinary probe metric is shaped over the run's own leading axes, which is what
+    /// the item picker's slice is built from. An ENVELOPE metric is not: it carries four grid axes
+    /// of its own (<c>rhoS</c>, <c>thetaS</c>, <c>rhoL</c>, <c>thetaL</c>) and <c>SMenv</c> has no
+    /// frequency axis at all. A slice authored against the old axes would pin axes the cube does not
+    /// have and leave its own unpinned — which draws the first grid point and calls it the
+    /// answer.</para>
+    ///
+    /// <para>Matched by NAME and only when the names differ, so an ordinary edit (a different probe,
+    /// a new Z0) leaves a slice the reader has arranged exactly as it was.</para>
+    /// </summary>
+    private void SyncWspSlice()
+    {
+        if (WspSpec is not { } spec || _trace.CubeName is not { } cn) return;
+        if (ResolveTraceSourceEntry()?.Data is not { } ds) return;
+        if (!WspSource.TryEvaluate(ds, cn, spec, out var cube, out _) || cube is null) return;
+
+        var want = cube.Axes.Select(a => a.Name).ToArray();
+        var have = _trace.Slice?.Select(s => s.AxisName).ToArray() ?? [];
+        if (want.SequenceEqual(have)) return;
+
+        var axes = cube.Axes.ToArray();
+        _trace.Slice = BuildDefaultSlice(axes, DefaultEnvelopeXAxis(axes));
+        RebuildAxisRoles();
+    }
+
+    /// <summary>
+    /// Which axis a freshly re-authored probe slice keeps as X: the frequency axis when there is
+    /// one, otherwise the pulled side's θ — because [E] Fig. 6-9 plot the margin envelope AGAINST
+    /// PHASE, and a length-1 axis is not a phase sweep.
+    /// </summary>
+    private static int DefaultEnvelopeXAxis(RfCore.Data.Axis[] axes)
+    {
+        for (int d = 0; d < axes.Length; d++)
+            if (axes[d].Name is "freq" or "ssfreq") return d;
+        for (int d = 0; d < axes.Length; d++)
+            if (axes[d].Name is "thetaS" or "thetaL" && axes[d].Length > 1) return d;
+        return DefaultXAxis(axes);
     }
 
     /// <summary>
@@ -250,6 +481,13 @@ public partial class TraceRowViewModel
                 foreach (string s in items) WspProbeItems.Add(s);
                 _wspProbeLabels.Clear();
                 _wspProbeLabels.AddRange(labels);
+
+                // The two envelope sides carry the same rows plus an explicit "not pulled" one at the
+                // top, so turning a side off is a choice on the same control rather than a second
+                // checkbox beside it.
+                WspSideProbeItems.Clear();
+                WspSideProbeItems.Add(WspSideOffItem);
+                foreach (string s in items) WspSideProbeItems.Add(s);
             }
 
             if (WspSpec is { } spec)
@@ -259,15 +497,23 @@ public partial class TraceRowViewModel
                 // which is more use than silently re-pointing the trace at whatever is first.
                 _selectedWspProbeItem = ItemOfLabel(spec.Probe) is { Length: > 0 } pi ? pi : null;
                 _selectedWspWithItem  = ItemOfLabel(spec.With)  is { Length: > 0 } wi ? wi : null;
+                _selectedWspSourceItem = spec.SourceProbe.Length == 0
+                    ? WspSideOffItem
+                    : ItemOfLabel(spec.SourceProbe) is { Length: > 0 } si ? si : null;
+                _selectedWspLoadItem = spec.LoadProbe.Length == 0
+                    ? WspSideOffItem
+                    : ItemOfLabel(spec.LoadProbe) is { Length: > 0 } li ? li : null;
                 _wspReadout = ds is not null
                     ? WspReadouts.For(_trace, ds, _parent.PlotType)
                     : null;
             }
             else
             {
-                _selectedWspProbeItem = null;
-                _selectedWspWithItem  = null;
-                _wspReadout           = null;
+                _selectedWspProbeItem  = null;
+                _selectedWspWithItem   = null;
+                _selectedWspSourceItem = null;
+                _selectedWspLoadItem   = null;
+                _wspReadout            = null;
             }
         }
         catch
@@ -285,6 +531,15 @@ public partial class TraceRowViewModel
         OnPropertyChanged(nameof(ShowWspWith));
         OnPropertyChanged(nameof(ShowWspSet));
         OnPropertyChanged(nameof(ShowWspZ0));
+        OnPropertyChanged(nameof(ShowWspEnvelope));
+        OnPropertyChanged(nameof(ShowWspPassive));
+        OnPropertyChanged(nameof(SelectedWspSourceItem));
+        OnPropertyChanged(nameof(SelectedWspLoadItem));
+        OnPropertyChanged(nameof(WspGammaSText));
+        OnPropertyChanged(nameof(WspGammaLText));
+        OnPropertyChanged(nameof(WspThetaStepDeg));
+        OnPropertyChanged(nameof(WspPassiveText));
+        OnPropertyChanged(nameof(WspEnvelopeGridText));
         OnPropertyChanged(nameof(WspZ0Text));
         OnPropertyChanged(nameof(WspActiveSide));
         OnPropertyChanged(nameof(WspSetIndex));

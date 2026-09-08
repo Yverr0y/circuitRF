@@ -23000,12 +23000,41 @@ rect plot draws the line the RUN judged against rather than the published defaul
 edit this brief made outside `src/Ui`/`src/Render`; it is additive, and a source written before it
 simply leaves the threshold line off while the −12 dB floor — arithmetic, not a setting — still draws.
 
-### Not built: the Envelope sub-card (R-wsp4-9)
+### The Envelope sub-card (R-wsp4-9) — built 2026-09-08, in a second pass
 
-Everything else in the brief landed. The envelope card — the `|ΓS|`/`|ΓL|` ladders, the θ step, the
-two families of pulled loci, the θS × θL stability map, `SMenv` and the NDF step overlay — is a
-second feature of comparable size to the rest of the brief and is deliberately absent rather than
-half-present. **Its library half is complete and reachable today**: `wsp_loadpull`,
-`wsp_loadpull_unstable`, `wsp_loadpull_margin`, `wsp_loadpull_margin_env`, `wsp_loadpull_ndf` and
-`wsp_loadpull_ndf_enc` all evaluate in a `measure` line and in the expression engine (WSP-3, WSP-9),
-so the numbers exist headlessly; what is missing is the card that authors them.
+The entry that stood here said the envelope card was deliberately absent, and named its library half
+as complete and reachable. It is built now, together with the half of R-wsp4-6 the same pass had left
+out: the probe-pair blocks and `wsp_ymatrix` as **network sources**. The value production, the grid
+reshape and the four traps found there are in `src/Render/RESOLVED.md`; what follows is what `src/Ui`
+learned.
+
+**The Envelope sub-card is THREE probes, and the extra two are on the card rather than in the item
+picker.** The `probe` row that every other metric uses is the SUSPECT node — where the pulled circuit
+is read — and `source`/`load` are where the pulling happens. Keeping them apart is §9's own
+arrangement and it is what makes "this probe is not at its termination" a question that can be asked
+at all; a single probe row would have had nothing to check the precondition against.
+
+**Each side is turned off by an explicit `(not pulled)` row, not by an empty combo.** An empty
+selection reads as "not filled in yet", which is a different state from "deliberately unpulled" and
+the two produce the same picture. The ladder box has the same rule from the other direction: blank or
+a single `0` is off, while a `0` rung BESIDE others is kept, because there it is the matched
+termination the rest are read against.
+
+**A ladder, not a magnitude.** [E]'s own `0.9, 0.875, 0.874` is three rungs either side of the ρ at
+which encirclements first appear; the point of the card is to see all three at once rather than to
+re-run twice and remember what the last picture looked like.
+
+**The card counts the terminations before anything is computed.** Every grid point is a rank-1 update
+per frequency and the two sides multiply, so `3 × 24` on one side against `3 × 24` on both is 72
+versus 5,184 — a difference between a second and a minute that nothing else on the card would have
+shown. The line beside the θ step is that count.
+
+**The refusal shows through `SpecError`, which is the card's existing error line.** R-wsp4-9 asks for
+`wsprobe.envelope-probe-not-at-termination` "on the card with its text", and `WspSource`'s failure
+already becomes `Trace.ExpressionError`, which that line renders verbatim. A second copy of the same
+sentence inside the Envelope sub-card would be noise on the one card most likely to produce it.
+
+**Picking the pair is what creates the block groups, so the signal list has to be rebuilt.** The item
+picker lists a source's GROUPS, and a group that appears after it was built is a group nobody can
+select — `EnsureWspVirtualGroups` calls `RebuildSignals()` only when something was actually added, so
+an ordinary edit does not churn the list under the reader.
