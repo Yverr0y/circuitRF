@@ -1,3 +1,4 @@
+using CircuitRF.Core.Devices;
 using CircuitRF.Core.Design;
 using CircuitRF.Core.Elaboration;
 using CircuitRF.Core.Netlist;
@@ -669,6 +670,14 @@ internal static class Check
         {
             foreach (var w in nl.Warnings) f.Add(CliDiagnostics.CheckElaborationWarning(path, w));
             foreach (var n in nl.Notes)    f.Add(CliDiagnostics.CheckElaborationNote(path, n));
+
+            // R-wsp1-12(b): a WSProbe with one net on both terminals. The GUI's own series-probe
+            // insertion cut prevents this for a drawn probe; this is its headless twin.
+            foreach (var ec in nl.Components)
+                if (ec.Model is WSProbeModel && ec.Nodes.Length >= 2 && ec.Nodes[0] == ec.Nodes[1])
+                    f.Add(CliDiagnostics.CheckWsProbeShorted(
+                        path, ec.InstancePath,
+                        ec.Nodes[0] < nl.Nodes.Count ? nl.Nodes.NameOf(ec.Nodes[0]) : $"node {ec.Nodes[0]}"));
 
             // Will anything dispatch? Two questions, and only the second one uses ChainSelector.
             //

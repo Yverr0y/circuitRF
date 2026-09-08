@@ -26,7 +26,7 @@ namespace CircuitRF.Core.Devices;
 /// dead short across the tank and stamps Gmax; R &lt; 0 stamps a negative conductance with its sign.
 /// Both warn once per instance, not once per frequency point.</para>
 /// </summary>
-public sealed class ParallelRlcModel : ComponentModel, IInductiveBranch
+public sealed class ParallelRlcModel : ComponentModel, IReportsWarnings, IInductiveBranch
 {
     public override int       PortCount => 2;
     public override ModelKind Kind      => ModelKind.Linear;
@@ -36,6 +36,17 @@ public sealed class ParallelRlcModel : ComponentModel, IInductiveBranch
 
     // Deduplication: warn once per component instance, not once per frequency point.
     private bool _warnedR;
+
+    // Queued rather than printed — see ResistorModel for why; drained by the engine after each stamp.
+    private readonly List<(string Key, string Message)> _pending = [];
+
+    public IReadOnlyList<(string Key, string Message)> DrainWarnings()
+    {
+        if (_pending.Count == 0) return [];
+        var drained = _pending.ToArray();
+        _pending.Clear();
+        return drained;
+    }
 
     public override void Stamp(IMnaContext mna, ElaboratedComponent c, double omega)
     {
@@ -51,10 +62,10 @@ public sealed class ParallelRlcModel : ComponentModel, IInductiveBranch
         {
             if (!_warnedR)
             {
-                Console.Error.WriteLine(
-                    $"[circuitRF] PRLC:{c.InstancePath}: R=0 Ω — a short across the whole element; " +
+                _pending.Add(($"prlc.short:{c.InstancePath}",
+                    $"PRLC:{c.InstancePath}: R=0 Ω — a short across the whole element; " +
                     $"stamping Gmax={ResistorModel.DefaultGmax:G4} S and proceeding. " +
-                    "(Set R to a large value for a low-loss tank.)");
+                    "(Set R to a large value for a low-loss tank.)"));
                 _warnedR = true;
             }
             g = ResistorModel.DefaultGmax;
@@ -63,9 +74,9 @@ public sealed class ParallelRlcModel : ComponentModel, IInductiveBranch
         {
             if (!_warnedR)
             {
-                Console.Error.WriteLine(
-                    $"[circuitRF] PRLC:{c.InstancePath}: R={r:G4} Ω < 0 — non-physical/active element; " +
-                    "stamping 1/R with its sign and proceeding.");
+                _pending.Add(($"prlc.negative:{c.InstancePath}",
+                    $"PRLC:{c.InstancePath}: R={r:G4} Ω < 0 — non-physical/active element; " +
+                    "stamping 1/R with its sign and proceeding."));
                 _warnedR = true;
             }
             g = 1.0 / r;   // negative conductance — intentional

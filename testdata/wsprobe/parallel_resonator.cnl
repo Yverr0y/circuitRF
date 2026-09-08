@@ -1,0 +1,11 @@
+; parallel_resonator.cnl — the document's Fig. 34 (Eq. 119–128): a parallel unstable resonator.
+; G side R1 || L1 || C1 to ground; L side RS to ground. NO PORTS.
+; R1 = -5 Ohm, NOT the series fixture's -20: a parallel negative resistance starts up only when its
+; conductance exceeds the load's (|R1| < RS). With -20 Ohm against 10 Ohm, Re(1/H0) = -1/20 + 1/10 > 0
+; and the Kurokawa signature is absent — the circuit is stable (src/Engine/RESOLVED.md, WSP-1).
+R:R1        nG 0   R=-5 Ohm
+L:L1        nG 0   L=1 nH
+C:C1        nG 0   C=10 pF
+WSProbe:P   nG nL
+R:RS        nL 0   R=10 Ohm
+analysis SP1 type=sparam start=0.5 stop=3 npts=251 Unit=GHz

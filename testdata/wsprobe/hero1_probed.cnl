@@ -1,0 +1,37 @@
+; hero1_probed.cnl — Hero 1 with two WSProbes, for the identity, non-perturbation, cross-term,
+; sweep, parallel and counter gates of brief-wsprobe-1 R-wsp1-14(e)–(l).
+; P1 sits at the SnP's port 1 (G = a1, toward Term1; L = x1, the device); P2 at its port 2
+; (G = x2, the device; L = a2, toward Term2). A probe has feedback around it only when a path joins
+; its two sides other than through the probe: here C5 (a1–a2) plus the two-port closes a loop
+; around each, so y12 != 0 at both. The brief's placement — between L1 and a1 — leaves the G side
+; a dangling one-port (L1 + Term1 to ground) with NO path around the probe, and there ZG = 1/YG
+; exactly (src/Engine/RESOLVED.md, WSP-1).
+R3v = 200
+
+Port:Term1  p1 0  Num=1 Z=50 Ohm
+Port:Term2  p2 0  Num=2 Z=50 Ohm
+Port:Term3  p3 0  Num=3 Z=50 Ohm
+Port:Term4  p4 0  Num=4 Z=50 Ohm
+
+L:L1   p1   a1   L=3.3 nH
+C:C1   a1   0    C=1.5 pF
+
+WSProbe:P1  a1 x1
+SnP:X1  x1 x2  NumPorts=2 File="../Hero1/potentially_unstable_amp.s2p" Type="touchstone" InterpMode="linear" InterpDomain="RI" ExtrapMode="clamp"
+WSProbe:P2  x2 a2
+
+L:L2   a2   p2   L=2.7 nH
+C:C2   p2   0    C=1.0 pF
+
+C:C3   p3   a1   C=1.5 pF
+R:R3   p3   0    R=R3v
+
+L:L4   p4   a2   L=1.8 nH
+R:R4   p4   0    R=150 Ohm
+
+C:C5   a1   a2   C=0.2 pF
+
+analysis SP1 type=sparam start=1 stop=3 npts=41 Unit=GHz
+measure ZGg = SP1.ZG("P1")
+measure h   = SP1.wsp(2, 2)
+measure ix  = SP1.idx("P2")

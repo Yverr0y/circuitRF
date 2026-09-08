@@ -29,7 +29,7 @@ and it is gated by the same firewall test. That is what the `em` verb (§8) runs
 
 | Verb | Input | Runs | Writes |
 |---|---|---|---|
-| `sparam` | `.cnl` or `.csch` | `SParameterEngine` | Touchstone `.sNp` by default; `-o`'s extension picks the format (`.sNp`, or `.npy`/`.mat`/`.txt` for the cubes) |
+| `sparam` | `.cnl` or `.csch` | `SParameterEngine` | Touchstone `.sNp` by default; `-o`'s extension picks the format (`.sNp`, or `.npy`/`.mat`/`.txt` for the cubes). With a `WSProbe` in the netlist it also prints one line per probe (`WSProbe GATE idx=1 H0(f_lo)=… ZG(f_lo)=…`), evaluates the bench's `measure` lines, carries `wsprobes: [{label, idx}]` in `--json`, and — a probe with no port being legal — refuses a Touchstone of a run that has no `S`, naming the cube spellings (`docs/design/stability-wsprobe.md` §3) |
 | `dc` | `.cnl` or `.csch` | `NonlinearDcEngine` | node voltages + probe currents to stdout |
 | `hb` | `.cnl` or `.csch` | `HbEngine` (single- or multi-tone) | stdout tables; `-o .mat/.npy/.txt` |
 | `lp` | `.cnl` or `.csch` | `LoadpullEngine` + `LoadpullPostProcessor` | stdout grid table; `-o .mat/.npy/.txt/.spl/.lpcwave` |

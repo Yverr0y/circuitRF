@@ -9,6 +9,7 @@ using CSparse.Complex.Factorization;
 using NumFlat;
 using RfCore;
 using RfCore.Data;
+using RfCore.Stability;
 
 namespace CircuitRF.Engine;
 
@@ -53,10 +54,35 @@ public static class SParameterEngine
     {
         settings ??= AnalysisSettings.Default;
 
+        return RunWithStats(netlist, freqsHz, settings, control).Data;
+    }
+
+    /// <summary>
+    /// The work a run did, as COUNTS: how many factorisations and how many back-substitutions.
+    /// Exposed for the WSProbe gate (brief-wsprobe-1 R-wsp1-14(l)): "one factorisation per
+    /// frequency, and <c>N_ports + 2·N_probes</c> solves against it" is a structural property, and a
+    /// count holds it where a timing would only measure the machine (owner rule, 2026-08-23).
+    /// </summary>
+    public sealed record RunStats(int Factorizations, int BackSubstitutions, int PatternBuilds);
+
+    /// <summary>The serial sweep, with its <see cref="RunStats"/>. What <see cref="Run(ElaboratedNetlist, double[], AnalysisSettings?, RunControl?)"/> calls.</summary>
+    public static (DataSet Data, RunStats Stats) RunWithStats(
+        ElaboratedNetlist netlist,
+        double[]          freqsHz,
+        AnalysisSettings? settings = null,
+        RunControl?       control  = null)
+    {
+        settings ??= AnalysisSettings.Default;
+
         var prep      = Prepare(netlist, freqsHz, settings);
         var sMatrices = new Mat<Complex>[freqsHz.Length];
-        RunRange(prep, freqsHz, settings, 0, freqsHz.Length, sMatrices, control, abort: null);
-        return BuildDataSet(freqsHz, sMatrices, prep.Z0PerPort);
+        var wsp       = prep.Probes.Length > 0 ? new Complex[freqsHz.Length][,] : null;
+        RunRange(prep, freqsHz, settings, 0, freqsHz.Length, sMatrices, wsp, control, abort: null);
+        var stats = new RunStats(
+            prep.Mna.Factorizations + (prep.MnaTerminated?.Factorizations ?? 0),
+            prep.BackSubstitutions,
+            prep.Mna.PatternBuilds);
+        return (BuildDataSet(netlist, freqsHz, sMatrices, prep.Z0PerPort, prep.Probes, wsp), stats);
     }
 
     // ── Frequency-parallel overload (SP-P3) ───────────────────────────────────
@@ -107,6 +133,9 @@ public static class SParameterEngine
         var sMatrices = new Mat<Complex>[freqCount];
         var preps     = new Prepared[degree];
         var extras    = new ElaboratedNetlist?[degree - 1];
+        // The wsp matrices, one per frequency, written by index exactly as the S matrices are — so
+        // a parallel run's wsp is bit-identical to the serial one for the same reason its S is.
+        var wsp       = netlist.WspProbes.Count > 0 ? new Complex[freqCount][,] : null;
 
         try
         {
@@ -131,7 +160,7 @@ public static class SParameterEngine
                 var (lo, hi) = ChunkRange(freqCount, degree, c);
                 try
                 {
-                    RunRange(preps[c], freqsHz, settings, lo, hi, sMatrices, control, abort);
+                    RunRange(preps[c], freqsHz, settings, lo, hi, sMatrices, wsp, control, abort);
                 }
                 catch (Exception ex)
                 {
@@ -150,7 +179,7 @@ public static class SParameterEngine
             for (int i = 0; i < extras.Length; i++)
                 if (extras[i] is { } copy) netlist.MergeDiagnosticsFrom(copy);
 
-            return BuildDataSet(freqsHz, sMatrices, preps[0]!.Z0PerPort);
+            return BuildDataSet(netlist, freqsHz, sMatrices, preps[0]!.Z0PerPort, preps[0]!.Probes, wsp);
         }
         finally
         {
@@ -209,13 +238,98 @@ public static class SParameterEngine
         return (lo, hi);
     }
 
-    private static DataSet BuildDataSet(double[] freqsHz, Mat<Complex>[] sMatrices, Complex[] z0PerPort)
+    private static DataSet BuildDataSet(
+        ElaboratedNetlist netlist,
+        double[]          freqsHz,
+        Mat<Complex>[]   sMatrices,
+        Complex[]         z0PerPort,
+        WspProbeSite[]    probes,
+        Complex[][,]?     wsp)
     {
-        var refZ0 = z0PerPort.Length > 0 ? z0PerPort[0] : new Complex(50, 0);
-        var snp   = new SNP(freqsHz, sMatrices, MatrixType.S, MatrixFormat.RI, refZ0);
-        var ds    = DataSetBuilder.FromSnp(snp);            // S cube + uniform Z0 placeholder
-        ds.Add("Z0", DataSetBuilder.BuildZ0Cube(z0PerPort)); // overwrite with per-port truth
+        DataSet ds;
+        if (z0PerPort.Length > 0)
+        {
+            var refZ0 = z0PerPort[0];
+            var snp   = new SNP(freqsHz, sMatrices, MatrixType.S, MatrixFormat.RI, refZ0);
+            ds = DataSetBuilder.FromSnp(snp);                    // S cube + uniform Z0 placeholder
+            ds.Add("Z0", DataSetBuilder.BuildZ0Cube(z0PerPort)); // overwrite with per-port truth
+        }
+        else
+        {
+            // R-wsp1-6: a port-less run is legal when a probe is present — the document's own
+            // fixtures (Fig. 31, 34) have none. No S, no Z0; the wsp cubes go into an otherwise
+            // empty DataSet, and nothing downstream may assume S exists.
+            ds = new DataSet();
+        }
+
+        if (wsp is not null) AddWspCubes(ds, netlist, freqsHz, probes, wsp);
         return ds;
+    }
+
+    /// <summary>
+    /// The <c>wsp</c> matrix and the six default outputs per probe, as cubes (R-wsp1-10):
+    /// <c>wsp</c> over <c>{freq, row, col}</c> with 1-based integer <c>row</c>/<c>col</c> values so
+    /// the document's <c>wsp(r, c)</c> is <c>wsp[f, r, c]</c> with no index arithmetic between;
+    /// <c>H0:&lt;label&gt;</c> … <c>F:&lt;label&gt;</c> over <c>{freq}</c>, computed through
+    /// <see cref="WspReduction"/> — the same functions every derived metric calls, so a run's cube
+    /// and a trace card's function of the same probe are one implementation (overview D-2); and
+    /// <c>__WspProbes</c>, the label ↔ idx metadata, which a sweep passes through unstacked like
+    /// every <c>__</c> cube.
+    /// </summary>
+    private static void AddWspCubes(
+        DataSet ds, ElaboratedNetlist netlist, double[] freqsHz, WspProbeSite[] probes, Complex[][,] wsp)
+    {
+        int nf = freqsHz.Length, m = probes.Length, size = 2 * m;
+        var freqAxis = new Axis("freq", (double[])freqsHz.Clone(), "Hz");
+
+        var rc = new double[size];
+        for (int k = 0; k < size; k++) rc[k] = k + 1;
+        var rowAxis = new Axis("row", rc);
+        var colAxis = new Axis("col", (double[])rc.Clone());
+
+        var data = new Complex[nf * size * size];
+        for (int fi = 0; fi < nf; fi++)
+        {
+            var w = wsp[fi];
+            for (int r = 0; r < size; r++)
+            for (int c = 0; c < size; c++)
+                data[(fi * size + r) * size + c] = w[r, c];
+        }
+        ds.Add("wsp", new DataCube([freqAxis, rowAxis, colAxis], data));
+
+        for (int pi = 0; pi < m; pi++)
+        {
+            var probe = probes[pi];
+            var h0 = new Complex[nf]; var y0 = new Complex[nf];
+            var zg = new Complex[nf]; var zl = new Complex[nf];
+            var lg = new Complex[nf]; var f  = new Complex[nf];
+            int firstDegenerate = -1;
+            for (int fi = 0; fi < nf; fi++)
+            {
+                var d = WspReduction.Defaults(WspProbeQuad.Of(wsp[fi], probe.Idx));
+                h0[fi] = d.H0; y0[fi] = d.Y0; zg[fi] = d.ZG; zl[fi] = d.ZL; lg[fi] = d.LG; f[fi] = d.F;
+                if (d.Degenerate && firstDegenerate < 0) firstDegenerate = fi;
+            }
+            if (firstDegenerate >= 0)
+                netlist.AddWarningOnce($"wsprobe.degenerate-node:{probe.Label}",
+                    $"WSProbe '{probe.Label}': the reduced two-port is undefined at " +
+                    $"{freqsHz[firstDegenerate] / 1e9:G6} GHz (H0 = 0 is an exact short from the G " +
+                    $"node to ground; Y0 = 0 is an exact open in the probe branch). The affected " +
+                    $"outputs are NaN there; no epsilon was added to a denominator.");
+
+            ds.Add($"H0:{probe.Label}", new DataCube([freqAxis], h0) { Unit = "Ohm" });
+            ds.Add($"Y0:{probe.Label}", new DataCube([freqAxis], y0) { Unit = "S" });
+            ds.Add($"ZG:{probe.Label}", new DataCube([freqAxis], zg) { Unit = "Ohm" });
+            ds.Add($"ZL:{probe.Label}", new DataCube([freqAxis], zl) { Unit = "Ohm" });
+            ds.Add($"LG:{probe.Label}", new DataCube([freqAxis], lg));
+            ds.Add($"F:{probe.Label}",  new DataCube([freqAxis], f));
+        }
+
+        var pIdx   = new double[m];
+        var labels = new string[m];
+        for (int pi = 0; pi < m; pi++) { pIdx[pi] = pi; labels[pi] = probes[pi].Label; }
+        var idxVals = probes.Select(p => (double)p.Idx).ToArray();
+        ds.Add("__WspProbes", new DataCube([new Axis("probe", pIdx, "", labels)], idxVals));
     }
 
     // ── Per-netlist setup ─────────────────────────────────────────────────────
@@ -237,7 +351,28 @@ public static class SParameterEngine
         internal Func<int, string>  BranchNamer       = null!;
         internal bool               CanRetry;
         internal double[]?          DcNodeVoltages;
+
+        /// <summary>The WSProbes, in idx order. Empty for every unprobed run, and the emptiness is
+        /// what keeps such a run byte-identical (R-wsp1-12).</summary>
+        internal WspProbeSite[]     Probes            = [];
+
+        /// <summary>
+        /// The legacy path's TERMINATED assembly, built only when a probe is present there. The
+        /// document is explicit that the network the probes see is the terminated one (§4.2) — on
+        /// the wave path that is the assembly already on the stack, but a legacy port is a 0 V
+        /// driven branch, which is not a termination. Its own <see cref="MnaSystem"/> so the main
+        /// assembly's pattern cache is untouched.
+        /// </summary>
+        internal MnaSystem?         MnaTerminated;
+
+        /// <summary>Back-substitutions performed so far, for <see cref="RunStats"/>.</summary>
+        internal int                BackSubstitutions;
     }
+
+    /// <summary>One WSProbe as the engine addresses it: the component, the document's label and
+    /// idx, and its two nodes (G first). The branch index is read off the model at solve time,
+    /// because the wave and legacy assemblies number branches differently.</summary>
+    internal readonly record struct WspProbeSite(int ComponentIndex, string Label, int Idx, int GNode, int LNode);
 
     private static Prepared Prepare(
         ElaboratedNetlist netlist, double[] freqsHz, AnalysisSettings settings)
@@ -245,7 +380,17 @@ public static class SParameterEngine
         // ── Identify ports + build branch-label map ───────────────────────────
         int nonGroundNodes = netlist.Nodes.Count - 1;
         var (ports, branchLabels) = CollectPortsAndBranchLabels(netlist, nonGroundNodes, freqsHz);
-        if (ports.Count == 0)
+
+        // R-wsp1-2/R-wsp1-6: the probes, in the idx order the elaborator assigned. A port-less run is
+        // legal when there is at least one — the document's own fixtures have no ports.
+        var probes = netlist.WspProbes
+            .Select(w => new WspProbeSite(
+                w.ComponentIndex, w.Label, w.Idx,
+                netlist.Components[w.ComponentIndex].Nodes[0],
+                netlist.Components[w.ComponentIndex].Nodes[1]))
+            .ToArray();
+
+        if (ports.Count == 0 && probes.Length == 0)
             throw new InvalidOperationException(
                 "S-parameter analysis requires at least one Port, Term, or P1Tone component at the testbench top level. " +
                 "Place Term or P1Tone components (Num=1, Z=50 Ohm) directly in the testbench, not inside sub-cells.");
@@ -255,6 +400,16 @@ public static class SParameterEngine
 
         // Choose path once: wave path when every port Z0 has a positive real part.
         bool allPortsResistive = z0PerPort.All(z => z.Real > 1e-12);
+
+        // R-wsp1-4: on the legacy path the probe solves need every port terminated in its Z0, and a
+        // port with Z0 = 0 exactly cannot be — never a large-conductance stand-in.
+        if (probes.Length > 0 && !allPortsResistive)
+            foreach (var port in ports)
+                if (port.Z0 == Complex.Zero)
+                    throw new InvalidOperationException(
+                        $"wsprobe.port-short: port {port.PortNum} has Z0 = 0 and cannot be terminated " +
+                        $"for the WSProbe solves (the probes see the network with every port terminated " +
+                        $"in its Z0). Give the port a non-zero reference impedance.");
 
         // ── Build diagnostic namers (used when factorization fails) ───────────
         var nodeTouchers = new Dictionary<int, List<string>>(netlist.Nodes.Count);
@@ -339,6 +494,8 @@ public static class SParameterEngine
             BranchNamer       = branchNamer,
             CanRetry          = canRetry,
             DcNodeVoltages    = dcNodeVoltages,
+            Probes            = probes,
+            MnaTerminated     = probes.Length > 0 && !allPortsResistive ? new MnaSystem(nonGroundNodes) : null,
         };
     }
 
@@ -350,14 +507,15 @@ public static class SParameterEngine
         AnalysisSettings settings,
         int              lo,
         int              hi,
-        Mat<Complex>[]   sMatrices,
+        Mat<Complex>[]  sMatrices,
+        Complex[][,]?    wspOut,
         RunControl?      control,
         Func<bool>?      abort)
     {
         if (p.AllPortsResistive)
-            RunWavePath(p, freqsHz, settings, lo, hi, sMatrices, control, abort);
+            RunWavePath(p, freqsHz, settings, lo, hi, sMatrices, wspOut, control, abort);
         else
-            RunLegacyPath(p, freqsHz, settings, lo, hi, sMatrices, control, abort);
+            RunLegacyPath(p, freqsHz, settings, lo, hi, sMatrices, wspOut, control, abort);
     }
 
     // ── Wave path (Re(Z0) > 0 for every port) ─────────────────────────────────
@@ -368,7 +526,8 @@ public static class SParameterEngine
         AnalysisSettings settings,
         int              lo,
         int              hi,
-        Mat<Complex>[]   sMatrices,
+        Mat<Complex>[]  sMatrices,
+        Complex[][,]?    wspOut,
         RunControl?      control,
         Func<bool>?      abort)
     {
@@ -420,7 +579,8 @@ public static class SParameterEngine
                 lu = mna.Factorize(nodeNamer: nodeNamer, branchNamer: branchNamer);
             }
 
-            var sMatrix = new Mat<Complex>(N, N);
+            // N = 0 (a port-less probe run, R-wsp1-6): nothing to extract, and the entry stays default.
+            var sMatrix = N > 0 ? new Mat<Complex>(N, N) : default;
             if (xBuf.Length != mna.Size) { xBuf = new Complex[mna.Size]; bBuf = new Complex[mna.Size]; }
 
             for (int j = 0; j < N; j++)
@@ -437,6 +597,7 @@ public static class SParameterEngine
                 if (ports[j].Node1 > 0) b[ports[j].Node1 - 1] = -iInj;
 
                 lu.Solve(b, xBuf);
+                p.BackSubstitutions++;
 
                 // Extract S column j via Kurokawa power-wave formula.
                 // I_k = I_inj(k==j) − V_k/Z0_k  (port current: injection minus conductance draw)
@@ -452,7 +613,86 @@ public static class SParameterEngine
             }
 
             sMatrices[fi] = sMatrix;
+
+            // R-wsp1-3/R-wsp1-4: the probe injections, against the SAME factorisation — on this path
+            // the assembly on the stack is already the terminated network (every port stamps its
+            // 1/Z0, sources are off, nonlinear devices are linearised at the operating point).
+            if (wspOut is not null) wspOut[fi] = SolveProbes(p, lu, xBuf, bBuf);
         }
+    }
+
+    /// <summary>
+    /// The two injections per probe and the four readings per probe pair that fill the document's
+    /// <c>wsp</c> matrix (T. A. Winslow, <i>General Circuit Analysis Using The WSProbe</i> (2023),
+    /// §4.1, Eq. 31–36), against an already-factored terminated assembly: <c>2N</c>
+    /// back-substitutions and no factorisation, no stamping.
+    ///
+    /// <para>For probe <c>i</c> (branch <c>br_i</c>, G-side node <c>nG_i</c>), overview §3's
+    /// conventions:</para>
+    /// <code>
+    ///   series:  b = 0;  b[br_i]     = −1     unit vS with − at G, + at L  (the constraint row is
+    ///                                         V(nG) − V(nL) = value, so −1 gives v_L − v_G = 1)
+    ///   shunt:   b = 0;  b[nG_i − 1] = +1     unit iP INTO the G-side node
+    /// </code>
+    /// <para>and for every probe <c>j</c>, <c>iS_j = x[br_j]</c> (the branch current, which flows
+    /// G → L by the engine's own first-node → second-node convention) and <c>vP_j = x[nG_j − 1]</c>
+    /// (a grounded G node reads 0). Filled 1-based per Eq. 33 — rows are the STIMULUS probe,
+    /// columns the RESPONSE probe:</para>
+    /// <code>
+    ///   wsp(2i−1, 2j−1) = iS_j  of the series solve   (Y0_ij, Eq. 133)
+    ///   wsp(2i−1, 2j  ) = vP_j  of the series solve   (Eq. 135)
+    ///   wsp(2i  , 2j−1) = iS_j  of the shunt  solve   (Eq. 136)
+    ///   wsp(2i  , 2j  ) = vP_j  of the shunt  solve   (H0_ij, Eq. 131)
+    /// </code>
+    /// <para><b>The series-source sign is the one place a wrong guess survives every symmetric
+    /// test:</b> with −1 a zero-feedback cascade gives <c>vP/vS = −ZG/(ZG + ZL)</c> (Eq. 67, 69);
+    /// with +1 it gives the negative and ZG comes out negated. R-wsp1-14(a) holds it.</para>
+    /// </summary>
+    private static Complex[,] SolveProbes(Prepared p, SparseLU lu, Complex[] x, Complex[] b)
+    {
+        var probes = p.Probes;
+        var comps  = p.Netlist.Components;
+        int m      = probes.Length;
+
+        // The branch index of THIS assembly, read off the model after the stamp — the wave and
+        // legacy paths number branches differently, and a precomputed index would be the wrong one
+        // on one of them.
+        var br = new int[m];
+        for (int i = 0; i < m; i++)
+        {
+            br[i] = ((SeriesProbeModelBase)comps[probes[i].ComponentIndex].Model).LastBranchIndex;
+            if (br[i] < 0)
+                throw new InvalidOperationException(
+                    $"WSProbe '{probes[i].Label}' allocated no branch in the S-parameter assembly.");
+        }
+
+        var w = new Complex[2 * m, 2 * m];
+        for (int i = 0; i < m; i++)
+        {
+            int rs = 2 * i;       // 0-based row of the document's 2i−1 (series stimulus)
+            int rp = 2 * i + 1;   // 0-based row of the document's 2i   (shunt stimulus)
+
+            Array.Clear(b);
+            b[br[i]] = -Complex.One;
+            lu.Solve(b, x);
+            p.BackSubstitutions++;
+            for (int j = 0; j < m; j++)
+            {
+                w[rs, 2 * j]     = x[br[j]];
+                w[rs, 2 * j + 1] = probes[j].GNode > 0 ? x[probes[j].GNode - 1] : Complex.Zero;
+            }
+
+            Array.Clear(b);
+            if (probes[i].GNode > 0) b[probes[i].GNode - 1] = Complex.One;
+            lu.Solve(b, x);
+            p.BackSubstitutions++;
+            for (int j = 0; j < m; j++)
+            {
+                w[rp, 2 * j]     = x[br[j]];
+                w[rp, 2 * j + 1] = probes[j].GNode > 0 ? x[probes[j].GNode - 1] : Complex.Zero;
+            }
+        }
+        return w;
     }
 
     private static void StampPortConductances(MnaSystem mna, List<PortEntry> ports, int N)
@@ -476,7 +716,8 @@ public static class SParameterEngine
         AnalysisSettings settings,
         int              lo,
         int              hi,
-        Mat<Complex>[]   sMatrices,
+        Mat<Complex>[]  sMatrices,
+        Complex[][,]?    wspOut,
         RunControl?      control,
         Func<bool>?      abort)
     {
@@ -512,6 +753,7 @@ public static class SParameterEngine
 
             // ── Factorize: attempt 1 ──────────────────────────────────────────
             SparseLU lu;
+            bool regularized = false;
             try
             {
                 lu = mna.Factorize(nodeNamer: nodeNamer, branchNamer: branchNamer);
@@ -529,6 +771,7 @@ public static class SParameterEngine
                 ApplyRegularization(mna, netlist, nonGroundNodes, settings,
                     applyIfNecessary: true);
                 lu = mna.Factorize(nodeNamer: nodeNamer, branchNamer: branchNamer);
+                regularized = true;
             }
 
             // ── Extract port Y-matrix via unit-voltage excitation ─────────────
@@ -541,6 +784,7 @@ public static class SParameterEngine
                 mna.FillRhsWithPortDrive(b, branchRow: ports[j].BranchIndex, driveValue: Complex.One);
 
                 lu.Solve(b, xBuf);
+                p.BackSubstitutions++;
 
                 // Branch current flows FROM signal TO ref (AddBranchCurrent convention).
                 // Port current (INTO the + terminal) = −branch_current.
@@ -550,6 +794,26 @@ public static class SParameterEngine
 
             // ── Y → S via RfCore (power-wave, per-port complex Z0) ────────────
             sMatrices[fi] = RFNetwork.YToS(yMat, z0PerPort);
+
+            // ── The probe solves, against the TERMINATED network (R-wsp1-4) ───
+            // A legacy port is a 0 V driven branch, which is not a termination. The second
+            // assembly is the same stamp sequence — so every model's branch index and every SDD's
+            // resolved control branch are the ones this assembly has too — plus one diagonal entry
+            // per port branch, −Z0, which turns the constraint V(n0) − V(n1) = 0 into
+            // V(n0) − V(n1) − Z0·I = 0: the port terminated in its own Z0 with no drive. It is
+            // factored on its own MnaSystem, so the main assembly's pattern cache is untouched, and
+            // it takes the regularisation the main assembly needed at this frequency.
+            if (wspOut is not null)
+            {
+                var mnaT = p.MnaTerminated!;
+                StampAll(mnaT, netlist, omega, dcNodeVoltages: dcNodeVoltages);
+                for (int j = 0; j < N; j++)
+                    mnaT.AddBranchConstraint(ports[j].BranchIndex, ports[j].BranchIndex, -z0PerPort[j]);
+                ApplyRegularization(mnaT, netlist, nonGroundNodes, settings, applyIfNecessary: regularized);
+                var luT = mnaT.Factorize(nodeNamer: nodeNamer, branchNamer: branchNamer);
+                if (xBuf.Length != mnaT.Size) { xBuf = new Complex[mnaT.Size]; bBuf = new Complex[mnaT.Size]; }
+                wspOut[fi] = SolveProbes(p, luT, xBuf, bBuf);
+            }
         }
     }
 
@@ -708,7 +972,8 @@ public static class SParameterEngine
                 $"SDD '{sddName}': C[{n}]={target.InstancePath} is an ideal current source (I_1Tone/I_nTone): " +
                 $"its current is an input, not a solved unknown, so it has no branch to reference. " +
                 $"Put an IProbe in series with it and reference that instead."),
-            IProbeModel   probe => probe.LastBranchIndex,
+            // IProbe and WSProbe alike: a 0 V ammeter is a legitimate C[n]= reference.
+            SeriesProbeModelBase probe => probe.LastBranchIndex,
             // The ideal voltage-gain source — see the DC engine's own list for why.
             VcvsModel      vcvs => vcvs.LastBranchIndex,
             // L, SRLC and PRLC all carry their inductor current on a branch of their own — the
@@ -719,7 +984,7 @@ public static class SParameterEngine
             ZPortModel       zp => PortBranch(zp.PortBranchIndices, port),
             _ => throw new InvalidOperationException(
                 $"SDD '{sddName}': C[{n}]={target.InstancePath} references a '{target.ComponentType}' " +
-                $"which is not a referenceable device class (Vdc, VCVS, V_1Tone/V_nTone, IProbe, L, SRLC, PRLC, SnP, Z_Port).")
+                $"which is not a referenceable device class (Vdc, VCVS, V_1Tone/V_nTone, IProbe, WSProbe, L, SRLC, PRLC, SnP, Z_Port).")
         };
         if (br < 0)
             throw new InvalidOperationException(

@@ -228,6 +228,18 @@ internal static class CliDiagnostics
         ("path", path), ("extension", extension));
 
     /// <summary>
+    /// A Touchstone was asked for from a run that produced no S — a port-less WSProbe run
+    /// (brief-wsprobe-1 R-wsp1-6, R-wsp1-12(a)). Refused naming the spellings that DO carry the
+    /// result, because the run is not empty: its wsp cubes are exactly what a cube file holds.
+    /// </summary>
+    public static Diagnostic SparamNoSParameters(string path) => Diagnostic.Create(
+        "sparam.export.no-s-parameters",
+        DiagnosticSeverity.Error,
+        "sparam: the run has no S-parameters (no Port/Term — only WSProbe outputs), so there is no " +
+        "Touchstone to write for '{path}'. Write the cubes instead: -o out.npy, out.mat or out.txt.",
+        ("path", path));
+
+    /// <summary>
     /// An <c>--at</c> or a <c>--range</c> whose SPELLING is wrong. Refused before the run, which is
     /// the whole reason it is a separate diagnostic from the one below: the axis names cannot be
     /// checked until there is a result, but <c>--at freq</c> with no value can be, and there is no
@@ -900,6 +912,18 @@ internal static class CliDiagnostics
     public static Diagnostic CheckElaborationNote(string path, string text) => Diagnostic.Create(
         "check.elaboration.note", DiagnosticSeverity.Info,
         "{path}: {text}", ("path", path), ("text", text));
+
+    /// <summary>
+    /// A WSProbe whose two terminals are the same net (brief-wsprobe-1 R-wsp1-12(b)). In the GUI
+    /// the series-probe insertion cut makes this impossible for an IProbe; a hand-written
+    /// <c>.cnl</c> has no such cut, and a probe across one net measures a loop of nothing — every
+    /// output it reports is about a circuit that is not the one drawn.
+    /// </summary>
+    public static Diagnostic CheckWsProbeShorted(string path, string probe, string net) => Diagnostic.Create(
+        "wsprobe.shorted", DiagnosticSeverity.Warning,
+        "{path}: WSProbe '{probe}' has both terminals on net '{net}'. A WSProbe splits a node into a " +
+        "G side and an L side; with one net on both it measures nothing. Give it two nets, G first.",
+        ("path", path), ("probe", probe), ("net", net));
 
     /// <summary>
     /// No analysis of any kind will dispatch. <c>SelectTop</c>'s own sentence per kind, forwarded.

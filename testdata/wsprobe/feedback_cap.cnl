@@ -1,0 +1,8 @@
+; feedback_cap.cnl — the document's Fig. 25 (Eq. 85–87), the pure-feedback capacitor, SYMMETRIC case
+; only (typo register T-5). Probe from A to B; C from A to B; 1 GOhm terminations at A and B so
+; G1 = G2 = 1e-9 S. Closed form: ZG = ZL = 1/(G1 + 2 jwC), i.e. CG = CL = 2C, and ZG + ZL = 1/Y0.
+WSProbe:P   A B
+C:Cf        A B    C=1 pF
+Term:T1     A 0    Num=1 Z=1e9 Ohm
+Term:T2     B 0    Num=2 Z=1e9 Ohm
+analysis SP1 type=sparam start=0.5 stop=6 npts=50 Unit=GHz

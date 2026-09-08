@@ -1,0 +1,10 @@
+; cascade.cnl — brief-wsprobe-1 R-wsp1-14(a): the zero-feedback cascade, the sign anchor.
+; Term1 (50 Ohm) — L1 — [probe G→L] — C2 || R2 — ground. No path around the probe, so
+;   ZG = 50 + jwL1,  ZL = 1/(jwC2 + 1/R2),  Y0 = 1/(ZG+ZL),  H0 = ZG||ZL,
+;   vP/vS = -ZG/(ZG+ZL) (Eq. 67),  iS/iP = (1/ZL)/(1/ZG+1/ZL) (Eq. 76),  LG = 0, F = 1.
+Term:T1     p1 0   Num=1 Z=50 Ohm
+L:L1        p1 nG  L=2 nH
+WSProbe:P   nG nL
+C:C2        nL 0   C=1 pF
+R:R2        nL 0   R=100 Ohm
+analysis SP1 type=sparam start=0.5 stop=6 npts=50 Unit=GHz

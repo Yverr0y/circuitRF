@@ -370,6 +370,56 @@ public sealed class Evaluator
             return SliceToValue(cube[sliceArgs]);
         }
 
+        // ── WSProbe accessors (brief-wsprobe-1 R-wsp1-11; overview D-5) ──────
+        //
+        //   SP1.wsp(r, c)     one element of the document's wsp matrix traced over freq (Eq. 36):
+        //                     r and c are the document's 1-BASED row/col, matched by axis VALUE —
+        //                     never positional, because wsp(3, 13) is a name the reference document
+        //                     gave the quantity, and a positional slice of {freq,row,col} would
+        //                     pin freq instead.
+        //   SP1.idx("GATE")   the probe's idx, from __WspProbes (never guessed).
+        //   SP1.H0("GATE") … SP1.F("GATE")   the per-probe default-output cubes, keyed by label
+        //                     exactly as I("IP1") keys a branch — trailing sweep axes kept.
+        if (accessorName == "wsp" && cl.Args.Length == 2)
+        {
+            var cube = ds["wsp"];
+            int r = (int)Math.Round(EvalExpr(cl.Args[0], scope).AsReal());
+            int c = (int)Math.Round(EvalExpr(cl.Args[1], scope).AsReal());
+            var sliceArgs = new object[cube.Rank];
+            for (int d = 0; d < cube.Rank; d++)
+            {
+                var ax = cube.Axes[d];
+                sliceArgs[d] = ax.Name switch
+                {
+                    "row" => WspAxisIndex(ax, r, cl.Name, "row"),
+                    "col" => WspAxisIndex(ax, c, cl.Name, "col"),
+                    _     => Range.All,
+                };
+            }
+            return SliceToValue(cube[sliceArgs]);
+        }
+
+        if (accessorName is "idx" or "H0" or "Y0" or "ZG" or "ZL" or "LG" or "F"
+            && cl.Args.Length == 1)
+        {
+            var nameVal  = EvalExpr(cl.Args[0], scope);
+            string label = nameVal.Kind == ValueKind.String ? nameVal.AsString() : nameVal.ToString();
+
+            if (!ds.Contains("__WspProbes"))
+                throw new ExpressionException(
+                    $"{cl.Name}: analysis '{analysisName}' carries no WSProbe outputs (no WSProbe in the netlist).");
+            var probes = ds["__WspProbes"];
+            var labels = probes.Axes[0].Labels ?? [];
+            int pi = Array.FindIndex(labels, l => l.Equals(label, StringComparison.Ordinal));
+            if (pi < 0)
+                throw new ExpressionException(
+                    $"{cl.Name}: no WSProbe named '{label}'. Probes present: [{string.Join(", ", labels)}]");
+
+            if (accessorName == "idx")
+                return new Value(probes.RealValues[pi]);
+            return new Value(ds[$"{accessorName}:{label}"]);
+        }
+
         // ── Generic positional accessor ───────────────────────────────────────
         {
             var cube      = ds[accessorName];
@@ -378,6 +428,17 @@ public sealed class Evaluator
                 sliceArgs[i] = ArgToSliceObj(EvalExpr(cl.Args[i], scope), cl.Name, i);
             return SliceToValue(cube[sliceArgs]);
         }
+    }
+
+    /// <summary>The 0-based index on a wsp row/col axis whose VALUE is the document's 1-based
+    /// number, or an error naming the legal range.</summary>
+    private static int WspAxisIndex(Axis ax, int value, string exprName, string which)
+    {
+        for (int k = 0; k < ax.Values.Length; k++)
+            if ((int)Math.Round(ax.Values[k]) == value) return k;
+        throw new ExpressionException(
+            $"{exprName}: wsp {which} {value} is outside 1..{ax.Values.Length} " +
+            $"(2 × the number of probes).");
     }
 
     // ── V back-solve from linear back-solver (C1) ────────────────────────────

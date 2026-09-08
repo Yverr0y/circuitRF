@@ -50,6 +50,18 @@ public sealed class ElaboratedNetlist : IDisposable
     private readonly HashSet<string> _globalsWithExplicitUnit = new(StringComparer.Ordinal);
     internal void MarkGlobalHasUnit(string name) => _globalsWithExplicitUnit.Add(name);
 
+    /// <summary>
+    /// The WSProbes of this netlist in FLATTENED NETLIST ORDER, each with the document's <c>idx</c>
+    /// (T. A. Winslow, <i>General Circuit Analysis Using The WSProbe</i> (2023), Eq. 50–52) —
+    /// 1-based, assigned here and nowhere else, because it depends on the OTHER probes and is
+    /// therefore a property of the elaborated netlist rather than of any model
+    /// (brief-wsprobe-1 R-wsp1-2). <c>Label</c> is the component's instance path, so a probe inside a
+    /// sub-cell is <c>X1.GATE</c> (§4.3, "at any depth of schematic hierarchy"). Empty for a
+    /// netlist with no probe, which is what keeps every unprobed run untouched.
+    /// </summary>
+    public IReadOnlyList<WspProbeEntry> WspProbes => _wspProbes;
+    private readonly List<WspProbeEntry> _wspProbes = [];
+
     public void AddComponent(ElaboratedComponent c)
     {
         int idx = Components.Count;
@@ -59,6 +71,8 @@ public sealed class ElaboratedNetlist : IDisposable
             _nonlinearComponents.Add(idx);
             foreach (var n in c.Nodes) _nonlinearNodes.Add(n);
         }
+        if (c.Model is WSProbeModel)
+            _wspProbes.Add(new WspProbeEntry(idx, c.InstancePath, _wspProbes.Count + 1));
     }
 
     internal void SetResolvedGlobal(string name, Value val) => _resolvedGlobals[name] = val;
@@ -192,3 +206,9 @@ public sealed class ElaboratedNetlist : IDisposable
 
     private bool _disposed;
 }
+
+/// <summary>
+/// One WSProbe of an elaborated netlist: which component it is, the document's "Label" (the
+/// instance path) and its 1-based <c>idx</c> in flattened netlist order (Eq. 50–52).
+/// </summary>
+public readonly record struct WspProbeEntry(int ComponentIndex, string Label, int Idx);

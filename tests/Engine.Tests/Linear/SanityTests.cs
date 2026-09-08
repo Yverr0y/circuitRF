@@ -282,23 +282,21 @@ Mutual:M1  M=15 nH Inductor1=""L1"" Inductor2=""L2""
     }
 
     // ── Change 1: Resistor with R < 0 — warns and solves ─────────────────────
+    // The notice is read from the netlist's warnings list, not a captured console: the model queues
+    // it through IReportsWarnings and the engine drains it, which is the route the Messages pane and
+    // --json read (ModelNoticeRoutingTests has the parallel-path half).
     [Fact]
     public void Resistor_NegativeR_WarnsAndSolves()
     {
-        var errCapture = new System.IO.StringWriter();
-        Console.SetError(errCapture);
-        DataSet? ds;
-        try
-        {
-            // R < 0: active/negative-resistance element. Should warn, not throw.
-            ds = Run(@"
+        // R < 0: active/negative-resistance element. Should warn, not throw.
+        var (lib, tb) = new CnlReader().Read(@"
 Port:P1  n1 0  Num=1 Z=50 Ohm
 R:Rneg  n1 0  R=-50 Ohm
-", [1e9]);
-        }
-        finally { Console.SetError(new System.IO.StreamWriter(Console.OpenStandardError()) { AutoFlush = true }); }
+");
+        var nl = new Elaborator(lib).Elaborate(tb);
+        var ds = SParameterEngine.Run(nl, [1e9]);
 
-        string w = errCapture.ToString();
+        string w = string.Join("\n", nl.Warnings);
         Assert.Contains("< 0",   w);
         Assert.Contains("Rneg", w);
         Assert.NotNull(ds);
@@ -308,20 +306,15 @@ R:Rneg  n1 0  R=-50 Ohm
     [Fact]
     public void Resistor_ZeroR_UsesGmaxAndWarns()
     {
-        var errCapture = new System.IO.StringWriter();
-        Console.SetError(errCapture);
-        DataSet? ds;
-        try
-        {
-            // R = 0: near-short via Gmax. Should warn and return a result.
-            ds = Run(@"
+        // R = 0: near-short via Gmax. Should warn and return a result.
+        var (lib, tb) = new CnlReader().Read(@"
 Port:P1  n1 0  Num=1 Z=50 Ohm
 R:Rzero  n1 0  R=0 Ohm
-", [1e9]);
-        }
-        finally { Console.SetError(new System.IO.StreamWriter(Console.OpenStandardError()) { AutoFlush = true }); }
+");
+        var nl = new Elaborator(lib).Elaborate(tb);
+        var ds = SParameterEngine.Run(nl, [1e9]);
 
-        string w = errCapture.ToString();
+        string w = string.Join("\n", nl.Warnings);
         Assert.Contains("Gmax", w);
         Assert.Contains("Rzero", w);
         Assert.NotNull(ds);

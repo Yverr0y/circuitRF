@@ -384,13 +384,14 @@ public sealed class ReferenceCliVerbTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// The seven factory types no <c>EngineReference</c> maps to. Placeable in a <c>.cnl</c>, drawn
-    /// by nothing — and reported with their token and an explicit note, for the same reason.
+    /// The eight factory types no <c>EngineReference</c> maps to (the WSProbe's symbol is WSP-4's).
+    /// Placeable in a <c>.cnl</c>, drawn by nothing — and reported with their token and an explicit
+    /// note, for the same reason.
     /// </summary>
     [Fact]
     public void EveryPlaceableTypeNothingDraws_IsReportedAsSuch()
     {
-        string[] expected = ["Chain", "ExtDevice", "I_nTone", "SemiC", "Short", "Term", "V_nTone"];
+        string[] expected = ["Chain", "ExtDevice", "I_nTone", "SemiC", "Short", "Term", "V_nTone", "WSProbe"];
 
         var drawn = Enum.GetValues<SymbolKind>()
             .Where(k => !LibraryCatalog.InternalOnlyKinds.Contains(k))

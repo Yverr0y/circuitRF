@@ -1610,3 +1610,46 @@ mis-wired instance line was therefore invisible to every headless caller until i
 parts whose expansions are guarded on an exact net count (`Tuner`, the FET/BJT/MOS families) it was
 invisible after it ran too, because a short line skips the expansion in silence and simulates to
 completion.
+
+## WSP-1 — the WSProbe and the `wsp` matrix in the S-parameter engine (2026-09-08)
+
+`brief-wsprobe-1-probe-and-wsp-matrix.md`, built in one pass; design in
+`docs/design/stability-wsprobe.md`. Every gate (a)–(n) is in `tests/Engine.Tests/Linear/WSProbeTests.cs`
+and the CLI half in `tests/Ui.Tests/Cli/WsProbeCliTests.cs`. Three things the brief stated that the
+physics or the code overrode, and two observations worth the next reader's time:
+
+- **The brief's Hero 1 probe placement has NO feedback around either probe.** It put P1 between `L1`
+  and `a1` and P2 between `a2` and `L2`, claiming "the C5 and C3 paths make y12 ≠ 0". They do not: a
+  probe has feedback around it only when a path joins its two sides other than through the probe, and
+  ground does not count. With P1 there the G side is `L1` + `Term1` to ground — a dangling one-port —
+  and `ZG = 1/YG` held to 1e-15 at every frequency, which is what gate (e)'s last assertion caught
+  (`ZG·YG = 1 ⟺ z12·(z12 + z21 − z11 − z22) = 0`). The fixture puts the probes at the two-port's
+  ports instead, where `C5` plus the two-port closes a loop around each, and the difference is then 2.1×.
+- **The parallel resonator cannot use the series fixture's values.** The brief says "same values"
+  (`R1 = −20 Ω`, `RS = 10 Ω`) for Fig. 34. A parallel negative resistance starts up only when its
+  conductance exceeds the load's: `Re(1/H0) = 1/R1 + 1/RS = −0.05 + 0.1 > 0`, so with those values
+  the circuit is stable and the Kurokawa signature the gate asserts is absent. `R1 = −5 Ω` in the
+  fixture. Eq. 119/120 hold for either; only the signature depends on it.
+- **The counters gate needed a counter that did not exist.** `MnaSystem.Factorizations` (incremented
+  on the success path of `Factorize`) and `SParameterEngine.RunWithStats` (factorisations,
+  back-substitutions, pattern builds) were added for R-wsp1-14(l); `Run` calls `RunWithStats` and
+  discards the stats, so nothing about the ordinary entry point changed.
+- **"No-probe runs are byte-identical" was measured across builds, once, by hand** — a worktree of the
+  pre-change commit, `sparam` on Hero 1 and Hero 1B to `.npy` and `.mat` from both, `cmp`: identical in
+  all four. What the test holds is the structure that makes it true: an unprobed run's DataSet is
+  exactly `{S, Z0}`, it does one back-substitution per port per frequency and one pattern build. There is
+  no committed `.npy` golden and there should not be one.
+- **A negative-R notice printed once per elaborated COPY under the frequency-parallel path — fixed.**
+  The port-less resonator fixture has 251 points, so `PlanDegree` elaborates three copies, and
+  `ResistorModel`/`ParallelRlcModel` wrote their `R < 0` and `R = 0` notices to `Console.Error`
+  directly (with a per-instance `_warned` flag) — three identical lines on the terminal, and NOTHING
+  in `ElaboratedNetlist.Warnings`, so the Messages pane and `--json` never saw them at all. Both models
+  now implement `IReportsWarnings` and queue the notice keyed per instance path; the engine drains it
+  after the stamp and the SP-P3 merge dedupes the copies (`ModelNoticeRoutingTests`). The two
+  `SanityTests` that captured the console read the warnings list now. Ten more direct console writes
+  remain in the microstrip, TLINE and mutual-inductance models; same shape, same fix, not done here.
+- **On the legacy path the terminated assembly is the SAME stamp sequence plus one diagonal per port.**
+  Skipping the ports (as the wave path does) would shift every later branch index and break an SDD's
+  resolved control branch; adding `−Z0` to each port branch's diagonal keeps the numbering and turns the
+  0 V drive into a termination. A port with `Z0 = 0` exactly is a refusal (`wsprobe.port-short`), never
+  a large conductance.

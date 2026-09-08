@@ -1,0 +1,10 @@
+; series_resonator.cnl — the document's Fig. 31 (Eq. 109–118): a series unstable resonator.
+; G side R1 + L1 + C1 in series to ground with R1 < 0; L side RS to ground. NO PORTS (R-wsp1-6).
+; f0 = 1/(2 pi sqrt(L1 C1)) = 1.5915 GHz. 1/Y0 = ZG + ZL crosses the negative real axis clockwise
+; at f0; 1/H0 never does (pole masking, §4.10 p. 76–77).
+R:R1        nG n1  R=-20 Ohm
+L:L1        n1 n2  L=1 nH
+C:C1        n2 0   C=10 pF
+WSProbe:P   nG nL
+R:RS        nL 0   R=10 Ohm
+analysis SP1 type=sparam start=0.5 stop=3 npts=251 Unit=GHz

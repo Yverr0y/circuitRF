@@ -1,6 +1,3 @@
-using System.Numerics;
-using CircuitRF.Core.Elaboration;
-
 namespace CircuitRF.Core.Devices;
 
 /// <summary>
@@ -10,28 +7,11 @@ namespace CircuitRF.Core.Devices;
 /// Semantically identical to a 0 V VoltageSourceModel; separated so the branch current
 /// is always available by the probe's instance name rather than a node label.
 ///
+/// The stamp lives in <see cref="SeriesProbeModelBase"/>, which the WSProbe shares — the two are
+/// one element electrically, and the base is what every engine site matches so both report alike.
+///
 /// .cnl syntax: IProbe:IP1 n_plus n_minus
 /// </summary>
-public sealed class IProbeModel : ComponentModel
+public sealed class IProbeModel : SeriesProbeModelBase
 {
-    public override int       PortCount => 1;
-    public override ModelKind Kind      => ModelKind.Linear;
-
-    /// <summary>Branch index set on the most recent Stamp call. Used by HbLinearBackSolver.</summary>
-    public int LastBranchIndex { get; private set; } = -1;
-
-    public override void Stamp(IMnaContext mna, ElaboratedComponent c, double omega)
-    {
-        if (c.Nodes.Length < 2) return;
-        int np = c.Nodes[0];
-        int nm = c.Nodes[1];
-
-        int br = mna.AddBranch();
-        LastBranchIndex = br;
-
-        mna.AddConstraint(br, np, new Complex(+1, 0));
-        mna.AddConstraint(br, nm, new Complex(-1, 0));
-        mna.AddSourceValue(br, Complex.Zero);   // V = 0 (ideal ammeter)
-        mna.AddBranchCurrent(br, np, nm);
-    }
 }

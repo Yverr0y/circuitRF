@@ -89,6 +89,10 @@ internal static class JsonRun
     /// verb hands them to the exporter.</summary>
     public static DataSet? Data;
 
+    /// <summary>The WSProbes an S-parameter run carried, label and idx (R-wsp1-12(a)). Null when
+    /// the run had none, so the key is absent rather than an empty list.</summary>
+    public static IReadOnlyList<WsProbeJson>? Wsprobes;
+
     /// <summary>What <c>check</c> found, in counts (R-aut4-10). The findings themselves travel as
     /// diagnostics; this is the tally that tells "checked nothing" from "checked everything".</summary>
     public static CheckReportJson? Check;
@@ -150,6 +154,7 @@ internal static class JsonRun
         InputPath           = null;
         Analysis            = null;
         Data                = null;
+        Wsprobes            = null;
         Check               = null;
         Explain             = null;
         Document            = null;
@@ -416,7 +421,7 @@ internal static class JsonRun
         // either schema to say which — so a caller now always learns what the run produced and can
         // then decide what to ask for.
         return new ResultPayload(summary, groups, Shape: ResultDocumentWriter.Shape(ds),
-                                 Narrowed: narrowed);
+                                 Narrowed: narrowed, Wsprobes: Wsprobes);
     }
 
     /// <summary>

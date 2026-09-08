@@ -786,8 +786,9 @@ public sealed class HbLinearExtractor
                     names[vm.LastBranchIndex - _nonGroundCount] = $"V:{ec.InstancePath}";
                     break;
 
-                case IProbeModel ipm when ipm.LastBranchIndex >= _nonGroundCount:
-                    names[ipm.LastBranchIndex - _nonGroundCount] = $"IProbe:{ec.InstancePath}";
+                // IProbe and WSProbe — the label names the TYPE, as the inductive branches do.
+                case SeriesProbeModelBase ipm when ipm.LastBranchIndex >= _nonGroundCount:
+                    names[ipm.LastBranchIndex - _nonGroundCount] = $"{ec.ComponentType}:{ec.InstancePath}";
                     break;
 
                 case TunerModel tm:

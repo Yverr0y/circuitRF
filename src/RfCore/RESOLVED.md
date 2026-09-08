@@ -506,3 +506,19 @@ Two smaller decisions:
 Interpolation is linear on real and imaginary parts for a complex cube, which is what a linear
 interpolation of a complex quantity is. Nothing interpolates magnitude and phase separately: around a
 wrap that is a different and wrong answer.
+
+## WSP-1 — `Stability/WspReduction.cs`, the single-probe reduction (2026-09-08)
+
+The first file of `src/RfCore/Stability/`: pure functions over `Complex` values that turn one
+probe's 2×2 block of the `wsp` matrix into the reduced two-port (`[Y]` Eq. 44, `[Z]` Eq. 48) and the
+six default outputs. Two things to know before extending it (WSP-2 does):
+
+- **Eq. 40 and Eq. 47 are wrong as printed and are not implemented** (overview typo register T-1, T-2).
+  `y12`/`y21` of Eq. 40 carry the `|P|` term with the wrong sign; Eq. 47's `z22` has a wrong first
+  factor. Eq. 44 and Eq. 48 are the forms, and gate (e) holds `[Y]·[Z] = I` to 1e-11 on a network
+  with real feedback.
+- **`ZG`/`ZL` ship in the Z form, `−A/B` and `(1 + A)/B`**, not the `|Y|` form of Eq. 65/66: one fewer
+  cancellation, exact algebraically, and the two agree to ~1e-15 on Hero 1. The `|Y|` forms are kept
+  as `ZGFromY`/`ZLFromY` for tests only. **No epsilon is added to any denominator** — `H0 = 0` or
+  `Y0 = 0` returns NaN with `Degenerate` set, and the engine warns once per probe. The document's own
+  `wsp_yop`/`wsp__zop` add `1e-15`; circuitRF does not (overview D-7).

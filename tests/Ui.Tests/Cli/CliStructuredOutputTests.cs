@@ -773,7 +773,9 @@ public sealed class CliStructuredOutputTests(ITestOutputHelper output) : IDispos
         "serve.tool.unknown",
         // R-aut9-1: `sparam -o` honours the extension now, and one that names no format it writes is
         // a refusal listing the ones it does — rather than a Touchstone written under that name.
+        "sparam.export.no-s-parameters",
         "sparam.export.unsupported-format",
+        "wsprobe.shorted",
     ];
 
     private string[] Args(string argLine)

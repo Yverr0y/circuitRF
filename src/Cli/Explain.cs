@@ -1,3 +1,4 @@
+using CircuitRF.Core.Devices;
 using CircuitRF.Core.Design;
 using CircuitRF.Core.Elaboration;
 using CircuitRF.Core.Expressions;
@@ -230,7 +231,7 @@ internal static class Explain
 
                 if (wantAnalyses)
                 {
-                    var (rows, analysisExit) = ExplainAnalyses(tb, analysisName);
+                    var (rows, analysisExit) = ExplainAnalyses(lib, tb, analysisName);
                     analyses = rows;
                     exit    |= analysisExit;
                 }
@@ -477,9 +478,33 @@ internal static class Explain
     // ── --analysis ───────────────────────────────────────────────────────────
 
     private static (IReadOnlyList<ExplainAnalysisJson>, int) ExplainAnalyses(
-        TestBench tb, string? requested)
+        Library lib, TestBench tb, string? requested)
     {
         int exit = 0;
+
+        // R-wsp1-12(b): an S-parameter analysis reports its port count and its WSProbes — label,
+        // idx and BOTH terminal nets — which only an elaboration can answer (idx is assigned there,
+        // and a probe in a sub-cell is X1.GATE). Elaborated once, only when an S-parameter analysis
+        // is declared, and a failure to elaborate leaves the rows as they were: this is a report of
+        // what resolved, and elaboration failures are `check`'s to report.
+        int? ports = null;
+        IReadOnlyList<ExplainWsProbeJson>? wsProbes = null;
+        if (tb.Analyses.Any(a => a is SParameterAnalysis))
+        {
+            try
+            {
+                using var nl = new Elaborator(lib).Elaborate(tb);
+                ports = nl.Components.Count(ec =>
+                    (ec.Model is PortModel or TermModel or P1ToneModel) && !ec.InstancePath.Contains('.'));
+                if (nl.WspProbes.Count > 0)
+                    wsProbes = nl.WspProbes.Select(w =>
+                    {
+                        var ec = nl.Components[w.ComponentIndex];
+                        return new ExplainWsProbeJson(w.Label, w.Idx, NetName(nl, ec.Nodes[0]), NetName(nl, ec.Nodes[1]));
+                    }).ToList();
+            }
+            catch (Exception) { /* reported by check; nothing to explain here */ }
+        }
 
         if (requested is not null
             && !tb.Analyses.Any(a => a.Name.Equals(requested, StringComparison.OrdinalIgnoreCase)))
@@ -551,6 +576,7 @@ internal static class Explain
                           && AnalysisChain.IsChainRunnable(top, tb)
                           && unresolved.Count == 0;
 
+            bool isSparam = a is SParameterAnalysis;
             rows.Add(new ExplainAnalysisJson(
                 a.Name,
                 KindOf(a),
@@ -562,11 +588,16 @@ internal static class Explain
                 dispatched.TryGetValue(a.Name, out var byVerb) && runnable ? byVerb : null,
                 promoted.TryGetValue(a.Name, out var from) ? from : null,
                 SweepOf(a),
-                unresolved.Count > 0 ? unresolved : null));
+                unresolved.Count > 0 ? unresolved : null,
+                Ports:    isSparam ? ports : null,
+                WsProbes: isSparam ? wsProbes : null));
         }
 
         return (rows, exit);
     }
+
+    private static string NetName(ElaboratedNetlist nl, int node)
+        => node == 0 ? "0" : node < nl.Nodes.Count ? nl.Nodes.NameOf(node) : $"node {node}";
 
     /// <summary>
     /// The references an analysis names as STRINGS and that do not resolve in this design — the load
@@ -880,6 +911,17 @@ internal static class Explain
                 // stdout too rather than only in --json.
                 foreach (var u in a.Unresolved ?? [])
                     Console.WriteLine($"      unresolved: {u}");
+
+                // R-wsp1-12(b): what the S-parameter run will report — S over its ports, or none,
+                // and the probes with the idx each will carry and the two nets each splits.
+                if (a.WsProbes is { } probes)
+                {
+                    Console.WriteLine(a.Ports is > 0
+                        ? $"      S-parameters: {a.Ports} port(s); WSProbe outputs: {probes.Count} probe(s)"
+                        : $"      S-parameters: none (no ports); WSProbe outputs: {probes.Count} probe(s)");
+                    foreach (var w in probes)
+                        Console.WriteLine($"      WSProbe {w.Label} idx={w.Idx}  G={w.G}  L={w.L}");
+                }
             }
         }
     }

@@ -700,3 +700,8 @@ src/Core/Elaboration/NodeMap.cs|'{alias}' is already a net name, so it cannot al
 # user reaches, not a condition anyone is meant to read. Every user-facing refusal in this area is a
 # `check.touchstone.*` Diagnostic instead.
 src/RfCore/Data/PassiveMetrics.cs|Frequency axis ({freqs.Length}) and impedance array ({z.Length}) differ in length.
+src/Core/Expressions/Evaluator.cs|{cl.Name}: analysis '{analysisName}' carries no WSProbe outputs (no WSProbe in the netlist).
+src/Core/Expressions/Evaluator.cs|{cl.Name}: no WSProbe named '{label}'. Probes present: [{string.Join(
+src/Core/Expressions/Evaluator.cs|{exprName}: wsp {which} {value} is outside 1..{ax.Values.Length} 
+src/Engine/SParameterEngine.cs|WSProbe '{probes[i].Label}' allocated no branch in the S-parameter assembly.
+src/Engine/SParameterEngine.cs|wsprobe.port-short: port {port.PortNum} has Z0 = 0 and cannot be terminated 

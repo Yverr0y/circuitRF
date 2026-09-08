@@ -22,7 +22,7 @@ namespace CircuitRF.Core.Devices;
 /// <see cref="Temperature.PolynomialScale"/>. Reaching for the junction relations here would be
 /// borrowing device physics for something that has none.</para>
 /// </summary>
-public sealed class ResistorModel : ComponentModel
+public sealed class ResistorModel : ComponentModel, IReportsWarnings
 {
     private readonly double _temperatureFactor;
 
@@ -42,8 +42,22 @@ public sealed class ResistorModel : ComponentModel
     /// </summary>
     public const double DefaultGmax = 1e12; // S
 
-    // Deduplication: warn once per component instance, not once per frequency sweep.
+    // Deduplication: warn once per component instance, not once per frequency sweep. The message is
+    // QUEUED, not printed: a model has no netlist to reach, so the engine drains it after the stamp
+    // into ElaboratedNetlist.AddWarningOnce, keyed per instance path. That key is what makes the
+    // frequency-parallel path's separately elaborated copies (SP-P3) report the notice once rather
+    // than once per copy — a direct Console.Error write from here printed it three times on a
+    // 251-point sweep (src/Engine/RESOLVED.md, WSP-1).
     private bool _warned;
+    private readonly List<(string Key, string Message)> _pending = [];
+
+    public IReadOnlyList<(string Key, string Message)> DrainWarnings()
+    {
+        if (_pending.Count == 0) return [];
+        var drained = _pending.ToArray();
+        _pending.Clear();
+        return drained;
+    }
 
     public override void Stamp(IMnaContext mna, ElaboratedComponent c, double omega)
     {
@@ -54,9 +68,9 @@ public sealed class ResistorModel : ComponentModel
         {
             if (!_warned)
             {
-                Console.Error.WriteLine(
-                    $"[circuitRF] R:{c.InstancePath}: R=0 Ω — stamping Gmax={DefaultGmax:G4} S " +
-                    "as a near-short; proceeding. (Set R to a small positive value to suppress.)");
+                _pending.Add(($"resistor.short:{c.InstancePath}",
+                    $"R:{c.InstancePath}: R=0 Ω — stamping Gmax={DefaultGmax:G4} S " +
+                    "as a near-short; proceeding. (Set R to a small positive value to suppress.)"));
                 _warned = true;
             }
             g = DefaultGmax;
@@ -65,9 +79,9 @@ public sealed class ResistorModel : ComponentModel
         {
             if (!_warned)
             {
-                Console.Error.WriteLine(
-                    $"[circuitRF] R:{c.InstancePath}: R={r:G4} Ω < 0 — non-physical/active element; " +
-                    "stamping 1/R with its sign and proceeding.");
+                _pending.Add(($"resistor.negative:{c.InstancePath}",
+                    $"R:{c.InstancePath}: R={r:G4} Ω < 0 — non-physical/active element; " +
+                    "stamping 1/R with its sign and proceeding."));
                 _warned = true;
             }
             g = 1.0 / r;   // negative conductance — intentional

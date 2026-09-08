@@ -279,6 +279,17 @@ For Hero 1 this is the whole path: a 4-port RLC network with an embedded SNP blo
 
 Cross-reference: `docs/design/ports-pins-and-terms.md` §"The scoping rule".
 
+**The WSProbe rides this loop (2026-09-08).** A `WSProbe:<label> nG nL` — a 0 V series element with
+an orientation, sharing its stamp with `IProbe` — adds, inside the per-frequency loop of both paths and
+against the same factorisation, two back-substitutions per probe (a unit series voltage in the probe
+branch and a unit shunt current into the G-side node) and reads the branch current and G-side voltage
+at every probe. The result is the document's `2N × 2N` `wsp` matrix and, from it, the six default
+per-probe outputs (`H0`, `Y0`, `ZG`, `ZL`, `LG`, `F`); a netlist with a probe and no port is legal and
+produces those cubes with no `S`. On the legacy path the probes see a second, *terminated* assembly
+(each port branch with `−Z0` on its diagonal), because a 0 V driven branch is not a termination. A
+netlist with no probe is byte-identical to before. The conventions, the sign that a symmetric test
+cannot catch, the DataSet layout and the accessors are in `docs/design/stability-wsprobe.md`.
+
 ---
 
 ## 10. Reuse by harmonic balance

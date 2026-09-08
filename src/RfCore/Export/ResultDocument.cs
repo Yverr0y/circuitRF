@@ -144,7 +144,17 @@ namespace RfCore.Export
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         ResultShapeJson? Shape = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        IReadOnlyList<NarrowingJson>? Narrowed = null);
+        IReadOnlyList<NarrowingJson>? Narrowed = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<WsProbeJson>? Wsprobes = null);
+
+    /// <summary>
+    /// One WSProbe of an S-parameter run: the document's Label and its <c>idx</c>
+    /// (brief-wsprobe-1 R-wsp1-12(a)). The <c>idx</c> is reported rather than left to be inferred
+    /// because it depends on the other probes, and a caller building <c>wsp(2·idx−1, 2·idx)</c>
+    /// from a guess would read the wrong probe's block in silence.
+    /// </summary>
+    public sealed record WsProbeJson(string Label, int Idx);
 
     // ── the shape of a result, without its values (R-aut9-10) ────────────────
 
@@ -345,7 +355,18 @@ namespace RfCore.Export
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         ExplainSweepJson?     Sweep,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        IReadOnlyList<string>? Unresolved = null);
+        IReadOnlyList<string>? Unresolved = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        int?                  Ports = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<ExplainWsProbeJson>? WsProbes = null);
+
+    /// <summary>
+    /// One WSProbe as <c>explain --analysis</c> reports it for an S-parameter analysis
+    /// (brief-wsprobe-1 R-wsp1-12(b)): its label, its <c>idx</c>, and BOTH terminal nets — G first,
+    /// L second — because the orientation is what every bidirectional quantity is relative to.
+    /// </summary>
+    public sealed record ExplainWsProbeJson(string Label, int Idx, string G, string L);
 
     /// <param name="Kind">The <c>ValueKind</c> — <c>real</c>, <c>complex</c>, <c>bool</c>, or
     /// whatever else the engine produced. Reported rather than coerced: a Bool forced to a number is

@@ -273,7 +273,16 @@ static int RunSparam(string[] args)
         // nobody, which is exactly how a singular-matrix report went unseen here.
         PrintWarnings(nl, shown);
 
-        JsonRun.Data = ds;
+        // R-wsp1-12(a): one line per WSProbe after the S summary, and the label ↔ idx pairs in the
+        // document — the idx depends on the other probes, so it is reported, never left to be guessed.
+        PrintWsProbes(ds, nl, freqs);
+
+        // R-wsp1-11: the TestBench's measure lines, through the one evaluator the GUI uses, so a
+        // measurement of a probe output (SP1.ZG("P1")) answers the same headlessly as when opened.
+        var measDs = spa is not null ? EvaluateMeasurements(tb, nl, spa.Name, ds, run: null) : null;
+        var exportDs = measDs is null ? ds : MergeForExport(ds, measDs);
+
+        JsonRun.Data = exportDs;
 
         // R-aut9-1. The tool schema says the extension picks the format, and for `sparam` it did
         // not: every -o wrote Touchstone whatever it was called, so `-o out.npy` produced a file
@@ -287,11 +296,16 @@ static int RunSparam(string[] args)
                 return JsonRun.Fail(CliDiagnostics.SparamUnsupportedExportFormat(
                     output, Path.GetExtension(output)));
 
-            DataSetExporter.Export(ds, output, format, new ExportOptions(Format: format));
+            DataSetExporter.Export(exportDs, output, format, new ExportOptions(Format: format));
             Console.WriteLine($"Wrote {output}");
             JsonRun.AddOutput(JsonRun.KindOf(output), output);
             return 0;
         }
+
+        // A port-less probe run has no S (R-wsp1-6); a Touchstone of it would be a lie, so the
+        // refusal names the spellings that carry the wsp cubes.
+        if (!ds.Contains("S"))
+            return JsonRun.Fail(CliDiagnostics.SparamNoSParameters(output ?? Path.ChangeExtension(input, ".sNp")));
 
         var snp = RfCore.Data.DataSetBuilder.ToSnp(ds);
 
@@ -1726,6 +1740,32 @@ static string RowLabel(IReadOnlyList<Axis> axes, long row)
             : $"{a.Name}={a.Values[idx[d]]:G5}";
     }
     return string.Join(" ", parts);
+}
+
+/// <summary>
+/// The WSProbes of an S-parameter run, one line each — <c>WSProbe GATE idx=1  H0(f_lo)=… ZG(f_lo)=…</c>
+/// — and the same label ↔ idx pairs into the <c>--json</c> document (brief-wsprobe-1 R-wsp1-12(a)).
+/// Silent for a run with none, so an unprobed run prints exactly what it always printed.
+/// </summary>
+static void PrintWsProbes(DataSet ds, ElaboratedNetlist nl, double[] freqs)
+{
+    if (nl.WspProbes.Count == 0 || !ds.Contains("__WspProbes")) return;
+
+    var probes = nl.WspProbes;
+    if (!ds.Contains("S"))
+        Console.WriteLine($"S-parameters: none (no ports); WSProbe outputs: {probes.Count} probe(s)");
+
+    var rows = new List<WsProbeJson>(probes.Count);
+    foreach (var probe in probes)
+    {
+        var h0 = (Complex)ds[$"H0:{probe.Label}"][0];
+        var zg = (Complex)ds[$"ZG:{probe.Label}"][0];
+        Console.WriteLine(
+            $"WSProbe {probe.Label} idx={probe.Idx}  H0({freqs[0] / 1e9:G4} GHz)={FormatComplex(h0)}  " +
+            $"ZG({freqs[0] / 1e9:G4} GHz)={FormatComplex(zg)}");
+        rows.Add(new WsProbeJson(probe.Label, probe.Idx));
+    }
+    JsonRun.Wsprobes = rows;
 }
 
 static string FormatComplex(Complex z)

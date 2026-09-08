@@ -97,6 +97,12 @@ public sealed class MnaSystem : IMnaContext
     public int PatternBuilds => _patternBuilds;
     private int _patternBuilds;
 
+    /// <summary>How many factorisations this system has completed. A counter for the same reason
+    /// <see cref="PatternBuilds"/> is one: "one factorisation per frequency" is a structural
+    /// property a test can hold without timing anything (brief-wsprobe-1 R-wsp1-14(l)).</summary>
+    public int Factorizations => _factorizations;
+    private int _factorizations;
+
     public int NodeCount   => _nodeCount;
     public int BranchCount => _branchCount;
     public int Size        => _nodeCount + _branchCount;
@@ -307,6 +313,7 @@ public sealed class MnaSystem : IMnaContext
                 factEx);
         }
 
+        _factorizations++;
         return lu;
     }
 

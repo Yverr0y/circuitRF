@@ -732,7 +732,7 @@ public sealed class NonlinearDcEngine
 
     private static int GetControlBranchIndex(string sddName, int n, int port, ElaboratedComponent target)
     {
-        const string AllowedKinds = "Vdc, VCVS, V_1Tone/V_nTone, IProbe, L (Inductor), SRLC, PRLC, SnP, Z_Port";
+        const string AllowedKinds = "Vdc, VCVS, V_1Tone/V_nTone, IProbe, WSProbe, L (Inductor), SRLC, PRLC, SnP, Z_Port";
         return target.Model switch
         {
             VdcModel        vdc  => ValidateSinglePortBranch(sddName, n, port, vdc.LastBranchIndex,  "Vdc"),
@@ -744,7 +744,7 @@ public sealed class NonlinearDcEngine
                 $"SDD '{sddName}': C[{n}]={target.InstancePath} is an ideal current source (I_1Tone/I_nTone): " +
                 $"its current is an input, not a solved unknown, so it has no branch to reference. " +
                 $"Put an IProbe in series with it and reference that instead."),
-            IProbeModel probe => ValidateSinglePortBranch(sddName, n, port, probe.LastBranchIndex, "IProbe"),
+            SeriesProbeModelBase probe => ValidateSinglePortBranch(sddName, n, port, probe.LastBranchIndex, target.ComponentType),
             // The ideal voltage-GAIN source. Its branch current is a solved unknown exactly as a
             // Vdc's is, so it is referenceable for the same reason — and a behavioural source that
             // reads the current out of another behavioural source is an ordinary thing to write.
@@ -812,7 +812,7 @@ public sealed class NonlinearDcEngine
         var map = new Dictionary<string, double>(StringComparer.Ordinal);
         foreach (var ec in _nl.Components)
         {
-            if (ec.Model is not IProbeModel probe) continue;
+            if (ec.Model is not SeriesProbeModelBase probe) continue;
             int br = probe.LastBranchIndex;
             if (br >= _nodeCount && br < _systemSize)
                 map[ec.InstancePath] = x[br];

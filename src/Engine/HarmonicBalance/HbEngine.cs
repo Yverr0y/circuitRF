@@ -643,7 +643,7 @@ public sealed class HbEngine
         var probeCurrents = new Dictionary<string, Complex[]>(StringComparer.Ordinal);
         foreach (var ec in _netlist.Components)
         {
-            if (ec.Model is not IProbeModel ip || ip.LastBranchIndex < 0) continue;
+            if (ec.Model is not SeriesProbeModelBase ip || ip.LastBranchIndex < 0) continue;
             var spec = new Complex[K + 1];
             for (int k = 0; k <= K; k++)
             {
@@ -964,7 +964,7 @@ public sealed class HbEngine
         var probeCurrents = new Dictionary<string, Complex[]>(StringComparer.Ordinal);
         foreach (var ec in _netlist.Components)
         {
-            if (ec.Model is not IProbeModel ip || ip.LastBranchIndex < 0) continue;
+            if (ec.Model is not SeriesProbeModelBase ip || ip.LastBranchIndex < 0) continue;
             var spec = new Complex[M];
             for (int m = 0; m < M; m++)
                 spec[m] = ip.LastBranchIndex < xMix[m].Length ? xMix[m][ip.LastBranchIndex] : Complex.Zero;
@@ -1233,7 +1233,7 @@ public sealed class HbEngine
         var probeCurrents = new Dictionary<string, Complex[]>(StringComparer.Ordinal);
         foreach (var ec in _netlist.Components)
         {
-            if (ec.Model is not IProbeModel ip || ip.LastBranchIndex < 0) continue;
+            if (ec.Model is not SeriesProbeModelBase ip || ip.LastBranchIndex < 0) continue;
             var spec = new Complex[M];
             for (int m = 0; m < M; m++)
                 spec[m] = ip.LastBranchIndex < xMix[m].Length ? xMix[m][ip.LastBranchIndex] : Complex.Zero;
@@ -2206,7 +2206,7 @@ public sealed class HbEngine
     private static int GetControlBranchIndexHb(
         string sddName, int n, int port, ElaboratedComponent target)
     {
-        const string Allowed = "Vdc, V_1Tone/V_nTone, IProbe, L (Inductor), SRLC, PRLC, SnP, Z_Port";
+        const string Allowed = "Vdc, V_1Tone/V_nTone, IProbe, WSProbe, L (Inductor), SRLC, PRLC, SnP, Z_Port";
         return target.Model switch
         {
             VdcModel        vdc  => ValidateSinglePortBranchHb(sddName, n, port, vdc.LastBranchIndex,  "Vdc"),
@@ -2218,7 +2218,7 @@ public sealed class HbEngine
                 $"HB: SDD '{sddName}': C[{n}]={target.InstancePath} is an ideal current source (I_1Tone/I_nTone): " +
                 $"its current is an input, not a solved unknown, so it has no branch to reference. " +
                 $"Put an IProbe in series with it and reference that instead."),
-            IProbeModel probe => ValidateSinglePortBranchHb(sddName, n, port, probe.LastBranchIndex, "IProbe"),
+            SeriesProbeModelBase probe => ValidateSinglePortBranchHb(sddName, n, port, probe.LastBranchIndex, target.ComponentType),
             // L, SRLC and PRLC — every model carrying an inductor branch (IInductiveBranch).
             IInductiveBranch ind => ValidateSinglePortBranchHb(sddName, n, port, ind.LastBranchIndex, target.ComponentType),
             SnpModel    snp   => ValidateMultiPortBranchHb(sddName, n, port, snp.PortBranchIndices,  "SnP"),
