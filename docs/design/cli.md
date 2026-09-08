@@ -1651,6 +1651,13 @@ they carry is full of commas.
 | `i`, `j` | pin the cube's axes named `i` and `j` by **port number**. Refused alongside a bracketed slice. |
 | `y` | `db`, `db10`, `db20`, `mag`, `phase`, `real`, `imag`, `conj` — folded in as the transform prefix, so there is one table of those names and it is the parser's. |
 | `axis` | `left` (default) or `right`. |
+| `probe` | the WSProbe a metric is taken at, by the LABEL `__WspProbes` carries. Turns the trace into a probe metric. |
+| `with` | the second probe of a pair, for the `wsp_block_calc` metrics. |
+| `set` | the ordered probe set for Ohtomo, semicolon separated. Order is part of the answer. |
+| `metric` | which of the reference document's quantities (WSP-4). Required alongside `probe`. |
+| `z0` | the reference the circulator, pair and Ohtomo metrics normalise by; absent means the source group's own port-1 Re(Z0), else 50 Ω. |
+| `side` | `G` or `L` — which side of every probe Ohtomo treats as the active subnetwork. |
+| `gi` | which of Ohtomo's `G_i` to draw, 1-based. |
 
 **An integer on an `i`/`j` axis is a PORT NUMBER, not an index** — `S[:,2,1]` is S21, which is what
 makes that spelling readable. Off by one here is the quietest possible wrong answer, since S12 and S21
@@ -1661,6 +1668,25 @@ for a bare unrecognised name is "Missing `[`" — correct from where it stands a
 who mistyped a cube or is looking at the wrong run — so that one refusal is made here rather than
 forwarded. **A plot with no trace is refused rather than drawn**, for R-rnd4-4's reason: an empty plot
 is a valid picture that exports cleanly and looks exactly like a measurement that came back empty.
+
+**A WSProbe quantity is the same trace the card authors** (WSP-4 R-wsp4-12), so there is no second
+probe path here any more than there is a second plotting one:
+
+```
+circuitrf plot run.npy -o loci.svg  --type polar --trace cube=SP1.wsp,probe=GATE,metric=invH0
+circuitrf plot run.npy -o margin.svg          --trace cube=SP1.wsp,probe=GATE,metric=SM_Y0,y=db20
+circuitrf plot run.npy -o lgm.svg   --type polar --trace cube=SP1.wsp,probe=GATE,with=DRAIN,metric=LGM
+```
+
+`cube=` names the run's own `wsp` MATRIX and the metric is taken of it; the written `.cdd` carries
+the probe spec in the field the window writes, and the byte-identity gate above extends to it
+unchanged. **Case is load-bearing in the metric names** — the document writes `LGF` for one probe's
+forward circulator loop gain and `LGf` for a probe pair's feedback-as-synthetic-FET one — so the
+exact spelling resolves first and a case-insensitive form resolves only where it is unambiguous;
+`1/H0`, which no shell takes, is also spelled `invH0`. **A probe the run does not have is refused BY
+NAME with the run's own list**, in the library's own sentence, and a `probe=` without a `metric=` is
+refused naming the flag that answers it: a probe alone would draw the raw matrix entry and look like
+an answer. A `probe=` on a cube that is not a `wsp` matrix is refused by kind, for the same reason.
 
 `--x`/`--y`/`--y2` are optional and independent — an axis without one autoscales, which works because
 `Plot.RestoreAxesFromConfig` re-autoscales only the axes whose own flag is still set. They are refused

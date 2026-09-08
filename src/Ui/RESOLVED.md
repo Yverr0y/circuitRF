@@ -22946,3 +22946,66 @@ writing a duplicate of a state the history already holds.
 workspace's own recording setting across a restore (R-rc5-12c rule 4) rewrites that field in the
 `.cws`, so the tree the workspace started in differs by one line from the tree a restore puts back. The
 gate asserts convergence rather than a magic number, which is the property that was actually asked for.
+
+---
+
+## WSP-4 — the WSProbe symbol, its placement, and the card around the metrics (2026-09-08)
+
+`brief-wsprobe-4-ui-symbol-and-data-display.md`. The value production, the metric table and the
+readouts are in `src/Render` (see its own `RESOLVED.md` for the four traps found there); what follows
+is what `src/Ui` learned.
+
+**`SymbolKind.WSProbe` reuses the IProbe's geometry deliberately** — two pins at the bottom, 100 apart
+— because a WSProbe is placed into a wire the same way and `SeriesProbeInsertion` needs both pins on
+one straight segment. `FindShortedSpan` never named a kind; the kind check was at the call site in
+`SchematicViewModel.CommitPlacement`, so generalising it meant moving the question into
+`SeriesProbeInsertion.IsSeriesProbe` rather than adding a second literal there. A third series probe
+now cannot be added and silently miss the wire cut.
+
+**The glyph's letters ARE the orientation, and the pin order is not the drawing.** `G` and `L` are
+drawn at the two pin ends and a rotation or a mirror moves them on screen; extraction always emits
+`WSProbe:<label> nG nL` with the G pin's net first. Getting that wrong is a plausible wrong answer,
+not an error: every `G`/`L`-labelled output of the run (`ZG`, `ZL`, `YG`, `YL` and both margins) swaps
+and the numbers stay the right size. `WSProbePlacementTests` grounds one pin at whatever world point
+it lands on after each of the four rotations and both flips, and asserts `"0"` in the matching
+POSITION — which is the contract, rather than a reading of the picture.
+
+### The card's item picker had the network-parameter trap in it a second time
+
+Every WSProbe metric of one run shares ONE `CubeName` (the `…wsp` matrix), which is exactly the shape
+the N² network-parameter element items have. Both of the "nothing actually changed, skip" shortcuts
+that were fixed for those — `RebuildSignalsCore`'s auto-select match and
+`OnSelectedSignalChanged`'s `alreadyApplied` — had to learn the metric too. Without it, picking
+`SM_H0` would silently keep drawing whatever metric was already on the trace, and every rebuild
+(which is what a re-run is) would re-select the first metric in the list, so a saved `SM_H0` trace
+would come back looking like `H0`.
+
+### The spec box shows a name, not a shorthand the parser reads back
+
+A probe trace names itself the way a `measure` line would (overview D-5):
+`wsp_SM_Y0(SP1.wsp, SP1.idx("GATE"))`. That is a NAME for what the card's own pickers author — the
+values come from the slice — and `CubeTraceSpecParser` cannot read it. A `LostFocus` fires
+`CommitSpec` on every tab through the box, so an UNEDITED commit is a no-op and only a genuine edit
+gives the probe metric up and becomes what was typed. Showing `mag(SP1.wsp[:, 0, 0])` instead would
+have been a true description of the read and a false description of the quantity.
+
+### Two smaller things
+
+**`BuildDefaultSlice` gained an axes-only overload.** A metric cube does not exist until it is
+evaluated, and the picker needs its slice before anything has been computed; building a throwaway
+`DataCube` to read axis names allocated the whole sweep to answer a question about its shape.
+
+**The engine now reports its own `MarginThreshold`** as a `__WspMarginThreshold` metadata cube, so the
+rect plot draws the line the RUN judged against rather than the published default. That is the one
+edit this brief made outside `src/Ui`/`src/Render`; it is additive, and a source written before it
+simply leaves the threshold line off while the −12 dB floor — arithmetic, not a setting — still draws.
+
+### Not built: the Envelope sub-card (R-wsp4-9)
+
+Everything else in the brief landed. The envelope card — the `|ΓS|`/`|ΓL|` ladders, the θ step, the
+two families of pulled loci, the θS × θL stability map, `SMenv` and the NDF step overlay — is a
+second feature of comparable size to the rest of the brief and is deliberately absent rather than
+half-present. **Its library half is complete and reachable today**: `wsp_loadpull`,
+`wsp_loadpull_unstable`, `wsp_loadpull_margin`, `wsp_loadpull_margin_env`, `wsp_loadpull_ndf` and
+`wsp_loadpull_ndf_enc` all evaluate in a `measure` line and in the expression engine (WSP-3, WSP-9),
+so the numbers exist headlessly; what is missing is the card that authors them.

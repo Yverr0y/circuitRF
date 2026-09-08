@@ -189,8 +189,9 @@ a result is a function of the design and the engine, so the design is the thing 
 <a href="#kept">what is kept, and what is not</a> — the same table applies.</p>
 <h2 id="panel">The History panel</h2>
 <p><strong>View ▸ Panels ▸ History</strong>, or the clock button on the workspace toolbar. A list, newest first.</p>
-<p><strong>Each row is what you scan</strong>: the time, the date — with the year on it whenever the entry is not from
-this year — the title you wrote, or a short line saying how the entry came about for one nobody
+<p><strong>Each row is what you scan</strong>: the time — <em>just now</em>, <em>7 minutes ago</em>, <em>3 hours ago</em> for anything
+inside the last day, and the clock time beyond that — the date, with the year on it whenever the entry
+is not from this year; the title you wrote, or a short line saying how the entry came about for one nobody
 titled. A version carries its tag. On a workspace more than one person works in, the row says who kept
 it. And a row says the three things that change what it <em>means</em>: that it was brought back from an
 earlier state, that a file was left out of it, or that tidying up has tidied it away.</p>
@@ -201,18 +202,24 @@ never need. It is there for the day you do: it is what to give someone helping y
 workspace with tools other than circuitRF.</p>
 <p><strong>Right-click a row</strong> for everything you can do to it:</p>
 <ul>
-<li><strong>Go back to &quot;…&quot;</strong> — see <a href="#going-back">going back</a> below.</li>
-<li><strong>Compare with the workspace as it is now</strong> — lists the documents that differ between that entry and
-what you have on disk this minute.</li>
+<li><strong>Go back to &quot;…&quot;</strong> — see <a href="#going-back">going back</a> below. It quotes the title when you wrote one,
+and says <em>go back to this state</em> when the entry is one circuitRF named itself.</li>
+<li><strong>Compare to Current</strong> — lists the documents that entry holds which your files no longer do.
+Nothing is changed. If they hold the same files, it says so.</li>
 <li><strong>Keep permanently</strong> — marks an entry so circuitRF's own tidying-up will never remove it. Ones you
 asked for, and the one taken before you went back, are already marked.</li>
 <li><strong>Bring this back</strong> — on an entry marked <em>tidied away</em>, puts it back in the list as an ordinary one.
 See <a href="#tidying">tidying up</a>.</li>
-<li><strong>Rename this entry…</strong>, <strong>Correct what you wrote…</strong> and <strong>Let this entry go</strong> — the label or the
-title, and what happens to a version you have already sent. See
-<a href="#titles">&quot;I typed the title wrong&quot;</a>.</li>
+<li><strong>Rename this entry…</strong>, <strong>Edit Comments…</strong> and <strong>Tidy this away</strong> — the label or the title, what
+happens to a version you have already sent, and putting an entry out of the way.
+See <a href="#titles">&quot;I typed the title wrong&quot;</a>.</li>
 <li><strong>Copy the identifier</strong>.</li>
 </ul>
+<p><strong>There is no delete.</strong> Nothing on this menu destroys anything: <em>Tidy this away</em> is the same putting-away
+that automatic tidying does, and the entry stays in the list marked <em>tidied away</em> until you bring it
+back. The only thing that actually frees space is <strong>Settings ▸ Revision Control ▸ Reclaim space</strong>, which
+works by age over everything already tidied away — never on one entry you picked. See
+<a href="#tidying">tidying up</a>.</p>
 <p>Two buttons at the top of the panel <em>create</em> something: <strong>keep this state</strong> writes a restore point, and
 <strong>keep this version</strong> records a titled version. They are the same two things File ▸ Keep This State…
 and File ▸ Keep This Version… do.</p>
@@ -284,8 +291,9 @@ it.</p>
 <h2 id="comparing">What changed between two versions</h2>
 <p>Select a version and the panel lists <strong>the documents that differ</strong> between it and the one before it:
 which cells changed, which were added, which were removed. Right-click any entry — a version or a
-restore point — and choose <strong>Compare with the workspace as it is now</strong> to ask the other question:
-what that entry holds that your files no longer do.</p>
+restore point — and choose <strong>Compare to Current</strong> to ask the other question: what that entry holds
+that your files no longer do. When the two hold the same files it tells you so, rather than showing
+you an empty list.</p>
 <p>That is deliberately where it stops. circuitRF does not show you a line-by-line comparison of what is
 inside a schematic or a layout — open both and look, or go back to one of them. A list of changed
 coordinates is not a picture of what moved.</p>
@@ -303,17 +311,17 @@ ever about <strong>who else has already read it</strong>.</p>
 <tbody>
 <tr>
 <td><strong>a restore point</strong></td>
-<td><strong>Rename this entry…</strong> — change the label to anything. You can also <strong>Let this entry go</strong>.</td>
+<td><strong>Rename this entry…</strong> — change the label to anything. You can also <strong>Tidy this away</strong>.</td>
 <td>Nothing chains to a restore point, no copy takes one and no send carries one. It is your machine's own safety net and the label is yours alone.</td>
 </tr>
 <tr>
 <td><strong>a version you have not shared</strong></td>
-<td><strong>Correct what you wrote…</strong> — the title changes, and that is the end of it.</td>
+<td><strong>Edit Comments…</strong> — the title changes, and that is the end of it.</td>
 <td>Nobody else has seen it, so there is nothing to put out of step.</td>
 </tr>
 <tr>
 <td><strong>a version you have sent to another copy</strong></td>
-<td><strong>Correct what you wrote…</strong> — this adds a correction <em>beside</em> the original.</td>
+<td><strong>Edit Comments…</strong> — this adds a correction <em>beside</em> the original.</td>
 <td>The original string is on somebody else's disk. circuitRF can put your wording in front of it; it cannot reach into their copy and take the old one out.</td>
 </tr>
 </tbody>

@@ -335,6 +335,15 @@ public static class ComponentTypeRegistry
             Category: ComponentCategory.Terminals,
             SearchTerms: ["VProbe", "V", "voltmeter", "voltage", "probe", "meter", "net name", "label"],
             IsCommon: true),
+        // WSProbe: the stability probe of T. A. Winslow, General Circuit Analysis Using The WSProbe
+        // (2023). Electrically an IProbe — a 0 V series short — but its value is the run's `wsp`
+        // matrix and every quantity the document derives from it. Instance name (WSP1, WSP2, ...) is
+        // the document's "Label", and is what `__WspProbes` maps to the 1-based `idx`.
+        [SymbolKind.WSProbe]       = new("WSProbe", "WSP",
+            Category: ComponentCategory.Terminals,
+            SearchTerms: ["WSProbe", "Winslow", "stability", "probe", "H0", "Y0", "loop gain",
+                          "driving point"],
+            IsCommon: true),
         [SymbolKind.Sdd]           = new("SDD",   "X",
             Category: ComponentCategory.Other,
             SearchTerms: ["SDD", "Sdd", "nonlinear", "behavioral"],
@@ -858,6 +867,10 @@ public static class ComponentTypeRegistry
           + "instance; there is no second terminal to get the wrong way round, and nothing it can "
           + "short together.",
 
+        SymbolKind.WSProbe =>
+            "G is the generator-side terminal, L the load-side. ZG looks out of G, ZL out of L; "
+          + "swapping them swaps every G/L-labelled output and negates nothing else.",
+
         _ => "",
     };
 
@@ -899,6 +912,7 @@ public static class ComponentTypeRegistry
         SymbolKind.TermG         => "Port",  // SAME engine component as Term — R-hk-6, no parallel model
         SymbolKind.Pin           => "Pin",   // sentinel — IsPrimitive("Pin")==false; elaborator skips it
         SymbolKind.IProbe        => "IProbe",
+        SymbolKind.WSProbe       => "WSProbe",
         // Sentinel, like Var and Meas: no ComponentModelFactory entry exists and none can. A VProbe
         // line DOES reach the .cnl and the elaborator -- unlike VAR/MEAS -- but the elaborator turns
         // it into a net-name alias and builds no model, which is what makes it free of the circuit.
@@ -2574,6 +2588,8 @@ public static class ComponentTypeRegistry
             case "IP":     kind = SymbolKind.IProbe;        return true;
             case "VPROBE":
             case "VP":     kind = SymbolKind.VProbe;        return true;
+            case "WSPROBE":
+            case "WSP":    kind = SymbolKind.WSProbe;       return true;
             case "VAR":    kind = SymbolKind.Var;           return true;
             case "MEAS":   kind = SymbolKind.Meas;          return true;
             case "P1TONE": kind = SymbolKind.P1Tone;        return true;

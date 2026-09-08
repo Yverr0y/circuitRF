@@ -297,6 +297,75 @@ expression still requires the qualified form today (a noted future enhancement).
 
 ---
 
+## 9a. The WSProbe section (WSP-4)
+
+A source carrying a `wsp` matrix and its `__WspProbes` table offers, in the ordinary item picker and
+in its own group (`SP1 ▸ WSProbe`), every quantity T. A. Winslow, *General Circuit Analysis Using
+The WSProbe* (2023) derives from that matrix. Picking one opens a **WSProbe** section on the card.
+
+**A probe trace is a cube trace.** Its `CubeName` is the run's own `…wsp` cube, so every "is that
+cube still in this source" check downstream is the ordinary one; its `Slice` is authored against the
+METRIC's axes — the matrix cube's leading axes, `{freq}` or `{Pin, freq}` — so the family/slider
+mechanism, the markers, the Table, the export and `.cdd` persistence work with no probe-specific
+path. What the `Trace.Wsp` spec changes is only where the VALUES come from:
+`TraceResolve.SetCubeDataFromCore` substitutes `WspSource`'s metric cube for the raw matrix at the
+same one interception point a renormalized S/Z/Y cube is substituted at.
+
+**No numerics live in the Data Display.** Every value is a call into `src/RfCore/Stability/` — the
+same functions the S-parameter engine computes a run's `H0:`/`ZG:`/`SM_Y0:` cubes with, and the same
+ones `wsp_H0(SP1.wsp, idx)` resolves to in a `measure` line. The gate is bit identity, the rule
+`NetworkMetrics` is already under.
+
+**The list, and its gating** (`WspMetrics`, in `src/Render/DataDisplay/Models/WspTrace.cs`):
+
+| Group | Items | Plots on |
+|---|---|---|
+| Driving point | `H0`, `Y0`, `1/H0`, `1/Y0` | Polar, Rect; Smith for `H0`/`Y0` |
+| Bidirectional | `ZG`, `ZL`, `YG`, `YL`, `Zop`, `Yop` | Smith, Polar, Rect |
+| Loop gain | `LG`, `F`, `LGF`, `LGR`, `LG_H`, `LG_MF`, `LG_MR`, `LG_MGF`, `LG_MGR` | Polar, Rect |
+| Match | nodal Γ | Smith, Polar, Rect |
+| Stability margin | `SM_Y0`, `SM_H0`, `SM`, and the proxies `rY`, `iY`, `rH`, `iH` | Rect only |
+| Probe pair | `F_LGa`, `F_LGf`, `F_LGH`, `F_LGM`, `LGa`, `LGf`, `LGH`, `LGM` | Polar, Rect |
+| Probe set | Ohtomo's `G_i` | Polar, Rect |
+
+A metric that does not fit the plot type is offered **disabled with a reason**, never removed — the
+rule the derived metrics already follow, for the same reason: a metric that vanishes reads as one
+circuitRF does not have. A Table takes everything.
+
+**Case is load-bearing in these names and cannot be folded away.** The document writes `LGF` for one
+probe's forward synthetic-circulator loop gain (Eq. 99) and `LGf` for a probe pair's
+feedback-as-synthetic-FET loop gain (Eq. 149); likewise `LG_H` against `LGH`. `WspMetrics.TryParse`
+resolves the exact spelling first and offers the loose, case-insensitive form only for names that
+have no collision under it — so `lgf` resolves to neither rather than to one of them.
+
+**The card's own controls.** A **probe** picker (labels from `__WspProbes`, in `idx` order, showing
+`idx` beside each — probes are named and never indexed in a `.cdd`, because `idx` is assigned at
+elaboration and a design that gains a probe renumbers the ones after it). A **with** picker for the
+pair metrics. An ordered **set** for Ohtomo, where order is part of the answer. A **Z0**, blank
+meaning "the source group's own port-1 Re(Z0), else 50 Ω", resolved at draw time. Each row is shown
+only when its metric reads it: an inert control implies it changed the answer.
+
+**The readouts** (`WspReadouts`) are the three readings the document takes off a polar plot by eye,
+made countable: Kurokawa's start-up frequencies on a driving-point locus (`none` is a real answer and
+is printed), the encirclement count of a polar locus, and — for a margin — its minimum together with
+the Kurokawa search of the *matching* driving-point function (`SM_Y0` ↔ `1/Y0`). **Mark crossings**
+places one marker per reported frequency. A margin on a rect plot also draws two horizontal reference
+lines: the run's own `MarginThreshold` (dashed, from the `__WspMarginThreshold` cube) and the −12 dB
+floor, below which one side of the node presents negative resistance.
+
+**The reduced two-port is a virtual NETWORK group.** `DataSourceView` adds
+`<analysis> ▸ WSProbe <label> ▸ reduced 2-port` carrying `S`, `Y`, `Z` and a per-port `Z0` of the
+reduction at that probe (Eq. 44), so µ, µ′, K, |Δ|, MAG/MSG and both stability circles apply to it
+through the code that already computes them. It is appended AFTER the analysis groups, because
+`FindCubeSpec` answers with the first group carrying an `S` and that has to keep being the run's own.
+
+**The `plot` verb** takes the same trace: `--trace cube=SP1.wsp,probe=GATE,metric=invH0,y=polar`,
+with `with=`, `set=A;B`, `z0=`, `side=G|L` and `gi=` for the metrics that read them. It writes the
+same `.cdd` the window writes, so the byte-identity gate covers probe traces with no new plotting
+path.
+
+---
+
 ## 10. Interface reference (for user documentation)
 
 A condensed cheat-sheet to expand into end-user docs:
@@ -317,6 +386,9 @@ A condensed cheat-sheet to expand into end-user docs:
   `Gain vs Pout`. Families follow the Y side automatically; the X side can come from another loaded
   file. See `plot-versus.md`.
 - **Operating points (no sweep):** values are scalars — view them on a **Table**.
+- **A WSProbe node:** pick the run's `▸ WSProbe` group, then the quantity; the section below chooses
+  which probe it is taken at. `1/H0` and `1/Y0` on a Polar plot are the document's own stability
+  reading, and the card reports the crossings it finds beside them.
 
 ---
 

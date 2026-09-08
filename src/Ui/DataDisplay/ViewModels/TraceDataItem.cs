@@ -4,6 +4,7 @@
 
 using System.IO;
 using RfCore;
+using CircuitRF.Render.DataDisplay;
 using CircuitRF.Ui.DataDisplay;
 
 namespace CircuitRF.Ui.DataDisplay.ViewModels;
@@ -83,6 +84,45 @@ public sealed class TraceDataItem
         Slice       = slice;
         Label       = label;
         IsEnabled   = isEnabled;
+    }
+
+    // ---- WSProbe metric constructor (WSP-4 R-wsp4-5) -----------------------
+
+    /// <summary>The WSProbe metric this item selects, or <see cref="WspMetric.None"/> for every
+    /// other kind of item.</summary>
+    public WspMetric WspMetric { get; init; } = WspMetric.None;
+
+    /// <summary>
+    /// One quantity of the reference document, over a run's <c>wsp</c> matrix.
+    ///
+    /// <para>It is a CUBE-BOUND item — its <see cref="CubeName"/> is the run's own <c>…wsp</c> cube
+    /// and its <see cref="Slice"/> is authored against the metric's axes — so everything the picker,
+    /// the axis-role editor and the persistence already do with a cube trace applies unchanged. The
+    /// probe itself is NOT part of the item: it is chosen on the card's own WSProbe section, so the
+    /// list is one entry per metric rather than one per (probe x metric).</para>
+    ///
+    /// <para>Gating is the metric's own (<see cref="WspMetrics.DisabledReasonOn"/>): a margin is a
+    /// real scalar and belongs on a rectangular plot, a loop gain has no Smith grid, and each is
+    /// offered DISABLED WITH A REASON on the wrong plot type rather than vanishing — the same rule
+    /// the derived metrics already follow (R-wsp4-14g).</para>
+    /// </summary>
+    public TraceDataItem(DataSourceEntryViewModel entry, string wspCubeName, AxisSlice[] slice,
+                         WspMetric metric, PlotType plotType)
+    {
+        Entry       = entry;
+        Row         = 0;
+        Col         = 0;
+        Derived     = DerivedParameters.None;
+        IsBroken    = false;
+        IsCubeBound = true;
+        CubeName    = wspCubeName;
+        Slice       = slice;
+        WspMetric   = metric;
+
+        var info = WspMetrics.Info(metric);
+        DisabledReason = WspMetrics.DisabledReasonOn(metric, plotType);
+        IsEnabled      = DisabledReason is null;
+        Label          = info is { } i ? $"{i.Name} — {i.Description}" : WspMetrics.Name(metric);
     }
 
     // ---- Derived parameter constructor -------------------------------------

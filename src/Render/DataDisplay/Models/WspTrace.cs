@@ -1,0 +1,373 @@
+// ================================================================
+//  WspTrace.cs  —  the WSProbe metrics a trace can be, and the ONE
+//  function that produces their samples
+//
+//  WSP-4 (R-wsp4-5, R-wsp4-6, R-wsp4-11). Every value here is a call
+//  into src/RfCore/Stability/ — the same functions the S-parameter
+//  engine computes a run's H0:/Y0:/ZG:/ZL:/SM_Y0:/SM_H0: cubes with,
+//  and the same ones `wsp_H0(SP1.wsp, idx)` resolves to in a measure
+//  line (overview D-2/D-6). Nothing in this file does arithmetic on a
+//  wsp entry: a second implementation of one of these formulae would
+//  agree with the library on the fixtures and drift on a real circuit,
+//  which is the failure the bit-identity gate (R-wsp4-14a) exists to
+//  make impossible rather than unlikely.
+//
+//  It lives BELOW the firewall for the reason RND-1 put the renderers
+//  there: `src/Ui`'s trace card and `src/Cli`'s `plot` verb both build
+//  the same trace, and a probe metric that meant one thing in the
+//  window and another headlessly would be invisible in both.
+// ================================================================
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Numerics;
+using RfCore.Data;
+using RfCore.Stability;
+
+namespace CircuitRF.Render.DataDisplay;
+
+/// <summary>The sections the trace card groups the metric list into (R-wsp4-5's table).</summary>
+public enum WspMetricGroup
+{
+    DrivingPoint,
+    Bidirectional,
+    LoopGain,
+    Match,
+    Margin,
+    Pair,
+    ProbeSet,
+}
+
+/// <summary>
+/// One quantity of T. A. Winslow, <i>General Circuit Analysis Using The WSProbe</i> (2023) that a
+/// Data Display trace can be, under the document's own name (overview §1: nothing is renamed to
+/// something more circuitRF-flavoured).
+///
+/// <para><b>Append-only.</b> The member NAME is what a <c>.cdd</c> carries, so a member may be
+/// added but never renamed, reordered out of meaning, or removed — the same rule
+/// <see cref="DerivedParameters"/> is under, and for the same reason: a saved display would come
+/// back drawing a different quantity with no error anywhere.</para>
+/// </summary>
+public enum WspMetric
+{
+    None = 0,
+
+    // ── Driving point (§4.9–4.10, Eq. 50–52, 105–108) ────────────────────────
+    H0, Y0, InvH0, InvY0,
+
+    // ── Bidirectional immittances (Eq. 61–78, 89–95) ─────────────────────────
+    ZG, ZL, YG, YL, Zop, Yop,
+
+    // ── Loop gains (§4.6, §4.8, Eq. 92–104) ──────────────────────────────────
+    LG, F, LGF, LGR, LG_H, LG_MF, LG_MR, LG_MGF, LG_MGR,
+
+    // ── Match (App. E.7) ─────────────────────────────────────────────────────
+    NodalGamma,
+
+    // ── Stability margin ([M] Eq. 9/10 and its four proxies) ─────────────────
+    SM_Y0, SM_H0, SM, rY, iY, rH, iH,
+
+    // ── Probe pair — wsp_block_calc {9..16} (Eq. 144–151) ────────────────────
+    F_LGa, F_LGf, F_LGH, F_LGM, LGa, LGf, LGH, LGM,
+
+    // ── Probe set — Ohtomo's global loop gains (Eq. 177–180) ─────────────────
+    OhtomoG,
+}
+
+/// <summary>What the trace card needs to know about one metric, in one row.</summary>
+/// <param name="Metric">The member itself.</param>
+/// <param name="Name">The document's own spelling — what the card lists and what
+/// <c>plot --trace metric=</c> takes.</param>
+/// <param name="Description">The one line beside it in the picker.</param>
+/// <param name="Group">Which section of the card it sits in.</param>
+/// <param name="IsReal">True for a real scalar (every margin quantity); false for a complex one.</param>
+/// <param name="OnSmith">Whether a Smith chart can carry it — true only for a quantity that IS an
+/// immittance or a reflection coefficient.</param>
+/// <param name="Unit">The engine unit of the value, for the axis label.</param>
+public readonly record struct WspMetricInfo(
+    WspMetric      Metric,
+    string         Name,
+    string         Description,
+    WspMetricGroup Group,
+    bool           IsReal,
+    bool           OnSmith,
+    string         Unit);
+
+/// <summary>
+/// The metric table, its plot-type gating, and the name a <c>.cdd</c> or a <c>--trace</c> spells
+/// each member with.
+/// </summary>
+public static class WspMetrics
+{
+    /// <summary>Every metric a WSProbe trace can be, in the card's own order.</summary>
+    public static readonly IReadOnlyList<WspMetricInfo> All =
+    [
+        new(WspMetric.H0,    "H0",    "driving-point impedance, vP/iP (Eq. 50)",   WspMetricGroup.DrivingPoint, false, true,  "Ohm"),
+        new(WspMetric.Y0,    "Y0",    "driving-point admittance, iS/vS (Eq. 52)",  WspMetricGroup.DrivingPoint, false, true,  "S"),
+        new(WspMetric.InvH0, "1/H0",  "Kurokawa's locus on H0 (Eq. 107)",          WspMetricGroup.DrivingPoint, false, false, "S"),
+        new(WspMetric.InvY0, "1/Y0",  "Kurokawa's locus on Y0 (Eq. 108)",          WspMetricGroup.DrivingPoint, false, false, "Ohm"),
+
+        new(WspMetric.ZG,  "ZG",  "impedance looking out of G, series stimulus (Eq. 65)", WspMetricGroup.Bidirectional, false, true, "Ohm"),
+        new(WspMetric.ZL,  "ZL",  "impedance looking out of L, series stimulus (Eq. 66)", WspMetricGroup.Bidirectional, false, true, "Ohm"),
+        new(WspMetric.YG,  "YG",  "admittance looking out of G, shunt stimulus (Eq. 72)", WspMetricGroup.Bidirectional, false, true, "S"),
+        new(WspMetric.YL,  "YL",  "admittance looking out of L, shunt stimulus (Eq. 77)", WspMetricGroup.Bidirectional, false, true, "S"),
+        new(WspMetric.Zop, "Zop", "open-port impedance, 1/(y11+y22) (Eq. 89)",            WspMetricGroup.Bidirectional, false, true, "Ohm"),
+        new(WspMetric.Yop, "Yop", "open-port admittance, 1/(z11+z22) (Eq. 90)",           WspMetricGroup.Bidirectional, false, true, "S"),
+
+        new(WspMetric.LG,     "LG",     "bilateral (Tian) loop gain (Eq. 92)",          WspMetricGroup.LoopGain, false, false, ""),
+        new(WspMetric.F,      "F",      "return difference, 1 - LG (Eq. 53)",           WspMetricGroup.LoopGain, false, false, ""),
+        new(WspMetric.LGF,    "LGF",    "forward synthetic-circulator loop gain (Eq. 99)",  WspMetricGroup.LoopGain, false, false, ""),
+        new(WspMetric.LGR,    "LGR",    "reverse synthetic-circulator loop gain (Eq. 97)",  WspMetricGroup.LoopGain, false, false, ""),
+        new(WspMetric.LG_H,   "LG_H",   "Hurst loop gain (Eq. 100)",                    WspMetricGroup.LoopGain, false, false, ""),
+        new(WspMetric.LG_MF,  "LG_MF",  "Middlebrook forward (Eq. 101)",                WspMetricGroup.LoopGain, false, false, ""),
+        new(WspMetric.LG_MR,  "LG_MR",  "Middlebrook reverse (Eq. 102)",                WspMetricGroup.LoopGain, false, false, ""),
+        new(WspMetric.LG_MGF, "LG_MGF", "general feedback theorem, forward (Eq. 103)",  WspMetricGroup.LoopGain, false, false, ""),
+        new(WspMetric.LG_MGR, "LG_MGR", "general feedback theorem, reverse (Eq. 104)",  WspMetricGroup.LoopGain, false, false, ""),
+
+        new(WspMetric.NodalGamma, "nodal gamma", "nodal conjugate reflection coefficient (App. E.7)",
+                                                                                        WspMetricGroup.Match, false, true, ""),
+
+        new(WspMetric.SM_Y0, "SM_Y0", "stability margin on 1/Y0 ([M] Eq. 9)",   WspMetricGroup.Margin, true, false, ""),
+        new(WspMetric.SM_H0, "SM_H0", "stability margin on 1/H0 ([M] Eq. 10)",  WspMetricGroup.Margin, true, false, ""),
+        new(WspMetric.SM,    "SM",    "the smaller of the two margins",         WspMetricGroup.Margin, true, false, ""),
+        new(WspMetric.rY,    "rY",    "real-part proxy of ZG, ZL ([M] M-rY)",   WspMetricGroup.Margin, true, false, ""),
+        new(WspMetric.iY,    "iY",    "imaginary-part proxy of ZG, ZL ([M] M-iY)", WspMetricGroup.Margin, true, false, ""),
+        new(WspMetric.rH,    "rH",    "real-part proxy of YG, YL ([M] M-rH)",   WspMetricGroup.Margin, true, false, ""),
+        new(WspMetric.iH,    "iH",    "imaginary-part proxy of YG, YL ([M] M-iH)", WspMetricGroup.Margin, true, false, ""),
+
+        new(WspMetric.F_LGa, "F_LGa", "return difference 1 - LGa (Eq. 144)", WspMetricGroup.Pair, false, false, ""),
+        new(WspMetric.F_LGf, "F_LGf", "return difference 1 - LGf (Eq. 145)", WspMetricGroup.Pair, false, false, ""),
+        new(WspMetric.F_LGH, "F_LGH", "return difference 1 - LGH (Eq. 146)", WspMetricGroup.Pair, false, false, ""),
+        new(WspMetric.F_LGM, "F_LGM", "return difference 1 - LGM (Eq. 147)", WspMetricGroup.Pair, false, false, ""),
+        new(WspMetric.LGa,   "LGa",   "two-block loop gain (Eq. 148)",       WspMetricGroup.Pair, false, false, ""),
+        new(WspMetric.LGf,   "LGf",   "feedback-as-synthetic-FET loop gain (Eq. 149)", WspMetricGroup.Pair, false, false, ""),
+        new(WspMetric.LGH,   "LGH",   "two-block Hurst loop gain (Eq. 150)", WspMetricGroup.Pair, false, false, ""),
+        new(WspMetric.LGM,   "LGM",   "two-block Middlebrook loop gain (Eq. 151)", WspMetricGroup.Pair, false, false, ""),
+
+        new(WspMetric.OhtomoG, "G", "Ohtomo global loop gain G_i over the probe set (Eq. 179)",
+                                                                             WspMetricGroup.ProbeSet, false, false, ""),
+    ];
+
+    private static readonly Dictionary<WspMetric, WspMetricInfo> ByMetric =
+        All.ToDictionary(m => m.Metric);
+
+    /// <summary>The document's own spellings, EXACTLY — including case.</summary>
+    private static readonly Dictionary<string, WspMetric> ByExactName =
+        All.ToDictionary(m => m.Name, m => m.Metric, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The case- and punctuation-insensitive lookup, built ONLY from names that have no collision
+    /// under it.
+    ///
+    /// <para><b>Case is load-bearing in this notation and cannot be folded away.</b> The document
+    /// writes <c>LGF</c> for the forward synthetic-circulator loop gain of ONE probe (Eq. 99) and
+    /// <c>LGf</c> for the feedback-as-synthetic-FET loop gain of a probe PAIR (Eq. 149); likewise
+    /// <c>LG_H</c> and <c>LGH</c>, <c>LG_MF</c>/<c>LG_MR</c> and <c>LGM</c>. Folding case would
+    /// silently answer one question with the other's number. So a name whose canonical form is
+    /// shared is simply not in this table, and only its exact spelling resolves.</para>
+    /// </summary>
+    private static readonly Dictionary<string, WspMetric> ByLooseName = BuildLooseNames();
+
+    private static Dictionary<string, WspMetric> BuildLooseNames()
+    {
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var m in All)
+        {
+            string k = Canonical(m.Name);
+            counts[k] = counts.TryGetValue(k, out int n) ? n + 1 : 1;
+        }
+        var loose = new Dictionary<string, WspMetric>(StringComparer.Ordinal);
+        foreach (var m in All)
+        {
+            string k = Canonical(m.Name);
+            if (counts[k] == 1) loose[k] = m.Metric;
+        }
+        return loose;
+    }
+
+    /// <summary>The row for <paramref name="m"/>, or null for <see cref="WspMetric.None"/>.</summary>
+    public static WspMetricInfo? Info(WspMetric m)
+        => ByMetric.TryGetValue(m, out var info) ? info : null;
+
+    /// <summary>The document's spelling, or "" for <see cref="WspMetric.None"/>.</summary>
+    public static string Name(WspMetric m) => Info(m)?.Name ?? "";
+
+    /// <summary>
+    /// A metric from the name a <c>--trace metric=</c> or a <c>.cdd</c> carries.
+    ///
+    /// <para>Four passes, tightest first: the document's exact spelling; the enum member's own name
+    /// (case-sensitively — <c>LGF</c> and <c>LGf</c> are two members and two quantities); the
+    /// command-line aliases for the names the document writes with characters a shell does not take
+    /// (<c>1/H0</c> is <c>invH0</c>); and finally the loose form, for the majority of names that
+    /// have no case- or punctuation-collision. A name that collides resolves only exactly — see
+    /// <see cref="ByLooseName"/> for why that is deliberate.</para>
+    /// </summary>
+    public static bool TryParse(string? name, out WspMetric metric)
+    {
+        metric = WspMetric.None;
+        if (string.IsNullOrWhiteSpace(name)) return false;
+        string text = name.Trim();
+
+        if (ByExactName.TryGetValue(text, out metric)) return true;
+        if (Enum.TryParse(text, ignoreCase: false, out metric) && metric != WspMetric.None) return true;
+
+        metric = Canonical(text) switch
+        {
+            "invh0" => WspMetric.InvH0,
+            "invy0" => WspMetric.InvY0,
+            // The placeholders WSP-9 retired, pointed at the published quantities that replaced
+            // them, so a display or a script written against them keeps working rather than
+            // failing with a name nobody can look up any more (overview D-12).
+            "nz" => WspMetric.InvH0,
+            "ny" => WspMetric.InvY0,
+            "gamma" or "nodalgamma" or "wspnodalgamma" => WspMetric.NodalGamma,
+            "ohtomo" or "ohtomog" or "gi" => WspMetric.OhtomoG,
+            "stabilitymargin" or "sm" => WspMetric.SM,
+            _ => WspMetric.None,
+        };
+        if (metric != WspMetric.None) return true;
+
+        return ByLooseName.TryGetValue(Canonical(text), out metric) && metric != WspMetric.None;
+    }
+
+    private static string Canonical(string s)
+    {
+        Span<char> buf = stackalloc char[s.Length];
+        int n = 0;
+        foreach (char c in s)
+            if (char.IsLetterOrDigit(c)) buf[n++] = char.ToLowerInvariant(c);
+        return new string(buf[..n]);
+    }
+
+    /// <summary>True when the metric needs a SECOND probe ("with probe") to be computable.</summary>
+    public static bool NeedsPair(WspMetric m) => Info(m)?.Group == WspMetricGroup.Pair;
+
+    /// <summary>True when the metric needs an ordered probe SET.</summary>
+    public static bool NeedsProbeSet(WspMetric m) => Info(m)?.Group == WspMetricGroup.ProbeSet;
+
+    /// <summary>
+    /// True when the metric reads the <c>Z0</c> field on the card: the two synthetic-circulator loop
+    /// gains normalise by it (Eq. 96–99), every pair metric scatters its two blocks at it
+    /// (Eq. 142/143), and Ohtomo's <c>SA</c>/<c>SP</c> are reflection coefficients in it. Everything
+    /// else ignores it, and the card hides the field rather than showing an inert one.
+    /// </summary>
+    public static bool UsesZ0(WspMetric m)
+        => m is WspMetric.LGF or WspMetric.LGR
+        || Info(m)?.Group is WspMetricGroup.Pair or WspMetricGroup.ProbeSet;
+
+    /// <summary>
+    /// Whether <paramref name="m"/> can be drawn on <paramref name="plotType"/>, and why not when it
+    /// cannot (R-wsp4-5's gating, R-wsp4-14g). The rule is the metric's OWN kind rather than a
+    /// per-member list, so a metric added later cannot be forgotten here.
+    ///
+    /// <para>A Table carries anything: it renders complex and scalar cells alike, which is the same
+    /// exemption <see cref="DerivedParameters"/>'s gating already makes.</para>
+    /// </summary>
+    public static string? DisabledReasonOn(WspMetric m, PlotType plotType)
+    {
+        if (Info(m) is not { } info) return null;
+        if (plotType == PlotType.Table) return null;
+
+        bool complexPlane = plotType is PlotType.Smith or PlotType.Polar;
+
+        if (info.Group == WspMetricGroup.Margin)
+            return complexPlane
+                ? "The stability margin is a real number in [0, 1] versus frequency — add it to a "
+                + "rectangular (or table) plot. (Winslow, EuMIC 2024.)"
+                : null;
+
+        if (!complexPlane) return null;                       // every complex quantity reads on Rect
+        if (plotType == PlotType.Polar) return null;          // and every one of them on Polar
+        return info.OnSmith
+            ? null
+            : $"{info.Name} is not an immittance or a reflection coefficient, so a Smith chart has "
+            + "no grid for it — add it to a Polar or a rectangular plot.";
+    }
+
+    /// <summary>
+    /// The measure-line spelling of this trace — the accessor grammar of overview D-5, which is what
+    /// the document itself writes and what a <c>measure</c> line would type to get the same numbers.
+    ///
+    /// <para>It is a NAME for what the card's own pickers author, not a cube shorthand the spec
+    /// parser reads back: the card shows it so a reader can carry the trace into a measure line, and
+    /// <c>TraceRowViewModel.CommitSpec</c> treats retyping it unchanged as a no-op for that reason.</para>
+    /// </summary>
+    public static string AccessorText(WspTraceSpec spec, string? cubeSpec)
+    {
+        string wsp   = cubeSpec ?? "wsp";
+        string group = wsp.LastIndexOf('.') is int d && d > 0 ? wsp[..d] : "";
+        string idx   = group.Length > 0 ? $"{group}.idx(\"{spec.Probe}\")" : $"idx(\"{spec.Probe}\")";
+
+        if (NeedsPair(spec.Metric))
+        {
+            string idx2 = group.Length > 0 ? $"{group}.idx(\"{spec.With}\")" : $"idx(\"{spec.With}\")";
+            int one = spec.Metric switch
+            {
+                WspMetric.F_LGa => 9,  WspMetric.F_LGf => 10, WspMetric.F_LGH => 11, WspMetric.F_LGM => 12,
+                WspMetric.LGa   => 13, WspMetric.LGf   => 14, WspMetric.LGH   => 15, WspMetric.LGM   => 16,
+                _ => 0,
+            };
+            return $"wsp_block_calc({wsp}, {idx}, {idx2}){{{one}}}";
+        }
+
+        if (spec.Metric == WspMetric.OhtomoG)
+        {
+            string set = string.Join(", ", spec.Set.Select(l => group.Length > 0
+                ? $"{group}.idx(\"{l}\")" : $"idx(\"{l}\")"));
+            return $"wsp_loopgain_ohtomo({wsp}, [{set}], \"{spec.ActiveSide}\"){{{spec.SetIndex}}}";
+        }
+
+        return spec.Metric switch
+        {
+            WspMetric.H0    => $"wsp_H0({wsp}, {idx})",
+            WspMetric.Y0    => $"wsp_Y0({wsp}, {idx})",
+            WspMetric.InvH0 => $"1 / wsp_H0({wsp}, {idx})",
+            WspMetric.InvY0 => $"1 / wsp_Y0({wsp}, {idx})",
+            WspMetric.ZG    => $"wsp_ZG({wsp}, {idx})",
+            WspMetric.ZL    => $"wsp_ZL({wsp}, {idx})",
+            WspMetric.YG    => $"wsp_YG({wsp}, {idx})",
+            WspMetric.YL    => $"wsp_YL({wsp}, {idx})",
+            WspMetric.Zop   => $"wsp_zop({wsp}, {idx})",
+            WspMetric.Yop   => $"wsp_yop({wsp}, {idx})",
+            WspMetric.LG    => $"wsp_loopgain({wsp}, {idx}, \"BI\")",
+            WspMetric.F     => $"1 - wsp_loopgain({wsp}, {idx}, \"BI\")",
+            WspMetric.LGF   => $"wsp_loopgain({wsp}, {idx}, \"UNI\")",
+            WspMetric.LGR   => $"wsp_loopgain({wsp}, {idx}, \"REV\")",
+            WspMetric.LG_H  => $"wsp_loopgain({wsp}, {idx}, \"HST\")",
+            WspMetric.LG_MF => $"wsp_loopgain({wsp}, {idx}, \"MB\")",
+            WspMetric.LG_MR => $"wsp_loopgain({wsp}, {idx}, \"MBR\")",
+            WspMetric.LG_MGF => $"wsp_loopgain({wsp}, {idx}, \"GFT\")",
+            WspMetric.LG_MGR => $"wsp_loopgain({wsp}, {idx}, \"GFTR\")",
+            WspMetric.NodalGamma => $"wsp_nodal_gamma({wsp}, {idx})",
+            WspMetric.SM_Y0 => $"wsp_SM_Y0({wsp}, {idx})",
+            WspMetric.SM_H0 => $"wsp_SM_H0({wsp}, {idx})",
+            WspMetric.SM    => $"wsp_stability_margin({wsp}, {idx})",
+            WspMetric.rY    => $"wsp_rY({wsp}, {idx})",
+            WspMetric.iY    => $"wsp_iY({wsp}, {idx})",
+            WspMetric.rH    => $"wsp_rH({wsp}, {idx})",
+            WspMetric.iH    => $"wsp_iH({wsp}, {idx})",
+            _ => wsp,
+        };
+    }
+
+    /// <summary>
+    /// The driving-point function whose Kurokawa search PAIRS with a margin trace: <c>SM_Y0</c> is
+    /// the distance and <c>1/Y0</c> is the detector, so the card reads both on one line (WSP-9
+    /// §2.1f, R-wsp4-7). <see cref="WspMetric.None"/> for anything that is not a margin.
+    /// </summary>
+    public static WspMetric MarginCompanion(WspMetric m) => m switch
+    {
+        WspMetric.SM_Y0 or WspMetric.rY or WspMetric.iY => WspMetric.Y0,
+        WspMetric.SM_H0 or WspMetric.rH or WspMetric.iH => WspMetric.H0,
+        _ => WspMetric.None,
+    };
+
+    /// <summary>The default Rect transform for a freshly picked metric: dB for a margin (the
+    /// paper's own axis, overview D-16), magnitude for everything else.</summary>
+    public static CubeTransform DefaultTransform(WspMetric m, PlotType plotType)
+    {
+        if (plotType is PlotType.Smith or PlotType.Polar) return CubeTransform.None;
+        return Info(m)?.Group == WspMetricGroup.Margin ? CubeTransform.dB20 : CubeTransform.Mag;
+    }
+}

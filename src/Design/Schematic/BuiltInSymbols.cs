@@ -70,6 +70,7 @@ public static class BuiltInSymbols
     private static readonly Symbol _pin          = BuildPin();
     private static readonly Symbol _iprobe       = BuildIProbe();
     private static readonly Symbol _vprobe       = BuildVProbe();
+    private static readonly Symbol _wsprobe      = BuildWSProbe();
     private static readonly Symbol _var          = BuildVar();
     private static readonly Symbol _meas         = BuildMeas();
     private static readonly Symbol _generic      = BuildGeneric();
@@ -221,6 +222,7 @@ public static class BuiltInSymbols
             case SymbolKind.Pin:        return _pin;
             case SymbolKind.IProbe:     return _iprobe;
             case SymbolKind.VProbe:     return _vprobe;
+            case SymbolKind.WSProbe:    return _wsprobe;
             case SymbolKind.Var:        return _var;
             case SymbolKind.Meas:       return _meas;
             case SymbolKind.P1Tone:     return _p1Tone;
@@ -975,6 +977,39 @@ public static class BuiltInSymbols
         L(-65, 30, -89, 79),                                            // shaft: ring edge -> head
         Poly(true, -100, 100, -96, 75, -82, 82),                        // arrowhead, tip AT the pin
     ], SymbolKind.VProbe);
+
+    // ── WSProbe — the stability probe (Winslow 2023, Fig. 15) ────────────────
+    //
+    // The IProbe's geometry, deliberately: two pins at the BOTTOM (0,100)/(100,100), 100 apart,
+    // stems rising to a connector at y=0. A WSProbe is placed into a wire exactly as an IProbe is,
+    // and the wire-cut affordance (SeriesProbeInsertion) needs both pins on one straight segment.
+    //
+    // The BODY is a plain square straddling that connector, with the two terminal letters inside it
+    // at the ends they name — G at the left pin's end, L at the right's. Those letters are the whole
+    // of what a reader uses to tell the two terminals apart, and they are the reason this is not
+    // just the IProbe's ammeter window: an IProbe's terminals are interchangeable up to a sign, and
+    // a WSProbe's are not. Rotating or mirroring the instance moves the DRAWING; the pin order, and
+    // therefore `WSProbe:<label> nG nL`, never moves with it.
+    //
+    // Above the square, a TWO-HEADED arrow — the document's own mark for the probe (Fig. 15). It
+    // says the quantity is BIDIRECTIONAL: ZG looks out of G and ZL out of L, and neither is "the"
+    // impedance of the node. Nothing else in the library carries a double arrowhead, so it reads as
+    // this part at a glance even when the letters are too small to resolve.
+    //
+    // The square is 70 x 70 about (50,0) — the IProbe's own body width, so the two probes sit at the
+    // same visual weight on one sheet. ProbeGlyphTextSize is what keeps the letters in step with the
+    // IProbe's "I" and the VProbe's "V"; changing it changes all three.
+    private static Symbol BuildWSProbe() => Sym([
+        L(  0, 100,   0,   0),                     // left stem  (G pin → connector)
+        L(100, 100, 100,   0),                     // right stem (L pin → connector)
+        L(  0,   0, 100,   0),                     // horizontal connector, through the body
+        RRect(50, 0, 70, 70, 6),                   // the body — a square in the wire
+        Txt("G", 31, 0, fontSize: ProbeGlyphTextSize),   // the generator-side terminal, at its end
+        Txt("L", 69, 0, fontSize: ProbeGlyphTextSize),   // the load-side terminal, at its end
+        L(22, -56, 78, -56),                       // two-headed arrow: shaft
+        Poly(true, 14, -56, 28, -62, 28, -50),     //                    left head
+        Poly(true, 86, -56, 72, -62, 72, -50),     //                    right head
+    ], SymbolKind.WSProbe);
 
     // ── Ground — stem + filled downward triangle (Core Graphics style) ────────
     // Pins: (0,0) — the connection point at the top of the symbol.

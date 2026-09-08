@@ -423,6 +423,46 @@ Select the probe **and** its wire together and they move as one, so the probe st
 
 {{table: components/VProbe}}
 
+### Stability Probe (WSProbe) {#wsprobe}
+
+{{symbol: wsprobe}}
+
+A stability probe, placed *in* a node so that it splits the node into a generator-side terminal (`G`)
+and a load-side terminal (`L`). It implements T. A. Winslow, *General Circuit Analysis Using The
+WSProbe* (2023); every quantity below is that document's, under its own name.
+
+Electrically it is an [IProbe](#iprobe) — a 0 V short — and it is placed the same way: drop it onto
+the wire whose node you want to look at, and circuitRF deletes the stretch of wire between its two
+pins so the probe breaks into the run instead of being shorted by it. It perturbs nothing, so a
+design simulates identically with every WSProbe deleted. It takes no parameters.
+
+**The letters are the orientation.** `G` is the generator-side terminal and `L` the load-side one:
+`ZG` looks out of `G`, `ZL` out of `L`. Rotating or mirroring the symbol moves the drawing and never
+the pin order, so swapping the two means swapping the wires — which swaps every `G`/`L`-labelled
+output and negates nothing else.
+
+**What it produces is not a number but a matrix.** An S-parameter run with any WSProbe in it writes a
+`wsp` cube — 2N x 2N for N probes — and six named outputs per probe: `H0` and `Y0`, the driving-point
+impedance and admittance; `ZG` and `ZL`, the bidirectional impedances; `LG`, the bilateral loop gain;
+and `F = 1 - LG`. Two stability margins, `SM_Y0` and `SM_H0`, come with them. Everything else the
+document derives — every other loop gain, the reduced two-port at the probe, the probe-pair blocks,
+the global loop gains over a set of probes — is post-processing of that one matrix, and is available
+in the Data Display's trace card and in a `measure` line.
+
+**Reading a node for stability is two plots, not one.** Plot `1/H0` and `1/Y0` on a polar chart and
+look for a clockwise crossing of the negative real axis; the trace card reports the frequencies it
+finds, or `none`. Both must be checked, because a zero can hide the pole in one of them but never in
+both — a series resonance shows in `1/Y0` alone and a parallel one in `1/H0` alone.
+
+**The stability margin is a distance, and the search is the detector.** `SM_Y0` and `SM_H0` are
+unitless numbers in `[0, 1]`, shown in dB (`20*log10`), and the trace card prints each one's minimum
+beside the crossing search that pairs with it. A node with positive resistance on both sides can never
+read below **-12 dB**, so anything under that line certifies negative resistance on one side; the run
+reports any probe whose margin falls below the analysis' `MarginThreshold` (default -15 dB) as worth
+looking at. That report is a note, not a warning: a low margin is somewhere to look, not a failure.
+
+{{table: components/WSProbe}}
+
 ### Tuner / SourceTuner / LoadTuner {#tuner}
 
 <div class="symbol-row">

@@ -400,3 +400,67 @@ beside its neighbours — the shape of every shared-static hazard.
 is flattened with, the other the face a PLOT draws with). `ScalarCubeTests`,
 `PanAndMarkerLabelTests` — which renders pixels and was silently party to it — and
 `RenderDataDisplayCliTests` are in it.
+
+---
+
+## WSP-4 — the WSProbe metrics, and the four things that were not obvious (2026-09-08)
+
+`brief-wsprobe-4-ui-symbol-and-data-display.md`. The Data Display half landed here rather than in
+`src/Ui` because `src/Cli`'s `plot` verb builds the same trace: the metric table, its gating, the
+value production and the readouts are in `src/Render/DataDisplay/` and both consumers call them.
+
+**A probe trace is a cube trace, and that decided everything downstream.** Its `CubeName` is the run's
+own `…wsp` matrix and its values are substituted at `TraceResolve.SetCubeDataFromCore`'s single
+interception point — the one a renormalized S/Z/Y cube already used. The slice, the family/slider
+mechanism, the markers, the Table, the export, `.cdd` persistence and `render --data` then needed no
+probe-specific path at all, and a swept `wsp` (`{Pin, freq, row, col}`) becomes a metric cube over
+`{Pin, freq}`, which the family marker `~` already draws one curve per sweep point of. R-wsp4-10 cost
+nothing because of this; a parallel resolve path would have cost it twice and drifted.
+
+### 1. Case is load-bearing in the document's metric names, and folding it is a silent wrong answer
+
+The first `WspMetrics` name table canonicalised to lowercase-alphanumeric and threw at class-init on a
+duplicate key. The duplicates are real quantities: the document writes **`LGF`** for one probe's
+forward synthetic-circulator loop gain (Eq. 99) and **`LGf`** for a probe PAIR's
+feedback-as-synthetic-FET loop gain (Eq. 149), and the same collision exists for `LG_H`/`LGH` and
+`LG_MF`/`LG_MR` against `LGM`. Had the dictionary been built with an overwrite instead of an `Add`,
+`metric=lgf` would have resolved to whichever came last and drawn a plausible curve.
+
+The lookup now resolves the exact spelling first, then the enum member name case-SENSITIVELY, then a
+small alias table for the names a shell cannot type (`1/H0` → `invH0`), and only then the loose form —
+built from names that have **no** collision under it, so `lgf` resolves to neither rather than to one.
+A name that collides is reachable only by its own spelling, which is the honest behaviour.
+
+### 2. Skia's SVG device silently drops a stroke's path effect
+
+`SKPathEffect.CreateDash` on a `DrawLine` renders on the PNG and PDF backends and produces **nothing
+at all** in the SVG — no `stroke-dasharray`, no path, no error. The margin threshold line was missing
+from every `.svg` while the solid floor line beside it was present. `DrawWspMarginReferenceLines`
+emits the dash as segments instead, so the three exports agree — which is the property
+`render`'s own byte-identity gate rests on. Anything else in the renderers that reaches for a path
+effect will have the same problem.
+
+### 3. A margin level is stated in dB and the axis may not be
+
+`Trace.WspMarginLevelInDisplayUnits` first passed a dB level straight through for `dB20`, `dB10` and
+`dB` alike. `dB10`/`dB` render `10·log10` of the same ratio, so the −12 dB floor belongs at **−6** on
+that axis; unconverted, both reference lines sat below every curve. Visibly wrong on a linear axis,
+and quietly wrong on a `10·log10` one — which is exactly where a reader would take a margin off the
+drawing and believe it. The level is now converted per transform (overview D-16 fixes the margin's own
+convention at `20·log10`).
+
+### 4. The virtual reduced-two-port groups must be appended AFTER the analysis groups
+
+`DataSourceView` adds one network group per probe (`<analysis> ▸ WSProbe <label> ▸ reduced 2-port`,
+carrying `S`/`Y`/`Z`/`Z0`) so that µ, µ′, K, |Δ|, MAG/MSG and both stability circles apply to the
+document's own two-port reduction (Eq. 44) through the code that already computes them — the cheapest
+new capability in the series, and free only because it is an ordinary network group.
+
+`DataSetBuilder.FindCubeSpec` answers with the FIRST group carrying an `S`, and that has to keep being
+the run's own: a network view built from a probe's reduction would quietly replace the amplifier's own
+S-parameters in every metric that takes one. The groups are therefore materialized after the
+`Z`/`Y` pass, and a test asserts `FindSCubeSpec` still names the analysis group.
+
+**The scattering conversion is `WspMatrix.ScatteringOfY`**, the same one WSP-3 scatters a probe pair's
+blocks with (Eq. 142/143) — not a second S-from-Y — so a circle read off the reduction and a pair
+block's own S-parameters agree by construction.

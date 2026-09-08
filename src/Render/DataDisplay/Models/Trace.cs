@@ -696,6 +696,71 @@ namespace CircuitRF.Render.DataDisplay
 
         public bool          IsCubeBound => CubeName is not null || Expression is not null;
 
+        // ── WSProbe (WSP-4) ──────────────────────────────────────────────────
+        //
+        //  A WSProbe trace IS a cube-bound trace: its CubeName is the run's own `…wsp` matrix, so
+        //  every "is that cube still in this source" check downstream is the ordinary one, and its
+        //  Slice is authored against the METRIC cube's axes (the wsp cube's leading axes, which is
+        //  exactly what WspSource.LeadingAxes hands back). What this field changes is only where
+        //  the values come from — TraceResolve substitutes WspSource's cube for the raw matrix at
+        //  the same one interception point a renormalized S/Z/Y cube is substituted at.
+        //
+        //  Null for every other trace, so a `.cdd` written before WSP-4 loads with no probe metric
+        //  and behaves exactly as it did.
+
+        /// <summary>The WSProbe metric this trace draws, or null when it is not a probe trace
+        /// (R-wsp4-11). See <see cref="WspTraceSpec"/>.</summary>
+        public WspTraceSpec? Wsp { get; set; }
+
+        /// <summary>
+        /// True when this trace draws a WSProbe metric.
+        ///
+        /// <para><b>Cube-bound is part of the question.</b> A trace that becomes network-bound has
+        /// its <see cref="CubeName"/> cleared but keeps whatever <see cref="Wsp"/> it had — which is
+        /// harmless for value production (the resolve returns early on a non-cube trace) and is NOT
+        /// harmless for the RENDERER, which would go on drawing a margin's reference lines under a
+        /// curve that is no longer a margin. The same shape as the cube-versus-derived rule this
+        /// file already carries, and the same fix: ask the whole question in one place.</para>
+        /// </summary>
+        public bool IsWspTrace => IsCubeBound && Wsp is { } w && w.IsActive;
+
+        /// <summary>
+        /// The run's own <c>MarginThreshold</c>, in dB — stamped from the source's
+        /// <c>__WspMarginThreshold</c> cube when the trace resolves, so the rect plot draws the line
+        /// the RUN judged against rather than the published default (R-wsp4-7). NaN when the run set
+        /// <c>MarginThreshold=none</c>, or when the source predates the cube; the −12 dB floor is
+        /// drawn either way, because it is arithmetic rather than a setting.
+        /// </summary>
+        public double WspMarginThresholdDb { get; set; } = double.NaN;
+
+        /// <summary>
+        /// True when this trace is a margin on a rectangular plot — the one state the two horizontal
+        /// reference lines belong on. A margin drawn linear gets them at the same MARGINS, converted
+        /// through the trace's own transform, rather than at the dB numbers (overview D-16).
+        /// </summary>
+        public bool ShowsWspMarginReferenceLines
+            => IsWspTrace
+            && WspMetrics.Info(Wsp!.Metric)?.Group == WspMetricGroup.Margin
+            && _lastPlotType == PlotType.Rect;
+
+        /// <summary>
+        /// A margin level — stated at the paper's own <c>20·log10</c> (overview D-16) — converted to
+        /// the units this trace is ACTUALLY drawn in, so the line lands on the same RATIO whatever
+        /// the axis is showing.
+        ///
+        /// <para>The <c>dB10</c>/<c>dB</c> case is the one that matters: those render
+        /// <c>10·log10</c> of the same number, which is HALF the dB, so a −12 dB floor sits at −6 on
+        /// that axis. Passing the level through unconverted would put both reference lines below
+        /// every curve — visibly wrong on a linear axis, and quietly wrong on a 10·log10 one, which
+        /// is where a reader would take a margin off the drawing and believe it.</para>
+        /// </summary>
+        public double WspMarginLevelInDisplayUnits(double db) => Transform switch
+        {
+            CubeTransform.dB20                     => db,
+            CubeTransform.dB10 or CubeTransform.dB => db / 2.0,
+            _                                      => Math.Pow(10.0, db / 20.0),
+        };
+
         // ── Performance guardrail (Phase 7.3) ────────────────────────────────────
         // Max curves a single family trace renders. Single source of truth — clamp +
         // one Message past it. Raise/lower here for perf testing.
@@ -1024,6 +1089,17 @@ namespace CircuitRF.Render.DataDisplay
         /// <see cref="BuildPickerExpression"/> appends the <c>vs X</c> half on top of this.</summary>
         private string BuildPickerYExpression()
         {
+            // WSP-4: a WSProbe trace names itself the way a measure line would (overview D-5), not
+            // by the slice through the raw wsp matrix its values are computed FROM. `mag(SP1.wsp[:,
+            // 0, 0])` is a true description of the read and a false description of the quantity.
+            if (IsWspTrace)
+            {
+                string body = WspMetrics.AccessorText(Wsp!, CubeName);
+                return Transform == CubeTransform.None
+                    ? body
+                    : $"{TransformFunctionName(Transform)}({body})";
+            }
+
             if (CubeName is null || Slice is null)
             {
                 // The fallback description can itself be a "Y vs X" string (it reads Expression),
@@ -1155,6 +1231,7 @@ namespace CircuitRF.Render.DataDisplay
             foreach (var kvp in src.FamilyColumnWidths)
                 FamilyColumnWidths[kvp.Key] = kvp.Value;
             // Cube-bound identity fields (Phase 7.2c-a).
+            Wsp             = src.Wsp?.Clone();
             CubeName        = src.CubeName;
             Slice           = src.Slice;   // AxisSlice[] is immutable; sharing is safe.
             Transform       = src.Transform;

@@ -270,6 +270,36 @@ public static class DocDataDisplayFixtures
     /// <summary>The Plot Inspector showing a trace card against a harmonic-balance run.</summary>
     public static FigureScene InspectorHb() => Inspector(DocRunData.HarmonicBalance(), PlotType.Rect);
 
+    /// <summary>
+    /// The Plot Inspector with its WSProbe section open — the probe picker, the metric, and the
+    /// reading beside it (WSP-4 §2, for WSP-7).
+    ///
+    /// <para><c>1/Y0</c> on a POLAR plot, because that is the pairing the reference document reads a
+    /// node's stability off (§4.9-4.10): the locus is looked at for a clockwise crossing of the
+    /// negative real axis, and the card states in words what the eye is being asked to see. A
+    /// rectangular card of the same quantity would be a picture of the controls with the point of
+    /// them left out.</para>
+    /// </summary>
+    public static FigureScene InspectorWsProbe()
+    {
+        var (_, plot) = Plotted(DocRunData.WsProbe(), PlotType.Polar);
+        var row = plot.Inspector.Traces[0];
+        // The picker is a group→item cascade, so the section has to be selected before its items
+        // are the ones on offer — the same two gestures a reader makes.
+        row.SelectedGroup = row.AvailableGroups.First(
+            g => g.EndsWith("\u25b8 WSProbe", StringComparison.Ordinal));
+        PickSignal(row, WspMetricLabel(WspMetric.InvY0));
+        return new FigureScene(new PlotInspectorView { DataContext = plot.Inspector });
+    }
+
+    /// <summary>The picker label a WSProbe metric appears under — built the same way the item builds
+    /// it, so the figure cannot go looking for a label the card stopped using.</summary>
+    private static string WspMetricLabel(WspMetric metric)
+    {
+        var info = WspMetrics.Info(metric)!.Value;
+        return $"{info.Name} \u2014 {info.Description}";
+    }
+
     /// <summary>The Plot Inspector showing a load-pull contour trace card.</summary>
     public static FigureScene InspectorLoadpull()
         => Inspector(DocRunData.Loadpull(), PlotType.Smith, contour: true);

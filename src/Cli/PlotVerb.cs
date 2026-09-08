@@ -48,6 +48,16 @@ internal static class PlotVerb
         public string? YText;
         public bool    Secondary;
         public string  Raw = "";       // the whole --trace argument, for refusals
+
+        // WSProbe (WSP-4 R-wsp4-12). `probe=` is what turns a `cube=wsp` trace into a probe metric;
+        // everything else here is the option some metrics read.
+        public string? Probe;
+        public string? With;
+        public string? Set;
+        public string? Metric;
+        public string? Z0;
+        public string? Side;
+        public int?    Gi;
     }
 
     private sealed class Options
@@ -130,7 +140,7 @@ internal static class PlotVerb
         var traces = new List<TraceConfig>(o.Traces.Count);
         for (int i = 0; i < o.Traces.Count; i++)
         {
-            var (tc, refusal) = BuildTrace(o.Traces[i], data, Path.GetFileName(o.Result), i);
+            var (tc, refusal) = BuildTrace(o.Traces[i], data, Path.GetFileName(o.Result), i, o.Type);
             if (refusal is { } r) return r;
             traces.Add(tc!);
         }
@@ -174,7 +184,9 @@ internal static class PlotVerb
             "                     [--size WxH] [--scale n | --dpi n] [--variant light|dark]\n" +
             "                     [--background opaque|transparent] [--write-cdd out.cdd]\n" +
             "  a trace spec is comma-separated key=value: cube=S i=2 j=1 y=db axis=left|right\n" +
-            "  cube= takes the trace card's own shorthand — S[:,1,0], Pout, mag(V[:,\"X1.drain\"])");
+            "  cube= takes the trace card's own shorthand — S[:,1,0], Pout, mag(V[:,\"X1.drain\"])\n" +
+            "  a WSProbe quantity: cube=<analysis>.wsp probe=<label> metric=<name> [with=<label>]\n" +
+            "                      [set=A;B] [z0=50] [side=G|L] [gi=1]");
         return 1;
     }
 
@@ -354,6 +366,24 @@ internal static class PlotVerb
                         default: return (null, JsonRun.Fail(CliDiagnostics.PlotTraceAxisUnknown(raw, value)));
                     }
                     break;
+                case "probe":  spec.Probe  = value; break;
+                case "with":   spec.With   = value; break;
+                case "set":    spec.Set    = value; break;
+                case "metric": spec.Metric = value; break;
+                case "z0":     spec.Z0     = value; break;
+                case "side":
+                    if (!value.Equals("G", StringComparison.OrdinalIgnoreCase)
+                     && !value.Equals("L", StringComparison.OrdinalIgnoreCase))
+                        return (null, JsonRun.Fail(CliDiagnostics.PlotWspSideUnknown(raw, value)));
+                    spec.Side = value.ToUpperInvariant();
+                    break;
+                case "gi":
+                {
+                    if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int gi) || gi < 1)
+                        return (null, JsonRun.Fail(CliDiagnostics.PlotTracePortMalformed(raw, key, value)));
+                    spec.Gi = gi;
+                    break;
+                }
                 default:
                     return (null, JsonRun.Fail(CliDiagnostics.PlotTraceUnknownKey(raw, key)));
             }
@@ -396,7 +426,7 @@ internal static class PlotVerb
     /// the result actually holds.
     /// </summary>
     private static (TraceConfig? Trace, int? Refusal) BuildTrace(
-        TraceSpec spec, DataSet data, string sourceRef, int index)
+        TraceSpec spec, DataSet data, string sourceRef, int index, PlotType plotType)
     {
         string text = spec.Text;
 
@@ -406,6 +436,98 @@ internal static class PlotVerb
         // is the list of what the file holds, so this refusal is made here rather than forwarded.
         if (BareCubeName(text) is { Length: > 0 } bare && !data.Contains(bare))
             return (null, JsonRun.Fail(CliDiagnostics.PlotNoSuchCube(bare, CubeNames(data))));
+
+        // ── a WSProbe metric (WSP-4 R-wsp4-12) ──────────────────────────────
+        //
+        //  `cube=` names the run's own wsp MATRIX and the metric is taken of it, which is exactly
+        //  what the trace card authors — the document this verb writes is the same `.cdd` the GUI
+        //  writes, so there is no second probe path here any more than there is a second plotting
+        //  one. The refusals are the library's own sentences, which name the run's probes.
+        if (spec.Probe is not null || spec.Metric is not null || spec.With is not null
+            || spec.Set is not null || spec.Side is not null || spec.Gi is not null)
+        {
+            if (text.Contains('['))
+                return (null, JsonRun.Fail(CliDiagnostics.PlotTracePortsWithSlice(spec.Raw)));
+            if (spec.Metric is null)
+                return (null, JsonRun.Fail(CliDiagnostics.PlotWspMetricRequired(spec.Raw)));
+            if (!WspMetrics.TryParse(spec.Metric, out var metric))
+                return (null, JsonRun.Fail(CliDiagnostics.PlotWspMetricUnknown(
+                    spec.Raw, spec.Metric, string.Join(", ", WspMetrics.All.Select(m => m.Name)))));
+
+            if (WspSource.LeadingAxes(data, text) is not { Length: > 0 } leading)
+                return (null, JsonRun.Fail(CliDiagnostics.PlotWspNotAWspCube(spec.Raw, text)));
+
+            var wspSpec = new WspTraceSpec
+            {
+                Probe  = spec.Probe ?? "",
+                With   = spec.With  ?? "",
+                Set    = spec.Set is { Length: > 0 } set
+                    ? [.. set.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]
+                    : [],
+                Metric = metric,
+                Z0     = spec.Z0 is { Length: > 0 } z0 && double.TryParse(
+                             z0, NumberStyles.Float, CultureInfo.InvariantCulture, out double z0v)
+                         ? new System.Numerics.Complex(z0v, 0)
+                         : System.Numerics.Complex.Zero,
+                ActiveSide = spec.Side == "L" ? RfCore.Stability.WspSide.L : RfCore.Stability.WspSide.G,
+                SetIndex   = spec.Gi ?? 1,
+            };
+
+            // Resolved HERE rather than at draw time, for the reason every other refusal in this
+            // verb is made here: "this run has no probe named GATE, it has DRAIN and SOURCE" is an
+            // answer a caller can act on, and a picture with no curve in it is not.
+            if (!WspSource.TryEvaluate(data, text, wspSpec, out _, out string wspErr))
+                return (null, JsonRun.Fail(CliDiagnostics.PlotWspUnresolved(spec.Raw, wspErr)));
+
+            // `y=` on a probe trace is the ordinary transform over the metric's own values — the
+            // same table the trace card's combo uses, resolved through the spec parser so there is
+            // one list of transform names. Absent, the metric's own default applies.
+            var wspTransform = WspMetrics.DefaultTransform(metric, plotType);
+            if (spec.YText is { } wy)
+            {
+                string t = wy.Equals("imaginary", StringComparison.OrdinalIgnoreCase) ? "imag" : wy;
+                // The parser's OWN table, by name — not by handing it `db(wsp)`, which is not a spec
+                // it can read: the cube here is the 2N x 2N matrix and the values are a METRIC of it.
+                if (!CubeTraceSpecParser.TryParseTransformName(t, out wspTransform))
+                    return (null, JsonRun.Fail(CliDiagnostics.PlotTraceUnresolved(
+                        spec.Raw, $"{t}(…)", $"'{wy}' is not a transform. "
+                      + "They are: db20, db10, db, mag, phase, real, imag, conj, none.")));
+            }
+
+            int xIdx = 0;
+            for (int d = 0; d < leading.Length; d++)
+                if (leading[d].Name == "freq") { xIdx = d; break; }
+
+            var wspSlice = new AxisSlice[leading.Length];
+            for (int d = 0; d < leading.Length; d++)
+                wspSlice[d] = d == xIdx
+                    ? new AxisSlice(leading[d].Name, AxisRole.KeepAsX, 0)
+                    : new AxisSlice(leading[d].Name, AxisRole.PinToIndex, 0);
+
+            return (new TraceConfig
+            {
+                SourcePath       = sourceRef,
+                CubeName         = text,
+                CubeSlice        = [.. wspSlice.Select(AxisSliceConfig.From)],
+                CubeTransform    = wspTransform,
+                UseSecondaryAxis = spec.Secondary,
+                WsProbe          = new WspTraceConfig
+                {
+                    Probe      = wspSpec.Probe,
+                    With       = wspSpec.With,
+                    Set        = [.. wspSpec.Set],
+                    Metric     = wspSpec.Metric,
+                    Z0         = wspSpec.Z0.Real.ToString("G6", CultureInfo.InvariantCulture),
+                    ActiveSide = wspSpec.ActiveSide,
+                    SetIndex   = wspSpec.SetIndex,
+                },
+                Properties       = new TracePropertiesConfig
+                {
+                    LineColorIndex   = WheelColor(index),
+                    MarkerColorIndex = WheelColor(index),
+                },
+            }, null);
+        }
 
         // i/j pin the axes NAMED i and j, by port number. They are the convenience over the
         // shorthand, so a spec that already carries a slice is a caller saying both things at once,

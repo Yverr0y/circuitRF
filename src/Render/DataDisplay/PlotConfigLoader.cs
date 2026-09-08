@@ -197,6 +197,18 @@ public static class PlotConfigLoader
                     ? traceConfig.CubeSlice.Select(s => s.ToSlice()).ToArray()
                     : null;
                 trace.Expression = traceConfig.Expression;
+                // WSP-4: the probe metric rides on the cube-bound trace it already is.
+                if (traceConfig.WsProbe is { } wc)
+                    trace.Wsp = new WspTraceSpec
+                    {
+                        Probe      = wc.Probe,
+                        With       = wc.With,
+                        Set        = [.. wc.Set],
+                        Metric     = wc.Metric,
+                        Z0         = ComplexStringHelper.TryParse(wc.Z0, out var wz0) ? wz0 : System.Numerics.Complex.Zero,
+                        ActiveSide = wc.ActiveSide,
+                        SetIndex   = wc.SetIndex,
+                    };
             }
             else
             {

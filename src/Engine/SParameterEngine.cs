@@ -353,6 +353,14 @@ public static class SParameterEngine
             termZ[2 * pi]     = probes[pi].TermZG ?? nan;
             termZ[2 * pi + 1] = probes[pi].TermZL ?? nan;
         }
+        // __WspMarginThreshold: the run's own MarginThreshold, in dB, so the Data Display can draw
+        // the line the run actually judged against rather than the published default (WSP-4
+        // R-wsp4-7). NaN when the knob is `none`. Metadata like __WspProbes — a sweep passes it
+        // through unstacked, and the trace picker skips every `__` cube.
+        ds.Add("__WspMarginThreshold",
+            new DataCube([new Axis("one", [0.0])],
+                         new[] { settings.WspMarginThresholdDb ?? double.NaN }));
+
         ds.Add("__WspTermZ", new DataCube(
             [new Axis("probe", (double[])pIdx.Clone(), "", (string[])labels.Clone()),
              new Axis("side", [0.0, 1.0], "", ["G", "L"])],

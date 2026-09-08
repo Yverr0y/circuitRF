@@ -1,15 +1,22 @@
 namespace CircuitRF.Ui.Schematic;
 
 /// <summary>
-/// The wire an <see cref="SymbolKind.IProbe"/> shorts out the moment it is placed, and the rule
-/// for when circuitRF may clear it.
+/// The wire a SERIES PROBE shorts out the moment it is placed, and the rule for when circuitRF may
+/// clear it.
 ///
-/// <para><b>Why this exists.</b> An IProbe is a 0 V series ammeter: it measures the current
-/// through itself, so it is only useful placed IN a wire. The natural gesture is to drop it onto
-/// the wire whose current is wanted — at which point both of its pins land on that wire and the
-/// probe is shorted by the very run it was meant to break into, reading nothing. Every user then
-/// performs the same second gesture: delete the stretch of wire between the two pins. This finds
-/// that stretch so the placement can do it for them.</para>
+/// <para><b>Why this exists.</b> A series probe is a 0 V short: it reports on the branch it is IN,
+/// so it is only useful placed IN a wire. The natural gesture is to drop it onto the wire whose
+/// current is wanted — at which point both of its pins land on that wire and the probe is shorted
+/// by the very run it was meant to break into, reading nothing. Every user then performs the same
+/// second gesture: delete the stretch of wire between the two pins. This finds that stretch so the
+/// placement can do it for them.</para>
+///
+/// <para><b>Two kinds are series probes</b> (<see cref="IsSeriesProbe"/>): the
+/// <see cref="SymbolKind.IProbe"/> this was written for, and the
+/// <see cref="SymbolKind.WSProbe"/>, which is electrically the same 0 V short and is placed the
+/// same way. A shorted WSProbe is worse than a shorted ammeter, not better — its whole output is
+/// the <c>wsp</c> matrix of the node it was meant to split, and a node it never split has none. The
+/// headless twin of this rule is <c>check</c>'s <c>wsprobe.shorted</c>.</para>
 ///
 /// <para><b>The result must be electrically identical to the hand edit</b>, and that is the whole
 /// constraint on <see cref="FindShortedSpan"/>. The cut is allowed only when the two pins sit on
@@ -28,6 +35,14 @@ namespace CircuitRF.Ui.Schematic;
 /// </summary>
 public static class SeriesProbeInsertion
 {
+    /// <summary>
+    /// The kinds this affordance is for: a two-terminal 0 V short whose whole purpose is to break
+    /// into a branch. Asked here rather than listed at the call site, so a third series probe
+    /// cannot be added and silently miss the wire cut.
+    /// </summary>
+    public static bool IsSeriesProbe(SymbolKind kind)
+        => kind is SymbolKind.IProbe or SymbolKind.WSProbe;
+
     /// <summary>
     /// The stretch of wire to remove: which wire, which of its segments, and the two cut points
     /// in that segment's own order — <paramref name="First"/> is the one nearer the segment's

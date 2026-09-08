@@ -167,8 +167,19 @@ RFfreq = 2 GHz
 </code></pre>
 <p>Top-level <strong>global variables</strong>, usable anywhere a value is expected. They're also <strong>sweepable</strong> —
 and both are swept by the analyses below (<code>Pin</code> is the drive level, <code>RFfreq</code> the fundamental). A
-variable may carry a unit (<code>2 GHz</code>); when it does, that unit wins wherever the variable is
-referenced.</p>
+variable may carry a unit (<code>2 GHz</code>, <code>48 V</code>, <code>10 dBm</code>, <code>50 Ohm</code>); when it does, that unit wins
+wherever the variable is referenced.</p>
+<div class="callout note">
+    <span class="label">Any unit, not just the scaling ones</span>
+    <p>Both kinds work here: the ones that scale a number (<code>GHz</code>, <code>mF</code>,
+    <code>pH</code>) and the ones that only name a quantity (<code>V</code>, <code>A</code>,
+    <code>W</code>, <code>dBm</code>, <code>Ohm</code>, <code>deg</code>). Before circuitRF 1.0
+    <code>VDS = 48 V</code> was a parse error while <code>RFfreq = 2 GHz</code> was fine; the two
+    are the same thing now.</p>
+    <p>The unit is only ever read off the end of something that is <em>not</em> already a valid
+    expression, so an expression whose last token happens to spell a unit is left alone —
+    <code>x = 2 * f</code> is a multiplication, not two femtoseconds.</p>
+  </div>
 <h3 id="w-components">4 · Components &amp; instances</h3>
 <pre><code class="language-netlist">C:C1  Vin  n1  C=1 mF
 L:L1  n2  n3  L=1 mH
@@ -243,6 +254,99 @@ each of 3 frequencies from 1 to 3 GHz (<code>Npts=3</code>, <code>Unit=GHz</code
     Nest them with <code>Inner=</code> to sweep more than one variable. The innermost non-sweep analysis
     (<code>HB1</code>) is what each point actually solves.</p>
   </div>
+<h4 id="w-analysis-keys">What a directive may say</h4>
+<p><code>type=</code> takes one of six tokens, and each one has a fixed set of keys:</p>
+<table>
+<thead>
+<tr>
+<th><code>type=</code></th>
+<th>Verb that runs it</th>
+<th>Keys it must have</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dc</code></td>
+<td><code>dc</code></td>
+<td><em>(none)</em></td>
+</tr>
+<tr>
+<td><code>sparam</code></td>
+<td><code>sparam</code></td>
+<td><code>start</code>, <code>stop</code></td>
+</tr>
+<tr>
+<td><code>hb</code></td>
+<td><code>hb</code></td>
+<td><code>Tone</code>, or <code>Tone[1]</code> for a multi-tone run</td>
+</tr>
+<tr>
+<td><code>loadpull</code></td>
+<td><code>lp</code></td>
+<td><code>Tone</code>, <code>LoadTuner</code>, <code>SourceTuner</code>, <code>Grid</code></td>
+</tr>
+<tr>
+<td><code>loadpull_pursuit</code></td>
+<td><code>lpp</code></td>
+<td><code>Tone</code>, <code>LoadTuner</code>, <code>SourceTuner</code></td>
+</tr>
+<tr>
+<td><code>parametric_sweep</code></td>
+<td><em>(the inner analysis's)</em></td>
+<td><code>Var</code>, <code>Inner</code>, and either <code>Values</code> or <code>Start</code>+<code>Stop</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>A key circuitRF does not recognise is refused, by name, with the legal ones listed</strong> — and so is a
+<code>type=</code> token it does not recognise. Every missing required key is reported at once rather than one
+per run. Before 1.0 an unrecognised key was accepted and thrown away in silence, so a directive could
+<code>check</code> clean and then run something quite different from what it said.</p>
+<p>The schematic editor's own key names are accepted as aliases, since a natural way to write a
+directive is to copy them out of a saved <code>.csch</code>: an <code>Lp</code>/<code>Lpp</code>/<code>Psa</code> prefix and an
+<code>Expr</code>/<code>Name</code>/<code>Path</code> suffix are stripped, so <code>LpLoadTunerName=</code> is <code>LoadTuner=</code> and <code>PsaVarName=</code> is
+<code>Var=</code>. So are the editor's short type tags — <code>sp</code>, <code>lp</code>, <code>lpp</code>, <code>sweep</code>.</p>
+<h4 id="w-sparam-unit">Frequency units on a <code>sparam</code> directive</h4>
+<p>A frequency may state its unit three ways, and they mean the same thing:</p>
+<pre><code class="language-netlist">analysis SP1 type=sparam start=0.5 GHz stop=6 GHz npts=551
+analysis SP1 type=sparam start=0.5 stop=6 npts=551 Unit=GHz
+analysis SP1 type=sparam start=&quot;0.5&quot; startUnit=GHz stop=&quot;6&quot; stopUnit=GHz npts=551
+</code></pre>
+<p><code>Unit=</code> sets <code>startUnit</code>, <code>stopUnit</code> and <code>stepUnit</code> together; any of the three given individually
+wins over it. <strong>A bare number with no unit anywhere is hertz.</strong></p>
+<div class="callout warning">
+    <span class="label">Changed in 1.0</span>
+    <p><code>Unit=</code> used to be read by <code>parametric_sweep</code> and silently ignored by
+    <code>sparam</code>, so the second line above swept <strong>0.5 Hz to 6 Hz</strong>. It reported
+    no error at any stage, and the S11 it produced was flat and entirely plausible-looking — the
+    terminations' DC reflection coefficient, nine orders of magnitude from the band that was asked
+    for. If you have a <code>.cnl</code> written against the old behaviour that deliberately relied
+    on the unit being dropped, it will now sweep the band it states.</p>
+  </div>
+<p>An exported Touchstone file's declared unit follows its data, so a header saying <code># GHz</code> above a
+first column reading <code>5E-10</code> is no longer possible. A file that was <em>read</em> keeps the unit its own
+option line declared.</p>
+<h4 id="w-net-counts">Wiring, and how many nets a part takes</h4>
+<p>The nets on an instance line come before the first <code>key=value</code>, and <strong>the count has to match the
+part</strong>. A line with the wrong number is refused, naming the type, the instance and both counts:</p>
+<pre><code>Tuner:T1 is wired to 1 net, and a Tuner takes 2. Add the missing net before the
+first 'name=value' on the line.
+</code></pre>
+<p>A part's net count is <strong>not</strong> always the pin count its schematic symbol draws — several parts have an
+implicit reference terminal. <code>Port</code>, <code>Term</code> and <code>Tuner</code> each take two nets (signal and reference)
+where the glyph shows one pin; <code>SDD</code> and <code>Z_Port</code> take two per port; an ideal system block such as
+<code>Atten</code> or <code>Coupler</code> takes two per RF port. <code>circuitrf reference components</code> states the net count for
+each part beside its pin count.</p>
+<div class="callout warning">
+    <span class="label">Changed in 1.0</span>
+    <p>A short instance line used to produce either <code>Index was outside the bounds of the
+    array</code> — which named nothing — or, on a <code>Tuner</code>, no error at all: the run
+    completed, reported <code>ok</code>, and gave a circuit whose bias tee delivered nothing.</p>
+  </div>
+<h4 id="w-booleans">Yes-and-no parameters</h4>
+<p>A parameter that is a switch — <code>BiasTee</code>, <code>RefPin</code>, <code>RefNode</code>, <code>IncludeCapacitance</code>, <code>GroundPlane</code>,
+<code>OpVars</code> — accepts <code>on</code>/<code>true</code>/<code>yes</code>/<code>1</code> and <code>off</code>/<code>false</code>/<code>no</code>/<code>0</code>, in any case. <strong>Anything else is
+refused by name.</strong> Before 1.0 <code>BiasTee</code> accepted the literal <code>on</code> and nothing else, so <code>BiasTee=true</code>
+was read as <em>off</em> without a word.</p>
 <h3 id="w-measures">6 · Measurements</h3>
 <pre><code class="language-netlist">measure Pin_avail_dBm = Pin
 measure Pin_deliv_W = real(0.5*HB1.V(&quot;Vin&quot;,1)*conj(HB1.I(&quot;Iin&quot;,1)))

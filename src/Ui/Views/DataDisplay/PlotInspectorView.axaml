@@ -1061,6 +1061,97 @@
                                                    Text="{Binding EmptyQuantityMessage}"
                                                    Margin="0,2,0,0"/>
 
+                                        <!-- ── WSProbe (WSP-4 §2) ────────────────────────────────
+                                             Which probe the metric is taken AT, and the two or three
+                                             options some metrics read. The metric itself is chosen in
+                                             the item picker above, beside every other quantity — this
+                                             section is what a probe metric needs that a cube does not.
+
+                                             Every row is IsVisible-gated on the metric's own kind, so
+                                             an inert control is never shown: a bilateral loop gain has
+                                             no Z0 to normalise by, and asking for one would imply it
+                                             changed the answer. -->
+                                        <StackPanel Spacing="2"
+                                                    IsVisible="{Binding ShowWspSection}"
+                                                    Margin="0,4,0,0">
+
+                                            <Grid ColumnDefinitions="46,*">
+                                                <TextBlock Grid.Column="0" Text="probe" Classes="label"
+                                                           VerticalAlignment="Center"/>
+                                                <ComboBox Grid.Column="1"
+                                                          ItemsSource="{Binding WspProbeItems}"
+                                                          SelectedItem="{Binding SelectedWspProbeItem, Mode=TwoWay}"
+                                                          HorizontalAlignment="Stretch"
+                                                          ToolTip.Tip="The WSProbe this quantity is taken at. The idx beside each label is the document's own 1-based probe index — what a measure line types as SP1.idx(&quot;LABEL&quot;)."/>
+                                            </Grid>
+
+                                            <Grid ColumnDefinitions="46,*" IsVisible="{Binding ShowWspWith}">
+                                                <TextBlock Grid.Column="0" Text="with" Classes="label"
+                                                           VerticalAlignment="Center"/>
+                                                <ComboBox Grid.Column="1"
+                                                          ItemsSource="{Binding WspProbeItems}"
+                                                          SelectedItem="{Binding SelectedWspWithItem, Mode=TwoWay}"
+                                                          HorizontalAlignment="Stretch"
+                                                          ToolTip.Tip="The second probe of the pair. A two-block loop gain is a property of the two probes together, not of either one."/>
+                                            </Grid>
+
+                                            <Grid ColumnDefinitions="46,*,Auto" IsVisible="{Binding ShowWspSet}">
+                                                <TextBlock Grid.Column="0" Text="set" Classes="label"
+                                                           VerticalAlignment="Center"/>
+                                                <TextBox Grid.Column="1"
+                                                         Text="{Binding WspSetText, Mode=TwoWay}"
+                                                         FontSize="{StaticResource FontSize}"
+                                                         HorizontalAlignment="Stretch"
+                                                         PlaceholderText="GATE, DRAIN, …"
+                                                         ToolTip.Tip="The ordered probe set, comma separated. ORDER is part of the answer: Ohtomo's G_i are the trailing principal minors of M in this order."/>
+                                                <NumericUpDown Grid.Column="2"
+                                                               Value="{Binding WspSetIndex, Mode=TwoWay}"
+                                                               Minimum="1" Increment="1"
+                                                               ShowButtonSpinner="True"
+                                                               Width="72" Margin="4,0,0,0"
+                                                               FontSize="{StaticResource FontSize}"
+                                                               ToolTip.Tip="Which G_i to draw, 1-based."/>
+                                            </Grid>
+
+                                            <Grid ColumnDefinitions="46,*,Auto" IsVisible="{Binding ShowWspZ0}">
+                                                <TextBlock Grid.Column="0" Text="Z0" Classes="label"
+                                                           VerticalAlignment="Center"/>
+                                                <TextBox Grid.Column="1"
+                                                         Text="{Binding WspZ0Text, Mode=TwoWay}"
+                                                         FontSize="{StaticResource FontSize}"
+                                                         HorizontalAlignment="Stretch"
+                                                         PlaceholderText="source's own Z0"
+                                                         ToolTip.Tip="The reference this quantity normalises by. Blank follows the source group's own port-1 Re(Z0), else 50 Ω."/>
+                                                <ComboBox Grid.Column="2"
+                                                          IsVisible="{Binding ShowWspSet}"
+                                                          ItemsSource="{x:Static vm:TraceRowViewModel.WspSides}"
+                                                          SelectedItem="{Binding WspActiveSide, Mode=TwoWay}"
+                                                          Margin="4,0,0,0" Width="60"
+                                                          ToolTip.Tip="Which side of every probe is the ACTIVE subnetwork (G = generator side, L = load side)."/>
+                                            </Grid>
+
+                                            <!-- The reading: Kurokawa's start-up frequencies, the
+                                                 encirclement count, or a margin's minimum together
+                                                 with the search that pairs with it. "none" is a real
+                                                 answer and is printed as one. -->
+                                            <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowWspReadout}">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding WspReadoutText}"
+                                                           Classes="label"
+                                                           TextWrapping="Wrap"
+                                                           VerticalAlignment="Center"
+                                                           ToolTip.Tip="{Binding WspReadoutText}"/>
+                                                <Button Grid.Column="1"
+                                                        Classes="seg-btn"
+                                                        Command="{Binding MarkWspCrossingsCommand}"
+                                                        IsEnabled="{Binding CanMarkWspCrossings}"
+                                                        Padding="6,2" Margin="4,0,0,0"
+                                                        ToolTip.Tip="{Binding MarkWspCrossingsTooltip}">
+                                                    <TextBlock Text="Mark crossings" FontSize="10"/>
+                                                </Button>
+                                            </Grid>
+                                        </StackPanel>
+
                                         <!-- ── Plot versus: give the trace its own X data ────────
                                              "vs X" turns Gain-vs-swept-Pin into Gain-vs-Pout. The X
                                              side's swept axis and family MIRROR the Y side's by axis

@@ -238,6 +238,16 @@ namespace CircuitRF.Render.DataDisplay
             return true;
         }
 
+        /// <summary>
+        /// The transform-name table, exposed because the <c>plot</c> verb's <c>y=</c> has to reach
+        /// it on a trace whose CUBE is not what is being transformed. A WSProbe trace's cube is the
+        /// run's 2N x 2N matrix and its VALUES are a metric of it, so <c>db(wsp)</c> is not a spec
+        /// the parser can be asked to read — but the name <c>db</c> must still mean here exactly
+        /// what it means everywhere else, which is what this being one table is for.
+        /// </summary>
+        public static bool TryParseTransformName(string s, out CubeTransform transform)
+            => TryParseTransform(s, out transform);
+
         private static bool TryParseTransform(string s, out CubeTransform transform)
         {
             switch (s.ToLowerInvariant())

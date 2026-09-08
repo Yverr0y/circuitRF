@@ -664,3 +664,22 @@ resize handle auto-fits the column.
   per trace when traces disagree on the X quantity; Table columns pair by index. Gates: matching point
   counts, real-valued X, Rect/Table only. Spec: `plot-versus.md`.
 - **Phase 7.3 — COMPLETE.** Multi-dimensional sweep via axis-role assignment (X / pinned / family); a family is ONE trace object rendering N curves (`family-curves.md`). Slice grammar (`~`/`:`/index + All/`a..b` ranges), `CubeTraceSpecParser`, `SliceTokenParser`, harmonic stem-plot X-axis case all in place; family guardrail = `Trace.MaxFamilyCurves` (101) with clamp + one Message past it.
+- **WSProbe metrics — COMPLETE (WSP-4, 2026-09-08).** A source carrying a `wsp` matrix and its
+  `__WspProbes` table offers, in its own picker group, every quantity T. A. Winslow, *General Circuit
+  Analysis Using The WSProbe* (2023) derives from that matrix — the driving-point immittances, the
+  bidirectional ones, all eight single-probe loop gains, the nodal Γ, the published stability margins
+  and their four proxies, the eight probe-pair block loop gains, and Ohtomo's global ones. **No
+  numerics live in the Data Display:** every value is a call into `src/RfCore/Stability/`, the same
+  functions the S-parameter engine writes a run's own `H0:`/`ZG:`/`SM_Y0:` cubes with, and the gate is
+  bit identity with the library. Detail in `trace-card.md` §9a.
+
+  Two things here are worth reading before touching either. **A probe trace is a cube trace** whose
+  `CubeName` is the run's raw `…wsp` matrix and whose values are substituted at
+  `TraceResolve`'s single interception point — the one a renormalized S/Z/Y cube already uses — so
+  the slice, the family/slider mechanism, the markers, the Table, the export, `.cdd` persistence and
+  `render --data` needed no probe-specific path at all, and a swept `wsp` becomes a family for free.
+  And **the reduced two-port at a probe is a virtual NETWORK group**
+  (`<analysis> ▸ WSProbe <label> ▸ reduced 2-port`, carrying `S`/`Y`/`Z`/`Z0`), appended after the
+  analysis groups so `FindCubeSpec` still answers with the run's own `S` — which is what makes µ, K,
+  |Δ|, MAG/MSG and the stability circles apply to the reduction through the code that already
+  computes them.

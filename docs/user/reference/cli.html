@@ -67,6 +67,9 @@
   </ol>
 </li>
 <li><a href="#read"><code>read</code> — a result or a document, back</a></li>
+<li><a href="#netlist"><code>netlist</code> — the netlist a schematic runs as</a></li>
+<li><a href="#plot"><code>plot</code> — a picture of a result</a></li>
+<li><a href="#find"><code>find</code> — what is in this folder?</a></li>
 <li><a href="#reference"><code>reference</code> — what may I write?</a></li>
 <li><a href="#elab"><code>elab</code> — the elaborated netlist</a></li>
 <li><a href="#json"><code>--json</code> — one machine-readable document</a></li>
@@ -105,31 +108,31 @@ convention behind both.</p>
 <tbody>
 <tr>
 <td><code>sparam</code></td>
-<td><code>.cnl</code></td>
+<td><code>.cnl</code> or <code>.csch</code></td>
 <td>The linear S-parameter engine over a frequency sweep</td>
 <td>A Touchstone <code>.sNp</code>, always</td>
 </tr>
 <tr>
 <td><code>dc</code></td>
-<td><code>.cnl</code></td>
+<td><code>.cnl</code> or <code>.csch</code></td>
 <td>The nonlinear DC engine</td>
 <td>Node voltages and probe currents, to stdout</td>
 </tr>
 <tr>
 <td><code>hb</code></td>
-<td><code>.cnl</code></td>
+<td><code>.cnl</code> or <code>.csch</code></td>
 <td>Harmonic balance, single- or multi-tone</td>
 <td>Spectra tables to stdout; <code>-o .mat/.npy/.txt</code></td>
 </tr>
 <tr>
 <td><code>lp</code></td>
-<td><code>.cnl</code></td>
+<td><code>.cnl</code> or <code>.csch</code></td>
 <td>Loadpull over the directive's Γ grid</td>
 <td>A per-Γ-point table; <code>-o .mat/.npy/.txt/.spl/.lpcwave</code></td>
 </tr>
 <tr>
 <td><code>lpp</code></td>
-<td><code>.cnl</code></td>
+<td><code>.cnl</code> or <code>.csch</code></td>
 <td>Loadpull <strong>pursuit</strong> — searches for the optima</td>
 <td>Optima + the follow-on grid; <code>-o</code> as <code>hb</code>; <code>--out-grid</code> writes a <code>.gam</code></td>
 </tr>
@@ -188,6 +191,24 @@ convention behind both.</p>
 <td><strong>Nothing</strong> — what the file holds, to stdout</td>
 </tr>
 <tr>
+<td><code>netlist</code></td>
+<td>a <code>.csch</code>, a cell folder, or a workspace</td>
+<td>The same extraction <strong>Simulate</strong> performs</td>
+<td>A <code>.cnl</code>, or the netlist text to stdout</td>
+</tr>
+<tr>
+<td><code>plot</code></td>
+<td>a result file</td>
+<td>Builds a one-plot data display and draws it</td>
+<td>A <code>.svg</code>, <code>.pdf</code> or <code>.png</code>, where <code>-o</code> says</td>
+</tr>
+<tr>
+<td><code>find</code></td>
+<td>a directory</td>
+<td>Nothing — it reads documents</td>
+<td><strong>Nothing</strong> — the workspaces, cells, views and analyses under it</td>
+</tr>
+<tr>
 <td><code>reference</code></td>
 <td><strong>nothing</strong></td>
 <td>Nothing — it reads no file</td>
@@ -195,7 +216,7 @@ convention behind both.</p>
 </tr>
 <tr>
 <td><code>elab</code></td>
-<td><code>.cnl</code></td>
+<td><code>.cnl</code> or <code>.csch</code></td>
 <td>Elaboration only, no analysis</td>
 <td>The elaborated netlist, to stdout</td>
 </tr>
@@ -209,6 +230,9 @@ convention behind both.</p>
 </table>
 <p><code>hb</code>, <code>lp</code> and <code>lpp</code> all run <strong>the whole parametric sweep</strong> when one wraps the analysis — see
 <a href="#wrapper">naming the wrapper</a>.</p>
+<p><strong>Every run verb takes a schematic as well as a netlist.</strong> Hand it a <code>.csch</code> and it extracts the
+netlist in memory first — the same extraction <strong>Simulate</strong> performs — so you do not have to write one
+out to run a design you drew. <a href="#netlist"><code>netlist</code></a> is how you see what it will run.</p>
 <h2 id="channels">Results on stdout, everything else on stderr</h2>
 <p><strong>stdout is the result. stderr is everything else</strong> — progress, per-grid-point engine chatter,
 <code>[circuitRF]</code> notes, elaboration and engine warnings, device-worker logs.</p>
@@ -242,9 +266,41 @@ convergence notes still scroll past on screen. Redirect <code>2&amp;gt;/dev/null
 <td><code>--group g,h</code></td>
 <td>Narrow that document's result to these groups.</td>
 </tr>
+<tr>
+<td><code>--at axis=value</code></td>
+<td>Narrow it to <strong>one point of an axis</strong> — <code>--at freq=2GHz</code>. The nearest grid point, and the document says which one it gave you.</td>
+</tr>
+<tr>
+<td><code>--interp</code></td>
+<td>Make every <code>--at</code> interpolate between the two bracketing points instead. Never the default: it returns a number the run did not compute, and the document says so.</td>
+</tr>
+<tr>
+<td><code>--range axis=lo:hi</code></td>
+<td>Keep a band of an axis — <code>--range freq=1GHz:3GHz</code>.</td>
+</tr>
+<tr>
+<td><code>--result full\|summary</code></td>
+<td><code>summary</code> returns the result's <strong>shape</strong> — group and cube names, units, axis lengths and extents — and no values at all.</td>
+</tr>
+<tr>
+<td><code>--summary</code></td>
+<td>Report the informational notes as counts by severity instead of in full. Warnings and errors always travel in full, and stderr is untouched.</td>
+</tr>
 </tbody>
 </table>
 <p>Frequencies are written as <code>1GHz</code>, <code>100MHz</code>, or bare Hz (<code>1e9</code>) anywhere a frequency is accepted.</p>
+<div class="callout">
+<span class="label">Ask for the part you want, not the whole result</span>
+<p><code>--only</code> and <code>--group</code> narrow by cube <i>name</i>, which does nothing when the
+result has one cube. A 551-point two-port S-parameter run is about 173&nbsp;kB of JSON; if the
+question is "what is S21 at 2&nbsp;GHz", <code class="nowrap">--at freq=2GHz --only S</code> is a few
+hundred bytes. Every value carries its own unit — a bare <code>2</code> could be 2&nbsp;Hz or
+2&nbsp;GHz — and an axis name nothing in the result has is refused, listing the ones that exist,
+rather than quietly handing you everything.</p>
+<p>Every run returns <code>result.shape</code> whether or not it returns the values, so
+<code class="nowrap">--result summary</code> is how you find out what a run produced before deciding
+what to ask for.</p>
+</div>
 <div class="callout">
 <span class="label">An option a verb does not take is refused, never ignored</span>
 <p>Every verb stops with <code>unknown option '…'</code> and exit&nbsp;1 rather than dropping a flag it
@@ -256,7 +312,7 @@ different question with nothing to say so.</p>
 </div>
 <hr />
 <h2 id="sparam"><code>sparam</code> — S-parameters</h2>
-<pre><code class="cmd"><span class="prompt">$ </span>circuitrf sparam &lt;file.cnl&gt; [--freq start:stop:step] [-o out.sNp]</code></pre>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf sparam &lt;file.cnl|.csch&gt; [--freq start:stop:step] [-o out.sNp]</code></pre>
 <pre><code class="language-text">$ circuitrf sparam hero1.cnl --freq 1GHz:3GHz:1GHz -o hero1.s2p
 S-parameter analysis: 3 points, 1–3 GHz
 Wrote hero1.s2p
@@ -275,14 +331,25 @@ Wrote hero1.s2p
 </tr>
 <tr>
 <td><code>-o</code>, <code>--output &lt;path&gt;</code></td>
-<td>Where the Touchstone goes. Omitted, it is the input file with its extension changed to <code>.sNp</code> for the port count found.</td>
+<td>Where the result goes, and <strong>its extension picks the format</strong>: <code>.s1p</code>…<code>.s99p</code> for a Touchstone, or <code>.npy</code> / <code>.mat</code> / <code>.txt</code> for the cubes. Omitted, it is the input file with its extension changed to <code>.sNp</code> for the port count found.</td>
 </tr>
 </tbody>
 </table>
-<p><code>sparam</code> <strong>always</strong> writes a Touchstone; there is no stdout table. The port count in the extension
-comes from the network, so a circuit that grew a port writes <code>.s3p</code> without you editing the command.</p>
+<p>There is no stdout table. The port count in the default extension comes from the network, so a
+circuit that grew a port writes <code>.s3p</code> without you editing the command. An extension naming no format
+this verb writes is refused, listing the ones it does — you never get a Touchstone under a name that
+says otherwise.</p>
+<div class="callout">
+<span class="label">Ports with different reference impedances</span>
+<p>A Touchstone file declares <b>one</b> reference impedance, and circuitRF writes port&nbsp;1's on
+the option line. When the ports differ, the file also carries a header note listing each port's own
+impedance and saying that the data is referenced to <i>those</i> — and circuitRF reads that note back,
+so <code>circuitrf read</code> on the file reports the real per-port references rather than the
+option line repeated. Nothing is renormalized: the numbers are the ones the solve produced. If you
+want the per-port references in a form every tool reads, write <code>.npy</code> instead.</p>
+</div>
 <h2 id="dc"><code>dc</code> — the operating point</h2>
-<pre><code class="cmd"><span class="prompt">$ </span>circuitrf dc &lt;file.cnl&gt;</code></pre>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf dc &lt;file.cnl|.csch&gt;</code></pre>
 <pre><code class="language-text">$ circuitrf dc hero2.cnl
 DC: converged in 3 iteration(s), residual 7.27E-16
 Node voltages:
@@ -295,7 +362,7 @@ Node voltages:
 <a href="#exit">exits 2</a> if the solve did not converge — the operating point is the one thing every nonlinear
 analysis is built on, so a non-converged DC is a failed run, not a partial one.</p>
 <h2 id="hb"><code>hb</code> — harmonic balance</h2>
-<pre><code class="cmd"><span class="prompt">$ </span>circuitrf hb &lt;file.cnl&gt; [-a name] [--set var=expr] [-o out.npy]</code></pre>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf hb &lt;file.cnl|.csch&gt; [-a name] [--set var=expr] [-o out.npy]</code></pre>
 <p>The same verb runs <strong>single- and multi-tone</strong> — which it is comes from the netlist's directive, not
 from a flag.</p>
 <pre><code class="language-text">$ circuitrf hb hero2.cnl --rows 6
@@ -381,7 +448,7 @@ stderr and the run continues</strong> — one bad expression does not throw away
                          Unresolved name 'Pout_dBm' in scope 'measurements'
 </code></pre>
 <h2 id="lp"><code>lp</code> — loadpull</h2>
-<pre><code class="cmd"><span class="prompt">$ </span>circuitrf lp &lt;file.cnl&gt; [--grid grid.gam] [--pin start:step:max] [-o out.spl]</code></pre>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf lp &lt;file.cnl|.csch&gt; [--grid grid.gam] [--pin start:step:max] [-o out.spl]</code></pre>
 <p><code>lp</code> sweeps the load (or source) termination over the directive's Γ grid, runs a harmonic-balance
 drive ladder at each point, and reports the figures of merit.</p>
 <pre><code class="language-text">$ circuitrf lp hero3.cnl --rows 8
@@ -455,7 +522,7 @@ as a measured surface, so a headless run can produce a file the GUI opens. <code
 post-processor a GUI run does, so the exported cubes carry the derived display metrics (<code>Pout_dBm</code>,
 <code>Zin</code>, <code>IRL_dB</code>, <code>AMPM_deg</code>) — a <code>.npy</code> written here and one written by the GUI carry the same cubes.</p>
 <h2 id="lpp"><code>lpp</code> — loadpull pursuit</h2>
-<pre><code class="cmd"><span class="prompt">$ </span>circuitrf lpp &lt;file.cnl&gt; [--out-grid found.gam] [-o out.npy]</code></pre>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf lpp &lt;file.cnl|.csch&gt; [--out-grid found.gam] [-o out.npy]</code></pre>
 <p>A pursuit <strong>searches</strong> for the max-power (MXP) and max-efficiency (MXE) terminations rather than
 reading a grid, then runs a follow-on loadpull over the terminations it recommends.</p>
 <pre><code class="language-text">$ circuitrf lpp hero3B_at_compression.cnl
@@ -789,6 +856,14 @@ that, and <code>--to</code> is <strong>required</strong> when the output is a fo
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf convert mmic.gds -o mmic.dxf --dxf-version AC1015</code></pre>
 <p>Bring a board in as editable circuitRF cells and keep the technology it declared:</p>
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf convert board.kicad_pcb -o cells/ --to clay</code></pre>
+<div class="callout note">
+<span class="label">A <code>clay</code> target is a <em>folder</em>, not a file</span>
+<p>An import writes one cell <b>folder</b> per structure the source holds, plus the technology beside
+them — so <code>-o cells/</code> is the shape, and <code>-o cells/board.clay</code> is
+<b>refused</b> with the folder spelling in the message. Point it at a folder and look inside: the
+<code>.clay</code> is at <code>cells/&lt;Cell&gt;/layout/&lt;Cell&gt;.clay</code>, which is where every
+other circuitRF tool expects a layout view to be.</p>
+</div>
 <p>One cell out of a GDSII library that holds many:</p>
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf convert lib.gds --list-cells
 <span class="prompt">$ </span>circuitrf convert lib.gds -o coupler.dxf --cell COUPLER</code></pre>
@@ -805,7 +880,7 @@ that, and <code>--to</code> is <strong>required</strong> when the output is a fo
 <tbody>
 <tr>
 <td><code>-o, --output &lt;path&gt;</code></td>
-<td>The file to write — or the <strong>folder</strong>, for <code>gerber</code> and <code>clay</code>. Required.</td>
+<td>The file to write — or the <strong>folder</strong>, for <code>gerber</code> and <code>clay</code>; a file-shaped path there is refused. Required.</td>
 </tr>
 <tr>
 <td><code>--from &lt;fmt&gt;</code>, <code>--to &lt;fmt&gt;</code></td>
@@ -1039,6 +1114,10 @@ the two ways you most plausibly meant, plus the document's own display unit when
 <p>A schematic or a symbol takes <b>bare numbers</b>, because its coordinates really are dimensionless
 design units — and <code>--json</code> says <code>"unit": "design-units"</code> rather than leaving you
 to assume metres.</p>
+<p><b>You do not have to write one from scratch.</b>
+<a href="#explain-extents"><code>explain --extents</code></a> prints a ready-made
+<code>--window</code> line for the whole document and for each layer, in exactly this spelling. Copy
+it; there is no conversion to get wrong.</p>
 </div>
 <p><strong>A window of a different shape from the page is letterboxed, never cropped and never stretched.</strong> You
 get the whole region you asked for, with bars; the resolved window is in the <code>--json</code> document with
@@ -1136,6 +1215,31 @@ accepted under the generated <code>L&lt;layer&gt;/&lt;datatype&gt;</code> name
 <code>explain --layers</code> prints for it, and is excluded like any other when you name a different
 one.</p>
 </div>
+<h4 id="render-fit-layers">Framing on some layers and drawing all of them</h4>
+<p><strong>A fit frames what it draws.</strong> So hiding a layer takes it out of the framing as well as out of the
+picture — which is usually what you want, and occasionally not. The case that bites is an imported
+board: the drill-map fabrication drawing sits far outside the board outline, and framed with everything
+else it shrinks the board to a corner of the page.</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf render board.clay -o board.png --fit-layers "Top Copper,Bottom Copper"</code></pre>
+<p><code>--fit-layers</code> frames on those and <strong>draws everything</strong> — so the drill map is still there, it simply
+falls outside the frame. It is refused with <code>--window</code> and <code>--center/--span</code>, which state the frame
+outright, and refused when the layers you named draw nothing, because framing on nothing is not a page.
+With <code>--json</code> each layer row says whether the frame was taken from it.</p>
+<h4 id="render-layer-colors">Recolouring a layer for one picture</h4>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf render board.clay -o copper.png \
+      --layers "L1 Copper,L2 Copper,L3 Copper" \
+      --layer-colors "L1 Copper=#e04030,L2 Copper=#30a050,L3 Copper=#3060e0"</code></pre>
+<p>A Gerber import gives every copper layer nearly the same colour, so a copper overlay comes out
+unreadable. <code>--layer-colors</code> says how a layer draws <strong>for this render only</strong> — nothing is written to
+the technology, because changing a design to change a picture of it is not a fix. The flag can be
+repeated, and one entry can carry several comma-separated pairs.</p>
+<p>Colours are <code>#rgb</code>, <code>#rrggbb</code> or <code>#rrggbbaa</code>. <strong>The eight-digit form sets the layer's fill opacity</strong>,
+which is the alpha the renderer actually paints a fill through — a layer's own colour alpha is not read
+at all, so an override that only set it would look applied and change nothing. Layer names are the ones
+<a href="#explain-layers"><code>explain --layers</code></a> prints, including the generated <code>L&lt;layer&gt;/&lt;datatype&gt;</code> names an
+import produces; a name that is not one of them, or a value that is not a colour, is a refusal rather
+than a silent skip. <code>--json</code> reports each layer's <code>color</code> and <code>fillOpacity</code> <strong>as drawn</strong>, which is how
+you check an override landed — a colour change is the one thing a picture alone cannot confirm.</p>
 <table>
 <thead>
 <tr>
@@ -1247,10 +1351,12 @@ under it, and a label on the top silk:</p>
 <p><strong>How big is it, so I can write a window?</strong> In base SI, with the unit and the scale named.</p>
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain Amp/Stage1/layout/Stage1.clay --extents
 <span class="output">  extents      0 -0.003 .. 0.02 0.00376719  (0.02 x 0.00676719 m, scale 1E-06)
-    Top Copper           0 0 .. 0.02 0.0029
-    Bottom Copper        0.002 -0.003 .. 0.018 -0.001
-    Silk Top             0.0004 0.00338437 .. 0.00234306 0.00376719</span></code></pre>
-<p>The line is 20 mm long and 2.9 mm wide, on <code>Top Copper</code>. Now the left 6 mm of it, that layer only:</p>
+               --window 0um,-3000um,20000um,3767.188um
+    Top Copper           0 0 .. 0.02 0.0029   --window 0um,0um,20000um,2900um
+    Bottom Copper        0.002 -0.003 .. 0.018 -0.001   --window 2000um,-3000um,18000um,-1000um
+    Silk Top             0.0004 0.00338437 .. 0.00234306 0.00376719   --window 400um,3384.375um,2343.062um,3767.188um</span></code></pre>
+<p>The line is 20 mm long and 2.9 mm wide, on <code>Top Copper</code> — and the <code>--window</code> line beside each box is
+already in the spelling the next command takes. Now the left 6 mm of it, that layer only:</p>
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf render Amp --cell Stage1 --layers "Top Copper" \
                         --window 0um,0um,6000um,3000um -o stage1-top.png
 <span class="output">Wrote stage1-top.png (1600x1200 device-pixels, 10,399 bytes)
@@ -1329,6 +1435,26 @@ layout in another, and that layout's layers must be read by <em>its</em> technol
 HB1      hb                 enabled  runnable         → promoted to SWEEP1</span></code></pre>
 <p>A sweep is reported in <strong>base SI with its unit and its scale</strong>. Reading a mark without its scale has
 already produced a run at 2 Hz that looked entirely normal.</p>
+<p><code>runnable</code> is two claims, not one: the chain reaches an enabled analysis, <strong>and</strong> every reference the
+analysis names resolves — the tuner instances, the inner analysis a sweep wraps, the swept variable,
+and the variables a tone expression reads. When one does not, the chain is not runnable and the
+report says which:</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain pa.cnl --analysis
+<span class="output">  analyses:
+    LP1              loadpull-pursuit   LP1                          not-runnable
+      unresolved: LoadTuner=NoSuchTuner: no instance of that name in this document. Its Tuners are: Load.
+      unresolved: SourceTuner=AlsoMissing: no instance of that name in this document. Its Tuners are: Load.</span></code></pre>
+<div class="callout warning">
+    <span class="label">Changed in 1.0</span>
+    <p><code>runnable</code> used to mean only the first half, so the analysis above was reported
+    <code>runnable</code> and <code>dispatched by lpp</code> while naming two tuners that do not
+    exist. Whether a thing will run is the question this verb exists to answer, and a caller that
+    acts on an optimistic yes gets its refusal later, about something it has already been told is
+    fine.</p>
+    <p>What <code>explain</code> still does <em>not</em> claim is anything that would need a solve —
+    "this bench has no bias source" is a property of the solved circuit, and this verb solves
+    nothing. It reports what it can establish and stays quiet about the rest.</p>
+  </div>
 <h3 id="explain-touchstone">`explain` on a Touchstone file — what IS this part?</h3>
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain part.s2p
 <span class="output">part.s2p  (touchstone)
@@ -1440,9 +1566,10 @@ name is a name <a href="#render-layers"><code>render --layers</code></a> accepts
 <h3 id="explain-extents">`--extents` — how big is it?</h3>
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain Stage1.clay --extents
 <span class="output">  extents      0 -0.003 .. 0.02 0.00376719  (0.02 x 0.00676719 m, scale 1E-06)
-    Top Copper           0 0 .. 0.02 0.0029
-    Bottom Copper        0.002 -0.003 .. 0.018 -0.001
-    Silk Top             0.0004 0.00338437 .. 0.00234306 0.00376719</span></code></pre>
+               --window 0um,-3000um,20000um,3767.188um
+    Top Copper           0 0 .. 0.02 0.0029   --window 0um,0um,20000um,2900um
+    Bottom Copper        0.002 -0.003 .. 0.018 -0.001   --window 2000um,-3000um,18000um,-1000um
+    Silk Top             0.0004 0.00338437 .. 0.00234306 0.00376719   --window 400um,3384.375um,2343.062um,3767.188um</span></code></pre>
 <p><strong>In base SI, with the unit <em>and</em> the scale named</strong> — the rule <code>--analysis</code> already follows, for the
 reason it follows it: reading a mark without its scale has already produced a run at 2 Hz that looked
 entirely normal. A schematic or a symbol reports <code>design-units</code> at scale 1, because its coordinates are
@@ -1450,6 +1577,19 @@ dimensionless and dressing them up in metres would be a lie.</p>
 <p>This is <strong>the same function <code>render --fit</code> frames on</strong>, which is why you can size a <code>--window</code> from it
 and get exactly the region you expected. The per-layer boxes are the document's own shapes; an
 instance's extent arrives as one box for the whole placement.</p>
+<div class="callout note">
+<span class="label">The <code>--window</code> line is meant to be pasted</span>
+<p>Every box comes with the same numbers written the way
+<a href="#render-viewport"><code>render --window</code></a> takes them — in this document's own display
+unit, whole document and per layer, and in <code>--json</code> as a <code>window</code> field beside
+the coordinates. <b>The metres above are deliberately not what you type</b>: a layout coordinate
+carries a unit there, and <code>m</code> is not one of the suffixes it reads. Copy the
+<code>--window</code> line and you get exactly that box; there is no conversion to do and no chance of
+being three orders of magnitude out.</p>
+<p>So <em>framing on one layer</em> is a copy rather than a calculation — and if you want to frame on
+one layer while still drawing the others, that is
+<a href="#render-layers"><code>render --fit-layers</code></a>.</p>
+</div>
 <p>An <strong>empty</strong> document says so rather than reporting a zero box, because a zero box is a point at the
 origin and that is a different fact. On a <strong>symbol</strong>, or on a layout carrying a fixed-size ruler, the
 report adds a note: the fit adds room for marks that are drawn in <em>pixels</em> — a pin's name, a ruler's
@@ -1474,13 +1614,176 @@ documents comes back as <strong>its own bytes</strong>, unchanged.</p>
 20,000-point swept loadpull in full is the expensive direction:</p>
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf read hero3.npy --only Pout_dBm --json</code></pre>
 <hr />
+<h2 id="netlist"><code>netlist</code> — the netlist a schematic runs as</h2>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf netlist &lt;path.csch | cell-folder | workspace --cell N&gt; [-o out.cnl]</code></pre>
+<p>The extraction <strong>Simulate</strong> performs, as a file you can read. It takes a <code>.csch</code>, a cell folder, or a
+workspace with <code>--cell</code> — the same three inputs <a href="#render"><code>render</code></a> takes, resolved the same way.</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf netlist Example_SParam_LC.csch
+<span class="output">; extracted from Example_SParam_LC
+
+Port:Term1  n1  0  Num=1  Z=50 Ohm
+L:L1  n1  n2  L=2 nH
+C:C1  n2  0  C=0.8 pF
+Port:Term2  n2  0  Num=2  Z=50 Ohm
+
+analysis SP1 type=sparam start="1" startUnit=GHz stop="5" stopUnit=GHz npts=201</span></code></pre>
+<p>Without <code>-o</code> the netlist goes to stdout, so <code>circuitrf netlist Stage1.csch &amp;gt; stage1.cnl</code> is the file
+and nothing else. With <code>-o</code> it is written there, and the path is what goes to stdout.</p>
+<div class="callout">
+<span class="label">This is the netlist a run actually consumes — the same bytes</span>
+<p>You do not need it to simulate a drawing: every run verb takes a <code>.csch</code> directly and
+extracts it in memory. What this verb is for is <b>seeing</b> that extraction — and checking a
+<code>.cnl</code> you wrote by hand against what circuitRF produces for the equivalent schematic.
+Both go through one function, so the file here is not merely equivalent to what a run reads, it is
+byte for byte the same text.</p>
+</div>
+<p><code>-o</code> takes a <code>.cnl</code> and refuses any other extension — there is one format here. A <code>.cnl</code> input is
+refused too: passing it through the reader and the writer would hand back a file that is not the one
+you gave (comments gone, directives reordered) and call it an extraction.</p>
+<hr />
+<h2 id="plot"><code>plot</code> — a picture of a result</h2>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf plot &lt;result.npy|.sNp&gt; -o &lt;out.svg|.pdf|.png&gt; --trace &lt;spec&gt; [--trace &lt;spec&gt;]…</code></pre>
+<p>One plot, one axis pair, without writing a data display first.</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf plot lc.s2p -o match.png \
+<span class="prompt">    </span>--trace cube=S,i=1,j=1,y=db --trace cube=S,i=2,j=1,y=db \
+<span class="prompt">    </span>--title "LC lowpass" --ylabel dB --x 1:5 --y -40:5
+<span class="output">Wrote match.png (792x612 device-pixels, 19,785 bytes)
+  1 plot(s) on 1 page(s), 1 data source(s)</span></code></pre>
+<p><strong>A trace spec is comma-separated <code>key=value</code>:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>What it means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cube</code></td>
+<td>Which cube. Required. It is the same shorthand the trace card's spec box takes, so <code>S</code>, <code>S[:,2,1]</code>, <code>Pout</code> and <code>mag(V[:,&quot;X1.drain&quot;])</code> all work.</td>
+</tr>
+<tr>
+<td><code>i</code>, <code>j</code></td>
+<td>The <strong>port numbers</strong> of a matrix cube — <code>i=2,j=1</code> is S21. Refused together with a bracketed slice: they are the convenience over writing one.</td>
+</tr>
+<tr>
+<td><code>y</code></td>
+<td><code>db</code>, <code>db10</code>, <code>db20</code>, <code>mag</code>, <code>phase</code>, <code>real</code>, <code>imag</code> or <code>conj</code>.</td>
+</tr>
+<tr>
+<td><code>axis</code></td>
+<td><code>left</code> (the default) or <code>right</code>.</td>
+</tr>
+</tbody>
+</table>
+<p><code>circuitrf read &lt;result&gt;</code> lists the cubes a file holds and their axes, which is where the names come
+from. A cube the file does not hold is refused, listing the ones it does.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-o &lt;path&gt;</code></td>
+<td>Required. Its extension picks the format: <code>.svg</code>, <code>.pdf</code> or <code>.png</code>.</td>
+</tr>
+<tr>
+<td><code>--type rect\|smith\|polar\|table</code></td>
+<td>Default <code>rect</code>.</td>
+</tr>
+<tr>
+<td><code>--freq-unit Hz\|kHz\|MHz\|GHz</code></td>
+<td>Default GHz. It is also the unit <code>--x</code> is read in.</td>
+</tr>
+<tr>
+<td><code>--title</code>, <code>--xlabel</code>, <code>--ylabel</code>, <code>--y2label</code></td>
+<td>Custom labels. Omitted, the plot labels itself.</td>
+</tr>
+<tr>
+<td><code>--x lo:hi</code>, <code>--y lo:hi</code>, <code>--y2 lo:hi</code></td>
+<td>Axis windows. An axis you leave out autoscales. Refused on a Smith or Polar chart, whose window is the complex plane.</td>
+</tr>
+<tr>
+<td><code>--size WxH</code>, <code>--scale</code>, <code>--dpi</code></td>
+<td>The page. Default 792×612 points — the same page <strong>File ▸ Export</strong> writes. <code>--scale</code>/<code>--dpi</code> are <code>.png</code> only.</td>
+</tr>
+<tr>
+<td><code>--variant light\|dark</code>, <code>--background opaque\|transparent</code></td>
+<td>As <code>render</code>.</td>
+</tr>
+<tr>
+<td><code>--write-cdd &lt;path&gt;</code></td>
+<td>Also write the data display this drew.</td>
+</tr>
+</tbody>
+</table>
+<div class="callout">
+<span class="label"><code>--write-cdd</code> is how you go further</span>
+<p>This verb draws one plot with one axis pair. Everything else a data display can do — several plots
+on a page, tabs, markers, contours, a summary table — is still done by writing a <code>.cdd</code> and
+calling <a href="#render"><code>render</code></a>. <code>--write-cdd</code> hands you the document
+this verb built, which is a correct starting point to edit rather than a blank page; the picture it
+draws and the picture <code>render</code> draws from that file are byte for byte the same, because
+they are the same code.</p>
+</div>
+<p>A plot with no <code>--trace</code> is refused rather than drawn. An empty plot is a valid picture that exports
+cleanly and looks exactly like a measurement that came back empty.</p>
+<hr />
+<h2 id="find"><code>find</code> — what is in this folder?</h2>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf find &lt;root&gt; [--depth n] [--no-analyses]</code></pre>
+<p>The workspaces under a directory, their cells, each cell's views, and the analyses each cell declares.</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf find ./projects
+<span class="output">/home/you/projects  (1 workspace(s), 2 cell(s), depth 4)
+  Amp  /home/you/projects/Amp  [tech tech/generic-mmic.ctech]
+    LC                       schematic: LC.csch
+                             analyses: SP1
+    Stage1                   schematic: Stage1.csch, layout: Stage1.clay
+                             analyses: HB1, SWEEP1</span></code></pre>
+<p>It reads what the other verbs read, so a cell listed here is the cell <code>render</code> would draw and the
+analyses are the ones <code>hb</code> would dispatch. It writes nothing, so it runs on a read-only tree and on a
+workspace the application has open.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--depth n</code></td>
+<td>How many levels below the root a workspace is looked for. Default 4, at most 12.</td>
+</tr>
+<tr>
+<td><code>--no-analyses</code></td>
+<td>Skip the analyses. Each one costs an extraction, which adds up on a large tree.</td>
+</tr>
+</tbody>
+</table>
+<div class="callout">
+<span class="label">The walk is bounded, and it says when it stopped</span>
+<p>A listing that quietly gave up reads as "the workspace is not here". So when the walk hits
+<code>--depth</code> with directories still below it, it says so — a warning on stderr and
+<code>truncated: true</code> in the <code>--json</code> document. Raise <code>--depth</code> and ask
+again. A directory symbolic link is never followed, so nothing outside the root you named can appear
+in the answer.</p>
+</div>
+<hr />
 <h2 id="reference"><code>reference</code> — what may I write?</h2>
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference
 <span class="prompt">$ </span>circuitrf reference netlist
 <span class="prompt">$ </span>circuitrf reference components
-<span class="prompt">$ </span>circuitrf reference components MLIN</code></pre>
+<span class="prompt">$ </span>circuitrf reference components MLIN
+<span class="prompt">$ </span>circuitrf reference analyses
+<span class="prompt">$ </span>circuitrf reference analyses sparam
+<span class="prompt">$ </span>circuitrf reference data-display
+<span class="prompt">$ </span>circuitrf reference technology</code></pre>
 <p>They are, in order: the list of topics with what each costs; one page as text; every netlist
-primitive; and just that one.</p>
+primitive; just that one; every analysis directive with every key it takes; just that one; and the
+two document formats nothing else here creates for you.</p>
 <p><code>check</code> tells you that what you wrote is wrong. <code>explain</code> tells you what circuitRF made of it.
 This one tells you what you are <strong>allowed</strong> to write in the first place — the primitive type names,
 how many nets each takes and in what order, what its parameters are called and what they default to.</p>
@@ -1499,17 +1802,21 @@ direction and a 4 kB page and an 84 kB one should not look alike:</p>
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference
 <span class="output">Reference topics — circuitrf reference &lt;topic&gt;
 
-  netlist            12.1 kB  The Netlist (.cnl) Format
+  netlist            17.7 kB  The Netlist (.cnl) Format
   expressions         9.1 kB  Expressions
   units              10.9 kB  Units
   measurements        5.8 kB  Measurements
   pins-ports-terms    4.3 kB  Pins, Ports &amp; Terms
   sdd                12.2 kB  The SDD (Symbolically-Defined Device)
-  file-formats        9.5 kB  File Formats
-  component-notes    71.3 kB  Components
-  components         84.1 kB  Component types
+  file-formats       11.6 kB  File Formats
+  component-notes    74.2 kB  Components
+  data-display       12.8 kB  The .cdd data-display format
+  technology          6.1 kB  The .ctech technology format
+  analyses            8.5 kB  Analysis directives
+  components         91.3 kB  Component types
 
-  circuitrf reference components &lt;TYPE&gt;   one primitive</span></code></pre>
+  circuitrf reference components &lt;TYPE&gt;   one primitive
+  circuitrf reference analyses &lt;TYPE&gt;     one analysis directive</span></code></pre>
 <p>These are the same pages you are reading now, shipped inside the program so they are there on a
 machine that has no copy of this site. <code>components</code> is the <strong>generated catalogue</strong> — read from the
 live component registry every time you ask, so it cannot go stale — while <code>component-notes</code> is this
@@ -1520,30 +1827,72 @@ answers &quot;what may I write&quot;; the page answers &quot;what does it mean&q
 <h3 id="reference-components">The component catalogue</h3>
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference components MLIN
 <span class="output">MLIN
-  nets: 2  1 2
+  nets: 2
+  terminals: 2  1 2
+  order: The two terminals are interchangeable: the line is uniform, so neither end is the input.
   Mlin (MLIN) — Microstrip   search: MLIN, microstrip, microstrip line, line, hammerstad
-    nets: 2  1 2
+    terminals: 2  1 2
     W                  2.9              mm     shown
     L                  10               mm     shown
     SignalLayer        -                -      -
     GroundReference    -                -      -</span></code></pre>
 <p>The columns are the parameter's <strong>name</strong>, its <strong>default expression</strong>, its <strong>unit</strong>, whether it shows
 on the schematic by default, and — where the registry has one — what it means.</p>
-<p><code>nets</code> is the part you cannot get from a picture: <strong>how many nets the instance line takes, and in what
-order.</strong> That order is a contract the models themselves read, and it is not always the one you would
-guess — a MESFET is gate, drain, source while a JFET is drain, gate, source; a diode is anode then
-cathode; a 2-port SDD takes four nets, as ± pairs.</p>
+<p><code>terminals</code> is the part you cannot get from a picture: the pins the symbol draws, <strong>in the order a
+netlist line writes their nets.</strong> That order is a contract the models themselves read, and it is not
+always the one you would guess — a MESFET is gate, drain, source while a JFET is drain, gate, source,
+and a diode is anode then cathode.</p>
+<div class="callout warn">
+<span class="label">`nets` and `terminals` are two different numbers, and the first is the one to write to</span>
+<p><b>How many nets the instance line binds</b> is <code>nets</code>. <b>How many pins the symbol
+draws</b> is <code>terminals</code>. They are usually the same and they are not always: a
+<code>Tuner</code> draws one pin and its line takes two, because its reference terminal is implicit
+on the glyph. So do <code>Port</code>, <code>Term</code>, <code>Vdc</code> and <code>IProbe</code>;
+a 2-port <code>SDD</code> takes four nets, as ± pairs.</p>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference components Tuner
+<span class="output">Tuner
+  nets: 2
+  terminals: 1  1</span></code></pre>
+<p>Writing <code>Tuner:T1 n_drain Z[1]=50 BiasTee=on Vbias=48</code> — one net — is now refused by
+name. It used to run: the bias tee delivered nothing, every diagnostic was clean, and the output sat
+at the engine's floor at every drive point.</p>
+</div>
 <div class="callout note">
-<span class="label">Some port counts are not fixed, and they say so</span>
-<p>An SDD, a <code>Z_Port</code> and an <code>SnP</code> take as many ports as <code>NumPorts</code>
-says; a Verilog-A model takes as many as <code>Pins</code> says; an ideal switch takes
-<code>1 + Throws</code>. Those report <b>what sets the count</b> rather than a number, and any
-terminals they list are labelled with the count they were listed at:</p>
+<span class="label">Some counts are not fixed, and they say so</span>
+<p>An SDD's, a <code>Z_Port</code>'s and an <code>SnP</code>'s follow a port-count parameter; a
+Verilog-A model's follows <code>Pins</code>; an ideal switch's follows <code>Throws</code>; a wBond's
+follows the arrays it places. Those report <b>the rule</b> rather than a number:</p>
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference components SDD
 <span class="output">SDD
-  nets: set by NumPorts — at NumPorts=2: 1+ 1- 2+ 2-</span></code></pre>
-<p>A number printed where the honest answer is "it depends" is worse than no number at all.</p>
+  nets: SddPortCount=N binds 2N nets.
+  terminals: set by NumPorts — at NumPorts=2: 1+ 1- 2+ 2-</span></code></pre>
+<p>Note that the two lines name <i>different parameters</i>, and that is not a mistake: the parameter
+panel calls it <code>NumPorts</code>, and a <code>.cnl</code> instance line spells it
+<code>SddPortCount</code>. A number printed where the honest answer is "it depends" is worse than no
+number at all.</p>
 </div>
+<h3 id="reference-analyses">Analysis directives</h3>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference analyses sparam
+<span class="output">sparam   also: sp, s_param, sparameter, s_parameters
+  bare words: log
+  type                   required       The analysis kind. One of the tokens this page lists.
+  enabled                true           false skips the analysis at run time without deleting it.
+  start                  required       First frequency. Bare number in Hz unless a unit follows or Unit=/startUnit= is given.
+  stop                   required       Last frequency, same spelling rules as start.
+  step                   1e8            Step size. Mutually exclusive with npts; npts wins when both are given.
+  npts                   -              Point count. Selects the point-count sweep mode.
+  Unit                   -              Sets startUnit, stopUnit and stepUnit at once. Any one of those given individually overrides it.
+  ...</span></code></pre>
+<p>Every <code>analysis type=</code> token, every other spelling of it that is accepted, and every key it may carry
+with its default and whether it is required. It is read from the same table the <code>.cnl</code> reader
+validates against, so a key that is not on this page is a key the reader <strong>refuses</strong> — it is not
+ignored, and it has not been since the netlist contract landed.</p>
+<h3 id="reference-formats">The two formats nothing creates for you</h3>
+<p><code>circuitrf reference data-display</code> and <code>circuitrf reference technology</code> describe the <code>.cdd</code> and
+<code>.ctech</code> files field by field, generated from the types their readers actually deserialise into, each
+with a minimal example that was written out and run. They are here because those are the two formats
+you may have to write by hand: <code>new workspace</code> copies a technology in for you, but nothing creates a
+data display.</p>
 <p>A few entries carry a <strong>note</strong> instead of a clean answer, and the note is the useful part. <code>GND</code>,
 <code>VAR</code>, <code>MEAS</code> and <code>Pin</code> are schematic elements the netlist extractor consumes rather than components
 you can place in a <code>.cnl</code>. <code>Chain</code>, <code>ExtDevice</code>, <code>SemiC</code>, <code>Short</code>, <code>Term</code>, <code>V_nTone</code> and <code>I_nTone</code> are
@@ -1556,7 +1905,7 @@ parameter with its default, unit, dimension and visibility:</p>
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf reference components --json | jq -r '.result.reference.components[].type'</code></pre>
 <hr />
 <h2 id="elab"><code>elab</code> — the elaborated netlist</h2>
-<pre><code class="cmd"><span class="prompt">$ </span>circuitrf elab &lt;file.cnl&gt;</code></pre>
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf elab &lt;file.cnl|.csch&gt;</code></pre>
 <p>Elaborates and stops: flattens the hierarchy, resolves every parameter and expression top-down, and
 numbers the nodes, then prints <a href="netlist.html">the elaborated netlist</a> — the exact thing the engines
 consume. No analysis runs.</p>
@@ -1599,9 +1948,38 @@ machine-independent, so it is something a build can assert on; a wall clock is n
 <li><strong><code>result.explain</code></strong> gains <code>cells</code>, <code>layers</code> and <code>extents</code> for the three questions of the same name.
 <code>extents</code> carries <code>perLayer</code> boxes beside the whole; <code>layers</code> carries the resolved technology and
 the walk that found it.</li>
+<li><strong><code>result.shape</code> is always there</strong>, on every run and every <code>read</code> that produced cubes, whether or
+not the values are: the groups, the cube names, each cube's kind and unit, how many numbers it
+holds, and every axis with its name, unit, length and end points. It is what lets you find out what
+a run produced before deciding what to ask for, and it costs a couple of kilobytes on any result.</li>
+<li><strong><code>result.narrowed</code></strong> appears when you used <code>--at</code> or <code>--range</code>, and says per axis what you asked
+for, what you got, and whether it was the <code>nearest</code> grid point or <code>interpolated</code>.</li>
 <li>Numbers are raw, invariant and unrounded. <code>NaN</code> and infinity are written as JSON's named literals,
 because a loadpull grid genuinely contains NaN wherever a point never converged.</li>
 </ul>
+<h3 id="json-units">Every cube says what its numbers are in</h3>
+<p>A cube's <code>unit</code> is always present and never empty. SI symbols as they are written — <code>Hz</code>, <code>V</code>, <code>A</code>,
+<code>W</code>, <code>Ohm</code>, <code>F</code>, <code>H</code>, <code>K</code>, <code>m</code>, <code>s</code> — and <code>dB</code> and <code>dBm</code> likewise; <code>%</code> for a ratio already scaled to a
+percentage, <code>1</code> for one that is not, <code>index</code> for a flag or a count, and <strong><code>unknown</code></strong> where circuitRF
+cannot say. A <code>measure</code> line you wrote yourself has whatever unit your expression has, and saying
+<code>unknown</code> is an answer where a guess would not be.</p>
+<div class="callout">
+<span class="label">Why this is worth a field of its own</span>
+<p>One loadpull-pursuit result carried <code>Efficiency</code> reading 65.84 and <code>MXE_Eff</code>
+reading 0.7087 at the same operating point — the cube in percent, the scalar as a fraction. Reading
+the scalar and formatting it as a percentage gives 0.7%; multiplying the cube by 100 gives 6584%.
+Both are one plausible line of code, and until the unit was carried there was nothing anywhere to say
+which was which. Nothing was rescaled to fix it: the numbers are what the engine computed, and the
+document now says what they are.</p>
+</div>
+<h3 id="json-summary"><code>--summary</code>: the notes as counts</h3>
+<p>Some verbs are deliberately talkative. The Gerber import names every inference it made <em>as</em> an
+inference, which is exactly what lets you decide whether to trust the result — but it is not what you
+want back from <code>convert --list-cells</code>, whose answer is one cell name.</p>
+<p><code>--summary</code> reports the informational notes as counts by severity and adds a <code>diagnosticSummary</code>
+block saying how many were left out. <strong>Warnings and errors are never collapsed</strong>, and stderr still
+carries everything, so nothing is hidden: what you stop paying for is thirty notes describing
+inferences that all went fine.</p>
 <hr />
 <h2 id="serve"><code>serve</code> — the MCP server</h2>
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf serve --root &lt;dir&gt; [--kits &lt;dir&gt;]</code></pre>
@@ -1620,7 +1998,7 @@ tree the server will read or write, and a path escaping it is refused rather tha
 <em>What it will not do</em> below). Nothing else about the host matters, because the transport is
 the process's own stdin and stdout.</p>
 </div>
-<p><strong>Ten tools, and each is a verb you already have:</strong></p>
+<p><strong>Thirteen tools, and each is a verb you already have:</strong></p>
 <table>
 <thead>
 <tr>
@@ -1658,6 +2036,18 @@ the process's own stdin and stdout.</p>
 <td><code>read</code></td>
 </tr>
 <tr>
+<td><code>netlist</code></td>
+<td><code>netlist</code> — the extraction a schematic runs as</td>
+</tr>
+<tr>
+<td><code>plot</code></td>
+<td><code>plot</code> — one picture from one result file. It takes <code>attachImage</code> too</td>
+</tr>
+<tr>
+<td><code>find</code></td>
+<td><code>find</code> — the workspaces, cells, views and analyses under a directory</td>
+</tr>
+<tr>
 <td><code>history</code></td>
 <td><a href="history.html"><code>history checkpoint</code>, <code>list</code> or <code>restore</code></a> — the correction nouns (<code>rename</code>, <code>retitle</code>, <code>correct</code>, <code>review</code>) are on the verb but not on this server</td>
 </tr>
@@ -1674,7 +2064,7 @@ the process's own stdin and stdout.</p>
 <p><strong>Every tool returns exactly the document <code>--json</code> writes</strong>, byte for byte, because the server calls
 the verb rather than re-implementing it. Nothing is reachable through the server that is not
 reachable from your own shell, and nothing is reachable from your shell that the server cannot do.</p>
-<p><strong><code>render</code> can hand the picture back, not just its path.</strong> Pass <code>attachImage: true</code> and the result
+<p><strong><code>render</code> and <code>plot</code> can hand the picture back, not just its path.</strong> Pass <code>attachImage: true</code> and the result
 carries the rendered file itself — a <code>.png</code> or <code>.svg</code> as image content, a <code>.pdf</code> as an embedded
 resource with its own type. It is <strong>off by default</strong>, because an image is expensive in a way a JSON
 document is not, and a client that only wanted the path should not pay for one.</p>
@@ -1700,7 +2090,13 @@ be the adapter making a rendering decision, which is the one thing it does not d
 that escapes — through <code>../</code>, through an absolute path, or through a symbolic link — is
 <b>refused, naming the root</b>. It is never quietly clamped to something inside.</li>
 <li><b>Nothing deletes, and nothing overwrites an existing workspace.</b> There is no person at the
-other end to confirm with, so the answer is no. A client that wants a file gone deletes it itself.</li>
+other end to confirm with, so the answer is no. A client that wants a file gone deletes it itself.
+<code>create</code> does make a missing <i>parent</i> directory, because that overwrites nothing and
+a client with no file tools of its own had nowhere to go from the refusal.</li>
+<li><b>No tool writes a file of the client's own text.</b> circuitRF is driven by writing its
+documents, and the client supplies that half itself — what these tools write is what they
+<i>produce</i>: a created document, a result, a netlist, a picture. A general write tool would put an
+unbounded filesystem write behind the root, and it is deliberately not offered.</li>
 <li><b>No shell, and no program a client names.</b> Device workers and PCell generators still run as
 they always did; nothing new becomes launchable because something asked.</li>
 </ul>

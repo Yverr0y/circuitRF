@@ -269,12 +269,53 @@ public sealed class TraceConfig
     public TracePropertiesConfig   Properties { get; set; } = new();
     public List<MarkerConfig>      Markers    { get; set; } = new();
 
+    /// <summary>Non-null when this trace draws a WSProbe metric (WSP-4, R-wsp4-11). The trace is
+    /// still cube-bound — <see cref="CubeName"/> names the run's own <c>…wsp</c> matrix and
+    /// <see cref="CubeSlice"/> is authored against the METRIC's axes — so a reader that does not
+    /// know about this field still finds a well-formed cube trace. Absent in every `.cdd` written
+    /// before WSP-4, which loads unchanged.</summary>
+    public WspTraceConfig? WsProbe { get; set; }
+
     /// <summary>Non-null when this trace is a loadpull contour trace (7.4e).
     /// When present, the standard network/cube-bound fields are ignored.</summary>
     public ContourTraceConfig? ContourTrace { get; set; }
 
     /// <summary>Non-null when this trace is a summary-table column (7.5). Mutually exclusive with ContourTrace.</summary>
     public SummaryColumnConfig? SummaryColumn { get; set; }
+}
+
+/// <summary>
+/// Persisted authoring state for one WSProbe trace (WSP-4, R-wsp4-11) — which probe (or pair, or
+/// ordered set) the metric is taken at, which metric, and the two options some of them read.
+///
+/// <para><b>Probes are named, never indexed.</b> The document's <c>idx</c> is assigned at
+/// elaboration in flattened netlist order, so a design that gains a probe renumbers the ones after
+/// it — a saved display carrying an index would come back drawing a different node with nothing
+/// said. The label is the stable identity, and a label this run does not have is reported by name
+/// with the run's own list beside it.</para>
+///
+/// <para><see cref="Metric"/> is written by NAME (<c>JsonStringEnumConverter</c>), and
+/// <see cref="WspMetric"/> is append-only for the reason
+/// <see cref="DerivedParameters"/> is.</para>
+/// </summary>
+public sealed class WspTraceConfig
+{
+    public string       Probe { get; set; } = "";
+    public string       With  { get; set; } = "";
+    public List<string> Set   { get; set; } = new();
+
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public WspMetric Metric { get; set; } = WspMetric.None;
+
+    /// <summary>The circulator/pair/Ohtomo reference, in the trace card's own complex spelling.
+    /// "0" means "take the source group's own port-1 Re(Z0), else 50 Ohm" — resolved at draw time,
+    /// so a display authored against one run reads the next run's reference.</summary>
+    public string Z0 { get; set; } = "0";
+
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public RfCore.Stability.WspSide ActiveSide { get; set; } = RfCore.Stability.WspSide.G;
+
+    public int SetIndex { get; set; } = 1;
 }
 
 /// <summary>Persisted authoring state for one summary-table column (Phase 7.5).

@@ -128,6 +128,7 @@ public static class LibraryCatalog
         (SymbolKind.Var,         0),
         (SymbolKind.Meas,        0),
         (SymbolKind.IProbe,      0),
+        (SymbolKind.WSProbe,     0),
         (SymbolKind.VProbe,      0),
         (SymbolKind.Vdc,         0),
         (SymbolKind.P1Tone,      0),

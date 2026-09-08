@@ -21,7 +21,7 @@ public class PaletteFilterOrderingTests
         string[] expected =
         [
             "R", "GND", "L", "M", "C", "NonlinearC",
-            "Term", "TermG", "VAR", "MEAS", "IProbe", "VProbe", "Vdc",
+            "Term", "TermG", "VAR", "MEAS", "IProbe", "WSProbe", "VProbe", "Vdc",
             "P1Tone", "VTone", "ITone",
             "S2P", "S3P", "SPICE", "TLIN", "MLIN",
             "SourceTuner", "LoadTuner", "Z1P", "wBond",
@@ -44,17 +44,19 @@ public class PaletteFilterOrderingTests
     [Fact]
     public void AllItemsPinnedOrder_EverythingAfterThePinnedRows_KeepsAllItemsOwnRelativeOrder()
     {
-        // 26 = the length of LibraryCatalog's own AllFilterPinnedOrder. Bump this when a row is
+        // 27 = the length of LibraryCatalog's own AllFilterPinnedOrder. Bump this when a row is
         // pinned or unpinned; Match was the 23rd (2026-08-19), ITone the 24th (2026-08-29),
         // SpiceModel the 25th (2026-09-01), pinned next to SnP because it is the same gesture —
-        // placing a file the user already has — and VProbe the 26th, pinned next to IProbe for the
-        // same reason. (Vdc moved BELOW that IProbe/VProbe pair on 2026-09-07; the count is
-        // unchanged, only the sequence asserted above.)
+        // placing a file the user already has — VProbe the 26th, pinned next to IProbe for the
+        // same reason, and WSProbe the 27th (WSP-4), pinned BETWEEN them: it is a probe and belongs
+        // with the probes, and putting it there is what keeps the owner's own
+        // Vdc-directly-after-VProbe adjacency (2026-09-07) intact. (Vdc moved BELOW that probe run
+        // on 2026-09-07; the sequence asserted above is the authority.)
         //
         // The tail is the automatic order EXCEPT for LibraryCatalog's declared positional swaps —
         // Bead <-> SRLC, 2026-09-07 — which the expectation applies here rather than exempting the
         // rows from the check: a swap that silently became a third change would otherwise pass.
-        const int PinnedRows = 26;
+        const int PinnedRows = 27;
         var pinned      = LibraryCatalog.AllItemsPinnedOrder();
         var pinnedSet   = pinned.Take(PinnedRows).Select(i => (i.Kind, i.PortCount)).ToHashSet();
         var restActual  = pinned.Skip(PinnedRows).Select(i => (i.Kind, i.PortCount)).ToList();

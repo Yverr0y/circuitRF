@@ -2053,7 +2053,8 @@ internal static class CliDiagnostics
 
     public static Diagnostic PlotTraceUnknownKey(string trace, string key) => Diagnostic.Create(
         "plot.trace.unknown-key", DiagnosticSeverity.Error,
-        "plot: in --trace '{trace}', '{key}' is not one of cube, i, j, y, axis.",
+        "plot: in --trace '{trace}', '{key}' is not one of cube, i, j, y, axis, probe, with, set, "
+      + "metric, z0, side, gi.",
         ("trace", trace), ("key", key));
 
     public static Diagnostic PlotTraceCubeRequired(string trace) => Diagnostic.Create(
@@ -2077,6 +2078,39 @@ internal static class CliDiagnostics
         "plot.trace.ports-with-slice", DiagnosticSeverity.Error,
         "plot: --trace '{trace}' gives both a bracketed slice and i=/j=. Give one — i and j are the "
       + "convenience over writing the slice.", ("trace", trace));
+
+    // ── WSProbe traces (WSP-4 R-wsp4-12) ─────────────────────────────────────
+
+    public static Diagnostic PlotWspMetricUnknown(string trace, string metric, string known)
+        => Diagnostic.Create(
+            "plot.trace.wsp-metric-unknown", DiagnosticSeverity.Error,
+            "plot: in --trace '{trace}', metric='{metric}' is not a WSProbe quantity. They are: {known}",
+            ("trace", trace), ("metric", metric), ("known", known));
+
+    /// <summary>A probe field on a cube that is not a wsp matrix. Refused rather than dropped: the
+    /// picture would be of the cube named, which is not what was asked for.</summary>
+    public static Diagnostic PlotWspNotAWspCube(string trace, string cube) => Diagnostic.Create(
+        "plot.trace.wsp-not-a-wsp-cube", DiagnosticSeverity.Error,
+        "plot: --trace '{trace}' asks for a WSProbe quantity of '{cube}', which is not a wsp matrix "
+      + "({{…, freq, row, col}}, square). A run with a WSProbe in it writes one as `<analysis>.wsp`.",
+        ("trace", trace), ("cube", cube));
+
+    /// <summary>Only a metric names a probe quantity; a probe without one would draw the raw
+    /// matrix entry and look like an answer.</summary>
+    public static Diagnostic PlotWspMetricRequired(string trace) => Diagnostic.Create(
+        "plot.trace.wsp-metric-required", DiagnosticSeverity.Error,
+        "plot: --trace '{trace}' names a probe but no metric. Add metric=<name> — for example "
+      + "metric=invY0, metric=SM_Y0 or metric=LGM.", ("trace", trace));
+
+    /// <summary>The library's own sentence, forwarded — it names the run's probes.</summary>
+    public static Diagnostic PlotWspUnresolved(string trace, string why) => Diagnostic.Create(
+        "plot.trace.wsp-unresolved", DiagnosticSeverity.Error,
+        "plot: --trace '{trace}' does not resolve: {why}", ("trace", trace), ("why", why));
+
+    public static Diagnostic PlotWspSideUnknown(string trace, string value) => Diagnostic.Create(
+        "plot.trace.wsp-side-unknown", DiagnosticSeverity.Error,
+        "plot: in --trace '{trace}', side='{value}' is not G or L.",
+        ("trace", trace), ("value", value));
 
     public static Diagnostic PlotNoSuchCube(string cube, string known) => Diagnostic.Create(
         "plot.trace.no-such-cube", DiagnosticSeverity.Error,

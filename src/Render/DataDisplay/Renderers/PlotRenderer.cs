@@ -250,6 +250,32 @@ namespace CircuitRF.Render.DataDisplay
                 }
             }
 
+            // ---- WSProbe margin reference lines (WSP-4 R-wsp4-7) ---------
+            //
+            //  UNDER the curves, because they are a scale the curve is read against and not
+            //  something drawn on top of it. Two, and they say different kinds of thing:
+            //
+            //   • the run's own MarginThreshold (dashed) — a SETTING, the level below which the run
+            //     itself reported the probe as worth looking at;
+            //   • the −12 dB floor (lighter) — a FACT: a node with positive resistance on both
+            //     sides never reads below it, so anything under that line certifies negative
+            //     resistance on one side (WSP-9 §2.2, overview D-16).
+            //
+            //  Drawn once per distinct level, not once per trace: two margin traces on one plot
+            //  share the same floor, and stacking two identical strokes darkens it.
+            if (plot.PlotType == PlotType.Rect)
+                DrawWspMarginReferenceLines(canvas, canvasSize, plot, tf, theme);
+
+            // ---- WSProbe critical points, on a polar plot (R-wsp4-7) -----
+            //
+            //  The two families read against DIFFERENT points: a driving-point locus (1/H0, 1/Y0)
+            //  is read for a clockwise crossing of the negative real axis about the ORIGIN, and a
+            //  loop gain is read about +1. Both are drawn, once, when the plot carries a WSProbe
+            //  trace at all — a reader who has to remember which one applies is a reader who will
+            //  occasionally use the wrong one.
+            if (plot.PlotType == PlotType.Polar && plot.Traces.Any(t => t.IsWspTrace))
+                DrawWspCriticalPoints(canvas, tf, theme);
+
             // ---- Traces --------------------------------------------------
             bool plotIsRect = plot.PlotType == PlotType.Rect;
             foreach (var trace in plot.Traces)
@@ -362,6 +388,85 @@ namespace CircuitRF.Render.DataDisplay
         }
 
         // ---- Watermark --------------------------------------------------
+
+        /// <summary>The origin and +1 as small reference marks on a polar plot carrying a WSProbe
+        /// trace. See the call site for why both.</summary>
+        private static void DrawWspCriticalPoints(SKCanvas canvas, TransformSet tf, RenderTheme theme)
+        {
+            using var paint = new SKPaint
+            {
+                Color = theme.TickColor.WithAlpha(150), StrokeWidth = 1f,
+                IsAntialias = true, Style = SKPaintStyle.Stroke,
+            };
+            foreach (double re in new[] { 0.0, 1.0 })
+            {
+                var p = tf.PrimaryToCanvas(re, 0.0);
+                canvas.DrawLine(p.X - 4f, p.Y, p.X + 4f, p.Y, paint);
+                canvas.DrawLine(p.X, p.Y - 4f, p.X, p.Y + 4f, paint);
+            }
+        }
+
+        /// <summary>
+        /// The threshold and the −12 dB floor beneath every WSProbe margin trace on a rectangular
+        /// plot. No-op when the plot carries none. See the call site for what each line means.
+        /// </summary>
+        private static void DrawWspMarginReferenceLines(
+            SKCanvas canvas, (double W, double H) canvasSize, Plot plot, TransformSet tf,
+            RenderTheme theme)
+        {
+            var drawn = new HashSet<(double Level, bool Secondary, bool Dashed)>();
+            var clip  = ViewportClipRect(tf.Viewport, canvasSize);
+
+            foreach (var trace in plot.Traces)
+            {
+                if (!trace.ShowsWspMarginReferenceLines) continue;
+
+                // The floor first, so the dashed threshold draws over it when the run set −12.
+                Line(trace, WspMarginFloorDb, dashed: false, alpha: 70);
+                if (double.IsFinite(trace.WspMarginThresholdDb))
+                    Line(trace, trace.WspMarginThresholdDb, dashed: true, alpha: 140);
+            }
+
+            void Line(Trace trace, double db, bool dashed, byte alpha)
+            {
+                double level = trace.WspMarginLevelInDisplayUnits(db);
+                if (!double.IsFinite(level)) return;
+                if (!drawn.Add((level, trace.UseSecondaryAxis, dashed))) return;
+
+                var p0 = tf.ToCanvas(0, level, trace.UseSecondaryAxis);
+                if (p0.Y < clip.Top || p0.Y > clip.Bottom) return;   // outside the framed window
+
+                using var paint = new SKPaint
+                {
+                    Color       = theme.TickColor.WithAlpha(alpha),
+                    StrokeWidth = 1f,
+                    IsAntialias = true,
+                    Style       = SKPaintStyle.Stroke,
+                };
+
+                if (!dashed)
+                {
+                    canvas.DrawLine(clip.Left, p0.Y, clip.Right, p0.Y, paint);
+                    return;
+                }
+
+                // The dash is drawn as SEGMENTS rather than through SKPathEffect.CreateDash,
+                // because Skia's SVG device does not honour a path effect on a stroke: the line
+                // simply does not appear in the file, while the identical call renders on the PNG
+                // and PDF backends. Emitting the geometry keeps the three exports agreeing, which
+                // is the property `render`'s own byte-identity gate rests on.
+                const float on = 5f, off = 4f;
+                for (float x = clip.Left; x < clip.Right; x += on + off)
+                    canvas.DrawLine(x, p0.Y, Math.Min(x + on, clip.Right), p0.Y, paint);
+            }
+        }
+
+        /// <summary>
+        /// The floor a passive node cannot go below (WSP-9 §2.2): with positive resistance on both
+        /// sides of the node the margin is bounded below by 0.25, which is −12 dB at overview
+        /// D-16's convention. Below it, one side presents negative resistance.
+        /// </summary>
+        public const double WspMarginFloorDb = -12.0;
 
         private static void DrawWatermark(
             SKCanvas             canvas,

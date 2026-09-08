@@ -46,6 +46,27 @@ public enum SymbolKind
     /// </summary>
     VProbe,
 
+    /// <summary>
+    /// The WSProbe — T. A. Winslow, <i>General Circuit Analysis Using The WSProbe</i> (2023),
+    /// Fig. 15/16 (engine "WSProbe", <see cref="CircuitRF.Core.Devices.WSProbeModel"/>).
+    ///
+    /// <para><b>Electrically it is an <see cref="IProbe"/></b> — a 0 V series short that perturbs
+    /// nothing — and it is placed the same way, IN a wire, so that it splits one node into a
+    /// generator-side terminal (<c>G</c>) and a load-side terminal (<c>L</c>). What it is FOR is
+    /// different: the run it appears in produces the 2N x 2N <c>wsp</c> matrix (Eq. 31-36), and
+    /// every driving-point immittance, bidirectional impedance, loop gain and stability margin the
+    /// document derives is post-processing of that one matrix.</para>
+    ///
+    /// <para><b>The letters ARE the orientation.</b> The glyph draws <c>G</c> at one pin end and
+    /// <c>L</c> at the other, and a flipped or rotated placement moves the drawing, never the pin
+    /// order: extraction always emits <c>WSProbe:&lt;label&gt; nG nL</c> with the G pin's net
+    /// first. Swapping the two swaps every G/L-labelled output and negates nothing else.</para>
+    ///
+    /// <para>No parameters: a <c>Z0</c> for the synthetic circulator (Eq. 96-99) is an argument to
+    /// the metric, not a property of the probe.</para>
+    /// </summary>
+    WSProbe,
+
     Sdd,
     ZPort,
     Generic,

@@ -87,6 +87,12 @@ public static class SymbolPortDefs
             // VProbe: ONE terminal, at the tip of the arrow that points down-left out of the dial.
             // On grid (a multiple of 100 from the body centre) so it lands on wire vertices.
             case SymbolKind.VProbe:  return [("v", -100f, 100f)];
+            // WSProbe: the IProbe's geometry exactly — two terminals at the bottom, 100 apart, both
+            // at y=100 — because it is placed into a wire the same way and the wire-cut affordance
+            // needs both pins on one straight segment. Pin order IS the G/L contract: index 0 is G
+            // (generator side), index 1 is L (load side), and extraction emits them in that order
+            // whatever the instance's rotation or mirror does to the DRAWING.
+            case SymbolKind.WSProbe: return [("G", 0f, 100f), ("L", 100f, 100f)];
             // TLIN: horizontal 2-port — port 1 left, port 2 right. Both ground-referenced
             // (the reference net is implicit; only these two signal nets are netlisted).
             case SymbolKind.Tline:   return [("1", -200f, 0f), ("2", 200f, 0f)];

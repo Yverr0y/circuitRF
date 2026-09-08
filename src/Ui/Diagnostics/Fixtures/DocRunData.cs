@@ -105,11 +105,36 @@ public static class DocRunData
     public static string ExampleSParam()
         => Run("ExampleSParam", tb => { }, template: "Example_SParam_LC", docSchematic: true);
 
+    /// <summary>
+    /// The shipped S-parameter test bench with a WSProbe in the gate lead — the run every WSProbe
+    /// figure is taken from (WSP-4 R-wsp4-14h, for WSP-7).
+    ///
+    /// <para><b>The template's own gate AMMETER becomes the probe</b>, rather than a probe being
+    /// inserted beside it. The two are the same element electrically — a 0 V series short — so the
+    /// circuit, its bias and every other result are unchanged, and the schematic still shows one
+    /// component in that lead rather than two in series doing almost the same thing. What changes is
+    /// what the run REPORTS about that node: an ammeter gives the current through it, and a WSProbe
+    /// gives the <c>wsp</c> matrix and everything the reference document derives from it.</para>
+    /// </summary>
+    public static string WsProbe() => Run("WsProbe", tb => { }, shapeModel: model =>
+    {
+        var gate = model.Components.FirstOrDefault(
+                       c => c.Symbol == SymbolKind.IProbe && c.InstanceName == "IGS")
+            ?? throw new InvalidOperationException(
+                "The shipped S-parameter template no longer carries the gate ammeter IGS, so the "
+              + "WSProbe documentation fixture has nothing to convert. Fix the fixture rather than "
+              + "the template — the figure would otherwise be a card with no probe on it.");
+
+        gate.Symbol       = SymbolKind.WSProbe;
+        gate.InstanceName = "PG";
+    });
+
     // ── The run ───────────────────────────────────────────────────────────────
 
     private static string Run(string key, Action<TestBench> shape,
                               string template = DocFixtures.SchematicTemplateId,
-                              bool docSchematic = false)
+                              bool docSchematic = false,
+                              Action<SchematicEditModel>? shapeModel = null)
     {
         if (_cache.TryGetValue(key, out var cached)) return cached;
 
@@ -119,6 +144,7 @@ public static class DocRunData
         var model = docSchematic
             ? ShippedSchematicTemplates.LoadDocSchematic(template)
             : ShippedSchematicTemplates.Load(template, dir);
+        shapeModel?.Invoke(model);
         var extracted = NetExtractor.Extract(model, key);
         shape(extracted.TestBench);
 

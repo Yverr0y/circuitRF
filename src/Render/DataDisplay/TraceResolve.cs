@@ -444,6 +444,35 @@ public static class TraceResolve
         if (RfCore.Data.NetworkMetrics.IsNetworkParamCubeSpec(ds, t.CubeName))
             cube = ResolveNetworkParamCube(ds, t, t.CubeName, cube);
 
+        // WSP-4: a WSProbe trace's CubeName is the run's raw `wsp` matrix, and its VALUES are a
+        // metric of it — one library call per leading-axis point, at the SAME interception point,
+        // and for the same reason: everything below reads `cube`, so the slice, the family
+        // mechanism, the markers, the Table, the export and `render --data` need no probe-specific
+        // path at all. A probe that is not in this run says so on the card rather than drawing an
+        // empty curve (R-rnd4-4's rule).
+        if (t.IsWspTrace)
+        {
+            if (!WspSource.TryEvaluate(ds, t.CubeName, t.Wsp!, out var wspCube, out string wspErr))
+            {
+                t.ExpressionError = wspErr;
+                t.InvalidSpecText = t.CubeName;
+                t.Points.Clear();
+                t.FamilyCurves.Clear();
+                return;
+            }
+            cube = wspCube!;
+
+            // The run's own MarginThreshold, for the rect plot's dashed reference line. A source
+            // written before the engine reported it simply has no cube, and the trace keeps NaN —
+            // the −12 dB floor is still drawn, since that one is arithmetic and not a setting.
+            string grp = WspSource.GroupOf(t.CubeName);
+            string thrSpec = grp == RfCore.Data.DataSet.DefaultGroup
+                ? "__WspMarginThreshold" : $"{grp}.__WspMarginThreshold";
+            t.WspMarginThresholdDb = ds.Contains(thrSpec) && ds[thrSpec].BufferLength > 0
+                ? ds[thrSpec].RealValues[0]
+                : double.NaN;
+        }
+
         // From here down, `cube` is what the indexer will read. Record it now so the crash note
         // describes the object the gather saw rather than re-deriving one from the DataSet later.
         probe.Cube = cube;

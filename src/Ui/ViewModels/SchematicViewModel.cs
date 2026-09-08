@@ -3440,13 +3440,14 @@ public sealed partial class SchematicViewModel : ObservableObject
                 numParam.Expression = NextFreePinNum(EditModel).ToString();
         }
 
-        // An IProbe dropped onto a wire is shorted out by that wire and reads nothing until the
-        // user deletes the stretch between its two pins — so do it for them, as part of the SAME
-        // undoable placement. Only ever here: this is the placement path, so a later drag of the
-        // probe cannot reach it, and the span is cleared only when SeriesProbeInsertion has proved
-        // the cut carries no junction and therefore changes no circuit. See that class.
+        // A series probe (IProbe or WSProbe) dropped onto a wire is shorted out by that wire and
+        // reads nothing until the user deletes the stretch between its two pins — so do it for them,
+        // as part of the SAME undoable placement. Only ever here: this is the placement path, so a
+        // later drag of the probe cannot reach it, and the span is cleared only when
+        // SeriesProbeInsertion has proved the cut carries no junction and therefore changes no
+        // circuit. Which kinds count is that class's own question. See it.
         IUiCommand place = new PlaceComponentCommand(EditModel, comp);
-        if (kind == SymbolKind.IProbe &&
+        if (SeriesProbeInsertion.IsSeriesProbe(kind) &&
             SeriesProbeInsertion.FindShortedSpan(EditModel, comp) is { } shorted)
             place = new CompositeCommand(new CutWireSpanCommand(EditModel, shorted), place);
 

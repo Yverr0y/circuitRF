@@ -1525,6 +1525,20 @@ public partial class DataDisplayViewModel : ViewModelBase, IDisposable
             FormatString          = t.FormatString,
             MaximumFractionDigits = t.MaximumFractionDigits,
             // Cube-bound identity fields (Phase 7.2c-a). Null = network-bound.
+            // WSP-4: the probe metric, when this is one. Probes are named, never indexed — see
+            // WspTraceConfig.
+            WsProbe       = t.Wsp is { IsActive: true } w
+                ? new WspTraceConfig
+                {
+                    Probe      = w.Probe,
+                    With       = w.With,
+                    Set        = new List<string>(w.Set),
+                    Metric     = w.Metric,
+                    Z0         = ComplexStringHelper.Format(w.Z0),
+                    ActiveSide = w.ActiveSide,
+                    SetIndex   = w.SetIndex,
+                }
+                : null,
             CubeName      = t.CubeName,
             CubeTransform = t.Transform,
             CubeSlice     = t.Slice is null

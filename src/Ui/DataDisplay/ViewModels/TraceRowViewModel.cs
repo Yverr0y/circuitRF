@@ -1245,9 +1245,14 @@ public partial class TraceRowViewModel : ViewModelBase
             // EXCEPT for a network-parameter element item (§4): N² of them share one CubeName
             // ("SP1.S(1,1)".."SP1.S(4,4)" all bind CubeName=="SP1.S"), so "same CubeName" alone is
             // not "nothing changed" there — the i/j port pair must also match.
+            // WSP-4: every WSProbe metric of one run shares ONE CubeName (the `…wsp` matrix), so
+            // "same CubeName" alone is not "nothing changed" here either — exactly the trap the
+            // network-parameter element items sprang, and it fails the same way: picking SM_H0
+            // would silently keep drawing whatever metric was already on the trace.
             alreadyApplied = _trace.IsCubeBound
                 && string.Equals(_trace.SourcePath, value.Entry.FilePath, StringComparison.OrdinalIgnoreCase)
                 && _trace.CubeName == value.CubeName
+                && (_trace.Wsp?.Metric ?? WspMetric.None) == value.WspMetric
                 && (!HasPortPair(value.Slice) || NetworkParamSliceMatches(value.Slice, _trace.Slice));
         }
         else
@@ -1322,9 +1327,30 @@ public partial class TraceRowViewModel : ViewModelBase
                 }
                 _trace.Slice = carried;
             }
+            // WSP-4: a probe metric rides on the cube-bound trace it already is. The PROBE is
+            // carried over from whatever the card had — switching from H0 to SM_Y0 at the same node
+            // is the ordinary gesture, and re-asking for the probe every time would make it the
+            // exceptional one. A trace becoming an ordinary cube trace gives the spec up entirely.
+            if (value.WspMetric != WspMetric.None)
+            {
+                var carriedSpec = _trace.Wsp?.Clone() ?? new WspTraceSpec();
+                carriedSpec.Metric = value.WspMetric;
+                if (carriedSpec.Probe.Length == 0
+                    && value.Entry.Data is { } probeDs && value.CubeName is { } wspName
+                    && WspSource.Probes(probeDs, WspSource.GroupOf(wspName)) is { Count: > 0 } firstProbes)
+                    carriedSpec.Probe = firstProbes[0].Label;
+                _trace.Wsp = carriedSpec;
+            }
+            else if (_trace.Wsp is not null)
+            {
+                _trace.Wsp = null;
+            }
+
             // Re-apply the first-add nicety for the NEW signal: an auto-transform only for COMPLEX data
             // (so it shows a curve), None for REAL data (raw, no annoying "mag"). Matches the seed path.
-            if (cubeForRank is not null)
+            if (value.WspMetric != WspMetric.None)
+                _trace.Transform = WspMetrics.DefaultTransform(value.WspMetric, _parent.PlotType);
+            else if (cubeForRank is not null)
                 _trace.Transform = DefaultTransformFor(cubeForRank, _parent.PlotType, value.CubeName);
             _trace.InvalidSpecText = null;
             _trace.ExpressionError = null;
@@ -1380,6 +1406,7 @@ public partial class TraceRowViewModel : ViewModelBase
             _trace.InvalidSpecText = null;
             _trace.ExpressionError = null;
             _trace.Transform       = CubeTransform.None;
+            _trace.Wsp             = null;      // WSP-4: a probe metric is a cube-bound identity
             AxisRoles.Clear();
             _trace.Data = (value.Entry.NetworkView ?? value.Entry.Snp)!;
 
@@ -2795,6 +2822,45 @@ public partial class TraceRowViewModel : ViewModelBase
             }
         }
 
+        // ---- WSProbe metrics (WSP-4 R-wsp4-5) ----------------------------------------------
+        //
+        // One section per analysis group that carries BOTH a `wsp` matrix and its `__WspProbes`
+        // table — the two things a probe metric needs to be computable and to be named. The list is
+        // one entry per METRIC, not per (probe x metric): which probe is a property of the trace and
+        // is chosen on the card's own WSProbe section, so a four-probe run offers 36 rows rather
+        // than 144.
+        //
+        // The pair and probe-set groups are offered too, and are exactly as computable as the rest
+        // once their second probe or their set is filled in on the card. Withholding them until
+        // then would leave a user looking for a metric the picker had silently removed.
+        foreach (var entry in selectedEntry is null
+            ? System.Linq.Enumerable.Empty<DataSourceEntryViewModel>()
+            : new[] { selectedEntry })
+        {
+            if (entry.Data is not { } wds) continue;
+
+            string wspPrefix = singleSource
+                ? ""
+                : $"{System.IO.Path.GetFileNameWithoutExtension(entry.DisplayName)}..";
+
+            foreach (string group in WspSource.GroupsWithProbes(wds))
+            {
+                string wspSpec = WspSource.WspCubeSpec(group);
+                // The metric cube's OWN axes — the wsp matrix's leading axes, which is what every
+                // metric of it is shaped over. Slicing against the raw {freq, row, col} cube would
+                // pin `row`/`col` on a cube that no longer has them.
+                if (WspSource.LeadingAxes(wds, wspSpec) is not { Length: > 0 } leading) continue;
+                var probeSlice = BuildDefaultSlice(leading, DefaultXAxis(leading));
+
+                string wspGroup = wspPrefix
+                    + (group == DataSet.DefaultGroup ? "Signals" : group) + " \u25b8 WSProbe";
+
+                foreach (var info in WspMetrics.All)
+                    _allSignals.Add(new TraceDataItem(entry, wspSpec, probeSlice, info.Metric, _parent.PlotType)
+                                    { Group = wspGroup });
+            }
+        }
+
         // ---- Network metrics for a SIMULATED S-parameter run (R-stb-1) ---------------------
         //
         // A grouped run's S cube has no SNP by design (it goes through the cube path above, which
@@ -2876,10 +2942,16 @@ public partial class TraceRowViewModel : ViewModelBase
                 && string.Equals(s.Entry.FilePath, _trace.SourcePath, StringComparison.OrdinalIgnoreCase)
                 && s.CubeName == _trace.CubeName).ToList();
 
-            match = candidates.Count <= 1
-                ? candidates.FirstOrDefault()
-                : candidates.FirstOrDefault(s => NetworkParamSliceMatches(s.Slice, _trace.Slice))
-                  ?? candidates.FirstOrDefault();
+            // WSP-4: every probe metric of one run shares that same CubeName too, and disambiguates
+            // on the METRIC. Without this the card would re-select the first metric in the list on
+            // every rebuild — which is what a re-run is — and a saved SM_H0 trace would come back
+            // looking like H0.
+            match = _trace.IsWspTrace
+                ? candidates.FirstOrDefault(s => s.WspMetric == _trace.Wsp!.Metric)
+                : candidates.Count <= 1
+                    ? candidates.FirstOrDefault()
+                    : candidates.FirstOrDefault(s => NetworkParamSliceMatches(s.Slice, _trace.Slice))
+                      ?? candidates.FirstOrDefault();
         }
         else if (_trace.Data != null)
         {
@@ -3234,15 +3306,18 @@ public partial class TraceRowViewModel : ViewModelBase
     /// any freq-swept cube), else the first non-label (node/branch/opvar) axis. Returns -1 when only
     /// label axes exist (→ no X → scalar, valid for no-sweep DC).
     /// </summary>
-    internal static int DefaultXAxis(RfCore.Data.DataCube cube)
+    internal static int DefaultXAxis(RfCore.Data.DataCube cube) => DefaultXAxis([.. cube.Axes]);
+
+    /// <inheritdoc cref="DefaultXAxis(RfCore.Data.DataCube)"/>
+    internal static int DefaultXAxis(RfCore.Data.Axis[] axes)
     {
-        for (int d = 0; d < cube.Rank; d++)
-            if (cube.Axes[d].Name == "freq") return d;
-        for (int d = 0; d < cube.Rank; d++)
+        for (int d = 0; d < axes.Length; d++)
+            if (axes[d].Name == "freq") return d;
+        for (int d = 0; d < axes.Length; d++)
             // `opvar` joins node/branch as a LABEL axis, not a plottable one: its entries are
             // different quantities (a transconductance beside a capacitance beside a temperature),
             // so plotting along it draws one line through numbers that share no unit.
-            if (cube.Axes[d].Name is not "node" and not "branch" and not "opvar") return d;
+            if (axes[d].Name is not "node" and not "branch" and not "opvar") return d;
         return -1;
     }
 
@@ -3252,14 +3327,22 @@ public partial class TraceRowViewModel : ViewModelBase
     /// [freq, i, j] (+ optional swept prefix) this is S(1,1) over frequency with i/j and the sweep pinned.
     /// </summary>
     internal static AxisSlice[] BuildDefaultSlice(RfCore.Data.DataCube cube)
+        => BuildDefaultSlice([.. cube.Axes], DefaultXAxis(cube));
+
+    /// <summary>
+    /// The same default slice from AXES ALONE — for a cube that does not exist yet. A WSProbe
+    /// metric's cube is computed on demand from the run's `wsp` matrix, and the picker needs its
+    /// slice before anything has been evaluated; building a throwaway cube just to read its axis
+    /// names would allocate the whole sweep to answer a question about its shape.
+    /// </summary>
+    internal static AxisSlice[] BuildDefaultSlice(RfCore.Data.Axis[] axes, int xIdx)
     {
-        int rank = cube.Rank;
+        int rank = axes.Length;
         if (rank == 0) return Array.Empty<AxisSlice>();
-        int xIdx = DefaultXAxis(cube);
         var slice = new AxisSlice[rank];
         for (int d = 0; d < rank; d++)
         {
-            var ax = cube.Axes[d];
+            var ax = axes[d];
             if (d == xIdx)
                 slice[d] = new AxisSlice(ax.Name, AxisRole.KeepAsX, 0);
             else
@@ -3432,6 +3515,7 @@ public partial class TraceRowViewModel : ViewModelBase
 
     public void RefreshDescription()
     {
+        RefreshWspSection();   // WSP-4: the probe pickers and the readout are card state like the rest
         OnPropertyChanged(nameof(IsContourTrace));
         OnPropertyChanged(nameof(IsSummaryColumn));
         OnPropertyChanged(nameof(IsStandardTrace));
@@ -3512,6 +3596,18 @@ public partial class TraceRowViewModel : ViewModelBase
     public void CommitSpec(string text)
     {
         if (!_trace.IsCubeBound) return;
+
+        // WSP-4: a WSProbe trace's spec text is the MEASURE-LINE spelling of what the card's own
+        // pickers author (wsp_SM_Y0(SP1.wsp, SP1.idx("GATE")) — overview D-5), not a cube shorthand
+        // the parser reads back. Re-committing it unchanged — which a LostFocus does on every tab
+        // through the box — must not turn the trace into something else, so an unedited commit is a
+        // no-op; a genuine edit gives the probe metric up and becomes whatever was typed.
+        if (_trace.IsWspTrace)
+        {
+            if (string.Equals(text.Trim(), _trace.BuildPickerExpression(), StringComparison.Ordinal))
+                return;
+            _trace.Wsp = null;
+        }
 
         _trace.Expression      = text;
         _trace.InvalidSpecText = null;

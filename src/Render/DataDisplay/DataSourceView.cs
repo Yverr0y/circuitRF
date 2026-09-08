@@ -21,6 +21,8 @@
 // ================================================================
 
 using System;
+using System.Linq;
+using System.Numerics;
 using RfCore;
 using RfCore.Data;
 
@@ -65,6 +67,74 @@ public static class DataSourceView
             ds.AddToGroup(group, "Z", NetworkMetrics.ConvertSCube(sCube, z0PerPort, MatrixType.Z));
             ds.AddToGroup(group, "Y", NetworkMetrics.ConvertSCube(sCube, z0PerPort, MatrixType.Y));
         }
+
+        MaterializeWspReducedTwoPorts(ds);
+    }
+
+    /// <summary>
+    /// The name of the virtual group holding one probe's reduced two-port — the document's
+    /// "two-port network reduction" (§4.2) made visible (WSP-4 R-wsp4-8).
+    /// </summary>
+    public static string ReducedTwoPortGroup(string analysisGroup, string probeLabel)
+        => analysisGroup == DataSet.DefaultGroup
+            ? $"WSProbe {probeLabel} \u25b8 reduced 2-port"
+            : $"{analysisGroup} \u25b8 WSProbe {probeLabel} \u25b8 reduced 2-port";
+
+    /// <summary>
+    /// One virtual NETWORK group per WSProbe, holding the reduced two-port <c>[Y]</c> at that probe
+    /// (Eq. 44) as <c>Y</c>, <c>Z</c>, <c>S</c> and a per-port <c>Z0</c>.
+    ///
+    /// <para><b>This is the cheapest new capability in the series</b>, and it is cheap for exactly
+    /// the reason the virtual <c>Z</c>/<c>Y</c> cubes above are: once the reduction is an ordinary
+    /// network group, µ, µ', K, |Δ|, MAG/MSG and both stability circles apply to it with no code at
+    /// all — they are functions of an S matrix and this IS one. The document's own reading of the
+    /// reduced two-port (WSP-2 §3) becomes every metric the Data Display already has.</para>
+    ///
+    /// <para><b>Appended after the analysis groups, never before.</b> <c>FindCubeSpec</c> answers
+    /// with the FIRST group carrying an <c>S</c>, and that has to keep being the run's own — a
+    /// network view built from a probe's reduced two-port would quietly replace the amplifier's own
+    /// S-parameters in every metric that takes one.</para>
+    ///
+    /// <para>Idempotent, like the pass above: a group that is already here is left alone.</para>
+    /// </summary>
+    private static void MaterializeWspReducedTwoPorts(DataSet ds)
+    {
+        foreach (string group in WspSource.GroupsWithProbes(ds).ToList())
+        {
+            string wspSpec = WspSource.WspCubeSpec(group);
+            foreach (var (label, _) in WspSource.Probes(ds, group))
+            {
+                string reduced = ReducedTwoPortGroup(group, label);
+                if (ds.Groups.Contains(reduced)) continue;
+                if (!WspSource.TryReducedTwoPort(ds, wspSpec, label, out var yCube, out _)) continue;
+
+                // The reduction is an ADMITTANCE matrix (Eq. 44); S and Z come from it by the
+                // ordinary conversions, at the analysis group's own port-1 reference so that a
+                // circle read off this group and one read off the run agree about what 50 ohms is.
+                var z0 = ReferenceOf(ds, group);
+                var z0PerPort = new[] { z0, z0 };
+                var sCube = WspSource.ScatteringOf(yCube!, z0);
+
+                ds.AddToGroup(reduced, "Y",  yCube!);
+                ds.AddToGroup(reduced, "S",  sCube);
+                ds.AddToGroup(reduced, "Z",  NetworkMetrics.ConvertSCube(sCube, z0PerPort, MatrixType.Z));
+                ds.AddToGroup(reduced, NetworkMetrics.Z0CubeName,
+                              new DataCube([new Axis("port", [1.0, 2.0])], z0PerPort));
+            }
+        }
+    }
+
+    /// <summary>The analysis group's own port-1 reference, else 50 ohms — real, because every
+    /// conversion here is defined at a real reference.</summary>
+    private static Complex ReferenceOf(DataSet ds, string group)
+    {
+        var cubes = ds.CubesIn(group);
+        if (cubes.TryGetValue(NetworkMetrics.Z0CubeName, out var z0) && z0.BufferLength > 0)
+        {
+            var v = z0.DataKind == DataKind.Complex ? z0.ComplexValues[0] : new Complex(z0.RealValues[0], 0);
+            if (v.Real > 0) return new Complex(v.Real, 0);
+        }
+        return new Complex(50, 0);
     }
 
     /// <summary>

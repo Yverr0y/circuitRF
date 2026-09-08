@@ -403,5 +403,10 @@ public static class FigureCatalog
         new("plot-inspector-loadpull", DocDataDisplayFixtures.InspectorLoadpull, 440, 320,
             null,
             "A contour trace card: the metric, the constraint, the levels and the interpolation."),
+
+        new("plot-inspector-wsprobe", DocDataDisplayFixtures.InspectorWsProbe, 440, 420,
+            null,
+            "The trace card's WSProbe section: which probe the quantity is taken at, which of the "
+          + "reference document's quantities it is, and the Kurokawa reading beside it."),
     ];
 }
