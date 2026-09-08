@@ -154,6 +154,16 @@ public static class LayoutConvert
         if (from == Fmt.Clay && to == Fmt.Clay)
             return JsonRun.Fail(CliDiagnostics.ConvertClayToClay());
 
+        // R-aut12-4. A clay target is a DIRECTORY — the import writes one cell folder per structure
+        // and a technology beside them, which is why `--to clay` simply stops after the import. A
+        // file-shaped path used to become a DIRECTORY of that name with the real `.clay` two levels
+        // inside it, and the extension is also how a caller SAYS clay, so the inference stays and the
+        // shape is refused with the command that answers it. Refusing beats collapsing to one file:
+        // an import that produced a hierarchy has no single file to collapse to, and a rule that
+        // works only for the flat case is a rule that fails silently on the other one.
+        if (to == Fmt.Clay && ClayDirectoryRefusal(o.Output!) is { } clayRefusal)
+            return clayRefusal;
+
         Console.Error.WriteLine($"[circuitRF] {Name(from)} -> {Name(to.Value)}");
 
         string? scratch = null;
@@ -191,6 +201,27 @@ public static class LayoutConvert
             if (scratch is not null && Directory.Exists(scratch))
                 try { Directory.Delete(scratch, recursive: true); } catch { /* best effort */ }
         }
+    }
+
+    /// <summary>
+    /// R-aut12-4: whether the <c>--to clay</c> output path names a DIRECTORY, which is the only shape
+    /// this target has. An existing directory passes whatever it is called — a caller with a folder
+    /// called <c>cells.clay</c> already has the thing that would be written into.
+    /// </summary>
+    private static int? ClayDirectoryRefusal(string output)
+    {
+        if (Directory.Exists(output)) return null;
+        if (File.Exists(output)) return JsonRun.Fail(CliDiagnostics.ConvertClayTargetIsAFile(output));
+        if (Path.GetExtension(output).Length == 0) return null;
+
+        // The same path with the extension taken off — a directory beside where the caller meant,
+        // named the way they were already naming it, so the refusal can be acted on by editing one
+        // token rather than by rethinking the command.
+        string suggestion = Path.Combine(
+            Path.GetDirectoryName(output) is { Length: > 0 } d ? d : "",
+            Path.GetFileNameWithoutExtension(output));
+        return JsonRun.Fail(CliDiagnostics.ConvertClayTargetIsADirectory(
+            output, suggestion.Length > 0 ? suggestion : "cells"));
     }
 
     // ── What a source resolved to ─────────────────────────────────────────────────────────────────

@@ -488,8 +488,13 @@ namespace RfCore.Export
         bool?                            Truncated = null);
 
     /// <param name="Name">The layer's name, as <see cref="ExplainLayerJson.Name"/> spells it.</param>
+    /// <param name="Window">This layer's box in the spelling <c>render --window</c> takes, so a
+    /// caller can frame on one layer without doing the arithmetic. See
+    /// <see cref="ExplainExtentsJson.Window"/>.</param>
     public sealed record ExplainLayerExtentJson(
-        string Name, double X0, double Y0, double X1, double Y1);
+        string Name, double X0, double Y0, double X1, double Y1,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Window = null);
 
     /// <summary>
     /// How big the document is — <b>the same box <c>render --fit</c> frames on, from the same function</b>
@@ -511,6 +516,18 @@ namespace RfCore.Export
     /// <paramref name="Unit"/> — 1e-6 for a layout drawn in micrometres, 2.54e-5 for one drawn in
     /// mils, 1 where the coordinates are dimensionless. Reading a mark without its scale has already
     /// produced a run at 2 Hz that looked entirely normal (R-aut4-9).</param>
+    /// <param name="Window">
+    /// <b>The same box written as <c>render --window</c> takes it</b>, so the output of this verb is
+    /// the input of that one (R-aut12-3). The numeric fields are base SI and <c>--window</c> refuses
+    /// a bare number — correctly, because DBU, micrometres and millimetres are three plausible
+    /// pictures — so without this every windowed render needed a hand conversion, which is exactly
+    /// the arithmetic-in-the-caller this surface exists to remove.
+    ///
+    /// <para>A layout is spelled in the document's own DISPLAY unit, with enough decimal places that
+    /// the string reads back to the same DBU; a schematic or a symbol is spelled as the bare design
+    /// units <c>--window</c> takes there. Absent when the document is empty, which is the one case
+    /// with no box to frame.</para>
+    /// </param>
     /// <param name="PerLayer">
     /// Layout only, and only the layers that have geometry. <b>The document's OWN shapes</b> — an
     /// instance's content is measured as ONE box for the whole placement and cannot be split per layer
@@ -535,6 +552,8 @@ namespace RfCore.Export
         double? Width,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         double? Height,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Window,
         string  Unit,
         double  Scale,
         bool    Empty,
@@ -1106,7 +1125,30 @@ namespace RfCore.Export
     /// frame issued a draw call for; an instance's interior is accounted in
     /// <see cref="RenderCountersJson.InstancesDrawn"/> instead.</para>
     /// </param>
-    public sealed record RenderLayerJson(string Name, bool Rendered, long Shapes);
+    /// <param name="Rendered">Whether this render painted it — <c>LayerDef.Visible</c> on the
+    /// technology the drawing was taken through, after any <c>--layers</c> / <c>--hide-layers</c>.</param>
+    /// <param name="Shapes">How many shapes the document draws on it, hierarchy included and arrays
+    /// multiplied. An EXCLUDED layer and an EMPTY one are two different answers.</param>
+    /// <param name="Color">
+    /// The <c>#rrggbb</c> the layer was drawn in, <b>after any <c>--layer-colors</c> override</b>
+    /// (R-aut12-1). This is what makes the override checkable: a colour change is the one thing a
+    /// caller receiving only a picture cannot verify from the numbers beside it.
+    /// </param>
+    /// <param name="FillOpacity">What its fill was painted at, 0 to 1 — the layer's real alpha, since
+    /// the renderer takes only R, G and B from the colour.</param>
+    /// <param name="Framed">
+    /// Whether the fit was framed on this layer. Present only when <c>--fit-layers</c> narrowed the
+    /// framing (R-aut12-2); absent means the ordinary rule, which is that a fit frames everything
+    /// this render draws.
+    /// </param>
+    public sealed record RenderLayerJson(
+        string Name, bool Rendered, long Shapes,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? Color = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        double? FillOpacity = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        bool? Framed = null);
 
     /// <param name="Mode"><c>full</c>, <c>screen</c>, or the pixel budget as written.</param>
     /// <param name="ToleranceDbu">

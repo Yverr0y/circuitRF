@@ -982,6 +982,10 @@ public sealed class ServeProtocolAdapterTests(ITestOutputHelper output) : IDispo
         "integer" => JsonValue.Create(1),
         "number"  => JsonValue.Create(1.0),
         "array"   => new JsonArray("x"),
+        // AUT-12's `StrMap` — a map of name to value, which the adapter type-checks before it emits
+        // anything. Falling through to the string default here would make the probe a wrong-type
+        // refusal, which passes every assertion below while exercising nothing.
+        "object"  => new JsonObject { ["x"] = "x" },
         _         => JsonValue.Create("x"),
     };
 

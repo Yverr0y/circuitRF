@@ -46,7 +46,7 @@ Twelve verbs run no analysis, so none of §3-§6 applies to them and §7's exit 
 
 | Verb | Input | Does | Writes |
 |---|---|---|---|
-| `convert` | any interchange format | one import, one export | the target format; documented in the repo-root `CLAUDE.md` |
+| `convert` | any interchange format | one import, one export | the target format; documented in the repo-root `CLAUDE.md`. **A `clay` target is a DIRECTORY** — see below |
 | `new workspace` | a directory | `WorkspaceCreate.Create` | a `.cws` and, unless `--tech none`, a copied `.ctech` |
 | `new cell` | a workspace + a name | `CellCreate.Create` | a cell folder and one empty-but-valid file per `--views` |
 | `import part` | a component file or folder | `ComponentRead` + `ComponentImport.Import` | a cell folder holding the land patterns and the symbol |
@@ -58,6 +58,17 @@ Twelve verbs run no analysis, so none of §3-§6 applies to them and §7's exit 
 | `plot` | a result file | builds a one-plot data display and draws it | one `.svg` / `.pdf` / `.png`, and the `.cdd` under `--write-cdd` — §15 |
 | `find` | a directory | enumerates the workspaces, cells, views and analyses under it | **nothing** — §16 |
 | `serve` | `--root <dir>` | a protocol server on stdin/stdout — §11 | whatever the tool it was asked for writes |
+
+**`convert`'s `clay` target is a directory, and a file-shaped path there is a refusal** (R-aut12-4).
+An import writes one cell FOLDER per structure plus the technology beside them — which is why `--to
+clay` simply stops after the import — so `-o out/board.clay` used to produce a *directory* called
+`out/board.clay` with the real `.clay` two levels inside it. Nothing was lost, because the result
+document reported the true paths, but a path that names a file and yields a directory of that name is
+a surprise nobody is there to notice on a build machine. The `.clay` extension is also how a caller
+SAYS clay, so the inference stays and the SHAPE is what is refused, with the directory spelling in the
+message. Collapsing to a single file was the alternative and is worse: an import that produced a
+hierarchy has no one file to collapse to, so the rule would work for the flat case and discard the
+other silently.
 | `reference` | **nothing at all** | reports what a caller may WRITE: the shipped reference pages, plus four topics generated from the live registries and readers — the component catalogue, the analysis directives, and the `.cdd` and `.ctech` formats | **nothing** — §12 |
 
 **`new` is one verb with a noun, not three** (`brief-automation-3-authoring-verbs.md` R-aut3-13): the
@@ -719,6 +730,24 @@ deliberately (§11.3).
   size is chosen. That is the stable, zoom-independent answer a zoom-independent verb owes, and the
   `note` field says so.
 
+  **Every box also comes back as a `window` STRING, in the spelling `render --window` accepts**
+  (R-aut12-3) — whole document and per layer. The numbers above are base SI, and `--window` refuses a
+  bare number, correctly and for a good reason; so until this landed, the one tool that says where the
+  content is emitted exactly what the other tool rejects, and every windowed render needed a hand
+  conversion. A layout is spelled in the document's own DISPLAY unit (`0um,-3000um,402000um,402000um`)
+  and not in metres, because `LayoutUnits.TryParse` — which is what `render` parses a coordinate with —
+  reads nm, um, mm, mil and in and **has no spelling for a bare metre at all**, so emitting the numeric
+  field's own unit would have produced a string that reads plausibly and is refused. A schematic's and a
+  symbol's are bare design units, which is what `--window` takes there.
+
+  The spelling is `LayoutUnits.Spell`, beside the parser it inverts, and **its decimal count is derived
+  rather than chosen**: one DBU is `1000 / (nm-per-unit × dbu-per-micron)` of the display unit, so that
+  many places resolve a single DBU and one more puts the two roundings an order of magnitude apart. A
+  fixed four places silently quantises a nanometre-resolution layout written in millimetres to 10 nm —
+  a window off by a hair, which is invisible. The suffix table is `LayoutUnits.AsciiSuffix`, which is
+  **not** the display table beside it: that one gives micrometres as `µm`, which the parser does accept
+  but which travels through an argument list, a JSON document and somebody's shell on the way back.
+
 The six questions are **refused together rather than ordered** (R-rnd3-2) — each asks something
 different, and a precedence nobody stated would be an invention. `--all` is `--cells`' own modifier and
 is refused beside anything else; `--view` is only ever a cell folder's disambiguator, spelled exactly
@@ -754,8 +783,9 @@ Per §3.2, with `diagnostics` carrying the findings and `result` carrying the re
                                    "layers":[{"name","number","datatype","purpose","visible",
                                               "selectable","color","fill","shapes","instancesUsing"}]},
 
-                         "extents":{"x0","y0","x1","y1","width","height","unit","scale","empty",
-                                    "note","perLayer":[{"name","x0","y0","x1","y1"}]} } }
+                         "extents":{"x0","y0","x1","y1","width","height","window","unit","scale",
+                                    "empty","note",
+                                    "perLayer":[{"name","x0","y0","x1","y1","window"}]} } }
 ```
 
 Exactly one of `analyses` / `expression` / `reference` / `cells` / `layers` / `extents` is ever
@@ -935,6 +965,13 @@ Confining the first would turn `dark` into `<root>/dark`, which resolves to no t
 confining the second would let a client name a file outside the root and learn from the refusal
 whether it exists. The split — an extension, a separator or a root means a path — is
 `Render.ResolveTheme`'s own, one step earlier, and each end names the other.
+
+A third, `StrMap`, arrived with `layerColors` (R-aut12-1) and is about SHAPE rather than confinement:
+a JSON **object** of layer name to colour, emitted as the flag repeated once per entry. An object
+because that is what the thing is, and a client made to assemble the `=` itself will eventually
+assemble it wrong; repeated rather than comma-joined because the KEY is a layer name a technology
+author chose, and one containing a comma would split into two names that resolve to nothing. The verb
+takes both spellings, so a person at a shell still writes one quoted list.
 
 `--only` and `--group` are reachable as tool arguments (R-aut5-6) — reading is the expensive
 direction, and a client that receives eight full loadpull cubes when it wanted one number is the
@@ -1376,6 +1413,8 @@ across frames — which is what every existing export already passes.
 ```
 --layers <a,b,...>       render only these        (layout only; refused on a schematic or symbol)
 --hide-layers <a,b,...>  render everything except these
+--fit-layers <a,b,...>   frame the fit on these; draw everything
+--layer-colors <name=#rrggbb[aa],...>   how a layer draws, for this render only. Repeatable.
 --theme <name|path.ccolor>   --variant light|dark   --background opaque|transparent
 --grid                   default off      --no-rulers   default: whatever the document says
 ```
@@ -1385,6 +1424,34 @@ editor honours, not "all layers regardless". **The selection is applied to a CLO
 technology, never to the cached one**: `TechnologyCache` hands back a shared instance and flipping
 `Visible` on it would leak into the next render in the same process, which is not hypothetical because
 `serve` runs many calls in one. That is the class of defect that only appears on the second call.
+**All four of these flags go through that one clone** — `TechnologyLayerSelection.WithLayers`, in
+`src/Design` — in a single pass, so a colour predicate reads the technology's own definition rather
+than whatever a first pass left behind.
+
+**`--fit-layers` exists because `--fit` frames what is DRAWN, and that is the wrong knob for one real
+case.** The framing rule is not new and is now stated: `DocumentExtents.LayoutBox` gates on
+`LayerDef.Visible`, which is the same flag `--layers` / `--hide-layers` write on that clone, so hiding a
+layer takes it out of the framing as well as out of the picture. What the exercise hit is a Gerber
+import whose drill-map fabrication drawing sits far outside the board and, framed with everything else,
+shrinks the board to a fraction of the page — and hiding it is a *different picture* from the one that
+was wanted. `--fit-layers` narrows the framing without narrowing the drawing. It is refused together
+with `--window` and `--center/--span`, which state the frame outright, and refused when the layers it
+names draw nothing, because framing on nothing is not a page. The `--json` layer report carries
+`framed` per layer when it is in force, and omits it otherwise — "framed on everything drawn" is the
+ordinary rule and reporting it per layer would read as a choice somebody made.
+
+**`--layer-colors` is a RENDER-time override and writes nothing.** A Gerber import assigns the six
+copper layers near-identical colours, so a copper overlay is unreadable; before this the only route was
+to hand-edit the generated `.ctech`, which is changing the design to change a picture of it. The names
+resolve through the same map `--layers` resolves through — a layer the technology does not define but
+the document draws on is nameable under exactly the generated `L<layer>/<datatype>` name `explain
+--layers` prints for it — and an unknown name, or a value that is not a colour, is a refusal rather
+than a skip. **An eight-digit colour sets the layer's FILL OPACITY, not the colour's alpha**:
+`LayoutRenderer` builds its `SKColor` from R, G and B alone at all four of its call sites and takes the
+alpha from `LayerDef.FillOpacity`, so an override that wrote the alpha into the colour and stopped
+would parse, report itself as applied, and change nothing in the picture. The layer report carries each
+layer's `color` and `fillOpacity` AS DRAWN, which is what makes the override checkable — a colour
+change is the one thing a caller receiving only a picture cannot verify from the numbers beside it.
 
 Theme resolution is `ThemeResolver`'s existing chain and nothing new — an explicit `--theme <path>`
 first, then workspace directory, user themes directory, shipped `.ccolor`. With no `--theme`, the
@@ -1416,6 +1483,14 @@ the detail mode with its effective tolerance in DBU, and `counters`. **There is 
 construction — which is what lets a gate assert about work done rather than about a shared runner's
 wall clock. Extents and viewport come back in base SI **with the unit and the scale named**, the rule
 `explain --analysis` already follows.
+
+AUT-12's own gates sit beside RND-2's, in the same file and for the same reason: **the colour override
+is asserted across three renders in ONE process** — reference, coloured, plain — with the third
+required to be byte-identical to the first, because a shared cached `Technology` written in place is
+the defect that only appears on the second call; and `--fit-layers` is asserted to produce the viewport
+`--hide-layers` produces while drawing what an unfiltered render draws, which is the whole difference
+between the two flags and is measurable only where the narrowed frame still contains some of the other
+layer's content.
 
 `verticesEmitted` is the one counter this verb added, in that existing style and for that reason: nothing
 else could be asserted against `--detail`'s claim, because the same shapes are drawn and the same paths

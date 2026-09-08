@@ -19,11 +19,13 @@
 
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using CircuitRF.Cli;
 using CircuitRF.Design.Layout;
 using CircuitRF.Design.Schematic;
 using CircuitRF.Design.Symbol;
+using CircuitRF.Design.Theming;
 using CircuitRF.Design.Workspace;
 using CircuitRF.Render;
 using SkiaSharp;
@@ -420,6 +422,227 @@ public sealed class RenderCliVerbTests(ITestOutputHelper output) : IDisposable
         Assert.All(second.Layers, l => Assert.True(l.Visible));
     }
 
+    // ══ AUT-12 ══════════════════════════════════════════════════════════════
+    //
+    //  R-aut12-1 (a render-time colour override) and R-aut12-2 (framing on a subset) — the two
+    //  places the artwork half of the automation surface made a caller edit a document or do
+    //  arithmetic to get the picture it wanted.
+
+    /// <summary>
+    /// <b>R-aut12-1's own gate, in the only form that can fail:</b> three renders in ONE process —
+    /// a reference, one with a colour override, then a plain one again. The third must be
+    /// byte-identical to the first.
+    ///
+    /// <para>This is the same trap <c>--layers</c> has and it is worth re-asserting rather than
+    /// assuming: <see cref="TechnologyCache"/> hands back a SHARED <see cref="Technology"/>, so
+    /// writing <c>LayerDef.Color</c> on the resolved instance would recolour every later render taken
+    /// through that cache — in a process that renders many, which <c>circuitrf serve</c> is. Across
+    /// two processes the defect is invisible by construction, which is why this drives
+    /// <c>CliEntry.Run</c> directly.</para>
+    /// </summary>
+    [Fact]
+    public void ALayerColourOverride_DoesNotLeakIntoTheNextRenderInTheSameProcess()
+    {
+        var ws = BuildWorkspace();
+        string reference = Path.Combine(_root, "colour-ref.png");
+        string coloured  = Path.Combine(_root, "colour-a.png");
+        string after     = Path.Combine(_root, "colour-b.png");
+
+        Assert.Equal(0, InProcessCli("render", ws.Clay, "-o", reference, "--size", "400x300"));
+        Assert.Equal(0, InProcessCli("render", ws.Clay, "-o", coloured, "--size", "400x300",
+                                     "--layer-colors", "Metal1=#00ff00"));
+        Assert.Equal(0, InProcessCli("render", ws.Clay, "-o", after, "--size", "400x300"));
+
+        // The vacuity guard: without it a no-op override would pass this test perfectly.
+        Assert.NotEqual(File.ReadAllBytes(reference), File.ReadAllBytes(coloured));
+        Assert.Equal(File.ReadAllBytes(reference), File.ReadAllBytes(after));
+    }
+
+    /// <summary>The same claim one level down, where the leak would actually happen — the twin of
+    /// <see cref="TheLayerSelectionCopiesTheTechnology_LeavingTheCachedOneAlone"/>, because a colour
+    /// override goes through the same clone and would otherwise be free to write in place.</summary>
+    [Fact]
+    public void TheColourOverrideCopiesTheTechnology_LeavingTheCachedOneAlone()
+    {
+        var ws = BuildWorkspace();
+        var cache = new TechnologyCache();
+
+        var first = TechnologyResolver.ResolveForDocument(null, ws.Clay, null, cache).Resolution.Tech!;
+        var repainted = TechnologyLayerSelection.WithLayers(
+            first, null,
+            l => l.Key == Metal1
+                ? new TechnologyLayerSelection.LayerAppearance(new Rgba(0, 255, 0), 0.9)
+                : null);
+
+        Assert.Equal(new Rgba(0, 255, 0), repainted.Layers.Single(l => l.Key == Metal1).Color);
+        Assert.Equal(0.9, repainted.Layers.Single(l => l.Key == Metal1).FillOpacity);
+        Assert.Equal(new Rgba(200, 30, 30), first.Layers.Single(l => l.Key == Metal1).Color);
+
+        var second = TechnologyResolver.ResolveForDocument(null, ws.Clay, null, cache).Resolution.Tech!;
+        Assert.Same(first, second);                                   // the premise: one shared instance
+        Assert.Equal(new Rgba(200, 30, 30), second.Layers.Single(l => l.Key == Metal1).Color);
+        Assert.Equal(0.5, second.Layers.Single(l => l.Key == Metal1).FillOpacity);
+    }
+
+    /// <summary>
+    /// The override reaches the REPORT as well as the picture, and the eight-digit form moves the
+    /// layer's fill opacity rather than an alpha nothing paints through — <c>LayoutRenderer</c> builds
+    /// its <c>SKColor</c> from R, G and B alone at all four of its call sites, so an override that
+    /// wrote the alpha into the colour and stopped would parse, report itself as applied, and change
+    /// nothing.
+    /// </summary>
+    [Fact]
+    public void ALayerColourOverride_IsReportedAsDrawn_AndItsAlphaIsTheFillOpacity()
+    {
+        var ws = BuildWorkspace();
+
+        var plain = LayerRow(RenderRawJson(ws.Clay, "--size", "400x300"), "Metal1");
+        Assert.Equal("#c81e1e", plain.GetProperty("color").GetString());
+        Assert.Equal(0.5, plain.GetProperty("fillOpacity").GetDouble(), 12);
+
+        var painted = LayerRow(
+            RenderRawJson(ws.Clay, "--size", "400x300", "--layer-colors", "Metal1=#00ff0080"),
+            "Metal1");
+        Assert.Equal("#00ff00", painted.GetProperty("color").GetString());
+        Assert.Equal(128 / 255.0, painted.GetProperty("fillOpacity").GetDouble(), 12);
+
+        // A layer nobody named keeps the technology's own paint — the override is not a repaint of
+        // everything that happened to be near that shade.
+        var untouched = LayerRow(
+            RenderRawJson(ws.Clay, "--size", "400x300", "--layer-colors", "Metal1=#00ff0080"),
+            "Metal2");
+        Assert.Equal("#1e78c8", untouched.GetProperty("color").GetString());
+        Assert.Equal(0.5, untouched.GetProperty("fillOpacity").GetDouble(), 12);
+    }
+
+    /// <summary>R-aut12-1's refusals. A name that is not a layer, and a value that is not a colour,
+    /// are each refused rather than skipped — a layer left at its own colour is a picture that looks
+    /// exactly like the override having worked on something already near that shade.</summary>
+    [Fact]
+    public void ALayerColourOverride_RefusesAnUnknownLayerAndANonColour()
+    {
+        var ws = BuildWorkspace();
+        string outPath = Path.Combine(_root, "never.png");
+
+        foreach ((string entry, string id) in new[]
+        {
+            ("Nope=#ff0000",   "render.layers.unknown"),
+            ("Metal1=puce",    "render.layer-colors.bad-color"),
+            ("Metal1",         "render.layer-colors.malformed"),
+        })
+        {
+            var (exit, stdout, _) = RunCli("render", ws.Clay, "-o", outPath,
+                                           "--layer-colors", entry, "--json");
+            Assert.Equal(1, exit);
+            Assert.Contains($"\"id\": \"{id}\"", stdout, StringComparison.Ordinal);
+            Assert.False(File.Exists(outPath), "a refused render wrote a file");
+        }
+    }
+
+    /// <summary>
+    /// R-aut12-2's first half, which was the BEHAVIOUR all along and had never been stated or
+    /// tested: <b>a fit frames what is DRAWN.</b> <c>DocumentExtents.LayoutBox</c> gates on
+    /// <c>LayerDef.Visible</c>, and that is the same flag <c>--hide-layers</c> writes on the clone the
+    /// drawing is taken through — so hiding the outlier removes it from the framing too.
+    ///
+    /// <para>The fixture is the shape the exercise hit: a small mark 100 mm away, which framed with
+    /// everything else shrinks the real content to a fraction of the page.</para>
+    /// </summary>
+    [Fact]
+    public void AFit_FramesOnlyWhatIsDrawn()
+    {
+        var ws = BuildWorkspace(outlier: true);
+
+        var whole  = Viewport(RenderRawJson(ws.Clay, "--size", "800x600"));
+        var hidden = Viewport(RenderRawJson(ws.Clay, "--size", "800x600", "--hide-layers", "Silk"));
+
+        output.WriteLine($"whole:  {whole.X0:G4}..{whole.X1:G4}");
+        output.WriteLine($"hidden: {hidden.X0:G4}..{hidden.X1:G4}");
+
+        // The outlier is at 100 mm; the rest of the fixture ends at 900 µm. Framing without it is
+        // therefore two orders of magnitude tighter.
+        Assert.True(whole.X1 - whole.X0 > 0.05, $"the outlier did not dominate the fit: {whole.X1 - whole.X0} m");
+        Assert.True(hidden.X1 - hidden.X0 < 0.005, $"hiding the outlier did not tighten the fit: {hidden.X1 - hidden.X0} m");
+    }
+
+    /// <summary>
+    /// R-aut12-2's second half, and the one <c>--hide-layers</c> cannot do: <b>frame on these, draw
+    /// everything.</b> The viewport is the one hiding the outlier produces, and the shape count is
+    /// the one drawing everything produces — which is the combination a caller wants and could not
+    /// previously ask for.
+    /// </summary>
+    [Fact]
+    public void FitLayers_FramesOnThoseAndStillDrawsTheRest()
+    {
+        var ws = BuildWorkspace(outlier: true);
+
+        var hidden  = RenderRawJson(ws.Clay, "--size", "800x600", "--hide-layers", "Silk");
+        var framed  = RenderRawJson(ws.Clay, "--size", "800x600", "--fit-layers", "Metal1,Metal2");
+
+        var a = Viewport(hidden);
+        var b = Viewport(framed);
+        Assert.Equal(a.X0, b.X0, 12);
+        Assert.Equal(a.X1, b.X1, 12);
+
+        // The picture is NOT narrowed. At that identical viewport, hiding Silk loses its in-board
+        // shape and narrowing the FRAMING keeps it — which is the whole difference between the two
+        // flags, and the one thing the far outlier alone could not show, because content outside a
+        // viewport is culled either way.
+        output.WriteLine($"hidden drew {Shapes(hidden)}, framed drew {Shapes(framed)}");
+        Assert.True(Shapes(hidden) < Shapes(framed),
+            $"--fit-layers drew {Shapes(framed)} shapes and --hide-layers drew {Shapes(hidden)}: "
+          + "narrowing the frame must not narrow the picture");
+
+        // And the report says which layers the frame was taken from, so a caller can check it.
+        Assert.True(LayerRow(framed, "Metal1").GetProperty("framed").GetBoolean());
+        Assert.False(LayerRow(framed, "Silk").GetProperty("framed").GetBoolean());
+        Assert.True(LayerRow(framed, "Silk").GetProperty("rendered").GetBoolean());
+
+        // Absent, not false, when nothing narrowed the framing: "framed on everything drawn" is the
+        // ordinary rule and reporting it per layer would read as a choice somebody made.
+        Assert.False(LayerRow(RenderRawJson(ws.Clay, "--size", "800x600"), "Metal1")
+                        .TryGetProperty("framed", out _));
+    }
+
+    /// <summary>R-aut12-2's refusals: a frame that was stated outright has nothing for
+    /// <c>--fit-layers</c> to decide, and framing on layers that draw nothing is not a page.</summary>
+    [Fact]
+    public void FitLayers_IsRefusedWithAStatedWindowAndOnLayersThatDrawNothing()
+    {
+        var ws = BuildWorkspace();
+        string outPath = Path.Combine(_root, "never-fit.png");
+
+        var stated = RunCli("render", ws.Clay, "-o", outPath, "--fit-layers", "Metal1",
+                            "--window", "0um,0um,400um,300um", "--json");
+        Assert.Equal(1, stated.ExitCode);
+        Assert.Contains("\"id\": \"render.fit-layers.not-fitting\"", stated.StdOut, StringComparison.Ordinal);
+
+        var empty = RunCli("render", ws.Clay, "-o", outPath, "--fit-layers", "Silk", "--json");
+        Assert.Equal(1, empty.ExitCode);
+        Assert.Contains("\"id\": \"render.fit-layers.empty\"", empty.StdOut, StringComparison.Ordinal);
+
+        Assert.False(File.Exists(outPath), "a refused render wrote a file");
+    }
+
+    /// <summary>Both new options are drawing-layer options, so a schematic, a symbol and a data
+    /// display each refuse them BY NAME rather than ignoring them — the rule <c>--layers</c> already
+    /// follows, kept in step by <c>Render.LayerOptionNamed</c>.</summary>
+    [Theory]
+    [InlineData("--fit-layers", "Metal1")]
+    [InlineData("--layer-colors", "Metal1=#ff0000")]
+    public void TheNewLayerOptions_AreRefusedOnADocumentWithNoLayers(string option, string value)
+    {
+        var ws = BuildWorkspace();
+        foreach (string path in new[] { ws.Csch, ws.Csym })
+        {
+            var run = RunCli("render", path, "-o", Path.Combine(_root, "never-kind.png"),
+                             option, value, "--json");
+            Assert.Equal(1, run.ExitCode);
+            Assert.Contains("\"id\": \"render.layers.not-applicable\"", run.StdOut, StringComparison.Ordinal);
+            Assert.Contains(option, run.StdOut, StringComparison.Ordinal);
+        }
+    }
+
     // ── gate 6: the viewport is honoured, measured from the raster ────────────
 
     /// <summary>
@@ -567,7 +790,14 @@ public sealed class RenderCliVerbTests(ITestOutputHelper output) : IDisposable
     /// engage on (it has a hard floor at 16 vertices, so an authored rectangle never decimates).</param>
     /// <param name="undefinedLayer">Adds a shape on a layer key the technology does not declare —
     /// what an import routinely produces, and what the fallback palette exists for.</param>
-    private Workspace BuildWorkspace(bool denseContour = false, bool undefinedLayer = false)
+    /// <param name="outlier">Puts TWO shapes on Silk: one 100 mm away — the shape of an imported
+    /// board's drill-map fabrication drawing, which sits far outside the board and, framed with
+    /// everything else, shrinks the board to a fraction of the page — and one inside the board
+    /// itself. The second is what makes "frame on these, DRAW everything" measurable: with only the
+    /// far one, a narrowed frame and a hidden layer produce the same picture, because content
+    /// outside the viewport is culled either way (R-aut12-2).</param>
+    private Workspace BuildWorkspace(bool denseContour = false, bool undefinedLayer = false,
+                                     bool outlier = false)
     {
         string root = Path.Combine(_root, "Demo");
         string cell = Path.Combine(root, "Stage1");
@@ -583,7 +813,7 @@ public sealed class RenderCliVerbTests(ITestOutputHelper output) : IDisposable
             Path.Combine(root, ".cws"), new CwsFile { DefaultTechRef = Path.Combine("tech", "Fixture.ctech") });
 
         string clay = Path.Combine(cell, "layout", "Stage1.clay");
-        LayoutPersistence.SaveToFile(clay, LayoutFixture(denseContour, undefinedLayer));
+        LayoutPersistence.SaveToFile(clay, LayoutFixture(denseContour, undefinedLayer, outlier));
 
         string csch = Path.Combine(cell, "schematic", "Stage1.csch");
         SchematicPersistence.SaveToFile(csch, SchematicFixture(), "Stage1");
@@ -606,7 +836,8 @@ public sealed class RenderCliVerbTests(ITestOutputHelper output) : IDisposable
         ],
     };
 
-    private static LayoutView LayoutFixture(bool denseContour = false, bool undefinedLayer = false)
+    private static LayoutView LayoutFixture(bool denseContour = false, bool undefinedLayer = false,
+                                            bool outlier = false)
     {
         var view = new LayoutView { DbuPerMicron = Dbu, DisplayUnit = LayoutUnit.Um, SnapDbu = Dbu };
         view.Shapes.Add(new RectShape { Layer = Metal1, X1 = 0, Y1 = 0, X2 = 400 * Dbu, Y2 = 200 * Dbu });
@@ -620,6 +851,19 @@ public sealed class RenderCliVerbTests(ITestOutputHelper output) : IDisposable
             {
                 Layer = new LayerKey(99, 0), X1 = 800 * Dbu, Y1 = 0, X2 = 900 * Dbu, Y2 = 100 * Dbu,
             });
+
+        if (outlier)
+        {
+            view.Shapes.Add(new RectShape
+            {
+                Layer = Silk, X1 = 100_000 * Dbu, Y1 = 100_000 * Dbu,
+                X2 = 100_100 * Dbu, Y2 = 100_100 * Dbu,
+            });
+            view.Shapes.Add(new RectShape
+            {
+                Layer = Silk, X1 = 50 * Dbu, Y1 = 50 * Dbu, X2 = 150 * Dbu, Y2 = 150 * Dbu,
+            });
+        }
 
         if (denseContour)
         {
@@ -724,6 +968,24 @@ public sealed class RenderCliVerbTests(ITestOutputHelper output) : IDisposable
         Assert.True(exit == 0, stderr + stdout);
         return stdout;
     }
+
+    /// <summary>One layer's row of the <c>--json</c> layer report, by name.</summary>
+    private static JsonElement LayerRow(string json, string name)
+        => JsonDocument.Parse(json).RootElement
+               .GetProperty("result").GetProperty("render").GetProperty("layers").EnumerateArray()
+               .Single(l => l.GetProperty("name").GetString() == name).Clone();
+
+    private static (double X0, double X1) Viewport(string json)
+    {
+        var vp = JsonDocument.Parse(json).RootElement
+                     .GetProperty("result").GetProperty("render").GetProperty("viewport");
+        return (vp.GetProperty("x0").GetDouble(), vp.GetProperty("x1").GetDouble());
+    }
+
+    private static long Shapes(string json)
+        => JsonDocument.Parse(json).RootElement
+               .GetProperty("result").GetProperty("render").GetProperty("counters")
+               .GetProperty("shapesDrawn").GetInt64();
 
     private Counters RenderJson(string path, params string[] extra)
     {

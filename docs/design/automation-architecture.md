@@ -428,6 +428,47 @@ solve.
 
 ---
 
+## 6B. The answer of one verb is the argument of the next
+
+**AUT-12, and the counterpart to §6A.** Silence is one way a surface fails a caller. The other is
+telling it the truth in a form it cannot use — where nothing is wrong, no diagnostic is owed, and the
+caller is nonetheless left doing arithmetic, or editing the design, to get an ordinary result.
+
+The same exercise §6A's evidence comes from found the artwork half of this surface *good*: `import`,
+`explain --layers/--extents/--cells` and `render` composed cleanly, and the Gerber import's
+diagnostics named every inference AS an inference, which is exactly what lets a non-human caller
+decide whether to trust a result. What it also found were four places where the composition stopped
+one step short. Each is a small change, and together they are a rule:
+
+> **A value one verb emits to be acted on is emitted in the form the acting verb takes.**
+
+- **`explain --extents` emitted metres; `render --window` refuses a bare number.** Both are right on
+  their own: base SI with the unit and the scale named is the reporting rule (R-rnd3-8), and a bare
+  layout coordinate is genuinely ambiguous across six orders of magnitude (R-rnd2-4). But the one
+  tool that says where the content is emitted exactly what the other rejects, so every windowed
+  render needed a hand conversion. `--extents` now carries a `window` string in the accepted spelling
+  beside the numbers, whole document and per layer. The numbers were not changed: a report is read by
+  more than one kind of caller, and replacing a measurement with a command line would trade one
+  half-answer for another.
+- **`render --layers` chose which layers drew; nothing chose how.** A Gerber import gives the six
+  copper layers near-identical colours, so an overlay is unreadable, and the only route was to
+  hand-edit the generated `.ctech`. **Changing a design to change a picture of it is not a fix** — a
+  render-time override is (`--layer-colors`), and it is applied to the same clone the layer selection
+  already goes through.
+- **`--hide-layers` was the only way to keep an outlier out of a fit, and it removes the content
+  too.** `--fit-layers` frames on some layers and draws all of them.
+- **`convert -o out/board.clay` produced a DIRECTORY called `out/board.clay`.** The result document
+  reported the true paths, so nothing was lost — and a path that names a file and yields a directory
+  of that name is still a surprise nobody is there to notice on a build machine. It is now a refusal
+  naming the directory spelling, because the alternative — collapsing to one file — works for a flat
+  import and discards a hierarchy silently.
+
+The shape of all four: **the capability existed and the composition did not.** That is a class worth
+naming, because it produces no error, no warning and no wrong answer — only a caller writing code
+that this surface was supposed to make unnecessary.
+
+---
+
 ## 7. What is deliberately excluded
 
 **R-aut-11. The running GUI is not remote-controlled.** No command channel into a live

@@ -238,6 +238,79 @@ public sealed class ConvertCliVerbTests(ITestOutputHelper output) : IDisposable
         Assert.Contains("copy", stderr, StringComparison.OrdinalIgnoreCase);
     }
 
+    // ── AUT-12 R-aut12-4: a clay target is a DIRECTORY, and says so ──────────────────────────────
+
+    /// <summary>
+    /// <c>-o out/board.clay</c> used to produce a DIRECTORY called <c>out/board.clay</c>, with the
+    /// real <c>.clay</c> two levels inside it. Nothing was lost — the result document reported the
+    /// true paths — but a path that names a file and yields a directory of that name is a surprise,
+    /// and on a build machine nobody is there to notice it.
+    ///
+    /// <para><b>Refused rather than collapsed to one file, and that is the design.</b> An import
+    /// produces one cell FOLDER per structure plus a technology beside them; a rule that wrote a lone
+    /// <c>.clay</c> would work for the flat case and silently discard a hierarchy in the other. The
+    /// extension is also how a caller SAYS clay, so the inference is kept and the SHAPE is what is
+    /// refused — with the command that answers it in the message.</para>
+    /// </summary>
+    [Fact]
+    public void AFileShapedClayTarget_IsRefusedAndNamesTheDirectoryToUse()
+    {
+        string source = SourceIn("gdsii");
+        string asked  = Path.Combine(_root, "out", "board.clay");
+
+        var (code, _, stderr) = RunCli("convert", source, "-o", asked);
+        output.WriteLine(stderr);
+
+        Assert.NotEqual(0, code);
+        Assert.Contains("convert.target.clay-needs-directory", Ids(source, asked));
+        // The suggestion is the same path with the extension taken off, so acting on the refusal is
+        // an edit of one token rather than a rethink.
+        Assert.Contains(Path.Combine(_root, "out", "board"), stderr, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(asked), "the refused target was created anyway");
+    }
+
+    /// <summary>The directory spelling the refusal names works, and puts the cells where it said.
+    /// Without this the refusal could be correct and the advice wrong.</summary>
+    [Fact]
+    public void TheDirectorySpellingTheRefusalNames_Works()
+    {
+        string source = SourceIn("gdsii");
+        string dir = Path.Combine(_root, "out2", "board");
+
+        var (code, stdout, stderr) = RunCli("convert", source, "-o", dir, "--to", "clay");
+        output.WriteLine(stderr);
+        Assert.Equal(0, code);
+
+        foreach (string written in stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.Trim()))
+            Assert.StartsWith(Path.GetFullPath(dir), Path.GetFullPath(written), StringComparison.Ordinal);
+        Assert.NotEmpty(Directory.GetFiles(dir, "*.clay", SearchOption.AllDirectories));
+    }
+
+    /// <summary>An existing FILE where a directory of cell folders belongs. Nothing in `convert`
+    /// deletes or overwrites, so this is a refusal rather than a replacement.</summary>
+    [Fact]
+    public void AnExistingFileAsAClayTarget_IsRefusedRatherThanReplaced()
+    {
+        string source = SourceIn("gdsii");
+        string file = Path.Combine(_root, "occupied");
+        File.WriteAllText(file, "not a cell folder");
+
+        var (code, _, stderr) = RunCli("convert", source, "-o", file, "--to", "clay");
+        output.WriteLine(stderr);
+        Assert.NotEqual(0, code);
+        Assert.Equal("not a cell folder", File.ReadAllText(file));
+    }
+
+    /// <summary>The ids a refused run reports, read out of its own <c>--json</c> document rather than
+    /// matched in prose.</summary>
+    private string[] Ids(string source, string output)
+    {
+        var (_, stdout, _) = RunCli("convert", source, "-o", output, "--json");
+        return [.. System.Text.Json.JsonDocument.Parse(stdout).RootElement
+                     .GetProperty("diagnostics").EnumerateArray()
+                     .Select(d => d.GetProperty("id").GetString()!)];
+    }
+
     [Fact]
     public void ListCells_ReportsWhatAFileHoldsAndWritesNothing()
     {

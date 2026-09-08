@@ -76,8 +76,9 @@ Instead, briefly paraphrase owner/user messages. Pre-existing quotes are ok.
   **`convert` is one import and one export** (2026-09): every ordered pair of `clay`/`gdsii`/`dxf`/
   `gerber`/`board` works because every reader lands on a cell folder plus a technology and every
   writer starts from one — a `.clay` target stops after the import, anything else exports out of a
-  scratch directory (`--keep-cells` keeps it). Formats infer from the paths (a FOLDER is a Gerber file
-  set; an unknown extension is classified by CONTENT through the import's own classifier); `--from`/
+  scratch directory (`--keep-cells` keeps it). **A `clay` target is a DIRECTORY; a file-shaped path is
+  a refusal naming the directory spelling** (AUT-12). Formats infer from the paths (a FOLDER is a
+  Gerber file set; an unknown extension is classified by CONTENT through the import's own classifier); `--from`/
   `--to` override. Two things the GUI asks in a dialog: the layer mapping takes the same default the
   dialog pre-selects, and **an unstated Excellon coordinate format is a REFUSAL, never a guess** —
   leading vs trailing suppression differ by four orders of magnitude on identical text, so it prints
@@ -130,7 +131,8 @@ Instead, briefly paraphrase owner/user messages. Pre-existing quotes are ok.
   declared chain, which one dispatches and for which verb, and whether a named inner analysis
   would be promoted; `--ref` resolves a relative reference and says whether it leaves the
   workspace. **A sweep is reported in base SI WITH its unit and its scale** — reading a mark
-  without its scale once produced a run at 2 Hz that looked entirely normal. **A `.csch` reaches
+  without its scale once produced a run at 2 Hz that looked entirely normal. **`--extents` also emits
+  a `window` string in the spelling `render --window` takes** (AUT-12). **A `.csch` reaches
   the elaborator through the `.cnl`**, in memory, because that is what the GUI's own Simulate does
   and the two readers disagree about bare words: skipping the round trip reports errors the
   application does not have. The **DRC engine and the `.wasm` rule model moved to `src/Design`**
@@ -177,8 +179,10 @@ Instead, briefly paraphrase owner/user messages. Pre-existing quotes are ok.
   and a 6.2 MB one in 0.36 s**. `--layers`/`--hide-layers` apply to a **CLONE** of the resolved
   technology (`TechnologyLayerSelection`, in `src/Design`) — `TechnologyCache` hands back a shared
   instance and mutating it would narrow every later render in the same process, which is the defect
-  that only appears on the second call. Rulers stay ON (document content, not overlay state); every
-  other overlay is off by construction. Progress and cancellation ride `RunHost`'s `RunControl` like
+  that only appears on the second call. **`--fit-layers` frames the fit on some layers and draws all
+  of them; `--layer-colors name=#rrggbb[aa]` recolours one for this render only — eight digits sets
+  FILL OPACITY, the only alpha the renderer reads** (AUT-12). Rulers stay ON (document content, not
+  overlay state); every other overlay is off by construction. Progress and cancellation ride `RunHost`'s `RunControl` like
   `em`'s, so a cancelled render exits 130 and **writes nothing**. Gate:
   `tests/Ui.Tests/Render/RenderCliVerbTests.cs`, which compares the verb run as a PROCESS against the
   in-process `CircuitRF.Render` call **byte for byte** — schematic, symbol and layout, SVG and PDF,

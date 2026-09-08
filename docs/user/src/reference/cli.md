@@ -617,6 +617,15 @@ Bring a board in as editable circuitRF cells and keep the technology it declared
 
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf convert board.kicad_pcb -o cells/ --to clay</code></pre>
 
+<div class="callout note">
+<span class="label">A <code>clay</code> target is a <em>folder</em>, not a file</span>
+<p>An import writes one cell <b>folder</b> per structure the source holds, plus the technology beside
+them — so <code>-o cells/</code> is the shape, and <code>-o cells/board.clay</code> is
+<b>refused</b> with the folder spelling in the message. Point it at a folder and look inside: the
+<code>.clay</code> is at <code>cells/&lt;Cell&gt;/layout/&lt;Cell&gt;.clay</code>, which is where every
+other circuitRF tool expects a layout view to be.</p>
+</div>
+
 One cell out of a GDSII library that holds many:
 
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf convert lib.gds --list-cells
@@ -630,7 +639,7 @@ Convert a directory of drawings in one line:
 
 | Option | What it does |
 |---|---|
-| `-o, --output <path>` | The file to write — or the **folder**, for `gerber` and `clay`. Required. |
+| `-o, --output <path>` | The file to write — or the **folder**, for `gerber` and `clay`; a file-shaped path there is refused. Required. |
 | `--from <fmt>`, `--to <fmt>` | `clay`, `gdsii`, `dxf`, `gerber`, `board`. Say it when the path does not. |
 | `--cell <name>` | Which cell to export, when the source holds several. |
 | `--list-cells` | Report what the input holds and write nothing. |
@@ -842,6 +851,10 @@ the two ways you most plausibly meant, plus the document's own display unit when
 <p>A schematic or a symbol takes <b>bare numbers</b>, because its coordinates really are dimensionless
 design units — and <code>--json</code> says <code>"unit": "design-units"</code> rather than leaving you
 to assume metres.</p>
+<p><b>You do not have to write one from scratch.</b>
+<a href="#explain-extents"><code>explain --extents</code></a> prints a ready-made
+<code>--window</code> line for the whole document and for each layer, in exactly this spelling. Copy
+it; there is no conversion to get wrong.</p>
 </div>
 
 **A window of a different shape from the page is letterboxed, never cropped and never stretched.** You
@@ -911,6 +924,39 @@ accepted under the generated <code>L&lt;layer&gt;/&lt;datatype&gt;</code> name
 <code>explain --layers</code> prints for it, and is excluded like any other when you name a different
 one.</p>
 </div>
+
+<h4 id="render-fit-layers">Framing on some layers and drawing all of them</h4>
+
+**A fit frames what it draws.** So hiding a layer takes it out of the framing as well as out of the
+picture — which is usually what you want, and occasionally not. The case that bites is an imported
+board: the drill-map fabrication drawing sits far outside the board outline, and framed with everything
+else it shrinks the board to a corner of the page.
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf render board.clay -o board.png --fit-layers "Top Copper,Bottom Copper"</code></pre>
+
+`--fit-layers` frames on those and **draws everything** — so the drill map is still there, it simply
+falls outside the frame. It is refused with `--window` and `--center/--span`, which state the frame
+outright, and refused when the layers you named draw nothing, because framing on nothing is not a page.
+With `--json` each layer row says whether the frame was taken from it.
+
+<h4 id="render-layer-colors">Recolouring a layer for one picture</h4>
+
+<pre><code class="cmd"><span class="prompt">$ </span>circuitrf render board.clay -o copper.png \
+      --layers "L1 Copper,L2 Copper,L3 Copper" \
+      --layer-colors "L1 Copper=#e04030,L2 Copper=#30a050,L3 Copper=#3060e0"</code></pre>
+
+A Gerber import gives every copper layer nearly the same colour, so a copper overlay comes out
+unreadable. `--layer-colors` says how a layer draws **for this render only** — nothing is written to
+the technology, because changing a design to change a picture of it is not a fix. The flag can be
+repeated, and one entry can carry several comma-separated pairs.
+
+Colours are `#rgb`, `#rrggbb` or `#rrggbbaa`. **The eight-digit form sets the layer's fill opacity**,
+which is the alpha the renderer actually paints a fill through — a layer's own colour alpha is not read
+at all, so an override that only set it would look applied and change nothing. Layer names are the ones
+[`explain --layers`](#explain-layers) prints, including the generated `L<layer>/<datatype>` names an
+import produces; a name that is not one of them, or a value that is not a colour, is a refusal rather
+than a silent skip. `--json` reports each layer's `color` and `fillOpacity` **as drawn**, which is how
+you check an override landed — a colour change is the one thing a picture alone cannot confirm.
 
 | Option | What it does |
 |---|---|
@@ -1020,11 +1066,13 @@ under it, and a label on the top silk:
 
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain Amp/Stage1/layout/Stage1.clay --extents
 <span class="output">  extents      0 -0.003 .. 0.02 0.00376719  (0.02 x 0.00676719 m, scale 1E-06)
-    Top Copper           0 0 .. 0.02 0.0029
-    Bottom Copper        0.002 -0.003 .. 0.018 -0.001
-    Silk Top             0.0004 0.00338437 .. 0.00234306 0.00376719</span></code></pre>
+               --window 0um,-3000um,20000um,3767.188um
+    Top Copper           0 0 .. 0.02 0.0029   --window 0um,0um,20000um,2900um
+    Bottom Copper        0.002 -0.003 .. 0.018 -0.001   --window 2000um,-3000um,18000um,-1000um
+    Silk Top             0.0004 0.00338437 .. 0.00234306 0.00376719   --window 400um,3384.375um,2343.062um,3767.188um</span></code></pre>
 
-The line is 20 mm long and 2.9 mm wide, on `Top Copper`. Now the left 6 mm of it, that layer only:
+The line is 20 mm long and 2.9 mm wide, on `Top Copper` — and the `--window` line beside each box is
+already in the spelling the next command takes. Now the left 6 mm of it, that layer only:
 
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf render Amp --cell Stage1 --layers "Top Copper" \
                         --window 0um,0um,6000um,3000um -o stage1-top.png
@@ -1262,9 +1310,10 @@ Two things it cannot tell you, both worth knowing:
 
 <pre><code class="cmd"><span class="prompt">$ </span>circuitrf explain Stage1.clay --extents
 <span class="output">  extents      0 -0.003 .. 0.02 0.00376719  (0.02 x 0.00676719 m, scale 1E-06)
-    Top Copper           0 0 .. 0.02 0.0029
-    Bottom Copper        0.002 -0.003 .. 0.018 -0.001
-    Silk Top             0.0004 0.00338437 .. 0.00234306 0.00376719</span></code></pre>
+               --window 0um,-3000um,20000um,3767.188um
+    Top Copper           0 0 .. 0.02 0.0029   --window 0um,0um,20000um,2900um
+    Bottom Copper        0.002 -0.003 .. 0.018 -0.001   --window 2000um,-3000um,18000um,-1000um
+    Silk Top             0.0004 0.00338437 .. 0.00234306 0.00376719   --window 400um,3384.375um,2343.062um,3767.188um</span></code></pre>
 
 **In base SI, with the unit *and* the scale named** — the rule `--analysis` already follows, for the
 reason it follows it: reading a mark without its scale has already produced a run at 2 Hz that looked
@@ -1274,6 +1323,20 @@ dimensionless and dressing them up in metres would be a lie.
 This is **the same function `render --fit` frames on**, which is why you can size a `--window` from it
 and get exactly the region you expected. The per-layer boxes are the document's own shapes; an
 instance's extent arrives as one box for the whole placement.
+
+<div class="callout note">
+<span class="label">The <code>--window</code> line is meant to be pasted</span>
+<p>Every box comes with the same numbers written the way
+<a href="#render-viewport"><code>render --window</code></a> takes them — in this document's own display
+unit, whole document and per layer, and in <code>--json</code> as a <code>window</code> field beside
+the coordinates. <b>The metres above are deliberately not what you type</b>: a layout coordinate
+carries a unit there, and <code>m</code> is not one of the suffixes it reads. Copy the
+<code>--window</code> line and you get exactly that box; there is no conversion to do and no chance of
+being three orders of magnitude out.</p>
+<p>So <em>framing on one layer</em> is a copy rather than a calculation — and if you want to frame on
+one layer while still drawing the others, that is
+<a href="#render-layers"><code>render --fit-layers</code></a>.</p>
+</div>
 
 An **empty** document says so rather than reporting a zero box, because a zero box is a point at the
 origin and that is a different fact. On a **symbol**, or on a layout carrying a fixed-size ruler, the

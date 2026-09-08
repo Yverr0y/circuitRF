@@ -2,6 +2,7 @@ using CircuitRF.Design.Cells;
 using CircuitRF.Design.Layout;
 using CircuitRF.Design.Schematic;
 using CircuitRF.Design.Symbol;
+using CircuitRF.Design.Theming;
 using CircuitRF.Design.Workspace;
 using CircuitRF.Render;
 using RfCore.Export;
@@ -306,7 +307,7 @@ internal static class ExplainQueries
                l.Key.Layer, l.Key.Datatype,
                l.Purpose,
                l.Visible, l.Selectable,
-               $"#{l.Color.R:x2}{l.Color.G:x2}{l.Color.B:x2}",
+               l.Color.ToHex(),
                tech?.FindFillPattern(l.FillPattern) is { } fp ? fp.Name : "solid",
                shapes, placements);
 
@@ -400,7 +401,7 @@ internal static class ExplainQueries
         double displayScale = MetresPerUnit(view.DisplayUnit);
 
         if (bb.IsEmpty)
-            return (new ExplainExtentsJson(null, null, null, null, null, null, "m", displayScale,
+            return (new ExplainExtentsJson(null, null, null, null, null, null, null, "m", displayScale,
                                            true, null, EmptyNote), 0);
 
         var perLayer = DocumentExtents.LayoutBoxPerLayer(view, res.Tech);
@@ -417,12 +418,30 @@ internal static class ExplainQueries
             bb.MinX * metresPerDbu, bb.MinY * metresPerDbu,
             bb.MaxX * metresPerDbu, bb.MaxY * metresPerDbu,
             (bb.MaxX - bb.MinX) * metresPerDbu, (bb.MaxY - bb.MinY) * metresPerDbu,
-            "m", displayScale, false,
+            LayoutWindow(bb, view), "m", displayScale, false,
             [.. perLayer.Select(p => new ExplainLayerExtentJson(
                 names.TryGetValue(p.Key, out var n) ? n : p.Key.ToString(),
                 p.Box.MinX * metresPerDbu, p.Box.MinY * metresPerDbu,
-                p.Box.MaxX * metresPerDbu, p.Box.MaxY * metresPerDbu))],
+                p.Box.MaxX * metresPerDbu, p.Box.MaxY * metresPerDbu,
+                LayoutWindow(p.Box, view)))],
             note), 0);
+    }
+
+    /// <summary>
+    /// R-aut12-3. A DBU box written as the <c>x0,y0,x1,y1</c> <c>render --window</c> accepts —
+    /// <b>the output of this verb is the input of that one</b>, which it was not while this one
+    /// emitted bare metres and that one refused a bare number.
+    ///
+    /// <para>The DOCUMENT's display unit, not metres: <c>LayoutUnits.TryParse</c> — which is what
+    /// <c>render</c> parses a coordinate with — reads nm, um, mm, mil and in, and has no spelling for
+    /// a bare metre at all, so emitting the numeric field's own unit would have produced a string
+    /// that reads plausibly and is refused. The spelling and the decimal count are
+    /// <see cref="LayoutUnits.Spell"/>'s, beside the parser, so the two cannot drift apart.</para>
+    /// </summary>
+    private static string LayoutWindow(Bbox bb, LayoutView view)
+    {
+        return string.Join(',', new[] { bb.MinX, bb.MinY, bb.MaxX, bb.MaxY }.Select(One));
+        string One(long dbu) => LayoutUnits.Spell(dbu, view.DisplayUnit, view.DbuPerMicron);
     }
 
     private static (ExplainExtentsJson?, int) SchematicExtents(string csch)
@@ -463,8 +482,18 @@ internal static class ExplainQueries
 
     private static ExplainExtentsJson Box(WorldRect? r, string unit, double scale, string? note)
         => r is { } b
-            ? new ExplainExtentsJson(b.X0, b.Y0, b.X1, b.Y1, b.W, b.H, unit, scale, false, null, note)
-            : new ExplainExtentsJson(null, null, null, null, null, null, unit, scale, true, null, EmptyNote);
+            ? new ExplainExtentsJson(b.X0, b.Y0, b.X1, b.Y1, b.W, b.H, DesignUnitWindow(b),
+                                     unit, scale, false, null, note)
+            : new ExplainExtentsJson(null, null, null, null, null, null, null,
+                                     unit, scale, true, null, EmptyNote);
+
+    /// <summary>The same round trip on the two document kinds whose coordinates are dimensionless:
+    /// <c>render --window</c> takes BARE numbers there and a unit suffix would be the invention, so
+    /// this differs from <see cref="LayoutWindow"/> in exactly that. <c>R</c> because the string has
+    /// to read back as the same double — a trimmed one frames a subtly different page.</summary>
+    private static string DesignUnitWindow(WorldRect b)
+        => string.Join(',', new[] { b.X0, b.Y0, b.X1, b.Y1 }
+                            .Select(v => v.ToString("R", System.Globalization.CultureInfo.InvariantCulture)));
 
     /// <summary>The same table <c>render</c> reports its own scale from.</summary>
     private static double MetresPerUnit(LayoutUnit u) => u switch

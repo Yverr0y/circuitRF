@@ -1,3 +1,5 @@
+using CircuitRF.Design.Theming;
+
 namespace CircuitRF.Design.Layout;
 
 /// <summary>
@@ -40,12 +42,47 @@ public static class TechnologyLayerSelection
     /// </param>
     public static Technology WithVisibility(
         Technology tech, Func<LayerDef, bool> visible, IEnumerable<LayerDef>? extraLayers = null)
+        => WithLayers(tech, visible, null, extraLayers);
+
+    /// <summary>
+    /// How a layer is PAINTED, overridden for one render — <c>brief-automation-12</c>'s R-aut12-1.
+    /// </summary>
+    /// <param name="Color">The layer's colour. Only R, G and B reach the canvas: every one of
+    /// <c>LayoutRenderer</c>'s four call sites builds its <c>SKColor</c> from those three and takes
+    /// the alpha from <paramref name="FillOpacity"/> instead, so a colour's own alpha is not a knob
+    /// and is not pretended to be one.</param>
+    /// <param name="FillOpacity">What the fill is painted at, 0 to 1 — <see cref="LayerDef.FillOpacity"/>.
+    /// Null leaves the layer's own. <b>This is the layer's real alpha</b>, which is why an override
+    /// that only set a colour could not make an overlay readable.</param>
+    public readonly record struct LayerAppearance(Rgba Color, double? FillOpacity = null);
+
+    /// <summary>
+    /// <paramref name="tech"/> copied, with each layer's visibility decided by
+    /// <paramref name="visible"/> and its paint by <paramref name="appearance"/> — both optional, and
+    /// both answered from the ORIGINAL <see cref="LayerDef"/>.
+    ///
+    /// <para><b>One clone, not two chained ones.</b> A second pass over the output of the first works
+    /// and is the obvious way to add a colour override to an existing visibility narrowing, but it
+    /// reflects every property twice per layer and — worse — makes the appearance predicate read a
+    /// copy rather than the technology's own definition, so "as before, but brighter" quietly means
+    /// "as the previous pass left it".</para>
+    /// </summary>
+    public static Technology WithLayers(
+        Technology tech,
+        Func<LayerDef, bool>? visible,
+        Func<LayerDef, LayerAppearance?>? appearance,
+        IEnumerable<LayerDef>? extraLayers = null)
     {
         var clone = ShallowCopy(tech);
         clone.Layers = [.. tech.Layers.Concat(extraLayers ?? []).Select(l =>
         {
             var copy = ShallowCopy(l);
-            copy.Visible = visible(l);
+            if (visible is not null) copy.Visible = visible(l);
+            if (appearance?.Invoke(l) is { } a)
+            {
+                copy.Color = a.Color;
+                if (a.FillOpacity is { } fo) copy.FillOpacity = fo;
+            }
             return copy;
         })];
         return clone;

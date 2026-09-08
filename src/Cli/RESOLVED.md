@@ -7,6 +7,157 @@ what the design says.
 ---
 
 
+## AUT-12 — layer colour, framing on a subset, and two shapes that did not compose (2026-09-08)
+
+`brief-automation-12-render-ergonomics.md`. Four places the artwork half of the automation surface —
+otherwise the strongest part of it — made a caller do arithmetic or edit a document to get an ordinary
+picture. **None of the four was a bug**: every one produced a correct answer in a form the next verb
+could not take, which is a failure class with no error, no warning and no wrong result. It is written
+up as `automation-architecture.md` §6B, beside §6A's "silence is the defect".
+
+### The renderer ignores a layer colour's alpha, so an eight-digit override had to move something else
+
+`LayerDef` carries a `Color` (RGBA) and a `FillOpacity` (0-1), and it is easy to assume the first is
+the alpha. It is not: `LayoutRenderer` builds its `SKColor` as `new SKColor(def.Color.R, def.Color.G,
+def.Color.B)` at **all four** of its call sites (`LayoutRenderer.cs:977`, `:1135`,
+`Instances.cs:961`, `Snap.cs:87`) and takes the alpha from `FillOpacity` — `LayerFillPaint.Create`
+computes `def.FillOpacity * 255` and `DrawLayer` computes the stroke's alpha the same way.
+`Color.A` reaches nothing.
+
+*Side effect worth knowing about:* putting a colour in the layer report fixed a name in the same row.
+On a layout with NO technology every layer is a fallback-palette layer, and that branch of
+`LayerReport` had been spelling the row's name `kv.Key.ToString()` — and `LayerKey` is a plain record
+struct, so that is `LayerKey { Layer = 7, Datatype = 0 }`. Building the row from
+`FallbackPalette.For(key)` gives both the colour the picture was actually drawn in and the `L7/0` name
+`explain --layers` and `--layers` already use.
+
+So `--layer-colors "Top Copper=#ff000080"` had to be defined as setting the layer's **fill opacity**,
+not the colour's alpha. Writing the alpha into `Rgba.A` and stopping would have produced an override
+that parses, reports itself as applied, and changes not one pixel — the exact shape of failure this
+whole series is about, arrived at from the opposite direction. `RenderLayerJson` now reports each
+layer's `color` and `fillOpacity` **as drawn** for the same reason: a colour change is the one thing a
+caller receiving only a picture cannot verify from the numbers beside it.
+
+### One clone carrying both the visibility and the colour, not two chained ones
+
+`TechnologyLayerSelection.WithVisibility` already existed for `--layers`, and the obvious way to add a
+colour override was a second pass over its output. It works, and it is wrong in a way that would not
+have shown up for a while: the appearance predicate would then read a **copy** rather than the
+technology's own `LayerDef`, so "as before, but brighter" would quietly mean "as the previous pass
+left it". `WithLayers` takes both predicates and both read the original; `WithVisibility` forwards to
+it, so there is still exactly one reflective copy.
+
+The cached-technology trap is unchanged and now has a second gate: three renders in ONE process —
+reference, coloured, plain — with the third required byte-identical to the first. It is the same trap
+`--layers` has (`TechnologyCache` hands back a shared instance) and re-asserting it per flag is
+cheap, because it is invisible across two processes by construction.
+
+### `--fit` already framed only what is drawn; nobody had said so, and it is the wrong knob anyway
+
+The brief offered two answers and the truth needed both. `DocumentExtents.LayoutBox` gates on
+`LayerDef.Visible` and `DrawLayout` measures with the **clone** the drawing is taken through, so
+`--hide-layers` had always shrunk the fit as well as the picture. Specifying and testing it was one
+test.
+
+But it does not answer the case that produced the requirement. An imported board's drill-map
+fabrication drawing sits far outside the board; hiding it fixes the framing and **removes the
+content**, which is a different picture from the one that was wanted. `--fit-layers` frames on some
+layers and draws all of them, through a second clone taken from the first.
+
+**The gate for it needed a fixture nobody would guess.** Comparing `shapesDrawn` between
+`--fit-layers` and an unfiltered render fails: the narrowed frame culls the far outlier, so the two
+counts differ for a reason that has nothing to do with the flag. `shapesDrawn` is a per-frame counter
+and is viewport-dependent by construction. The fixture therefore puts **two** shapes on the outlier
+layer — one 100 mm away and one inside the board — and the assertion is against `--hide-layers` at
+the identical viewport, where the in-board shape is the whole difference between the two flags.
+
+### `explain --extents` and `render --window` were each right and could not be composed
+
+`--extents` reports base SI with the unit and the scale named (R-rnd3-8, and the 2 Hz bug is why).
+`--window` refuses a bare number, because DBU, micrometres and millimetres are three plausible
+pictures six orders of magnitude apart (R-rnd2-4). Both rules are correct and together they meant the
+one verb that says WHERE the content is emitted exactly what the other verb rejects.
+
+**The fix is a `window` STRING beside the numbers, not a change to the numbers.** A report is read by
+more than one kind of caller, and replacing a measurement with a command line would trade one
+half-answer for another.
+
+Three things about the spelling that are not obvious:
+
+- **It cannot be metres.** `LayoutUnits.TryParse` — which is what `render` parses a coordinate with —
+  reads `nm`, `u`/`um`/`µm`, `mm`, `mil` and `in`/`inch`, and has **no spelling for a bare metre at
+  all**. Emitting the numeric field's own unit would have produced a string that reads perfectly
+  plausibly and is refused. It is spelled in the document's DISPLAY unit instead.
+- **The suffix table is not the display table.** `LayoutUnits.Suffix` already existed and gives
+  micrometres as `µm`, which the parser does accept. A coordinate emitted to be pasted travels through
+  an argument list, a JSON document and somebody's shell first, so `AsciiSuffix` is a second table with
+  one row different, and both live beside the parser rather than in either verb.
+- **The decimal count is derived.** One DBU is `1000 / (nm-per-unit × dbu-per-micron)` of the display
+  unit; `Spell` uses that many places plus one, so the formatter's nearest-value rounding and
+  `ToDbu`'s away-from-zero rounding cannot land on opposite sides of a boundary. `Format`'s default
+  four places silently quantises a nanometre-resolution layout written in millimetres to 10 nm — a
+  window off by a hair, which is invisible in the picture. The round-trip gate uses coordinates that
+  are round in no unit at all, because a value landing on whole micrometres round-trips through a
+  truncating formatter as happily as through a correct one.
+
+The vacuity guard is the defect itself, kept as a test: the numeric fields spelled straight out of the
+document are still refused by `--window` on a layout. Without it, a `window` field that happened to be
+unit-bearing by accident would look like a fix.
+
+**And the hand conversion was not merely tedious — it was lossy, which nobody had noticed.** Writing
+the user-docs transcript by converting the printed metres gave `3767.19um`; the real value is
+`3767.188um`. The console prints coordinates at `G6`, so a hand conversion inherits six significant
+figures and a 20 mm board loses the last two nanometres of its box. `DocumentedWalkthroughTests` —
+which executes the chapter and compares the real transcript — caught it immediately, which is exactly
+the argument for the feature: **the number a caller could see was never the number the verb wanted.**
+
+### `convert -o out/board.clay`: refused, rather than collapsed to one file
+
+A `clay` target is a directory because the import IS the conversion — the readers write one cell
+folder per structure plus a technology beside them, which is why `--to clay` simply stops after the
+import. `-o out/board.clay` therefore produced a *directory* called `out/board.clay` with the real
+`.clay` two levels inside it.
+
+Writing the `.clay` where asked was the other option in the brief and is worse: an import that
+produced a **hierarchy** has no single file to collapse to, so the rule would work for the flat case
+and discard the other silently — which is the failure mode the refusal exists to remove, reintroduced
+one level down. The `.clay` extension is also how a caller SAYS clay, so the inference is kept and the
+SHAPE is refused, with the directory spelling (the same path minus the extension) in the message so
+acting on it is an edit of one token. An existing directory passes whatever it is called; an existing
+FILE is its own refusal, because nothing in `convert` overwrites.
+
+### Noticed while working here, deliberately NOT changed: `--layers` has a dead alias
+
+`Render.ApplyLayerSelection` builds its name map with two entries per layer:
+
+```csharp
+known[l.Name] = l.Key;
+known[l.Key.ToString()] = l.Key;   // a caller that has only the numeric key from an import
+```
+
+`LayerKey` is a plain `readonly record struct`, so the second key is the literal string
+`LayerKey { Layer = 1, Datatype = 0 }` — nothing a caller would ever type, and the comment's stated
+intent is unreachable. It costs nothing and misleads nobody in practice, because the generated
+definitions carry `L1/0` as their **Name** and that is the spelling both `explain --layers` and
+`--layers` already use.
+
+Left alone on purpose: making `1/0` work is a widening of the accepted input with no requirement
+behind it, and this brief's four changes are each answering an observed defect. Recorded so the next
+person to read that line does not assume it works.
+
+### `StrMap`: an MCP option kind that is about shape, not confinement
+
+`layerColors` is a map, and the two ways to carry one over the existing kinds are both worse. An
+array of `"name=#rrggbb"` strings makes the client assemble the `=`, which it will eventually assemble
+wrong. A comma-joined `StrList` splits on a character that can legitimately appear in the KEY — a
+layer name is chosen by a technology author, not by us — and the two halves then resolve to nothing.
+`StrMap` declares `{"type":"object","additionalProperties":{"type":"string"}}` and emits the flag
+repeated, one `key=value` per entry. The CLI accepts both spellings, so a person at a shell still
+writes one quoted list.
+
+---
+
+
 ## AUT-11 — `netlist`, `plot`, `find`, and a `create` that makes its own parent (2026-09-08)
 
 `brief-automation-11-missing-verbs.md`. Four capabilities a client reached for and did not find.

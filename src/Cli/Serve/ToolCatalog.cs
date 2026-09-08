@@ -42,6 +42,17 @@ internal enum OptKind
     /// one it asks about all of them, and passing "" as a value asks about a chain called "".
     /// </summary>
     StrOptional,
+    /// <summary>
+    /// A JSON OBJECT emitted as the flag repeated, one <c>key=value</c> per entry —
+    /// <c>render --layer-colors "Top Copper=#e04030" --layer-colors "Silk Top=#202020"</c>.
+    ///
+    /// <para>An object rather than an array of <c>"k=v"</c> strings because that is the shape the
+    /// thing IS, and a client that has to assemble the <c>=</c> itself will eventually assemble it
+    /// wrong. Repeated rather than comma-joined for the reason a map has that an array does not: the
+    /// KEY is a layer name chosen by a technology author, and one containing a comma would split into
+    /// two names that resolve to nothing. The verb accepts both spellings.</para>
+    /// </summary>
+    StrMap,
 }
 
 /// <param name="Json">The argument's name in the tool call.</param>
@@ -342,7 +353,9 @@ internal static class ToolCatalog
                         new("layers",  "--layers",  OptKind.Flag,
                             "List the layers of the resolved technology, with how many shapes the document draws on each."),
                         new("extents", "--extents", OptKind.Flag,
-                            "The document's bounding box, in base SI with its unit and scale — what render --fit frames on."),
+                            "The document's bounding box, in base SI with its unit and scale — what render --fit frames on. "
+                          + "Each box also comes back as a `window` string in the spelling render --window takes, whole "
+                          + "document and per layer, so no conversion is needed to frame one."),
                         new("all",     "--all",     OptKind.Flag,
                             "Only with cells: include generated cells, which are hidden by default. On its own it is refused."),
                         new("view",    "--view",    OptKind.Str,
@@ -412,7 +425,8 @@ internal static class ToolCatalog
                             "Proceed on a guessed Excellon format. Unstated, it is refused: the two readings differ by four orders of magnitude."),
                         Summary,
                     ],
-                    "One import and one export, between any two interchange formats."),
+                    "One import and one export, between any two interchange formats. A clay target is a "
+                  + "DIRECTORY of cell folders plus a technology, not a file; a file-shaped path there is refused."),
             ]),
 
         // RND-5's one new tool, and it is one (R-rnd0-4 / R-rnd5-1): the document kind comes from the
@@ -467,6 +481,18 @@ internal static class ToolCatalog
                             "Layout only: draw only these layers. An undefined name is refused — ask explain --layers."),
                         new("hideLayers", "--hide-layers", OptKind.StrList,
                             "Layout only: draw everything but these. Refused together with layers."),
+                        new("fitLayers", "--fit-layers", OptKind.StrList,
+                            "Layout only: frame the fit on these layers and draw everything. A fit already frames only "
+                          + "what is DRAWN, so hiding a layer removes it from the framing too; this narrows the framing "
+                          + "without narrowing the picture — an imported board's drill map sits far outside the board "
+                          + "and shrinks it to a fraction of the frame. Refused with window or center/span, which state "
+                          + "the frame outright."),
+                        new("layerColors", "--layer-colors", OptKind.StrMap,
+                            "Layout only: how a layer DRAWS, for this render only — {\"Top Copper\": \"#e04030\"}. "
+                          + "Nothing is written to the technology. #rgb, #rrggbb or #rrggbbaa; the eight-digit form "
+                          + "sets the layer's fill opacity, which is the alpha the renderer paints through. Use it when "
+                          + "an import gave several layers near-identical colours and an overlay is unreadable. "
+                          + "The layer report in the result carries each layer's colour as drawn."),
                         new("detail", "--detail", OptKind.Str,
                             "full (default: every level-of-detail tier off, what is stored is what is drawn), screen "
                           + "(the tiers as a canvas engages them), or a pixel budget. A vector file is several times "
@@ -861,6 +887,27 @@ internal static class ToolCatalog
                 return true;
             }
 
+            case OptKind.StrMap:
+            {
+                if (node is not JsonObject map)
+                {
+                    refusal = CliDiagnostics.ServeArgumentWrongType(tool, opt.Json, "an object of name to value");
+                    return false;
+                }
+                foreach (var (key, value) in map)
+                {
+                    string? text = value is null ? null : AsString(value, tool, opt.Json, ref refusal);
+                    if (text is null)
+                    {
+                        refusal ??= CliDiagnostics.ServeArgumentWrongType(tool, opt.Json, "an object of name to value");
+                        return false;
+                    }
+                    argv?.Add(opt.Cli);
+                    argv?.Add(key + "=" + text);
+                }
+                return true;
+            }
+
             case OptKind.StrList or OptKind.StrRepeat or OptKind.PathRepeat:
             {
                 var items = AsStrings(node, tool, opt.Json, ref refusal);
@@ -998,6 +1045,12 @@ internal static class ToolCatalog
             ["type"]        = "array",
             ["items"]       = new JsonObject { ["type"] = "string" },
             ["description"] = o.Description,
+        },
+        OptKind.StrMap => new JsonObject
+        {
+            ["type"]                 = "object",
+            ["additionalProperties"] = new JsonObject { ["type"] = "string" },
+            ["description"]          = o.Description,
         },
         _ => new JsonObject { ["type"] = "string", ["description"] = o.Description },
     };

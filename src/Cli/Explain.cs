@@ -840,9 +840,14 @@ internal static class Explain
                 Console.WriteLine(
                     $"  extents      {extents.X0:G6} {extents.Y0:G6} .. {extents.X1:G6} {extents.Y1:G6}"
                     + $"  ({extents.Width:G6} x {extents.Height:G6} {extents.Unit}, scale {extents.Scale:G6})");
+            // R-aut12-3: the same box in the spelling `render --window` takes, so the answer can be
+            // pasted rather than converted. Printed on its own line and NAMED as the flag it feeds.
+            if (extents.Window is { } win)
+                Console.WriteLine($"  {"",-12} --window {win}");
             if (extents.Note is { } en) Console.WriteLine($"  {"",-12} note: {en}");
             foreach (var pl in extents.PerLayer ?? [])
-                Console.WriteLine($"    {pl.Name,-20} {pl.X0:G6} {pl.Y0:G6} .. {pl.X1:G6} {pl.Y1:G6}");
+                Console.WriteLine($"    {pl.Name,-20} {pl.X0:G6} {pl.Y0:G6} .. {pl.X1:G6} {pl.Y1:G6}"
+                    + (pl.Window is { } lw ? $"   --window {lw}" : ""));
         }
 
         if (analyses is not null)

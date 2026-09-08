@@ -366,6 +366,29 @@ internal static class CliDiagnostics
         "convert.clay-to-clay", DiagnosticSeverity.Error,
         "clay to clay is a file copy, not a conversion — nothing to do.");
 
+    /// <summary>
+    /// R-aut12-4. A <c>clay</c> target is a DIRECTORY of cell folders, and asking for
+    /// <c>out/board.clay</c> used to produce a directory of exactly that name with the real
+    /// <c>.clay</c> two levels inside it. The result document did report the true paths, so nothing
+    /// was lost — but a path that names a file and yields a directory of that name is a surprise, and
+    /// the answer is to say what shape the argument has rather than to invent a collapse that would
+    /// discard a hierarchy the moment an import produced one.
+    /// </summary>
+    public static Diagnostic ConvertClayTargetIsADirectory(string output, string suggestion)
+        => Diagnostic.Create(
+            "convert.target.clay-needs-directory", DiagnosticSeverity.Error,
+            "An import produces one cell FOLDER per structure plus a technology beside them, so a "
+          + "clay target is a directory, not a file: '{output}' would have become a directory of that "
+          + "name with the .clay two levels inside it. Write `-o {suggestion} --to clay`.",
+            ("output", output), ("suggestion", suggestion));
+
+    /// <summary>R-aut12-4's other half: the named directory is an existing FILE. Nothing here
+    /// overwrites, so this is a refusal rather than a delete.</summary>
+    public static Diagnostic ConvertClayTargetIsAFile(string output) => Diagnostic.Create(
+        "convert.target.clay-is-a-file", DiagnosticSeverity.Error,
+        "'{output}' is an existing file, and a clay target is a directory of cell folders. "
+      + "Name a directory.", ("output", output));
+
     public static Diagnostic ConvertFailed(string message) => Diagnostic.Create(
         "convert.failed", DiagnosticSeverity.Error, "{message}", ("message", message));
 
@@ -1727,6 +1750,41 @@ internal static class CliDiagnostics
         "render.layers.no-technology", DiagnosticSeverity.Error,
         "No technology resolved for this layout, so there are no layer names to select by. "
       + "`circuitrf explain` reports the walk that found none.");
+
+    // ── AUT-12: layer colour, and framing on a subset ────────────────────────
+
+    /// <summary>R-aut12-1. The entry did not read as <c>name=colour</c> at all — a missing <c>=</c>,
+    /// or nothing on one side of it.</summary>
+    public static Diagnostic RenderLayerColorMalformed(string text) => Diagnostic.Create(
+        "render.layer-colors.malformed", DiagnosticSeverity.Error,
+        "render: --layer-colors takes name=colour entries, got '{text}'. "
+      + "For example --layer-colors \"Top Copper=#e04030,Bottom Copper=#3060e0\".",
+        ("text", text));
+
+    /// <summary>R-aut12-1. The name was a layer; the value was not a colour. Refused rather than
+    /// left at the layer's own colour, which is a picture that looks exactly like the override
+    /// having worked on a layer that already happened to be near that shade.</summary>
+    public static Diagnostic RenderLayerColorBadValue(string name, string value) => Diagnostic.Create(
+        "render.layer-colors.bad-color", DiagnosticSeverity.Error,
+        "render: '{value}' is not a colour for layer '{name}'. Write #rgb, #rrggbb, or #rrggbbaa — "
+      + "the eight-digit form sets the layer's fill opacity, which is the alpha the renderer actually "
+      + "paints through.",
+        ("name", name), ("value", value));
+
+    /// <summary>R-aut12-2. <c>--fit-layers</c> chooses what a FIT frames on, and this render was
+    /// given its frame outright. Named rather than ignored: a flag that silently did nothing is the
+    /// same failure as a plausible wrong picture.</summary>
+    public static Diagnostic RenderFitLayersNotFitting(string mode) => Diagnostic.Create(
+        "render.fit-layers.not-fitting", DiagnosticSeverity.Error,
+        "render: --fit-layers chooses what a fit is framed on, and {mode} states the frame outright. "
+      + "Pass one.", ("mode", mode));
+
+    /// <summary>R-aut12-2. Framing on nothing is not a page — and an empty picture is
+    /// indistinguishable from a viewport that missed.</summary>
+    public static Diagnostic RenderFitLayersEmpty(string names) => Diagnostic.Create(
+        "render.fit-layers.empty", DiagnosticSeverity.Error,
+        "render: nothing is drawn on {names}, so there is no box for --fit-layers to frame on. "
+      + "`circuitrf explain --extents` reports which layers have geometry.", ("names", names));
 
     public static Diagnostic RenderDetailNotApplicable(string kind) => Diagnostic.Create(
         "render.detail.not-applicable", DiagnosticSeverity.Error,

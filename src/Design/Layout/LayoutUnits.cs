@@ -106,6 +106,56 @@ public static class LayoutUnits
         return true;
     }
 
+    /// <summary>
+    /// The suffix <see cref="TryParse"/> reads for <paramref name="unit"/>, <b>in ASCII</b> — the
+    /// spelling a coordinate is WRITTEN in, as against <see cref="Suffix"/>, which is what a label
+    /// beside a dimension field DISPLAYS.
+    ///
+    /// <para>They differ in one row and it matters: <see cref="Suffix"/> gives micrometres as
+    /// <c>µm</c>, which <see cref="TryParse"/> does accept but which travels through an argument
+    /// list, a JSON document and somebody's shell before it gets back here. A coordinate is emitted
+    /// to be pasted into <c>circuitrf render --window</c>, so it is emitted in the seven bits every
+    /// one of those hops carries unchanged.</para>
+    ///
+    /// <para>Said once, here, because <c>render</c>'s "a bare number is a refusal" message offers
+    /// these spellings and <c>explain --extents</c> emits them. Two tables would be free to disagree,
+    /// and the symptom would be one verb printing a coordinate the other refuses — which is
+    /// R-aut12-3 exactly.</para>
+    /// </summary>
+    public static string AsciiSuffix(LayoutUnit unit) => unit switch
+    {
+        LayoutUnit.Nm   => "nm",
+        LayoutUnit.Um   => "um",
+        LayoutUnit.Mm   => "mm",
+        LayoutUnit.Mil  => "mil",
+        LayoutUnit.Inch => "in",
+        _ => throw new ArgumentOutOfRangeException(nameof(unit), unit, null),
+    };
+
+    /// <summary>
+    /// A DBU value written as a unit-bearing string <see cref="TryParse"/> reads back to the SAME
+    /// DBU — <c>6000um</c>, <c>-3mm</c>, <c>0nm</c>. The inverse of <see cref="TryParse"/>, and the
+    /// spelling <c>circuitrf render --window</c> accepts (R-aut12-3: the one verb that says where the
+    /// content is must emit what the other verb takes).
+    ///
+    /// <para><b>The decimal count is derived, not chosen.</b> One DBU is
+    /// <c>1000 / (nm-per-unit x dbu-per-micron)</c> of this unit, so that many places resolve a single
+    /// DBU and one more place puts the formatter's nearest-value rounding and
+    /// <see cref="ToDbu"/>'s away-from-zero rounding a full order of magnitude apart, where they
+    /// cannot land on opposite sides of a boundary. A fixed four places silently quantises a
+    /// nanometre-resolution layout to 10 nm when it is written in millimetres — a window off by a
+    /// hair, which is invisible.</para>
+    /// </summary>
+    public static string Spell(long dbu, LayoutUnit unit, int dbuPerMicron)
+        => Format(dbu, unit, dbuPerMicron, SpellDecimals(unit, dbuPerMicron)) + AsciiSuffix(unit);
+
+    /// <summary>How many decimal places <see cref="Spell"/> needs to resolve one DBU, plus one.</summary>
+    private static int SpellDecimals(LayoutUnit unit, int dbuPerMicron)
+    {
+        double dbuPerUnit = NmPerUnit(unit) * (double)Math.Max(1, dbuPerMicron) / 1000.0;
+        return Math.Clamp((int)Math.Ceiling(Math.Log10(Math.Max(1.0, dbuPerUnit))) + 1, 1, 15);
+    }
+
     /// <summary>Formats a DBU value in <paramref name="unit"/>, trailing zeros trimmed, InvariantCulture.</summary>
     public static string Format(long dbu, LayoutUnit unit, int dbuPerMicron, int maxDecimals = 4)
     {

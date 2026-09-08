@@ -4,6 +4,7 @@ using CircuitRF.Design.Cells;
 using CircuitRF.Design.Layout;
 using CircuitRF.Design.Schematic;
 using CircuitRF.Design.Symbol;
+using CircuitRF.Design.Theming;
 using CircuitRF.Design.Workspace;
 using CircuitRF.Diagnostics;
 using CircuitRF.Render;
@@ -76,6 +77,15 @@ internal static class Render
         public string?      Cell;
         public string[]?    OnlyLayers;
         public string[]?    HideLayers;
+        /// <summary>R-aut12-2: what a FIT is framed on, when that is not what is drawn. An imported
+        /// board's drill-map fabrication drawing sits far outside the board and shrinks it to a
+        /// fraction of the frame; hiding it removes the content too, which is a different picture
+        /// from the one that was wanted.</summary>
+        public string[]?    FitLayers;
+        /// <summary>R-aut12-1: <c>name=#rrggbb</c> entries, accumulated across repeats of the flag
+        /// and across the commas inside one. A RENDER-time override — nothing is written to the
+        /// technology, because changing a design to change a picture of it is not a fix.</summary>
+        public List<string> LayerColors = new();
         public Detail       Detail = Detail.Full;
         public string       DetailText = "full";
         public double       DetailBudget;
@@ -152,7 +162,8 @@ internal static class Render
             "Usage: circuitrf render <path> -o <out.svg|.pdf|.png> [--view V] [--cell N]\n" +
             "                        [--fit | --window x0,y0,x1,y1 | --center x,y --span w]\n" +
             "                        [--margin f] [--size WxH] [--scale n | --dpi n]\n" +
-            "                        [--layers a,b | --hide-layers a,b] [--detail full|screen|<px>]\n" +
+            "                        [--layers a,b | --hide-layers a,b] [--fit-layers a,b]\n" +
+            "                        [--layer-colors name=#rrggbb,...] [--detail full|screen|<px>]\n" +
             "                        [--theme name|file.ccolor] [--variant light|dark]\n" +
             "                        [--background opaque|transparent] [--grid] [--no-rulers]\n" +
             "  a .cdd adds:          [--data file]... [--tab name|n] [--plot n] [--all-tabs]");
@@ -242,6 +253,12 @@ internal static class Render
 
                 case "--layers" when i + 1 < args.Length:      o.OnlyLayers = SplitList(args[++i]); continue;
                 case "--hide-layers" when i + 1 < args.Length: o.HideLayers = SplitList(args[++i]); continue;
+                case "--fit-layers" when i + 1 < args.Length:  o.FitLayers  = SplitList(args[++i]); continue;
+                // Repeatable AND comma-separated, because both spellings arrive: a shell writes one
+                // quoted list, and `serve` emits the flag once per entry of a JSON object so that a
+                // layer name carrying a comma survives the trip.
+                case "--layer-colors" or "--layer-colours" when i + 1 < args.Length:
+                    o.LayerColors.AddRange(SplitList(args[++i])); continue;
 
                 case "--detail" when i + 1 < args.Length:
                     o.DetailText = args[++i];
@@ -345,6 +362,13 @@ internal static class Render
 
         if (o.OnlyLayers is not null && o.HideLayers is not null)
             return JsonRun.Fail(CliDiagnostics.RenderLayersConflict());
+
+        // R-aut12-2. --fit-layers decides what a FIT frames on, so it has nothing to say about a
+        // window that was stated outright. Refused rather than ignored, on R-rnd0-6's rule: a flag
+        // that silently did nothing produces a picture the caller believes it narrowed.
+        if (o.FitLayers is not null && o.Mode != ViewportMode.Fit)
+            return JsonRun.Fail(CliDiagnostics.RenderFitLayersNotFitting(
+                o.Mode == ViewportMode.Window ? "--window" : "--center/--span"));
 
         return null;
     }
@@ -492,8 +516,7 @@ internal static class Render
         if (o.CenterText is not null) return "--center";
         if (o.SpanText   is not null) return "--span";
         if (o.FitStated)              return "--fit";
-        if (o.OnlyLayers is not null) return "--layers";
-        if (o.HideLayers is not null) return "--hide-layers";
+        if (LayerOptionNamed(o) is { } layerOption) return layerOption;
         if (o.View       is not null) return "--view";
         if (o.Cell       is not null) return "--cell";
         if (o.Detail != Detail.Full)  return "--detail";
@@ -503,6 +526,18 @@ internal static class Render
         // own bounding box with a margin that scales with --size, and there is nothing here for a
         // fraction of an extent to be a fraction OF.
         if (o.Margin != DefaultMargin) return "--margin";
+        return null;
+    }
+
+    /// <summary>The first of the four layer options the caller typed, or null. Said once so the
+    /// three places that refuse them — a schematic, a symbol and a data display, none of which has
+    /// drawing layers — cannot fall out of step with the set as it grows.</summary>
+    private static string? LayerOptionNamed(Options o)
+    {
+        if (o.OnlyLayers      is not null) return "--layers";
+        if (o.HideLayers      is not null) return "--hide-layers";
+        if (o.FitLayers       is not null) return "--fit-layers";
+        if (o.LayerColors.Count > 0)       return "--layer-colors";
         return null;
     }
 
@@ -543,8 +578,10 @@ internal static class Render
         // and flipping LayerDef.Visible on it would leak into the next render in the same process —
         // which is not hypothetical, because `serve` runs many calls in one. This is the class of
         // defect that only ever appears on the SECOND call.
-        var (drawTech, layerReport, layerRefusal) = ApplyLayerSelection(tech, view, baseDir, o);
-        if (layerRefusal is { } lr) return lr;
+        var plan = ApplyLayerSelection(tech, view, baseDir, o);
+        if (plan.Refusal is { } lr) return lr;
+        var drawTech   = plan.DrawTech;
+        var layerReport = plan.Report;
 
         RunHost.Cancellation.ThrowIfCancellationRequested();
         RunHost.Control?.BeginStage("measure");
@@ -560,7 +597,21 @@ internal static class Render
         // has to be solved against. On a document with no Fixed ruler in it they are the same box.
         var extents = DocumentExtents.LayoutBox(view, drawTech, baseDir);
         if (extents.IsEmpty) return JsonRun.Fail(CliDiagnostics.RenderNothingToDraw(t.File));
-        var fitBox = DocumentExtents.LayoutFitBox(view, drawTech, baseDir, pxW, pxH, o.Margin);
+
+        // R-aut12-2. A FIT frames what is DRAWN — `DocumentExtents.LayoutBox` gates on
+        // `LayerDef.Visible`, which is what `--layers`/`--hide-layers` wrote on this same clone, so
+        // hiding a layer removes it from the framing as well as from the picture. `--fit-layers`
+        // narrows the framing FURTHER, without narrowing the picture: an imported board's drill map
+        // sits far outside the board and shrinks it to a fraction of the frame, and hiding it is a
+        // different picture from the one that was wanted.
+        var fitBox = DocumentExtents.LayoutFitBox(view, plan.FitTech, baseDir, pxW, pxH, o.Margin);
+        if (fitBox.IsEmpty)
+            // Only reachable through --fit-layers: the box above came from the same measurement over
+            // the DRAW technology and was already checked. The other arm is there so this cannot ever
+            // report a flag the caller did not pass.
+            return JsonRun.Fail(o.FitLayers is { } fl
+                ? CliDiagnostics.RenderFitLayersEmpty(Join(fl))
+                : CliDiagnostics.RenderNothingToDraw(t.File));
 
         Console.Error.WriteLine(
             $"[circuitRF] {view.Shapes.Count} shape(s), {view.Instances.Count} instance placement(s), " +
@@ -704,14 +755,24 @@ internal static class Render
         }
     }
 
+    /// <summary>What the four layer flags decided. <paramref name="FitTech"/> differs from
+    /// <paramref name="DrawTech"/> only when <c>--fit-layers</c> narrowed the framing.</summary>
+    private readonly record struct LayerPlan(
+        Technology? DrawTech, Technology? FitTech,
+        IReadOnlyList<RenderLayerJson>? Report, int? Refusal);
+
     /// <summary>
     /// R-rnd2-8: the selection is applied to a CLONE of the resolved technology, never to the cached
     /// one, and the clone is a reflective field-for-field copy rather than a hand-written one — a
     /// hand-written copy silently drops any field added to <c>LayerDef</c> afterwards, and the symptom
     /// would be a layer that renders differently only when <c>--layers</c> is passed.
+    ///
+    /// <para>R-aut12-1 and R-aut12-2 join it: which layers DRAW, how they draw, and which of them a
+    /// FIT is framed on are all decided here, and the first two go through the SAME clone in one pass
+    /// — see <c>TechnologyLayerSelection.WithLayers</c> for why chaining two passes is subtly
+    /// wrong.</para>
     /// </summary>
-    private static (Technology? Tech, IReadOnlyList<RenderLayerJson>? Report, int? Refusal)
-        ApplyLayerSelection(Technology? tech, LayoutView view, string baseDir, Options o)
+    private static LayerPlan ApplyLayerSelection(Technology? tech, LayoutView view, string baseDir, Options o)
     {
         // HIERARCHY INCLUDED, arrays multiplied (RND-3 R-rnd3-6) — and through CellHierarchy's own
         // walk, which is also what `explain --layers` counts with. Counting `view.Shapes` alone here
@@ -752,11 +813,12 @@ internal static class Render
                              .Select(FallbackPalette.For)];
 
         string[]? named = o.OnlyLayers ?? o.HideLayers;
-        if (named is null)
-            return (tech, LayerReport(tech, generated, counts, static l => l.Visible), null);
+        bool anything = named is not null || o.FitLayers is not null || o.LayerColors.Count > 0;
+        if (!anything)
+            return new LayerPlan(tech, tech, LayerReport(tech, generated, counts, static l => l.Visible, null), null);
 
         if (tech is null)
-            return (null, null, JsonRun.Fail(CliDiagnostics.RenderNoTechnologyForLayers()));
+            return new LayerPlan(null, null, null, JsonRun.Fail(CliDiagnostics.RenderNoTechnologyForLayers()));
 
         var known = new Dictionary<string, LayerKey>(StringComparer.OrdinalIgnoreCase);
         foreach (var l in tech.Layers.Concat(generated))
@@ -765,25 +827,94 @@ internal static class Render
             known[l.Key.ToString()] = l.Key;   // a caller that has only the numeric key from an import
         }
 
-        var chosen = new HashSet<LayerKey>();
-        foreach (string name in named)
+        // R-rnd2-7: not a silent skip. A misspelling that produced a picture without that layer is
+        // indistinguishable from a layer that is genuinely empty — and the same is true of a layer
+        // whose colour override or fit selection quietly missed.
+        int? Unknown(string name) => JsonRun.Fail(CliDiagnostics.RenderUnknownLayer(
+            name, Join([.. tech.Layers.Concat(generated).Select(l => l.Name)
+                                      .Where(n => n.Length > 0).Distinct().Order(StringComparer.Ordinal)])));
+
+        Func<LayerDef, bool>? visible = null;
+        if (named is not null)
         {
-            // R-rnd2-7: not a silent skip. A misspelling that produced a picture without that layer is
-            // indistinguishable from a layer that is genuinely empty.
-            if (!known.TryGetValue(name, out var key))
-                return (null, null, JsonRun.Fail(CliDiagnostics.RenderUnknownLayer(
-                    name, Join([.. tech.Layers.Concat(generated).Select(l => l.Name)
-                                              .Where(n => n.Length > 0).Distinct().Order(StringComparer.Ordinal)]))));
-            chosen.Add(key);
+            var chosen = new HashSet<LayerKey>();
+            foreach (string name in named)
+            {
+                if (!known.TryGetValue(name, out var key)) return new LayerPlan(null, null, null, Unknown(name));
+                chosen.Add(key);
+            }
+            bool only = o.OnlyLayers is not null;
+            visible = l => only ? chosen.Contains(l.Key) : l.Visible && !chosen.Contains(l.Key);
         }
 
-        bool only = o.OnlyLayers is not null;
+        var (colors, colorRefusal) = ParseLayerColors(o, known, Unknown);
+        if (colorRefusal is { } cf) return new LayerPlan(null, null, null, cf);
+
+        HashSet<LayerKey>? fitKeys = null;
+        if (o.FitLayers is not null)
+        {
+            fitKeys = [];
+            foreach (string name in o.FitLayers)
+            {
+                if (!known.TryGetValue(name, out var key)) return new LayerPlan(null, null, null, Unknown(name));
+                fitKeys.Add(key);
+            }
+        }
+
         // R-rnd2-8's copy lives in src/Design beside Technology itself, not here: it is data
         // manipulation on the design model rather than a CLI concern, RND-3's `explain --layers` and
         // RND-4 both want it, and a second copy of it would be free to disagree about what was drawn.
-        var clone = TechnologyLayerSelection.WithVisibility(
-            tech, l => only ? chosen.Contains(l.Key) : l.Visible && !chosen.Contains(l.Key), generated);
-        return (clone, LayerReport(clone, [], counts, static l => l.Visible), null);
+        // ONE clone carries both the visibility and the colour, so the colour predicate reads the
+        // technology's own definition rather than whatever a first pass left behind.
+        var drawTech = TechnologyLayerSelection.WithLayers(
+            tech, visible,
+            colors.Count == 0 ? null : l => colors.TryGetValue(l.Key, out var a) ? a : null,
+            generated);
+
+        Technology fitTech = drawTech;
+        if (fitKeys is not null)
+            // Framed on these, drawn as before — and only where the layer is drawn at all, so
+            // --fit-layers cannot resurrect something --hide-layers took out of the picture.
+            fitTech = TechnologyLayerSelection.WithLayers(
+                drawTech, l => l.Visible && fitKeys.Contains(l.Key), null);
+
+        return new LayerPlan(drawTech, fitTech,
+            LayerReport(drawTech, [], counts, static l => l.Visible,
+                        fitKeys is null ? null : l => fitKeys.Contains(l.Key) && l.Visible),
+            null);
+    }
+
+    /// <summary>
+    /// R-aut12-1's <c>--layer-colors</c>, parsed against the same name map <c>--layers</c> resolves
+    /// through — so a layer the technology does not define but the document draws on is nameable here
+    /// under exactly the generated name <c>explain --layers</c> prints for it.
+    ///
+    /// <para><b>An eight-digit colour sets the layer's FILL OPACITY, not the colour's alpha.</b>
+    /// <c>LayoutRenderer</c> builds its <c>SKColor</c> from R, G and B alone and takes the alpha from
+    /// <see cref="LayerDef.FillOpacity"/>, at all four of its call sites. Writing the alpha into the
+    /// colour and stopping there would be an override that parses, reports itself as applied, and
+    /// changes nothing in the picture.</para>
+    /// </summary>
+    private static (Dictionary<LayerKey, TechnologyLayerSelection.LayerAppearance> Colors, int? Refusal)
+        ParseLayerColors(Options o, Dictionary<string, LayerKey> known, Func<string, int?> unknown)
+    {
+        var colors = new Dictionary<LayerKey, TechnologyLayerSelection.LayerAppearance>();
+        foreach (string entry in o.LayerColors)
+        {
+            int eq = entry.LastIndexOf('=');
+            if (eq <= 0 || eq == entry.Length - 1)
+                return (colors, JsonRun.Fail(CliDiagnostics.RenderLayerColorMalformed(entry)));
+
+            string name = entry[..eq].Trim();
+            string value = entry[(eq + 1)..].Trim();
+            if (!known.TryGetValue(name, out var key)) return (colors, unknown(name));
+            if (!Rgba.TryParseHex(value, out var rgba))
+                return (colors, JsonRun.Fail(CliDiagnostics.RenderLayerColorBadValue(name, value)));
+
+            colors[key] = new TechnologyLayerSelection.LayerAppearance(
+                rgba, rgba.A == 255 ? null : rgba.A / 255.0);
+        }
+        return (colors, null);
     }
 
     /// <summary>
@@ -794,28 +925,37 @@ internal static class Render
     /// </summary>
     private static IReadOnlyList<RenderLayerJson>? LayerReport(
         Technology? tech, IReadOnlyList<LayerDef> generated,
-        IReadOnlyDictionary<LayerKey, long> counts, Func<LayerDef, bool> rendered)
+        IReadOnlyDictionary<LayerKey, long> counts, Func<LayerDef, bool> rendered,
+        Func<LayerDef, bool>? framed)
     {
         if (tech is null)
         {
             // No technology at all: every layer the document draws on is a fallback-palette layer, and
-            // reporting an empty list would read as "this document uses none".
+            // reporting an empty list would read as "this document uses none". The colour is the
+            // palette's own, which is what the picture was actually drawn in.
             return [.. counts.OrderBy(kv => kv.Key.ToString(), StringComparer.Ordinal)
-                             .Select(kv => new RenderLayerJson(kv.Key.ToString(), true, kv.Value))];
+                             .Select(kv => Row(FallbackPalette.For(kv.Key), kv.Value))];
         }
-        return [.. tech.Layers.Concat(generated).Select(l => new RenderLayerJson(
+        return [.. tech.Layers.Concat(generated).Select(l =>
+            Row(l, counts.TryGetValue(l.Key, out long n) ? n : 0))];
+
+        // The palette's own definitions are what the renderer paints an undeclared key with, so
+        // `rendered` reads the same flag on both paths and neither needs a special case.
+        RenderLayerJson Row(LayerDef l, long shapes) => new(
             l.Name.Length > 0 ? l.Name : l.Key.ToString(),
             rendered(l),
-            counts.TryGetValue(l.Key, out long n) ? n : 0))];
+            shapes,
+            l.Color.ToHex(),
+            l.FillOpacity,
+            framed?.Invoke(l));
     }
 
     // ── schematic ────────────────────────────────────────────────────────────
 
     private static int DrawSchematic(Options o, Target t)
     {
-        if (o.OnlyLayers is not null || o.HideLayers is not null)
-            return JsonRun.Fail(CliDiagnostics.RenderLayersNotApplicable(
-                o.OnlyLayers is not null ? "--layers" : "--hide-layers", "schematic"));
+        if (LayerOptionNamed(o) is { } layerOption)
+            return JsonRun.Fail(CliDiagnostics.RenderLayersNotApplicable(layerOption, "schematic"));
         if (o.Detail != Detail.Full && o.DetailText != "full")
             return JsonRun.Fail(CliDiagnostics.RenderDetailNotApplicable("schematic"));
 
@@ -863,9 +1003,8 @@ internal static class Render
 
     private static int DrawSymbol(Options o, Target t)
     {
-        if (o.OnlyLayers is not null || o.HideLayers is not null)
-            return JsonRun.Fail(CliDiagnostics.RenderLayersNotApplicable(
-                o.OnlyLayers is not null ? "--layers" : "--hide-layers", "symbol"));
+        if (LayerOptionNamed(o) is { } layerOption)
+            return JsonRun.Fail(CliDiagnostics.RenderLayersNotApplicable(layerOption, "symbol"));
         if (o.Detail != Detail.Full && o.DetailText != "full")
             return JsonRun.Fail(CliDiagnostics.RenderDetailNotApplicable("symbol"));
 
@@ -1030,13 +1169,9 @@ internal static class Render
     {
         var units = new List<LayoutUnit> { LayoutUnit.Um, LayoutUnit.Mm };
         if (!units.Contains(view.DisplayUnit)) units.Add(view.DisplayUnit);
-        return string.Join(" or ", units.Select(u => $"'{bare}{Suffix(u)}'"));
-
-        static string Suffix(LayoutUnit u) => u switch
-        {
-            LayoutUnit.Nm => "nm", LayoutUnit.Um => "um", LayoutUnit.Mm => "mm",
-            LayoutUnit.Mil => "mil", _ => "in",
-        };
+        // LayoutUnits' own ASCII table — the same one `explain --extents` spells its `--window`
+        // string with, so this verb cannot offer a suffix that verb does not emit, or the reverse.
+        return string.Join(" or ", units.Select(u => $"'{bare}{LayoutUnits.AsciiSuffix(u)}'"));
     }
 
     private static (WorldRect? Rect, int? Refusal) ParseWorldRect(string text, string option, LayoutView? view)

@@ -24,6 +24,7 @@
 // ================================================================
 
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using CircuitRF.Design.Cells;
 using CircuitRF.Design.Layout;
@@ -333,6 +334,116 @@ public sealed class ExplainQueryCliVerbTests(ITestOutputHelper output) : IDispos
         // width/height are explain's own, and they are the box rather than a second measurement.
         Assert.Equal(fromExplain.GetProperty("x1").GetDouble() - fromExplain.GetProperty("x0").GetDouble(),
                      fromExplain.GetProperty("width").GetDouble(), 12);
+    }
+
+    // ══ AUT-12 R-aut12-3 — the output of this verb is the input of `render --window` ══════════════
+
+    /// <summary>
+    /// <b>The whole requirement, as a round trip.</b> <c>explain --extents</c> emits base-SI metres
+    /// and <c>render --window</c> refuses a bare number — correctly, and for a good reason — so the
+    /// one tool that says WHERE the content is emitted exactly what the other tool rejected, and
+    /// every windowed render needed a hand conversion.
+    ///
+    /// <para>Asserted VERBATIM: the string is taken out of the document and handed to the other verb
+    /// as one argument, with nothing done to it. A test that re-derived the coordinates would be
+    /// testing its own arithmetic, which is the arithmetic this requirement exists to delete.</para>
+    /// </summary>
+    [Theory]
+    [InlineData("layout")]
+    [InlineData("schematic")]
+    [InlineData("symbol")]
+    public void TheEmittedWindowString_IsAcceptedVerbatimByRenderWindow(string kind)
+    {
+        var ws = BuildWorkspace();
+        string path = kind switch { "layout" => ws.Clay, "schematic" => ws.Csch, _ => ws.Csym };
+
+        string window = ExplainJson(path, "--extents").GetProperty("extents")
+                            .GetProperty("window").GetString()!;
+        output.WriteLine($"{kind}: --window {window}");
+
+        string outPath = Path.Combine(_root, $"roundtrip-{kind}.png");
+        var run = RunCli("render", path, "-o", outPath, "--window", window);
+        Assert.True(run.ExitCode == 0, $"'{window}' was refused:\n{run.StdErr}{run.StdOut}");
+        Assert.True(File.Exists(outPath));
+    }
+
+    /// <summary>
+    /// The vacuity guard, and the defect in one line: the NUMERIC fields spelled straight out of the
+    /// document are refused on a layout. Without this, a <c>window</c> field that happened to be
+    /// unit-bearing by accident would look like a fix.
+    /// </summary>
+    [Fact]
+    public void TheNumericExtentsSpelledDirectly_AreStillRefusedOnALayout()
+    {
+        var ws = BuildWorkspace();
+        var box = ExplainJson(ws.Clay, "--extents").GetProperty("extents");
+
+        string bare = string.Join(',', new[] { "x0", "y0", "x1", "y1" }
+            .Select(f => box.GetProperty(f).GetDouble().ToString("R", CultureInfo.InvariantCulture)));
+
+        var run = RunCli("render", ws.Clay, "-o", Path.Combine(_root, "never.png"),
+                         "--window", bare, "--json");
+        Assert.Equal(1, run.ExitCode);
+        Assert.Contains("render.viewport.unit-required", run.StdOut, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Each PER-LAYER box carries the same spelling, which is what makes "frame on the copper" a
+    /// paste rather than a calculation — the companion to <c>render --fit-layers</c>.
+    /// </summary>
+    [Fact]
+    public void EveryPerLayerExtent_CarriesAWindowStringTheRenderTakes()
+    {
+        var ws = BuildWorkspace();
+        var perLayer = ExplainJson(ws.Clay, "--extents").GetProperty("extents")
+                           .GetProperty("perLayer").EnumerateArray().ToArray();
+        Assert.NotEmpty(perLayer);
+
+        foreach (var layer in perLayer)
+        {
+            string window = layer.GetProperty("window").GetString()!;
+            output.WriteLine($"{layer.GetProperty("name").GetString()}: {window}");
+            var run = RunCli("render", ws.Clay, "-o", Path.Combine(_root, "per-layer.png"),
+                             "--window", window);
+            Assert.True(run.ExitCode == 0, $"'{window}' was refused:\n{run.StdErr}{run.StdOut}");
+        }
+    }
+
+    /// <summary>
+    /// The string reads back to the SAME DBU, at two display units and two DBU resolutions — the part
+    /// a "did it get accepted" test cannot see. A fixed decimal count silently quantises a
+    /// nanometre-resolution layout written in millimetres, which is a window off by a hair and
+    /// invisible in the picture; the count is derived from the document's own scale instead.
+    /// </summary>
+    [Theory]
+    [InlineData(LayoutUnit.Um, 1000)]
+    [InlineData(LayoutUnit.Mm, 1000)]
+    [InlineData(LayoutUnit.Mil, 1000)]
+    [InlineData(LayoutUnit.Nm, 1)]
+    public void TheEmittedWindowString_ReadsBackToTheSameDbu(LayoutUnit unit, int dbuPerMicron)
+    {
+        string dir = Path.Combine(_root, $"spell-{unit}-{dbuPerMicron}");
+        Directory.CreateDirectory(dir);
+        string clay = Path.Combine(dir, "Spelled.clay");
+
+        // Deliberately not round in ANY unit: a box that lands on whole micrometres would round-trip
+        // through a truncating formatter as happily as through a correct one.
+        var view = new LayoutView { DbuPerMicron = dbuPerMicron, DisplayUnit = unit, SnapDbu = 1 };
+        var box = new Bbox(-3_000_001, -7, 20_000_003, 2_900_009);
+        view.Shapes.Add(new RectShape { Layer = Metal1, X1 = box.MinX, Y1 = box.MinY, X2 = box.MaxX, Y2 = box.MaxY });
+        LayoutPersistence.SaveToFile(clay, view);
+
+        string window = ExplainJson(clay, "--extents").GetProperty("extents")
+                            .GetProperty("window").GetString()!;
+        output.WriteLine($"{unit} @ {dbuPerMicron} DBU/µm: {window}");
+
+        long[] back = [.. window.Split(',').Select(t =>
+        {
+            Assert.True(LayoutUnits.TryParse(t, unit, dbuPerMicron, out long dbu),
+                        $"render's own parser refused '{t}'");
+            return dbu;
+        })];
+        Assert.Equal([box.MinX, box.MinY, box.MaxX, box.MaxY], back);
     }
 
     // ══ gate 6 — extents are hierarchy-correct ════════════════════════════════════════════════════
