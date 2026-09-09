@@ -87,7 +87,7 @@ public class CorrectingWhatYouWroteTests
     /// R-rc11-4's other half: <b>a rename works on the four origins whose subject ignores the
     /// label.</b>
     ///
-    /// <para>A workspace-close entry is "workspace closed" whatever anybody types, so a rename routed
+    /// <para>A workspace-close entry is "closed" whatever anybody types, so a rename routed
     /// through the label alone would silently do nothing on exactly the entries a designer most wants
     /// to name — the automatic ones they are trying to find again.</para>
     /// </summary>
@@ -102,7 +102,7 @@ public class CorrectingWhatYouWroteTests
         Assert.True(WorkspaceCheckpoints.Take(git, CheckpointOrigin.WorkspaceClosed, null).Recorded);
 
         var closed = RestorePoints.List(git).Single();
-        Assert.Equal("workspace closed", closed.Label);
+        Assert.Equal("closed", closed.Label);
 
         Assert.True(RestorePoints.Rename(git, closed, "the day the match worked").Ok);
 

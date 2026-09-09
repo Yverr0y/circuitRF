@@ -178,6 +178,22 @@ public sealed class HistoryRowItem
 
     public bool HasIdentity => Identity.Length > 0;
 
+    /// <summary>
+    /// <b>What names this row</b> (owner, 2026-09-08). Every automatic entry rendered under circuitRF's
+    /// own wording for its origin, so a workspace closed forty times listed forty rows reading the same
+    /// three words and the panel could not be scanned. The time separates them; it does not let a
+    /// designer refer to one. See <see cref="HistoryIds"/> for why seven characters and why this is not
+    /// a widening of the vocabulary rule.
+    ///
+    /// <para>The WHOLE identity stays on the expander and is what the copy action puts on the
+    /// clipboard — R-rc10-15's finding, unchanged: a value shown short and copied long is exactly the
+    /// trust problem that was reported once already, and this is a second rendering of the same string
+    /// rather than a second value.</para>
+    /// </summary>
+    public string ShortIdentity => HistoryIds.Short(Entry.Identity);
+
+    public bool HasShortIdentity => ShortIdentity.Length > 0;
+
     /// <summary>§5.6 rule 2's ordering number, on the entries that carry one.</summary>
     public string SequenceText
         => Entry.Sequence is { } n ? "Entry " + n.ToString(System.Globalization.CultureInfo.CurrentCulture) : "";
@@ -309,6 +325,7 @@ public partial class HistoryTool : Tool, IActivatableTool
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSelection))]
     [NotifyPropertyChangedFor(nameof(CanGoBack))]
+    [NotifyPropertyChangedFor(nameof(CanGoBackToSelection))]
     [NotifyPropertyChangedFor(nameof(CanKeepPermanently))]
     [NotifyPropertyChangedFor(nameof(CanBringBack))]
     [NotifyPropertyChangedFor(nameof(CanCompare))]
@@ -333,6 +350,34 @@ public partial class HistoryTool : Tool, IActivatableTool
 
     public bool HasSelection       => Selected is not null;
     public bool CanGoBack          => Selected is { CanGoBack: true };
+
+    /// <summary>
+    /// <b>Whether the panel offers going back to the selected row as a BUTTON</b> (owner, 2026-09-08:
+    /// there was no go-back button in this window at all).
+    ///
+    /// <para>Going back has lived only on the row's right-click menu since R-rc10-17 moved every
+    /// row action there, and that rule is right for the other seven — but it put the panel's ONE
+    /// primary action behind a gesture a designer has to guess at, at the moment they are least
+    /// inclined to go hunting. So the action is on the surface as well, named after its destination
+    /// exactly as the menu item is (<see cref="HistoryRowItem.GoBackText"/>), and the menu keeps its
+    /// entry: this is a second site for one action, never a second implementation of it.</para>
+    ///
+    /// <para><b>And there is no button when it would land where the workspace already is</b> (owner,
+    /// 2026-09-08) — the same rule <see cref="WayForward.LeadsSomewhereElse"/> withdraws the way-back
+    /// under, applied to the selection. This session knows which entry the workspace was last put
+    /// into; a go-back to that entry is a whole reload that changes nothing, and offering one teaches a
+    /// designer that the button does not work. Nothing is asked of the repository for this: the
+    /// identity is already in hand.</para>
+    /// </summary>
+    public bool CanGoBackToSelection
+        => Selected is { CanGoBack: true } row && !IsWhereTheWorkspaceIs(row);
+
+    /// <summary>Whether this row is the state this session last put the workspace into. Unknown — no
+    /// restore this session — is <i>not</i> where the workspace is: an unrestored workspace holds
+    /// whatever has been edited since, and every row is a real way back from it.</summary>
+    private bool IsWhereTheWorkspaceIs(HistoryRowItem row)
+        => WayForward is { WentBackToId.Length: > 0 } w
+        && string.Equals(w.WentBackToId, row.Entry.Identity, StringComparison.Ordinal);
     public bool CanKeepPermanently => Selected is { IsPoint: true, Entry.Point.Kept: false };
     public bool CanBringBack       => Selected is { Thinned: true };
     public bool CanCompare         => Selected is { IsVersion: true };
@@ -562,18 +607,46 @@ public partial class HistoryTool : Tool, IActivatableTool
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasWayForward))]
     [NotifyPropertyChangedFor(nameof(WayForwardText))]
+    [NotifyPropertyChangedFor(nameof(ComeForwardText))]
+    [NotifyPropertyChangedFor(nameof(CanComeForward))]
+    // Where the workspace IS decides whether the selected row is a way back at all — so the button
+    // over the list is re-evaluated when a restore reports itself, not only when the selection moves.
+    [NotifyPropertyChangedFor(nameof(CanGoBackToSelection))]
     private WayForward? _wayForward;
 
     public bool   HasWayForward  => WayForward is not null;
+
     public string WayForwardText => WayForward is { } w
-                                  ? HistoryMessages.WayForward(w.WentBackTo, w.KeptAs.Label) : "";
+        ? HistoryMessages.WayForward(
+              w.WentBackToId, w.WentBackToUtc ?? w.KeptAs.TakenUtc,
+              // The second clause is about a state to come BACK to, so it is dropped when there is
+              // none — see WayForward.LeadsSomewhereElse. The empty id is what omits it.
+              w.LeadsSomewhereElse ? w.KeptAs.CommitId : "", w.KeptAs.TakenUtc,
+              DateTimeOffset.UtcNow)
+        : "";
+
+    /// <summary>
+    /// <b>Whether there is a way back to offer at all.</b> A restore that replaced content identical
+    /// to what it wrote left the designer nowhere earlier to return to, and offering one anyway named
+    /// the state they were already looking at (owner, 2026-09-08).
+    /// </summary>
+    public bool CanComeForward => WayForward is { LeadsSomewhereElse: true };
+
+    /// <summary>
+    /// What the button says. <b>The destination, not the direction</b> — see
+    /// <see cref="HistoryMessages.GoBackToId"/> for why a direction was the wrong thing to put on it.
+    /// </summary>
+    public string ComeForwardText => WayForward is { } w
+                                   ? HistoryMessages.GoBackToId(w.KeptAs.CommitId) : "";
 
     /// <summary>Invoked when the designer follows the way forward.</summary>
     public Action<RestorePoint>? ComeForwardRequested { get; set; }
 
     public void ComeForward()
     {
-        if (WayForward is { } w) ComeForwardRequested?.Invoke(w.KeptAs);
+        // Guarded as well as hidden: the button is not the only thing that could reach this, and a
+        // restore to the state the workspace is already in is a whole reload that changes nothing.
+        if (WayForward is { LeadsSomewhereElse: true } w) ComeForwardRequested?.Invoke(w.KeptAs);
     }
 
     // ── Incoming versions (RC-9 R-rc9-6) ─────────────────────────────────────────────────────────

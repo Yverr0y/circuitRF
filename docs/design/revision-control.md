@@ -1423,6 +1423,15 @@ in the documentation rather than left to be discovered.
   entry the previous state was kept as, with the action that returns to it. **This is the most
   reassuring control in the feature and it creates nothing** — it points at an entry that already
   exists, and reaching it is an ordinary restore with an ordinary checkpoint of its own.
+
+  **Both states are named by identity and time, and the action is named after its destination**
+  *(rev 7, owner 2026-09-08)*. The line quoted the two entries' labels, which on the two entries a
+  restore produces are both generated, so it named neither state in a way anybody could act on. And the
+  action said *come forward again*, which is a DIRECTION — but going back and coming forward are one
+  operation performed twice, so the control could be pressed for ever and never said where the last
+  press had landed, which reads as a control that does nothing. Naming the destination is what makes
+  the two presses visibly different, and from the third press on the two identities settle into a pair
+  because §5.8's restore already declines to record a state the history holds.
 - **An interrupted restore is detected on the next open, not discovered by simulating.** A restore over
   thousands of files on a share can be interrupted by a crash or a dropped connection, and what it
   leaves is §1.3's failure exactly: a workspace that opens, is well-formed, and is half of two states.
@@ -1531,10 +1540,29 @@ is what they open when scanning was not enough, and the split is between *which 
 | on the row | in the expander |
 |---|---|
 | the time, and the date **including the year whenever it is not the current year** | the full timestamp with its zone |
+| **the short identity** (rev 7) | the whole identity, and the action that copies it |
 | the title, or the origin sentence for an entry nobody titled | the origin, spelled out (§5.5) |
 | the tag mark, for a version | whether it is local-only or has been shared (§5.11 turns on this) |
-| who kept it, on a workspace with more than one author | the commit identity — short, with the full one copyable |
+| who kept it, on a workspace with more than one author | |
 | the restored-from line (§5.5) and the left-out-file line (§8.2b) | the sequence number (§5.6 rule 2), and the kept mark |
+
+**The short identity moved onto the row in rev 7** *(owner, 2026-09-08)*, and the origin sentences got
+shorter to make room for it. **An entry nobody titled had no name** — only circuitRF's wording for how
+it came about, which is the same three words on every entry of that kind, so a workspace closed forty
+times listed forty rows reading *workspace closed*. The time tells them apart and gives a designer
+nothing they can quote, point at, or hand to somebody helping them; and the sentence §5.8 reports a
+restore in had to name two different states by two generated phrases, which is how it came to read
+*"went back to 'workspace closed'. What you had was kept as 'your work before you went back'"*. The
+generated labels are now as short as they can be and say only what KIND of moment it was — *closed*,
+*before going back*, *before: <the batch's intent>* — because the identity beside them is what names
+the row. **The whole identity is still what the copy action puts on the clipboard** and is still in the
+expander: a value shown short and copied long is the trust problem R-rc10-15 already had to fix once,
+and this is a second rendering of one string rather than a second value.
+
+**This is not a widening of §0's rule.** R-rc7-4 already exempted the identity of a state — *nothing
+git-shaped appears unbidden; what an explicit action produces may be named precisely* — and opening the
+History panel is that action. No verb moved: nothing branches, checks out, stashes or merges, and
+`NoGitVocabularyReachesADesigner` scans the same literals it always did.
 
 **The year is a defect, not a sparseness.** `VersionHistoryTool.Day` renders `ddd d MMM` and
 `RestoredFrom` renders `d MMM HH:mm`; a version kept in December reads in January as one kept this

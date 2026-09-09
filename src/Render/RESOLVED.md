@@ -92,6 +92,45 @@ own alpha is then the transparency that was wanted. Every one of those samples r
 and its reference rather than grid, they are meant to be the darker lines, and putting them inside
 would have faded them to the arcs' tone.
 
+### The Smith chart's numbers did not shrink with the chart
+
+Reported the same day, against wide axis limits: past about ±5 the grid numbers ran together into a
+blob. The grid of a Smith chart is FIXED in the Γ plane — its arcs ARE the unit disc's — so unlike a
+polar plot's rings it cannot be re-latticed for a wider window. Zoom out and the whole chart is just
+a smaller object in a bigger box. Every part of it scaled with the window except the numbers, whose
+size came from the CANVAS (`FontSizeTicks * lw`), so the anchors closed on each other at constant
+text size: crowded at ±2, illegible by ±5, a smudge at ±10.
+
+**The text scales with the disc, and what still will not fit is dropped.** Both halves are needed.
+The scale is `2 / Window.Width` — the disc's radius runs as 1/(half-window), so that IS the chart's
+own zoom, and it is exactly 1 at the unit window, where the picture is byte-identical to before
+(checked at two canvas sizes). It comes from the window's WIDTH rather than from the measured disc
+radius so that panning, which moves the disc without resizing it, cannot change the size of a
+number. Below `SmithLabelMinScale` (0.45) it stops shrinking, because a face much under half the
+tick size is texture rather than text — and past that floor no size makes room, so a label landing
+on one already placed is dropped instead.
+
+Three details:
+
+- **The thinning test is a rect overlap, not `DrawPolarGrid`'s one-dimensional "taken so far" edge.**
+  A Smith chart's numbers crowd in two dimensions: the reactance labels come down the outside of the
+  disc towards the same r → ∞ point the resistance numbers run into.
+- **The placement ORDER is the priority, and the unit circle goes first.** Ascending order alone
+  dropped `1` — the chart's own centre — because `0.5`'s label reaches it first. r = 1 and x = ±1 are
+  placed before anything else; the rest run outwards-in from the roomy r = 0 side, so what is lost is
+  what piles into r → ∞.
+- **Under `SmithLabelMinDiscFaces` (4) font sizes of disc radius the grid carries no numbers at
+  all.** A number is about two font sizes wide at the floor scale, so a disc smaller than that is one
+  a single label would very nearly span; thinning would leave one arbitrary survivor sitting on a
+  smudge, and nothing is the better answer.
+
+The old `axes.Window.Width > 3` rule — which dropped the two 10s and nothing else — is gone: it was a
+two-step approximation of a continuous problem, and at ±2 it threw away numbers that now fit,
+because the text is half the size there.
+
+harmonicaRF's Smith panels draw through this same code with the default unit window, so they are
+untouched.
+
 ### A Y-axis label rendered a rectangle — and THREE renderers draw one
 
 Skia draws a glyph the typeface lacks as NOTDEF — a box — and substitutes nothing. Checked against

@@ -6,7 +6,7 @@
              x:DataType="vm:HistoryTool"
              Background="{DynamicResource SystemChromeLowColor}">
 
-  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,Auto">
+  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto">
 
     <!-- ── The header (RC-10 §5.10) ────────────────────────────────────────────────────────────────
          TWO ACTIONS THAT CREATE SOMETHING, then the filter and the search. Everything that acts on a
@@ -107,9 +107,14 @@
               BorderThickness="1" BorderBrush="{DynamicResource SystemAccentColor}">
         <StackPanel Spacing="4">
           <TextBlock Text="{Binding WayForwardText}" FontSize="11" TextWrapping="Wrap"/>
+          <!-- Owner, 2026-09-08. The button NAMES ITS DESTINATION. "Come forward again" named a
+               direction, and going back and coming forward are one operation performed twice — so it
+               could be pressed for ever and never told anyone where the last press had landed, which
+               read as a control that did nothing. See HistoryMessages.GoBackToId. -->
           <Button x:Name="ComeForwardButton" Click="OnComeForwardClick"
                   HorizontalAlignment="Left" Padding="6,2" FontSize="11"
-                  Content="Come forward again"/>
+                  IsVisible="{Binding CanComeForward}"
+                  Content="{Binding ComeForwardText}"/>
         </StackPanel>
       </Border>
 
@@ -135,7 +140,8 @@
              ItemsSource="{Binding Rows}"
              SelectedItem="{Binding Selected}"
              Background="Transparent"
-             BorderThickness="0">
+             BorderThickness="0"
+             Grid.IsSharedSizeScope="True">
 
       <ListBox.Styles>
         <!-- Every card the SAME WIDTH (owner, 2026-09-07). Each row was sizing to its own title, so a
@@ -265,8 +271,19 @@
                       HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                       Background="Transparent" BorderThickness="0">
               <Expander.Header>
-                <Grid ColumnDefinitions="Auto,*,Auto" HorizontalAlignment="Stretch"
-                      Opacity="{Binding RowOpacity}">
+                <!-- Owner, 2026-09-08. THE TIME COLUMN IS SHARED-WIDTH, so the identity and the title
+                     start at the same x on every row. Left to size itself, each row's column was as
+                     wide as its own phrase — "just now" against "37 minutes ago" against "14:32" —
+                     and everything to the right of it stepped in and out as the eye went down the
+                     list. The shared group is what makes the widest realised row set the column for
+                     all of them; the MinWidth is the floor, so a screenful of "just now" does not
+                     collapse the column and then jump when an older row scrolls in. -->
+                <Grid HorizontalAlignment="Stretch" Opacity="{Binding RowOpacity}">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" SharedSizeGroup="HistoryWhen" MinWidth="86"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                  </Grid.ColumnDefinitions>
                   <StackPanel Grid.Column="0" Margin="0,0,8,0">
                     <!-- No longer monospace: this cell holds WORDS for anything inside the last day
                          ("7 minutes ago"), and a monospace face spends about a quarter more of a
@@ -285,7 +302,7 @@
                          TextTrimming never engaged and a long one ran straight over the "tidied away"
                          mark in the next column. The star column is what gives the text a width to be
                          trimmed against; the ellipsis was there all along and had nothing to bite on. -->
-                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="4">
+                    <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="4">
                       <!-- R-rc10-2. ONE MARK carries the whole difference between the two kinds. It
                            says titled, permanent, travels — three promises the unmarked rows do not
                            make — and it is not an importance badge. One mark and one accent: a second
@@ -295,7 +312,15 @@
                                        IsVisible="{Binding HasVersionMark}"
                                        ToolTip.Tip="{Binding $parent[UserControl].((vm:HistoryTool)DataContext).VersionMarkMeans}"
                                        Foreground="{DynamicResource SystemAccentColor}"/>
-                      <TextBlock Grid.Column="1" Text="{Binding Title}"
+                      <!-- Owner, 2026-09-08. WHAT NAMES THE ROW, on every row that has one. Forty
+                           automatic entries rendered forty identical labels and the list could not be
+                           scanned, let alone pointed at; the time tells them apart and gives a designer
+                           nothing to say out loud. Monospace on purpose — this column IS a fixed-width
+                           column of hex, which is the one thing in this panel that lines up. -->
+                      <TextBlock Grid.Column="1" Text="{Binding ShortIdentity}" FontFamily="monospace"
+                                 Opacity="0.55" TextWrapping="NoWrap"
+                                 IsVisible="{Binding HasShortIdentity}" />
+                      <TextBlock Grid.Column="2" Text="{Binding Title}"
                                  TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
                                  ToolTip.Tip="{Binding Title}" />
                     </Grid>
@@ -361,8 +386,34 @@
                IsVisible="{Binding !Rows.Count}"
                Text="{Binding EmptyText}" />
 
+    <!-- ── THE GO-BACK BUTTON, on the surface (owner, 2026-09-08) ───────────────────────────────────
+         Going back lived only on the row's right-click menu, and this window's one primary action was
+         behind a gesture a designer has to guess at — asked for at the moment they are least inclined
+         to go hunting for it. So it is a button as well, right under the list it acts on, and the menu
+         entry stays: one action, two sites, one implementation (HistoryTool.GoBack).
+
+         It NAMES ITS DESTINATION, from the same string the menu item uses — so the row it will act on
+         is legible without looking back up at the selection, and a title nobody wrote is never quoted.
+
+         AND IT IS ABSENT when it would land where the workspace already is (owner, 2026-09-08): the
+         same withdrawal WayForward.LeadsSomewhereElse makes for the way back, applied to the
+         selection. A button that reloads the whole workspace to no effect is what teaches a designer
+         that the button does not work. -->
+    <Button Grid.Row="4" x:Name="GoBackButton" Click="OnGoBackClick"
+            IsVisible="{Binding CanGoBackToSelection}"
+            HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+            Margin="6,2,6,4" Padding="6,3" FontSize="11"
+            ToolTip.Tip="Puts this workspace's files back to the selected state. What you have now is kept first, so this is not a one-way door.">
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <!-- R-rc10-16's glyph, at every site the action appears — and never the undo arrow. -->
+        <mi:MaterialIcon Kind="TimelineClock" Width="14" Height="14" VerticalAlignment="Center"/>
+        <TextBlock Text="{Binding Selected.GoBackText}" TextTrimming="CharacterEllipsis"
+                   VerticalAlignment="Center"/>
+      </StackPanel>
+    </Button>
+
     <!-- R-rc7-11. Comparison is the browser's real job, at the granularity of DOCUMENTS. -->
-    <Border Grid.Row="4" BorderThickness="0,1,0,0" MaxHeight="180"
+    <Border Grid.Row="5" BorderThickness="0,1,0,0" MaxHeight="180"
             BorderBrush="{DynamicResource SystemBaseLowColor}"
             IsVisible="{Binding CanGoBack}">
       <ScrollViewer>
@@ -400,7 +451,7 @@
     <!-- ONE LINE. A Text="…" attribute wrapped across source lines keeps the continuation line's
          indentation as literal spaces — XML normalises the newline to a space and leaves the rest —
          so the sentence rendered with a twenty-character gap in the middle of it. -->
-    <TextBlock Grid.Row="5" Margin="6,4" FontSize="10" Opacity="0.65" TextWrapping="Wrap"
+    <TextBlock Grid.Row="6" Margin="6,4" FontSize="10" Opacity="0.65" TextWrapping="Wrap"
                Text="Going back brings back the files in this workspace. Anything in a workspace it refers to, and any simulation results, are left exactly as they are." />
   </Grid>
 </UserControl>

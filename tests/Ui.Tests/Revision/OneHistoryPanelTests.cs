@@ -577,7 +577,7 @@ public class OneHistoryPanelTests
         // The entry a restore takes of the state it is about to replace. Nobody wrote its label.
         var before = new HistoryEntry(
             HistoryEntryKind.RestorePoint, null,
-            Point(CheckpointOrigin.BeforeRestore, "before going back", null), null, now);
+            Point(CheckpointOrigin.BeforeRestore, "your work before you went back", null), null, now);
 
         var beforeRow = new HistoryRowItem(before, now, showAuthor: false);
 
@@ -587,8 +587,8 @@ public class OneHistoryPanelTests
 
         // The stored label is the OLD wording — this entry is one a designer already has — and the row
         // shows the current wording anyway.
-        Assert.Equal("your work before you went back", beforeRow.Title);
-        Assert.Equal("your work before you went back",
+        Assert.Equal("before going back", beforeRow.Title);
+        Assert.Equal("before going back",
                      CheckpointMessage.SubjectFor(CheckpointOrigin.BeforeRestore, null));
 
         // A save-point the designer named is theirs, is quoted, and is never re-rendered.
@@ -678,7 +678,7 @@ public class OneHistoryPanelTests
     public void ACorrectedTitleDoesNotSurviveInTheWayForwardSentence()
     {
         var point = new RestorePoint("refs/x", "kept-1", "t0", 1, DateTimeOffset.UtcNow,
-                                     CheckpointOrigin.BeforeRestore, "your work before you went back",
+                                     CheckpointOrigin.BeforeRestore, "before going back",
                                      null, true, []);
 
         var way = new WayForward("the careless title", point, "aaa");
@@ -840,15 +840,117 @@ public class OneHistoryPanelTests
         Assert.True(at > 0, "the row no longer binds a Title at all");
 
         // The nearest layout ancestor of the title must be the constraining Grid, not a StackPanel.
+        // Matched on the STAR column rather than on the whole column list: the row gained a column for
+        // the short identity on 2026-09-08, and what makes the ellipsis engage is that the title's own
+        // column is the star one — not how many fixed columns sit to its left.
         string before = axaml[..at];
-        int grid  = before.LastIndexOf("<Grid ColumnDefinitions=\"Auto,*\"", StringComparison.Ordinal);
+        int grid  = before.LastIndexOf("<Grid ColumnDefinitions=\"Auto,", StringComparison.Ordinal);
         int stack = before.LastIndexOf("<StackPanel Orientation=\"Horizontal\"", StringComparison.Ordinal);
+
+        Assert.True(grid > 0 && axaml[grid..].StartsWith("<Grid ColumnDefinitions=\"Auto,Auto,*\"", StringComparison.Ordinal),
+                    "the title's own column is no longer the star one, so nothing constrains its width.");
 
         Assert.True(grid > stack,
                     "the title is back inside a horizontal StackPanel, which measures with infinite "
                   + "width — its ellipsis will never engage and a long title will overlap the mark.");
 
         Assert.Contains("TextTrimming=\"CharacterEllipsis\"", axaml[at..(at + 220)], StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <b>The way back is withdrawn when it would name the state the workspace is already in</b>
+    /// (owner, 2026-09-08: the panel read <i>Now at f15b942</i> over a button reading <i>Go back to
+    /// f15b942</i>).
+    ///
+    /// <para>A restore whose target holds the content the workspace already had replaced nothing, and
+    /// <c>WorkspaceRestore</c> then resolves the replaced state to an entry holding that same content
+    /// — correctly, because that is where the workspace was. What stops being meaningful is the way
+    /// BACK, so the action goes and the line says only where the workspace is.</para>
+    ///
+    /// <para><b>Content decides it, not identity.</b> Two entries over one tree are two identities and
+    /// one state, so an identity comparison alone would still have offered the second of them.</para>
+    /// </summary>
+    [Fact]
+    public void TheWayBackIsWithdrawnWhenItNamesTheStateAlreadyLoaded()
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        RestorePoint Point(string commit, string tree) =>
+            new("refs/x", commit, tree, 1, now, CheckpointOrigin.BeforeRestore, "before going back",
+                null, true, []);
+
+        // The entry the restore reported as replaced IS the entry it went to.
+        var same = Point("f15b942aaaa", "tree-1");
+        var tool = new HistoryTool { WayForward = new WayForward("t", same, same.CommitId, now, same.TreeId) };
+
+        Assert.True(tool.HasWayForward);                    // the line still says where the workspace is
+        Assert.False(tool.CanComeForward);                  // …and offers nothing
+        Assert.Contains("f15b942", tool.WayForwardText, StringComparison.Ordinal);
+        Assert.DoesNotContain("is kept as", tool.WayForwardText, StringComparison.Ordinal);
+
+        // A DIFFERENT identity over the SAME content is the same state, and is withdrawn too.
+        var twin = Point("bbbbbbbbbbbb", "tree-1");
+        var over = new HistoryTool { WayForward = new WayForward("t", twin, "f15b942aaaa", now, "tree-1") };
+        Assert.False(over.CanComeForward);
+
+        // Genuinely different content: the way back stands.
+        var other = Point("cccccccccccc", "tree-2");
+        var real  = new HistoryTool { WayForward = new WayForward("t", other, "f15b942aaaa", now, "tree-1") };
+        Assert.True(real.CanComeForward);
+        Assert.Contains("is kept as", real.WayForwardText, StringComparison.Ordinal);
+        Assert.Contains(HistoryIds.Short(other.CommitId), real.ComeForwardText, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <b>Going back is a BUTTON in the panel, not only a right-click menu item</b> (owner,
+    /// 2026-09-08: there was no go-back button in the History window).
+    ///
+    /// <para>R-rc10-17 moved every row action to the row's own menu, which is right for the other
+    /// seven — and left this window's one primary action behind a gesture a designer has to guess at,
+    /// at the moment they are least inclined to go hunting. The menu item stays: one action, two
+    /// sites, and <see cref="HistoryTool.GoBack"/> is still the only implementation.</para>
+    ///
+    /// <para><b>And there is no button when it would land where the workspace already is</b> (owner,
+    /// 2026-09-08) — the same withdrawal <see cref="WayForward.LeadsSomewhereElse"/> makes for the way
+    /// back, applied to the selection.</para>
+    /// </summary>
+    [Fact]
+    public void GoingBackIsAButtonOnTheSurface_AndIsAbsentForTheStateAlreadyLoaded()
+    {
+        var now  = DateTimeOffset.UtcNow;
+        var tool = new HistoryTool();
+
+        var earlier = new RestorePoint("refs/x", new string('a', 40), new string('t', 40), 1, now,
+                                       CheckpointOrigin.SavePoint, "the working match",
+                                       "the working match", false, []);
+        var here    = new RestorePoint("refs/y", new string('b', 40), new string('u', 40), 2, now,
+                                       CheckpointOrigin.BeforeRestore, "before going back", null,
+                                       false, []);
+
+        tool.SetRows(new HistoryList.Result(
+            [new HistoryEntry(HistoryEntryKind.RestorePoint, null, here,    null, now),
+             new HistoryEntry(HistoryEntryKind.RestorePoint, null, earlier, null, now)], 0),
+            hasWorkspace: true);
+
+        Assert.False(tool.CanGoBackToSelection);            // nothing selected, nothing to name
+
+        tool.Selected = tool.Rows[1];
+        Assert.True(tool.CanGoBackToSelection);
+        Assert.Contains("the working match", tool.Selected!.GoBackText, StringComparison.Ordinal);
+
+        // A restore has happened and the workspace sits on `here`: that row offers no button, and
+        // every other row still does.
+        tool.WayForward = new WayForward("the working match", earlier, here.CommitId, now, here.TreeId);
+
+        tool.Selected = tool.Rows[0];
+        Assert.False(tool.CanGoBackToSelection);
+        tool.Selected = tool.Rows[1];
+        Assert.True(tool.CanGoBackToSelection);
+
+        // The button is really in the window, bound to that property and to the row's own wording.
+        string axaml = RestorePointsTests.ReadSource("src/Ui/Views/Revision/HistoryToolView.axaml");
+        Assert.Contains("x:Name=\"GoBackButton\"", axaml, StringComparison.Ordinal);
+        Assert.Contains("IsVisible=\"{Binding CanGoBackToSelection}\"", axaml, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1185,13 +1287,27 @@ public class OneHistoryPanelTests
         Assert.NotNull(back.PreRestore);
         Assert.Equal("tuesday", File.ReadAllText(ws.File_("cells/a/thing.csch")));
 
-        // The line names BOTH entries — where it went, and what the previous state was kept as.
-        var forward = new WayForward(tuesday.Point!.Label, back.PreRestore!);
+        // The line names BOTH entries — where it went, and what the previous state was kept as — and it
+        // names them by IDENTITY (owner, 2026-09-08). It used to quote their labels, which on the two
+        // entries a restore produces are circuitRF's own generated wording, so the sentence read "went
+        // back to 'workspace closed'. What you had was kept as 'your work before you went back'" and
+        // named neither state in a way anybody could act on.
+        var forward = new WayForward(tuesday.Point!.Label, back.PreRestore!,
+                                     tuesday.Point.CommitId, tuesday.Point.TakenUtc,
+                                     tuesday.Point.TreeId);
         var tool    = new HistoryTool { WayForward = forward };
 
         Assert.True(tool.HasWayForward);
-        Assert.Contains(tuesday.Point.Label,       tool.WayForwardText, StringComparison.Ordinal);
-        Assert.Contains(back.PreRestore!.Label,    tool.WayForwardText, StringComparison.Ordinal);
+        Assert.True(tool.CanComeForward);
+        Assert.Contains(HistoryIds.Short(tuesday.Point.CommitId),    tool.WayForwardText, StringComparison.Ordinal);
+        Assert.Contains(HistoryIds.Short(back.PreRestore!.CommitId), tool.WayForwardText, StringComparison.Ordinal);
+
+        // And the BUTTON names where it goes, rather than a direction that could be pressed for ever.
+        Assert.Contains(HistoryIds.Short(back.PreRestore!.CommitId), tool.ComeForwardText, StringComparison.Ordinal);
+
+        // Neither generated label reaches the sentence at all now, which is what stops two different
+        // states being named by the same three words.
+        Assert.DoesNotContain(back.PreRestore!.Label, tool.WayForwardText, StringComparison.Ordinal);
 
         // Following it is an ordinary restore, and it returns the tree — byte for byte.
         var forwardAgain = WorkspaceRestore.Restore(git, forward.KeptAs);

@@ -536,7 +536,8 @@ public partial class WorkspaceViewModel
 
         // R-rc10-18. Recorded BEFORE the reload, which replaces every panel instance — the refresh at
         // the end of the switch is what puts it on screen.
-        _wayForward     = new WayForward(version.Title, kept, version.CommitId);
+        _wayForward     = new WayForward(version.Title, kept, version.CommitId, version.WhenUtc,
+                                         version.TreeId);
         _wayForwardRoot = root;
 
         await ReloadWorkspaceAfterFilesChangedUnderneath();
@@ -578,7 +579,8 @@ public partial class WorkspaceViewModel
         // Before RC-10 this reassurance existed, was correct, and was filed in the panel the designer
         // had not opened: a restore begun from the Versions panel left them looking at a window with no
         // evidence that the afternoon they had just replaced still existed.
-        _wayForward     = new WayForward(point.Label, kept, point.CommitId);
+        _wayForward     = new WayForward(point.Label, kept, point.CommitId, point.TakenUtc,
+                                         point.TreeId);
         _wayForwardRoot = root;
 
         await ReloadWorkspaceAfterFilesChangedUnderneath();

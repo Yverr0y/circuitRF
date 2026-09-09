@@ -54,10 +54,28 @@ public partial class HistoryToolView : UserControl
     /// Puts keyboard focus in the list. Posted, because the ask arrives as a dialog is closing and the
     /// window has not finished handing focus back yet — grabbing before that lands means grabbing
     /// something the window then takes away again.
+    ///
+    /// <para><b>The panel's own WINDOW is activated first, and that is not the same operation</b>
+    /// (owner, 2026-09-08: after Keep This Version the workspace window came forward, not the floated
+    /// History window the button had been pressed in).</para>
+    ///
+    /// <para>Both keep dialogs are shown over the WORKSPACE window on purpose — they are modal to the
+    /// shell, and owning them by a float would leave the shell clickable underneath. So the platform
+    /// correctly hands activation back to the shell when the dialog closes, and a control focused in
+    /// a window the operating system has just deactivated receives no keystrokes and shows no
+    /// highlight: the ask was being honoured into a window nobody was looking at. Docked, this is a
+    /// no-op, because the panel's top level IS the window already coming forward.</para>
     /// </summary>
     private void OnActivationFocusRequested() =>
         Avalonia.Threading.Dispatcher.UIThread.Post(
-            () => HistoryRows.Focus(), Avalonia.Threading.DispatcherPriority.Input);
+            () =>
+            {
+                if (Avalonia.Controls.TopLevel.GetTopLevel(this) is Avalonia.Controls.Window window)
+                    window.Activate();
+
+                HistoryRows.Focus();
+            },
+            Avalonia.Threading.DispatcherPriority.Input);
 
     private HistoryTool? Tool => DataContext as HistoryTool;
 

@@ -93,6 +93,16 @@ public static class HistoryDates
     }
 
     /// <summary>
+    /// A moment inside a sentence, at the shortest spelling that stays unambiguous: the clock time on
+    /// its own when it is today, and <see cref="DayAndTime"/> otherwise. Used where the sentence has
+    /// already established which day it is talking about.
+    /// </summary>
+    public static string ClockOrDayAndTime(DateTimeOffset whenUtc, DateTimeOffset nowUtc)
+        => whenUtc.ToLocalTime().Date == nowUtc.ToLocalTime().Date
+         ? whenUtc.ToLocalTime().ToString("HH:mm", CultureInfo.CurrentCulture)
+         : DayAndTime(whenUtc, nowUtc);
+
+    /// <summary>
     /// The whole moment, with its zone — <b>what the expander carries and the row does not</b>
     /// (R-rc10-14). The row answers <i>which moment was this</i>; this answers <i>what exactly is
     /// this</i>, and the offset is the part that settles an argument about a workspace that has been

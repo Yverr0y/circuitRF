@@ -307,9 +307,35 @@ public static class HistoryMessages
     /// afternoon they had just replaced still existed — the reassurance was implemented, correct, and
     /// in the room the designer was not in.</para>
     /// </summary>
-    public static string WayForward(string wentBackTo, string keptAs) =>
-        $"This workspace went back to '{wentBackTo}'. What you had before that was kept as '{keptAs}' "
-      + "— go to it to come forward again.";
+    public static string WayForward(
+        string         nowAtId,
+        DateTimeOffset nowAtUtc,
+        string         keptAsId,
+        DateTimeOffset keptAsUtc,
+        DateTimeOffset nowUtc)
+    {
+        string here = HistoryIds.Short(nowAtId);
+        string kept = HistoryIds.Short(keptAsId);
+
+        return (here.Length > 0
+                 ? $"Now at {here}, {HistoryDates.DayAndTime(nowAtUtc, nowUtc)}."
+                 : $"Now at the state from {HistoryDates.DayAndTime(nowAtUtc, nowUtc)}.")
+             + (kept.Length > 0
+                 ? $" Your work up to {HistoryDates.ClockOrDayAndTime(keptAsUtc, nowUtc)} is kept as {kept}."
+                 : "");
+    }
+
+    /// <summary>
+    /// What the button under that line says. <b>It names its destination</b> rather than a direction,
+    /// which is the whole of what was wrong with "Come forward again" (owner, 2026-09-08): going back
+    /// and coming forward are one operation performed twice, so a button labelled with a direction can
+    /// be pressed for ever and never says where the last press took you. Two presses land on two
+    /// identities and the label changes between them, which is the evidence that something happened —
+    /// and from the third press on the two settle into a pair, because WorkspaceRestore stops recording
+    /// a state the history already holds.
+    /// </summary>
+    public static string GoBackToId(string commitId)
+        => HistoryIds.Short(commitId) is { Length: > 0 } id ? "Go back to " + id : "Go back to that state";
 
     // ── RC-11: correcting what you wrote (§5.11) ──────────────────────────────────────────────────
 

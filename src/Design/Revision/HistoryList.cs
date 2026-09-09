@@ -223,14 +223,47 @@ public sealed record HistoryEntry(
 /// <param name="WentBackTo">The entry the workspace was put back to, as its title read at the time.</param>
 /// <param name="KeptAs">The entry holding what was replaced — the way forward itself.</param>
 /// <param name="WentBackToId">
-/// <b>Which entry <paramref name="WentBackTo"/> was copied from</b>, so a correction to that title can
-/// find this copy and replace it (owner, 2026-09-07). A title a designer has deleted must not go on
-/// being read back to them out of a sentence nothing updates — the same defect
-/// <see cref="RestoreProvenance.Retitle"/> closes on the copy bound for the next commit, in the copy
-/// bound for the panel. Empty means unknown, which matches nothing and is left alone.
+/// <b>The identity of the state the workspace was put into</b> — which is what the sentence NAMES it by
+/// since 2026-09-08, a generated label having turned out to name every second entry identically.
+///
+/// <para>It is still tracked across a correction for the reason it originally was: both correction
+/// paths that rewrite a commit change its identity, and a sentence left pointing at the old one would
+/// quietly stop matching the row it is about. Empty means unknown, which matches nothing and is left
+/// alone.</para>
 /// </param>
-public sealed record WayForward(string WentBackTo, RestorePoint KeptAs, string WentBackToId = "")
+/// <param name="WentBackToUtc">When that state was taken, for the sentence to say so beside the
+/// identity. An identity alone answers <i>which</i> and never <i>when</i>, and <i>when</i> is what a
+/// designer is actually navigating by.</param>
+/// <param name="WentBackToTreeId">The CONTENT the workspace was put into, for
+/// <see cref="LeadsSomewhereElse"/> to compare against. The identity would not do on its own: two
+/// entries holding identical content are two different identities, and a way back to one of them is
+/// still a way back to where the designer already is.</param>
+public sealed record WayForward(
+    string          WentBackTo,
+    RestorePoint    KeptAs,
+    string          WentBackToId    = "",
+    DateTimeOffset? WentBackToUtc   = null,
+    string          WentBackToTreeId = "")
 {
+    /// <summary>
+    /// <b>Whether the way back goes anywhere</b> (owner, 2026-09-08: the panel said <i>Now at
+    /// f15b942</i> over a button reading <i>Go back to f15b942</i>).
+    ///
+    /// <para>A restore that replaced content identical to what it wrote replaced nothing, and
+    /// <see cref="WorkspaceRestore"/> then resolves the entry holding the state being replaced to an
+    /// entry holding the target's own content — correctly, because that IS where the workspace was.
+    /// The way back is what stops being meaningful, not the restore: there is no earlier state to
+    /// return to, so the action is withdrawn and the line says only where the workspace is.</para>
+    ///
+    /// <para><b>Content first, identity as the backstop.</b> The tree is the fact that matters; the
+    /// identity catches the same defect on a record built before the tree was carried, and costs one
+    /// comparison.</para>
+    /// </summary>
+    public bool LeadsSomewhereElse
+        => !string.Equals(WentBackToId, KeptAs.CommitId, StringComparison.Ordinal)
+        && !(WentBackToTreeId.Length > 0
+             && string.Equals(WentBackToTreeId, KeptAs.TreeId, StringComparison.Ordinal));
+
     /// <summary>
     /// This sentence with the corrected wording in it, when the correction is to the entry this names.
     /// Returns the same instance otherwise — matched on IDENTITY, never on the text, because titles

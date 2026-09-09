@@ -1,5 +1,154 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## Owner report, 2026-09-08 — the History window: a stuck-translucent float, and rows that all read alike
+
+### A floating panel goes half-transparent on a click of its title bar, and stays that way
+
+Reported against the History panel torn off into its own window: clicking the title bar without
+dragging leaves the window translucent until the title bar is clicked a second time.
+
+**It is a latch in Dock 12.0.0.2 that the platform never releases.** `HostWindow.OnPointerPressed` →
+`MoveDrag` → `TryBeginWindowDrag` sets the `:dragging` pseudo-class *before* it knows whether a drag
+will follow, and only `OnPointerReleased` clears it. Its Fluent theme styles
+`HostWindow:toolwindow:dragging` with `Opacity 0.5`, `Background null` and
+`TransparencyLevelHint = Transparent` — that is the translucency, and it is a perfectly good drag
+affordance. Between those two handlers sits `Window.BeginMoveDrag`, which on macOS is
+`Avalonia.Native`'s `_native.BeginMoveDrag()` → `[NSWindow performWindowDragWithEvent:]`: an AppKit
+event loop that swallows the mouse-up. Avalonia is never told the button came up, `OnPointerReleased`
+does not run, and the class stays set until some later release inside the window happens to clear it
+— which is exactly the reported remedy of clicking again.
+
+**It is not specific to a click that never moved.** A real drag leaves the class set too; it is
+simply less noticeable, because the click that follows a drag usually lands in the window and clears
+it. Confirmed by decompiling both packages rather than inferred: the setter/clearer pair in
+`Dock.Avalonia`, the `0.5` in `Dock.Avalonia.Themes.Fluent`'s compiled XAML, and the one-line
+`BeginMoveDrag` in `Avalonia.Native`.
+
+**Fixed by watching for a pointer MOVE with no button held**, in `Views/HostWindowDragLatch.cs`,
+attached in `CrfHostWindow`'s constructor beside the two existing per-`TopLevel` repairs. There is no
+release to listen for — that is the defect — and what always follows an OS window drag is a move over
+the window with the button up. The button test is what leaves a genuine drag translucent: while one is
+running the platform delivers nothing here at all, and if it ever did, the button would be down. Only
+the pseudo-class is cleared; Dock's own private `_draggingWindow`/`_mouseDown` still settle on the
+next release exactly as they do now, the difference being that nobody is looking through the window
+while they wait.
+
+### Every automatic entry rendered under the same three words
+
+An entry nobody titled had no name, only circuitRF's wording for how it came about — so a workspace
+closed forty times listed forty rows reading *workspace closed*, and §5.8's own report of a restore
+had to name two different states by two generated phrases: *"This workspace went back to 'workspace
+closed'. What you had before that was kept as 'your work before you went back' — go to it to come
+forward again."*
+
+**The short identity is on the row now** (`HistoryIds`, 7 characters, git's own abbreviation), the
+generated labels say only what KIND of moment it was (*closed*, *before going back*), and the
+way-back line names both states by identity and time. The whole identity is still what the expander
+shows and what the copy action puts on the clipboard — R-rc10-15's finding is unchanged, because this
+is a second rendering of one string rather than a second value.
+
+**`HistoryEntry.LabelOf` is why the reword reached entries a designer already has.** It renders a
+generated label afresh from `CheckpointMessage.SubjectFor` and reads back only what a *person* wrote,
+so the shortened wording applies to a workspace recorded last month rather than only to entries made
+from now on.
+
+### "Come forward again" could be pressed for ever
+
+Reported as a control that looked like it was doing nothing. It was doing something every time: going
+back and coming forward are one operation, so each press restored the other state and offered the way
+back to the one just left — for ever, and with a button whose label never changed to prove it.
+
+**The button names its destination now** (`HistoryMessages.GoBackToId` → *Go back to 3c4d8ba*), so two
+presses read as two different actions. From the third press on the two identities settle into a fixed
+pair, because `WorkspaceRestore` already declines to record a state the live list holds — the
+ping-pong fix of 2026-09-07, which stopped the entries growing but left the wording unable to show it.
+
+### The way back named the state the workspace was already in
+
+Reported as a card reading *Now at f15b942* over a button reading *Go back to f15b942*.
+
+**`WorkspaceRestore` is right and the panel was wrong.** When the target holds the content the
+workspace already had, the restore replaces nothing, so the pre-restore checkpoint records nothing and
+`PreRestore` resolves to whichever live entry holds the current tree — which in that case is an entry
+holding the target's own content. That is a correct answer to *where was the workspace*; it is simply
+not an answer to *where can it go back to*, and there is no such place.
+
+**`PreRestore` was deliberately not made null.** `GoBackTo` pattern-matches on it, so a null there
+means the workspace is written and then never reloaded — silent and severe, and already recorded as
+such on 2026-09-07. The withdrawal is therefore in the offer, not in the result: `WayForward`
+`.LeadsSomewhereElse` compares the target's TREE against the kept entry's, the button is hidden when
+they match, and the sentence drops its second clause so the line says only where the workspace is.
+`HistoryTool.ComeForward` checks the same thing, because a hidden button is not the only way in.
+
+**Content decides it, with identity as the backstop.** Two entries over one tree are two identities
+and one state, so an identity comparison on its own would still have offered the second of them.
+
+### There was no go-back button in the History window
+
+Reported as not being able to find a way back to the previous state after going to a different one.
+The action existed and worked — it was on the row's right-click **menu**, and nowhere else.
+
+**R-rc10-17 is right about the other seven row actions and wrong about this one.** Moving *keep
+permanently*, *compare*, *rename*, *tidy away* and the rest to the row's own menu is what keeps the
+header from being a strip of glyphs. But going back is the whole reason this panel exists, and it was
+the one action reachable only by a gesture a designer has to guess at — asked for at the moment they
+are least inclined to go hunting for it. The way-back card is not a substitute: it is session-only
+and describes one restore, so it says nothing at all until a restore has already happened.
+
+**It is a labelled button under the list**, naming its destination from `HistoryRowItem.GoBackText` —
+the same string the menu item carries, so a generated label is still never quoted. The menu entry
+stays: one action, two sites, and `HistoryTool.GoBack` is still the only implementation, which the
+gate holds by counting the handler's callers.
+
+**And it is absent when it would land where the workspace already is** — the withdrawal
+`WayForward.LeadsSomewhereElse` makes for the way back, applied to the selection. The session already
+knows which entry the workspace was last put into, so this costs no read: a go-back to that row is a
+full reload that changes nothing, and offering one is how a designer learns that a button does not
+work.
+
+### The identity and title columns stepped in and out down the list
+
+The row's time column is `Auto`-width, so each row sized it to its own phrase — *just now* against
+*37 minutes ago* against *14:32* — and everything to the right of it started at a different x on
+every row.
+
+The column is a `SharedSizeGroup` inside a `Grid.IsSharedSizeScope` on the list, so the widest
+realised row sets it for all of them, **with a `MinWidth` floor** so a screenful of short phrases does
+not collapse the column and then jump when an older row scrolls into view. A fixed width was the other
+candidate and was not taken: the longest phrase the formatter can produce is bounded, but its pixel
+width is not — it depends on the face and the user's text scaling.
+
+### A dialog started from a FLOATED panel handed the window back to the shell
+
+Reported for Keep This Version: the button was pressed in the floated History window, and when the
+dialog closed the workspace window came forward instead.
+
+**`ThenFocusThePanel` was already doing exactly what it was written to do**, and it was not enough.
+It calls `tool.RequestActivationFocus()`, which the view honours by focusing the list — a
+KEYBOARD-focus operation, scoped to one top level. Both keep dialogs are deliberately shown over the
+workspace window, because they are modal to the shell and owning them by a float would leave the
+shell clickable underneath; so the platform correctly activates the shell when the dialog closes, and
+the panel then focused a control in a window the operating system had just deactivated. No
+keystrokes, no highlight, and nothing to see. Docked it worked, which is why it was not caught: the
+panel's top level was the window coming forward anyway.
+
+`HistoryToolView.OnActivationFocusRequested` activates the panel's own `TopLevel` before focusing the
+list. Docked, that is a no-op on the window that is already active.
+
+### Two defects found while investigating the restore's cost, not yet fixed
+
+Both are consequences of a restore reloading through `SwitchToWorkspace`, the *open a different
+workspace* path, and both are written up in `docs/sonnet-briefs/brief-history-restore-in-place.md`:
+
+- **The restored `.cws` is overwritten a moment after it is restored.** `PersistOutgoingWorkspaceSession()`
+  runs at the top of the switch and writes the current session's tabs and dock arrangement over the
+  `.cws` the restore just brought back.
+- **Every restore probably writes a spurious *closed* entry.** `TakeCloseCheckpoint` runs next.
+  `WorkspaceCheckpoints.Take` skips an unchanged tree — but the write above has just changed it, so
+  the tree test passes and an automatic entry is recorded immediately after every restore. History
+  noise generated by the act of reading history, and a plausible contributor to the complaint above.
+
+
 ## Owner reports, 2026-09-08 — the macOS menu with no window, and a crash closing one
 
 ### The background menu named an operation it cannot perform

@@ -72,6 +72,11 @@ public class CrfHostWindow : HostWindow
         // fallback is this window: a floating tool window exists to hold panels, so closing it is what
         // the ✕ means even when no single panel can be named.
         Views.ToolChromeCloseButton.Attach(this, () => Views.WorkspaceLocator.For(this), CloseFloatedToolPanels);
+
+        // A click on this window's title bar leaves Dock's `:dragging` class set, because the mouse-up
+        // that would clear it is swallowed by the platform's own window-drag loop — so the window sits
+        // at half opacity until some later click happens to release inside it. See HostWindowDragLatch.
+        Views.HostWindowDragLatch.Attach(this);
     }
 
     /// <summary>

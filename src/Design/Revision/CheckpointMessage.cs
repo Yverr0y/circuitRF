@@ -51,14 +51,18 @@ public static class CheckpointMessage
         return origin switch
         {
             CheckpointOrigin.SavePoint       => trimmed.Length > 0 ? trimmed : UnnamedSavePoint,
-            CheckpointOrigin.WorkspaceClosed => "workspace closed",
+            CheckpointOrigin.WorkspaceClosed => "closed",
             CheckpointOrigin.BeforeBatch     => "before: " + (trimmed.Length > 0 ? trimmed : UnnamedBatch),
-            // Owner, 2026-09-07: "before going back" named a MOMENT and not a thing, so the list read
-            // as an instruction and the menu built from it read "Go back to 'before going back'".
-            // This entry is the designer's own work as it stood a second before a restore replaced it
-            // — the single most reassuring row in the panel — and naming the work is what makes that
-            // legible. See HistoryRowItem.GoBackText, which no longer quotes a generated label at all.
-            CheckpointOrigin.BeforeRestore   => "your work before you went back",
+            // Owner, 2026-09-08. These labels are no longer what identifies a row — the entry's own
+            // short identity is, and it is on the row beside the time. So the label went back to naming
+            // the KIND of moment in as few words as carry it, which is all a label can honestly do when
+            // a workspace holds forty of them.
+            //
+            // "before going back" was tried once before and withdrawn (2026-09-07) because the menu
+            // built from it read "Go back to 'before going back'". That is fixed at its source:
+            // HistoryRowItem.GoBackText quotes only words a PERSON wrote, so a generated label reaches
+            // no menu item now.
+            CheckpointOrigin.BeforeRestore   => "before going back",
             CheckpointOrigin.RecordingOff    => "recording turned off",
             CheckpointOrigin.RecordingOn     => "recording turned back on",
             _                                => UnnamedSavePoint,

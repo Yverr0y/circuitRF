@@ -421,6 +421,18 @@ namespace CircuitRF.Render.DataDisplay
         /// searches its step for.</summary>
         private const int PolarRingTarget = 5;
 
+        /// <summary>How far the Smith chart's grid numbers are allowed to shrink with the disc
+        /// before they stop shrinking and start being dropped instead. A face much under half the
+        /// tick size stops being read and starts being texture, and a chart that small has more to
+        /// gain from three legible numbers than from ten unreadable ones.</summary>
+        private const double SmithLabelMinScale = 0.45;
+
+        /// <summary>Font sizes of disc RADIUS below which the Smith grid carries no numbers at all.
+        /// At the floor scale a number is about two font sizes wide, so a disc under this is one a
+        /// single label would very nearly span — there is no chart left in there to annotate.
+        /// </summary>
+        private const double SmithLabelMinDiscFaces = 4.0;
+
         /// <summary>Canvas pixels below which the polar minor ticks stop being drawn. Absolute
         /// rather than a multiple of the line width on purpose: this is a question about what the
         /// eye can still separate, and a comb finer than a few pixels reads as a grey band on the
@@ -502,6 +514,19 @@ namespace CircuitRF.Render.DataDisplay
 
             double[] constantRValues = { 0, 0.5, 1, 2, 5, 10, -0.5, -0.8, -1.2, -1.5, -2, -2.5, -3, -4, -7, -12 };
             double[] constantXValues = { 0.2, 0.5, 1, 2, 5, 10 };
+
+            // The circles that carry a NUMBER, in the order the numbers are PLACED — which is a
+            // priority, because a label landing on one already placed is dropped (see below). The
+            // unit circle goes first: r = 1 is the chart's own centre and x = ±1 its cardinal arcs,
+            // and a zoomed-out chart with no 1 on it says nothing at all. The rest run outwards-in
+            // from the roomy r = 0 side, so what is lost is what piles into r → ∞ at the right.
+            //
+            // Resistance is the positive family only: r = 0 is the outline and the negative values
+            // are the extended chart outside |Γ| = 1, and neither has ever been labelled. Reactance
+            // is `constantXValues` reordered — that array is INDEXED by the arc mask tables above
+            // and must keep its own order.
+            double[] constantRLabelValues = { 1, 0.5, 2, 5, 10 };
+            double[] constantXLabelValues = { 1, 0.2, 0.5, 2, 5, 10 };
 
             var rCircles = new (float cx, float cy, float r, double rVal)[constantRValues.Length];
             for (int i = 0; i < constantRValues.Length; i++)
@@ -635,65 +660,86 @@ namespace CircuitRF.Render.DataDisplay
             if (unitPxR > 0 && float.IsFinite(unitPxR))
                 canvas.DrawCircle(unitCtr.X, unitCtr.Y, unitPxR, smithPaint);
 
-            // The radius numbers, whatever the radius is. This used to be gated on
-            // `axes.Window.Width < 8` as well, which was safe only while a Polar plot could never
-            // frame anything much bigger than the unit circle: once autoscale is allowed off that
-            // floor (Plot.UnityMinimumApplies), a locus of tens of ohms drew a grid of unlabelled
-            // rings and there was nothing on the plot to say what scale it was at.
-            if (canvasSize.W > 250)
+            // ---- The grid numbers ----------------------------------------------------------
+            //
+            // A Smith chart's grid is FIXED in the Γ plane — its arcs ARE the unit disc's — so
+            // unlike a polar plot's rings it cannot be re-latticed for a wider window. Zoom out and
+            // the whole chart is simply a smaller object in a bigger box, and its numbers have to
+            // travel with it. They did not: the size came from the CANVAS (`FontSizeTicks * lw`),
+            // so as the window widened the anchors closed on each other at constant text size and
+            // the numbers printed over one another — crowded at ±2, a blob by ±5, a smudge at ±10
+            // (owner, 2026-09-08).
+            //
+            // Two things are done about it and BOTH are needed. The text scales with the disc, so
+            // the chart stays self-similar as far down as text can still be read; and what will not
+            // fit even then is DROPPED rather than overprinted, because past the scale floor there
+            // is no size that makes room. Scaling alone ends in two-pixel mush; thinning alone
+            // throws away numbers a smaller face would have fitted.
+            if (canvasSize.W > 250 && unitPxR > 0 && float.IsFinite(unitPxR))
             {
-                var (lblFont, lblPaint) = MakeTextObjects(axes.FontSizeTicks * 0.85, lw, theme);
+                // The disc's radius runs as 1/(half-window), so this IS the chart's own zoom, and
+                // it is exactly 1 at the unit window — where nothing about the picture changes. It
+                // comes from the window's WIDTH rather than from unitPxR so that panning, which
+                // moves the disc without resizing it, cannot change the size of a number.
+                double zoom  = axes.Window.Width > 2.0 ? 2.0 / axes.Window.Width : 1.0;
+                double scale = Math.Max(SmithLabelMinScale, zoom);
+
+                var (lblFont, lblPaint) = MakeTextObjects(axes.FontSizeTicks * 0.85 * scale, lw, theme);
                 using var _lf2 = lblFont;
                 using var _lp2 = lblPaint;
                 lblPaint.Color = RenderTheme.WithOpacity(lblPaint.Color, axes.MinorTransparencyScale);
 
                 lblFont.GetFontMetrics(out var metrics);
 
-                double[] rLabels = axes.Window.Width > 3
-                    ? new[] { 0.5, 1.0, 2.0, 5.0 }
-                    : new[] { 0.5, 1.0, 2.0, 5.0, 10.0 };
+                // Below this the chart is a glyph rather than a chart: a number is about as wide as
+                // the disc it would annotate, and thinning would leave one arbitrary survivor
+                // sitting on a smudge. Nothing is the better answer there than something.
+                bool numbered = unitPxR >= lblFont.Size * SmithLabelMinDiscFaces;
 
-                foreach (double rVal in rLabels)
+                // What has already been placed. A Smith chart's numbers crowd in TWO dimensions —
+                // the reactance arcs' labels come down the outside of the disc towards the same
+                // r → ∞ point the resistance numbers run into — so this is a rect overlap
+                // test, not the one-dimensional "taken so far" edge DrawPolarGrid gets away with.
+                var   placed = new List<SKRect>();
+                float pad    = lblFont.Size * 0.30f;
+
+                void Place(string text, float left, float baselineY)
                 {
-                    string text    = " " + rVal.ToString("G4");
-                    var    g       = RfHelpers.Z2G(new Complex(rVal, 0));
-                    var    pt      = tf.PrimaryToCanvas(g.Real, g.Imaginary);
-                    float  baselineY = pt.Y - metrics.Ascent;
-                    canvas.DrawText(text, pt.X, baselineY,
-                        SKTextAlign.Left, lblFont, lblPaint);
+                    var box = new SKRect(left, baselineY + metrics.Ascent,
+                                         left + lblFont.MeasureText(text), baselineY + metrics.Descent);
+                    var probe = SKRect.Inflate(box, pad, pad);
+                    foreach (var taken in placed)
+                        if (taken.IntersectsWith(probe)) return;
+
+                    placed.Add(box);
+                    canvas.DrawText(text, left, baselineY, SKTextAlign.Left, lblFont, lblPaint);
                 }
 
-                double[] xLabels = axes.Window.Width > 3
-                    ? constantXValues.Take(constantXValues.Length - 1).ToArray()
-                    : constantXValues;
-
-                foreach (double xVal in xLabels)
+                if (numbered)
                 {
-                    var g   = RfHelpers.Z2G(new Complex(0, xVal));
-                    var ptU = tf.PrimaryToCanvas( g.Real,  g.Imaginary);
-                    var ptD = tf.PrimaryToCanvas( g.Real, -g.Imaginary);
-
-                    string textU  = " "  + xVal.ToString("G4");
-                    string textD  = " -" + xVal.ToString("G4");
-                    float  twU    = lblFont.MeasureText(textU);
-                    float  twD    = lblFont.MeasureText(textD);
-
-                    float baselineYU = ptU.Y - metrics.Ascent;
-                    float baselineYD = ptD.Y - metrics.Descent;
-
-                    if (xVal <= 1.0)
+                    foreach (double rVal in constantRLabelValues)
                     {
-                        canvas.DrawText(textU, ptU.X, baselineYU,
-                            SKTextAlign.Left, lblFont, lblPaint);
-                        canvas.DrawText(textD, ptD.X, baselineYD,
-                            SKTextAlign.Left, lblFont, lblPaint);
+                        var g  = RfHelpers.Z2G(new Complex(rVal, 0));
+                        var pt = tf.PrimaryToCanvas(g.Real, g.Imaginary);
+                        Place(" " + rVal.ToString("G4"), pt.X, pt.Y - metrics.Ascent);
                     }
-                    else
+
+                    foreach (double xVal in constantXLabelValues)
                     {
-                        canvas.DrawText(textU, ptU.X - twU, baselineYU,
-                            SKTextAlign.Left, lblFont, lblPaint);
-                        canvas.DrawText(textD, ptD.X - twD, baselineYD,
-                            SKTextAlign.Left, lblFont, lblPaint);
+                        var g   = RfHelpers.Z2G(new Complex(0, xVal));
+                        var ptU = tf.PrimaryToCanvas( g.Real,  g.Imaginary);
+                        var ptD = tf.PrimaryToCanvas( g.Real, -g.Imaginary);
+
+                        string textU = " "  + xVal.ToString("G4");
+                        string textD = " -" + xVal.ToString("G4");
+
+                        // Past x = 1 the label would run off the right of the disc, so it hangs
+                        // from the anchor's left instead. Unchanged from before the thinning.
+                        float leftU = xVal <= 1.0 ? ptU.X : ptU.X - lblFont.MeasureText(textU);
+                        float leftD = xVal <= 1.0 ? ptD.X : ptD.X - lblFont.MeasureText(textD);
+
+                        Place(textU, leftU, ptU.Y - metrics.Ascent);
+                        Place(textD, leftD, ptD.Y - metrics.Descent);
                     }
                 }
             }
