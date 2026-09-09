@@ -379,6 +379,24 @@ public static class HbSmallSignal
         public int SparseSolves;
         /// <summary>Probe frequencies skipped as degenerate.</summary>
         public int DegeneratePoints;
+
+        // ── WSP-8's own counters (R-wsp8-9) ─────────────────────────────────
+        /// <summary>Sparse LU factorisations of the linear partition performed BY the small-signal
+        /// sweep. Zero after the first operating point of a drive sweep is the whole claim of
+        /// brief-wsprobe-8, and this is the counter that states it.</summary>
+        public int SparseFactorizations;
+        /// <summary>Transposed (Hermitian) back-substitutions — the rows of <c>M⁻¹</c> of
+        /// R-wsp8-1.</summary>
+        public int TransposedSolves;
+        /// <summary>Stamps of the linear partition. One per frequency per operating point is what
+        /// the cache's bit-for-bit certificate costs, and it is not free: it is the price of an
+        /// invalidation rule no caller has to remember (R-wsp8-4).</summary>
+        public int Stamps;
+        /// <summary>Cache entries reused, and entries computed.</summary>
+        public int CacheHits, CacheMisses;
+        /// <summary>The sideband census of R-wsp8-5: distinct <c>|ω|</c> actually factored, distinct
+        /// SIGNED sideband frequencies, and the number the sweep would visit if none coincided.</summary>
+        public int DistinctSidebandFrequencies, SignedSidebandFrequencies, TotalSidebandVisits;
     }
 
     /// <summary>
@@ -406,7 +424,15 @@ public static class HbSmallSignal
     /// <c>−1</c> — the same one place a wrong guess survives every symmetric test that
     /// brief-wsprobe-1 R-wsp1-14(a) holds shut for the linear engine.</para>
     /// </summary>
-    public static Complex[][,] SolveProbes(
+    /// <summary>
+    /// <b>WSP-5's straightforward path, kept as the oracle brief-wsprobe-8's fast path is measured
+    /// against</b> (R-wsp8-9(b)). Every sparse factorisation and every sparse solve of the
+    /// small-signal sweep happens here, per operating point — which is exactly the cost
+    /// <see cref="SolveProbes"/> removes. Nothing calls this in a shipped run; it exists so the
+    /// comparison is against code rather than against a remembered answer, and so the arithmetic
+    /// the fast path rearranges stays written down in the form it was derived in.
+    /// </summary>
+    public static Complex[][,] SolveProbesStraightforward(
         ElaboratedNetlist netlist, HbLinearExtractor extractor, ISidebands sb,
         ProbeSite[] probes, double[] ssFreqsHz, Complex[,] yDc, Counters counters,
         string commensurateWith, Func<bool>? abort = null)
@@ -568,6 +594,199 @@ public static class HbSmallSignal
             extractor.InvalidateLinear(omegaSs);
         }
         return wsp;
+    }
+
+    // ── WSP-8: the same answer with no sparse work per operating point ───────
+
+    /// <summary>
+    /// The branch row each probe's series injection and current reading address, read off the
+    /// models AFTER the assembly that allocated them — the HB assembly numbers branches its own
+    /// way, so the index is the stamp's, never the model's own idea of one.
+    /// </summary>
+    private static int[] BranchRows(ElaboratedNetlist netlist, ProbeSite[] probes, int size)
+    {
+        var br = new int[probes.Length];
+        for (int i = 0; i < probes.Length; i++)
+        {
+            br[i] = ((SeriesProbeModelBase)netlist.Components[probes[i].ComponentIndex].Model)
+                    .LastBranchIndex;
+            if (br[i] < 0 || br[i] >= size)
+                throw new InvalidOperationException(
+                    $"WSProbe '{probes[i].Label}' allocated no branch in the harmonic-balance " +
+                    "assembly, so its small-signal injections have nowhere to go.");
+        }
+        return br;
+    }
+
+    /// <summary>
+    /// Fill the cache's probe blocks for a whole range before any sideband-only entry is made, so a
+    /// probe frequency that is another point's sideband is factored once rather than twice. Runs
+    /// only while the cache is keeping probe blocks at all — under either budget fallback
+    /// (R-wsp8-8) nothing would be kept and the pass would be pure cost.
+    /// </summary>
+    private static bool Precompute(
+        HbLinearExtractor extractor, double[] ssFreqsHz, int lo, int hi, ISidebands sb,
+        HbSmallSignalCache cache, Func<int, HbSmallSignalCache.ProbeGeometry> geometry,
+        Counters counters, int worker, Func<bool>? abort)
+    {
+        bool any = false;
+        for (int fi = lo; fi < hi; fi++)
+        {
+            if (abort?.Invoke() == true) return any;
+            double omegaSs = 2.0 * Math.PI * ssFreqsHz[fi];
+            if (sb.IsDegenerate(omegaSs)) continue;
+
+            cache.ProbeBlockAt(extractor, omegaSs, geometry, counters, worker);
+            any = true;
+
+            // The tier is decided on the first entry; below Full there is nothing to prefill.
+            if (cache.ChosenTier != HbSmallSignalCache.Tier.Full) return any;
+        }
+        return any;
+    }
+
+    /// <summary>
+    /// The <c>wsp</c> matrix at every probe frequency — the same quantity
+    /// <see cref="SolveProbesStraightforward"/> computes, with every operating-point-INDEPENDENT
+    /// piece taken from <paramref name="cache"/> instead of being recomputed (brief-wsprobe-8 §2–§3).
+    ///
+    /// <para><b>What is left per operating point is dense only.</b> The cache supplies
+    /// <c>Y_NN</c> at every sideband, and at <c>ω_ss</c> also <c>W</c> (the reading of each
+    /// injection with the interface open), <c>T</c> (the reading per unit interface current) and
+    /// <c>I_src</c> (each injection's Norton excitation). What remains is one dense factorisation of
+    /// <c>J_ss</c> and <c>2N</c> dense back-substitutions — the honest floor for this formulation,
+    /// and genuinely per operating point because the device spectra are.</para>
+    ///
+    /// <para>The arithmetic is R-wsp5-5's, rearranged and not replaced: <c>J_ss·V = −RHS</c> with the
+    /// Norton excitation at the zero sideband, the balance <c>I_nl,0 = −(Y_NN·V[·,0] + I_src)</c>
+    /// read there, and the reading <c>r = W[p, ·] + T·(−I_nl,0)</c> — which is the back-solve of
+    /// step 4 with the <c>2N</c> rows of <c>M⁻¹</c> already taken.</para>
+    /// </summary>
+    public static Complex[][,] SolveProbes(
+        ElaboratedNetlist netlist, HbLinearExtractor extractor, ISidebands sb,
+        ProbeSite[] probes, double[] ssFreqsHz, Complex[,] yDc, Counters counters,
+        string commensurateWith, HbSmallSignalCache cache, Func<bool>? abort = null)
+    {
+        var wsp = new Complex[ssFreqsHz.Length][,];
+        SolveProbeRange(netlist, extractor, sb, probes, ssFreqsHz, 0, ssFreqsHz.Length, wsp,
+                        yDc, counters, commensurateWith, cache, worker: 0, abort);
+        return wsp;
+    }
+
+    /// <summary>
+    /// One contiguous chunk of the tickle grid, written into <paramref name="wsp"/> BY INDEX —
+    /// R-wsp8-9's parallel form. The grid is embarrassingly parallel: each point's arithmetic is
+    /// unchanged and each worker writes only its own slice, so nothing is merged, nothing is
+    /// reordered, and the result is bit-identical to the serial run at every degree. Each worker
+    /// brings its own netlist copy, its own extractor and its own cache slice; the operating point's
+    /// two-sided spectra are read-only and shared.
+    /// </summary>
+    public static void SolveProbeRange(
+        ElaboratedNetlist netlist, HbLinearExtractor extractor, ISidebands sb,
+        ProbeSite[] probes, double[] ssFreqsHz, int lo, int hi, Complex[][,] wsp,
+        Complex[,] yDc, Counters counters, string commensurateWith,
+        HbSmallSignalCache cache, int worker, Func<bool>? abort = null)
+    {
+        int np = probes.Length, size = 2 * np;
+        int nInt = extractor.InterfaceCount;
+        var nan = new Complex(double.NaN, double.NaN);
+
+        // A range is exactly one operating point on one worker, so this is where the cache's
+        // validation epoch turns over — nothing else has to remember to say so.
+        cache.BeginOperatingPoint(worker);
+
+        if (nInt * sb.Count > ConversionMatrixCeiling)
+            throw new InvalidOperationException(TooLargeMessage(nInt * sb.Count, nInt, sb.Count));
+
+        Complex[,] YAt(double omega) => cache.YNNAt(extractor, omega, yDc, counters, worker);
+
+        int sc = sb.Count, nc = nInt * sc;
+        var rhs  = new Complex[nc];
+        var vSb  = new Complex[nc];
+        var iNl0 = new Complex[nInt];
+
+        Func<int, HbSmallSignalCache.ProbeGeometry> geometry =
+            mnaSize => HbSmallSignalCache.GeometryOf(probes, BranchRows(netlist, probes, mnaSize));
+
+        // ── The probe frequencies FIRST, before any sideband-only entry ──────
+        //
+        // A probe frequency is also a SIDEBAND of other probe frequencies whenever the grid step
+        // divides the fundamental — which is precisely the alignment R-wsp8-5 wants to reward. A
+        // sideband-only entry holds Y_NN and nothing else, so reaching one of those frequencies as a
+        // probe frequency later means factoring it a SECOND time to obtain W and T; the LU itself is
+        // deliberately not kept (that is the memory the whole design refuses to spend). Visiting the
+        // probe frequencies first makes every such collision a cache HIT instead, at the cost of one
+        // extra stamp per point — which is the trade this pass exists to make.
+        if (Precompute(extractor, ssFreqsHz, lo, hi, sb, cache, geometry, counters, worker, abort))
+            { /* the cache holds every probe block of this range */ }
+
+        for (int fi = lo; fi < hi; fi++)
+        {
+            if (abort?.Invoke() == true) break;
+
+            double omegaSs = 2.0 * Math.PI * ssFreqsHz[fi];
+            var w = new Complex[size, size];
+            wsp[fi] = w;
+
+            if (sb.IsDegenerate(omegaSs))
+            {
+                counters.DegeneratePoints++;
+                netlist.AddWarningOnce("wsprobe.hb-ss-degenerate-frequency",
+                    DegeneracyNote(ssFreqsHz[fi], commensurateWith));
+                for (int r = 0; r < size; r++)
+                for (int c = 0; c < size; c++) w[r, c] = nan;
+                continue;
+            }
+
+            // Everything operating-point-independent, for this probe frequency. The geometry is a
+            // factory because the branch rows only exist once the cache has stamped the assembly.
+            var block = cache.ProbeBlockAt(extractor, omegaSs, geometry, counters, worker);
+
+            var yss = Math.Abs(omegaSs) < 1e-12 ? yDc : block.YNN;
+
+            // ── The conversion matrix, factored once for all 2N injections ────
+            var jss = BuildJss(sb, nInt, omegaSs, YAt);
+            var lu  = new DenseLu(jss, nc);
+            counters.DenseFactorizations++;
+            if (lu.Singular)
+            {
+                netlist.AddWarningOnce("wsprobe.hb-ss-singular-conversion-matrix",
+                    $"WSProbe small-signal sweep: the conversion matrix is singular at " +
+                    $"{ssFreqsHz[fi] / 1e9:G6} GHz, so the wsp entries there are NaN. A singular " +
+                    "conversion matrix at a real probe frequency means the linearised periodic " +
+                    "system has a pole exactly there — which is what the sweep is looking for, so " +
+                    "read the neighbouring points rather than this one.");
+                for (int r = 0; r < size; r++)
+                for (int c = 0; c < size; c++) w[r, c] = nan;
+                continue;
+            }
+
+            for (int p = 0; p < size; p++)
+            {
+                // 1–2. J_ss·V = −RHS, the Norton excitation at the zero sideband only.
+                Array.Clear(rhs);
+                for (int n = 0; n < nInt; n++) rhs[n * sc + sb.Zero] = -block.ISrc[n, p];
+                lu.Solve(rhs, vSb);
+                counters.DenseSolves++;
+
+                // 3. The device current at the zero sideband.
+                for (int n = 0; n < nInt; n++)
+                {
+                    Complex acc = Complex.Zero;
+                    for (int m = 0; m < nInt; m++) acc += yss[n, m] * vSb[m * sc + sb.Zero];
+                    iNl0[n] = -(acc + block.ISrc[n, p]);
+                }
+
+                // 4. The readings, with the 2N rows of M⁻¹ already taken:
+                //    r = W[p, ·] + T·(−I_nl,0), which is step 4's back-solve contracted.
+                for (int c = 0; c < size; c++)
+                {
+                    Complex acc = block.W[p, c];
+                    for (int n = 0; n < nInt; n++) acc += block.T[c, n] * -iNl0[n];
+                    w[p, c] = acc;
+                }
+            }
+        }
     }
 
     // ── R-wsp5-9(b): the fold onto the HB Jacobian ───────────────────────────

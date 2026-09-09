@@ -564,7 +564,13 @@ static int RunHb(string[] args)
                 $"HB '{hba.Name}': {DescribeTones(p)}, MaxHarm={p.MaxHarmonic}" +
                 (p.IsMultiTone ? $", MaxMixOrder={p.MaxMixOrder}" : "") +
                 $", tol={p.Tol:G3}");
-            run = new HbEngine(nl, tb, settings).Run(p);
+            // The library and base directory are handed over so a long WSProbe tickle grid can be
+            // split across workers (brief-wsprobe-8 R-wsp8-9) — each worker needs a netlist copy of
+            // its own, and a copy needs the library it was elaborated from. Nothing else uses them,
+            // and a run with no small-signal sweep is unaffected.
+            run = new HbEngine(nl, tb, settings, wspCache: null, lib: lib,
+                               baseDirectory: Path.GetDirectoryName(Path.GetFullPath(input)))
+                  .Run(p);
             ds  = run.DataSet;
         }
 

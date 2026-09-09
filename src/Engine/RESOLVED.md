@@ -1991,3 +1991,160 @@ that reason. This is the same trap the sweep-scale note records.
 **A WSProbe hung off a large resistor reports that resistor.** The probe must sit IN a node,
 splitting it, with real circuit on both sides; only then is `1/Y0 = ZG + ZL` the loop impedance the
 start-up condition is about.
+
+## WSP-8 — the WSProbe's harmonic-balance sweep with no sparse work per operating point (2026-09-08)
+
+brief-wsprobe-8. WSP-5's straightforward path factors the linear partition `2·K_ss + 2` times per
+probe frequency **per operating point**, and every one of those factorisations is of a matrix that
+does not depend on the drive. The sparse work moves into a cache keyed by frequency
+(`HbSmallSignalCache`), the per-operating-point work becomes dense-only, and the tickle grid
+parallelises. **No answer changes**: the shipped path agrees with WSP-5's, which is kept as
+`HbSmallSignal.SolveProbesStraightforward` and is the oracle, to **1.3e-15 relative** — three orders
+inside the brief's own 1e-12 gate — and WSP-5's independent two-tone oracle still passes against it.
+
+### What the cache holds, and the one trap in getting it
+
+Per frequency: `Y_NN` (`N_int²`), and at a probe frequency also `W` (`2N × 2N`, the reading of each
+injection with the interface open), `T` (`2N × N_int`, the reading per unit interface current) and
+`I_src` (`N_int × 2N`). One factorisation and `N_int + 2N` **transposed** solves fill all of it,
+replacing `4N` forward solves plus `N_int` Z-column solves per operating point.
+
+**`SparseLU.SolveTranspose` in CSparse solves `Mᴴ y = b`, not `Mᵀ y = b`.** Measured directly on a
+3×3 non-symmetric complex matrix, because a real test matrix cannot tell the two apart — and neither
+can a real-vector right-hand side, which is what every obvious probe uses. The row of `M⁻¹` this
+formulation wants is therefore `conj(y)`. Omitting the conjugation is a sign error on the imaginary
+part alone: every magnitude stays exactly right, so a Smith-chart plot of `wsp` looks entirely
+plausible and only the phase is mirrored.
+
+### Two premises of the brief that were false
+
+**"`ParametricSweepEngine` must hand the same extractor to every operating point (it does for `hb`
+today; assert)" — it does not.** The sweep re-elaborates the netlist and constructs a fresh
+`HbEngine`, and therefore a fresh `HbLinearExtractor`, at every point (`ParametricSweepEngine.Run`'s
+`using var netlist = …Elaborate(tb)` is a correctness requirement — an external device's instances
+live in a worker process and are only released by disposal). So an extractor-owned cache would be
+thrown away exactly when it was about to pay for itself. **The cache lives on the sweep instead** and
+is threaded down as an optional `HbEngine` constructor argument; it holds no netlist, no component
+and no factorisation, so the re-elaboration between points costs it nothing, and the entries are
+valid for any netlist that stamps the same matrix.
+
+**Gate (c)'s "`HbLinearExtractor.Factorizations` equals the number of distinct sideband
+frequencies" cannot hold as written**, for two independent reasons. That counter also counts the HB
+Newton solve's own per-harmonic factorisations, which the small-signal sweep has nothing to do with;
+and the brief's arithmetic (`M + 2·K_ss·m`, 3,791 for its own example) counts **signed** sidebands,
+while `Y(−ω) = conj(Y(ω))` is a theorem and one entry serves `+ω` and `−ω` both. The census
+therefore reports three numbers — visits, signed distinct, folded distinct — and the folded one is
+the factorisation count. On the measured fixtures the fold is worth 1.5-1.6× on its own.
+
+### The certificate is not free, and it is what caps the speed-up on a small circuit
+
+R-wsp8-4's rule is that reuse is *verified*, never declared: each entry carries the VALUES of the
+matrix it was computed from and the next use re-stamps and compares them bit for bit, exactly as
+`HbLinearExtractor` validates its own factorisations. That costs one stamp and one `O(nnz)`
+comparison per frequency per operating point — no factorisation and no solve, but not nothing. On a
+40-nonzero fixture a stamp costs about what a factorisation costs, so removing 195,324
+factorisations while adding 211,601 stamps nets very little; the win is real only because the sparse
+SOLVES go too. **A factorisation is superlinear in `n` and a stamp is linear, so the ratio improves
+with the size of the linear partition** — which is the regime the brief is about, and is why the
+300-section-ladder row below is the honest headline rather than the 16-device one.
+
+Two things cut the stamp count without weakening the guarantee:
+
+- **A validation epoch per (worker, operating point).** Nothing mutates the netlist during a
+  small-signal sweep — the Newton solve is finished before the first probe frequency is touched — so
+  a second visit to a frequency *inside one sweep* cannot find a different matrix than the first
+  visit did. An entry validated in the current epoch is trusted without a stamp. The epoch is opened
+  by `HbSmallSignal.SolveProbeRange` itself, which is the one function that runs a sweep on a slice,
+  so there is nothing for a caller to remember. Measured: 211,601 → 58,999 stamps on the 401-point
+  fixture, 3.6× → 5.7× overall.
+- **The probe frequencies are visited before any sideband-only entry** (`HbSmallSignal.Precompute`).
+  A probe frequency is also a sideband of other probe frequencies precisely when the grid step
+  divides `f0` — the alignment R-wsp8-5 exists to reward — and a sideband-only entry holds `Y_NN`
+  and nothing else, so reaching one later as a probe frequency means factoring it a second time for
+  `W` and `T`. The LU is deliberately not kept; that is the memory the whole design refuses to spend.
+
+### The frequency a shared sideband is computed at must be a function of its VALUE
+
+The first version keyed entries by a rounded frequency but computed each entry at whichever spelling
+of `ω_ss + k·ω0` arrived first. Two consequences, one fatal and one merely expensive:
+
+- **Expensive:** the certificate then compared a matrix stamped at spelling A against one stamped at
+  spelling B, which differ in their last bits, so *every* shared sideband missed. The cache reported
+  1,439 entries and 90,596 factorisations at the same time — the tell that a cache is storing and
+  never reading.
+- **Fatal to R-wsp8-9(g):** which spelling arrives first depends on the ORDER of visits, and chunking
+  the grid across workers changes that order. `wsp` then agreed with the serial run at one degree and
+  differed by ~2e-15 relative at another. It reproduced under full-suite load and passed in
+  isolation, which is exactly the shape of a bug people call flaky and it was not.
+
+`HbSmallSignalCache.Canonical` rounds the frequency to the key's own precision before it is used, so
+the entry is a function of the value alone and every worker at every degree computes the same one.
+**1e-14 relative is the floor, not a preference**: the rounding is done on the mantissa and the
+rounded integer must stay below `2^53`. Tightening it from 1e-13 to 1e-14 costs 5.8% more
+factorisations (1,439 → 1,522 on the 401-point fixture) and buys determinism; the frequency
+perturbation it introduces is what moved the agreement with the straightforward path from 4.7e-16 to
+1.3e-15.
+
+### Measured (Release, scratch harness, M4-class laptop, `MaxParallelism = 1` unless stated)
+
+Fixtures are generated cascades of the WSP-5 two-port SDD, one `WSProbe` on each side of each
+device, so `N_int` = probes = 2 × stages. **The brief's own table names a "16-FET amplifier (fixture
+from WSP-7)" — no such fixture exists in the repository**, so the 16-stage row below is a generated
+stand-in and the sizes are smaller than the brief's (they were chosen so the whole table runs in
+under a minute; the per-point costs extrapolate).
+
+| Circuit | `N_int` | `K_ss` | probes | `M` | drive points | straightforward (s) | this brief (s) | speed-up | sparse factorisations |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 device | 2 | 5 | 2 | 401 | 41 | 1.14 | 0.20 | **5.6×** | 195,324 → 1,522 |
+| 4 stages | 8 | 7 | 8 | 201 | 11 | 1.62 | 0.98 | 1.7× | 35,376 → 992 |
+| 16 stages | 32 | 7 | 32 | 51 | 3 | 2.56 | 2.15 | 1.2× | 2,448 → 472 |
+| 1 device + 300-section linear ladder | 2 | 5 | 2 | 201 | 11 | 8.11 | 0.45 | **18.0×** | 26,532 → 769 |
+
+**Where the remaining time goes, which is the number the next person needs.** Per operating point,
+after the first: the 16-stage row spends 0.69 s of its 0.72 s in the DENSE work — 51 factorisations
+of a 480 × 480 `J_ss` plus 64 back-substitutions each — and 1,416/3 = 472 stamps. That is the honest
+floor for this formulation, and the brief says so: `P·M` dense LUs of size `N_int(2K_ss+1)`, genuinely
+per operating point because the device spectra are. The 1-device and ladder rows are the opposite
+regime, where the dense matrix is 22 × 22 and everything was sparse.
+
+**Parallelism** (16 stages, `K_ss = 7`, `M = 145`, whole `HbEngine.Run` including the HB solve):
+
+| `MaxParallelism` | 1 | 2 | 4 | 8 |
+|---|---|---|---|---|
+| wall clock | 2.13 s | 1.15 s | 0.70 s | 0.70 s |
+
+Degree caps at 4 because `MinSsPointsPerWorker` is 32 and the grid is 145 points; 8 and 4 are the
+same run. `ProcessorCount` was 10.
+
+Three things pin the sweep to the serial path regardless of `MaxParallelism`, and each is a real
+constraint rather than caution: no `Library` was supplied to `HbEngine` (there is then nothing to
+elaborate a per-worker copy FROM, and the copy is the whole thread-safety story — a model writes
+state during `Stamp`); a netlist that may not be elaborated twice (`SParameterEngine`'s own
+`CanElaborateInParallel`, shared rather than copied); and a **lattice** sideband family, whose
+difference-index memo and scratch buffer are written on first use.
+
+### `SSMaxHarm` — measured, and it is not a cheap knob
+
+`1/H0` at the `DRAIN` probe over 0.41-3.89 GHz, one device driven into compression, against
+`K_ss = 7`:
+
+| `K_ss` | 0 | 1 | 2 | 3 | 5 |
+|---|---|---|---|---|---|
+| median error | 205 % | 53 % | 59 % | 36 % | **7.1 %** |
+| worst error | 235 % | 259 % | 95 % | 62 % | **26.9 %** |
+
+The convergence is not monotone (`K_ss = 1` is worse than `K_ss = 2` at the worst point) because
+truncating the sideband set is not a series expansion of the answer — it removes mixing paths, and
+removing an odd number of them can move the result further than removing an even number. **At a
+hard-driven operating point even `K_ss = K − 2` is a 7 % answer**, which is why the default stays at
+`K` and why the brief's suggested "measure it, do not guess" was worth doing: the guess would have
+been "a couple of harmonics down is free".
+
+### Budget
+
+`AnalysisSettings.WspCacheBudgetMB`, default 512. The projection is made once, from the first stamp's
+`nnz`, so every operating point behaves identically; over budget the probe blocks are dropped first
+and the sideband `Y_NN` entries second, and either fallback is stated once with the sizes
+(`wsprobe.hb-cache-over-budget`). **The brief's §4 arithmetic omits the certificates, and on a large
+design they are the larger half** — `16·nnz` bytes per entry against `16·N_int²` for the `Y_NN` it
+guards. They are counted in the projection for that reason.

@@ -702,6 +702,28 @@ injections at that frequency, plus a linear-partition extraction per sideband. S
 with the tickle-frequency count, the sideband count and the probe count — not with the drive sweep,
 which reuses each operating point.
 
+**Two choices you make on the directive change what it costs, and one of them is free.** The linear
+part of the circuit is the same at every drive level, so every sparse factorisation of the sweep is
+done once and reused across the whole drive sweep — and a sideband `ssfreq + k·f0` of one tickle
+point is *literally the same frequency* as a sideband of another whenever the tickle step divides the
+fundamental. **A grid step of `f0/m` therefore shares most of its sideband work between points**,
+which on a long sweep is worth several times over. circuitRF never moves your grid to get it: a
+frequency you wrote is a frequency it uses, so the run instead reports how many distinct sideband
+frequencies your grid landed on and what an aligned step would have bought. `SSNpts` chosen so the
+step comes out at `f0/200` costs nothing and is the free half.
+
+**`SSMaxHarm` is the half that is not free.** It truncates the sideband set, and truncating it
+cuts the sideband extractions linearly and the dense conversion matrix *cubically* — which is why it
+is tempting. Measured on a single device driven into compression, `1/H0` computed at `SSMaxHarm = K −
+2` was 7 % from the untruncated answer at the median tickle frequency and 27 % from it at the worst
+one, and the error does not fall monotonically as you raise it (truncation removes mixing paths; it
+is not a series expansion of the answer). The default is `MaxHarm` for that reason. Lower it to
+explore quickly, raise it back before you believe a margin — and the run says so once whenever it is
+below `MaxHarm`.
+
+Long tickle grids are run in parallel, several points at a time, exactly as an S-parameter sweep is;
+`MaxParallelism` governs both and the result does not depend on it.
+
 Three refusals, each by name: **three or more tones** (one and two are supported); the
 **rectangular-FFT two-tone path** rather than the default lattice; and a conversion system above
 2000 unknowns, which states which of `SSMaxHarm`, `MaxHarm` and `MaxMixOrder` is binding. A run that

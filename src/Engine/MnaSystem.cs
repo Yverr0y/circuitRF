@@ -655,6 +655,46 @@ public sealed class MnaSystem : IMnaContext
         return _csc!;
     }
 
+    /// <summary>
+    /// A copy of the assembled matrix's VALUE array alone — the cache certificate of
+    /// brief-wsprobe-8 R-wsp8-4, without the structural arrays <see cref="BuildCsc"/> also clones.
+    ///
+    /// <para><b>Why the values alone are enough.</b> The WSProbe small-signal sweep stamps every one
+    /// of its frequencies into ONE <see cref="MnaSystem"/> (R-wsp8-6), so the row indices and column
+    /// pointers are literally the same arrays for every entry and cloning them per frequency would
+    /// store one topology thousands of times. What can differ between two stamps at one frequency is
+    /// a VALUE, and that is what <see cref="MatchesValues"/> compares. A structural change is caught
+    /// separately and more cheaply, by <see cref="PatternBuilds"/> moving.</para>
+    /// </summary>
+    /// <summary>Nonzeros in the assembled matrix — the size of one cache certificate
+    /// (brief-wsprobe-8 R-wsp8-8's budget arithmetic), and nothing else.</summary>
+    internal int LiveNnz
+    {
+        get { EnsurePattern(); return _csc!.Values.Length; }
+    }
+
+    internal Complex[] SnapshotValues()
+    {
+        EnsurePattern();
+        return (Complex[])_csc!.Values.Clone();
+    }
+
+    /// <summary>
+    /// Whether the currently-stamped matrix has exactly the values of <paramref name="other"/>, a
+    /// previous <see cref="SnapshotValues"/> of this same system. Bit equality, not a tolerance —
+    /// the question is whether this is the SAME matrix, for the reason
+    /// <see cref="MatchesCsc"/> gives at length.
+    /// </summary>
+    internal bool MatchesValues(Complex[]? other)
+    {
+        if (other is null) return false;
+        EnsurePattern();
+        var v = _csc!.Values;
+        if (other.Length != v.Length) return false;
+        for (int i = 0; i < v.Length; i++) if (!other[i].Equals(v[i])) return false;
+        return true;
+    }
+
     public CompressedColumnStorage<Complex> BuildCsc()
     {
         EnsurePattern();

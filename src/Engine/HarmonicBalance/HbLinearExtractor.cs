@@ -613,6 +613,28 @@ public sealed class HbLinearExtractor
         return mna;
     }
 
+    /// <summary>
+    /// A fresh <see cref="MnaSystem"/> sized for this netlist, for a caller that wants ONE system it
+    /// stamps many frequencies into — brief-wsprobe-8 R-wsp8-6. The extractor's own
+    /// <c>_mnaCache</c> is keyed per omega, which is right for the handful of harmonics an HB solve
+    /// visits and wrong for a small-signal sweep that visits thousands of frequencies once each: it
+    /// would build the sparsity pattern and the AMD ordering once per frequency, and hold every
+    /// assembled matrix for the life of the run.
+    /// </summary>
+    internal MnaSystem NewSmallSignalMna() => new(_nonGroundCount);
+
+    /// <summary>
+    /// Stamp the linear partition at <paramref name="omega"/> into <paramref name="mna"/>, sources
+    /// ACTIVE — the same assembly <see cref="StampAt"/> performs, into a system the caller owns.
+    /// The component visit order is the same, so the branch numbering is the same and a probe's
+    /// <c>LastBranchIndex</c> means what it means everywhere else.
+    /// </summary>
+    internal void StampSmallSignal(MnaSystem mna, double omega)
+    {
+        mna.Reset();
+        StampInto(mna, omega, zeroDrive: false);
+    }
+
     private MnaSystem BuildMna(double omega, bool zeroDrive)
     {
         var mna = new MnaSystem(_nonGroundCount);

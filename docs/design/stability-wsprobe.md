@@ -1402,3 +1402,157 @@ The example designs the figures are drawn from are the committed `testdata/` net
 already run — `series_resonator.cnl`, `parallel_resonator.cnl`, `margin_split_resonator.cnl`,
 `two_stage_terms.cnl`, `hb_varactor_divider.cnl`, `ohtomo_type_a_ndf.cnl` and
 `hidden_pole_two_port.cnl` — read rather than copied (`src/Ui/Diagnostics/Fixtures/DocWsProbeFixtures.cs`).
+
+---
+
+## 13. Performance under harmonic balance (WSP-8)
+
+§10 is the formulation; this section is what it costs and what was done about it. **It changes no
+answer** — the implementation §10 describes is kept as `HbSmallSignal.SolveProbesStraightforward`
+and is the oracle the shipped path is measured against, at 1.3e-15 relative.
+
+*(brief-wsprobe-8 asked for this as §12; §12 was already taken by WSP-7's documentation map.)*
+
+### 13.1 Where the time went
+
+For one operating point, `M` tickle frequencies, `N` probes, `N_int` interface nodes and sideband
+order `K_ss`, §10's straightforward path performs per tickle frequency:
+
+| work | count | kind |
+|---|---|---|
+| `Y_NN(ω_ss + kω0)`, `k = −K_ss … K_ss` | `2K_ss + 1` sparse factorisations, `N_int` solves each | sparse, size `n` |
+| the linear partition at `ω_ss` | 1 factorisation, `4N` back-solves | sparse, size `n` |
+| `J_ss` and its factorisation | 1 dense LU of size `n_c = N_int(2K_ss + 1)` | dense |
+| the `2N` injections | `2N` dense back-substitutions | dense |
+
+A drive sweep of `P` points multiplies every row by `P`. **Every sparse row is of a matrix that does
+not depend on the drive**: the linear partition is the same at every drive level, and what genuinely
+changes with the operating point — the two-sided device spectra of §10.2 — enters only the dense
+conversion matrix. The ratio, roughly `P·(2K_ss + 1)`, is the whole of the difference between this
+analysis and an S-parameter sweep of the same circuit.
+
+### 13.2 Rows of `M⁻¹`, and the whole per-frequency block at once
+
+At `ω_ss` the readings the document wants are `2N` entries of the solution vector — a branch current
+and a G-node voltage per probe. Writing `R` for that `2N × n` selection of rows and `b_p` for one
+injection,
+
+```
+r = R·M⁻¹·b_p + R·M⁻¹·B_int·(−I_nl,0)  =  W[p, ·] + T·(−I_nl,0)
+```
+
+and `R·M⁻¹` is `2N` **rows** of `M⁻¹`, each one transposed solve. `b_p` has a single nonzero, so
+every entry of `W` (`2N × 2N`) is one lookup; `T` (`2N × N_int`) is the same rows read at the
+interface nodes. The `N_int` interface rows give `Z_NN` — hence `Y_NN` — *and* every injection's
+open-circuit interface voltage, hence `I_src = −Y_NN·V_oc` for all `2N` at once.
+
+**One factorisation and `N_int + 2N` transposed solves per frequency**, against `1 + 2N` forward
+solves plus `N_int` Z-column solves *per operating point*. All of it is small and dense: `Y_NN` is
+`N_int²`, `W` is `4N²`, `T` and `I_src` are `2N·N_int` each. The factorisation itself is deliberately
+**not** kept — that is the memory the design refuses to spend, and it is why a frequency reached
+first as a sideband and later as a tickle point has to be factored twice unless the tickle points are
+visited first (they are).
+
+**`SolveTranspose` is Hermitian.** CSparse solves `Mᴴ y = b`; the row of `M⁻¹` is `conj(y)`. This is
+measured, not assumed — a real matrix and a real right-hand side cannot tell `Mᵀ` from `Mᴴ` — and
+omitting the conjugation is a sign error on the imaginary part alone, which leaves every magnitude
+right.
+
+### 13.3 What is left per operating point
+
+```
+J_ss   ← the cached Y_NN(ω_k) for every k, and this point's G⁽²⁾, C⁽²⁾, Dw⁽²⁾
+LU(J_ss)                                        one dense factorisation
+for each of the 2N injections p:
+    V      = J_ss⁻¹·(−I_src[·, p] in the k = 0 block)
+    I_nl,0 = −(Y_NN(ω_ss)·V[·,0] + I_src[·, p])
+    r[p, ·]= W[p, ·] + T·(−I_nl,0)
+```
+
+**Dense only.** `P·M` dense LUs of size `n_c`, and that is the honest floor for this formulation: on
+a 32-interface-node fixture at `K_ss = 7` it is 96 % of the remaining time. The counters assert the
+rest is gone.
+
+### 13.4 Reuse across the sweep, and how it is made safe
+
+The cache lives on the **drive sweep**, not on the extractor: `ParametricSweepEngine` re-elaborates
+the netlist and builds a fresh `HbEngine` — and therefore a fresh `HbLinearExtractor` — at every
+point, so an extractor-owned cache would be discarded exactly when it was about to pay for itself.
+Nothing in it holds a netlist, a component or a factorisation.
+
+Reuse is **verified, never declared**. Each entry carries the values of the matrix it was computed
+from; the next use re-stamps that frequency and compares them bit for bit, exactly as the extractor
+validates its own factorisations. A swept linear element or a loadpull tuner override changes the
+matrix and the entry is recomputed; nothing else can go stale and no caller has to remember to
+invalidate. The cost is one stamp and one `O(nnz)` comparison per frequency per operating point —
+no factorisation and no solve — and on a small linear partition that is the dominant residual cost,
+which is why a *second* visit to a frequency inside one sweep is trusted without re-stamping (the
+Newton solve is finished before the first tickle frequency is touched, so nothing can have changed).
+
+**One `MnaSystem` for the whole sweep.** The extractor's own cache is keyed per omega, which is right
+for the handful of harmonics a Newton solve visits and wrong for thousands of one-shot frequencies:
+it would build the sparsity pattern and the AMD ordering once per frequency and hold every assembled
+matrix for the life of the run. The small-signal sweep stamps every frequency into one system, and
+`PatternBuilds` for the whole drive sweep is 1.
+
+### 13.5 Sideband coincidence, and the grid nobody moves
+
+`Y_NN` is keyed by frequency, so when the tickle step divides `f0` the sidebands of one point **are**
+the sidebands of others: a grid of `M` points at step `f0/m` visits `M + 2K_ss·m` distinct sideband
+frequencies instead of `M(2K_ss + 1)`. Folding `ω < 0` onto `|ω|` — `Y(−ω) = conj(Y(ω))` is a
+theorem — collapses it further.
+
+**The grid is never altered to achieve this.** A frequency the user wrote is a frequency the engine
+uses; the run reports the census (visits, signed distinct, folded distinct) so a designer can choose
+an aligned step, and the user page says so in one paragraph.
+
+A frequency is keyed — and **computed at** — its value rounded to 1e-14 relative. Rounding the
+computation frequency and not merely the key is what makes an entry a function of its value alone:
+`ω_ss + k·ω0` reached from different `(ω_ss, k)` pairs differs in its last bits, and computing at
+whichever spelling arrived first would make the answer depend on the ORDER of visits — which is
+precisely what chunking the grid across workers changes.
+
+### 13.6 Parallelism
+
+The tickle grid is embarrassingly parallel: contiguous chunks, each worker with its own elaborated
+netlist copy, its own extractor and its own cache slice, each writing its slice of `wsp` by index.
+`MaxParallelism` governs it as it governs the S-parameter sweep, and the operating point's two-sided
+spectra are read-only and shared. Measured 3.0× at degree 4.
+
+**Not across operating points.** The drive sweep warm-starts each HB point from the previous one and
+that ordering is the convergence story (`DriveLadder`, `HbDriveRamp`). Overlapping point `i`'s
+small-signal work with point `i + 1`'s Newton solve is a later refinement.
+
+Three things pin the sweep serial regardless of the setting: no `Library` to elaborate a per-worker
+copy from (the copy is the whole thread-safety story — a model writes state during `Stamp`); a
+netlist that may not be elaborated twice (an external device is a slot in a worker *process*; a
+control-referencing SDD resolves per netlist); and a **lattice** sideband family, whose
+difference-index memo is written on first use.
+
+### 13.7 Memory, and giving up in order
+
+`AnalysisSettings.WspCacheBudgetMB` (default 512). The projection is made once, from the first
+stamp's `nnz`, so every operating point behaves identically. Over budget the per-tickle-point blocks
+(`W`, `T`, `I_src`) are dropped first and recomputed per operating point — one factorisation and
+`N_int + 2N` transposed solves each, still far below §10's path; over budget again the sideband
+`Y_NN` entries go too. Either fallback is stated **once**, with the sizes, because a run that
+silently got slower is a run nobody can explain.
+
+The certificate is counted in the projection: `16·nnz` bytes per entry, against `16·N_int²` for the
+`Y_NN` it guards. On a large design the certificates are the larger half.
+
+### 13.8 `SSMaxHarm`
+
+`K_ss < K` cuts the sideband factorisations linearly and `n_c` — hence the dense LU — cubically. It
+is not a cheap knob. Measured on one device driven into compression, `1/H0` over 0.41-3.89 GHz
+against `K_ss = 7`:
+
+| `K_ss` | 0 | 1 | 2 | 3 | 5 |
+|---|---|---|---|---|---|
+| median error | 205 % | 53 % | 59 % | 36 % | 7.1 % |
+| worst error | 235 % | 259 % | 95 % | 62 % | 26.9 % |
+
+The convergence is not monotone, and it is not supposed to be: truncation removes mixing paths
+rather than terms of a series, so removing an odd number of them can move the answer further than
+removing an even number. **The default stays at `K`.** The low-drive limit needs only `K_ss = 0` and
+the `f0/2` parametric case needs `K_ss ≥ 1`, but a hard-driven stage needs the lot.

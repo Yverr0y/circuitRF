@@ -1498,6 +1498,24 @@ same span usually avoids it, and the warning says so.</p>
 injections at that frequency, plus a linear-partition extraction per sideband. So the cost scales
 with the tickle-frequency count, the sideband count and the probe count — not with the drive sweep,
 which reuses each operating point.</p>
+<p><strong>Two choices you make on the directive change what it costs, and one of them is free.</strong> The linear
+part of the circuit is the same at every drive level, so every sparse factorisation of the sweep is
+done once and reused across the whole drive sweep — and a sideband <code>ssfreq + k·f0</code> of one tickle
+point is <em>literally the same frequency</em> as a sideband of another whenever the tickle step divides the
+fundamental. <strong>A grid step of <code>f0/m</code> therefore shares most of its sideband work between points</strong>,
+which on a long sweep is worth several times over. circuitRF never moves your grid to get it: a
+frequency you wrote is a frequency it uses, so the run instead reports how many distinct sideband
+frequencies your grid landed on and what an aligned step would have bought. <code>SSNpts</code> chosen so the
+step comes out at <code>f0/200</code> costs nothing and is the free half.</p>
+<p><strong><code>SSMaxHarm</code> is the half that is not free.</strong> It truncates the sideband set, and truncating it
+cuts the sideband extractions linearly and the dense conversion matrix <em>cubically</em> — which is why it
+is tempting. Measured on a single device driven into compression, <code>1/H0</code> computed at <code>SSMaxHarm = K − 2</code> was 7 % from the untruncated answer at the median tickle frequency and 27 % from it at the worst
+one, and the error does not fall monotonically as you raise it (truncation removes mixing paths; it
+is not a series expansion of the answer). The default is <code>MaxHarm</code> for that reason. Lower it to
+explore quickly, raise it back before you believe a margin — and the run says so once whenever it is
+below <code>MaxHarm</code>.</p>
+<p>Long tickle grids are run in parallel, several points at a time, exactly as an S-parameter sweep is;
+<code>MaxParallelism</code> governs both and the result does not depend on it.</p>
 <p>Three refusals, each by name: <strong>three or more tones</strong> (one and two are supported); the
 <strong>rectangular-FFT two-tone path</strong> rather than the default lattice; and a conversion system above
 2000 unknowns, which states which of <code>SSMaxHarm</code>, <code>MaxHarm</code> and <code>MaxMixOrder</code> is binding. A run that

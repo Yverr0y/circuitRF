@@ -498,7 +498,10 @@ public static class SchematicRunService
             case HarmonicBalanceAnalysis hba:
             {
                 var p = HbEngine.Resolve(hba, nl.ResolvedGlobals, nl.GlobalsWithExplicitUnit);
-                return new HbEngine(nl, tb).Run(p).DataSet;
+                // lib/baseDirectory only so a long WSProbe tickle grid can be split across workers
+                // (brief-wsprobe-8 R-wsp8-9), each on its own netlist copy — the same reason the
+                // S-parameter case above takes them.
+                return new HbEngine(nl, tb, null, null, lib, baseDirectory).Run(p).DataSet;
             }
 
             case LoadpullAnalysis lpa:

@@ -839,17 +839,17 @@ public sealed class WSProbeHbTests(ITestOutputHelper output)
 
     /// <summary>
     /// R-wsp5-9(i), and overview D-14: the SHAPE of the work asserted as counts, never as wall
-    /// clock. Per probe frequency the straightforward path performs exactly
-    /// <c>2·K_ss + 2</c> linear-partition extractions (one per sideband, plus the handle at
-    /// <c>ω_ss</c> that the <c>4N</c> back-substitutions share — a cache hit, counted), ONE dense
-    /// factorisation of <c>J_ss</c>, <c>2N</c> dense solves and <c>4N</c> sparse back-solves.
+    /// clock.
     ///
-    /// <para><b>The brief says <c>2N</c> sparse back-solves; the honest count is <c>4N</c>.</b> Each
-    /// injection needs two: one for the open-circuit interface voltages that form the Norton
-    /// excitation (R-wsp5-5 step 1) and one for the reading with the device current injected
-    /// (step 4). They differ only in their right-hand side, so they share the factorisation, but
-    /// they are two triangular solves and counting them as one would make the counter a claim the
-    /// code does not meet.</para>
+    /// <para><b>These are brief-wsprobe-8's counts, not WSP-5's.</b> WSP-5's straightforward path
+    /// performed <c>2·K_ss + 2</c> linear-partition FACTORISATIONS, <c>4N</c> sparse back-solves and
+    /// <c>2N</c> dense solves per probe frequency PER OPERATING POINT; the shipped path performs no
+    /// sparse factorisation and no sparse solve at all after the first operating point, because the
+    /// linear partition does not depend on the drive. What is asserted here is that the requests are
+    /// still the same shape — one probe block plus one <c>Y_NN</c> per sideband, one dense
+    /// factorisation and <c>2N</c> dense solves per point — and that the sparse work underneath them
+    /// collapsed onto the distinct frequencies. WSP-8's own gates
+    /// (<c>WSProbeHbPerformanceTests</c>) hold the rest, including the equality with WSP-5's path.</para>
     /// </summary>
     [Fact]
     public void SmallSignalSolve_HasTheStructureItsCountersClaim()
@@ -862,13 +862,28 @@ public sealed class WSProbeHbTests(ITestOutputHelper output)
         Assert.NotNull(c);
         output.WriteLine($"per {nPoints} points: partitions {c.LinearPartitions}, dense LU " +
                          $"{c.DenseFactorizations}, dense solves {c.DenseSolves}, sparse solves " +
-                         $"{c.SparseSolves}, degenerate {c.DegeneratePoints}");
+                         $"{c.SparseSolves}, sparse LU {c.SparseFactorizations}, transposed " +
+                         $"{c.TransposedSolves}, stamps {c.Stamps}, hits {c.CacheHits}, " +
+                         $"degenerate {c.DegeneratePoints}");
 
         Assert.Equal(0, c.DegeneratePoints);
         Assert.Equal(nPoints, c.DenseFactorizations);
         Assert.Equal(nPoints * 2 * nProbes, c.DenseSolves);
-        Assert.Equal(nPoints * 4 * nProbes, c.SparseSolves);
-        Assert.Equal(nPoints * (2 * kSs + 2), c.LinearPartitions);
+        // 2·K_ss + 1 sidebands and the probe block at ω_ss, plus one PREFILL pass over the probe
+        // frequencies — which exists so a probe frequency that is another point's sideband is
+        // factored once rather than twice (see HbSmallSignal.Precompute).
+        Assert.Equal(nPoints * (2 * kSs + 3), c.LinearPartitions);
+
+        // The whole of brief-wsprobe-8 in two lines: no forward sparse solve survives, and the
+        // factorisations are one per DISTINCT sideband frequency rather than 2·K_ss + 2 per point.
+        Assert.Equal(0, c.SparseSolves);
+        Assert.Equal(c.DistinctSidebandFrequencies, c.SparseFactorizations);
+        Assert.True(c.SparseFactorizations < nPoints * (2 * kSs + 2),
+            $"{c.SparseFactorizations} factorisations for {nPoints} points at K_ss = {kSs}");
+
+        // Each factorisation carries N_int interface rows; a probe frequency carries 2N more.
+        const int nInt = 2;
+        Assert.Equal(c.SparseFactorizations * nInt + nPoints * 2 * nProbes, c.TransposedSolves);
     }
 
     /// <summary>

@@ -49,8 +49,9 @@ public static class ParametricSweepEngine
         TestBench tb,
         AnalysisSettings? settings = null,
         string? baseDirectory = null,
-        RunControl? control = null)
-        => Run(sweep, lib, tb, settings, baseDirectory, new OutputWriteState(), control);
+        RunControl? control = null,
+        HarmonicBalance.HbSmallSignalCache? wspCache = null)
+        => Run(sweep, lib, tb, settings, baseDirectory, new OutputWriteState(), control, wspCache);
 
     private static DataSet Run(
         ParametricSweepAnalysis sweep,
@@ -59,7 +60,8 @@ public static class ParametricSweepEngine
         AnalysisSettings? settings,
         string? baseDirectory,
         OutputWriteState writeState,
-        RunControl? control = null)
+        RunControl? control = null,
+        HarmonicBalance.HbSmallSignalCache? wspCache = null)
     {
         // Locate the inner analysis, skipping disabled sweeps (collapse): a disabled inner sweep is
         // transparent — its dimension is dropped and ITS inner runs here instead.
@@ -122,6 +124,20 @@ public static class ParametricSweepEngine
         var innerControl = inner is ParametricSweepAnalysis ? control : control?.Child();
         bool countsLeaves = inner is not ParametricSweepAnalysis;
 
+        // The WSProbe small-signal sweep's operating-point-independent cache (brief-wsprobe-8
+        // R-wsp8-4). It lives HERE, for the length of the drive sweep, because that is the lifetime
+        // it pays for itself over: the linear partition is the same at every drive level, and this
+        // loop re-elaborates the netlist and builds a fresh HbEngine at every point, so a cache
+        // owned by either of those would be thrown away exactly when it was about to be reused.
+        // Nothing in it holds a netlist or a component — the entries are small dense arrays plus
+        // the matrix each was computed from, and every use re-stamps and compares that matrix bit
+        // for bit before trusting the entry.
+        // A caller may supply one (a test asserting the shape of the work, or an outer driver that
+        // wants the reuse to span more than this loop); otherwise this loop owns it.
+        wspCache ??= inner is HarmonicBalanceAnalysis
+            ? new HarmonicBalance.HbSmallSignalCache(settings)
+            : null;
+
         for (int si = 0; si < sweepValues.Length; si++)
         {
             control?.ThrowIfCancellationRequested();
@@ -161,7 +177,7 @@ public static class ParametricSweepEngine
                 // holds a model, and the warm-start seed is a plain complex array.
                 using var netlist = new Elaborator(lib) { BaseDirectory = baseDirectory }.Elaborate(tb);
                 datasets.Add(RunInner(inner, lib, tb, netlist, settings, baseDirectory, writeState,
-                    warmStart ? seed : null, out var nextSeed, innerControl));
+                    warmStart ? seed : null, out var nextSeed, innerControl, wspCache));
                 seed = warmStart ? nextSeed : null;
             }
             finally
@@ -344,7 +360,8 @@ public static class ParametricSweepEngine
         OutputWriteState writeState,
         Complex[,]? hbWarmStart,
         out Complex[,]? hbConvergedSeed,
-        RunControl? control = null)
+        RunControl? control = null,
+        HarmonicBalance.HbSmallSignalCache? wspCache = null)
     {
         // Only an HB inner produces a chainable seed — at ANY tone count since HB-P3 M3; every other
         // inner leaves it null so the sweep does not warm-start across it (continuation is
@@ -358,7 +375,8 @@ public static class ParametricSweepEngine
             case HarmonicBalanceAnalysis hba:
             {
                 var p  = HbEngine.Resolve(hba, netlist.ResolvedGlobals, netlist.GlobalsWithExplicitUnit);
-                var rr = new HbEngine(netlist, tb, settings).Run(p, hbWarmStart);
+                var rr = new HbEngine(netlist, tb, settings, wspCache, lib, baseDirectory)
+                         .Run(p, hbWarmStart);
                 // Chain this point's converged spectrum into the next point's seed. A non-converged
                 // point resets the chain — design §11.1's rule, kept for every tone count: with the
                 // line search in, non-convergence is rare, and the reset is the belt to its braces.
@@ -376,7 +394,7 @@ public static class ParametricSweepEngine
                 // Recursive: outer override already injected in tb.GlobalVariables.
                 // This call re-elaborates for each of its own sweep values on top of that.
                 // Same writeState threads down so a nested sweep truncates the OutputGrid only once.
-                return Run(psa, lib, tb, settings, baseDirectory, writeState, control);
+                return Run(psa, lib, tb, settings, baseDirectory, writeState, control, wspCache);
 
             case LoadpullAnalysis lpa:
             {

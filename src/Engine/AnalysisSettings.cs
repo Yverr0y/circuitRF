@@ -312,6 +312,34 @@ public sealed class AnalysisSettings
     /// </summary>
     public int MaxParallelism { get; init; } = 0;
 
+    // ── The WSProbe small-signal cache (WSP-8 R-wsp8-8) ─────────────────────────
+
+    /// <summary>
+    /// How much memory, in megabytes, the WSProbe's harmonic-balance small-signal sweep may hold in
+    /// its operating-point-independent cache before it starts recomputing instead of remembering.
+    ///
+    /// <para><b>What the cache holds and why it is worth holding.</b> The linear partition does not
+    /// depend on the drive level, so every sparse factorisation and every sparse solve of the
+    /// small-signal sweep is the same at every operating point of a drive sweep. Caching them turns
+    /// <c>P·M·(2K_ss+1)</c> factorisations into <c>distinct(ω)</c> of them (brief-wsprobe-8 §1) —
+    /// the whole point of that brief.</para>
+    ///
+    /// <para><b>The two tiers it gives up in.</b> Over budget, the per-<c>ω_ss</c> probe blocks
+    /// (<c>W</c>, <c>T</c>, <c>I_src</c>) are dropped first and recomputed per operating point — one
+    /// factorisation and <c>N_int + 2N</c> transposed solves each, still far below the
+    /// straightforward path. Over budget again, the sideband <c>Y_NN</c> entries go too and the
+    /// sweep falls back to per-operating-point extraction. Either fallback is stated ONCE
+    /// (<c>wsprobe.hb-cache-over-budget</c>) with the sizes, because a run that silently got slower
+    /// is a run nobody can explain.</para>
+    ///
+    /// <para>512 MB by default. A workstation with memory to spare can raise it; 0 disables the
+    /// cache entirely, which is the straightforward path's cost and is only ever what a test wants.
+    /// The certificate each entry carries — the stamped matrix it was computed from, which is what
+    /// makes the reuse safe rather than assumed — is counted in the budget too; on a large design it
+    /// is the larger half.</para>
+    /// </summary>
+    public int WspCacheBudgetMB { get; init; } = 512;
+
     // ── The WSProbe stability-margin threshold (WSP-9 R-wsp9-3) ─────────────────
 
     /// <summary>

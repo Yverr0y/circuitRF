@@ -252,7 +252,13 @@ public static class SParameterEngine
     /// <c>ResolveSParamControlBranches</c> simply runs per netlist and its test surface is small, so
     /// it stays on the path it has always run on until this one has some use behind it.</para>
     /// </summary>
-    private static bool CanRunInParallel(ElaboratedNetlist netlist)
+    private static bool CanRunInParallel(ElaboratedNetlist netlist) => CanElaborateInParallel(netlist);
+
+    /// <inheritdoc cref="CanRunInParallel"/>
+    /// <remarks>Internal because the WSProbe's harmonic-balance small-signal sweep asks the same
+    /// question of the same netlist for the same reason (brief-wsprobe-8 R-wsp8-9), and a second
+    /// copy of this list would be a second thing to keep in step.</remarks>
+    internal static bool CanElaborateInParallel(ElaboratedNetlist netlist)
     {
         foreach (var ec in netlist.Components)
         {

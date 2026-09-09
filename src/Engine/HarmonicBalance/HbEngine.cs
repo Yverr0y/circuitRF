@@ -150,13 +150,33 @@ public sealed class HbEngine
     private readonly TestBench          _tb;
     private readonly AnalysisSettings   _settings;
 
-    public HbEngine(ElaboratedNetlist netlist, TestBench tb, AnalysisSettings? settings = null)
+    /// <param name="wspCache">
+    /// The WSProbe small-signal sweep's operating-point-independent cache (brief-wsprobe-8 R-wsp8-4).
+    /// Supplied by whoever owns the DRIVE SWEEP, because that is the lifetime the cache pays for
+    /// itself over — <c>ParametricSweepEngine</c> re-elaborates the netlist and builds a fresh
+    /// <see cref="HbEngine"/> at every point, so a cache created here would be discarded exactly
+    /// when it was about to be reused. Null gives every point its own cache, which is correct and
+    /// costs what WSP-5 cost.
+    /// </param>
+    /// <param name="lib">The library the netlist was elaborated from, and the base directory that
+    /// elaboration used — needed ONLY to elaborate the per-worker copies of a parallel small-signal
+    /// sweep (R-wsp8-9). Null pins the sweep to the serial path.</param>
+    public HbEngine(ElaboratedNetlist netlist, TestBench tb, AnalysisSettings? settings = null,
+                    HbSmallSignalCache? wspCache = null,
+                    Library? lib = null, string? baseDirectory = null)
     {
         _netlist  = netlist;
         _tb       = tb;
         _settings = settings ?? AnalysisSettings.Default;
+        _wspCache = wspCache;
+        _lib      = lib;
+        _baseDir  = baseDirectory;
         RefuseNonlinearBranchEquations(netlist);
     }
+
+    private readonly HbSmallSignalCache? _wspCache;
+    private readonly Library?            _lib;
+    private readonly string?             _baseDir;
 
     /// <summary>
     /// Refuses, up front and by name, a device that CONSTRAINS a port voltage nonlinearly.
@@ -1931,11 +1951,32 @@ public sealed class HbEngine
         HbSmallSignal.ISidebands sidebands, HbSmallSignal.ProbeSite[] probes,
         Complex[,] yDc, string commensurateWith)
     {
-        var counters = new HbSmallSignal.Counters();
-        var wsp = HbSmallSignal.SolveProbes(
-            _netlist, extractor, sidebands, probes, p.SsGrid, yDc, counters, commensurateWith);
+        double[] grid = p.SsGrid;
+        var census = HbSmallSignalCache.SidebandCensus(grid, sidebands);
 
+        int degree = PlanSmallSignalDegree(grid.Length, sidebands);
+        var cache  = _wspCache ?? new HbSmallSignalCache(_settings, degree);
+
+        // The chunk boundaries decide which slice holds which frequency, so the cache's slice count
+        // and this run's degree are the same number by construction.
+        cache.EnsureDegree(degree);
+        cache.Plan(extractor.InterfaceCount, probes.Length, census.Distinct, grid.Length);
+
+        var counters = new HbSmallSignal.Counters();
+        var wsp = degree > 1
+            ? SolveProbesInParallel(extractor, sidebands, probes, grid, yDc, counters,
+                                    commensurateWith, cache, degree)
+            : HbSmallSignal.SolveProbes(_netlist, extractor, sidebands, probes, grid, yDc,
+                                        counters, commensurateWith, cache);
+
+        counters.DistinctSidebandFrequencies = census.Distinct;
+        counters.SignedSidebandFrequencies   = census.Signed;
+        counters.TotalSidebandVisits         = census.Total;
         LastSmallSignalCounters = counters;
+
+        ReportSidebandCensus(census, grid, sidebands);
+        if (cache.OverBudgetNote() is { } budget)
+            _netlist.AddNoteOnce("wsprobe.hb-cache-over-budget", budget);
 
         WspCubePacker.Add(
             ds, _netlist,
@@ -1946,6 +1987,173 @@ public sealed class HbEngine
                 WspCubePacker.TermZAt(_netlist, x.LNode))).ToArray(),
             wsp, p.MarginThresholdDb,
             axisWhat: "a probe frequency of ");
+    }
+
+    // ── WSP-8: the tickle grid in parallel, and the census it reports ───────
+
+    /// <summary>Minimum probe frequencies a worker must be given before splitting is worth an
+    /// elaboration and a thread start — the S-parameter sweep's own threshold, for the same
+    /// reason.</summary>
+    public const int MinSsPointsPerWorker = 32;
+
+    /// <summary>
+    /// How many workers this small-signal sweep will actually run with. Pure and public to the
+    /// tests, because "did it take the serial path?" is otherwise only answerable by timing.
+    ///
+    /// <para>Three things pin it to 1 regardless of <see cref="AnalysisSettings.MaxParallelism"/>:
+    /// no <see cref="Library"/> was supplied (there is then nothing to elaborate a per-worker copy
+    /// FROM, and a copy is the whole thread-safety story — a model writes state during
+    /// <c>Stamp</c>); a netlist that may not be elaborated twice (an external device is a slot in a
+    /// worker PROCESS, a control-referencing SDD resolves per netlist); and a LATTICE sideband
+    /// family, whose difference-index memo and scratch buffer are written on first use and are not
+    /// shared state anything may race on.</para>
+    /// </summary>
+    public int PlanSmallSignalDegree(int ssPointCount, HbSmallSignal.ISidebands sidebands)
+    {
+        int requested = _settings.MaxParallelism;
+        if (requested == 1)                              return 1;
+        if (_lib is null)                                return 1;
+        if (sidebands is not HbSmallSignal.ToneSidebands) return 1;
+        if (!SParameterEngine.CanElaborateInParallel(_netlist)) return 1;
+
+        int cap = requested > 1 ? requested : Environment.ProcessorCount;
+        return Math.Max(1, Math.Min(cap, ssPointCount / MinSsPointsPerWorker));
+    }
+
+    /// <summary>
+    /// The tickle grid split into contiguous chunks, each on its own elaborated copy of the netlist,
+    /// its own extractor and its own cache slice — R-wsp8-9. Each chunk writes only its own slice of
+    /// <c>wsp</c> by index, so nothing is merged and the result is bit-identical to the serial run.
+    /// </summary>
+    private Complex[][,] SolveProbesInParallel(
+        HbLinearExtractor extractor, HbSmallSignal.ISidebands sidebands,
+        HbSmallSignal.ProbeSite[] probes, double[] grid, Complex[,] yDc,
+        HbSmallSignal.Counters counters, string commensurateWith,
+        HbSmallSignalCache cache, int degree)
+    {
+        var wsp     = new Complex[grid.Length][,];
+        var nets    = new ElaboratedNetlist[degree];
+        var exs     = new HbLinearExtractor[degree];
+        var extras  = new ElaboratedNetlist?[degree - 1];
+        var percore = new HbSmallSignal.Counters[degree];
+
+        nets[0] = _netlist;
+        exs[0]  = extractor;
+        for (int i = 0; i < degree; i++) percore[i] = new HbSmallSignal.Counters();
+
+        try
+        {
+            // Elaborated SERIALLY, before any worker starts: the Elaborator reads the TestBench's
+            // global-variable list, which a parametric sweep is mutating around this very call.
+            for (int i = 1; i < degree; i++)
+            {
+                var copy = new Elaborator(_lib!) { BaseDirectory = _baseDir }.Elaborate(_tb);
+                extras[i - 1] = copy;
+                nets[i] = copy;
+                exs[i]  = new HbLinearExtractor(copy, _settings);
+            }
+
+            var faults  = new Exception?[degree];
+            int faulted = 0;
+            Func<bool> abort = () => Volatile.Read(ref faulted) != 0;
+
+            Parallel.For(0, degree, new ParallelOptions { MaxDegreeOfParallelism = degree }, c =>
+            {
+                var (lo, hi) = ChunkRange(grid.Length, degree, c);
+                try
+                {
+                    HbSmallSignal.SolveProbeRange(
+                        nets[c], exs[c], sidebands, probes, grid, lo, hi, wsp, yDc,
+                        percore[c], commensurateWith, cache, worker: c, abort);
+                }
+                catch (Exception ex)
+                {
+                    faults[c] = ex;
+                    Volatile.Write(ref faulted, 1);
+                }
+            });
+
+            // Chunks are contiguous and in order, so the lowest faulting CHUNK holds the lowest
+            // faulting frequency — the point the serial loop would have died on.
+            foreach (var fault in faults)
+                if (fault is not null)
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fault).Throw();
+
+            foreach (var copy in extras) if (copy is not null) _netlist.MergeDiagnosticsFrom(copy);
+            foreach (var c in percore) Accumulate(counters, c);
+            return wsp;
+        }
+        finally
+        {
+            foreach (var copy in extras) copy?.Dispose();
+        }
+    }
+
+    /// <summary>Half-open range of probe-frequency indices chunk <paramref name="chunk"/> owns. The
+    /// first <c>count % degree</c> chunks carry one extra point, so the split is contiguous and
+    /// covers the grid exactly whatever the remainder.</summary>
+    internal static (int Lo, int Hi) ChunkRange(int count, int degree, int chunk)
+    {
+        int size = count / degree, rem = count % degree;
+        int lo   = chunk * size + Math.Min(chunk, rem);
+        int hi   = lo + size + (chunk < rem ? 1 : 0);
+        return (lo, Math.Min(hi, count));
+    }
+
+    /// <summary>Fold one worker's counters into the run's — R-wsp8-9(g)'s "each worker's counters
+    /// sum to the serial counters".</summary>
+    private static void Accumulate(HbSmallSignal.Counters into, HbSmallSignal.Counters from)
+    {
+        into.LinearPartitions      += from.LinearPartitions;
+        into.DenseFactorizations   += from.DenseFactorizations;
+        into.DenseSolves           += from.DenseSolves;
+        into.SparseSolves          += from.SparseSolves;
+        into.DegeneratePoints      += from.DegeneratePoints;
+        into.SparseFactorizations  += from.SparseFactorizations;
+        into.TransposedSolves      += from.TransposedSolves;
+        into.Stamps                += from.Stamps;
+        into.CacheHits             += from.CacheHits;
+        into.CacheMisses           += from.CacheMisses;
+    }
+
+    /// <summary>
+    /// R-wsp8-5's report: how many distinct frequencies the sidebands actually visit against how
+    /// many they would if none coincided, and — when the grid is uniform — what the step is as a
+    /// fraction of the fundamental. A grid whose step DIVIDES the fundamental shares sidebands
+    /// between points and collapses the sparse work by that ratio.
+    ///
+    /// <para><b>The grid is never altered to achieve it.</b> A frequency the user wrote is a
+    /// frequency the engine uses (the AUT-8 rule); this is said so a designer can choose an aligned
+    /// step, not so the engine can choose one for them.</para>
+    /// </summary>
+    private void ReportSidebandCensus(
+        (int Distinct, int Signed, int Total) census, double[] grid, HbSmallSignal.ISidebands sb)
+    {
+        if (census.Total == 0) return;
+
+        string alignment = "";
+        if (grid.Length > 1 && sb.Count > 1)
+        {
+            double step = grid[1] - grid[0];
+            bool uniform = true;
+            for (int i = 2; i < grid.Length && uniform; i++)
+                uniform = Math.Abs((grid[i] - grid[i - 1]) - step) <= 1e-9 * Math.Abs(step);
+
+            double f0 = (sb.Offset(sb.Zero + 1) - sb.Offset(sb.Zero)) / (2.0 * Math.PI);
+            if (uniform && step > 0 && f0 > 0)
+            {
+                double m = f0 / step;
+                alignment = Math.Abs(m - Math.Round(m)) < 1e-6 && Math.Round(m) >= 1
+                    ? $" (the grid step is f0/{Math.Round(m):F0}, so the sidebands of one point are the sidebands of others)"
+                    : " (the grid step does not divide f0, so no two points share a sideband; a step of f0/m would)";
+            }
+        }
+
+        _netlist.AddNoteOnce("wsprobe.hb-sideband-census",
+            $"WSProbe small-signal sweep: {census.Total} sideband visits landed on {census.Signed} " +
+            $"distinct sideband frequencies, {census.Distinct} of them after folding ω < 0 onto " +
+            $"|ω| — which is the number of linear-partition factorisations the whole drive sweep " +
+            $"performs{alignment}. The grid itself is untouched.");
     }
 
     /// <summary>
