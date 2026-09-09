@@ -193,8 +193,8 @@ public sealed partial class LayoutEditorViewModel
     private long _pasteCursorX;
     private long _pasteCursorY;
 
-    /// <summary>True while a Paste ghost is attached to the cursor, waiting for a click to commit or
-    /// Escape to cancel.</summary>
+    /// <summary>True while a Paste ghost is attached to the cursor, waiting for a click to commit,
+    /// Enter to commit at the SOURCE coordinates, or Escape to cancel.</summary>
     public bool IsPastePlacementActive => _pastePlacementShapes is not null;
 
     /// <summary>
@@ -228,6 +228,11 @@ public sealed partial class LayoutEditorViewModel
         _pastePlacementAnchorY = anchorY;
         _pasteCursorX = anchorX;
         _pasteCursorY = anchorY;
+        // The same one-line hint every other placement gesture in this editor posts (the ruler-label
+        // move, the schematic's label move): a mode with a ghost on the cursor has no other
+        // affordance saying which keys it answers to, and Enter's whole value is being reachable
+        // without having read a release note.
+        _messageSink?.Info("Click to place, Enter to place at the source coordinates, Esc to cancel");
         RebuildOverlay();
     }
 
@@ -246,6 +251,29 @@ public sealed partial class LayoutEditorViewModel
         _pastePlacementInstanceBoxOnly = [];
         _pastePlacementRulers = [];
         RebuildOverlay();
+    }
+
+    /// <summary>
+    /// Places the ghost at the SOURCE coordinates — Enter/Return during a paste placement (owner
+    /// request, 2026-09-09). The point is copy/paste BETWEEN <c>.clay</c> documents: the pasted
+    /// geometry lands on exactly the coordinates it was copied from, which no amount of careful
+    /// mousing can guarantee, and which is what makes two documents overlay each other correctly.
+    ///
+    /// <para>It is <see cref="CommitPastePlacement"/> with a zero delta, and written as exactly that
+    /// — the cursor is moved back onto the anchor and the ordinary commit runs — so the two spellings
+    /// of "place this" cannot drift: same port renumbering, same one undo entry, same
+    /// select-what-was-just-placed. The anchor is the fragment's own bbox corner in SOURCE
+    /// coordinates (<c>LayoutFragment.Build</c>), rescaled with the shapes when the destination's
+    /// DBU-per-micron differs, so "zero delta" means the shapes keep the coordinates they arrived
+    /// with — the same placement <see cref="PasteInPlace"/> (Ctrl/⌘+Shift+V) performs without ever
+    /// arming a ghost.</para>
+    /// </summary>
+    private void CommitPastePlacementAtSource()
+    {
+        if (_pastePlacementShapes is null) return;
+        _pasteCursorX = _pastePlacementAnchorX;
+        _pasteCursorY = _pastePlacementAnchorY;
+        CommitPastePlacement();
     }
 
     private void CommitPastePlacement()

@@ -1,5 +1,91 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## Layout editor: two paths ignored the layer Select flag, and a paste ghost could not be placed at its source (owner, 2026-09-09)
+
+Three reports. Two of them turned out to be the same rule broken in two different places.
+
+### Ctrl/Cmd+A selected geometry on layers the user had locked
+
+`SelectAllCommand` handed `Enumerable.Range(0, Model.Shapes.Count)` straight to
+`ReplaceMixedSelection` — **every shape, with no layer gate at all**. It was the only selection
+gesture in the editor without one: a click already goes through `LayoutHitTest.HitStack`'s
+`!def.Visible || !def.Selectable` skip, and a marquee through the identical test in
+`ComputeMarqueeSelection` (its own comment calls it "gate 8"). So a `.ctech` layer with `Selectable`
+switched off was honoured by both ways of picking one thing and by neither way of picking
+everything, and **Ctrl+A followed by Delete removed artwork that had been locked against selection
+on purpose** — the reason that flag exists, defeated by the shortcut people reach for before a bulk
+edit.
+
+The fix is `SelectableShapeIndices()`, next to `ResolveLayerDef` in `LayoutEditorViewModel.cs`, and
+it applies the SAME two-part test rather than a third spelling of it: hidden is excluded as well as
+locked, exactly as the click and the marquee exclude it. An unknown layer still resolves through
+`FallbackPalette` and is selectable, so a document with no technology is untouched — which is what
+`LayoutSelectAllIncludesInstancesTests` had always been asserting without a technology in play, and
+why the gap survived.
+
+**Instances and rulers stay unfiltered, deliberately.** Neither carries a layer: an instance's
+artwork lives on the layers of the cell it places, which is that sub-cell's business, and a ruler is
+an annotation with no layer at all. Filtering either would be inventing a rule the marquee does not
+have.
+
+### Enter places a paste ghost at the coordinates it was copied from
+
+There was no way to say "put it back exactly where it came from" mid-placement. That is the gesture
+that makes copy/paste BETWEEN `.clay` documents work — the fragment has to land on the source
+coordinates for two documents to overlay — and no amount of careful mousing gets there, because the
+snap grid quantizes to the grid, not to where the geometry actually was.
+
+`CommitPastePlacementAtSource` is `CommitPastePlacement` with the cursor moved back onto the anchor,
+written as literally that so the two spellings of "place this" cannot drift: same port renumbering
+(`ResolvePortNumbers`), same single undo entry, same select-what-was-just-placed. It works because
+the anchor is the fragment's own bbox corner in SOURCE coordinates (`LayoutFragment.Build`), rescaled
+alongside the shapes when the destination's DBU-per-micron differs — so a zero delta means the
+shapes keep the coordinates they arrived with, which is the placement `PasteInPlace`
+(Ctrl/Cmd+Shift+V) already performs without ever arming a ghost.
+
+`LayoutCanvas` marks Escape/Enter/Return handled while a ghost is armed — it previously returned
+without setting `Handled`, so the keys the ghost acts on went on to bubble to any window KeyBinding
+or default button above the canvas. `BeginPastePlacement` now posts the same one-line hint every
+other placement gesture in this editor posts (the ruler-label move, the schematic's label move): a
+ghost on the cursor has no other affordance saying which keys it answers to.
+
+### …and the marker GRAB was the second half of the same bug
+
+Reported straight after the fix above, and it is a different code path: *only 2 layers Selectable,
+select all, click to drag, and some other layer moves.* With Select All fixed, the selection was
+right and the DRAG still moved a locked shape.
+
+**Geometry snap gates its candidates on `Visible` alone, and says so** —
+`LayoutSnapQuery.FindCandidates`, "locked IS snappable — only `Visible` gates". That is correct for
+the **target** role: aligning new artwork to a locked board outline or keepout is exactly what
+locking a layer is for. But `TryBeginSnapMarkerDrag` reuses that same candidate list for the **grab**
+role, where it `ApplyClickSelection`s the candidate's owner and starts moving it. So a marker
+belonging to a locked shape claimed the press, **silently replaced the whole selection with that one
+shape**, and dragged the one thing the technology said could not be picked up.
+
+Marker grab is a click-through — its own doc comment says it consumes the press "even when the raw
+click misses that shape's own hit-test" — so it has to obey the same `Visible && Selectable` gate the
+click it stands in for obeys. `GrabbableOnly` (`LayoutEditorViewModel.Snap.cs`) applies it, and
+**only to the grab**; the target role is untouched, which is what the third test pins.
+
+Two details that are the difference between a fix and a new bug:
+
+- **Filtered BEFORE the cycle cache is built, not after it chooses.** R-snp-9 cycling then still
+  reaches every candidate the press is allowed to grab, instead of stalling on a locked one; and an
+  empty result falls through to ordinary selection exactly as "nothing within tolerance" already does.
+- **Instance owners pass through untouched**, for the same reason Select All does not filter them:
+  an instance carries no layer of its own, and neither `LayoutHitTest.HitInstanceStack` nor its
+  sub-cell walk (`CellGeometryHitTest`) filters one by what is inside it. Gating here would invent a
+  rule the click does not have.
+
+`ApplyClickSelection` has exactly two callers — the pick stack (gated all along) and this one — so
+that was the whole hole.
+
+Gate for all three: `tests/Ui.Tests/Layout/LayoutSelectAllAndPasteAtSourceTests.cs`. The two
+marker-grab tests were confirmed to fail with the gate removed and pass with it, rather than assumed
+to cover it.
+
+
 ## "EM sheet at: Bottom / Top" named an internal construct, and there is no "symmetric" (owner, 2026-09-09)
 
 Owner, reading the chapter this round had just extended: *what is a "band"?* It is the extractor's

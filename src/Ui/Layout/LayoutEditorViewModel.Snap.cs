@@ -529,6 +529,48 @@ public sealed partial class LayoutEditorViewModel
                                  _snapDragOwnerIsInstance, _snapDragOwnerIndex);
     }
 
+    /// <summary>
+    /// The candidates this press may PICK UP, out of everything it may snap TO — owner-reported bug,
+    /// 2026-09-09: "I set only 2 layers Selectable, select all, then click to drag, and some other
+    /// layer moves."
+    ///
+    /// <para><b>The two roles are not the same set, and that is the whole point.</b>
+    /// <see cref="LayoutSnapQuery.FindCandidates"/> gates on <c>Visible</c> alone and says so —
+    /// "locked IS snappable" — which is right for the TARGET role: aligning new artwork to a locked
+    /// board outline or keepout is exactly what locking a layer is for. But
+    /// <see cref="TryBeginSnapMarkerDrag"/> reuses that same list for the GRAB role, where it
+    /// <see cref="ApplyClickSelection"/>s the candidate's owner and starts moving it — so a marker
+    /// belonging to a locked shape handed the user that shape instead of the selection they were
+    /// reaching for, silently REPLACING it, and dragged the one thing the technology said could not
+    /// be picked up. Marker grab is a click-through: it must obey the same
+    /// <c>Visible &amp;&amp; Selectable</c> gate the click it stands in for obeys
+    /// (<c>LayoutHitTest.HitStack</c>).</para>
+    ///
+    /// <para>Filtered BEFORE the cycle cache is built, not after it chooses, so R-snp-9 cycling still
+    /// reaches every candidate a press is allowed to grab rather than stalling on a locked one; and
+    /// an empty result falls through to ordinary selection exactly as "nothing within tolerance"
+    /// already does.</para>
+    ///
+    /// <para><b>Instance owners pass through untouched.</b> An instance carries no layer of its own —
+    /// its artwork is on the layers of the cell it places — and neither
+    /// <c>LayoutHitTest.HitInstanceStack</c> nor Select All filters one by what is inside it. Gating
+    /// here would invent a rule the click does not have.</para>
+    /// </summary>
+    private List<SnapCandidate> GrabbableOnly(IReadOnlyList<SnapCandidate> candidates)
+    {
+        var grabbable = new List<SnapCandidate>(candidates.Count);
+        foreach (var c in candidates)
+        {
+            if (!c.OwnerIsInstance && c.OwnerIndex >= 0 && c.OwnerIndex < Model.Shapes.Count)
+            {
+                var def = ResolveLayerDef(Model.Shapes[c.OwnerIndex].Layer);
+                if (!def.Visible || !def.Selectable) continue;
+            }
+            grabbable.Add(c);
+        }
+        return grabbable;
+    }
+
     /// <summary>R-snp-8: the click-through headline behaviour. Consumes the press for the top-priority
     /// snap candidate's owning shape/instance (R-snp-9 cycling on repeated near-identical presses,
     /// reusing <see cref="_snapCycleCache"/>) even when the raw click misses that shape's own
@@ -550,8 +592,8 @@ public sealed partial class LayoutEditorViewModel
         else
         {
             var counters = new SnapQueryCounters();
-            var candidates = LayoutSnapQuery.FindCandidates(
-                Model, Technology, InstanceBaseDir, px, py, snapTolDbu, IncludeIntersectionsEnabled, null, null, ref counters);
+            var candidates = GrabbableOnly(LayoutSnapQuery.FindCandidates(
+                Model, Technology, InstanceBaseDir, px, py, snapTolDbu, IncludeIntersectionsEnabled, null, null, ref counters));
             if (candidates.Count == 0) { _snapCycleCache.Clear(); return false; }
             chosen = _snapCycleCache.Rebuild(px, py, candidates);
         }

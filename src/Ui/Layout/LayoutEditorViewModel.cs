@@ -428,9 +428,18 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         // docs/design/layout-view.md §9B: and every RULER, for exactly the reason the instance bug
         // above records — Select All must select everything the user can select, or Ctrl+A then Delete
         // silently leaves one kind behind.
+        // Owner-reported bug, 2026-09-09: Select All selected geometry on layers whose technology
+        // entry says Selectable == false (and on hidden ones), which no other selection gesture in
+        // this editor does — a click goes through LayoutHitTest.HitStack's own Visible/Selectable
+        // gate, and a marquee through ComputeMarqueeSelection's "gate 8". Select All is "select
+        // everything the user CAN select", and a layer the user has switched Select off for is
+        // precisely what they have said they cannot; the previous behaviour meant Ctrl+A then
+        // Delete silently removed artwork on layers that were locked against selection on purpose.
+        // Instances and rulers are unfiltered because neither carries a layer — an instance's
+        // artwork lives on the layers of the cell it places, which is the sub-cell's business.
         SelectAllCommand = new RelayCommand(() =>
         {
-            ReplaceMixedSelection(Enumerable.Range(0, Model.Shapes.Count),
+            ReplaceMixedSelection(SelectableShapeIndices(),
                                   Enumerable.Range(0, Model.Instances.Count),
                                   Enumerable.Range(0, Model.Rulers.Count));
             _cycleCache.Clear();
@@ -1028,6 +1037,21 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
     }
 
     private string LayerDisplayName(LayerKey key) => ResolveLayerDef(key).Name;
+
+    /// <summary>Every shape index whose resolved layer is both <c>Visible</c> and <c>Selectable</c> —
+    /// the same gate a click (<c>LayoutHitTest.HitStack</c>) and a marquee
+    /// (<see cref="ComputeMarqueeSelection"/>) already apply, shared by Select All so the three
+    /// gestures cannot disagree about what is selectable. An unknown layer resolves through
+    /// <see cref="FallbackPalette"/> and is selectable, so a document with no technology is
+    /// unaffected.</summary>
+    private IEnumerable<int> SelectableShapeIndices()
+    {
+        for (int i = 0; i < Model.Shapes.Count; i++)
+        {
+            var def = ResolveLayerDef(Model.Shapes[i].Layer);
+            if (def.Visible && def.Selectable) yield return i;
+        }
+    }
 
     // ── Overlap cycling cache (R-L1c-2) ────────────────────────────────────────
     // ClickCycleCache<int>.ClickX/ClickY is the world point (rounded to DBU) of the press that built
@@ -3157,6 +3181,12 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         if (_pastePlacementShapes is not null)
         {
             if (key == Key.Escape) CancelPastePlacement();
+            // Enter/Return places the ghost at the coordinates it was COPIED from, so a fragment
+            // pasted into a second .clay lands exactly on top of where it sits in the first
+            // (owner, 2026-09-09). Deliberately inside the paste branch's own "the ghost owns the
+            // keyboard" block: while something is attached to the cursor, Enter can only mean
+            // "put it down".
+            else if (key is Key.Enter or Key.Return) CommitPastePlacementAtSource();
             return;
         }
 

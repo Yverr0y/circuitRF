@@ -1571,11 +1571,15 @@ public sealed class LayoutCanvas : Control
             InvalidateVisual();
         }
 
-        // A paste ghost in progress owns every key itself (Escape cancels it) — never let a
-        // clipboard shortcut race with an already-armed placement.
+        // A paste ghost in progress owns every key itself (Escape cancels it; Enter places it at the
+        // coordinates it was copied from) — never let a clipboard shortcut race with an already-armed
+        // placement. The two keys the ghost ACTS on are marked handled so neither reaches a window
+        // KeyBinding or a default button above this canvas.
         if (_viewModel?.IsPastePlacementActive == true)
         {
+            bool consumed = e.Key is Key.Escape or Key.Enter or Key.Return;
             _viewModel.OnKeyDown(e.Key, e.KeyModifiers);
+            if (consumed) e.Handled = true;
             InvalidateVisual();
             return;
         }
