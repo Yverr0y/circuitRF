@@ -1,5 +1,28 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## The WSProbe glyph bent every wire it was placed in (owner, 2026-09-08)
+
+The WSProbe was drawn on the IProbe's geometry deliberately — two pins at `(0,100)`/`(100,100)`, stems
+rising to a connector at `y = 0` — on the reasoning that both are placed into a wire the same way and
+`SeriesProbeInsertion` needs both pins on one straight segment. The second half is true; the first
+half was not. **An IProbe hangs BELOW the wire it measures; a WSProbe sits IN it.** Dropped into a
+horizontal run, the dropped pins turned the wire through 90 degrees at each end.
+
+It is now a straight horizontal through: pins at `(0,0)` and `(100,0)`, a short lead from each pin to
+the body edge, and the body's `G`/`L` letters on that same line. **The leads stop at x = 15 and x = 85
+rather than crossing the body** — a line through the middle ran straight through the two letters,
+which are the only marks that tell the terminals apart. Two files, and they must agree:
+`EditableSchematic.PortDefsFor` (the pins) and `BuiltInSymbols.BuildWSProbe` (the drawing).
+
+**This MOVES the pins of an already-placed WSProbe by 100 units in y.** Nothing shipped in the
+repository places one — no `.csch`, no template, and the WSProbe test fixtures are all `.cnl` netlists
+— so there was nothing to migrate here. A design drawn before this needs its probes re-connected, and
+there is no format version to detect that: the pin offsets are geometry, not stored state.
+
+Gate: `tests/Ui.Tests/Schematic/WSProbePlacementTests.cs`, whose `PinDrop` constant is now 0 and whose
+wire-cut cases pass unchanged — which is the evidence that the cut affordance never depended on where
+the pins sat, only on their being collinear.
+
 ## The component catalogue reported one number where there are two (AUT-10, 2026-09-08)
 
 `CatalogEntry` carried `Ports` — the SYMBOL's pin count, from `SymbolPortDefs` — and the CLI printed

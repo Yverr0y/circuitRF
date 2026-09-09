@@ -594,12 +594,15 @@ public sealed partial class Evaluator
         {
             int n = (int)v.AsReal();
             // S/Y/Z port axes (i, j) use 1-based PORT NUMBERS resolved by axis value: S[:, 2, 1] = S21.
-            if (axis.Name is "i" or "j")
+            // The WSProbe matrix's row/col are the same: WspCubePacker writes 1-based axis values so
+            // the document's wsp(r, c) is wsp[:, r, c] with no index arithmetic between.
+            if (axis.Name is "i" or "j" or "row" or "col")
             {
                 for (int k = 0; k < axis.Values.Length; k++)
                     if ((int)Math.Round(axis.Values[k]) == n) return k;
+                string what = axis.Name is "row" or "col" ? "Index" : "Port";
                 throw new ExpressionException(
-                    $"Port {n} not found on axis '{axis.Name}'. Available ports: " +
+                    $"{what} {n} not found on axis '{axis.Name}'. Available: " +
                     $"[{string.Join(", ", axis.Values.Select(x => ((int)Math.Round(x)).ToString()))}].");
             }
             return n;

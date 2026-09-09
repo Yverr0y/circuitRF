@@ -890,7 +890,9 @@ public static class TraceResolve
         foreach (var s in t.Slice)
         {
             if (s.Role != AxisRole.PinToIndex) continue;
-            if (s.AxisName is "i" or "j") continue;   // positional port pair — TraceLabeler owns it
+            // Positional pairs — TraceLabeler owns them. row/col are the WSProbe matrix's own and
+            // read positionally too, so a display token built here would never be used.
+            if (s.AxisName is "i" or "j" or "row" or "col") continue;
 
             Axis? axis = null;
             foreach (var a in cube.Axes) if (a.Name == s.AxisName) { axis = a; break; }

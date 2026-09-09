@@ -186,14 +186,18 @@ namespace CircuitRF.Render.DataDisplay
             // would not say which index it is.
             if (t.Slice is not null)
             {
+                // The WSProbe matrix's row/col join i/j here: a reader asked for "(1,1)" rather
+                // than "(row=1,col=1)" — the names carry nothing a matrix element does not already
+                // say positionally, and the axis values are 1-based, exactly as the ports are.
                 bool bothPortsPinned =
-                    t.Slice.Count(x => x.Role == AxisRole.PinToIndex && x.AxisName is "i" or "j") == 2;
+                    t.Slice.Count(x => x.Role == AxisRole.PinToIndex
+                                    && x.AxisName is "i" or "j" or "row" or "col") == 2;
 
                 bool first = true;
                 foreach (var s in t.Slice)
                 {
                     if (s.Role != AxisRole.PinToIndex) continue;
-                    bool isPort = s.AxisName is "i" or "j";
+                    bool isPort = s.AxisName is "i" or "j" or "row" or "col";
 
                     // A WSProbe trace names its own pins where the generic path cannot: the wsp
                     // matrix's row/col say nothing about the quantity, and the envelope's grid axes

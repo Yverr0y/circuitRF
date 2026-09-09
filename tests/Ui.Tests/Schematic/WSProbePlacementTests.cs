@@ -20,8 +20,9 @@ namespace CircuitRF.Ui.Tests.Schematic;
 /// </summary>
 public class WSProbePlacementTests
 {
-    // R0 WSProbe pins sit at (X, Y+100) and (X+100, Y+100) — the IProbe's own geometry.
-    private const double PinDrop = 100.0;
+    // R0 WSProbe pins sit at (X, Y) and (X+100, Y) — a straight horizontal through, so the origin
+    // IS the G pin (owner, 2026-09-08: the IProbe's dropped pins bent the wire at both ends).
+    private const double PinDrop = 0.0;
 
     private static (SchematicEditModel Model, SchematicViewModel Vm) MakeVm()
     {

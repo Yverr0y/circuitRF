@@ -980,9 +980,16 @@ public static class BuiltInSymbols
 
     // ── WSProbe — the stability probe (Winslow 2023, Fig. 15) ────────────────
     //
-    // The IProbe's geometry, deliberately: two pins at the BOTTOM (0,100)/(100,100), 100 apart,
-    // stems rising to a connector at y=0. A WSProbe is placed into a wire exactly as an IProbe is,
-    // and the wire-cut affordance (SeriesProbeInsertion) needs both pins on one straight segment.
+    // A STRAIGHT HORIZONTAL THROUGH: two pins 100 apart at (0,0)/(100,0), on the same line as the
+    // body's own text, with a short lead from each pin to the body edge. Deliberately NOT the
+    // IProbe's dropped pins, which is what it had until 2026-09-08 — an IProbe hangs BELOW the wire
+    // it measures, and copying that geometry made every WSProbe dropped into a horizontal run bend
+    // the wire through 90 degrees at each end. It is still placed into a wire the same way, and the
+    // wire-cut affordance (SeriesProbeInsertion) still has both pins on one straight segment.
+    //
+    // The leads stop at the body edge (x = 15 and x = 85) rather than crossing it: a line drawn
+    // through the middle of the body ran straight through the G and L letters, which are the only
+    // marks that tell the two terminals apart.
     //
     // The BODY is a plain square straddling that connector, with the two terminal letters inside it
     // at the ends they name — G at the left pin's end, L at the right's. Those letters are the whole
@@ -1000,9 +1007,8 @@ public static class BuiltInSymbols
     // same visual weight on one sheet. ProbeGlyphTextSize is what keeps the letters in step with the
     // IProbe's "I" and the VProbe's "V"; changing it changes all three.
     private static Symbol BuildWSProbe() => Sym([
-        L(  0, 100,   0,   0),                     // left stem  (G pin → connector)
-        L(100, 100, 100,   0),                     // right stem (L pin → connector)
-        L(  0,   0, 100,   0),                     // horizontal connector, through the body
+        L(  0,   0,  15,   0),                     // left lead  (G pin → body edge)
+        L( 85,   0, 100,   0),                     // right lead (body edge → L pin)
         RRect(50, 0, 70, 70, 6),                   // the body — a square in the wire
         Txt("G", 31, 0, fontSize: ProbeGlyphTextSize),   // the generator-side terminal, at its end
         Txt("L", 69, 0, fontSize: ProbeGlyphTextSize),   // the load-side terminal, at its end

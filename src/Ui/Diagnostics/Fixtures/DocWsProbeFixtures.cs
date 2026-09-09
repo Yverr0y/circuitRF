@@ -125,21 +125,40 @@ public static class DocWsProbeFixtures
     // ── The figures ───────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The two driving-point loci of the reference document's own series resonator, on one polar
-    /// plot: <c>1/Y0</c>, which carries Kurokawa's clockwise crossing of the negative real axis at
-    /// the resonance, and <c>1/H0</c>, which does not.
+    /// The two driving-point loci of the reference document's own series resonator: <c>1/Y0</c>,
+    /// which carries Kurokawa's clockwise crossing of the negative real axis at the resonance, and
+    /// <c>1/H0</c>, which does not.
     ///
     /// <para>That pairing IS the figure. §4.10's point is that a zero can mask the pole in one of
     /// the two functions but never in both, and a picture of only the one that shows it would be a
     /// picture of the wrong half of the lesson.</para>
+    ///
+    /// <para><b>TWO plots, which is what the page's own heading says and what this figure did not
+    /// do until 2026-09-08.</b> The two loci are reciprocal quantities — <c>1/H0</c> is an
+    /// admittance and <c>1/Y0</c> an impedance — so on one shared polar radius their magnitudes are
+    /// whatever the circuit's impedance level makes them. On this resonator that is 10 to 30 Ω
+    /// against 0.05 S: a ratio of about 600, which drew <c>1/H0</c> as a dot on the origin. Nothing
+    /// was wrong with the trace and nothing said so; the reader simply could not see it, which the
+    /// owner reported as "am I supposed to see 1/H0?". A plot each gives each locus its own radius,
+    /// and the comparison the caption asks for is then one a reader can actually make.</para>
     /// </summary>
     public static FigureScene ResonatorPolar()
     {
-        var (vm, plot) = Plot2(Run("WspSeriesResonator"), PlotType.Polar,
-                               WspMetric.InvY0, WspMetric.InvH0, "P");
+        const double side = 360.0;
+        string id = Run("WspSeriesResonator");
+
+        var (vm, yPlot) = DocDataDisplayFixtures.PlotFor(id, PlotType.Polar, traces: 1, size: (side, side));
+        PickWsp(yPlot.Inspector.Traces[0], WspMetric.InvY0, "P");
+
+        var display = vm.Window.DataDisplay
+            ?? throw new InvalidOperationException("The Data Display document has no active tab.");
+        var hPlot = display.AddPlot(PlotType.Polar, width: side, height: side);
+        hPlot.Inspector.AddTraceCommand.Execute(null);
+        PickWsp(hPlot.Inspector.Traces[0], WspMetric.InvH0, "P");
+
         return new FigureScene(new DataDisplayView
             { DataContext = DocDataDisplayFixtures.Document(vm, "Series resonator") })
-            { AfterLayout = DocDataDisplayFixtures.CentredPlot(plot) };
+            { AfterLayout = DocDataDisplayFixtures.CentredRow(yPlot, hPlot) };
     }
 
     /// <summary>

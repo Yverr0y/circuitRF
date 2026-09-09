@@ -72,6 +72,52 @@ public class SchematicArmClearsSelectionTests
         Assert.Equal(undoBefore, vm.UndoRedo.UndoDescription);
     }
 
+    /// <summary>
+    /// The same defect one step later (owner, 2026-09-08): the FIRST click placed a part and left it
+    /// SELECTED with the tool still armed, which is exactly the state <see cref="BeginPlacement"/>
+    /// refuses to create — so the next R rotated the part that had just landed instead of the ghost,
+    /// and the reported symptom was "R rotates before placing and does nothing after".
+    /// </summary>
+    [Theory]
+    [InlineData(SymbolKind.Pin)]
+    [InlineData(SymbolKind.Term)]
+    [InlineData(SymbolKind.Ground)]
+    public void R_AfterPlacing_StillRotatesTheGhost_AndLeavesThePlacedPartAlone(SymbolKind armed)
+    {
+        var model = new SchematicEditModel();
+        var vm    = new SchematicViewModel(model);
+
+        vm.BeginPlacement(armed);
+        vm.OnPointerMoved(700, 300, leftDown: false);
+        vm.OnPointerPressed(700, 300, KeyModifiers.None);
+
+        Assert.Single(model.Components);
+        Assert.Equal(SchematicViewModel.Tool.Place, vm.ActiveTool);   // still armed for the next one
+        Assert.Empty(vm.Selection.Ids);                              // and nothing is selected
+        var placedRotation = model.Components[0].Rotation;
+        var undoBefore     = vm.UndoRedo.UndoDescription;
+
+        Assert.True(vm.OnKeyDown(Key.R, KeyModifiers.None));
+
+        Assert.Equal(SymbolRotation.R90, vm.CurrentPlacementRotation);
+        Assert.Equal(placedRotation, model.Components[0].Rotation);
+        Assert.Equal(undoBefore, vm.UndoRedo.UndoDescription);
+    }
+
+    /// <summary>A placement made while NOT armed — a drag from the Project Tree, an import — still
+    /// ends with the new part selected, which is what a one-shot placement should do.</summary>
+    [Fact]
+    public void APlacementMadeWhileNotArmed_StillSelectsWhatItPlaced()
+    {
+        var model = new SchematicEditModel();
+        var vm    = new SchematicViewModel(model);
+
+        vm.CommitPlacement(SymbolKind.Resistor, 2, SymbolRotation.R0, 300, 300);
+
+        Assert.Single(model.Components);
+        Assert.Equal([model.Components[0].Id], vm.Selection.Ids);
+    }
+
     [Fact]
     public void Delete_WithAPlacementArmed_NoLongerReachesTheOldSelection()
     {

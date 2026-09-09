@@ -251,7 +251,12 @@ namespace CircuitRF.Render.DataDisplay
                     canvas.DrawCircle(ctr.X, ctr.Y, pxR, axisPaint);
             }
 
-            if (canvasSize.W > 250 && axes.Window.Width < 8)
+            // The radius numbers, whatever the radius is. This used to be gated on
+            // `axes.Window.Width < 8` as well, which was safe only while a Polar plot could never
+            // frame anything much bigger than the unit circle: once autoscale is allowed off that
+            // floor (Plot.UnityMinimumApplies), a locus of tens of ohms drew a grid of unlabelled
+            // rings and there was nothing on the plot to say what scale it was at.
+            if (canvasSize.W > 250)
             {
                 var (lblFont, lblPaint) = MakeTextObjects(axes.FontSizeTicks * 0.85, lw, theme);
                 using var _lf1 = lblFont;
@@ -431,7 +436,12 @@ namespace CircuitRF.Render.DataDisplay
 
             canvas.DrawPath(realAxis, smithPaint);
 
-            if (canvasSize.W > 250 && axes.Window.Width < 8)
+            // The radius numbers, whatever the radius is. This used to be gated on
+            // `axes.Window.Width < 8` as well, which was safe only while a Polar plot could never
+            // frame anything much bigger than the unit circle: once autoscale is allowed off that
+            // floor (Plot.UnityMinimumApplies), a locus of tens of ohms drew a grid of unlabelled
+            // rings and there was nothing on the plot to say what scale it was at.
+            if (canvasSize.W > 250)
             {
                 var (lblFont, lblPaint) = MakeTextObjects(axes.FontSizeTicks * 0.85, lw, theme);
                 using var _lf2 = lblFont;

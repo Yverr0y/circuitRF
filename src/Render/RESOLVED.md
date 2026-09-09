@@ -1,5 +1,54 @@
 # src/Render — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## Owner report round, 2026-09-08 — the plot scales and the wsp matrix's indices
+
+Three reports whose fixes live below the firewall. `src/Ui/RESOLVED.md` carries the two that do not.
+
+### A Polar plot could not be scaled inside the unit circle
+
+`Plot.AutoscaleEnforceUnityMinimum` — on by default, never set anywhere — unioned every complex-plane
+autoscale with the unit square. That is right for a Smith chart, whose grid IS the unit disc: a Smith
+chart framed smaller than |Γ| = 1 has no boundary. It is wrong for a Polar plot, which carries
+whatever the trace is — ohms, siemens, a loop gain — and the floor made every small quantity a dot on
+the origin, which looks exactly like a trace that is not being drawn. The WSProbe chapter's `1/H0`
+locus (about 0.05 S) beside `1/Y0` (10-30 Ω) is the case that surfaced it.
+
+**`UnityMinimumApplies` is the property AND `PlotType != Polar`.** Two consequences of taking the
+floor away that were not obvious until it was gone:
+
+- **`paddingComplex` existed and was applied to nothing.** The complex branch of `AutoscaleCore` read
+  neither `padX` nor `padY` — the union with unity always left slack, so nothing missed them. Without
+  the floor a locus would have touched the frame, so the Polar branch now runs `EnsureMinExtent` and
+  the same `InflateRect` padding the Rect branch has always used. The constant was already there and
+  already 0.02.
+- **The radius numbers were gated on `axes.Window.Width < 8`** in `AxesRenderer.DrawPolarGrid`, which
+  is safe only while a Polar plot cannot frame much more than the unit circle. A 59-unit-wide window
+  drew a grid of unlabelled rings with nothing anywhere to say what scale it was at. The gate is now
+  the canvas-width one alone.
+
+### The `wsp` matrix's `row`/`col` read 0-based everywhere a user met them
+
+`WspCubePacker` writes those axes with 1-based VALUES (`k + 1`) precisely so the reference document's
+`wsp(r, c)` needs no index arithmetic. Only `i`/`j` — the S/Y/Z port axes — were being READ that way,
+so the trace card offered `mag(SP1.wsp[:, 0, 0])` for the first element and the Y-axis label read
+`SP1.wsp(row=1,col=1)`.
+
+**Four sites, and they must move together** — the same rule `i`/`j` are already under:
+`SliceTokenParser` (typed slice), `Trace.BuildPickerYExpression` (what the picker writes back),
+`TraceLabeler.BuildCubeQuantity` (positional, so it reads `(2,1)` exactly as `S(2,1)` does), and
+`Evaluator.ResolvePin`, which is the measure-line and expression path and resolves by axis VALUE
+rather than by arithmetic. `TraceResolve.ApplyPinnedAxisDisplay` skips them for the same reason it
+skips `i`/`j`: the label is positional, so a display token built there could never be used.
+
+Note this is only ever the `wsp`/`wsp_passive` matrices — nothing else in the repo names an axis
+`row` or `col`, and both cubes are 1-based by construction.
+
+**A WSProbe TRACE was never affected**, and that is worth separating: `WspMetrics.PinToken` returns
+null for `row`/`col`, so a `1/H0 @ GATE` trace never printed them at all. This was the plain-cube
+route — picking `SP1.wsp` out of the analysis group and pinning the two axes by hand.
+
+Gate: `tests/Ui.Tests/DataDisplay/WspMatrixIndexingTests.cs` and `PolarScaleTests.cs`.
+
 
 ## RND-1 — the render layer below the UI firewall (2026-09-07)
 

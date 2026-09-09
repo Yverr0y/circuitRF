@@ -75,8 +75,7 @@ public sealed class ParallelRlcModel : ComponentModel, IReportsWarnings, IInduct
             if (!_warnedR)
             {
                 _pending.Add(($"prlc.negative:{c.InstancePath}",
-                    $"PRLC:{c.InstancePath}: R={r:G4} Ω < 0 — non-physical/active element; " +
-                    "stamping 1/R with its sign and proceeding."));
+                    $"PRLC:{c.InstancePath}: R={r:G4} Ω < 0 — non-physical/active element."));
                 _warnedR = true;
             }
             g = 1.0 / r;   // negative conductance — intentional

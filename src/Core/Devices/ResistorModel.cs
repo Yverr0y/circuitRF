@@ -104,8 +104,7 @@ public sealed class ResistorModel : ComponentModel, IReportsWarnings
             if (!_warned && !passive)
             {
                 _pending.Add(($"resistor.negative:{c.InstancePath}",
-                    $"R:{c.InstancePath}: R={r:G4} Ω < 0 — non-physical/active element; " +
-                    "stamping 1/R with its sign and proceeding."));
+                    $"R:{c.InstancePath}: R={r:G4} Ω < 0 — non-physical/active element."));
                 _warned = true;
             }
             // The passive assembly takes |R| — the document's "negative resistances … rendered

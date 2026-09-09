@@ -148,7 +148,7 @@ src/Core/Expressions/Evaluator.cs|Cube index has {ix.Tokens.Length} token(s) but
 src/Core/Expressions/Evaluator.cs|Index for axis '{axis.Name}' must be ':', a name, an integer, or a range — got {v.Kind}.
 src/Core/Expressions/Evaluator.cs|Operator '{lg.Op}' requires Bool, got {l.Kind}
 src/Core/Expressions/Evaluator.cs|Operator '{lg.Op}' requires Bool, got {r.Kind}
-src/Core/Expressions/Evaluator.cs|Port {n} not found on axis '{axis.Name}'. Available ports: 
+src/Core/Expressions/Evaluator.cs|{what} {n} not found on axis '{axis.Name}'. Available: 
 src/Core/Expressions/Evaluator.cs|Unknown AST node: {expr.GetType().Name}
 src/Core/Expressions/Evaluator.cs|Unknown binary op '{b.Op}'
 src/Core/Expressions/Evaluator.cs|Unknown comparison op '{cmp.Op}'

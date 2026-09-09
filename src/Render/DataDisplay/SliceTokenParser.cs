@@ -108,10 +108,13 @@ public static class SliceTokenParser
         if (int.TryParse(tk, out int index))
         {
             // S/Y/Z port axes (i, j) use 1-based PORT NUMBERS, not 0-based indices: S[:, 2, 1] = S21.
-            if (axisName is "i" or "j")
+            // The WSProbe matrix's row/col are the same case and must read the same way: the cube's
+            // own axis VALUES are 1-based (WspCubePacker writes k+1), so the document's wsp(1,1) is
+            // wsp[:, 1, 1] with no index arithmetic between the paper and the card.
+            if (axisName is "i" or "j" or "row" or "col")
             {
                 if (index < 1 || index > axisLength)
-                { error = $"Port {index} out of range for axis '{axisName}' (1..{axisLength})."; return new Token(Kind.Invalid); }
+                { error = $"{(axisName is "row" or "col" ? "Index" : "Port")} {index} out of range for axis '{axisName}' (1..{axisLength})."; return new Token(Kind.Invalid); }
                 return new Token(Kind.PinIndex, Index: index - 1);
             }
             if (index < 0 || index >= axisLength)

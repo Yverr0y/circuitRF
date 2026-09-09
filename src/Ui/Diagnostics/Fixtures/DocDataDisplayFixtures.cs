@@ -62,6 +62,14 @@ public static class DocDataDisplayFixtures
     /// <summary><see cref="Centred"/>, for the same reason.</summary>
     internal static Action<Control> CentredPlot(PlotContainerViewModel plot) => Centred(plot);
 
+    /// <summary>
+    /// <see cref="Centred"/> for a ROW of plots: they are laid out left to right with an even gap and
+    /// the whole row is centred in the canvas, so a figure that is about comparing two plots reads as
+    /// one picture rather than two that happen to be near each other.
+    /// </summary>
+    internal static Action<Control> CentredRow(params PlotContainerViewModel[] plots)
+        => Row(plots);
+
     private static (DataDisplayDocumentViewModel Doc, PlotContainerViewModel Plot) Plotted(
         string logicalId, PlotType type, bool contour = false, int traces = 1,
         (double W, double H)? size = null)
@@ -138,6 +146,40 @@ public static class DocDataDisplayFixtures
         double zoom = plot.ZoomLevel > 0 ? plot.ZoomLevel : 1.0;
         plot.Left += Math.Round(((w - plot.ViewTotalWidth) / 2.0 - plot.ViewContainerLeft) / zoom);
         plot.Top  += Math.Round(((h - plot.ViewHeight)     / 2.0 - plot.ViewTop)           / zoom);
+    };
+
+    /// <summary>
+    /// Lay <paramref name="plots"/> out in one horizontal row, vertically aligned, and centre the row
+    /// in the canvas — the same delta-from-the-view's-own-numbers correction <see cref="Centred"/>
+    /// makes, applied to the row's total extent instead of one plot's.
+    /// </summary>
+    private static Action<Control> Row(PlotContainerViewModel[] plots) => root =>
+    {
+        if (plots.Length == 0) return;
+
+        var canvas = root.GetVisualDescendants().OfType<ItemsControl>()
+                         .FirstOrDefault(c => c.Name == "PlotCanvas")
+            ?? throw new InvalidOperationException(
+                "The Data Display view no longer has a control named 'PlotCanvas'. Every whole-document "
+              + "plot figure centres its plot in that control's bounds, so a rename makes them all "
+              + "silently off-centre again rather than failing.");
+
+        double w = canvas.Bounds.Width, h = canvas.Bounds.Height;
+        if (w <= 0 || h <= 0)
+            throw new InvalidOperationException(
+                $"The Data Display canvas arranged to {w}x{h}, so the plots cannot be centred in it.");
+
+        const double gap = 24.0;
+        double rowWidth = plots.Sum(p => p.ViewTotalWidth) + gap * (plots.Length - 1);
+        double x = (w - rowWidth) / 2.0;
+
+        foreach (var p in plots)
+        {
+            double zoom = p.ZoomLevel > 0 ? p.ZoomLevel : 1.0;
+            p.Left += Math.Round((x - p.ViewContainerLeft) / zoom);
+            p.Top  += Math.Round(((h - p.ViewHeight) / 2.0 - p.ViewTop) / zoom);
+            x += p.ViewTotalWidth + gap;
+        }
     };
 
     // ── Whole-document figures ────────────────────────────────────────────────

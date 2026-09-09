@@ -1,5 +1,62 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## Owner report round, 2026-09-08 — the WSProbe glyph, and the plot scales
+
+Five separate reports, three of them in `src/Render` and two here. `src/Render/RESOLVED.md` and
+`src/Design/RESOLVED.md` carry the halves that live there.
+
+### Placing a part while still armed re-created the state arming had just cleared
+
+`SchematicViewModel.BeginPlacement` clears the selection because arming and a selection are two
+claims on the same keys — that is the 2026-09-07 fix, `SchematicArmClearsSelectionTests`. The FIRST
+click then undid it: `CommitPlacement` ends with `Selection.SelectOne(comp.Id)`, and the tool stays
+armed for the next part, so `R` fell through the ghost branch of `OnKeyDown` into `RotateSelection`,
+which rotated the part that had just landed. The reported symptom is "R rotates the GND before
+placing and does nothing after" — the ghost is simply no longer what the key reaches.
+
+**The fix is `SelectPlacedPart`, not a key-handling special case.** One condition — do not select
+while `ActiveTool == Tool.Place` — fixes `R`, `M` and `Delete` together, and the arm-time rule and
+the place-time rule are then the same rule stated once. A placement made while NOT armed (a drag
+from the Project Tree, an import) still selects what it placed.
+
+**Worth knowing when reading this code:** the toolbar's Pin/Term/GND buttons and their `P`/`T`/
+`Shift+G` shortcuts do NOT arm the app-level `PlacementService` — `BeginPlacement` sets view-model
+state only. So `PlacementService.Pending` is null on that path, `WorkspaceWindow`'s window-level
+tunnel handler (which is what rotates a palette-armed ghost from any focus) returns immediately, and
+the rotation is done by `RotateSelection`'s empty-selection branch instead. Two paths, one visible
+behaviour, and only one of them is reachable from the toolbar.
+
+### The Axes Limits flyout could never make a Smith or Polar window SMALLER
+
+Owner report: typing −0.1 to 0.1 into X on a Polar plot did nothing. Not a parse failure and not the
+autoscale guard — `ApplySquareFromEditedAxis` refreshed BOTH text boxes of the edited axis after
+applying the square (brief-dd-plot-type-integrity §3's "so the coupled value is visible
+immediately"), and the fields apply on every keystroke. So typing into Min re-wrote Max to the OLD
+outer limit, the square came back the size it already was, and Min was overwritten with it. Every
+subsequent keystroke repeated it. The window could only ever GROW.
+
+**Only the COUPLED axis is refreshed now.** The edited axis keeps what the user typed; the other one
+shows what the square implies, which is the part they cannot work out for themselves. §3's own test
+(`PlotTypeIntegrityTests.SmithManualXEdit_CouplesYToASquareWindow`) passed throughout, because it
+only ever widened — a growth-only test cannot see a growth-only bug. `PolarScaleTests` covers both
+directions.
+
+*Note for anyone reading `src/Ui/DataDisplay/CLAUDE.md`:* its §3 paragraph still says "then refresh
+BOTH text boxes", which is now the description of the defect rather than of the behaviour.
+
+### The WSProbe chapter's first figure was a picture of one locus
+
+`wsprobe-resonator-polar` put `1/Y0` and `1/H0` on ONE polar plot. They are reciprocal quantities —
+`1/H0` is an admittance, `1/Y0` an impedance — so a shared radius scales them by whatever the
+circuit's impedance level is. On that resonator, measured: `1/Y0` spans about 10 to 30 Ω and `1/H0`
+about 0.05 S, a ratio near 600. `1/H0` was drawn, correctly, as a dot on the origin. The owner's
+question was "am I supposed to see 1/H0?", which is the right question to ask of a figure whose
+caption says to compare two things.
+
+It is two polar plots now, one per locus, which is also what the section's own heading
+("The primary metric: two polar plots") had been saying all along.
+`DocDataDisplayFixtures.CentredRow` is the layout helper — `Centred` for a row of plots.
+
 ## RC-10 — one history panel (2026-09-07)
 
 `docs/sonnet-briefs/brief-revision-control-10-one-history-panel.md`,

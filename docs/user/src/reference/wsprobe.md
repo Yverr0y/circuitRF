@@ -82,10 +82,10 @@ current `iP` into its G-side node — and reads, at *every* probe, two responses
     <circle cx="440" cy="100" r="4" fill="var(--text)" stroke="none"/>
   </g>
   <g fill="var(--text)" font-family="var(--font-sans)" font-size="14">
-    <text x="84" y="120" text-anchor="middle" fill="var(--muted)">G-side</text>
-    <text x="84" y="138" text-anchor="middle" fill="var(--muted)">network</text>
-    <text x="556" y="120" text-anchor="middle" fill="var(--muted)">L-side</text>
-    <text x="556" y="138" text-anchor="middle" fill="var(--muted)">network</text>
+    <text x="84" y="111" text-anchor="middle" fill="var(--muted)">G-side</text>
+    <text x="84" y="129" text-anchor="middle" fill="var(--muted)">network</text>
+    <text x="556" y="111" text-anchor="middle" fill="var(--muted)">L-side</text>
+    <text x="556" y="129" text-anchor="middle" fill="var(--muted)">network</text>
     <text x="320" y="66" text-anchor="middle">vS</text>
     <text x="234" y="205">iP</text>
     <text x="180" y="90" text-anchor="end">G</text>

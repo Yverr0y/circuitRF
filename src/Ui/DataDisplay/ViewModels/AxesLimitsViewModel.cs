@@ -194,8 +194,16 @@ public partial class AxesLimitsViewModel : ViewModelBase
     /// SAME helper <see cref="Plot.Autoscale"/> uses, so a manual edit followed by an autoscale can
     /// never jump between two different notions of "square". The edited axis's span is applied as
     /// the square's span (its own extent on both sides of the origin, even if asymmetric); the other
-    /// axis is whatever that square implies — both text boxes are refreshed so the user sees the
-    /// coupled value immediately.
+    /// axis is whatever that square implies — the COUPLED axis's text boxes are refreshed so the
+    /// user sees it immediately.
+    ///
+    /// <para><b>The edited axis's own boxes are deliberately NOT refreshed, and that is a fix
+    /// rather than an omission.</b> These fields apply on every keystroke, and the two ends of one
+    /// axis are read together: refreshing both wrote the square back over the end the user had not
+    /// reached yet, so typing "-0.1" into Min re-wrote Max to the OLD outer limit, the square came
+    /// back the size it already was, and Min was overwritten with it. The window could therefore
+    /// never be made smaller from this flyout — a Polar plot asked for -0.1 … 0.1 simply stayed at
+    /// unity, with no error anywhere.</para>
     /// </summary>
     private void ApplySquareFromEditedAxis(double lo, double hi, bool editedIsX)
     {
@@ -207,8 +215,8 @@ public partial class AxesLimitsViewModel : ViewModelBase
         _plot.Axes.Window      = square;
         _plot.Axes.WindowState = square;
 
-        RefreshXText();
-        RefreshYText();
+        if (editedIsX) RefreshYText();
+        else           RefreshXText();
         RaiseRedraw();
     }
 

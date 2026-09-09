@@ -343,6 +343,13 @@ public class WsProbeDocsTests
     /// scale. So the assertion is geometric and not a pixel comparison — and it recovers the
     /// crossing's own value, <c>1/Y0 = ZG + ZL = R1 + RS = −10 Ω</c> at resonance, from the drawn
     /// path.</para>
+    ///
+    /// <para><b>A PLOT EACH since 2026-09-08, and the reading is per frame for that reason.</b> The
+    /// two loci are reciprocal quantities — <c>1/H0</c> is an admittance, <c>1/Y0</c> an impedance —
+    /// so on one shared radius the smaller of them is a dot on the origin (measured: ~0.05 S against
+    /// 10–30 Ω, a ratio near 600). Each locus therefore has its own square, its own origin cross and
+    /// its own scale, and the <c>+1</c> mark is simply outside the frame on the admittance plot,
+    /// which is what an off-window reference point should do.</para>
     /// </summary>
     [Fact]
     public void TheResonatorFigureCrossesTheNegativeRealAxisOnceBetweenItsTwoLoci()
@@ -350,26 +357,47 @@ public class WsProbeDocsTests
         string svg = File.ReadAllText(
             Path.Combine(DocsOut(), "assets", "figures", "wsprobe-resonator-polar.svg"));
 
-        // The two critical-point marks: an 8-unit horizontal stroke each, in the same frame.
-        var marks = new List<(double X, double Y)>();
-        foreach (RxMatch m in Regex.Matches(svg,
-                     @"<path[^>]*transform=""translate\(([-\d.]+) ([-\d.]+)\)""[^>]*d=""M([-\d.]+) ([-\d.]+)L([-\d.]+) ([-\d.]+)""[^>]*/>"))
+        // Skia's SVG writer hoists repeated geometry into <path id="…"> and re-draws it through
+        // <use xlink:href="#…" transform="translate(…)">. Two plots carrying the same 8-unit cross
+        // is exactly that case, so a reader of this file has to resolve the indirection or it sees
+        // one mark where there are three.
+        var defs = Regex.Matches(svg, @"<path id=""([^""]+)""[^>]*d=""([^""]+)""")
+                        .ToDictionary(m => m.Groups[1].Value, m => m.Groups[2].Value);
+
+        // Every horizontal 8-unit stroke, as (frame, centre) — the frame is the plot it belongs to.
+        var marks = new List<(double Fx, double Fy, double X, double Y)>();
+        foreach (RxMatch m in Regex.Matches(svg, @"<(?:path|use)([^>]*)/>"))
         {
-            double[] v = [.. m.Groups.Cast<RxGroup>().Skip(1).Select(g => double.Parse(g.Value, CultureInfo.InvariantCulture))];
-            if (Math.Abs(v[5] - v[3]) < 0.01 && Math.Abs(v[4] - v[2]) is > 7 and < 9)
-                marks.Add((v[0] + (v[2] + v[4]) / 2, v[1] + v[3]));
+            string attrs = m.Groups[1].Value;
+            // A <path id="…"> is the DEFINITION inside <defs> and is never itself drawn — counting it
+            // adds a phantom frame at the origin.
+            if (Regex.IsMatch(attrs, @"\bid=""")) continue;
+            string? d = Regex.Match(attrs, @"\bd=""([^""]+)""") is { Success: true } dm
+                ? dm.Groups[1].Value
+                : Regex.Match(attrs, @"xlink:href=""#([^""]+)""") is { Success: true } hm
+                    && defs.TryGetValue(hm.Groups[1].Value, out string? href) ? href : null;
+            if (d is null) continue;
+
+            var seg = Regex.Match(d, @"^M([-\d.]+) ([-\d.]+)L([-\d.]+) ([-\d.]+)$");
+            if (!seg.Success) continue;
+            double[] v = [.. seg.Groups.Cast<RxGroup>().Skip(1).Select(g => double.Parse(g.Value, CultureInfo.InvariantCulture))];
+            if (Math.Abs(v[3] - v[1]) > 0.01 || Math.Abs(v[2] - v[0]) is <= 7 or >= 9) continue;
+
+            var (fx, fy) = FrameOf(attrs);
+            marks.Add((fx, fy, (v[0] + v[2]) / 2, v[1]));
         }
 
-        Assert.True(marks.Count == 2,
-            $"The polar figure should carry two WSProbe critical-point marks (the origin and +1); "
-          + $"{marks.Count} were found, so its complex plane cannot be read off it.");
+        // One frame per plot, and within a frame the ORIGIN is the leftmost mark: the other, when it
+        // is there at all, is +1 and is to its right.
+        var frames = marks.GroupBy(k => (k.Fx, k.Fy))
+                          .ToDictionary(g => g.Key, g => g.OrderBy(k => k.X).ToList());
 
-        var origin = marks[0];
-        double scale = marks[1].X - origin.X;
-        Assert.True(scale > 1, "The +1 mark is not to the right of the origin mark.");
+        Assert.True(frames.Count == 2,
+            $"The resonator figure should be two polar plots, each with its own origin cross; "
+          + $"{frames.Count} frame(s) carrying one were found.");
 
-        // Every drawn locus: a path of at least 100 line segments.
-        var crossings = new List<double>();
+        // Every drawn locus: a path of at least 100 line segments, read in its own frame.
+        var crossings = new List<(double Re, bool HasScale)>();
         int loci = 0;
         foreach (RxMatch m in Regex.Matches(svg, @"<path([^>]*)d=""(M[^""]{500,})"""))
         {
@@ -377,13 +405,17 @@ public class WsProbeDocsTests
             if (d.Count(c => c == 'L') < 100) continue;
             loci++;
 
-            var t = Regex.Match(m.Groups[1].Value, @"translate\(([-\d.]+) ([-\d.]+)\)");
-            double tx = t.Success ? double.Parse(t.Groups[1].Value, CultureInfo.InvariantCulture) : 0;
-            double ty = t.Success ? double.Parse(t.Groups[2].Value, CultureInfo.InvariantCulture) : 0;
+            var (fx, fy) = FrameOf(m.Groups[1].Value);
+            Assert.True(frames.TryGetValue((fx, fy), out var frameMarks),
+                $"A locus is drawn in a frame at ({fx}, {fy}) that carries no origin cross, so its "
+              + "complex plane cannot be read off the picture.");
+
+            var origin = frameMarks![0];
+            double? scale = frameMarks.Count > 1 ? frameMarks[1].X - origin.X : null;
 
             var pts = Regex.Matches(d, @"[ML]([-\d.]+) ([-\d.]+)")
-                           .Select(p => (X: tx + double.Parse(p.Groups[1].Value, CultureInfo.InvariantCulture),
-                                         Y: ty + double.Parse(p.Groups[2].Value, CultureInfo.InvariantCulture)))
+                           .Select(p => (X: double.Parse(p.Groups[1].Value, CultureInfo.InvariantCulture),
+                                         Y: double.Parse(p.Groups[2].Value, CultureInfo.InvariantCulture)))
                            .ToList();
 
             for (int i = 1; i < pts.Count; i++)
@@ -391,9 +423,10 @@ public class WsProbeDocsTests
                 double ia = pts[i - 1].Y - origin.Y, ib = pts[i].Y - origin.Y;
                 if (ia == 0 && ib == 0) continue;
                 if (ia < 0 == ib < 0) continue;                       // no sign change: no crossing
-                double f = ia / (ia - ib);
+                double f  = ia / (ia - ib);
                 double xc = pts[i - 1].X + (pts[i].X - pts[i - 1].X) * f;
-                if (xc < origin.X) crossings.Add((xc - origin.X) / scale);
+                if (xc < origin.X)
+                    crossings.Add((scale is { } s ? (xc - origin.X) / s : double.NaN, scale is not null));
             }
         }
 
@@ -401,12 +434,23 @@ public class WsProbeDocsTests
         Assert.True(crossings.Count == 1,
             "Exactly one of the two loci may cross the negative real axis — that is the whole lesson "
           + "of the figure (a zero can mask the pole in one driving-point function but never in "
-          + $"both). {crossings.Count} crossing(s) were drawn: "
-          + string.Join(", ", crossings.Select(c => c.ToString("0.##", CultureInfo.InvariantCulture))) + ".");
+          + $"both). {crossings.Count} crossing(s) were drawn.");
 
-        Assert.True(Math.Abs(crossings[0] + 10.0) < 0.5,
-            $"The crossing is drawn at Re = {crossings[0]:0.##}, and the closed form puts it at "
+        Assert.True(crossings[0].HasScale,
+            "The locus that crosses is the impedance one, and its plot must carry the +1 mark as "
+          + "well as the origin — without it the crossing has no scale to be read against.");
+        Assert.True(Math.Abs(crossings[0].Re + 10.0) < 0.5,
+            $"The crossing is drawn at Re = {crossings[0].Re:0.##}, and the closed form puts it at "
           + "1/Y0 = ZG + ZL = R1 + RS = -20 + 10 = -10 Ohm. The figure is drawing something else.");
+
+        static (double X, double Y) FrameOf(string attrs)
+        {
+            var t = Regex.Match(attrs, @"translate\(([-\d.]+) ([-\d.]+)\)");
+            return t.Success
+                ? (double.Parse(t.Groups[1].Value, CultureInfo.InvariantCulture),
+                   double.Parse(t.Groups[2].Value, CultureInfo.InvariantCulture))
+                : (0, 0);
+        }
     }
 
     // ── The designs, run ──────────────────────────────────────────────────────

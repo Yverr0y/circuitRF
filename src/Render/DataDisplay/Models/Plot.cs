@@ -149,7 +149,22 @@ namespace CircuitRF.Render.DataDisplay
             set { _autoscaleMag = value; if (value) RunAutoscale("both"); }
         }
 
+        /// <summary>
+        /// Whether autoscale on a complex-plane plot never shows less than the unit circle.
+        ///
+        /// <para><b>True for a Smith chart and false for a Polar plot, and that difference is the
+        /// point.</b> A Smith chart's grid IS the unit disc — a Γ plane whose |Γ| = 1 circle is the
+        /// chart, so shrinking inside it would draw a chart with no boundary. A Polar plot carries
+        /// whatever the trace is: an impedance in ohms, an admittance in siemens, a loop gain. The
+        /// unity floor made every one of those unreadable in one direction — a 1/H0 locus of a few
+        /// tens of millisiemens collapsed to a dot at the origin, which is indistinguishable from a
+        /// trace that is not being drawn at all.</para>
+        /// </summary>
         public bool AutoscaleEnforceUnityMinimum { get; set; } = true;
+
+        /// <summary>The effective floor: the property above, and never on a Polar plot.</summary>
+        private bool UnityMinimumApplies
+            => AutoscaleEnforceUnityMinimum && PlotType != PlotType.Polar;
 
         // ---- Display options --------------------------------------------
 
@@ -655,7 +670,7 @@ namespace CircuitRF.Render.DataDisplay
             }
             else
             {
-                if (AutoscaleEnforceUnityMinimum)
+                if (UnityMinimumApplies)
                 {
                     var unity = new PlotRect(-1, -1, 2, 2);
                     if (primary.Width / unity.Width > 1.05)
@@ -668,6 +683,15 @@ namespace CircuitRF.Render.DataDisplay
                         primary   = unity;
                         secondary = unity;
                     }
+                }
+                else
+                {
+                    // Without the unity floor there is nothing else holding the window open, so a
+                    // locus gets the same degeneracy guard and the same breathing room a Rect trace
+                    // has always had. paddingComplex existed and was never applied to anything —
+                    // the floor made it unnecessary, and it is exactly what is wanted here.
+                    primary   = InflateRect(EnsureMinExtent(primary),   primary.Width   * padX, primary.Height   * padY);
+                    secondary = InflateRect(EnsureMinExtent(secondary), secondary.Width * padX, secondary.Height * padY);
                 }
 
                 primary   = SquareCentredOnOrigin(primary);

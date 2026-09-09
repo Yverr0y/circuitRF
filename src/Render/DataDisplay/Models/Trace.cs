@@ -1133,7 +1133,9 @@ namespace CircuitRF.Render.DataDisplay
                 s.IsNarrowedRange                  ? $"{s.RangeStart}..{s.RangeEndExclusive}"
                 : s.Role == AxisRole.KeepAsX       ? ":"
                 : s.Role == AxisRole.FamilyIterate ? "~"
-                : (s.AxisName is "i" or "j")       ? (s.Index + 1).ToString()   // 1-based port number (S[:, 2, 1] = S21)
+                // 1-based port number (S[:, 2, 1] = S21); the WSProbe matrix's row/col read the
+                // same way, because its axis values are 1-based too (SliceTokenParser).
+                : (s.AxisName is "i" or "j" or "row" or "col") ? (s.Index + 1).ToString()
                 : !string.IsNullOrEmpty(s.Label)   ? $"\"{s.Label}\""
                 :                                    s.Index.ToString());
             var inner = string.Join(", ", parts);

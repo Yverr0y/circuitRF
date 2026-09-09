@@ -3452,7 +3452,7 @@ public sealed partial class SchematicViewModel : ObservableObject
             place = new CompositeCommand(new CutWireSpanCommand(EditModel, shorted), place);
 
         Execute(place);
-        Selection.SelectOne(comp.Id);
+        SelectPlacedPart(comp.Id);
         ComponentPlaced?.Invoke(kind);
     }
 
@@ -3726,7 +3726,29 @@ public sealed partial class SchematicViewModel : ObservableObject
                 });
 
         Execute(new PlaceComponentCommand(EditModel, comp));
-        Selection.SelectOne(comp.Id);
+        SelectPlacedPart(comp.Id);
+    }
+
+    /// <summary>
+    /// Selects what was just placed — <b>unless the placement is still armed</b>, in which case
+    /// nothing is selected at all.
+    ///
+    /// <para>This is the second half of the fix <see cref="BeginPlacement"/> already carries, and it
+    /// is the same defect one step later. Arming clears the selection because arming and a selection
+    /// are two claims on the same keys and the selection wins every one of them — but the FIRST
+    /// click re-created the conflict by selecting what it had just placed. With the tool still armed,
+    /// R then rotated that part instead of the ghost, M mirrored it, and Delete removed it: the
+    /// reported symptom is that rotate-before-placing works and rotate-after-placing does not,
+    /// because the ghost is no longer what the keys reach.</para>
+    ///
+    /// <para>Every path that places while NOT armed — a drag from the Project Tree, an import — is
+    /// unchanged and still ends with the new part selected, which is what a one-shot placement
+    /// should do.</para>
+    /// </summary>
+    private void SelectPlacedPart(string id)
+    {
+        if (ActiveTool == Tool.Place) return;
+        Selection.SelectOne(id);
     }
 
     /// <summary>

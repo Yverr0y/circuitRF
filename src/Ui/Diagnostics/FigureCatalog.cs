@@ -414,9 +414,11 @@ public static class FigureCatalog
         // Each is a real run of a committed testdata/ netlist — see DocWsProbeFixtures, whose
         // catalogue names the page section and the brief gate every design serves.
 
-        new("wsprobe-resonator-polar", DocWsProbeFixtures.ResonatorPolar, 850, 620,
+        // A plot each, not two traces on one: 1/H0 is an admittance and 1/Y0 an impedance, so on a
+        // shared radius one of them is a dot on the origin (see DocWsProbeFixtures.ResonatorPolar).
+        new("wsprobe-resonator-polar", DocWsProbeFixtures.ResonatorPolar, 1060, 600,
             WindowFrame.Titled("circuitRF - Data Display"),
-            "The two driving-point loci of an unstable series resonator on one polar plot. 1/Y0 "
+            "The two driving-point loci of an unstable series resonator, a polar plot each. 1/Y0 "
           + "crosses the negative real axis clockwise at the resonance; 1/H0 never does. Both must "
           + "be checked, because a zero can mask the pole in one of them but never in both."),
 
