@@ -1,5 +1,98 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## A new workspace's History panel said no workspace was open (owner, 2026-09-09)
+
+Reported after File ▸ New Workspace, a Gerber import into it, and an attempt to keep the state: the
+History panel said *"No workspace is open. A history belongs to one workspace; open one to see it."*
+about the workspace on screen.
+
+**`HistoryTool.HasWorkspace` starts false and is set only by a refresh** — `SetSources` →
+`Show`, from `WorkspaceViewModel.RefreshHistoryPanel`, which `OnWorkspaceOpenedForRevision` calls.
+`NewWorkspace` never called it. It rebuilds the dock (`CreateDefaultLayout`), so the panel it hands
+the user is a FRESH `HistoryTool` sitting at its default, and nothing on that path told it otherwise.
+
+**The sentence was the visible half.** `CanKeep` is `HasWorkspace && CanKeepAnything`, so both of the
+panel's keep buttons were dead — which is what the report was actually about, and it is the state a
+designer is most likely to want to record. File ▸ Keep This State… still worked, being on
+`CanKeepAnything` alone; the same asymmetry that hid the 2026-09-07 defect this one is a sibling of.
+
+**Three routes reach an open workspace, and two of them were missing the call.** The gap was found by
+looking for the assignment rather than for the report: `CurrentWorkspacePath = <non-null>` occurs at
+three sites, and only the switch path had the hook.
+
+- `NewWorkspace` — the reported one.
+- `ExecuteSavePlan`, when the plan carries a workspace step: saving scratch documents with no
+  workspace open CREATES one. Nothing rebuilds the dock here, so the stale panel is the one that was
+  already on screen saying *no workspace is open* — and it goes on saying it, correctly worded and
+  wrong.
+- `SwitchToWorkspace`, which was already right.
+
+**`NewWorkspace` was also skipping §5.3's close boundary for the workspace being LEFT.** It writes
+the outgoing session (`PersistOutgoingWorkspaceSession`) and then abandoned it, where both other
+routes away from a workspace pair that write with `TakeCloseCheckpoint(CurrentWorkspacePath)`. So
+creating a workspace silently discarded the last stretch of work in the previous one — no entry, no
+message, and nothing about the result says so. Same one-line fix, same place in the sequence: after
+the session write, while `CurrentWorkspacePath` still names the workspace being left.
+
+**No close boundary is owed on the save-creates-a-workspace path**, and that is a fact about
+`SavePlan.Build` rather than a judgement: the workspace step exists only when
+`_currentWorkspacePath is null`, so there is no workspace being left. Which is why the two gates in
+`tests/Ui.Tests/Revision/PanelStateAfterCloseTests.cs` are written over different sets — the open
+hook over every `CurrentWorkspacePath` assignment, the close boundary over every
+`PersistOutgoingWorkspaceSession()` call, which is exactly the routes that leave one.
+
+Both gates were checked against the pre-fix file rather than assumed to bite: the open hook fails at
+two of the three sites there, the close boundary at one of the three.
+
+### Two failures in the same run that were the TESTS, not the code (2026-09-09)
+
+The full `Ui.Tests` run that gated the fix above came back with two failures on paths nothing had
+touched. Both were tests that depend on something outside their own control, and both are fixed at
+the root rather than moved off the routine gate — a test moved aside for a fault it could have been
+written not to have stops gating anything.
+
+**`LayoutRulerModelTests.GerberAndExcellon_AreByteIdentical_WithAndWithoutRulers` — a clock
+straddle.** It writes the same artwork twice and compares every produced file byte for byte. Both
+writers stamp the moment of writing (`%TF.CreationDate` in each Gerber file, `"CreationDate"` in the
+`.gbrjob`), so a pair of exports that lands either side of a second boundary differs by one second
+and the test fails about rulers. The `.kicad_pcb` sibling three methods below already stripped its
+own stamp; so does `ConvertCliVerbTests`, whose byte-identity gate excludes the same line. This one
+was the outlier, and it now strips it too. Nothing is lost: the stamp's own format is gated by
+`GerberWriterTests` and `GerberJobFileTests`, both of which inject a fixed date.
+
+**`WindowChannelTests.WithNothingListeningTheQuestionAnswersNullAndTheBatchIsNotRefusedForIt` — a
+real circuitRF was open on the machine.** It asserts that with nobody listening the channel answers
+null; it got `false`. The endpoint is MACHINE-WIDE — a named pipe on Windows, a socket under
+`XDG_RUNTIME_DIR` (or the temp directory) elsewhere — so a running window answers, truthfully, that
+it has nothing unsaved. Confirmed rather than inferred: the socket was present during the run and a
+hand-written client got `no` back from it. Every sibling test in that class already carries a guard
+for the same fact (`if (window.Unavailable) return;`); this was the one with none, and it is the one
+where the ABSENCE is the subject.
+
+On a Unix-family platform it now gets its own empty runtime directory, so the absence is a fact about
+the test rather than about the machine and the assertion is real — still over the actual transport.
+**The directory has to be short**: a Unix socket path is capped near 104 bytes and macOS's own temp
+directory is half of that before the socket's name is added, and an over-long path throws
+`ArgumentOutOfRangeException`, which `WindowChannel.Exchange` does not catch — the test would fail
+rather than read null. Windows names its pipe with a constant and has no such seam, so there an
+occupied endpoint is detected and the test steps aside; a machine with no circuitRF running still
+gates it.
+
+**Neither belonged in `Category=Benchmark`.** That tier is for tests that measure the machine — a
+wall-clock budget, or something too timing-sensitive to survive a full-solution run's parallel start
+(`Hero1BTests`' gate is the model). Neither of these measures anything: one compared a timestamp it
+should never have compared, the other asked a machine-wide singleton a question only an empty machine
+can answer. Tagging them would have hidden two fixable defects and left the coverage gone.
+
+**What was checked before concluding there was nothing else to move.** The known load-dependent family
+in this assembly — the exact `CellStat.Calls` counts — was already dealt with on 2026-09-04 by
+`CellStatGlobalsCollection`, which serialises the classes that drive that process-global against each
+other. Every wall-clock assertion still in the default tier was listed and read: nine of them, seven
+untagged, and all seven are order-of-magnitude guards against a hang or an algorithmic blow-up (1 s
+for a sub-millisecond operation, 30 s for a setup measured in seconds) rather than budgets that
+measure the machine. The eleven archived TRX files hold four historical failures, each once. So there
+is no standing population of load-dependent tests in the routine gate to move off it.
+
 ## The Relaunch button lands where the progress bar was (owner, 2026-09-09)
 
 The staged-update offer was a SECOND Messages row: the download's live row settled to

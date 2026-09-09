@@ -335,6 +335,80 @@ public class PanelStateAfterCloseTests
         Assert.Equal(HistoryMessages.NothingRecordedYet, tool.EmptyText);
     }
 
+    /// <summary>
+    /// <b>And CREATING a workspace fills it too</b> — owner-reported, 2026-09-09: a workspace was made
+    /// with File ▸ New Workspace, a Gerber imported into it, and the History panel said <i>No workspace
+    /// is open</i> about the workspace on screen.
+    ///
+    /// <para>The same defect as <see cref="OpeningAWorkspaceFillsTheHistoryPanel"/>, one route over and
+    /// missed when that one was fixed. New Workspace rebuilds the dock from scratch, which builds a
+    /// FRESH panel whose <c>HasWorkspace</c> starts false, and it was one of two routes to an open
+    /// workspace that never reached <c>OnWorkspaceOpenedForRevision</c> — the other being a save that
+    /// creates the workspace out of scratch documents. The wrong sentence was the visible half; the
+    /// consequential half is that <c>CanKeep</c> is <c>HasWorkspace &amp;&amp; CanKeepAnything</c>, so
+    /// both keep actions were dead in the panel of a brand-new workspace, which is the state a designer
+    /// is most likely to want to record.</para>
+    ///
+    /// <para>Written over EVERY route rather than over New Workspace, because that is the shape this
+    /// defect keeps returning in: a path that arrives at an open workspace without telling the revision
+    /// surfaces. A future one is covered without anyone having to remember this.</para>
+    /// </summary>
+    [Fact]
+    public void EveryRouteToAnOpenWorkspaceFillsTheHistoryPanel()
+    {
+        string source = Strip(File.ReadAllText(SourcePath("ViewModels/WorkspaceViewModel.cs")));
+
+        var sites = Regex.Matches(source, @"CurrentWorkspacePath\s*=\s*(?!null)\S");
+        Assert.True(sites.Count >= 3,
+            "A route that opens a workspace has gone; this gate must follow the assignment.");
+
+        foreach (System.Text.RegularExpressions.Match site in sites)
+        {
+            string rest = source[site.Index..NextHandlerAfter(source, site.Index)];
+            Assert.True(rest.Contains("OnWorkspaceOpenedForRevision()", StringComparison.Ordinal),
+                "A route that sets CurrentWorkspacePath does not tell the revision surfaces about it, "
+              + "so its History panel reports 'No workspace is open' with one open and both keep "
+              + "actions stay dead. Near: " + OneLineAt(source, site.Index));
+        }
+    }
+
+    /// <summary>
+    /// <b>And the workspace being LEFT gets §5.3's close boundary on every route</b>, which New
+    /// Workspace also skipped: it wrote the outgoing session and then abandoned it, so the last stretch
+    /// of work in that workspace was never recorded and nothing about the result said so.
+    ///
+    /// <para>Gated on the pairing rather than on the assignment, because the outgoing session write is
+    /// exactly the set of routes that leave a workspace — a save that CREATES one leaves nothing, and
+    /// owes no boundary.</para>
+    /// </summary>
+    [Fact]
+    public void EveryRouteAwayFromAWorkspaceTakesItsCloseBoundary()
+    {
+        string source = Strip(File.ReadAllText(SourcePath("ViewModels/WorkspaceViewModel.cs")));
+
+        var leaving = Regex.Matches(source, @"PersistOutgoingWorkspaceSession\(\);");
+        Assert.True(leaving.Count >= 3, "A route that leaves a workspace has gone.");
+
+        foreach (System.Text.RegularExpressions.Match site in leaving)
+        {
+            string rest = source[site.Index..NextHandlerAfter(source, site.Index)];
+            Assert.True(rest.Contains("TakeCloseCheckpoint(CurrentWorkspacePath)", StringComparison.Ordinal),
+                "A route that writes the outgoing workspace's session does not then record it, so the "
+              + "work done in it since the last entry is kept nowhere. Near: "
+              + OneLineAt(source, site.Index));
+        }
+    }
+
+    /// <summary>The line containing <paramref name="index"/>, for a failure that names where.</summary>
+    private static string OneLineAt(string source, int index)
+    {
+        // Built EAGERLY by every caller — Assert.True's message argument is evaluated whether or not
+        // the assertion holds — so it has to be right for a passing site too, not only a failing one.
+        int start = source.LastIndexOf('\n', index) + 1;
+        int end   = source.IndexOf('\n', start);
+        return source[start..(end < 0 ? source.Length : end)].Trim();
+    }
+
     // ══ 5. Closing the WINDOW, not the workspace ══════════════════════════════════════════════════
 
     /// <summary>

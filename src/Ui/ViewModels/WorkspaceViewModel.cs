@@ -1341,6 +1341,12 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             ResetHarmonicaDockedFocusTracking();
             // Same as the switch path: the workspace being left keeps its own session record.
             PersistOutgoingWorkspaceSession();
+            // RC-5 §5.3's third boundary for the workspace being LEFT, after that write (R-rc5-21)
+            // and while CurrentWorkspacePath still names it — the same pairing the open path has.
+            // Creating a workspace closes the previous one just as surely as opening one does, and
+            // this path skipped the boundary entirely, so the last stretch of work in the outgoing
+            // workspace was never recorded.
+            TakeCloseCheckpoint(CurrentWorkspacePath);
         // …and any debounce still counting down for it is now redundant — the write it was going to
         // make has just been made. Left running it would fire mid-open, against the INCOMING
         // workspace path and a dock tree that is not finished yet (SuspendLayoutPersistence stops
@@ -1392,6 +1398,17 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             // R-dock-9: hiding the dockers is a view preference, so it survives a workspace switch.
             ReapplyCollapsedStateIfNeeded();
             ApplyShowDockersOnLaunchPreference(AppPreferencesIo.Load().ShowDockersOnLaunch ?? true);
+
+            // RC-5, and the LAST thing on this path exactly as it is on the open path. Owner-reported,
+            // 2026-09-09: the History panel said "No workspace is open" in a workspace that had just
+            // been created and had a Gerber imported into it. CreateDefaultLayout above built a FRESH
+            // HistoryTool, whose HasWorkspace starts false and is set only by a refresh — and this was
+            // one of two routes to an open workspace that never called it (the other is a save that
+            // creates the workspace out of scratch documents, in ExecuteSavePlan). The wrong
+            // sentence was the visible half; the consequential half is that both keep actions were
+            // dead in the panel (CanKeep = HasWorkspace && CanKeepAnything), which is what the report
+            // was actually about. Reads only (R-rc5-4a), so it creates nothing in the new workspace.
+            OnWorkspaceOpenedForRevision();
         }
         catch (Exception ex)
         {
@@ -14549,6 +14566,14 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
 
         foreach (var p in written)
             Messages.Success("Saved", p);
+
+        // RC-5, and for the same reason it is on the two switch paths: this is the THIRD route to an
+        // open workspace — saving scratch documents when none is open creates one (SavePlan.Build sets
+        // the workspace step only when CurrentWorkspacePath is null, which is also why no close
+        // boundary is owed here: there is no workspace being left). The panel is the one that was
+        // already on screen with no workspace, so its HasWorkspace is false and stays false until
+        // something tells it otherwise. Reads only (R-rc5-4a).
+        if (plan.WorkspaceStep is not null) OnWorkspaceOpenedForRevision();
     }
 
     // ---- Close / quit prompt helpers -----------------------------------------

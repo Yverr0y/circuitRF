@@ -7,18 +7,12 @@
 [![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-blue.svg)](#getting-started)
 [![UI: Avalonia](https://img.shields.io/badge/UI-Avalonia%2012-7B68EE.svg)](https://avaloniaui.net/)
 
-circuitRF is an EDA tool for developing RF circuits.  It can analyze the frequency response and nonlinear behavior of RF circuits — from a handful of components to hierarchical, multi-port designs with thousands of components — using **DC**, **S-parameter**, and **harmonic-balance** analyses, plus first-class **loadpull / sourcepull**. The analyses and the workflow are built around the RF/microwave problem, the file formats are human-readable, and the headline goal is to make loadpull as easy as a few clicks. circuitRF also includes a **layout editor** for PCB and MMIC design — with substrate-aware microstrip components, schematic↔layout generation, and full two-way interchange with **Gerber + Excellon**, **GDSII**, **DXF** and `.kicad_pcb` board files — read, written, and convertible in any direction, from the GUI or from `circuitrf convert` — and a **2.5D electromagnetic solver** that analyses that layout geometry against its substrate stackup.
+circuitRF is an EDA tool for developing RF circuits.  It can analyze the frequency response and nonlinear behavior of RF circuits — from a handful of components to hierarchical, multi-port designs with thousands of components — using **DC**, **S-parameter**, and **harmonic-balance** analyses, plus first-class **loadpull / sourcepull**. The analyses and the workflow are built around the RF/microwave problem, the file formats are human-readable, and the headline goal is to make loadpull as easy as a few clicks. circuitRF also includes a **layout editor** for PCB and MMIC design — with substrate-aware microstrip components, schematic↔layout generation, and full two-way interchange with **Gerber + Excellon**, **GDSII**, **DXF** and `.kicad_pcb` board files — read, written, and convertible in any direction, from the GUI or from coomand line user `circuitrf convert` — and a **2.5D electromagnetic solver** that analyses that layout geometry using its substrate stackup.
 
 circuitRF is for RF practitioners or researchers who can't justify the cost of traditional tools (or find those tools too heavy for a quick investigation): **power-amplifier, LNA, and mixer designers; RF EDA and device-modeling engineers; academic researchers; and capable hobbyists.** It is written in **C# / .NET 10**, with an **Avalonia 12** GUI rendered through **SkiaSharp**, and it was built largely **AI-assisted** (see
 [AI-assisted development](#ai-assisted-development)).
 
-> **Status:** v1 *beta*. The engine (S-parameters, nonlinear DC, single/two-tone harmonic balance,
-> parametric sweeps, loadpull) runs the acceptance circuits from both the CLI and the GUI; the Avalonia
-> schematic/symbol editors and the Data Display — including end-to-end loadpull simulation, contour plotting
-> and interactive contour markers — are in place. The **layout editor** also finished: geometry editing,
-> technologies/stackups, hierarchy, GDSII/DXF/Gerber interchange, parametric microstrip components, and
-> schematic↔layout generation all work; the **2.5D method-of-moments EM solver** that consumes those layouts
-> is complete. What's left after that is packaging and hardening
+> **Status:** v1 *beta*.
 > ([Roadmap & status](#roadmap--status)). Expect rough edges, and please file issues.
 
 ---
@@ -83,10 +77,6 @@ These install for you alone, need no administrator rights, and update themselves
 | Linux, Intel/AMD | [circuitRF-1.0.0-beta.15-linux-x64.tar.gz](https://github.com/potatobeanradio/circuitRF/releases/download/1.0.0-beta.15/circuitRF-1.0.0-beta.15-linux-x64.tar.gz) |
 | Linux, ARM | [circuitRF-1.0.0-beta.15-linux-arm64.tar.gz](https://github.com/potatobeanradio/circuitRF/releases/download/1.0.0-beta.15/circuitRF-1.0.0-beta.15-linux-arm64.tar.gz) |
 
-**Not sure which?** Windows: Settings ▸ System ▸ About ▸ *System type*. macOS: Apple menu ▸ About This Mac — an
-*Apple M-series chip* is Apple Silicon. Linux: `uname -m` — `x86_64` or `aarch64`.
-
-**macOS** — drag to Applications, or to `~/Applications` if you are not an administrator.
 
 **Linux** — unpack and run `install.sh`. It writes only inside `~/.local`, puts `circuitrf` on your PATH
 and registers the menu entry and file types; `--uninstall` removes it and leaves your work alone.
@@ -117,18 +107,6 @@ simulation features *you* want.
 You do **not** need to be a professional software developer. If you've scripted in MATLAB or Python, you
 have enough to start. Pair yourself with [Claude Code](https://www.anthropic.com/claude-code) (or your
 AI assistant of choice) and let it do the heavy lifting on the C#.
-
-**The recommended first contribution:** browse the [component library](#adding-a-standard-library-component)
-for a part you wish were there — a diode, a BJT, a microstrip line, an ideal transformer, a coupler — and
-add it. circuitRF ships a step-by-step skill for exactly this:
-
-> **[`docs/skills/adding-a-library-component.md`](docs/skills/adding-a-library-component.md)** — hand this
-> file to Claude Code, tell it which component you want, and it will walk the whole procedure (palette,
-> symbol, ports, the engine stamp, the factory, and a regression test).
-
-It's the fastest way to learn the codebase, it's genuinely useful to other users, and it's the kind of
-contribution where *your* RF expertise — not your C# fluency — is the scarce ingredient. See
-[Contributing](#contributing) for the full picture.
 
 ---
 
@@ -243,29 +221,11 @@ all** (no Avalonia). This is **not** a hope; it's an **enforced invariant** —
 [`tests/Firewall.Tests`](tests/Firewall.Tests) loads each of those nine assemblies and fails the build if
 any references `Avalonia*`.
 
-That firewall is why `circuitrf em` exists at all. The half of the EM path that turns a `.cem` plus a
-`.clay` into an `EmProblem` used to sit in the `CircuitRF.Ui` assembly; it was carved out into
-**`src/Design`** so the CLI could reach it without dragging Avalonia across the line — one
-implementation of the layout reader, the stackup resolver and the run service, driven by both the
+That firewall is how the command `circuitrf em` from a terminal even works at all. The half of the EM path that
+turns a `.cem` plus a `.clay` into an `EmProblem` used to sit in the `CircuitRF.Ui` assembly; it was carved
+out into **`src/Design`** so the CLI could reach it without dragging Avalonia across the line — one implementation
+of the layout reader, the stackup resolver and the run service, driven by both the
 Simulate button and the command line.
-
-**The same operation was performed a second time in 2026-09, for the schematic.** The `.csch`/`.csym`
-document model, its persistence and `NetExtractor` moved to `src/Design/Schematic` and
-`src/Design/Symbol` — 41 files, chosen as the closure of what the compiler needed rather than by hand —
-so a design can be authored, extracted, elaborated and run with no display. The 64 editor, shell and
-session files stayed exactly where they were: the canvas, the edit session, undo, hit-testing,
-drag-follow, the palette and `PlacementService` are presentation and belong to `src/Ui`. The DRC engine
-and the interchange readers and writers crossed on the same terms and for the same reason — `circuitrf
-check` and `circuitrf convert` need them, and `src/Cli` cannot reference `src/Ui`.
-
-**And a third time, for the picture.** The ~11,000 lines of Skia that draw every frame the application
-shows — `SchematicRenderer`, `SymbolEditorRenderer`, `LayoutRenderer` and `WBondRenderer` — moved to
-**`src/Render`** so a command line can produce the picture the GUI produces rather than one that
-resembles it. Two things had to be fixed on the way, both of which failed SILENTLY before: the embedded
-fonts and the shipped `.ccolor` loaded through Avalonia's `AssetLoader`, which needs a live app host, so
-a headless render quietly drew in the platform's default typeface and fell back to the in-code palette.
-Both are ordinary embedded resources now, read out of `CircuitRF.Render` itself, and `src/Ui` LINKS the
-same files rather than keeping a second copy.
 
 The entire engine↔UI contract is two shapes: **design model down, `DataSet` up.** A replacement UI
 re-implements only the *presentation* of those two shapes; the engine, elaboration, analyses, result model,
@@ -397,8 +357,7 @@ circuitRF/
 
 ## Getting started
 
-You'll develop on **Windows**, **macOS**, or **Linux**. The steps are nearly identical on all three; where
-they differ, it's called out. If you're new to .NET, just follow along — the commands are copy-paste.
+You can help develop circuitRF using **Windows**, **macOS**, or **Linux**.
 
 ### 1. Install the tools
 
@@ -408,9 +367,6 @@ they differ, it's called out. If you're new to .NET, just follow along — the c
 | **Git** | clone the repos | <https://git-scm.com/downloads> |
 | **Visual Studio Code** | edit + debug (lightweight, cross-platform) | <https://code.visualstudio.com/> |
 | VS Code **C# Dev Kit** extension | C# editing/IntelliSense/debug in VS Code | <https://marketplace.visualstudio.com/items?itemName=ms-dotnettools.csdevkit> |
-
-> Prefer a full IDE? **Visual Studio 2022** (Windows) or **JetBrains Rider** (all OSes) work too — open
-> the `src/` projects directly. VS Code is the lightest path and what most contributors use.
 
 Verify the SDK is installed:
 ```bash
@@ -431,26 +387,12 @@ git clone https://github.com/potatobeanradio/circuitRF.git
 cd circuitRF
 
 dotnet build      # restores packages + compiles everything
-dotnet test       # optional 5-10 min tests; runs the regression test suite
+dotnet test       # optional 10-15 min tests; runs the regression test suite
 ```
 
-A green `dotnet test` means your environment is good. (On Windows use the same commands in PowerShell or
-the terminal; on macOS/Linux use any shell.)
+### 4. Optional — building the device workers
 
-**Loadpull/contour test fixtures are not included, and cannot be.** A handful of tests under
-`Engine.Tests` and `Ui.Tests` read real lab-measured GaN FET `.spl`/`.lpcwave` files from
-`testdata/spl_test_data/` and `testdata/lpwave_test_data/`. That data is third-party measured data
-held under terms that do not permit redistribution, so it has never been committed to this repository
-and is not available on request. On a fresh clone those tests report as **Skipped**, with a reason
-naming the missing path — they never fail, and a fresh clone is fully green without them.
-
-If you have your own loadpull measurements in either format, dropping them at those paths exercises
-the same code. The parsers and the tests that read them are in the repository; only the data is not.
-
-
-### 4. Optional — the device workers
-
-Needed only for kits whose device models ship as **compiled libraries**. `dotnet build` builds the
+Needed only for PDKs whose device models ship as **compiled libraries**. `dotnet build` builds the
 workers itself *if a C compiler is on PATH* — with none, it warns and carries on, and such a kit
 refuses at Run.
 
@@ -477,7 +419,7 @@ Alternatives to zig (MinGW `gcc`, Docker/Podman) and the rest:
 [BUILDING.md ▸ Helper programs](BUILDING.md#helper-programs).
 
 
-### 5. Optional — package it as an app
+### Note: To package circuitRF as an app with installers
 
 [**BUILDING.md**](BUILDING.md) has step-by-step instructions for producing the installers users
 download: `.msi` (Windows x64/arm64/x86, per-machine and per-user), `.zip` (the Windows update
@@ -489,21 +431,19 @@ channel). One script per platform, run from the repository root.
 
 ## Running circuitRF
 
-### Launch the GUI
+### To launch the GUI
 
 ```bash
 # from the circuitRF/ directory:
 dotnet run --project src/Ui
 ```
 
-This opens the desktop app: build a schematic, set up analyses, hit **Run**, and view results in the Data
-Display. New to it? Start a scratch schematic (**File → New Schematic**), drag a few parts from the
-**Library Palette**, wire them, and explore.
+### To run circuitRF headless from the command line
 
-### Run headless from the command line
+Full CLI documentation: the
+[Command Line chapter](docs/user/reference/cli.html) of the user docs (design notes in
+[`docs/design/cli.md`](docs/design/cli.md)).
 
-Every engine is fully drivable without the GUI — this is how they're tested, and how you'd script a batch.
-Most verbs take a `.cnl` netlist (a human-readable text circuit description); `em` takes a `.cem` EM setup.
 
 ```bash
 # S-parameters: sweep 1-3 GHz in 50 MHz steps, write a Touchstone file
@@ -551,20 +491,6 @@ dotnet run --project src/Cli -- serve --root ~/designs
 # Help
 dotnet run --project src/Cli
 ```
-
-Frequencies accept `1GHz`, `100MHz`, or bare Hz (`1e9`). **Results go to stdout, everything else to
-stderr**, so `... lp x.cnl > table.txt` gives you a table and still shows progress on the terminal.
-
-**Every verb also takes `--json`**, which puts one machine-readable document on stdout and nothing
-else — the same schema for every verb, with the failure as the payload when a run fails, so a caller
-never has to tell "no output" apart from "output I could not parse". `--only` and `--group` narrow it.
-`serve` is the one exception to the channel split: its stdout carries a protocol and nothing may be
-written there, so it takes no `--json` of its own — every call through it returns the same document.
-
-The CLI evaluates a test bench's `measure` lines through the same evaluator the GUI does, so **a `.cnl`
-that works headless works when opened**. Full documentation: the
-[Command Line chapter](docs/user/reference/cli.html) of the user docs (design notes in
-[`docs/design/cli.md`](docs/design/cli.md)).
 
 ### Run a netlist through an engine (in code)
 
@@ -626,9 +552,10 @@ plotting** (engine → RBF surface fit → contour render, for simulated *and* m
 **Done: layout editor** based on an integer-DBU geometry model — drawing tools,
 curves and holes, booleans and offsets, scale, technologies with layer tables and substrate **stackups**,
 hierarchy with instances and arrays, push-in/pop-out navigation, flatten and group-into-cell, a spatial index
-and LOD rendering for large designs, **GDSII / DXF / Gerber+Excellon interchange**, a **parametric cell
-(PCell)** mechanism, the **microstrip component family** with published discontinuity models,
-**schematic↔layout generation** in both directions, and bondwire layout-driven design and modeling [`docs/design/wbond.md`](docs/design/wbond.md).
+and LOD rendering for large designs, import and export of **GDSII / DXF / Gerber+Excellon / .kicad_pcb** file formats,
+a **parametric cell (PCell)** mechanism, the **microstrip component family** with published discontinuity models,
+**schematic↔layout generation** in both directions, and bondwire layout-driven design and
+modeling [`docs/design/wbond.md`](docs/design/wbond.md).
 
 **Done: electromagnetic simulation using MoM.** A **2.5D method-of-moments** solver that analyses layout
 geometry against its technology stackup and returns S-parameters:
@@ -642,7 +569,7 @@ What's left for the v1 release is **beta test**.
 
 **Deferred to v2:**
 ** open green fields for development**
-- Parameter **tuning** and design **optimization**
+- Parameter **tuning** and RF design **optimization**
 - **Noise analysis** — noise figure, phase noise, or noise-parameter (Fmin, Γopt, Rn) extraction. 
 - **LVS**
 - **Transient Analysis**

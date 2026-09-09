@@ -108,18 +108,57 @@ public class WindowChannelTests
     /// <summary>
     /// <b>No window listening is an ANSWER, not a failure</b> (R-rc5-7c). Refusing every batch on a
     /// machine with no window open would refuse exactly the headless case §1.2 is written for.
+    ///
+    /// <para><b>The endpoint is MACHINE-WIDE, and this test is the one that needs it empty.</b> It
+    /// failed in a full run on 2026-09-09 with <c>False</c> rather than null — a real circuitRF was
+    /// open on the machine at the time and answered, truthfully, that it had nothing unsaved. The
+    /// siblings above all carry a guard for the same fact (<c>if (window.Unavailable) return;</c>);
+    /// this is its counterpart for the case where the ABSENCE is the subject, and it was the one test
+    /// here with no guard at all. Its failure says nothing about the code, which is the whole cost:
+    /// somebody then spends the next ten minutes finding that out.</para>
+    ///
+    /// <para>On a Unix-family platform the endpoint is a socket under <c>XDG_RUNTIME_DIR</c>, so the
+    /// test gets its OWN empty runtime directory and the absence becomes a fact about the test rather
+    /// than about the machine — deterministic, and it still drives the real transport. Windows names
+    /// its pipe with a constant and offers no such seam, so there the occupied case is DETECTED and
+    /// skipped rather than asserted; a machine with no circuitRF running still gates it.</para>
     /// </summary>
     [Fact]
     public void WithNothingListeningTheQuestionAnswersNullAndTheBatchIsNotRefusedForIt()
     {
-        var previous = WindowChannel.Timeout;
+        // Windows: nothing can move the pipe, so only a quiet machine can answer this.
+        if (OperatingSystem.IsWindows() && File.Exists(@"\\.\pipe\" + WindowChannel.EndpointName)) return;
+
+        // Short by necessity, not by taste: a Unix socket path is capped near 104 bytes, and macOS's
+        // own temp directory is half of that before the socket's name is added. An over-long path
+        // throws ArgumentOutOfRangeException, which Exchange does NOT catch — the test would fail
+        // instead of reading null.
+        string? quiet = OperatingSystem.IsWindows()
+                      ? null
+                      : Path.Combine("/tmp", "crf-nw-" + Guid.NewGuid().ToString("N")[..8]);
+        if (quiet is not null) Directory.CreateDirectory(quiet);
+
+        var previousTimeout = WindowChannel.Timeout;
+        var previousXdg     = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
         WindowChannel.Timeout = TimeSpan.FromMilliseconds(250);
+        // Process-wide, and safe for that reason only: WindowChannel and Program.cs are the two readers
+        // of this variable in the repository, and both test classes that drive the channel are in this
+        // one collection, so nothing else is looking at it while this runs.
+        if (quiet is not null) Environment.SetEnvironmentVariable("XDG_RUNTIME_DIR", quiet);
         try
         {
             // Null, not false: the two are different states and only one of them is "no window".
             Assert.Null(WindowChannel.AsksWindowForUnsavedChanges(Path.GetTempPath()));
         }
-        finally { WindowChannel.Timeout = previous; }
+        finally
+        {
+            WindowChannel.Timeout = previousTimeout;
+            if (quiet is not null)
+            {
+                Environment.SetEnvironmentVariable("XDG_RUNTIME_DIR", previousXdg);
+                try { Directory.Delete(quiet, true); } catch (IOException) { }
+            }
+        }
     }
 
     /// <summary>The wire, parsed by the one function both halves use.</summary>

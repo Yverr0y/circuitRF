@@ -242,8 +242,18 @@ public class LayoutRulerModelTests : System.IDisposable
 
         // Every produced file (the copper Gerbers, the Excellon drill, the job file), concatenated in
         // a stable order — one comparison covering both writers.
+        //
+        // The WRITE TIMESTAMP is stripped, exactly as the .kicad_pcb sibling below strips its own.
+        // Both writers stamp the moment of writing — `%TF.CreationDate` in every Gerber file and
+        // `"CreationDate"` in the .gbrjob — and this test writes the two exports one after the other,
+        // so whenever the pair straddles a second boundary they differ by a second and the test fails
+        // for a reason that has nothing to do with rulers. It is the ONLY difference such a run has,
+        // and it is a real property of the files rather than a defect: the stamp is provenance, and
+        // the CLI's own byte-identity gate excludes the same line for the same reason. What this gate
+        // is about is the GEOMETRY, which is what is left.
         return string.Join("\n---\n", Directory.GetFiles(outDir).OrderBy(f => f, System.StringComparer.Ordinal)
-            .Select(f => Path.GetFileName(f) + "\n" + File.ReadAllText(f)));
+            .Select(f => Path.GetFileName(f) + "\n"
+                       + string.Join("\n", File.ReadAllLines(f).Where(l => !l.Contains("CreationDate")))));
     }
 
     [Fact]
