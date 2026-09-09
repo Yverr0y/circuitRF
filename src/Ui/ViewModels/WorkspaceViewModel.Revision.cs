@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Input.Platform;
+using Dock.Model.Core;
 using CommunityToolkit.Mvvm.Input;
 using CircuitRF.Design.Revision;
 using CircuitRF.Ui.Messages;
@@ -668,15 +669,20 @@ public partial class WorkspaceViewModel
             && !await PromptSaveBeforeClose(window, "going back to an earlier version", includeFloated: false))
             return;
 
-        if (History.GoBackToVersion(root, version) is not { Ok: true, PreRestore: { } kept }) return;
+        // The busy cursor covers the RESTORE as well as the reload: the write and its pre-restore
+        // checkpoint are synchronous git work on the UI thread, and they are most of the wait.
+        using var busy = await Views.BusyCursorScope.WhileAsync(window);
 
-        // R-rc10-18. Recorded BEFORE the reload, which replaces every panel instance — the refresh at
-        // the end of the switch is what puts it on screen.
+        if (History.GoBackToVersion(root, version) is not { Ok: true, PreRestore: { } kept } outcome)
+            return;
+
+        // R-rc10-18. Recorded before the reload — the refresh at the end of it is what puts it on
+        // screen, and the narrow reload leaves the panel instance it goes to alone.
         _wayForward     = new WayForward(version.Title, kept, version.CommitId, version.WhenUtc,
                                          version.TreeId);
         _wayForwardRoot = root;
 
-        await ReloadWorkspaceAfterFilesChangedUnderneath();
+        await ReloadChangedDocuments(outcome.ChangedPaths);
     }
 
     // ── Going back (§5.8) ─────────────────────────────────────────────────────────────────────────
@@ -706,7 +712,11 @@ public partial class WorkspaceViewModel
             && !await PromptSaveBeforeClose(window, "going back to an earlier state", includeFloated: false))
             return;
 
-        if (History.Restore(root, point) is not { Ok: true, PreRestore: { } kept }) return;
+        // As in GoBackToVersion: the restore itself is synchronous git work on the UI thread, so the
+        // cursor goes on before it rather than before the reload.
+        using var busy = await Views.BusyCursorScope.WhileAsync(window);
+
+        if (History.Restore(root, point) is not { Ok: true, PreRestore: { } kept } outcome) return;
 
         // R-rc10-18, §12 Q35. THE WAY FORWARD, offered where the way back was taken. It creates
         // nothing — the entry already exists, because §5.8's restore takes it before it writes a single
@@ -719,13 +729,13 @@ public partial class WorkspaceViewModel
                                          point.TreeId);
         _wayForwardRoot = root;
 
-        await ReloadWorkspaceAfterFilesChangedUnderneath();
+        await ReloadChangedDocuments(outcome.ChangedPaths);
     }
 
     /// <summary>
-    /// R-rc5-12b's second half, and R-rc5-7b's — <b>one implementation with two callers</b>, which is
-    /// the requirement rather than a convenience: two reload paths that drift is the shape of defect
-    /// §5.8 is written against.
+    /// <b>The fallback under <see cref="ReloadChangedDocuments"/></b>, and nothing calls it directly
+    /// any more: reopening the whole workspace is what a restore did for every change until
+    /// 2026-09-08, and it is right only when what changed is not known.
     ///
     /// <para>Reopening the workspace is what discards the undo stacks, because the edit-session
     /// registry is cleared as part of the switch. Nothing here reaches into a stack to trim it — an
@@ -743,6 +753,189 @@ public partial class WorkspaceViewModel
         _layoutRegistry.Clear();
 
         await SwitchToWorkspaceReporting(cws);
+    }
+
+    /// <summary>
+    /// R-rc5-12b's second half, done to <b>the documents that actually changed and to nothing
+    /// else</b> — one implementation shared by a restore, a version restore, an interrupted restore
+    /// finished, and an agent batch's close.
+    ///
+    /// <para><b>Why this is not <see cref="ReloadWorkspaceAfterFilesChangedUnderneath"/>.</b> That one
+    /// reopens the workspace, which is correct for opening a DIFFERENT workspace and enormously wrong
+    /// for going back to an earlier state of the one already open: it drops every registry, replaces
+    /// the whole dock tree with a fresh default, empties the Messages panel, regenerates every PCell
+    /// and re-reads every open tab off disk. Owner report, 2026-09-08: the window stalled and then
+    /// flashed as all of that was rebuilt, for a restore that had changed one schematic. The scope was
+    /// the defect, not any one of those steps — each is right for its own purpose.</para>
+    ///
+    /// <para><b>What is left alone, because it is already correct:</b> the dock tree and every panel
+    /// in it, the project tree, the Messages panel, the technology cache except the entries whose file
+    /// changed, the generated-cell cache, and every open document the restore did not touch. What is
+    /// NOT left alone is the undo stack of a document that did change — R-rc5-12b's requirement is per
+    /// document and is met in full by applying it to the documents that changed, which is what closing
+    /// and reopening the tab does.</para>
+    ///
+    /// <para><b>A null changed-set means "everything", never "nothing"</b>, and falls back to the full
+    /// reopen. A restore whose diff could not be produced is slow; a restore that reloaded nothing
+    /// would leave every tab showing the state that was just replaced, with no error attached.</para>
+    ///
+    /// <para><b>The workspace file is never re-read here and the arrangement is never re-applied.</b>
+    /// A consequence worth stating: going back to a state where a different set of tabs was open does
+    /// not reopen them. The alternative is the rebuild this exists to avoid, and the earlier
+    /// arrangement was not being restored before either — the switch wrote the CURRENT session over
+    /// the restored <c>.cws</c> before anything read it.</para>
+    /// </summary>
+    private async Task ReloadChangedDocuments(IReadOnlyList<RestoredPath>? changed)
+    {
+        if (CurrentWorkspacePath is null) return;
+        if (changed is null || WorkspaceRootDir is not { } root)
+        {
+            await ReloadWorkspaceAfterFilesChangedUnderneath();
+            return;
+        }
+
+        var changedAbs = new List<string>(changed.Count);
+        foreach (var entry in changed)
+        {
+            try
+            {
+                changedAbs.Add(Path.GetFullPath(Path.Combine(
+                    root, entry.RelativePath.Replace('/', Path.DirectorySeparatorChar))));
+            }
+            catch (ArgumentException) { }
+        }
+
+        // A technology whose file came back is a different technology, and the cache hands out the one
+        // it read. Invalidated per PATH — a blanket ResetTechCache would drop every entry, including
+        // the live overrides of technologies this restore never touched.
+        foreach (string abs in changedAbs)
+            if (abs.EndsWith(".ctech", StringComparison.OrdinalIgnoreCase))
+                _techCache.Invalidate(abs);
+
+        var affected = OpenDocumentsAffectedBy(_openDocsByPath.Keys, changedAbs);
+
+        // Captured BEFORE anything closes: closing removes the dockable from its dock, so its place in
+        // the tab strip is unreadable a line later. A reopened tab that lands at the end of the strip
+        // is a rearrangement the designer did not ask for.
+        var reopen = new List<(string Path, string Kind, IDock? Dock, int Index, bool WasActive)>();
+        var active = _factory.DocumentDock?.ActiveDockable;
+
+        foreach (string key in affected)
+        {
+            if (!_openDocsByPath.TryGetValue(key, out var dockable)) continue;
+            if (DocumentPathAndKind(dockable) is not ({ } docPath, { } kind)) continue;
+
+            var dock  = dockable.Owner as IDock;
+            int index = dock?.VisibleDockables?.IndexOf(dockable) ?? -1;
+
+            reopen.Add((docPath, kind, dock, index, ReferenceEquals(active, dockable)));
+
+            // Force, because the prompt has already happened: GoBackTo offers unsaved work up before
+            // it writes a file, and a batch is refused outright while anything is dirty.
+            try { _factory.ForceCloseDockable(dockable); }
+            catch (Exception ex) { Messages.Warning($"Could not reload '{Path.GetFileName(docPath)}': {ex.Message}"); }
+        }
+
+        // DISCARD, not retire, and over the CHANGED PATHS rather than the closed tabs — an edit session
+        // routinely outlives its tab, because closing a dirty schematic keeps its session precisely so
+        // reopening restores the edit. That is right while the file still holds what the session was
+        // edited against, and it is §1.3's failure the moment a restore replaces it: an undo would
+        // re-apply the last few minutes of the state that was just replaced onto the restored file,
+        // producing a document that existed at no moment ever. Unreferenced-guarded, so a session a
+        // torn-off window is still showing is not ours to drop.
+        foreach (string abs in changedAbs)
+        {
+            if (abs.EndsWith(".csch", StringComparison.OrdinalIgnoreCase))      DiscardSessionIfUnreferenced(abs);
+            else if (abs.EndsWith(".clay", StringComparison.OrdinalIgnoreCase)) DiscardLayoutSessionIfUnreferenced(abs);
+        }
+
+        foreach (var (docPath, kind, dock, index, wasActive) in reopen)
+        {
+            // Gone with the restore — the tab closed above and there is nothing to put back.
+            bool exists = string.Equals(kind, "cell", StringComparison.OrdinalIgnoreCase)
+                        ? Directory.Exists(docPath)
+                        : File.Exists(docPath);
+            if (!exists) continue;
+
+            switch (kind)
+            {
+                case "schematic":   OpenOrActivateSchematic(docPath); break;
+                case "symbol":      OpenOrActivateSymbol(docPath); break;
+                case "cell":        OpenOrActivateCellPlaceholder(docPath, Path.GetFileName(docPath)); break;
+                case "datadisplay": OpenOrActivateDataDisplay(docPath); break;
+                // Asynchronous on purpose: a 27 MB board read on the UI thread is the freeze this
+                // whole change is about, and the ordinary open path already does it off-thread.
+                case "layout":      await OpenOrActivateLayoutAsync(docPath); break;
+                case "tech":        OpenOrActivateTech(docPath); break;
+                case "emsetup":     OpenOrActivateEmSetup(docPath); break;
+                default: continue;
+            }
+
+            // Not every open path lands in the map fully normalized — the technology document's own
+            // lookup already does this two-step for the same reason.
+            if (_openDocsByPath.TryGetValue(Path.GetFullPath(docPath), out var reopened)
+                || _openDocsByPath.TryGetValue(docPath, out reopened))
+                RestoreTabPosition(reopened, dock, index, wasActive);
+        }
+
+        // Cheap, and the only two surfaces that genuinely have to be told: the tree because files came
+        // and went, the History panel because it is where the way forward is offered.
+        _factory.ProjectTreeTool?.Refresh();
+        RefreshHistoryPanel();
+    }
+
+    /// <summary>
+    /// Puts a reopened document back where its tab was. Best effort by design — a dock that has since
+    /// gone, or a document that reopened somewhere else entirely, simply keeps where it landed, which
+    /// is what every other open in the application already does.
+    /// </summary>
+    private void RestoreTabPosition(IDockable reopened, IDock? dock, int index, bool wasActive)
+    {
+        try
+        {
+            if (dock?.VisibleDockables is { } siblings && index >= 0)
+            {
+                int now = siblings.IndexOf(reopened);
+                int at  = Math.Min(index, siblings.Count - 1);
+                if (now >= 0 && at >= 0 && now != at)
+                    _factory.MoveDockable(dock, reopened, siblings[at]);
+            }
+
+            if (wasActive) _factory.SetActiveDockable(reopened);
+        }
+        catch (Exception ex)
+        {
+            Messages.Warning($"Could not restore the tab order after reloading: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// <b>Which open documents a set of changed files reaches.</b> A document key is usually the file
+    /// itself; a cell's key is its FOLDER, so a changed file anywhere inside it is a change to that
+    /// document — which is why this is at-or-under rather than equality.
+    ///
+    /// <para><c>internal static</c> so the gate can exercise the decision directly:
+    /// <see cref="WorkspaceViewModel"/> cannot be built with real documents in it headlessly, and the
+    /// rule worth holding is this one — a restore that changed one of five open documents reloads
+    /// exactly one.</para>
+    /// </summary>
+    internal static List<string> OpenDocumentsAffectedBy(
+        IEnumerable<string> openDocumentKeys, IReadOnlyCollection<string> changedAbsolutePaths)
+    {
+        // The keys are compared NORMALIZED and returned AS THEY WERE: the map is not uniformly
+        // normalized, so a normalized key would not index it back.
+        List<string> affected = [];
+        foreach (string key in openDocumentKeys)
+        {
+            string normalized;
+            try   { normalized = Path.GetFullPath(key); }
+            catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
+                  { normalized = key; }
+
+            if (changedAbsolutePaths.Any(c => IsPathOrUnder(c, normalized)))
+                affected.Add(key);
+        }
+        return affected;
     }
 
     /// <summary>
@@ -767,7 +960,16 @@ public partial class WorkspaceViewModel
         // out on the strength of a flag that only this window's own save paths set.
         NoteWorkspaceChangedUnderneath();
 
-        await ReloadWorkspaceAfterFilesChangedUnderneath();
+        // A batch already knows what it changed — it names the paths over R-rc5-7c's channel — and
+        // until now that list was thrown away and the whole workspace reopened. Same reload, same
+        // rules, and the batch gets the narrow one for free.
+        var root = WorkspaceRootDir;
+        await ReloadChangedDocuments(root is null ? null : [.. relativePaths.Select(rel =>
+        {
+            string abs = Path.GetFullPath(Path.Combine(root, rel.Replace('/', Path.DirectorySeparatorChar)));
+            return new RestoredPath(rel, File.Exists(abs) || Directory.Exists(abs)
+                                         ? RestoredPathKind.Written : RestoredPathKind.Removed);
+        })]);
     }
 
     // ── Opening a workspace (R-rc5-12c's last rule, R-rc5-4c) ─────────────────────────────────────
@@ -780,9 +982,10 @@ public partial class WorkspaceViewModel
     {
         History.ResetForWorkspace();
 
-        // R-rc10-18. The way forward survives the reload a restore performs — that reload switches to
-        // the SAME workspace — and must not survive opening a different one, where it would name two
-        // entries that are not in the list.
+        // R-rc10-18. The way forward survives a restore — which no longer comes through here at all,
+        // and reaches this only on ReloadChangedDocuments' fallback, where the workspace being reopened
+        // is still the same one. It must not survive opening a DIFFERENT workspace, where it would name
+        // two entries that are not in the list.
         if (!string.Equals(_wayForwardRoot, WorkspaceRootDir, StringComparison.Ordinal))
         {
             _wayForward     = null;
@@ -872,9 +1075,13 @@ public partial class WorkspaceViewModel
     {
         if (InterruptedRestore is not { } inFlight) return;
 
-        History.FinishInterruptedRestore(WorkspaceRootDir, inFlight);
+        var outcome = History.FinishInterruptedRestore(WorkspaceRootDir, inFlight);
         InterruptedRestore = null;
-        await ReloadWorkspaceAfterFilesChangedUnderneath();
+
+        // The checkpoint it takes first sees the HALF-written workspace, so the diff against the
+        // target is still exactly what is left to do. A failure hands back no changed set and falls
+        // back to the full reopen, which is the right answer for a restore that did not complete.
+        await ReloadChangedDocuments(outcome is { Ok: true } ? outcome.ChangedPaths : null);
     }
 
     // ── RC-6: the indicator, the question, and switching recording off (§5.6, §5.7, §12 Q4) ───────

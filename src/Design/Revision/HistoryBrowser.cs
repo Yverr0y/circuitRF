@@ -207,11 +207,34 @@ public static class HistoryBrowser
     /// </summary>
     public static IReadOnlyList<DocumentChange> Compare(GitCommand git, string fromTreeOrCommit,
                                                        string toTreeOrCommit)
+        => TryCompare(git, fromTreeOrCommit, toTreeOrCommit) ?? [];
+
+    /// <summary>
+    /// <see cref="Compare"/>, with <b>"the diff could not be produced" told apart from "nothing
+    /// differs"</b> — one list and one parser, because a second one would drift.
+    ///
+    /// <para>The distinction is load-bearing for <see cref="WorkspaceRestore"/>, which uses the answer
+    /// to decide which files to write: an empty list means write nothing, and a failure means write
+    /// everything. Reading a failure as an empty list there would leave the workspace untouched and
+    /// report a successful restore.</para>
+    /// </summary>
+    /// <param name="findRenames">
+    /// Whether a delete-plus-add pair is reported as one <see cref="DocumentChangeKind.Renamed"/> row.
+    /// True for the browser, which is naming documents to a reader. <b>False for a caller acting on the
+    /// paths</b>: a rename IS a removal and a write, and collapsing the pair hides one of the two paths
+    /// that has to be touched.
+    /// </param>
+    public static IReadOnlyList<DocumentChange>? TryCompare(GitCommand git, string fromTreeOrCommit,
+                                                            string toTreeOrCommit,
+                                                            bool findRenames = true)
     {
-        var r = git.Run(
-            ["diff-tree", "-r", "-z", "--name-status", "--find-renames", fromTreeOrCommit, toTreeOrCommit],
-            new GitRunOptions(ReadOnly: true));
-        if (!r.Ok) return [];
+        List<string> arguments = ["diff-tree", "-r", "-z", "--name-status"];
+        if (findRenames) arguments.Add("--find-renames");
+        arguments.Add(fromTreeOrCommit);
+        arguments.Add(toTreeOrCommit);
+
+        var r = git.Run(arguments, new GitRunOptions(ReadOnly: true));
+        if (!r.Ok) return null;
 
         var fields = r.StdOut.Split('\0', StringSplitOptions.RemoveEmptyEntries);
 

@@ -4403,3 +4403,57 @@ Workspace brings one IN from an address. What can honestly be reviewed first is 
 can already read — §7A's librarian case, one workspace on this machine copied out of another. A source
 behind an address cannot be enumerated before it has been fetched, so the list is empty and the dialog
 is not shown; an empty review is a review that teaches people to click through the next one.
+
+## A restore writes the files that differ, and names them (2026-09-08)
+
+`brief-history-restore-in-place.md` §2, §4 phase 1. The design half of a restore that no longer
+rebuilds the window around it; the window half is in `src/Ui/RESOLVED.md`.
+
+### `checkout-index -a -f` wrote the whole workspace, every time
+
+`WorkspaceRestore.WriteFiles` restored every file in the target tree whether it differed or not. Two
+consequences, and the second is the one that mattered:
+
+- **`FilesWritten` reported the size of the workspace**, not the size of the change — so the sentence
+  a designer reads after going back named a number with nothing to do with what they had done.
+- **Every untouched file came back with a new modification time.** That is what made a
+  one-schematic restore look, to everything downstream, like a workspace that had changed entirely.
+
+**Git already knew.** `Restore` holds both tree ids a few lines apart — the pre-restore checkpoint's
+and the target's — and one read-only `diff-tree` answers "which paths, and how" before a single file
+is written. Measured on a synthetic workspace of 2,001 files / 43 MB with one file differing:
+
+| | wall clock |
+|---|---|
+| `checkout-index -a -f` (what every restore did) | **0.40 – 0.51 s** |
+| `diff-tree -r -z --name-status` + `checkout-index -f -- <one path>` | **0.03 s** |
+
+and 2,000 modification times left alone.
+
+### Three things worth keeping in mind if this is touched again
+
+- **A failed diff is a third answer, not an empty one.** `HistoryBrowser.Compare` returned `[]` both
+  for "nothing differs" and for "git would not answer", which is fine for a browser listing changes
+  and fatal for a caller deciding what to write: read as empty it would write nothing, report success,
+  and leave the workspace in the state being replaced. `TryCompare` is the same call and the same
+  parser returning null on failure, and `Compare` is now one line over it. `RestoreResult.ChangedPaths`
+  is nullable for the same reason and **null means "everything", never "nothing"**.
+- **Rename detection is off for this caller, on purpose.** To a reader "moved" is one fact; to a
+  caller acting on the paths a rename is a removal AND a write, and collapsing the pair hides one of
+  the two paths that has to be touched — which is rule 2 of R-rc5-12c failing silently.
+- **The two policy files are excluded from the changed set on both sides.** They are put back verbatim
+  a few steps later (rule 4), so a restore never changes them, and a caller told otherwise would
+  reload a document for a file whose content was just preserved.
+
+`-a` is still there as `WriteEverything`, reached only when the diff could not be produced: a restore
+that is slow is a nuisance, and one that wrote half a state is the defect the whole feature exists
+against. The named-path write is chunked at 500 paths per invocation because a command line has a
+length bound; the gate-17c interrupt seam (`FilesPerWrite`) still overrides it and still interrupts
+after the first file.
+
+The removal pass is untouched. Which files a removal may act on is R-rc5-12c rule 2 and is not a
+performance question.
+
+Gate: `tests/Ui.Tests/Revision/RestoreInPlaceTests.cs` — the untouched file's modification time is
+asserted, which is the assertion a count alone cannot make (a rewrite with identical bytes is
+invisible in the content).

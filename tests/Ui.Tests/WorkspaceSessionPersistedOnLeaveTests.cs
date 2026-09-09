@@ -120,24 +120,59 @@ public sealed class WorkspaceSessionPersistedOnLeaveTests : IDisposable
         Assert.Equal(Path.Combine("tech", "pcb.ctech"), read.ActiveDocumentPath);
     }
 
+    /// <summary>
+    /// A kind that one of these three knows about and another does not is a tab that goes missing, and
+    /// each way of going missing is worse than the last.
+    ///
+    /// <para><b>The kinds are read from <c>DocumentPathAndKind</c></b>, which is where they are
+    /// produced — the <c>.cws</c> writer emits what that returns. It used to carry the literals inline
+    /// and this gate read them out of <c>WriteWorkspaceFile</c>; anchoring on the producer is both
+    /// correct and what keeps the gate honest when a caller is added.</para>
+    /// </summary>
     [Fact]
     public void TheRestoreSwitch_HandlesEveryKindTheWriterCanEmit()
     {
-        var src = RepoFile(Path.Combine("src", "Ui", "ViewModels", "WorkspaceViewModel.cs"));
+        var src      = RepoFile(Path.Combine("src", "Ui", "ViewModels", "WorkspaceViewModel.cs"));
+        var revision = RepoFile(Path.Combine("src", "Ui", "ViewModels", "WorkspaceViewModel.Revision.cs"));
 
-        var writer  = MethodBody(src, "WriteWorkspaceFile");
+        var kinds   = SwitchArms(src, "DocumentPathAndKind(IDockable dockable) => dockable switch");
         var restore = MethodBody(src, "RestoreOpenDocumentsAsync");
+        var reload  = MethodBody(revision, "ReloadChangedDocuments");
 
-        // A kind the writer emits but the restorer has no case for is a silently-dropped tab — the
-        // same class of bug as not writing it at all, just one step later.
-        foreach (var kind in new[] { "schematic", "symbol", "cell", "datadisplay", "layout", "tech" })
+        Assert.Equal(
+            new[] { "cell", "datadisplay", "emsetup", "layout", "schematic", "symbol", "tech" },
+            kinds.Order().ToArray());
+
+        foreach (var kind in kinds)
         {
-            Assert.Contains($"\"{kind}\"", writer);
+            // No case here is a silently-dropped tab: recorded on the way out, never reopened.
             Assert.Contains($"case \"{kind}\"", restore);
+
+            // And no case HERE is worse — going back to an earlier state closes the tab to reload it,
+            // so a kind this does not know is a document that is shut and does not come back.
+            Assert.Contains($"case \"{kind}\"", reload);
         }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The string literals a switch expression yields, from its header to the <c>};</c> that ends it.
+    /// <see cref="MethodBody"/> cannot be used: it anchors on a declaration carrying no parenthesis
+    /// before the name, and this one's return type is a tuple.
+    /// </summary>
+    private static string[] SwitchArms(string src, string header)
+    {
+        int a = src.IndexOf(header, System.StringComparison.Ordinal);
+        Assert.True(a >= 0, $"'{header}' must be in the source");
+        int b = src.IndexOf("};", a, System.StringComparison.Ordinal);
+        Assert.True(b > a);
+
+        return [.. System.Text.RegularExpressions.Regex
+                    .Matches(src[a..b], "\"([a-z]+)\"")
+                    .Select(m => m.Groups[1].Value)
+                    .Distinct()];
+    }
 
     /// <summary>
     /// Body of a method, from its declaration to the matching closing brace.

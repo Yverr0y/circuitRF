@@ -1842,46 +1842,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
                 int order    = 0;
                 foreach (var dockable in _openDocsByPath.Values)
                 {
-                    string? docPath = null;
-                    string? kind    = null;
-
-                    if (dockable is SchematicDocument sd && sd.FilePath is not null)
-                    {
-                        docPath = sd.FilePath;
-                        kind    = "schematic";
-                    }
-                    else if (dockable is SymbolEditorDocument syed &&
-                             syed.ViewModel.CurrentSymbolPath is not null)
-                    {
-                        docPath = syed.ViewModel.CurrentSymbolPath;
-                        kind    = "symbol";
-                    }
-                    else if (dockable is CellParameterEditorDocument cpd)
-                    {
-                        // Derive cell folder path from the .ccell path stored in the edit model.
-                        docPath = Path.GetDirectoryName(cpd.ViewModel.EditModel.CcellPath);
-                        kind    = "cell";
-                    }
-                    else if (dockable is DataDisplayDocument dd && dd.FilePath is not null)
-                    {
-                        docPath = dd.FilePath;
-                        kind    = "datadisplay";
-                    }
-                    else if (dockable is LayoutDocument lad && lad.FilePath is not null)
-                    {
-                        docPath = lad.FilePath;
-                        kind    = "layout";
-                    }
-                    else if (dockable is TechDocument techDocKind)
-                    {
-                        docPath = techDocKind.FilePath;
-                        kind    = "tech";
-                    }
-                    else if (dockable is EmSetupDocument emDocKind)
-                    {
-                        docPath = emDocKind.FilePath;
-                        kind    = "emsetup";
-                    }
+                    var (docPath, kind) = DocumentPathAndKind(dockable);
 
                     // R-fgn-6: a foreign document is never recorded in the current workspace's .cws —
                     // even one that's currently DOCKED (opened via File ▸ Open from outside the
@@ -2186,6 +2147,13 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     /// </summary>
     private async Task SwitchToWorkspaceReporting(string cwsPath)
     {
+        // Owner, 2026-09-08. Seconds of work the window cannot paint through, and until this the only
+        // pointer feedback was none — which reads as an application that has hung. Here rather than
+        // inside SwitchToWorkspace so it covers the failure path too: a switch that throws leaves the
+        // workspace half-open, and leaving the busy cursor on top of that would be a window that never
+        // comes back. Held over the whole await, so the cursor is put back when the last document is in.
+        using var busy = await Views.BusyCursorScope.WhileAsync(Views.WorkspaceLocator.WindowFor(this));
+
         try
         {
             await SwitchToWorkspace(cwsPath);
@@ -2446,6 +2414,31 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     /// the project tree) so a brief pause already looks like something happening, and a bar that
     /// flashes up on every ordinary open would be noise.</summary>
     private const int WorkspaceOpenProgressAppearsAfterMs = 1000;
+
+    /// <summary>
+    /// <b>What a materialized document IS</b> — the file (or, for a cell, the folder) it stands for,
+    /// and the kind name that reopens it.
+    ///
+    /// <para>One implementation, two callers, and that is the requirement rather than a convenience:
+    /// the <c>.cws</c> open list is written from this and <see cref="RestoreOpenDocumentsAsync"/>'s
+    /// switch reads it back, so a kind that only one of them knows about is a tab that is recorded and
+    /// never reopened — or, on the restore path, one that is closed and never comes back.</para>
+    ///
+    /// <para>Both nulls for a document that stands for nothing on disk: a scratch document, or the
+    /// welcome stub.</para>
+    /// </summary>
+    private static (string? Path, string? Kind) DocumentPathAndKind(IDockable dockable) => dockable switch
+    {
+        SchematicDocument    { FilePath: { } p }                     => (p, "schematic"),
+        SymbolEditorDocument { ViewModel.CurrentSymbolPath: { } p }   => (p, "symbol"),
+        // Derive cell folder path from the .ccell path stored in the edit model.
+        CellParameterEditorDocument cpd                               => (Path.GetDirectoryName(cpd.ViewModel.EditModel.CcellPath), "cell"),
+        DataDisplayDocument  { FilePath: { } p }                      => (p, "datadisplay"),
+        LayoutDocument       { FilePath: { } p }                      => (p, "layout"),
+        TechDocument         techDoc                                  => (techDoc.FilePath, "tech"),
+        EmSetupDocument      emDoc                                    => (emDoc.FilePath, "emsetup"),
+        _                                                             => (null, null),
+    };
 
     /// <summary>
     /// Which document keys <see cref="RestoreOpenDocumentsAsync"/> is going to open, answered from

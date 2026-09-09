@@ -86,7 +86,7 @@ public partial class HistoryToolView : UserControl
         => Tool?.KeepVersion();
 
     private void OnGoBackClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-        => Tool?.GoBack();
+        => AfterTheClickHasPainted(tool => tool.GoBack());
 
     private void OnKeepClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
         => Tool?.Keep();
@@ -101,7 +101,40 @@ public partial class HistoryToolView : UserControl
         => Tool?.CompareWithWorkspace();
 
     private void OnComeForwardClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-        => Tool?.ComeForward();
+        => AfterTheClickHasPainted(tool => tool.ComeForward());
+
+    /// <summary>
+    /// <b>Runs an action only once the click that asked for it is off the screen.</b>
+    ///
+    /// <para>Owner report, 2026-09-08: the context menu stayed on screen while going back to a state.
+    /// Avalonia does close a <see cref="ContextMenu"/> when one of its items is clicked — but the close
+    /// is a layout pass, and the handler runs FIRST and inline. Every other item on that menu is
+    /// instant, so the close painted at once and the behaviour looked right; going back is the one
+    /// whose action is seconds long, so the close could not reach the screen until it was over and the
+    /// menu sat on top of the work it had started.</para>
+    ///
+    /// <para><b>Both halves are needed.</b> Closing the menu explicitly is what makes it go at the
+    /// moment of the click; posting the action at
+    /// <see cref="Avalonia.Threading.DispatcherPriority.Background"/> is what lets the frame WITHOUT it
+    /// reach the screen before the UI thread is busy again. Either one alone leaves the menu visible
+    /// for the duration.</para>
+    ///
+    /// <para>The row menu is closed by NAME rather than by walking up from the sender, because these
+    /// two actions are on a BUTTON as well as on the menu — and closing a menu that is not open is
+    /// nothing, while a parent walk that finds nothing is a fix that silently did not apply.</para>
+    ///
+    /// <para>Only the two actions that start a restore come through here. An instant one has nothing
+    /// to defer and would only gain a dispatcher turn.</para>
+    /// </summary>
+    private void AfterTheClickHasPainted(System.Action<HistoryTool> action)
+    {
+        if (Tool is not { } tool) return;
+
+        HistoryRows.ContextMenu?.Close();
+
+        Avalonia.Threading.Dispatcher.UIThread.Post(
+            () => action(tool), Avalonia.Threading.DispatcherPriority.Background);
+    }
 
     // RC-11 §5.11. The three corrections, on the menu R-rc10-17 built for them.
 

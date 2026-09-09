@@ -14,7 +14,41 @@ public sealed record RestoreResult(
     int                       FilesWritten,
     int                       FilesRemoved,
     RestorePoint?             PreRestore,
-    IReadOnlyList<Diagnostic> Diagnostics);
+    IReadOnlyList<Diagnostic> Diagnostics)
+{
+    /// <summary>
+    /// <b>Exactly which files the restore touched</b>, workspace-relative — or <b>null when that could
+    /// not be worked out</b>, which is a different answer from "none".
+    ///
+    /// <para>It exists because the caller's half of a restore (R-rc5-12b) is per DOCUMENT, and without
+    /// this the only honest way to satisfy it was to reload everything. A restore that changed one
+    /// schematic used to rebuild the whole window — every panel, every tab, every generated cell —
+    /// because nothing told the window that the other four tabs were already correct.</para>
+    ///
+    /// <para><b>Null means "reload everything", never "reload nothing"</b>. A caller that read a
+    /// failed diff as an empty set would leave every open document showing the state that was just
+    /// replaced, which is §1.3's failure with no error attached to it.</para>
+    ///
+    /// <para>Not a positional member: every construction of this record predates it, and a failure
+    /// result has nothing to say here.</para>
+    /// </summary>
+    public IReadOnlyList<RestoredPath>? ChangedPaths { get; init; }
+}
+
+/// <summary>What a restore did to one path.</summary>
+public enum RestoredPathKind
+{
+    /// <summary>Its content was brought back — it differed, or it was not there at all.</summary>
+    Written,
+
+    /// <summary>It came after the state being restored, so it was taken away.</summary>
+    Removed,
+}
+
+/// <summary>One path a restore touched, workspace-relative with forward slashes (git's own spelling).</summary>
+/// <param name="RelativePath">Where it is in the workspace.</param>
+/// <param name="Kind">What the restore did to it.</param>
+public sealed record RestoredPath(string RelativePath, RestoredPathKind Kind);
 
 /// <summary>
 /// <b>Going back to an earlier state</b> (<c>docs/design/revision-control.md</c> §5.8, §6.3;
@@ -171,7 +205,24 @@ public static class WorkspaceRestore
                     "going back to an earlier state",
                     "that state holds no files, so there is nothing to bring back"));
 
-            int written = WriteFiles(git, options, targetPaths);
+            // ── 4a. WHAT DIFFERS, before a single file is written ─────────────────────────────────
+            //
+            // Git already knows, and it is almost never many. The pre-restore checkpoint above holds
+            // the tree the workspace is in RIGHT NOW, so one read-only diff against the target answers
+            // "which paths, and how" in milliseconds — and the alternative, `checkout-index -a`,
+            // rewrites every file in the workspace whether it differs or not. That is not only slow:
+            // it restamps the modification time of every untouched file, which is what turned a
+            // one-schematic restore into a whole-window rebuild upstream.
+            //
+            // NULL is a third answer and it is not "nothing differs". A diff that could not be
+            // produced falls back to writing the whole tree, exactly as before — a restore that is
+            // slow is a nuisance, a restore that half-writes is §1.3's failure.
+            var changed = ChangedBetween(git, currentTree, target.TreeId);
+
+            int written = changed is null
+                        ? WriteEverything(git, options, targetPaths)
+                        : WriteFiles(git, options, [.. changed.Where(c => c.Kind == RestoredPathKind.Written)
+                                                             .Select(c => c.RelativePath)]);
             if (written < 0)
                 return Fail(GitFailures.Unrecognised("going back to an earlier state",
                                                      "the files could not be written"));
@@ -218,7 +269,8 @@ public static class WorkspaceRestore
                                     new RestoredState(target.Label, target.TakenUtc, target.CommitId));
 
             notes.Add(RestorePointMessages.Restored(target.Label, written, removed));
-            return new RestoreResult(true, written, removed, replaced, notes);
+            return new RestoreResult(true, written, removed, replaced, notes)
+                   { ChangedPaths = changed };
         }
         finally
         {
@@ -258,22 +310,70 @@ public static class WorkspaceRestore
     // ── The pieces ────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
+    /// <b>Which paths differ between the state the workspace is in and the one being restored</b>, or
+    /// null when that question could not be answered.
+    ///
+    /// <para>One read-only <c>diff-tree</c>, through <see cref="HistoryBrowser.TryCompare"/> — the
+    /// parser that already exists, rather than a second one that would drift from it. <b>Renames are
+    /// deliberately NOT detected</b>: to a reader "moved" is one fact, but to a caller acting on the
+    /// paths a rename is a removal AND a write, and collapsing the pair hides one of the two paths
+    /// that has to be touched.</para>
+    ///
+    /// <para>The two policy files are left out on both sides. They are put back verbatim a few steps
+    /// later (rule 4), so a restore never changes them and a caller told otherwise would reload a
+    /// document for a file whose content it just preserved.</para>
+    /// </summary>
+    private static IReadOnlyList<RestoredPath>? ChangedBetween(
+        GitCommand git, string? currentTree, string targetTree)
+    {
+        if (currentTree is not { Length: > 0 }) return null;
+
+        var diff = HistoryBrowser.TryCompare(git, currentTree, targetTree, findRenames: false);
+        if (diff is null) return null;
+
+        List<RestoredPath> changed = [];
+        foreach (var c in diff)
+        {
+            // findRenames is off, so this cannot arrive — but reading one as a single write would
+            // silently leave the old path on disk, which is the one outcome rule 2 exists to prevent.
+            if (c.Kind == DocumentChangeKind.Renamed && c.PreviousPath is { Length: > 0 } was
+                && !IsPreserved(was))
+                changed.Add(new RestoredPath(was, RestoredPathKind.Removed));
+
+            if (IsPreserved(c.RelativePath)) continue;
+
+            changed.Add(new RestoredPath(
+                c.RelativePath,
+                c.Kind == DocumentChangeKind.Removed ? RestoredPathKind.Removed : RestoredPathKind.Written));
+        }
+
+        return changed;
+    }
+
+    /// <summary>
+    /// How many paths one <c>checkout-index</c> invocation is asked for when the caller has not set
+    /// <see cref="FilesPerWrite"/>. Named paths are what makes a restore write only what changed, and
+    /// a command line has a length bound — so the set is chunked rather than passed whole. Large
+    /// enough that the ordinary restore of a handful of files is still one process.
+    /// </summary>
+    private const int PathsPerWrite = 500;
+
+    /// <summary>
     /// Writes the loaded state out. <c>checkout-index</c> is the plumbing that turns an index into
     /// files and it is the ONLY thing in this brief whose name contains that word — nothing switches,
     /// branches, stashes or resets, which gate 24 scans for.
+    ///
+    /// <para><b>Named paths, not <c>-a</c>.</b> <c>-a</c> writes every file in the workspace whether
+    /// it differs or not, which is both the wait and — because it restamps every file's modification
+    /// time — the reason a one-file restore looked to everything downstream like a workspace that had
+    /// changed entirely. <see cref="WriteEverything"/> is still there for the case where the diff
+    /// could not be produced.</para>
     /// </summary>
-    private static int WriteFiles(GitCommand git, GitRunOptions options, IReadOnlyCollection<string> paths)
+    private static int WriteFiles(GitCommand git, GitRunOptions options, IReadOnlyList<string> paths)
     {
         if (paths.Count == 0) return 0;
 
-        int perCall = FilesPerWrite;
-        if (perCall <= 0)
-        {
-            var all = git.Run(["checkout-index", "-a", "-f"], options);
-            if (!all.Ok) return -1;
-            AfterFilesWritten?.Invoke(paths.Count);
-            return paths.Count;
-        }
+        int perCall = FilesPerWrite > 0 ? FilesPerWrite : PathsPerWrite;
 
         int done = 0;
         foreach (var chunk in paths.Chunk(perCall))
@@ -289,6 +389,24 @@ public static class WorkspaceRestore
         }
 
         return done;
+    }
+
+    /// <summary>
+    /// The fallback: the whole tree, as every restore did before the diff existed. Reached only when
+    /// <see cref="ChangedBetween"/> could not answer — a restore that is slow is a nuisance, and a
+    /// restore that wrote half a state would be the defect the whole feature is written against.
+    /// </summary>
+    private static int WriteEverything(GitCommand git, GitRunOptions options,
+                                       IReadOnlyCollection<string> paths)
+    {
+        if (paths.Count == 0) return 0;
+
+        if (FilesPerWrite > 0) return WriteFiles(git, options, [.. paths]);
+
+        var all = git.Run(["checkout-index", "-a", "-f"], options);
+        if (!all.Ok) return -1;
+        AfterFilesWritten?.Invoke(paths.Count);
+        return paths.Count;
     }
 
     /// <summary>

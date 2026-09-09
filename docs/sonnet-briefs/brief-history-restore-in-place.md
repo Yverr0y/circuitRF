@@ -1,6 +1,8 @@
 # Brief — going back to an earlier state without closing the workspace
 
-**Status:** not started. Investigation done 2026-09-08 against `main` @ `ff0dfc37`.
+**Status: PHASE 1 COMPLETED 2026-09-08.** Investigation done 2026-09-08 against `main` @
+`ff0dfc37`. Phases 2 and 3 are not started. What phase 1 measured, what it found on the way, and the
+one consequence it accepts are in `src/Design/RESOLVED.md` and `src/Ui/RESOLVED.md`.
 
 **Reported (owner, 2026-09-08):** changing state from the History window stalls the UI for a moment
 and then the workspace window flashes as everything redraws. The ask is that it feel instantaneous —
