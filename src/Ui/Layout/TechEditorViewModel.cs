@@ -24,8 +24,10 @@ namespace CircuitRF.Ui.Layout;
 public sealed partial class TechEditorViewModel : ObservableObject
 {
     /// <summary>Absolute path of the .ctech file. Never null — a Technology is always
-    /// workspace-scoped configuration; unlike a layout there is no scratch/unsaved-floating state.</summary>
-    public string FilePath { get; }
+    /// workspace-scoped configuration; unlike a layout there is no scratch/unsaved-floating state.
+    /// It moves in exactly one place, <see cref="SaveAs"/>, mirroring
+    /// <c>EmSetupEditorViewModel.FilePath</c>.</summary>
+    public string FilePath { get; private set; }
 
     /// <summary>The live, mutable working copy. Replaced wholesale by <see cref="ApplySnapshot"/>
     /// (Execute/Undo of a <see cref="TechSnapshotCommand"/>) — row view models hold references into
@@ -331,6 +333,12 @@ public sealed partial class TechEditorViewModel : ObservableObject
     /// call <c>TechnologyCache.Invalidate(path)</c>, which is what fires L0c's live-refresh seam.</summary>
     public event Action<string>? TechSaved;
 
+    /// <summary>Fired after a successful <see cref="SaveAs"/>, with the OLD path and the NEW one.
+    /// Separate from <see cref="TechSaved"/> because the workspace has to re-key its open-document
+    /// map and invalidate the cache entry for BOTH paths — the old one because this editor is no
+    /// longer the live view of it, the new one because there was no entry for it at all.</summary>
+    public event Action<string, string>? TechSavedAs;
+
     /// <summary>Raised when a save fails (e.g. a read-only / unwritable location). A failed save
     /// must surface an error, never crash the app — mirrors <see cref="LayoutEditorViewModel"/>.</summary>
     public event Action<string>? SaveError;
@@ -371,6 +379,42 @@ public sealed partial class TechEditorViewModel : ObservableObject
         }
         UndoRedo.MarkSaved();   // IsModified → false → IsDirty → false, via the subscription above
         TechSaved?.Invoke(FilePath);
+    }
+
+    /// <summary>
+    /// Write this technology to a DIFFERENT <c>.ctech</c> and follow it from then on — the tab menu's
+    /// Save As… (owner request, 2026-09-09). The original file is left exactly as it was on disk;
+    /// Save As is not a move.
+    ///
+    /// <para><b>What it does NOT do, and what the caller has to say out loud.</b> A design resolves
+    /// its technology through an explicit reference — a layout's own <c>TechRef</c>, or the
+    /// workspace's <c>DefaultTechRef</c> (<c>TechnologyResolver</c>) — so every open layout goes on
+    /// resolving the ORIGINAL path until something repoints it. That is the same thing a schematic's
+    /// Save As does to the cells that instantiate it, and it is reported rather than guessed at:
+    /// silently repointing a whole workspace's designs at a file the user has only just made would be
+    /// a much larger edit than the one they asked for.</para>
+    ///
+    /// <para>The picker lives on the caller for the reason the rest of this file does: everything
+    /// under <c>src/Ui/Layout/</c> is framework-free, so this takes a resolved path and does the I/O.
+    /// </para>
+    /// </summary>
+    public void SaveAs(string newPath)
+    {
+        if (string.IsNullOrWhiteSpace(newPath)) return;
+        try
+        {
+            TechPersistence.SaveToFile(newPath, Working);
+        }
+        catch (Exception ex)
+        {
+            SaveError?.Invoke($"Couldn't save technology to '{newPath}': {ex.Message}");
+            return;
+        }
+
+        string oldPath = FilePath;
+        FilePath = newPath;
+        UndoRedo.MarkSaved();
+        TechSavedAs?.Invoke(oldPath, newPath);
     }
 
     // ── Snapshot undo plumbing (internal — used by row view models) ───────────

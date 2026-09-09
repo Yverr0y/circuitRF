@@ -23,10 +23,17 @@ public static class WorkspaceTechnologyChoices
     ///
     /// <para>Labelled by the technology's own <c>Name</c>, falling back to the filename stem. Two
     /// technologies can legitimately carry the same name — a copy taken into a cell folder is the
-    /// obvious case — so <b>any label that is not unique gains its workspace-relative folder</b>. A
+    /// obvious case — so <b>any label that is not unique gains its workspace-relative FILE path</b>. A
     /// picker with two identical rows is worse than a long one: it makes the choice unmakeable rather
     /// than merely wordy, and it is exactly what widening the search from one folder to the whole tree
     /// makes possible.</para>
+    ///
+    /// <para><b>The folder alone was not enough</b> (owner report, 2026-09-09). A Save As from the
+    /// technology editor writes a second <c>.ctech</c> carrying the same internal <c>Name</c>, and the
+    /// obvious place to put it is beside the original — so both rows disambiguated to the same folder
+    /// and the picker was back to two identical labels. The file name is the half that always differs,
+    /// because two files cannot share a path. Every row also carries its full path as a tooltip in the
+    /// dialog itself, which is the answer for the case no label can carry.</para>
     ///
     /// <para><paramref name="rootDir"/> null (a loose file with no ancestor workspace) yields nothing,
     /// leaving "(Workspace default)" and Browse… — unchanged from before.</para>
@@ -75,24 +82,23 @@ public static class WorkspaceTechnologyChoices
         foreach (var path in ordered)
         {
             string name = names[path];
-            string label = duplicated.Contains(name) ? $"{name}  —  {RelativeFolder(rootDir, path)}" : name;
+            string label = duplicated.Contains(name) ? $"{name}  —  {RelativeFilePath(rootDir, path)}" : name;
             choices.Add(new TechChoice(label, path));
         }
         return choices;
     }
 
-    /// <summary>The file's folder relative to the workspace root, or "." for the root itself — the
-    /// short, meaningful half of the path, since the root is the same for every row.</summary>
-    private static string RelativeFolder(string rootDir, string filePath)
+    /// <summary>The file relative to the workspace root — the short, meaningful half of the path,
+    /// since the root is the same for every row, and the only half that is guaranteed to differ
+    /// between two rows. Falls back to the bare file name if the path cannot be made relative.</summary>
+    private static string RelativeFilePath(string rootDir, string filePath)
     {
         try
         {
-            var dir = Path.GetDirectoryName(filePath);
-            if (dir is null) return ".";
-            var rel = Path.GetRelativePath(rootDir, dir);
-            return rel is "" or "." ? "." : rel;
+            var rel = Path.GetRelativePath(rootDir, filePath);
+            return rel is "" or "." ? Path.GetFileName(filePath) : rel;
         }
-        catch { return "."; }
+        catch { return Path.GetFileName(filePath); }
     }
 
 

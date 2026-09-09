@@ -34,20 +34,21 @@ public sealed record ChangeTechnologyResult(string? AbsoluteTechPath, bool Adopt
 /// </summary>
 public partial class ChangeTechnologyDialog : Window
 {
-    private sealed record TechChoiceItem(string Label, string? AbsolutePath)
-    {
-        public override string ToString() => Label;
-    }
-
     public ChangeTechnologyDialog() => InitializeComponent();
 
     public ChangeTechnologyDialog(LayoutEditorViewModel vm) : this()
     {
         CurrentText.Text = $"Current: {vm.TechSummaryText}";
 
-        var items = new List<TechChoiceItem> { new("(Workspace default)", null) };
+        var items = new List<ListBoxItem>
+        {
+            Row("(Workspace default)", null,
+                "Whatever this workspace's default technology resolves to — no explicit reference is "
+                + "written into the layout."),
+        };
+
         foreach (var choice in WorkspaceTechnologyChoices.Enumerate(vm.WorkspaceRootDir, vm.WorkspaceTechDir))
-            items.Add(new TechChoiceItem(choice.Label, choice.AbsolutePath));
+            items.Add(Row(choice.Label, choice.AbsolutePath, choice.AbsolutePath));
 
         ChoiceList.ItemsSource = items;
         ChoiceList.SelectedIndex = 0;
@@ -74,6 +75,28 @@ public partial class ChangeTechnologyDialog : Window
         Close(new ChangeTechnologyResult(result[0].Path.LocalPath, AdoptUnitsCheck.IsChecked == true));
     }
 
+    /// <summary>
+    /// One row: its label, the file it stands for (in <c>Tag</c>), and <b>its full path as a
+    /// tooltip</b>.
+    ///
+    /// <para>The tooltip is owner-requested (2026-09-09) and it answers the question no label can. A
+    /// technology's row is named after the technology's own internal <c>Name</c>, which two files can
+    /// share — a Save As from the technology editor produces exactly that — and while
+    /// <see cref="WorkspaceTechnologyChoices"/> appends the workspace-relative path to a duplicated
+    /// name, "which file is this actually" is a question a user can have about ANY row, including the
+    /// unique ones. Hovering answers it without lengthening every label.</para>
+    ///
+    /// <para>Built as <c>ListBoxItem</c>s rather than data items with a template because a tooltip is
+    /// per-container: an <c>ItemTemplate</c> would have to bind <c>ToolTip.Tip</c> through the item's
+    /// own type, and this dialog carries no data context to bind against.</para>
+    /// </summary>
+    private static ListBoxItem Row(string label, string? absolutePath, string? tooltip)
+    {
+        var row = new ListBoxItem { Content = label, Tag = absolutePath };
+        if (tooltip is { Length: > 0 }) ToolTip.SetTip(row, tooltip);
+        return row;
+    }
+
     private ChangeTechnologyResult BuildResult() =>
-        new((ChoiceList.SelectedItem as TechChoiceItem)?.AbsolutePath, AdoptUnitsCheck.IsChecked == true);
+        new((ChoiceList.SelectedItem as ListBoxItem)?.Tag as string, AdoptUnitsCheck.IsChecked == true);
 }

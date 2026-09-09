@@ -82,6 +82,35 @@ public sealed class WorkspaceTechnologyChoicesTests : IDisposable
     }
 
     [Fact]
+    public void TwoTechnologiesWithTheSameNameInTheSameFolder_AreStillToldApart()
+    {
+        // Owner report, 2026-09-09: a Save As from the technology editor writes a second .ctech
+        // carrying the same internal Name, and the obvious place to put it is beside the original —
+        // so disambiguating by FOLDER produced two identical rows again, which is the very state the
+        // rule above exists to prevent. The file name is the half that always differs.
+        WriteTech("tech/board.ctech",    "Board");
+        WriteTech("tech/board-v2.ctech", "Board");
+
+        var choices = WorkspaceTechnologyChoices.Enumerate(_root, TechDir);
+
+        Assert.Equal(2, choices.Count);
+        Assert.Equal(2, choices.Select(c => c.Label).Distinct(StringComparer.Ordinal).Count());
+        Assert.Contains(choices, c => c.Label.Contains("board.ctech", StringComparison.Ordinal));
+        Assert.Contains(choices, c => c.Label.Contains("board-v2.ctech", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void EveryRowCarriesTheFileItStandsFor_SoTheDialogCanShowThePath()
+    {
+        // The tooltip the dialog puts on each row is this path (ChangeTechnologyDialog.Row). It is
+        // the answer for a UNIQUE row too, where no label carries a path at all.
+        string path = WriteTech("tech/only.ctech", "Only");
+
+        var choice = Assert.Single(WorkspaceTechnologyChoices.Enumerate(_root, TechDir));
+        Assert.Equal(path, choice.AbsolutePath);
+    }
+
+    [Fact]
     public void AUniqueName_IsNotClutteredWithAFolder()
     {
         WriteTech("cells/amp.ccell/only.ctech", "Only");

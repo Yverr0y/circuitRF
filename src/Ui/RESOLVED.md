@@ -1,5 +1,130 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## Save and Save As… on the document tab's own context menu (owner, 2026-09-09)
+
+Asked for below "Reveal in Finder": a Save and a Save As… that act on the tab that was right-clicked,
+**docked or floating** (the owner's own clarification, mid-request).
+
+**They are not File ▸ Save with a different parameter.** Every save route in `WorkspaceViewModel`
+starts at `ResolveActiveDocumentForCommands()` — ⌘S means "the document in front of the user". A tab
+menu means the tab under the pointer, which is very often a BACKGROUND tab. So `SaveFromTabAsync` /
+`SaveAsFromTabAsync` (`WorkspaceViewModel.TabSave.cs`) take an `IDockable` and nothing else, and each
+case delegates to the per-document route that already existed. **Nothing is written there** — a test
+scans that file for `Persistence.SaveToFile`, `File.WriteAllText` and `SaveAllAsync`, because a second
+spelling of "saved" for one document kind is the defect §4 of the Reveal entry already records.
+
+**The floating half is why the workspace is resolved from the DOCKABLE, not the window.** A torn-off
+document lives in a `CrfHostWindow` whose DataContext is the document, so `WorkspaceLocator` (which
+answers from the caller's window) cannot help and a `$parent[DockControl].DataContext` route would
+work docked and silently do nothing floating — the same trap the Reveal command was built around.
+`WorkspaceViewModel.WorkspaceOf(dockable)` asks the FACTORY (one per view model, stamped onto every
+dockable it initializes, and the same instance for a torn-off document), falling back to a walk of
+each open workspace's layout INCLUDING its floating windows. `HostWindowOf` then returns the floating
+host as the dialog owner, so a picker opens over the window the user right-clicked in.
+
+**Neither item is gated by `CanExecute`, deliberately.** The menu is one shared `ContextMenu` whose
+DataContext changes as tabs are right-clicked; whether Avalonia re-queries a parameterized command's
+`CanExecute` at that moment depends on attachment order, and a stale grey-out would make a dirty
+document unsaveable with nothing on screen to say why. Visibility carries every decision instead
+(`DocumentTabMenuVisibility` — a converter, re-evaluated on DataContext change, which is what the
+Reveal item has always relied on), and the two states a gate would have expressed are REPORTED: a
+clean document says "Nothing to save.", and a read-only one is routed to Save As with SL2 R-sl2-8's
+own wording. `AsyncRelayCommandOptions.AllowConcurrentExecutions` is part of that — without it an
+`AsyncRelayCommand` reports `CanExecute` false while it runs, which is the same stale-grey hazard
+arriving by a different door.
+
+**Two routes had to be moved before the menu could reach them, and both for the same reason: a
+background tab's view may never have been realized.**
+- **harmonicaRF's `.charm` write lived in `HarmonicaView`'s code-behind.** It is now
+  `HarmonicaDocumentSave.RunAsync`, called by the view's own File menu and by the tab. It is a static
+  rather than a workspace method because harmonicaRF also runs standalone, with no workspace at all;
+  the workspace parameter is optional and only puts the saved file into the project tree.
+- **The EM setup's Save As picker lived in `EmSetupEditorView`.** It is now
+  `WorkspaceViewModel.SaveEmSetupAs`, called by the editor's own button and by the tab — everything
+  under `src/Ui/Layout/` is framework-free, so the VM still takes a resolved path and does the I/O.
+
+`SaveDataDisplayDoc` gained a `saveAs` flag (force the picker, and drop the OLD key from
+`_openDocsByPath` before adding the new one — leaving it would make the file the user saved away from
+look like it were still open in a tab).
+
+### The technology tab was withheld and the owner asked for it back the same day
+
+Save As was initially offered on every saveable kind EXCEPT `TechDocument`, on the reasoning that a
+design resolves its technology through an explicit reference (a layout's `TechRef`, or the
+workspace's `DefaultTechRef` — `TechnologyResolver`), so a Save As leaves every open layout resolving
+the ORIGINAL file. **That is true and it was still the wrong call**: a schematic's Save As does
+exactly the same thing to the cells that instantiate it, and circuitRF has always offered that. The
+answer is to say so, not to hide the item — `OnTechSavedAs` posts which file the editor now edits and
+that designs still point at the old one.
+
+`TechEditorViewModel.SaveAs` mirrors `EmSetupEditorViewModel.SaveAs` (the picker on the caller,
+`FilePath` moving in exactly one place), and its `TechSavedAs` event carries **both** paths — the old
+one as well as the new. The EM version captures the original path in a closure instead, so a SECOND
+Save As there removes the original key again rather than the one that is actually current; carrying
+it in the event is what avoids inheriting that. The workspace invalidates `TechnologyCache` for both
+paths: the old because this editor is no longer the live view of it, the new because there was no
+entry at all.
+
+A test pins the two route tables as an IDENTITY — a kind that can be saved can be saved elsewhere —
+so diverging again has to be a deliberate edit rather than an omission. That is the same shape as the
+derived guards the Reveal item grew after shipping twice with the entry missing from tabs nobody had
+listed.
+
+### Two same-named technologies in the same folder made the Change Technology picker unusable
+
+Reported immediately after the first `.ctech` Save As. `WorkspaceTechnologyChoices` already
+disambiguated a duplicated technology NAME by appending the file's workspace-relative FOLDER — but a
+Save As naturally writes the copy BESIDE the original, so both rows disambiguated to the same folder
+and the picker was back to two identical labels, which its own comment calls "unmakeable rather than
+merely wordy". It now appends the relative **file path**, the half that cannot be shared.
+
+**And every row carries its full path as a tooltip** (the owner's own suggestion), which is the
+answer for a UNIQUE row too — the label is the technology's internal `Name`, and "which file is this
+actually" is a question a user can have about any row. Rows are built as `ListBoxItem`s rather than
+data items with a template because a tooltip is per-container and this dialog carries no data context
+to bind against.
+
+## The "MallocStackLogging" flood on quit is macOS's, not ours (2026-09-09) — investigated, unfixed
+
+Reported as a terminal flood of 20-30 lines on quitting a `dotnet run` session, suspected of being a
+`.ctech` close:
+
+```
+CircuitRF.Ui(56891) MallocStackLogging: can't turn off malloc stack logging because it was not enabled.
+```
+
+**Nothing in circuitRF, .NET or Avalonia/Skia is involved.** The line is printed by macOS's
+`MallocStackLogging.framework` (`msl_turn_off_stack_logging`, reached through libSystem's
+`turn_off_stack_logging`); neither symbol nor string appears in any shipped native library or in the
+.NET install, and across the whole dyld shared cache only `libcoreroutine.dylib` (the Routine daemon
+client) and `XCTAutomationSupport` call them.
+
+**The mechanism is reproduced.** Once that framework is loaded into a process, libmalloc's at-fork
+CHILD handler tries to disable stack logging in every subsequent `fork()`. It is not enabled, so each
+child warns — and because it happens after the fork and before the `exec`, the line carries the
+PARENT's program name with the CHILD's pid. Hence `CircuitRF.Ui` on pids that were never the app,
+consecutive pid numbers, and a line count that simply tracks how many child processes were started.
+It is a warning about a diagnostic facility: no leak, no corruption, nothing wrong with the shutdown.
+
+**There is no point in our code to fix it at.** The write happens inside `fork()` itself, before
+.NET's child code runs, so it reaches the terminal even for children started with
+`RedirectStandardError = true`. Both suppression knobs were measured and both are worse:
+`MallocLogFile=/dev/null` does nothing, and `MallocStackLoggingDisable=1` silences this message only
+to have each child print a different one. Setting `MallocStackLogging` to ANY value ENABLES lite-mode
+logging rather than disabling it.
+
+**What stayed unknown is the arming step** — what loads the framework into a session, which is why it
+is intermittent. Two instrumented runs never loaded it, and it is soft-linked, so it shows up in no
+`dlopen` scan either. The only half that is ours is the fork COUNT: something spawned ~20-30 children
+around that quit, where a quiet session spawns none.
+
+*If it recurs:* the way to catch it in one run is to interpose `write`/`writev`, match the bytes
+against `"MallocStackLogging"` and dump a `backtrace()` — that catches a direct call, a `dlsym` and a
+forked child before `exec` alike, and works through `dotnet run` via `DYLD_INSERT_LIBRARIES` (the
+Debug apphost is ad-hoc signed, so the injection is not stripped). The backtrace names both the
+arming call and what is forking.
+
+
 ## Layout editor: Clip and Cut Out, and the boolean operand filter that was a deny-list (2026-09-09)
 
 `docs/sonnet-briefs/brief-layout-clip-and-cut-out.md`. The report was that selecting a whole copper

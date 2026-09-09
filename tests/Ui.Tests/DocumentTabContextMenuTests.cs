@@ -87,17 +87,25 @@ public class DocumentTabContextMenuTests
     }
 
     [Fact]
-    public void RevealAndItsSeparatorHideTogetherForAScratchDocument()
+    public void RevealHidesForAScratchDocument_AndNoStrayRuleIsLeftBehind()
     {
-        // A scratch document has no file, so the entry does not apply — and a separator left
+        // A scratch document has no file, so the Reveal entry does not apply — and a separator left
         // behind on its own would render as a stray rule at the top of the menu.
+        //
+        // The separator used to carry Reveal's own converter, which was right while Reveal was the
+        // only entry. Since Save and Save As joined it (2026-09-09) it tracks the WHOLE block
+        // (DocumentTabMenuVisibility.Any) instead: bound to Reveal alone it would now vanish from a
+        // scratch schematic tab that still shows two entries, fusing ours onto Dock's.
         string src  = Menu();
         int menu    = src.IndexOf("<ContextMenu x:Key=", StringComparison.Ordinal);
         int firstDock = src.IndexOf("DocumentTabStripItemFloatString", menu, StringComparison.Ordinal);
         string ours = src[menu..firstDock];
 
         const string guard = "IsVisible=\"{Binding Converter={x:Static conv:FileBackedDocumentConverter.Instance}}\"";
-        Assert.Equal(2, ours.Split(guard).Length - 1);
+        Assert.Equal(1, ours.Split(guard).Length - 1);   // the Reveal item, and only it
+
+        const string block = "IsVisible=\"{Binding Converter={x:Static conv:DocumentTabMenuVisibility.Any}}\"";
+        Assert.Equal(1, ours.Split(block).Length - 1);   // the separator that closes our block
     }
 
     [Fact]
@@ -272,6 +280,215 @@ public class DocumentTabContextMenuTests
             : "Reveal in File Manager";
         Assert.Equal(expected, CircuitRF.Ui.FileReveal.Label);
         Assert.Equal(expected, CircuitRF.Ui.Commands.DocumentTabCommands.RevealLabel);
+    }
+
+    // ── Save / Save As on the tab (owner request, 2026-09-09) ─────────────────────────────────
+
+    [Fact]
+    public void SaveAndSaveAsFollowReveal_AndTheSeparatorStillClosesOurBlock()
+    {
+        // The owner asked for both entries BELOW "Reveal in Finder"; the separator that already
+        // divided circuitRF's block from Dock's has to stay the last thing in it, or a rule lands in
+        // the middle of our own items.
+        string src = Menu();
+        int menu      = src.IndexOf("<ContextMenu x:Key=", StringComparison.Ordinal);
+        int reveal    = src.IndexOf("cmds:DocumentTabCommands.Reveal}", menu, StringComparison.Ordinal);
+        int save      = src.IndexOf("cmds:DocumentTabCommands.Save}", menu, StringComparison.Ordinal);
+        int saveAs    = src.IndexOf("cmds:DocumentTabCommands.SaveAs}", menu, StringComparison.Ordinal);
+        int separator = src.IndexOf("<Separator", menu, StringComparison.Ordinal);
+        int firstDock = src.IndexOf("DocumentTabStripItemFloatString", menu, StringComparison.Ordinal);
+
+        Assert.True(reveal > menu,       "Reveal is not inside the ContextMenu.");
+        Assert.True(save   > reveal,     "Save must come after Reveal.");
+        Assert.True(saveAs > save,       "Save As… must come after Save.");
+        Assert.True(separator > saveAs,  "The separator must come after both save entries.");
+        Assert.True(separator < firstDock, "The separator must sit between our block and Dock's own items.");
+    }
+
+    [Fact]
+    public void BothSaveEntriesPassTheDockableItself_SoAFloatingTabSavesToo()
+    {
+        // Same reason Reveal takes the dockable: a torn-off document lives in a floating host window
+        // whose DataContext is the DOCUMENT, not the WorkspaceViewModel — any route through the
+        // visual tree or the shell's DataContext works docked and silently does nothing floating.
+        // The workspace is resolved FROM the dockable instead (WorkspaceViewModel.WorkspaceOf).
+        string menu = Menu();
+        foreach (var command in new[] { "Save", "SaveAs" })
+        {
+            int at = menu.IndexOf($"Command=\"{{x:Static cmds:DocumentTabCommands.{command}}}\"", StringComparison.Ordinal);
+            Assert.True(at > 0, $"The {command} item is not bound to DocumentTabCommands.{command}.");
+            Assert.Contains("CommandParameter=\"{Binding}\"",
+                            menu.Substring(at, Math.Min(300, menu.Length - at)), StringComparison.Ordinal);
+        }
+
+        string commands = Read("src", "Ui", "Commands", "DocumentTabCommands.cs");
+        Assert.Contains("WorkspaceViewModel.WorkspaceOf(d)", commands, StringComparison.Ordinal);
+        Assert.DoesNotContain("WorkspaceLocator.Any()", commands, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheSeparatorHidesOnlyWhenEveryCircuitRfEntryDoes()
+    {
+        // It used to track the Reveal item alone, which was right while Reveal was the only entry.
+        // With three, a separator bound to Reveal's own rule would vanish from a scratch schematic
+        // tab that still shows Save and Save As, leaving our items fused onto Dock's.
+        string src = Menu();
+        Assert.Contains("<Separator IsVisible=\"{Binding Converter={x:Static conv:DocumentTabMenuVisibility.Any}}\" />",
+                        src, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EveryDocumentTypeIsNamedInTheSaveRouteTable()
+    {
+        // DERIVED, for the reason the Reveal item's own guards are: the first version of this menu
+        // shipped with the entry missing from six of the ten document kinds because the list was
+        // hand-written. A document type absent from the table below answers false to HasSaveRoute
+        // and its tab silently offers no Save at all — so an eleventh document kind has to be named
+        // here (even if the answer is "no route"), rather than defaulting to one.
+        string table = Read("src", "Ui", "ViewModels", "WorkspaceViewModel.TabSave.cs");
+        var missing = new System.Collections.Generic.List<string>();
+
+        foreach (var type in DocumentTypeNames())
+            if (!table.Contains(type, StringComparison.Ordinal))
+                missing.Add(type);
+
+        Assert.True(missing.Count == 0,
+            "These document types are not named in WorkspaceViewModel.TabSave.cs, so their tabs "
+            + "silently get no Save entry: " + string.Join(", ", missing));
+    }
+
+    [Fact]
+    public void TheSaveRouteGuardActuallySeesTheDocumentTypes()
+    {
+        // Guards the guard above: a scan that found nothing would pass it vacuously.
+        Assert.True(DocumentTypeNames().Count >= 10,
+            "The Document-subclass scan found " + DocumentTypeNames().Count + " types; it should see all of them.");
+        Assert.Contains("HarmonicaDocument", DocumentTypeNames());
+        Assert.Contains("StubDocument", DocumentTypeNames());
+    }
+
+    [Fact]
+    public void TheWelcomeTabOffersNeitherSave()
+    {
+        // The one document kind that can be constructed here without a view model. StubDocument has
+        // no file, ever, so both entries hide rather than greying out.
+        var welcome = new CircuitRF.Ui.ViewModels.Dock.StubDocument();
+        Assert.False(CircuitRF.Ui.ViewModels.WorkspaceViewModel.HasSaveRoute(welcome));
+        Assert.False(CircuitRF.Ui.ViewModels.WorkspaceViewModel.HasSaveAsRoute(welcome));
+        Assert.False(CircuitRF.Ui.ViewModels.WorkspaceViewModel.HasSaveRoute(null));
+        Assert.False(CircuitRF.Ui.ViewModels.WorkspaceViewModel.HasSaveAsRoute(null));
+    }
+
+    [Fact]
+    public void EverySaveableDocumentKindAlsoOffersSaveAs()
+    {
+        // The owner's own report the day this shipped: Save As was missing on a .ctech tab, because
+        // TechDocument had been left out of the Save As table on the theory that a technology is
+        // referenced by path and a Save As would leave designs pointing at the old file. It does —
+        // and so does a schematic's Save As, which circuitRF has always offered, so the answer is to
+        // SAY that (WorkspaceViewModel.OnTechSavedAs) rather than to withhold the item.
+        //
+        // Pinned as an identity between the two tables: a kind that can be saved can be saved
+        // elsewhere. Diverging again has to be a deliberate edit to this test, not an omission.
+        string table = Read("src", "Ui", "ViewModels", "WorkspaceViewModel.TabSave.cs");
+
+        var save   = TypesListedAfter(table, "internal static bool HasSaveRoute");
+        var saveAs = TypesListedAfter(table, "internal static bool HasSaveAsRoute");
+
+        Assert.NotEmpty(save);
+        Assert.Equal(save, saveAs);
+        Assert.Contains("TechDocument", save);
+    }
+
+    /// <summary>The <c>XDocument or YDocument or …</c> type list in one of the two route predicates.</summary>
+    private static System.Collections.Generic.List<string> TypesListedAfter(string source, string signature)
+    {
+        int at = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(at > 0, $"'{signature}' was not found — the route table has been renamed or moved.");
+
+        int end = source.IndexOf(';', at);
+        return System.Text.RegularExpressions.Regex.Matches(source[at..end], @"\b(\w+Document)\b")
+                   .Select(m => m.Groups[1].Value)
+                   .Distinct()
+                   .OrderBy(n => n, StringComparer.Ordinal)
+                   .ToList();
+    }
+
+    [Fact]
+    public void TheTabMenuWritesNoFileOfItsOwn()
+    {
+        // The entries exist to REACH the routes File ▸ Save already uses, not to be a second one.
+        // A save written here would be a second spelling of "saved" for the same document kind —
+        // the defect RESOLVED.md §4 records for the three copies of Reveal's own argument forms.
+        string table = Read("src", "Ui", "ViewModels", "WorkspaceViewModel.TabSave.cs");
+        foreach (var write in new[] { "Persistence.SaveToFile", "File.WriteAllText", "SaveAllAsync" })
+            Assert.DoesNotContain(write, table, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HarmonicaHasExactlyOneSaveImplementation()
+    {
+        // The .charm write used to live in HarmonicaView's code-behind, which the tab menu cannot
+        // reach: a background tab's view may never have been realized, so a route that starts at the
+        // view does nothing on the tab the user actually right-clicked. It moved to a shared static
+        // (harmonicaRF also runs standalone, with no workspace, so it cannot live on the workspace).
+        string view = Read("src", "Ui", "Views", "Harmonica", "HarmonicaView.axaml.cs");
+        Assert.Contains("HarmonicaDocumentSave.RunAsync", view, StringComparison.Ordinal);
+        Assert.DoesNotContain("ToCharmJson()", view, StringComparison.Ordinal);
+
+        string shared = Read("src", "Ui", "Harmonica", "HarmonicaDocumentSave.cs");
+        Assert.Contains("ToCharmJson()", shared, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ATechnologySaveAsFollowsTheNewFile_AndSaysWhoStillPointsAtTheOld()
+    {
+        // A .ctech is referenced by PATH (a layout's TechRef, or the workspace's DefaultTechRef), so
+        // the editor moving to the new file leaves every design resolving the original. The route
+        // re-keys the open-document map, invalidates BOTH cache entries, and says so — a Save As that
+        // silently changed nothing visible is what withholding this entry was meant to avoid, and
+        // reporting it is the better answer.
+        string ws = Read("src", "Ui", "ViewModels", "WorkspaceViewModel.cs");
+        Assert.Contains("private void OnTechSavedAs(string oldPath, string newPath)", ws, StringComparison.Ordinal);
+        Assert.Contains("_techCache.Invalidate(oldPath)", ws, StringComparison.Ordinal);
+        Assert.Contains("_techCache.Invalidate(newPath)", ws, StringComparison.Ordinal);
+        Assert.Contains("still do — repoint a layout's technology", ws, StringComparison.Ordinal);
+
+        // The VM carries the OLD path in the event, so a SECOND Save As moves the key that is
+        // actually current rather than removing the original one again.
+        string vm = Read("src", "Ui", "Layout", "TechEditorViewModel.cs");
+        Assert.Contains("public event Action<string, string>? TechSavedAs;", vm, StringComparison.Ordinal);
+        Assert.Contains("TechSavedAs?.Invoke(oldPath, newPath)", vm, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheEmSetupSaveAsPickerIsStatedOnce()
+    {
+        // Same shape: the .cem picker moved off the editor view so the tab menu can open the same
+        // one. Two pickers would be two suggested names, two extensions and two overwrite rules.
+        string view = Read("src", "Ui", "Views", "Layout", "EmSetupEditorView.axaml.cs");
+        Assert.Contains("SaveEmSetupAs(doc, owner)", view, StringComparison.Ordinal);
+        Assert.DoesNotContain("Save EM Setup As", view, StringComparison.Ordinal);
+
+        Assert.Contains("Save EM Setup As",
+                        Read("src", "Ui", "ViewModels", "WorkspaceViewModel.TabSave.cs"), StringComparison.Ordinal);
+    }
+
+    /// <summary>Every <c>Document</c> subclass in src/Ui, read from the source tree.</summary>
+    private static System.Collections.Generic.List<string> DocumentTypeNames()
+    {
+        var found = new System.Collections.Generic.List<string>();
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(RepoRoot(), "src", "Ui"), "*.cs", SearchOption.AllDirectories))
+        {
+            if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
+                file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                continue;
+
+            foreach (System.Text.RegularExpressions.Match m in
+                     System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(file), @"class\s+(\w+)\s*:\s*Document\b"))
+                found.Add(m.Groups[1].Value);
+        }
+        return found;
     }
 
     // ── One reveal implementation ─────────────────────────────────────────────────────────────

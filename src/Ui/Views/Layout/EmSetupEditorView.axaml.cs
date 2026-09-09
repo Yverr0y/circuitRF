@@ -130,25 +130,18 @@ public partial class EmSetupEditorView : UserControl
     }
 
     /// <summary>
-    /// Save As (owner request, 2026-08-09). The picker lives here rather than on the view model
-    /// because everything under <c>src/Ui/Layout/</c> is framework-free — the VM takes a resolved
-    /// path and does the I/O, exactly as the symbol editor's own Save As does.
+    /// Save As (owner request, 2026-08-09). The picker lives on the WORKSPACE rather than here or on
+    /// the view model: everything under <c>src/Ui/Layout/</c> is framework-free, so the VM takes a
+    /// resolved path and does the I/O, and the document TAB's own Save As… (2026-09-09) needs the
+    /// same picker from a place that has no view — one route, called from both buttons.
     /// </summary>
     private async void OnSaveAsClick(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not EmSetupDocument doc) return;
-        var top = TopLevel.GetTopLevel(this);
-        if (top?.StorageProvider is not { } sp) return;
+        if (WorkspaceLocator.For(this) is not { } workspace) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
 
-        var file = await sp.SaveFilePickerAsync(new FilePickerSaveOptions
-        {
-            Title                  = "Save EM Setup As",
-            SuggestedFileName      = Path.GetFileName(doc.ViewModel.FilePath),
-            DefaultExtension       = "cem",
-            ShowOverwritePrompt    = true,
-            FileTypeChoices        = [new FilePickerFileType("circuitRF EM Setup") { Patterns = ["*.cem"] }],
-        });
-        if (file?.TryGetLocalPath() is { Length: > 0 } path) doc.ViewModel.SaveAs(path);
+        await workspace.SaveEmSetupAs(doc, owner);
     }
 
     /// <summary>

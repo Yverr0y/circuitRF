@@ -193,7 +193,7 @@ public sealed class DataDisplayTreeDirtyTests : IDisposable
     {
         string save = Between(
             Src("src", "Ui", "ViewModels", "WorkspaceViewModel.cs"),
-            "private async Task<bool> SaveDataDisplayDoc(DataDisplayDocument dd, Window owner)");
+            "private async Task<bool> SaveDataDisplayDoc(DataDisplayDocument dd, Window owner, bool saveAs = false)");
 
         int materialize = save.IndexOf("dd.Materialize(picked);", StringComparison.Ordinal);
         int refresh     = save.IndexOf("ProjectTreeTool?.Refresh();", StringComparison.Ordinal);

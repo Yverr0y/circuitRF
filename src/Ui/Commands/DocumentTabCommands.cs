@@ -1,4 +1,6 @@
 using CommunityToolkit.Mvvm.Input;
+using Dock.Model.Core;
+using CircuitRF.Ui.ViewModels;
 
 namespace CircuitRF.Ui.Commands;
 
@@ -25,4 +27,41 @@ public static class DocumentTabCommands
     /// </summary>
     public static IRelayCommand<object?> Reveal { get; } = new RelayCommand<object?>(
         dockable => FileReveal.Reveal((dockable as IFileBackedDocument)?.FilePath));
+
+    /// <summary>
+    /// Saves the right-clicked document — the tab it was invoked on, never the active one, which is
+    /// the whole difference between this and File ▸ Save.
+    ///
+    /// <para>Both save commands resolve the workspace from the DOCKABLE
+    /// (<see cref="WorkspaceViewModel.WorkspaceOf"/>) for the same reason
+    /// <see cref="Reveal"/> takes the dockable: a torn-off document's window has the document as its
+    /// DataContext, so anything routed through the visual tree works docked and quietly does nothing
+    /// floating. Nothing is written here — every route is the one File ▸ Save already uses; see
+    /// <c>WorkspaceViewModel.TabSave.cs</c>.</para>
+    ///
+    /// <para><b><c>AllowConcurrentExecutions</c> is what keeps the item permanently enabled</b>, and
+    /// that is the point rather than a side effect. An <c>AsyncRelayCommand</c> otherwise reports
+    /// <c>CanExecute</c> false while it runs, and the shared menu is re-parented and re-DataContexted
+    /// between right-clicks — a missed <c>CanExecuteChanged</c> would leave Save greyed on a dirty
+    /// document with nothing on screen to say why. The two states a gate would have expressed are
+    /// reported instead, by the route, in words.</para>
+    /// </summary>
+    public static IAsyncRelayCommand<object?> Save { get; } = new AsyncRelayCommand<object?>(
+        async dockable =>
+        {
+            if (dockable is IDockable d && WorkspaceViewModel.WorkspaceOf(d) is { } workspace)
+                await workspace.SaveFromTabAsync(d);
+        },
+        AsyncRelayCommandOptions.AllowConcurrentExecutions);
+
+    /// <summary>Writes the right-clicked document to a file the user picks, and follows it there.
+    /// Offered on every document kind that can BE followed to a new file — see
+    /// <see cref="WorkspaceViewModel.HasSaveAsRoute"/> for the one saveable kind that cannot.</summary>
+    public static IAsyncRelayCommand<object?> SaveAs { get; } = new AsyncRelayCommand<object?>(
+        async dockable =>
+        {
+            if (dockable is IDockable d && WorkspaceViewModel.WorkspaceOf(d) is { } workspace)
+                await workspace.SaveAsFromTabAsync(d);
+        },
+        AsyncRelayCommandOptions.AllowConcurrentExecutions);
 }

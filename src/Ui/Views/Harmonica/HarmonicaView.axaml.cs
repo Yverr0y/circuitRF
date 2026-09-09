@@ -690,35 +690,20 @@ public partial class HarmonicaView : UserControl
         Refresh();
     }
 
+    /// <summary>
+    /// File ▸ Save / Save As… The write itself is <see cref="HarmonicaDocumentSave"/>'s, shared with
+    /// the document TAB's own Save (WorkspaceViewModel.TabSave.cs): a tab menu has to reach a
+    /// document whose view may not be realized, so the route cannot start here — and two routes that
+    /// both write a <c>.charm</c> are two that drift.
+    /// </summary>
     private async System.Threading.Tasks.Task SaveCharmAsync(bool saveAs)
     {
         if (_doc is null || Vm is not { } h) return;
+        if (TopLevel.GetTopLevel(this) is not { } top) return;
 
-        string? path = saveAs ? null : _doc.FilePath;
-        if (path is null)
-        {
-            if (TopLevel.GetTopLevel(this) is not { } top) return;
-            var file = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-            {
-                Title             = "Save harmonicaRF document",
-                DefaultExtension  = "charm",
-                SuggestedFileName = (_doc.FilePath is { } p
-                    ? System.IO.Path.GetFileName(p) : "harmonica.charm"),
-            });
-            if (file is null) return;
-            path = file.Path.LocalPath;
-        }
+        if (await HarmonicaDocumentSave.RunAsync(_doc, top, Workspace, saveAs) is { } error)
+            h.SolveError = error;
 
-        try
-        {
-            await System.IO.File.WriteAllTextAsync(path, h.ToCharmJson());
-            _doc.OnSavedToPath(path);
-
-            // Open item 6 — a .charm saved into an open workspace appears in the tree with no reload.
-            // Null standalone (§1.2), where there is no tree to refresh and nothing to register.
-            Workspace?.NotifyHarmonicaSaved(_doc, path);
-        }
-        catch (Exception ex) { h.SolveError = ex.Message; }
         Refresh();
     }
 

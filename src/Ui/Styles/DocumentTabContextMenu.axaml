@@ -49,7 +49,23 @@
                   Command="{x:Static cmds:DocumentTabCommands.Reveal}"
                   CommandParameter="{Binding}"
                   IsVisible="{Binding Converter={x:Static conv:FileBackedDocumentConverter.Instance}}" />
-        <Separator IsVisible="{Binding Converter={x:Static conv:FileBackedDocumentConverter.Instance}}" />
+
+        <!-- Save / Save As… for the RIGHT-CLICKED tab (owner request, 2026-09-09). File ▸ Save always
+             means the ACTIVE document; these mean this one, which is very often a background tab. Both
+             hide on a document kind that has no such route rather than showing as disabled, and neither
+             is gated by CanExecute — see DocumentTabMenuVisibility for why visibility carries every
+             decision the menu makes, and WorkspaceViewModel.TabSave.cs for the routes themselves (each
+             is the one File ▸ Save already uses; nothing is written there). -->
+        <MenuItem Header="Save"
+                  Command="{x:Static cmds:DocumentTabCommands.Save}"
+                  CommandParameter="{Binding}"
+                  IsVisible="{Binding Converter={x:Static conv:DocumentTabMenuVisibility.Save}}" />
+        <MenuItem Header="Save As…"
+                  Command="{x:Static cmds:DocumentTabCommands.SaveAs}"
+                  CommandParameter="{Binding}"
+                  IsVisible="{Binding Converter={x:Static conv:DocumentTabMenuVisibility.SaveAs}}" />
+
+        <Separator IsVisible="{Binding Converter={x:Static conv:DocumentTabMenuVisibility.Any}}" />
 
         <!-- ── Dock.Avalonia.Themes.Fluent 12.0.0.2, verbatim ───────────────────────────────── -->
         <MenuItem Header="{DynamicResource DocumentTabStripItemFloatString}"

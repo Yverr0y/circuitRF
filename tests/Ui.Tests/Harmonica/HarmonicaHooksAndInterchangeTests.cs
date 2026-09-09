@@ -311,7 +311,14 @@ public sealed class HarmonicaHooksAndInterchangeTests(ITestOutputHelper output)
     {
         string ws = Read("src/Ui/ViewModels/WorkspaceViewModel.cs");
         Assert.Contains("NotifyHarmonicaSaved", ws, StringComparison.Ordinal);
-        Assert.Contains("Workspace?.NotifyHarmonicaSaved(_doc, path)",
+
+        // The call moved out of HarmonicaView's code-behind and into the shared save route
+        // (2026-09-09), because the document TAB's own Save has to reach a document whose view may
+        // never have been realized. The workspace is still optional — harmonicaRF runs standalone,
+        // where there is no tree to refresh and nothing to register.
+        Assert.Contains("workspace?.NotifyHarmonicaSaved(doc, path)",
+                        Read("src/Ui/Harmonica/HarmonicaDocumentSave.cs"), StringComparison.Ordinal);
+        Assert.Contains("HarmonicaDocumentSave.RunAsync",
                         Read("src/Ui/Views/Harmonica/HarmonicaView.axaml.cs"), StringComparison.Ordinal);
     }
 }

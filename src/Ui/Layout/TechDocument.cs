@@ -26,8 +26,9 @@ public sealed class TechDocument : Document, IUndoableDocument, IActivatableDocu
     public TechEditorViewModel ViewModel { get; }
     public UndoRedoStack       UndoRedo  => ViewModel.UndoRedo;
 
-    /// <summary>Absolute on-disk path of the .ctech file. Never null — see class header.</summary>
-    public string FilePath { get; }
+    /// <summary>Absolute on-disk path of the .ctech file. Never null — see class header. It moves
+    /// only on a Save As, which the VM announces (<see cref="TechEditorViewModel.TechSavedAs"/>).</summary>
+    public string FilePath { get; private set; }
 
     private bool _isDirty;
 
@@ -53,10 +54,22 @@ public sealed class TechDocument : Document, IUndoableDocument, IActivatableDocu
         ViewModel  = viewModel;
         _isDirty   = false;
 
+        ViewModel.TechSavedAs += (_, newPath) => OnSavedAs(newPath);
+
         ViewModel.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(TechEditorViewModel.IsDirty))
                 IsDirty = ViewModel.IsDirty;
         };
+    }
+
+    /// <summary>Save As landed: follow the new file. Mirrors <c>EmSetupDocument.OnSavedAs</c> — it
+    /// may be called any number of times, unlike a scratch document's one-way Materialize.</summary>
+    private void OnSavedAs(string newPath)
+    {
+        FilePath   = newPath;
+        _baseTitle = Path.GetFileName(newPath);
+        Id         = _baseTitle;
+        Title      = _isDirty ? $"• {_baseTitle}" : _baseTitle;
     }
 }

@@ -6948,6 +6948,13 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             vm.SaveError += OnTechSaveError;
             vm.TechLiveChanged += OnTechLiveChanged;
             var doc = new TechDocument(Path.GetFileName(absolutePath), vm, absolutePath);
+
+            // Save As follows the new file, so the open-document map follows with it — otherwise
+            // reopening the .ctech from the tree would mint a SECOND live view of one file. The OLD
+            // path is carried by the event rather than captured here, so a second Save As moves the
+            // key that is actually current instead of removing the original one again.
+            vm.TechSavedAs += OnTechSavedAs;
+
             _factory.OpenDocument(doc);
             _openDocsByPath[absolutePath] = doc;
             HookTechFileDirty(doc);
@@ -7730,6 +7737,36 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     {
         _techCache.Invalidate(path);
         Messages.Success("Saved", path);
+    }
+
+    /// <summary>
+    /// A technology editor followed a Save As onto <paramref name="newPath"/>. Both cache entries are
+    /// invalidated: the OLD one because this editor is no longer the live view of that file (anything
+    /// still referencing it must read what is on disk), the new one because there was no entry at all.
+    ///
+    /// <para>The sentence afterwards is the point of the whole route. A design resolves its technology
+    /// through an explicit reference — a layout's <c>TechRef</c> or the workspace's
+    /// <c>DefaultTechRef</c> — so every open layout goes on resolving the ORIGINAL file. Repointing
+    /// them silently would be a far bigger edit than the one the user asked for; saying so is what
+    /// keeps a Save As from looking like it changed nothing.</para>
+    /// </summary>
+    private void OnTechSavedAs(string oldPath, string newPath)
+    {
+        _techCache.Invalidate(oldPath);
+        _techCache.Invalidate(newPath);
+
+        if (_openDocsByPath.TryGetValue(oldPath, out var moved))
+        {
+            _openDocsByPath.Remove(oldPath);
+            _openDocsByPath[newPath] = moved;
+        }
+
+        _factory.ProjectTreeTool?.Refresh();
+        Messages.Success("Saved", newPath);
+        Messages.Info(
+            $"This editor now edits '{Path.GetFileName(newPath)}'. Designs that referenced " +
+            $"'{Path.GetFileName(oldPath)}' still do — repoint a layout's technology, or the " +
+            "workspace's default technology, to use the new file.");
     }
 
     // A technology save failed (e.g. read-only / unwritable location) — surface it instead of crashing.
@@ -15288,11 +15325,17 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     /// Saves a data display: writes in-place for materialized docs, or shows a .cdd picker
     /// for scratch docs (then materializes and tracks the result).
     /// Returns true on success, false when cancelled.
+    ///
+    /// <para><paramref name="saveAs"/> takes the picker branch for a document that already HAS a
+    /// path — the tab menu's Save As… (WorkspaceViewModel.TabSave.cs). The old path is dropped from
+    /// the open-document map before the new one is added: leaving it there would make the .cdd the
+    /// user just saved away FROM look like it were still open in a tab, so the next attempt to open
+    /// it would activate this document instead.</para>
     /// </summary>
-    private async Task<bool> SaveDataDisplayDoc(DataDisplayDocument dd, Window owner)
+    private async Task<bool> SaveDataDisplayDoc(DataDisplayDocument dd, Window owner, bool saveAs = false)
     {
         var window = dd.ViewModel.Window;
-        if (dd.FilePath is { } path)
+        if (!saveAs && dd.FilePath is { } path)
         {
             await window.SaveAllAsync(path);
             Messages.Success("Saved", path);
@@ -15301,8 +15344,8 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
 
         var result = await owner.StorageProvider.SaveFilePickerAsync(new Avalonia.Platform.Storage.FilePickerSaveOptions
         {
-            Title              = "Save Data Display",
-            SuggestedFileName  = dd.Id,
+            Title              = saveAs ? "Save Data Display As" : "Save Data Display",
+            SuggestedFileName  = dd.FilePath is { } current ? Path.GetFileNameWithoutExtension(current) : dd.Id,
             DefaultExtension   = "cdd",
             FileTypeChoices    = [new Avalonia.Platform.Storage.FilePickerFileType("circuitRF Data Display") { Patterns = ["*.cdd"] }],
         });
@@ -15311,6 +15354,8 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         var picked = Path.GetFullPath(result.Path.LocalPath);
         await window.SaveAllAsync(picked);
         _scratchDataDisplays.Remove(dd);
+        if (dd.FilePath is { } previous && !string.Equals(previous, picked, StringComparison.OrdinalIgnoreCase))
+            _openDocsByPath.Remove(previous);
         dd.Materialize(picked);
         _openDocsByPath[picked] = dd;
         // The file did not exist when the tree was last scanned — a rescan is what puts a node there
