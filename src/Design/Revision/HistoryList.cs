@@ -201,6 +201,14 @@ public sealed record HistoryEntry(
     /// <summary>The identity, shown only in an expander and only because opening one is the explicit
     /// action R-rc10-15 permits it under.</summary>
     public string Identity => Version?.CommitId ?? Point?.CommitId ?? "";
+
+    /// <summary>
+    /// <b>The CONTENT this entry holds</b>, which is what decides whether going back to it would change
+    /// anything (owner, 2026-09-08). Two entries over one tree are two identities and one state, so an
+    /// identity comparison answers the wrong question — the same reasoning
+    /// <see cref="WayForward.LeadsSomewhereElse"/> already states one type over.
+    /// </summary>
+    public string TreeId => Version?.TreeId ?? Point?.TreeId ?? "";
 }
 
 /// <summary>
@@ -309,6 +317,44 @@ public sealed record HistorySources(
     public static readonly HistorySources Nothing = new(
         [], [], [], SharedVersions.Local,
         new Dictionary<string, string>(StringComparer.Ordinal), 0);
+
+    /// <summary>
+    /// <b>The most recently recorded entry, over both lists</b> — and therefore the content the
+    /// workspace on disk holds, for as long as nothing has been written into it since (owner,
+    /// 2026-09-08).
+    ///
+    /// <para>That pairing is the whole point: <i>has anything been written since the last entry</i> is
+    /// answerable with no git at all, and combined with this it says what the workspace CONTAINS
+    /// without hashing a single file. It is what withdraws the offer to go back to the state the
+    /// workspace is already in, and what greys the two keep actions rather than letting them take a
+    /// title and then record nothing.</para>
+    ///
+    /// <para><b>Thinned entries count.</b> Retention tidying one away does not change what it holds, and
+    /// this is a statement about content rather than about what the list shows. Null when there is no
+    /// history at all — the case where a keep always records.</para>
+    ///
+    /// <para><b>The clock is the only term the two lists share</b>, which is
+    /// <see cref="HistoryList.Build"/>'s own caveat: under a clock fault this can name the wrong one of
+    /// two entries recorded seconds apart. The consequence is a button offered or withheld, never a
+    /// state altered, and each row still carries its own date.</para>
+    /// </summary>
+    public HistoryEntry? Newest
+    {
+        get
+        {
+            HistoryEntry? newest = null;
+
+            if (Versions.Count > 0)
+                newest = new HistoryEntry(HistoryEntryKind.Version, Versions[0], null, null,
+                                          Versions[0].WhenUtc);
+
+            if (Points.Count > 0 && (newest is null || Points[0].TakenUtc > newest.WhenUtc))
+                newest = new HistoryEntry(HistoryEntryKind.RestorePoint, null, Points[0], null,
+                                          Points[0].TakenUtc);
+
+            return newest;
+        }
+    }
 
     /// <summary>
     /// <b>The same sources with one entry's tidied-away mark set the other way</b> — the local half of

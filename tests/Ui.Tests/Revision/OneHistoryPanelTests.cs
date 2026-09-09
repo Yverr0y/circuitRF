@@ -582,7 +582,11 @@ public class OneHistoryPanelTests
         var beforeRow = new HistoryRowItem(before, now, showAuthor: false);
 
         Assert.False(beforeRow.HasWrittenTitle);
-        Assert.Equal("Go back to this state", beforeRow.GoBackText);
+
+        // NOTHING IS QUOTED, and since 2026-09-08 the destination is named by its IDENTITY rather than
+        // by "this state" — which read the same on every row, on exactly the rows whose generated labels
+        // already read alike. See TheGoBackButtonNamesItsDestinationByIdentityWhenNobodyTitledIt.
+        Assert.Equal("Go to c0", beforeRow.GoBackText);
         Assert.DoesNotContain("\u201C", beforeRow.GoBackText);
 
         // The stored label is the OLD wording — this entry is one a designer already has — and the row
@@ -1511,6 +1515,293 @@ public class OneHistoryPanelTests
         yield return "src/Ui/Views/Revision/HistoryToolView.axaml";
         yield return "src/Ui/Views/Revision/HistoryToolView.axaml.cs";
         yield return "src/Ui/Docking/DockLayoutRetirement.cs";
+    }
+
+    // ══ Nothing to record: the two keep actions, and the way back (owner, 2026-09-08) ═════════════
+
+    /// <summary>
+    /// <b>The free signal</b> — <c>docs/sonnet-briefs/brief-history-keep-when-nothing-changed.md</c> §4,
+    /// gates 1 and 2.
+    ///
+    /// <para>Both keep actions used to open their dialog, take a title, and then create nothing: the
+    /// tree test that declines a duplicate lives in <c>GitCheckpoint.Record</c>, after the dialog. The
+    /// enabled state comes from <i>has anything been written since the last entry</i>, which is a latch
+    /// this window already sets on every write — <b>and there is no repository in this fixture at all</b>,
+    /// which is the assertion that no git runs to answer it.</para>
+    ///
+    /// <para><b>Per boundary, not per session</b>, and that is why it is a second field:
+    /// <c>CircuitRfWroteAFileThisSession</c> is RC-5's arming guard and must stay true for the rest of
+    /// the session, or a workspace that was edited and then recorded would stop arming its own close.</para>
+    /// </summary>
+    [Fact]
+    public void NothingWrittenSinceTheLastEntryIsAnsweredWithNoRepositoryAtAll()
+    {
+        var service = new WorkspaceHistoryService(new SilentSink());
+
+        // A fresh session over a workspace that was recorded on the way out: nothing to keep.
+        service.ResetForWorkspace();
+        Assert.False(service.WrittenSinceLastEntry);
+        Assert.False(service.CircuitRfWroteAFileThisSession);
+
+        // One write brings both back.
+        service.NoteWorkspaceWrite();
+        Assert.True(service.WrittenSinceLastEntry);
+        Assert.True(service.CircuitRfWroteAFileThisSession);
+
+        // A boundary that recorded clears ONLY the per-boundary one. There is no repository here, so
+        // TakeSavePoint records nothing and the latch must stand — the flag tracks what was recorded,
+        // never what was attempted.
+        Assert.False(service.TakeSavePoint(Path.Combine(Path.GetTempPath(), "no-such-workspace-crf"), "x"));
+        Assert.True(service.WrittenSinceLastEntry);
+
+        // Somebody else's process writing in is not circuitRF editing a design: it must not arm the
+        // repository (R-rc5-4a), and it must bring the keep actions back.
+        service.ResetForWorkspace();
+        service.NoteWorkspaceChangedUnderneath();
+        Assert.True(service.WrittenSinceLastEntry);
+        Assert.False(service.CircuitRfWroteAFileThisSession);
+    }
+
+    /// <summary>
+    /// <b>A real boundary clears it, and a restore sets it again.</b> §4 gate 1's other half, over a
+    /// repository this time — the flag has to follow what actually happened rather than what was asked
+    /// for.
+    ///
+    /// <para>The restore case is the one that would be silent if missed: a restore replaces the
+    /// workspace's files, and the entry it took on the way in holds what was REPLACED. So there is
+    /// something to keep again, and if the flag stayed clear both keep actions would grey out at exactly
+    /// the moment §1.4 is written about.</para>
+    /// </summary>
+    [GitFact]
+    public void ABoundaryClearsTheSignalAndARestoreSetsItAgain()
+    {
+        using var ws  = Armed();
+        var git       = ws.Git();
+        var service   = new WorkspaceHistoryService(new SilentSink());
+
+        ws.Write("cells/a/thing.csch", "monday");
+        service.NoteWorkspaceWrite();
+        Assert.True(service.TakeSavePoint(ws.Root, "monday"));
+        Assert.False(service.WrittenSinceLastEntry);          // the newest entry now holds what is on disk
+
+        ws.Write("cells/a/thing.csch", "tuesday");
+        service.NoteWorkspaceWrite();
+        Assert.True(service.KeepVersion(ws.Root, "tuesday").Ok);
+        Assert.False(service.WrittenSinceLastEntry);          // a version is a boundary too
+
+        var monday = RestorePoints.List(git).Single(p => p.Intent == "monday");
+        Assert.True(service.Restore(ws.Root, monday) is { Ok: true });
+        Assert.True(service.WrittenSinceLastEntry);           // the restored state is no entry's content
+    }
+
+    /// <summary>
+    /// <b>The panel's two header buttons carry the reason on them</b> — §4 gate 3's shape, and the
+    /// R-rc6-8 argument one control over: a greyed control with nothing said about it is
+    /// indistinguishable from a feature that was never built.
+    /// </summary>
+    [Fact]
+    public void TheKeepButtonsGreyOutWithTheReasonOnThem()
+    {
+        var tool = new HistoryTool();
+
+        // True by default, so a panel nobody has told anything is the panel that was here before.
+        Assert.True(tool.CanKeepAnything);
+
+        tool.SetRows(new HistoryList.Result([], 0), hasWorkspace: true);
+        Assert.True(tool.CanKeep);
+        Assert.DoesNotContain(HistoryMessages.NothingToKeepYet, tool.SavePointTooltip, StringComparison.Ordinal);
+
+        tool.CanKeepAnything = false;
+        Assert.False(tool.CanKeep);
+        Assert.Equal(HistoryMessages.NothingToKeepYet, tool.SavePointTooltip);
+        Assert.Equal(HistoryMessages.NothingToKeepYet, tool.KeepVersionTooltip);
+
+        // And it says what would bring them back, not only that they are off.
+        Assert.Contains("already kept",       HistoryMessages.NothingToKeepYet, StringComparison.Ordinal);
+        Assert.Contains("Change something",   HistoryMessages.NothingToKeepYet, StringComparison.Ordinal);
+
+        // With no workspace the pair is off whatever the signal says.
+        tool.CanKeepAnything = true;
+        tool.SetRows(new HistoryList.Result([], 0), hasWorkspace: false);
+        Assert.False(tool.CanKeep);
+
+        string axaml = RestorePointsTests.ReadSource("src/Ui/Views/Revision/HistoryToolView.axaml");
+        Assert.Contains("IsEnabled=\"{Binding CanKeep}\"",              axaml, StringComparison.Ordinal);
+        Assert.Contains("ToolTip.Tip=\"{Binding SavePointTooltip}\"",   axaml, StringComparison.Ordinal);
+        Assert.Contains("ToolTip.Tip=\"{Binding KeepVersionTooltip}\"", axaml, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <b>The four terms of the enabled state, and the three that force it TRUE</b> — §3 step 2 and §4
+    /// gates 3 and 5, held by reading the predicate itself.
+    ///
+    /// <para>A test that could construct a whole <c>WorkspaceViewModel</c> would assert this by running
+    /// it; this one asserts the terms are all present, which is what the gates are actually about — the
+    /// two that would be dangerous to lose are <b>unsaved work</b> (trap 2: the one action a designer
+    /// with an unsaved schematic reaches for must not be the one that is unavailable) and <b>the held
+    /// and off states</b>, which stay visible and refuse out loud rather than greying.</para>
+    /// </summary>
+    [Fact]
+    public void TheEnabledStateIsTheFreeSignalPlusTheThreeStatesThatForceItOn()
+    {
+        string source = RestorePointsTests.StripComments(
+            RestorePointsTests.ReadSource("src/Ui/ViewModels/WorkspaceViewModel.Revision.cs"));
+
+        int predicate = source.IndexOf("private bool CanKeepAnything()", StringComparison.Ordinal);
+        Assert.True(predicate > 0, "CanKeepAnything is what both commands report through");
+
+        string body = source[predicate..(predicate + 500)];
+        Assert.Contains("!_recordingIsOn",            body, StringComparison.Ordinal);
+        Assert.Contains("!_workspaceHasAHistory",     body, StringComparison.Ordinal);
+        Assert.Contains("History.WrittenSinceLastEntry", body, StringComparison.Ordinal);
+        Assert.Contains("HasAnyDirtyWork",            body, StringComparison.Ordinal);
+
+        // Both commands report through it, and neither still reports through the workspace-open test.
+        Assert.Contains("[RelayCommand(CanExecute = nameof(CanKeepAnything))]", source, StringComparison.Ordinal);
+        Assert.Equal(2, Regex.Matches(source, @"CanExecute = nameof\(CanKeepAnything\)").Count);
+
+        // §3 step 1. A KEEP SAVES DIRTY DOCUMENTS FIRST, through the prompt a close, an archive and a
+        // workspace copy already use — never a second save path — and BEFORE the dialog that takes the
+        // title. A save-point records what is on disk, so with a schematic unsaved it recorded the
+        // previous content under the title just written.
+        foreach (string keep in new[] { "KeepThisState", "KeepThisVersion" })
+        {
+            int at     = source.IndexOf("private async Task " + keep + "(", StringComparison.Ordinal);
+            Assert.True(at > 0, keep);
+
+            string method = source[at..(at + 900)];
+            int    prompt = method.IndexOf("PromptSaveBeforeClose", StringComparison.Ordinal);
+            int    dialog = method.IndexOf("new " + keep.Replace("KeepThis", "KeepThis") + "Dialog",
+                                           StringComparison.Ordinal);
+
+            Assert.True(prompt > 0, keep + " must offer up unsaved work first");
+            Assert.True(dialog > prompt, keep + " must save BEFORE it takes a title");
+            Assert.Contains("HasAnyDirtyWork(includeFloated: false)", method, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// <b>The go-back button names the entry it will act on, by identity when nobody titled it</b>
+    /// (owner, 2026-09-08).
+    ///
+    /// <para><i>Go back to this state</i> read the same on every row — and the rows it appeared on are
+    /// exactly the ones whose generated labels already read alike, so the button under the list said
+    /// nothing at all about which of forty entries it would act on. The wording is the way-forward
+    /// button's, which is the point: two buttons that perform one action say it one way. A title a
+    /// PERSON wrote is still what is shown when there is one, and still the only thing quoted.</para>
+    /// </summary>
+    [Fact]
+    public void TheGoBackButtonNamesItsDestinationByIdentityWhenNobodyTitledIt()
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        RestorePoint Point(string commit, string? intent) =>
+            new("refs/x", commit, new string('t', 40), 1, now,
+                intent is null ? CheckpointOrigin.WorkspaceClosed : CheckpointOrigin.SavePoint,
+                intent ?? "closed", intent, false, []);
+
+        var untitled = new HistoryRowItem(
+            new HistoryEntry(HistoryEntryKind.RestorePoint, null, Point("3c4d8ba9f1e2d3c4b5a6", null),
+                             null, now), now, false);
+
+        Assert.Equal("Go to 3c4d8ba", untitled.GoBackText);
+        Assert.Equal(HistoryMessages.GoBackToId("3c4d8ba9f1e2d3c4b5a6"), untitled.GoBackText);
+
+        var titled = new HistoryRowItem(
+            new HistoryEntry(HistoryEntryKind.RestorePoint, null,
+                             Point("aaaaaaaaaaaabbbbbbbb", "the working match"), null, now), now, false);
+
+        Assert.Equal("Go to “the working match”", titled.GoBackText);
+    }
+
+    /// <summary>
+    /// <b>And it is withdrawn for the state the workspace already holds, with no restore having
+    /// happened</b> (owner, 2026-09-08).
+    ///
+    /// <para>The existing withdrawal knew only where THIS SESSION'S last restore had put the workspace,
+    /// so on a freshly opened workspace the newest entry — whose content is exactly what is on disk —
+    /// still offered a button that reloads everything to no effect, which is how a designer learns that
+    /// a button does not work. The second fact costs nothing either: with nothing written since the
+    /// newest entry was recorded, that entry's tree IS what the workspace holds.</para>
+    ///
+    /// <para><b>Matched on the TREE, so the second of two entries over one state goes too</b>, and
+    /// <b>unknown offers every row</b> — a button withheld when it was needed is the failure §1.4 is
+    /// about, and one offered needlessly costs a reload.</para>
+    /// </summary>
+    [Fact]
+    public void TheGoBackButtonIsWithdrawnForTheContentTheWorkspaceAlreadyHolds()
+    {
+        var now  = DateTimeOffset.UtcNow;
+        var tool = new HistoryTool();
+
+        RestorePoint Point(string commit, string tree, string intent) =>
+            new("refs/" + commit, commit, tree, 1, now, CheckpointOrigin.SavePoint, intent, intent,
+                false, []);
+
+        var onDisk = Point(new string('a', 40), new string('1', 40), "where we are");
+        var twin   = Point(new string('b', 40), new string('1', 40), "the same state, kept twice");
+        var older  = Point(new string('c', 40), new string('2', 40), "monday");
+
+        tool.SetRows(new HistoryList.Result(
+            [new HistoryEntry(HistoryEntryKind.RestorePoint, null, onDisk, null, now),
+             new HistoryEntry(HistoryEntryKind.RestorePoint, null, twin,   null, now),
+             new HistoryEntry(HistoryEntryKind.RestorePoint, null, older,  null, now)], 0),
+            hasWorkspace: true);
+
+        // UNKNOWN: every row is a way back, which is the direction that matters.
+        tool.Selected = tool.Rows[0];
+        Assert.True(tool.CanGoBackToSelection);
+
+        tool.WorkspaceTreeId = onDisk.TreeId;
+
+        tool.Selected = tool.Rows[0];
+        Assert.False(tool.CanGoBackToSelection);          // the entry whose content is on disk
+        tool.Selected = tool.Rows[1];
+        Assert.False(tool.CanGoBackToSelection);          // and the other entry over that same content
+        tool.Selected = tool.Rows[2];
+        Assert.True(tool.CanGoBackToSelection);           // genuinely different content: the button stands
+
+        // The host decides it from the free signal and the read it was refreshed by — never by hashing
+        // the workspace, which is a whole checkpoint's work in front of somebody looking at a panel.
+        string source = RestorePointsTests.StripComments(
+            RestorePointsTests.ReadSource("src/Ui/ViewModels/WorkspaceViewModel.Revision.cs"));
+        Assert.Contains("tool.WorkspaceTreeId = History.WrittenSinceLastEntry ? \"\" : sources.Newest?.TreeId",
+                        source, StringComparison.Ordinal);
+        Assert.DoesNotContain("HasSomethingToKeep", source, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <b>The newest entry over both lists</b>, which is what the workspace on disk matches while
+    /// nothing has been written since. Restore points are ordered by RC-5's own sequence and versions by
+    /// the line of work, so the clock is the only term the two share — stated in
+    /// <see cref="HistorySources.Newest"/> and gated here.
+    /// </summary>
+    [Fact]
+    public void TheNewestEntryIsTakenOverBothLists()
+    {
+        var t0 = new DateTimeOffset(2026, 9, 8, 9, 0, 0, TimeSpan.Zero);
+
+        var version = new HistoryVersion(new string('v', 40), new string('V', 40), t0.AddHours(1),
+                                         "tuesday", true, null, "A Designer");
+        var point   = new RestorePoint("refs/p", new string('p', 40), new string('P', 40), 3,
+                                       t0.AddHours(2), CheckpointOrigin.WorkspaceClosed, "closed",
+                                       null, false, []);
+
+        Assert.Null(HistorySources.Nothing.Newest);
+
+        var pointIsNewer = HistorySources.Nothing with { Versions = [version], Points = [point] };
+        Assert.Equal(point.TreeId, pointIsNewer.Newest!.TreeId);
+
+        var versionIsNewer = HistorySources.Nothing with
+        {
+            Versions = [version with { WhenUtc = t0.AddHours(3) }],
+            Points   = [point],
+        };
+        Assert.Equal(version.TreeId, versionIsNewer.Newest!.TreeId);
+
+        // One list only, either way round.
+        Assert.Equal(point.TreeId,   (HistorySources.Nothing with { Points   = [point]   }).Newest!.TreeId);
+        Assert.Equal(version.TreeId, (HistorySources.Nothing with { Versions = [version] }).Newest!.TreeId);
     }
 
     private static GitWorkspace Armed()

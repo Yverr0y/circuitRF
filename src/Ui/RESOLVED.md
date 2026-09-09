@@ -1,5 +1,152 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## brief-history-keep-when-nothing-changed, 2026-09-08 — the two keep actions, and the way back
+
+### The reported bug, and the signal that made it cheap to fix
+
+With nothing changed, both keep actions opened their dialog, took a title, and then created nothing.
+The diagnosis was short: `KeepThisState` and `KeepThisVersion` show their dialog first and record
+second, and the tree test that declines a duplicate lives in `GitCheckpoint.Record` — after the tree
+has been computed, which is after the dialog. So `NothingToRecord` and
+`HistoryMessages.NothingChangedSinceLastVersion` were correct, correctly worded, and arrived once the
+designer had already done the work of naming something.
+
+**The obvious fix is unaffordable, and that is the interesting part.** "Would this record anything" is
+*the computed tree differs from the newest entry's*, and computing it is `git add --all` plus
+`write-tree` over the whole workspace — the cost measured as `LastCloseCheckpointMs`, re-paid in full
+on every call because `GitCheckpoint` discards its private index at each end deliberately. Asking it
+whenever a panel refreshes puts a whole checkpoint's work in front of somebody who is only looking at
+the panel, which is exactly the cost RC-11 took out of the filter checkboxes.
+`WorkspaceCommit.HasSomethingToKeep` exists and does precisely this; a gate now asserts the window
+does **not** call it.
+
+**The free signal is `WorkspaceHistoryService.WrittenSinceLastEntry`** — a latch every path that writes
+into the open workspace already sets, cleared wherever a boundary *records*. It answers *has anything
+been written since the last entry* with no git at all, and it errs towards **enabled**: a write that
+happened to produce identical bytes leaves the action available and the recording still declines, which
+is the behaviour that was reported and no worse than it. That direction is the whole reason the flag is
+acceptable — a greyed control is indistinguishable from a feature that was never built (R-rc6-8), so
+being wrong the other way would cost more than the bug does.
+
+**It had to be a SECOND field, not a change to `CircuitRfWroteAFileThisSession`.** That one is RC-5's
+arming guard and must stay true for the rest of the session; made per-boundary, a workspace that was
+edited and then recorded would stop arming its own close. Two fields, one setter, and the note on each
+says which question it answers.
+
+**Three writers are easy to miss and all three are silent when missed:**
+
+- **A restore sets it.** A restore replaces the workspace's files, and the entry it took on the way in
+  holds what was *replaced*. So the restored state is named by no newest entry, there is something to
+  keep again, and had the flag stayed clear both keep actions would have greyed out at exactly the
+  moment §1.4 is written about. `FinishInterruptedRestore` has the same claim.
+- **An external write sets it, without arming.** An agent's batch through `circuitrf serve` reaches the
+  window as `App.WorkspaceDocumentsChangedUnderneath`, and that is not circuitRF editing a design — so
+  it goes through a second entry point, `NoteWorkspaceChangedUnderneath`, which touches only the
+  per-boundary flag. Routing it through `NoteWorkspaceWrite` would let another process's touch of a
+  shared folder cause a colleague's glance to create a repository there (R-rc5-4a).
+- **A boundary that FAILED does not clear it.** The clear is inside `if (outcome.Recorded)`, in `Reach`
+  rather than at its three callers, for the reason that method exists at all.
+
+### The dangerous half, and why the brief refused to implement the greying on its own
+
+**Neither keep path saved dirty documents first**, and both now do — through
+`PromptSaveBeforeClose`, the prompt a close, an archive and a workspace copy already use, and
+**before** the dialog that takes the title.
+
+Two things follow from that, and the second is the more severe of the two defects found here:
+
+1. Unsaved work would otherwise be a case where the free signal reads *false* — nothing has been
+   written into the workspace — so the one action a designer with an unsaved schematic reaches for
+   would have been unavailable at the moment they most want it. `CanKeepAnything` therefore carries
+   `HasAnyDirtyWork` as a term as well: a keep will now write those files, so it genuinely will record
+   something.
+2. **Independently of this brief: a save-point taken with unsaved work recorded the PREVIOUS content
+   under the title the designer had just written.** They believe they kept this afternoon; they kept
+   this morning. Nothing about the result says so, and going back to it later is how they find out.
+   R-rc5-21 already states the claim for the close boundary — an entry that keeps a workspace file one
+   save out of date is invisible when wrong — and an explicit save-point has the same claim and
+   stronger, because the designer is *naming this state*. A version is worse again: it is what gets
+   sent, so one recorded a save out of date is wrong on somebody else's machine too.
+
+### The enabled state has four terms and three of them force it ON
+
+`WorkspaceViewModel.CanKeepAnything` is what both `[RelayCommand]`s report through (they reported
+through `CanCloseWorkspace` before) and what the panel's two header buttons are bound to. The signal is
+one term; the other three are the states in which it would say the wrong thing:
+
+- **held, off or failing** — those have their own answers and are deliberately not this one. Held stays
+  visible and refuses out loud; with no git the whole affordance is hidden instead. Conflating *nothing
+  to record* with *not allowed to record* would undo both.
+- **no history yet** — the first entry always records, and there is no newest entry for a write to have
+  happened since.
+- **unsaved work anywhere** — trap 2, above.
+
+The two cached fields behind it (`_recordingIsOn`, `_workspaceHasAHistory`) come from the reads
+`RefreshHistoryPanel` was already performing, and that method now performs them **outside** its
+`HistoryTool` guard: whether there is anything to keep is a fact about the workspace, and the same two
+actions are on the File menu with every tool panel closed. `NoteWorkspaceWrite` notifies only on the
+**first** write after a boundary, because the signal is a latch — it runs on the save path of every
+document kind in the application.
+
+**An EDIT re-enables them too, not only a save**, and leaving that out would have left trap 2 half
+unfixed for the panel: a `Save` command whose greyed appearance lags is an accepted convention here
+(`CanSaveAllDocuments` says so in its own note, and `RelayCommand.CanExecute` is re-evaluated at
+invocation so the keystroke still works), but a bound `IsEnabled` on a Button is a real block — nobody
+can click it. The hook is the undo stack's `CanUndo`, plus the wire history and the Data Display's own,
+because an edit is what makes a document dirty.
+
+**The reason is on the control** (`HistoryMessages.NothingToKeepYet`), on the panel's buttons and on the
+File menu's two items, and it says what would bring them back rather than only that they are off. A
+greyed control that says why reads as finished; one that says nothing reads as broken.
+
+### The go-back button: the right identity, and one more state it should not offer
+
+Two owner points about the button under the list, both answered without asking the repository anything.
+
+**It names the entry it will act on by IDENTITY when nobody titled it.** `GoBackText` said *Go back to
+this state*, which reads the same on every row — and the rows it appears on are exactly the ones whose
+generated labels already read alike, so on a workspace closed forty times the button said nothing at
+all about which of forty entries it would act on. The wording is now
+`HistoryMessages.GoBackToId`'s, which the way-forward button already carries: two buttons that perform
+one action say it one way. A title a **person** wrote is still what is shown when there is one, and
+still the only thing quoted.
+
+**And the word "back" came off both buttons** (owner, 2026-09-08): *Go to 3c4d8ba*. The destination is
+already on the button, so the direction word only restated which way time runs — the same argument that
+took "Come forward again" off the way-forward button, one step further.
+
+**It is withdrawn for the content the workspace already holds.** The withdrawal added on 2026-09-08
+knew only where *this session's last restore* had put the workspace, so on a freshly opened workspace
+the newest entry — whose content is exactly what is on disk — still offered a button that reloads
+everything to no effect, which is how a designer learns that a button does not work.
+`HistoryTool.IsWhereTheWorkspaceIs` now takes either of two free facts:
+
+- `WorkspaceTreeId`, set by the host to `sources.Newest?.TreeId` when `WrittenSinceLastEntry` is false
+  and to nothing otherwise — the free signal and the read the panel was refreshed by, combined into
+  *what the workspace contains*, with nothing hashed;
+- the entry this session's last restore put it into, matched on identity as before.
+
+**Matched on the TREE**, so the second of two entries recorded over one state is withdrawn as well as
+the first — `WayForward.LeadsSomewhereElse`'s own argument, one property over. **Unknown offers every
+row**, which is the direction that matters: a button withheld when it was needed is the failure §1.4 is
+about, and one offered needlessly costs a reload.
+
+`HistorySources.Newest` and `HistoryEntry.TreeId` are the two additions in `src/Design` this needed.
+`Newest` takes the later of the two lists' heads by clock, which is `HistoryList.Build`'s own caveat
+restated: restore points are ordered by RC-5's sequence and versions by the line of work, so under a
+clock fault it can name the wrong one of two entries recorded seconds apart. The consequence is a
+button offered or withheld, never a state altered.
+
+### What the gates hold, and what they cannot
+
+In `tests/Ui.Tests/Revision/OneHistoryPanelTests.cs`. The free signal is asserted **with no repository
+in the fixture at all**, which is the proof that no git runs to answer it; the boundary/restore
+transitions are asserted over a real one. The enabled predicate's four terms and the save-before-dialog
+ordering are held by reading the source, because constructing a whole `WorkspaceViewModel` — and
+running a modal save prompt inside it — is not something this suite can do. That is a real limit of the
+gate rather than a claim about the code: **the ordering is asserted, the dialog actually appearing is
+not.**
+
 ## Owner report, 2026-09-08 — the History window: a stuck-translucent float, and rows that all read alike
 
 ### A floating panel goes half-transparent on a click of its title bar, and stays that way

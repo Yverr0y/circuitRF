@@ -221,11 +221,19 @@ public sealed class HistoryRowItem
     {
         get
         {
-            if (!HasWrittenTitle) return "Go back to this state";
+            string title = HasWrittenTitle ? Title.ReplaceLineEndings(" ").Trim() : "";
 
-            string title = Title.ReplaceLineEndings(" ").Trim();
+            // NOBODY WROTE A TITLE, so the destination is named by its IDENTITY (owner, 2026-09-08).
+            // "Go back to this state" read the same on every row, and the rows it appeared on are
+            // exactly the ones whose generated labels already read alike — so the button under the list
+            // said nothing about which of forty entries it would act on. The wording is
+            // HistoryMessages.GoBackToId's, which the way-forward button already carries: two buttons
+            // that perform one action say it one way, and neither quotes a phrase nobody wrote. The
+            // word "back" came off both (owner, 2026-09-08): the destination is on the button already.
+            if (title.Length == 0) return HistoryMessages.GoBackToId(Entry.Identity);
+
             if (title.Length > 40) title = title[..39] + "…";
-            return title.Length > 0 ? $"Go back to “{title}”" : "Go back to this state";
+            return $"Go to “{title}”";
         }
     }
 
@@ -372,12 +380,85 @@ public partial class HistoryTool : Tool, IActivatableTool
     public bool CanGoBackToSelection
         => Selected is { CanGoBack: true } row && !IsWhereTheWorkspaceIs(row);
 
-    /// <summary>Whether this row is the state this session last put the workspace into. Unknown — no
-    /// restore this session — is <i>not</i> where the workspace is: an unrestored workspace holds
-    /// whatever has been edited since, and every row is a real way back from it.</summary>
+    /// <summary>
+    /// Whether this row holds the state the workspace is already in. <b>Two ways of knowing that, and
+    /// neither costs a repository read</b> — which is the constraint: the honest answer is <i>hash every
+    /// file and compare the tree</i>, and paying a whole checkpoint's work to decide whether to draw a
+    /// button is the cost RC-11 removed from this panel once already.
+    ///
+    /// <list type="number">
+    ///   <item><description><b>The workspace's own content, when it is known</b>
+    ///   (<see cref="WorkspaceTreeId"/>) — matched on the TREE, so the second of two entries recorded
+    ///   over one state is withdrawn as well as the first.</description></item>
+    ///   <item><description><b>Where this session's last restore put it</b> — matched on identity,
+    ///   which is what the session knows for certain and what the way-forward line is already built
+    ///   from.</description></item>
+    /// </list>
+    ///
+    /// <para><b>Unknown is not "where the workspace is."</b> Both facts are absent by default, and a
+    /// workspace nothing is known about offers every row as a way back — which is the direction that
+    /// matters, because a button withheld when it was needed is the failure §1.4 is written against,
+    /// while one offered needlessly costs a reload.</para>
+    /// </summary>
     private bool IsWhereTheWorkspaceIs(HistoryRowItem row)
-        => WayForward is { WentBackToId.Length: > 0 } w
-        && string.Equals(w.WentBackToId, row.Entry.Identity, StringComparison.Ordinal);
+        => (WorkspaceTreeId.Length > 0
+            && string.Equals(WorkspaceTreeId, row.Entry.TreeId, StringComparison.Ordinal))
+        || (WayForward is { WentBackToId.Length: > 0 } w
+            && string.Equals(w.WentBackToId, row.Entry.Identity, StringComparison.Ordinal));
+
+    /// <summary>
+    /// <b>The content the workspace on disk holds, when that is known for free</b> (owner, 2026-09-08:
+    /// a go-back button offered for the state the workspace was already in).
+    ///
+    /// <para>The host sets it to the newest entry's tree when nothing has been written into the
+    /// workspace since that entry was recorded, and to nothing otherwise —
+    /// <c>WorkspaceHistoryService.WrittenSinceLastEntry</c> answers the second half with no git at all,
+    /// and <c>HistorySources.Newest</c> the first from the read the panel was refreshed by. Empty means
+    /// unknown, and unknown offers every row.</para>
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanGoBackToSelection))]
+    private string _workspaceTreeId = "";
+
+    // ── Nothing to record (owner, 2026-09-08) ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <b>Whether a keep would record anything at all.</b> Both keep actions used to open their dialog,
+    /// take a title, and then create nothing: the tree test that declines a duplicate lives in
+    /// <c>GitCheckpoint.Record</c>, which is after the dialog, so the refusal was correct, correctly
+    /// worded, and arrived once the designer had already done the work of naming something.
+    ///
+    /// <para><b>Decided by the host, not here</b> — it is a fact about the workspace, and the same two
+    /// actions are on the File menu with every tool panel closed. See
+    /// <c>WorkspaceHistoryService.WrittenSinceLastEntry</c> for why the signal is a per-boundary write
+    /// flag rather than a tree comparison, and <c>WorkspaceViewModel.CanKeepAnything</c> for the three
+    /// states that force it true regardless.</para>
+    ///
+    /// <para><b>True by default</b>, so a panel nobody has told anything is the panel that was here
+    /// before this existed.</para>
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanKeep))]
+    [NotifyPropertyChangedFor(nameof(SavePointTooltip))]
+    [NotifyPropertyChangedFor(nameof(KeepVersionTooltip))]
+    private bool _canKeepAnything = true;
+
+    /// <summary>Whether either header button is live. One property over both, because there is one
+    /// reason and it is the same reason.</summary>
+    public bool CanKeep => HasWorkspace && CanKeepAnything;
+
+    /// <summary>
+    /// <b>The reason is on the control</b> (R-rc6-8's argument, one control over). A greyed button with
+    /// nothing said about it is indistinguishable from a feature that was never built; one that says why
+    /// — and what would bring it back — reads as finished.
+    /// </summary>
+    public string SavePointTooltip => CanKeepAnything
+        ? "Keep this state — writes a restore point for the workspace as it stands, with a line saying what it is"
+        : HistoryMessages.NothingToKeepYet;
+
+    public string KeepVersionTooltip => CanKeepAnything
+        ? "Keep this version — records the whole workspace under a title you write, so you can find it again and send it out"
+        : HistoryMessages.NothingToKeepYet;
     public bool CanKeepPermanently => Selected is { IsPoint: true, Entry.Point.Kept: false };
     public bool CanBringBack       => Selected is { Thinned: true };
     public bool CanCompare         => Selected is { IsVersion: true };
@@ -408,6 +489,7 @@ public partial class HistoryTool : Tool, IActivatableTool
     /// is empty rather than looking broken.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(EmptyText))]
+    [NotifyPropertyChangedFor(nameof(CanKeep))]
     private bool _hasWorkspace;
 
     /// <summary>

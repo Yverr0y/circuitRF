@@ -450,10 +450,13 @@
                      because that is where a user looking for it will be: §5.3 describes it as
                      something the user asks for, and it is not a save — it keeps the state you are in
                      so you can come back to it. -->
+                <!-- The tooltip is BOUND because the item greys out when there is nothing to record
+                     (owner, 2026-09-08) and a greyed item with no reason on it is indistinguishable
+                     from a feature that was never built. -->
                 <MenuItem Header="_Keep This State…"
                           Command="{Binding KeepThisStateCommand}"
                           CommandParameter="{Binding $parent[Window]}"
-                          ToolTip.Tip="Keep this workspace as it is now, with a line saying what it is, so you can come back to it.">
+                          ToolTip.Tip="{Binding KeepThisStateTooltip}">
                     <MenuItem.Icon><mi:MaterialIcon Kind="BookmarkOutline" Width="16" Height="16"/></MenuItem.Icon>
                 </MenuItem>
                 <!-- revision-control.md §5.2, RC-7 R-rc7-1. Beside Keep This State… and deliberately
@@ -463,7 +466,7 @@
                 <MenuItem Header="Keep This _Version…"
                           Command="{Binding KeepThisVersionCommand}"
                           CommandParameter="{Binding $parent[Window]}"
-                          ToolTip.Tip="Record this workspace as a version, under a title you write — what you come back to, and what you send out.">
+                          ToolTip.Tip="{Binding KeepThisVersionTooltip}">
                     <MenuItem.Icon><mi:MaterialIcon Kind="TagOutline" Width="16" Height="16"/></MenuItem.Icon>
                 </MenuItem>
                 <Separator/>

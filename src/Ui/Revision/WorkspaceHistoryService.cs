@@ -49,7 +49,50 @@ public sealed class WorkspaceHistoryService
     public bool CircuitRfWroteAFileThisSession { get; private set; }
 
     /// <summary>Set by every path that writes into the open workspace.</summary>
-    public void NoteWorkspaceWrite() => CircuitRfWroteAFileThisSession = true;
+    public void NoteWorkspaceWrite()
+    {
+        CircuitRfWroteAFileThisSession = true;
+        WrittenSinceLastEntry          = true;
+    }
+
+    /// <summary>
+    /// <b>Whether anything has been written into the workspace since the last entry was recorded</b>
+    /// (owner, 2026-09-08: both keep actions opened their dialog, took a title, and then created
+    /// nothing).
+    ///
+    /// <para><b>This is the free signal, and the reason a cheap one was needed.</b> "Would a keep record
+    /// anything" is <i>the computed tree differs from the newest entry's</i>, and computing that is
+    /// <c>git add --all</c> plus <c>write-tree</c> over the whole workspace — the cost measured as
+    /// <c>LastCloseCheckpointMs</c>, re-paid in full on every call because
+    /// <see cref="GitCheckpoint"/> discards its private index at each end deliberately. Asking it
+    /// whenever a panel refreshes puts a whole checkpoint's work in front of somebody who is only
+    /// looking at the panel, which is precisely the cost RC-11 removed from the filter checkboxes.</para>
+    ///
+    /// <para><b>It errs towards enabled.</b> A write that happened to produce identical bytes leaves it
+    /// true, the action stays available and the recording still declines — which is the behaviour that
+    /// was reported, and no worse than it. The direction matters: a greyed control is
+    /// indistinguishable from a feature that was never built (R-rc6-8), so being wrong in the other
+    /// direction would cost more than the bug does.</para>
+    ///
+    /// <para><b>Per BOUNDARY, not per session</b> — which is the whole difference from
+    /// <see cref="CircuitRfWroteAFileThisSession"/>, and why they are two fields rather than one. That
+    /// one is RC-5's arming guard and must stay true for the rest of the session, or a workspace that
+    /// was edited and then recorded would stop arming its own close.</para>
+    /// </summary>
+    public bool WrittenSinceLastEntry { get; private set; }
+
+    /// <summary>
+    /// <b>Somebody else's process wrote into this workspace</b> — an agent's batch through
+    /// <c>circuitrf serve</c>, which reaches the window as
+    /// <c>App.WorkspaceDocumentsChangedUnderneath</c>.
+    ///
+    /// <para><b>Deliberately NOT <see cref="NoteWorkspaceWrite"/>.</b> That one arms the repository, and
+    /// arming is a statement about circuitRF having edited a design: a file manager or another process
+    /// touching a shared folder must not cause a colleague's glance to create a repository there
+    /// (R-rc5-4a). What an external write does change is what a keep would find, so it clears exactly
+    /// the one signal that is about the last entry.</para>
+    /// </summary>
+    public void NoteWorkspaceChangedUnderneath() => WrittenSinceLastEntry = true;
 
     /// <summary>
     /// R-rc6-4a. Whether a boundary in this session actually WROTE an entry.
@@ -80,6 +123,11 @@ public sealed class WorkspaceHistoryService
     {
         CircuitRfWroteAFileThisSession = false;
         RecordedSomethingThisSession   = false;
+
+        // A workspace that was closed properly was recorded on the way out, so its files match its
+        // newest entry and there is nothing to keep until something is written. That is the ordinary
+        // case, and it is the one the reported bug is about.
+        WrittenSinceLastEntry          = false;
         _housekeeping.ResetForWorkspace();
         _reportedOnOpen                = false;
         _lastBoundaryFailed            = false;
@@ -189,7 +237,16 @@ public sealed class WorkspaceHistoryService
             }
         }
 
-        if (outcome.Recorded) RecordedSomethingThisSession = true;
+        if (outcome.Recorded)
+        {
+            RecordedSomethingThisSession = true;
+
+            // The newest entry now holds what is on disk, so there is nothing further to keep until
+            // something is written. Cleared HERE rather than at the three callers, for the reason the
+            // whole of this method exists: three callers agreeing about it is how it becomes true in
+            // two of them.
+            WrittenSinceLastEntry = false;
+        }
 
         Changed?.Invoke();
         return outcome.Recorded;
@@ -241,6 +298,12 @@ public sealed class WorkspaceHistoryService
 
         if (result.Ok)
         {
+            // A restore REPLACES the workspace's files, and the entry it took on the way in holds what
+            // was replaced rather than what is now there. So there is something to keep again — the
+            // restored state is named nowhere as the newest entry — and the free signal has to say so,
+            // or both keep actions would grey out at the one moment §1.4 is written about.
+            WrittenSinceLastEntry = true;
+
             _messages.Info(RestorePointMessages.RestoreReferenceCaveat(
                 WorkspacePins.Survey(workspaceRoot!).Any(p => p.Pin is not null)));
             _messages.Info(RestorePointMessages.RestoreLeavesResultsAlone);
@@ -277,6 +340,9 @@ public sealed class WorkspaceHistoryService
 
         var result = WorkspaceRestore.Finish(git, inFlight);
         foreach (var d in result.Diagnostics) _messages.PostDiagnostic(d);
+
+        // The same reasoning as Restore's: what is on disk afterwards is named by no newest entry.
+        if (result.Ok) WrittenSinceLastEntry = true;
 
         Changed?.Invoke();
         return result;
@@ -570,7 +636,11 @@ public sealed class WorkspaceHistoryService
         var result = WorkspaceCommit.Commit(armed.Git, title, leaveOut);
         foreach (var d in result.Diagnostics) _messages.PostDiagnostic(d);
 
-        if (result.Ok) RecordedSomethingThisSession = true;
+        if (result.Ok)
+        {
+            RecordedSomethingThisSession = true;
+            WrittenSinceLastEntry        = false;
+        }
 
         Changed?.Invoke();
         return result;

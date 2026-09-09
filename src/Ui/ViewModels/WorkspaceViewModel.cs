@@ -3104,6 +3104,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         RedoCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(UndoDescription));
         OnPropertyChanged(nameof(RedoDescription));
+        RefreshKeepAffordances();
     }
 
     // (Re)subscribe to the active target's CURRENT stack and refresh Undo/Redo command + labels.
@@ -3161,6 +3162,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         RedoCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(UndoDescription));
         OnPropertyChanged(nameof(RedoDescription));
+        RefreshKeepAffordances();
     }
 
     private void OnActiveStackPropertyChanged(object? sender,
@@ -3170,6 +3172,12 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         {
             UndoCommand.NotifyCanExecuteChanged();
             OnPropertyChanged(nameof(UndoDescription));
+
+            // AN EDIT IS WHAT MAKES A DOCUMENT DIRTY, and unsaved work is one of the terms in whether
+            // there is anything to keep (owner, 2026-09-08) — a keep saves those documents first, so it
+            // genuinely will record something. Without this the panel's two header buttons would stay
+            // greyed until the edit was SAVED, which is the one moment the designer most wants them.
+            RefreshKeepAffordances();
         }
         if (e.PropertyName is nameof(UndoRedoStack.CanRedo))
         {

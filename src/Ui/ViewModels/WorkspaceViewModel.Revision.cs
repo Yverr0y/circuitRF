@@ -60,6 +60,83 @@ public partial class WorkspaceViewModel
     private string? WorkspaceRootDir
         => CurrentWorkspacePath is { } cws ? Path.GetDirectoryName(cws) : null;
 
+    // ── Nothing to record (owner, 2026-09-08) ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <b>Whether either keep action would record anything.</b> Reported by the two commands' own
+    /// <c>CanExecute</c> and by the panel's two header buttons, which is the whole of the fix: both used
+    /// to open their dialog, take a title, and then create nothing, because the tree test that declines
+    /// a duplicate lives in <c>GitCheckpoint.Record</c> — after the dialog.
+    ///
+    /// <para><b>Four terms, and three of them force it TRUE.</b> The signal on its own is
+    /// <c>WrittenSinceLastEntry</c>, which costs no git (see its own note for why a tree comparison was
+    /// not an option); the other three are the states in which it would say the wrong thing:</para>
+    ///
+    /// <list type="bullet">
+    ///   <item><description><b>Held, off, or failing.</b> Those already have their own answers and are
+    ///   deliberately not this one — held stays visible and refuses out loud (R-rc6-8), and with no git
+    ///   the whole affordance is hidden instead. Conflating <i>nothing to record</i> with <i>not allowed
+    ///   to record</i> would undo both.</description></item>
+    ///   <item><description><b>A workspace with no history yet.</b> The first entry always records, and
+    ///   there is no newest entry for a write to have happened since.</description></item>
+    ///   <item><description><b>Unsaved work anywhere.</b> This is the case that would otherwise be
+    ///   dangerous: nothing has been written into the workspace, so the signal is false, and the one
+    ///   action a designer with an unsaved schematic reaches for would be unavailable at the moment they
+    ///   most want it. A keep now SAVES those documents first, so it genuinely will record
+    ///   something.</description></item>
+    /// </list>
+    /// </summary>
+    private bool CanKeepAnything()
+        => CurrentWorkspacePath is not null
+        && (!_recordingIsOn
+         || !_workspaceHasAHistory
+         || History.WrittenSinceLastEntry
+         || HasAnyDirtyWork(includeFloated: false));
+
+    /// <summary>Whether circuitRF is recording into this workspace at all. Cached from the read
+    /// <see cref="RefreshHistoryPanel"/> already performs — this must never make a control's enabled
+    /// state cost a subprocess.</summary>
+    private bool _recordingIsOn = true;
+
+    /// <summary>
+    /// Whether this workspace has any recorded entry. Cached for the same reason, and asked only where
+    /// the answer can have changed: <b>a write cannot create the first entry</b>, so the save path does
+    /// not ask.
+    /// </summary>
+    private bool _workspaceHasAHistory;
+
+    /// <summary>
+    /// Brings the two keep affordances up to date — the File menu's commands and, when it exists, the
+    /// panel's pair of header buttons. <b>No repository is read here</b>; everything it needs is either
+    /// in hand or a field.
+    /// </summary>
+    private void RefreshKeepAffordances()
+    {
+        bool can = CanKeepAnything();
+
+        KeepThisStateCommand.NotifyCanExecuteChanged();
+        KeepThisVersionCommand.NotifyCanExecuteChanged();
+
+        OnPropertyChanged(nameof(KeepThisStateTooltip));
+        OnPropertyChanged(nameof(KeepThisVersionTooltip));
+
+        if (_factory.HistoryTool is { } tool) tool.CanKeepAnything = can;
+    }
+
+    /// <summary>
+    /// What the File menu's two items say. <b>The reason is on the control</b> — a greyed item with
+    /// nothing said about it is indistinguishable from a feature that was never built (R-rc6-8's
+    /// argument, one control over).
+    /// </summary>
+    public string KeepThisStateTooltip => CanKeepAnything()
+        ? "Keep this workspace as it is now, with a line saying what it is, so you can come back to it."
+        : HistoryMessages.NothingToKeepYet;
+
+    /// <summary>The same, for the version.</summary>
+    public string KeepThisVersionTooltip => CanKeepAnything()
+        ? "Record this workspace as a version, under a title you write — what you come back to, and what you send out."
+        : HistoryMessages.NothingToKeepYet;
+
     /// <summary>
     /// R-rc5-4a. Called by every path that writes a file into the open workspace.
     ///
@@ -68,7 +145,28 @@ public partial class WorkspaceViewModel
     /// session, and that fact has to come from the edit session rather than from the disk — a file
     /// manager touching the folder is not circuitRF editing a design.</para>
     /// </summary>
-    public void NoteWorkspaceWrite() => History.NoteWorkspaceWrite();
+    public void NoteWorkspaceWrite()
+    {
+        // Only the FIRST write after a boundary changes anything a control is showing — the signal is a
+        // latch that a boundary clears — so the notification is guarded rather than raised on every save
+        // of every document. This runs on the save path of every document kind in the application.
+        bool alreadyKnown = History.WrittenSinceLastEntry;
+
+        History.NoteWorkspaceWrite();
+
+        if (!alreadyKnown) RefreshKeepAffordances();
+    }
+
+    /// <summary>
+    /// <b>Somebody else's process wrote into this workspace</b> — an agent's batch through
+    /// <c>circuitrf serve</c>. It is not circuitRF editing a design, so it must not arm the repository
+    /// (R-rc5-4a); it does change what a keep would find, so the two keep actions come back.
+    /// </summary>
+    private void NoteWorkspaceChangedUnderneath()
+    {
+        History.NoteWorkspaceChangedUnderneath();
+        RefreshKeepAffordances();
+    }
 
     // ── The explicit save-point (R-rc5-4c, §5.3's second boundary) ────────────────────────────────
 
@@ -84,10 +182,22 @@ public partial class WorkspaceViewModel
     /// unexpectedly large file out and record that they did; this is where the question finally gets
     /// put to somebody.</para>
     /// </summary>
-    [RelayCommand(CanExecute = nameof(CanCloseWorkspace))]
+    [RelayCommand(CanExecute = nameof(CanKeepAnything))]
     private async Task KeepThisState(Window? owner)
     {
         if (WorkspaceRootDir is not { } root) return;
+
+        // R-rc5-21's claim, and stronger here than at a close: THE DESIGNER IS NAMING THIS STATE
+        // (owner, 2026-09-08). What a save-point records is what is on disk, so with a schematic
+        // unsaved this recorded the PREVIOUS content under the title just written — an entry a
+        // designer believes holds this afternoon and which holds this morning. Nothing about the
+        // result says so, and going back to it later is how they find out.
+        //
+        // The same prompt a close, an archive and a workspace copy already use — not a second save
+        // path — and a cancelled prompt records nothing at all.
+        if (owner is not null && HasAnyDirtyWork(includeFloated: false)
+            && !await PromptSaveBeforeClose(owner, "keeping this state", includeFloated: false))
+            return;
 
         var dialog = new KeepThisStateDialog();
         dialog.Present(LargeFilesAwaitingAnAnswer(root), IsFirstRecording(root));
@@ -183,6 +293,15 @@ public partial class WorkspaceViewModel
     /// </summary>
     private void RefreshHistoryPanel()
     {
+        // FIRST, and OUTSIDE the panel guard below. Whether there is anything to keep is a fact about
+        // the workspace, and the two keep actions are on the File menu as well as in this panel — a
+        // designer with every tool panel closed still reaches them. Both reads are ones this method was
+        // already paying for when the panel existed.
+        var recording         = History.State(WorkspaceRootDir);
+        _recordingIsOn        = recording == RecordingState.On;
+        _workspaceHasAHistory = WorkspaceHistoryService.HasHistory(WorkspaceRootDir);
+        RefreshKeepAffordances();
+
         if (_factory.HistoryTool is not { } tool) return;
 
         // Wired PER INSTANCE, not once per session. A workspace switch goes through
@@ -263,11 +382,22 @@ public partial class WorkspaceViewModel
         // boundary and a workspace switch and nowhere else — a filter toggle used to come through here
         // and re-read everything, including a second full pass over the restore points for the empty
         // line's count.
-        var state = History.State(WorkspaceRootDir);
+        // Read ONCE and reused: the recording state was already established above, and asking git for
+        // it a second time in one refresh is the shape of cost RC-11 took out of this panel.
+        var sources = History.ReadEntries(WorkspaceRootDir);
+
         tool.SetSources(
-            History.ReadEntries(WorkspaceRootDir),
+            sources,
             WorkspaceRootDir is not null,
-            state == RecordingState.On ? "" : HoldMessages.IndicatorDetailFor(state));
+            _recordingIsOn ? "" : HoldMessages.IndicatorDetailFor(recording));
+
+        // WHAT THE WORKSPACE HOLDS, when that is known for nothing (owner, 2026-09-08). With nothing
+        // written since the newest entry was recorded, the files on disk ARE that entry's content — so
+        // going back to it, or to any other entry over the same tree, is a whole reload that changes
+        // nothing, and the panel withdraws the offer. Empty means unknown, and unknown offers every row:
+        // a button withheld when it was needed is the failure §1.4 is about, and one offered needlessly
+        // costs a reload.
+        tool.WorkspaceTreeId = History.WrittenSinceLastEntry ? "" : sources.Newest?.TreeId ?? "";
 
         // R-rc10-18. The way forward, reported on arrival and by name. Cleared when the workspace
         // changes, because it is a sentence about one restore in one session.
@@ -403,10 +533,16 @@ public partial class WorkspaceViewModel
     /// afterwards is how a history comes to read as a change of mind — and §8.3's sentence about
     /// rewriting (R-rc7-21), which is stated and never offered.</para>
     /// </summary>
-    [RelayCommand(CanExecute = nameof(CanCloseWorkspace))]
+    [RelayCommand(CanExecute = nameof(CanKeepAnything))]
     private async Task KeepThisVersion(Window? owner)
     {
         if (WorkspaceRootDir is not { } root) return;
+
+        // The same first step as Keep This State…, and with more at stake: a version is what gets
+        // SENT, so one recorded a save out of date is wrong on somebody else's machine too.
+        if (owner is not null && HasAnyDirtyWork(includeFloated: false)
+            && !await PromptSaveBeforeClose(owner, "keeping this version", includeFloated: false))
+            return;
 
         var dialog = new KeepThisVersionDialog();
         dialog.Present(RestoreProvenance.Read(root) is { } state
@@ -625,6 +761,12 @@ public partial class WorkspaceViewModel
     public async Task ReloadAfterExternalChange(IReadOnlyList<string> relativePaths)
     {
         if (relativePaths.Count == 0) return;
+
+        // Somebody else's process wrote into this workspace — an agent's batch is the case this path
+        // exists for. So there is something to keep again, and the two keep actions must not stay greyed
+        // out on the strength of a flag that only this window's own save paths set.
+        NoteWorkspaceChangedUnderneath();
+
         await ReloadWorkspaceAfterFilesChangedUnderneath();
     }
 

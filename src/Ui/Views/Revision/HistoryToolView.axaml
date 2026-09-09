@@ -18,17 +18,24 @@
          were once labelled "Keep", which is what made them look like one operation done twice. -->
     <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,*,Auto,Auto" Margin="4,4,4,2">
 
+      <!-- DISABLED WHEN THERE IS NOTHING TO RECORD, AND THE REASON IS ON THEM (owner, 2026-09-08).
+           Both of these used to open their dialog, take a title, and then create nothing: the tree test
+           that declines a duplicate lives in GitCheckpoint.Record, which is after the dialog. The
+           enabled state comes from a signal that costs no git — see WorkspaceHistoryService's
+           WrittenSinceLastEntry — and it is NOT the held or the off state, which stay enabled and
+           refuse out loud. A greyed control that says why reads as finished; one that says nothing
+           reads as broken (R-rc6-8, one control over). -->
       <Button Grid.Column="0" x:Name="SavePointButton" Click="OnSavePointClick"
-              IsEnabled="{Binding HasWorkspace}"
-              ToolTip.Tip="Keep this state — writes a restore point for the workspace as it stands, with a line saying what it is"
+              IsEnabled="{Binding CanKeep}"
+              ToolTip.Tip="{Binding SavePointTooltip}"
               Padding="3,2" Background="Transparent" BorderThickness="0" Margin="0,0,1,0">
         <mi:MaterialIcon Kind="ContentSavePlusOutline" Width="14" Height="14"
                          Foreground="{DynamicResource SystemBaseMediumColor}"/>
       </Button>
 
       <Button Grid.Column="1" x:Name="KeepVersionButton" Click="OnKeepVersionClick"
-              IsEnabled="{Binding HasWorkspace}"
-              ToolTip.Tip="Keep this version — records the whole workspace under a title you write, so you can find it again and send it out"
+              IsEnabled="{Binding CanKeep}"
+              ToolTip.Tip="{Binding KeepVersionTooltip}"
               Padding="3,2" Background="Transparent" BorderThickness="0">
         <mi:MaterialIcon Kind="TagPlusOutline" Width="14" Height="14"
                          Foreground="{DynamicResource SystemBaseMediumColor}"/>
@@ -394,11 +401,14 @@
 
          It NAMES ITS DESTINATION, from the same string the menu item uses — so the row it will act on
          is legible without looking back up at the selection, and a title nobody wrote is never quoted.
+         An entry nobody titled is named by its IDENTITY rather than by "this state", which read the
+         same on every row and so named nothing at all.
 
-         AND IT IS ABSENT when it would land where the workspace already is (owner, 2026-09-08): the
-         same withdrawal WayForward.LeadsSomewhereElse makes for the way back, applied to the
-         selection. A button that reloads the whole workspace to no effect is what teaches a designer
-         that the button does not work. -->
+         AND IT IS ABSENT when it would land where the workspace already is (owner, 2026-09-08), by
+         either of the two free facts HistoryTool.IsWhereTheWorkspaceIs lists: the tree the workspace
+         holds when nothing has been written since the newest entry, and the entry this session's last
+         restore put it into. A button that reloads the whole workspace to no effect is what teaches a
+         designer that the button does not work. -->
     <Button Grid.Row="4" x:Name="GoBackButton" Click="OnGoBackClick"
             IsVisible="{Binding CanGoBackToSelection}"
             HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"

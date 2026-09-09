@@ -326,16 +326,38 @@ public static class HistoryMessages
     }
 
     /// <summary>
-    /// What the button under that line says. <b>It names its destination</b> rather than a direction,
-    /// which is the whole of what was wrong with "Come forward again" (owner, 2026-09-08): going back
-    /// and coming forward are one operation performed twice, so a button labelled with a direction can
-    /// be pressed for ever and never says where the last press took you. Two presses land on two
+    /// What the button under that line says. <b>It names its destination and nothing else</b> — not a
+    /// direction, which is the whole of what was wrong with "Come forward again" (owner, 2026-09-08):
+    /// going back and coming forward are one operation performed twice, so a button labelled with a
+    /// direction can be pressed for ever and never says where the last press took you. <b>And not the
+    /// word "back" either</b> (owner, 2026-09-08): the destination is already on the button, so the
+    /// direction word only ever restated which way time runs. Two presses land on two
     /// identities and the label changes between them, which is the evidence that something happened —
     /// and from the third press on the two settle into a pair, because WorkspaceRestore stops recording
     /// a state the history already holds.
     /// </summary>
     public static string GoBackToId(string commitId)
-        => HistoryIds.Short(commitId) is { Length: > 0 } id ? "Go back to " + id : "Go back to that state";
+        => HistoryIds.Short(commitId) is { Length: > 0 } id ? "Go to " + id : "Go to that state";
+
+    // ── Nothing to record (owner, 2026-09-08) ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <b>Why the two keep actions are greyed out</b> (owner, 2026-09-08: both of them opened their
+    /// dialog, took a title, and then created nothing).
+    ///
+    /// <para><b>The reason is on the control.</b> A greyed control with no reason given is
+    /// indistinguishable from a feature that was never built, which is R-rc6-8's argument one control
+    /// over; a greyed control that says why reads as finished. It says what would change it, because
+    /// the answer to <i>why can I not keep this</i> is only useful with <i>and what would let me</i>
+    /// beside it.</para>
+    ///
+    /// <para>Never used for the held or the off state. Those have their own sentences and their own
+    /// controls — visible, enabled and refusing out loud — and conflating <i>nothing to record</i> with
+    /// <i>not allowed to record</i> would undo both.</para>
+    /// </summary>
+    public const string NothingToKeepYet =
+        "This state is already kept — nothing has changed since the last entry in the history. "
+      + "Change something in the workspace and this comes back.";
 
     // ── RC-11: correcting what you wrote (§5.11) ──────────────────────────────────────────────────
 
