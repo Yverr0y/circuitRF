@@ -265,6 +265,14 @@ e.g. viewing a reflection or transmission coefficient as a vector.</p>
 													freq (1 to 10 GHz)
 											</text></g></g></g></g></g></g></svg></span>
 </span><figcaption>The same run on a polar plot: magnitude and angle, without the impedance grid.</figcaption></figure>
+<p><strong>It is also where a node's stability is read.</strong> The reference document behind
+<a href="wsprobe.html">the WSProbe</a> reads <code>1/H0</code> and <code>1/Y0</code> on a polar chart and looks for a <strong>clockwise
+crossing of the negative real axis</strong> — so those two, and the envelope's <code>1/H0env</code> and <code>1/Y0env</code>, are
+offered on Polar and on nothing else. An <a href="wsprobe.html#global">Ohtomo global loop gain</a> is polar-only
+for the same reason, with one difference that matters: <strong>its critical point is <code>+1</code>, not the origin</strong>.
+A polar plot carrying any WSProbe trace draws small reference marks at <strong>both</strong> points, because a
+reader who has to remember which family reads against which is a reader who will occasionally use the
+wrong one.</p>
 <h2 id="table">Table</h2>
 <p>The numbers in a grid. <strong>Table is special: it shows complex <em>and</em> scalar data simultaneously</strong> in
 the same table — something no other plot type does. A complex column displays in a chosen complex
@@ -994,7 +1002,7 @@ surface, and the max-power / max-efficiency optima are flagged.</p>
   <a href="components.html">Components</a>.</p>
 
 <nav class="page-nav">
-  <a class="prev" href="derived-metrics.html"><span class="dir">Previous</span><span class="name">Derived Metrics</span></a>
+  <a class="prev" href="wsprobe.html"><span class="dir">Previous</span><span class="name">The WSProbe</span></a>
   <a class="next" href="npy-export.html"><span class="dir">Next</span><span class="name">Results &amp; Data Export</span></a>
 </nav>
 </main>

@@ -54,6 +54,7 @@ with can be traced to an assumption rather than to a mystery.</p>
 <li><a href="#fixture">The fixture: the one thing you must tell it</a></li>
 <li><a href="#srf">Self-resonance</a></li>
 <li><a href="#datavsmodel">Checking data against a model</a></li>
+<li><a href="#inside">Stability from inside the circuit</a></li>
 <li><a href="#headless">Asking the same questions headless</a></li>
 </ol>
 </nav>
@@ -181,6 +182,9 @@ Note that μ and μ′ come from <strong>the same trace card control</strong> �
 <p><strong>Unconditional stability requires K &gt; 1 <em>and</em> |Δ| &lt; 1</strong> — both, always. K alone is not a stability
 criterion, which is the reason |Δ| is offered as its own trace rather than folded into K's. Plot them
 together.</p>
+<p><strong>And both together are still a two-port test.</strong> A two-port that passes K and |Δ| can still oscillate,
+because these are computed from the <em>reduced</em> two-port and a pole the reduction hides is a pole they
+cannot see — see <a href="wsprobe.html#ndf">the WSProbe page's NDF example</a>.</p>
 <h3 id="section">|Δ|</h3>
 <p>The magnitude of the determinant above, plotted on its own so that the K &gt; 1 test can be completed.</p>
 <h2 id="gain">Maximum gain: MAG and MSG</h2>
@@ -378,6 +382,19 @@ frequency axis.</li>
 <em>above</em> the band the model was fitted over, and almost always in ESR before it shows in |Z| — the
 reactance dominates |Z| everywhere except within a whisker of resonance, so a model with the loss wrong
 by a factor of three still overlays convincingly on a |Z| plot. <strong>Compare ESR, not |Z|.</strong></p>
+<h2 id="inside">Stability from inside the circuit</h2>
+<p>Everything on this page is computed from an S-matrix — a <em>terminal</em> view of a network. That is the
+right view for a part you are buying and the wrong one for a node inside an amplifier you are
+drawing, where the question is what the two halves of that node present to each other.</p>
+<p><strong><a href="wsprobe.html">The WSProbe</a></strong> answers that one. It is a component you drop into a node; it perturbs
+nothing and costs no extra sweep, and what it produces is the driving-point impedance and admittance
+at that node, the impedance looking each way out of it, every classical loop gain, and a bounded
+<a href="wsprobe.html#stability-margin">stability margin</a> that says how close the node is rather than only
+whether it is stable. It also brings the <a href="wsprobe.html#ndf">normalized determinant function</a>, which
+is the rigorous N-port answer that K and |Δ| are an approximation to.</p>
+<p>The two pages meet in both directions: a probe's reduced two-port is an ordinary network source, so
+every metric above — μ, K, |Δ|, MAG/MSG and the stability circles — applies to a stage measured
+<em>inside</em> the circuit, loaded by what actually loads it.</p>
 <h2 id="headless">Asking the same questions headless</h2>
 <p>Two CLI verbs answer without opening a plot. Both are read-only.</p>
 <p><strong>Is this file sound?</strong></p>
@@ -427,7 +444,7 @@ gives a sensible resonance and a milliohm-scale floor, and the others are obviou
 
 <nav class="page-nav">
   <a class="prev" href="data-display.html"><span class="dir">Previous</span><span class="name">The Data Display</span></a>
-  <a class="next" href="plot-types.html"><span class="dir">Next</span><span class="name">Plot Types</span></a>
+  <a class="next" href="wsprobe.html"><span class="dir">Next</span><span class="name">The WSProbe</span></a>
 </nav>
 </main>
 

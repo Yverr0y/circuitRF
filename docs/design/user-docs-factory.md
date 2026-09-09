@@ -220,6 +220,21 @@ A catalog of figures, in the same spirit as `SymbolArtworkGenerator.Catalog`:
 Each row is *(id, fixture factory, capture size, variants)*. Adding a figure is one row — the property
 that has kept the symbol generator alive.
 
+**A figure whose fixture needs a real result runs one.** `DocRunData` runs the shipped schematic
+templates through `SchematicRunService.Prepare`/`Execute` — the two calls the Run button makes — and
+`DocWsProbeFixtures` (added by WSP-7) does the same for the committed `testdata/` netlists the
+WSProbe briefs' own gates run, located by walking up to `circuitrf.slnx`. **Neither copies a design
+into `src/Ui`**: a second copy agrees with the first on the day it is written and drifts afterwards,
+and the whole point of a generated figure is that it is the picture the program actually produces.
+`DocWsProbeFixtures.Designs` names, per row, the page section AND the brief gate its design serves,
+so a design that stops being cited is visible rather than merely unused.
+
+Two traps that produce a figure which is *not wrong so much as it is the opposite of its caption*,
+both found by WSP-7 and both recorded in `src/Ui/RESOLVED.md`: **a swept cube draws ONE curve unless
+an axis is set to `IsFamily`** (a drive-swept fan came out as a single line at the first operating
+point), and **a group materialised eagerly for every run fails when the SOURCE is loaded**, not where
+the reader asked for it.
+
 **B. Content** (`docs/user/src/*.md`, hand-written)
 Markdown with front-matter (title, kind, breadcrumb, anchors) and **typed placeholders** the generator
 expands:

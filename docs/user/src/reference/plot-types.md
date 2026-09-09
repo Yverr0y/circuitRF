@@ -53,6 +53,15 @@ e.g. viewing a reflection or transmission coefficient as a vector.
 
 {{ui: plot-polar-data}}
 
+**It is also where a node's stability is read.** The reference document behind
+[the WSProbe](wsprobe.html) reads `1/H0` and `1/Y0` on a polar chart and looks for a **clockwise
+crossing of the negative real axis** — so those two, and the envelope's `1/H0env` and `1/Y0env`, are
+offered on Polar and on nothing else. An [Ohtomo global loop gain](wsprobe.html#global) is polar-only
+for the same reason, with one difference that matters: **its critical point is `+1`, not the origin**.
+A polar plot carrying any WSProbe trace draws small reference marks at **both** points, because a
+reader who has to remember which family reads against which is a reader who will occasionally use the
+wrong one.
+
 ## Table {#table}
 
 The numbers in a grid. **Table is special: it shows complex *and* scalar data simultaneously** in

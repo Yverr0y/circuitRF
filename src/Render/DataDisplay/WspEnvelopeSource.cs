@@ -163,7 +163,8 @@ public static partial class WspSource
             if (idxL > 0)
                 WspEnvelope.RequireAtTermination(all, idxL, WspSide.L, TermZ(ds, group, idxL, WspSide.L), spec.LoadProbe);
         }
-        catch (ArgumentException ex) { error = ex.Message.Split(" (Parameter")[0]; return false; }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        { error = ex.Message.Split(" (Parameter")[0]; return false; }
 
         Complex z0 = spec.Z0 == Complex.Zero ? DefaultZ0(ds, group) : spec.Z0;
 
@@ -252,7 +253,8 @@ public static partial class WspSource
                 }
             }
         }
-        catch (ArgumentException ex) { error = ex.Message.Split(" (Parameter")[0]; return false; }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        { error = ex.Message.Split(" (Parameter")[0]; return false; }
     }
 
     private static Complex[][,] PerFreq(Complex[][,] blocks, int outerIndex, int nf)

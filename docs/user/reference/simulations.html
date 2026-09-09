@@ -83,8 +83,13 @@ interpolated onto the sweep.</p>
     <tbody>
       <tr><td>Frequency sweep</td><td>Start / Stop / Step (or point count); one or more segments. Units accepted (<code>GHz</code>, <code>MHz</code>, …).</td></tr>
       <tr><td>Reference impedance</td><td>Per-port reference (from each Term's <code>Z</code>); the result renormalizes to it.</td></tr>
+      <tr><td><code>NDF=yes</code></td><td>Also compute the <a href="wsprobe.html#ndf">normalized determinant function</a> — the rigorous count of right-half-plane poles of the whole network. <code>PassiveVars=</code> / <code>PassiveParams=</code> name what passivates a user-supplied model.</td></tr>
+      <tr><td><code>MarginThreshold=</code></td><td>The <a href="wsprobe.html#stability-margin">stability margin</a> in dB below which a WSProbe is reported as worth looking at. Default <code>-15</code>; <code>none</code> disables.</td></tr>
     </tbody>
   </table>
+<p class="small">A <a href="components.html#wsprobe">WSProbe</a> anywhere in the circuit adds the
+<code>wsp</code> matrix and its derived quantities to this run, at the cost of a few extra
+back-substitutions and no extra factorization. See <a href="wsprobe.html">The WSProbe</a>.</p>
 <p class="small">For the ideal <a href="system-components.html">System Components</a> this is the
 analysis that answers almost everything about them: port match, isolation, coupling and directivity,
 a filter's passband and rejection, a duplexer's arm-to-arm leakage, and an amplifier's small-signal
@@ -115,6 +120,9 @@ compression and IM3, and passive intermodulation on the blocks that carry it. Tw
       <tr><td>GuardHarmonic</td><td>Extra guard harmonic(s) beyond <code>MaxHarm</code> for anti-alias safety.</td><td>0</td></tr>
       <tr><td>Lambda</td><td>Newton damping factor (1 = full step; lower damps an unstable solve).</td><td>1</td></tr>
       <tr><td>MaxIter</td><td>Maximum Newton iterations per solve point.</td><td>100</td></tr>
+      <tr><td>SSStart / SSStop / SSNpts / SSStep / SSUnit / SSLog</td><td>The small-signal "tickle" sweep a <a href="components.html#wsprobe">WSProbe</a> is driven over, around the converged large-signal operating point. Absent, there is no small-signal solve and the run is unchanged. See <a href="wsprobe.html#hb">The WSProbe under harmonic balance</a>.</td><td>0.1-10 GHz</td></tr>
+      <tr><td>SSMaxHarm</td><td>Sidebands retained in the conversion matrix for that solve.</td><td>= MaxHarm</td></tr>
+      <tr><td>MarginThreshold</td><td>As for S-parameters, applied at each operating point.</td><td>-15 dB</td></tr>
     </tbody>
     <caption>Multi-tone analysis adds the extra tones and a mixing order (≥ 5 at two tones, to capture close-in IM products; lower it as tones are added).</caption>
   </table>

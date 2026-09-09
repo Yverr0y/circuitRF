@@ -129,6 +129,25 @@ public static class DocRunData
         gate.InstanceName = "PG";
     });
 
+    /// <summary>
+    /// Run a netlist that is already written — the WSProbe example designs, which are committed
+    /// <c>testdata/</c> files rather than schematic templates (<see cref="DocWsProbeFixtures"/>).
+    ///
+    /// <para>Shares the caching, the scratch directory, the plan/execute pair and the export with
+    /// the template path below, so a figure built from a netlist and one built from a schematic
+    /// cannot disagree about where results land or about what a failure looks like.</para>
+    /// </summary>
+    internal static string RunNetlistText(string key, string cnlText)
+    {
+        if (_cache.TryGetValue(key, out var cached)) return cached;
+
+        string dir = Path.Combine(Scratch.Value, key);
+        Directory.CreateDirectory(dir);
+        string cnl = Path.Combine(dir, "netlist.cnl");
+        File.WriteAllText(cnl, cnlText);
+        return Finish(key, dir, cnl);
+    }
+
     // ── The run ───────────────────────────────────────────────────────────────
 
     private static string Run(string key, Action<TestBench> shape,
@@ -152,12 +171,19 @@ public static class DocRunData
         File.WriteAllText(cnl, CnlWriter.Write(extracted.TestBench, extracted.Library,
                                                $"generated for the user documentation from {template}"));
 
+        return Finish(key, dir, cnl);
+    }
+
+    /// <summary>Plan, run and export one prepared netlist. The one place a documentation run fails,
+    /// so every fixture fails the same way and says the same thing.</summary>
+    private static string Finish(string key, string dir, string cnl)
+    {
         var plan = SchematicRunService.Prepare(cnl, dir);
         if (plan.Status != RunStatus.Success)
             throw new InvalidOperationException(
-                $"The documentation's '{key}' fixture could not be planned from the shipped '{template}' "
-              + $"template: {plan.StatusMessage}. The figure would have been an empty plot frame, which "
-              + "is why this is an error and not a warning.");
+                $"The documentation's '{key}' fixture could not be planned: {plan.StatusMessage}. The "
+              + "figure would have been an empty plot frame, which is why this is an error and not a "
+              + "warning.");
 
         var result = SchematicRunService.Execute(plan, new RunControl());
         if (result.Status != RunStatus.Success || result.GroupedResults is not { } grouped)

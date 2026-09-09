@@ -408,5 +408,46 @@ public static class FigureCatalog
             null,
             "The trace card's WSProbe section: which probe the quantity is taken at, which of the "
           + "reference document's quantities it is, and the Kurokawa reading beside it."),
+
+        // ── The WSProbe chapter's own figures (brief-wsprobe-7 §4) ────────────
+        //
+        // Each is a real run of a committed testdata/ netlist — see DocWsProbeFixtures, whose
+        // catalogue names the page section and the brief gate every design serves.
+
+        new("wsprobe-resonator-polar", DocWsProbeFixtures.ResonatorPolar, 850, 620,
+            WindowFrame.Titled("circuitRF - Data Display"),
+            "The two driving-point loci of an unstable series resonator on one polar plot. 1/Y0 "
+          + "crosses the negative real axis clockwise at the resonance; 1/H0 never does. Both must "
+          + "be checked, because a zero can mask the pole in one of them but never in both."),
+
+        new("wsprobe-margin-resonator", DocWsProbeFixtures.MarginResonator, 850, 560,
+            WindowFrame.Titled("circuitRF - Data Display"),
+            "Both stability margins of a series resonator with the reactance split across the "
+          + "probe: SM_Y0 notches at the resonance and SM_H0's minimum is somewhere else entirely "
+          + "- pole masking, in margin form. The analysis' threshold and the -12 dB floor are drawn "
+          + "beneath them."),
+
+        new("wsprobe-envelope-card", DocWsProbeFixtures.EnvelopeCard, 440, 520,
+            null,
+            "The trace card's Envelope sub-card: the probe each side is pulled at, a ladder of "
+          + "|Gamma| per side, the angular step, and the number of terminations it is about to "
+          + "compute."),
+
+        new("wsprobe-margin-envelope-ohtomo", DocWsProbeFixtures.MarginEnvelopeOhtomo, 850, 560,
+            WindowFrame.Titled("circuitRF - Data Display"),
+            "The margin envelope and the NDF's encirclement count over the same terminations, on "
+          + "one pair of axes. The NDF answers yes or no; the margin says how close."),
+
+        new("wsprobe-hb-fan", DocWsProbeFixtures.HbFan, 850, 560,
+            WindowFrame.Titled("circuitRF - Data Display"),
+            "The stability margin of a pumped varactor against the small-signal probe frequency, "
+          + "one curve per pump level. The collapse at half the fundamental is a parametric "
+          + "instability, which is the case no linear analysis can see."),
+
+        new("wsprobe-ndf-k", DocWsProbeFixtures.NdfK, 850, 560,
+            WindowFrame.Titled("circuitRF - Data Display"),
+            "Rollett's K of a two-port whose terminal S-parameters are those of a 6 dB pad, above "
+          + "1 across the band, beside the NDF's encirclement count of the loop those terminal "
+          + "S-parameters cannot see."),
     ];
 }

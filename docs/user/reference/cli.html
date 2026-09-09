@@ -339,6 +339,18 @@ Wrote hero1.s2p
 circuit that grew a port writes <code>.s3p</code> without you editing the command. An extension naming no format
 this verb writes is refused, listing the ones it does — you never get a Touchstone under a name that
 says otherwise.</p>
+<p><strong>A run carrying <a href="wsprobe.html">WSProbes</a> prints one line per probe</strong> after the S summary, and a run
+with <code>NDF=yes</code> on its directive prints the right-half-plane pole count:</p>
+<pre><code class="language-text">$ circuitrf sparam amp.cnl
+S-parameter analysis 'SP1': 2001 points, 0.5-3 GHz (1 segment(s))
+NDF: 2 right-half-plane pole(s)  (net clockwise encirclement 1.989; NDF(100 GHz)=1 ∠ 1.8)
+WSProbe P idx=1  H0(0.5 GHz)=11.597 ∠ -1.4  ZG(0.5 GHz)=10.482 ∠ 17.4
+                 SM_Y0 min -18.1 dB @ 1.59125 GHz  SM_H0 min -19.8 dB @ 1.73375 GHz
+</code></pre>
+<p><code>--json</code> carries the same under <code>wsprobes</code> and <code>ndf</code>. <strong>The margins are linear there and dB on the
+line</strong>, because dB is a display convention and a document should carry the number. A circuit that has
+WSProbes and <strong>no ports at all</strong> is a legitimate run — it writes every <code>wsp</code> cube and no <code>S</code> — and
+asking it for a Touchstone is refused, naming the spellings that do carry the result.</p>
 <div class="callout">
 <span class="label">Ports with different reference impedances</span>
 <p>A Touchstone file declares <b>one</b> reference impedance, and circuitRF writes port&nbsp;1's on
@@ -1674,8 +1686,21 @@ you gave (comments gone, directives reordered) and call it an extraction.</p>
 <td><code>axis</code></td>
 <td><code>left</code> (the default) or <code>right</code>.</td>
 </tr>
+<tr>
+<td><code>probe</code></td>
+<td>A <a href="wsprobe.html">WSProbe</a> label. Given, it turns a <code>cube=&lt;analysis&gt;.wsp</code> trace into a probe metric.</td>
+</tr>
+<tr>
+<td><code>metric</code></td>
+<td>Which of the reference document's quantities — <code>H0</code>, <code>1/Y0</code>, <code>ZG</code>, <code>SM_Y0</code>, <code>LGa</code>, <code>SMenv</code>, … See <a href="wsprobe.html#metrics">The WSProbe</a>. Some take <code>with=</code>, <code>set=</code>, <code>z0=</code>, <code>side=</code>, <code>gi=</code> or the envelope's grid keys.</td>
+</tr>
 </tbody>
 </table>
+<pre><code class="language-text">circuitrf plot amp.npy -o margin.svg --trace cube=SP1.wsp,probe=GATE,metric=SM_Y0,y=db
+</code></pre>
+<p><strong>Case is load-bearing in that notation and is not folded away</strong> — <code>LGF</code> is one probe's forward
+synthetic-circulator loop gain and <code>LGf</code> is a probe <em>pair's</em> feedback-as-synthetic-FET loop gain.
+A name whose canonical form is shared by two quantities resolves only when it is spelled exactly.</p>
 <p><code>circuitrf read &lt;result&gt;</code> lists the cubes a file holds and their axes, which is where the names come
 from. A cube the file does not hold is refused, listing the ones it does.</p>
 <table>

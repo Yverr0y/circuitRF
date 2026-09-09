@@ -117,7 +117,8 @@ public static partial class WspSource
                 vals[b * 4 + 2] = s[1, 0]; vals[b * 4 + 3] = s[1, 1];
             }
         }
-        catch (ArgumentException ex) { error = ex.Message.Split(" (Parameter")[0]; return false; }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        { error = ex.Message.Split(" (Parameter")[0]; return false; }
 
         result = new DataCube([.. leading!, new Axis("i", [1.0, 2.0]), new Axis("j", [1.0, 2.0])], vals);
         return true;
@@ -155,17 +156,43 @@ public static partial class WspSource
 
         int n = set.Count;
         var vals = new Complex[blocks * n * n];
+        int singular = 0;
         try
         {
             for (int b = 0; b < blocks; b++)
             {
-                var y = WspGlobal.Ymatrix(BlockAt(raw!, b, size), [.. set]);
+                Complex[,]? y = null;
+                // A SINGULAR reduced Z at one frequency is an ordinary condition, not a failure of
+                // the run: a probe whose G node is held by an ideal voltage source — the gate bias
+                // node of the shipped FET test bench, say — has H0 = 0 exactly, which is the
+                // degenerate node the library already reports as NaN rather than fudging (overview
+                // D-7). It must arrive here as a GAP in the trace, and it must never leave this
+                // method as an exception: this group is materialized EAGERLY for every run that
+                // carries a probe, so an escape takes the whole Data Display with it.
+                try { y = WspGlobal.Ymatrix(BlockAt(raw!, b, size), [.. set]); }
+                catch (InvalidOperationException) { singular++; }
+
                 for (int r = 0; r < n; r++)
                 for (int c = 0; c < n; c++)
-                    vals[(b * n + r) * n + c] = y[r, c];
+                    vals[(b * n + r) * n + c] = y is null
+                        ? new Complex(double.NaN, double.NaN)
+                        : y[r, c];
             }
         }
-        catch (ArgumentException ex) { error = ex.Message.Split(" (Parameter")[0]; return false; }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        { error = ex.Message.Split(" (Parameter")[0]; return false; }
+
+        // Every point singular is not a gap, it is a quantity this probe set does not have — one
+        // probe on a hard-driven node is the whole matrix. Reported as a refusal rather than
+        // offered as an item that can only ever draw nothing.
+        if (singular == blocks)
+        {
+            error = "wsp_ymatrix over " + string.Join(", ", names)
+                  + " is singular at every point: the network's reduced impedance matrix at these "
+                  + "probe nodes has no inverse. A probe whose G node is held by an ideal voltage "
+                  + "source has H0 = 0 exactly, which is that case.";
+            return false;
+        }
 
         var ports = set.Select(i => (double)i).ToArray();
         result = new DataCube(

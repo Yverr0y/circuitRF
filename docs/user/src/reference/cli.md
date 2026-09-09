@@ -183,6 +183,22 @@ circuit that grew a port writes `.s3p` without you editing the command. An exten
 this verb writes is refused, listing the ones it does — you never get a Touchstone under a name that
 says otherwise.
 
+**A run carrying [WSProbes](wsprobe.html) prints one line per probe** after the S summary, and a run
+with `NDF=yes` on its directive prints the right-half-plane pole count:
+
+```text
+$ circuitrf sparam amp.cnl
+S-parameter analysis 'SP1': 2001 points, 0.5-3 GHz (1 segment(s))
+NDF: 2 right-half-plane pole(s)  (net clockwise encirclement 1.989; NDF(100 GHz)=1 ∠ 1.8)
+WSProbe P idx=1  H0(0.5 GHz)=11.597 ∠ -1.4  ZG(0.5 GHz)=10.482 ∠ 17.4
+                 SM_Y0 min -18.1 dB @ 1.59125 GHz  SM_H0 min -19.8 dB @ 1.73375 GHz
+```
+
+`--json` carries the same under `wsprobes` and `ndf`. **The margins are linear there and dB on the
+line**, because dB is a display convention and a document should carry the number. A circuit that has
+WSProbes and **no ports at all** is a legitimate run — it writes every `wsp` cube and no `S` — and
+asking it for a Touchstone is refused, naming the spellings that do carry the result.
+
 <div class="callout">
 <span class="label">Ports with different reference impedances</span>
 <p>A Touchstone file declares <b>one</b> reference impedance, and circuitRF writes port&nbsp;1's on
@@ -1427,6 +1443,16 @@ One plot, one axis pair, without writing a data display first.
 | `i`, `j` | The **port numbers** of a matrix cube — `i=2,j=1` is S21. Refused together with a bracketed slice: they are the convenience over writing one. |
 | `y` | `db`, `db10`, `db20`, `mag`, `phase`, `real`, `imag` or `conj`. |
 | `axis` | `left` (the default) or `right`. |
+| `probe` | A [WSProbe](wsprobe.html) label. Given, it turns a `cube=<analysis>.wsp` trace into a probe metric. |
+| `metric` | Which of the reference document's quantities — `H0`, `1/Y0`, `ZG`, `SM_Y0`, `LGa`, `SMenv`, … See [The WSProbe](wsprobe.html#metrics). Some take `with=`, `set=`, `z0=`, `side=`, `gi=` or the envelope's grid keys. |
+
+```text
+circuitrf plot amp.npy -o margin.svg --trace cube=SP1.wsp,probe=GATE,metric=SM_Y0,y=db
+```
+
+**Case is load-bearing in that notation and is not folded away** — `LGF` is one probe's forward
+synthetic-circulator loop gain and `LGf` is a probe *pair's* feedback-as-synthetic-FET loop gain.
+A name whose canonical form is shared by two quantities resolves only when it is spelled exactly.
 
 `circuitrf read <result>` lists the cubes a file holds and their axes, which is where the names come
 from. A cube the file does not hold is refused, listing the ones it does.

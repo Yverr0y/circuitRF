@@ -109,6 +109,27 @@ s11    = SP1.S[:, 1, 1]        S11
 </code></pre>
 <p><code>SP1.S[:, 2, 1]</code> is <strong>S21</strong>, not &quot;row 2 column 1 by zero-based index.&quot; A port outside <code>1..nPorts</code>
 is a clear error listing the available ports.</p>
+<h2 id="wsprobe">WSProbe accessors</h2>
+<p>A run with a <a href="components.html#wsprobe">WSProbe</a> in it carries one <code>wsp</code> matrix plus a named set of
+outputs per probe, and both are reachable by accessor:</p>
+<pre><code class="language-text">SP1.wsp                 the whole matrix, over {freq, row, col}
+SP1.wsp(3, 13)          one element traced over frequency — the document's wsp(3,13)
+SP1.idx(&quot;GATE&quot;)         the probe's 1-based index, as an integer
+SP1.H0(&quot;GATE&quot;)          and Y0, ZG, ZL, LG, F, SM_Y0, SM_H0 the same way
+</code></pre>
+<p><code>row</code> and <code>col</code> are <strong>1-based matrix positions</strong>, matched by axis value rather than by position, so
+they are the reference document's own indices with no arithmetic in between — and, like the
+S-parameter ports above, a positional slice would pin the frequency axis instead.</p>
+<p><code>HB1.*</code> resolves identically for a probe under <a href="wsprobe.html#hb">harmonic balance</a>, over <code>ssfreq</code>
+rather than <code>freq</code>.</p>
+<p>A worked measurement — the smaller of a probe's two stability margins, and the frequencies at which
+the driving-point locus actually crosses:</p>
+<pre><code class="language-text">measure  SMgate = wsp_stability_margin(SP1.wsp, SP1.idx(&quot;GATE&quot;))
+measure  fosc   = wsp_unstable_freq_kurokawa(1 / SP1.H0(&quot;GATE&quot;))
+</code></pre>
+<p>An unknown probe label is an error that lists the probes present. Every derived metric of
+<a href="wsprobe.html#metrics">The WSProbe</a> can be written this way, and evaluates identically in the window
+and under <code>circuitrf sparam</code>.</p>
 <h2 id="compose">Composition &amp; scope</h2>
 <p>Measurements are evaluated in declaration order, and each is in scope by name for the ones after
 it — so a complex figure of merit builds from intermediates. Also in scope: every global

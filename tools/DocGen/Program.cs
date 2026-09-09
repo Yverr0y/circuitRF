@@ -141,6 +141,14 @@ public static class Program
             Console.Error.WriteLine(ex.Message);
             if (ex.InnerException is { } inner && !ReferenceEquals(inner, ex))
                 Console.Error.WriteLine("  ---> " + inner.Message);
+
+            // And then the whole thing, stack included. A figure is built by a fixture that drives
+            // real view models over real engine results, so a failure can arrive from anywhere in
+            // the application — "the matrix is singular." names neither the figure nor the call that
+            // raised it, and finding out otherwise means editing this file and running the 40-second
+            // generation again, which is exactly what happened (brief-wsprobe-7).
+            Console.Error.WriteLine();
+            Console.Error.WriteLine(ex.ToString());
             return 1;
         }
     }

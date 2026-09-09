@@ -1359,3 +1359,46 @@ the passivation carries over unchanged and what is missing is only the plumbing.
   differential and no source or load termination reaches it. The fixture carries a probe on **both**
   gates: the envelope's NDF is the *reduced* one over the probe set, and WSP-9's own gate (i) shows a
   set covering one gate cannot see that mode.
+
+---
+
+## 12. Where it is documented (WSP-7)
+
+The user-facing half is **one chapter**, `docs/user/src/reference/wsprobe.html`, sitting directly
+after Derived Metrics in the Simulate section of the reading order. Everything in §1–§11 above has a
+section of it, and every section here names the one that carries it — so a change to the engine has
+a page to update rather than a search to do.
+
+| This note | The chapter | Figure |
+|---|---|---|
+| §1 the probe, §2 the `wsp` matrix | §1 *What the WSProbe is*, §3 *What it computes* | `{{symbol: wsprobe}}` + an authored redrawing of the two injections |
+| §1 placement, the netlist spelling, `idx` | §2 *Placing it* | — |
+| §2.2 the six defaults, the reduced two-port | §3 (table) and its callout | — |
+| §2.3 what a loop gain is and is not, §5.3 `Zop`/`Yop` | §4 *Reading the results* | — |
+| §2.4 where feedback comes from, §5.3 `ZG ≠ 1/YG` | §4 (the warning callout) | — |
+| §5.5 Kurokawa's search, the both-must-be-checked rule | §4 | `wsprobe-resonator-polar` |
+| §5.2 the single-probe catalogue, §5.6 base SI | §5 *The derived metrics* | — |
+| §9 the stability margin, §9.2 the conventions, §9.3 what the numbers mean | §4a *The stability margin* | `wsprobe-margin-resonator` |
+| §9.4 what the engine reports, `MarginThreshold` | §4a (the threshold message) | — |
+| §6.4 the probe pair, the residual | §6 *Probe pairs: a block in situ* | — |
+| §7 bifurcation and sides, Ohtomo | §7 *Global stability* | — |
+| §8 the envelope, §9.5 margin and NDF over it, §9.7 what it cannot see | §8 *The stability envelope* | `wsprobe-envelope-card`, `wsprobe-margin-envelope-ohtomo` |
+| §10 the large-signal small-signal solve, §10.5–10.7 | §9 *Under harmonic balance* | `wsprobe-hb-fan` |
+| §11 the NDF, §11.3 the passivation contract, §11.4 the SDD shape | §10 *NDF* | `wsprobe-ndf-k` |
+| §3 the accessors and the CLI | §11 *From the command line* | — |
+| every caveat, in one list | §12 *Caveats* | — |
+| the history the whole thing sits in | Appendix A *Stability, from the beginning* | three authored diagrams |
+
+Two rules the chapter is under, both gated by `tests/Ui.Tests/Docs/WsProbeDocsTests.cs`:
+
+- **Every equation it cites is a row of the equation register** (overview §4). The register is the
+  list of equations somebody re-derived or checked numerically; a citation outside it is a claim
+  with no provenance.
+- **The two printed equations the register marks as wrong (T-16, T-17) appear only in their
+  corrected form**, and the page says so rather than leaving a reader to discover it against a
+  non-reciprocal network.
+
+The example designs the figures are drawn from are the committed `testdata/` netlists the gates above
+already run — `series_resonator.cnl`, `parallel_resonator.cnl`, `margin_split_resonator.cnl`,
+`two_stage_terms.cnl`, `hb_varactor_divider.cnl`, `ohtomo_type_a_ndf.cnl` and
+`hidden_pole_two_port.cnl` — read rather than copied (`src/Ui/Diagnostics/Fixtures/DocWsProbeFixtures.cs`).

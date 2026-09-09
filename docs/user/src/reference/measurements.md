@@ -115,6 +115,37 @@ s11    = SP1.S[:, 1, 1]        S11
 `SP1.S[:, 2, 1]` is **S21**, not "row 2 column 1 by zero-based index." A port outside `1..nPorts`
 is a clear error listing the available ports.
 
+## WSProbe accessors {#wsprobe}
+
+A run with a [WSProbe](components.html#wsprobe) in it carries one `wsp` matrix plus a named set of
+outputs per probe, and both are reachable by accessor:
+
+```text
+SP1.wsp                 the whole matrix, over {freq, row, col}
+SP1.wsp(3, 13)          one element traced over frequency — the document's wsp(3,13)
+SP1.idx("GATE")         the probe's 1-based index, as an integer
+SP1.H0("GATE")          and Y0, ZG, ZL, LG, F, SM_Y0, SM_H0 the same way
+```
+
+`row` and `col` are **1-based matrix positions**, matched by axis value rather than by position, so
+they are the reference document's own indices with no arithmetic in between — and, like the
+S-parameter ports above, a positional slice would pin the frequency axis instead.
+
+`HB1.*` resolves identically for a probe under [harmonic balance](wsprobe.html#hb), over `ssfreq`
+rather than `freq`.
+
+A worked measurement — the smaller of a probe's two stability margins, and the frequencies at which
+the driving-point locus actually crosses:
+
+```text
+measure  SMgate = wsp_stability_margin(SP1.wsp, SP1.idx("GATE"))
+measure  fosc   = wsp_unstable_freq_kurokawa(1 / SP1.H0("GATE"))
+```
+
+An unknown probe label is an error that lists the probes present. Every derived metric of
+[The WSProbe](wsprobe.html#metrics) can be written this way, and evaluates identically in the window
+and under `circuitrf sparam`.
+
 ## Composition & scope {#compose}
 
 Measurements are evaluated in declaration order, and each is in scope by name for the ones after

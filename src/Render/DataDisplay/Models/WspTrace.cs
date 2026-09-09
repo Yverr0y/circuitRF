@@ -20,6 +20,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Numerics;
 using RfCore.Data;
@@ -315,6 +316,67 @@ public static class WspMetrics
             : $"{info.Name} is not an immittance or a reflection coefficient, so a Smith chart has "
             + "no grid for it — add it to a Polar or a rectangular plot.";
     }
+
+    /// <summary>
+    /// The SHORT name of this trace — the document's own name for the quantity and the probe it is
+    /// taken at, <c>1/Y0 @ GATE</c>, <c>LGa @ G1→D1</c>, <c>SMenv @ PG</c>.
+    ///
+    /// <para>The axis and legend label, where <see cref="AccessorText"/> is the measure line. The
+    /// two are different jobs: a plot carrying <c>1/H0</c> and <c>1/Y0</c> of ONE probe — which is
+    /// the reading the reference document's §4.10 is entirely about — labelled both traces
+    /// <c>SP1.wsp</c> until this existed, because the label was built from the raw matrix the values
+    /// are computed FROM rather than from the quantity. The full accessor is correct and is far too
+    /// long for an axis.</para>
+    /// </summary>
+    public static string ShortLabel(WspTraceSpec spec)
+    {
+        string name = Name(spec.Metric);
+        if (name.Length == 0) return "";
+        if (NeedsPair(spec.Metric) && spec.With.Length > 0)
+            return $"{name} @ {spec.Probe}\u2192{spec.With}";
+        if (spec.Metric == WspMetric.OhtomoG)
+            return spec.Set.Count > 0
+                ? $"G{spec.SetIndex} @ {string.Join(",", spec.Set)}"
+                : $"G{spec.SetIndex}";
+        return spec.Probe.Length > 0 ? $"{name} @ {spec.Probe}" : name;
+    }
+
+    /// <summary>
+    /// What a PINNED axis of a WSProbe trace is called in its label, or null when it says nothing
+    /// and should be left out.
+    ///
+    /// <para><c>row</c> and <c>col</c> always say nothing: they index the raw <c>wsp</c> matrix the
+    /// value is computed FROM, and the quantity is already named. The four envelope grid axes are
+    /// named from the SPEC rather than from the axis, because the cube the label is built against is
+    /// <c>wsp</c> itself, which does not carry them — so the generic path prints the bare index, and
+    /// <c>rhoS=0</c> for a ladder whose only rung is 0.9 reads as an unpulled source, which is the
+    /// opposite of what the trace shows. A side that is not pulled contributes nothing at all.</para>
+    /// </summary>
+    public static string? PinToken(WspTraceSpec spec, string axisName, int index)
+    {
+        switch (axisName)
+        {
+            case "row" or "col":
+                return null;
+
+            case "rhoS" or "thetaS" when spec.SourceProbe.Length == 0 || spec.GammaSMags.Count == 0:
+            case "rhoL" or "thetaL" when spec.LoadProbe.Length   == 0 || spec.GammaLMags.Count == 0:
+                return null;
+
+            case "rhoS": return MagToken("|ΓS|", spec.GammaSMags, index);
+            case "rhoL": return MagToken("|ΓL|", spec.GammaLMags, index);
+            case "thetaS" or "thetaL":
+                return $"θ{(axisName[^1] == 'S' ? "S" : "L")}="
+                     + (index * spec.ThetaStepDeg).ToString("0.##", CultureInfo.InvariantCulture) + "°";
+            default:
+                return "";   // "" = no opinion; the generic path names it
+        }
+    }
+
+    private static string? MagToken(string name, IReadOnlyList<double> mags, int index)
+        => index >= 0 && index < mags.Count
+            ? $"{name}={mags[index].ToString("0.####", CultureInfo.InvariantCulture)}"
+            : null;
 
     /// <summary>
     /// The measure-line spelling of this trace — the accessor grammar of overview D-5, which is what

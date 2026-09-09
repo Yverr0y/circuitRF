@@ -50,6 +50,18 @@ public static class DocDataDisplayFixtures
     /// Replace the constructor's seeded empty Smith plot with one of <paramref name="type"/>, add a
     /// trace, and hand back both the document and the plot.
     /// </summary>
+    /// <summary>
+    /// <see cref="Plotted"/> under a name the WSProbe figures can call it by
+    /// (<see cref="DocWsProbeFixtures"/> builds its own trace cards over the same document).
+    /// </summary>
+    internal static (DataDisplayDocumentViewModel Doc, PlotContainerViewModel Plot) PlotFor(
+        string logicalId, PlotType type, bool contour = false, int traces = 1,
+        (double W, double H)? size = null)
+        => Plotted(logicalId, type, contour, traces, size);
+
+    /// <summary><see cref="Centred"/>, for the same reason.</summary>
+    internal static Action<Control> CentredPlot(PlotContainerViewModel plot) => Centred(plot);
+
     private static (DataDisplayDocumentViewModel Doc, PlotContainerViewModel Plot) Plotted(
         string logicalId, PlotType type, bool contour = false, int traces = 1,
         (double W, double H)? size = null)

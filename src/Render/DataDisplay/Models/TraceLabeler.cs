@@ -166,7 +166,14 @@ namespace CircuitRF.Render.DataDisplay
 
         private static string BuildCubeQuantity(Trace t)
         {
-            var sb = new StringBuilder(t.CubeName ?? "");
+            // WSP-4/WSP-7: a WSProbe trace is named by the QUANTITY, not by the raw wsp matrix its
+            // values are computed from. Without this, a plot carrying 1/H0 and 1/Y0 of one probe —
+            // the reading the reference document's whole pole-masking section is about — labels
+            // both traces "SP1.wsp" and the reader cannot tell which locus is which. Pinned axes
+            // and the transform still append below, because on an envelope trace they say which
+            // rung and which load angle.
+            var sb = new StringBuilder(
+                t.IsWspTrace ? WspMetrics.ShortLabel(t.Wsp!) : t.CubeName ?? "");
 
             // Append pinned-axis selectors, e.g. "(node=0)".
             //
@@ -187,6 +194,23 @@ namespace CircuitRF.Render.DataDisplay
                 {
                     if (s.Role != AxisRole.PinToIndex) continue;
                     bool isPort = s.AxisName is "i" or "j";
+
+                    // A WSProbe trace names its own pins where the generic path cannot: the wsp
+                    // matrix's row/col say nothing about the quantity, and the envelope's grid axes
+                    // are not on the cube this label is built against. See WspMetrics.PinToken.
+                    if (t.IsWspTrace && WspMetrics.PinToken(t.Wsp!, s.AxisName, s.Index) is { } wspToken)
+                    {
+                        if (wspToken.Length == 0) { }        // no opinion — fall through
+                        else
+                        {
+                            sb.Append(first ? '(' : ',');
+                            sb.Append(wspToken);
+                            first = false;
+                            continue;
+                        }
+                    }
+                    else if (t.IsWspTrace) continue;         // null — this pin says nothing
+
                     sb.Append(first ? '(' : ',');
 
                     // The owner resolves what a pinned axis READS as, because that answer lives on

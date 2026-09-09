@@ -461,6 +461,10 @@ read below **-12 dB**, so anything under that line certifies negative resistance
 reports any probe whose margin falls below the analysis' `MarginThreshold` (default -15 dB) as worth
 looking at. That report is a note, not a warning: a low margin is somewhere to look, not a failure.
 
+**[The WSProbe has its own chapter](wsprobe.html)** — every quantity with its equation, the probe
+pairs, the global loop gains, the stability envelope, the probe under harmonic balance, the NDF, and
+an appendix on stability analysis itself.
+
 {{table: components/WSProbe}}
 
 ### Tuner / SourceTuner / LoadTuner {#tuner}

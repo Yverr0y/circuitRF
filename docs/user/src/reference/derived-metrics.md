@@ -30,6 +30,7 @@ with can be traced to an assumption rather than to a mystery.
 <li><a href="#fixture">The fixture: the one thing you must tell it</a></li>
 <li><a href="#srf">Self-resonance</a></li>
 <li><a href="#datavsmodel">Checking data against a model</a></li>
+<li><a href="#inside">Stability from inside the circuit</a></li>
 <li><a href="#headless">Asking the same questions headless</a></li>
 </ol>
 </nav>
@@ -115,6 +116,10 @@ K = (1 − |S11|² − |S22|² + |Δ|²) / (2·|S12·S21|)
 **Unconditional stability requires K > 1 *and* |Δ| < 1** — both, always. K alone is not a stability
 criterion, which is the reason |Δ| is offered as its own trace rather than folded into K's. Plot them
 together.
+
+**And both together are still a two-port test.** A two-port that passes K and |Δ| can still oscillate,
+because these are computed from the *reduced* two-port and a pole the reduction hides is a pole they
+cannot see — see [the WSProbe page's NDF example](wsprobe.html#ndf).
 
 ### |Δ|
 
@@ -288,6 +293,23 @@ Where the two curves separate is where the model stops being the part. In practi
 *above* the band the model was fitted over, and almost always in ESR before it shows in |Z| — the
 reactance dominates |Z| everywhere except within a whisker of resonance, so a model with the loss wrong
 by a factor of three still overlays convincingly on a |Z| plot. **Compare ESR, not |Z|.**
+
+## Stability from inside the circuit {#inside}
+
+Everything on this page is computed from an S-matrix — a *terminal* view of a network. That is the
+right view for a part you are buying and the wrong one for a node inside an amplifier you are
+drawing, where the question is what the two halves of that node present to each other.
+
+**[The WSProbe](wsprobe.html)** answers that one. It is a component you drop into a node; it perturbs
+nothing and costs no extra sweep, and what it produces is the driving-point impedance and admittance
+at that node, the impedance looking each way out of it, every classical loop gain, and a bounded
+[stability margin](wsprobe.html#stability-margin) that says how close the node is rather than only
+whether it is stable. It also brings the [normalized determinant function](wsprobe.html#ndf), which
+is the rigorous N-port answer that K and |Δ| are an approximation to.
+
+The two pages meet in both directions: a probe's reduced two-port is an ordinary network source, so
+every metric above — μ, K, |Δ|, MAG/MSG and the stability circles — applies to a stage measured
+*inside* the circuit, loaded by what actually loads it.
 
 ## Asking the same questions headless {#headless}
 

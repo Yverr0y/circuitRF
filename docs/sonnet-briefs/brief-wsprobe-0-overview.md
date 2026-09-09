@@ -194,7 +194,7 @@ given in the typo register.
 | 196–201 | even-mode transfer impedance and power gain (`wsp_impedance`, `wsp_gain`) | 196/197 ✓; 199/201 ✗ (T-14; the code is right) | WSP-2 |
 | 203–208 | `Γin`, `Γout`, `GP`, `GA`, `GT`, `Gmax` (`GainDEFs`) | ✓ (textbook) | WSP-2 |
 | 17 | NDF as the sequential product of return differences (Struble) | ✓ | WSP-6 cross-check |
-| 5–8, 11–16, 20–25 | K, B, Barkhausen, Bode's `F = Δ/Δ0`, Jackson, Middlebrook, Tian | textbook | user docs appendix |
+| 5–25 | K, B, Kurokawa's oscillator (9–10), Barkhausen, Bode's `F = Δ/Δ0`, NDF (17), Jackson's index (18–20), Middlebrook, Tian | textbook | user docs appendix |
 | M-Eq. 1–2 | `1/H0 = YG + YL`, `1/Y0 = ZG + ZL` (= Eq. 93/95) | ✓ | WSP-9 |
 | M-Eq. 3–4 | `ZG = z11 − z12 = (y12 + y22)/|Y|`, `ZL = z22 − z21 = (y21 + y11)/|Y|` (= Eq. 65–68) | ✓ | WSP-9 |
 | M-Eq. 5–6 | `YG = y11 + y12`, `YL = y22 + y21` (= Eq. 72–77) and their Z-forms | Y-forms ✓; Z-forms ✗ (`z12`/`z21` swapped; T-17) | WSP-9 |
