@@ -71,7 +71,8 @@ public sealed class TechEditorNarrowWidthTests
     {
         var axaml = Axaml();
 
-        var start = axaml.IndexOf("<Grid ColumnDefinitions=\"*,Auto,Auto,Auto,Auto\">", StringComparison.Ordinal);
+        // Five Auto columns: Undo, Redo, Save, and the Help button added beside them.
+        var start = axaml.IndexOf("<Grid ColumnDefinitions=\"*,Auto,Auto,Auto,Auto,Auto\">", StringComparison.Ordinal);
         Assert.True(start >= 0, "the header row's outer Grid must still be present");
 
         // The identity block occupies the one star column and must degrade rather than overflow.

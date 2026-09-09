@@ -46,6 +46,18 @@ public static class DocAnchors
     public static readonly IReadOnlyList<string> PlotTypeAnchors =
         ["smith", "polar", "table", "rectangular"];
 
+    /// <summary>
+    /// The Technology Editor's Help button, which follows the visible tab — from
+    /// <c>TechEditorViewModel.HelpDestinationFor</c>. Four tabs edit four unrelated things and no one
+    /// chapter documents all of them, so three of these are sections of the Layout Editor chapter and
+    /// the fourth is the Stackup chapter.
+    /// </summary>
+    public static readonly IReadOnlyList<Link> TechEditorLinks =
+        [new("reference/layout-editor.html", "technology"),
+         new("reference/stackup.html",       ""),
+         new("reference/layout-editor.html", "drc"),
+         new("reference/layout-editor.html", "interchange")];
+
     /// <summary>Pages opened whole, with no anchor.</summary>
     public static readonly IReadOnlyList<string> WholePages =
         ["index.html", "reference/components.html", "reference/nonlinear-capacitor.html",
@@ -68,6 +80,7 @@ public static class DocAnchors
         foreach (var a in AnalysisAnchors) links.Add(new Link("reference/simulations.html", a));
         foreach (var a in PlotTypeAnchors) links.Add(new Link("reference/plot-types.html", a));
         foreach (var p in WholePages)      links.Add(new Link(p, ""));
+        links.AddRange(TechEditorLinks);
 
         return links.Distinct().ToList();
     }

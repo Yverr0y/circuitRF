@@ -310,7 +310,7 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
         }
     }
 
-    // ── MIM-6 — which surface of its own band a conductor's analysis sheet sits on ─────────────
+    // ── MIM-6 — which neighbouring dielectric absorbs this conductor's thickness ───────────────
     //
     // A ComboBox rather than the "Ground reference" checkbox beside it, for one reason: the two
     // values are not a flag and its absence. Both are real, named modelling choices a process author
@@ -318,6 +318,18 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
     // wants Bottom, so the same technology carries both and the row has to SAY which it is rather
     // than leave it to an unticked box. It commits immediately and undoably, exactly as that
     // checkbox and the via Fill combo do.
+    //
+    // The STORED value is still a surface of the conductor's own z band; the row displays the
+    // consequence instead (SheetAtLabelConverter), because the band is an internal construct of the
+    // extractor and naming it in the UI asked the user a question they had no way to answer.
+    // A THIRD "symmetric" value was considered and declined (owner, 2026-09-09): it is
+    // representable — half the band to each neighbour puts the sheet on the interface between the
+    // two grown regions, so PlanarProblem.CanSolve is satisfied — but no structure wants it. It
+    // would sit every ordinary line half a metal thickness away from the closed-form microstrip
+    // models circuitRF validates against, forever, and it is the row a reader picks by false
+    // analogy with the expand-up/expand-down/symmetric convention of tools that grow REAL metal
+    // from a drawing plane. That convention answers a different question; this stackup places the
+    // metal explicitly and never has to.
     public static IReadOnlyList<ConductorSheetSurface> SheetAtChoices { get; } =
         Enum.GetValues<ConductorSheetSurface>();
 
@@ -331,7 +343,10 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
             if (Layer.SheetAt == value) return;
             var before = _owner.SnapshotJson();
             Layer.SheetAt = value;
-            _owner.CommitEdit(before, $"Put {Layer.Name}'s analysis sheet at the {value.ToString().ToLowerInvariant()} of its band");
+            // The undo entry says what the user chose, in the words the row says it in — "at the
+            // bottom of its band" named an internal z interval nobody had been shown.
+            _owner.CommitEdit(before,
+                $"Give {Layer.Name}'s thickness to {Converters.SheetAtLabelConverter.Label(value)}");
         }
     }
 

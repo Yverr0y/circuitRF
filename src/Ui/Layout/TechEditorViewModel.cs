@@ -451,7 +451,41 @@ public sealed partial class TechEditorViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(ActiveTabIssues));
         OnPropertyChanged(nameof(HasActiveTabIssues));
+        OnPropertyChanged(nameof(HelpTip));
     }
+
+    // ── Help ──────────────────────────────────────────────────────────────────────────────────────
+    //
+    // One window edits four unrelated things, and no single documentation page covers all four. So the
+    // Help button follows the visible tab rather than opening one chapter and hoping: the stackup has a
+    // chapter of its own, and the other three tabs are sections of the Layout Editor chapter.
+    //
+    // The mapping lives HERE, not in the code-behind, so it can be asserted without a UI platform —
+    // and every destination it can produce is listed in DocAnchors.TechEditorLinks, which is what makes
+    // the docs build fail if one of those sections stops being emitted.
+
+    /// <summary>The page (relative to <c>docs/user/</c>) and anchor the Help button opens for a tab
+    /// index — 0 Layers, 1 Stackup, 2 DRC Rules, 3 Interchange.</summary>
+    public static (string Page, string Anchor) HelpDestinationFor(int tabIndex) => tabIndex switch
+    {
+        1 => ("reference/stackup.html",       ""),
+        2 => ("reference/layout-editor.html", "drc"),
+        3 => ("reference/layout-editor.html", "interchange"),
+        _ => ("reference/layout-editor.html", "technology"),
+    };
+
+    /// <summary>Where Help goes from the tab that is showing now.</summary>
+    public (string Page, string Anchor) HelpDestination => HelpDestinationFor(SelectedTabIndex);
+
+    /// <summary>What the Help button's tooltip says — it names the tab, because the button's
+    /// destination changes with it and a bare "Help" would not say that.</summary>
+    public string HelpTip => SelectedTabIndex switch
+    {
+        1 => "Open the documentation for the Stackup",
+        2 => "Open the documentation for design-rule checking",
+        3 => "Open the documentation for interchange mappings",
+        _ => "Open the documentation for the technology and its layer table",
+    };
 
     private void RaiseValidationViews()
     {
@@ -605,6 +639,30 @@ public sealed partial class TechEditorViewModel : ObservableObject
                            LayoutUnits.DefaultDbuPerMicron) + " " +
         LayoutUnits.Suffix(Working.DefaultDisplayUnit);
 
+    // ── What the stack is MADE OF, beside how tall it is ──────────────────────────────────────────
+    //
+    // Three counts on the same row as the height, because the height alone does not answer the
+    // question a reader of a stackup actually opens it with — "is this the four-layer board I think
+    // it is?". A 4/3/2 reads as a four-layer board with two via kinds at a glance; scrolling the
+    // cards and counting them by eye is the version of this that gets it wrong.
+    //
+    // DELIBERATELY TERSE ("conductors: 4", not "Number of conductors: 4"): these sit beside the
+    // height in a row that also has to hold the board-thickness comparison, and the readouts wrap
+    // rather than truncate when the window narrows.
+
+    /// <summary>How many Conductor entries the stackup holds.</summary>
+    public string ConductorCountText  => "conductors: "  + CountOf(StackupKind.Conductor);
+
+    /// <summary>How many Dielectric entries the stackup holds.</summary>
+    public string DielectricCountText => "dielectrics: " + CountOf(StackupKind.Dielectric);
+
+    /// <summary>How many Via entries the stackup holds. <b>Entries, not holes</b> — a via entry is a
+    /// kind of connection between two named conductors, and one entry covers every via drawn on its
+    /// drawing layer.</summary>
+    public string ViaCountText        => "vias: "        + CountOf(StackupKind.Via);
+
+    private int CountOf(StackupKind kind) => Working.Stackup.Layers.Count(l => l.Kind == kind);
+
     /// <summary>Whether another document stated an overall board thickness for this stackup to be
     /// compared against — a Gerber job file's <c>BoardThickness</c>, today. False for every
     /// hand-authored technology, which is most of them.</summary>
@@ -652,6 +710,9 @@ public sealed partial class TechEditorViewModel : ObservableObject
     private void RaiseStackHeightViews()
     {
         OnPropertyChanged(nameof(StackTotalText));
+        OnPropertyChanged(nameof(ConductorCountText));
+        OnPropertyChanged(nameof(DielectricCountText));
+        OnPropertyChanged(nameof(ViaCountText));
         OnPropertyChanged(nameof(HasBoardThickness));
         OnPropertyChanged(nameof(BoardThicknessText));
         OnPropertyChanged(nameof(HasStackHeightMismatch));

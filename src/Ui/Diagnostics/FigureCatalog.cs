@@ -154,6 +154,20 @@ public static class FigureCatalog
             WindowFrame.Titled("circuitRF - Layout editor"),
             "The layout editor: a microstrip run with a mitred bend, a crossing stub and a ground via."),
 
+        // The Technology Editor's Stackup tab, on the shipped four-layer board technology.
+        //
+        // TALL ON PURPOSE. A .ctech's stackup is a scrolling list of cards, and a capture at the
+        // height of a real docked window shows four of the nine entries with a scrollbar past them —
+        // which is the one thing a figure cannot convey, because a reader cannot scroll a picture.
+        // The height here is the height at which all nine cards and the summary row fit with nothing
+        // clipped, so what the page shows is the whole stackup.
+        new("tech-editor-stackup", DocTechEditorFixtures.StackupTab, 980, 2080,
+            WindowFrame.Titled("circuitRF - PCB 4-Layer FR-4 (62mil, 1/0.5oz)"),
+            "The Technology Editor's Stackup tab on the shipped four-layer FR-4 technology: four "
+          + "copper entries, three dielectrics between them, and two via entries that span different "
+          + "pairs of conductors. The boundary conditions and the three Add buttons are on the top "
+          + "row; the summary beneath them is the stack height and what the stack is made of."),
+
         // The stackup in cross-section, drawn from the shipped MMIC technology rather than from a
         // hand-written list of bands — so the picture cannot outlive the thing it is a picture of.
         new("stackup-mmic", DocStackupFixtures.MmicCrossSection, 862, 354, null,

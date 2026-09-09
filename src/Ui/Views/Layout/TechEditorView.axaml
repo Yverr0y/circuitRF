@@ -10,6 +10,7 @@
 
     <UserControl.Resources>
         <conv:ToLowerStringConverter x:Key="ToLower"/>
+        <conv:SheetAtLabelConverter x:Key="SheetAtLabel"/>
     </UserControl.Resources>
 
     <UserControl.Styles>
@@ -107,6 +108,20 @@
             <Setter Property="MinHeight" Value="0"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
+        <!-- The Stackup tab's summary readouts. One class rather than five copies of the same
+             three setters, and the vertical margin is what keeps the row legible when the WrapPanel
+             it lives in wraps onto a second line. -->
+        <Style Selector="TextBlock.stat, SelectableTextBlock.stat">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,1"/>
+        </Style>
+        <Style Selector="TextBlock.statsep">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Opacity" Value="0.5"/>
+            <Setter Property="Margin" Value="8,1"/>
+        </Style>
         <Style Selector="TextBlock.filtercount">
             <Setter Property="FontSize" Value="10"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
@@ -172,7 +187,7 @@
                 BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
                 BorderThickness="0,0,0,1"
                 Padding="8,6">
-            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto">
                 <!-- The identity block owns the ONLY star column, so it is the one that shrinks as the
                      window narrows. A horizontal StackPanel would keep its full desired width and paint
                      straight over the next column (the reported overlap), so this is a Grid whose middle
@@ -212,6 +227,17 @@
                 <Button Grid.Column="2" Content="Undo" Command="{Binding ViewModel.UndoCommand}" FontSize="11" Padding="8,3" Margin="4,0,0,0"/>
                 <Button Grid.Column="3" Content="Redo" Command="{Binding ViewModel.RedoCommand}" FontSize="11" Padding="8,3" Margin="4,0,0,0"/>
                 <Button Grid.Column="4" Content="Save" Command="{Binding ViewModel.SaveCommand}" FontSize="11" Padding="8,3" Margin="4,0,0,0"/>
+
+                <!-- Help, in the top-right corner, on the same ? glyph every other Help button in the
+                     application uses. It is TAB-AWARE — see TechEditorView.OnHelp — because this one
+                     window edits four unrelated things and there is no single page that documents all
+                     of them; a button that always opened the same chapter would be right a quarter of
+                     the time. Every destination it can emit is listed in DocAnchors, so the docs build
+                     fails if one of those sections stops being emitted. -->
+                <Button Grid.Column="5" Name="HelpButton" Padding="6,3" Margin="8,0,0,0"
+                        ToolTip.Tip="{Binding ViewModel.HelpTip}">
+                    <mi:MaterialIcon Kind="HelpCircleOutline" Width="14" Height="14"/>
+                </Button>
             </Grid>
         </Border>
 
@@ -488,44 +514,84 @@
             <!-- Stackup ────────────────────────────────────────────────────── -->
             <TabItem Header="{Binding ViewModel.StackupTabHeader}">
                 <DockPanel>
-                    <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,Auto,Auto,Auto,*" Margin="6,6">
-                        <TextBlock Grid.Column="0" Text="Top:" VerticalAlignment="Center" FontSize="11" Margin="0,0,4,0"/>
-                        <ComboBox Grid.Column="1" Classes="cell"
+                    <!-- TWO rows, and which control is on which is the whole point of the arrangement:
+                         the things you ACT with are on the top row (the two boundary conditions, and the
+                         three Add buttons at the right edge), and the things you READ are on the row
+                         below. The Add buttons used to be docked to the BOTTOM of the pane, a full
+                         stackup's scroll away from the row being added to.
+
+                         ClipToBounds on the top row is the backstop for a window narrow enough that the
+                         starred spacer has run out: the Add buttons are then trimmed at the right edge
+                         rather than painting over the Bottom combo beside them, which is what a Grid
+                         does when its Auto columns no longer fit. -->
+                    <Grid DockPanel.Dock="Top" RowDefinitions="Auto,Auto" RowSpacing="4"
+                          ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto" Margin="6,6" ClipToBounds="True">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Top:" VerticalAlignment="Center" FontSize="11" Margin="0,0,4,0"/>
+                        <ComboBox Grid.Row="0" Grid.Column="1" Classes="cell"
                                   ItemsSource="{x:Static lay:TechEditorViewModel.BoundaryConditions}"
                                   SelectedItem="{Binding ViewModel.StackupTop, Mode=TwoWay}"/>
-                        <TextBlock Grid.Column="2" Text="Bottom:" VerticalAlignment="Center" FontSize="11" Margin="12,0,4,0"/>
-                        <ComboBox Grid.Column="3" Classes="cell"
+                        <TextBlock Grid.Row="0" Grid.Column="2" Text="Bottom:" VerticalAlignment="Center" FontSize="11" Margin="12,0,4,0"/>
+                        <ComboBox Grid.Row="0" Grid.Column="3" Classes="cell"
                                   ItemsSource="{x:Static lay:TechEditorViewModel.BoundaryConditions}"
                                   SelectedItem="{Binding ViewModel.StackupBottom, Mode=TwoWay}"/>
 
-                        <!-- GI3 R-gi3-6/R-gi3-7. The cheapest possible check on a hand-entered
-                             stackup: does it add up? It catches the common error directly — a stack
-                             transcribed one row at a time and never totalled does not match the board
-                             it came from, and nothing said so before a run gave a wrong answer.
-                             The board figure appears only when some other document stated one (a job
-                             file's BoardThickness); a disagreement is MARKED and never corrected. -->
-                        <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6"
-                                    HorizontalAlignment="Right" VerticalAlignment="Center">
-                            <TextBlock Text="Stack height:" FontSize="11" VerticalAlignment="Center"
+                        <StackPanel Grid.Row="0" Grid.Column="5" Orientation="Horizontal" Spacing="4"
+                                    HorizontalAlignment="Right" VerticalAlignment="Center" Margin="12,0,0,0">
+                            <Button Content="＋ Dielectric" Command="{Binding ViewModel.AddDielectricLayerCommand}" FontSize="11" Padding="8,3"/>
+                            <Button Content="＋ Conductor" Command="{Binding ViewModel.AddConductorLayerCommand}" FontSize="11" Padding="8,3"/>
+                            <Button Content="＋ Via" Command="{Binding ViewModel.AddViaLayerCommand}" FontSize="11" Padding="8,3"/>
+                        </StackPanel>
+
+                        <!-- GI3 R-gi3-6/R-gi3-7, plus the three counts beside it. The height is the
+                             cheapest possible check on a hand-entered stackup: does it add up? It
+                             catches the common error directly — a stack transcribed one row at a time
+                             and never totalled does not match the board it came from, and nothing said
+                             so before a run gave a wrong answer. The board figure appears only when
+                             some other document stated one (a job file's BoardThickness); a
+                             disagreement is MARKED and never corrected.
+
+                             A WrapPanel, not the StackPanel this was: a horizontal StackPanel measures
+                             its children with UNBOUNDED width on its own axis, so a narrow window does
+                             not shorten it — it runs out of the row and over whatever is beside it.
+                             These readouts wrap onto a second line instead, which is why the row above
+                             is where the buttons live and this one is free to grow downwards.
+
+                             SelectableTextBlock throughout: every one of these is a number somebody
+                             copies — into a fab note, a spreadsheet, or a message asking whether the
+                             board is the one they think it is. -->
+                        <WrapPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="6"
+                                   HorizontalAlignment="Right">
+                            <TextBlock Text="Stack height:" Classes="stat" Margin="0,0,6,0"
                                        Foreground="{DynamicResource SystemBaseMediumColor}"/>
-                            <TextBlock Text="{Binding ViewModel.StackTotalText}" FontSize="11"
-                                       VerticalAlignment="Center" FontWeight="SemiBold"
-                                       ToolTip.Tip="The sum of every Conductor and Dielectric thickness in this stackup, in the technology's display unit. Via entries are excluded — a via has no z band of its own, it traverses the dielectrics between the conductors it spans."/>
-                            <TextBlock Text="·" FontSize="11" VerticalAlignment="Center" Opacity="0.5"
+                            <SelectableTextBlock Text="{Binding ViewModel.StackTotalText}" Classes="stat"
+                                                 FontWeight="SemiBold"
+                                                 ToolTip.Tip="The sum of every Conductor and Dielectric thickness in this stackup, in the technology's display unit. Via entries are excluded — a via has no z band of its own, it traverses the dielectrics between the conductors it spans."/>
+                            <TextBlock Text="·" Classes="statsep"/>
+                            <SelectableTextBlock Text="{Binding ViewModel.ConductorCountText}" Classes="stat"
+                                                 Foreground="{DynamicResource SystemBaseMediumColor}"
+                                                 ToolTip.Tip="How many Conductor entries this stackup holds — the metal layers. On a board this is the layer count the fabricator quotes."/>
+                            <TextBlock Text="·" Classes="statsep"/>
+                            <SelectableTextBlock Text="{Binding ViewModel.DielectricCountText}" Classes="stat"
+                                                 Foreground="{DynamicResource SystemBaseMediumColor}"
+                                                 ToolTip.Tip="How many Dielectric entries this stackup holds — the insulating layers between the conductors. A dielectric is never drawn on and has no drawing layer."/>
+                            <TextBlock Text="·" Classes="statsep"/>
+                            <SelectableTextBlock Text="{Binding ViewModel.ViaCountText}" Classes="stat"
+                                                 Foreground="{DynamicResource SystemBaseMediumColor}"
+                                                 ToolTip.Tip="How many Via ENTRIES this stackup holds, not how many holes are drilled. A via entry is one kind of connection between two named conductors, and every via drawn on its drawing layer is an instance of it."/>
+                            <TextBlock Text="·" Classes="statsep"
                                        IsVisible="{Binding ViewModel.HasBoardThickness}"/>
-                            <TextBlock Text="board:" FontSize="11" VerticalAlignment="Center"
+                            <TextBlock Text="board:" Classes="stat" Margin="0,0,6,0"
                                        Foreground="{DynamicResource SystemBaseMediumColor}"
                                        IsVisible="{Binding ViewModel.HasBoardThickness}"/>
-                            <TextBlock Text="{Binding ViewModel.BoardThicknessText}" FontSize="11"
-                                       VerticalAlignment="Center"
-                                       IsVisible="{Binding ViewModel.HasBoardThickness}"
-                                       ToolTip.Tip="The overall board thickness the imported job file states. It is a second opinion, not a constraint: nothing derives geometry from it, and the stack a solver sees is built from the layer entries alone."/>
-                            <TextBlock Text="⚠ does not match the stated board thickness" FontSize="11"
-                                       VerticalAlignment="Center"
+                            <SelectableTextBlock Text="{Binding ViewModel.BoardThicknessText}" Classes="stat"
+                                                 IsVisible="{Binding ViewModel.HasBoardThickness}"
+                                                 ToolTip.Tip="The overall board thickness the imported job file states. It is a second opinion, not a constraint: nothing derives geometry from it, and the stack a solver sees is built from the layer entries alone."/>
+                            <TextBlock Text="⚠ does not match the stated board thickness" Classes="stat"
+                                       Margin="6,0,0,0"
                                        Foreground="{DynamicResource CrfWarningBrush}"
                                        IsVisible="{Binding ViewModel.HasStackHeightMismatch}"
                                        ToolTip.Tip="{Binding ViewModel.StackHeightMismatchText}"/>
-                        </StackPanel>
+                        </WrapPanel>
                     </Grid>
 
                     <!-- The stackup rows are cards, not a column grid, so the filter row has only
@@ -539,14 +605,8 @@
                         <TextBlock Grid.Column="1" Classes="filtercount" Text="{Binding ViewModel.StackupFilterSummary}"/>
                     </Grid>
 
-                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="4" Margin="6,4">
-                        <Button Content="＋ Dielectric" Command="{Binding ViewModel.AddDielectricLayerCommand}" FontSize="11" Padding="8,3"/>
-                        <Button Content="＋ Conductor" Command="{Binding ViewModel.AddConductorLayerCommand}" FontSize="11" Padding="8,3"/>
-                        <Button Content="＋ Via" Command="{Binding ViewModel.AddViaLayerCommand}" FontSize="11" Padding="8,3"/>
-                    </StackPanel>
-
                     <ListBox Classes="rows" x:Name="StackupList" ItemsSource="{Binding ViewModel.FilteredStackupLayers}"
-                             Margin="6,0" SelectionMode="Single">
+                             Margin="6,0,6,4" SelectionMode="Single">
                             <ListBox.ItemTemplate>
                                 <DataTemplate x:DataType="lay:StackupLayerRowViewModel">
                                   <StackPanel>
@@ -648,12 +708,39 @@
                                                  capacitor's LOWER plate wants, so the modelled plate
                                                  gap is the capacitor dielectric alone. -->
                                             <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding IsConductor}">
-                                                <TextBlock Text="EM sheet at:" Width="70" FontSize="11"
-                                                           VerticalAlignment="Center" TextWrapping="Wrap"/>
-                                                <ComboBox Classes="cell" MinWidth="90"
+                                                <!-- Owner, 2026-09-09: this row used to read "EM sheet
+                                                     at: Bottom / Top", which cannot be answered without
+                                                     knowing what a conductor's z BAND is — a word the
+                                                     control never defined and a reader has no reason to
+                                                     know. The stored value is still a surface (see
+                                                     ConductorSheetSurface, and a .ctech is byte-identical);
+                                                     what the label and the rows now name is the CONSEQUENCE,
+                                                     which is the half a process author is actually choosing
+                                                     between. SheetAtLabelConverter is display-only.
+
+                                                     Wider than the 70 px the rows above use, on the
+                                                     "Patterned with:" precedent two cards down: a label
+                                                     that says what the control does is worth one row's
+                                                     alignment.
+
+                                                     The tooltip is on the LABEL as well as on the combo —
+                                                     the words are what a reader hovers when they do not
+                                                     know what the control is for, and hovering the control
+                                                     assumes you already do. Same text, so the two cannot
+                                                     drift into saying different things. -->
+                                                <TextBlock Text="Metal thickness goes to:" Width="140" FontSize="11"
+                                                           VerticalAlignment="Center" TextWrapping="Wrap"
+                                                           ToolTip.Tip="The full-wave planar solver has no thickness for metal — a conductor is a sheet at one height — so this conductor's thickness has to be given to the dielectric on one side of it. The layer above (the default, and what every technology written before this field means) leaves the substrate under the line exactly as you entered it, which is what the closed-form microstrip models agree with. The substrate below grows the substrate by this metal, which is what a thin-film capacitor's LOWER plate needs so the modelled plate gap is the capacitor dielectric alone. The stack height never changes either way."/>
+                                                <ComboBox Classes="cell" MinWidth="160"
                                                           ItemsSource="{Binding SheetAtChoices}"
                                                           SelectedItem="{Binding SelectedSheetAt, Mode=TwoWay}"
-                                                          ToolTip.Tip="Which surface of this conductor's band the full-wave planar solver puts its zero-thickness sheet on. Bottom (the default) absorbs the band into the dielectric above and is what makes a microstrip's height come out as the substrate thickness. Top absorbs it into the dielectric below, which is what a thin-film capacitor's lower plate needs."/>
+                                                          ToolTip.Tip="The full-wave planar solver has no thickness for metal — a conductor is a sheet at one height — so this conductor's thickness has to be given to the dielectric on one side of it. The layer above (the default, and what every technology written before this field means) leaves the substrate under the line exactly as you entered it, which is what the closed-form microstrip models agree with. The substrate below grows the substrate by this metal, which is what a thin-film capacitor's LOWER plate needs so the modelled plate gap is the capacitor dielectric alone. The stack height never changes either way.">
+                                                    <ComboBox.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <TextBlock Text="{Binding Converter={StaticResource SheetAtLabel}}"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.ItemTemplate>
+                                                </ComboBox>
                                             </StackPanel>
 
                                             <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsDielectric}">
@@ -692,7 +779,8 @@
                                                  dielectric and is what every other entry means. -->
                                             <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding IsDielectric}">
                                                 <TextBlock Text="Patterned with:" Width="86" FontSize="11"
-                                                           VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                                           VerticalAlignment="Center" TextWrapping="Wrap"
+                                                           ToolTip.Tip="For a patterned thin film such as a capacitor dielectric: the conductor it is deposited under. Name the conductor directly ABOVE this entry. An EM run carries this dielectric only when that conductor is one of its analysis levels; otherwise it enters the medium as air at the same thickness and the run says so in its notes. Leave as (none) for an ordinary, laterally continuous dielectric."/>
                                                 <ComboBox Classes="cell" MinWidth="110"
                                                           ItemsSource="{Binding PresentWithChoices}"
                                                           SelectedItem="{Binding SelectedPresentWith, Mode=TwoWay}"

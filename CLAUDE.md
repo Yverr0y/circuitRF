@@ -297,10 +297,10 @@ Then report it and move on: "failed, I touched nothing on that path, here is the
 complete answer. Whether a load-dependent test has genuinely regressed is a question about the repo,
 not about your change — ask the owner rather than spending minutes of machine time on it unasked.
 
-### `dotnet test` is fast by default (brief-test-default-fast.md, 2026-07-28)
 
-**Plain `dotnet test`, with no flags, is the routine gate — it is fast by construction, not by
-convention.** Repo-root `circuitrf.runsettings` (`TestCaseFilter: Category!=Benchmark`) is wired in via
+**Plain `dotnet test`, with no flags, is the routine gate — but it takes a long time to run so use it
+only when absolutely nessesary.  Even `dotnet test tests/Ui.Tests` can take a long time to run (> 7 min)
+** Repo-root `circuitrf.runsettings` (`TestCaseFilter: Category!=Benchmark`) is wired in via
 `Directory.Build.props`'s `RunSettingsFilePath`, so every invocation — `dotnet test` at the root,
 `dotnet test tests/Ui.Tests`, an IDE test run, CI — inherits the exclusion automatically. There is
 nothing to type and nothing to forget. This supersedes the prior two-tag, filter-must-be-typed schemes

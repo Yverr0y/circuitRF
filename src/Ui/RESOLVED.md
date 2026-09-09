@@ -1,5 +1,120 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## "EM sheet at: Bottom / Top" named an internal construct, and there is no "symmetric" (owner, 2026-09-09)
+
+Owner, reading the chapter this round had just extended: *what is a "band"?* It is the extractor's
+own name for the slice of z a stackup row occupies (`PlanarExtractor.Band`, `BottomM`/`TopM`) — an
+internal construct, **used thirteen times in `stackup.md` and defined nowhere**, and printed on a
+control as the only thing distinguishing its two values.
+
+**What the setting actually is.** The full-wave planar kernel has no thickness for metal: a conductor
+is a sheet at one z. Its slice therefore has to be filled with something, and the stackup never says
+what fills a metal layer where no metal is drawn. Two decisions, always made as a pair
+(`PlanarExtractor.cs:757-780`): which face of the slice the sheet sits on, and which neighbouring
+dielectric grows by the metal's thickness. `Bottom` → sheet on the lower face, thickness to the
+dielectric ABOVE, so the substrate stays as authored. `Top` → sheet on the upper face, thickness to
+the dielectric BELOW, so the substrate grows. **The stack height is identical either way** — nothing
+moves; only which neighbour absorbs the vanished thickness.
+
+**The row now names the consequence** — "Metal thickness goes to: the layer above (default) / the
+substrate below" — through `SheetAtLabelConverter`, which is **display only**. The enum, the property
+and the `.ctech` are untouched (`"SheetAt": "Bottom"|"Top"`), so every technology ever written reads
+back identically and no extraction changes. Widened past the card's 70 px label column on the
+`Patterned with:` precedent: a label that says what the control does is worth one row's alignment.
+
+**The undo entry moved with it.** It said *"Put X's analysis sheet at the bottom of its band"* — the
+same undefined word, in the one list a user reads to find out what they just did.
+
+### "Expand up / expand down / symmetric" is a different question, and the answer to it is no
+
+Asked twice, so it is written down here rather than left to be re-derived. That convention belongs to
+a stackup that hands you an **interface** and a thickness and must decide which way real copper grows
+from it. **circuitRF never asks it**: its stackup is an explicit ordered list, the conductor is its
+own row with its own thickness already between two named dielectric rows, and its extent is settled
+before any EM question is put. Nothing is ever displaced, so there is no "intrude" either.
+
+**I first claimed a third "symmetric" value was structurally impossible, and that was wrong.**
+`PlanarProblem.CanSolve:291` refuses a level *buried inside a dielectric region* — but half the slice
+to each neighbour puts the boundary between the two grown regions exactly at the sheet, so the level
+lands on a real interface, and `BuildMedium` already cuts at every level's z. It is implementable;
+the fallback in the medium loop would key off the metal's own `BottomM`/`TopM` rather than the
+interval's `lo`/`hi`, and the two halves would not merge because `IsLevelBoundary` blocks it.
+
+**Declined anyway, and this is the reason to keep:** no structure wants it. `Bottom` exists because it
+makes a microstrip's height come out as the substrate thickness, which is what the **validated
+closed-form models agree with** — they carry real metal and measure height to its underside. `Top`
+exists because a plate gap must be the dielectric alone. Symmetric answers neither, would place every
+ordinary line permanently half a metal thickness from the closed-form reference, and puts the sheet
+at the metal's centroid for the ground-referenced case where the field is in the substrate under the
+strip. It is also precisely the row a reader picks by false analogy with the convention above — a
+third choice that is never right, on a control whose whole difficulty was already that it is hard to
+explain. The chapter now says so in a callout, so the next reader does not have to ask.
+
+Gates: `TechEditorHelpAndStackupSummaryTests` — the relabel with the stored enum asserted unchanged,
+`Enum.GetValues<ConductorSheetSurface>().Length == 2` with the chapter's explanation of why, and a
+word-boundary scan that fails if "band" returns to `stackup.md`.
+
+## Technology Editor: a Help button, two tooltips, and the Stackup tab's own toolbar row (owner, 2026-09-09)
+
+Five requests in one round. Four are ordinary; the two worth writing down are why the Help button is
+tab-aware and why the summary row is a `WrapPanel`.
+
+**The Help button follows the visible tab.** One window edits four unrelated things and there is no
+single chapter that documents all of them, so a button that always opened one page would be right a
+quarter of the time. `TechEditorViewModel.HelpDestinationFor` maps 0 Layers →
+`layout-editor.html#technology`, 1 Stackup → `stackup.html`, 2 DRC Rules → `layout-editor.html#drc`,
+3 Interchange → `layout-editor.html#interchange`. **The mapping lives in the view model, not the
+code-behind**, so it is assertable without a UI platform — and every destination it can emit is
+listed in `DocAnchors.TechEditorLinks`, which is what puts it inside `DocsFactoryTests`'
+existing anchor gate. A broken deep link fails silently: the browser opens the page at the top and
+nobody notices the section is missing.
+
+**The summary row is a `WrapPanel`, and that is the fix rather than a preference.** A horizontal
+`StackPanel` measures its children with unbounded width on its own axis, so it does not shorten as
+the window narrows — it runs out of its cell and paints over whatever is beside it. That is the same
+mechanism this file's header row was already fixed for (`TechEditorNarrowWidthTests`), and adding
+three more readouts beside the stack height would have reintroduced it. The row wraps onto a second
+line instead, which is affordable precisely because the Add buttons moved off it onto row 0.
+
+**The Add buttons moved from a `DockPanel.Dock="Bottom"` strip to the top row's right edge**, where
+`Stack height:` used to be. The old placement put them a full stackup's scroll away from the row
+being added to. The top row carries `ClipToBounds` as the backstop: when the starred spacer runs out,
+a Grid's Auto columns overflow rather than shrink, and trimming the buttons at the right edge is
+better than painting them over the Bottom combo.
+
+**A tooltip on a control is not a tooltip on its label.** "EM sheet at" and "Patterned with" both had
+one on the ComboBox and none on the words beside it — but the words are what a reader hovers when
+they do not know what the control is *for*; hovering the control assumes they already do. Same text
+on both, and a test counts the occurrences so the two cannot drift.
+
+**The new documentation figure is `tech-editor-stackup`**, the Stackup tab on the shipped four-layer
+FR-4 technology, cited from `stackup.md`'s new "The Stackup tab, field by field" section. Two things
+about it:
+
+- **Four layers is the smallest board that is not degenerate.** Two signal coppers and two planes
+  make *ground reference* a designation rather than "the bottom one"; three dielectrics make the
+  stack genuinely stratified; and two via entries with *different* spans make "a via is a connection
+  between two named conductors" visible rather than asserted. On a two-layer board all three look
+  like coincidences.
+- **980 x 2080, which is tall on purpose.** The stackup is a scrolling list of cards and a reader
+  cannot scroll a picture, so the height is the height at which all nine entries fit with nothing
+  clipped — measured, not guessed: content ends at y = 2107 in the framed canvas, which is 2073 in
+  content coordinates plus the list's 4 px bottom margin. A conductor card is ~305 px (it carries the
+  drawing-layer checkbox list), a dielectric ~122, a via ~110.
+
+**Two things regenerating the docs turned up that are NOT this change**, recorded so the next person
+does not chase them:
+
+- `schematic-editor.html`'s library-palette figure moved every tile after `S2P` by one. That is
+  2026-09-08's deliberate reorder of `LibraryCatalog` (WSProbe moved to sit after S2P) finally
+  reaching the docs — WSProbe is still on the palette, four occurrences before and after.
+- `harmonica-instrument*.svg` changed with **no text difference at all**, which is the known
+  nondeterministic figure family. Classify these by diffing the text nodes, not the byte count.
+
+Gates: `TechEditorHelpAndStackupSummaryTests` (the whole round, including the counts against the real
+shipped `.ctech` and an undo), and `TechEditorNarrowWidthTests`, whose header-Grid column list needed
+its fifth `Auto` for the Help button.
+
 ## A new workspace's History panel said no workspace was open (owner, 2026-09-09)
 
 Reported after File ▸ New Workspace, a Gerber import into it, and an attempt to keep the state: the

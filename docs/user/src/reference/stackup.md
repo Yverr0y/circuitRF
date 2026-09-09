@@ -20,9 +20,10 @@ every port in the run at once.**
 <ol>
 <li><a href="#where">Where the stackup lives</a></li>
 <li><a href="#anatomy">Anatomy of a stackup</a></li>
+<li><a href="#tab">The Stackup tab, field by field</a></li>
 <li><a href="#ground">Where your port's negative terminal is</a></li>
 <li><a href="#levels">Which conductors get simulated</a></li>
-<li><a href="#sheet-surface">Which surface a conductor's sheet sits on</a></li>
+<li><a href="#sheet-surface">Where a conductor's thickness goes</a></li>
 <li><a href="#slab">The slab, and what makes one solvable</a></li>
 <li><a href="#vias">Vias</a></li>
 <li><a href="#mim">A thin-film (MIM) capacitor</a></li>
@@ -96,6 +97,85 @@ simply not part of the EM problem. If a run tells you it found "nothing on a lay
 conductor", that binding is what is missing — not the artwork.</p>
 </div>
 
+## The Stackup tab, field by field {#tab}
+
+Below is the shipped **four-layer FR-4** technology — the one a new workspace can be created
+against — open in the Technology Editor's Stackup tab. Nine entries: four coppers, three dielectrics
+between them, and two via entries. It is worth opening yourself alongside this page; everything on it
+is described below.
+
+{{ui: tech-editor-stackup}}
+
+### The top row: what is above and below, and how to add an entry
+
+| Control | What it does |
+|---|---|
+| **Top** | The boundary condition above the whole sandwich — `Open` (free space, the usual case) or `Ground`. |
+| **Bottom** | The boundary condition below it — `Ground` (the usual case) or `Open`. |
+| **＋ Dielectric / ＋ Conductor / ＋ Via** | Appends an entry of that kind. A new entry lands at the bottom of the list; the **↑ ↓** buttons on its own row move it to where it belongs. |
+
+### The summary row: what the stack adds up to, and what it is made of
+
+| Readout | What it means |
+|---|---|
+| **Stack height** | The sum of every Conductor and Dielectric thickness, in the technology's display unit. **Via entries are excluded** — a via occupies no slice of the stack; it traverses the dielectrics between the conductors it spans. 62.13 mil above is the 62 mil the board is sold as. |
+| **conductors / dielectrics / vias** | How many entries of each kind. `conductors: 4` is the layer count a fabricator quotes; `vias: 2` is two *kinds* of connection, not two holes. |
+| **board** | Shown only when some other document stated an overall board thickness — a Gerber job file's, today. If it disagrees with the stack height by more than 1%, the row says so and **nothing is corrected**: which of the two numbers is wrong is not something circuitRF can know. |
+
+The filter box below it narrows the list by entry name, and the count beside it is how many of the
+nine are showing.
+
+### Every entry: kind, name, order
+
+Each entry is a card. The grey word at its left is its **kind**, fixed when it was added. The box
+beside it is its **name**, and the name is not decoration: a via entry names the two conductors it
+spans **by name**, and an EM setup names its analysis levels the same way. The three buttons at the
+right are **↑** and **↓** — the list is ordered top to bottom and **that order is z** — and **✕**,
+which removes the entry.
+
+### A Conductor entry
+
+| Field | What it is |
+|---|---|
+| **Thickness** | The metal's thickness, in the display unit. Used by the cross-section kernel and by interchange; the full-wave planar kernel solves a zero-thickness sheet and uses this only to place it — see [What the EM engine does not read](#ignored). |
+| **σ (S/m)** | Conductivity at 20 °C. Sets conductor loss and skin depth in the cross-section kernel. The **combo beside it** is a shortcut that fills the box with a metal's bulk value (copper 5.8e7, silver 6.3e7, gold 4.1e7, aluminium 3.77e7, nickel 1.43e7); the box stays typeable and is what gets saved, and a value matching none of them reads as *Custom*. |
+| **Ground reference** | Marks this conductor as the ground plane — **the negative terminal of every port in an EM run**. In the figure it is ticked on `Inner 1` and on `Bottom Copper`; the rule for which one a given run uses is in [the next section](#ground). |
+| **Metal thickness goes to** | The full-wave solver has no thickness for metal, so this conductor's thickness is given to the dielectric above it or the one below it. `the layer above` is the default and is what every technology authored before the field existed means. The stack height is the same either way. Full explanation, and the one case that needs the other setting: [Where a conductor's thickness goes](#sheet-surface). |
+| **Drawing layer** | Which drawing layers map onto this conductor — a **checkbox list**, because a conductor may carry several, with a filter box above it for a process that has hundreds. A shape on a layer bound to nothing is simply not part of the EM problem. |
+
+### A Dielectric entry
+
+| Field | What it is |
+|---|---|
+| **Thickness** | The separation this material provides. On the figure, 8 mil of prepreg either side of a 42 mil core. |
+| **ε<sub>r</sub>** | Relative permittivity. |
+| **tanδ** | Loss tangent. |
+| **µ<sub>r</sub>** | Relative permeability — 1 for everything that is not a magnetic material. |
+| **Patterned with** | `(none)` for an ordinary, laterally continuous dielectric, which is what all three on this board are. Naming a conductor here says *this film exists only where that metal's artwork is* — the thin-film capacitor case, described in [The capacitor dielectric rides along only when its plate is analysed](#mim-tied). |
+
+**A dielectric has no drawing layer, and there is no picker for one.** It is not drawn: it is a sheet
+of material spanning the whole problem at its stated thickness.
+
+### A Via entry
+
+Via entries are listed **as their own group below the ordered ones**, under a line saying why: a via
+is not a layer of the sandwich and has no position in the top-to-bottom order.
+
+| Field | What it is |
+|---|---|
+| **Spans** | The two conductor entries this via connects, **by name**. The two on the figure differ, and that is the point of a four-layer board: `Plated Through-Hole` runs Top Copper → Bottom Copper, while `Ground Via (L1-L2)` runs Top Copper → Inner 1. |
+| **Fill · Plated** | Whether these holes are metal at all. Unticked means a non-plated hole — a mounting hole, a routed cutout — drawn as it is but **not** extracted as a vertical conductor. |
+| **Fill kind** | Plated or solid. Carried for thermal work; the RF solve does not read it, because a plated wall a few µm thick is already many skin depths. |
+| **Wall** | Plated wall thickness — the metal on the barrel wall, **not** the hole radius. 20–25 µm (about 1 mil) is typical and is what the shipped technologies use. |
+| **Drawing layer** | The one drawing layer via shapes are drawn on. **One**, not a list: a via binds at most one, so this is a plain picker with an explicit `(none)`. |
+
+<div class="callout note">
+<span class="label">The ? in the corner opens this page</span>
+<p>The Help button at the top right of the Technology Editor follows the tab you are on: the Stackup
+tab opens this chapter, and the Layers, DRC Rules and Interchange tabs open their own sections of
+<a href="layout-editor.html#technology">The Layout Editor</a>.</p>
+</div>
+
 ## Where your port's negative terminal is {#ground}
 
 **Every port in an EM run returns through one plane, and the stackup picks it.** Not the panel, not
@@ -144,32 +224,65 @@ conductor with artwork on it is an **analysis level**.
   named, every signal conductor that actually carries artwork is included.
 - Levels are ordered **bottom to top**, and the lowest one sits on the slab's top surface.
 
-## Which surface a conductor's sheet sits on {#sheet-surface}
+## Where a conductor's thickness goes {#sheet-surface}
 
-The full-wave solver models a conductor as a **zero-thickness sheet at one height**, so its band's
-thickness has to go somewhere: it is absorbed into the dielectric on the other side of the sheet.
-Which side is a per-conductor setting — **EM sheet at** on the conductor's row in the Stackup tab.
+**The full-wave solver has no thickness for metal at all.** It models a conductor as a
+**zero-thickness sheet at one height** — so the slice of the stack that conductor occupies has to be
+filled with *something*, and the stackup does not say what fills a metal layer where no metal is
+drawn. The answer is that the metal's thickness is given to the dielectric on one side of it, and
+which side is a per-conductor setting: **Metal thickness goes to** on the conductor's row in the
+Stackup tab.
 
-| Setting | The sheet sits | The band's thickness goes | Height of a line on it |
+| Setting | The metal's thickness is added to | The sheet ends up at | Height of a line on it |
 |---|---|---|---|
-| **Bottom** (default) | on the band's bottom surface | into the dielectric **above** | the substrate under it |
-| **Top** | on the band's top surface | into the dielectric **below** | the substrate **plus its own metal** |
+| **the layer above** (default) | the dielectric **above** the conductor | the top surface of the dielectric **below** | the substrate under it, exactly as entered |
+| **the substrate below** | the dielectric **below** the conductor | the bottom surface of the dielectric **above** | the substrate **plus this conductor's own thickness** |
 
-**Bottom is what you want almost everywhere**, and it is what a conductor that says nothing means: a
-trace deposited on a substrate and encapsulated by whatever comes next, whose height above the ground
-plane comes out as the substrate thickness.
+**Neither setting moves anything, and the stack height is identical either way** — the total is the
+same number in both cases. All that changes is which neighbour absorbs the vanished thickness, and
+therefore how high above the ground plane the sheet lands.
 
-**Top is for the lower plate of a capacitor.** With the sheet at the bottom of its band, that plate's
-whole metal thickness lands inside the plate gap, and the solver separates the two sheets by the
-capacitor dielectric *plus that metal* — 3.2 µm rather than 0.2 on a typical MMIC metal. Setting
-**Top** on the lower plate's entry puts the gap back to the dielectric alone, and gives the metal's
-thickness to the substrate below instead. The shipped MMIC technology does exactly this on `Metal1`.
+**"The layer above" is what you want almost everywhere**, and it is what a conductor that says
+nothing means: a trace deposited on a substrate and encapsulated by whatever comes next, whose height
+above the ground plane comes out as the substrate thickness. It is also the setting the
+**closed-form** microstrip models agree with — they model real metal of real thickness and measure
+their height to the metal's *underside*.
+
+**"The substrate below" is for the lower plate of a capacitor.** With the thickness given to the
+layer above, that plate's whole metal thickness lands inside the plate gap, and the solver separates
+the two sheets by the capacitor dielectric *plus that metal* — 3.2 µm rather than 0.2 on a typical
+MMIC metal. Giving it to the substrate below instead puts the gap back to the dielectric alone. The
+shipped MMIC technology does exactly this on `Metal1`.
 
 **And it applies only where the capacitor does.** A run that is not analysing the plate has no plate
-gap to get right, so **Top** on the conductor directly under a [patterned dielectric](#mim-tied) is
-put back to **Bottom** for that run — the same run note that reports the dielectric reports this.
-That is what lets one technology set it at all: an ordinary line on `Metal1` still solves against
-100 µm of GaAs, exactly as it did before the capacitor module existed.
+gap to get right, so a conductor directly under a [patterned dielectric](#mim-tied) is put back to
+the default for that run — the same run note that reports the dielectric reports this. That is what
+lets one technology set it at all: an ordinary line on `Metal1` still solves against 100 µm of GaAs,
+exactly as it did before the capacitor module existed.
+
+<div class="callout note">
+<span class="label">This is not "expand up / expand down / symmetric"</span>
+<p>Tools whose stackup gives you an <em>interface</em> and a metal thickness have to decide which way
+the copper grows from it — up, down, or half each way. <b>circuitRF never asks that</b>, because its
+stackup is an explicit ordered list: the conductor is its own row with its own thickness, already
+sitting between two named dielectric rows. Its extent is fully determined before any EM question is
+asked, and nothing is ever displaced.</p>
+<p>This setting answers a <em>later</em> question, and one that exists only for the full-wave planar
+kernel: given that the metal already occupies a known slice, and the solver will represent it as a
+sheet at a single height, which face is that height and which neighbour fills the gap. <b>There is
+deliberately no "symmetric".</b> Half to each side is representable, but no structure wants it: it
+would place every ordinary line permanently half a metal thickness away from the closed-form models
+circuitRF validates itself against, and for the ground-referenced case that matters the field is in
+the substrate under the strip — the underside is the right face there, not a crude default that a
+midpoint would refine.</p>
+</div>
+
+<div class="callout note">
+<span class="label">The cross-section kernel ignores this entirely</span>
+<p>It models real metal of real thickness and has no sheet to place, so the setting is read by the
+<b>full-wave planar</b> path only. It also never applies to the <b>ground plane</b>, whose boundary
+is always taken at its top surface whatever its own row says.</p>
+</div>
 
 The trade is stated rather than hidden: in a *capacitor* run a `Metal1` microstrip's EM substrate is
 103 µm of GaAs rather than 100 — a ~3% height shift, against a 16× error in the modelled plate
@@ -273,12 +386,12 @@ is what a thin film physically is: deposited under the plate and etched away eve
 **So an EM run carries the film only if the plate is one of its analysis levels.** Draw a capacitor
 and the plate has artwork on it, so the film is there and the plates are 0.2 µm apart. Draw plain
 interconnect and it is not, so the film enters the medium as **air at the same thickness** — nothing
-above it moves — and the lower metal's sheet goes back to the bottom of its band. That run is then
+above it moves — and the lower metal's thickness goes back to the layer above. That run is then
 identical, number for number, to the same run on a stackup that never had a capacitor module in it.
 **No setting to remember, and nothing to switch.**
 
 **It is always reported.** A run whose tie deactivated says so in its notes, naming the dielectric,
-the plate that would switch it back on, and the sheet surface it reverted. A medium you did not
+the plate that would switch it back on, and the thickness setting it reverted. A medium you did not
 author and cannot see is exactly the kind of change that produces a complete, believable answer to a
 question nobody asked.
 
@@ -352,9 +465,9 @@ together in it.
   on this technology, and the two costs in [the tie's own section](#mim-tied) land on your
   interconnect: airbridge posts between those metals refuse the whole run, and a line on either metal
   moves in ε<sub>eff</sub> and Z₀.
-- **Set the lower metal's sheet surface to Top** — see
-  [Which surface a conductor's sheet sits on](#sheet-surface). A conductor is solved as a
-  zero-thickness sheet, and by default that sheet sits at the *bottom* of its own band, so the
+- **Give the lower metal's thickness to the substrate below** — see
+  [Where a conductor's thickness goes](#sheet-surface). A conductor is solved as a
+  zero-thickness sheet, and by default its thickness is given to the layer *above* it, so the
   modelled plate separation would be your dielectric **plus the lower plate's whole metal
   thickness** — several times the gap you just entered, with a plausible capacitance to show for it.
   The tie reverts this setting for you in any run that is not analysing the plate, which is why it is
@@ -367,7 +480,7 @@ surface goes back, and the run's notes say so.
 
 **What activation does change**, stated so it is not a surprise the first time a capacitor run
 disagrees with an interconnect one: in a run that *does* analyse the plate, the film is real, and the
-lower metal's line sees it. Its sheet moves to the top of its band, so its substrate grows by that
+lower metal's line sees it. Its thickness is given to the substrate instead, so that substrate grows by that
 metal's own thickness, and ε<sub>eff</sub>/Z₀ move with it. That is the capacitor run's real physics,
 not an artifact — it is the same structure a capacitor sits in.
 
@@ -382,10 +495,10 @@ mesh has to resolve the gap, which is the subject of the next section.
 <span class="label">Never read a small element off a RAW solve, and mesh the gap</span>
 <p>The solver models the plate separation the process states — 0.2 µm on the shipped MMIC technology,
 the capacitor dielectric and nothing else. (It used to model 3.2 µm: a conductor is solved as a
-zero-thickness sheet, and with that sheet at the bottom of its own band the lower plate's whole metal
-thickness fell inside the gap. The lower plate's entry now says its sheet sits on the
-<strong>top</strong> of its band — see <a href="#sheet-surface">Which surface a conductor's sheet
-sits on</a>.) The run's notes print every level's z <em>and</em> the surface it sits on, so you can
+zero-thickness sheet, and with that thickness given to the layer above it the lower plate's whole
+metal thickness fell inside the gap. The lower plate's entry now gives its thickness to the
+<strong>substrate below</strong> instead — see <a href="#sheet-surface">Where a conductor's
+thickness goes</a>.) The run's notes print every level's z <em>and</em> the surface it sits on, so you can
 always read back the separation it used.</p>
 <p><strong>A port on upper metal now de-embeds.</strong> It used to be refused: the reference
 impedance a de-embedded answer is published against is Z<sub>c</sub> = γ/(jωC<sub>pul</sub>), and
@@ -425,11 +538,11 @@ Stated plainly, because a field that is carried but unused is worse than one tha
   conductor loss is not in the answer. The **cross-section (uniform-line) kernel** does use it, for
   its Wheeler-incremental-inductance surface resistance.
 - **Conductor thickness is not modelled by the full-wave kernel either** — it solves a zero-thickness
-  sheet, placed on one surface of the conductor's own band. The thickness itself is used by the
-  cross-section kernel and by interchange. Which surface the sheet sits on is normally invisible
-  (3 µm of metal under a 100 µm substrate moves nothing), and matters exactly once: between the two
-  plates of a [thin-film capacitor](#mim). It is a per-conductor setting — see
-  [Which surface a conductor's sheet sits on](#sheet-surface).
+  sheet. The thickness itself is used by the cross-section kernel and by interchange, and the
+  full-wave kernel gives it to one of the two dielectrics beside the conductor. Which one is
+  normally invisible (3 µm of metal under a 100 µm substrate moves nothing), and matters exactly
+  once: between the two plates of a [thin-film capacitor](#mim). It is a per-conductor setting —
+  see [Where a conductor's thickness goes](#sheet-surface).
 - **A via's fill and wall thickness are carried for thermal work**, not read by the RF solve: a plated
   wall a few µm thick is many skin depths at RF, so plated and solid behave the same.
 

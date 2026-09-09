@@ -35,6 +35,15 @@ public partial class TechEditorView : UserControl
         // routes somewhere else entirely. The three other document views already take focus on
         // activation through this same hook; this one never subscribed, which is the whole bug.
         DataContextChanged += OnDataContextChanged;
+
+        // The destination follows the visible tab (TechEditorViewModel.HelpDestinationFor) — this
+        // window edits four unrelated things and no one chapter covers all of them.
+        HelpButton.Click += (_, _) =>
+        {
+            var (page, anchor) = (DataContext as TechDocument)?.ViewModel.HelpDestination
+                                 ?? TechEditorViewModel.HelpDestinationFor(0);
+            DocLauncher.Open(page, anchor.Length == 0 ? null : anchor);
+        };
     }
 
     private TechDocument? _subscribedDoc;
