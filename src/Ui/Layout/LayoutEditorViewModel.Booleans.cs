@@ -35,12 +35,30 @@ public sealed partial class LayoutEditorViewModel
     /// their operand set, disabled with a reason for a bitmap-only selection and SILENTLY skipped
     /// (never a crash) in a mixed selection, so those operations apply to the geometric shapes only.
     /// <c>LayoutClipper</c>/<c>LayoutFlattener</c> have no case for it and would throw if one ever
-    /// reached them — this is the one filter that keeps that from happening.</summary>
+    /// reached them — this is the one filter that keeps that from happening.
+    ///
+    /// <para><b>R-clip-8 (brief-layout-clip-and-cut-out.md §8): a <see cref="LabelShape"/> and a
+    /// <see cref="ViaShape"/> are excluded here for the same reason, and the test is now the POSITIVE
+    /// one.</b> This used to name <c>BitmapShape</c> and nothing else, so selecting a label or a via
+    /// together with geometry on the same layer and running any boolean threw
+    /// <c>ArgumentOutOfRangeException</c> out of a context-menu click — the flattener's own message
+    /// says plainly that neither is a filled region; the filter simply never learned about them. Asking
+    /// <see cref="LayoutBooleans.IsClipperOperand"/> what the flattener ACCEPTS means a new non-region
+    /// shape kind is excluded by default rather than reintroducing that crash.</para></summary>
     private IReadOnlyList<int> GeometricSelectedIndices =>
+        ValidSelectedIndices.Where(i => LayoutBooleans.IsClipperOperand(Model.Shapes[i])).ToList();
+
+    /// <summary>The OTHER exclusion, and it is deliberately not the one above: a rigid-body transform
+    /// (rotate/mirror — <c>LayoutEditorViewModel.Rotate.cs</c>) moves any shape that has an
+    /// orientation, and a <see cref="LabelShape"/> and a <see cref="ViaShape"/> both do — a port label's
+    /// whole direction IS its rotation. Only a <see cref="BitmapShape"/> is excluded, because it is an
+    /// axis-aligned image with no rotation of its own (R-bmp-3). Sharing one list with the clipper
+    /// operand set above would silently stop ports and vias rotating.</summary>
+    private IReadOnlyList<int> RotatableSelectedIndices =>
         ValidSelectedIndices.Where(i => Model.Shapes[i] is not BitmapShape).ToList();
 
     private const string SelectAtLeastOneReason = "Select at least one shape";
-    private const string NotGeometryReason = "Bitmaps are not geometry — select a shape";
+    private const string NotGeometryReason = "Bitmaps, labels and vias are not filled regions — select a shape";
 
     /// <summary>brief-L3a-followups.md §2/R-fix-2's table: "Boolean ops, offset, flatten, repair —
     /// No, an instance is not geometry." Unlike a bitmap (§3, above — silently skipped in a mixed
@@ -218,6 +236,136 @@ public sealed partial class LayoutEditorViewModel
         CommitReplace(indices, result.Shapes, opName);
         ReportOperandOutcome(result, opName, operands);
     }
+
+    // ── Clip / Cut Out (brief-layout-clip-and-cut-out.md) ─────────────────────
+
+    /// <summary>
+    /// R-clip-1: the topmost clippable shape under the right-click that opened the context menu — the
+    /// STENCIL. Mirrors <see cref="FindBitmapForContextMenu"/>'s shape exactly (any shape under the
+    /// click, not just an already-selected one), because two facts make that gesture exact: a
+    /// right-click never disturbs the selection (<c>LayoutCanvas.OnPointerPressed</c>'s right-button
+    /// branch only RECORDS the point), and the menu already hit-tests the click for its edge/vertex/
+    /// ruler/bitmap items. So the gesture is "select what you want clipped, right-click the tool
+    /// shape, choose Clip" — explicit, no extra click, no mode, no ordering convention.
+    /// </summary>
+    public int? FindClipStencil(double wx, double wy, long tolDbu)
+    {
+        long px = (long)Math.Round(wx), py = (long)Math.Round(wy);
+        foreach (var idx in LayoutHitTest.HitStack(Model, Technology, px, py, tolDbu))
+            if (LayoutBooleans.IsClipperOperand(Model.Shapes[idx])) return idx;
+        return null;
+    }
+
+    /// <summary>The operand set for a clip whose stencil is <paramref name="stencilIndex"/>: every
+    /// selected geometric shape EXCEPT the stencil itself. R-clip-1 — the stencil need not be selected,
+    /// and when it is (a <c>Select All</c> sweeps it up) it is excluded rather than clipped against
+    /// itself. §4 — the operands may sit on any mix of layers: Clip combines nothing, so the same-layer
+    /// rule the other booleans need has no meaning here.</summary>
+    private IReadOnlyList<int> ClipOperandIndices(int stencilIndex) =>
+        GeometricSelectedIndices.Where(i => i != stencilIndex).ToList();
+
+    /// <summary>
+    /// §7's table, in its stated order. Deliberately NOT <see cref="BooleanOpAvailability"/>: that
+    /// requires a same-layer pair, which §4 drops for these two.
+    ///
+    /// <para>Every disabled case names its remedy (R13a) — and here the reason text is also how a user
+    /// learns the gesture, which is why none of them may be silent or hidden.</para>
+    /// </summary>
+    public LayoutCommandAvailability ClipAvailability(double wx, double wy, long tolDbu)
+    {
+        if (ShapeOnlyBlockReason("Clip and Cut Out") is { } r) return LayoutCommandAvailability.Disabled(r);
+        if (GeometricSelectedIndices.Count == 0)
+            return LayoutCommandAvailability.Disabled(
+                "Select the shapes to clip, then right-click the shape to clip them to");
+        if (FindClipStencil(wx, wy, tolDbu) is not { } stencil)
+            return LayoutCommandAvailability.Disabled("Right-click the shape to clip to");
+        if (ClipOperandIndices(stencil).Count == 0)
+            return LayoutCommandAvailability.Disabled(
+                "Select the shapes to clip — the right-clicked shape is the stencil, not an operand");
+        return LayoutCommandAvailability.Enabled;
+    }
+
+    /// <summary>R-clip-3: the stencil named by kind AND layer — <c>"Rect · Top Copper"</c> — so a
+    /// mis-aimed right-click is visible BEFORE the click, not after. Used by the enabled tooltip and
+    /// by every Messages sentence below. The menu HEADERS are the bare verbs (owner, 2026-09-09), so
+    /// the tooltip is where the stencil is named on the way in.</summary>
+    public string ClipStencilLabel(int stencilIndex) =>
+        stencilIndex >= 0 && stencilIndex < Model.Shapes.Count
+            ? $"{ShapeTypeName(Model.Shapes[stencilIndex])} · {LayerDisplayName(Model.Shapes[stencilIndex].Layer)}"
+            : "";
+
+    /// <summary>The enabled tooltip (R-clip-3): <c>"Clips the 67 selected shapes to Rect · Top
+    /// Copper"</c>.</summary>
+    public string ClipTooltip(int stencilIndex, bool cutOut)
+    {
+        int n = ClipOperandIndices(stencilIndex).Count;
+        string what = cutOut ? "Cuts" : "Clips";
+        string prep = cutOut ? "out of" : "to";
+        return $"{what} the {Plural(n, "selected shape", "selected shapes")} {prep} {ClipStencilLabel(stencilIndex)}";
+    }
+
+    public void ApplyClip(int stencilIndex)   => ApplyClipCore(stencilIndex, cutOut: false);
+    public void ApplyCutOut(int stencilIndex) => ApplyClipCore(stencilIndex, cutOut: true);
+
+    /// <summary>
+    /// R-clip-7: ONE undo entry — a single <c>ReplaceShapesCommand</c> over the whole operand set,
+    /// built and executed exactly once, exactly as every other method in this file does.
+    ///
+    /// <para><b>R-clip-2 — the stencil is NOT consumed.</b> It is a tool, not an operand, so it is
+    /// neither removed nor re-added and the undo entry never touches it. That is what makes the common
+    /// case work: clip Top Copper, then select Bottom Copper and clip again with the same rect.
+    /// Deleting it afterwards is one keystroke; recreating it is not.</para>
+    ///
+    /// <para><b>R-clip-0 — the operands are the SELECTION and nothing else.</b> Unselected geometry is
+    /// never touched, on any layer, including geometry on the stencil's own layer that the stencil
+    /// overlaps.</para>
+    /// </summary>
+    private void ApplyClipCore(int stencilIndex, bool cutOut)
+    {
+        if (stencilIndex < 0 || stencilIndex >= Model.Shapes.Count) return;
+        var stencil = Model.Shapes[stencilIndex];
+        if (!LayoutBooleans.IsClipperOperand(stencil)) return;
+
+        var indices = ClipOperandIndices(stencilIndex);
+        if (indices.Count == 0) return;
+
+        var operands = indices.Select(i => Model.Shapes[i]).ToList();
+        string opName = cutOut ? "Cut Out" : "Clip";
+        // Resolved BEFORE the commit: CommitReplace removes the operands, so the stencil's INDEX no
+        // longer names the stencil afterwards — reporting from it would name the wrong shape, or
+        // nothing at all.
+        string stencilLabel = ClipStencilLabel(stencilIndex);
+
+        var result = cutOut
+            ? LayoutBooleans.CutOut(operands, stencil, Technology)
+            : LayoutBooleans.Clip(operands, stencil, Technology);
+
+        CommitReplace(indices, result.Shapes, opName);
+        ReportClipOutcome(result, opName, cutOut, operands.Count, stencilLabel);
+    }
+
+    /// <summary>R-clip-3's three sentences. The all-removed case gets its OWN sentence naming the
+    /// cause, for the same reason R-clip-4 rewrites Intersect's: an empty result here is a legitimate
+    /// outcome and must not read as a failure.</summary>
+    private void ReportClipOutcome(LayoutClipResult result, string opName, bool cutOut, int operandCount, string stencil)
+    {
+        if (result.AnyCurvedOperand) WarnCurvedOperandOnce(opName);
+
+        if (result.Shapes.Count == 0)
+        {
+            _messageSink?.Warning(cutOut
+                ? $"{opName}: every selected shape lay entirely inside {stencil} — all {operandCount} were removed."
+                : $"{opName}: no selected shape overlapped {stencil} — all {operandCount} were removed.");
+            return;
+        }
+
+        string verb = cutOut ? "cut out of" : "clipped to";
+        _messageSink?.Success(
+            $"{opName}: {Plural(operandCount, "shape", "shapes")} {verb} {stencil} — " +
+            $"{result.OperandsRemoved} removed, {result.OperandsChanged} changed, {result.OperandsUntouched} unchanged.");
+    }
+
+    private static string Plural(int n, string one, string many) => $"{n} {(n == 1 ? one : many)}";
 
     // ── Offset (§3) ────────────────────────────────────────────────────────────
 
@@ -431,6 +579,29 @@ public sealed partial class LayoutEditorViewModel
             _messageSink?.Warning($"{opName}: operands were on different nets — net cleared.");
 
         if (result.Shapes.Count == 0)
-            _messageSink?.Info($"{opName} produced no geometry.");
+            _messageSink?.Warning(EmptyResultReason(opName));
     }
+
+    /// <summary>
+    /// R-clip-4: an empty boolean result is a LEGITIMATE outcome and must not read as a failure.
+    /// "Intersect produced no geometry." was <c>Info</c> severity and did not say why, which is how
+    /// the reported gesture — draw a rect over the region of interest, select the whole copper layer,
+    /// run Intersect — looked like a bug rather than the correct answer to the question it asked.
+    /// Intersect is n-ary (<c>A ∩ B ∩ C ∩ …</c>), so it goes empty at the first disjoint pair and never
+    /// reaches the rect; on the reported board 2,185 of 2,278 shape pairs had disjoint bounding boxes.
+    /// Its sentence therefore names the cause AND points at <see cref="ApplyClip"/>, which is the
+    /// operation that gesture actually wanted.
+    /// </summary>
+    private static string EmptyResultReason(string opName) => opName switch
+    {
+        "Intersect" =>
+            "Intersect: the selected shapes have no region in common (Intersect is the region shared " +
+            "by ALL of them). To keep the part of each shape inside one region, right-click that " +
+            "region and use Clip.",
+        "Difference" =>
+            "Difference: nothing was left — the other selected shapes cover the first one completely.",
+        "XOR" =>
+            "XOR: the selected shapes cover exactly the same region, so their symmetric difference is empty.",
+        _ => $"{opName} produced no geometry.",
+    };
 }

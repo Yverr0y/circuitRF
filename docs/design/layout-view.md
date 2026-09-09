@@ -662,7 +662,10 @@ geometry and does not live in `Shapes`; see §9B.1 for why.
 operands; this is what the deleted `Merge` command used to do); Intersect/Difference/XOR require a
 same-layer pair to enable but still combine across the whole selection, unchanged from L1e · Size
 (grow/shrink by a signed offset) · **Scale** (numeric factor or target size, plus bbox handles:
-corner = uniform, side = one axis) · Slice · Align/distribute · Move-to-layer · Set net ·
+corner = uniform, side = one axis) · **Clip / Cut Out** (per-operand booleans against a STENCIL — the
+shape under the right-click; every selected shape is clipped independently and keeps its own identity,
+layer and net, and the stencil itself is not consumed. Not `Intersect`, which is the one region shared
+by ALL operands; see brief-layout-clip-and-cut-out.md) · Align/distribute · Move-to-layer · Set net ·
 **Flatten to Polygon…** (§3.2, curve → polygon; always prompts for the tolerance) ·
 **Flatten Hierarchy** (§7, instance → geometry) · Group-into-cell. The two flattens are different
 operations on different things; label them distinctly in the UI, because "Flatten" alone will be
@@ -1450,7 +1453,7 @@ Stated so they stay non-goals:
 
 - **Not DRC input.** A ruler measures; it does not assert. It has no pass/fail, no tolerance and no
   rule binding, and `DrcRegions` never sees one.
-- **Not geometry.** Never an operand of Union/Intersect/Difference/XOR/Offset/Slice/Flatten, never
+- **Not geometry.** Never an operand of Union/Intersect/Difference/XOR/Offset/Clip/Cut Out/Flatten, never
   meshed by the MoM extractors, never in the spatial index (there are tens of rulers, not 500,000 — a
   linear scan for hit-test and paint is the right-sized tool), never a snap *target* (it can snap *to*
   artwork; artwork does not snap to it).

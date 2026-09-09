@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Avalonia.Input;
 using CircuitRF.Ui.Layout;
@@ -428,6 +430,337 @@ public class LayoutBooleanOperationsViewModelTests
         var only = Assert.Single(counts); // the Rect is skipped — nothing to flatten
         Assert.Equal(0, only.Index);
         Assert.Equal(vm.PreviewFlattenVertexCount(0, 1000), only.VertexCount);
+    }
+
+    // ── Clip / Cut Out (brief-layout-clip-and-cut-out.md §10) ────────────────────
+    //
+    // The stencil is the shape under the RIGHT-CLICK (R-clip-1), which the canvas passes through as a
+    // world point; these tests call FindClipStencil/ClipAvailability with that point directly, which is
+    // exactly what LayoutCanvas.AddBooleanAndFlattenMenuItems does with the (wx, wy) it already has.
+
+    private const long ClipTol = 40;
+
+    private static string SerializeOne(LayoutShape shape)
+    {
+        var view = new LayoutView();
+        view.Shapes.Add(shape);
+        return LayoutPersistence.Serialize(view);
+    }
+
+    /// <summary>§10 gate 2, and the test for the question this whole design turns on — R-clip-0:
+    /// GEOMETRY THAT IS NOT SELECTED IS BYTE-IDENTICAL AFTERWARDS, including geometry on the stencil's
+    /// OWN layer that the stencil overlaps.</summary>
+    [Fact]
+    public void Clip_NeverTouchesUnselectedGeometry_EvenOnTheStencilsOwnLayerAndOverlappingIt()
+    {
+        var model = FreshModel();
+        var operand = new RectShape { Layer = Layer1, X1 = -20_000, Y1 = 10_000, X2 = 20_000, Y2 = 20_000 };
+        var stencil = new RectShape { Layer = Layer1, X1 = 0, Y1 = 0, X2 = 100_000, Y2 = 100_000 };
+        // Unselected, on the stencil's own layer, and squarely underneath it.
+        var bystander = new RectShape { Layer = Layer1, X1 = 30_000, Y1 = 30_000, X2 = 40_000, Y2 = 40_000 };
+        model.Shapes.Add(operand); model.Shapes.Add(stencil); model.Shapes.Add(bystander);
+        string bystanderJson = SerializeOne(bystander);
+
+        var vm = new LayoutEditorViewModel(model) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+        Click(vm, -10_000, 15_000);                 // select the operand only
+        Assert.Equal([0], vm.SelectedIndices);
+
+        vm.ApplyClip(stencilIndex: 1);
+
+        Assert.Contains(bystander, model.Shapes);
+        Assert.Equal(bystanderJson, SerializeOne(bystander));
+    }
+
+    /// <summary>§10 gate 3 — the stencil designation. Finding it mutates no selection; a stencil that
+    /// happens to BE selected is excluded from the operand set rather than clipped against itself; and
+    /// a right-click on empty space disables the command with its stated reason rather than guessing a
+    /// stencil.</summary>
+    [Fact]
+    public void FindClipStencil_MutatesNoSelection_AndASelectedStencilIsExcludedFromItsOwnOperandSet()
+    {
+        var model = FreshModel();
+        var a = new RectShape { Layer = Layer1, X1 = -20_000, Y1 = 10_000, X2 = 20_000, Y2 = 20_000 };
+        var stencil = new RectShape { Layer = Layer1, X1 = 0, Y1 = 0, X2 = 100_000, Y2 = 100_000 };
+        model.Shapes.Add(a); model.Shapes.Add(stencil);
+
+        var vm = new LayoutEditorViewModel(model) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+        vm.SelectAllCommand.Execute(null);                    // Select All sweeps the stencil up too
+        var before = vm.SelectedIndices.ToList();
+
+        Assert.Equal(1, vm.FindClipStencil(80_000, 80_000, ClipTol));
+        Assert.Equal(before, vm.SelectedIndices);              // the query changed nothing
+
+        Assert.True(vm.ClipAvailability(80_000, 80_000, ClipTol).CanExecute);
+        vm.ApplyClip(stencilIndex: 1);
+
+        // Only `a` was an operand; the stencil is not clipped against itself and survives (R-clip-2).
+        Assert.Same(stencil, model.Shapes.Single(sh => ReferenceEquals(sh, stencil)));
+        Assert.DoesNotContain(a, model.Shapes);
+    }
+
+    [Fact]
+    public void ClipAvailability_RightClickOnEmptySpace_IsDisabledWithItsStatedReason_NotAGuess()
+    {
+        var model = FreshModel();
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 0, Y1 = 0, X2 = 10_000, Y2 = 10_000 });
+        var vm = new LayoutEditorViewModel(model) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+        vm.SelectAllCommand.Execute(null);
+
+        var avail = vm.ClipAvailability(900_000, 900_000, ClipTol);
+
+        Assert.False(avail.CanExecute);
+        Assert.Equal("Right-click the shape to clip to", avail.DisabledReason);
+    }
+
+    [Fact]
+    public void ClipAvailability_NothingSelected_AndStencilOnlySelection_EachNameTheirOwnRemedy()
+    {
+        var model = FreshModel();
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 0, Y1 = 0, X2 = 100_000, Y2 = 100_000 });
+        var vm = new LayoutEditorViewModel(model) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+
+        var empty = vm.ClipAvailability(50_000, 50_000, ClipTol);
+        Assert.False(empty.CanExecute);
+        Assert.Equal("Select the shapes to clip, then right-click the shape to clip them to", empty.DisabledReason);
+
+        Click(vm, 50_000, 50_000);   // now the stencil is the ONLY selected shape
+        var onlyStencil = vm.ClipAvailability(50_000, 50_000, ClipTol);
+        Assert.False(onlyStencil.CanExecute);
+        Assert.Equal("Select the shapes to clip — the right-clicked shape is the stencil, not an operand",
+            onlyStencil.DisabledReason);
+    }
+
+    /// <summary>§10 gate 4 / R-clip-2 — the stencil is a TOOL, not an operand: it survives the
+    /// operation byte-identically, and the SAME stencil clips a second, disjoint selection on another
+    /// layer in a second operation. That is the common case the rule exists for.</summary>
+    [Fact]
+    public void Clip_StencilIsNotConsumed_AndClipsASecondLayerInASecondOperation()
+    {
+        var model = FreshModel();
+        var layer2 = new LayerKey(2, 0);
+        var top = new RectShape { Layer = Layer1, X1 = -20_000, Y1 = 10_000, X2 = 20_000, Y2 = 20_000 };
+        var bottom = new RectShape { Layer = layer2, X1 = -20_000, Y1 = 60_000, X2 = 20_000, Y2 = 70_000 };
+        var stencil = new RectShape { Layer = Layer1, X1 = 0, Y1 = 0, X2 = 100_000, Y2 = 100_000 };
+        model.Shapes.Add(top); model.Shapes.Add(bottom); model.Shapes.Add(stencil);
+        string stencilJson = SerializeOne(stencil);
+
+        var vm = new LayoutEditorViewModel(model) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+        Click(vm, -10_000, 15_000);
+        int stencilIndex = vm.FindClipStencil(80_000, 80_000, ClipTol)!.Value;
+        vm.ApplyClip(stencilIndex);
+
+        Assert.Contains(stencil, model.Shapes);
+        Assert.Equal(stencilJson, SerializeOne(stencil));
+
+        // Second operation, other layer, same stencil — which is only possible because it survived.
+        Click(vm, -10_000, 65_000);
+        int stencilIndex2 = vm.FindClipStencil(80_000, 80_000, ClipTol)!.Value;
+        Assert.True(vm.ClipAvailability(80_000, 80_000, ClipTol).CanExecute);
+        vm.ApplyClip(stencilIndex2);
+
+        Assert.Contains(stencil, model.Shapes);
+        Assert.Equal(stencilJson, SerializeOne(stencil));
+        var clipped = model.Shapes.OfType<PolygonShape>().Where(sh => sh.Layer == layer2).ToList();
+        Assert.Equal(new Bbox(0, 60_000, 20_000, 70_000), LayoutGeometry.BboxOf(Assert.Single(clipped)));
+    }
+
+    /// <summary>§10 gate 7 / §4 — one stencil, operands on three layers, ONE operation: each result on
+    /// its own operand's layer, and <c>ClipAvailability</c> is enabled for a selection with no
+    /// same-layer pair at all (which is exactly what <c>BooleanOpAvailability</c> would refuse).</summary>
+    [Fact]
+    public void Clip_ThreeLayersNoSameLayerPair_IsEnabled_AndKeepsEachResultOnItsOwnLayer()
+    {
+        var model = FreshModel();
+        var layer2 = new LayerKey(2, 0);
+        var layer3 = new LayerKey(3, 0);
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = -20_000, Y1 = 10_000, X2 = 20_000, Y2 = 20_000 });
+        model.Shapes.Add(new RectShape { Layer = layer2, X1 = -20_000, Y1 = 40_000, X2 = 20_000, Y2 = 50_000 });
+        model.Shapes.Add(new RectShape { Layer = layer3, X1 = -20_000, Y1 = 70_000, X2 = 20_000, Y2 = 80_000 });
+        var stencil = new RectShape { Layer = Layer1, X1 = 0, Y1 = 0, X2 = 100_000, Y2 = 100_000 };
+        model.Shapes.Add(stencil);
+
+        var vm = new LayoutEditorViewModel(model) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+        Click(vm, -10_000, 15_000);
+        Click(vm, -10_000, 45_000, KeyModifiers.Shift);
+        Click(vm, -10_000, 75_000, KeyModifiers.Shift);
+        Assert.Equal(3, vm.SelectedIndices.Count);
+        Assert.False(vm.BooleanOpAvailability.CanExecute);   // no same-layer pair — the other booleans refuse
+        Assert.True(vm.ClipAvailability(80_000, 80_000, ClipTol).CanExecute);
+
+        vm.ApplyClip(vm.FindClipStencil(80_000, 80_000, ClipTol)!.Value);
+
+        var results = model.Shapes.OfType<PolygonShape>().ToList();
+        Assert.Equal(3, results.Count);
+        Assert.Equal([Layer1, layer2, layer3], results.Select(r => r.Layer));
+    }
+
+    /// <summary>§10 gate 8 / R-clip-7 — ONE undo entry restoring every operand at its original index,
+    /// byte-identical. The stencil is neither removed nor re-added, so the undo entry never touches
+    /// it.</summary>
+    [Fact]
+    public void Clip_OneUndoEntry_RestoresEveryOperandAtItsOriginalIndex_ByteIdentical()
+    {
+        var model = FreshModel();
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = -20_000, Y1 = 10_000, X2 = 20_000, Y2 = 20_000 });
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = -20_000, Y1 = 40_000, X2 = 20_000, Y2 = 50_000 });
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 0, Y1 = 0, X2 = 100_000, Y2 = 100_000 });  // stencil
+        string jsonBefore = LayoutPersistence.Serialize(model);
+
+        var vm = new LayoutEditorViewModel(model) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+        Click(vm, -10_000, 15_000);
+        Click(vm, -10_000, 45_000, KeyModifiers.Shift);
+
+        vm.ApplyClip(stencilIndex: 2);
+        Assert.True(vm.UndoRedo.CanUndo);
+
+        vm.UndoRedo.Undo();
+
+        Assert.False(vm.UndoRedo.CanUndo);   // exactly one entry, not two
+        Assert.Equal(jsonBefore, LayoutPersistence.Serialize(model));
+    }
+
+    /// <summary>§10 gate 9 / R-clip-3 — Messages names the stencil by kind AND layer, reports the three
+    /// counts, and the all-removed case gets its own sentence instead of reading as a failure.</summary>
+    [Fact]
+    public void Clip_Messages_NameTheStencilAndReportTheThreeCounts()
+    {
+        var model = FreshModel();
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = -20_000, Y1 = 10_000, X2 = 20_000, Y2 = 20_000 }); // straddles
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 30_000, Y1 = 30_000, X2 = 40_000, Y2 = 40_000 });  // inside
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 500_000, Y1 = 0, X2 = 510_000, Y2 = 10_000 });     // outside
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 0, Y1 = 0, X2 = 100_000, Y2 = 100_000 });          // stencil
+
+        var sink = new FakeMessageSink();
+        var vm = new LayoutEditorViewModel(model, messageSink: sink) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+        Click(vm, -10_000, 15_000);
+        Click(vm, 35_000, 35_000, KeyModifiers.Shift);
+        Click(vm, 505_000, 5_000, KeyModifiers.Shift);
+
+        vm.ApplyClip(stencilIndex: 3);
+
+        var posted = Assert.Single(sink.Posted);
+        Assert.Equal(MessageLevel.Success, posted.Level);
+        Assert.Contains("Rect · ", posted.Text);                       // the stencil, named by kind and layer
+        Assert.Contains("1 removed, 1 changed, 1 unchanged.", posted.Text);
+    }
+
+    [Fact]
+    public void Clip_NothingOverlapped_PostsItsOwnSentence_NotAGenericFailure()
+    {
+        var model = FreshModel();
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 500_000, Y1 = 0, X2 = 510_000, Y2 = 10_000 });
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 0, Y1 = 0, X2 = 100_000, Y2 = 100_000 });   // stencil
+
+        var sink = new FakeMessageSink();
+        var vm = new LayoutEditorViewModel(model, messageSink: sink) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+        Click(vm, 505_000, 5_000);
+
+        vm.ApplyClip(stencilIndex: 1);
+
+        var posted = Assert.Single(sink.Posted);
+        Assert.Contains("no selected shape overlapped Rect · ", posted.Text);
+        Assert.Contains("all 1 were removed.", posted.Text);
+    }
+
+    /// <summary>R-clip-4 — Intersect's empty result is a legitimate outcome, so it now names its CAUSE
+    /// and points at Clip instead of reading as a failure. §1's semantics are untouched: it is still
+    /// empty.</summary>
+    [Fact]
+    public void Intersect_DisjointShapes_ReportsWhyItIsEmptyAndPointsAtClip()
+    {
+        var model = FreshModel();
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 0, Y1 = 0, X2 = 1_000, Y2 = 1_000 });
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 500_000, Y1 = 0, X2 = 501_000, Y2 = 1_000 });
+
+        var sink = new FakeMessageSink();
+        var vm = new LayoutEditorViewModel(model, messageSink: sink) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+        Click(vm, 500, 500);
+        Click(vm, 500_500, 500, KeyModifiers.Shift);
+
+        vm.ApplyIntersect();
+
+        Assert.Empty(model.Shapes);
+        var posted = Assert.Single(sink.Posted);
+        Assert.Equal(MessageLevel.Warning, posted.Level);
+        Assert.Contains("no region in common", posted.Text);
+        Assert.Contains("use Clip", posted.Text);
+    }
+
+    /// <summary>§10 gate 10 / R-clip-8, VM half — the LIVE CRASH §8 found: a label or a via selected
+    /// together with geometry on the same layer, and any boolean run, threw
+    /// <c>ArgumentOutOfRangeException</c> out of a context-menu click. Both kinds, every operation that
+    /// builds an operand set.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Booleans_WithALabelOrAViaInTheSelection_DoNotThrow_AndSkipThatShape(bool useLabel)
+    {
+        var model = FreshModel();
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 0, Y1 = 0, X2 = 10_000, Y2 = 10_000 });
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 5_000, Y1 = 5_000, X2 = 15_000, Y2 = 15_000 });
+        LayoutShape nonRegion = useLabel
+            ? new LabelShape { Layer = Layer1, X = 20_000, Y = 20_000, Text = "N1" }
+            : new ViaShape { Layer = Layer1, X = 20_000, Y = 20_000, PadSize = 2_000, DrillSize = 1_000 };
+        model.Shapes.Add(nonRegion);
+
+        var vm = new LayoutEditorViewModel(model) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+        vm.SelectAllCommand.Execute(null);
+        Assert.Equal(3, vm.SelectedIndices.Count);
+        Assert.True(vm.CanBooleanOp);
+
+        vm.ApplyIntersect();                       // used to throw here
+        vm.UndoRedo.Undo();
+        vm.SelectAllCommand.Execute(null);
+        vm.ApplyUnion();
+        vm.UndoRedo.Undo();
+        vm.SelectAllCommand.Execute(null);
+        vm.ApplyXor();
+        vm.UndoRedo.Undo();
+        vm.SelectAllCommand.Execute(null);
+        vm.ApplyDifference();
+        vm.UndoRedo.Undo();
+        vm.SelectAllCommand.Execute(null);
+        vm.ApplyOffsetToSelection();
+        vm.UndoRedo.Undo();
+
+        // The non-region shape was skipped, not consumed — it is still in the model, untouched.
+        Assert.Contains(nonRegion, model.Shapes);
+    }
+
+    [Fact]
+    public void ClipStencil_IsNeverALabelAViaOrABitmap()
+    {
+        var model = FreshModel();
+        model.Shapes.Add(new LabelShape { Layer = Layer1, X = 0, Y = 0, Text = "N1" });
+        model.Shapes.Add(new ViaShape { Layer = Layer1, X = 0, Y = 0, PadSize = 20_000, DrillSize = 10_000 });
+        var vm = new LayoutEditorViewModel(model) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+
+        Assert.Null(vm.FindClipStencil(0, 0, ClipTol));
+    }
+
+    /// <summary>§10 gate 11 / R-clip-9 — <c>Slice</c> was listed as a shipped command in both the design
+    /// note and the user reference and has never existed anywhere in <c>src/Ui</c> or <c>src/Design</c>.
+    /// A knife-cut Slice is a real, different operation (a line that divides shapes, conserving area) and
+    /// spending the name on "remove what is inside a region" would make it unnameable later.</summary>
+    [Fact]
+    public void Docs_NoLongerPromiseASliceCommand_AndListClipAndCutOutInstead()
+    {
+        foreach (var relative in new[] { "docs/design/layout-view.md", "docs/user/src/reference/layout-editor.md" })
+        {
+            string text = File.ReadAllText(Path.Combine(RepoRoot(), relative));
+            Assert.DoesNotContain("Slice", text);
+            Assert.Contains("Clip", text);
+            Assert.Contains("Cut Out", text);
+        }
+    }
+
+    private static string RepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "circuitrf.slnx")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        return dir!.FullName;
     }
 
     [Fact]

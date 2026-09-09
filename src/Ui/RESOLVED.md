@@ -1,5 +1,76 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## Layout editor: Clip and Cut Out, and the boolean operand filter that was a deny-list (2026-09-09)
+
+`docs/sonnet-briefs/brief-layout-clip-and-cut-out.md`. The report was that selecting a whole copper
+layer plus a rect drawn over a region of interest and running **Intersect** emptied the layer.
+Intersect was right — it is n-ary (`A ∩ B ∩ C ∩ …`) and goes empty at the first disjoint pair — and
+its semantics are unchanged. What was missing was **per-operand clipping**, now `Clip` and `Cut Out`.
+
+### Three things that are easy to get wrong here, and why they are what they are
+
+**The stencil is the shape under the RIGHT-CLICK, not a shape in the selection.** Two facts already
+in the code make that exact: `LayoutCanvas.OnPointerPressed`'s right-button branch only RECORDS the
+point and never runs `ApplyClickSelection`, so the selection survives the right-click intact; and
+`BuildContextMenuItems(wx, wy)` already hit-tests that point for its edge/vertex/ruler/bitmap items.
+Every alternative was worse and for the same reason — invisibility. *Last shape in document order* is
+deterministic and lands on the right shape for the motivating workflow, but nothing on screen says
+which shape is special. *Last shape selected* does not exist for most selections: `SetSelection`
+preserves the order it is handed, so click order is meaningful for a click-built selection, while a
+marquee hands it spatial-index query order and `Select All` hands it ascending index order — a rule
+that is click order sometimes and tree order otherwise is a rule nobody can predict.
+
+**An operand the stencil cannot touch is passed through as the SAME OBJECT.** Without the bbox reject
+in `LayoutBooleans.ClipCore`, `Clip` quietly converts every Circle, RoundedRect and Curve on the layer
+into a `PolygonShape` — a destructive, invisible flatten of artwork nobody asked to touch. It is also
+the whole performance story: on the reported board it skips 65 of 67 operands with no Clipper2 call at
+all. The **disjoint** test is exact for both operations and every stencil kind; the **containment**
+shortcut is not, and is restricted to a `RectShape` stencil, because "the operand's bbox is inside the
+stencil's bbox" implies "the operand is inside the stencil" only for a convex, hole-free stencil.
+
+**Each result keeps its own operand's `Layer` and `Net`.** This is a deliberate departure from
+`Combine`'s `NetsDiffered` rule, which clears the net when operands disagree — correct for a union,
+whose single output region genuinely has no single net, and wrong here: clipping a 40-net copper layer
+would silently strip 40 nets.
+
+### The live crash the investigation found, and the shape of the fix
+
+Selecting a `LabelShape` or a `ViaShape` together with geometry on the same layer and running any
+boolean threw `ArgumentOutOfRangeException` out of a context-menu click — through
+`LayoutClipper.ToClipperPaths` into `LayoutFlattener.Flatten`, whose own message says plainly that
+neither is a filled-region primitive. `GeometricSelectedIndices` filtered `BitmapShape` **and nothing
+else**: a deny-list that simply never learned about the other two. It is now the positive test
+`LayoutBooleans.IsClipperOperand` — what the flattener ACCEPTS — so a new non-region shape kind is
+excluded by default instead of reintroducing the crash. The reported cell happened to carry no label
+or via on that layer, which is the only reason the report was an empty layer and not a crash dialog.
+
+**The trap that fix walked straight into, caught by the existing rotate tests:** `Rotate`/`Mirror`
+shared that same list, and a rigid-body transform moves any shape that HAS an orientation — a port
+label's whole direction IS its rotation, and a via has a position to move. Narrowing one list broke
+seven rotate tests. The two exclusions are now separate members (`GeometricSelectedIndices` for
+clipper operands, `RotatableSelectedIndices` for everything but a bitmap) with a comment on each
+saying why it is not the other.
+
+**The menu headers are the bare verbs, not `Clip to Rect`.** R-clip-3 asked for the stencil in the
+header as well; the owner asked for `Clip` and `Cut Out` alone. The stencil is still named on the way
+IN — the enabled tooltip carries it by kind and layer — and on the way out, in every Messages
+sentence, so the requirement the header was serving is met on hover rather than at a glance.
+
+### Two smaller things fixed on the same trip
+
+- **An empty boolean result is a legitimate outcome and must not read as a failure.** `"Intersect
+  produced no geometry."` was `Info` severity and did not say why. Intersect now names its cause and
+  points at `Clip`; Difference and XOR get their own sentences, minus the pointer.
+- **The stencil's label has to be resolved BEFORE the commit.** `CommitReplace` removes the operands,
+  so the stencil's index no longer names the stencil afterwards — reporting from it named nothing at
+  all. The Messages gate caught this, not review.
+
+`Slice` was listed as a shipped command in `docs/design/layout-view.md` and
+`docs/user/src/reference/layout-editor.md` and has never existed anywhere in `src/Ui` or `src/Design`.
+It is a genuinely different operation — a knife cut: a line that divides the shapes it crosses, no
+region removed, area conserved — so spending the name on "remove what is inside a region" would have
+made a real knife cut unnameable later. Both lists now say `Clip` and `Cut Out`; a test holds it.
+
 ## Layout editor: two paths ignored the layer Select flag, and a paste ghost could not be placed at its source (owner, 2026-09-09)
 
 Three reports. Two of them turned out to be the same rule broken in two different places.

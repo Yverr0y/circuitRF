@@ -1072,7 +1072,7 @@ public sealed class LayoutCanvas : Control
             items.Add(refreshCache);
         }
 
-        AddBooleanAndFlattenMenuItems(items);
+        AddBooleanAndFlattenMenuItems(items, wx, wy);
         AddInstanceHierarchyMenuItems(items);
 
         if (overlayItems.Count == 0) return items;
@@ -1241,7 +1241,7 @@ public sealed class LayoutCanvas : Control
     /// surviving entry, since flattening is irreversible-except-by-undo and its resolution is the
     /// whole point of the operation).
     /// </summary>
-    private void AddBooleanAndFlattenMenuItems(List<object> items)
+    private void AddBooleanAndFlattenMenuItems(List<object> items, double wx, double wy)
     {
         if (_viewModel is null) return;
 
@@ -1276,6 +1276,29 @@ public sealed class LayoutCanvas : Control
         AddAvailItem("Intersect", boolAvail).Click  += (_, _) => { _viewModel.ApplyIntersect(); InvalidateVisual(); };
         AddAvailItem("Difference", boolAvail).Click += (_, _) => { _viewModel.ApplyDifference(); InvalidateVisual(); };
         AddAvailItem("XOR", boolAvail).Click        += (_, _) => { _viewModel.ApplyXor(); InvalidateVisual(); };
+
+        // brief-layout-clip-and-cut-out.md §7: in the boolean block, directly after XOR, no separator
+        // — they ARE booleans and belong with the others. Unlike everything else in this method these
+        // two are stencil-scoped as well as selection-scoped (R-clip-1: the shape under the right-click
+        // is the stencil), which is why this method now takes the (wx, wy) its caller already had.
+        long clipTol = HitTolDbu();
+        var stencil = _viewModel.FindClipStencil(wx, wy, clipTol);
+        var clipAvail = _viewModel.ClipAvailability(wx, wy, clipTol);
+
+        // R-clip-3 asked for the stencil in the HEADER too (`Clip to Rect`); the owner asked for the
+        // bare verbs instead (2026-09-09). The stencil is still named everywhere it has to be — the
+        // enabled TOOLTIP carries it by kind and layer, and so does every Messages sentence — so a
+        // mis-aimed right-click is still visible before the click, on hover rather than at a glance.
+        void AddClipItem(string header, bool cutOut, Action<int> apply)
+        {
+            var mi = AddAvailItem(header, clipAvail);
+            if (clipAvail.CanExecute && stencil is { } s)
+                ToolTip.SetTip(mi, _viewModel.ClipTooltip(s, cutOut));
+            mi.Click += (_, _) => { if (stencil is { } s2) { apply(s2); InvalidateVisual(); } };
+        }
+
+        AddClipItem("Clip", cutOut: false, i => _viewModel.ApplyClip(i));
+        AddClipItem("Cut Out", cutOut: true, i => _viewModel.ApplyCutOut(i));
 
         Sep();
         AddAvailItem("Offset…", _viewModel.OffsetAvailability).Click += async (_, _) => await ShowOffsetDialogAsync();

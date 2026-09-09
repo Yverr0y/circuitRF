@@ -118,8 +118,24 @@ automatically on GDSII export.
 **Edit operations:** boolean **Union** (grouped per layer — one result per distinct layer in the
 selection), **Intersect / Difference / XOR** (which need a same-layer pair to enable), **Size**
 (grow or shrink by a signed offset), **Scale** (a numeric factor or a target size, plus bounding-box
-handles: corner for uniform, side for one axis), **Slice**, **Align and distribute**, **Move to layer**,
+handles: corner for uniform, side for one axis), **Clip** and **Cut Out**, **Align and distribute**, **Move to layer**,
 **Set net**, **Flatten to Polygon…**, **Flatten Hierarchy** and **Group into cell**.
+
+<div class="callout note">
+<span class="label">Clip and Cut Out are not Intersect</span>
+<p><strong>Intersect</strong> is the region shared by <em>all</em> the selected shapes, folded across the
+whole selection — so a selection holding any two shapes that do not overlap intersects to nothing. That
+is the right answer to the question it asks, and it is almost never the question you meant when you drew
+a rectangle over a region of interest.</p>
+<p><strong>Clip</strong> and <strong>Cut Out</strong> ask the other one. Draw the region, <em>select the
+shapes you want clipped</em>, then <em>right-click the region</em> and choose <strong>Clip</strong>
+(keep what is inside it) or <strong>Cut Out</strong> (keep what is outside). Both name the shape they
+found under your click in their tooltip, so you can check your aim before you commit to it.
+Every selected shape is clipped on its own and keeps its own identity, layer and net, so the operands may
+sit on any mix of layers. The right-clicked shape is the stencil, not an operand: it is never clipped
+against itself and it survives the operation, so the same rectangle can clip a second layer straight
+afterwards. Nothing you did not select is touched, on any layer.</p>
+</div>
 
 <div class="callout note">
 <span class="label">The two "flatten" commands are different operations</span>

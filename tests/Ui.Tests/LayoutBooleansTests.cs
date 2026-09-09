@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using CircuitRF.Ui.Layout;
 
@@ -264,6 +266,225 @@ public class LayoutBooleansTests
 
         Assert.Equal(json1, LayoutPersistence.Serialize(reloaded));
         Assert.Equal(json1, json2);
+    }
+
+    // ── Clip / Cut Out (brief-layout-clip-and-cut-out.md §10) ────────────────────
+
+    private static string SerializeOne(LayoutShape shape)
+    {
+        var view = new LayoutView();
+        view.Shapes.Add(shape);
+        return LayoutPersistence.Serialize(view);
+    }
+
+    /// <summary>§10 gate 1, geometry half — the REPORTED case. 67 mutually disjoint polygons plus a
+    /// Rect region of interest: 65 lie fully outside it, 1 fully inside, 1 straddles (the board-wide
+    /// pour). Clip keeps the inside one, the clipped part of the straddler, and nothing else — while
+    /// Intersect over the SAME operand set still returns empty, because that is the correct answer to
+    /// the different question §1 describes.</summary>
+    [Fact]
+    public void Clip_SixtySevenDisjointPolygons_KeepsOnlyTheInsideOneAndTheClippedStraddler_IntersectStillEmpty()
+    {
+        var stencil = Rect(0, 0, 100_000, 100_000);
+
+        var operands = new List<LayoutShape>();
+        // 65 fully outside, marched well clear of the stencil.
+        for (int i = 0; i < 65; i++)
+            operands.Add(Rect(200_000 + i * 20_000, 0, 210_000 + i * 20_000, 10_000));
+        // 1 fully inside.
+        var inside = Rect(20_000, 20_000, 40_000, 40_000);
+        operands.Add(inside);
+        // 1 straddling — the board-wide pour.
+        operands.Add(Rect(-500_000, 40_000, 500_000, 60_000));
+
+        var result = LayoutBooleans.Clip(operands, stencil, null);
+
+        Assert.Equal(2, result.Shapes.Count);
+        Assert.Equal(65, result.OperandsRemoved);
+        Assert.Equal(1, result.OperandsChanged);
+        Assert.Equal(1, result.OperandsUntouched);
+        Assert.Equal(operands.Count, result.OperandsRemoved + result.OperandsChanged + result.OperandsUntouched);
+
+        // The fully-inside operand is passed through as the SAME object (R-clip-6), not polygonized.
+        Assert.Same(inside, result.Shapes[0]);
+        // The straddler is clipped to the stencil's own span.
+        var clipped = Assert.IsType<PolygonShape>(result.Shapes[1]);
+        Assert.Equal(new Bbox(0, 40_000, 100_000, 60_000), LayoutGeometry.BboxOf(clipped));
+
+        // §1 unchanged: Intersect over the same operands (plus the rect) is still empty.
+        var withStencil = new List<LayoutShape>(operands) { stencil };
+        Assert.Empty(LayoutBooleans.Intersect(withStencil, null).Shapes);
+    }
+
+    /// <summary>R-clip-5 — each result carries its OWN operand's net, never a cleared one. Clipping a
+    /// 40-net copper layer must not silently strip 40 nets, which is what <c>Combine</c>'s
+    /// <c>NetsDiffered</c> rule would have done.</summary>
+    [Fact]
+    public void Clip_OperandsOnFourDifferentNets_EachResultKeepsItsOwnNet()
+    {
+        var stencil = Rect(0, 0, 100_000, 100_000);
+        var operands = new List<LayoutShape>
+        {
+            Rect(-10_000, 10_000, 10_000, 20_000, net: "VDD"),
+            Rect(-10_000, 30_000, 10_000, 40_000, net: "GND"),
+            Rect(-10_000, 50_000, 10_000, 60_000, net: "RFin"),
+            Rect(-10_000, 70_000, 10_000, 80_000, net: "RFout"),
+        };
+
+        var result = LayoutBooleans.Clip(operands, stencil, null);
+
+        Assert.Equal(4, result.OperandsChanged);
+        Assert.Equal(new[] { "VDD", "GND", "RFin", "RFout" }, result.Shapes.Select(sh => sh.Net));
+    }
+
+    /// <summary>§4 — one stencil, operands on three layers, one operation: each result stays on its
+    /// OWN operand's layer. The stencil contributes no layer.</summary>
+    [Fact]
+    public void Clip_OperandsOnThreeLayers_EachResultKeepsItsOwnLayer()
+    {
+        var layer3 = new LayerKey(3, 0);
+        var stencil = Rect(0, 0, 100_000, 100_000);
+        var operands = new List<LayoutShape>
+        {
+            Rect(-10_000, 10_000, 10_000, 20_000, Layer1),
+            Rect(-10_000, 30_000, 10_000, 40_000, Layer2),
+            Rect(-10_000, 50_000, 10_000, 60_000, layer3),
+        };
+
+        var result = LayoutBooleans.Clip(operands, stencil, null);
+
+        Assert.Equal(new[] { Layer1, Layer2, layer3 }, result.Shapes.Select(sh => sh.Layer));
+    }
+
+    /// <summary>§10 gate 6 / R-clip-6 — the test that catches a SILENT FLATTEN. A Circle and a
+    /// RoundedRect wholly outside the stencil survive Cut Out as the same objects, still
+    /// <c>CircleShape</c>/<c>RoundedRectShape</c>, byte-identical through
+    /// <c>LayoutPersistence.Serialize</c>.</summary>
+    [Fact]
+    public void CutOut_CurvedOperandsWhollyOutsideTheStencil_PassThroughAsTheSameObjects_NotPolygonized()
+    {
+        var stencil = Rect(0, 0, 10_000, 10_000);
+        var circle = new CircleShape { Layer = Layer1, Cx = 500_000, Cy = 500_000, R = 20_000 };
+        var rrect = new RoundedRectShape { Layer = Layer1, X1 = 900_000, Y1 = 0, X2 = 950_000, Y2 = 50_000, CornerRadius = 5_000 };
+        string circleJson = SerializeOne(circle), rrectJson = SerializeOne(rrect);
+
+        var result = LayoutBooleans.CutOut([circle, rrect], stencil, null);
+
+        Assert.Equal(2, result.OperandsUntouched);
+        Assert.Equal(0, result.OperandsChanged);
+        Assert.Equal(0, result.OperandsRemoved);
+        Assert.False(result.AnyCurvedOperand);   // nothing was flattened, so nothing to warn about
+        Assert.Same(circle, result.Shapes[0]);
+        Assert.Same(rrect, result.Shapes[1]);
+        Assert.IsType<CircleShape>(result.Shapes[0]);
+        Assert.IsType<RoundedRectShape>(result.Shapes[1]);
+        Assert.Equal(circleJson, SerializeOne(result.Shapes[0]));
+        Assert.Equal(rrectJson, SerializeOne(result.Shapes[1]));
+    }
+
+    /// <summary>The Rect-stencil containment shortcut's other half: an operand wholly INSIDE a Rect
+    /// stencil is removed by Cut Out with no Clipper2 call, and passed through unchanged by Clip.</summary>
+    [Fact]
+    public void CutOut_OperandWhollyInsideARectStencil_IsRemoved()
+    {
+        var stencil = Rect(0, 0, 100_000, 100_000);
+        var inside = new CircleShape { Layer = Layer1, Cx = 50_000, Cy = 50_000, R = 10_000 };
+
+        var result = LayoutBooleans.CutOut([inside], stencil, null);
+
+        Assert.Empty(result.Shapes);
+        Assert.Equal(1, result.OperandsRemoved);
+    }
+
+    /// <summary>§10's property test: Clip and Cut Out are COMPLEMENTS. For any operand and stencil,
+    /// Clip ∪ Cut Out reconstructs the operand and their intersection is empty — one assertion that
+    /// catches a fill-rule or hole-nesting mistake in either.</summary>
+    [Theory]
+    [InlineData(0, 0, 60_000, 60_000)]        // straddles one corner
+    [InlineData(-50_000, 20_000, 50_000, 30_000)] // a bar straight through
+    [InlineData(20_000, 20_000, 80_000, 80_000)]  // wholly inside
+    [InlineData(500_000, 0, 600_000, 10_000)]     // wholly outside
+    public void ClipAndCutOut_AreComplements_OverAPolygonStencil(long x1, long y1, long x2, long y2)
+    {
+        // A NON-rect stencil on purpose — the Rect containment shortcut must not be what makes this
+        // pass, and an L-shaped stencil exercises concavity.
+        var stencil = new PolygonShape
+        {
+            Layer = Layer1,
+            Xy = [0, 0, 100_000, 0, 100_000, 40_000, 40_000, 40_000, 40_000, 100_000, 0, 100_000],
+        };
+        var operand = Rect(x1, y1, x2, y2);
+
+        var kept = LayoutBooleans.Clip([operand], stencil, null).Shapes;
+        var dropped = LayoutBooleans.CutOut([operand], stencil, null).Shapes;
+
+        // Union of the two halves is the operand back again.
+        var rebuilt = LayoutBooleans.Union([.. kept, .. dropped], null).Shapes;
+        Assert.Equal(AreaOf([operand]), AreaOf(rebuilt), 1e-6 * Math.Max(1.0, AreaOf([operand])));
+        // ...and the two halves share no area.
+        Assert.Equal(0.0, AreaOf(LayoutBooleans.Intersect([.. Wrap(kept), .. Wrap(dropped)], null).Shapes), 1.0);
+    }
+
+    // A one-element list stays itself; an empty half is represented by a degenerate zero-area rect so
+    // the n-ary Intersect below still has two operands to fold.
+    private static IReadOnlyList<LayoutShape> Wrap(IReadOnlyList<LayoutShape> shapes) =>
+        shapes.Count > 0 ? shapes : [Rect(0, 0, 0, 0)];
+
+    private static double AreaOf(IReadOnlyList<LayoutShape> shapes)
+    {
+        double sum = 0;
+        foreach (var shape in shapes)
+        {
+            var rings = LayoutFlattener.Flatten(shape, LayoutFlattener.ResolveTolDbu(shape, null));
+            for (int i = 0; i < rings.Count; i++)
+                sum += i == 0 ? Math.Abs(LayoutGeometry.SignedArea(rings[i])) : -Math.Abs(LayoutGeometry.SignedArea(rings[i]));
+        }
+        return sum;
+    }
+
+    /// <summary>§10 gate 10 / R-clip-8 — EVERY <c>LayoutShape</c> subclass in a boolean operand set,
+    /// no throw. The exclusion is a positive test for what the flattener accepts
+    /// (<see cref="LayoutBooleans.IsClipperOperand"/>), so a new non-region shape kind cannot
+    /// reintroduce the <c>ArgumentOutOfRangeException</c> §8 found.</summary>
+    [Fact]
+    public void EveryLayoutShapeSubclass_IsEitherAcceptedByTheClipperOrExcludedByIsClipperOperand()
+    {
+        LayoutShape[] all =
+        [
+            Rect(0, 0, 10_000, 10_000),
+            new PolygonShape { Layer = Layer1, Xy = [0, 0, 10_000, 0, 10_000, 10_000] },
+            new RoundedRectShape { Layer = Layer1, X1 = 0, Y1 = 0, X2 = 10_000, Y2 = 10_000, CornerRadius = 1_000 },
+            new CircleShape { Layer = Layer1, Cx = 0, Cy = 0, R = 5_000 },
+            new CurveShape { Layer = Layer1, Xy = [0, 0, 10_000, 0, 10_000, 10_000] },
+            new PathShape { Layer = Layer1, Xy = [0, 0, 10_000, 0], Width = 1_000 },
+            new ViaShape { Layer = Layer1, X = 0, Y = 0, PadSize = 2_000, DrillSize = 1_000 },
+            new LabelShape { Layer = Layer1, X = 0, Y = 0, Text = "L1" },
+            new BitmapShape { Layer = Layer1, X = 0, Y = 0, W = 1_000, H = 1_000 },
+        ];
+
+        // Every subclass is covered — a new one added to the model without a decision here fails this.
+        var kinds = typeof(LayoutShape).Assembly.GetTypes()
+            .Where(t => t.IsSubclassOf(typeof(LayoutShape)) && !t.IsAbstract).ToList();
+        Assert.Equal(kinds.Count, all.Select(sh => sh.GetType()).Distinct().Count());
+
+        var accepted = all.Where(LayoutBooleans.IsClipperOperand).ToList();
+        Assert.Equal(6, accepted.Count);   // Rect/Polygon/RoundedRect/Circle/Curve/Path
+
+        // Nothing IsClipperOperand accepts may throw out of any boolean, offset or clip.
+        foreach (var shape in accepted)
+        {
+            LayoutBooleans.Union([shape, Rect(0, 0, 5_000, 5_000)], null);
+            LayoutBooleans.Intersect([shape, Rect(0, 0, 5_000, 5_000)], null);
+            LayoutBooleans.Difference([shape, Rect(0, 0, 5_000, 5_000)], null);
+            LayoutBooleans.Xor([shape, Rect(0, 0, 5_000, 5_000)], null);
+            LayoutBooleans.Offset(shape, 100, null);
+            LayoutBooleans.Clip([shape], Rect(0, 0, 5_000, 5_000), null);
+            LayoutBooleans.CutOut([shape], Rect(0, 0, 5_000, 5_000), null);
+        }
+
+        // ...and everything it rejects is exactly what LayoutFlattener refuses.
+        foreach (var shape in all.Where(sh => !LayoutBooleans.IsClipperOperand(sh)))
+            Assert.Throws<ArgumentOutOfRangeException>(() => LayoutClipper.ToClipperPaths(shape, 1000));
     }
 
     private static RectShape Clone(RectShape r) => new() { Layer = r.Layer, Net = r.Net, X1 = r.X1, Y1 = r.Y1, X2 = r.X2, Y2 = r.Y2 };

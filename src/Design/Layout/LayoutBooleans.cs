@@ -18,6 +18,25 @@ public readonly record struct LayoutBooleanResult(
     bool AnyCurvedOperand,
     bool NetsDiffered);
 
+/// <summary>One <see cref="LayoutBooleans.Clip"/>/<see cref="LayoutBooleans.CutOut"/> result
+/// (docs/sonnet-briefs/brief-layout-clip-and-cut-out.md §6). Unlike <see cref="LayoutBooleanResult"/>
+/// this is NOT one combined region: N operands go in and each contributes 0..N shapes of its own, in
+/// operand order, keeping its own <c>Layer</c> and <c>Net</c> (R-clip-5). The three counts partition
+/// the operand set exactly — <c>OperandsRemoved + OperandsChanged + OperandsUntouched</c> is the
+/// operand count — and are what Messages reports (R-clip-3).</summary>
+/// <param name="Shapes">Results in operand order; an operand may contribute 0..N.</param>
+/// <param name="OperandsRemoved">Operands that went empty.</param>
+/// <param name="OperandsChanged">Operands whose geometry was rebuilt by the clipper.</param>
+/// <param name="OperandsUntouched">Operands passed through as the SAME object (R-clip-6).</param>
+/// <param name="AnyCurvedOperand">True when an operand that was actually clipped needed flattening —
+/// an operand skipped by the bbox test (R-clip-6) never does, whatever its kind.</param>
+public readonly record struct LayoutClipResult(
+    IReadOnlyList<LayoutShape> Shapes,
+    int OperandsRemoved,
+    int OperandsChanged,
+    int OperandsUntouched,
+    bool AnyCurvedOperand);
+
 public static class LayoutBooleans
 {
     // ── Public operations ──────────────────────────────────────────────────────
@@ -92,6 +111,113 @@ public static class LayoutBooleans
         var shapes = LayoutClipper.FromClipperTree(tree, shape.Layer, shape.Net);
         return new LayoutBooleanResult(shapes, IsCurved(shape), NetsDiffered: false);
     }
+
+    // ── Clip / Cut Out (brief-layout-clip-and-cut-out.md) ─────────────────────
+
+    /// <summary>Keeps the part of each operand that lies INSIDE <paramref name="stencil"/>, each
+    /// operand clipped independently (§2). This is not <see cref="Intersect"/>: that is the one region
+    /// shared by ALL operands and goes empty at the first disjoint pair, which is the correct answer to
+    /// a different question (§1).</summary>
+    public static LayoutClipResult Clip(IReadOnlyList<LayoutShape> operands, LayoutShape stencil, Technology? tech) =>
+        ClipCore(ClipType.Intersection, operands, stencil, tech);
+
+    /// <summary>Keeps the part of each operand that lies OUTSIDE <paramref name="stencil"/> — the
+    /// complement of <see cref="Clip"/> over the same operand and stencil.</summary>
+    public static LayoutClipResult CutOut(IReadOnlyList<LayoutShape> operands, LayoutShape stencil, Technology? tech) =>
+        ClipCore(ClipType.Difference, operands, stencil, tech);
+
+    /// <summary>
+    /// The shared per-operand clip. <paramref name="clipType"/> is <c>Intersection</c> for Clip and
+    /// <c>Difference</c> for Cut Out; everything else about the two is identical, which is why they
+    /// are complements by construction rather than by two pieces of arithmetic that have to agree.
+    ///
+    /// <para><b>R-clip-5 — each result carries its OWN operand's layer and net.</b> The stencil
+    /// contributes neither. This is a deliberate departure from <see cref="Combine"/>'s
+    /// <c>NetsDiffered</c> rule, which clears the net when operands disagree: that is right for a
+    /// union, whose single output region genuinely has no single net, and wrong here, where clipping a
+    /// 40-net copper layer would silently strip 40 nets.</para>
+    ///
+    /// <para><b>R-clip-6 — an operand the stencil cannot touch is passed through as the SAME
+    /// OBJECT.</b> Without the bbox reject below, Clip would quietly convert every Circle,
+    /// RoundedRect and Curve on the layer into a <c>PolygonShape</c> — a destructive, invisible
+    /// flatten of artwork the user never asked to touch. It is also what makes the operation fast: on
+    /// the board that motivated this brief it skips 65 of 67 operands with no Clipper2 call at all.
+    /// The disjoint test is exact for both operations and every stencil kind. The containment test is
+    /// NOT: an operand's bbox lying inside the stencil's bbox implies the operand lies inside the
+    /// stencil only when the stencil is convex and hole-free, which a <c>RectShape</c> is and an
+    /// arbitrary <c>PolygonShape</c> is not — so it is restricted to a Rect stencil.</para>
+    /// </summary>
+    private static LayoutClipResult ClipCore(
+        ClipType clipType, IReadOnlyList<LayoutShape> operands, LayoutShape stencil, Technology? tech)
+    {
+        bool keepInside = clipType == ClipType.Intersection;
+        var stencilBox = LayoutGeometry.BboxOf(stencil);
+        // A Rect stencil IS its own bounding box, so "inside the box" and "inside the stencil" are the
+        // same statement — the only stencil kind for which the containment shortcut is exact.
+        bool stencilIsItsBox = stencil is RectShape;
+
+        Paths64? stencilPaths = null;   // built lazily: a selection entirely rejected by bbox never needs it
+
+        var shapes = new List<LayoutShape>(operands.Count);
+        int removed = 0, changed = 0, untouched = 0;
+        bool anyCurved = false;
+
+        foreach (var operand in operands)
+        {
+            var box = LayoutGeometry.BboxOf(operand);
+
+            if (!box.Intersects(stencilBox))
+            {
+                // Nothing of this operand is inside the stencil.
+                if (keepInside) removed++;
+                else { shapes.Add(operand); untouched++; }
+                continue;
+            }
+
+            if (stencilIsItsBox && Inside(box, stencilBox))
+            {
+                // All of this operand is inside the stencil.
+                if (keepInside) { shapes.Add(operand); untouched++; }
+                else removed++;
+                continue;
+            }
+
+            stencilPaths ??= LayoutClipper.ToClipperPaths(stencil, LayoutFlattener.ResolveTolDbu(stencil, tech));
+
+            if (IsCurved(operand)) anyCurved = true;
+            var subject = LayoutClipper.ToClipperPaths(operand, LayoutFlattener.ResolveTolDbu(operand, tech));
+
+            var tree = new PolyTree64();
+            Clipper.BooleanOp(clipType, subject, stencilPaths, tree, LayoutClipper.Rule);
+            var pieces = LayoutClipper.FromClipperTree(tree, operand.Layer, operand.Net);
+
+            if (pieces.Count == 0) { removed++; continue; }
+            shapes.AddRange(pieces);
+            changed++;
+        }
+
+        return new LayoutClipResult(shapes, removed, changed, untouched, anyCurved);
+    }
+
+    private static bool Inside(in Bbox inner, in Bbox outer) =>
+        !inner.IsEmpty && !outer.IsEmpty &&
+        inner.MinX >= outer.MinX && inner.MaxX <= outer.MaxX &&
+        inner.MinY >= outer.MinY && inner.MaxY <= outer.MaxY;
+
+    /// <summary>
+    /// Whether <see cref="LayoutClipper.ToClipperPaths"/> accepts this shape — i.e. whether it may
+    /// enter a boolean/offset/clip operand set at all, or be a clip stencil.
+    ///
+    /// <para><b>R-clip-8 — stated once, as a POSITIVE test for what the flattener accepts, never as a
+    /// deny-list.</b> A deny-list is what let a <c>LabelShape</c> or a <c>ViaShape</c> reach
+    /// <see cref="LayoutFlattener.Flatten"/> and throw <c>ArgumentOutOfRangeException</c> out of a
+    /// context-menu click: the filter listed <c>BitmapShape</c> and simply never learned about the
+    /// other two. Listed positively, a new non-region shape kind is excluded by default rather than
+    /// crashing. A via wanted as artwork has <c>Convert to Via</c>'s inverse; a label has
+    /// <c>Flatten to Polygon</c>, the supported route from text to a region.</para>
+    /// </summary>
+    public static bool IsClipperOperand(LayoutShape shape) =>
+        shape is RectShape or PolygonShape or RoundedRectShape or CircleShape or CurveShape or PathShape;
 
     /// <summary>True when a shape's Clipper2 conversion needs the flattener — §3.2 R9e's "curved
     /// operands are flattened" warning trigger. A plain <c>Rect</c>/<c>Polygon</c> never does.</summary>

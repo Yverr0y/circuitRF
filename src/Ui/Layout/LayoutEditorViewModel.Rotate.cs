@@ -50,7 +50,7 @@ public partial class LayoutEditorViewModel
     /// are content of the same view and rotate with it, so a toolbar button greyed out with wires
     /// selected would be refusing the commonest thing on that cell.</para>
     public LayoutCommandAvailability RotateAvailability =>
-        GeometricSelectedIndices.Count == 0 && _selectedInstanceIndices.Count == 0
+        RotatableSelectedIndices.Count == 0 && _selectedInstanceIndices.Count == 0
         && SelectedWireIndices.Count == 0
             ? new LayoutCommandAvailability(false, "Select geometry, an instance or a wire to rotate.")
             : new LayoutCommandAvailability(true, null);
@@ -113,7 +113,7 @@ public partial class LayoutEditorViewModel
         Func<LayoutRotation, LayoutRotation> portDirection,
         string description)
     {
-        var shapeIndices    = GeometricSelectedIndices;
+        var shapeIndices    = RotatableSelectedIndices;
         var instanceIndices = _selectedInstanceIndices.ToList();
 
         // WB40f: the WIRES of a wirebond cell are content of this same view and are carried by the
