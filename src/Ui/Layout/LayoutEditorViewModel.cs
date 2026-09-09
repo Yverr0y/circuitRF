@@ -765,8 +765,15 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
     /// R-via-4 completed both starter stackups — no separate "has a drill function" flag exists or is
     /// needed, since <c>StackupKind.Via</c> IS that function.
     ///
-    /// <para>Enabled only when the CURRENT layer is one a via entry claims — not merely when the
-    /// stackup has a via entry somewhere.</para>
+    /// <para>Enabled when the CURRENT layer is one a via entry claims — or when the technology
+    /// declares exactly ONE via layer, since arming the tool then moves to it
+    /// (<see cref="MoveToTheOnlyViaLayer"/>) and there was never a choice to make.</para>
+    ///
+    /// <para><b>That second clause closes a deadlock</b> (owner-reported, 2026-09-09). The move used
+    /// to be reachable only from <see cref="OnActiveToolChanged"/> — which cannot run, because the
+    /// only thing that arms the tool is the toolbar button this property disables. On the ordinary
+    /// board, whose stackup declares one drill layer, the tool the move exists to serve could never
+    /// be armed at all without first finding that layer in the combo by hand.</para>
     ///
     /// <para><b>Why the extra condition.</b> <see cref="CommitViaPlacement"/> places on
     /// <see cref="CurrentLayerKey"/>, and a via on a layer no <see cref="StackupKind.Via"/> entry binds
@@ -784,21 +791,50 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
                 return LayoutCommandAvailability.Disabled(
                     "Via: this technology's stackup has no via layer — draw geometry on a via/drill layer directly instead.");
 
-            if (!ViaSpanResolver.DrillLayerKeys(tech).Contains(CurrentLayerKey))
-                return LayoutCommandAvailability.Disabled(
-                    "Via: " + (ViaSpanResolver.Explain(CurrentLayerKey, tech) ?? "the current layer is not a via layer."));
+            var drill = ViaSpanResolver.DrillLayerKeys(tech);
+            if (drill.Contains(CurrentLayerKey) || drill.Count == 1)
+                return LayoutCommandAvailability.Enabled;
 
-            return LayoutCommandAvailability.Enabled;
+            return LayoutCommandAvailability.Disabled(
+                "Via: " + (ViaSpanResolver.Explain(CurrentLayerKey, tech) ?? "the current layer is not a via layer."));
+        }
+    }
+
+    /// <summary>The sole via layer this technology declares, when it declares exactly one and the
+    /// current layer is not already it — i.e. the layer arming the tool would move to. Null
+    /// otherwise.</summary>
+    private LayerKey? PendingViaLayerMove
+    {
+        get
+        {
+            if (Technology is not { } tech) return null;
+            var drill = ViaSpanResolver.DrillLayerKeys(tech);
+            if (drill.Count != 1) return null;
+            var only = drill.Single();
+            return only == CurrentLayerKey ? null : only;
         }
     }
 
     /// <summary>The toolbar tooltip text — the base description when enabled, the R13a reason when
     /// not (bound directly rather than left to code-behind, since a toolbar button has no natural
     /// "open a menu" moment to compute it in, unlike the context-menu items <c>LayoutCanvas</c> already
-    /// surfaces <see cref="LayoutCommandAvailability.DisabledReason"/> for).</summary>
-    public string ViaToolTipText => ViaToolAvailability.CanExecute
-        ? "Via (place at snapped point)"
-        : ViaToolAvailability.DisabledReason!;
+    /// surfaces <see cref="LayoutCommandAvailability.DisabledReason"/> for).
+    ///
+    /// <para>When arming the tool will MOVE the current layer, the tooltip says so and names the
+    /// layer: the layer combo changing under the user is otherwise a silent side effect of pressing
+    /// an unrelated button.</para></summary>
+    public string ViaToolTipText
+    {
+        get
+        {
+            if (!ViaToolAvailability.CanExecute) return ViaToolAvailability.DisabledReason!;
+            if (PendingViaLayerMove is not { } move) return "Via (place at snapped point)";
+
+            var name = Technology?.Layers.FirstOrDefault(l => l.Key == move)?.Name
+                       ?? $"({move.Layer},{move.Datatype})";
+            return $"Via (place at snapped point — switches the current layer to \"{name}\")";
+        }
+    }
 
     /// <summary>§4.1: "single click places a ViaShape at the snapped point... pad and drill default
     /// from the technology." One <see cref="AddShapeCommand"/>, exactly like every other L1b drawing
@@ -807,7 +843,15 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
     /// fixed technology defaults, only editable afterward via the Properties Inspector (L1j).</summary>
     private void CommitViaPlacement(double wx, double wy, KeyModifiers mods)
     {
+        // The availability check alone is no longer enough to know WHERE this lands: the tool is also
+        // enabled on the "one via layer, arming moves to it" clause, and the layer combo is still live
+        // while the tool is armed — so a user who arms Via and then picks a copper layer would place a
+        // via bound to no via entry, which is exactly the inert shape ViaToolAvailability exists to
+        // refuse. Re-run the move (a no-op when it has already happened) and then check the layer
+        // itself, not the button.
         if (!ViaToolAvailability.CanExecute) return;
+        MoveToTheOnlyViaLayer();
+        if (!ViaSpanResolver.DrillLayerKeys(Technology).Contains(CurrentLayerKey)) return;
         // R-dup-2: Alt no longer suspends snap anywhere in this editor — it arms a duplicate drag.
         var (sx, sy) = LayoutSnapping.SnapPoint(wx, wy, Model.SnapDbu, suspend: false);
 
@@ -2781,6 +2825,36 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
     /// directly (e.g. from a test) is also fine — both stay in sync via the partial-changed hooks.</summary>
     [ObservableProperty] private LayerPickerItem? _currentLayerItem;
 
+    /// <summary>
+    /// The layer somebody actually PICKED — from the toolbar combo, from a test, or from the Via
+    /// tool's own move — as opposed to whatever <see cref="RebuildAvailableLayers"/> seeded when it
+    /// had nothing better. Null until the first such pick.
+    ///
+    /// <para><b>Why it is remembered separately from <see cref="CurrentLayerKey"/>.</b> A rebuild has
+    /// to answer "did the user mean this layer, or did I put them here?", and the key alone cannot
+    /// say. Two owner-reported symptoms came out of not distinguishing them (2026-09-09), both on a
+    /// technology imported from Gerber, where drawing layer 1/0 is the fabrication-details layer:</para>
+    ///
+    /// <list type="bullet">
+    /// <item>The constructor runs a rebuild with no technology yet — every call site applies a
+    /// resolution on the NEXT line — so it seeded from the no-technology fallback set and left
+    /// <c>CurrentLayerKey</c> at 1/0. The very next rebuild found a REAL layer numbered 1/0 and kept
+    /// it as though it had been chosen, so the editor opened on a fabrication-details layer that the
+    /// technology marks neither visible nor selectable.</item>
+    /// <item>Any moment the technology failed to resolve (the open <c>.ctech</c> editor pushes through
+    /// this same seam on every commit, and a load failure resolves to a null Technology) dragged the
+    /// layer to that same 1/0 and pinned it there once the technology came back.</item>
+    /// </list>
+    ///
+    /// <para>Holding the pick means a technology that disappears and returns returns the user to their
+    /// own layer, rather than to whatever the placeholder set happened to collide with.</para>
+    /// </summary>
+    private LayerKey? _chosenLayerKey;
+
+    /// <summary>True only while <see cref="RebuildAvailableLayers"/> is writing its own choice, so
+    /// that write does not masquerade as a user pick.</summary>
+    private bool _seedingLayers;
+
     partial void OnCurrentLayerItemChanged(LayerPickerItem? value)
     {
         if (value is not null) CurrentLayerKey = value.Key;
@@ -2790,6 +2864,7 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
     /// see <see cref="ViaToolAvailability"/> — so the toolbar has to be told when it moves.</summary>
     partial void OnCurrentLayerKeyChanged(LayerKey value)
     {
+        if (!_seedingLayers) _chosenLayerKey = value;
         OnPropertyChanged(nameof(ViaToolAvailability));
         OnPropertyChanged(nameof(ViaToolTipText));
     }
@@ -2797,11 +2872,15 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
     /// <summary>Repopulates <see cref="AvailableLayers"/> from <see cref="Technology"/> (ordered by
     /// ZOrder) or a small fixed fallback set (1/0 … 4/0) when there is no technology — gate 11.
     /// Called at construction and whenever <see cref="Technology"/> changes (L0c's live seam).
-    /// Keeps the current selection if its key still exists; otherwise falls back to the first
-    /// layer, never throwing.</summary>
+    /// Restores the layer the user PICKED if its key still exists; otherwise seeds
+    /// <see cref="DefaultLayerChoice"/>, never throwing.
+    ///
+    /// <para>The fallback set's keys are placeholders, not a claim about any process — matching one
+    /// of them against a real technology is a numeric COINCIDENCE, which is why the restore is keyed
+    /// on <see cref="_chosenLayerKey"/> and not on the current key. See that field for the two
+    /// symptoms that came of conflating them.</para></summary>
     private void RebuildAvailableLayers()
     {
-        var previous = CurrentLayerKey;
         AvailableLayers.Clear();
 
         if (Technology is { Layers.Count: > 0 } tech)
@@ -2819,9 +2898,51 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
             }
         }
 
-        var match = AvailableLayers.FirstOrDefault(l => l.Key == previous) ?? AvailableLayers.FirstOrDefault();
-        CurrentLayerItem = match;
-        if (match is not null) CurrentLayerKey = match.Key;
+        var match = (_chosenLayerKey is { } chosen
+                        ? AvailableLayers.FirstOrDefault(l => l.Key == chosen)
+                        : null)
+                    ?? DefaultLayerChoice();
+
+        _seedingLayers = true;
+        try
+        {
+            CurrentLayerItem = match;
+            if (match is not null) CurrentLayerKey = match.Key;
+        }
+        finally { _seedingLayers = false; }
+    }
+
+    /// <summary>
+    /// The layer to land on when nothing has been picked (or the pick no longer exists): the topmost
+    /// CONDUCTOR that the technology marks both visible and selectable, failing that the topmost
+    /// visible-and-selectable layer of any kind, failing that simply the first.
+    ///
+    /// <para><b>Visible/Selectable are a floor on what may be seeded, not a preference.</b> A layer
+    /// with either switched off is one the user has said they do not work on — seeding it means the
+    /// next rectangle they draw lands somewhere they cannot see it and cannot click it. That is the
+    /// same judgement <c>LayoutHitTest.HitStack</c>, the marquee's gate 8 and Select All already make
+    /// about what "the user can select" means. Choosing a CONDUCTOR first, rather than whatever sorts
+    /// lowest, is the ordinary case: artwork is drawn on copper, and a board technology sorts its
+    /// documentation and drill layers well above it.</para>
+    ///
+    /// <para>An explicit pick is never second-guessed by any of this: a user who selects a hidden
+    /// layer in the combo keeps it.</para>
+    /// </summary>
+    private LayerPickerItem? DefaultLayerChoice()
+    {
+        if (Technology is not { Layers.Count: > 0 } tech) return AvailableLayers.FirstOrDefault();
+
+        bool Usable(LayerPickerItem item) =>
+            tech.Layers.FirstOrDefault(l => l.Key == item.Key) is { Visible: true, Selectable: true };
+
+        var conductors = tech.Stackup.Layers
+            .Where(l => l.Kind == StackupKind.Conductor)
+            .SelectMany(l => l.DrawingLayers)
+            .ToHashSet();
+
+        return AvailableLayers.FirstOrDefault(i => Usable(i) && conductors.Contains(i.Key))
+               ?? AvailableLayers.FirstOrDefault(Usable)
+               ?? AvailableLayers.FirstOrDefault();
     }
 
     // ── Toolbar fields — staged text, parsed via LayoutUnits.TryParse (§1 R6, gate 8) ───────────

@@ -24344,3 +24344,50 @@ vertex handles of an editable path. Sitting next to the Polygon tool that is a p
 it is not, and the whole point of the button is that a circle is not a polygon. It is `CircleOutline`
 now — a plain ring. Nothing else changed; `RecordCircleOutline` still belongs to the Via tool, which
 is a different shape on purpose.
+
+## The layer combo landed on a hidden drawing layer, and that disabled the Via tool (2026-09-09)
+
+Two owner reports on one workspace, one cause. The layout editor kept opening on a
+`GERB_..._Fabrication_Details` layer the technology marks neither Visible nor Selectable, and the
+toolbar's Via button was permanently disabled on a board whose stackup declares an ordinary
+through-drill.
+
+**`RebuildAvailableLayers` could not tell a layer the user PICKED from one it had seeded itself.** It
+restored `CurrentLayerKey` by key, and the key alone does not carry that distinction. Two consequences,
+both of which need a technology whose drawing layers are numbered by a Gerber import — copper starts at
+2, so **drawing layer 1 is the fabrication-details layer**:
+
+- **Every open landed there.** The constructor runs a rebuild, and at that moment there is no
+  technology — every `new LayoutEditorViewModel(...)` site applies a resolution on the NEXT line. So it
+  seeded from the no-technology fallback set, whose keys (1/0 … 4/0) are placeholders, and left the
+  current key at 1/0. The rebuild that followed found a REAL layer numbered 1/0 and restored it as
+  though it had been chosen. The collision is arithmetic, not intent.
+- **A technology that failed to resolve pinned it there.** Any null resolution — an unreadable or
+  momentarily absent `.ctech`, pushed through the same seam the open technology editor uses on every
+  commit — falls back to that placeholder set. A current layer outside 1–4 could not survive it, and
+  the next successful resolution turned the placeholder into the same real layer.
+
+The pick is now held separately (`_chosenLayerKey`, written only when something outside the rebuild
+sets the layer), so a technology that disappears and returns returns the user to their own layer.
+Where nothing has been picked, `DefaultLayerChoice` seeds **the topmost conductor the technology marks
+both visible and selectable** — Visible/Selectable are a floor on what may be SEEDED, the same
+judgement `LayoutHitTest.HitStack`, the marquee's gate 8 and Select All already make; an explicit pick
+of a hidden layer is still kept.
+
+**The Via button was a deadlock, not a second bug.** `ViaToolAvailability` refused correctly on a layer
+no via entry claims — and `MoveToTheOnlyViaLayer`, which exists to fix exactly that where the stackup
+declares one via layer, was reachable only from `OnActiveToolChanged`, which the disabled button
+prevented from ever running. It is enabled on the sole-via-layer case now, the tooltip names the layer
+it will switch to, and `CommitViaPlacement` re-runs the move and checks the LAYER rather than the
+button — the combo stays live while a tool is armed, and a via bound to no via entry is the inert shape
+the refusal existed to prevent.
+
+**And the refusal could not be read.** A disabled control takes no pointer input, so its tooltip never
+shows; the Via button's reason names the layer to draw vias on and the user never saw it.
+`ToolTip.ShowOnDisabled` is set on `Button`/`ToggleButton` in `Styles/CircuitRfStyles.axaml` now, where
+both applications reach it. Two views had opted in locally and seventeen with bound `IsEnabled` had
+not — a per-view opt-in is a list that falls behind silently. It belongs in the EXISTING global
+`Style Selector="Button"` block: a second block with the same selector is what two style-scanning
+tests find first.
+
+Gate: `tests/Ui.Tests/LayoutCurrentLayerSeedingTests.cs`.

@@ -15,6 +15,9 @@
     </UserControl.Resources>
 
     <UserControl.Styles>
+        <!-- Tooltips on disabled buttons are application-wide now — see Styles/CircuitRfStyles.axaml.
+             That is what makes the Via tool's own refusal (ViaToolAvailability.DisabledReason, bound
+             to ToolTip.Tip below) readable at the moment it applies. -->
         <Style Selector="Button.ToolActive">
             <Setter Property="Foreground" Value="White"/>
         </Style>

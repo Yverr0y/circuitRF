@@ -318,6 +318,20 @@
                  paragraph above is about, on the axis that paragraph did not fix, and it belongs in
                  the same one place: a per-button VerticalContentAlignment is how this comes back. -->
             <Setter Property="VerticalContentAlignment" Value="Center"/>
+
+            <!-- A DISABLED BUTTON MUST STILL BE ABLE TO EXPLAIN ITSELF (owner-reported, 2026-09-09).
+                 A disabled control takes no pointer input, so its tooltip is unreachable by default —
+                 which hides the message exactly when it is worth most. This app puts REASONS in those
+                 tooltips: LayoutCommandAvailability.DisabledReason binds straight to ToolTip.Tip on the
+                 layout editor's Via tool and its neighbours, and it names the layer to draw vias on
+                 instead. The owner could not read one, because the button carrying it was greyed out.
+                 Here rather than per view, and for the same reason as the two setters above:
+                 SchematicView and SymbolEditorView had each opted in locally and seventeen other views
+                 with bound IsEnabled had not — a per-view opt-in is a list that falls behind silently. -->
+            <Setter Property="ToolTip.ShowOnDisabled" Value="True"/>
+        </Style>
+        <Style Selector="ToggleButton">
+            <Setter Property="ToolTip.ShowOnDisabled" Value="True"/>
         </Style>
         <Style Selector="CheckBox">
             <Setter Property="FontSize" Value="{DynamicResource FontSize}"/>
