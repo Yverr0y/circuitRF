@@ -39,6 +39,8 @@ public sealed partial class MessageEntry : ObservableObject
     private double?      _progressPercent;
     private bool         _progressIndeterminate;
     private RunCancellation? _cancellation;
+    private string?      _actionLabel;
+    private Func<Task>?  _actionInvoke;
 
     public MessageEntry(MessageLevel level, string text, string? filePath, DateTime timestamp,
                         string? actionLabel = null, Func<Task>? actionInvoke = null)
@@ -47,8 +49,8 @@ public sealed partial class MessageEntry : ObservableObject
         _text        = text;
         FilePath     = filePath;
         Timestamp    = timestamp;
-        ActionLabel  = actionLabel;
-        ActionInvoke = actionInvoke;
+        _actionLabel  = actionLabel;
+        _actionInvoke = actionInvoke;
     }
 
     public MessageLevel Level
@@ -99,7 +101,7 @@ public sealed partial class MessageEntry : ObservableObject
     /// <c>ICommand</c> keeps the entry free of any UI-framework type, which is what lets the
     /// message model stay where it is.</para>
     /// </summary>
-    public string? ActionLabel { get; }
+    public string? ActionLabel => _actionLabel;
 
     /// <summary>
     /// What <see cref="ActionLabel"/> does. Null whenever the label is.
@@ -108,10 +110,28 @@ public sealed partial class MessageEntry : ObservableObject
     /// open window whether it may close, which is several dialogs long and cannot be done
     /// synchronously.</para>
     /// </summary>
-    public Func<Task>? ActionInvoke { get; }
+    public Func<Task>? ActionInvoke => _actionInvoke;
 
     /// <summary>Whether this row shows an action button at all — the view's only visibility test.</summary>
     public bool HasAction => ActionLabel is { Length: > 0 } && ActionInvoke is not null;
+
+    /// <summary>
+    /// Gives a row that is ALREADY on screen its action — how a live progress row settles into one
+    /// carrying a button (see <see cref="IProgressMessage.CompleteWithAction"/>).
+    ///
+    /// <para>Which is why these are notifying properties rather than the constructor-only ones they
+    /// started as: the update announcement replaces the download row's bar with the Relaunch button
+    /// in place, and a button bound to a property that never raises a change would simply never
+    /// appear.</para>
+    /// </summary>
+    internal void SetAction(string? label, Func<Task>? invoke)
+    {
+        _actionLabel  = label;
+        _actionInvoke = invoke;
+        OnPropertyChanged(nameof(ActionLabel));
+        OnPropertyChanged(nameof(ActionInvoke));
+        OnPropertyChanged(nameof(HasAction));
+    }
 
     /// <summary>0–100 while this message is showing progress; null for an ordinary message (and once
     /// a live one completes, so a finished run's line carries no leftover bar).</summary>

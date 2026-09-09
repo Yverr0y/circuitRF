@@ -30,6 +30,15 @@ internal sealed class RecordingProgressMessage : IProgressMessage
 
     public void Complete(MessageLevel level, string text) => Completed.Add((level, text));
 
+    public List<(MessageLevel Level, string Text, string Label)> CompletedWithAction { get; } = [];
+    public Func<Task>? LastAction { get; private set; }
+
+    public void CompleteWithAction(MessageLevel level, string text, string actionLabel, Func<Task> action)
+    {
+        CompletedWithAction.Add((level, text, actionLabel));
+        LastAction = action;
+    }
+
     public void BindCancellation(RunCancellation? cancellation) => Bound = cancellation;
 }
 

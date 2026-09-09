@@ -294,6 +294,72 @@ public sealed class LiveProgressMessageTests
         Assert.True(entry.ProgressIndeterminate);
     }
 
+    // ── the bar becoming a button ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Owner request, 2026-09-09: after the update has downloaded and installed, the progress bar
+    /// should simply BECOME the Relaunch button — same row, in place — rather than settling to a
+    /// "done" line with the offer arriving underneath it on a new one.
+    /// </summary>
+    [Fact]
+    public void CompleteWithAction_TurnsTheBarIntoTheButton_OnTheSameRow()
+    {
+        var (live, entry) = NewLive("Downloading circuitRF 1.0.0");
+        live.Update("Downloading circuitRF 1.0.0", "installing", indeterminate: true);
+
+        live.CompleteWithAction(MessageLevel.Info, "circuitRF updated.", "Relaunch circuitRF",
+                                () => System.Threading.Tasks.Task.CompletedTask);
+
+        // The bar and its counter are gone — the row is text plus a button now.
+        Assert.False(entry.HasProgress);
+        Assert.False(entry.ProgressIndeterminate);
+        Assert.False(entry.HasProgressText);
+
+        // …and the button is on THAT row, which is the whole point.
+        Assert.True(entry.HasAction);
+        Assert.Equal("Relaunch circuitRF", entry.ActionLabel);
+        Assert.NotNull(entry.ActionInvoke);
+        Assert.Equal("circuitRF updated.", entry.Text);
+    }
+
+    /// <summary>
+    /// The row is already rendered when the action arrives, so the button appears only if the change
+    /// is notified. HasAction is the view's one visibility test — an un-notified assignment would
+    /// leave the button permanently invisible with nothing wrong anywhere in the log.
+    /// </summary>
+    [Fact]
+    public void CompleteWithAction_RaisesPropertyChanged_SoTheButtonAppears()
+    {
+        var (live, entry) = NewLive();
+
+        var changed = new List<string>();
+        entry.PropertyChanged += (_, e) => changed.Add(e.PropertyName!);
+
+        live.CompleteWithAction(MessageLevel.Info, "done", "Relaunch circuitRF",
+                                () => System.Threading.Tasks.Task.CompletedTask);
+
+        Assert.Contains(nameof(MessageEntry.HasAction), changed);
+        Assert.Contains(nameof(MessageEntry.ActionLabel), changed);
+        Assert.Contains(nameof(MessageEntry.HasProgress), changed);
+    }
+
+    /// <summary>
+    /// A sink with no live row has nothing to turn into a button, so it is asked to post one — the
+    /// same degradation <see cref="IMessageSink.PostAction"/> already has, and this PlainSink drops
+    /// the button and keeps the sentence, which is why the sentence has to stand on its own.
+    /// </summary>
+    [Fact]
+    public void CompleteWithAction_OnASinkWithoutLiveSupport_StillPostsTheSentence()
+    {
+        var sink = new PlainSink();
+        var live = ((IMessageSink)sink).BeginProgress("Downloading…");
+
+        live.CompleteWithAction(MessageLevel.Info, "circuitRF updated.", "Relaunch circuitRF",
+                                () => System.Threading.Tasks.Task.CompletedTask);
+
+        Assert.Equal(["Downloading…", "circuitRF updated."], sink.Texts);
+    }
+
     private sealed class PlainSink : IMessageSink
     {
         public List<string>       Texts  { get; } = [];

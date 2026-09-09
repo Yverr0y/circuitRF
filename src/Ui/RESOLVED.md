@@ -1,5 +1,38 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## The Relaunch button lands where the progress bar was (owner, 2026-09-09)
+
+The staged-update offer was a SECOND Messages row: the download's live row settled to
+"Downloading circuitRF 1.0.0-beta.13 - done." and the announcement — with the button on the end of
+it — arrived underneath. Two lines about one event, and the button on the one the user was not
+watching.
+
+The download row now settles INTO the announcement: `IProgressMessage.CompleteWithAction` replaces
+the row's text, drops its bar and its counter, and gives it the action, so the bar turns into the
+button in place. The three inline containers are already adjacent in `MessagesView.axaml` (bar,
+counter, button), which is why nothing in the view changed.
+
+**`MessageEntry.ActionLabel`/`ActionInvoke` had to stop being constructor-only.** They were get-only
+auto-properties, which is correct for a row posted with its button; a row that GAINS one is already
+rendered, and `HasAction` — the view's one visibility test — would never have raised a change.
+`SetAction` notifies all three. An un-notified assignment here fails silently: the log line is
+right, the button simply never appears.
+
+**The degradation is the existing one.** `CompleteWithAction`'s interface default drops the button
+and keeps the sentence, exactly as `IMessageSink.PostAction`'s does, and `PostOnlyProgressMessage`
+asks its sink for an ordinary action message — which is what harmonicaRF, wBond and any headless
+sink got before and still get. The wording is unchanged either way, so a log copied into a report
+reads the same.
+
+Announcing moved out of `FetchVerifyStageCoreAsync` into `SettleDownloadRow`, which is what makes it
+one write rather than an announcement followed by a settle that overwrites it. `Announce` still owns
+the once-per-version gate and now says whether it announced: a version already announced leaves the
+row owing an ordinary "- done."
+
+Gates: `tests/Ui.Tests/LiveProgressMessageTests.cs` (the bar becomes the button, and the change is
+notified) and `tests/Ui.Tests/Updates/RelaunchTests.cs` (a live row is settled and NO second row is
+posted; same sentence with a row as without one).
+
 ## The subtle mark on a stackup field an EM run cannot use (owner, 2026-09-08)
 
 The Technology editor's Stackup tab reported an unusable field only as a sentence in the problems

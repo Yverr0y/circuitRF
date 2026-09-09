@@ -74,4 +74,20 @@ internal sealed class LiveProgressMessage(MessageEntry entry, Action<Action> mar
             Entry.ProgressIndeterminate = false;
             Entry.ProgressPercent       = null;
         });
+
+    /// <summary>
+    /// The same settle, with the button landing exactly where the bar was: both live in
+    /// <c>InlineUIContainer</c>s on the one row, in that order, so dropping the bar and the counter
+    /// and giving the row an action swaps one control for the other in place.
+    /// </summary>
+    public void CompleteWithAction(MessageLevel level, string text, string actionLabel, System.Func<System.Threading.Tasks.Task> action)
+        => marshal(() =>
+        {
+            Entry.Level = level;
+            Entry.Text  = text;
+            Entry.ProgressText          = null;
+            Entry.ProgressIndeterminate = false;
+            Entry.ProgressPercent       = null;
+            Entry.SetAction(actionLabel, action);
+        });
 }

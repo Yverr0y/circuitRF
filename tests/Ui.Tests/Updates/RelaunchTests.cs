@@ -341,6 +341,70 @@ public sealed class RelaunchTests : IDisposable
     }
 
     /// <summary>
+    /// Owner request, 2026-09-09: the offer lands on the row the DOWNLOAD was drawn on, where the
+    /// progress bar was — not on a row of its own underneath it. So when there is a live row, the
+    /// announcement settles it and posts nothing at all to the sink.
+    /// </summary>
+    [Fact]
+    public void WithALiveDownloadRow_TheAnnouncementSettlesThatRow_AndPostsNoSecondOne()
+    {
+        RelaunchRequest.Handler = () => Task.CompletedTask;
+        var sink = new ActionSink();
+        var row  = new RecordingProgressMessage();
+
+        UpdateService.PostAnnouncement(sink, "1.0.0-beta.11", "1.0.0-beta.12", row);
+
+        Assert.Empty(sink.Posted);
+        var (level, text, label) = Assert.Single(row.CompletedWithAction);
+        Assert.Equal(MessageLevel.Info, level);
+        Assert.Equal($"Relaunch {UpdateApp.Name}", label);
+        Assert.Contains("1.0.0-beta.12", text);
+        Assert.NotNull(row.LastAction);
+
+        // Settled through the WITH-ACTION path only: a plain Complete as well would mean the row
+        // was written twice, and which write landed last would decide whether the button exists.
+        Assert.Empty(row.Completed);
+    }
+
+    /// <summary>
+    /// The same row, in a build with no handler installed — harmonicaRF, wBond. It settles into the
+    /// sentence with no button, which is the point of the sentence standing on its own.
+    /// </summary>
+    [Fact]
+    public void WithALiveRowAndNoHandler_TheRowSettlesIntoTheSentenceWithNoButton()
+    {
+        RelaunchRequest.Handler = null;
+        var sink = new ActionSink();
+        var row  = new RecordingProgressMessage();
+
+        UpdateService.PostAnnouncement(sink, "1.0.0", "1.1.0", row);
+
+        Assert.Empty(sink.Posted);
+        Assert.Empty(row.CompletedWithAction);
+        var (level, text) = Assert.Single(row.Completed);
+        Assert.Equal(MessageLevel.Info, level);
+        Assert.Contains($"Relaunch {UpdateApp.Name} to start using the version", text);
+    }
+
+    /// <summary>
+    /// The wording does not change with the row either: the same sentence whether it settles a live
+    /// row or is posted on its own, for the same reason it is the same with and without the button.
+    /// </summary>
+    [Fact]
+    public void TheSentenceIsTheSameOnALiveRowAsOnItsOwn()
+    {
+        RelaunchRequest.Handler = () => Task.CompletedTask;
+
+        var posted = new ActionSink();
+        UpdateService.PostAnnouncement(posted, "1.0.0", "1.1.0");
+
+        var row = new RecordingProgressMessage();
+        UpdateService.PostAnnouncement(new ActionSink(), "1.0.0", "1.1.0", row);
+
+        Assert.Equal(posted.Posted[0].Text, row.CompletedWithAction[0].Text);
+    }
+
+    /// <summary>
     /// A sink that has not heard of actions loses the button and keeps the message. This is the
     /// interface default, and it is what lets the message model gain an action without every
     /// existing sink changing.

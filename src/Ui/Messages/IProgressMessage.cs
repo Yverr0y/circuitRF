@@ -1,3 +1,6 @@
+using System;
+using System.Threading.Tasks;
+
 namespace CircuitRF.Ui.Messages;
 
 /// <summary>
@@ -51,6 +54,23 @@ public interface IProgressMessage
     void Complete(MessageLevel level, string text);
 
     /// <summary>
+    /// Settles the line like <see cref="Complete"/> and leaves an ACTION BUTTON where the bar was —
+    /// the row the user was watching becomes the row they act on.
+    ///
+    /// <para>The one caller is the auto-update announcement (owner request, 2026-09-09): the
+    /// download's bar reaches the end and turns into "Relaunch circuitRF" on that same line, rather
+    /// than settling to a "- done." line with the offer arriving underneath it on a row of its own.
+    /// The progress row and the thing it was leading up to are one event and read as one line.</para>
+    ///
+    /// <para><b>The default drops the button and keeps the sentence</b>, exactly as
+    /// <see cref="IMessageSink.PostAction"/>'s does and for the same reason: a sink with no way to
+    /// offer one still has to say what happened. So the text must read correctly with nothing to
+    /// press.</para>
+    /// </summary>
+    void CompleteWithAction(MessageLevel level, string text, string actionLabel, Func<Task> action)
+        => Complete(level, text);
+
+    /// <summary>
     /// Binds the running operation's Cancel to this row, so the user can stop it by right-clicking its
     /// progress bar. Optional: a sink with no bar (a status line, a test fake) inherits the no-op.
     ///
@@ -73,4 +93,9 @@ internal sealed class PostOnlyProgressMessage(IMessageSink sink) : IProgressMess
     public void Finish(MessageLevel level, string outcome, bool keepBar = true) => sink.Post(level, outcome);
 
     public void Complete(MessageLevel level, string text) => sink.Post(level, text);
+
+    /// <summary>There is no row to turn into a button, so the sink is asked for one of its own —
+    /// which is what a sink with no live-message support could always have had.</summary>
+    public void CompleteWithAction(MessageLevel level, string text, string actionLabel, Func<Task> action)
+        => sink.PostAction(level, text, actionLabel, action);
 }

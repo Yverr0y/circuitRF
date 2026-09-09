@@ -547,10 +547,21 @@ If several versions are staged before the user relaunches, each new staging post
 the **installed** version to the **newly staged** one — so the last line the user sees is always the true
 end state.
 
+**It is not a new row: it settles the download's own row** (owner request, 2026-09-09). The download,
+the verify and the install are already drawn on one live row with a progress bar (§13.6a), and that row
+is what the announcement replaces — the bar and its counter go and the button takes the bar's place, so
+the thing the user has been watching turns into the thing they act on. Previously the row settled to
+"Downloading circuitRF 1.0.0-beta.2 - done." and the offer arrived underneath it on a row of its own,
+which is two lines about one event. `IProgressMessage.CompleteWithAction` is the settle that does it;
+like every other member of that interface its default degrades — a sink with no live row is asked for
+an ordinary `PostAction` message instead, which is exactly what used to happen. A version already
+announced settles the row the way it always did, since there is no second offer to make.
+
 ### 10.2.1 The "Relaunch circuitRF" button (2026-09-06)
 
 The line carries a **Relaunch circuitRF** button, hosted inline in an `InlineUIContainer` the same way
-the progress bar on a live message is. A real button rather than an underlined run (owner's choice): the
+the progress bar on a live message is — and on the staged-update line it is literally in the bar's
+place, on the row the download was drawn on (§10.2). A real button rather than an underlined run (owner's choice): the
 file-path link's weight is right for "show me where that file is" and wrong for an action that closes
 the application. It is **absent**, not disabled, on every row without an action, so ordinary messages
 keep the row height they have always had.

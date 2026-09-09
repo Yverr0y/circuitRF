@@ -309,7 +309,7 @@ public sealed class UpdateService
             throw;
         }
 
-        SettleDownloadRow(live, title, result);
+        SettleDownloadRow(live, title, runningVersion, result);
         return result;
     }
 
@@ -319,20 +319,28 @@ public sealed class UpdateService
     /// <see cref="MessageLevel.Info"/> — the row is removed as a live bar without being promoted into
     /// a warning the policy says not to post.
     /// </summary>
-    private static void SettleDownloadRow(IProgressMessage? live, string title, CheckResult result)
+    private void SettleDownloadRow(IProgressMessage? live, string title, string runningVersion,
+                                   CheckResult result)
     {
+        // The staged case settles the row INTO the announcement, so the bar the user has been
+        // watching turns into the Relaunch button on that same line (owner request, 2026-09-09).
+        // The download and the offer it was leading up to are one event, and were previously drawn
+        // as two rows — a "- done." line, and the thing the user actually wanted underneath it.
+        //
+        // Announce still owns the once-per-version gate, so a version already announced settles the
+        // row the way it always did: there is no second offer to make, and a row left saying
+        // "installing" would be worse than a plain "- done."
+        if (result.Outcome == CheckOutcome.Staged)
+        {
+            if (Announce(runningVersion, result.Version ?? "", live)) return;
+            live?.Complete(MessageLevel.Info, $"{title} - done.");
+            return;
+        }
+
         if (live is null) return;
 
         switch (result.Outcome)
         {
-            case CheckOutcome.Staged:
-                // Complete rather than Finish: Finish APPENDS to the counter, and by this point the
-                // counter is the phase word ("installing"), so the row would settle reading
-                // "installing - downloaded." The bar goes with it — the Announce line that follows
-                // is the message, and a full bar under it is noise.
-                live.Complete(MessageLevel.Info, $"{title} - done.");
-                break;
-
             case CheckOutcome.Cancelled:
                 // Deliberately does NOT promise a resume. UpdateDownloader keeps the .partial and can
                 // resume from it, but ReclaimDebris deletes the whole of staging/ at the start of
@@ -463,7 +471,8 @@ public sealed class UpdateService
                 : UpdateInstallSite.VersionDirPrefix + version;
         });
 
-        Announce(runningVersion, version);
+        // The announcement is made by SettleDownloadRow, on the row this run has been drawing —
+        // see there for why it is not posted here.
         return new CheckResult(CheckOutcome.Staged, version);
     }
 
@@ -537,13 +546,18 @@ public sealed class UpdateService
     /// <para><b>The sentence still stands on its own with no button.</b> A build with no handler
     /// installed — harmonicaRF, wBond, a headless sink — posts exactly the line it always did.</para>
     /// </summary>
-    private void Announce(string from, string to)
+    /// <param name="row">The live download row, when there is one — settled INTO the announcement
+    /// rather than followed by it.</param>
+    /// <returns>Whether the announcement was made; false when this version has already been
+    /// announced, which leaves the caller owing the row an ordinary outcome.</returns>
+    private bool Announce(string from, string to, IProgressMessage? row = null)
     {
         UpdateState s = UpdateStateIo.Load();
-        if (s.Announced is not null && s.Announced.Contains(to)) return;
+        if (s.Announced is not null && s.Announced.Contains(to)) return false;
 
-        PostAnnouncement(_messages, from, to);
+        PostAnnouncement(_messages, from, to, row);
         UpdateStateIo.Update(st => st.Announced_Add(to));
+        return true;
     }
 
     /// <summary>
@@ -552,15 +566,31 @@ public sealed class UpdateService
     /// means faking a signed release, a download and an unpack, none of which this decision depends
     /// on — and a decision only a test can reach is a decision the application does not make.
     /// </summary>
-    internal static void PostAnnouncement(Messages.IMessageSink? sink, string from, string to)
+    internal static void PostAnnouncement(
+        Messages.IMessageSink? sink, string from, string to, Messages.IProgressMessage? row = null)
     {
         string line =
             $"{UpdateApp.Name} updated from {from} to {to} in the background. "
             + $"Relaunch {UpdateApp.Name} to start using the version. "
             + "Automatic updates can be disabled in Settings, under Security & Permissions.";
 
-        if (sink is not null && RelaunchRequest.Handler is { } relaunch)
-            sink.PostAction(Messages.MessageLevel.Info, line, $"Relaunch {UpdateApp.Name}", relaunch);
+        string label = $"Relaunch {UpdateApp.Name}";
+        Func<Task>? relaunchHandler = RelaunchRequest.Handler;
+
+        // On the download's own row when there is one: its bar and its counter go, and the button
+        // takes the bar's place. No row (a headless check, a sink with no live support) posts the
+        // line as its own message exactly as before.
+        if (row is not null)
+        {
+            if (relaunchHandler is { } onRow)
+                row.CompleteWithAction(Messages.MessageLevel.Info, line, label, onRow);
+            else
+                row.Complete(Messages.MessageLevel.Info, line);
+            return;
+        }
+
+        if (sink is not null && relaunchHandler is { } relaunch)
+            sink.PostAction(Messages.MessageLevel.Info, line, label, relaunch);
         else
             sink?.Info(line);
     }
