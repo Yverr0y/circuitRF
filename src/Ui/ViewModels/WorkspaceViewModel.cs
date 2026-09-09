@@ -12796,7 +12796,10 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         var mainWindow = ResolveOwner(null);
         if (mainWindow is null) return;
 
-        var dlg     = new InputNameDialog("Duplicate Cell", "New cell name:");
+        // Pre-populated with the cell's own name (and pre-selected by the dialog): a duplicate is
+        // almost always named by ADDING to the original, so retyping it from scratch was work the
+        // dialog already had the answer to.
+        var dlg     = new InputNameDialog("Duplicate Cell", "New cell name:", cellNode.Name);
         var newName = await dlg.ShowDialog<string?>(mainWindow);
         if (newName is null) return;
 
@@ -12814,32 +12817,11 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         {
             CopyDirectoryRecursive(oldDir, newDir);
 
-            // Rename primary schematic and symbol if present.
-            foreach (var viewType in new[] { ViewType.Schematic, ViewType.Symbol })
-            {
-                var res = CellFolder.ResolvePrimary(newDir, viewType);
-                if (res.State is not (PrimaryState.SoleFile or PrimaryState.NamedPresent))
-                    continue;
-
-                var subDir     = CellFolder.SubFolderPath(newDir, viewType);
-                var ext        = CellFolder.ViewExtension(viewType);
-                var targetName = newName + ext;
-                var targetPath = Path.Combine(subDir, targetName);
-
-                if (res.ResolvedName is null) continue;
-                var sourcePath = Path.Combine(subDir, res.ResolvedName);
-
-                // Skip rename if a different non-primary file already has the target name.
-                if (File.Exists(targetPath)
-                    && !string.Equals(res.ResolvedName, targetName, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                if (!string.Equals(res.ResolvedName, targetName, StringComparison.OrdinalIgnoreCase))
-                    File.Move(sourcePath, targetPath);
-
-                // Update .ccell to point to the renamed primary.
-                UpdateCcellPrimary(newDir, viewType, targetName);
-            }
+            // Every primary the cell has takes the new cell's name — the LAYOUT included, which it
+            // was not before: a duplicate of a cell with artwork opened a folder called "amp_v2"
+            // holding "amp.clay", and the .ccell inside it still said "amp.clay" too, so nothing
+            // ever complained and the two names simply drifted apart from birth.
+            ApplyPrimaryRenames(workspaceDir, newDir, cellNode.Name, newName);
 
             _factory.ProjectTreeTool?.Refresh();
             Messages.Success("Duplicated", newDir);
@@ -12920,81 +12902,53 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             Messages.Info($"Updated {rewritten.Count} schematic reference(s) to '{newName}'.");
 
         // Optionally rename the primary file of EVERY view the cell has.
-        //
-        // Layout was missing here and nothing else made up for it: a renamed cell kept a `.clay`
-        // named after the old cell, so the folder said one name and the file inside it said another
-        // — and the .ccell's own PrimaryLayout still pointed at the old file name, which is why the
-        // view kept opening and the drift stayed invisible. ViewExtension/ResolvePrimary/
-        // UpdateCcellPrimary all handled Layout already; only this list did not.
         if (renamePrimaries)
-        {
-            foreach (var viewType in new[] { ViewType.Schematic, ViewType.Symbol, ViewType.Layout })
-            {
-                var res = CellFolder.ResolvePrimary(newDir, viewType);
-                if (res.State is not (PrimaryState.SoleFile or PrimaryState.NamedPresent))
-                    continue;
-
-                var subDir     = CellFolder.SubFolderPath(newDir, viewType);
-                var ext        = CellFolder.ViewExtension(viewType);
-                var targetName = newName + ext;
-                var targetPath = Path.Combine(subDir, targetName);
-
-                if (res.ResolvedName is null) continue;
-                var sourcePath = Path.Combine(subDir, res.ResolvedName);
-
-                if (File.Exists(targetPath)
-                    && !string.Equals(res.ResolvedName, targetName, StringComparison.OrdinalIgnoreCase))
-                {
-                    Messages.Warning(
-                        $"Skipped renaming {CellFolder.SubFolderName(viewType)} primary: '{targetName}' already exists as a non-primary file.");
-                    continue;
-                }
-
-                if (!string.Equals(res.ResolvedName, targetName, StringComparison.OrdinalIgnoreCase))
-                {
-                    try { File.Move(sourcePath, targetPath); }
-                    catch (Exception ex)
-                    {
-                        Messages.Warning($"Could not rename {CellFolder.SubFolderName(viewType)} primary: {ex.Message}");
-                        continue;
-                    }
-
-                    // The wires are attached to the .clay BY STEM (WB40) — layout/x.clay pairs with
-                    // layout/x.wBond and with nothing else. So renaming the .clay without its .wBond
-                    // does not leave a cosmetic mismatch, it DETACHES the wires: the layout reopens
-                    // empty while the bonds sit in a file now paired with nothing. The two renames
-                    // are one operation, and this is the only place that can do them together.
-                    if (viewType == ViewType.Layout)
-                        RenamePairedWBond(workspaceDir, subDir,
-                            Path.GetFileNameWithoutExtension(res.ResolvedName), newName,
-                            oldName, newName);
-                }
-
-                UpdateCcellPrimary(newDir, viewType, targetName);
-            }
-        }
+            ApplyPrimaryRenames(workspaceDir, newDir, oldName, newName);
 
         _factory.ProjectTreeTool?.Refresh();
         Messages.Success($"Renamed '{oldName}' → '{newName}'", newDir);
     }
 
-    // Reads, updates, and re-saves a .ccell file's primary field for one view type.
-    private static void UpdateCcellPrimary(string cellDir, ViewType viewType, string newPrimaryFileName)
+    /// <summary>
+    /// Gives every primary view file in <paramref name="cellDir"/> the cell's own name, reports what
+    /// each one did, and takes the wirebond design along with the layout.
+    ///
+    /// <para>Shared by Rename Cell and Duplicate Cell because the tidy-up is identical and keeping
+    /// two copies of it is what let Duplicate go on omitting the layout after Rename stopped:
+    /// <see cref="PrimaryViewRename"/> owns the one list of view types.</para>
+    ///
+    /// <para>The wires are attached to the <c>.clay</c> BY STEM (WB40) — <c>layout/x.clay</c> pairs
+    /// with <c>layout/x.wBond</c> and with nothing else. So renaming the <c>.clay</c> without its
+    /// <c>.wBond</c> does not leave a cosmetic mismatch, it DETACHES the wires: the layout reopens
+    /// empty while the bonds sit in a file now paired with nothing. The two renames are one
+    /// operation, and this is the only place that can do them together.</para>
+    /// </summary>
+    private void ApplyPrimaryRenames(
+        string workspaceDir, string cellDir, string oldCellName, string newCellName)
     {
-        var ccellPath = Path.Combine(cellDir, CellFolder.CcellFileName);
-        if (!File.Exists(ccellPath)) return;
-        try
+        foreach (var result in PrimaryViewRename.ToCellName(cellDir, newCellName))
         {
-            var ccell = CellPersistence.LoadFromFile(ccellPath);
-            switch (viewType)
+            var viewName = CellFolder.SubFolderName(result.ViewType);
+            switch (result.Outcome)
             {
-                case ViewType.Schematic: ccell.PrimarySchematic = newPrimaryFileName; break;
-                case ViewType.Symbol:    ccell.PrimarySymbol    = newPrimaryFileName; break;
-                case ViewType.Layout:    ccell.PrimaryLayout    = newPrimaryFileName; break;
+                case PrimaryRenameOutcome.Blocked:
+                    Messages.Warning(
+                        $"Skipped renaming {viewName} primary: '{result.NewFileName}' already exists as a non-primary file.");
+                    break;
+
+                case PrimaryRenameOutcome.Failed:
+                    Messages.Warning($"Could not rename {viewName} primary: {result.Error}");
+                    break;
+
+                case PrimaryRenameOutcome.Renamed when result.ViewType == ViewType.Layout:
+                    RenamePairedWBond(
+                        workspaceDir,
+                        CellFolder.SubFolderPath(cellDir, ViewType.Layout),
+                        Path.GetFileNameWithoutExtension(result.OldFileName!), newCellName,
+                        oldCellName, newCellName);
+                    break;
             }
-            CellPersistence.SaveToFile(ccellPath, ccell);
         }
-        catch { /* non-fatal: .ccell update is best-effort for alpha */ }
     }
 
     /// <summary>

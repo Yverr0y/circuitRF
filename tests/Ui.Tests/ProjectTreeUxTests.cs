@@ -53,39 +53,10 @@ public class ProjectTreeUxTests : IDisposable
             CopyDirectoryRecursive(d, Path.Combine(dst, Path.GetFileName(d)));
     }
 
-    // Mirrors the duplicate-cell primary rename logic in WorkspaceViewModel.DuplicateCellAsync.
+    // The real thing, not a copy of it. This test file used to re-implement the rename here, which
+    // is why it went on passing while the shipped Duplicate omitted the layout entirely.
     private static void DuplicateCellPrimaries(string newCellDir, string newCellName)
-    {
-        var ccellPath = Path.Combine(newCellDir, CellFolder.CcellFileName);
-        var ccell     = File.Exists(ccellPath) ? CellPersistence.LoadFromFile(ccellPath) : new CcellFile();
-        bool ccellDirty = false;
-
-        foreach (var viewType in new[] { ViewType.Schematic, ViewType.Symbol })
-        {
-            var res = CellFolder.ResolvePrimary(newCellDir, viewType);
-            if (res.State is not (PrimaryState.SoleFile or PrimaryState.NamedPresent)) continue;
-            if (res.ResolvedName is null) continue;
-
-            var subDir     = CellFolder.SubFolderPath(newCellDir, viewType);
-            var ext        = CellFolder.ViewExtension(viewType);
-            var targetName = newCellName + ext;
-            var targetPath = Path.Combine(subDir, targetName);
-            var srcPath    = Path.Combine(subDir, res.ResolvedName);
-
-            // Skip if a different non-primary file already has the target name.
-            if (File.Exists(targetPath)
-                && !string.Equals(res.ResolvedName, targetName, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            if (!string.Equals(res.ResolvedName, targetName, StringComparison.OrdinalIgnoreCase))
-                File.Move(srcPath, targetPath);
-
-            if (viewType == ViewType.Schematic) { ccell.PrimarySchematic = targetName; ccellDirty = true; }
-            else if (viewType == ViewType.Symbol) { ccell.PrimarySymbol = targetName; ccellDirty = true; }
-        }
-
-        if (ccellDirty) CellPersistence.SaveToFile(ccellPath, ccell);
-    }
+        => PrimaryViewRename.ToCellName(newCellDir, newCellName);
 
     // ── Item 6 tests ──────────────────────────────────────────────────────────
 

@@ -154,7 +154,10 @@
                         <Button Classes.ToolActive="{Binding ActiveViewModel.ActiveTool, Converter={StaticResource EnumEqualsBool}, ConverterParameter=Circle}"
                                 Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Circle"
                                 ToolTip.Tip="Circle (center-radius)" Padding="6,3">
-                            <mi:MaterialIcon Kind="VectorCircle" Width="16" Height="16"/>
+                            <!-- A plain outline, not VectorCircle: that glyph draws the four vertex
+                                 handles of an editable path, which reads as "polygon" beside the
+                                 Polygon tool it sits next to. A circle is a circle. -->
+                            <mi:MaterialIcon Kind="CircleOutline" Width="16" Height="16"/>
                         </Button>
                         <Button Classes.ToolActive="{Binding ActiveViewModel.ActiveTool, Converter={StaticResource EnumEqualsBool}, ConverterParameter=Polygon}"
                                 Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Polygon"

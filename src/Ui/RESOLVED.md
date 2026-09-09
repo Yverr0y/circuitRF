@@ -24287,3 +24287,60 @@ just as well and shows nothing.
 
 Gate: `RestoreInPlaceTests.TheMenuGoesAtTheClickAndThePointerSaysTheWindowIsWorking` — a source scan,
 since both need a running Avalonia application to observe.
+
+---
+
+## Duplicate Cell: the copy's own name, and the layout it never renamed (2026-09-09)
+
+A user duplicated a cell with artwork and hit two things in a row.
+
+**The dialog opened empty.** A duplicate is almost always named by ADDING to the original —
+"Amp" → "Amp_v2" — so the empty box asked the user to retype a name the dialog already had. It now
+opens on the source cell's name, pre-selected by `InputNameDialog`'s existing `initialText`
+behaviour (R-cc-3), so typing over it still costs nothing.
+
+**Then the copy's layout kept the OLD cell's name.** Duplicate renamed the primary schematic and
+symbol and stopped there, so "Amp_v2" contained "Amp.clay" from the moment it existed — and the
+copied `.ccell`'s `PrimaryLayout` still said "Amp.clay" too, which is exactly why nothing ever
+complained: the folder and the file disagreed, but the file and the record agreed, so the view
+opened and the drift was invisible until someone read the folder.
+
+**The cause is a second copy of the list, and it is the same defect this file already recorded once.**
+Rename Cell had the identical loop and was taught `ViewType.Layout` (plus the `.wBond` stem pairing
+that the layout rename drags along) when the same complaint arrived about renaming. Duplicate's copy
+of those twenty lines was in another method three hundred lines away and there was no reason for
+anyone to think of it. `tests/Ui.Tests/ProjectTreeUxTests.cs` held a THIRD copy — a private
+`DuplicateCellPrimaries` that "mirrors the duplicate-cell primary rename logic" — so the tests went
+on passing against a mirror of the bug.
+
+The fix is one list: `PrimaryViewRename.ToCellName` in `src/Design/Cells`, beside `PrimaryViewRepair`
+and for its reason (file names and `.ccell` arithmetic over a cell folder — no dialog, no canvas, no
+workspace, and a headless caller that copies a cell owes exactly the same tidy-up). Both view-model
+paths call `ApplyPrimaryRenames`, which is the reporting and the wirebond pairing and nothing else;
+the tests call the real function.
+
+Three things worth keeping:
+
+- **It returns a result per view type, carrying the OLD file name.** The `.clay`/`.wBond` pairing is
+  by shared STEM (WB40), and once the file has moved the caller cannot recover what it was. A bool
+  would not carry it, and a caller that guessed the old stem from the old CELL name would be wrong
+  for any cell whose primary was named something else.
+- **Duplicate has a hazard Rename never had: the source cell is still there**, holding a `.clay` and
+  a `.wBond` of exactly the names being renamed away in the copy. `CellUsageScanner.RewriteWBondLinks`
+  matches a link by where it RESOLVES, not by its last segment, so the original's schematic keeps
+  pointing at the original's wires — verified rather than assumed
+  (`DuplicateCellPrimariesTests.TheOriginalCell_IsNotTouched`).
+- **A name already taken by a non-primary file is refused, and now says so.** Duplicate used to
+  `continue` in silence; the outcome is reported as a warning on both paths, because a primary left
+  under the old name is a visible oddity the user can fix and a silent skip is not.
+
+Gates: `tests/Ui.Tests/DuplicateCellPrimariesTests.cs` and the rewritten Item 6 tests in
+`ProjectTreeUxTests.cs`.
+
+## The Circle tool's glyph was a polygon (2026-09-09)
+
+The layout toolbar's Circle button used Material's `VectorCircle`, which draws a circle WITH the four
+vertex handles of an editable path. Sitting next to the Polygon tool that is a picture of the thing
+it is not, and the whole point of the button is that a circle is not a polygon. It is `CircleOutline`
+now — a plain ring. Nothing else changed; `RecordCircleOutline` still belongs to the Via tool, which
+is a different shape on purpose.

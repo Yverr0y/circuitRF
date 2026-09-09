@@ -4537,3 +4537,27 @@ performance question.
 Gate: `tests/Ui.Tests/Revision/RestoreInPlaceTests.cs` — the untouched file's modification time is
 asserted, which is the assertion a count alone cannot make (a rewrite with identical bytes is
 invisible in the content).
+
+---
+
+## `PrimaryViewRename` — one list of view types, for every caller that renames a cell (2026-09-09)
+
+Added beside `PrimaryViewRepair`, and for that class's reason: giving a cell's primary view files the
+cell's own name is file names and `.ccell` arithmetic over a cell folder — no dialog, no canvas, no
+workspace — and any non-GUI caller that copies or renames a cell owes the same tidy-up.
+
+It exists because two view-model operations each kept their own copy of the loop. Rename Cell was
+taught `ViewType.Layout`; Duplicate Cell's copy was three hundred lines away and was not, so a
+duplicated cell was born with a `.clay` named for the cell it came from. The full account is in
+`src/Ui/RESOLVED.md` under "Duplicate Cell".
+
+What it deliberately does NOT do: touch anything a view file POINTS at. A `.clay` pairs with its
+`.wBond` by shared stem (`WBondCell.Resolve`, in `src/Ui`), so renaming one owes the other — that
+pairing lives above this layer, and the Layout result carries the OLD file name so the caller can
+honour it. A caller that reconstructed the old stem from the old CELL name would be wrong for every
+cell whose primary was named something else.
+
+`NoPrimary` covers both "no view of this type" and "several with none chosen", and neither is an
+error: a cell need not have a layout, and picking between two alphabetically is a design decision
+this operation has no business making — the same refusal `PrimaryViewRepair.ClearedForChoice` makes
+on the way out.
