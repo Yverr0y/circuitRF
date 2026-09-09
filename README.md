@@ -642,9 +642,7 @@ What's left for the v1 release is **beta test**.
 
 **Deferred to v2:**
 ** open green fields for development**
-- **AI interface** for automated design
 - Parameter **tuning** and design **optimization**
-- **Advanced stability** analysis (NDF, Winslow Probe etc)
 - **Noise analysis** — noise figure, phase noise, or noise-parameter (Fmin, Γopt, Rn) extraction. 
 - **LVS**
 - **Transient Analysis**
