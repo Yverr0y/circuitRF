@@ -88,6 +88,58 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
     [ObservableProperty] private string _stagedMur  = "";
     [ObservableProperty] private string _stagedSigmaSm = "";
 
+    // ── The subtle mark on a field an EM run cannot use (owner, 2026-09-08) ────────────────────
+    //
+    // A Gerber import used to leave every substrate value at zero, and the only thing that said so was
+    // a sentence in the problems list naming a layer — which is a long way from the box the number
+    // has to be typed into. Ten rows of that is a technology somebody believes is finished and that
+    // refuses at Simulate.
+    //
+    // The PREDICATE is not here. StackupFieldReadiness (src/Design) holds one answer per field and
+    // TechValidation phrases the same predicates as sentences, so the mark beside the box and the
+    // problem in the list can never disagree — which is the failure that matters, a field marked
+    // fine that stops a run. This file only asks, and re-asks after every edit.
+    //
+    // It marks UNUSABLE, never IMPLAUSIBLE. A defaulted 4.4 on a board that is really 3.66 is not
+    // marked, because nothing here knows which board it is; the import's own message is what says
+    // those numbers are guesses.
+
+    public string? ThicknessNeeds     => StackupFieldReadiness.Problem(Layer, StackupField.Thickness);
+    public string? SigmaNeeds         => StackupFieldReadiness.Problem(Layer, StackupField.Sigma);
+    public string? EpsrNeeds          => StackupFieldReadiness.Problem(Layer, StackupField.Epsr);
+    public string? TanDNeeds          => StackupFieldReadiness.Problem(Layer, StackupField.TanD);
+    public string? MurNeeds           => StackupFieldReadiness.Problem(Layer, StackupField.Mur);
+    public string? WallThicknessNeeds => StackupFieldReadiness.Problem(Layer, StackupField.WallThickness);
+
+    public bool ThicknessNeedsValue     => ThicknessNeeds     is not null;
+    public bool SigmaNeedsValue         => SigmaNeeds         is not null;
+    public bool EpsrNeedsValue          => EpsrNeeds          is not null;
+    public bool TanDNeedsValue          => TanDNeeds          is not null;
+    public bool MurNeedsValue           => MurNeeds           is not null;
+    public bool WallThicknessNeedsValue => WallThicknessNeeds is not null;
+
+    /// <summary>
+    /// Re-asks every field. Called after ANY commit rather than only after the one that changed —
+    /// the fields are not independent (a via's Fill decides whether its wall is asked for at all,
+    /// and a kind change moves which of them apply), and six property notifications on an edit
+    /// nobody can measure is the cheap side of that trade.
+    /// </summary>
+    private void RaiseReadiness()
+    {
+        OnPropertyChanged(nameof(ThicknessNeeds));
+        OnPropertyChanged(nameof(SigmaNeeds));
+        OnPropertyChanged(nameof(EpsrNeeds));
+        OnPropertyChanged(nameof(TanDNeeds));
+        OnPropertyChanged(nameof(MurNeeds));
+        OnPropertyChanged(nameof(WallThicknessNeeds));
+        OnPropertyChanged(nameof(ThicknessNeedsValue));
+        OnPropertyChanged(nameof(SigmaNeedsValue));
+        OnPropertyChanged(nameof(EpsrNeedsValue));
+        OnPropertyChanged(nameof(TanDNeedsValue));
+        OnPropertyChanged(nameof(MurNeedsValue));
+        OnPropertyChanged(nameof(WallThicknessNeedsValue));
+    }
+
     // ── GI3 R-gi3-1/R-gi3-2 — the conductivity preset ─────────────────────────────────────────
     //
     // σ was one of the two fields on this panel with no tooltip, no preset and — after a Gerber
@@ -226,6 +278,7 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
             Layer.Fill = value;
             _owner.CommitEdit(before, $"Set {Layer.Name} fill to {value}");
             OnPropertyChanged(nameof(IsPlatedVia));
+            RaiseReadiness();     // a solid via is not asked for a wall; a plated one is
         }
     }
 
@@ -410,6 +463,7 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
 
         ApplyDrawingLayerFilter();
         OnPropertyChanged(nameof(DrawingLayerSummary));
+        RaiseReadiness();
     }
 
     private void ApplyDrawingLayerFilter()
@@ -466,6 +520,7 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
         var before = _owner.SnapshotJson();
         Layer.WallThicknessDbu = v;
         _owner.CommitEdit(before, $"Set {Layer.Name} wall thickness");
+        RaiseReadiness();
     }
 
     public void CommitName()
@@ -490,7 +545,7 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
         var before = _owner.SnapshotJson();
         Layer.ThicknessDbu = dbu;
         _owner.CommitEdit(before, $"Set thickness of {Layer.Name}");
-        RefreshFromModel();
+        RefreshFromModel();   // raises readiness
     }
 
     public void CommitEpsr()
@@ -501,6 +556,7 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
         var before = _owner.SnapshotJson();
         Layer.Epsr = v;
         _owner.CommitEdit(before, $"Set εr of {Layer.Name}");
+        RaiseReadiness();
     }
 
     public void CommitTanD()
@@ -511,6 +567,7 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
         var before = _owner.SnapshotJson();
         Layer.TanD = v;
         _owner.CommitEdit(before, $"Set tanδ of {Layer.Name}");
+        RaiseReadiness();
     }
 
     public void CommitMur()
@@ -521,6 +578,7 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
         var before = _owner.SnapshotJson();
         Layer.Mur = v;
         _owner.CommitEdit(before, $"Set µr of {Layer.Name}");
+        RaiseReadiness();
     }
 
     public void CommitSigmaSm()
@@ -531,6 +589,7 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
         var before = _owner.SnapshotJson();
         Layer.SigmaSm = v;
         _owner.CommitEdit(before, $"Set σ of {Layer.Name}");
+        RaiseReadiness();
     }
 
     partial void OnIsGroundReferenceChanged(bool value)

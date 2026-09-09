@@ -1,5 +1,85 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## A Gerber import now completes the substrate from one generic FR-4 board (owner, 2026-09-08)
+
+**This reverses GI2's most emphatic rule, on purpose, and the reversal is narrower than it looks.**
+`GerberStackupMapping` built the structure an artwork-only set implies — conductors in their resolved
+order, a dielectric between each pair, each conductor bound to its drawing layer — and wrote every
+substrate VALUE as zero. Zero was chosen precisely: it is outside `TechValidation`'s `Epsr < 1` and
+outside both extractors' own `Epsr >= 1` guards, so a fresh import was **unsimulatable by
+construction**. `Gi2StackupSkeletonTests` said in capitals not to "correct" it to 1.0, and that half of
+the argument still stands — 1.0 is AIR, an entirely valid substrate that RUNS and answers a different
+question with nothing downstream to question it.
+
+What the owner weighed against it is what the zeros cost: eleven rows of numbers typed by hand after
+every six-layer import, every time, for values that are the same on nearly every board. **A default
+that is named and reported is not the silent-air failure the zeros guarded against.** So
+`SubstrateDefaults.Fill` completes the stack and the import says which values it supplied.
+
+### What is supplied, and where the numbers come from
+
+The shipped `pcb-2layer_FR-4_70mil_1oz.ctech`, which is why a two-layer set now reproduces that
+technology exactly — arrived at rather than copied. εr 4.4, tanδ 0.02, µr 1, outer copper 35 µm, inner
+copper 18 µm (the shipped four-layer says 17.5; 18 is the rounded figure asked for).
+
+**Dielectric thickness is derived, never a constant**, and that is the part worth knowing. A stated
+overall board thickness wins: budget = stated − every conductor, shared evenly among the dielectrics
+that have none. With nothing stated the budget is 1.778 mm, the shipped two-layer's core — so two
+layers come out at exactly 1.778 mm and six come out as an ordinary 1.8 mm board rather than a 9 mm
+one. A fixed per-dielectric constant would have produced the second.
+
+### Three rules the pass keeps
+
+- **Unset only, never a correction.** Zero thickness, zero εr, non-positive µr. Anything else is a
+  number somebody or some file stated and is left exactly as it is — *including values that are
+  wrong*, because correcting one would hide a real mistake behind a plausible number and would make
+  the import unpredictable. This is `TechValidation`'s own unset-versus-wrong rule, applied.
+- **εr and tanδ move together.** A dielectric with a stated permittivity and a zero loss tangent is a
+  LOSSLESS dielectric, which is a legitimate thing to author; tanδ is filled in only where εr was
+  also unset.
+- **Nothing is inferred from the material NAMES in the files.** That refusal is unchanged and
+  permanent — it is a lookup table of laminate trade names and it would put third-party product names
+  in this repository. `SubstrateDefaults` is ONE generic grade and a second would be the first row of
+  that table.
+
+### The trap that made the job-file branch a separate fix
+
+That branch left an omitted `DielectricConstant` at `StackupLayer`'s own C# default of **1.0**, not at
+zero — so it read back as a measured vacuum and `Fill` would have left it alone. It writes 0
+explicitly now, which is why both branches complete through one pass. The skeleton branch still writes
+zeros for the same reason: build the structure with the spelling of "nobody said", then let one pass
+complete it.
+
+### The two guards that replaced the zeros
+
+Both are required and neither is in this file. The import's own message — a SECOND paragraph, kept
+apart from the one reporting what the files said, because a paragraph mixing read values with guessed
+ones is one nobody can act on. And `StackupFieldReadiness`, which marks a field an EM run cannot use in
+the Technology editor.
+
+Gates: `tests/Ui.Tests/Gi2StackupSkeletonTests.cs` (rewritten, with its header recording what it used
+to assert) and `GerberImportTests`. One assertion survives unchanged and should: the dielectrics are
+never 1.0.
+
+## Which stackup field an EM run cannot use, asked once (owner, 2026-09-08)
+
+`StackupFieldReadiness` answers *would an EM run refuse this field*, per FIELD, and every predicate in
+it mirrors one `TechValidation` already reports. **The two shapes are not redundant.** A validator
+emits SENTENCES attributed to a TAB, which is right for a problems list and useless to a TextBox: a
+sentence naming a layer by name cannot tell a box whether it is the one at fault. The alternative —
+re-deriving the condition beside the control — drifts from the one the extractors actually refuse on,
+silently, and in the direction that costs: a field marked fine that stops a run.
+
+**It marks UNUSABLE, never IMPLAUSIBLE.** A defaulted 4.4 on a board that is really 3.66 is not marked,
+because nothing in circuitRF knows which board it is looking at — that is what the import's own "these
+are guesses" paragraph is for. A mark that appeared on plausible numbers would be one nobody could
+ever clear.
+
+A field the row's kind does not use answers null, so a hidden control never contributes a mark with
+nowhere to go — the same reason a via is never asked for a thickness (it has no z band of its own) and
+only a plated one is asked for a wall.
+
+
 ## The WSProbe glyph bent every wire it was placed in (owner, 2026-09-08)
 
 The WSProbe was drawn on the IProbe's geometry deliberately — two pins at `(0,100)`/`(100,100)`, stems

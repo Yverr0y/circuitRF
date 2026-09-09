@@ -62,6 +62,8 @@
 <li><a href="#assistants">History and AI assistants</a></li>
 </ol>
 </nav>
+<p>circuitRF uses Git under the hood for revision control. To enable History tracking, Git must be
+installed and then configured in the circuitRF <a href="settings.html#revision-control">Settings</a>.</p>
 <h2 id="two-kinds">Two kinds of entry, one list</h2>
 <p><strong>circuitRF records what you did and never edits it. What you <em>wrote about</em> it is yours until you have
 shared it.</strong> Those are two different promises and it is worth having both of them in mind from the
@@ -176,9 +178,12 @@ read first.</p>
 <p>What is recorded is <strong>the whole workspace as it stands</strong>: every cell, every schematic, every layout, the
 technology, the workspace's own configuration. Not just the document you have open.</p>
 <div class="callout note">
-<span class="label">Nothing changed means nothing is kept</span>
-<p>If the workspace is exactly as it was when you kept the last version, circuitRF says so and keeps
-nothing. Two entries holding identical content would be two entries you could not tell apart.</p>
+<span class="label">Nothing changed means nothing to keep, and you are told before you type</span>
+<p>If the workspace is exactly as it was when the last entry was made, both keep buttons are
+<b>greyed</b> and hovering one says why. Two entries holding identical content would be two entries you
+could not tell apart. Change anything and they come back.</p>
+<p>Anything unsaved is saved first, in the same words a close asks in — so what gets recorded under the
+title you just wrote is what you are looking at, not what was last written to disk.</p>
 </div>
 <p>Afterwards, one line appears in the Messages panel saying what was kept <strong>and giving the version's
 identity</strong> — a short string of letters and digits. You will almost certainly never need it. It is there
@@ -189,25 +194,42 @@ a result is a function of the design and the engine, so the design is the thing 
 <a href="#kept">what is kept, and what is not</a> — the same table applies.</p>
 <h2 id="panel">The History panel</h2>
 <p><strong>View ▸ Panels ▸ History</strong>, or the clock button on the workspace toolbar. A list, newest first.</p>
-<p><strong>Each row is what you scan</strong>: the time — <em>just now</em>, <em>7 minutes ago</em>, <em>3 hours ago</em> for anything
-inside the last day, and the clock time beyond that — the date, with the year on it whenever the entry
-is not from this year; the title you wrote, or a short line saying how the entry came about for one nobody
-titled. A version carries its tag. On a workspace more than one person works in, the row says who kept
-it. And a row says the three things that change what it <em>means</em>: that it was brought back from an
-earlier state, that a file was left out of it, or that tidying up has tidied it away.</p>
+<p><strong>Each row is what you scan</strong>, and it reads left to right in three parts.</p>
+<ul>
+<li><strong>The time</strong> — <em>just now</em>, <em>7 minutes ago</em>, <em>3 hours ago</em> for anything inside the last day, and the
+clock time beyond that — with the date under it, carrying the year whenever the entry is not from
+this year. The column is the same width on every row, so everything to the right of it lines up.</li>
+<li><strong>The entry's own short name</strong>, in a fixed-width face: seven letters and digits, such as <code>f15b942</code>.
+<strong>This is what one entry is called.</strong> A time tells two entries apart; it is not something you can
+quote, point at, or give to somebody helping you — and forty automatic entries share their wording.
+It is the first few characters of the <a href="#panel">full identifier</a> in the entry's own expander, and it
+is what the buttons and the menu name their destination by.</li>
+<li><strong>The label</strong> — the title you wrote, or a short line saying how the entry came about for one nobody
+titled: <em>closed</em>, <em>save-point</em>, <em>before going back</em>, and <em>&quot;before: widen the output match&quot;</em> for an
+assistant's batch, which quotes what the assistant said it was about to do.
+Those generated ones are deliberately short and deliberately repetitive: they name the <em>kind</em> of
+moment, which is all a label can honestly do, and the short name beside them is what tells one from
+another.</li>
+</ul>
+<p>A version carries its tag. On a workspace more than one person works in, the row says who kept it. And
+a row says the three things that change what it <em>means</em>: that it was brought back from an earlier
+state, that a file was left out of it, or that tidying up has tidied it away.</p>
 <p><strong>Open a row</strong> for what a row cannot carry: the full date and time with its time zone, a sentence
 spelling out how the entry came about, whether it has left this machine or is still only here, its
-ordering number, and its identifier — a short string of letters and digits you will almost certainly
-never need. It is there for the day you do: it is what to give someone helping you look at the
-workspace with tools other than circuitRF.</p>
+ordering number, and its identifier <strong>in full</strong>. The row shows the first seven characters of that
+same string, and <strong>Copy the identifier</strong> puts the whole of it on the clipboard — it is one value shown
+two ways, never two values. You will almost certainly never need the long form; it is there for the day
+you do, to give someone helping you look at the workspace with tools other than circuitRF.</p>
 <p><strong>Right-click a row</strong> for everything you can do to it:</p>
 <ul>
-<li><strong>Go back to &quot;…&quot;</strong> — see <a href="#going-back">going back</a> below. It quotes the title when you wrote one,
-and says <em>go back to this state</em> when the entry is one circuitRF named itself.</li>
+<li><strong>Go to &quot;…&quot;</strong> — see <a href="#going-back">going back</a> below. <strong>It names where it will take you, and it
+quotes only words a person wrote.</strong> A titled entry reads <em>Go to &quot;Output match retuned for 3.5 GHz&quot;</em>;
+one nobody titled reads <em>Go back to f15b942</em>, naming that entry's own short name, because <em>go back to
+this state</em> read identically on every row and said nothing about which of forty it would act on.</li>
 <li><strong>Compare to Current</strong> — lists the documents that entry holds which your files no longer do.
 Nothing is changed. If they hold the same files, it says so.</li>
 <li><strong>Keep permanently</strong> — marks an entry so circuitRF's own tidying-up will never remove it. Ones you
-asked for, and the one taken before you went back, are already marked.</li>
+asked for, and the one labelled <em>before going back</em>, are already marked.</li>
 <li><strong>Bring this back</strong> — on an entry marked <em>tidied away</em>, puts it back in the list as an ordinary one.
 See <a href="#tidying">tidying up</a>.</li>
 <li><strong>Rename this entry…</strong>, <strong>Edit Comments…</strong> and <strong>Tidy this away</strong> — the label or the title, what
@@ -223,6 +245,17 @@ works by age over everything already tidied away — never on one entry you pick
 <p>Two buttons at the top of the panel <em>create</em> something: <strong>keep this state</strong> writes a restore point, and
 <strong>keep this version</strong> records a titled version. They are the same two things File ▸ Keep This State…
 and File ▸ Keep This Version… do.</p>
+<p><strong>Both go grey when there is nothing to record</strong>, and hovering one says so: <em>this state is already
+kept — nothing has changed since the last entry in the history</em>. Change anything and they come back.
+Until this existed, both opened their dialog, took a title off you, and only then said they had
+recorded nothing.</p>
+<p>A button that is grey because history is <strong>off</strong>, <strong>held</strong>, or has <strong>no git</strong> is a different thing and
+looks different: those stay live and refuse out loud, because &quot;not allowed to record&quot; and &quot;nothing to
+record&quot; are not the same answer.</p>
+<p><strong>One more button appears under the list when you select a row</strong>: the same <em>Go to &quot;…&quot;</em> the row's menu
+carries, on the surface, because going back is this panel's whole point and it should not need a
+gesture you have to guess at. It is <strong>absent</strong> when it would put the workspace back into the state it
+is already in — there would be nothing for it to change.</p>
 <h3 id="the-filter">The filter</h3>
 <p>The funnel opens five tick boxes: <strong>versions</strong>, <strong>states you kept</strong>, <strong>before an assistant</strong>, <strong>kept
 automatically</strong>, and <strong>tidied away</strong>. Everything is on except <em>kept automatically</em> — the entries
@@ -256,8 +289,9 @@ like a feature that had never been built.</p>
 </div>
 <h2 id="going-back">Going back — &quot;I broke the match network yesterday&quot;</h2>
 <p>Open <strong>View ▸ Panels ▸ History</strong>, find the entry — the titles and the dates are what you are looking
-for, and the <a href="#panel">search</a> is faster than scrolling — then right-click it and choose <strong>Go back
-to &quot;…&quot;</strong>.</p>
+for, and the <a href="#panel">search</a> is faster than scrolling — then either press the <strong>Go to &quot;…&quot;</strong> button
+under the list, or right-click the row and choose the same item there. They are one action with two
+places to reach it, and both name the entry they will take you to.</p>
 <p>What happens, in order:</p>
 <ol>
 <li>If anything is unsaved, circuitRF asks about it, in the same words it asks when you close a
@@ -266,7 +300,9 @@ leave you with a workspace matching neither state.</li>
 <li>The state you are in now is kept, so you can come forward again.</li>
 <li>The files go back. Anything created since is taken away, because yesterday's files plus today's new
 cell is a workspace that never existed.</li>
-<li>Open documents are re-opened from the files that are now there.</li>
+<li><strong>Only the documents whose files actually changed are re-opened.</strong> Your panel layout, your other
+open tabs, the project tree and the Messages panel are already correct and are left exactly as they
+are. Going back to a state that differed in one schematic touches one schematic.</li>
 </ol>
 <div class="callout warning">
 <span class="label">Undo does not survive going back</span>
@@ -279,12 +315,21 @@ this workspace's history and is left exactly as it is.</p>
 <h2 id="forward">&quot;I went back and I want to come forward again&quot;</h2>
 <p>You went back to Tuesday. It was the wrong Tuesday, or you only wanted to look. <strong>The afternoon you
 just replaced is not gone</strong>, and this is the twenty seconds in which people believe it is.</p>
-<p><strong>The panel tells you, at the top of the list, on arrival.</strong> One line, naming the entry you went back
-to and the entry your previous state was kept as, with a button that returns to it. Press it and you
-are back where you were.</p>
+<p><strong>The panel tells you, at the top of the list, on arrival.</strong> One line, in two halves: <em>Now at f15b942,
+Tue 14:32. Your work up to 15:07 is kept as a3c91de.</em> Where you are, and where the afternoon went —
+each named by <a href="#panel">the entry's own short name</a> and by its time, because a name answers <em>which</em> and
+a time is what you are actually navigating by.</p>
+<p>Under it, a button that says <strong>Go back to a3c91de</strong> — the second half of that line, again. It names
+its <strong>destination</strong>, not a direction: going back and coming forward are one operation performed twice,
+so a button labelled <em>Come forward again</em> could be pressed for ever and never tell you where the last
+press had landed. Press this one and you are back where you were, and the name on it changes to the
+state you just left.</p>
 <p>It is not a different or a scarier operation than the one that brought you here — it is the same one.
 Coming forward keeps a restore point of <em>this</em> state first, exactly as going back did, so there is no
 step in this that you cannot undo by taking it again.</p>
+<p><strong>If there is nowhere to go, the button is not there.</strong> Going back to a state whose files were
+identical to the ones you already had replaced nothing, so there is no earlier afternoon to return to;
+the line then says only where you are.</p>
 <p><strong>Nothing was created to make this possible.</strong> The entry the line points at is the one circuitRF wrote
 before it replaced a single file, and it is in the list with everything else. Tidying up never removes
 it.</p>

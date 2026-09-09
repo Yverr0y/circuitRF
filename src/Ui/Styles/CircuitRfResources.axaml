@@ -28,6 +28,20 @@
              may silently fail to render on BorderBrush — always use a SolidColorBrush resource. -->
         <SolidColorBrush x:Key="CrfTileBorderBrush" Color="#55808080"/>
 
+        <!-- Owner, 2026-09-08: the SUBTLE mark on an editor field an EM run cannot use — an empty
+             thickness, a permittivity below 1, a conductivity of zero. Amber and NOT red, on
+             CrfForeignBandBrush's own precedent: red means the application refused something, and an
+             unfilled field is a normal state of a freshly imported technology, not a fault. It is a
+             1px outline plus a barely-there wash, because the field has to stay READABLE and typeable
+             while it is marked — the point is that the eye lands on it while scrolling a stackup, not
+             that it shouts.
+
+             Semi-transparent so one pair serves both themes, same convention as CrfTileBorderBrush.
+             SolidColorBrush and not a System*Color key, for the reason that brush records: a Color
+             assigned to BorderBrush may silently fail to render. -->
+        <SolidColorBrush x:Key="CrfNeedsValueBorderBrush" Color="#E8A33D"/>
+        <SolidColorBrush x:Key="CrfNeedsValueFillBrush"   Color="#1FE8A33D"/>
+
         <!-- Icon brush: wraps SystemBaseMediumColor as a Brush so it can be assigned to
              Stroke/BorderBrush properties (which require IBrush, not Color).
              Defined at Application scope so popup visual trees can reach it. -->

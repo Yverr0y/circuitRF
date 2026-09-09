@@ -59,6 +59,17 @@ conditions for what is above and below the whole sandwich.
 | **Dielectric** | The material between two conductors | Thickness, ε<sub>r</sub>, tanδ, µ<sub>r</sub> |
 | **Via** | A connection *between* two conductors — not a layer of the sandwich | The drawing layer via shapes are drawn on, the two conductors it **spans by name**, and its fill (plated or solid) with a wall thickness |
 
+<div class="callout note">
+<span class="label">A field an EM run cannot use is marked as you look at it</span>
+<p>A thickness of zero, a permittivity below 1, a conductivity of zero — anything an EM run would
+refuse outright — gets a <b>faint amber outline</b> on the box itself, and hovering it says what is
+wrong and what would fix it. It is amber and not red on purpose: an unfilled field is a normal state of
+a technology somebody is still writing, not a fault.</p>
+<p><b>It marks unusable, never merely unlikely.</b> A value that is present and plausible is never
+marked, because nothing in circuitRF knows which board you are looking at — so a mark means the run
+will stop, and an unmarked field is not a claim that the number is right.</p>
+</div>
+
 The two boundary conditions are properties of the stack as a whole:
 
 - **Top** — `Open` (free space above, the usual case) or `Ground`.

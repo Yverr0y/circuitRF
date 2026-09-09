@@ -128,13 +128,16 @@ public static class LibraryCatalog
         (SymbolKind.Var,         0),
         (SymbolKind.Meas,        0),
         (SymbolKind.IProbe,      0),
-        (SymbolKind.WSProbe,     0),
         (SymbolKind.VProbe,      0),
         (SymbolKind.Vdc,         0),
         (SymbolKind.P1Tone,      0),
         (SymbolKind.ToneSource,  0),   // "V1Tone" — the single-tone voltage source, displayed as VTone.
         (SymbolKind.CurrentToneSource, 0), // "I_1Tone" — its current-source dual, displayed as ITone.
         (SymbolKind.Snp,         2),   // S2P
+        // Owner, 2026-09-08: WSProbe sits after S2P. It was pinned among the probes (WSP-4) on the
+        // reading that a probe belongs with the probes; what it is actually reached for is the same
+        // gesture as an S2P — measuring a two-port block — so it is where the eye is already looking.
+        (SymbolKind.WSProbe,     0),
         (SymbolKind.Snp,         3),   // S3P
         (SymbolKind.SpiceModel,  0),   // SPICE — a .model card or .subckt run from its own file
         (SymbolKind.Tline,       0),   // TLIN

@@ -23,6 +23,29 @@
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
 
+        <!-- ── A FIELD AN EM RUN CANNOT USE (owner, 2026-09-08) ─────────────────
+             A Gerber import used to leave every substrate value at zero, and the only thing that said
+             so was a sentence in the problems list naming a layer by name — a long way from the box
+             the number has to be typed into. Ten of those is a technology somebody believes is
+             finished and that refuses at Simulate.
+
+             AMBER, NOT RED, and 1px plus a wash you can barely see: red means the application refused
+             something, while an unfilled thickness is a normal state of a freshly imported technology.
+             The field must stay perfectly readable and typeable while it is marked — the job is to
+             catch the eye scrolling a stackup, not to shout.
+
+             The condition comes from StackupFieldReadiness (src/Design), which is also what
+             TechValidation phrases its sentences from, so the mark beside the box and the problem in
+             the list cannot disagree.
+
+             A Style beats a ControlTheme in Avalonia, so this survives the theme's own :pointerover
+             and :focus border setters without needing a copy for each. -->
+        <Style Selector="TextBox.cell.needsvalue">
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource CrfNeedsValueBorderBrush}"/>
+            <Setter Property="Background"  Value="{DynamicResource CrfNeedsValueFillBrush}"/>
+        </Style>
+
         <!-- ── A cell that cannot overflow gets a stripped-down template ────────
              A row of this table is realized whole every time the list scrolls a page, and a
              stock TextBox is not a cheap thing to realize: its template carries a ScrollViewer,
@@ -580,6 +603,8 @@
                                             <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding !IsVia}">
                                                 <TextBlock Text="Thickness:" Width="70" FontSize="11" VerticalAlignment="Center"/>
                                                 <TextBox Classes="cell compact" Width="60" Tag="Thickness"
+                                                         Classes.needsvalue="{Binding ThicknessNeedsValue}"
+                                                         ToolTip.Tip="{Binding ThicknessNeeds}"
                                                          Text="{Binding StagedThicknessText}"
                                                          LostFocus="OnFieldLostFocus" KeyDown="OnFieldKeyDown"/>
                                                 <TextBlock Text="{Binding ThicknessUnitSuffix}" FontSize="10"
@@ -601,6 +626,7 @@
                                                 <TextBlock Text="σ (S/m):" Width="70" FontSize="11" VerticalAlignment="Center"
                                                            ToolTip.Tip="Conductor conductivity at 20 °C, in siemens per metre. It sets conductor loss and skin depth — how deep the current actually flows at frequency, and therefore how much of this metal is doing any work. A conductor with a conductivity of zero or less is REFUSED by the EM path rather than solved, which is what an imported board hits if this is left blank."/>
                                                 <TextBox Classes="cell compact" Width="60" Tag="Sigma"
+                                                         Classes.needsvalue="{Binding SigmaNeedsValue}"
                                                          Text="{Binding StagedSigmaSm}"
                                                          ToolTip.Tip="Conductor conductivity at 20 °C, in siemens per metre. It sets conductor loss and skin depth — how deep the current actually flows at frequency, and therefore how much of this metal is doing any work. A conductor with a conductivity of zero or less is REFUSED by the EM path rather than solved, which is what an imported board hits if this is left blank."
                                                          LostFocus="OnFieldLostFocus" KeyDown="OnFieldKeyDown"/>
@@ -634,16 +660,22 @@
                                                 <StackPanel Orientation="Horizontal" Spacing="3">
                                                     <TextBlock Text="εr:" FontSize="11" VerticalAlignment="Center"/>
                                                     <TextBox Classes="cell compact" Width="60" Tag="Epsr" Text="{Binding StagedEpsr}"
+                                                             Classes.needsvalue="{Binding EpsrNeedsValue}"
+                                                             ToolTip.Tip="{Binding EpsrNeeds}"
                                                              LostFocus="OnFieldLostFocus" KeyDown="OnFieldKeyDown"/>
                                                 </StackPanel>
                                                 <StackPanel Orientation="Horizontal" Spacing="3">
                                                     <TextBlock Text="tanδ:" FontSize="11" VerticalAlignment="Center"/>
                                                     <TextBox Classes="cell compact" Width="70" Tag="TanD" Text="{Binding StagedTanD}"
+                                                             Classes.needsvalue="{Binding TanDNeedsValue}"
+                                                             ToolTip.Tip="{Binding TanDNeeds}"
                                                              LostFocus="OnFieldLostFocus" KeyDown="OnFieldKeyDown"/>
                                                 </StackPanel>
                                                 <StackPanel Orientation="Horizontal" Spacing="3">
                                                     <TextBlock Text="µr:" FontSize="11" VerticalAlignment="Center"/>
                                                     <TextBox Classes="cell compact" Width="60" Tag="Mur" Text="{Binding StagedMur}"
+                                                             Classes.needsvalue="{Binding MurNeedsValue}"
+                                                             ToolTip.Tip="{Binding MurNeeds}"
                                                              LostFocus="OnFieldLostFocus" KeyDown="OnFieldKeyDown"/>
                                                 </StackPanel>
                                             </StackPanel>
@@ -703,6 +735,7 @@
                                                            ToolTip.Tip="Plated wall thickness — the metal deposited on the barrel wall, NOT the hole radius. 20-25 µm is typical for a plated through-hole board and is what circuitRF's own shipped technologies use. For RF above roughly 1 GHz this barely matters: a wall a few µm thick is already many skin depths, so a solver may treat a plated barrel and a solid one identically. For thermal it matters directly — it multiplies the conductive cross-section, which is exactly what a thermal via array is sized on."/>
                                                 <TextBox Classes="cell compact" Width="60" Tag="WallThickness"
                                                          IsVisible="{Binding IsPlatedVia}"
+                                                         Classes.needsvalue="{Binding WallThicknessNeedsValue}"
                                                          Text="{Binding StagedWallThickness}"
                                                          ToolTip.Tip="Plated wall thickness — the metal deposited on the barrel wall, NOT the hole radius. 20-25 µm is typical for a plated through-hole board and is what circuitRF's own shipped technologies use. For RF above roughly 1 GHz this barely matters: a wall a few µm thick is already many skin depths, so a solver may treat a plated barrel and a solid one identically. For thermal it matters directly — it multiplies the conductive cross-section, which is exactly what a thermal via array is sized on."
                                                          LostFocus="OnFieldLostFocus" KeyDown="OnFieldKeyDown"/>

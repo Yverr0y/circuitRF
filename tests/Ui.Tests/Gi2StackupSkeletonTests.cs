@@ -1,15 +1,24 @@
-// Gate for docs/sonnet-briefs/brief-gi2-stackup-skeleton.md.
+// Gate for docs/sonnet-briefs/brief-gi2-stackup-skeleton.md, as the owner amended it on 2026-09-08.
 //
 // An import that resolved six copper layers, worked out their order, bound each to a drawing layer and
 // reported all of it — and then wrote a stackup with two via entries and nothing else. GI2 emits the
-// STRUCTURE it had already computed and still refuses every VALUE that describes the substrate.
+// STRUCTURE it had already computed.
 //
-// THE LOAD-BEARING ASSERTION IN THIS FILE IS Epsr == 0. StackupLayer.Epsr's own C# default is 1.0,
-// which is AIR — a perfectly valid, entirely simulatable substrate. A skeleton that shipped 1.0 would
-// be WORSE than the empty stackup it replaces, because it would RUN and answer a different question.
-// Zero is the spelling of "unset" that this codebase already treats as unusable, and the test named
-// TheDielectricsAreNotAir_AndThatIsTheWholePoint exists because 0 looks like an oversight to anyone
-// reading the code cold. It is not. Do not "correct" it to 1.0.
+// WHAT THIS FILE ASSERTED UNTIL 2026-09-08, AND WHY IT NO LONGER DOES. The load-bearing assertion was
+// Epsr == 0 on every dielectric: zero is this codebase's spelling of "nobody said", it is outside every
+// extractor's guard and outside TechValidation's `Epsr < 1`, so the skeleton was UNSIMULATABLE by
+// construction. That was aimed at StackupLayer.Epsr's own C# default of 1.0 — AIR, a perfectly valid
+// substrate that RUNS and answers a different question with nothing downstream to question it.
+//
+// The owner's decision is that the zeros were being paid for on every Gerber import, and that a
+// default which is NAMED, REPORTED and plausible is not the silent-air failure that rule guarded
+// against. So the structure is completed with one ordinary FR-4 board (SubstrateDefaults) and the
+// import says which values it supplied. The tests below assert the FR-4 values and — still, in the same
+// place and for the same reason — that a dielectric is never left at 1.0. Air remains the wrong answer;
+// what changed is that "no answer" is no longer the alternative.
+//
+// The rule this file still holds shut, unchanged: NOTHING is inferred from the material NAMES in the
+// files. TheDielectricsAreNamedPositionally_AndNameNoLaminate is that gate.
 //
 // Fixtures are hand-authored, following L4e/L4f/L4g/GI1's precedent: worth less than a real set as a
 // dialect test, costs nothing to redistribute, names no tool or product.
@@ -135,9 +144,24 @@ public class Gi2StackupSkeletonTests : IDisposable
         Assert.All(electrical.Where(l => l.Kind == StackupKind.Conductor),
                    l => Assert.Equal(PcbStackupMapping.DefaultCopperConductivitySm, l.SigmaSm));
 
-        // Every quantity that describes the SUBSTRATE is unset.
-        Assert.All(electrical, l => Assert.Equal(0, l.ThicknessDbu));
-        Assert.All(electrical.Where(l => l.Kind == StackupKind.Dielectric), l => Assert.Equal(0.0, l.TanD));
+        // Every quantity that describes the SUBSTRATE is FILLED IN, from the one generic board
+        // (owner, 2026-09-08). Outer copper is the first and last conductor in the top-to-bottom
+        // order; the four between them are inner foil.
+        var copper = electrical.Where(l => l.Kind == StackupKind.Conductor).ToList();
+        Assert.Equal(35_000, copper[0].ThicknessDbu);
+        Assert.Equal(35_000, copper[^1].ThicknessDbu);
+        Assert.All(copper[1..^1], l => Assert.Equal(18_000, l.ThicknessDbu));
+
+        // The five dielectrics share the default 1.778 mm board, because no file in this set states an
+        // overall thickness. A six-layer board that came out 9 mm thick would be the arithmetic
+        // nobody checks.
+        Assert.All(electrical.Where(l => l.Kind == StackupKind.Dielectric), l =>
+        {
+            Assert.Equal(355_600, l.ThicknessDbu);       // 1778 um / 5
+            Assert.Equal(4.4, l.Epsr, 12);
+            Assert.Equal(0.02, l.TanD, 12);
+            Assert.Equal(1.0, l.Mur, 12);
+        });
     }
 
     /// <summary>R-gi2-5 — positional and neutral. The number and construction of the layers between two
@@ -161,23 +185,25 @@ public class Gi2StackupSkeletonTests : IDisposable
     // ══════════════════════════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// <c>StackupLayer.Epsr</c> defaults to <c>1.0</c>, which is AIR: a valid, simulatable substrate,
-    /// and exactly the fabrication R-L4g-9 forbids inventing. A skeleton carrying 1.0 would RUN — it
-    /// would be worse than the empty stackup it replaces, because nothing downstream would question it.
-    /// <c>0</c> is outside <c>TechValidation</c>'s <c>Epsr &lt; 1</c> check and outside both
-    /// extractors' own <c>Epsr &gt;= 1</c> guards, so it is the spelling of "unset" the codebase
-    /// already treats as unusable.
+    /// <c>StackupLayer.Epsr</c> defaults to <c>1.0</c>, which is AIR: a valid, entirely simulatable
+    /// substrate that would be indistinguishable from a measured one. That is still the wrong answer
+    /// and this is still the test that says so — what changed on 2026-09-08 is the RIGHT answer.
+    /// Until then it was <c>0</c>, "nobody said", which made the stack unusable on purpose; it is now
+    /// one ordinary FR-4 board, supplied by <c>SubstrateDefaults</c> and named in the import's own
+    /// message.
     ///
-    /// <para><b>This is the assertion most likely to be "corrected" by someone later. Do not.</b></para>
+    /// <para><b>The <c>NotEqual(1.0)</c> below is the assertion most likely to be lost in a later
+    /// tidy-up. Keep it.</b> A refactor that stopped writing Epsr explicitly in the skeleton branch,
+    /// or that let Fill treat 1.0 as "unset", would put air back with no other symptom.</para>
     /// </summary>
     [Fact]
-    public void TheDielectricsAreNotAir_AndThatIsTheWholePoint()
+    public void TheDielectricsAreOrdinaryFr4_AndNeverAir()
     {
         var tech = TechOf(Import(SixLayerSet(), "skeleton_notair"));
 
         foreach (var d in Electrical(tech).Where(l => l.Kind == StackupKind.Dielectric))
         {
-            Assert.Equal(0.0, d.Epsr);
+            Assert.Equal(SubstrateDefaults.Epsr, d.Epsr, 12);
             Assert.NotEqual(1.0, d.Epsr);   // 1.0 is air, and air runs. Spelled out on purpose.
         }
     }
@@ -191,16 +217,21 @@ public class Gi2StackupSkeletonTests : IDisposable
             Directory.EnumerateFiles(result.CellDir!, "*.clay", SearchOption.AllDirectories).First()).Shapes;
 
     /// <summary>
-    /// R-gi2-4, on the two-conductor set — the shape the cross-section kernel is actually for, so
-    /// nothing but the missing substrate is left for either extractor to refuse.
+    /// R-gi2-4, INVERTED by the owner's 2026-09-08 decision, on the two-conductor set.
     ///
-    /// <para>A test that asserted a skeleton RUNS would be asserting the bug this phase is carefully
-    /// not introducing. Both extractors are checked because neither one's refusal covers the other's
-    /// path, and both are asserted to NAME the missing value: a bare "cannot solve" would leave the
-    /// person who imported the board with nowhere to go.</para>
+    /// <para>Until then this asserted that both extractors refused a fresh import and that each named
+    /// the missing substrate — which was the point of the zeros. With the substrate supplied, <b>no
+    /// refusal from either kernel may mention a missing substrate value any more</b>: that is what the
+    /// change bought, and a refusal still saying "zero thickness" would mean the fill never ran.
+    ///
+    /// <para>Both are still checked, because neither one's refusal covers the other's path. What each
+    /// says now is about something else entirely and both are legitimate: the cross-section kernel
+    /// refuses a circular pad as a non-uniform cross-section, and the planar kernel refuses because
+    /// nothing has named a GROUND REFERENCE — a real, separate decision no artwork file can make
+    /// (R-gi2-10), and the one thing this fill deliberately does not guess at.</para>
     /// </summary>
     [Fact]
-    public void AFreshSkeletonIsRefusedByBothExtractors_AndEachNamesTheMissingSubstrate()
+    public void AFreshImportIsNoLongerRefusedForItsSubstrate_AndWhatIsLeftIsNotASubstrateQuestion()
     {
         // Two copper layers and one through hole — the pad on top is claimed by the drill as a via,
         // which leaves exactly one signal level and so takes the kernel past its own level check to
@@ -215,35 +246,43 @@ public class Gi2StackupSkeletonTests : IDisposable
         var shapes = ArtworkOf(result);
 
         var cross = CrossSectionExtractor.Extract(shapes, tech, 1000);
-        Assert.False(cross.Ok);
-        Assert.Contains("zero thickness", cross.Refusal!, StringComparison.Ordinal);
-        Assert.Contains("Stackup tab", cross.Refusal!, StringComparison.Ordinal);
+        if (!cross.Ok) Assert.DoesNotContain("zero thickness", cross.Refusal!, StringComparison.Ordinal);
 
         // The planar path used to reach the SLAB-HEIGHT check first and answer "the signal sits at or
         // below the ground plane — check the stackup order", which is a wrong diagnosis of a stack
         // whose order is fine and whose thicknesses were never entered. It now names the real cause.
         var planar = PlanarExtractor.Extract(shapes, tech, 1000, 1e9);
-        Assert.False(planar.Ok);
-        Assert.Contains("zero thickness", planar.Refusal!, StringComparison.Ordinal);
-        Assert.Contains("Stackup tab", planar.Refusal!, StringComparison.Ordinal);
-        Assert.DoesNotContain("check the stackup order", planar.Refusal!, StringComparison.OrdinalIgnoreCase);
+        if (!planar.Ok)
+        {
+            Assert.DoesNotContain("zero thickness", planar.Refusal!, StringComparison.Ordinal);
+            // What IS left: which copper is ground. Nothing in a Gerber set says it, and this fill
+            // does not pretend to know — so the message names the decision rather than a value.
+            Assert.Contains("ground reference", planar.Refusal!, StringComparison.Ordinal);
+        }
+
+        // Deliberately not asserted here: that marking a ground plane makes this particular set run.
+        // This fixture's only remaining signal shape IS the bottom conductor's (the top pad was
+        // claimed by the drill as a via), so marking it ground leaves nothing to solve for — a
+        // property of a two-file fixture, not of the substrate. What this gate is about is that no
+        // refusal names a substrate value any more.
     }
 
-    /// <summary>The six-layer set too — where the cross-section kernel's own multi-level refusal
-    /// legitimately comes first (a six-layer board is not one cross-section, whatever its substrate
-    /// says). Refused is refused; what matters here is that neither extractor produces a RESULT.</summary>
+    /// <summary>The six-layer set too. The cross-section kernel's own multi-level refusal legitimately
+    /// comes first there (a six-layer board is not one cross-section, whatever its substrate says) —
+    /// and neither kernel may refuse it for a substrate value any more.</summary>
     [Fact]
-    public void TheSixLayerSkeletonIsRefusedByBothExtractorsToo()
+    public void TheSixLayerImportIsNotRefusedForItsSubstrateEither()
     {
         var result = Import(SixLayerSet(), "skeleton_refused");
         var tech = TechOf(result);
         var shapes = ArtworkOf(result);
 
-        Assert.False(CrossSectionExtractor.Extract(shapes, tech, 1000).Ok);
+        var cross = CrossSectionExtractor.Extract(shapes, tech, 1000);
+        Assert.False(cross.Ok);                      // six levels is not one cross-section
+        Assert.DoesNotContain("zero thickness", cross.Refusal!, StringComparison.Ordinal);
 
         var planar = PlanarExtractor.Extract(shapes, tech, 1000, 1e9);
-        Assert.False(planar.Ok);
-        Assert.Contains("zero thickness", planar.Refusal!, StringComparison.Ordinal);
+        if (!planar.Ok) Assert.DoesNotContain("zero thickness", planar.Refusal!, StringComparison.Ordinal);
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -252,70 +291,63 @@ public class Gi2StackupSkeletonTests : IDisposable
 
     /// <summary>
     /// A skeleton has conductors, so every per-row check that <c>stackupIsSubstrateless</c> used to
-    /// suppress re-engages at once: eleven "non-positive thickness" and five "εr &lt; 1". That is the
-    /// 22-message wall arriving by a different door, and it would make the skeleton a regression.
-    /// The COUNT is asserted, not just the content — this gate is about volume.
+    /// suppress re-engaged at once: eleven "non-positive thickness" and five "εr &lt; 1". That was the
+    /// 22-message wall arriving by a different door, and R-gi2-9 replaced it with one summary.
+    ///
+    /// <para><b>Since 2026-09-08 there is nothing for that summary to say</b> — the values are
+    /// supplied, so nothing is unset, so the wall it was suppressing cannot form either. The COUNT is
+    /// still asserted, because that is what this gate is about: an import must not hand anybody a list
+    /// of problems it created itself.</para>
     /// </summary>
     [Fact]
-    public void AFreshSkeletonReportsOneStackupSummary_NotSixteenPerRowProblems()
+    public void AFreshImportReportsOneStackupProblem_AndItIsTheOneNoFileCouldAnswer()
     {
         var tech = TechOf(Import(SixLayerSet(), "skeleton_validator"));
         var stackupProblems = TechValidation.Analyze(tech)
             .Where(p => p.Area == TechProblemArea.Stackup).ToList();
 
-        // Exactly two, and each is a DIFFERENT fact:
-        //   1. the skeleton summary (R-gi2-9)
-        //   2. no ground reference (R-gi2-10 — a real, separate decision no artwork file can make)
-        //
-        // It was THREE when this was written: the drill layer's plated via also had no wall thickness,
-        // which this file recorded as "GI3's field, unchanged here". GI3 R-gi3-4 changed it — an import
-        // now writes the same 25 µm every shipped technology writes and names it as a default — so the
-        // third problem is gone and its absence is asserted below rather than left to the count.
-        Assert.Equal(2, stackupProblems.Count);
+        // Exactly one, and it is the decision no artwork file can make: which copper is ground
+        // (R-gi2-10). The substrate summary is gone because there is no gap left to summarise, and
+        // the plated via's wall thickness went the same way at GI3 R-gi3-4 — an import writes the
+        // same 25 um every shipped technology writes and names it as a default.
+        var only = Assert.Single(stackupProblems);
+        Assert.Contains("ground reference", only.Message, StringComparison.Ordinal);
+
         Assert.DoesNotContain(stackupProblems,
             p => p.Message.Contains("Plated with no wall thickness", StringComparison.Ordinal));
-
-        var summary = Assert.Single(stackupProblems,
+        Assert.DoesNotContain(stackupProblems,
             p => p.Message.Contains("substrate values are not", StringComparison.Ordinal));
-        Assert.Contains("6 conductor(s) and 5 dielectric(s)", summary.Message, StringComparison.Ordinal);
-        Assert.Contains("11 still need a thickness", summary.Message, StringComparison.Ordinal);
-        Assert.Contains("5 dielectric(s) still need a relative permittivity", summary.Message, StringComparison.Ordinal);
 
-        Assert.Single(stackupProblems, p => p.Message.Contains("ground reference", StringComparison.Ordinal));
-
-        // The per-row walls are gone.
+        // The per-row walls are gone, and now for a second reason as well.
         Assert.DoesNotContain(stackupProblems, p => p.Message.Contains("non-positive thickness", StringComparison.Ordinal));
         Assert.DoesNotContain(stackupProblems, p => p.Message.Contains("εr < 1", StringComparison.Ordinal));
     }
 
-    /// <summary>Gate 5. Someone working down the list must see their remaining work shrink — and pick
-    /// up no new problems for having started.</summary>
+    /// <summary>Gate 5, in the form that survives the fill: somebody typing their fabricator's real
+    /// numbers over the defaulted ones must pick up no new problems for having started.</summary>
     [Fact]
-    public void FillingInOneDielectric_ShrinksTheSummary_AndRaisesNothingNew()
+    public void TypingRealNumbersOverTheDefaults_RaisesNothingNew()
     {
         var tech = TechOf(Import(SixLayerSet(), "skeleton_progressive"));
         int before = TechValidation.Analyze(tech).Count(p => p.Area == TechProblemArea.Stackup);
 
         var first = Electrical(tech).First(l => l.Kind == StackupKind.Dielectric);
         first.ThicknessDbu = 1_500_000;   // 1.5 mm
-        first.Epsr = 4.4;
-        first.TanD = 0.02;
+        first.Epsr = 3.66;
+        first.TanD = 0.004;
 
         var after = TechValidation.Analyze(tech).Where(p => p.Area == TechProblemArea.Stackup).ToList();
-        Assert.Equal(before, after.Count);           // the same three facts, none added
+        Assert.Equal(before, after.Count);           // the same one fact, none added
 
-        var summary = Assert.Single(after, p => p.Message.Contains("substrate values are not", StringComparison.Ordinal));
-        Assert.Contains("10 still need a thickness", summary.Message, StringComparison.Ordinal);
-        Assert.Contains("4 dielectric(s) still need a relative permittivity", summary.Message, StringComparison.Ordinal);
-
-        // And the row that was filled in is not reported at all — not as unset, not as wrong.
+        // And the row that was edited is not reported at all — not as unset, not as wrong.
         Assert.DoesNotContain(after, p => p.Message.Contains($"\"{first.Name}\"", StringComparison.Ordinal));
     }
 
     /// <summary>
-    /// R-gi2-11. The distinction that matters is UNSET versus WRONG. Zero on a freshly imported row is
-    /// unset and is summarised; a negative thickness, or a permittivity of 0.5, is a value somebody
-    /// typed and must keep its own row — otherwise the summary would swallow a real mistake.
+    /// R-gi2-11. The distinction that matters is UNSET versus WRONG, and the fill turns on the same
+    /// one: a freshly imported row's zero is "nobody said" and gets a default, while a negative
+    /// thickness or a permittivity of 0.5 is a value somebody typed and is left alone AND reported.
+    /// A pass that "tidied" those would hide a real mistake behind a plausible number.
     /// </summary>
     [Fact]
     public void AValueSomebodyTypedWrongly_KeepsItsOwnRow_EvenInsideASkeleton()
@@ -331,7 +363,6 @@ public class Gi2StackupSkeletonTests : IDisposable
 
         Assert.Single(stackup, p => p.Message.Contains("non-positive thickness (-5 DBU)", StringComparison.Ordinal));
         Assert.Single(stackup, p => p.Message.Contains("εr < 1 (0.5)", StringComparison.Ordinal));
-        Assert.Single(stackup, p => p.Message.Contains("substrate values are not", StringComparison.Ordinal));
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -483,24 +514,32 @@ public class Gi2StackupSkeletonTests : IDisposable
         var electrical = Electrical(TechOf(result));
 
         Assert.Equal(3, electrical.Count);                   // 2 conductors, 1 dielectric
-        Assert.All(electrical, l => Assert.Equal(0, l.ThicknessDbu));
+
+        // The stated board thickness is now SPENT, not just reported (owner, 2026-09-08): 1.57 mm
+        // less the two 35 um outer coppers leaves 1.5 mm for the single dielectric. A number a file
+        // actually states always beats SubstrateDefaults' own 1.778 mm board.
+        Assert.Equal(1_500_000, electrical.Single(l => l.Kind == StackupKind.Dielectric).ThicknessDbu);
+        Assert.All(electrical.Where(l => l.Kind == StackupKind.Conductor),
+                   l => Assert.Equal(35_000, l.ThicknessDbu));
 
         var said = Assert.Single(result.Messages,
             m => m.Contains("were created from the artwork", StringComparison.Ordinal));
         Assert.Contains("overall board thickness of 1.57 mm", said, StringComparison.Ordinal);
-        // The thickness is REPORTED and not DISTRIBUTED: dividing it across five unknown dielectrics
-        // would be a substrate invented under another name.
-        Assert.Contains("every thickness is zero", said, StringComparison.Ordinal);
+
+        var supplied = Assert.Single(result.Messages,
+            m => m.Contains("NOT STATED BY ANY FILE IN THIS SET", StringComparison.Ordinal));
+        Assert.Contains("the overall board thickness the files state", supplied, StringComparison.Ordinal);
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
     // Gate 9 — round trip
     // ══════════════════════════════════════════════════════════════════════════════════════════
 
-    /// <summary>Including the zeros. A persistence layer that dropped an unset field and let
-    /// <c>Epsr</c>'s C# default of 1.0 come back would turn every reloaded skeleton into air.</summary>
+    /// <summary>Including the substrate. A persistence layer that dropped one of these fields and let
+    /// <c>Epsr</c>'s C# default of 1.0 come back would turn every reloaded import into air — the same
+    /// failure the zeros used to guard against, by the same door.</summary>
     [Fact]
-    public void TheSkeletonRoundTripsThroughCtech_WithItsZerosIntact()
+    public void TheImportedTechnologyRoundTripsThroughCtech_WithItsSubstrateIntact()
     {
         var result = Import(SixLayerSet(), "skeleton_roundtrip");
 
@@ -511,33 +550,75 @@ public class Gi2StackupSkeletonTests : IDisposable
         var reloaded = TechPersistence.LoadFromFile(second);
 
         Assert.Equal(Snapshot(first.Stackup), Snapshot(reloaded.Stackup));
-        Assert.All(Electrical(reloaded), l => Assert.Equal(0, l.ThicknessDbu));
-        Assert.All(Electrical(reloaded).Where(l => l.Kind == StackupKind.Dielectric),
-                   l => Assert.Equal(0.0, l.Epsr));
+        Assert.All(Electrical(reloaded), l => Assert.True(l.ThicknessDbu > 0));
+        Assert.All(Electrical(reloaded).Where(l => l.Kind == StackupKind.Dielectric), l =>
+        {
+            Assert.Equal(SubstrateDefaults.Epsr, l.Epsr, 12);
+            Assert.NotEqual(1.0, l.Epsr);
+        });
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
     // The message the import prints (R-gi2-12)
     // ══════════════════════════════════════════════════════════════════════════════════════════
 
+    /// <summary>
+    /// <b>TWO paragraphs, and they must stay two.</b> One reports what the FILES said; the other
+    /// reports what nothing said and circuitRF supplied anyway. The whole safety of defaulting rests
+    /// on somebody being able to tell those apart at a glance, so a single merged paragraph — read
+    /// values and guesses in one sentence — is the regression this asserts against.
+    /// </summary>
     [Fact]
-    public void TheImportSaysWhatItBuilt_AndSaysPlainlyThatNoSubstrateWasInvented()
+    public void TheImportSaysWhatItBuilt_AndSeparatelyWhatItGuessed()
     {
         var result = Import(SixLayerSet(), "skeleton_message");
 
-        var said = Assert.Single(result.Messages,
+        var built = Assert.Single(result.Messages,
             m => m.Contains("were created from the artwork", StringComparison.Ordinal));
 
-        Assert.Contains("6 conductor layer(s) and 5 dielectric layer(s)", said, StringComparison.Ordinal);
-        Assert.Contains("NO SUBSTRATE WAS INVENTED", said, StringComparison.Ordinal);
-        Assert.Contains("every thickness is zero", said, StringComparison.Ordinal);
-        Assert.Contains("5.8e+7 S/m", said, StringComparison.Ordinal);
-        Assert.Contains("named here as a default", said, StringComparison.Ordinal);
-        Assert.Contains("cannot be simulated", said, StringComparison.Ordinal);
+        Assert.Contains("6 conductor layer(s) and 5 dielectric layer(s)", built, StringComparison.Ordinal);
+        Assert.Contains("states nothing about the substrate at all", built, StringComparison.Ordinal);
+        Assert.Contains("5.8e+7 S/m", built, StringComparison.Ordinal);
+        Assert.Contains("named here as a default", built, StringComparison.Ordinal);
+
+        // The claim that made this paragraph honest before the fill would now be false in it.
+        Assert.DoesNotContain("NO SUBSTRATE WAS INVENTED", built, StringComparison.Ordinal);
+
+        var guessed = Assert.Single(result.Messages,
+            m => m.Contains("NOT STATED BY ANY FILE IN THIS SET", StringComparison.Ordinal));
+
+        // Every quantity supplied is NAMED, with its number, and the paragraph says plainly that
+        // these describe a board circuitRF has not seen.
+        Assert.Contains("35 um outer", guessed, StringComparison.Ordinal);
+        Assert.Contains("18 um inner", guessed, StringComparison.Ordinal);
+        Assert.Contains("355.6 um each", guessed, StringComparison.Ordinal);
+        Assert.Contains("relative permittivity 4.4", guessed, StringComparison.Ordinal);
+        Assert.Contains("loss tangent 0.02", guessed, StringComparison.Ordinal);
+        Assert.Contains("guesses", guessed, StringComparison.Ordinal);
+        Assert.Contains("Stackup tab", guessed, StringComparison.Ordinal);
+
+        // And the rule that did NOT change is restated where somebody reading the message will see it.
+        Assert.Contains("was inferred from the material names", guessed, StringComparison.Ordinal);
 
         // The old "left EMPTY" sentence is gone — it would now be false.
         Assert.DoesNotContain(result.Messages,
             m => m.Contains("stackup was left EMPTY", StringComparison.Ordinal));
+    }
+
+    /// <summary>A set whose job file states a complete stackup is a STATEMENT about the board, so
+    /// there is nothing to supply and nothing is said. The note must never appear over values a file
+    /// actually carried.</summary>
+    [Fact]
+    public void ACompleteJobFileStackup_GetsNoDefaultsNote()
+    {
+        var dir = Folder("jobcomplete");
+        Write(dir, "board.gtl", Artwork("Copper,L1,Top,Signal"));
+        Write(dir, "board.gbl", Artwork("Copper,L2,Bot,Signal", xMm: 2.0));
+        Write(dir, "board.gbrjob", JobFileWithStackup);
+
+        var result = Import(dir, "jobcomplete_import");
+        Assert.DoesNotContain(result.Messages,
+            m => m.Contains("NOT STATED BY ANY FILE IN THIS SET", StringComparison.Ordinal));
     }
 
     /// <summary>The one case that still leaves the stackup genuinely empty: no copper anywhere, so

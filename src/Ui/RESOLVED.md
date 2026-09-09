@@ -1,5 +1,45 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## The subtle mark on a stackup field an EM run cannot use (owner, 2026-09-08)
+
+The Technology editor's Stackup tab reported an unusable field only as a sentence in the problems
+list, naming the layer — which is a long way from the box the number has to be typed into. Ten rows of
+that is a technology somebody believes is finished and that refuses at Simulate.
+
+Each numeric field now carries `Classes.needsvalue`, bound to a flag on `StackupLayerRowViewModel`
+that asks `StackupFieldReadiness` (src/Design). **The predicate is not in this project**, and that is
+the point: `TechValidation` phrases the same predicates as sentences, so the mark beside the box and
+the problem in the list cannot disagree.
+
+**Amber, not red, at 1px plus a wash you can barely see** — `CrfNeedsValueBorderBrush` /
+`CrfNeedsValueFillBrush`, on `CrfForeignBandBrush`'s own precedent. Red means the application refused
+something; an unfilled thickness is a normal state of a freshly imported technology. The field must
+stay perfectly readable and typeable while it is marked: the job is to catch the eye scrolling a
+stackup, not to shout.
+
+**Two mechanics worth knowing.**
+
+- A `Style` beats a `ControlTheme` in Avalonia, so one selector survives the theme's own `:pointerover`
+  and `:focus` border setters. No per-pseudo-class copy was needed.
+- **Four of the row's commit methods deliberately do not call `RefreshFromModel`** — `CommitEpsr`,
+  `CommitTanD`, `CommitMur`, `CommitSigmaSm`. Without an explicit `RaiseReadiness()` the mark survives
+  the correction that cleared it, which teaches somebody the mark means nothing. It re-asks every
+  field rather than the one that changed, because the fields are not independent: a via's Fill decides
+  whether its wall is asked for at all.
+
+Gate: `tests/Ui.Tests/StackupFieldReadinessTests.cs`. It asserts the flags and the notifications, and
+deliberately asserts no colour — a test that a Style setter names a resource key proves nothing about
+what anyone sees.
+
+## The palette: WSProbe sits after S2P (owner, 2026-09-08)
+
+WSP-4 pinned it between IProbe and VProbe, on the reading that a probe belongs with the probes. What it
+is actually reached for is the same gesture as an S2P — measuring a two-port block — so it is where the
+eye is already looking. `LibraryCatalog.AllFilterPinnedOrder`, one row moved; the pinned count is
+unchanged, and the owner's own Vdc-directly-after-VProbe adjacency survives because the probe run
+closes up behind it.
+
+
 ## brief-history-keep-when-nothing-changed, 2026-09-08 — the two keep actions, and the way back
 
 ### The reported bug, and the signal that made it cheap to fix

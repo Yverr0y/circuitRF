@@ -507,11 +507,24 @@ from artwork alone and both come back as vias, and the summary says so.
 
 **What you get** is one **flat cell** — Gerber has no hierarchy, and reconstructing footprints from
 artwork would be guesswork — inside its own import folder, with its **own new `.ctech`**. Your workspace
-technology is read but never modified. The stackup is built from the job file when there is one and left
-**empty** when there is not, because a single Gerber file carries no substrate data at all and an
-invented substrate is worse than none: nothing downstream questions it, and it *will* be simulated. The
-summary says what is still needed before the EM path can run, and reminds you to crop the region of
-interest first — a whole board is not a MoM problem.
+technology is read but never modified.
+
+**The stackup is built from the job file when there is one, and from the artwork when there is not** —
+the number of coppers, their order, and which drawing layer each is bound to were all worked out by the
+import already. **What no Gerber file states at all is the substrate**, and rather than leave it blank
+circuitRF fills it in with one ordinary FR-4 board: 35 µm outer copper, 18 µm inner, ε<sub>r</sub> 4.4,
+tan δ 0.02, and the dielectrics sharing out the board thickness the files state — or 1.778 mm when they
+state none.
+
+**Every one of those numbers is named in the import summary, in a paragraph of its own**, kept apart
+from the paragraph reporting what the files actually said. They are guesses about a board circuitRF has
+not seen, and they exist so a board can be opened and looked at rather than hand-typed before anything
+can run. **Check them against your fabricator's stackup before you trust an EM result**, on the
+Technology Editor's Stackup tab. Nothing is ever inferred from the material *names* in the files.
+
+The summary also says what is still needed before the EM path can run — the one thing no artwork file
+can answer is which copper is the ground plane — and reminds you to crop the region of interest first:
+a whole board is not a MoM problem.
 
 Also worth reading in the summary: the **stroke count** per layer. A copper pour that arrived as a few
 thousand parallel strokes is correct artwork but is neither editable copper nor meshable; **Merge** fixes

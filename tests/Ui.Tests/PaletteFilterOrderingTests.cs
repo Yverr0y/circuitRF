@@ -21,9 +21,9 @@ public class PaletteFilterOrderingTests
         string[] expected =
         [
             "R", "GND", "L", "M", "C", "NonlinearC",
-            "Term", "TermG", "VAR", "MEAS", "IProbe", "WSProbe", "VProbe", "Vdc",
+            "Term", "TermG", "VAR", "MEAS", "IProbe", "VProbe", "Vdc",
             "P1Tone", "VTone", "ITone",
-            "S2P", "S3P", "SPICE", "TLIN", "MLIN",
+            "S2P", "WSProbe", "S3P", "SPICE", "TLIN", "MLIN",
             "SourceTuner", "LoadTuner", "Z1P", "wBond",
         ];
 
@@ -48,10 +48,10 @@ public class PaletteFilterOrderingTests
         // pinned or unpinned; Match was the 23rd (2026-08-19), ITone the 24th (2026-08-29),
         // SpiceModel the 25th (2026-09-01), pinned next to SnP because it is the same gesture —
         // placing a file the user already has — VProbe the 26th, pinned next to IProbe for the
-        // same reason, and WSProbe the 27th (WSP-4), pinned BETWEEN them: it is a probe and belongs
-        // with the probes, and putting it there is what keeps the owner's own
-        // Vdc-directly-after-VProbe adjacency (2026-09-07) intact. (Vdc moved BELOW that probe run
-        // on 2026-09-07; the sequence asserted above is the authority.)
+        // same reason, and WSProbe the 27th (WSP-4). WSProbe was pinned between IProbe and VProbe
+        // until 2026-09-08 and now sits directly after S2P (owner) — the count is unchanged, and the
+        // owner's own Vdc-directly-after-VProbe adjacency (2026-09-07) survives the move because the
+        // probe run closes up behind it. The sequence asserted above is the authority.
         //
         // The tail is the automatic order EXCEPT for LibraryCatalog's declared positional swaps —
         // Bead <-> SRLC, 2026-09-07 — which the expectation applies here rather than exempting the

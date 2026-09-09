@@ -783,8 +783,13 @@ public class GerberImportTests : IDisposable
         Assert.DoesNotContain(result.Messages, m => m.Contains("A-LAMINATE-TRADE-NAME", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// Renamed and inverted on 2026-09-08 (owner). A job file's two electrical fields are optional and
+    /// routinely absent, so this branch reaches the same half-filled stack the artwork-only one does —
+    /// and takes the same completion, reported in the same separate paragraph.
+    /// </summary>
     [Fact]
-    public void AJobFileThatOmitsPermittivityAndLossTangent_LeavesThemUnset_AndSaysWhichAreMissing()
+    public void AJobFileThatOmitsPermittivityAndLossTangent_TakesTheFr4Defaults_AndSaysSo()
     {
         var dir = Folder("jobstack-bare");
         Write(dir, "board.gtl", Artwork("Copper,L1,Top,Signal"));
@@ -802,32 +807,41 @@ public class GerberImportTests : IDisposable
         var dielectric = TechPersistence.LoadFromFile(result.TechPath!).Stackup.Layers
             .Single(l => l.Kind == StackupKind.Dielectric);
 
-        // Unset is StackupLayer's own default - vacuum - and the message is what stops it reading as a
-        // measurement.
-        Assert.Equal(1.0, dielectric.Epsr);
-        Assert.Equal(0.0, dielectric.TanD);
+        // NOT StackupLayer's own default of 1.0 - vacuum, which would read as a measurement and would
+        // run. Ordinary FR-4, and the message is what says it is a guess.
+        Assert.Equal(SubstrateDefaults.Epsr, dielectric.Epsr, 12);
+        Assert.Equal(SubstrateDefaults.TanD, dielectric.TanD, 12);
+        Assert.NotEqual(1.0, dielectric.Epsr);
+
+        // The thickness the file DID state is untouched - a stated value is never corrected.
+        Assert.Equal(1_500_000, dielectric.ThicknessDbu);
+
         Assert.Contains(result.Messages, m =>
-            m.Contains("relative permittivity (1 dielectric(s) left unset)", StringComparison.Ordinal) &&
-            m.Contains("loss tangent (1 dielectric(s) left unset)", StringComparison.Ordinal));
+            m.Contains("NOT STATED BY ANY FILE IN THIS SET", StringComparison.Ordinal) &&
+            m.Contains("relative permittivity 4.4 on 1 dielectric(s)", StringComparison.Ordinal) &&
+            m.Contains("loss tangent 0.02 on 1 dielectric(s)", StringComparison.Ordinal) &&
+            m.Contains("guesses", StringComparison.Ordinal));
     }
 
-    // -- Gate 12: no job file, and NO fabricated substrate ----------------------------------------
+    // -- Gate 12: no job file, so the substrate is DEFAULTED and reported ------------------------
 
     /// <summary>
-    /// <b>GI2 changed what this gate asserts, and the change is a narrowing, not a relaxation.</b>
-    /// It used to assert an EMPTY stackup, because "structure" and "values" were refused together.
-    /// GI2 (brief-gi2-stackup-skeleton.md) splits them: the number of conductors, their order and
-    /// their drawing-layer bindings were already resolved by the identity cascade and are now
-    /// emitted, while every quantity that describes the SUBSTRATE is still refused. R-L4d-6's rule
-    /// is unchanged and is what the second half of this test now holds — a test that asserted a
-    /// plausible thickness or permittivity here would be asserting the bug, because nothing
-    /// downstream would ever question it and it WOULD be simulated.
+    /// <b>This gate has been narrowed twice, and the second time reversed it.</b> It first asserted an
+    /// EMPTY stackup, because "structure" and "values" were refused together. GI2
+    /// (brief-gi2-stackup-skeleton.md) split them: the number of conductors, their order and their
+    /// drawing-layer bindings were already resolved by the identity cascade and are emitted, while
+    /// every substrate value was still refused and spelled zero.
     ///
-    /// <para>The full skeleton gate is <c>Gi2StackupSkeletonTests</c>; this keeps L4g's own check
-    /// that a set with no job file invents nothing.</para>
+    /// <para>The owner's 2026-09-08 decision replaces the second half: the zeros were being paid for
+    /// on every Gerber import, and one ordinary FR-4 board — NAMED, in the import's own message, as a
+    /// guess about a board circuitRF has not seen — is a better answer than a technology nobody can
+    /// simulate. What R-L4d-6 still forbids and this still checks is inferring a substrate from the
+    /// material NAMES in the files.</para>
+    ///
+    /// <para>The full gate is <c>Gi2StackupSkeletonTests</c>; this is L4g's own corner of it.</para>
     /// </summary>
     [Fact]
-    public void ASetWithNoJobFile_InventsNoSubstrate_AndOneMessageSaysSo()
+    public void ASetWithNoJobFile_TakesTheFr4Defaults_AndOneMessageSaysWhich()
     {
         var dir = Folder("nojob");
         Write(dir, "board.gtl", Artwork("Copper,L1,Top,Signal"));
@@ -842,17 +856,23 @@ public class GerberImportTests : IDisposable
             [StackupKind.Conductor, StackupKind.Dielectric, StackupKind.Conductor],
             electrical.Select(l => l.Kind));
 
-        // Values: none. Zero thickness and Epsr = 0 are outside every extractor's own guard, which is
-        // what makes the result unsimulatable rather than merely wrong. Epsr's C# default of 1.0 would
-        // have been AIR — a valid substrate that runs.
-        Assert.All(electrical, l => Assert.Equal(0, l.ThicknessDbu));
-        Assert.Equal(0.0, electrical[1].Epsr);
-        Assert.Equal(0.0, electrical[1].TanD);
+        // Values: one ordinary FR-4 board. Both coppers are outer at two layers, and the single
+        // dielectric takes the whole default 1.778 mm budget — which is exactly the shipped
+        // pcb-2layer_FR-4 technology, arrived at rather than copied.
+        Assert.Equal(35_000, electrical[0].ThicknessDbu);
+        Assert.Equal(1_778_000, electrical[1].ThicknessDbu);
+        Assert.Equal(35_000, electrical[2].ThicknessDbu);
+        Assert.Equal(SubstrateDefaults.Epsr, electrical[1].Epsr, 12);
+        Assert.Equal(SubstrateDefaults.TanD, electrical[1].TanD, 12);
+        Assert.NotEqual(1.0, electrical[1].Epsr);      // 1.0 is air, and air runs. Still true.
 
+        // Two paragraphs: what the files said, and — separately — what circuitRF supplied.
         Assert.Contains(result.Messages, m =>
             m.Contains("were created from the artwork", StringComparison.Ordinal) &&
-            m.Contains("NO SUBSTRATE WAS INVENTED", StringComparison.Ordinal) &&
-            m.Contains("cannot be simulated", StringComparison.Ordinal));
+            m.Contains("states nothing about the substrate at all", StringComparison.Ordinal));
+        Assert.Contains(result.Messages, m =>
+            m.Contains("NOT STATED BY ANY FILE IN THIS SET", StringComparison.Ordinal) &&
+            m.Contains("was inferred from the material names", StringComparison.Ordinal));
     }
 
     // -- Gate 13: order is DECLARED, or it is reported as a guess ----------------------------------
