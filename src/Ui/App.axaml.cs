@@ -965,22 +965,48 @@ public partial class App : Application
     {
         Avalonia.Threading.Dispatcher.UIThread.UnhandledException += (_, e) =>
         {
-            if (e.Exception is not ArgumentException ex) return;
-            if (!ex.Message.Contains("menu being updated does not match", StringComparison.OrdinalIgnoreCase)) return;
-            if (ex.StackTrace is not { } trace || !trace.Contains("Avalonia.Native", StringComparison.Ordinal)) return;
+            if (!IsKnownNativeMenuMismatch(e.Exception)) return;
 
             Console.Error.WriteLine(
                 "circuitRF: swallowed a known Avalonia.Native NativeMenu exporter exception on the " +
-                "dispatcher (brief-harmonicarf-r3a §2.4 — a floor, not the fix): " + ex);
+                "dispatcher (brief-harmonicarf-r3a §2.4 — a floor, not the fix): " + e.Exception);
             e.Handled = true;
         };
     }
+
+    /// <summary>
+    /// Avalonia.Native's own <c>ArgumentException("The menu being updated does not match.")</c> —
+    /// one native menu proxy asked to update itself from a DIFFERENT <c>NativeMenu</c> instance than
+    /// the one it was built from. Narrow by construction: the exact message AND an
+    /// <c>Avalonia.Native</c> frame, never a blanket "is this an ArgumentException".
+    ///
+    /// <para><b>It is matched in two places because the same throw arrives by two routes.</b>
+    /// <see cref="WireNativeMenuDispatcherBackstop"/> catches it when a QUEUED
+    /// <c>DoLayoutReset</c> throws — no call site exists to wrap. But when the throw is synchronous
+    /// inside a native window callback (a window's <c>Activated</c>, which Avalonia raises from
+    /// <c>DispatcherImpl.RunLoop</c> rather than from a dispatcher job) the dispatcher's unhandled
+    /// hook never sees it and the process dies — which is exactly the crash an owner hit closing a
+    /// workspace on macOS (2026-09-08). There the guard has to be at the call site, and the two
+    /// share this predicate so the policy is stated once.</para>
+    /// </summary>
+    internal static bool IsKnownNativeMenuMismatch(Exception? e) =>
+        e is ArgumentException ex
+        && ex.Message.Contains("menu being updated does not match", StringComparison.OrdinalIgnoreCase)
+        && ex.StackTrace is { } trace
+        && trace.Contains("Avalonia.Native", StringComparison.Ordinal);
 
     // ---- macOS background menu window (no-window state) -----------------------
 
     private void BuildBgMenuWindow(IClassicDesktopStyleApplicationLifetime desktop)
     {
-        var newItem = new NativeMenuItem { Header = "New Workspace", Gesture = new KeyGesture(Key.N, KeyModifiers.Meta) };
+        // "New Window", because that is what the item DOES — `NewWorkspaceWindow(null)` shows an
+        // empty workspace window, which is File ▸ New Window's action, not File ▸ New Workspace…'s
+        // (that one runs a dialog and creates a `.cws` on disk). The header said "New Workspace" and
+        // named an operation this menu cannot perform: with no window open there is no workspace
+        // view model to run it on (owner, 2026-09-08). The gesture stays Meta+N even though the
+        // shell spells New Window Meta+Shift+N — with no window open this is the only way in, and
+        // Meta+N is what every macOS application opens a window with from the background state.
+        var newItem = new NativeMenuItem { Header = "New Window", Gesture = new KeyGesture(Key.N, KeyModifiers.Meta) };
         newItem.Click += (_, _) => NewWorkspaceWindow();
 
         var fileMenu = new NativeMenu();

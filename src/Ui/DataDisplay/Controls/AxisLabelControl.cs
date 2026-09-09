@@ -222,25 +222,34 @@ namespace CircuitRF.Ui.DataDisplay.Controls
                 string displayText = useCustom ? _customLabel! : _text;
                 SKColor textColor  = useCustom ? _theme.TextColor : _traceColor;
 
-                using var font  = new SKFont(SkiaFonts.PlexRegular, fontSizePx);
+                // Per-glyph DejaVu fallback. This control is a SECOND Y-axis-label renderer — the
+                // one that draws the per-trace strips beside the plot, where
+                // AxesRenderer.DrawTitleAndAxisLabels draws the one in the Skia margin — and it is
+                // the one a WSProbe label actually lands in. IBM Plex has no U+25B8 "▸", the
+                // separator in a group name like "SP1 ▸ WSProbes WSP1, WSP2 ▸ [Y]", and Skia draws
+                // a glyph the face lacks as a NOTDEF box rather than substituting anything (owner,
+                // 2026-09-08). Plex also lacks U+2220 "∠", U+2225 "∥", U+25CF and U+25B2; it DOES
+                // have U+2192 "→", so the arrow in a probe-pair name was never the problem.
+                using var font     = new SKFont(SkiaFonts.PlexRegular, fontSizePx);
+                using var fallback = new SKFont(SkiaFonts.DejaVuRegular, fontSizePx);
                 using var paint = new SKPaint { Color = textColor, IsAntialias = true };
 
                 // Trim text to fit the available length (= strip height − margin).
                 string text = displayText;
                 float maxLen = h - 12f;
-                while (text.Length > 1 && font.MeasureText(text) > maxLen)
+                while (text.Length > 1 && RendererText.MeasureTextWithFallback(text, font, fallback) > maxLen)
                     text = text[..^1];
                 if (text.Length < displayText.Length) text = text.TrimEnd() + "…";
 
-                float tw = font.MeasureText(text);
+                float tw = RendererText.MeasureTextWithFallback(text, font, fallback);
                 float cx = w / 2f;
                 float cy = h / 2f;
 
                 canvas.Save();
                 canvas.Translate(cx, cy);
                 canvas.RotateDegrees(_isRight ? 90f : -90f);
-                canvas.DrawText(text, -tw / 2f, font.Size * 0.35f,
-                    SKTextAlign.Left, font, paint);
+                RendererText.DrawLeftTextWithFallback(
+                    canvas, text, -tw / 2f, font.Size * 0.35f, font, fallback, paint);
                 canvas.Restore();
             }
         }

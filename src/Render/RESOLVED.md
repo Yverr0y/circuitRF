@@ -1,5 +1,138 @@
 # src/Render — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## Owner report, 2026-09-08 — the Polar grid only ever looked right at unity
+
+`AxesRenderer.DrawPolarGrid` took its ring radii from `axes.Ticks(true).MinorX`. That tick set is
+built for a RECTANGULAR axis, and `MinorX` is the lattice with every MAJOR multiple **removed** —
+correct when the majors are drawn separately as their own darker gridlines, and wrong as a set of
+radii, because nothing draws them here. The ring sequence therefore had a hole in it wherever a
+major tick fell.
+
+It went unnoticed because the unit circle is the one window where the arithmetic comes out even:
+width 2 gives a 0.2 minor spacing and a major multiplier of 2, so the surviving radii are 0.2, 0.6,
+1.0 — three evenly spaced rings with the outermost exactly at the frame. Nothing about that is a
+property of the code; it is a coincidence of that one window. Off unity it failed three different
+ways at once:
+
+| window | rings drawn |
+|---|---|
+| ±1 | 0.2, 0.6, 1.0 — even, and the boundary is on the lattice |
+| ±1.2 | 0.2, 0.6, 1.0 — **no ring at the frame at all**, and nothing says the radius is 1.2 |
+| ±1.5 | 0.2 … 1.4 with **1.0 missing**, six rings, no frame |
+| ±2 | 0.2 … 1.8 with **1.0 missing**, eight rings, no frame |
+| ±3 | 0.5, 1.5, 2.5 — half-integers only, no frame |
+
+**The rings are computed from the framed radius now, not from the tick set.** `PolarRings(rMax)`
+picks the nearest 1/2/5 decade to `rMax / 5`, every multiple of it is drawn, and the boundary ring
+at exactly `rMax` is always drawn and always labelled — so the ring COUNT is roughly the same at
+every scale, which is the property that was missing. A window is a square centred on the origin on
+every complex plot type (`Plot.SquareCentredOnOrigin` serves both `Plot.Autoscale` and the
+axis-limits flyout), so its half-width IS that radius; it is taken from the X edges because the
+rings are drawn in X pixels.
+
+Three details are load-bearing and each came from a case that looked wrong on screen:
+
+- **The nice-number thresholds are nudged in by a tolerance**, because the mantissa is a QUOTIENT and
+  a decade boundary does not survive one: `rMax = 1.5` gives `m = 2.9999999999999996` and
+  `rMax = 0.75` gives `m = 1.4999999999999998`, so a bare `m < 3` / `m < 1.5` takes the finer branch
+  and the plot comes back with seven rings and a tick comb at twice its neighbours' density — for a
+  radius one digit long.
+- **A multiple landing within two fifths of a step of the frame is dropped**, not drawn beside it.
+  `rMax = 12.5` has 12 on its lattice, half a step from the edge, and two circles that close read as
+  a rendering fault rather than as a grid. A quarter of a step was not enough for that case.
+- **Minor radii are short ticks ACROSS the two diameters, not rings of their own.** Five
+  subdivisions of five rings is twenty-five circles, which stops reading as a grid and starts
+  reading as shading; on the axes they give the same fine reading at a fifth of the ink. They are
+  suppressed below 4 canvas pixels of spacing — absolute pixels, because this is a question about
+  what the eye can separate, and a comb finer than that is a grey band however thin its strokes.
+
+The radius numbers now carry the axis's SI prefix through the same `EngineeringFormat` path the
+rectangular ticks use (one group for the whole axis, never one per ring — `G4` printed `0.0002` on a
+milli-scale plot), sit clear of the tick comb rather than on the axis line, and are dropped
+**outwards-in** where the lattice is too tight to label completely, so the boundary number — the one
+that says what scale the plot is at — is the one that survives.
+
+### The outline was clipped where it touched the box — on the Smith chart too
+
+Both grids clip to `PlotRenderer.ViewportClipRect`, and both draw an OUTLINE whose radius is on the
+boundary that clip is cut to, so the outer half of that stroke was taken away. Measured as ink
+across the stroke on a 900 px polar render: 224 and 232 at 45° and 135°, **112 at the top and 94 at
+the bottom** — half a line, exactly at the four points where the disc is tangent to the box.
+
+**The Smith chart had a second, worse instance** running all the way round rather than at four
+points: with the window at exactly the unit square the grid is also clipped to a `ClipPath` of the
+unit circle, and the `r = 0` circle IS that circle — so the chart's outline was half-width
+everywhere, which is why it read lighter than the constant-R circles inside it.
+
+**Widening both clips fixes the outline and is the wrong fix**, which the first attempt did and an
+owner caught the same day: the reactance arcs then ran past |Γ| = 1 by their own thickness. An arc
+meets the boundary at a shallow angle, so a stroke's width of RADIAL slack shows up as a much longer
+tail along the edge — an arc leaves the disc visibly where a circle concentric with it would not.
+
+**The outline is separated from the grid it bounds instead.** The arcs keep the exact clips they
+always had; the outline is drawn afterwards, outside them, under a box one stroke wider — it is the
+only thing that needs the slack, and it needs it precisely because it sits on the boundary. Polar
+got the same split, where it also stops the diameters' square end caps poking a pixel past the
+frame. After: 222 / 210 / 213 around the polar ring, and 23 near-white antialiasing pixels beyond
+the Smith disc against 0 before, none of them an arc.
+
+### Every crossing on the Smith grid was darker than the lines that made it
+
+The constant-R and constant-X arcs were each stroked at `MinorTransparencyScale`, so an overlap
+composited: two 50 % strokes read 75 %, three read 87.5 %. Sampled on a 900 px render, a plain arc
+is **208** and the r=1 × x=1, r=1 × x=2, r=2 × x=1 and r=0.5 × x=1 crossings were **185, 185, 185,
+187** — so the grid was darkest exactly where it is busiest, and the chart read stippled rather than
+ruled.
+
+**The family is drawn into one `SaveLayer` at full opacity and composited once.** Inside the layer
+an overlap is the same colour as a single stroke, because opaque over opaque is opaque; the layer's
+own alpha is then the transparency that was wanted. Every one of those samples reads 207-208 now.
+
+**The outline and the real axis stay out of the layer, at full strength.** They are the chart's frame
+and its reference rather than grid, they are meant to be the darker lines, and putting them inside
+would have faded them to the arcs' tone.
+
+### A Y-axis label rendered a rectangle — and THREE renderers draw one
+
+Skia draws a glyph the typeface lacks as NOTDEF — a box — and substitutes nothing. Checked against
+the shipped `cmap`s rather than assumed: of the characters these labels can carry, **IBM Plex lacks
+U+25B8 `▸`, U+2220 `∠`, U+2225 `∥`, U+25CF `●` and U+25B2 `▲`, and HAS U+2192 `→`**. So in
+`WSProbe GATE→DRAIN ▸ block` the arrow was never the problem and the group separator beside it
+always was — the report called it "the -> glyph", which is what a small right-pointing triangle
+looks like.
+
+`RendererText` already splits a string into runs by coverage and falls back to DejaVu; the marker
+info box and the Table have used it for `∠` since they were written. Three places draw a Data
+Display axis label and **none of them did**:
+
+| renderer | what it draws | reached by |
+|---|---|---|
+| `AxesRenderer.DrawTitleAndAxisLabels` | the title, the X label(s), the Y label in the Skia margin | a Rect plot's first left/right trace, or a custom label |
+| `AxisLabelControl` (`src/Ui`) | the per-trace label STRIPS beside the plot | **every Smith/Polar trace, and Rect traces past the first** |
+| `PlotComposer` | those same strips, in an exported document | Export / `render --data` |
+
+**Fixing only the first fixed nothing the reporter could see**, and that is the finding: a WSProbe
+trace's label lands in the strips, which are a different renderer in a different project, reached
+through an Avalonia custom draw operation rather than through `AxesRenderer` at all. All three go
+through the fallback now. The title's shrink-to-fit resizes both faces together — measuring with one
+size and drawing with another is how a centred string ends up off-centre.
+
+Two text sites were checked and deliberately left alone: `ContourRenderer`'s level labels and marker
+letters are CENTRE-aligned and numeric, and `RendererText`'s run splitter is exact only for
+left-aligned text; and `PlotRenderer`'s VSWR readout can only emit `∞`, which Plex covers.
+`HarmonicaPanelRenderer`'s own rotated Y2 label has the same shape and the same gap, but it draws
+harmonicaRF's labels rather than Data Display ones — it is not this report and was not changed.
+
+The gate is `tests/Ui.Tests/DataDisplay/AxisLabelGlyphFallbackTests.cs`, which asserts the coverage
+facts above against the shipped faces, asserts the fallback changes the drawn PICTURE for the
+reported label while leaving an ASCII one byte-identical (a splitter that measured with DejaVu and
+still drew with Plex would leave the box on screen and pass every width assertion), and scans the
+two renderers that cannot be driven without a canvas. **Load a face for an assertion through
+`SkiaFonts.RealFace`, never `RealPlexRegular`** — the latter hands back the lazy cached instance the
+renderers draw with, and disposing it takes the typeface out from under the whole process; it
+crashed the test host here before the test ever ran.
+
+
 ## Owner report round, 2026-09-08 — the plot scales and the wsp matrix's indices
 
 Three reports whose fixes live below the firewall. `src/Ui/RESOLVED.md` carries the two that do not.

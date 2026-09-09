@@ -257,24 +257,29 @@ public static class PlotComposer
         SKColor textColor   = useCustom ? theme.TextColor
                             : RenderTheme.ToSKColor(trace.Properties.LineColor);
 
-        using var font  = new SKFont(SkiaFonts.PlexRegular, fontSizePx);
+        // Per-glyph DejaVu fallback — this is a TRACE label, so it carries whatever the group and
+        // cube names carry, and IBM Plex does not cover all of it (U+25B8 "▸", the group separator,
+        // is the one that reached a plot). Skia draws a missing glyph as a NOTDEF box.
+        using var font     = new SKFont(SkiaFonts.PlexRegular, fontSizePx);
+        using var fallback = new SKFont(SkiaFonts.DejaVuRegular, fontSizePx);
         using var paint = new SKPaint { Color = textColor, IsAntialias = true };
 
         string text   = displayText;
         float  maxLen = h - 12f;
-        while (text.Length > 1 && font.MeasureText(text) > maxLen)
+        while (text.Length > 1 && RendererText.MeasureTextWithFallback(text, font, fallback) > maxLen)
             text = text[..^1];
         if (text.Length < displayText.Length)
             text = text.TrimEnd() + "…";
 
-        float tw = font.MeasureText(text);
+        float tw = RendererText.MeasureTextWithFallback(text, font, fallback);
         float cx = x + w / 2f;
         float cy = y + h / 2f;
 
         canvas.Save();
         canvas.Translate(cx, cy);
         canvas.RotateDegrees(isRight ? 90f : -90f);
-        canvas.DrawText(text, -tw / 2f, font.Size * 0.35f, SKTextAlign.Left, font, paint);
+        RendererText.DrawLeftTextWithFallback(
+            canvas, text, -tw / 2f, font.Size * 0.35f, font, fallback, paint);
         canvas.Restore();
     }
 }

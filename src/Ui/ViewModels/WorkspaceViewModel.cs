@@ -13674,13 +13674,45 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     /// gets its own independent platform exporter (per Avalonia's own <c>NativeMenu.GetInfo</c>), so
     /// attaching the same instance to a second window does not detach it from the first.
     /// </summary>
+    /// <remarks>
+    /// <para><b>Two guards, and the second one is a floor rather than a diagnosis.</b> This runs
+    /// from a window's <c>Activated</c> handler, so it fires again on every re-activation for the
+    /// life of the window — and the menu it would set is almost always the one already there.
+    /// Re-setting an attached property to the value it already holds raises no change notification,
+    /// so the redundant call was silent, but reading the answer first makes the no-op explicit and
+    /// removes a whole class of exporter churn.</para>
+    ///
+    /// <para>The catch is for the throw an owner hit closing a workspace on macOS (2026-09-08):
+    /// <c>ArgumentException("The menu being updated does not match.")</c> out of
+    /// <c>__MicroComIAvnMenuProxy.Update</c>, which took the process down. <b>The dispatcher
+    /// backstop could not have caught it</b> — Avalonia raises <c>Activated</c> from
+    /// <c>DispatcherImpl.RunLoop</c>'s native callback, not from a dispatcher job, so
+    /// <c>Dispatcher.UIThread.UnhandledException</c> never sees it. What is left of the failure is
+    /// a window whose menu bar is the bare app menu until it is activated again, which is the same
+    /// cosmetic state this method exists to repair and is never worth a crash.
+    /// <b>It is not the root cause</b>: why the native proxy and the managed instance disagree at
+    /// that moment is unexplained, and the console line is there so the next occurrence carries
+    /// its own evidence.</para>
+    /// </remarks>
     private static void AttachSharedNativeMenuIfMacOS(Window shellWindow, Window tornOffWindow)
     {
         if (!OperatingSystem.IsMacOS()) return;
 
         var menu = Avalonia.Controls.NativeMenu.GetMenu(shellWindow);
-        if (menu is not null)
+        if (menu is null) return;
+        if (ReferenceEquals(Avalonia.Controls.NativeMenu.GetMenu(tornOffWindow), menu)) return;
+
+        try
+        {
             Avalonia.Controls.NativeMenu.SetMenu(tornOffWindow, menu);
+        }
+        catch (Exception ex) when (App.IsKnownNativeMenuMismatch(ex))
+        {
+            Console.Error.WriteLine(
+                "circuitRF: the shared macOS native menu could not be attached to '"
+              + tornOffWindow.Title + "' — its menu bar stays the bare app menu until it is "
+              + "activated again. " + ex);
+        }
     }
 
     /// <summary>Finds the first non-<see cref="ITool"/> dockable reachable from a window's

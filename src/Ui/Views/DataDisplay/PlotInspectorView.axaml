@@ -430,7 +430,7 @@
                                                     <!-- R-stb-5: a metric that does not fit this plot type stays
                                                          VISIBLE but disabled, and says why on hover, rather than
                                                          vanishing or producing an empty trace. -->
-                                                    <TextBlock Text="{Binding Label}"
+                                                    <TextBlock Text="{Binding PickerText}"
                                                                Classes.brokenSource="{Binding IsBroken}"
                                                                FontSize="{StaticResource FontSize}"
                                                                TextTrimming="CharacterEllipsis"
@@ -1289,7 +1289,7 @@
                                                           ToolTip.Tip="Quantity plotted along X">
                                                     <ComboBox.ItemTemplate>
                                                         <DataTemplate x:DataType="vm:TraceDataItem">
-                                                            <TextBlock Text="{Binding Label}"
+                                                            <TextBlock Text="{Binding PickerText}"
                                                                        FontSize="{StaticResource FontSize}"
                                                                        TextTrimming="CharacterEllipsis"
                                                                        ToolTip.Tip="{Binding TooltipText}"/>

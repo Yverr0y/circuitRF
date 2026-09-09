@@ -218,6 +218,34 @@ namespace CircuitRF.Render.DataDisplay
         //  Polar grid
         // ================================================================
 
+        /// <summary>
+        /// The polar grid: the two diameters, the ring lattice, the minor tick marks along the
+        /// axes, and the radius numbers.
+        ///
+        /// <para><b>The rings are computed here from the framed radius, not taken from
+        /// <see cref="Axes.Ticks"/>, and that is the whole fix for a non-unity scale.</b> The tick
+        /// set is built for a RECTANGULAR axis: <c>MinorX</c> is the lattice with every major
+        /// multiple REMOVED, which is exactly right when the majors are drawn as their own darker
+        /// gridlines and exactly wrong as a set of radii — the rings then had a hole in them
+        /// wherever a major tick fell. It only ever looked acceptable at unity because the numbers
+        /// happen to come out even there (0.2, 0.6, 1.0). Off unity it fell apart in three
+        /// different ways at once: a window of ±2 drew eight rings with a gap where 1.0 should be,
+        /// ±3 drew nothing but half-integers (0.5, 1.5, 2.5), and ±1.2 drew the unit-circle lattice
+        /// with no ring at the boundary at all — so the plot had no frame and nothing said what its
+        /// outer radius was.</para>
+        ///
+        /// <para>What is drawn instead is a lattice chosen for a RADIUS: a nice step
+        /// (<see cref="PolarRings"/>) giving about five rings, every multiple of it present, and
+        /// the boundary ring at exactly the window's own radius always drawn and always labelled.
+        /// The number of rings is therefore the same at every scale, which is the property that was
+        /// missing — a polar plot of tens of ohms now reads exactly like the unit-circle one.</para>
+        ///
+        /// <para>The radius numbers carry the axis's SI prefix through the same
+        /// <see cref="EngineeringFormat"/> path the rectangular ticks use (one group for the whole
+        /// axis, never one per ring), and are dropped from the inside outwards wherever the next
+        /// one out has already taken the space — so a tight lattice thins its labels rather than
+        /// overprinting them.</para>
+        /// </summary>
         public static void DrawPolarGrid(
             SKCanvas             canvas,
             (double W, double H) canvasSize,
@@ -225,12 +253,26 @@ namespace CircuitRF.Render.DataDisplay
             TransformSet         tf,
             RenderTheme          theme)
         {
-            float lw = LineWidth(canvasSize);
+            float lw     = LineWidth(canvasSize);
+            float gridSw = lw * (float)axes.GridThicknessFactor;
+
+            // The exact plot box for everything except the boundary ring, which is drawn at the end
+            // under a box one stroke wider. The ring's radius is at the window's own edge, so it is
+            // tangent to the box at four points and the OUTER half of its stroke falls outside —
+            // an exact clip takes that half away and the outline reads thinner at top, bottom, left
+            // and right than on the diagonals (owner, 2026-09-08). Only the ring gets the slack:
+            // widening the clip for the whole grid would let the diameters' square end caps poke a
+            // pixel past the frame, which is the same defect one step smaller.
+            var exactClip = PlotRenderer.ViewportClipRect(tf.Viewport, canvasSize);
 
             canvas.Save();
-            canvas.ClipRect(PlotRenderer.ViewportClipRect(tf.Viewport, canvasSize));
+            canvas.ClipRect(exactClip);
 
-            using var axisPaint = StrokePaint(theme.GridColor, lw * (float)axes.GridThicknessFactor);
+            using var axisPaint = StrokePaint(theme.GridColor, gridSw);
+            using var ringPaint = StrokePaint(
+                RenderTheme.WithOpacity(theme.GridColor, axes.MinorTransparencyScale), gridSw);
+            using var tickPaint = StrokePaint(
+                theme.TickColor, lw * (float)axes.TickThicknessFactor);
 
             using var cross = new SKPath();
             cross.MoveTo(tf.PrimaryToCanvas(axes.Window.Left,  0.0));
@@ -239,17 +281,73 @@ namespace CircuitRF.Render.DataDisplay
             cross.LineTo(tf.PrimaryToCanvas(0.0, axes.Window.Bottom));
             canvas.DrawPath(cross, axisPaint);
 
-            var ticks = axes.Ticks(true);
-            var radii  = ticks.MinorX.Select(Math.Abs).Where(r => r > 1e-12).Distinct().ToList();
-            var ctr    = tf.PrimaryToCanvas(0.0, 0.0);
+            // A complex plot's window is a square centred on the origin — Plot.Autoscale and the
+            // axis-limits flyout both go through Plot.SquareCentredOnOrigin — so half its width IS
+            // the framed radius. Taken from the X edges because the rings are drawn in X pixels.
+            double rMax = Math.Max(Math.Abs(axes.Window.Left), Math.Abs(axes.Window.Right));
+            var    ctr  = tf.PrimaryToCanvas(0.0, 0.0);
+            var    edge = tf.PrimaryToCanvas(rMax, 0.0);
+            float  pxMax = Math.Abs(edge.X - ctr.X);
 
-            foreach (double r in radii)
+            if (!(rMax > 0) || !(pxMax > 0) || !float.IsFinite(pxMax))
             {
-                var   edge = tf.PrimaryToCanvas(r, 0.0);
-                float pxR  = Math.Abs(edge.X - ctr.X);
-                if (pxR > 0)
-                    canvas.DrawCircle(ctr.X, ctr.Y, pxR, axisPaint);
+                canvas.Restore();
+                return;
             }
+
+            float  pxPerWorld  = pxMax / (float)rMax;
+            var    (step, sub) = PolarRings(rMax);
+
+            // A multiple landing close to the boundary is dropped rather than drawn beside it: the
+            // boundary ring is always present, and two circles a fraction of a step apart read as
+            // a rendering fault rather than as a lattice. Two fifths of a step is what a radius of
+            // 12.5 needs — its lattice runs 2, 4, … 12, and the last of those is half a step from
+            // the edge.
+            double lastMultiple = rMax - step * 0.4;
+
+            var rings = new List<double>();
+            for (int n = 1; n * step <= lastMultiple; n++) rings.Add(n * step);
+            rings.Add(rMax);
+
+            for (int i = 0; i < rings.Count - 1; i++)
+                canvas.DrawCircle(ctr.X, ctr.Y, (float)rings[i] * pxPerWorld, ringPaint);
+
+            // Minor radii are marked as short ticks ACROSS the two diameters rather than as rings
+            // of their own. Five subdivisions of five rings is twenty-five circles, which stops
+            // reading as a grid and starts reading as shading; on the axes they give the same fine
+            // reading at a fifth of the ink, and they are the polar counterpart of the minor ticks
+            // DrawRectGrid puts on its own two edges.
+            double minorStep = step / sub;
+            if (sub > 1 && minorStep * pxPerWorld >= MinMinorTickSpacingPx)
+            {
+                float  halfX     = (float)(axes.TickLengthX / 2);
+                float  halfY     = (float)(axes.TickLengthY / 2);
+
+                using var minorTicks = new SKPath();
+                for (int n = 1; n * minorStep <= lastMultiple; n++)
+                {
+                    if (n % sub == 0) continue;              // a major radius: its ring is drawn
+                    double rm = n * minorStep;
+
+                    foreach (double s in new[] { rm, -rm })
+                    {
+                        minorTicks.MoveTo(tf.PrimaryToCanvas(s, -halfY));
+                        minorTicks.LineTo(tf.PrimaryToCanvas(s,  halfY));
+                        minorTicks.MoveTo(tf.PrimaryToCanvas(-halfX, s));
+                        minorTicks.LineTo(tf.PrimaryToCanvas( halfX, s));
+                    }
+                }
+                canvas.DrawPath(minorTicks, tickPaint);
+            }
+
+            // The boundary ring, and only the boundary ring, under the widened box.
+            canvas.Restore();
+            canvas.Save();
+            canvas.ClipRect(SKRect.Inflate(exactClip, gridSw, gridSw));
+            canvas.DrawCircle(ctr.X, ctr.Y, pxMax, axisPaint);
+            canvas.Restore();
+            canvas.Save();
+            canvas.ClipRect(exactClip);
 
             // The radius numbers, whatever the radius is. This used to be gated on
             // `axes.Window.Width < 8` as well, which was safe only while a Polar plot could never
@@ -263,20 +361,71 @@ namespace CircuitRF.Render.DataDisplay
                 using var _lp1 = lblPaint;
                 lblPaint.Color = RenderTheme.WithOpacity(lblPaint.Color, axes.MinorTransparencyScale);
 
-                foreach (double r in radii)
+                int   group = EngineeringFormat.GroupFor(EngineeringFormat.AxisMagnitude(rMax));
+                float gap   = lw * 2.5f;
+                float baseY = ctr.Y - (float)(axes.TickLengthY / 2) * pxPerWorld - gap;
+
+                // Outwards-in, so the boundary number — the one that says what scale the plot is
+                // at — is the one that survives a lattice too tight to label completely.
+                float takenLeft = float.MaxValue;
+                for (int i = rings.Count - 1; i >= 0; i--)
                 {
-                    var    pt   = tf.PrimaryToCanvas(r, 0.0);
-                    string text = r.ToString("G4") + "  ";
-                    float  tw   = lblFont.MeasureText(text);
-                    canvas.DrawText(text,
-                        pt.X - tw,
-                        pt.Y,
-                        SKTextAlign.Left, lblFont, lblPaint);
+                    string text  = EngineeringFormat.Tick(rings[i], group, axes.NumDigitsXAxis);
+                    float  right = ctr.X + (float)rings[i] * pxPerWorld - gap;
+                    float  left  = right - lblFont.MeasureText(text);
+                    if (right > takenLeft - gap) continue;
+
+                    canvas.DrawText(text, left, baseY, SKTextAlign.Left, lblFont, lblPaint);
+                    takenLeft = left;
                 }
             }
 
             canvas.Restore();
         }
+
+        /// <summary>
+        /// The ring lattice for a polar plot framed at <paramref name="rMax"/>: the radial step and
+        /// the number of subdivisions of it that carry a minor tick.
+        ///
+        /// <para>The step is the nearest 1/2/5 decade to <c>rMax / 5</c>, so the plot carries
+        /// roughly five rings whatever its scale, and the numbers on them are the ones a reader
+        /// would have chosen — a unit-circle plot gets 0.2 &#8230; 1.0 (the companion to a Smith
+        /// chart's own radial grid), ±2 gets 0.5 &#8230; 2.0, ±50 gets 10 &#8230; 50.</para>
+        ///
+        /// <para>Subdivisions follow the step's own mantissa rather than a constant, so a minor
+        /// tick always lands on a number worth reading: a step of 1 or 5 divides by five, a step of
+        /// 2 divides by four (giving halves, not fifths of a two).</para>
+        /// </summary>
+        internal static (double Step, int Subdivisions) PolarRings(double rMax)
+        {
+            if (!(rMax > 0) || !double.IsFinite(rMax)) return (0, 0);
+
+            double raw = rMax / PolarRingTarget;
+            double mag = Math.Pow(10.0, Math.Floor(Math.Log10(raw)));
+            double m   = raw / mag;
+
+            // The thresholds are nudged inwards by a tolerance because the mantissa is a QUOTIENT
+            // and a decade boundary does not survive one: rMax = 1.5 gives m = 2.9999999999999996
+            // and rMax = 0.75 gives m = 1.4999999999999998, so a bare `m < 3` and `m < 1.5` both
+            // take the finer branch and the plot comes back with seven rings and a tick comb twice
+            // the density of its neighbours — for a radius one digit long.
+            const double tol = 1e-9;
+            double nice = m < 1.5 - tol ? 1.0
+                        : m < 3.0 - tol ? 2.0
+                        : m < 7.0 - tol ? 5.0
+                        :                 10.0;
+            return (nice * mag, nice == 2.0 ? 4 : 5);
+        }
+
+        /// <summary>Rings a polar plot aims to carry, at any scale — what <see cref="PolarRings"/>
+        /// searches its step for.</summary>
+        private const int PolarRingTarget = 5;
+
+        /// <summary>Canvas pixels below which the polar minor ticks stop being drawn. Absolute
+        /// rather than a multiple of the line width on purpose: this is a question about what the
+        /// eye can still separate, and a comb finer than a few pixels reads as a grey band on the
+        /// axis however thin its strokes are.</summary>
+        private const float MinMinorTickSpacingPx = 4f;
 
         // ================================================================
         //  Smith chart grid
@@ -289,28 +438,58 @@ namespace CircuitRF.Render.DataDisplay
             TransformSet         tf,
             RenderTheme          theme)
         {
-            float lw = LineWidth(canvasSize);
+            float lw     = LineWidth(canvasSize);
+            float gridSw = lw * (float)axes.GridThicknessFactor;
+
+            // The OUTLINE is separated from the grid it bounds, rather than the clip being widened
+            // to fit it. Both are needed and they want opposite things: the constant-R and
+            // constant-X arcs must be cut off exactly at |Γ| = 1, and the outline — the r = 0
+            // circle, which IS that boundary — must not be, since a clip cut to its own radius
+            // takes the outer half of its stroke away all the way round. That is why the outline
+            // read thinner than the arcs inside it.
+            //
+            // Widening the disc clip by a stroke fixed the outline and let the reactance arcs run
+            // past the boundary by their own thickness (owner, 2026-09-08). Arcs meet the boundary
+            // at a shallow angle, so a stroke's width of radial slack shows up as a much longer
+            // tail along the edge — an arc leaves the disc visibly where a circle concentric with
+            // it would not. So the arcs keep the exact clip they always had, and the outline is
+            // drawn afterwards, outside it.
+            var   unitCtr = tf.PrimaryToCanvas(0.0, 0.0);
+            var   unitEdge = tf.PrimaryToCanvas(1.0, 0.0);
+            float unitPxR = Math.Abs(unitEdge.X - unitCtr.X);
+
+            var exactClip = PlotRenderer.ViewportClipRect(tf.Viewport, canvasSize);
 
             canvas.Save();
-            canvas.ClipRect(PlotRenderer.ViewportClipRect(tf.Viewport, canvasSize));
+            canvas.ClipRect(exactClip);
 
             bool clipToUnit = axes.Window.Width == 2
                            && axes.Window.X     == -1
                            && axes.Window.Y     == -1;
             if (clipToUnit)
             {
-                var   ctr  = tf.PrimaryToCanvas(0.0, 0.0);
-                var   edge = tf.PrimaryToCanvas(1.0, 0.0);
-                float pxR  = Math.Abs(edge.X - ctr.X);
                 using var unitPath = new SKPath();
-                unitPath.AddCircle(ctr.X, ctr.Y, pxR);
-                canvas.ClipPath(unitPath);
+                unitPath.AddCircle(unitCtr.X, unitCtr.Y, unitPxR);
+                canvas.ClipPath(unitPath, SKClipOperation.Intersect, antialias: true);
             }
 
-            using var smithPaint = StrokePaint(theme.GridColor, lw * (float)axes.GridThicknessFactor);
-            using var minorPaint = StrokePaint(
-                RenderTheme.WithOpacity(theme.GridColor, axes.MinorTransparencyScale),
-                lw * (float)axes.GridThicknessFactor);
+            using var smithPaint = StrokePaint(theme.GridColor, gridSw);
+
+            // OPAQUE, and the transparency is applied once to the whole family below. Painting each
+            // arc at MinorTransparencyScale composited every crossing: two 50%% strokes over each
+            // other read 75%, three read 87.5%, so the grid was darkest exactly where it is
+            // busiest and the chart looked stippled rather than ruled (owner, 2026-09-08). Drawn
+            // into a layer at full opacity, an overlap is the same colour as a single stroke,
+            // because opaque over opaque is opaque; the layer is then composited once.
+            using var minorPaint = StrokePaint(theme.GridColor.WithAlpha(255), gridSw);
+
+            // Only the ALPHA of a SaveLayer paint matters — it is what the finished layer is
+            // composited with.
+            using var arcLayerPaint = new SKPaint
+            {
+                Color = SKColors.Black.WithAlpha(
+                    (byte)Math.Clamp(axes.MinorTransparencyScale * 255.0, 0, 255))
+            };
 
             using var realAxis = new SKPath();
             realAxis.MoveTo(tf.PrimaryToCanvas(axes.Window.Left,  0.0));
@@ -377,12 +556,19 @@ namespace CircuitRF.Render.DataDisplay
                 return p;
             }
 
+            canvas.SaveLayer(arcLayerPaint);
+
             for (int i = 0; i < rCircles.Length; i++)
             {
                 var (cx, cy, pxR, rVal) = rCircles[i];
                 if (pxR <= 0 || !float.IsFinite(pxR)) continue;
 
-                var paint = rVal == 0 ? smithPaint : minorPaint;
+                // r = 0 IS the unit circle — the chart's outline. It is drawn after this layer,
+                // at full strength like the real axis, and never inside it: it is not one of the
+                // arcs the transparency is for.
+                if (rVal == 0) continue;
+
+                var paint = minorPaint;
 
                 if (rMaskTable.TryGetValue(i, out int[]? xMaskIndices))
                 {
@@ -434,7 +620,20 @@ namespace CircuitRF.Render.DataDisplay
                 }
             }
 
+            canvas.Restore();                       // composite the arc layer, once
+
             canvas.DrawPath(realAxis, smithPaint);
+
+            // Out of the disc clip: the outline, and only the outline. It and the real axis stay at
+            // full strength — they are the chart's frame and its reference, not grid. The rect clip
+            // is widened by one stroke for the outline alone, because the disc is tangent to the
+            // plot box at four points and an exact box clip halves the stroke there exactly as the
+            // disc clip halved it everywhere.
+            canvas.Restore();
+            canvas.Save();
+            canvas.ClipRect(clipToUnit ? SKRect.Inflate(exactClip, gridSw, gridSw) : exactClip);
+            if (unitPxR > 0 && float.IsFinite(unitPxR))
+                canvas.DrawCircle(unitCtr.X, unitCtr.Y, unitPxR, smithPaint);
 
             // The radius numbers, whatever the radius is. This used to be gated on
             // `axes.Window.Width < 8` as well, which was safe only while a Polar plot could never
@@ -529,6 +728,17 @@ namespace CircuitRF.Render.DataDisplay
             using var _p = paint;
             if (plot.CustomTitleBold) font.Typeface = SkiaFonts.PlexBold;
 
+            // Per-glyph DejaVu fallback, for the same reason the markers and the Table already have
+            // one: IBM Plex does not cover every code point circuitRF's own strings are built from,
+            // and Skia draws a missing glyph as a NOTDEF box rather than substituting anything.
+            // The one that reached a plot was the group separator U+25B8 "▸" — a probe pair is
+            // named "WSProbe GATE→DRAIN ▸ block", and dropped into a Y-axis label it rendered as a
+            // rectangle (owner, 2026-09-08). Measured rather than assumed: of the characters these
+            // labels can carry, Plex lacks U+25B8, U+2220 and U+2225 and has U+2192, so the arrow
+            // was never the problem and the triangle beside it always was.
+            using var titleFallback = new SKFont(
+                plot.CustomTitleBold ? SkiaFonts.DejaVuBold : SkiaFonts.DejaVuRegular, font.Size);
+
             float w  = (float)canvasSize.W;
             float h  = (float)canvasSize.H;
 
@@ -548,17 +758,18 @@ namespace CircuitRF.Render.DataDisplay
                 // than the control. Since the PlotControl now clips to its bounds, scale the title
                 // font down so the full text fits within the canvas width instead of being clipped.
                 float avail   = w - 4f * lw;                 // small side margin
-                float titleW  = font.MeasureText(title);
+                float titleW  = RendererText.MeasureTextWithFallback(title, font, titleFallback);
                 float titleSz = font.Size;
                 if (titleW > avail && titleW > 0f)
                 {
                     titleSz = Math.Max(font.Size * (avail / titleW), font.Size * 0.5f);
                     font.Size = titleSz;
+                    titleFallback.Size = titleSz;      // the two must stay the same size to measure as one
                 }
-                float tw = font.MeasureText(title);
+                float tw = RendererText.MeasureTextWithFallback(title, font, titleFallback);
                 float tx = vpCenterX - tw / 2f;
                 float ty = vpTop / 2f + font.Size * 0.35f;
-                canvas.DrawText(title, tx, ty, SKTextAlign.Left, font, paint);
+                RendererText.DrawLeftTextWithFallback(canvas, title, tx, ty, font, titleFallback, paint);
                 rects.Title = new SKRect(tx, ty - font.Size, tx + tw, ty + font.Size * 0.5f);
             }
 
@@ -568,6 +779,7 @@ namespace CircuitRF.Render.DataDisplay
             // plot readable when two traces have different X quantities.
             using (var xFont = new SKFont(SkiaFonts.PlexRegular,
                        (float)(plot.Axes.FontSizeTicks * 0.9f * lw)))
+            using (var xFallback = new SKFont(SkiaFonts.DejaVuRegular, xFont.Size))
             {
                 float rowH = xFont.Size * 1.25f;
                 if (plot.XLabelsDiffer)
@@ -579,11 +791,11 @@ namespace CircuitRF.Render.DataDisplay
                     {
                         string lbl = plot.XLabelFor(xTraces[i]);
                         if (string.IsNullOrEmpty(lbl)) continue;
-                        float tw = xFont.MeasureText(lbl);
+                        float tw = RendererText.MeasureTextWithFallback(lbl, xFont, xFallback);
                         float tx = vpCenterX - tw / 2f;
                         float ty = top + rowH * i;
                         paint.Color = RenderTheme.ToSKColor(xTraces[i].Properties.LineColor);
-                        canvas.DrawText(lbl, tx, ty, SKTextAlign.Left, xFont, paint);
+                        RendererText.DrawLeftTextWithFallback(canvas, lbl, tx, ty, xFont, xFallback, paint);
                         if (i == 0)
                             rects.XLabel = new SKRect(tx, ty - xFont.Size, tx + tw,
                                                       ty + rowH * (xTraces.Count - 1) + xFont.Size * 0.5f);
@@ -595,17 +807,18 @@ namespace CircuitRF.Render.DataDisplay
                     string xLabel = plot.XLabel;
                     if (!string.IsNullOrEmpty(xLabel))
                     {
-                        float tw = xFont.MeasureText(xLabel);
+                        float tw = RendererText.MeasureTextWithFallback(xLabel, xFont, xFallback);
                         float tx = vpCenterX - tw / 2f;
                         float ty = vpBottom + (h - vpBottom) / 2f + xFont.Size * 0.35f;
-                        canvas.DrawText(xLabel, tx, ty, SKTextAlign.Left, xFont, paint);
+                        RendererText.DrawLeftTextWithFallback(canvas, xLabel, tx, ty, xFont, xFallback, paint);
                         rects.XLabel = new SKRect(tx, ty - xFont.Size, tx + tw, ty + xFont.Size * 0.5f);
                     }
                 }
             }
 
             {
-                using var yFont  = new SKFont(SkiaFonts.PlexRegular, (float)(plot.Axes.FontSizeTicks * 0.9f * lw));
+                using var yFont     = new SKFont(SkiaFonts.PlexRegular, (float)(plot.Axes.FontSizeTicks * 0.9f * lw));
+                using var yFallback = new SKFont(SkiaFonts.DejaVuRegular, yFont.Size);
                 using var yPaint = new SKPaint { IsAntialias = true };
                 float sw     = yFont.Size * 1.5f;
                 float maxLen = h - 12f;
@@ -614,16 +827,16 @@ namespace CircuitRF.Render.DataDisplay
                 {
                     if (cx < 0f || cx > w) return;
                     string s = text;
-                    while (s.Length > 1 && yFont.MeasureText(s) > maxLen)
+                    while (s.Length > 1 && RendererText.MeasureTextWithFallback(s, yFont, yFallback) > maxLen)
                         s = s[..^1];
                     if (s.Length < text.Length) s = "…" + s.TrimStart();
                     yPaint.Color = color;
-                    float tw = yFont.MeasureText(s);
+                    float tw = RendererText.MeasureTextWithFallback(s, yFont, yFallback);
                     canvas.Save();
                     canvas.Translate(cx, vpCenterY);
                     canvas.RotateDegrees(rotRight ? 90f : -90f);
-                    canvas.DrawText(s, -tw / 2f, yFont.Size * 0.35f,
-                        SKTextAlign.Left, yFont, yPaint);
+                    RendererText.DrawLeftTextWithFallback(
+                        canvas, s, -tw / 2f, yFont.Size * 0.35f, yFont, yFallback, yPaint);
                     canvas.Restore();
                 }
 

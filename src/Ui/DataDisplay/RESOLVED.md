@@ -1,5 +1,28 @@
 # DataDisplay — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## Owner report, 2026-09-08 — the WSProbe metric picker read as an ellipsis
+
+`TraceDataItem`'s WSProbe constructor built one string and used it for both jobs:
+`Label = "{Name} — {Description}"`, with `TooltipText` falling back to it. `Description` is the
+document's full wording INCLUDING its citation, so the picker offered
+`LG_MGR — general feedback theorem, reverse (Eq. 104)` in a combo box a few inches wide sharing its
+row with four other controls. What arrives is `LG_MGR — general feedback t…`: the half that is
+trimmed is the half that distinguishes it from `LG_MGF`, and the citation that survives in a wider
+card is a pointer into a document nobody is holding while choosing from a list.
+
+**`WspMetricInfo` carries a `Short` beside its `Description` now**, and `TraceDataItem` exposes
+`PickerText` — `"{Name} — {Short}"` for a probe metric, and `Label` for every other kind of item, so
+one property serves the two combo-box item templates that draw a `TraceDataItem` (the Y picker and
+the X picker of a "plot versus" row).
+
+**`Label` is deliberately unchanged, and that is what keeps the tooltip complete.** It is the item's
+IDENTITY as well as its text: `TooltipText` falls back to it, and the documentation fixtures
+(`DocWsProbeFixtures.PickWsp`, `DocDataDisplayFixtures.WspMetricLabel`) choose a metric by matching
+it. Shortening `Label` would have shortened the tooltip with it — and the tooltip is the one place
+the full wording and its citation still have to appear. The picker is where a line that long stops
+being readable, not where the information stops being wanted.
+
+
 ## The instrumented report arrived, and it excluded the read it was built to catch (2026-09-02)
 
 Third round of the field `IndexOutOfRangeException` (Windows, da-DK, 1.0.0-beta.8 — the release

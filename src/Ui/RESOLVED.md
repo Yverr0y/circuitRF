@@ -1,5 +1,53 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## Owner reports, 2026-09-08 — the macOS menu with no window, and a crash closing one
+
+### The background menu named an operation it cannot perform
+
+With every window closed, macOS keeps the application running and its menu bar is whatever
+`App.BuildBgMenuWindow` put on the invisible 1x1 window. Its one File item read **"New Workspace"**
+and ran `NewWorkspaceWindow(null)` — which shows an EMPTY workspace window, i.e. File ▸ New Window's
+action. File ▸ New Workspace… is a different thing entirely: it runs a dialog and creates a `.cws` on
+disk, and in the no-window state there is no workspace view model to run it on at all. The header is
+**"New Window"** now.
+
+The gesture stays `Meta+N` even though the shell spells New Window `Meta+Shift+N`. With no window
+open this is the only way back in, and `Meta+N` is what a macOS application opens a window with from
+the background state — a user reaching for it should not have to know which of the two commands the
+one visible item happens to be.
+
+### `AttachSharedNativeMenuIfMacOS` could take the process down
+
+Closing a workspace crashed with `ArgumentException("The menu being updated does not match.")` out of
+`__MicroComIAvnMenuProxy.Update`, reached from `NativeMenu.SetMenu` inside
+`WorkspaceViewModel.AttachSharedNativeMenuIfMacOS`, itself called from a window's `Activated`
+handler.
+
+**`App.WireNativeMenuDispatcherBackstop` could not have caught it, and that is the part worth
+keeping.** That backstop exists for the same throw and matches the same two conditions — but it hangs
+off `Dispatcher.UIThread.UnhandledException`, which only sees exceptions escaping a dispatcher JOB.
+Avalonia raises `Activated` from `DispatcherImpl.RunLoop`'s native callback, so this one went
+straight past it and out of `Dispatcher.MainLoop`. A throw on that path needs a guard at the call
+site; the two now share `App.IsKnownNativeMenuMismatch` so the "which exception is this" policy is
+stated once and stays as narrow as it was (exact message AND an `Avalonia.Native` frame).
+
+Two things changed at the call site:
+
+- **The attach is skipped when the window already holds that exact menu instance.** It runs on every
+  activation for the life of the window, and the menu it would set is almost always the one already
+  there. Re-setting an attached property to the value it holds raises no change notification, so the
+  redundant call was silent — but reading the answer first makes the no-op explicit and removes a
+  class of exporter churn.
+- **The remaining call is wrapped**, and the failure degrades to what it costs: a window whose menu
+  bar is the bare app menu until it is activated again, which is the same cosmetic state this method
+  exists to repair.
+
+**This is a floor, not a diagnosis.** Why the native proxy and the managed `NativeMenu` disagree at
+that moment is not explained, and it was not reproduced here — the console line exists so the next
+occurrence carries its own evidence. It joins the open macOS menu-bar item in
+`macos-menu-bar-becomekeywindow`.
+
+
 ## Owner report round, 2026-09-08 — the WSProbe glyph, and the plot scales
 
 Five separate reports, three of them in `src/Render` and two here. `src/Render/RESOLVED.md` and

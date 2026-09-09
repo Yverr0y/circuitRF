@@ -32,6 +32,21 @@ public sealed class TraceDataItem
     /// computed here rather than in the view.</summary>
     public string TooltipText => DisabledReason ?? Label;
 
+    private readonly string? _pickerText;
+
+    /// <summary>
+    /// What the ComboBox DRAWS for this item — the label for every kind of item except a WSProbe
+    /// metric, which carries a shortened wording of its own (<see cref="WspMetricInfo.Short"/>).
+    ///
+    /// <para><b>It is a separate property from <see cref="Label"/> on purpose.</b> The label is the
+    /// item's identity: <see cref="TooltipText"/> falls back to it, and the documentation figures
+    /// choose a metric by it. Shortening THAT would have changed what the tooltip says as well,
+    /// which is the one place the full wording and its citation still have to appear — the picker
+    /// is where a line that long stops being readable, not where the information stops being
+    /// wanted.</para>
+    /// </summary>
+    public string PickerText => _pickerText ?? Label;
+
     /// <summary>
     /// True when the source file is missing or the row/col is out of range
     /// for the currently loaded file.  The item is still selectable (it
@@ -123,6 +138,7 @@ public sealed class TraceDataItem
         DisabledReason = WspMetrics.DisabledReasonOn(metric, plotType);
         IsEnabled      = DisabledReason is null;
         Label          = info is { } i ? $"{i.Name} — {i.Description}" : WspMetrics.Name(metric);
+        _pickerText    = info is { } p ? $"{p.Name} — {p.Short}" : null;
     }
 
     // ---- Derived parameter constructor -------------------------------------

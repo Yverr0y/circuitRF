@@ -55,12 +55,64 @@ public class HarmonicaMenuDispatcherBackstopTests
         string body = src[methodStart..methodEnd];
 
         Assert.Contains("Dispatcher.UIThread.UnhandledException +=", body, System.StringComparison.Ordinal);
+        Assert.Contains("IsKnownNativeMenuMismatch(", body, System.StringComparison.Ordinal);
+        Assert.Contains("e.Handled = true;", body, System.StringComparison.Ordinal);
+    }
 
-        // Never a blanket handler — it must check the exception TYPE, the specific message, and that
-        // the stack actually originates in Avalonia.Native, before ever setting Handled = true.
-        Assert.Contains("is not ArgumentException", body, System.StringComparison.Ordinal);
+    /// <summary>
+    /// The narrowing itself, wherever it is written. It moved out of the handler when the call-site
+    /// guard in <c>WorkspaceViewModel.AttachSharedNativeMenuIfMacOS</c> needed the same test
+    /// (2026-09-08), so this scans the predicate the handler calls — but the property it pins is
+    /// unchanged: never a blanket "is this an ArgumentException", always the exception TYPE, the
+    /// specific message, AND a stack that actually originates in Avalonia.Native.
+    /// </summary>
+    [Fact]
+    public void TheKnownExceptionPredicate_IsNarrow()
+    {
+        string src = AppSource();
+
+        int start = src.IndexOf("internal static bool IsKnownNativeMenuMismatch(", System.StringComparison.Ordinal);
+        Assert.True(start >= 0, "Expected to find IsKnownNativeMenuMismatch.");
+        int end = src.IndexOf(";", start, System.StringComparison.Ordinal);
+        Assert.True(end >= 0);
+        string body = src[start..end];
+
+        Assert.Contains("is ArgumentException", body, System.StringComparison.Ordinal);
         Assert.Contains("menu being updated does not match", body, System.StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Avalonia.Native", body, System.StringComparison.Ordinal);
-        Assert.Contains("e.Handled = true;", body, System.StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The call-site guard the dispatcher backstop cannot stand in for. Avalonia raises a window's
+    /// <c>Activated</c> from <c>DispatcherImpl.RunLoop</c>'s native callback rather than from a
+    /// dispatcher job, so a throw out of <c>NativeMenu.SetMenu</c> there never reaches
+    /// <c>Dispatcher.UIThread.UnhandledException</c> and takes the process down instead — which is
+    /// what an owner hit closing a workspace on macOS (2026-09-08). A menu bar that fails to attach
+    /// is cosmetic and may never be fatal, so the <c>SetMenu</c> must stay wrapped, and wrapped by
+    /// the SAME predicate rather than by a bare <c>catch</c>.
+    /// </summary>
+    [Fact]
+    public void TheSharedMenuAttach_GuardsItsSetMenuWithTheSamePredicate()
+    {
+        string src = WorkspaceViewModelSource();
+
+        int start = src.IndexOf("private static void AttachSharedNativeMenuIfMacOS(", System.StringComparison.Ordinal);
+        Assert.True(start >= 0, "Expected to find AttachSharedNativeMenuIfMacOS.");
+        int end = src.IndexOf("\n    }", start, System.StringComparison.Ordinal);
+        Assert.True(end >= 0);
+        string body = src[start..end];
+
+        Assert.Contains("NativeMenu.SetMenu(", body, System.StringComparison.Ordinal);
+        Assert.Contains("catch", body, System.StringComparison.Ordinal);
+        Assert.Contains("App.IsKnownNativeMenuMismatch(", body, System.StringComparison.Ordinal);
+    }
+
+    private static string WorkspaceViewModelSource([CallerFilePath] string here = "")
+    {
+        var dir = Path.GetDirectoryName(here);
+        while (dir is not null && !File.Exists(Path.Combine(dir, "CLAUDE.md")))
+            dir = Path.GetDirectoryName(dir);
+        Assert.True(dir is not null, "Could not locate the repo root (no CLAUDE.md found walking up from this test file).");
+        return File.ReadAllText(Path.Combine(dir!, "src", "Ui", "ViewModels", "WorkspaceViewModel.cs"));
     }
 }
