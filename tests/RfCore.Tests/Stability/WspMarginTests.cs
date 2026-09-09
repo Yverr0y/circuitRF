@@ -222,6 +222,21 @@ public class WspMarginTests(ITestOutputHelper output)
         Assert.Equal(0.0, WspMargin.FromZ(new Complex(-20.0, 30.0), new Complex(10.0, -30.0)).sm, 15);
         Assert.True(WspMargin.FromZ(new Complex(-20.0, 30.0), new Complex(10.0, -29.0)).sm > 0.0);
         Assert.True(WspMargin.FromZ(new Complex(-20.0, 30.0), new Complex(30.0, -30.0)).sm > 0.0);
+
+        // ── The one exception, and it is convention (c) rather than an accident ───
+        // Both reactances exactly zero satisfies Kurokawa's second condition trivially, and the
+        // proxy is 0/0 there. §2.1c fixes it at 0.5, so SM_Y0 is 0.25 — the FLOOR, not zero.
+        // A probe facing a purely resistive termination sits in that case at EVERY frequency, and
+        // the margin on that stimulus is flat: this is why brief-wsprobe-9 §3's resonator splits
+        // its reactance across the probe rather than reusing WSP-1's.
+        Assert.Equal(0.25, WspMargin.FromZ(new Complex(-20.0, 0.0), new Complex(10.0, 0.0)).sm, 15);
+        for (double x = -40.0; x <= 40.0; x += 5.0)
+        {
+            // Im ZL identically 0: iY is 0.5 whatever the other side's reactance does, so the
+            // margin never moves. The flat −12.04 dB of the unsplit resonator, in closed form.
+            double sm = WspMargin.FromZ(new Complex(-20.0, x), new Complex(10.0, 0.0)).sm;
+            Assert.Equal(0.25, sm, 15);
+        }
     }
 
     /// <summary>

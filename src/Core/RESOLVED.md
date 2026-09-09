@@ -2870,3 +2870,33 @@ before any frequency-parallel worker starts, for the same reason SP-P3 already e
 there. `PassiveParams` overrides an instance parameter, which means replacing the `Instance` in
 `tb.Instances`; **a dotted path into a sub-cell is a refusal**, because adding an override there would
 mean editing a shared `Cell` and would change every other instance of it in the same run.
+
+## A positive resistor is not "carrying activity to passivate" (2026-09-08)
+
+`ResistorModel.Activity` is `ActiveExact` at the TYPE level and stays there: a resistor with `R < 0`
+is exactly the "negative resistance … rendered passive" of the reference document's §8 (p. 111), and
+the class cannot know its own value from a static property. What was missing is the other half —
+`ActivityFor`, the hook whose whole stated purpose is to "upgrade its conservative type-level answer
+to `Passive` once it has measured itself". The placed instance HAS its resolved `R`, and for `R ≥ 0`
+`StampPassive` and `Stamp` are the same stamp, so there is nothing there to passivate.
+
+The symptom was in the report, not the numbers: `explain --analysis` lists only the instances that are
+not plainly passive — "a hundred resistors saying passive is noise" — and its
+`N instance(s), M carrying activity to passivate` count is meant to be the active-device count. With
+every resistor answering `ActiveExact`, `M` was the resistor count plus the active devices and the
+listing printed a content-free line per resistor. On `testdata/wsprobe/three_probe.cnl` that was 10 of
+18; it is 3 now, the three VCCSs.
+
+**Nothing numerical moves, and that is worth knowing rather than assuming.** The passive assembly is
+built from `StampPassive` whatever the survey said. The engine has exactly two other consumers of
+`ActivityFor`: `NdfGuarded`, the per-frequency passivity guard, which has nothing to check on a
+positive resistor; and `NdfColumnOrder`, which is a column PREFERENCE for the matrix determinant
+lemma whose own comment says it is "a superset … `DeltaColumns` drops the ones that do not differ and
+appends any that differ and are not listed" — a positive resistor's columns do not differ, so they
+were being dropped anyway. The `R < 0` fixtures (`testdata/ndf/series_resonator_negr.cnl`) still
+report the same `NDF_poles` and still raise `ndf.constant-asymptote`, which only fires when the
+negative-resistance passivation actually happened.
+
+The sign test multiplies by `_temperatureFactor` because `StampConductance` branches on that same
+product, not on the stated resistance. Gate:
+`NdfTests.H2_APositiveResistorIsPassiveAtTheInstance_ANegativeOneIsNot`.

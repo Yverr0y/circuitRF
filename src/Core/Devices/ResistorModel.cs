@@ -67,9 +67,34 @@ public sealed class ResistorModel : ComponentModel, IReportsWarnings
     /// <para>The EFFECT is conditional and costs nothing: for an ordinary positive resistor
     /// <see cref="StampPassive"/> stamps the same conductance <see cref="Stamp"/> does, so the
     /// active and passive assemblies differ in no entry and the resistor contributes no column to
-    /// the determinant ratio at all.</para>
+    /// the determinant ratio at all. <see cref="ActivityFor"/> says so for the PLACED instance,
+    /// which is where the value is known.</para>
     /// </summary>
     public override Activity Activity => Activity.ActiveExact;
+
+    /// <summary>
+    /// The placed instance's answer: <see cref="Core.Activity.Passive"/> when its resolved
+    /// <c>R ≥ 0</c>, because then <see cref="StampPassive"/> and <see cref="Stamp"/> are the same
+    /// stamp and the resistor is not carrying activity to passivate at all. Only a NEGATIVE
+    /// resistor is the document's §8 negative resistance.
+    ///
+    /// <para>This is the hook's own purpose — "upgrade its conservative type-level answer to
+    /// Passive once it has measured itself" (<see cref="ComponentModel.ActivityFor"/>) — and
+    /// without it every resistor in a design was reported as active by
+    /// <c>explain --analysis</c>, whose listing exists to skip exactly that
+    /// ("a hundred resistors saying passive is noise") and whose "N carrying activity to
+    /// passivate" count was therefore the resistor count plus the active devices. Nothing
+    /// numerical moves: the passive assembly is built from <see cref="StampPassive"/> either way,
+    /// the per-frequency passivity guard has nothing to check on a positive resistor, and the
+    /// determinant lemma's column list is a PREFERENCE that already drops columns which do not
+    /// differ.</para>
+    /// </summary>
+    public override Activity ActivityFor(ElaboratedComponent c, IReadOnlyList<double> freqsHz)
+        => c.Parameters.TryGetValue("R", out var r)
+        && r.Kind == Expressions.ValueKind.Real
+        && r.AsReal() * _temperatureFactor >= 0.0     // the same product Stamp branches on
+            ? Activity.Passive
+            : Activity.ActiveExact;
 
     /// <inheritdoc/>
     public override string? PassivationNote =>

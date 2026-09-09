@@ -303,21 +303,49 @@ public static class WspEnvelope
         IReadOnlyList<Complex[,]> wspPerFreq, int idxS, int idxL,
         Complex[] gammaS, Complex[] gammaL, Complex z0,
         Complex[]? ySo, Complex[]? yLo, Action<int, int, int, Complex[,]> visit)
+        => OverGrids([wspPerFreq], idxS, idxL, gammaS, gammaL, z0, ySo, yLo,
+                     (s, l, fi, w) => visit(s, l, fi, w[0]));
+
+    /// <summary>
+    /// <see cref="OverGrid"/> over SEVERAL <c>wsp</c> sweeps of the same probed circuit at once —
+    /// the walk <see cref="LoadpullNdf"/> needs, which wants the active and the passivated runs'
+    /// re-terminated matrices at the same grid point in the same hand.
+    ///
+    /// <para>Each sweep gets its OWN starting admittances, which is not an approximation: the
+    /// update removes whatever that matrix's own probe sees on that side and installs <c>yS</c>, so
+    /// both land on the same absolute termination whatever they started from. Running the two walks
+    /// separately and keeping one of them would cost <c>O(ns·nl·nf·N²)</c> matrices — 130 MB on a
+    /// 21×21 grid over 501 frequencies with three probes, for a quantity consumed one point at a
+    /// time.</para>
+    /// </summary>
+    private static void OverGrids(
+        IReadOnlyList<IReadOnlyList<Complex[,]>> sweeps, int idxS, int idxL,
+        Complex[] gammaS, Complex[] gammaL, Complex z0,
+        Complex[]? ySo, Complex[]? yLo, Action<int, int, int, Complex[][,]> visit)
     {
-        int nf = wspPerFreq.Count, ns = gammaS.Length, nl = gammaL.Length;
+        int m = sweeps.Count, nf = sweeps[0].Count, ns = gammaS.Length, nl = gammaL.Length;
+        var so = new Complex[m];
+        var lo = new Complex[m];
+        var ws = new Complex[m][,];
+        var wl = new Complex[m][,];
         for (int fi = 0; fi < nf; fi++)
         {
-            var w   = wspPerFreq[fi];
-            var so  = idxS > 0 ? (ySo?[fi] ?? StartingAdmittance(w, idxS, WspSide.G)) : Complex.Zero;
-            var lo  = idxL > 0 ? (yLo?[fi] ?? StartingAdmittance(w, idxL, WspSide.L)) : Complex.Zero;
+            for (int k = 0; k < m; k++)
+            {
+                var w = sweeps[k][fi];
+                so[k] = idxS > 0 ? (ySo?[fi] ?? StartingAdmittance(w, idxS, WspSide.G)) : Complex.Zero;
+                lo[k] = idxL > 0 ? (yLo?[fi] ?? StartingAdmittance(w, idxL, WspSide.L)) : Complex.Zero;
+            }
             for (int s = 0; s < ns; s++)
             {
                 var ys = idxS > 0 ? Complex.One / GammaToZ(gammaS[s], z0) : Complex.Zero;
-                var ws = idxS > 0 ? ShuntUpdate(w, idxS, WspSide.G, ys - so) : w;
+                for (int k = 0; k < m; k++)
+                    ws[k] = idxS > 0 ? ShuntUpdate(sweeps[k][fi], idxS, WspSide.G, ys - so[k]) : sweeps[k][fi];
                 for (int l = 0; l < nl; l++)
                 {
                     var yl = idxL > 0 ? Complex.One / GammaToZ(gammaL[l], z0) : Complex.Zero;
-                    var wl = idxL > 0 ? ShuntUpdate(ws, idxL, WspSide.L, yl - lo) : ws;
+                    for (int k = 0; k < m; k++)
+                        wl[k] = idxL > 0 ? ShuntUpdate(ws[k], idxL, WspSide.L, yl - lo[k]) : ws[k];
                     visit(s, l, fi, wl);
                 }
             }
@@ -485,15 +513,13 @@ public static class WspEnvelope
             throw new ArgumentException("a Γ grid is empty.");
 
         int ns = gammaS.Length, nl = gammaL.Length;
-        var act = new Complex[ns, nl, nf][,];
         var ndf = new Complex[ns, nl, nf];
 
-        // Both walks visit the grid in the same order, so the passive matrix of a point meets the
-        // active one that was kept for it.
-        OverGrid(wspActive,  idxS, idxL, gammaS, gammaL, z0, ySo, yLo,
-                 (s, l, fi, wl) => act[s, l, fi] = (Complex[,])wl.Clone());
-        OverGrid(wspPassive, idxS, idxL, gammaS, gammaL, z0, ySo, yLo,
-                 (s, l, fi, wl) => ndf[s, l, fi] = WspGlobal.Ndf(act[s, l, fi], wl, probes));
+        // ONE walk over both sweeps, so the active and passivated matrices of a grid point meet
+        // each other while they are both still alive. Two walks with the first one's results kept
+        // would hold ns·nl·nf matrices of 2N × 2N at once.
+        OverGrids([wspActive, wspPassive], idxS, idxL, gammaS, gammaL, z0, ySo, yLo,
+                  (s, l, fi, w) => ndf[s, l, fi] = WspGlobal.Ndf(w[0], w[1], probes));
 
         var enc = new double[ns, nl];
         var trace = new Complex[nf];

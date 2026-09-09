@@ -306,7 +306,7 @@ static int RunSparam(string[] args)
 
         // R-wsp1-12(a): one line per WSProbe after the S summary, and the label ↔ idx pairs in the
         // document — the idx depends on the other probes, so it is reported, never left to be guessed.
-        PrintWsProbes(ds, nl, freqs);
+        PrintWsProbes(ds, nl, announceNoPorts: true);
 
         // R-wsp6-2: the whole point of the knob, on one line — and the property findings beside it,
         // because a count read off a sweep that has not reached its asymptote is not a count.
@@ -578,6 +578,12 @@ static int RunHb(string[] args)
         // solving, long after elaboration finished.
         PrintWarnings(nl, shown);
         PrintWorkerOutput();
+
+        // R-wsp1-12(a) and brief-wsprobe-5's run summary: the same probe line the S-parameter verb
+        // prints, over `ssfreq` instead of `freq`. Without it a headless HB run reported every wsp
+        // cube and no label ↔ idx map to read them by, and the margin minimum the threshold note is
+        // measured against was nowhere on stdout or in --json.
+        PrintWsProbes(ds, nl, announceNoPorts: false);
 
         // Measurements are the point of an HB run on anything real (conversion loss, gain, IMn), and
         // they are evaluated over the whole result including the sweep axis — so run them here, the
@@ -1784,17 +1790,34 @@ static string RowLabel(IReadOnlyList<Axis> axes, long row)
 }
 
 /// <summary>
-/// The WSProbes of an S-parameter run, one line each — <c>WSProbe GATE idx=1  H0(f_lo)=… ZG(f_lo)=…</c>
-/// — and the same label ↔ idx pairs into the <c>--json</c> document (brief-wsprobe-1 R-wsp1-12(a)).
+/// The WSProbes of a run, one line each — <c>WSProbe GATE idx=1  H0(f_lo)=… ZG(f_lo)=…</c> — and
+/// the same label ↔ idx pairs into the <c>--json</c> document (brief-wsprobe-1 R-wsp1-12(a)).
 /// Silent for a run with none, so an unprobed run prints exactly what it always printed.
+///
+/// <para><b>Both run verbs.</b> <c>sparam</c>'s probe axis is <c>freq</c> and <c>hb</c>'s is the
+/// small-signal <c>ssfreq</c> of brief-wsprobe-5, and the summary is the same line over either —
+/// R-wsp5's "the run summary prints the per-operating-point minimum", and R-wsp1-12(a)'s label ↔
+/// idx map, which a caller cannot guess. The axis is read off the probe's OWN cubes rather than
+/// passed in, so a swept run (the sweep axis prepended by <c>ParametricSweepEngine</c>) still
+/// names the frequency the minimum sits at.</para>
 /// </summary>
-static void PrintWsProbes(DataSet ds, ElaboratedNetlist nl, double[] freqs)
+/// <param name="announceNoPorts">
+/// Print the <c>S-parameters: none (no ports)</c> line when the run produced no <c>S</c>. Only the
+/// S-parameter verb has that story to tell — under harmonic balance a run with no ports is
+/// ordinary and the line would be noise.
+/// </param>
+static void PrintWsProbes(DataSet ds, ElaboratedNetlist nl, bool announceNoPorts)
 {
     if (nl.WspProbes.Count == 0 || !ds.Contains("__WspProbes")) return;
 
     var probes = nl.WspProbes;
-    if (!ds.Contains("S"))
+    if (announceNoPorts && !ds.Contains("S"))
         Console.WriteLine($"S-parameters: none (no ports); WSProbe outputs: {probes.Count} probe(s)");
+
+    // The probe axis, from the probe's own cubes: `freq` under S-parameters, `ssfreq` under
+    // harmonic balance. Last-axis by construction — the sweep engine prepends, never appends.
+    double[] freqs = ProbeAxis(ds, probes[0].Label);
+    if (freqs.Length == 0) return;
 
     var rows = new List<WsProbeJson>(probes.Count);
     foreach (var probe in probes)
@@ -1870,19 +1893,42 @@ static List<string> FindingKeys(ElaboratedNetlist nl)
     return keys;
 }
 
+/// <summary>
+/// The probe's own sweep axis — <c>freq</c> under S-parameters, <c>ssfreq</c> under the
+/// harmonic-balance small-signal sweep of brief-wsprobe-5. Taken from the LAST axis of one of the
+/// probe's cubes, which is that axis in both cases: <c>ParametricSweepEngine</c> prepends its
+/// sweep variable, so a drive-swept run's <c>SM_Y0:GATE</c> is <c>{Pin, ssfreq}</c> and the
+/// frequency is still innermost. Empty when the run carried none of the probe's cubes.
+/// </summary>
+static double[] ProbeAxis(DataSet ds, string label)
+{
+    foreach (string name in new[] { $"SM_Y0:{label}", $"SM_H0:{label}", $"H0:{label}", $"ZG:{label}" })
+    {
+        if (!ds.Contains(name)) continue;
+        var cube = ds[name];
+        if (cube.Rank == 0) continue;
+        return cube.Axis(cube.Rank - 1).Values;
+    }
+    return [];
+}
+
 /// <summary>The smallest non-NaN value of a margin cube and the frequency it sits at, or two nulls
-/// when the run carried no such cube (or every point is NaN — a degenerate probe).</summary>
+/// when the run carried no such cube (or every point is NaN — a degenerate probe).
+///
+/// <para>The cube may carry a sweep axis in front of the frequency one (a drive-swept HB run), so
+/// the minimum is taken over EVERY point and the frequency read out modulo the frequency axis —
+/// which is R-wsp5's per-operating-point minimum reported as one number for the run.</para></summary>
 static (double? Min, double? Hz) MarginMinimum(DataSet ds, string cube, double[] freqs)
 {
-    if (!ds.Contains(cube)) return (null, null);
+    if (!ds.Contains(cube) || freqs.Length == 0) return (null, null);
     var v = ds[cube].RealValues;
     int best = -1;
-    for (int k = 0; k < v.Length && k < freqs.Length; k++)
+    for (int k = 0; k < v.Length; k++)
     {
         if (double.IsNaN(v[k])) continue;
         if (best < 0 || v[k] < v[best]) best = k;
     }
-    return best < 0 ? (null, null) : (v[best], freqs[best]);
+    return best < 0 ? (null, null) : (v[best], freqs[best % freqs.Length]);
 }
 
 /// <summary>A margin in dB for the summary line: <c>20·log10</c> (overview D-16), with a

@@ -860,3 +860,34 @@ whose reduced NDF is documented as incomplete is an owner decision, not WSP-6's 
 What holds meanwhile, and is asserted at 288 grid points by WSP-6's gate (k): the two agree about
 **whether** a point is unstable — which is all R-wsp9-5's `≥ 1` threshold reads — and
 `NDF_poles == 2 × Encirclements` wherever both are clean.
+
+## Review round after WSP-9 — two findings in the stability library (2026-09-08)
+
+**The margin's "SM_Y0 = 0 iff Kurokawa" has an exception, and it is convention (c).** `WspMargin`'s
+summary listed `SM_Y0 = 0 ⇔ Re(ZG + ZL) ≤ 0 and Im ZL = −Im ZG` as a gated property. It is not one:
+when `Im ZG` and `Im ZL` are BOTH exactly zero the reactances cancel — Kurokawa's second condition
+holds — and `Proxy` returns the conventional 0.5 of §2.1c, so `SM_Y0` is 0.25. The test only ever
+checked the case with non-zero opposed reactances.
+
+It is not an academic corner. A probe facing a purely resistive termination has `Im ZL ≡ 0` at EVERY
+frequency, and `Proxy(g, 0) = ½(1 + 0/g) = 0.5` whatever the other side does — so the margin on that
+stimulus is flat at exactly the −12.04 dB floor and carries no information at all. Run
+`testdata/wsprobe/series_resonator.cnl`, which is the document's own Fig. 31 negative-resistance
+oscillator: `SM_Y0` reads −12.04 dB at all 251 points, the minimum lands at an arbitrary 1.7 GHz
+rather than at the 1.5915 GHz crossing, and the paper's −15 dB rule never fires on a circuit that
+certainly oscillates. This is [M]'s formula behaving as written, not a transcription error, and it is
+already why brief-wsprobe-9 §3's own fixture splits the reactance ACROSS the probe rather than reusing
+WSP-1's resonator (the fixture's header comment says so) and why the user docs carry "a probe against
+a purely resistive termination reads the resonance on the other side only". What was missing was the
+statement of it beside the property it contradicts, and a gate. Both are there now.
+
+**`LoadpullNdf` materialised the whole grid of re-terminated matrices.** It walked the grid twice —
+once over the active sweep keeping every `wsp'`, once over the passivated one consuming them — which
+is `ns·nl·nf` matrices of `2N × 2N` alive at once: ~130 MB on a 21×21 Γ grid over 501 frequencies with
+three probes, and ~350 MB with five, for a quantity consumed one grid point at a time. `OverGrid` is
+now a one-sweep wrapper over `OverGrids`, which walks any number of sweeps in lockstep and hands the
+visitor all their re-terminated matrices together; `LoadpullNdf` makes one walk over both. Each sweep
+keeps its OWN starting admittance, which is not an approximation and never was: the update removes
+whatever that matrix's probe sees on that side and installs `yS`, so both land on the same absolute
+termination whatever they started from — which is also why the precondition being checked against the
+active cube only is sound.

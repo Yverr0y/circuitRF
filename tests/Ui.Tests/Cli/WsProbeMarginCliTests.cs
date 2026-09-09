@@ -241,6 +241,52 @@ public sealed class WsProbeMarginCliTests(ITestOutputHelper output) : IDisposabl
         Assert.DoesNotContain("normalised", msg, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// The <b>harmonic-balance</b> verb prints the same probe line, over <c>ssfreq</c> instead of
+    /// <c>freq</c> — brief-wsprobe-5's "the run summary prints the per-operating-point minimum",
+    /// and R-wsp1-12(a)'s label ↔ idx map, which a caller cannot guess because <c>idx</c> depends
+    /// on the other probes. Both were absent from <c>hb</c>: the run wrote every <c>wsp</c> cube
+    /// and no way to read them by, and the margin minimum the threshold note is measured against
+    /// was nowhere on stdout or in <c>--json</c>.
+    /// </summary>
+    [Fact]
+    public void Hb_ReportsTheSameProbeLineOverSsfreq_AndCarriesItInTheJson()
+    {
+        string dir  = Dir("hb");
+        string path = Path.Combine(dir, "pumped.cnl");
+        File.WriteAllText(path, File.ReadAllText(Fixture("hb_pumped_two_port.cnl"))
+            .Replace("Tol=1e-10", "Tol=1e-10 SSStart=0.35 SSStop=3.15 SSNpts=8 SSUnit=GHz"));
+
+        var run = RunCli("hb", path, "--json", "--result", "summary");
+        Assert.True(run.ExitCode == 0, run.StdErr + run.StdOut);
+        using var doc = JsonDocument.Parse(run.StdOut);
+        var probes = doc.RootElement.GetProperty("result").GetProperty("wsprobes");
+        Assert.Equal(2, probes.GetArrayLength());
+        Assert.Equal("GATE",  probes[0].GetProperty("label").GetString());
+        Assert.Equal(1,       probes[0].GetProperty("idx").GetInt32());
+        Assert.Equal("DRAIN", probes[1].GetProperty("label").GetString());
+        Assert.Equal(2,       probes[1].GetProperty("idx").GetInt32());
+
+        // The frequency the minimum is reported at is a point of the SSFREQ grid, not of the
+        // tone grid — the axis the summary reads is the probe's own.
+        double yHz = probes[0].GetProperty("smY0MinHz").GetDouble();
+        Assert.InRange(yHz, 0.35e9, 3.15e9);
+
+        var text = RunCli("hb", path);
+        Assert.True(text.ExitCode == 0, text.StdErr + text.StdOut);
+        string line = Assert.Single(text.StdOut.Split('\n').Where(l => l.StartsWith("WSProbe GATE ")));
+        output.WriteLine(line);
+        Assert.Contains("idx=1", line);
+        Assert.Contains($"SM_Y0 min {Db(probes[0].GetProperty("smY0Min").GetDouble())}", line);
+        Assert.Contains($"@ {yHz / 1e9:G6} GHz", line);
+
+        // R-wsp1-12: an HB run with no small-signal sweep carries no probe cubes and the line is
+        // silent, so nothing an unprobed or un-swept run printed before has changed.
+        var bare = RunCli("hb", Fixture("hb_pumped_two_port.cnl"));
+        Assert.True(bare.ExitCode == 0, bare.StdErr + bare.StdOut);
+        Assert.DoesNotContain("WSProbe GATE idx=", bare.StdOut);
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private static (double Min, double Hz) Minimum(double[] v, double[] freqs)

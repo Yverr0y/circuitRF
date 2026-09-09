@@ -779,6 +779,45 @@ public sealed class NdfTests(ITestOutputHelper output)
         return all;
     }
 
+    /// <summary>
+    /// A resistor's TYPE-level answer is <see cref="Activity.ActiveExact"/> because a negative one
+    /// is §8's negative resistance, but the PLACED instance knows its own value and answers
+    /// <see cref="Activity.Passive"/> when <c>R ≥ 0</c> — <c>StampPassive</c> and <c>Stamp</c> are
+    /// then the same stamp and there is nothing to passivate.
+    ///
+    /// <para>It matters at the report: <c>explain --analysis</c> lists only the instances that are
+    /// not plainly passive, "because a hundred resistors saying passive is noise", and its
+    /// "N carrying activity to passivate" count is meant to be the active-device count. Without the
+    /// instance-level answer every resistor in every design was listed and counted. Nothing
+    /// numerical moves, which is the other half of this gate.</para>
+    /// </summary>
+    [Fact]
+    public void H2_APositiveResistorIsPassiveAtTheInstance_ANegativeOneIsNot()
+    {
+        Assert.Equal(Activity.ActiveExact, new ResistorModel().Activity);
+
+        const string net = """
+            R:RPOS  a 0  R=50 Ohm
+            R:RNEG  b 0  R=-50 Ohm
+            C:C1    a b  C=1 pF
+            WSProbe:P a b
+            analysis SP1 type=sparam start=1 stop=2 npts=3 Unit=GHz NDF=yes
+            """;
+        var (lib, tb) = new CnlReader().Read(net, "tb", null);
+        using var nl = new Elaborator(lib).Elaborate(tb);
+        double[] freqs = [1e9, 1.5e9, 2e9];
+
+        var byPath = nl.Components.ToDictionary(c => c.InstancePath, c => c.ActivityFor(freqs));
+        Assert.Equal(Activity.Passive,     byPath["RPOS"]);
+        Assert.Equal(Activity.ActiveExact, byPath["RNEG"]);
+
+        // The survey the CLI's listing is built from names the negative one and not the positive.
+        var survey = NdfPassivation.Survey(nl, freqs, [], []);
+        var active = survey.Instances.Where(i => i.Activity != Activity.Passive).Select(i => i.InstancePath).ToList();
+        Assert.Contains("RNEG", active);
+        Assert.DoesNotContain("RPOS", active);
+    }
+
     /// <summary>A complex impedance in the netlist's own spelling, for a <c>Z=</c> override.</summary>
     private static string Cx(Complex z)
         => $"{z.Real.ToString("R", System.Globalization.CultureInfo.InvariantCulture)}" +

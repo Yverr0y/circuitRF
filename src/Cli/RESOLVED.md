@@ -2065,3 +2065,35 @@ resistors saying "passive" is noise — and each `ActiveExact` model supplies it
 `PassivationNote` (`R → |R|, which is its ordinary stamp unless R < 0`) so the line says something
 rather than restating the enum. A refused instance carries its measurement into the listing too
 (`σ_max = 5.097 > 1 at 2.7 GHz`), so the reason is visible without reading the refusal block below it.
+
+## Review round after WSP-9 — `hb` reported no probes, and `explain` listed every resistor (2026-09-08)
+
+Two things a review of the finished WSProbe series found on the verbs. Neither is a wrong number;
+both are a caller unable to read a right one.
+
+**`hb` printed no WSProbe line at all.** `PrintWsProbes` was wired into `sparam` only, so a
+harmonic-balance run with an `SSStart/SSStop` sweep wrote `wsp`, the six default cubes and both
+margins — and no label ↔ idx map to read them by, and no margin minimum, and no `wsprobes[]` in
+`--json`. Both are required: R-wsp1-12(a) reports `idx` precisely because it depends on the other
+probes and cannot be guessed, and brief-wsprobe-5 §4 says the run summary prints the
+per-operating-point minimum. The threshold Info note DID fire under HB (it is raised by
+`WspCubePacker`, which both engines call), so the run said "this probe's margin collapsed" while
+printing nothing to say which probe or where.
+
+The line is now the same line over either verb, and it takes its sweep axis from the probe's own
+cubes rather than from a passed-in `freqs` — `freq` under S-parameters, `ssfreq` under harmonic
+balance, and a drive-swept run's `{Pin, ssfreq}` still names the frequency because
+`ParametricSweepEngine` PREPENDS its axis and the frequency stays innermost. The
+`S-parameters: none (no ports)` line stays on `sparam` alone: under harmonic balance a run without
+ports is ordinary and that sentence would be noise. Gate:
+`WsProbeMarginCliTests.Hb_ReportsTheSameProbeLineOverSsfreq_AndCarriesItInTheJson`, which also holds
+that an HB run with no small-signal sweep prints nothing new.
+
+**`explain --analysis` listed every resistor as carrying activity.** The listing filters on
+`Activity != passive` "because a hundred resistors saying passive is noise" — but `ResistorModel`
+answered `ActiveExact` at the TYPE level and had no instance-level override, so the filter kept all
+of them and `N carrying activity to passivate` was the resistor count plus the active devices (10 of
+18 on `three_probe.cnl`, of which 3 are the VCCSs that actually are active). `ResistorModel` now
+overrides `ActivityFor`, which is that hook's stated purpose, and answers `Passive` for `R ≥ 0`;
+a negative resistor is still §8's negative resistance and still `ActiveExact`. Nothing numerical
+moves — see `src/Core/RESOLVED.md`. The same fixture now reads 3.

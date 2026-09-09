@@ -629,6 +629,18 @@ structurally blind to that class of instability, which is why a two-device ampli
 balancing resistor rather than a better match.</p>
 </div>
 
+<div class="callout note">
+<span class="label">NDFenc counts turns; the NDF summary counts poles, and they differ by two</span>
+<p><code>NDFenc</code> (and <code>wsp_loadpull_ndf_enc</code>) is the <b>swept locus's own net
+turn</b>, over <code>&omega; &ge; 0</code>. The <code>NDF: n right-half-plane pole(s)</code> line an
+<code>NDF=yes</code> run prints is the count around the <em>closed</em> Nyquist contour, and
+Platzker's <code>NDF(&minus;&omega;) = conj NDF(&omega;)</code> makes the unswept arm turn through
+the same angle — so <b>poles = 2 &times; turns</b>. A conjugate pair, which is what an oscillator
+has, is one turn here and two poles there. The two always agree about <em>whether</em> a termination
+is unstable, which is what a non-zero <code>NDFenc</code> means; they are not the same number, and
+neither is wrong.</p>
+</div>
+
 ## Under harmonic balance {#hb}
 
 Everything above computes `wsp` from an S-parameter analysis, which linearises the nonlinear devices

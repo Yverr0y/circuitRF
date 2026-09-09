@@ -116,7 +116,14 @@ public readonly record struct WspMargins(
 ///   and the interpretive rule the docs carry: <b>a margin below −12 dB certifies that one side of
 ///   the node presents negative resistance at that frequency.</b></item>
 ///   <item><c>SM_Y0 = 0</c> iff <c>Re(ZG + ZL) ≤ 0</c> and <c>Im ZL = −Im ZG</c> — the two static
-///   Kurokawa conditions on <c>1/Y0</c>.</item>
+///   Kurokawa conditions on <c>1/Y0</c> — <b>with one exception, and it is convention (c), not an
+///   accident:</b> when <c>Im ZG</c> and <c>Im ZL</c> are BOTH exactly zero the reactances cancel
+///   trivially, so Kurokawa's second condition holds, yet <c>iY</c> is the conventional 0.5 and
+///   <c>SM_Y0</c> is 0.25 rather than 0. That is the case a probe facing a purely resistive
+///   termination sits in at every frequency, and it is why the resonator fixture of
+///   brief-wsprobe-9 §3 splits its reactance ACROSS the probe: with <c>Im ZL ≡ 0</c> the imaginary
+///   proxy is 0.5 everywhere and the margin on that stimulus is flat at −12.04 dB. The margin
+///   still reports the node correctly — it just reports it on the OTHER stimulus.</item>
 ///   <item><c>SM_Y0</c> and <c>SM_H0</c> are <b>not</b> functions of each other, even with zero
 ///   feedback (<c>YG = 1/ZG</c>, <c>YL = 1/ZL</c> there, and the ratio of reciprocals is not the
 ///   reciprocal of the ratio).</item>
