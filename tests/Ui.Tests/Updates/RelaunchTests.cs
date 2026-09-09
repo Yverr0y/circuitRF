@@ -282,8 +282,8 @@ public sealed class RelaunchTests : IDisposable
     // ── what the Messages panel is actually given ────────────────────────────────────────────
 
     /// <summary>
-    /// With a handler installed the announcement carries the button, and its caption says what it
-    /// does.
+    /// With a handler installed the announcement carries the button, its caption says what it does,
+    /// and the line names the version the user is being moved to.
     /// </summary>
     [Fact]
     public void TheAnnouncementOffersTheRelaunch()
@@ -296,7 +296,6 @@ public sealed class RelaunchTests : IDisposable
         var (level, text, label) = Assert.Single(sink.Posted);
         Assert.Equal(MessageLevel.Info, level);
         Assert.Equal($"Relaunch {UpdateApp.Name}", label);
-        Assert.Contains("1.0.0-beta.11", text);
         Assert.Contains("1.0.0-beta.12", text);
         Assert.NotNull(sink.LastAction);
     }
@@ -309,7 +308,7 @@ public sealed class RelaunchTests : IDisposable
     /// instruction.
     /// </summary>
     [Fact]
-    public void WithNoHandlerInstalled_TheSameSentenceIsPostedWithNoButton()
+    public void WithNoHandlerInstalled_TheLineSpellsOutTheInstruction()
     {
         RelaunchRequest.Handler = null;
         var sink = new ActionSink();
@@ -323,11 +322,17 @@ public sealed class RelaunchTests : IDisposable
     }
 
     /// <summary>
-    /// The wording does not change with the button — a user reading the log later, or copying it
-    /// into a report, must see the same sentence either way.
+    /// <b>The line with the button is SHORT, so it and the button fit on one line</b> (owner
+    /// request, 2026-09-09). Three clauses next to a button wrap onto a second and third row and
+    /// carry the button down with them, which is the layout the shortening exists to remove.
+    ///
+    /// <para>What it drops is what the button now says and where the setting lives. What it must
+    /// KEEP is the instruction — <see cref="IMessageSink.PostAction"/>'s default drops the button
+    /// and posts the text, so a line that read as a caption for a button would leave that user with
+    /// nothing to act on. Hence the four words, asserted here rather than left to the wording.</para>
     /// </summary>
     [Fact]
-    public void TheSentenceIsTheSameWithAndWithoutTheButton()
+    public void TheLineWithTheButton_IsShortAndStillSaysWhatToDo()
     {
         var withButton = new ActionSink();
         RelaunchRequest.Handler = () => Task.CompletedTask;
@@ -337,7 +342,14 @@ public sealed class RelaunchTests : IDisposable
         RelaunchRequest.Handler = null;
         UpdateService.PostAnnouncement(without, "1.0.0", "1.1.0");
 
-        Assert.Equal(withButton.Posted[0].Text, without.Posted[0].Text);
+        string withText    = withButton.Posted[0].Text;
+        string withoutText = without.Posted[0].Text;
+
+        Assert.True(withText.Length < withoutText.Length / 2,
+                    $"the button's line is meant to fit beside it: \"{withText}\"");
+        Assert.Contains("1.1.0", withText);
+        Assert.Contains("Relaunch", withText);
+        Assert.DoesNotContain("Settings", withText);
     }
 
     /// <summary>
@@ -387,8 +399,9 @@ public sealed class RelaunchTests : IDisposable
     }
 
     /// <summary>
-    /// The wording does not change with the row either: the same sentence whether it settles a live
-    /// row or is posted on its own, for the same reason it is the same with and without the button.
+    /// <b>The BUTTON decides the wording, not the row.</b> A line carrying the button reads the same
+    /// whether it settles a live row or is posted on its own — the row is where it lands, not what
+    /// it says.
     /// </summary>
     [Fact]
     public void TheSentenceIsTheSameOnALiveRowAsOnItsOwn()
@@ -417,7 +430,11 @@ public sealed class RelaunchTests : IDisposable
 
         UpdateService.PostAnnouncement(plain, "1.0.0", "1.1.0");
 
-        Assert.Contains("updated from 1.0.0 to 1.1.0", Assert.Single(plain.Posted));
+        // The short line, since a button was offered — and it still names the version and says to
+        // relaunch, which is the whole reason it keeps an instruction at all.
+        string posted = Assert.Single(plain.Posted);
+        Assert.Contains("1.1.0", posted);
+        Assert.Contains("Relaunch", posted);
     }
 
     private sealed class PlainSink : IMessageSink

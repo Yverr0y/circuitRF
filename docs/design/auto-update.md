@@ -536,10 +536,26 @@ directory and reverts `current`/the pending swap.
 
 ### 10.2 The Message Panel entry
 
-Info level, posted once per staged version, at the moment staging completes:
+Info level, posted once per staged version, at the moment staging completes. **There are two
+wordings, and the button decides which** (owner request, 2026-09-09) — beside a button the line has
+to fit on one line with it, and three clauses wrap onto a second and third row and carry the button
+down with them.
+
+With the button (§10.2.1):
+
+> circuitRF updated to 1.0.0-beta.2. Relaunch to start using it.   [ Relaunch circuitRF ]
+
+With no button — harmonicaRF, wBond, any headless sink:
 
 > circuitRF updated from 1.0.0-beta.1 to 1.0.0-beta.2 in the background. Relaunch circuitRF to start
 > using the version. Automatic updates can be disabled in Settings, under Security & Permissions.
+
+**The short form still carries the instruction**, in four words, and that is not decoration:
+`IMessageSink.PostAction`'s default drops the button and posts the text, so a line that read as a
+caption for a button would leave that user with nothing to act on. What it does drop is the
+from-version (the button names where the user is going) and where the setting lives — Settings ▸
+Security & Permissions is discoverable from the Settings dialog itself, and is still spelled out in
+the form that has no button to lean on.
 
 The application name is the running application's, so harmonicaRF and wBond say their own names.
 

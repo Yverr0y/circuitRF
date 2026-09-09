@@ -569,7 +569,23 @@ public sealed class UpdateService
     internal static void PostAnnouncement(
         Messages.IMessageSink? sink, string from, string to, Messages.IProgressMessage? row = null)
     {
-        string line =
+        // TWO WORDINGS, AND THE BUTTON IS WHAT DECIDES WHICH (owner request, 2026-09-09: the line
+        // and the button have to fit on ONE line). Next to a button, three clauses wrap onto a
+        // second and third row and push the button down with them — the button lands wherever the
+        // sentence happens to end, which is the layout the shortening exists to remove.
+        //
+        // What the short line drops is what the button itself now says (which version to relaunch
+        // into) and where the setting lives — Settings ▸ Security & Permissions is one line of the
+        // long form and is discoverable from the Settings dialog itself. What it KEEPS is the
+        // instruction, in four words: IMessageSink.PostAction's default drops the button and posts
+        // the text, so a line that made sense only next to a button would leave that user with
+        // nothing to act on.
+        string shortLine = $"{UpdateApp.Name} updated to {to}. Relaunch to start using it.";
+
+        // With no button, the full sentence, unchanged: it is the only thing telling the user what
+        // to do, and a build with no handler (harmonicaRF, wBond, a headless sink) has no other
+        // route to the instruction or to the setting.
+        string spelledOut =
             $"{UpdateApp.Name} updated from {from} to {to} in the background. "
             + $"Relaunch {UpdateApp.Name} to start using the version. "
             + "Automatic updates can be disabled in Settings, under Security & Permissions.";
@@ -583,16 +599,16 @@ public sealed class UpdateService
         if (row is not null)
         {
             if (relaunchHandler is { } onRow)
-                row.CompleteWithAction(Messages.MessageLevel.Info, line, label, onRow);
+                row.CompleteWithAction(Messages.MessageLevel.Info, shortLine, label, onRow);
             else
-                row.Complete(Messages.MessageLevel.Info, line);
+                row.Complete(Messages.MessageLevel.Info, spelledOut);
             return;
         }
 
         if (sink is not null && relaunchHandler is { } relaunch)
-            sink.PostAction(Messages.MessageLevel.Info, line, label, relaunch);
+            sink.PostAction(Messages.MessageLevel.Info, shortLine, label, relaunch);
         else
-            sink?.Info(line);
+            sink?.Info(spelledOut);
     }
 
     /// <summary>

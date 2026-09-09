@@ -21,8 +21,20 @@ right, the button simply never appears.
 **The degradation is the existing one.** `CompleteWithAction`'s interface default drops the button
 and keeps the sentence, exactly as `IMessageSink.PostAction`'s does, and `PostOnlyProgressMessage`
 asks its sink for an ordinary action message — which is what harmonicaRF, wBond and any headless
-sink got before and still get. The wording is unchanged either way, so a log copied into a report
-reads the same.
+sink got before and still get.
+
+**Then the wording split, because the line and the button have to fit on one line** (owner, same
+day). The three-clause sentence wraps onto a second and third row next to a button and carries the
+button down with it, so the button lands wherever the sentence happens to end — the row is one row
+again but reads as three. The BUTTON decides the wording, not the row: with one, *"circuitRF updated
+to 1.0.0-beta.13. Relaunch to start using it."*; without one, the full sentence, unchanged.
+
+**The short form keeps a four-word instruction on purpose.** `PostAction`'s default drops the button
+and posts the text, so a line written as a caption for a button would leave exactly that user with
+nothing to act on — the case is unreachable today (the handler is installed only by the GUI, whose
+sink renders buttons) and it is one `IMessageSink` implementation away from being reachable. What is
+dropped is the from-version, which the button's own caption covers, and the Settings pointer, which
+the form with no button still spells out.
 
 Announcing moved out of `FetchVerifyStageCoreAsync` into `SettleDownloadRow`, which is what makes it
 one write rather than an announcement followed by a settle that overwrites it. `Announce` still owns
