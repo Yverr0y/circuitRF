@@ -998,7 +998,8 @@ public static partial class LayoutRenderer
             {
                 Layer = label.Layer, X = label.X, Y = label.Y, Text = label.Text,
                 Height = effectiveHeight, RotationDegrees = label.RotationDegrees, IsPort = label.IsPort,
-                PortDirection = label.PortDirection, PortLayer = label.PortLayer, Style = label.Style,
+                PortDirection = label.PortDirection, PortLayer = label.PortLayer,
+                PortReference = label.PortReference, PortReturn = label.PortReturn, Style = label.Style,
                 HAlign = label.HAlign, VAlign = label.VAlign,
             };
             // A port ghost carries its own marker, so what the user is placing looks like what
@@ -1274,7 +1275,8 @@ public static partial class LayoutRenderer
                 {
                     Layer = label.Layer, X = label.X, Y = label.Y, Text = label.Text,
                     Height = effectiveHeight, RotationDegrees = label.RotationDegrees, IsPort = label.IsPort,
-                    PortDirection = label.PortDirection, Style = label.Style,
+                    PortDirection = label.PortDirection, PortLayer = label.PortLayer,
+                    PortReference = label.PortReference, PortReturn = label.PortReturn, Style = label.Style,
                     HAlign = label.HAlign, VAlign = label.VAlign,
                 };
                 // ── THE KIND IS ASKED OF `original`, NEVER OF THE DRAG OVERRIDE ──────────

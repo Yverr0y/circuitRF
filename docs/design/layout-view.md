@@ -330,7 +330,7 @@ is not "is it useful to draw?" but "what exactly ships when this is exported?"
 | `Curve` | layer, closed edge list (see §3.2), optional inner rings | A filled region whose boundary edges may be lines, circular arcs, or cubic Béziers. Spiral inductors, tapers, curved guard structures. |
 | `Path` | layer, centerline **edge list**, width, end style (flush / round / square / extended) | Keeps a trace *parametric*: change the width of a 40-segment route in one edit. The centerline uses the same edge vocabulary as `Curve`, so a **curved trace** — a swept bend, a radiused corner — is a `Path`, not a hand-built polygon. Maps to GDSII PATH and to Gerber D01 stroking. |
 | `Via` | layer(s), position, pad size, drill size | PCB needs a drill file, and a drill is not a polygon. Carrying it explicitly is what makes Excellon export possible without heuristics. |
-| `Label` | layer, position, text, size, rotation, `IsPort` | Two roles: annotation, and the port/pin marker that §9 and §10.6 key on. |
+| `Label` | layer, position, text, size, rotation, `IsPort`, and — for a port — `PortDirection`, `PortLayer`, `PortReference`, `PortReturn` | Two roles: annotation, and the port/pin marker that §9 and §10.6 key on. The four port fields are all additive and all **null-means-the-old-behaviour**: infer the direction, work out the conductor, return through the stackup's ground plane. |
 | `Bitmap` | layer, placement rect, image **path reference**, opacity, locked | A reference image — a scanned drawing, a die photo, a datasheet figure — to trace over. See §3.1b; it is the one primitive that is not geometry at all. |
 | `Instance` | cell ref, transform (translate + R0/R90/R180/R270 + mirror-X + magnification), optional array (rows, cols, pitch) | §7. Arrays matter enormously for MMIC. |
 
@@ -535,6 +535,18 @@ array.
 
     // Label: a shape like any other — the port/pin marker §9/§10.6 key on, not a separate section.
     { "$type": "Label", "X": 0, "Y": 0, "Text": "P1", "Height": 500000, "Rotation": "R0", "IsPort": true,
+      "Layer": { "Layer": 1, "Datatype": 0 } },
+
+    // A port that returns through DRAWN metal rather than through the stackup's ground plane
+    // (RP-2b). Both keys are omitted entirely for an ordinary port, which is every port written
+    // before they existed; null there means the plane, and no FormatVersion bump.
+    //   PortReference: "CoplanarGround" | "SecondConductor" — what the user MEANT. One object to
+    //     the kernel (two cuts at one station, driven against each other); the two spellings are
+    //     what the run's notes and a future coplanar calibration read differently.
+    //   PortReturn:    where the return conductor is cut, in this layout's own DBU frame.
+    { "$type": "Label", "X": 6000000, "Y": 700000, "Text": "P2", "Height": 500000,
+      "Rotation": "R0", "IsPort": true, "PortDirection": "R0",
+      "PortReference": "CoplanarGround", "PortReturn": { "X": 6000000, "Y": -700000 },
       "Layer": { "Layer": 1, "Datatype": 0 } }
   ],
   "Instances": [

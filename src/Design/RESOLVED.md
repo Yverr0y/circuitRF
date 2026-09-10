@@ -4796,3 +4796,117 @@ cell whose primary was named something else.
 error: a cell need not have a layout, and picking between two alphabetically is a design decision
 this operation has no business making — the same refusal `PrimaryViewRepair.ClearedForChoice` makes
 on the way out.
+
+---
+
+## RP-2b — a port's return is part of what the port IS (2026-09-10)
+
+RP-2a built the kernel's two-cut port and constructed every one of its ports by hand. This is how a
+user SAYS which return a port has, and how the run says what it did. `src/Design` and `src/Ui` only;
+no engine change was needed, which is the outcome the brief's own scope line asked for.
+
+### The two fields, and why they are on the label
+
+`LabelShape.PortReference` (`LayoutPortReference?` — `CoplanarGround`/`SecondConductor`, null = the
+stackup's ground plane) and `LabelShape.PortReturn` (`LayoutPortReturn`, a DBU point). Additive, no
+`.clay` `FormatVersion` bump, omitted from the file when null — the shape `PortDirection` and
+`PortLayer` already have, and for the same reason: every port drawn before today reads exactly as it
+did.
+
+**Not in the `.cem`.** A port is drawn in the layout and its return is part of what it IS — a port
+referenced to the strip beside it is a DIFFERENT port, not the same port analysed differently — so a
+`.cem` field would split one port's identity across two files and make the artwork non-portable
+between setups. The reference IMPEDANCE goes the other way for the mirror-image reason
+(`EmSetup.PortZ0s`): the same artwork can legitimately be analysed at two impedances.
+
+**A layout enum rather than the engine's `PlanarPortReference`.** `LayoutModel.cs` is the document
+model and its members are what a `.clay` spells on disk; the engine's enum carries a fourth member
+(`ViaBetweenLevels`) that names a refusal rather than anything anyone can draw, and putting it in a
+file format would promise a spelling nothing can read back.
+
+### The finding the brief asked for: `LabelShape` is copied field-by-field in THREE places
+
+`LayoutGeometry.Clone` was the known one. The other two are both in
+`src/Render/Renderers/LayoutRenderer.cs` — the display-only clone that applies
+`EffectiveVisibleLabelHeightDbu` to a label whose stored height would render sub-pixel, once for a
+ghost (`DrawGhostShape`) and once for a committed label.
+
+**The committed one had already dropped `PortLayer`, silently**, since that field was added. It is a
+display clone, so the consequence is narrow rather than a data loss — but it is exactly the class of
+defect R-rp2b-2 names: the clone is handed to the port-marker code, which resolves the port's
+conductor, and `PortLayer` is precisely the field that says which conductor a port COMMITTED to
+rather than which one is visible. So a port whose text height falls under the visibility floor
+resolved its marker against visible artwork instead of its own committed layer. Both renderer clones
+now carry all four port fields.
+
+Three copies of one record's fields is a shape that will produce a fourth. It is not consolidated
+here because the renderer's clones exist to change ONE field and are in a project this brief does not
+scope; recorded so the next person adding a `LabelShape` property knows there are three sites, not
+one.
+
+### Resolution: one rule, used twice
+
+`EmPortExtraction` resolves the return point through the SAME `NearestPolygon` the positive terminal
+goes through, and both terminals reach the kernel as arguments to the ONE `PlanarPort` construction
+that was already there. A second resolution rule would be a second chance for the two terminals to
+land on different levels with nobody noticing (RP-2's R-rp2-2, L9d's reason one level up). The level
+is stated for both terminals exactly when there is more than one level to be wrong about, which is
+the condition the positive terminal already used.
+
+### The refusals are layout-side even where the kernel refuses too
+
+Three of the four are also refused by `PlanarPorts.TryResolveTwoCut`. They are caught here as well
+because **the user reads this message and not the kernel's**, and the remedy is different at each
+end: the kernel's for an edge port is "cut this port as an internal delta gap", and the layout's names
+where that choice actually lives — the EM setup's own port list, spelled "Internal delta gap" exactly
+as the panel spells it.
+
+- A conductor-referenced EDGE port, and a conductor-referenced internal to-ground port (whose
+  negative terminal is the plane by construction — there is nothing for a second cut to be).
+- A reference with no return point. **Never a nearest-conductor search**: on a real board the nearest
+  metal to a line is very often not its return, and picking it silently is picking which loop the
+  answer is about.
+- A return point on no conductor.
+- A return point on the SAME polygon as the port. The kernel catches this on the MESH (a
+  4-connectivity walk, which also catches two polygons the mesher merged); the artwork check here
+  fires before a mesh is ever built and names the layout coordinates the user can act on.
+
+### The note: "every port" stopped being true, and both spellings said it
+
+`PlanarExtractor`'s R-em-4 block asserted *"That plane is the negative terminal of every port in this
+run and is not selectable per port"* in both its inferred and its `.cem`-overridden spelling. RP-2a
+made that false. The plane is still named once with its height — it is still the medium's own
+boundary condition, still the return for every port that did not say otherwise, and the 2%-scale trap
+this note exists for is unchanged — and only the clause claiming exclusivity moves, **and only when a
+port actually says otherwise**. A ground-only run's note is character for character what it was.
+
+The OPENER is scoped with it. Leaving *"Every port returns through 'X'"* standing and correcting it
+two sentences later would be a note whose first sentence is false, which is the same defect one clause
+down; a mixed run's opens *"Every port that does not name its own return conductor returns through
+…"* instead.
+
+The differing ports are named from their own LABEL TEXT rather than by port number. Numbering is
+`EmPortExtraction`'s (a label whose text names no number is auto-numbered in document order), and
+re-deriving it in the extractor would be a second copy of the ordering the s-matrix is indexed by. The
+CONDUCTOR each return landed on is named in that port's own note, which is the only place it is known
+— the extractor sees labels, not resolved terminals.
+
+### `explain`
+
+`port N return` steps, off the resolved `PlanarPort` rather than off the label, for the same reason
+the plane step is. Silent when every port returns through the plane, so an ordinary board's `explain`
+is unchanged; the moment one port differs, every port gets a row, because the interesting question
+about a mixed run is which ports are which and half an answer is worse here than none.
+
+### The pick is a gesture, and a click off the metal is refused
+
+`LayoutEditorViewModel.ArmPortReturnPick` — armed from the Properties inspector, owns the next click
+whatever tool is active (the shape `_pastePlacementShapes` and `_rulerLabelMove` already have),
+Escape puts it back, and a selection change cancels it so it cannot outlive the port it was armed
+for. What is being named is a CONDUCTOR and the honest way to name one is to point at it; a
+coordinate pair typed into two boxes would be the same guess with extra steps. The Port tool itself
+seeds neither field: a port placed on ordinary metal returns through the plane, which is what null
+means and what every port has always done.
+
+Gate: `tests/Ui.Tests/Em/PortReturnConductorTests.cs` — 18 tests, ~1 s, the brief's six gates in its
+own order.

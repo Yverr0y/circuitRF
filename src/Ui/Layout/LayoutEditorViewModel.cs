@@ -1006,7 +1006,120 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
             // The conductor the user could SEE when they placed it. Null for artwork inside a placed
             // instance, which owns no top-level layer and is not visibility-filtered anyway.
             PortLayer     = conductor.Shape?.Layer,
+            // RP-2b: PortReference and PortReturn are deliberately NOT seeded. A port placed on
+            // ordinary metal returns through the stackup's ground plane, which is what null means and
+            // what every port has always done — naming a drawn conductor instead is a deliberate act,
+            // made in the Properties inspector by picking the metal. Seeding a nearest-conductor guess
+            // here would silently reference the answer to whichever loop happened to be closest.
         };
+    }
+
+    // ── RP-2b — picking a port's RETURN conductor ───────────────────────────────────────────────
+
+    /// <summary>The port whose return terminal the next click places, or null. Armed from the
+    /// Properties inspector (<c>LayoutShapePropertiesViewModel.PickPortReturn</c>); it owns the next
+    /// click whatever tool is active, exactly as a paste placement and an F5 ruler-label move do, and
+    /// Escape puts it back.</summary>
+    private LabelShape? _portReturnPickFor;
+
+    /// <summary>True while a return-conductor pick is armed — for the view's own cursor/status.</summary>
+    public bool IsPickingPortReturn => _portReturnPickFor is not null;
+
+    /// <summary>
+    /// <b>Arms the pick: the next click on metal becomes this port's negative terminal.</b>
+    ///
+    /// <para>A gesture rather than a pair of coordinate fields, because what is being named is a
+    /// CONDUCTOR and the honest way to name one is to point at it. It is also why a click on bare
+    /// dielectric is refused with a reason instead of taking the nearest metal: the nearest other
+    /// conductor is not the same question as the return path, and answering the wrong one produces a
+    /// complete, plausible s-matrix for a loop the user did not mean (R-rp2b-10).</para>
+    /// </summary>
+    public void ArmPortReturnPick(LabelShape port)
+    {
+        ArgumentNullException.ThrowIfNull(port);
+        if (!port.IsPort) return;
+
+        _portReturnPickFor = port;
+        OnPropertyChanged(nameof(IsPickingPortReturn));
+        ReportMessage(
+            $"Click the conductor '{(port.Text is { Length: > 0 } t ? t : "this port")}' returns " +
+            "through — its negative terminal is a second cut in that metal, at the same station. " +
+            "Escape cancels.");
+    }
+
+    /// <summary>Escape, a selection change, or a completed pick. Leaves the model untouched.</summary>
+    public void CancelPortReturnPick()
+    {
+        if (_portReturnPickFor is null) return;
+        _portReturnPickFor = null;
+        OnPropertyChanged(nameof(IsPickingPortReturn));
+    }
+
+    /// <summary>
+    /// <b>The click that names the return conductor — resolved and REPORTED, never guessed.</b>
+    ///
+    /// <para>It goes through the same conductor lookup the Port tool's own placement does
+    /// (<c>LayoutPortDirection.LookupFor</c>, asking about VISIBLE metal, which is what the user is
+    /// pointing at), so a return point lands on the artwork the user can see and nothing else. Off
+    /// the metal it stays armed and says why: the alternative is a port silently referenced to
+    /// whatever happened to be nearest.</para>
+    ///
+    /// <para>Committed as one ordinary undo entry, carrying <see cref="LayoutChangeInfo.Updated"/>
+    /// because it renumbers nothing — the shape list's content and order are untouched, and a
+    /// <c>Full</c> here would wipe the <c>.cem</c>'s published internal-port marks and flash every
+    /// internal port back to an edge port's bar-and-arrow (<c>SetShapeFieldCommand</c>'s own note).</para>
+    /// </summary>
+    private void CommitPortReturnPick(double wx, double wy)
+    {
+        if (_portReturnPickFor is not { } port) return;
+
+        // GRID snap only, deliberately — unlike the Port tool, which snaps to conductor FEATURES.
+        // What this click names is a conductor and a station, not a corner or an edge midpoint, and
+        // geometry snap would happily pull the point to the return strip's own END, which is a
+        // different station from the signal cut's and is then refused as a skewed pair. The point
+        // only has to be on the metal; the mesher decides which gridline it lands on.
+        var (sx, sy) = LayoutSnapping.SnapPoint(wx, wy, Model.SnapDbu, suspend: false);
+
+        var conductorAt = LayoutPortDirection.LookupFor(Model, Technology, InstanceBaseDir);
+        var picked = conductorAt(sx, sy, null);
+        if (picked is null)
+        {
+            ReportWarning(
+                "Port return: click on a conductor — a port's return terminal is a cut in DRAWN " +
+                "metal, so there is nothing here to cut. The nearest conductor is deliberately not " +
+                "taken: it is very often not the return path, and referencing a port to the wrong " +
+                "one changes which loop the answer is about. Escape cancels.");
+            return;
+        }
+
+        // Same metal as the port itself is an ordinary internal delta gap wearing a costume, and the
+        // extraction refuses it by name. Said HERE as well, at the click, because the user is holding
+        // the gesture that caused it and the alternative is finding out at Simulate.
+        if (conductorAt(port.X, port.Y, null) is { } own && own.Shape is not null &&
+            ReferenceEquals(picked.Value.Shape, own.Shape))
+        {
+            ReportWarning(
+                "Port return: that is the same piece of metal the port is on. A port between two " +
+                "cuts of one conductor is an ordinary internal delta gap, which is what this port " +
+                "already is with no return named at all. Pick a genuinely separate conductor.");
+            return;
+        }
+
+        var old = port.PortReturn;
+        var now = new LayoutPortReturn(sx, sy);
+        int index = Model.Shapes.IndexOf(port);
+        Execute(new Commands.Layout.SetShapeFieldCommand<LayoutPortReturn?>(
+            Model, "Port return conductor", old, now, v => port.PortReturn = v,
+            index >= 0 ? LayoutChangeInfo.Updated([index]) : null));
+
+        CancelPortReturnPick();
+        ReportMessage(
+            $"Port '{(port.Text is { Length: > 0 } t ? t : "unnamed")}' returns through the metal at " +
+            $"{LayoutUnits.Format(sx, Model.DisplayUnit, Model.DbuPerMicron)}, " +
+            $"{LayoutUnits.Format(sy, Model.DisplayUnit, Model.DbuPerMicron)} " +
+            $"{LayoutUnits.Suffix(Model.DisplayUnit)}. The run resolves that point onto the mesh and " +
+            "says which conductor it landed on.");
+        RebuildOverlay();
     }
 
     /// <summary>
@@ -1133,6 +1246,13 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         _selectedIndices.Clear();
         _selectedIndices.AddRange(distinct);
         _pickedVertexIndex = null;
+
+        // RP-2b: a return-conductor pick was armed FOR one port from the Properties inspector, so it
+        // cannot outlive that port being the selection — otherwise the next click on metal would name
+        // a return for something the user is no longer looking at.
+        if (_portReturnPickFor is { } pending &&
+            !distinct.Any(i => ReferenceEquals(Model.Shapes[i], pending)))
+            CancelPortReturnPick();
 
         // Guarded on Count>0 so a replace against an already-empty instance selection is a no-op (no
         // spurious overlay rebuild) — the overwhelmingly common case.
@@ -3337,6 +3457,10 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         // click DROPS what is being carried and does nothing else, whatever tool is armed.
         if (_rulerLabelMove is not null) { UpdateRulerLabelMove(wx, wy); CommitRulerLabelMove(); return; }
 
+        // RP-2b: a return-conductor pick owns the next click for the same reason those two do — the
+        // user armed a one-shot gesture and a click can only mean "that one".
+        if (_portReturnPickFor is not null) { CommitPortReturnPick(wx, wy); return; }
+
         if (ActiveTool == Tool.Select) { HandleSelectPress(wx, wy, mods, Math.Max(hitTolDbu, 0), Math.Max(snapTolDbu, 0), Math.Max(gripLockTolDbu, 0)); return; }
 
         if (ActiveTool == Tool.Instance) { CommitInstancePlacement(); return; }
@@ -3549,6 +3673,12 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         if (_rulerLabelMove is not null)
         {
             if (key == Key.Escape) { CancelRulerLabelMove(); RebuildOverlay(); }
+            return;
+        }
+
+        if (_portReturnPickFor is not null)
+        {
+            if (key == Key.Escape) { CancelPortReturnPick(); RebuildOverlay(); }
             return;
         }
 

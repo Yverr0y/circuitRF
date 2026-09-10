@@ -9,6 +9,7 @@ using CircuitRF.Design.Layout;
 using CircuitRF.Design.Layout.Em;
 using CircuitRF.Design.Schematic;
 using CircuitRF.Design.Workspace;
+using CircuitRF.Engine.Mom;
 using System.Numerics;
 using RfCore;
 using RfCore.Data;
@@ -479,7 +480,82 @@ internal static class Explain
                 ? "named by this EM setup, overriding R-em-4's inferred choice"
                 : "R-em-4: the top surface of the highest ground-designated conductor below the " +
                   "lowest analysis level"));
+
+        ExplainPortReturns(setup, source, planar.Problem!, walks);
     }
+
+    /// <summary>
+    /// <b>RP-2b/R-rp2b-9 — each port's OWN return, once a port in this run has one.</b>
+    ///
+    /// <para>The plane above is still the medium's boundary condition and still the return for every
+    /// port that did not say otherwise. But since RP-2a a port may be two cuts driven against each
+    /// other — a signal cut and a return cut in DRAWN metal — and the step above cannot express
+    /// that, so a mixed run reported through it alone would say the plane was the negative terminal
+    /// of a port for which it is nowhere in the loop.</para>
+    ///
+    /// <para><b>It reports what the EXTRACTION resolved, not what the label asked for.</b> The
+    /// reference kind, the level and the point all come off the resolved <c>PlanarPort</c> — the
+    /// same object <c>circuitrf em</c> hands the kernel — so this cannot drift from the run by
+    /// restating a rule. A port the extraction refused is reported with its refusal rather than with
+    /// an answer, because "this port would have returned through X" is not true of a port that does
+    /// not resolve.</para>
+    ///
+    /// <para><b>Silent when every port returns through the plane</b>, which keeps an ordinary board's
+    /// <c>explain</c> exactly as long as it was: the plane step above already answers the question
+    /// completely for such a run, and N rows all saying "the plane" would bury the one row that ever
+    /// differs. The moment ONE port names its own return, EVERY port gets a row — the interesting
+    /// question about a mixed run is which ports are which, and half an answer is worse here than
+    /// none.</para>
+    /// </summary>
+    private static void ExplainPortReturns(
+        EmSetup setup, EmLayoutSource source, PlanarProblem problem, List<ResolutionStepJson> walks)
+    {
+        var ports = EmPortExtraction.Extract(
+            source.View.Shapes, problem, source.DbuPerMicron, setup.ResolvePortZ0,
+            source.View.DisplayUnit, setup.ResolvePortKind,
+            EmPortExtraction.DefaultGroundPathWidthM(source.Technology));
+
+        if (!ports.Rows.Any(r => r.Port?.IsConductorReferenced == true)) return;
+
+        foreach (var row in ports.Rows)
+        {
+            string step = $"port {row.Number} return";
+
+            if (row.Port is not { } port)
+            {
+                walks.Add(new ResolutionStepJson(step, PortFrom(row.Label), null,
+                    row.Problem ?? "this port did not resolve"));
+                continue;
+            }
+
+            if (!port.IsConductorReferenced)
+            {
+                walks.Add(new ResolutionStepJson(step, PortFrom(row.Label),
+                    "the run's return plane",
+                    "this port names no return conductor, so its negative terminal is the plane"));
+                continue;
+            }
+
+            int? level = port.NegativeLayerIndex ?? (problem.Layers.Count == 1 ? 0 : null);
+            string conductor = level is { } li && li < problem.Layers.Count
+                ? $"'{problem.Layers[li].Name}'"
+                : "a meshed conductor";
+            var neg = port.NegativeLocation!.Value;
+
+            walks.Add(new ResolutionStepJson(step, PortFrom(row.Label),
+                $"drawn metal on {conductor} at ({neg.X * 1e6:G6} µm, {neg.Y * 1e6:G6} µm)",
+                port.Reference == PlanarPortReference.CoplanarGround
+                    ? "this port names a coplanar ground conductor as its return: two cuts at one " +
+                      "station, driven against each other, with the plane nowhere in the loop"
+                    : "this port names a second conductor as its return: two cuts at one station, " +
+                      "driven against each other, with the plane nowhere in the loop"));
+        }
+    }
+
+    /// <summary>The label a port came from, as this walk's starting point — its own text when it has
+    /// one, since that is what the user sees on the canvas and what the run's notes name it by.</summary>
+    private static string PortFrom(LabelShape label)
+        => label.Text is { Length: > 0 } t ? $"port label '{t}'" : "an unnamed port label";
 
     // ── --ref ────────────────────────────────────────────────────────────────
 

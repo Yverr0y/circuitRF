@@ -364,12 +364,154 @@ public static class EmPortExtraction
                 continue;
             }
 
+            // ── RP-2b — WHAT THIS PORT RETURNS THROUGH, WHEN IT IS NOT THE PLANE ─────────────
+            //
+            // The reference is a property of the port LABEL (R-rp2b-1): a port is drawn in the
+            // layout and its return is part of what it IS, so a `.cem` that carried it would split
+            // one port's identity across two files. Null — every port drawn before RP-2b, and every
+            // port the Port tool still places — is the stackup's ground plane, and this whole block
+            // is skipped for it. That is what keeps a ground-referenced run bit-identical.
+            //
+            // R-rp2b-5/-6: the return point resolves through the SAME NearestPolygon the positive
+            // terminal just went through, and both terminals reach the kernel as arguments to the
+            // ONE PlanarPort construction below rather than through a second construction path.
+            var  reference     = PlanarPortReference.GroundPlane;
+            EmPoint? negPoint  = null;
+            int?     negLevel  = null;
+            string?  negLayerName = null;
+            if (label.PortReference is { } wantedReference)
+            {
+                // ── R-rp2b-7a — AN EDGE PORT CANNOT BE CONDUCTOR-REFERENCED, AND THE USER READS
+                // THIS MESSAGE RATHER THAN THE KERNEL'S ──────────────────────────────────────────
+                //
+                // RP-2a refuses it in the kernel too, and that refusal is the authority on WHY (a
+                // coplanar error box needs a coplanar calibration standard, which does not exist).
+                // It is caught here as well because the remedy is different at each end: the
+                // kernel's is "cut this port as an internal delta gap", and the layout's names
+                // where that choice actually lives — the EM setup's own port list.
+                if (kind != PlanarPortKind.InternalDeltaGap)
+                {
+                    string portProblem =
+                        $"Port {number} ('{Describe(label)}') at {Coord(label.X, label.Y, dbuPerMicron, displayUnit)} " +
+                        (kind == PlanarPortKind.Edge
+                            ? "is an EDGE port that returns through drawn metal, and that is refused " +
+                              "rather than approximated. An edge port has a feed outside its cut, so it " +
+                              "has an error box, and removing that box needs a calibration standard in " +
+                              "the port's own reference — a coplanar line, with its own impedance, its " +
+                              "own propagation constant and its own static capacitance. The standards " +
+                              "this kernel builds are single conductors over the ground plane, so this " +
+                              "port would be calibrated against the wrong line and publish s-parameters " +
+                              "that are plausible and referenced to nothing. Set this port's type to " +
+                              "'Internal delta gap' in the EM setup's port list — an interior cut has no " +
+                              "feed, no error box and needs no standard — or clear its return conductor " +
+                              "so it returns through the ground plane."
+                            : "is an internal (to-ground) port that also names a return conductor. Its " +
+                              "negative terminal is the ground plane by construction — that is what the " +
+                              "port IS, a gap at the foot of a via that reaches the plane — so there is " +
+                              "nothing for a second cut to be. Set this port's type to 'Internal delta " +
+                              "gap' in the EM setup's port list if you meant a port between two pieces " +
+                              "of drawn metal, or clear its return conductor.");
+                    firstProblem ??= portProblem;
+                    rows.Add(new EmPortRow(number, label, null, portProblem));
+                    continue;
+                }
+
+                // ── R-rp2b-7b — NO RETURN POINT IS A REFUSAL, NEVER A NEAREST-CONDUCTOR SEARCH ──
+                //
+                // R-rp2b-10's rule, enforced where it can actually be enforced. Picking the nearest
+                // other conductor would be picking WHICH LOOP the answer is about, silently, and on
+                // a real board the nearest metal to a line is very often not its return.
+                if (label.PortReturn is not { } wantedReturn)
+                {
+                    string portProblem =
+                        $"Port {number} ('{Describe(label)}') at {Coord(label.X, label.Y, dbuPerMicron, displayUnit)} " +
+                        $"returns through {ReferenceName(wantedReference)} but does not say WHERE. A " +
+                        "port referenced to drawn metal is two cuts driven against each other, so it " +
+                        "needs a point on the return conductor as well as one on the signal conductor, " +
+                        "and the return is never guessed — the nearest other metal is not the same " +
+                        "question as the return path, and getting it wrong changes which loop the " +
+                        "answer is about. Select the port and pick its return conductor in the " +
+                        "Properties inspector, or clear its reference so it returns through the " +
+                        "ground plane.";
+                    firstProblem ??= portProblem;
+                    rows.Add(new EmPortRow(number, label, null, portProblem));
+                    continue;
+                }
+
+                double nx = wantedReturn.X * perDbu, ny = wantedReturn.Y * perDbu;
+                var (negPoly, nLevel, negContaining) = NearestPolygon(problem, nx, ny);
+
+                if (negPoly is null)
+                {
+                    string portProblem =
+                        $"Port {number} ('{Describe(label)}')'s RETURN terminal, at " +
+                        $"{Coord(wantedReturn.X, wantedReturn.Y, dbuPerMicron, displayUnit)}, is not on any " +
+                        "conductor this EM setup meshes. A port's return conductor is meshed metal — " +
+                        "that is the whole difference between this and returning through the ground " +
+                        "plane, which is analytic and laterally infinite. Move the return point onto " +
+                        "the metal you mean, or check that its layer is bound to a signal conductor in " +
+                        "the technology's stackup and is one of this setup's analysis levels.";
+                    firstProblem ??= portProblem;
+                    rows.Add(new EmPortRow(number, label, null, portProblem));
+                    continue;
+                }
+
+                if (negContaining > 1)
+                {
+                    string portProblem =
+                        $"Port {number} ('{Describe(label)}')'s RETURN terminal, at " +
+                        $"{Coord(wantedReturn.X, wantedReturn.Y, dbuPerMicron, displayUnit)}, sits on metal on " +
+                        $"{negContaining} of this EM setup's {problem.Layers.Count} conductor levels (" +
+                        string.Join(", ", problem.Layers.Select(l => $"'{l.Name}'")) + "). A port's level " +
+                        "is part of its identity and two terminals is two chances to land on the wrong " +
+                        "one silently. Move the return point to somewhere only the level you mean " +
+                        "carries metal, or narrow this setup's analysis levels.";
+                    firstProblem ??= portProblem;
+                    rows.Add(new EmPortRow(number, label, null, portProblem));
+                    continue;
+                }
+
+                // ── R-rp2b-7c — TWO CUTS IN ONE CONDUCTOR IS AN ORDINARY DELTA GAP IN A COSTUME ──
+                //
+                // Caught on the artwork here (the same polygon), and again on the MESH in the kernel
+                // (a 4-connectivity walk, which also catches two polygons the mesher merged). Both
+                // are worth having: this one names the layout coordinates the user can act on, and
+                // fires before a mesh is ever built.
+                if (ReferenceEquals(negPoly, poly))
+                {
+                    string portProblem =
+                        $"Port {number} ('{Describe(label)}') at {Coord(label.X, label.Y, dbuPerMicron, displayUnit)} " +
+                        $"and its return terminal at {Coord(wantedReturn.X, wantedReturn.Y, dbuPerMicron, displayUnit)} " +
+                        "are on the SAME piece of metal. A port between two cuts of one conductor is " +
+                        "an ordinary internal delta gap, which is what this port already is with no " +
+                        "return conductor named at all. Pick a genuinely separate conductor as the " +
+                        "return, or clear this port's reference.";
+                    firstProblem ??= portProblem;
+                    rows.Add(new EmPortRow(number, label, null, portProblem));
+                    continue;
+                }
+
+                reference    = wantedReference == LayoutPortReference.CoplanarGround
+                                   ? PlanarPortReference.CoplanarGround
+                                   : PlanarPortReference.SecondConductor;
+                negPoint     = new EmPoint(nx, ny);
+                negLevel     = nLevel;
+                negLayerName = problem.Layers[nLevel].Name;
+            }
+
             var z0 = z0For?.Invoke(i) ?? new Complex(50, 0);
             ports.Add(new PlanarPort(number, new EmPoint(x, y), side, z0,
                                      problem.Layers.Count > 1 ? viaLevel ?? level : null,
+                                     Reference: reference,
                                      Kind: kind,
                                      GroundPathWidthM: kind == PlanarPortKind.Internal
-                                                           ? groundPathWidthM ?? assumedWidthM : null));
+                                                           ? groundPathWidthM ?? assumedWidthM : null,
+                                     NegativeLocation: negPoint,
+                                     // Stated only when there is more than one level to be wrong
+                                     // about, which is exactly the condition the positive terminal
+                                     // above uses. On a one-level mesh both terminals infer, and
+                                     // there is one candidate, so the answer is the same either way.
+                                     NegativeLayerIndex: problem.Layers.Count > 1 ? negLevel : null));
             owners.Add(label);
             rows.Add(new EmPortRow(number, label, ports[^1], null));
 
@@ -393,7 +535,27 @@ public static class EmPortExtraction
                   "both sides" +
                   (problem.Layers.Count > 1 ? $", on level {level} ('{problem.Layers[level].Name}')" : "") +
                   $" — driving current {CurrentDirection(side)} (the port's own direction), at " +
-                  $"{FormatOhms(z0)}. It is not de-embedded; the run's own notes say where the gap landed."
+                  $"{FormatOhms(z0)}. It is not de-embedded; the run's own notes say where the gap landed." +
+                  // RP-2b/R-rp2b-8 — a port that returns through DRAWN metal says so here, naming
+                  // the conductor its return terminal actually landed on. Appended rather than
+                  // replacing the sentence above, because everything in that sentence is still true:
+                  // this port is still an internal delta gap in the signal conductor. What the
+                  // reference adds is a SECOND cut, and the note has to say where.
+                  (negPoint is null
+                      ? ""
+                      : $" It does NOT return through the ground plane: its negative terminal is a " +
+                        // "At the same station" is deliberately NOT asserted here. This note is
+                        // written before the mesh exists, and whether the two cuts land on one
+                        // gridline is something only the resolution can answer — it refuses a
+                        // skewed pair by name (RP-2a's R-rp2a-2), which is where that claim belongs.
+                        $"second cut in the metal at " +
+                        $"{Coord(label.PortReturn!.Value.X, label.PortReturn.Value.Y, dbuPerMicron, displayUnit)}" +
+                        (problem.Layers.Count > 1 ? $" on level {negLevel} ('{negLayerName}')" : $" on '{negLayerName}'") +
+                        $", which this port names as {ReferenceName(reference)}. The two cuts are " +
+                        "driven against each other, so what this port measures is the loop between " +
+                        "those two conductors rather than the loop down to the plane. They have to " +
+                        "land at the same station: the run refuses a skewed pair by name rather " +
+                        "than solving it.")
                 : $"Port {number} ('{Describe(label)}') at {Coord(label.X, label.Y, dbuPerMicron, displayUnit)} was " +
                   $"taken to be on the conductor's {SideName(side)} end " +
                   (stated ? "(the port's own direction)" : "(inferred from the nearest conductor boundary)") +
@@ -658,6 +820,22 @@ public static class EmPortExtraction
         PlanarPortSide.MaxX => "in the −x direction",
         PlanarPortSide.MinY => "in the +y direction",
         _                   => "in the −y direction",
+    };
+
+    /// <summary>RP-2b — the two reference kinds in the user's own vocabulary. They are ONE object to
+    /// the kernel (two cuts at one station, RP-2a's R-rp2a-12) and differ only in what the user
+    /// meant, which is precisely why the notes and the refusals have to say which was meant.</summary>
+    private static string ReferenceName(LayoutPortReference r) => r switch
+    {
+        LayoutPortReference.CoplanarGround => "a coplanar ground conductor",
+        _                                  => "a second conductor",
+    };
+
+    /// <inheritdoc cref="ReferenceName(LayoutPortReference)"/>
+    private static string ReferenceName(PlanarPortReference r) => r switch
+    {
+        PlanarPortReference.CoplanarGround => "a coplanar ground conductor",
+        _                                  => "a second conductor",
     };
 
     private static string Describe(LabelShape l) => l.Text is { Length: > 0 } t ? t : "unnamed";

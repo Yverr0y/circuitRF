@@ -538,21 +538,60 @@ public static class PlanarExtractor
             // rather than from R-em-4 has to say so here or the two are indistinguishable — which
             // would make the override precisely the silent-different-answer this note prevents.
             // Both spellings keep naming the HEIGHT, which is the number the 2%-scale trap is in.
+            // ── RP-2b/R-rp2b-8 — "EVERY PORT" IS NO LONGER TRUE, AND THE NOTE MAY NOT SAY IT IS ──
+            //
+            // Both spellings below used to finish "That plane is the negative terminal of every port
+            // in this run and is not selectable per port." RP-2a made that sentence false: a port
+            // may name a DRAWN conductor as its return, and is then two cuts driven against each
+            // other with the plane nowhere in its loop.
+            //
+            // The plane is still named once, with its height, because it is still the medium's own
+            // boundary condition and still the return for every port that did not say otherwise —
+            // the 2%-scale trap this note exists for is unchanged. What changes is only the clause
+            // that claimed exclusivity, and it changes ONLY when a port actually says otherwise: a
+            // run where every port is ground-referenced reads character for character as it did.
+            //
+            // The differing ports are named from their own LABELS rather than by port number on
+            // purpose. Numbering is EmPortExtraction's (a label whose text names no number is
+            // auto-numbered in document order), and re-deriving it here would be a second copy of
+            // that ordering, free to drift from the one the s-matrix is indexed by. The label text
+            // is what the user sees on the canvas, and the CONDUCTOR each return landed on is named
+            // by that port's own note, which is the only place it is actually known.
+            var referenced = shapes
+                .OfType<LabelShape>()
+                .Where(l => l is { IsPort: true, PortReference: not null })
+                .Select(l => l.Text is { Length: > 0 } t ? $"'{t}'" : "an unnamed port")
+                .ToList();
+
+            // The OPENER is scoped too. Leaving "Every port returns through 'X'" standing and
+            // correcting it two sentences later would be a note whose first sentence is false, which
+            // is the same defect one clause down.
+            string opener = referenced.Count == 0
+                ? "Every port returns through"
+                : "Every port that does not name its own return conductor returns through";
+
+            string planeClause = referenced.Count == 0
+                ? "That plane is the negative terminal of every port in this run and is not " +
+                  "selectable per port; it is modelled as laterally infinite."
+                : "That plane is modelled as laterally infinite. " +
+                  $"{string.Join(", ", referenced)} " +
+                  $"{(referenced.Count == 1 ? "names its own return conductor" : "name their own return conductors")} " +
+                  $"instead, so {(referenced.Count == 1 ? "it returns" : "they return")} through " +
+                  "drawn, meshed metal rather than through this plane — each port's own note below " +
+                  "says which conductor its return terminal landed on.";
+
             notes.Add(overridden
-                ? $"Every port returns through '{groundBand.Layer.Name}' at " +
+                ? $"{opener} '{groundBand.Layer.Name}' at " +
                   $"{groundBand.TopM * 1e6:G4} µm, because THIS EM SETUP names it as the return " +
                   $"plane — {InferredWouldHaveBeen(inferredGround, tech, stack)}. The signal level " +
-                  $"sits at {signal.SheetM * 1e6:G4} µm. That plane is the negative terminal of " +
-                  "every port in this run and is not selectable per port; it is modelled as " +
-                  "laterally infinite. Clear this setup's return plane to go back to the automatic " +
-                  "choice."
-                : $"Every port returns through '{groundBand.Layer.Name}', the ground-designated " +
+                  $"sits at {signal.SheetM * 1e6:G4} µm. " + planeClause + " Clear this setup's " +
+                  "return plane to go back to the automatic choice."
+                : $"{opener} '{groundBand.Layer.Name}', the ground-designated " +
                   $"conductor at {groundBand.TopM * 1e6:G4} µm — the highest one below the " +
-                  $"signal level at {signal.SheetM * 1e6:G4} µm. That plane is the negative " +
-                  "terminal of every port in this run and is not selectable per port; it is modelled " +
-                  "as laterally infinite. To return through a different conductor, designate that " +
-                  "one as the ground reference in the technology editor, or name it as this EM " +
-                  "setup's own return plane to override the choice for this run alone.");
+                  $"signal level at {signal.SheetM * 1e6:G4} µm. " + planeClause + " To return " +
+                  "through a different conductor, designate that one as the ground reference in " +
+                  "the technology editor, or name it as this EM setup's own return plane to " +
+                  "override the choice for this run alone.");
 
             // ── A GROUND PLANE SKIPPED OVER IS NOT A GROUND PLANE — IT IS SUBSTRATE ───────────
             //

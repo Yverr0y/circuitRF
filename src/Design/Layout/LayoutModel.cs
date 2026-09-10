@@ -21,6 +21,36 @@ namespace CircuitRF.Design.Layout;
 
 public readonly record struct LayerKey(int Layer, int Datatype);
 
+/// <summary>
+/// <b>RP-2b — what an EM port's NEGATIVE terminal is, when it is not the stackup's ground plane.</b>
+/// Read only from <see cref="LabelShape.PortReference"/>, and <b>null there means the plane</b> —
+/// which is what every port drawn before RP-2b is, and what a port placed on ordinary metal still
+/// gets. There is deliberately no <c>GroundPlane</c> member: two spellings of one state is exactly
+/// how the two get to disagree.
+///
+/// <para>The two members are ONE object as far as the kernel is concerned (RP-2a's R-rp2a-12 — two
+/// cuts at one station, driven against each other) and differ in what the USER means: a ground strip
+/// beside the line, or a second signal conductor. That difference is what the run's own note and a
+/// future coplanar calibration read differently, which is why both members exist.</para>
+///
+/// <para>It is deliberately a LAYOUT enum rather than the engine's <c>PlanarPortReference</c>: this
+/// file is the document model, its members are what a <c>.clay</c> spells on disk, and the engine's
+/// enum carries a fourth member (<c>ViaBetweenLevels</c>) that names a refusal rather than anything
+/// anyone can draw.</para>
+/// </summary>
+public enum LayoutPortReference { CoplanarGround, SecondConductor }
+
+/// <summary>
+/// <b>RP-2b — where the return conductor is cut, in the layout's own DBU frame.</b> The same
+/// coordinate system <see cref="LabelShape.X"/>/<see cref="LabelShape.Y"/> are in, because it is the
+/// same kind of thing: a point the user clicked on metal.
+///
+/// <para>A record STRUCT, on <see cref="LayerKey"/>'s terms — immutable, value-compared, and copied
+/// by <c>LayoutGeometry</c>'s field-by-field clone with no chance of two labels sharing one mutable
+/// point object.</para>
+/// </summary>
+public readonly record struct LayoutPortReturn(long X, long Y);
+
 public enum LayoutRotation { R0, R90, R180, R270 }
 public enum PathEndStyle   { Flush, Round, Square, Extended }
 public enum AngleMode      { Manhattan, Deg45, AnyAngle }
@@ -534,6 +564,45 @@ public sealed class LabelShape : LayoutShape
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public LayerKey? PortLayer { get; set; }
+
+    /// <summary>
+    /// <b>RP-2b — what this port RETURNS THROUGH, when it is not the stackup's ground plane.</b>
+    /// Meaningful only when <see cref="IsPort"/>; null means the plane, which is what every port
+    /// drawn before this field carries and what a port placed on ordinary metal still gets. Naming a
+    /// return is a deliberate act, on exactly <see cref="PortDirection"/>'s terms.
+    ///
+    /// <para><b>It lives on the LABEL and not in the <c>.cem</c>, and that is a decision rather than
+    /// a convenience</b> (RP-2's R-rp2-8). A port is drawn in the layout and its return is part of
+    /// what it IS — a coplanar port referenced to the strip beside it is a different port, not the
+    /// same port analysed differently — so putting the reference in the setup would split one port's
+    /// identity across two files and make the artwork non-portable between setups. The reference
+    /// IMPEDANCE goes the other way for the mirror-image reason (<c>EmSetup.PortZ0s</c>): the same
+    /// artwork can legitimately be analysed at two impedances.</para>
+    ///
+    /// <para>Set here, the port needs <see cref="PortReturn"/> as well — a conductor-referenced port
+    /// is two cuts driven against each other, and there is no nearest-conductor search for the second
+    /// one, because guessing it is guessing which loop the answer is about.</para>
+    ///
+    /// <para>Additive: no <c>.clay</c> <c>FormatVersion</c> bump, omitted from the file when null.</para>
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public LayoutPortReference? PortReference { get; set; }
+
+    /// <summary>
+    /// <b>RP-2b — the point on the RETURN conductor this port's negative terminal is cut at.</b>
+    /// DBU, in the layout's own frame, exactly as <see cref="X"/>/<see cref="Y"/> are. Meaningful
+    /// only when <see cref="PortReference"/> is set; ignored otherwise, and null there is refused by
+    /// name rather than guessed at.
+    ///
+    /// <para>It resolves through the very same routine the positive terminal does
+    /// (<c>EmPortExtraction</c>, then <c>PlanarPorts.TryResolveAgainstPlane</c>) — a second
+    /// resolution rule would be a second chance for the two terminals to land on different levels
+    /// with nobody noticing (RP-2's R-rp2-2, L9d's reason one level up).</para>
+    ///
+    /// <para>Additive: no <c>.clay</c> <c>FormatVersion</c> bump, omitted from the file when null.</para>
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public LayoutPortReturn? PortReturn { get; set; }
 
     /// <summary>Additive (no <c>.clay</c> <c>FormatVersion</c> bump) — a newly-placed label always
     /// defaults to Regular; edited via the Properties Inspector.</summary>

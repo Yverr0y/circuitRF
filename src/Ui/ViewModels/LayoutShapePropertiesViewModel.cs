@@ -70,6 +70,19 @@ public sealed partial class LayoutShapePropertiesViewModel : ObservableObject
     public static PathEndStyle[]   PathEndStyleOptions { get; } = System.Enum.GetValues<PathEndStyle>();
     public static LayoutRotation[] RotationOptions     { get; } = System.Enum.GetValues<LayoutRotation>();
     public static LabelFontStyle[] LabelStyleOptions   { get; } = System.Enum.GetValues<LabelFontStyle>();
+
+    /// <summary>
+    /// RP-2b — what an EM port RETURNS THROUGH, as three rows rather than an enum plus a null.
+    ///
+    /// <para><b>"Ground plane" is a real row and is the FIRST one</b>, because on the model side it
+    /// is <c>null</c> and a combo bound to <c>LayoutPortReference?</c> would have to express that as
+    /// an absence — which reads as "not set yet" rather than as the answer it actually is. Every port
+    /// drawn before RP-2b and every port the Port tool places lands here, and it is the state a user
+    /// has to be able to get BACK to.</para>
+    /// </summary>
+    public static string[] PortReferenceOptions { get; } =
+        ["Ground plane", "Coplanar ground", "Second conductor"];
+
     /// <summary>docs/design/layout-view.md §9B.3 — the two ruler size modes, for the tri-state combo.
     /// <see cref="RulerStyleOptions"/> is deliberately the SAME <see cref="LabelFontStyle"/> list a
     /// label uses (R-rul-2): one typeface resolver serves both, and a ruler cannot acquire a face a
@@ -712,6 +725,77 @@ public sealed partial class LayoutShapePropertiesViewModel : ObservableObject
     }
 
     /// <summary>
+    /// <b>RP-2b — the port's RETURN, and picking the conductor it returns through.</b>
+    ///
+    /// <para>Shown for a selection that is entirely ports, exactly as the direction combo is, and on
+    /// the same terms: a port placed on ordinary metal reads "Ground plane" and behaves as it always
+    /// did, so naming a return is a deliberate act rather than something that happens by default.
+    /// Null across a mixed selection, like every other combo here.</para>
+    ///
+    /// <para><b>The return POINT is not typed in.</b> It is picked by clicking the metal, through
+    /// <see cref="LayoutEditorViewModel.ArmPortReturnPick"/>, which resolves and reports the
+    /// conductor the same way the Port tool resolves the one a port lands on — and refuses a click
+    /// that is on no conductor rather than taking the nearest one. A nearest-conductor guess here
+    /// silently references the answer to the wrong loop (R-rp2b-10), and on a real board the nearest
+    /// metal to a line is very often not its return.</para>
+    /// </summary>
+    [ObservableProperty] private string? _portReferenceValue;
+
+    /// <summary>True when the selected port(s) name a return conductor, i.e. when there is a return
+    /// POINT to show and pick. False for a ground-referenced port, which has no second terminal to
+    /// place.</summary>
+    [ObservableProperty] private bool _showPortReturn;
+
+    /// <summary>Where the return terminal is cut, in the layout's own display unit — or what is
+    /// missing. Read-only: this is a point on metal, and the way to say which metal is to click it.</summary>
+    [ObservableProperty] private string _portReturnText = "";
+
+    private static LayoutPortReference? ReferenceOf(string? option) => option switch
+    {
+        "Coplanar ground"  => LayoutPortReference.CoplanarGround,
+        "Second conductor" => LayoutPortReference.SecondConductor,
+        _                  => null,
+    };
+
+    private static string OptionOf(LayoutPortReference? r) => r switch
+    {
+        LayoutPortReference.CoplanarGround  => "Coplanar ground",
+        LayoutPortReference.SecondConductor => "Second conductor",
+        _                                   => "Ground plane",
+    };
+
+    partial void OnPortReferenceValueChanged(string? oldValue, string? newValue)
+    {
+        if (_isRefreshing || newValue is null || oldValue == newValue) return;
+        if (DragBlocksEdits()) return;
+
+        var wanted = ReferenceOf(newValue);
+        ApplyToEach<LayoutPortReference?>("Port return reference", s => ((LabelShape)s).PortReference,
+            (s, v) => ((LabelShape)s).PortReference = v, wanted, s => s is LabelShape { IsPort: true });
+
+        // Going back to the plane DROPS the return point rather than keeping it as invisible state.
+        // A port whose reference is cleared has no second terminal; a stored point that nothing reads
+        // and nothing shows is exactly the kind of thing that comes back to life on the next edit
+        // and answers a question the user thought they had withdrawn.
+        if (wanted is null)
+            ApplyToEach<LayoutPortReturn?>("Port return point", s => ((LabelShape)s).PortReturn,
+                (s, v) => ((LabelShape)s).PortReturn = v, null, s => s is LabelShape { IsPort: true });
+
+        RefreshFromVm();
+    }
+
+    /// <summary>Arms the canvas pick — the next click on metal becomes this port's return terminal.
+    /// One port at a time: a return point is a point on ONE conductor for ONE port, and applying one
+    /// click to several ports would be asserting they share a return, which is a different claim.</summary>
+    [RelayCommand]
+    private void PickPortReturn()
+    {
+        if (_vm is null || DragBlocksEdits()) return;
+        if (_selected is not [LabelShape { IsPort: true } port]) return;
+        _vm.ArmPortReturnPick(port);
+    }
+
+    /// <summary>
     /// The port's EXCITATION width — how far the port cut spans across the conductor — shown
     /// read-only beside the editable text size, because the owner's own question ("is Height the
     /// text font size, or the width of the port's excitation?") had no answer on screen.
@@ -733,6 +817,26 @@ public sealed partial class LayoutShapePropertiesViewModel : ObservableObject
         PortWidthText = LayoutPortDirection.Resolve(lookup, labels[0]) is { } hint
             ? LayoutUnits.Format(hint.WidthDbu, _vm.Model.DisplayUnit, _vm.Model.DbuPerMicron) + " " + LayoutUnits.Suffix(_vm.Model.DisplayUnit)
             : "(not on a conductor)";
+    }
+
+    /// <summary>RP-2b — the reference combo and the return-point readout, for the current
+    /// selection. Blank across a selection that disagrees, like every other field here.</summary>
+    private void RefreshPortReturn(System.Collections.Generic.List<LabelShape> labels)
+    {
+        var refs = labels.Select(l => l.PortReference).Distinct().ToList();
+        PortReferenceValue = refs.Count == 1 ? OptionOf(refs[0]) : null;
+        ShowPortReturn     = refs.Count == 1 && refs[0] is not null;
+
+        if (!ShowPortReturn || _vm is null) { PortReturnText = ""; return; }
+
+        var points = labels.Select(l => l.PortReturn).Distinct().ToList();
+        PortReturnText =
+            points.Count != 1     ? "(multiple)"
+            : points[0] is not { } pt
+                                  ? "(not picked — click Pick, then click the return conductor)"
+            : LayoutUnits.Format(pt.X, _vm.Model.DisplayUnit, _vm.Model.DbuPerMicron) + ", " +
+              LayoutUnits.Format(pt.Y, _vm.Model.DisplayUnit, _vm.Model.DbuPerMicron) + " " +
+              LayoutUnits.Suffix(_vm.Model.DisplayUnit);
     }
 
     partial void OnLabelStyleValueChanged(LabelFontStyle? oldValue, LabelFontStyle? newValue)
@@ -1986,11 +2090,13 @@ public sealed partial class LayoutShapePropertiesViewModel : ObservableObject
                 var dirs = labels.Select(l => l.PortDirection).Distinct().ToList();
                 PortDirectionValue = dirs.Count == 1 ? dirs[0] : null;
                 RefreshPortWidth(labels);
+                RefreshPortReturn(labels);
             }
         }
         else
         {
             ShowPortDirection = false;
+            ShowPortReturn    = false;
         }
         OnPropertyChanged(nameof(LabelHeightCaption));
 
@@ -2048,7 +2154,8 @@ public sealed partial class LayoutShapePropertiesViewModel : ObservableObject
         IsInstanceContext = false;
         IsRulerContext = false;
         ShowRoundedRect = ShowCircle = ShowVia = ShowPath = ShowLabel = ShowFlattenTol = ShowRectSize = ShowVertexList = ShowBitmap = ShowPortDirection = false;
-        PortWidthText = "";
+        ShowPortReturn = false;
+        PortWidthText = PortReturnText = "";
         OnPropertyChanged(nameof(LabelHeightCaption));
         ShowPCellParameterList = false;
         PCellParamRows = null; _pcellParamGeneratedCellDir = null;
@@ -2573,7 +2680,7 @@ public sealed partial class LayoutShapePropertiesViewModel : ObservableObject
         IsInstanceContext = false;
         IsRulerContext = true;
         ShowRoundedRect = ShowCircle = ShowVia = ShowPath = ShowLabel = ShowFlattenTol = ShowRectSize
-            = ShowVertexList = ShowBitmap = ShowPortDirection = false;
+            = ShowVertexList = ShowBitmap = ShowPortDirection = ShowPortReturn = false;
         ShowPCellParameterList = false;
         PCellParamRows = null; _pcellParamGeneratedCellDir = null;
         IsEditingEnabled = !DragBlocksEdits();

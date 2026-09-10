@@ -263,6 +263,34 @@
                                       HorizontalAlignment="Stretch"
                                       FontSize="11" Padding="4,2"/>
                         </Grid>
+                        <!-- RP-2b — what the port RETURNS THROUGH. "Ground plane" is a real row and
+                             the first one: it is what every port drawn before this field carries and
+                             what the Port tool still places, so naming a drawn conductor instead is a
+                             deliberate act rather than a default. -->
+                        <Grid ColumnDefinitions="56,*" IsVisible="{Binding ShowPortDirection}">
+                            <TextBlock Grid.Column="0" Text="Return" VerticalAlignment="Center" FontSize="11"
+                                       ToolTip.Tip="What this port's negative terminal is. The ground plane is analytic and laterally infinite; a drawn conductor is meshed metal, cut a second time at the same station and driven against the signal cut."
+                                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"/>
+                            <ComboBox Grid.Column="1"
+                                      ItemsSource="{x:Static vm:LayoutShapePropertiesViewModel.PortReferenceOptions}"
+                                      SelectedItem="{Binding PortReferenceValue, Mode=TwoWay}"
+                                      HorizontalAlignment="Stretch"
+                                      FontSize="11" Padding="4,2"/>
+                        </Grid>
+                        <!-- The return POINT is picked by clicking the metal, never typed and never
+                             guessed: the nearest other conductor is not the same question as the
+                             return path, and referencing a port to the wrong one changes which loop
+                             the answer is about. -->
+                        <Grid ColumnDefinitions="56,*,Auto" ColumnSpacing="4" IsVisible="{Binding ShowPortReturn}">
+                            <TextBlock Grid.Column="0" Text="Return at" VerticalAlignment="Center" FontSize="11"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"/>
+                            <SelectableTextBlock Grid.Column="1" Text="{Binding PortReturnText}" VerticalAlignment="Center"
+                                       FontSize="11" Opacity="0.75" TextWrapping="Wrap"
+                                       ToolTip.Tip="Where the return conductor is cut. The run resolves this point onto the mesh and reports which conductor it landed on."/>
+                            <Button Grid.Column="2" Content="Pick" FontSize="11" Padding="6,2"
+                                    Command="{Binding PickPortReturnCommand}"
+                                    ToolTip.Tip="Click here, then click the conductor this port returns through."/>
+                        </Grid>
                         <Grid ColumnDefinitions="56,*">
                             <TextBlock Grid.Column="0" Text="Style" VerticalAlignment="Center" FontSize="11"
                                        Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"/>

@@ -671,6 +671,17 @@ as a step: what was being resolved, from where, to what, and by which rule.
   it reports what the extraction resolved rather than restating the rule, because a rule restated
   here is a rule that can disagree with the run. The step is absent when the extraction refuses: the
   refusal is a `check` answer, and repeating it here would report a plane the run does not have.
+- **…and each port's OWN return, once a port in that run has one** (RP-2b,
+  `brief-em-return-plane-2b-port-reference-in-the-layout.md` R-rp2b-9). Since RP-2a a port may be
+  referenced to DRAWN metal instead — two cuts at one station, driven against each other, with the
+  plane nowhere in its loop — so a mixed run reported through the single plane step alone would say
+  the plane was the negative terminal of a port for which it is not. Each port then gets a
+  `port N return` step: the plane, or the conductor its return terminal landed on and the point it
+  landed at. Read off the resolved `PlanarPort` the extraction produced, for the same reason the
+  plane step is: a rule restated in the CLI is a rule that can disagree with the run. **Silent when
+  every port returns through the plane**, which keeps an ordinary board's `explain` exactly as long
+  as it was — but the moment one port differs, EVERY port gets a row, because the interesting
+  question about a mixed run is which ports are which.
 - **`--analysis`** — every declared chain, whether it is runnable, which one would dispatch and for
   which verb, and whether a named inner analysis would be **promoted** to its wrapper (§4). For a
   kind that reads one, it also prints the effective **`MarginThreshold`** in dB, or the word `none`
