@@ -3,6 +3,91 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## RP-2's first measurement: the mesh cannot span a slot, and never will (2026-09-10)
+
+`brief-em-return-plane-2-per-port-reference.md` asks, before any solver work, whether the surface
+mesher produces cells spanning a slot between two conductors — R-rp2-3, on which the whole of that
+brief rests. **It was measured, the answer is no, and the reason is structural rather than an
+omission.** The brief was too large for one round on top of that, so it is superseded by RP-2a/2b/2c
+(see `docs/sonnet-briefs/`); this section is the measurement and the audit those three are built on.
+
+### The measurement
+
+`CoplanarSlotMeshTests` meshes a conductor-backed CPW cross-section — centre strip, two slots, wide
+grounds — at both the coarse and the shipping mesh settings, over slot widths from 1 mm down to
+50 µm. **Bases spanning a slot: zero, in all sixteen cases.**
+
+| W | S | settings | N | min cell edge | grid rows in slot | cells in slot | bases spanning slot |
+|---|---|---|---|---|---|---|---|
+| 2.9 mm | 1 mm | coarse | 86 | 600 µm | 2 | 0 | **0** |
+| 2.9 mm | 1 mm | shipping | 585 | 85.2 µm | 6 | 0 | **0** |
+| 2.9 mm | 0.3 mm | coarse | 86 | 600 µm | 1 | 0 | **0** |
+| 2.9 mm | 0.3 mm | shipping | 585 | 85.2 µm | 3 | 0 | **0** |
+| 2.9 mm | 0.1 mm | coarse | 86 | 600 µm | 1 | 0 | **0** |
+| 2.9 mm | 0.1 mm | shipping | 585 | 85.2 µm | 2 | 0 | **0** |
+| 1.0 mm | 50 µm | coarse | 184 | 250 µm | 1 | 0 | **0** |
+| 1.0 mm | 50 µm | shipping | 1,119 | 29.4 µm | 2 | 0 | **0** |
+
+Note the 50 µm slot at the coarse settings: the slot is **one twelfth of the bulk cell size** and
+still owns a grid row of its own. That is the finding, not a coincidence.
+
+### Why it is structural, and why refining cannot change it
+
+Three facts of `SurfaceMesher`, composed:
+
+1. **Every polygon edge is a HARD gridline** (`CollectBoundaryLines`), so both edges of a slot are
+   gridlines regardless of the requested cell size.
+2. **A cell exists only where the grid row's CENTRE is inside metal** (`RowSpans`, and the conformal
+   path's equivalent). The row between two hard lines that bound a slot has its centre in the slot.
+3. **A basis is a pair of GRID-ADJACENT cells** (`cellAt[iy*nx+ix]` vs `ix+1`), so two conductors
+   with an empty column between them are not adjacent and produce no basis.
+
+A slot of nonzero width therefore always contains at least one metal-free grid row, and refining the
+mesh **adds** rows to the slot — it can never remove the last one. This is not a threshold that a
+finer mesh crosses. **R-rp2-3 as literally written — "the gap is across the SLOT and the mesh must
+carry cells that span it" — cannot be satisfied by this mesher, and making it so would mean a new
+basis family over non-metal (a slot/magnetic-frill basis), which is a far larger question than a
+per-port reference.**
+
+The test asserts the state of the world rather than a wish, and it is worth keeping in that form: a
+basis appearing across a slot would mean two conductors shorted through the mesh, which is worse than
+a missing feature.
+
+### What this leaves reachable, and it is the whole capability
+
+A conductor-referenced port does **not** need a basis across the slot. It needs **two cuts, one in
+each conductor**, driven against each other — the incidence column carries a signed block on the
+signal conductor's row and the opposite block on the return conductor's row. Each cut is an ordinary
+delta gap in its own metal, so R-rp2-3's real requirement ("a real gap in the mesh, not a pair of
+points") is met per conductor, and **no new basis family and no mesh change are involved**. That is
+what RP-2a builds, and it is the same `Y = BᵀZ⁻¹B` with a two-entry column instead of a one-entry one.
+
+The normalisation of those two blocks is the part that must be **measured, not reasoned into place**:
+±1 on both blocks impresses twice the loop voltage that ±½ does, and the two differ by a clean factor
+of two in `Z_c` — a complete, plausible, wrong answer of exactly the shape this file already records
+for the internal port's sign. RP-2a gates it against a CPW closed form.
+
+### The audit: where `GroundPlane` was assumed rather than checked
+
+The brief asks for this specifically, and the answer is better than expected — the "one signed row
+per port" assumption is spelled in **one file, three times**, all in `PlanarExcitation`:
+
+- `RightHandSide` — `foreach (int m in port.BasisIndices) rhs[m] = port.IncidenceSign;`
+- `Solve`'s Y assembly — `sum += col[m]` over one index set, times one sign.
+- `PortCurrent` — the same sum, times the same sign.
+
+Everything else keys off `PlanarPortResolution`, whose shape is the real constraint: `BasisIndices`,
+`WidthM`, `ReferencePlaneM`, `OuterEdgeM`, `TransverseLines` and `LongitudinalRunM` are all
+**singular** — one conductor, one cut, one cross-section. `PlanarCalibration` copies
+`TransverseLines` verbatim into its standards (D4), so a second conductor is invisible to the
+calibration path until that record grows a second set. **That, not the excitation, is the reason
+RP-2c (de-embedding a coplanar EDGE port) is a separate brief from RP-2a.**
+
+Two prose sites state the plane-as-negative-terminal rule and become false for a mixed run:
+`PlanarExtractor.cs`'s "That plane is the negative terminal of every port in this run and is not
+selectable per port" (both spellings, overridden and inferred), and `PlanarPort.cs`'s D3 header.
+No *code* was found that silently assumes it beyond the three lines above.
+
 ## The internal port — a port from the metal to the ground plane (2026-08-25)
 
 The third of §10.6's port types, and the one the design note had written down as *not* built with a

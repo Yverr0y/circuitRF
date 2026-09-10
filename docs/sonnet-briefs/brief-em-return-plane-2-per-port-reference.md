@@ -1,5 +1,27 @@
 # Sonnet Brief — RP-2: a port referenced to drawn metal
 
+> **SPLIT, 2026-09-10, after its own first measurement was made. Do not start from this file — start
+> from one of the three below.** RP-2 asks for a kernel capability, a document-format change and a
+> calibration rebuild in one round; keeping them together makes R-rp2-5's bit-identity gate, which
+> protects the whole L8/L9 acceptance set, impossible to run early.
+>
+> - **`brief-em-return-plane-2a-two-cut-port-kernel.md`** — the engine. The two-cut port,
+>   `InternalDeltaGap` only, edge ports refused by name.
+> - **`brief-em-return-plane-2b-port-reference-in-the-layout.md`** — `LabelShape`, the `.clay`, the
+>   extraction, the per-port note, `explain`, the Port tool.
+> - **`brief-em-return-plane-2c-coplanar-deembedding.md`** — the coplanar calibration standard, which
+>   is 2a's refusal arriving.
+>
+> **R-rp2-3 was MEASURED first, as this brief demands, and it changed the design.** The mesher does
+> not produce cells spanning a slot and structurally never will: a slot of nonzero width always owns
+> at least one metal-free grid row, so refining adds rows rather than removing the last one. §2b's
+> "the gap is across the SLOT and the mesh must carry cells that span it" is therefore not the shape
+> the excitation takes — it is **two cuts, one in each conductor, driven against each other**, which
+> needs no new basis family and no mesh change. Numbers, reason and the audit §6 asks for are in
+> `src/Engine/Mom/RESOLVED.md`; the instrument is `tests/Engine.Tests/Mom/CoplanarSlotMeshTests.cs`.
+> Everything else below still stands and the three briefs carry its requirements forward by number.
+
+
 **Read RP-1 first** (`brief-em-return-plane-1-explicit-ground-layer.md`). RP-1 is a `.cem` field and
 no kernel change; **this brief is a kernel capability and is much larger.** They are separate because
 one is a week and the other is not, and because RP-1 must not wait on this.

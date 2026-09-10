@@ -1,5 +1,29 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## RP-2's extraction-side audit, before any of it is built (2026-09-10)
+
+`brief-em-return-plane-2-per-port-reference.md` was measured and then split; the kernel half of the
+finding is in `src/Engine/Mom/RESOLVED.md` (short version: the mesher cannot produce a basis spanning
+a slot, structurally, so a conductor-referenced port is **two cuts, one per conductor**, not one cut
+across the gap). What is extraction-side and worth having written down before RP-2b starts:
+
+- **`EmPortExtraction` constructs every `PlanarPort` at one site** (`ports.Add(new PlanarPort(...))`),
+  and it already threads `Kind`, `LayerIndex` and `GroundPathWidthM` through per-port branches. A
+  reference and a negative-terminal point are one more pair of arguments there, not a second path.
+- **`LabelShape` is the right home for the reference** (R-rp2-8) and the precedent is already set
+  twice over: `PortDirection` and `PortLayer` are both nullable, both additive, both round-trip with
+  no `FormatVersion` bump, and both mean "work it out" when null. `LayoutGeometry.cs`'s clone of
+  `LabelShape` enumerates every property by hand — a new one added to the record and not to that
+  clone is dropped silently on copy/paste, which is the trap to name.
+- **The negative terminal cannot be a second `LabelShape`.** Two labels naming one port number is
+  already a refusal by name (§10.6), and re-using that spelling for a port's two terminals would make
+  the existing refusal wrong. It has to be a coordinate on the port's own label.
+- **`PlanarExtractor`'s "Every port returns through …" note is the only place the return path is
+  visible**, and *both* of its spellings assert "That plane is the negative terminal of every port in
+  this run and is not selectable per port." R-rp2-9 makes that sentence false; it is one string in one
+  method (`PlanarExtractor.cs`, the R-em-4 block) and must become per-port where the ports differ.
+- **`explain` reports the return plane as a run-level fact** since RP-1. The same change reaches it.
+
 ## RP-1 — a `.cem` may name its own return plane, and R-em-4's query turned out to be spelled twice (2026-09-10)
 
 `EmSetup.GroundStackupLayerName` names the conductor every port in one run returns through. **Empty
