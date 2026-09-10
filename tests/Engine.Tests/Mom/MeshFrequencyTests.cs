@@ -225,4 +225,90 @@ public class MeshFrequencyTests
                                  .UnknownCount
                     <= SurfaceMesher.Mesh(p, PlanarMeshSettings.Default).UnknownCount);
     }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // Owner report, 2026-09-09 — a cap that did not bind must not be reported as one
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void WhereTheCapDoesNotBind_TheNoteSaysSo_AndNamesTheKnobsAsInert()
+    {
+        // The reported shape: a 360 µm run on 1.6 mm FR-4, meshed 4 cells across at 90 µm, against a
+        // λ_g/5 cap of 2.86 mm at 10 GHz. The cap is ~32× coarser, so it never enters Math.Min and the
+        // mesh frequency is inert — which is the user-visible symptom.
+        var p = PlanarLineFixtures.Line(GroundedSlab.Fr4Starter, 360e-6, 3e-3, 10e9);
+        var s = new PlanarMeshSettings(Auto: false, CellsPerWavelength: 5);
+
+        var low  = SurfaceMesher.Mesh(p, s with { MeshFrequencyHz = 1e9 });
+        var high = SurfaceMesher.Mesh(p, s with { MeshFrequencyHz = 10e9 });
+        Assert.Equal(high.UnknownCount, low.UnknownCount);   // the complaint, reproduced
+
+        // So the note must not claim a cap, and must name what actually set the pitch.
+        Assert.DoesNotContain(low.Notes, n => n.Contains("Cell size capped", StringComparison.Ordinal));
+        string note = Assert.Single(low.Notes, n => n.Contains("did NOT set the cell size", StringComparison.Ordinal));
+        Assert.Contains("narrowest conductor run", note, StringComparison.Ordinal);
+        Assert.Contains("WILL NOT CHANGE THIS MESH", note, StringComparison.Ordinal);
+
+        // …and it names the control that IS live, because "your artwork is the problem" is accurate
+        // and useless. On the reported file the edge mesh is 42% of the unknowns.
+        Assert.Contains("turn the edge mesh off", note, StringComparison.Ordinal);
+        Assert.DoesNotContain("turn the edge mesh off",
+                              Assert.Single(SurfaceMesher.Mesh(p, s with { MeshFrequencyHz = 1e9, EdgeMesh = false })
+                                                         .Notes,
+                                            n => n.Contains("did NOT set the cell size", StringComparison.Ordinal)),
+                              StringComparison.Ordinal);
+
+        // …and where the cap DOES bind the wording is untouched: same geometry, same settings, at a
+        // mesh frequency high enough that λ_g/5 is the smaller of the two.
+        var bound = SurfaceMesher.Mesh(p, s with { MeshFrequencyHz = 4e12 });
+        Assert.Contains(bound.Notes, n => n.Contains("Cell size capped", StringComparison.Ordinal));
+        Assert.DoesNotContain(bound.Notes, n => n.Contains("did NOT set the cell size", StringComparison.Ordinal));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // Cells across the narrowest conductor — a CONTROL since 2026-09-09, and 1 is reachable
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void CellsAcrossTheConductor_SetsTheTransversePitch_AndIsNeverClampedOrRefused()
+    {
+        // 360 µm of metal, well inside the λ_g cap, so this setting alone decides the pitch.
+        var p = PlanarLineFixtures.Line(GroundedSlab.Fr4Starter, 360e-6, 3e-3, 10e9);
+        var s = new PlanarMeshSettings(Auto: false, CellsPerWavelength: 5);
+
+        var four = SurfaceMesher.Mesh(p, s with { MinCellsAcrossConductor = 4 });
+        var one  = SurfaceMesher.Mesh(p, s with { MinCellsAcrossConductor = 1 });
+
+        // What the setting controls is the PITCH, and that is what is asserted. It is deliberately
+        // NOT asserted that the cell count falls — it does not always, which is the whole reason the
+        // note below exists: with the edge mesh on, this fixture goes 10 grid lines to 11 when the
+        // pitch is coarsened 4×, because the edge fan is sized from the conductor width and now has
+        // further to bridge. Asserting monotonicity here would pin a behaviour the mesher does not
+        // have (and the first version of this test did exactly that, and failed).
+        // Auto:false already, or `EdgeMesh = false` would be collapsed away by Resolved.
+        var bare  = s with { EdgeMesh = false };
+        var bare4 = SurfaceMesher.Mesh(p, bare with { MinCellsAcrossConductor = 4 });
+        var bare1 = SurfaceMesher.Mesh(p, bare with { MinCellsAcrossConductor = 1 });
+        Assert.True(bare1.Mesh.GridY.Count < bare4.Mesh.GridY.Count,
+            $"with no edge fan, 1 across must coarsen the transverse grid: " +
+            $"{bare4.Mesh.GridY.Count} -> {bare1.Mesh.GridY.Count}");
+
+        // Owner instruction: mesh density is the user's. A bad mesh is a NOTE, never a refusal and
+        // never a clamp — so the report still solves and still reports the number that was asked for.
+        Assert.NotEqual(PlanarBudgetVerdict.Refused, one.Verdict);
+        Assert.Contains(one.Notes, n => n.Contains("At 1 cell across", StringComparison.Ordinal));
+        Assert.Contains(one.Notes, n => n.Contains("Cells across the narrowest conductor is set to 1",
+                                                   StringComparison.Ordinal));
+
+        // …and the default says nothing at all, so an untouched setup's report is unchanged.
+        Assert.DoesNotContain(four.Notes, n => n.Contains("Cells across the narrowest conductor is set to",
+                                                          StringComparison.Ordinal));
+
+        // Below 1 is clamped by Resolved rather than throwing — it is not a value the UI can produce.
+        Assert.Equal(1, (s with { MinCellsAcrossConductor = 0 }).Resolved.MinCellsAcrossConductor);
+
+        // It survives Auto: a number the user typed must not be discarded by a checkbox.
+        Assert.Equal(2, (new PlanarMeshSettings(Auto: true, MinCellsAcrossConductor: 2))
+                        .Resolved.MinCellsAcrossConductor);
+    }
 }

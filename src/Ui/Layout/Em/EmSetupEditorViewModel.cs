@@ -300,11 +300,19 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     }
 
     /// <summary>R-msh-8's numbers, in the engine's own units, formatted once. The panel prints this;
-    /// it computes nothing.</summary>
+    /// it computes nothing.
+    ///
+    /// <para><b>The λ_g ratio is of the cell that was BUILT, not of the cap</b> (owner report,
+    /// 2026-09-09). It used to divide λ_g by <c>MaxCellSizeM</c> — the λ_g/N cap — so the parenthetical
+    /// read "λ_g/5" whatever the mesh actually was, beside a max cell it did not describe. On the
+    /// reported connector cutout the largest cell is 185 µm and the cap is 2.86 mm: the line claimed
+    /// λ_g/5 for a mesh that is λ_g/77. Where the cap binds the two agree by construction and this
+    /// changes nothing; where it does not, this is the number that moves when the mesh moves — which is
+    /// the whole reason a user reads it.</para></summary>
     public string PlanarMeshSummary => PlanarMeshReport is not { } r
         ? ""
         : $"{r.UnknownCount:N0} unknowns · {r.CellCount:N0} cells · " +
-          $"max cell {r.MaxCellEdgeM * 1e6:G4} µm (λ_g/{(r.MaxCellSizeM > 0 ? r.GuidedWavelengthM / r.MaxCellSizeM : 0):G3} " +
+          $"max cell {r.MaxCellEdgeM * 1e6:G4} µm (λ_g/{(r.MaxCellEdgeM > 0 ? r.GuidedWavelengthM / r.MaxCellEdgeM : 0):G3} " +
           $"at {r.FrequencyHz / 1e9:G4} GHz) · " +
           $"{r.CellsAcrossNarrowestConductor} across the narrowest conductor ({r.NarrowestConductorWidthM * 1e6:G4} µm) · " +
           r.Verdict;
@@ -525,6 +533,13 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     [ObservableProperty] private string _planarCellsPerWavelengthText = "";
     [ObservableProperty] private string _planarEdgeCellsText          = "";
     [ObservableProperty] private bool   _planarEdgeMesh;
+
+    /// <summary>Cells across the narrowest conductor — the transverse pitch, and the one that binds
+    /// on geometry-driven artwork. A control since 2026-09-09 on the owner's instruction that mesh
+    /// density is the user's responsibility; see
+    /// <see cref="PlanarMeshSettings.DefaultMinCellsAcrossConductor"/> for what the mesher warns
+    /// about and why it never refuses.</summary>
+    [ObservableProperty] private string _planarMinCellsAcrossText     = "";
 
     /// <summary>
     /// M0's mesh-frequency control, staged as text like every other dimensioned field in this panel.
@@ -872,6 +887,16 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
                 else error = "Enter a whole number of 0 or more.";
                 break;
 
+            // Cells across the narrowest conductor. Owner instruction, 2026-09-09: the user owns mesh
+            // density, so 1 is accepted here and the mesher NOTES what it did rather than clamping or
+            // refusing. It clears Auto like the two above it — it is a resolution, not a performance
+            // knob, so leaving Auto on beside it would be the silently-ignored-setting failure.
+            case "PlanarMinCellsAcross":
+                if (TryInt(PlanarMinCellsAcrossText, 1, out int mca))
+                    updatedPlanar = pm with { Auto = false, MinCellsAcrossConductor = mca };
+                else error = "Enter a whole number of 1 or more.";
+                break;
+
             // M0 / R-emp-5 — the mesh frequency. Two things here are deliberate and easy to get
             // wrong: BLANK is a real value (null = max sweep), not "leave it alone"; and this
             // control does NOT clear Auto, unlike the two above it. Auto decides cells/λ and edge
@@ -888,7 +913,8 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
                 break;
         }
 
-        bool isPlanarField = field is "CellsPerWavelength" or "PlanarEdgeCells" or "MeshFrequency";
+        bool isPlanarField = field is "CellsPerWavelength" or "PlanarEdgeCells" or "MeshFrequency"
+                                   or "PlanarMinCellsAcross";
         if (isPlanarField) PlanarMeshFieldError = error; else MeshFieldError = error;
 
         // Bug report, 2026-08-14: an invalid commit used to fall through to RefreshMeshText(), which
@@ -1112,6 +1138,7 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         var pm = Working.PlanarMesh;
         PlanarCellsPerWavelengthText = pm.CellsPerWavelength.ToString(CultureInfo.InvariantCulture);
         PlanarEdgeCellsText          = pm.EdgeCells.ToString(CultureInfo.InvariantCulture);
+        PlanarMinCellsAcrossText     = pm.MinCellsAcrossConductor.ToString(CultureInfo.InvariantCulture);
         PlanarEdgeMesh               = pm.EdgeMesh;
         PlanarBoundaryCells          = pm.BoundaryCells;
         PlanarMeshFrequencyText      = pm.MeshFrequencyHz is { } mf

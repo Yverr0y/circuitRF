@@ -279,8 +279,8 @@ public static class SurfaceMesher
         var (narrowX, narrowY) = MeasureNarrowness(problem);
         double narrowest = Math.Min(narrowX, narrowY);
 
-        double hx = Math.Min(hWave, narrowX / PlanarMeshSettings.MinCellsAcrossConductor);
-        double hy = Math.Min(hWave, narrowY / PlanarMeshSettings.MinCellsAcrossConductor);
+        double hx = Math.Min(hWave, narrowX / s.MinCellsAcrossConductor);
+        double hy = Math.Min(hWave, narrowY / s.MinCellsAcrossConductor);
         if (!(hx > 0) || double.IsInfinity(hx)) hx = (x1 - x0) / 8.0;
         if (!(hy > 0) || double.IsInfinity(hy)) hy = (y1 - y0) / 8.0;
 
@@ -318,12 +318,12 @@ public static class SurfaceMesher
                 $"This geometry needs on the order of {estX * estY:N0} mesh cells, far past the " +
                 $"{UnknownCeiling:N0}-unknown ceiling this kernel is built for — the grid alone cannot " +
                 "be built, let alone solved. " +
-                (hWave <= Math.Min(narrowX, narrowY) / PlanarMeshSettings.MinCellsAcrossConductor
+                (hWave <= Math.Min(narrowX, narrowY) / s.MinCellsAcrossConductor
                     ? $"The cell size is set by wavelength (λ_g/{s.CellsPerWavelength} = {fmt(hWave)}): " +
                       "lower Cells per wavelength, size the mesh at a lower Mesh frequency, or analyse " +
                       "a smaller region."
                     : $"The cell size is set by the narrowest metal ({fmt(Math.Min(narrowX, narrowY))}, " +
-                      $"meshed {PlanarMeshSettings.MinCellsAcrossConductor} cells across), not by " +
+                      $"meshed {s.MinCellsAcrossConductor} cells across), not by " +
                       "wavelength, so Cells per wavelength will not reduce it — narrow the range of " +
                       "widths in the analysed region, or analyse a smaller region."));
         }
@@ -545,12 +545,49 @@ public static class SurfaceMesher
             // the exact class of silently wrong statement this area keeps finding.
             bool sizedAtSweepTop = !(s.MeshFrequencyHz is { } setF && setF > 0)
                                    || meshFreqHz >= problem.MaxFrequencyHz;
-            notes.Add($"Cell size capped at λ_g/{s.CellsPerWavelength} = {fmt(hWave)} — λ_g = {fmt(lambdaG)} " +
-                      $"in εᵣ = {problem.Slab.Material.EpsR:G4} at {Eng(meshFreqHz)}Hz, " +
-                      (sizedAtSweepTop
-                          ? "the highest frequency of the sweep. Widening the sweep upward will change " +
-                            "this, and with it the unknown count."
-                          : "the frequency the mesh is sized at. Changing it changes the unknown count."));
+
+            // WHICH quantity actually set the cell size — BuildRefusal's own question, asked here too
+            // (owner report, 2026-09-09). hx/hy are Math.Min(hWave, narrow/MinCells), so the cap binds
+            // exactly when it is the smaller of the two on at least one axis.
+            bool capBinds = hWave <= narrowX / s.MinCellsAcrossConductor
+                         || hWave <= narrowY / s.MinCellsAcrossConductor;
+
+            // ── A CAP THAT DID NOT BIND MUST NOT BE REPORTED AS ONE (owner report, 2026-09-09) ──
+            //
+            // This note said "Cell size capped at λ_g/N = … Changing it changes the unknown count"
+            // unconditionally. On the reported connector cutout — 360 µm at its narrowest, so a 90 µm
+            // pitch, against a λ_g/5 cap of 2.858 mm — that sentence is false twice over: nothing was
+            // capped at 2.858 mm (the largest cell is 185 µm), and changing the mesh frequency changes
+            // the unknown count by zero. Measured: 1,997 cells and 3,835 unknowns at 500 MHz, 1, 2, 5,
+            // 10 and 20 GHz alike. The user lowered the frequency the note named, pressed Mesh, saw the
+            // identical picture and the identical count, and reported it as a bug — which is exactly
+            // what BuildRefusal was already rewritten to prevent (see its own header, 2026-08-14), for
+            // the same reason, on the same geometry class. The refusal only fires past the unknown
+            // ceiling, so a mesh that SOLVES was still being told the inert story.
+            //
+            // So: say which quantity is binding, and name the knob that moves it — never the one that
+            // does not.
+            notes.Add(capBinds
+                ? $"Cell size capped at λ_g/{s.CellsPerWavelength} = {fmt(hWave)} — λ_g = {fmt(lambdaG)} " +
+                  $"in εᵣ = {problem.Slab.Material.EpsR:G4} at {Eng(meshFreqHz)}Hz, " +
+                  (sizedAtSweepTop
+                      ? "the highest frequency of the sweep. Widening the sweep upward will change " +
+                        "this, and with it the unknown count."
+                      : "the frequency the mesh is sized at. Changing it changes the unknown count.")
+                : $"The λ_g/{s.CellsPerWavelength} cap is {fmt(hWave)} (λ_g = {fmt(lambdaG)} in " +
+                  $"εᵣ = {problem.Slab.Material.EpsR:G4} at {Eng(meshFreqHz)}Hz) and it did NOT set " +
+                  $"the cell size: the narrowest conductor run is {fmt(narrowest)}, and meshing it " +
+                  $"{s.MinCellsAcrossConductor} cells across forces a " +
+                  $"{fmt(Math.Min(hx, hy))} pitch — {hWave / Math.Min(hx, hy):G3}× finer than the cap, " +
+                  "over the whole layout, because the grid is one tensor product. This structure is " +
+                  $"{Math.Max(x1 - x0, y1 - y0) / lambdaG:G3} λ_g across, so wavelength is not what is " +
+                  "resolving it: CELLS PER WAVELENGTH AND MESH FREQUENCY WILL NOT CHANGE THIS MESH. " +
+                  (s.EdgeMesh && s.EdgeCells > 0
+                      ? "To coarsen it, turn the edge mesh off — that is the one mesh control still " +
+                        "live here — or narrow the range of widths in the analysed region, or analyse " +
+                        "a smaller region."
+                      : "To coarsen it, narrow the range of widths in the analysed region, or analyse " +
+                        "a smaller region."));
 
             // The second note quantifies the trade in the unit the user set, and fires ONLY below the
             // sweep's top — at or above it there is nothing under-resolved to report.
@@ -562,8 +599,6 @@ public static class SurfaceMesher
             // while the cells were in fact 56 µm — λ_g/1120 — and told the user to raise the very
             // controls the refusal beside it had just said were inert. Same defect as the refusal's
             // own, in a note.
-            bool capBinds = hWave <= narrowX / PlanarMeshSettings.MinCellsAcrossConductor
-                         || hWave <= narrowY / PlanarMeshSettings.MinCellsAcrossConductor;
             if (!sizedAtSweepTop && problem.MaxFrequencyHz > 0 && capBinds)
             {
                 double effCellsPerLambda =
@@ -577,7 +612,53 @@ public static class SurfaceMesher
         }
 
         notes.Add($"Narrowest conductor dimension {fmt(narrowest)}, meshed {across} cell(s) across " +
-                  $"(target {PlanarMeshSettings.MinCellsAcrossConductor}).");
+                  $"(target {s.MinCellsAcrossConductor}).");
+
+        // ── The user owns mesh density; the mesher's job is to say what their number DID ─────────
+        //
+        // Owner instruction, 2026-09-09: mesh density is the user's responsibility, and a warning is
+        // the most the mesher may do about a choice it dislikes — the run goes ahead regardless. So
+        // this is a NOTE and never a refusal, and it never clamps.
+        //
+        // It exists because of a defect ELSEWHERE that makes this control's result unpredictable
+        // TODAY: the cell count is not monotonic in it (on a plain 200 µm × 10 mm line, 8/6/4/3/2/1
+        // across gives 220/200/180/160/180/200 cells — 1 costs as much as 6).
+        //
+        // The cause is NOT a legitimate trade against the edge fan, which is what the first version
+        // of this comment said. It is `BuildGridLines`' grading marcher: the half-step look-ahead in
+        // BoundaryMesher.PartitionFractions is clamped to the end of the interval, the size field AT
+        // an attractor is c0, so the approach to a conductor's far edge collapses into a uniform
+        // crawl at the FINEST cell size instead of grading down. Coarsening the bulk pitch widens the
+        // gap that crawl has to cover, so the wasted cells grow. Fixing the marcher makes the same
+        // ladder monotonic and cheaper at every rung (264/220/198/176/154/154) — verified, but it
+        // moves de-embedded S21 by 0.063 dB and needs a convergence study before it can ship:
+        // docs/sonnet-briefs/brief-em-transmission-line-mesh.md, M0.
+        //
+        // Until that lands, somebody who turns this down to save cells and gets more of them needs
+        // the reason on screen rather than in a file.
+        if (s.MinCellsAcrossConductor != PlanarMeshSettings.DefaultMinCellsAcrossConductor)
+        {
+            string what = $"Cells across the narrowest conductor is set to {s.MinCellsAcrossConductor}, " +
+                          $"not the default {PlanarMeshSettings.DefaultMinCellsAcrossConductor} — " +
+                          $"transverse pitch {fmt(Math.Min(hx, hy))}.";
+
+            notes.Add(s.MinCellsAcrossConductor < PlanarMeshSettings.DefaultMinCellsAcrossConductor
+                          && s.EdgeMesh && s.EdgeCells > 0
+                ? what + " NOTE that the cell count does not always fall when this is lowered — a " +
+                         "known grading defect, not a property of the mesh: the fan approaching a " +
+                         "conductor's far edge currently collapses to a uniform run at the finest " +
+                         "cell size instead of grading down, and coarsening the bulk pitch makes " +
+                         "that run longer. If the count did not fall, turn the edge mesh off, which " +
+                         "removes the fan entirely."
+                : what);
+
+            if (s.MinCellsAcrossConductor < 2)
+                notes.Add("At 1 cell across, a conductor carries NO transverse basis function of " +
+                          "its own — a rooftop spans a cell PAIR — so no current variation across " +
+                          "the metal is representable and the edge singularity is not resolved at " +
+                          "all. That is a legitimate thing to ask for on a line whose current is " +
+                          "uniform across it, and it is reported rather than refused.");
+        }
 
         if (s.EdgeMesh && s.EdgeCells > 0)
         {
@@ -762,7 +843,7 @@ public static class SurfaceMesher
     /// analyse a smaller region" unconditionally. On the reported geometry — a 6.9 → 100 Ω
     /// Klopfenstein taper, 13.1 mm of metal at one end and 299 µm at the other — <b>Cells per
     /// wavelength does not move the unknown count by one</b>, and neither does Mesh frequency:
-    /// <see cref="PlanarMeshSettings.MinCellsAcrossConductor"/> sets the pitch from the NARROWEST run
+    /// <see cref="s.MinCellsAcrossConductor"/> sets the pitch from the NARROWEST run
     /// (74.6 µm) and the λ_g cap sits 42× coarser at 3.13 mm, so it never binds. Measured:
     /// 7,749 unknowns at 5, 10 and 20 cells/λ alike; 5,772 with the edge mesh off; still refused. The
     /// user halved the knob the message named, saw the identical number, and stopped.
@@ -797,15 +878,15 @@ public static class SurfaceMesher
         // WHICH quantity set the cell size. This is the whole difference between a refusal a user can
         // act on and one they can only argue with: hx/hy are Math.Min(hWave, narrow/MinCells), so the
         // wavelength cap is binding exactly when it is the smaller of the two on at least one axis.
-        bool waveBinds = hWave <= narrowX / PlanarMeshSettings.MinCellsAcrossConductor
-                      || hWave <= narrowY / PlanarMeshSettings.MinCellsAcrossConductor;
+        bool waveBinds = hWave <= narrowX / s.MinCellsAcrossConductor
+                      || hWave <= narrowY / s.MinCellsAcrossConductor;
 
         var why = waveBinds
             ? $" The cell size is set by wavelength here — λ_g/{s.CellsPerWavelength} = {fmt(hWave)} " +
               $"across {fmt(extentX)} × {fmt(extentY)} of artwork."
             : $" The cell size is set by the NARROWEST metal, not by wavelength: the narrowest " +
               $"conductor run is {fmt(narrowest)}, and meshing it " +
-              $"{PlanarMeshSettings.MinCellsAcrossConductor} cells across forces a {fmt(pitch)} " +
+              $"{s.MinCellsAcrossConductor} cells across forces a {fmt(pitch)} " +
               $"pitch over all {fmt(extentX)} × {fmt(extentY)} of the artwork — the grid is one " +
               $"tensor product over the whole layout, so the narrow end is paid for everywhere. The " +
               $"λ_g/{s.CellsPerWavelength} cap is {fmt(hWave)}, {hWave / pitch:G3}× coarser, so " +

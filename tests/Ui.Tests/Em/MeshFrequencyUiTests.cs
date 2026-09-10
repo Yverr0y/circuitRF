@@ -277,4 +277,28 @@ public class MeshFrequencyUiTests
 
         Directory.Delete(dir, true);
     }
+
+    // ── Cells across the narrowest conductor (2026-09-09) — the sixth control ────────────────
+
+    [Fact]
+    public void MinCellsAcross_RoundTrips_OmitsAtItsDefault_AndMovesTheStalenessHash()
+    {
+        var setup = new EmSetup { Name = "x", LayoutRef = "a.clay" };
+
+        // Omitted at the default, so a .cem written before this control gains no byte.
+        Assert.DoesNotContain("MinCellsAcrossConductor", EmSetupPersistence.Serialize(setup),
+                              StringComparison.Ordinal);
+
+        setup.PlanarMesh = PlanarMeshSettings.Default with { MinCellsAcrossConductor = 1 };
+        string json = EmSetupPersistence.Serialize(setup);
+        Assert.Contains("MinCellsAcrossConductor", json, StringComparison.Ordinal);
+        Assert.Equal(1, EmSetupPersistence.Deserialize(json).PlanarMesh.MinCellsAcrossConductor);
+
+        // Clone drives undo snapshots and would silently lose the field.
+        Assert.Equal(1, setup.Clone().PlanarMesh.MinCellsAcrossConductor);
+
+        // R-em-20: it changes the mesh, so an .snp made under one value is not current for another.
+        Assert.NotEqual(EmSnpProvenance.MeshHash(PlanarMeshSettings.Default),
+                        EmSnpProvenance.MeshHash(setup.PlanarMesh));
+    }
 }

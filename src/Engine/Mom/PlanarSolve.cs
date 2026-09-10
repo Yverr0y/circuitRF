@@ -1977,7 +1977,7 @@ public static class PlanarSolve
             $"cross-level entry carries a peak of width {fmt(worstSep)} inside a cell of " +
             $"{fmt(worstCell)}. Nothing downstream shows it: reciprocity and passivity hold " +
             $"throughout. What acts on this is the CELL PITCH across the metal on those two levels. " +
-            $"That pitch is min(λ_g/CellsPerWavelength, width/{PlanarMeshSettings.MinCellsAcrossConductor}), " +
+            "That pitch is min(λ_g/CellsPerWavelength, width/MinCellsAcrossConductor), " +
             $"and only the first term responds to the frequency knobs" +
             (double.IsFinite(cellsPerWavelengthNeeded) && cellsPerWavelengthNeeded > 200
                 ? $" — and here it would take Cells per wavelength ≥ {cellsPerWavelengthNeeded:N0} " +

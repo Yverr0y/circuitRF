@@ -1973,3 +1973,151 @@ the slab top: ONE calibration, applied to both lines.
   refusal that blocked it; what still binds is MIM-3's MESH condition, and the shipped technology's
   default mesh sits outside it (`ValidatedCellOverSeparation`). That is gap 3's business, reported as
   a note, and no constant was moved here.
+
+## The mesh frequency looked inert — because on that geometry it IS, and the report said otherwise (2026-09-09)
+
+**Reported symptom.** Cells per wavelength held constant, Mesh frequency lowered, Mesh pressed each
+time: the rendered mesh never changed and the panel reported 1,997 cells at every setting.
+
+**Diagnosis — the plumbing is fine and the mesh is correct.** Measured on the reported `.cem` (one
+polygon, FR-4, εᵣ 4.4, sweep 0.5–10 GHz, cells/λ = 5), driving `SurfaceMesher.Mesh` directly at 500
+MHz, 1, 2, 5, 10 and 20 GHz: **1,997 cells and 3,835 unknowns at every one of them.** The cell size
+is `Math.Min(hWave, narrow / MinCellsAcrossConductor)`, the narrowest conductor run is 360 µm, so the
+transverse pitch is 90 µm — while the λ_g/5 cap at 10 GHz is 2.858 mm, **31.8× coarser**. The cap
+never enters the minimum, and the mesh frequency (and cells per wavelength with it) cannot move it.
+This is R-msh-4 working as designed.
+
+**The actual defect is the reporting, and it is the same one twice.**
+
+1. **The λ_g note claimed a cap that did not bind.** It read "Cell size capped at λ_g/5 = 2.858 mm …
+   Changing it changes the unknown count" unconditionally — false on both halves here: nothing was
+   capped at 2.858 mm (the largest cell built is 185 µm), and changing the frequency changes the
+   count by zero. `BuildRefusal` had already been rewritten for exactly this, on exactly this
+   geometry class (2026-08-14, the Klopfenstein taper) — but a refusal only fires past the unknown
+   ceiling, and this mesh is 3,835 unknowns and *solves*. So the mesh that runs was still being told
+   the inert story. The note now asks `capBinds` — `BuildRefusal`'s own question — and where the cap
+   does not bind it says so, quotes the narrowest run and the pitch it forces, and names the knobs
+   that are inert rather than the ones that are not.
+
+2. **`PlanarMeshSummary` divided λ_g by the CAP.** `λ_g/{GuidedWavelengthM / MaxCellSizeM}` is
+   `CellsPerWavelength` by construction, so the panel printed "max cell 185 µm (λ_g/5 at 10 GHz)" —
+   an honest max cell beside a ratio describing a different length. It now divides by
+   `MaxCellEdgeM`, the cell that was actually built (λ_g/77 here). Where the cap binds the two agree
+   and nothing changes.
+
+**The user's real question was "then how DO I coarsen it", and there is an answer.** Measured on
+the same file:
+
+| setting | cells | unknowns | verdict |
+|---|---|---|---|
+| as set in the `.cem` | 1,997 | 3,835 | Warn |
+| **edge mesh off** | **1,171** | **2,215** | **Ok** |
+| staircase instead of conformal | 1,988 | 3,838 | Warn |
+| edge mesh off + staircase | 1,161 | 2,214 | Ok |
+
+**The edge mesh is the one mesh control still live on a geometry-bound mesh — 41% of the cells and
+42% of the unknowns, and it takes the budget verdict from Warn to Ok.** So the non-binding note names
+it (when it is on) rather than sending the user straight to "redraw your artwork": the first version
+of this note listed only the geometry remedies, which is accurate and useless. `BuildRefusal` had
+always listed it; the note had not, because the note had never distinguished the two cases at all.
+
+For scale, the part is 6.07 × 1.96 mm with a 360 µm narrowest run — **0.042 λ_g across at the 1 GHz
+mesh frequency**, 0.42 λ_g at the sweep's 10 GHz top. An electrically small structure is resolved by
+its geometry, never by λ, which is why the note now states the λ_g count outright.
+
+**`MinCellsAcrossConductor` was measured as a hypothetical control and is NOT worth exposing.**
+Temporarily rebuilt at 2, 3 and 4 on this file: 1,374 / 1,141 / 1,997 cells. Note it is **not
+monotonic** — 2 costs more than 3, because the grid-line placement interacts with the edge grading —
+so a user turning it down would sometimes get a denser mesh, which is exactly the class of confusion
+this whole entry is about. The best case is ~1.75×, against the edge mesh's 1.7× from a control that
+already exists and behaves monotonically. D3's "exactly three controls" stands.
+
+**Left alone, deliberately.** The "Narrowest conductor dimension 360 µm, meshed 1 cell(s) across
+(target 4)" note pairs the measured narrowness with `MinCellsAcrossRun`, which is the minimum run
+over the *whole* artwork — on conformal or staircased curved metal a run of 1 comes from a boundary
+tip, not from the narrowest conductor. `PlanarMeshReport`'s own parameter doc already calls that out
+as honest information rather than a defect, so it is recorded here and not changed.
+
+**Gates.** `MeshFrequencyTests.WhereTheCapDoesNotBind_TheNoteSaysSo_AndNamesTheKnobsAsInert`
+reproduces the complaint (identical N at 1 and 10 GHz on a 360 µm line) and pins both wordings;
+`PlanarMeshOverlayTests.Panel_MeshBuildsTheSurfaceMesh_…` pins the summary's ratio to
+`MaxCellEdgeM`.
+
+
+## Cells across the conductor becomes a user control (2026-09-09)
+
+Same owner report as the entry above, one step on: having been told the wavelength knobs were inert,
+the answer to "then how do I get a coarser mesh" was for a long time "you cannot". The transverse
+pitch is `min(λ_g/CellsPerWavelength, narrowest/MinCellsAcrossConductor)` and the second term was a
+compile-time constant of 4.
+
+**Owner's decision: mesh density is the user's responsibility. A tool that will not give a bad mesh
+when one is asked for is deciding on the user's behalf. Warnings are allowed; refusals are not.**
+So `PlanarMeshSettings.MinCellsAcrossConductor` is an ordinary setting (default 4, `.cem` under the
+omit-at-default rule, a panel field, and a term in `EmSnpProvenance.MeshHash` appended only when off
+its default so no existing `.snp` reads as stale). 1 is reachable. Nothing clamps above 1 and nothing
+refuses.
+
+**What was measured first, and what it changed.** On a 200 µm × 10 mm FR-4 trace, de-embedded, S21
+moves under 0.001 dB from 1 cell across to 8 — **accuracy is not what 4 was buying**. But the cell
+count is **not monotonic** in it: 8 → 220 cells, 6 → 200, 4 → 180, 3 → 160, 2 → 180, 1 → 200.
+
+**The cause was mis-diagnosed first, and the correction matters.** The original write-up blamed the
+edge fan legitimately spending back what the bulk saved. Challenged and refuted: re-measured per axis
+on one rectangle, the y-steps at 1 across read `5.94, 17.87, 53.61, 87.13, 5.94, 5.94, 5.94, 5.94,
+5.94, 5.94` — the fan grades correctly away from the NEAR edge and **collapses into six uniform
+finest-size cells approaching the FAR edge**. That is the `BuildGridLines` marcher defect recorded in
+`brief-em-transmission-line-mesh.md` §0d (the half-step look-ahead is clamped to the interval end,
+where the size field is `c0`), and coarsening the bulk pitch lengthens the collapsed run. With a
+Lipschitz-consistent marcher the same ladder is **monotonic and cheaper at every rung**: 264 / 220 /
+198 / 176 / 154 / 154. A straight line DOES coarsen monotonically once the marcher is right.
+
+**Fixture trap found while re-measuring:** `PlanarMeshSettings.Default with { EdgeMesh = false }` is
+inert — `Default` has `Auto = true`, and `Resolved` collapses Auto to the default edge mesh. Any
+fixture varying the edge mesh must set `Auto: false`. `MinCellsAcrossConductor` survives Auto by
+design, so it takes effect either way; a real `.cem` carries `Auto: false` and is unaffected.
+
+That did not stop it shipping; it decided what the mesher REPORTS. Off its default the report always
+states the pitch the setting produced; lowered with the edge mesh on it says the count may not have
+fallen, names the grading defect as the reason, and names the edge mesh as what removes the fan; at 1 it states plainly that a rooftop spans a cell PAIR, so a
+one-cell-wide conductor carries no transverse basis at all and the edge singularity is unresolved —
+**reported, not refused**, because a line whose current is uniform across it is a legitimate thing to
+ask for.
+
+**Together with the edge mesh it is decisive.** On the reported connector cutout:
+
+| across | edge mesh on | edge mesh off |
+|---|---|---|
+| 4 (default) | 1,997 cells / 3,835 N / Warn | 1,171 / 2,215 / Ok |
+| 3 | 1,141 / 2,157 | 651 / 1,211 |
+| 2 | 1,374 / 2,608 | 341 / 614 |
+| **1** | 1,385 / 2,621 | **113 / 182** |
+
+1,997 → 113 cells, 17.7×.
+
+**A trap for anyone writing a test here:** do NOT assert that lowering it lowers the cell count. The
+first version of the engine test did, and failed — with the edge mesh on, this fixture goes 10 grid
+lines to 11 when the pitch is coarsened 4×. Assert the PITCH (or run with the edge mesh off, where
+the pitch governs directly).
+
+**It survives `Auto`**, unlike cells/λ and edge cells, and the argument is the owner's rather than
+the taxonomy's: it IS a resolution, so the taxonomy would have Auto reset it, but a number the user
+typed being discarded because a checkbox is ticked is the silently-ignored-setting failure the
+`BoundaryCells` and `MeshFrequencyHz` paragraphs in that file already exist to prevent.
+
+**D3's "exactly three controls" is now six**, and `PlanarMeshSettings`' class comment says so
+explicitly rather than continuing to claim three. D3's REASONING still governs what may be added: a
+control earns its place by being a modelling or responsibility decision that is the user's to make.
+
+**Still open, deliberately:** whether the DEFAULT moves from 4 to 3 (cheapest rung on both fixtures,
+inside §10.5's own 3–5 range) — that moves every recorded number and is a separate act. Written up as
+M1 of `docs/sonnet-briefs/brief-em-transmission-line-mesh.md`, which also carries the two other
+findings from this investigation: the mesh is **already anisotropic** (60:1 on a 200 µm × 50 mm
+trace, so "rectangular cells" is not a new capability — DIRECTION is what is missing), and a real
+grading defect in `BuildGridLines` (**110 consecutive 3 µm cells** at the far end of a 50 mm trace,
+because the marcher's half-step look-ahead is clamped to the interval end where the size field is
+`c0`). A Lipschitz-consistent marcher fixes it — 184 → 79 grid lines — but it moves de-embedded S21
+by 0.063 dB, so it needs a convergence study before it can ship. Both are in that brief.
+
+**Gates.** `MeshFrequencyTests.CellsAcrossTheConductor_SetsTheTransversePitch_AndIsNeverClampedOrRefused`
+and `MeshFrequencyUiTests.MinCellsAcross_RoundTrips_OmitsAtItsDefault_AndMovesTheStalenessHash`.

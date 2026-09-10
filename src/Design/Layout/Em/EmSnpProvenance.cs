@@ -169,10 +169,17 @@ public static class EmSnpProvenance
     /// reason.</b> An <c>.snp</c> produced with the mesh sized at 10 GHz is not current for one
     /// sized at 20 GHz — different cells, different unknowns, different numbers — and the hash is
     /// the only thing that can say so. One more line, equally easy to forget.</para>
+    ///
+    /// <para><b><see cref="PlanarMeshSettings.MinCellsAcrossConductor"/> too</b> (2026-09-09) — it
+    /// sets the transverse pitch directly, so it changes the cells, the unknowns and the answer.
+    /// <b>Appended at the END and only when it is off its default</b>, so every <c>.snp</c> stamped
+    /// before this control existed keeps the hash it already carries and does not read as stale.</para>
     /// </summary>
     public static string MeshHash(PlanarMeshSettings m)
         => Sha($"{m.Auto}|{m.CellsPerWavelength}|{m.EdgeMesh}|{m.EdgeCells}|{m.BoundaryCells}|" +
-               $"{(m.MeshFrequencyHz is { } f ? R(f) : "auto")}");
+               $"{(m.MeshFrequencyHz is { } f ? R(f) : "auto")}" +
+               (m.MinCellsAcrossConductor == PlanarMeshSettings.DefaultMinCellsAcrossConductor
+                    ? "" : $"|across={m.MinCellsAcrossConductor}"));
 
     /// <summary>
     /// A port's identity for staleness purposes is its number, its POSITION, its inferred side and

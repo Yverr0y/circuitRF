@@ -60,6 +60,13 @@ public sealed class CemPlanarMesh
     /// the format, not a nicety.
     /// </summary>
     public double? MeshFrequencyHz { get; set; }
+
+    /// <summary>
+    /// Cells across the narrowest conductor. <b>Nullable, and omitted at its default of 4</b>, so a
+    /// <c>.cem</c> written before this control existed gains no byte and re-serialises byte-identically
+    /// — the same rule <see cref="BoundaryCells"/> and <see cref="MeshFrequencyHz"/> follow.
+    /// </summary>
+    public int? MinCellsAcrossConductor { get; set; }
 }
 
 public sealed class CemFile
@@ -232,6 +239,9 @@ public static class EmSetupPersistence
             BoundaryCells      = s.PlanarMesh.BoundaryCells == PlanarMeshSettings.DefaultBoundaryCells
                                      ? null : s.PlanarMesh.BoundaryCells,
             MeshFrequencyHz    = s.PlanarMesh.MeshFrequencyHz,
+            MinCellsAcrossConductor =
+                s.PlanarMesh.MinCellsAcrossConductor == PlanarMeshSettings.DefaultMinCellsAcrossConductor
+                    ? null : s.PlanarMesh.MinCellsAcrossConductor,
         },
     };
 
@@ -262,7 +272,9 @@ public static class EmSetupPersistence
         PlanarMesh            = f.PlanarMesh is { } pm
             ? new PlanarMeshSettings(pm.Auto, pm.CellsPerWavelength, pm.EdgeMesh, pm.EdgeCells,
                                      pm.BoundaryCells ?? PlanarMeshSettings.DefaultBoundaryCells,
-                                     pm.MeshFrequencyHz)
+                                     pm.MeshFrequencyHz,
+                                     pm.MinCellsAcrossConductor
+                                         ?? PlanarMeshSettings.DefaultMinCellsAcrossConductor)
             : PlanarMeshSettings.Default,
     };
 

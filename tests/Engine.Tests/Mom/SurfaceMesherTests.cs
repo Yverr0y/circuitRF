@@ -177,7 +177,7 @@ public class SurfaceMesherTests
 
         Assert.True(r.NarrowestConductorWidthM <= 100e-6 * 1.001,
             $"narrowest measured {r.NarrowestConductorWidthM:G4} m — the 100 µm stub was missed");
-        Assert.True(r.CellsAcrossNarrowestConductor >= PlanarMeshSettings.MinCellsAcrossConductor,
+        Assert.True(r.CellsAcrossNarrowestConductor >= PlanarMeshSettings.DefaultMinCellsAcrossConductor,
             $"only {r.CellsAcrossNarrowestConductor} cell(s) across the narrowest run");
     }
 

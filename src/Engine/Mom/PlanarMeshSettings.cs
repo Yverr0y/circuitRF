@@ -30,9 +30,13 @@ public enum PlanarBoundaryCells
 }
 
 /// <summary>
-/// D3 — <b>exactly three user controls</b>, plus the fourth <see cref="PlanarBoundaryCells"/>
-/// documents: <c>Auto</c> (default), <c>Cells per wavelength</c>, and <c>Edge mesh on/off + cell
-/// count</c>. That is §10.5's own list, verbatim.
+/// D3 asked for <b>exactly three user controls</b> — <c>Auto</c>, <c>Cells per wavelength</c>,
+/// <c>Edge mesh on/off + cell count</c> — and that is §10.5's own list, verbatim. <b>There are six
+/// now, and every addition past the third was an explicit owner decision recorded at the parameter
+/// it added</b> (<see cref="PlanarBoundaryCells"/>, <see cref="MeshFrequencyHz"/>,
+/// <see cref="MinCellsAcrossConductor"/>). D3's REASONING still governs what may be added: a control
+/// earns its place by being a modelling or responsibility decision that is the user's to make, never
+/// by being a number that happens to exist in the mesher.
 ///
 /// <para><b>Kernel A's <see cref="EmMeshSettings"/> has six, and the temptation is to mirror it. Do
 /// not.</b> Its six exist because a boundary mesher over infinite dielectric interfaces has a
@@ -77,9 +81,10 @@ public sealed record PlanarMeshSettings(
     bool Auto               = true,
     int  CellsPerWavelength = 20,      // = DefaultCellsPerWavelength (a record's own const cannot
     bool EdgeMesh           = true,    //   be referenced from its primary-constructor defaults;
-    int  EdgeCells          = 3,       //   DefaultsMatchLiterals pins the two together)
+    int  EdgeCells          = 3,       //   the Default* consts below pin the two together)
     PlanarBoundaryCells BoundaryCells = PlanarBoundaryCells.Staircase,
-    double? MeshFrequencyHz = null)
+    double? MeshFrequencyHz = null,
+    int  MinCellsAcrossConductor = 4)
 {
     public const int  DefaultCellsPerWavelength = 20;
     public const bool DefaultEdgeMesh           = true;
@@ -87,11 +92,35 @@ public sealed record PlanarMeshSettings(
     public const PlanarBoundaryCells DefaultBoundaryCells = PlanarBoundaryCells.Staircase;
 
     /// <summary>
-    /// R-msh-4 — §10.5's "at least 3–5 cells across any conductor width". <b>Not a user control</b>
-    /// (D3 permits three and this is not one of them): it is auto-derived, and 4 sits in the middle
-    /// of the range the design note asks for.
+    /// R-msh-4 — §10.5's "at least 3–5 cells across any conductor width". 4 sits in the middle of
+    /// the range the design note asks for, and it is still the default.
+    ///
+    /// <para><b>It stopped being a constant on 2026-09-09, on the owner's explicit instruction:
+    /// the user is responsible for mesh density, and a tool that will not give them a bad mesh when
+    /// they ask for one is deciding on their behalf.</b> So
+    /// <see cref="PlanarMeshSettings.MinCellsAcrossConductor"/> is now an ordinary setting and 1 is
+    /// reachable. The concern that was raised and OVERRULED is recorded rather than dropped, because
+    /// it decides how the mesher must REPORT the result: <b>the cell count is not monotonic in this
+    /// number today.</b> Measured on a plain 200 µm × 10 mm FR-4 line at cells/λ = 20 — 8 → 220
+    /// cells, 6 → 200, 4 → 180, 3 → 160, 2 → 180, <b>1 → 200</b>. <b>Accuracy is not what 4 was
+    /// buying</b> — de-embedded S21 moved under 0.001 dB from 1 to 8 across.
+    ///
+    /// <para><b>That non-monotonicity is a DEFECT elsewhere, not a property of this control, and the
+    /// first version of this comment got the cause wrong.</b> It is not the edge fan legitimately
+    /// spending back what the bulk saved. It is <c>BuildGridLines</c>' grading marcher: the half-step
+    /// look-ahead in <c>BoundaryMesher.PartitionFractions</c> is clamped to the interval end, where
+    /// the size field is <c>c0</c> by definition, so the approach to a conductor's far edge collapses
+    /// into a uniform run at the FINEST cell size instead of grading down — and coarsening the bulk
+    /// pitch makes that run longer. With a Lipschitz-consistent marcher the same ladder is monotonic
+    /// and cheaper at every rung: 264 / 220 / 198 / 176 / 154 / 154. Verified, but it moves
+    /// de-embedded S21 by 0.063 dB, so it needs a convergence study first —
+    /// <c>docs/sonnet-briefs/brief-em-transmission-line-mesh.md</c> M0.</para>
+    ///
+    /// <para>Consequence for the mesher until that lands: turning this down can RAISE the count, so
+    /// <see cref="SurfaceMesher"/> says so when it did and names the edge mesh, which removes the
+    /// fan entirely. <b>A warning, never a refusal.</b></para>
     /// </summary>
-    public const int MinCellsAcrossConductor = 4;
+    public const int DefaultMinCellsAcrossConductor = 4;
 
     /// <summary>
     /// R-msh-5 — the outermost edge cell as a fraction of the reference length, §10.5's own 2–5%.
@@ -123,13 +152,21 @@ public sealed record PlanarMeshSettings(
     /// different question, and Auto has no opinion about it. Throwing it away here would mean a user
     /// who set a mesh frequency and left Auto on silently got the sweep's top instead — the exact
     /// shape of failure the boundary-cell control above already had to be protected from.</para>
+    ///
+    /// <para><b><see cref="MinCellsAcrossConductor"/> SURVIVES Auto as well, and here the argument is
+    /// the OWNER'S rather than the taxonomy's.</b> It is a resolution, so the taxonomy would have Auto
+    /// reset it; but the whole reason it is a control is that the user is responsible for mesh density,
+    /// and a number they typed being silently discarded because a checkbox is ticked is exactly the
+    /// failure the two paragraphs above exist to prevent. It carries.</para>
     /// </summary>
     public PlanarMeshSettings Resolved => Auto
         ? new PlanarMeshSettings(Auto: false, BoundaryCells: BoundaryCells,
-                                 MeshFrequencyHz: MeshFrequencyHz)
+                                 MeshFrequencyHz: MeshFrequencyHz,
+                                 MinCellsAcrossConductor: MinCellsAcrossConductor)
         : this with
         {
-            CellsPerWavelength = Math.Max(2, CellsPerWavelength),
-            EdgeCells          = Math.Max(0, EdgeCells),
+            CellsPerWavelength      = Math.Max(2, CellsPerWavelength),
+            EdgeCells               = Math.Max(0, EdgeCells),
+            MinCellsAcrossConductor = Math.Max(1, MinCellsAcrossConductor),
         };
 }

@@ -467,6 +467,11 @@ public class PlanarMeshOverlayTests
         foreach (string note in vm.PlanarMeshReport.Notes) Assert.Contains(note, vm.PlanarMeshNotes);
         Assert.Contains(vm.PlanarMeshReport.UnknownCount.ToString("N0"), vm.PlanarMeshSummary);
         Assert.Contains("across the narrowest conductor", vm.PlanarMeshSummary);
+
+        // Owner report, 2026-09-09 — the λ_g ratio describes the cell that was BUILT, not the cap.
+        // Dividing by MaxCellSizeM printed "λ_g/N" for every mesh whether or not the cap bound.
+        var r = vm.PlanarMeshReport;
+        Assert.Contains($"λ_g/{r.GuidedWavelengthM / r.MaxCellEdgeM:G3}", vm.PlanarMeshSummary);
     }
 
     [Fact]

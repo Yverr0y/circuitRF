@@ -754,28 +754,38 @@
                 <Border Classes="group" IsVisible="{Binding ViewModel.IsPlanarAnalysis}">
                   <StackPanel Spacing="2">
                 <TextBlock Classes="grouphdr" Text="Surface mesh"/>
-                <Grid ColumnDefinitions="180,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                <Grid ColumnDefinitions="180,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
                       ColumnSpacing="6" RowSpacing="3">
                     <TextBlock Grid.Row="0" Grid.Column="0" Classes="colhdr" Text="Cells per wavelength" VerticalAlignment="Center"/>
                     <TextBox   Grid.Row="0" Grid.Column="1" Classes="num" Tag="CellsPerWavelength"
                                Text="{Binding ViewModel.PlanarCellsPerWavelengthText}"
                                LostFocus="OnFieldLostFocus" KeyDown="OnFieldKeyDown"/>
-                    <TextBlock Grid.Row="1" Grid.Column="0" Classes="colhdr" Text="Edge mesh" VerticalAlignment="Center"/>
-                    <CheckBox  Grid.Row="1" Grid.Column="1" Name="PlanarEdgeMeshCheck" FontSize="11"
+                    <!-- The transverse counterpart of Cells per wavelength, and on geometry-driven
+                         artwork it is the one that actually binds: the pitch is
+                         min(lambda_g/CellsPerWavelength, narrowest/this). A control since 2026-09-09
+                         because mesh density is the user's to decide; 1 is accepted, and the mesher
+                         NOTES what it produced rather than clamping or refusing. -->
+                    <TextBlock Grid.Row="1" Grid.Column="0" Classes="colhdr" Text="Cells across conductor" VerticalAlignment="Center"/>
+                    <TextBox   Grid.Row="1" Grid.Column="1" Classes="num" Tag="PlanarMinCellsAcross"
+                               Text="{Binding ViewModel.PlanarMinCellsAcrossText}"
+                               LostFocus="OnFieldLostFocus" KeyDown="OnFieldKeyDown"
+                               ToolTip.Tip="Cells across the narrowest conductor — the transverse cell size. The mesh uses whichever is smaller, this or the wavelength cap, so on artwork with fine features this is the setting that decides the cell count. Lowering it coarsens the mesh, but not always the cell count: the edge-mesh cells are sized from the conductor width and do not move, so the graded fan can cost back what the bulk saved. 1 means no transverse current variation is representable at all."/>
+                    <TextBlock Grid.Row="2" Grid.Column="0" Classes="colhdr" Text="Edge mesh" VerticalAlignment="Center"/>
+                    <CheckBox  Grid.Row="2" Grid.Column="1" Name="PlanarEdgeMeshCheck" FontSize="11"
                                Content="Refine at conductor edges"
                                IsChecked="{Binding ViewModel.PlanarEdgeMesh}"/>
-                    <TextBlock Grid.Row="2" Grid.Column="0" Classes="colhdr" Text="Edge cells" VerticalAlignment="Center"/>
-                    <TextBox   Grid.Row="2" Grid.Column="1" Classes="num" Tag="PlanarEdgeCells"
+                    <TextBlock Grid.Row="3" Grid.Column="0" Classes="colhdr" Text="Edge cells" VerticalAlignment="Center"/>
+                    <TextBox   Grid.Row="3" Grid.Column="1" Classes="num" Tag="PlanarEdgeCells"
                                Text="{Binding ViewModel.PlanarEdgeCellsText}"
                                LostFocus="OnFieldLostFocus" KeyDown="OnFieldKeyDown"/>
                     <!-- The fourth control. Labelled for what it DOES, not for its implementation:
                          a user picks "follow the metal", not "cut cells". -->
-                    <TextBlock Grid.Row="3" Grid.Column="0" Classes="colhdr" Text="Boundary cells" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Row="4" Grid.Column="0" Classes="colhdr" Text="Boundary cells" VerticalAlignment="Center"/>
                     <!-- Width sized to the longest option ("Staircase") plus the chevron and a
                          margin, not stretched (owner request, 2026-08-11): a two-item closed choice
                          gains nothing from spanning the panel, and it made the group read as one
                          wide control beside four short ones. -->
-                    <ComboBox  Grid.Row="3" Grid.Column="1" Name="PlanarBoundaryCellsCombo" FontSize="11"
+                    <ComboBox  Grid.Row="4" Grid.Column="1" Name="PlanarBoundaryCellsCombo" FontSize="11"
                                Width="110" HorizontalAlignment="Left"
                                ItemsSource="{Binding ViewModel.BoundaryCellsChoices}"
                                SelectedItem="{Binding ViewModel.PlanarBoundaryCells}"
@@ -783,8 +793,8 @@
                     <!-- M0's fifth control, and the only one that is a PERFORMANCE knob. Edited in
                          the sweep's own frequency unit through the same staged-text committer every
                          other dimensioned field here uses; blank means "max sweep". -->
-                    <TextBlock Grid.Row="4" Grid.Column="0" Classes="colhdr" Text="Mesh frequency" VerticalAlignment="Center"/>
-                    <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                    <TextBlock Grid.Row="5" Grid.Column="0" Classes="colhdr" Text="Mesh frequency" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Spacing="4">
                         <TextBox Classes="num" Tag="MeshFrequency" Width="110"
                                  Text="{Binding ViewModel.PlanarMeshFrequencyText}"
                                  PlaceholderText="{Binding ViewModel.MeshFrequencyPlaceholder}"
