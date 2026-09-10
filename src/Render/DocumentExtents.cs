@@ -78,8 +78,12 @@ public static class DocumentExtents
             if (LayoutPortDirection.Resolve(conductorAt, label) is { } hint)
             {
                 long rad = Math.Max(hint.WidthDbu, label.Height);
-                bbox = bbox.Union(new Bbox(hint.PlaneX - rad, hint.PlaneY - rad,
-                                           hint.PlaneX + rad, hint.PlaneY + rad));
+                // The mark's OWN centre: an interior port draws its ring at the label, not a bar at
+                // the conductor end (LayoutPortDirection.PortHint.Interior), and a box round the end
+                // would bound empty metal while leaving the ring outside the page.
+                long mx = hint.Interior ? label.X : hint.PlaneX;
+                long my = hint.Interior ? label.Y : hint.PlaneY;
+                bbox = bbox.Union(new Bbox(mx - rad, my - rad, mx + rad, my + rad));
             }
         }
 
@@ -165,8 +169,12 @@ public static class DocumentExtents
                 if (LayoutPortDirection.Resolve(conductorAt, label) is { } hint)
                 {
                     long rad = Math.Max(hint.WidthDbu, label.Height);
-                    bb = bb.Union(new Bbox(hint.PlaneX - rad, hint.PlaneY - rad,
-                                           hint.PlaneX + rad, hint.PlaneY + rad));
+                    // The mark's OWN centre: an interior port draws its ring at the label, not a bar at
+                // the conductor end (LayoutPortDirection.PortHint.Interior), and a box round the end
+                // would bound empty metal while leaving the ring outside the page.
+                    long mx = hint.Interior ? label.X : hint.PlaneX;
+                    long my = hint.Interior ? label.Y : hint.PlaneY;
+                    bb = bb.Union(new Bbox(mx - rad, my - rad, mx + rad, my + rad));
                 }
             }
 

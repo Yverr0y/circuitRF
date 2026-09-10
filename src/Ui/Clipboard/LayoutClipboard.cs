@@ -200,7 +200,12 @@ public static class LayoutClipboard
                 // The marker spans the conductor width across the direction and reaches into the
                 // metal along it; take the whole square about the plane, which bounds both.
                 long r = Math.Max(hint.WidthDbu, label.Height);
-                bbox = bbox.Union(new Bbox(hint.PlaneX - r, hint.PlaneY - r, hint.PlaneX + r, hint.PlaneY + r));
+                // The mark's OWN centre: an interior port draws its ring at the label, not a bar at
+                // the conductor end (LayoutPortDirection.PortHint.Interior), and a box round the end
+                // would bound empty metal while leaving the ring outside the page.
+                long mx = hint.Interior ? label.X : hint.PlaneX;
+                long my = hint.Interior ? label.Y : hint.PlaneY;
+                bbox = bbox.Union(new Bbox(mx - r, my - r, mx + r, my + r));
             }
         }
 

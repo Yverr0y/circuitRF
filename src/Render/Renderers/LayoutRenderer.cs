@@ -1012,8 +1012,11 @@ public static partial class LayoutRenderer
             // arrow arrives at the plane the name is centred on, and the glyph reads as one object.
             if (label.IsPort)
             {
+                // Null, not Edge: a ghost is not placed yet, so no EM setup can have claimed it, and
+                // the ghost has to show what a click will actually LAND — which for a point in the
+                // middle of metal is an internal port's ring, not an edge port's bar at the far end.
                 DrawPortMarker(canvas, effective, conductorAt, ps, scaleUm, color, background,
-                               new LayoutFrameCounters(), PlanarPortKind.Edge);
+                               new LayoutFrameCounters(), statedKind: null);
                 DrawLabelText(canvas, effective, ps,
                               TintForContrast(color, background, PortMarkerContrastTintAmount),
                               centred: true);
@@ -1287,9 +1290,9 @@ public static partial class LayoutRenderer
                 // not retype it — the type lives in the .cem and no drag can touch it. Asking the
                 // stored shape is therefore not a workaround for the coordinate key; it is the
                 // correct question, and it stays correct if the key ever changes.
-                var portKind = label.IsPort && original is LabelShape stored
+                PlanarPortKind? portKind = label.IsPort && original is LabelShape stored
                     ? MarkKindOf(opts.InternalPortMarks, stored)
-                    : PlanarPortKind.Edge;
+                    : null;
 
                 // ── A PORT IS NOT DRAWN HERE — IT IS HANDED UP TO THE FRAME'S OWN TOP PASS ──────
                 //
@@ -1595,10 +1598,11 @@ public static partial class LayoutRenderer
             // A port's outline follows its MARK, and the mark's position follows its TYPE — asked of
             // `original` for the same reason DrawLayer does: a drag override is the same port
             // previewed elsewhere, and moving a port cannot retype it.
-            bool internalMark = shape is LabelShape { IsPort: true } && original is LabelShape stored
-                                && MarkKindOf(internalPortMarks, stored) != PlanarPortKind.Edge;
+            var statedKind = shape is LabelShape { IsPort: true } && original is LabelShape stored
+                             ? MarkKindOf(internalPortMarks, stored)
+                             : null;
 
-            using var outline = BuildOutlinePathForSelection(shape, ps, conductorAt, internalMark);
+            using var outline = BuildOutlinePathForSelection(shape, ps, conductorAt, statedKind);
             if (outline is null || outline.IsEmpty) continue;
             batch.AddPath(outline);
         }
@@ -1683,7 +1687,7 @@ public static partial class LayoutRenderer
     /// <see cref="BuildShapePath"/> entry: <c>Label</c> (real font metrics — see
     /// <see cref="MeasureLabelWorldBbox"/>) and <c>Via</c> (a circle at its pad radius).</summary>
     private static SKPath? BuildOutlinePathForSelection(LayoutShape shape, PathSpace ps,
-        LayoutPortDirection.ConductorLookup? conductorAt = null, bool internalMark = false)
+        LayoutPortDirection.ConductorLookup? conductorAt = null, PlanarPortKind? statedKind = null)
     {
         switch (shape)
         {
@@ -1692,8 +1696,11 @@ public static partial class LayoutRenderer
             // report that forced this. Every other label keeps the real-font-metrics glyph box below.
             case LabelShape { IsPort: true } port:
             {
-                var pb = LayoutHitTest.PortPickBbox(port, LayoutPortDirection.Resolve(conductorAt, port),
-                                                    atAnchor: internalMark);
+                var hint = LayoutPortDirection.Resolve(conductorAt, port);
+                var pb = LayoutHitTest.PortPickBbox(port, hint,
+                    atAnchor: hint is { } h
+                              && LayoutPortDirection.MarkAtAnchor(
+                                     statedKind ?? LayoutPortDirection.InferredKind(h), h));
                 if (pb.IsEmpty) return null;
                 var portPath = new SKPath();
                 portPath.AddRect(NormalizedRect(ps.X(pb.MinX), ps.Y(pb.MinY), ps.X(pb.MaxX), ps.Y(pb.MaxY)));
@@ -2425,18 +2432,26 @@ public static partial class LayoutRenderer
     /// </summary>
     private const double InternalGapOverhangOverWidth = LayoutPortDirection.GapOverhangOverWidth;
 
-    /// <summary>The internal port's ring, as a fraction of the conductor width — large enough to clear
-    /// the port's own centred label text, which is why it is sized off the conductor.</summary>
+    /// <summary>The internal port's ring, as a fraction of the conductor width.</summary>
     private const double InternalPortRingOverWidth = LayoutPortDirection.RingOverWidth;
 
-    /// <summary>Ring to first ground bar.</summary>
-    private const double InternalPortStemOverWidth = 0.16;
-
-    /// <summary>Half-widths of the three ground bars, widest first.</summary>
-    private static readonly double[] InternalPortGroundBarsOverWidth = [0.34, 0.21, 0.10];
-
-    /// <summary>Spacing between those bars.</summary>
-    private const double InternalPortGroundPitchOverWidth = 0.13;
+    /// <summary>
+    /// <b>The ceiling on the glyph ring: a fraction of the metal's own half-extent through the
+    /// label, measured in both directions.</b>
+    ///
+    /// <para><see cref="InternalPortRingOverWidth"/> alone is 0.55 of the port width, so the ring
+    /// was drawn slightly OUTSIDE the conductor it sits on — on a narrow trace it read as a circle
+    /// with a line through it rather than as a mark on the metal (owner, 2026-09-09). The width is
+    /// only one of the two extents that bound it: a port on a small pad, or near the end of a short
+    /// stub, is bounded ALONG the trace as well. So the glyph is clamped to the smaller of the two
+    /// spans measured through the label point, times this, which keeps it just inside the outline
+    /// instead of tangent to it — a ring drawn exactly on the metal's edge is drawn on top of the
+    /// edge and cannot be seen, the same failure the gap's flanges had.</para>
+    ///
+    /// <para>Only the GLYPH is clamped. Once there is a mesh the ring is the footprint the solver
+    /// resolved and is a DIMENSION, which must be reported at its real size whatever that is.</para>
+    /// </summary>
+    private const double InternalPortRingMaxOverSpan = 0.9;
 
     /// <summary>
     /// <b>The half-width of the gap the SOLVER will actually use</b>, in DBU, or null when there is no
@@ -2630,6 +2645,39 @@ public static partial class LayoutRenderer
         return span is { } s ? hint with { WidthDbu = s.Width } : hint;
     }
 
+    /// <summary>
+    /// <b>The radius of the internal port's GLYPH ring — bounded by the metal it is standing on.</b>
+    ///
+    /// <para>The preferred size is a fraction of the port width, which is a legibility figure and not
+    /// a dimension. The bound is a measurement: the conductor's own span through the label point, cut
+    /// both ways, so a narrow trace bounds the ring across and a small pad or a short stub bounds it
+    /// along as well. Where the outline cannot be measured — an instance's artwork reached through a
+    /// bounding box, with no ring to walk — the width itself is the bound, which is the same answer
+    /// for the straight run of metal that case usually is.</para>
+    /// </summary>
+    private static double InternalRingRadius(LayoutPortDirection.ConductorLookup? conductorAt,
+                                             LabelShape label, LayoutPortDirection.PortHint hint)
+    {
+        double half = 0.5 * hint.WidthDbu;
+
+        if (conductorAt?.Invoke(label.X, label.Y, label.PortLayer) is { Shape: { } shape } info)
+        {
+            foreach (var dir in new[] { LayoutRotation.R0, LayoutRotation.R90 })
+            {
+                bool alongX = dir is LayoutRotation.R0 or LayoutRotation.R180;
+                var span = LayoutPortDirection.SpanAt(
+                    shape, info.Box, dir,
+                    acrossAt: alongX ? label.Y : label.X,
+                    alongAt:  alongX ? label.X : label.Y);
+
+                if (span is { } s && s.Width > 0) half = System.Math.Min(half, 0.5 * s.Width);
+            }
+        }
+
+        return System.Math.Min(hint.WidthDbu * InternalPortRingOverWidth,
+                               half * InternalPortRingMaxOverSpan);
+    }
+
     /// <param name="meshHalfWidth">
     /// The gap the solver will actually use, per side, in DBU — from the computed mesh. Null falls
     /// back to <see cref="InternalGapHalfOverWidth"/>, which is a legibility fraction and not a
@@ -2639,24 +2687,26 @@ public static partial class LayoutRenderer
     /// like a live one.
     /// </param>
     /// <summary>
-    /// <b>The SHUNT port's mark: a ring around the via, with a ground symbol hanging off it.</b>
+    /// <b>The SHUNT port's mark: a ring around the via, and nothing else.</b>
     ///
     /// <para>The other two marks are statements about a plane the current crosses IN the layout —
     /// an edge port's bar across the conductor end, a gap's pair of brackets either side of its
     /// break — and both are oriented by the direction current flows. An internal port has no such
     /// direction: its current leaves the metal vertically, out of the plane the layout draws. So the
-    /// mark is deliberately NOT oriented by the conductor: a ring says "the port is here", the
-    /// ground symbol says "and its other terminal is the plane", and both read the same whichever
-    /// way the trace runs.</para>
+    /// mark is deliberately NOT oriented by the conductor: a ring says "the port is here", and it
+    /// reads the same whichever way the trace runs.</para>
     ///
-    /// <para>The ground symbol hangs DOWNWARD ON SCREEN rather than along any layout axis, for the
-    /// same reason: there is no layout direction it could honestly point along, and the one thing it
-    /// has to say — that this terminal is the ground plane — is a convention every reader of a
-    /// schematic already has.</para>
+    /// <para><b>It used to carry a schematic ground symbol below the ring</b> — a stem and three
+    /// narrowing bars, saying "and its other terminal is the plane". That is true of every internal
+    /// port and never varies, so the bars added ink to every one of them without distinguishing any
+    /// of them, and over the artwork underneath they read as distracting rather than informative
+    /// (owner, 2026-09-09). The ring alone still says the one thing that varies: where the port is,
+    /// and — once a mesh exists — how big the footprint it drives turned out to be.</para>
     /// </summary>
     private static void DrawInternalPortMarker(SKCanvas canvas, LabelShape label,
         LayoutPortDirection.PortHint hint, PathSpace ps, double scaleUm,
         SKColor layerColor, SKColor background, LayoutFrameCounters counters,
+        double glyphRadius,
         (double X0, double Y0, double X1, double Y1)? meshFootprint = null)
     {
         var color = TintForContrast(layerColor, background, PortMarkerContrastTintAmount);
@@ -2671,7 +2721,7 @@ public static partial class LayoutRenderer
         // the honest behaviour in both directions.
         double ax = label.X, ay = label.Y;
         double cxW = ax, cyW = ay;
-        double rxW = hint.WidthDbu * InternalPortRingOverWidth, ryW = rxW;
+        double rxW = glyphRadius, ryW = glyphRadius;
 
         if (meshFootprint is { } fp)
         {
@@ -2697,19 +2747,6 @@ public static partial class LayoutRenderer
         // rectangular via reads as the rectangle it is rather than as a circle of some average size.
         float rx = DX(rxW), ry = DX(ryW);
         path.AddOval(new SKRect(cx - rx, cy - ry, cx + rx, cy + ry));
-
-        // …and the ground symbol below it: a stem, then three bars narrowing away from the ring.
-        float y = cy + ry + DX(hint.WidthDbu * InternalPortStemOverWidth);
-        path.MoveTo(cx, cy + ry);
-        path.LineTo(cx, y);
-
-        foreach (double halfBar in InternalPortGroundBarsOverWidth)
-        {
-            float h = DX(hint.WidthDbu * halfBar);
-            path.MoveTo(cx - h, y);
-            path.LineTo(cx + h, y);
-            y += DX(hint.WidthDbu * InternalPortGroundPitchOverWidth);
-        }
 
         canvas.DrawPath(path, paint);
         counters.DrawCalls++;
@@ -2840,22 +2877,29 @@ public static partial class LayoutRenderer
         }
     }
 
-    /// <summary>What the active EM setup drives this label as. Exact longs — see
-    /// <see cref="LayoutRenderOptions.InternalPortMarks"/> for why not a port number. A label the
-    /// setup says nothing about is an edge port, which is what every port is unless something says
-    /// otherwise.</summary>
-    private static PlanarPortKind MarkKindOf(IReadOnlyList<(long X, long Y, PlanarPortKind Kind)>? marks,
-                                             LabelShape label)
+    /// <summary>What the active EM setup drives this label as, or <b>null when no setup has an answer
+    /// for it</b>. Exact longs — see <see cref="LayoutRenderOptions.InternalPortMarks"/> for why not a
+    /// port number.
+    ///
+    /// <para><b>"Says nothing" used to mean "edge port", and that was the bug</b> (owner,
+    /// 2026-09-09). A layout with no <c>.cem</c> open has no answer for ANY port, so every port drew
+    /// its bar and arrow at the conductor end however far from the label that was — see
+    /// <see cref="LayoutPortDirection.PortHint.Interior"/> for the measurement. Null now says exactly
+    /// that, and the caller infers from the geometry instead. A setup that HAS claimed the layout is
+    /// still the only authority, Edge included, which is why it publishes an entry for every port
+    /// rather than only for the internal ones.</para></summary>
+    private static PlanarPortKind? MarkKindOf(IReadOnlyList<(long X, long Y, PlanarPortKind Kind)>? marks,
+                                              LabelShape label)
     {
-        if (marks is null) return PlanarPortKind.Edge;
+        if (marks is null) return null;
         foreach (var (x, y, kind) in marks) if (x == label.X && y == label.Y) return kind;
-        return PlanarPortKind.Edge;
+        return null;
     }
 
     /// <summary>One port met by the layer loop, held back for <see cref="DrawPortGlyphs"/>. The
     /// colour is its LAYER's, unmodified — the contrast tint is applied once, inside the marker, and
     /// the name now takes the same one so the whole glyph is a single colour.</summary>
-    private readonly record struct DeferredPort(LabelShape Label, SKColor LayerColor, PlanarPortKind Kind);
+    private readonly record struct DeferredPort(LabelShape Label, SKColor LayerColor, PlanarPortKind? Kind);
 
     /// <summary>
     /// Every port glyph in the frame, drawn above all of its geometry.
@@ -2970,14 +3014,20 @@ public static partial class LayoutRenderer
     private static void DrawPortMarker(SKCanvas canvas, LabelShape label,
         LayoutPortDirection.ConductorLookup? conductorAt,
         PathSpace ps, double scaleUm, SKColor layerColor, SKColor background,
-        LayoutFrameCounters counters, PlanarPortKind kind,
+        LayoutFrameCounters counters, PlanarPortKind? statedKind,
         PlanarMeshReport? mesh = null, int dbuPerMicron = LayoutUnits.DefaultDbuPerMicron)
     {
         if (LayoutPortDirection.Resolve(conductorAt, label) is not { } hint) return;
 
+        // The EM setup's own answer when it has one — including Edge, so changing a port back to an
+        // edge port in the .cem draws it as one. Only where nothing has spoken does the drawing infer
+        // from where the label is standing.
+        var kind = statedKind ?? LayoutPortDirection.InferredKind(hint);
+
         if (kind == PlanarPortKind.Internal)
         {
             DrawInternalPortMarker(canvas, label, hint, ps, scaleUm, layerColor, background, counters,
+                                   InternalRingRadius(conductorAt, label, hint),
                                    MeshViaFootprint(mesh, label, dbuPerMicron));
             return;
         }

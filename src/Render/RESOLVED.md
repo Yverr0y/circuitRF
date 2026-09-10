@@ -1006,3 +1006,69 @@ report asked for; its rationale is rewritten to name the real cause.
 under it still draws a marker, at a stand-in width (`LayoutPortDirection.Resolve`'s own documented
 branch). Dropping the polygon is therefore not how you get a name-only reference frame — clearing
 `PortDirection` as well is.
+
+## The internal port's mark: no ground symbol, and a ring the metal can hold (2026-09-09)
+
+Two owner reports about the SHUNT port's glyph, one session after the six defects above.
+
+**The ground symbol is gone.** The mark was a ring with a stem and three narrowing bars hanging below
+it — the schematic convention for "and its other terminal is the plane". That is true of every
+internal port and never varies, so the bars put ink on every one of them without distinguishing any
+of them, and over dense artwork they read as clutter rather than as information. The ring alone still
+carries the part that varies: where the port is, and — once there is a mesh — how big the footprint
+it drives turned out to be. `InternalPortStemOverWidth`, `InternalPortGroundBarsOverWidth` and
+`InternalPortGroundPitchOverWidth` went with them.
+
+**The ring was drawn wider than the metal.** `RingOverWidth` is 0.55 of the port width, i.e. wider
+than the conductor's own half-width of 0.5, so on a plain trace the glyph crossed the outline at four
+points and read as a circle with a line through it. Sizing it off the width alone was the deeper
+error: a port on a small pad, or near the end of a short stub, is bounded ALONG the trace as well.
+`InternalRingRadius` now measures the metal's own span through the label in BOTH directions
+(`LayoutPortDirection.SpanAt`, the same measurement the delta gap's width uses) and clamps the glyph
+to 0.9 of the smaller half-span — just inside the outline rather than tangent to it, since a stroke
+drawn exactly on an edge is drawn on top of that edge and cannot be seen. Where the outline cannot be
+walked (an instance's artwork, which answers with a bounding box) the width is the bound, which is
+the same answer for the straight run of metal that case usually is.
+
+**Only the GLYPH is clamped.** Once a mesh exists the ring is the footprint the solver resolved, and
+that is a dimension: it is reported at its real size whatever that is, which is the whole point of
+drawing it there.
+
+Gate: `tests/Ui.Tests/Layout/LayoutInteriorPortPlacementTests.cs` renders the metal alone and the
+metal with an internal port, and asserts every differing pixel is inside the conductor's own rows.
+The baseline may not contain the port with no mark declared — that renders as an EDGE port, whose bar
+and arrow are a second difference that masks the one being measured.
+
+## An edge port's mark is at the conductor end — and that had no escape hatch (owner, 2026-09-09)
+
+`PortHint` gained `Interior`, and `LayoutPortDirection` gained `InferredKind`/`MarkAtAnchor` beside
+it. The report and the full reasoning are in `src/Ui/RESOLVED.md`; what belongs here is why the
+drawing side had to change at all.
+
+**A `.clay` carries no port TYPE, deliberately** — the same artwork can be gapped in one EM setup and
+edge-driven in another — so `MarkKindOf` fell back to `PlanarPortKind.Edge` for a label no `.cem` had
+claimed. An edge port's bar and arrow are drawn at `hint.PlaneX/PlaneY`, the conductor END, so a port
+standing in the middle of a rectangle was drawn, outlined and picked at a face it was nowhere near.
+Measured on a 20 × 2.9 mm rect: label (10000, 1450), mark (0, 1450), with geometry snap ON and OFF
+alike. Dragging it moved the label and left the mark; the pick region, which follows the mark, handed
+the press to the rectangle instead, so the artwork moved and the port did not.
+
+**The fallback now infers from the one thing the layout does know — where the label is.** At a face it
+is an edge port and the bar belongs there, which is the 2026-08-09 request ("I can't tell from the
+port glyph where the actual reference plane is") and is unchanged. Clear of both ends it is drawn at
+its own anchor. `MarkKindOf` returns **null** for "nothing has spoken" rather than `Edge`, because the
+two are different questions and conflating them is what removed the escape hatch.
+
+**`Interior` is computed in `Measured`, from the shape's OUTLINE, against both ends.** `FaceAlong` in
+the direction and in `Opposite(dir)`, falling back to the box only where there is no outline to walk —
+on a notched polygon the bounding box's ends are 6 mm from the wall a port is standing on, which is
+the same reason `Measured` stopped taking its plane from the box.
+
+**Three consumers had to move with it or the marks would drift apart**: `DrawPortMarker`,
+`DrawSelectionOutlines`/`BuildOutlinePathForSelection` (which now take `PlanarPortKind?` rather than a
+pre-computed bool) and `LayoutHitTest.PortPickBbox`'s `atAnchor`. `MarkAtAnchor` is the single place
+all three ask. `DocumentExtents` and `LayoutClipboard` box the mark's own centre for the same reason —
+a square around the plane bounds empty metal while leaving an interior ring off the page.
+
+**The ghost passes `statedKind: null`, not `Edge`.** A ghost is not placed yet, so no setup can have
+claimed it, and it must show what a click will actually land.

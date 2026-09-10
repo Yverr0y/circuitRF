@@ -936,6 +936,43 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         // what keeps a port from landing on a layer the user has switched off, and it is the moment
         // the port's own PortLayer commitment is made (LayoutPortDirection.LookupFor states the rule).
         var conductorAt = LayoutPortDirection.LookupFor(Model, Technology, InstanceBaseDir);
+
+        // ── THE TOGGLE DECIDES, AND IT DECIDES BY MOVING THE LABEL — NOT BY REMEMBERING A MODE ────
+        //
+        // Owner, 2026-09-09: "when geometry snap is on, the port should be snapping to the edge for
+        // placement and for drags. when snap is off, then port can be placed anywhere and renders as
+        // internal port does."
+        //
+        // There is nothing to add here for either half, and that is the point. Snap ON is the query
+        // above: the conductor's own edge features — an end face, a corner, an edge midpoint — win
+        // and the label LANDS on the metal's boundary. Snap OFF leaves the grid-snapped click
+        // untouched, so the label stays in the middle of the metal where the user put it.
+        //
+        // The drawing then follows from WHERE THE LABEL IS, with no memory of which toggle was up at
+        // the time (LayoutPortDirection.PortHint.Interior): on the boundary it is an edge port and
+        // draws its bar there, in the middle it is drawn as an internal port does. So a .clay still
+        // carries no port type, a file re-opened months later draws the same way, and a port DRAGGED
+        // across the same toggle changes with it — which is the half a stored mode could never do.
+        //
+        // An intermediate attempt centred the label on the conductor's centre line when snap was ON.
+        // That is the opposite of what the toggle says on the toolbar, and it is gone.
+        //
+        // ── AND SNAP ON FINISHES THE JOB: THE PORT REACHES THE METAL'S BOUNDARY ─────────────────
+        //
+        // Unconditional, not a fallback for "the query found nothing", and both halves of that matter.
+        // In the middle of a wide conductor there IS no feature within tolerance, so a query-only rule
+        // would leave the toggle doing nothing precisely where the two answers differ most. And where
+        // the query DOES answer, its answer is not always on the boundary — the rect's own centre is a
+        // snap feature, and a port snapped to it is a port geometry snap has parked in the middle of
+        // the metal, which is the one thing this toggle now promises it will not do.
+        //
+        // A no-op when the point is already on the outline, which is every corner, edge midpoint and
+        // end face the query returns — so ordinary feature snapping is untouched.
+        if (GeometrySnapEnabled
+            && conductorAt(sx, sy, null) is { } onMetal
+            && LayoutPortDirection.NearestBoundaryPoint(onMetal, sx, sy) is { } edge)
+            (sx, sy) = (edge.X, edge.Y);
+
         if (conductorAt(sx, sy, null) is not { } conductor) return null;
 
         // The same visibility floor an ordinary committed label gets — a port marker that renders
@@ -957,11 +994,93 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
             // names one, the box's nearest-side inference otherwise. Re-deriving it here from the
             // box alone (as this did) is what let a port on a tapered PCell be stamped with a
             // direction its own marker then disagreed with.
-            PortDirection = LayoutPortDirection.DirectionAt(conductor, sx, sy),
+            // A port INSIDE the metal carries the direction the metal runs in. DirectionAt infers
+            // from the NEAREST SIDE, which mid-conductor is a long one — so an interior port was
+            // stamped facing ACROSS its own trace, which is meaningless for a to-ground port and
+            // visibly wrong for a delta gap (its brackets are drawn perpendicular to this).
+            //
+            // NOT gated on geometry snap: this is a question about the point, not about how the
+            // point was arrived at, and a port placed with snapping off is inside the same metal.
+            PortDirection = InteriorDirectionAt(conductorAt, sx, sy)
+                            ?? LayoutPortDirection.DirectionAt(conductor, sx, sy),
             // The conductor the user could SEE when they placed it. Null for artwork inside a placed
             // instance, which owns no top-level layer and is not visibility-filtered anyway.
             PortLayer     = conductor.Shape?.Layer,
         };
+    }
+
+    /// <summary>
+    /// <b>The direction a port INSIDE a piece of metal faces: the way the metal runs.</b>
+    ///
+    /// <para>Null at a conductor's end and off the metal entirely, which is where
+    /// <c>LayoutPortDirection.DirectionAt</c>'s nearest-side inference is the right answer and is left
+    /// to give it. This is not gated on geometry snap: it asks about the POINT, not about how the
+    /// point was arrived at, so a port placed with snapping switched off faces along its trace too.</para>
+    /// </summary>
+    private static LayoutRotation? InteriorDirectionAt(
+        LayoutPortDirection.ConductorLookup conductorAt, long x, long y)
+    {
+        if (conductorAt(x, y, null) is not { } info) return null;
+
+        // ── A POINT ON THE METAL'S BOUNDARY IS NOT INTERIOR, WHICHEVER FACE IT IS ON ─────────────
+        //
+        // The end-of-the-run test below only knows about the two ENDS, so a port snapped onto a long
+        // SIDE of a trace — which is where geometry snap puts one when the user clicks nearer a side
+        // than an end — was stamped "along the metal" and then drew as an internal port sitting on the
+        // edge: neither answer, and visibly wrong. Being ON the outline is the whole question, so ask
+        // it directly. A port there gets DirectionAt's nearest-side inference, which is what names the
+        // face it is standing on.
+        if (LayoutPortDirection.NearestBoundaryPoint(info, x, y) is { } b
+            && Math.Abs(b.X - x) <= 1 && Math.Abs(b.Y - y) <= 1)
+            return null;
+
+        if (MetalSpansAt(conductorAt, x, y) is not { } m) return null;
+        return IsAtAnEnd(m, x, y) ? null : m.AlongX ? LayoutRotation.R0 : LayoutRotation.R90;
+    }
+
+    /// <summary>
+    /// The metal's own two spans through a point: which way the conductor RUNS there, where its
+    /// centre line is, and where its two ends are.
+    ///
+    /// <para>Measured from the OUTLINE rather than taken from the bounding box, so a taper or a bend
+    /// answers for the point that was actually asked about. The narrower of the two cuts is across the
+    /// conductor — that is what a trace's width is, whichever way it runs. Null off the metal, and
+    /// null for artwork inside a placed instance, which answers with a box and no outline: a box's
+    /// centre is exactly the wrong answer for the tapers and tees a PCell usually is.</para>
+    /// </summary>
+    private static (bool AlongX, long AcrossCentre, long AcrossWidth, long EndLo, long EndHi)? MetalSpansAt(
+        LayoutPortDirection.ConductorLookup conductorAt, long x, long y)
+    {
+        // The lookup hit-tests at zero tolerance, so this is "on the conductor", not "near one".
+        if (conductorAt(x, y, null) is not { Shape: { } shape } info) return null;
+
+        var cutX = LayoutPortDirection.SpanAt(shape, info.Box, LayoutRotation.R0,  acrossAt: y, alongAt: x);
+        var cutY = LayoutPortDirection.SpanAt(shape, info.Box, LayoutRotation.R90, acrossAt: x, alongAt: y);
+        if (cutX is not { } spanY || cutY is not { } spanX) return null;
+        if (spanY.Width <= 0 || spanX.Width <= 0) return null;
+
+        bool alongX = spanY.Width <= spanX.Width;
+        var across = alongX ? spanY : spanX;
+
+        return (alongX, across.Centre, across.Width,
+                alongX ? info.Box.MinX : info.Box.MinY,
+                alongX ? info.Box.MaxX : info.Box.MaxY);
+    }
+
+    /// <summary>
+    /// Whether a point is at one of the conductor's ENDS — where an edge port belongs and where every
+    /// feature worth snapping to lives.
+    ///
+    /// <para>A real tolerance rather than an equality, and it is the metal's own half-width: an end
+    /// face need not be the box's extreme on a bend or a taper, and a flattened arc's vertices sit a
+    /// fraction of a DBU inside it.</para>
+    /// </summary>
+    private static bool IsAtAnEnd(
+        (bool AlongX, long AcrossCentre, long AcrossWidth, long EndLo, long EndHi) m, long x, long y)
+    {
+        long along = m.AlongX ? x : y;
+        long eps = Math.Max(1, m.AcrossWidth / 2);
+        return along - m.EndLo <= eps || m.EndHi - along <= eps;
     }
 
     /// <summary>
@@ -1265,7 +1384,22 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         // letting the cycle pre-empt this would break select-then-drag onto a snap target. The only
         // thing that outranks it is a RULER on top (R-rul-11), and a marker is always about artwork
         // since a ruler is never a snap target (§9B.11).
-        if (picks is not [{ Kind: LayoutPickKind.Ruler }, ..]
+        // …and a PORT outranks it for a stronger reason than a ruler does (owner, 2026-09-09: "ports
+        // are being forced to the edge … when I drag a port that was already placed").
+        //
+        // A port label contributes NO snap features of its own, and it is deliberately placed ON a
+        // conductor's features — an end face, a corner, an edge midpoint — because that is what the
+        // Port tool snaps it to. So the marker under a press aimed at a port belongs to the METAL, and
+        // the click-through grab handed the press to the conductor: the drag then moved the trace and
+        // left the port where it was. On screen that reads as the port being welded to the edge and
+        // springing back, which is what the report describes; the port had in fact never moved and the
+        // artwork had. Measured on a plain 20 x 2.9 mm trace: drag the port from the end-face midpoint
+        // to mid-span and the RECT lands at (10000, -1050) while the port stays at (0, 1450).
+        //
+        // The whole point of the click-through grab is to reach a shape whose own hit-test the press
+        // MISSED. Here the press did not miss anything: it landed inside the port's own pick region,
+        // which is the mark the user is aiming at.
+        if (picks is not [{ Kind: LayoutPickKind.Ruler }, ..] && !TopPickIsPort(picks)
             && TryBeginSnapMarkerDrag(px, py, shift, ctrl, snapTolDbu))
             return;
 
@@ -1311,8 +1445,28 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         foreach (int i in LayoutRulerHitTest.HitStack(Model, px, py, tolDbu, LastZoomPxPerDbu))
             picks.Add(new LayoutPick(LayoutPickKind.Ruler, i));
 
+        // ── PORTS RANK ABOVE ORDINARY ARTWORK, for the reason rulers already do ─────────────────
+        //
+        // Owner report, 2026-09-09: "ports are being forced to the edge … I can prove it with ANY
+        // geometry." A port is a small MARK deliberately placed ON metal, and `HitStack` orders by
+        // ZOrder — so anything drawn above it takes the press, and dragging then moved that shape
+        // while the port sat still. Measured on the reporting board, pressing exactly on port P2:
+        // the stack came back [layer-3 polygon, P2, the trace] and the polygon won.
+        //
+        // On screen this is indistinguishable from the port being welded in place, and it happens
+        // with geometry snap ON or OFF: the toggle changes WHICH shape steals the press (the snap
+        // marker's owner, or the topmost pick), never that one does.
+        //
+        // Ports first, in their own relative order, exactly as R-rul-11 puts a ruler above the
+        // artwork it lies over. Nothing becomes unreachable: a second press at the same point cycles
+        // down the stack to whatever is underneath, which is what the cycle is for.
         var shapes = LayoutHitTest.HitStack(Model, Technology, px, py, tolDbu, PortMarkerRegion);
-        foreach (int i in shapes) picks.Add(new LayoutPick(LayoutPickKind.Shape, i));
+        foreach (int i in shapes)
+            if (i >= 0 && i < Model.Shapes.Count && Model.Shapes[i] is LabelShape { IsPort: true })
+                picks.Add(new LayoutPick(LayoutPickKind.Shape, i));
+        foreach (int i in shapes)
+            if (!(i >= 0 && i < Model.Shapes.Count && Model.Shapes[i] is LabelShape { IsPort: true }))
+                picks.Add(new LayoutPick(LayoutPickKind.Shape, i));
 
         if (shapes.Count == 0)
             foreach (int i in LayoutHitTest.HitInstanceStack(Model, Technology, InstanceBaseDir, px, py, tolDbu))
@@ -1320,6 +1474,15 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
 
         return picks;
     }
+
+    /// <summary>
+    /// Whether the topmost thing under a press is a PORT — the one artwork pick that outranks the
+    /// geometry-snap click-through grab. See the call site for what went wrong without it.
+    /// </summary>
+    private bool TopPickIsPort(IReadOnlyList<LayoutPick> picks) =>
+        picks is [{ Kind: LayoutPickKind.Shape, Index: var i }, ..]
+        && i >= 0 && i < Model.Shapes.Count
+        && Model.Shapes[i] is LabelShape { IsPort: true };
 
     /// <summary>Routes one picked entry to its own channel's click-selection rule — each of the three
     /// already knows how to handle Shift/Ctrl and how to clear the other two.</summary>
@@ -1840,6 +2003,11 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
     /// is the same rule with nothing left for it to protect.</para></summary>
     private bool _pointSnapDragActive;
 
+    /// <summary>True while the dragged lone port is one the active <c>.cem</c> drives as an INTERNAL
+    /// port — the one port the geometry-snap edge rule leaves alone. See <see cref="BeginMoveDrag"/>.
+    /// </summary>
+    private bool _portDragIsTypedInternal;
+
     /// <summary>
     /// A port's pick region for THIS document — the mark it draws, plus padding.
     ///
@@ -1853,11 +2021,21 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
     private Bbox PortMarkerRegion(LabelShape label)
     {
         var conductorAt = LayoutPortDirection.LookupFor(Model, Technology, InstanceBaseDir);
-        bool internalMark = false;
-        foreach (var (mx, my, kind) in InternalPortMarks)
-            if (mx == label.X && my == label.Y) { internalMark = kind != PlanarPortKind.Edge; break; }
+        var hint = LayoutPortDirection.Resolve(conductorAt, label);
 
-        return LayoutHitTest.PortPickBbox(label, LayoutPortDirection.Resolve(conductorAt, label), atAnchor: internalMark);
+        // The setup's own answer when it has one — Edge included, so a port changed back to an edge
+        // port in the .cem is picked by the bar at the conductor end again. Where nothing has spoken,
+        // the SAME inference the renderer makes, so the rectangle that highlights a port and the
+        // rectangle that responds to a click stay one rectangle (PortHint.Interior).
+        PlanarPortKind? stated = null;
+        foreach (var (mx, my, kind) in InternalPortMarks)
+            if (mx == label.X && my == label.Y) { stated = kind; break; }
+
+        bool atAnchor = hint is { } h
+                        && LayoutPortDirection.MarkAtAnchor(
+                               stated ?? LayoutPortDirection.InferredKind(h), h);
+
+        return LayoutHitTest.PortPickBbox(label, hint, atAnchor: atAnchor);
     }
 
     private void BeginMoveDrag(long px, long py)
@@ -1869,6 +2047,7 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         // on the snap target is the port itself — not wherever within its pick region the user
         // happened to press. (The pick region is deliberately generous; see LayoutHitTest.)
         _pointSnapDragActive = false;
+        _portDragIsTypedInternal = false;
         if (!_snapDragActive && _selectedInstanceIndices.Count == 0 && _selectedIndices.Count == 1)
         {
             int i = _selectedIndices[0];
@@ -1876,6 +2055,17 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
             {
                 _pointSnapDragActive = true;
                 px = port.X; py = port.Y;
+
+                // …but a port the .cem has TYPED as internal is never pulled to the metal's boundary
+                // by the edge rule below. Its whole reason for existing is to sit in the middle of a
+                // conductor — a delta gap dragged onto the edge is not a delta gap any more — and the
+                // setup's answer outranks an inference either way (owner, 2026-09-09). The edge rule
+                // is for the ports nothing has spoken for, which is every port in a layout with no
+                // setup open.
+                _portDragIsTypedInternal = false;
+                foreach (var (mx, my, kind) in InternalPortMarks)
+                    if (mx == port.X && my == port.Y)
+                    { _portDragIsTypedInternal = kind != PlanarPortKind.Edge; break; }
             }
         }
 
@@ -2353,6 +2543,28 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         else
         {
             (dx, dy) = (gridDx, gridDy);
+        }
+
+        // ── A DRAGGED PORT REACHES THE EDGE TOO, NOT ONLY A PLACED ONE ──────────────────────────
+        //
+        // Owner, 2026-09-09: "when geometry snap is on, the port should be snapping to the edge for
+        // placement and for drags." The same rule TryBuildPortPlacement applies, for the same two
+        // reasons: the attraction above is a TOLERANCE query and answers nothing mid-metal, and where
+        // it does answer the answer need not be on the boundary at all. A no-op once the point is on
+        // the outline, so a drop attracted to a corner or an end face is left exactly where it landed.
+        //
+        // Before the ortho lock, so Shift still composes with it exactly as it does with an attracted
+        // target: the port reaches the edge along the free axis and does not budge on the locked one.
+        if (_pointSnapDragActive && !_portDragIsTypedInternal && GeometrySnapEnabled)
+        {
+            var portConductorAt = LayoutPortDirection.LookupFor(Model, Technology, InstanceBaseDir);
+            long lx = _moveAnchorX + dx, ly = _moveAnchorY + dy;
+            if (portConductorAt(lx, ly, null) is { } onMetal
+                && LayoutPortDirection.NearestBoundaryPoint(onMetal, lx, ly) is { } edge)
+            {
+                dx = edge.X - _moveAnchorX;
+                dy = edge.Y - _moveAnchorY;
+            }
         }
 
         // R-dup-4 (owner, 2026-08-27): geometry snap KEEPS WORKING under Shift. Zeroing the locked
@@ -3774,7 +3986,13 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         else if (_portGhost is { } portGhost)
         {
             inProgress = portGhost;
-            DrawReadoutText = $"Port {portGhost.Text} — click to place";
+            // NO READOUT (owner, 2026-09-09). The other tools' readouts are MEASUREMENTS — a rect's
+            // size, a line's length, a handle's parameter — and they earn the space they take on the
+            // canvas. The Port tool's was a fixed sentence carrying no number at all, and now that the
+            // ghost draws the mark a click will actually land (an edge port's bar at the face, an
+            // interior port's ring at the cursor) it does not even say which of the two you are about
+            // to get. The ghost says everything the sentence did, in the place the user is looking.
+            DrawReadoutText = "";
         }
         else
         {

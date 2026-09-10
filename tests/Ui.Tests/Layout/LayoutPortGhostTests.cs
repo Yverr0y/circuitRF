@@ -94,7 +94,13 @@ public class LayoutPortGhostTests
         var ghost = Ghost(vm);
         Assert.NotNull(ghost);
         Assert.Equal(5_100 * Dbu, ghost!.X);
-        Assert.Equal(1_200 * Dbu, ghost.Y);
+
+        // ALONG the trace the grid decides, as it always did. ACROSS it the EDGE does, because this
+        // fixture has geometry snap ON (owner, 2026-09-09: "when geometry snap is on, the port should
+        // be snapping to the edge for placement and for drags"). 1,211 µm up a 2.9 mm trace is nearer
+        // the low-y side, so that is where the ghost sits — and, the ghost being the click's own
+        // preview, where the click lands.
+        Assert.Equal(0, ghost.Y);
     }
 
     [Fact]

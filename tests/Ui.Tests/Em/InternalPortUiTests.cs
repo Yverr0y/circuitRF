@@ -284,9 +284,21 @@ public class InternalPortUiTests
         // way the mark can differ, and it has to carry WHICH mark rather than merely "internal".
         var vm = Editor(TempDir());
 
-        var mark = Assert.Single(vm.InternalPortMarkAnchors);
-        Assert.Equal(PlanarPortKind.Internal, mark.Kind);
+        var mark = Assert.Single(vm.InternalPortMarkAnchors, m => m.Kind == PlanarPortKind.Internal);
         Assert.Equal(Mm(10), mark.X);
+
+        // ── AND EVERY OTHER PORT, AS AN EDGE PORT (2026-09-09) ────────────────────────────────
+        //
+        // It used to publish ONLY the non-edge ports, so "absent from this list" meant both "this
+        // setup calls it an edge port" and "no setup has ever spoken" — and the layout, unable to
+        // tell the two apart, assumed the former for both. That is what drew a port standing in the
+        // middle of a rectangle as an edge port with its bar at the metal's end, wherever the label
+        // actually was. An entry per port is what lets the layout infer for the ports this setup has
+        // NOT claimed while still obeying it for the ports it has, in either direction: the owner's
+        // "if user changes the port type from the .cem window, then the ports in layout are drawn
+        // properly" includes changing one BACK to Edge.
+        Assert.Equal(3, vm.InternalPortMarkAnchors.Count);
+        Assert.Equal(2, vm.InternalPortMarkAnchors.Count(m => m.Kind == PlanarPortKind.Edge));
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -357,7 +369,12 @@ public class InternalPortUiTests
         // A differential render, because the claim is only that the three marks are different from
         // each other — asserting particular pixels would be asserting the glyph's design, which is
         // free to change, rather than the property that a reader can tell them apart.
-        using var edge  = RenderWith(null);
+        // `Edge` EXPLICITLY, not null (2026-09-09). Null means "no EM setup has claimed this port",
+        // which is no longer a synonym for "edge port": this fixture's label sits at 10 mm along a
+        // 20 mm line, in the middle of the metal, and an unclaimed port there is now drawn where it
+        // stands rather than at a conductor end it is 10 mm from. Saying Edge here is the .cem saying
+        // Edge, which is what this test is about and what still produces an edge port's bar.
+        using var edge  = RenderWith(PlanarPortKind.Edge);
         using var gap   = RenderWith(PlanarPortKind.InternalDeltaGap);
         using var via = RenderWith(PlanarPortKind.Internal);
 
@@ -367,5 +384,24 @@ public class InternalPortUiTests
         // And it is drawn at all — the same render with no port mark differs from itself only if
         // something was painted, so this also pins that the via-port branch is reached.
         Assert.NotEqual(Pixels(edge), Pixels(gap));
+    }
+
+    /// <summary>
+    /// <b>The owner's report, at the pixel: a port no EM setup has claimed, standing in the middle of
+    /// a piece of metal, is drawn as an internal port and NOT as an edge port.</b>
+    ///
+    /// <para>This is the pair that used to be identical — <c>RenderWith(null)</c> was the edge-port
+    /// reference above — and the identity was the bug: with no <c>.cem</c> open there was no way to
+    /// draw a port anywhere but at a conductor end.</para>
+    /// </summary>
+    [Fact]
+    public void AnUnclaimedPortInTheMiddleOfMetal_DrawsAsAnInternalPort_NotAnEdgeOne()
+    {
+        using var unclaimed = RenderWith(null);
+        using var edge      = RenderWith(PlanarPortKind.Edge);
+        using var via       = RenderWith(PlanarPortKind.Internal);
+
+        Assert.Equal(Pixels(via), Pixels(unclaimed));
+        Assert.NotEqual(Pixels(edge), Pixels(unclaimed));
     }
 }

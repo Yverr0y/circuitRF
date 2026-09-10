@@ -1394,13 +1394,17 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         // because that is where it lives and because an unresolved row has no port to ask. For a
         // resolved row the two are the same value by construction — `kindFor` above IS this
         // function — so this is not a second opinion, it is the only one.
+        // EVERY port, Edge ones included (owner, 2026-09-09: "if user changes the port type from the
+        // .cem window, then the ports in layout are drawn properly"). The list used to hold only the
+        // internal ones, so "absent" meant both "this setup calls it an edge port" and "no setup has
+        // ever spoken", and the layout could not tell them apart — it assumed the former for both and
+        // drew every port in an unclaimed layout at a conductor end, wherever the label actually was
+        // (LayoutPortDirection.PortHint.Interior). An entry per port makes this setup's answer
+        // authoritative for the ports it knows, and leaves the layout free to infer for the rest — a
+        // port just drawn, which this setup has not re-extracted yet.
         var anchors = new List<(long X, long Y, PlanarPortKind Kind)>();
         for (int i = 0; i < ports.Rows.Count; i++)
-        {
-            var kind = Working.ResolvePortKind(i);
-            if (kind != PlanarPortKind.Edge)
-                anchors.Add((ports.Rows[i].Label.X, ports.Rows[i].Label.Y, kind));
-        }
+            anchors.Add((ports.Rows[i].Label.X, ports.Rows[i].Label.Y, Working.ResolvePortKind(i)));
         InternalPortMarkAnchors = anchors;
 
         var notes = new List<string>(_geometryNotes);

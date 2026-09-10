@@ -493,7 +493,7 @@ public static class DocLayoutFixtures
     /// <para><b>The mark is deliberately not oriented by the trace</b>, and the figure is where that
     /// is easiest to see: an edge port's bar and a gap's brackets both say which way current
     /// crosses a plane IN the layout, while an internal port's current leaves the plane altogether. A
-    /// ring and a ground symbol say that without claiming a direction the port does not have.</para>
+    /// plain ring says that without claiming a direction the port does not have.</para>
     /// </summary>
     public static FigureScene InternalPortOnALine()
     {

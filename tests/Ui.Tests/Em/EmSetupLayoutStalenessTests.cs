@@ -202,14 +202,16 @@ public class EmSetupLayoutStalenessTests
         const string clay = "/tmp/bad-port-marks.clay";
         var (view, vm) = ThreePortPanel(clay);
 
-        var before = Assert.Single(vm.InternalPortMarkAnchors);
-        Assert.Equal(PlanarPortKind.InternalDeltaGap, before.Kind);
+        // Single among the GAP marks: since 2026-09-09 the panel publishes an entry for every port,
+        // edge ones included, so that "absent" can mean "no setup has claimed this port" and the
+        // layout can draw an unclaimed one where it actually stands. What this test is about — the
+        // gap mark surviving another port's failure — is unchanged.
+        var before = Assert.Single(vm.InternalPortMarkAnchors, m => m.Kind == PlanarPortKind.InternalDeltaGap);
 
         view.Shapes.OfType<LabelShape>().First(l => l.Text == "P2").X = Mm(60);
         vm.Refresh();
 
-        var after = Assert.Single(vm.InternalPortMarkAnchors);
-        Assert.Equal(PlanarPortKind.InternalDeltaGap, after.Kind);
+        var after = Assert.Single(vm.InternalPortMarkAnchors, m => m.Kind == PlanarPortKind.InternalDeltaGap);
         Assert.Equal(before.X, after.X);
         Assert.Equal(before.Y, after.Y);
 

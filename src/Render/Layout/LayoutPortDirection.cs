@@ -2,6 +2,7 @@
 // read this, and only the renderer is allowed to know about Skia.
 
 using System.Collections.Generic;
+using CircuitRF.Engine.Mom;   // PlanarPortKind — the port TYPE an EM setup drives a label as.
 
 namespace CircuitRF.Render;
 
@@ -40,8 +41,48 @@ public static class LayoutPortDirection
     /// <para><see cref="LengthDbu"/> is the conductor's extent ALONG the direction — how much metal
     /// there is for the arrow to point into. Without it the marker has no way to know it is about to
     /// draw past the end of the thing it annotates (owner report, 2026-08-09).</para></summary>
+    /// <param name="Interior">
+    /// <b>True when the label does NOT sit at the conductor face its own direction names</b> — it is
+    /// standing in the middle of a piece of metal.
+    ///
+    /// <para><b>Why this is on the hint (owner, 2026-09-09: "port placement always snaps to edge of
+    /// geometry … SAME DAMN BUG WITH DRAGGING TOO").</b> A <c>.clay</c> deliberately carries no port
+    /// type — the same artwork can be gapped in one EM setup and edge-driven in another — so a layout
+    /// with no <c>.cem</c> claiming it drew EVERY port as an edge port, and an edge port's bar and
+    /// arrow are drawn at <see cref="PlaneX"/>/<see cref="PlaneY"/>, the conductor END. Click the
+    /// middle of a rectangle and the label was stored exactly where you clicked while the mark you
+    /// see appeared at the metal's edge; drag it and the label moved while the mark stayed put.
+    /// Measured on a 20 x 2.9 mm rect: click (10000, 1450) → label (10000, 1450), mark (0, 1450), with
+    /// geometry snap ON and OFF alike. Nothing was snapping — the port was being DRAWN somewhere it
+    /// was not.</para>
+    ///
+    /// <para>So where no setup has spoken, the drawing infers what it can honestly infer from the one
+    /// thing the layout does know — where the label is. At the face it names, it is an edge port and
+    /// the bar belongs at that face, which is the 2026-08-09 request ("where is the reference plane"
+    /// had no readable answer with the bar drawn wherever the user clicked) and is unchanged. Deep
+    /// inside the metal, "edge port" is not a tenable reading of the drawing at all, and the mark is
+    /// drawn at the label — <see cref="InferredKind"/>. A <c>.cem</c> that has claimed the layout
+    /// still overrules this outright, Edge included.</para>
+    /// </param>
     public readonly record struct PortHint(
-        LayoutRotation Direction, long WidthDbu, bool Inferred, long PlaneX, long PlaneY, long LengthDbu);
+        LayoutRotation Direction, long WidthDbu, bool Inferred, long PlaneX, long PlaneY, long LengthDbu,
+        bool Interior = false);
+
+    /// <summary>
+    /// <b>What to draw a port as when nothing has said what it is</b> — read only where the active EM
+    /// setup has no answer for this label. See <see cref="PortHint.Interior"/> for the report.
+    /// </summary>
+    public static PlanarPortKind InferredKind(PortHint hint) =>
+        hint.Interior ? PlanarPortKind.Internal : PlanarPortKind.Edge;
+
+    /// <summary>
+    /// <b>Whether a port's mark is drawn at the LABEL's own anchor rather than at the conductor
+    /// end.</b> The single answer the renderer, the selection outline and the pick region all take,
+    /// so none of them can disagree about where a port is — which is the drift
+    /// <see cref="MarkerBbox"/> exists to prevent.
+    /// </summary>
+    public static bool MarkAtAnchor(PlanarPortKind kind, PortHint hint) =>
+        kind != PlanarPortKind.Edge || hint.Interior;
 
     // ── THE MARKER'S OWN EXTENT ───────────────────────────────────────────────────────────────
     //
@@ -563,6 +604,56 @@ public static class LayoutPortDirection
         return width > 0 ? (width, best.Lo + width / 2) : null;
     }
 
+    /// <summary>
+    /// <b>The nearest point on the conductor's own boundary</b> — where a port goes when geometry
+    /// snap is on and there is no snap FEATURE within tolerance to take it.
+    ///
+    /// <para><b>Why it ignores the tolerance</b> (owner, 2026-09-09: "when geometry snap is on, the
+    /// port should be snapping to the edge for placement and for drags. when snap is off, then port
+    /// can be placed anywhere and renders as internal port does"). Ordinary geometry snap is a
+    /// tolerance query, so in the middle of a wide piece of metal there is no candidate and the click
+    /// stands — which would make the toggle do nothing at all exactly where the two answers differ
+    /// most, and leave the user with no way to say "on the edge, please" other than zooming until the
+    /// edge came within eight pixels. A port is not an ordinary shape: it belongs on a conductor
+    /// boundary or deliberately away from one, and the toggle is the sentence that says which.</para>
+    ///
+    /// <para>The boundary, not the nearest END face: a corner, a side and an end are all metal edges,
+    /// and picking the end would move the port along the trace to somewhere the user was not pointing.
+    /// Null for artwork with no outline to walk — an instance's box — where there is nothing to
+    /// measure and the click stands.</para>
+    /// </summary>
+    public static (long X, long Y)? NearestBoundaryPoint(ConductorInfo info, long x, long y)
+    {
+        if (info.Shape is not { } shape || OutlineOf(shape) is not { Length: >= 6 } xy) return null;
+
+        long bestX = 0, bestY = 0;
+        double bestD2 = double.MaxValue;
+
+        int n = xy.Length / 2;
+        for (int i = 0; i < n; i++)
+        {
+            int j = (i + 1) % n;
+            var (px, py) = NearestOnSegment(xy[2 * i], xy[2 * i + 1], xy[2 * j], xy[2 * j + 1], x, y);
+            double dx = px - (double)x, dy = py - (double)y;
+            double d2 = dx * dx + dy * dy;
+            if (d2 < bestD2) { bestD2 = d2; bestX = px; bestY = py; }
+        }
+
+        return bestD2 == double.MaxValue ? null : (bestX, bestY);
+    }
+
+    /// <summary>The point on segment AB closest to P, clamped to the segment's own ends.</summary>
+    private static (long X, long Y) NearestOnSegment(long ax, long ay, long bx, long by, long px, long py)
+    {
+        double vx = bx - (double)ax, vy = by - (double)ay;
+        double len2 = vx * vx + vy * vy;
+        if (len2 <= 0) return (ax, ay);
+
+        double t = ((px - (double)ax) * vx + (py - (double)ay) * vy) / len2;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        return ((long)System.Math.Round(ax + t * vx), (long)System.Math.Round(ay + t * vy));
+    }
+
     /// <summary>The shape's outer ring as a flat x,y array, or null when it has none to give.
     /// A polygon answers directly; anything curved is flattened at a tolerance fine enough that the
     /// span it yields is exact to the DBU.</summary>
@@ -788,7 +879,57 @@ public static class LayoutPortDirection
             }
         }
 
-        return new PortHint(dir, width, Inferred, px, py, length);
+        // The metal's two boundaries along this axis, THROUGH the label — the near one is the face
+        // the direction names and is already resolved into px/py above; the far one is the same
+        // question asked the other way. Measured on the outline where there is one, because a
+        // multi-feature polygon's bounding box describes its faces not at all (FaceAlong says why):
+        // on a notched polygon the box's ends are 6 mm from the wall the port is standing on.
+        long nearFace = alongX ? px : py;
+        long farFace  = (info.Shape is { } outline ? FaceAlong(outline, Opposite(dir), label.X, label.Y) : null)
+                        ?? (alongX ? (fromLow ? info.Box.MaxX : info.Box.MinX)
+                                   : (fromLow ? info.Box.MaxY : info.Box.MinY));
+
+        return new PortHint(dir, width, Inferred, px, py, length,
+                            Interior: IsInterior(label, dir, nearFace, farFace, width));
+    }
+
+    /// <summary>The reverse of a direction — the other end of the same axis.</summary>
+    private static LayoutRotation Opposite(LayoutRotation r) => r switch
+    {
+        LayoutRotation.R0   => LayoutRotation.R180,
+        LayoutRotation.R180 => LayoutRotation.R0,
+        LayoutRotation.R90  => LayoutRotation.R270,
+        _                   => LayoutRotation.R90,
+    };
+
+    /// <summary>
+    /// <b>Whether the label stands clear of BOTH ends of the metal, along the axis its direction
+    /// runs on</b> — that is, in the middle of a piece of conductor rather than at an end of it.
+    ///
+    /// <para><b>Both ends, not the one the direction names.</b> A port standing on the low-x face
+    /// while pointing R180 is a port the user deliberately rotated to drive current out of that end,
+    /// and its bar belongs at the face it names — that is
+    /// <c>LayoutPortMoveReseatsDirectionTests</c>' case and it is unchanged. What makes the owner's
+    /// port different is not that it disagrees with its direction: it is that there is no end
+    /// anywhere near it. Measuring only the named face would have swept the rotated port up with it.</para>
+    ///
+    /// <para>The tolerance is the metal's OWN size, both ways round, because neither alone is enough:
+    /// half the width is the natural reach of an end face and is what a user aiming at one lands
+    /// within with geometry snap switched OFF, but on a square pad half the width is the whole shape
+    /// and every point would read as an end. A quarter of the metal's extent along the axis bounds it
+    /// there. So a port dropped NEAR the end of a trace is still an edge port — it does not have to be
+    /// exactly on the face — while a port in the middle of a rectangle is not one, however square the
+    /// rectangle is.</para>
+    /// </summary>
+    private static bool IsInterior(LabelShape label, LayoutRotation dir,
+                                   long nearFace, long farFace, long width)
+    {
+        bool alongX = dir is LayoutRotation.R0 or LayoutRotation.R180;
+        long along  = alongX ? label.X : label.Y;
+        long span   = System.Math.Abs(farFace - nearFace);
+
+        long tol = System.Math.Max(1, System.Math.Min(width / 2, System.Math.Max(span, 1) / 4));
+        return System.Math.Abs(along - nearFace) > tol && System.Math.Abs(along - farFace) > tol;
     }
 
     /// <summary>

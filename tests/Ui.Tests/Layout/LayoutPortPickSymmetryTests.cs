@@ -132,14 +132,26 @@ public class LayoutPortPickSymmetryTests
     /// caller with no conductor lookup still gets and is still symmetric. What the 2026-08-09 report
     /// was really about — a port being grabbable from behind rather than only from in front — is now
     /// answered differently: you grab a port at its arrow, from any side of it.</para>
+    ///
+    /// <para><b>NARROWED, 2026-09-09 — it is an EDGE port you grab at its arrow.</b> The fixture
+    /// above puts its label at x = 6 mm, "well inside the conductor, clear of its own corners", and
+    /// went on to assert that pressing there did NOT select it while pressing 14 mm away at the
+    /// metal's end did. That is the owner's report — "port placement always snaps to edge of geometry
+    /// … SAME DAMN BUG WITH DRAGGING TOO" — written down as an expectation: a port standing in the
+    /// middle of a rectangle was drawn, highlighted and picked at an edge it was nowhere near, so
+    /// dragging it appeared to do nothing. A port with no EM setup claiming it is now drawn where the
+    /// evidence puts it (<c>LayoutPortDirection.PortHint.Interior</c>), and picked there too. The
+    /// original claim is kept below for the port it was always about — one at a conductor end.</para>
     /// </summary>
     [Fact]
-    public void ThePortIsGrabbedAtItsArrow_FromEitherSideOfIt()
+    public void AnEdgePortIsGrabbedAtItsArrow_FromEitherSideOfIt()
     {
-        // R0 means current flows +x, so the port names the LOW-x end and its plane is at x = 0.
+        // R0 means current flows +x, so the port names the LOW-x end and its plane is at x = 0 — and
+        // the label is put there too, which is what makes it an edge port rather than a mark stranded
+        // mid-conductor.
         foreach (long dx in new long[] { -H / 8, 0, H / 8 })
         {
-            Fixture(LayoutRotation.R0, out var v);
+            EndFixture(out var v);
             var vm = new LayoutEditorViewModel(v) { ActiveTool = LayoutEditorViewModel.Tool.Select };
             vm.ApplyTechResolution(new TechResolution(
                 StarterTechnologies.Pcb2Layer(), null, TechResolutionSource.WorkspaceDefault, []));
@@ -149,10 +161,32 @@ public class LayoutPortPickSymmetryTests
         }
     }
 
-    /// <summary>And NOT at its label, which is the deliberate consequence — stated so a later reader
-    /// does not mistake it for a regression.</summary>
+    /// <summary>…and not from the far end of the metal it stands on, which is the other half of the
+    /// same claim: an edge port's region is at ITS end, not at every end.</summary>
     [Fact]
-    public void ThePortIsNotGrabbedAtItsLabel()
+    public void AnEdgePortIsNotGrabbedAtTheFarEndOfItsConductor()
+    {
+        EndFixture(out var view);
+        var vm = new LayoutEditorViewModel(view) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+        vm.ApplyTechResolution(new TechResolution(
+            StarterTechnologies.Pcb2Layer(), null, TechResolutionSource.WorkspaceDefault, []));
+
+        vm.OnPointerPressed(20_000 * Dbu, 1_450 * Dbu, KeyModifiers.None, 1, 0);
+
+        Assert.DoesNotContain(1, vm.SelectedIndices);
+    }
+
+    /// <summary>
+    /// <b>The owner's report, as a test: a port in the middle of a piece of metal is grabbed
+    /// THERE.</b>
+    ///
+    /// <para>Not at the conductor's end, which is where its mark used to be drawn and therefore where
+    /// its pick region used to sit — 14 mm from the thing the user was aiming at. Pressing on the port
+    /// selected the RECTANGLE instead, so the drag moved the artwork and left the port behind: on
+    /// screen, a port welded to the edge.</para>
+    /// </summary>
+    [Fact]
+    public void APortInTheMiddleOfMetalIsGrabbedWhereItIs_NotAtTheConductorEnd()
     {
         Fixture(LayoutRotation.R0, out var view);
         var vm = new LayoutEditorViewModel(view) { ActiveTool = LayoutEditorViewModel.Tool.Select };
@@ -160,7 +194,27 @@ public class LayoutPortPickSymmetryTests
             StarterTechnologies.Pcb2Layer(), null, TechResolutionSource.WorkspaceDefault, []));
 
         vm.OnPointerPressed(Anchor, 1_450 * Dbu, KeyModifiers.None, 1, 0);
+        Assert.Contains(1, vm.SelectedIndices);
 
-        Assert.DoesNotContain(1, vm.SelectedIndices);
+        // …and NOT at the end it used to be dragged to, which is bare metal as far as this port is
+        // concerned. Shape 0 is the rectangle: pressing there is a press on the rectangle.
+        var far = new LayoutEditorViewModel(view) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+        far.ApplyTechResolution(new TechResolution(
+            StarterTechnologies.Pcb2Layer(), null, TechResolutionSource.WorkspaceDefault, []));
+        far.OnPointerPressed(0, 1_450 * Dbu, KeyModifiers.None, 1, 0);
+        Assert.DoesNotContain(1, far.SelectedIndices);
+    }
+
+    /// <summary>The same trace, with the port's label ON the low-x end it names — an ordinary edge
+    /// port, which is what the two tests above are about.</summary>
+    private static void EndFixture(out LayoutView view)
+    {
+        view = new LayoutView { DbuPerMicron = Dbu, SnapDbu = 0 };
+        view.Shapes.Add(new RectShape { Layer = TopCopper, X1 = 0, Y1 = 0, X2 = 20_000 * Dbu, Y2 = 2_900 * Dbu });
+        view.Shapes.Add(new LabelShape
+        {
+            Layer = TopCopper, X = 0, Y = 1_450 * Dbu, Text = "P1", Height = H,
+            IsPort = true, PortDirection = LayoutRotation.R0,
+        });
     }
 }

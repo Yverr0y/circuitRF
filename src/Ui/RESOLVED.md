@@ -24506,3 +24506,180 @@ numbers — Measure/Arrange itself needs a font manager this test project has no
 new case in `EmSetupHeaderShrinksTests`, which pins that the header IS the panel, that the content
 child comes first, and that the identity block declares a floor at all — a block with no floor is the
 bug back, silently.
+
+## A port went to the edge wherever you put it — placement AND drag (owner, 2026-09-09)
+
+> "port placement always snaps to edge of geometry … simply draw a rect, try to place a port with and
+> without geometry snapping turned on and the port always goes to the edge. SAME DAMN BUG WITH
+> DRAGGING TOO."
+
+**This supersedes the section that used to stand here**, which put a snap-ON click on the conductor's
+CENTRE LINE. That was the toggle doing the opposite of what the toolbar says, and the owner's own rule
+replaced it: *"when geometry snap is on, the port should be snapping to the edge for placement and for
+drags. when snap is off, then port can be placed anywhere and renders as internal port does."*
+
+### It was never the snapping — the port was DRAWN somewhere it was not
+
+Three earlier attempts went into the snap and pick layers and moved nothing, because the defect was
+not there. Measured on a 20 × 2.9 mm rect, geometry snap ON and OFF alike: click (10000, 1450), the
+dead centre, and the label is stored at (10000, 1450) — exactly where you clicked — while the mark you
+see, the plane bar and arrow, is drawn at **(0, 1450)**, the metal's left edge. Drag it to (15000,
+1450) and the label moves while the mark stays at x = 0. On a square, dragging past centre flipped the
+direction and the mark jumped to the *other* edge; never anywhere between.
+
+`LayoutPortDirection.Measured` resolves a hint whose plane is the conductor's END FACE, and
+`LayoutRenderer` draws an edge port's mark at `hint.PlaneX/PlaneY`. A `.clay` deliberately carries no
+port TYPE — the same artwork can be gapped in one EM setup and edge-driven in another — so a layout
+with no `.cem` claiming it drew **every** port as an edge port. There was no way to put one anywhere
+else, and the pick region followed the mark, so pressing on the port selected the RECTANGLE: the drag
+moved the artwork and left the port behind, which on screen is a port welded to the edge.
+
+### The toggle decides by MOVING THE LABEL, not by recording a mode
+
+The rule has to survive the file being closed and re-opened, and no mode can — a `.clay` has nowhere
+to put one, and must not grow one. So the toggle acts at the gesture and the drawing reads the result:
+
+- **Snap ON** lands the label on the metal's own boundary, so at render time it IS at a face and draws
+  as an edge port.
+- **Snap OFF** leaves the grid-snapped click alone, so the label stays mid-metal and draws as an
+  internal port does.
+
+`LayoutPortDirection.PortHint.Interior` is that reading, and `MarkAtAnchor`/`InferredKind` are the one
+place the renderer, the selection outline and the pick region all ask — so none of the three can
+disagree about where a port is. A port dragged across the toggle changes with it, which a stored mode
+could never do.
+
+**Interior is measured against BOTH ends, not the face the direction names.** A port standing on the
+low-x face while pointing R180 is one the user deliberately rotated to drive current out of that end,
+and its bar belongs at the face it names; measuring only the named face swept that case up too
+(`LayoutPortMoveReseatsDirectionTests`). And the ends come from the shape's own OUTLINE, not its
+bounding box: on the notched polygon in `LayoutPortGlyphReadsOverMetalTests` the box's ends are 6 mm
+from the wall the port is actually standing on.
+
+**The tolerance is the metal's own size, both ways round.** Half the width is the natural reach of an
+end face and is what a user lands within with snapping off; but on a square pad half the width is the
+whole shape, so every point would read as an end. A quarter of the extent along the axis bounds it
+there.
+
+### Snap ON reaches the edge unconditionally, and that is two separate reasons
+
+`NearestBoundaryPoint` is applied whenever geometry snap is on, not as a fallback for "the query found
+nothing":
+
+- Ordinary geometry snap is a TOLERANCE query, so in the middle of a wide conductor there is no
+  candidate at all — a query-only rule leaves the toggle doing nothing precisely where the two answers
+  differ most, with no way to ask for the edge but to zoom until it came within eight pixels.
+- Where the query DOES answer, its answer need not be on the boundary. **The rect's own centre is a
+  snap feature**, and a port snapped to it is a port geometry snap has parked in the middle of the
+  metal — the one thing this toggle now promises it will not do.
+
+It is a no-op once the point is on the outline, which is every corner, edge midpoint and end face the
+query returns, so ordinary feature snapping is untouched. The same call runs in `RecomputeMoveDelta`
+for the drag, before the ortho lock so Shift still composes.
+
+**A point on the boundary is not interior, whichever face it is on.** The end-of-run test only knows
+about the two ENDS, so a port snapped onto a long SIDE — where snap puts one when you click nearer a
+side than an end — was stamped "along the metal" and then drew as an internal port sitting on the
+edge: neither answer. `InteriorDirectionAt` now asks the outline directly and leaves `DirectionAt`'s
+nearest-side inference to name the face it is standing on.
+
+**A port the `.cem` types as INTERNAL is never pulled to the boundary by the drag rule.** Its whole
+reason for existing is to sit mid-conductor — a delta gap dragged onto the edge is not a delta gap —
+and the setup's answer outranks an inference in both directions.
+
+### "Says nothing" had to stop meaning "edge port"
+
+`MarkKindOf` returned `Edge` both for "no setup is open" and for "this setup calls it an edge port",
+and the layout could not tell them apart. It returns null for the first now, and the panel
+(`EmSetupEditorViewModel`) publishes an entry for **every** port, Edge ones included, rather than only
+the internal ones. That is what makes the owner's *"if user changes the port type from the .cem
+window, then the ports in layout are drawn properly"* work in both directions, including changing one
+back to Edge, while a port just drawn — which the setup has not re-extracted yet — still infers.
+
+The port ghost passes `statedKind: null` deliberately: a ghost is not placed yet, so no setup can have
+claimed it, and it has to show what the click will actually land.
+
+### The readout went away
+
+The Port tool's `DrawReadoutText` is now empty (owner: *"there should be no extra text rendered in the
+toolbar during port placement"*). The other tools' readouts are MEASUREMENTS — a rect's size, a line's
+length — and earn their space; this one was a fixed sentence carrying no number, and the ghost now
+draws the mark a click will land, in the place the user is looking.
+
+### Tests re-pointed rather than deleted
+
+Every one of them encoded "a port lives at the metal's edge", which is the defect:
+`LayoutPortPickSymmetryTests` (its fixture port is 6 mm inside the trace, and it asserted that
+pressing there did NOT select it — the report, written down as an expectation; the original claim is
+kept for a port at an end, via a new `EndFixture`), `LayoutPortGhostTests`,
+`LayoutPortPlacementFollowUpTests`, `InternalPortUiTests` (its edge reference was `RenderWith(null)`,
+which is no longer an edge port), `EmSetupLayoutStalenessTests`, `LayoutPortDragNotTheConductorTests`
+(now a Theory over both toggle states, expecting different landings and the same rectangle) and
+`LayoutInteriorPortPlacementTests` (rewritten to the owner's rule; its snap-OFF tests are what make
+the snap-ON pair non-vacuous — same click, same fixture, two answers).
+
+---
+
+## SUPERSEDED — Placing a port INSIDE a conductor, without giving up edge snapping (2026-09-09)
+
+> **Superseded the same day by the section above.** The rule below centred a snap-ON click on the
+> conductor, which is the geometry-snap toggle doing the opposite of what the toolbar says. Kept for
+> the diagnosis in it; the behaviour it describes is gone.
+
+Owner report: an internal port is hard to place because the Port tool always pulls to an edge. The
+workaround was to place a port at an edge, switch its kind to Internal in the `.cem`, come back to
+the layout and drag it inward — which nobody discovers.
+
+**The cause is that every snap feature a trace offers is on its OUTLINE.** Mid-span, the nearest of
+them is the long side's own midpoint, which sits within tolerance of the very point being aimed at,
+so it won every ranking and the port was pushed sideways onto the edge. Turning geometry snap off
+(S / F3) always worked and is far too coarse an answer: the whole reason the tool snaps is that a
+port wants to land exactly on a conductor feature.
+
+**The fix distinguishes the two cases by WHERE the candidate is, not by a mode** —
+`LayoutEditorViewModel.InteriorPortPoint`. An edge port is placed by aiming at a conductor's END, and
+an end's features (a pin, a corner, the end face's midpoint) sit at the extreme of the metal in the
+direction it runs; a candidate there still wins outright, and a `Pin` candidate wins wherever it is,
+because a pin IS a conductor end and the cell said so. What is declined is a candidate that would
+move the point ACROSS the conductor while the cursor is inside it. The point used instead is the
+metal's own centre across (measured with `LayoutPortDirection.SpanAt` in both directions, so a taper
+or a bend answers for the point actually clicked) and the ordinary grid snap along: the across
+coordinate is a measurement, the along coordinate is the user's to choose.
+
+**The snap marker is cleared when the interior point wins.** It had been computed for the edge
+feature the placement just declined, and a marker pointing at a spot the click will not use is the
+one thing the marker exists to rule out. The readout says "click to place at the centre of this
+conductor", which is how the behaviour is discoverable at all.
+
+**An interior placement also stamps the ALONG direction.** `LayoutPortDirection.DirectionAt` infers
+from the NEAREST SIDE, which mid-conductor is a long one — so an interior port used to be stamped
+facing across its own trace. Meaningless for a to-ground port, and visibly wrong for a delta gap,
+whose brackets are drawn perpendicular to that direction.
+
+**What this does NOT do:** the port's KIND still lives in the `.cem` and is set there. The layout
+tool places a port where the user means; it does not decide what the port is.
+
+**The interior rule is a GEOMETRY SNAP and is gated on the toggle.** It was not, when first written,
+and the owner's own proposal is what exposed it: switching geometry snap off (S / F3) is a route to
+interior placement in its own right — the point clicked is the point placed — and with the rule
+ungated the toggle still dragged a mid-trace click to the centre line. A switch on the toolbar that
+does not do the one thing it says is worse than the behaviour it was added to fix.
+
+**The DIRECTION is deliberately not gated on it.** Which way a port faces is a question about the
+POINT, not about how the point was arrived at, so a port placed with snapping off faces along its
+trace too — `InteriorDirectionAt`, which answers null at a conductor's end and leaves
+`LayoutPortDirection.DirectionAt`'s nearest-side inference to give the answer there. Both it and
+`InteriorPortPoint` measure through `MetalSpansAt`/`IsAtAnEnd`, so where the point goes and which way
+it faces cannot disagree about where the metal runs.
+
+**And it does not reach artwork inside a placed INSTANCE.** That lookup answers with a bounding box
+and no outline (`LayoutPortDirection.ConductorInfo.Shape` is null there), so there is nothing to
+measure a span on — and a box's centre is exactly the wrong answer for the tapers and tees a PCell
+instance usually is. Those keep the edge behaviour they had; an interior port on one is still placed
+and then dragged.
+
+Two existing tests asserted the old behaviour for an interior point and were re-pointed rather than
+deleted — `LayoutPortGhostTests.TheGhostFollowsTheSnappedPoint_NotTheRawCursor` and
+`LayoutPortPlacementFollowUpTests.WithNothingNearby_ThePortStillLandsOnTheGrid` both still assert the
+along coordinate is the grid's; the across coordinate is now the conductor's centre. New gate:
+`tests/Ui.Tests/Layout/LayoutInteriorPortPlacementTests.cs`.

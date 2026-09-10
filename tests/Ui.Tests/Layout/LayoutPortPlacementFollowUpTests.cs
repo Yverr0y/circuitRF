@@ -131,7 +131,13 @@ public class LayoutPortPlacementFollowUpTests : IDisposable
     public void WithNothingNearby_ThePortStillLandsOnTheGrid()
     {
         // The non-vacuity guard for the test above: without it, a port that simply followed the raw
-        // cursor would pass the geometry-snap case for the wrong reason.
+        // cursor would pass the geometry-snap case for the wrong reason. The grid is still what
+        // decides the coordinate ALONG the metal, and 10,400 landing on 10,000 is what shows it.
+        //
+        // ACROSS the metal the EDGE decides, because geometry snap is on (owner, 2026-09-09: "when
+        // geometry snap is on, the port should be snapping to the edge for placement and for drags").
+        // The 5 µm tolerance here is far too small to see any feature from mid-trace, which is exactly
+        // the case an ordinary tolerance query cannot answer — see LayoutInteriorPortPlacementTests.
         var view = new LayoutView { DbuPerMicron = Dbu, DisplayUnit = LayoutUnit.Um, SnapDbu = 1_000 * Dbu };
         view.Shapes.Add(new RectShape { Layer = TopCopper, X1 = 0, Y1 = 0, X2 = 20_000 * Dbu, Y2 = 2_900 * Dbu });
 
@@ -146,7 +152,7 @@ public class LayoutPortPlacementFollowUpTests : IDisposable
 
         var port = Assert.Single(view.Shapes.OfType<LabelShape>(), l => l.IsPort);
         Assert.Equal(10_000 * Dbu, port.X);
-        Assert.Equal(2_000 * Dbu, port.Y);
+        Assert.Equal(2_900 * Dbu, port.Y);   // the high-y side, the nearer of the two from 1,600
     }
 
     // ── (E) The reference plane is at the conductor END, not at the label anchor ───────────────
@@ -184,6 +190,13 @@ public class LayoutPortPlacementFollowUpTests : IDisposable
         Assert.Equal(0, hint.PlaneX);                     // the conductor's low-x edge...
         Assert.Equal(1_450 * Dbu, hint.PlaneY);           // ...centred across its width
         Assert.NotEqual(label.X, hint.PlaneX);            // ...and NOT where the label sits
+
+        // This label is 4 mm along a 20 mm trace, so it is INTERIOR and the renderer draws it as an
+        // internal port at its own anchor rather than putting a bar on that plane (2026-09-09). The
+        // plane is still resolved, and still resolved HERE, which is what this test is about: it is
+        // what an EM setup that calls this port an edge port would drive, and what the bar returns to
+        // the moment one does.
+        Assert.True(hint.Interior);
         Assert.Equal(2_900 * Dbu, hint.WidthDbu);
     }
 }
