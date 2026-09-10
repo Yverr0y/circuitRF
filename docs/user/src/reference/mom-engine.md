@@ -313,15 +313,18 @@ is always snapped to the conductor's end face, however far from it you put the t
 
 The same line with an **internal port** at its centre — where a bypass capacitor or a grounded
 resistor would attach. (A via is drawn here as well, to show the case where you have one; the port
-does not need it.) Its mark is deliberately unlike the other two: **a ring round the point, with a
-ground symbol on it.**
+does not need it.) Its mark is deliberately unlike the other two: **a plain ring round the point.**
 
 The reason is that the other two marks are statements about a plane the current crosses *in the
 layout* — an edge port's bar across an end face, a gap's brackets either side of a break — and both are
 oriented by the direction current flows. **An internal port has no such direction**: its current
-leaves the metal downward, out of the plane the layout draws. The ring says *the port is here*; the
-ground symbol says *its other terminal is the plane*; and neither claims a direction the port does not
-have.
+leaves the metal downward, out of the plane the layout draws. The ring says *the port is here*,
+without claiming a direction the port does not have.
+
+The ring used to carry a schematic ground symbol hanging below it. It said *the other terminal is the
+plane* — which is true of every internal port and never varies, so it was ink on every one of them
+that told none of them apart, and over dense artwork it read as clutter. The ring alone carries what
+actually varies.
 
 Its **polarity is fixed and you do not set it**: the + terminal is the metal and the − terminal is the
 ground plane. Rotating the label does nothing, because there is nothing for a direction to mean.

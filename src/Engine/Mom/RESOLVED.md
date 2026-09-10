@@ -2539,3 +2539,20 @@ each note separately. `NotesText` / `MeshNotesText` / `PlanarMeshNotesText` join
 
 **Diagnosis that is built and then not read is the same defect as diagnosis that is not built.**
 This one cost four rounds.
+
+## The via electrical-length refusal names the frequency that would pass (2026-09-09)
+
+An internal port on a 355.6 µm stackup was refused at a 20 GHz sweep top: k·ℓ = 0.3127 against
+`PlanarLevels.MaxElectricalLength`'s 0.30. The refusal explained the bound thoroughly and then said
+only "Lower the sweep's top" — leaving the reader to find the number by bisecting whole EM runs, with
+nothing on screen saying whether the geometry was 4% over the line or 400% over.
+
+k is proportional to frequency, so the answer is a plain ratio and exact: `CheckOne` now takes the
+sweep top the wavenumber was computed at (`PlanarKernel.MidpointRuleVerdict` already had it) and
+appends "(to 19.19 GHz or below, from 20 GHz)". Zero omits the phrase, which is what a unit test
+constructing a bare wavenumber wants.
+
+The other two remedies are unchanged and are the ones to reach for when the sweep top is not
+negotiable: split the via across intermediate meshed levels, or make the span shorter — for a
+ground-attached port, that means a ground-designated conductor closer to the signal level, since the
+span is the stackup's own.

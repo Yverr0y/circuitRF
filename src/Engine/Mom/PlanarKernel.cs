@@ -201,7 +201,7 @@ public sealed class PlanarKernel
         // L9e's GEOMETRIC arm (and with it NarrowestViaFootprint) is gone: the z-integral it bounded
         // is resolved, and the ℓ/w curve it was measured on is flat. What is left is electrical and
         // is about the BASIS — see PlanarLevels.CanRepresentVias.
-        return PlanarLevels.From(problem).CanRepresentVias(2.0 * Math.PI / lambdaG, ground);
+        return PlanarLevels.From(problem).CanRepresentVias(2.0 * Math.PI / lambdaG, ground, fHiHz);
     }
 
     /// <summary>The pre-solve mesh and R17's verdict — §10.5's "report the unknown count before

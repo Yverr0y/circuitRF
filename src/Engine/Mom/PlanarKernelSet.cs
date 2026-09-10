@@ -162,11 +162,16 @@ public sealed record PlanarLevels(IReadOnlyList<double> Z, double GroundZ = 0.0)
     /// <param name="kMax">Wavenumber at the top of the sweep, in the fastest-slowing medium.</param>
     /// <param name="hasGroundAttachment">Whether any via runs to the ground plane, whose span is
     /// <see cref="GroundZ"/> → the metal rather than one inter-level gap.</param>
-    public EmSuitability CanRepresentVias(double kMax, bool hasGroundAttachment = false)
+    /// <param name="fHiHz">
+    /// The sweep top <paramref name="kMax"/> was taken at, when the caller knows it — so a refusal can
+    /// name the frequency that WOULD pass rather than only the direction to move in. Zero omits that
+    /// sentence, which is what a unit test constructing a bare wavenumber wants.
+    /// </param>
+    public EmSuitability CanRepresentVias(double kMax, bool hasGroundAttachment = false, double fHiHz = 0)
     {
         for (int i = 0; i + 1 < Z.Count; i++)
         {
-            var v = CheckOne(kMax, LengthOf(i), $"The via between levels {i} and {i + 1}");
+            var v = CheckOne(kMax, LengthOf(i), $"The via between levels {i} and {i + 1}", fHiHz);
             if (!v.Ok) return v;
         }
 
@@ -174,14 +179,14 @@ public sealed record PlanarLevels(IReadOnlyList<double> Z, double GroundZ = 0.0)
             for (int i = 0; i < Z.Count; i++)
             {
                 var v = CheckOne(kMax, AttachmentLengthOf(i),
-                                 $"The ground via from the plane up to level {i}");
+                                 $"The ground via from the plane up to level {i}", fHiHz);
                 if (!v.Ok) return v;
             }
 
         return EmSuitability.Yes;
     }
 
-    private static EmSuitability CheckOne(double kMax, double ell, string subject)
+    private static EmSuitability CheckOne(double kMax, double ell, string subject, double fHiHz = 0)
     {
         double kl = kMax * ell;
         if (kl <= MaxElectricalLength) return EmSuitability.Yes;
@@ -195,9 +200,27 @@ public sealed record PlanarLevels(IReadOnlyList<double> Z, double GroundZ = 0.0)
             $"it has no degree of freedom for. The bound is set at 0.30 from a MEASUREMENT rather " +
             $"than from O((kℓ)²): subdividing an ATTACHED via moved the answer 0.077% at k·ℓ = 0.23 " +
             $"and 0.141% at k·ℓ = 1.0, while the subdivision itself costs ~14% of a de-embedded " +
-            $"point (see PlanarLevels.MaxElectricalLength). Lower the sweep's top, or — for a via " +
-            $"between two meshed levels — split it across intermediate levels, which gives it an " +
-            $"n-step profile at that cost.");
+            $"point (see PlanarLevels.MaxElectricalLength). Lower the sweep's top{TopThatPasses(kl, fHiHz)}, " +
+            $"or — for a via between two meshed levels — split it across intermediate levels, which " +
+            $"gives it an n-step profile at that cost.");
+    }
+
+    /// <summary>
+    /// <b>The sweep top this via WOULD pass at, as a phrase to hang on the refusal.</b>
+    ///
+    /// <para>k is proportional to frequency, so the bound is a plain ratio and the answer is exact
+    /// rather than a search. A refusal that says only "lower the sweep's top" leaves the reader to
+    /// find that number by bisecting whole EM runs, and nothing else on screen says how far over the
+    /// line the geometry is — 4% over reads exactly like 400% over.</para>
+    /// </summary>
+    private static string TopThatPasses(double kl, double fHiHz)
+    {
+        if (!(fHiHz > 0) || !(kl > 0)) return "";
+
+        double f = fHiHz * MaxElectricalLength / kl;
+        return f >= 1e9 ? $" (to {f / 1e9:G4} GHz or below, from {fHiHz / 1e9:G4} GHz)"
+             : f >= 1e6 ? $" (to {f / 1e6:G4} MHz or below, from {fHiHz / 1e6:G4} MHz)"
+                        : $" (to {f:G4} Hz or below)";
     }
 }
 
