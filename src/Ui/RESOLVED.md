@@ -24391,3 +24391,118 @@ not — a per-view opt-in is a list that falls behind silently. It belongs in th
 tests find first.
 
 Gate: `tests/Ui.Tests/LayoutCurrentLayerSeedingTests.cs`.
+
+---
+
+## The .cem header's two file names shrink and ellipsize (2026-09-09)
+
+Owner report: with a long name and a narrow `.cem` window, the Mesh/Simulate cluster renders **on
+top of** the setup name and the layout reference on the row below it.
+
+**Both texts were in containers that cannot squeeze**, and the two halves failed for different
+reasons — which is worth knowing, because fixing one and not the other looks fixed until you widen
+the window and narrow it again.
+
+- The `.cem` name was in an **`Auto` grid column**. An Auto column takes its content's full desired
+  width however little is left, so a longer name simply made the row wider.
+- The layout reference was in a **horizontal `StackPanel`**, which hands its children unbounded
+  width along its own axis — so the `TextTrimming="CharacterEllipsis"` it already carried could
+  never engage below its `MaxWidth`, at any window size.
+
+Either way the identity block overflowed its own cell in the header's outer `*,Auto` Grid, and the
+button cluster — laid out independently in that Auto column — drew over it. Avalonia's Grid does not
+clip a child that exceeds its cell, so the symptom is overlap rather than truncation.
+
+**Fix:** both rows are Grids with the file name in a **star column**, which is measured against what
+is actually left, so the TextBlock reports the smaller of its natural width and that and ellipsizes
+when it has to. Measured headless before and after (a scratch Avalonia headless app driving the real
+view, texts set directly since there is no view model): the name's arranged width was **672 px at
+every window width from 1400 down to 300**; it is 504 / 108 / 0 across the same range now, and the
+identity block's right edge no longer crosses the cluster's left edge at any width. Both names carry
+a `ToolTip.Tip` of their own text, so an elided one is still readable.
+
+**`HorizontalAlignment="Left"` on each row is load-bearing and is not cosmetic.** Left-aligned, the
+Grid arranges at its own DESIRED width instead of filling the cell, so the single star column settles
+at the text's natural width and no gap opens between the name and "Output file:". Stretched, that
+column would swallow every surplus pixel and push the output-file cluster to the far side of the
+identity block — reintroducing the 2026-08-14 complaint about the picker parking itself against the
+Mesh button. It is also why the trailing spacer column the first row used to carry is gone: it
+existed only to collect surplus, and there is none to collect. **Exactly one star column per row**,
+for the same reason — two would split the surplus and start squeezing the text before the spacer had
+given up its own width.
+
+What is left at extreme narrowness is graceful: the names trim to nothing and then the button
+cluster, right-aligned in its Auto column, clips at the window edge. Nothing draws over anything.
+
+Gate: `tests/Ui.Tests/Layout/EmSetupHeaderShrinksTests.cs` — a structural scan of the `.axaml`
+(this test project has no Avalonia platform, so there is no window and no layout pass; the same
+reason `DockWindowBehaviourTests` pins mechanisms rather than geometry). It asserts the row is a
+Grid, the text is in a star column and trims, no ancestor up to the header Border is a horizontal
+StackPanel, the row is left-aligned, there is exactly one star column, and the tooltip carries the
+full text. Verified to bite: turning the star column back to `Auto` fails two of them immediately.
+
+---
+
+## …and the buttons leave the window rather than land on the Output file box (2026-09-09)
+
+Follow-up to the entry above, same day. With the two names now ellipsizing, a narrow enough window
+still put the Mesh/Simulate cluster **on top of the Output file box**. Owner's instruction: let the
+buttons go outside the window on the right instead.
+
+**Why the star column alone cannot do it.** A `Grid` with `ColumnDefinitions="*,Auto"` gets the
+SHRINK ORDER right — the star column yields, the buttons keep their size — but it positions the
+buttons at their COLUMN's edge. The identity block has a hard floor of its own once both names are
+elided away (the "Output file:" label, the 120 px box, the "…" picker and their three 6 px gaps —
+**282 px**, measured), and below that it overflows its cell while the buttons are laid out at the
+cell boundary, i.e. inside it.
+
+**Two things were tried and measured before the fix that was kept.**
+
+- **A `DockPanel` with the identity block docked `Left`** places the buttons after the content's
+  ACTUAL width, so they can never overlap — but it inverts the priority: it offers the left child
+  everything, so the content keeps its natural width and the BUTTONS are the first thing squeezed.
+  At a 1000 px window the name still rendered at its full 672 px while the cluster had been cut to
+  16 px of its 574. The name has to go first; the buttons have to be last.
+- **Shrinking the fields instead** (owner suggestion). The Output-file `TextBox` is the only field in
+  that row with any give, and pinned at its 20 px `MinWidth` the row still has a ~162 px floor — the
+  label and the picker are both fixed — so the buttons still land on the row, just at a narrower
+  window. It also costs the box its stable resting size: `Width="120"` is what has to go for it to
+  shrink at all, and without it the width becomes content-driven, so a blank path (the common case,
+  since blank means "the default") renders as a 20 px stub. Reverted.
+
+**`ShrinkThenOverflowPanel` (`src/Ui/Controls/`) is the fix**: measure the trailing block
+unconstrained, offer the content what is left, and place the trailing block at whichever is further
+right — the panel's own right edge, or the content's. Two one-line rules, one for each half the
+built-ins get wrong.
+
+**The trap that shaped it: Avalonia clamps `DesiredSize` to the size a control was offered, and a
+`MinWidth` does not survive that clamp.** Measured directly — a `Border` with `MinWidth=300` offered
+100 px reports `DesiredSize.Width == 100`, and so does a `Grid` whose `Auto` column holds a 250 px
+child. So a parent CANNOT discover how wide its content really needs to be, which is the whole
+mechanism of the original bug. Nor can the floor be found by re-measuring: for every offer between
+the floor and the natural width this content legitimately wants exactly what it is given, so a
+probing measure saturates all the way to the natural width and never reveals the knee. The floor is
+therefore DECLARED — `MinWidth` on the identity block, which the panel reads — and it is a floor, so
+drift is graceful in both directions: too low lets a little overlap back at extreme widths, too high
+sends the buttons off the edge slightly early. The 282 px is measured against the bundled Inter face,
+so it does not move with the user's system font.
+
+Measured headless on the real view, window 1400 → 300 px (the probe shows every Mesh/Cancel/Simulate/
+Cancel button at once, since with no view model none of the `IsVisible` bindings resolve, so its
+574 px cluster is about twice the real one and the overflow starts earlier than it will in the app):
+
+| window | name | layout ref | Output-file group | cluster |
+|---|---|---|---|---|
+| 1400 | 504 | 420 | 644–794 | 818–1392 |
+| 1000 | 108 | 290 | 248–398 | 418–992 |
+| 800 | 0 | 170 | 140–290 | **304**–878 |
+| 300 | 0 | 170 | 140–290 | **304**–878 |
+
+The names give up their width first, the Output-file row stays whole, and the cluster parks at 304 —
+past the right edge, where the window clips it. Nothing overlaps at any width.
+
+Gates: `tests/Ui.Tests/Layout/ShrinkThenOverflowPanelTests.cs` (both rules as pure functions of three
+numbers — Measure/Arrange itself needs a font manager this test project has no platform for) and the
+new case in `EmSetupHeaderShrinksTests`, which pins that the header IS the panel, that the content
+child comes first, and that the identity block declares a floor at all — a block with no floor is the
+bug back, silently.

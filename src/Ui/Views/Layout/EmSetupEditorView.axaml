@@ -4,6 +4,7 @@
              xmlns:vm="using:CircuitRF.Ui.ViewModels"
              xmlns:conv="using:CircuitRF.Ui.Converters"
              xmlns:shared="using:CircuitRF.Ui.Views.Shared"
+             xmlns:ctl="using:CircuitRF.Ui.Controls"
              xmlns:mi="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
              x:Class="CircuitRF.Ui.Views.Layout.EmSetupEditorView"
              x:DataType="em:EmSetupDocument"
@@ -124,10 +125,25 @@
                  the output-file TextBox in the star column — so the squeeze lands on the TextBox
                  (down to MinWidth 80, then it clips inside its own box) instead of on the far edge of
                  a StackPanel that had already decided how wide it was going to be. -->
-            <Grid ColumnDefinitions="*,Auto">
+            <!-- Owner report, 2026-09-09 (the second half of the same day's header work): at a
+                 small enough width the Mesh/Simulate cluster renders on top of the Output file box.
+                 A Grid gets the SHRINK ORDER right and the POSITION wrong — see
+                 ShrinkThenOverflowPanel, which states both halves and why neither a Grid nor a
+                 DockPanel can do it alone, and why shrinking the fields instead does not answer it.
+                 Two children, content first, buttons second. -->
+            <ctl:ShrinkThenOverflowPanel>
                 <!-- TWO rows, not three (owner request, 2026-08-11). The name and the output file
                      share a line; the layout reference gets the second one. -->
-                <StackPanel Grid.Column="0" Orientation="Vertical" Margin="0,0,14,0">
+                <!-- MinWidth is this block's own FLOOR, and ShrinkThenOverflowPanel reads it —
+                     Avalonia clamps DesiredSize to whatever a control was offered, so a parent cannot
+                     discover it (that class's own note has the measurement). It is the Output-file
+                     row's un-shrinkable width with both names elided away: the "Output file:" label,
+                     the 120 px box, the "…" picker and their three 6 px gaps. Measured at 282 px
+                     against the bundled Inter face, which is why it does not move with the user's
+                     system font. It is a floor, so drift is graceful in both directions — too low
+                     lets a little overlap back at extreme widths, too high sends the buttons off the
+                     edge slightly early. -->
+                <StackPanel Orientation="Vertical" Margin="0,0,14,0" MinWidth="282">
                     <!-- Owner report, 2026-08-14: "the Output file '…' picker button is hugging the
                          Mesh button; it needs to hug its related text box (with some padding)."
                          The picker sat in a trailing Auto column with the TextBox in the STAR column,
@@ -143,10 +159,32 @@
                          (never a StackPanel, which hands children unbounded width along its axis), so
                          under squeeze the empty spacer yields first and then the TextBox compresses to
                          its MinWidth and clips inside its own box, exactly as before. -->
-                    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*" ColumnSpacing="6">
+                    <!-- Owner report, 2026-09-09: with a long name and a narrow .cem window, the
+                         Mesh/Simulate cluster renders on top of the name. The name was in an AUTO
+                         column, and an Auto column never yields: it takes its content's full desired
+                         width whatever is left, so the identity block simply overflowed its own cell
+                         and the buttons — in the outer grid's Auto column, laid out independently —
+                         drew over it.
+
+                         The name is in a STAR column now, and it trims. A star column is measured
+                         against what is actually left, so the TextBlock reports the smaller of its
+                         natural width and that, and ellipsizes when it has to.
+
+                         `HorizontalAlignment="Left"` on this Grid is what keeps the star column from
+                         becoming a wide-width regression: left-aligned, the Grid arranges at its own
+                         DESIRED width rather than filling the cell, so the one star column settles at
+                         the name's natural width and no gap opens between the name and "Output
+                         file:". That is also why the trailing spacer column this row used to carry is
+                         gone — it existed only to collect surplus, and there is none to collect. The
+                         2026-08-14 arrangement it was added for is unaffected: the picker is still the
+                         column immediately after the TextBox, so it still hugs it. -->
+                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="6"
+                          HorizontalAlignment="Left">
                         <TextBlock Grid.Column="0"
                                    Text="{Binding ViewModel.Working.Name}" FontWeight="SemiBold"
-                                   VerticalAlignment="Center"/>
+                                   VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"
+                                   ToolTip.Tip="{Binding ViewModel.Working.Name}"/>
 
                         <!-- Where the s-parameters land (owner request, 2026-08-09). Modelled on the
                              Analyses panel's own "Results file:" field: staged text, committed on
@@ -171,15 +209,27 @@
                          the geometry at run time, so the reference is a first-class, editable field
                          rather than a fact fixed at creation. Labelled now that it has its own row.
 
-                         This row's height is the "…" button's height (every other child is shorter). -->
-                    <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,3,0,0">
-                        <TextBlock Text="Layout:" Classes="colhdr" VerticalAlignment="Center"/>
-                        <TextBlock Text="{Binding ViewModel.LayoutStatus}" Classes="colhdr"
+                         This row's height is the "…" button's height (every other child is shorter).
+
+                         Same 2026-09-09 report, and the other half of it: this row was a horizontal
+                         StackPanel, which hands its children UNBOUNDED width along its own axis — so
+                         the reference's TextTrimming could never engage below its MaxWidth however
+                         narrow the window got, and the row ran under the buttons exactly as the name
+                         above did. A Grid, left-aligned, with the reference in the star column: same
+                         shape as the row above, same reason. MaxWidth stays as the upper cap it
+                         always was; the star column is what supplies the lower one. -->
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="6" Margin="0,3,0,0"
+                          HorizontalAlignment="Left">
+                        <TextBlock Grid.Column="0"
+                                   Text="Layout:" Classes="colhdr" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding ViewModel.LayoutStatus}" Classes="colhdr"
                                    VerticalAlignment="Center"
-                                   TextTrimming="CharacterEllipsis" MaxWidth="420"/>
-                        <Button Name="ChangeLayoutButton" Classes="ellipsis" Content="…"
+                                   TextTrimming="CharacterEllipsis" MaxWidth="420"
+                                   ToolTip.Tip="{Binding ViewModel.LayoutStatus}"/>
+                        <Button Grid.Column="2" Name="ChangeLayoutButton" Classes="ellipsis" Content="…"
                                 ToolTip.Tip="Point this EM setup at a different .clay. The cross-section, ports and mesh all re-derive against the new artwork, and the change is undoable."/>
-                    </StackPanel>
+                    </Grid>
                 </StackPanel>
 
                 <!-- The button cluster is ONE Grid cell, so it moves as a unit and the buttons never
@@ -192,8 +242,7 @@
                      to go stale the next time a font size or a row changes. It replaces the
                      2026-08-11 bottom-alignment, which used the same trick against the block's LAST
                      row to line up with Change Layout. -->
-                <StackPanel Grid.Column="1" Orientation="Horizontal"
-                            HorizontalAlignment="Right" VerticalAlignment="Top">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Top">
 
                 <!-- D2: Mesh computes the mesh ONLY and never solves. -->
                 <!-- One Mesh button, and it means "mesh THIS setup" — it dispatches to whichever
@@ -279,7 +328,7 @@
                     <mi:MaterialIcon Kind="HelpCircleOutline" Width="14" Height="14"/>
                 </Button>
                 </StackPanel>
-            </Grid>
+            </ctl:ShrinkThenOverflowPanel>
         </Border>
 
         <!-- ── The blocking reason, shown LIVE (R-em-13) ────────────────────── -->
