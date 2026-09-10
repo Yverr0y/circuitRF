@@ -204,6 +204,32 @@ function Add-Directory($path, $parentId) {
     }
 }
 
+# The machine an .exe was built for, read out of its own PE header, or $null when the file is not a
+# PE this can read. The Linux script does exactly this with the ELF header and for the same reason:
+# a helper that quietly fell back to the BUILDING machine is present, plausible and the right size,
+# and no listing of the publish tree shows the difference.
+function Get-PeMachine($path) {
+    $stream = [System.IO.File]::OpenRead($path)
+    try {
+        $buf = New-Object byte[] 4
+        if ($stream.Read($buf, 0, 2) -ne 2) { return $null }
+        if ($buf[0] -ne 0x4D -or $buf[1] -ne 0x5A) { return $null }      # 'MZ'
+
+        $stream.Position = 0x3C
+        if ($stream.Read($buf, 0, 4) -ne 4) { return $null }
+        $peOffset = [System.BitConverter]::ToInt32($buf, 0)
+        if ($peOffset -le 0 -or $peOffset -gt ($stream.Length - 6)) { return $null }
+
+        $stream.Position = $peOffset
+        if ($stream.Read($buf, 0, 4) -ne 4) { return $null }
+        if ($buf[0] -ne 0x50 -or $buf[1] -ne 0x45) { return $null }      # 'PE'
+
+        if ($stream.Read($buf, 0, 2) -ne 2) { return $null }
+        return [System.BitConverter]::ToUInt16($buf, 0)
+    }
+    finally { $stream.Dispose() }
+}
+
 foreach ($Arch in $arches) {
 
     Write-Host ''
@@ -327,7 +353,11 @@ To package deliberately without it: set CRF_ALLOW_NO_DEVICE_WORKER=1
     #
     # Set CRF_ALLOW_NO_DEVICE_WORKER=1 to package without it on purpose; it covers both helpers.
 
-    $osdiFiles = @('osdi-worker-x64.exe', 'osdi-worker-arm64.exe')
+    # osdi-worker.exe is the third of them and it is NOT a duplicate of the pair: it is the copy a
+    # kit's device-provider.json reaches by bare command, which is the one route with no model file
+    # to read an architecture out of.
+
+    $osdiFiles = @('osdi-worker-x64.exe', 'osdi-worker-arm64.exe', 'osdi-worker.exe')
     $osdiMissing = $osdiFiles | Where-Object { -not (Test-Path (Join-Path $publish $_)) }
 
     if ($osdiMissing) {
@@ -350,6 +380,44 @@ without cross targets) builds only the architecture it runs on, which is half of
 
 To package deliberately without it: set CRF_ALLOW_NO_DEVICE_WORKER=1
 '@
+        }
+    }
+
+    # ...AND THE FLAT ONE IS OF THE RIGHT ARCHITECTURE, which is a separate question from being
+    # present and is the one that got through. tools\osdi-worker\build.cmd used to pick that copy
+    # from %PROCESSOR_ARCHITECTURE% - correct for a developer build, wrong for every release, since
+    # ONE run of this script publishes all three architectures from a single machine. 1.0.0-beta.16
+    # therefore shipped an arm64 flat worker in the x86 and x64 payloads as well, and nothing
+    # downstream notices: VerilogAFileResolver reads each candidate's PE header and prefers the
+    # arch-suffixed pair, so only the bare-command route fails, on a user's machine, launching a
+    # binary the processor cannot execute.
+    #
+    # x86 expects the x64 worker. No 32-bit worker is built, and the worker is a separate process
+    # whose architecture has to match the MODEL rather than circuitRF - see build.cmd's own note.
+
+    $wantMachine = if ($Arch -eq 'arm64') { 0xAA64 } else { 0x8664 }
+    $machineNames = @{ 0x8664 = 'x64'; 0xAA64 = 'arm64'; 0x014C = 'x86' }
+    $flatWorker = Join-Path $publish 'osdi-worker.exe'
+
+    if (Test-Path $flatWorker) {
+        $gotMachine = Get-PeMachine $flatWorker
+        if ($gotMachine -ne $wantMachine) {
+            $gotName  = if ($machineNames.ContainsKey([int]$gotMachine)) { $machineNames[[int]$gotMachine] } else { "unreadable" }
+            $wantName = $machineNames[[int]$wantMachine]
+            if ($env:CRF_ALLOW_NO_DEVICE_WORKER -eq '1') {
+                Write-Host "WARNING: osdi-worker.exe in publish\$rid is $gotName, not $wantName. The bare-command route will not run."
+            } else {
+                throw @"
+osdi-worker.exe in publish\$rid is $gotName, but this package is $Arch and needs $wantName.
+
+That copy is the one a kit's device-provider.json reaches by bare command, so it is the one route
+that cannot recover by reading a model's header. It is built by tools\osdi-worker\build.cmd, which
+takes --arch from the .csproj; a stale tools\osdi-worker\build directory is the other way to get
+here. Delete it and build again.
+
+To package deliberately without a working one: set CRF_ALLOW_NO_DEVICE_WORKER=1
+"@
+            }
         }
     }
 
@@ -424,8 +492,13 @@ $($components.ToString().TrimEnd())
             # <?if?> branch it did NOT take, so an undefined one is an error even where it is unreachable.
             if (-not $perUser -and -not (Test-Path $stubFile)) { $stubFile = Join-Path $publish $exeName }
 
+            # -d Arch is the SAME value as -arch, and it is passed twice on purpose: -arch tells wix
+            # what to emit, and the .wxs preprocessor cannot read it back. It selects the UpgradeCode,
+            # which is per scope AND per architecture - see the note at the head of circuitRF.wxs. An
+            # architecture with no code of its own is a wix ERROR there, never a silently shared one.
             wix build circuitRF.wxs Files.wxs `
                 -arch $Arch `
+                -d "Arch=$Arch" `
                 -d "Version=$CrfMsiVersion" `
                 -d "VersionText=$CrfVersion" `
                 -d "Scope=$Scope" `

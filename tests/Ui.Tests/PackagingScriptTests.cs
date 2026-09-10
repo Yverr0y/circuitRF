@@ -137,6 +137,69 @@ public class PackagingScriptTests
     }
 
     /// <summary>
+    /// <b>The FLAT <c>osdi-worker.exe</c> follows the RID being published, never the machine doing
+    /// the publishing.</b>
+    ///
+    /// <para>Windows ships three copies of this helper: the arch-suffixed pair, which
+    /// <c>VerilogAFileResolver</c> picks between by reading the model's own PE header, and a flat
+    /// <c>osdi-worker.exe</c>, which is what a kit's <c>device-provider.json</c> reaches by BARE
+    /// COMMAND. That last route has no model file to read an architecture out of, so the copy has
+    /// to be right when it is made.</para>
+    ///
+    /// <para><b>It was chosen from <c>%PROCESSOR_ARCHITECTURE%</c>,</b> which is correct for a
+    /// developer build and wrong for every release: one run of <c>build-windows.ps1</c> publishes
+    /// x86, x64 and arm64 from a single machine. 1.0.0-beta.16 therefore shipped an arm64 flat
+    /// worker inside its x86 and x64 payloads — measured in the released <c>.zip</c> files, not
+    /// supposed.</para>
+    ///
+    /// <para><b>Nothing downstream catches it,</b> and that is the point of testing it here. The
+    /// resolver prefers the suffixed pair and accepts a candidate only on the evidence of its own
+    /// header, so the <c>.osdi</c> route stays correct and silent; only the bare-command route
+    /// fails, on a user's machine, launching a binary the processor cannot execute. This is the
+    /// same rule as the Linux test below, on the platform where the flat copy exists.</para>
+    /// </summary>
+    [Fact]
+    public void TheFlatWindowsOsdiWorker_FollowsTheTargetRid_NotTheBuildingMachine()
+    {
+        string project = File.ReadAllText(RepoFile("src", "Ui", "CircuitRF.Ui.csproj"));
+        string build   = File.ReadAllText(RepoFile("tools", "osdi-worker", "build.cmd"));
+        string script  = File.ReadAllText(RepoFile("packaging", "windows", "build-windows.ps1"));
+
+        // 1. Every Windows RID derives a target, by RID rather than by asking the machine - the
+        //    rule the Linux RIDs already carry.
+        foreach (string rid in new[] { "win-x64", "win-arm64", "win-x86" })
+            Assert.True(project.Contains($"'$(RuntimeIdentifier)' == '{rid}'", StringComparison.Ordinal),
+                        $"the .csproj derives no OSDI worker architecture for '{rid}', so "
+                        + $"`dotnet publish -r {rid}` leaves the flat worker as whatever the machine "
+                        + "doing the publishing happens to be.");
+
+        // 2. ...and it is HANDED to build.cmd. Deriving a target and not passing it is exactly the
+        //    shape of the bug: everything reads correctly and nothing acts on it.
+        Assert.True(Regex.IsMatch(project, @"build\.cmd&quot;[^\r\n]*\$\(_CrfOsdiTargetFlags\)"),
+                    "tools/osdi-worker/build.cmd is invoked without $(_CrfOsdiTargetFlags), so it "
+                    + "has nothing to go on but %PROCESSOR_ARCHITECTURE% and every payload cut on "
+                    + "one machine gets that machine's flat worker.");
+
+        // 3. build.cmd chooses the flat copy from the target it was given.
+        Assert.True(build.Contains("--arch", StringComparison.Ordinal)
+                    && build.Contains("targetarch=%~2", StringComparison.Ordinal),
+                    "tools/osdi-worker/build.cmd ignores --arch again, so the flag above is passed "
+                    + "and discarded.");
+
+        Assert.True(build.Contains("osdi-worker-%flatarch%.exe", StringComparison.Ordinal),
+                    "tools/osdi-worker/build.cmd no longer copies the flat osdi-worker.exe from the "
+                    + "target's build. Copying it from %hostarch% is the defect this test exists for.");
+
+        // 4. And packaging does not take any of that on trust, exactly as build-linux.sh reads the
+        //    ELF header back out of its publish tree. Building only warns; a RELEASE must not.
+        Assert.True(script.Contains("Get-PeMachine", StringComparison.Ordinal)
+                    && script.Contains("0xAA64", StringComparison.Ordinal),
+                    "packaging/windows/build-windows.ps1 does not read the flat osdi-worker.exe's "
+                    + "PE machine back out of the publish tree, so a helper that quietly fell back "
+                    + "to the building machine reaches a released package - which is how it did.");
+    }
+
+    /// <summary>
     /// <b>Both Linux architectures of the OSDI worker are targeted by the build and demanded by
     /// packaging.</b>
     ///
@@ -512,6 +575,79 @@ public class PackagingScriptTests
             + ". Without it the shortcut inherits its target's embedded icon, and the perUser "
             + "target is the icon-less launcher stub — so the Desktop shortcut shows the generic "
             + "Windows default. Add Icon=\"circuitRFIcon.ico\" IconIndex=\"0\".");
+    }
+
+    /// <summary>
+    /// <b>No two Windows packages may share an UpgradeCode.</b> Six of them: three architectures
+    /// times two install scopes.
+    ///
+    /// <para>One UpgradeCode per scope is what shipped through 1.0.0-beta.16, and it tells Windows
+    /// Installer that the x86, x64 and arm64 packages are ONE product built for different machines.
+    /// Running one over another is then a major upgrade — a 32-bit package asked to remove a 64-bit
+    /// product's components — which is the case Windows Installer handles worst. The symptom is not
+    /// an error: the install stalls in InstallValidate with "Computing space requirements" on
+    /// screen and eventually gives up. That was reported against the x86 installer.</para>
+    ///
+    /// <para>They are not one product. Each carries a different apphost and different native Skia
+    /// and ANGLE binaries, and in perMachine scope each installs to a different Program Files. The
+    /// two should simply never see each other.</para>
+    ///
+    /// <para><b>x64 keeps the codes it has already shipped with.</b> An UpgradeCode is a product's
+    /// identity over time, so abandoning one orphans every install carrying it — the next version
+    /// cannot find the old one to remove and lands beside it instead. x64 is the install base, so
+    /// it keeps its lineage; x86 and arm64, whose lineage is worth less than the hazard it carries,
+    /// took new codes. Those two literals are pinned here for that reason and must not be
+    /// "tidied".</para>
+    /// </summary>
+    [Fact]
+    public void WindowsUpgradeCodes_AreDistinctPerScopeAndArchitecture()
+    {
+        string wxs    = File.ReadAllText(RepoFile("packaging", "windows", "circuitRF.wxs"));
+        string script = File.ReadAllText(RepoFile("packaging", "windows", "build-windows.ps1"));
+
+        var pairs = Regex.Matches(
+                wxs,
+                @"<\?(?:if|elseif)\s+\$\(var\.Arch\)\s*=\s*""(\w+)""\s*\?>\s*<\?define\s+UpgradeGuid\s*=\s*""([0-9A-Fa-f-]{36})""\s*\?>")
+            .Select(m => new { Arch = m.Groups[1].Value, Guid = m.Groups[2].Value.ToUpperInvariant() })
+            .ToList();
+
+        Assert.True(pairs.Count == 6,
+                    $"circuitRF.wxs declares {pairs.Count} architecture-keyed UpgradeCodes, not 6 "
+                    + "(x86, x64 and arm64, in each of perMachine and perUser). build-windows.ps1 "
+                    + "builds all six by default, so every one of them needs its own.");
+
+        var shared = pairs.GroupBy(x => x.Guid).Where(g => g.Count() > 1)
+                          .Select(g => g.Key + " <- " + string.Join(", ", g.Select(x => x.Arch)))
+                          .ToList();
+
+        Assert.True(shared.Count == 0,
+                    "circuitRF.wxs gives one UpgradeCode to more than one Windows package: "
+                    + string.Join("; ", shared)
+                    + ". Windows Installer then treats them as the same product, so installing one "
+                    + "over another is a cross-architecture major upgrade - which stalls in "
+                    + "InstallValidate rather than failing.");
+
+        // x64's two codes are its identity across every release so far. Changing either orphans
+        // every x64 install that carries it.
+        Assert.True(pairs.Any(x => x.Arch == "x64" && x.Guid == "70CB9791-A58B-444F-8153-63DB32CE7235"),
+                    "the perMachine x64 UpgradeCode has changed. Every x64 install already out "
+                    + "there carries the old one, and the next version will no longer find it to "
+                    + "remove - it will install beside it.");
+
+        Assert.True(pairs.Any(x => x.Arch == "x64" && x.Guid == "1E4F8D22-6C0B-4A57-9E3D-0B71C4A8F015"),
+                    "the perUser x64 UpgradeCode has changed; see above. This is the scope that "
+                    + "updates itself, so an orphaned install keeps updating the wrong copy.");
+
+        // The .wxs cannot read wix's own -arch back, so it is told separately.
+        Assert.True(script.Contains("-d \"Arch=$Arch\"", StringComparison.Ordinal),
+                    "packaging/windows/build-windows.ps1 does not pass -d Arch to wix, so the .wxs "
+                    + "cannot select an UpgradeCode by architecture at all.");
+
+        // An architecture with no code of its own must STOP the build. Falling through to a shared
+        // one is the defect, and a silent default would reintroduce it the day a fourth is added.
+        Assert.True(wxs.Contains("<?error", StringComparison.Ordinal),
+                    "circuitRF.wxs has no <?error?> branch for an architecture it has no "
+                    + "UpgradeCode for, so a fourth one would silently share a code with x64.");
     }
 
     /// <summary>

@@ -5,6 +5,111 @@ symptom first, because that is what the next person will have in front of them.
 
 ---
 
+## The x86 installer stalls on "Computing space requirements": one UpgradeCode for three architectures (2026-09-10)
+
+**Symptom, as reported:** the 32-bit Windows installer gets stuck on *Computing space requirements*
+and eventually times out. x64 installs normally on other machines.
+
+**The package itself is not at fault, and that took ruling out first.** Every table in
+`circuitRF-1.0.0-beta.16-x86.msi` is identical to the x64 one apart from the things that must
+differ — summary `Template` (`Intel;1033` vs `x64;1033`), `ProgramFiles6432Folder` resolving to
+`ProgramFilesFolder` rather than `ProgramFiles64Folder`, and the component 64-bit attribute (0 vs
+256). Same 243 components, same 241 files, same single `#cab1.cab`, byte-identical
+`InstallUISequence`, `InstallExecuteSequence`, `Directory`, `Registry`, `Feature` and `ActionText`.
+No custom actions anywhere. The cab lists and tests the same on all three architectures. **Dumping
+the MSI tables is cheap and settles this class of question in minutes** — `msiinfo tables` /
+`msiinfo export` from `msitools` reads a `.msi` on macOS with no Windows involved.
+
+**What was wrong is the identity, not the contents.** All three architectures shared one
+`UpgradeCode` per scope — `{70CB9791-…}` perMachine, `{1E4F8D22-…}` perUser. That declares x86, x64
+and arm64 to be ONE product built for different machines, so running one over another is a **major
+upgrade**, and a 32-bit package is asked to remove a 64-bit product's components. Windows Installer
+handles that case worst of all, and it does not fail cleanly: it stalls in `InstallValidate`, whose
+`ActionText` is *Computing space requirements*, and gives up.
+
+They are not one product. Each carries a different apphost and different native Skia and ANGLE
+binaries, and in perMachine scope each installs to a different Program Files.
+
+**Two things make this easy to walk into and worth knowing:**
+
+- **`ActionText` is why the screen names the wrong step.** When the running action has no
+  `ActionText` row, the progress dialog keeps showing the PREVIOUS action's text — so "stuck on
+  Computing space requirements" is evidence about `InstallValidate` *or anything after it*. The
+  only way to name the action is a verbose log: `msiexec /i <pkg>.msi /l*vx %TEMP%\crf.log`, then
+  read the last `Action start` line.
+- **Every 1.0.0-beta.N has `ProductVersion 1.0.0.0`,** because `packaging/version.ps1` strips the
+  prerelease suffix and Windows Installer compares only the first three fields (its own comment says
+  so). The `Upgrade` table's two rows are `VersionMax=1.0.0.0` exclusive and `VersionMin=1.0.0.0`
+  exclusive, so **one beta matches neither row against another** — beta.16 installs as a second
+  product beside beta.15, into the same directory, sharing WiX's auto-generated component GUIDs.
+  That is the state in which costing has real per-component work to do instead of none, and it
+  accumulates with every beta a machine has seen. Not fixed here; it is the documented consequence
+  of the version scheme, and it is worth remembering when a costing stall is reported.
+
+**The fix** is an `UpgradeCode` per scope AND per architecture — six of them, selected by a new
+`$(var.Arch)` that `build-windows.ps1` passes alongside wix's own `-arch` (the preprocessor cannot
+read `-arch` back). **x64 keeps both of the codes it has already shipped with**: an UpgradeCode is a
+product's identity over time, and abandoning one orphans every install carrying it, so the install
+base keeps its lineage and x86/arm64 — whose lineage is worth less than the hazard — take new ones.
+One residue cannot be helped and is stated in the `.wxs`: an x64 package still shares a code with
+x86 and arm64 installs made *before* this change. That is the rarer direction and is exactly what
+shipped already. An architecture with no code of its own is now a `<?error?>`, never a silent
+fallthrough. Held by `PackagingScriptTests.WindowsUpgradeCodes_AreDistinctPerScopeAndArchitecture`.
+
+**A `.wxs` preprocessor change can be checked without Windows.** `wix` runs on macOS under protest
+("only supports Windows... all behavior after this point is undefined") and gets far enough to prove
+the directives out: strip the `ui:WixUI` element so no extension is needed, build once per
+architecture, and read past the `WIX0389`/`WIX0027` path errors, which are macOS artifacts and
+appear on the unmodified file too. An unknown architecture came back as the intended `WIX0250` with
+`$(var.Arch)` substituted, which is the half that cannot be verified by reading. Note that wix v7
+refuses to run at all until its OSMF EULA is accepted; a `--tool-path` install of v5 answers the
+question without touching that.
+
+---
+
+## Every Windows payload shipped the arm64 flat OSDI worker (2026-09-10)
+
+**Symptom:** none visible, which is why it shipped. Found by reading the PE headers of the released
+1.0.0-beta.16 `.zip` payloads while investigating something else.
+
+`osdi-worker.exe` — the FLAT copy, as opposed to the `-x64`/`-arm64` pair — was **arm64 in all
+three** Windows payloads. `tools/osdi-worker/build.cmd` chose it from `%PROCESSOR_ARCHITECTURE%`,
+which is right for a developer build and wrong for every release: **one run of `build-windows.ps1`
+publishes x86, x64 and arm64 from a single machine**, and that machine was an ARM box. It was the
+last helper decision still made by asking the host rather than by RID — the entry below is the same
+mistake on Linux.
+
+**Nothing downstream catches it, by design.** `VerilogAFileResolver` reads each candidate's own PE
+header and prefers the arch-suffixed pair, which was correct in every payload, so the `.osdi` route
+stays right and silent. The flat copy exists for the OTHER route — a kit's `device-provider.json`
+naming the worker by BARE COMMAND — and that route has no model file to read an architecture out of.
+So the only symptom is on a user's machine, launching a binary the processor cannot execute.
+
+**Fixed in three places, because two of them alone are inert:**
+
+- `_CrfOsdiArch`/`_CrfOsdiOs` now derive a target for the `win-*` RIDs as well, and
+  `_CrfOsdiTargetFlags` is passed to `build.cmd` — deriving a target and not handing it over is
+  exactly the shape of the original bug.
+- `build.cmd` honours `--arch` for the flat copy (it used to accept and discard it) and swallows
+  `--os`. It never narrows what is BUILT: the pair is built whenever the toolchain reaches both.
+- `build-windows.ps1` reads the flat worker's PE machine back out of the publish tree before
+  packaging, exactly as `build-linux.sh` reads the ELF header. Verified against the shipped
+  beta.16 payloads: it rejects x86 and x64, accepts arm64.
+
+**`win-x86` expects the x64 worker, and that is deliberate.** No 32-bit worker is built. The worker
+is a separate process, so circuitRF's own architecture never had to match it, and an x86 install is
+almost always sitting on 64-bit Windows, where a 32-bit process launches a 64-bit executable
+perfectly well. **On genuinely 32-bit Windows no shipped worker can run** — that was equally true of
+the arm64 copy this replaces, and closing it means building an `x86-windows-gnu` worker and adding
+it to `VerilogAFileResolver`'s candidate names. Not done; recorded so it is a decision rather than
+an oversight.
+
+A side effect worth having: setting `_CrfOsdiOs` to `windows` makes `build.sh` say *unsupported
+target OS - skipping* when a Mac publishes for Windows. Before, it built the Mac's own worker and
+dropped it into the Windows publish tree under the bare name packaging copies verbatim.
+
+---
+
 ## The OSDI worker was never built for the machine a Linux package targets (2026-09-04)
 
 **Symptom:** none yet, which is the point. Asked to confirm that the OSDI worker is available on

@@ -5,7 +5,8 @@
   <!--
     WiX v4 definition of the circuitRF .msi. One file for all three architectures AND both install
     scopes: build-windows.ps1 passes the architecture, the version, the publish directory and the scope
-    in, so nothing here is per-arch or per-scope except what the two <?if ?> blocks below select.
+    in, so nothing here is per-arch or per-scope except what the <?if ?> blocks below select - the
+    UpgradeCode, which is per scope AND per architecture, and the directory the files land in.
 
     Do not run wix by hand — packaging\windows\build-windows.ps1 publishes, harvests the file list into
     Files.wxs and invokes wix with the right arguments. See BUILDING.md.
@@ -42,10 +43,51 @@
     files it knows about. The user-visible residue is one directory under %LOCALAPPDATA%.
   -->
 
+  <!--
+    === THE UPGRADE CODE IS PER SCOPE **AND** PER ARCHITECTURE ==================================
+
+    Six of them, and the second axis is a fix rather than symmetry for its own sake. All three
+    architectures used to share one code per scope, which tells Windows Installer that the x86, x64
+    and arm64 packages are the same product built for different machines - so running one over
+    another is a MAJOR UPGRADE, and a 32-bit package is asked to remove a 64-bit product's
+    components. That is the case Windows Installer handles worst, and the symptom is not an error:
+    the install stalls in InstallValidate with "Computing space requirements" on screen and
+    eventually gives up (user-reported against the x86 installer, 1.0.0-beta.16).
+
+    They are not the same product. Each ships a different apphost, different native Skia and ANGLE
+    binaries, and - in perMachine scope - installs to a different Program Files. An x64 install is
+    not something an x86 install should ever replace; the two should simply not see each other.
+
+    x64 KEEPS THE CODES IT HAS SHIPPED WITH. An UpgradeCode is a product's identity over time, and
+    abandoning one orphans every install that carries it: the next version cannot find the old one
+    to remove, so it lands beside it. x64 is the install base, so it keeps its lineage and x86 and
+    arm64 - whose lineage is worth less than the cross-architecture hazard it carries - get new
+    codes. One residue remains and cannot be helped: an x64 package still shares a code with x86 and
+    arm64 installs made BEFORE this change, so it can still try to upgrade one of those. That is the
+    rarer direction and it is exactly what shipped already, not something added here.
+
+    $(var.Arch) is passed by build-windows.ps1, which is the same value it hands wix as -arch.
+  -->
   <?if $(var.Scope) = "perUser" ?>
-    <?define UpgradeGuid = "1E4F8D22-6C0B-4A57-9E3D-0B71C4A8F015" ?>
+    <?if $(var.Arch) = "x64" ?>
+      <?define UpgradeGuid = "1E4F8D22-6C0B-4A57-9E3D-0B71C4A8F015" ?>
+    <?elseif $(var.Arch) = "x86" ?>
+      <?define UpgradeGuid = "58411FE1-F2CB-4069-B3BC-6A3F8BBFAAB7" ?>
+    <?elseif $(var.Arch) = "arm64" ?>
+      <?define UpgradeGuid = "4EBA63E4-B92D-4ED9-8070-46DE2FF97F25" ?>
+    <?else?>
+      <?error Unknown architecture '$(var.Arch)'. Every architecture needs an UpgradeCode of its own; see the note above. ?>
+    <?endif?>
   <?else?>
-    <?define UpgradeGuid = "70CB9791-A58B-444F-8153-63DB32CE7235" ?>
+    <?if $(var.Arch) = "x64" ?>
+      <?define UpgradeGuid = "70CB9791-A58B-444F-8153-63DB32CE7235" ?>
+    <?elseif $(var.Arch) = "x86" ?>
+      <?define UpgradeGuid = "84DD50C0-57D1-439F-8E99-8740CEA50CD5" ?>
+    <?elseif $(var.Arch) = "arm64" ?>
+      <?define UpgradeGuid = "16FCB240-C27F-464E-83F6-42D3C5F23737" ?>
+    <?else?>
+      <?error Unknown architecture '$(var.Arch)'. Every architecture needs an UpgradeCode of its own; see the note above. ?>
+    <?endif?>
   <?endif?>
 
   <Package Name="circuitRF"

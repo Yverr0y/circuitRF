@@ -9,8 +9,15 @@ rem TWO BINARIES, AND THE REASON IS NOT circuitRF'S OWN ARCHITECTURE.
 rem
 rem     osdi-worker-x64.exe      loads an x86-64 .osdi
 rem     osdi-worker-arm64.exe    loads an arm64 .osdi
-rem     osdi-worker.exe          a copy of whichever matches this machine, for the bare-command
-rem                              route a kit's device-provider.json uses
+rem     osdi-worker.exe          a copy of whichever matches THE MACHINE BEING BUILT FOR, for the
+rem                              bare-command route a kit's device-provider.json uses
+rem
+rem THE FLAT COPY FOLLOWS --arch, NOT THIS MACHINE, and that is a fix. It used to be chosen from
+rem %PROCESSOR_ARCHITECTURE%, which is right for a developer build and wrong for every release: one
+rem run of packaging\windows\build-windows.ps1 publishes x86, x64 and arm64 from a single machine,
+rem so all three payloads of 1.0.0-beta.16 shipped the arm64 flat worker. The suffixed pair was
+rem correct throughout and VerilogAFileResolver prefers it, so the .osdi route never noticed - only
+rem the bare-command route did, on a user's machine, as a binary the processor cannot execute.
 rem
 rem This worker LoadLibrary()s a model the user compiled, and a process holds exactly one
 rem instruction set -- so the worker's architecture has to match THE MODEL'S, not circuitRF's. That
@@ -26,6 +33,7 @@ setlocal EnableDelayedExpansion
 set "here=%~dp0"
 set "build=%here%build"
 set "dest="
+set "targetarch="
 
 rem Parenthesised, not chained with &. In cmd, `if COND a & b` runs b UNCONDITIONALLY -- which in an
 rem argument loop silently consumes arguments in pairs whether they matched or not.
@@ -37,10 +45,18 @@ if /I "%~1"=="--dest" (
     shift
     goto args
 )
-rem --arch is accepted and ignored: build.sh takes one to cross-build a Mac slice and the .csproj
-rem passes that same flag from a property. Refusing it here would fail on an argument that means
-rem nothing on Windows rather than on anything real.
+rem --arch names the TARGET, in any of the spellings build.sh accepts, and decides which of the pair
+rem becomes the flat osdi-worker.exe. It never narrows what is BUILT: both are built whenever the
+rem toolchain can reach both, because the pair is what the .osdi route picks between.
 if /I "%~1"=="--arch" (
+    set "targetarch=%~2"
+    shift
+    shift
+    goto args
+)
+rem --os travels with --arch from the same .csproj property. Here it is always windows, so it is
+rem accepted and ignored rather than refused: build.sh needs it to tell a Mach-O from an ELF.
+if /I "%~1"=="--os" (
     shift
     shift
     goto args
@@ -49,10 +65,30 @@ shift
 goto args
 :after
 
-rem This machine's own architecture, in the spelling used for the file names.
+rem This machine's own architecture, in the spelling used for the file names. It decides what a
+rem single-target compiler can emit, and nothing else.
 set "hostarch=x64"
 if /I "%PROCESSOR_ARCHITECTURE%"=="ARM64" set "hostarch=arm64"
 if /I "%PROCESSOR_ARCHITEW6432%"=="ARM64" set "hostarch=arm64"
+
+rem ...and the architecture the flat copy is FOR: the target when one was named, this machine
+rem otherwise, so a plain `dotnet build` behaves exactly as it always has.
+set "flatarch=%hostarch%"
+if defined targetarch (
+    if /I "%targetarch%"=="x64"     set "flatarch=x64"
+    if /I "%targetarch%"=="x86_64"  set "flatarch=x64"
+    if /I "%targetarch%"=="amd64"   set "flatarch=x64"
+    if /I "%targetarch%"=="arm64"   set "flatarch=arm64"
+    if /I "%targetarch%"=="aarch64" set "flatarch=arm64"
+    rem NO 32-BIT WORKER IS BUILT, so an x86 target takes the x64 one. A worker is a separate
+    rem process, so circuitRF's own architecture never had to match it - and an x86 install of
+    rem circuitRF is almost always sitting on 64-bit Windows, where a 32-bit process launches a
+    rem 64-bit executable perfectly well. On a genuinely 32-bit Windows nothing here can run, and
+    rem that is unchanged by this: it was true of the arm64 copy that used to be shipped too.
+    if /I "%targetarch%"=="x86"  set "flatarch=x64"
+    if /I "%targetarch%"=="i386" set "flatarch=x64"
+    if /I "%targetarch%"=="i686" set "flatarch=x64"
+)
 
 rem A COMPILER THAT IS INSTALLED BUT NOT ON PATH is the ordinary way to arrive here and it looks
 rem exactly like having none -- PATH is read when a terminal starts, so one installed a minute ago
@@ -103,9 +139,19 @@ goto built
 :built
 if "%built%"=="" goto buildfailed
 
-rem The flat name, for this machine's architecture only. A kit's device-provider.json names the
-rem worker by bare command, and that route has no model file to read an architecture out of.
-if exist "%build%\osdi-worker-%hostarch%.exe" copy /Y "%build%\osdi-worker-%hostarch%.exe" "%build%\osdi-worker.exe" >nul 2>&1
+rem The flat name, for the target's architecture. A kit's device-provider.json names the worker by
+rem bare command, and that route has no model file to read an architecture out of - so this copy is
+rem the one decision here that cannot be corrected later by reading a header.
+rem
+rem It falls back to this machine's own build when the target's is absent, which is what a
+rem single-target compiler leaves behind. Naming the fallback out loud matters: the file is present
+rem and plausible either way, and the difference is one no `dir` will show.
+set "flatsrc=%build%\osdi-worker-%flatarch%.exe"
+if not exist "%flatsrc%" (
+    echo osdi-worker: no %flatarch% worker was built; the flat osdi-worker.exe falls back to %hostarch%.
+    set "flatsrc=%build%\osdi-worker-%hostarch%.exe"
+)
+if exist "%flatsrc%" copy /Y "%flatsrc%" "%build%\osdi-worker.exe" >nul 2>&1
 goto publish
 
 :buildfailed

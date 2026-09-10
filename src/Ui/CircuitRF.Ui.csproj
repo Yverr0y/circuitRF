@@ -437,7 +437,7 @@
       obtain, on every Windows build circuitRF has ever released.
     -->
     <Exec Condition="$([MSBuild]::IsOSPlatform('Windows'))"
-          Command="&quot;$(MSBuildProjectDirectory)\..\..\tools\osdi-worker\build.cmd&quot; --dest &quot;$(MSBuildProjectDirectory)\$(OutDir.TrimEnd('\'))&quot;"
+          Command="&quot;$(MSBuildProjectDirectory)\..\..\tools\osdi-worker\build.cmd&quot; --dest &quot;$(MSBuildProjectDirectory)\$(OutDir.TrimEnd('\'))&quot; $(_CrfOsdiTargetFlags)"
           ContinueOnError="true" StandardOutputImportance="low" />
   </Target>
 
@@ -524,10 +524,33 @@
       way packaging/macos/build-macos.sh runs lipo, so neither this nor a stale build directory can
       reach a released package - but getting it right here is what makes that check quiet.
     -->
-    <_CrfOsdiArch Condition="'$(RuntimeIdentifier)' == 'osx-arm64' or '$(RuntimeIdentifier)' == 'linux-arm64'">arm64</_CrfOsdiArch>
-    <_CrfOsdiArch Condition="'$(RuntimeIdentifier)' == 'osx-x64' or '$(RuntimeIdentifier)' == 'linux-x64'">x86_64</_CrfOsdiArch>
+    <_CrfOsdiArch Condition="'$(RuntimeIdentifier)' == 'osx-arm64' or '$(RuntimeIdentifier)' == 'linux-arm64' or '$(RuntimeIdentifier)' == 'win-arm64'">arm64</_CrfOsdiArch>
+    <_CrfOsdiArch Condition="'$(RuntimeIdentifier)' == 'osx-x64' or '$(RuntimeIdentifier)' == 'linux-x64' or '$(RuntimeIdentifier)' == 'win-x64'">x86_64</_CrfOsdiArch>
+    <_CrfOsdiArch Condition="'$(RuntimeIdentifier)' == 'win-x86'">x86</_CrfOsdiArch>
     <_CrfOsdiOs Condition="$(RuntimeIdentifier.StartsWith('osx'))">darwin</_CrfOsdiOs>
     <_CrfOsdiOs Condition="$(RuntimeIdentifier.StartsWith('linux'))">linux</_CrfOsdiOs>
+    <_CrfOsdiOs Condition="$(RuntimeIdentifier.StartsWith('win'))">windows</_CrfOsdiOs>
+
+    <!--
+      WINDOWS NEEDED THE SAME FLAG FOR A DIFFERENT REASON, and it went unnoticed a release longer
+      than the Linux half above.
+
+      Windows ships the PAIR - osdi-worker-x64.exe and osdi-worker-arm64.exe - plus a FLAT
+      osdi-worker.exe, which is the copy a kit's device-provider.json reaches by bare command and so
+      is the one route with no model file to read an architecture out of. build.cmd chose that copy
+      by asking the MACHINE it was running on, and it was the only helper decision still made that
+      way. So every Windows payload of 1.0.0-beta.16 - x86, x64 and arm64 alike - carries an arm64
+      flat worker, because the release was cut on an ARM box: on the other two the bare-command
+      route launches a binary the processor cannot execute.
+
+      Nothing downstream catches it. VerilogAFileResolver reads each candidate's PE header and
+      prefers the arch-suffixed pair, so the .osdi route is unaffected and stays quiet - which is
+      precisely why this had to be found in a shipped .zip rather than at run time.
+
+      win-x86 resolves to `x86`, which no Windows worker is built for; build.cmd says so and falls
+      back to x64. See its own note - a 32-bit circuitRF can still launch a 64-bit worker, which is
+      the case that actually occurs, since an x86 install almost always sits on 64-bit Windows.
+    -->
     <!-- Empty for a plain `dotnet build` (no RID), where build.sh falls back to this machine's own
          OS and architecture - so nothing about everyday building changes. -->
     <_CrfOsdiTargetFlags Condition="'$(_CrfOsdiArch)' != ''">--arch $(_CrfOsdiArch)</_CrfOsdiTargetFlags>
