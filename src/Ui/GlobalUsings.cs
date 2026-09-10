@@ -53,3 +53,8 @@ global using CircuitRF.Render;
 // namespace draws and resolves; it does not edit. The measurement that decided the line is in
 // src/Render/RESOLVED.md.
 global using CircuitRF.Render.DataDisplay;
+
+// The one place a STORED relative reference is turned into a filesystem path and back, aliased
+// rather than imported wholesale: `CircuitRF.Core`'s root namespace also holds `ComponentModel`,
+// which would shadow `System.ComponentModel` in every file here that names it.
+global using RefPath = CircuitRF.Core.RefPath;

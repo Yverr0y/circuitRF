@@ -199,12 +199,12 @@ internal sealed class CddSources : IPlotDataSources
         if (string.IsNullOrEmpty(sref)) return null;
         if (Path.IsPathRooted(sref)) return File.Exists(sref) ? Path.GetFullPath(sref) : null;
 
-        string beside = Path.GetFullPath(Path.Combine(cddDir, sref));
+        string beside = CircuitRF.Core.RefPath.Resolve(cddDir, sref);
         if (File.Exists(beside)) return beside;
 
         if (resultsDir is not null)
         {
-            string inResults = Path.GetFullPath(Path.Combine(resultsDir, sref));
+            string inResults = CircuitRF.Core.RefPath.Resolve(resultsDir, sref);
             if (File.Exists(inResults)) return inResults;
         }
         return null;

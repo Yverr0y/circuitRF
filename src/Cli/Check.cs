@@ -235,7 +235,7 @@ internal static class Check
             // The three reference lists a `.cws` carries. Each is exactly what the project tree
             // already shows as a warning node when it does not resolve — same finding, no new rule.
             if (cws.DefaultTechRef is { Length: > 0 } techRef
-                && !File.Exists(Path.Combine(root, techRef)))
+                && !File.Exists(Resolve(root, techRef)))
                 f.Add(CliDiagnostics.CheckWorkspaceRefUnresolved(cwsPath, "default technology", techRef));
 
             foreach (var lib in cws.LibraryRefs)
@@ -251,7 +251,7 @@ internal static class Check
         WalkFolder(root, f, cache, recursive: true);
 
         static string Resolve(string root, string reference) =>
-            Path.IsPathRooted(reference) ? reference : Path.Combine(root, reference);
+            Path.IsPathRooted(reference) ? reference : CircuitRF.Core.RefPath.Resolve(root, reference);
     }
 
     private static void CheckFolder(string path, Findings f, TechnologyCache cache, bool recursive)

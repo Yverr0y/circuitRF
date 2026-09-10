@@ -273,7 +273,7 @@ public sealed partial class LayoutEditorViewModel
                        : Path.GetDirectoryName(adopted)!;
 
         RetargetTo(
-            Path.GetRelativePath(baseDir, adopted),
+            RefPath.ToStored(Path.GetRelativePath(baseDir, adopted)),
             new TechResolution(tech, adopted, TechResolutionSource.LayoutRef, TechValidation.Validate(tech)),
             adoptUnits: false,
             mapping: []);
@@ -810,7 +810,7 @@ public sealed partial class LayoutEditorViewModel
             string? workspaceRelative = null;
             if (resolvedCellDir is { Length: > 0 } && WorkspaceRootDir is { Length: > 0 } root)
             {
-                try { workspaceRelative = Path.GetRelativePath(Path.GetFullPath(root), Path.GetFullPath(resolvedCellDir)); }
+                try { workspaceRelative = RefPath.ToStored(Path.GetRelativePath(Path.GetFullPath(root), Path.GetFullPath(resolvedCellDir))); }
                 catch { /* leave null — the absolute-path fallback still covers this instance */ }
             }
             workspaceRelativeDirs.Add(workspaceRelative);

@@ -161,7 +161,7 @@ public static class LayoutFlatten
         if (Workspace.ExternalCellRef.IsExternalRef(cellRef)) return cellRef;
         try
         {
-            string abs = Path.GetFullPath(Path.Combine(fromDir, cellRef));
+            string abs = CircuitRF.Core.RefPath.Resolve(fromDir, cellRef);
             return Path.GetRelativePath(Path.GetFullPath(toDir), abs);
         }
         catch

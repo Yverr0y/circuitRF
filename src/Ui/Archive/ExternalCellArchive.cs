@@ -102,7 +102,7 @@ public static class ExternalCellArchive
         {
             var parsed = WorkspacePersistence.LoadFromFile(cws);
             if (parsed.DefaultTechRef is not { Length: > 0 } techRef) return;
-            string abs = Path.GetFullPath(Path.Combine(otherRoot, techRef));
+            string abs = RefPath.Resolve(otherRoot, techRef);
             if (File.Exists(abs) && !WorkspaceRootFinder.IsOutside(abs, otherRoot))
                 members.Add(new ArchiveMember(abs, Rel(otherRoot, abs)));
         }

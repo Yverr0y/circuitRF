@@ -80,11 +80,11 @@ public static class WasmResolver
         WasmCache  cache)
     {
         if (!string.IsNullOrWhiteSpace(documentAssemblyRef) && documentDir is not null)
-            return Load(Path.GetFullPath(Path.Combine(documentDir, documentAssemblyRef)),
+            return Load(CircuitRF.Core.RefPath.Resolve(documentDir, documentAssemblyRef),
                         WasmResolutionSource.DocumentRef, cache);
 
         if (!string.IsNullOrWhiteSpace(workspaceDefaultRef) && workspaceRootDir is not null)
-            return Load(Path.GetFullPath(Path.Combine(workspaceRootDir, workspaceDefaultRef)),
+            return Load(CircuitRF.Core.RefPath.Resolve(workspaceRootDir, workspaceDefaultRef),
                         WasmResolutionSource.WorkspaceDefault, cache);
 
         return WasmResolution.None;

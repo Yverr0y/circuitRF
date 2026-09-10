@@ -145,7 +145,7 @@ public static class MatchFlattenService
         EditableComponent? replacement = null;
         if (replaceInPlace)
         {
-            string cellRef = Path.GetRelativePath(vm.EditModel.SchematicDirectory!, cellDir);
+            string cellRef = RefPath.ToStored(Path.GetRelativePath(vm.EditModel.SchematicDirectory!, cellDir));
             replacement = new EditableComponent
             {
                 // "X", the prefix every other cell instance in this schematic already uses — the

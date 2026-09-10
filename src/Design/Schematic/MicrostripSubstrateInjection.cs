@@ -58,7 +58,7 @@ public static class MicrostripSubstrateInjection
         var workspaceDir = Path.GetDirectoryName(cwsPath);
         if (workspaceDir is null) return null;
 
-        var techPath = Path.GetFullPath(Path.Combine(workspaceDir, techRef));
+        var techPath = CircuitRF.Core.RefPath.Resolve(workspaceDir, techRef);
         try { return TechPersistence.LoadFromFile(techPath); }
         catch { return null; }
     }
@@ -86,7 +86,7 @@ public static class MicrostripSubstrateInjection
         var workspaceDir = Path.GetDirectoryName(cwsPath);
         if (workspaceDir is null) return null;
 
-        try   { return Path.GetFullPath(Path.Combine(workspaceDir, techRef)); }
+        try   { return CircuitRF.Core.RefPath.Resolve(workspaceDir, techRef); }
         catch { return null; }
     }
 

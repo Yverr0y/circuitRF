@@ -451,7 +451,8 @@ public static class LayoutFragment
             {
                 try
                 {
-                    clone.CellRef = Path.GetRelativePath(Path.GetFullPath(destBaseDir), Path.GetFullPath(sourceCellDir));
+                    clone.CellRef = CircuitRF.Core.RefPath.ToStored(
+                        Path.GetRelativePath(Path.GetFullPath(destBaseDir), Path.GetFullPath(sourceCellDir)));
                     result.Add(clone);
                     continue;
                 }
@@ -465,7 +466,7 @@ public static class LayoutFragment
             {
                 try
                 {
-                    clone.CellRef = Path.GetFullPath(Path.Combine(destWorkspaceRootDir, workspaceRelativeDir));
+                    clone.CellRef = CircuitRF.Core.RefPath.Resolve(destWorkspaceRootDir, workspaceRelativeDir);
                     result.Add(clone);
                     continue;
                 }

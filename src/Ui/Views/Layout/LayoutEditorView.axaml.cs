@@ -1812,7 +1812,7 @@ public partial class LayoutEditorView : UserControl
         string baseDir = vm.CurrentLayoutPath is { } clay ? Path.GetDirectoryName(clay)!
             : vm.WorkspaceTechDir is { } td ? Path.GetDirectoryName(td)!
             : Path.GetDirectoryName(absoluteTechPath)!;
-        return Path.GetRelativePath(baseDir, absoluteTechPath);
+        return RefPath.ToStored(Path.GetRelativePath(baseDir, absoluteTechPath));
     }
 
     // ── brief-foreign-documents.md §4 item 2: the edge band's "Open Workspace" affordance ─────────

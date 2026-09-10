@@ -103,6 +103,26 @@ public class GerberImportEntryTests : IDisposable
         Assert.Single(LoadCell(result).Shapes.OfType<ViaShape>());
     }
 
+    // ── The import's own TechRef is portable ─────────────────────────────────────────────────────
+    //
+    // This writer is the one that produced the workspace in the 2026-09-10 report: on Windows it
+    // stored `..\..\name.ctech`, which on macOS is one filename with three backslashes in it and
+    // resolves to nothing. `TechnologyResolver` now reads either spelling, but a reader may not
+    // rewrite the files already out in the world — so the writer stores `/`, on every platform.
+    [Fact]
+    public void ImportedLayout_StoresItsTechRefWithForwardSlashes()
+    {
+        var dir = Folder("board_sep");
+        Write(dir, "board.gtl", Artwork("Copper,L1,Top,Signal"));
+
+        var result = GerberImportEntry.RunFolder(dir, Destination(), null, LayoutUnits.DefaultDbuPerMicron);
+
+        var techRef = LoadCell(result).TechRef;
+        Assert.NotNull(techRef);
+        Assert.DoesNotContain('\\', techRef!);
+        Assert.Contains('/', techRef!);
+    }
+
     // ── Gate 4 — one file chosen, the folder accepted ────────────────────────────────────────────
 
     [Fact]

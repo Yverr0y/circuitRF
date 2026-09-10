@@ -315,7 +315,7 @@ public static class ExternalWorkspaceGate
             if (techRef is not { Length: > 0 }) { following.Add(clay); continue; }
 
             bool resolves;
-            try { resolves = File.Exists(Path.GetFullPath(Path.Combine(Path.GetDirectoryName(clay)!, techRef))); }
+            try { resolves = File.Exists(CircuitRF.Core.RefPath.Resolve(Path.GetDirectoryName(clay)!, techRef)); }
             catch { resolves = false; }
             if (!resolves) following.Add(clay);
         }
@@ -490,7 +490,7 @@ public static class ExternalWorkspaceGate
         {
             var cws = WorkspacePersistence.LoadFromFile(Path.Combine(workspaceRoot, ".cws"));
             if (cws.DefaultTechRef is not { Length: > 0 } techRef) return null;
-            return Path.GetFullPath(Path.Combine(workspaceRoot, techRef));
+            return CircuitRF.Core.RefPath.Resolve(workspaceRoot, techRef);
         }
         catch { return null; }
     }

@@ -276,7 +276,7 @@ public static class MoveRedirects
             if (!visited.Add(nextRel)) continue;
 
             string nextAbs;
-            try { nextAbs = Path.GetFullPath(Path.Combine(root, nextRel.Replace('/', Path.DirectorySeparatorChar))); }
+            try { nextAbs = CircuitRF.Core.RefPath.Resolve(root, nextRel); }
             catch { continue; }
 
             // Through CellStat like every other filesystem question resolution asks, so the cost of a

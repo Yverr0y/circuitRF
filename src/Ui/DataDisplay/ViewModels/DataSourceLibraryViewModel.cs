@@ -70,7 +70,7 @@ public partial class DataSourceLibraryViewModel : ViewModelBase
             return SelectedDataSourceAbs;
         if (Path.IsPathRooted(sourceRef)) return sourceRef;
         var root = ResultsRootProvider?.Invoke();
-        return root is null ? null : Path.GetFullPath(Path.Combine(root, sourceRef));
+        return root is null ? null : RefPath.Resolve(root, sourceRef);
     }
 
     /// <summary>Enumerate available datasources without loading any file. Safe when there's no workspace.

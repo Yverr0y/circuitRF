@@ -48,8 +48,7 @@ public static class WorkspaceRefs
     public static string Resolve(string storedRef, string workspaceRootDir)
     {
         if (Path.IsPathRooted(storedRef)) return storedRef;
-        string native = storedRef.Replace('/', Path.DirectorySeparatorChar);
-        return Path.GetFullPath(Path.Combine(workspaceRootDir, native));
+        return CircuitRF.Core.RefPath.Resolve(workspaceRootDir, storedRef);
     }
 
     /// <summary>

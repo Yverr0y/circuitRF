@@ -142,7 +142,7 @@ public static class DocumentFileRefs
         if (storedRef.IndexOfAny(Path.GetInvalidPathChars()) >= 0) return null;
         if (Path.GetExtension(storedRef).Length is < 2 or > 12) return null;
 
-        var native = storedRef.Replace('/', Path.DirectorySeparatorChar);
+        var native = RefPath.ToNative(storedRef);
 
         try
         {
@@ -281,7 +281,7 @@ public static class DocumentFileRefs
 
         // A rooted reference resolves as itself and so says nothing about how a replacement would be
         // read; the write-back base comes from the property (and the document type) instead.
-        var writeBase = Path.IsPathRooted(s!.Replace('/', Path.DirectorySeparatorChar))
+        var writeBase = Path.IsPathRooted(RefPath.ToNative(s!))
             ? BaseForOpaqueRef(owner, ctx)
             : hit.Base;
 

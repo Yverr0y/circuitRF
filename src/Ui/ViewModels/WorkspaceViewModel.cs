@@ -1868,7 +1868,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
                     if (docPath is null || kind is null || WorkspaceRootFinder.IsOutside(docPath, wsDir)) continue;
 
                     string stored;
-                    try   { stored = Path.GetRelativePath(wsDir, docPath); }
+                    try   { stored = RefPath.ToStored(Path.GetRelativePath(wsDir, docPath)); }
                     catch { stored = docPath; }
                     docsList.Add(new CwsOpenDocument { Path = stored, Kind = kind, TabOrder = order++ });
                 }
@@ -1893,7 +1893,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
                 string? activePath = null;
                 if (activeAbsPath is not null && !WorkspaceRootFinder.IsOutside(activeAbsPath, wsDir))
                 {
-                    try   { activePath = Path.GetRelativePath(wsDir, activeAbsPath); }
+                    try   { activePath = RefPath.ToStored(Path.GetRelativePath(wsDir, activeAbsPath)); }
                     catch { activePath = activeAbsPath; }
                 }
                 ws.ActiveDocumentPath = activePath;
@@ -2388,7 +2388,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             if (!string.Equals(entry.Kind, "layout", StringComparison.OrdinalIgnoreCase)) continue;
             var abs = Path.IsPathRooted(entry.Path)
                 ? entry.Path
-                : Path.GetFullPath(Path.Combine(workspaceDir, entry.Path));
+                : RefPath.Resolve(workspaceDir, entry.Path);
             if (File.Exists(abs)) paths.Add(abs);
         }
         if (paths.Count == 0) return result;
@@ -2494,7 +2494,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         {
             var abs = Path.IsPathRooted(entry.Path)
                 ? entry.Path
-                : Path.GetFullPath(Path.Combine(workspaceDir, entry.Path));
+                : RefPath.Resolve(workspaceDir, entry.Path);
 
             bool exists = string.Equals(entry.Kind, "cell", StringComparison.OrdinalIgnoreCase)
                 ? Directory.Exists(abs)
@@ -2542,7 +2542,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
 
             var absPath = Path.IsPathRooted(entry.Path)
                 ? entry.Path
-                : Path.GetFullPath(Path.Combine(workspaceDir, entry.Path));
+                : RefPath.Resolve(workspaceDir, entry.Path);
 
             switch (entry.Kind)
             {
@@ -2585,7 +2585,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         {
             var absActive = Path.IsPathRooted(activePath)
                 ? activePath
-                : Path.GetFullPath(Path.Combine(workspaceDir, activePath));
+                : RefPath.Resolve(workspaceDir, activePath);
             // Tab selection ONLY — deliberately NOT ActivateOpenDocument. Restoring which tab was
             // last active is not a user asking for a window: floating windows are restored
             // separately by RestoreFloatingDocumentWindows, and raising-and-focusing here would
@@ -6407,7 +6407,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
                 CwsFile cws;
                 try   { cws = WorkspacePersistence.LoadFromFile(CurrentWorkspacePath); }
                 catch { cws = new CwsFile(); }
-                cws.DefaultTechRef = Path.GetRelativePath(workspaceDir, techPath);
+                cws.DefaultTechRef = RefPath.ToStored(Path.GetRelativePath(workspaceDir, techPath));
                 WorkspacePersistence.SaveToFileAtomic(CurrentWorkspacePath, cws);
                 _techCache.Invalidate(techPath);
                 RefreshAllOpenLayoutTech();
@@ -6716,7 +6716,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
                 CwsFile cws;
                 try   { cws = WorkspacePersistence.LoadFromFile(CurrentWorkspacePath); }
                 catch { cws = new CwsFile(); }
-                cws.DefaultTechRef = Path.GetRelativePath(workspaceDir, techPath);
+                cws.DefaultTechRef = RefPath.ToStored(Path.GetRelativePath(workspaceDir, techPath));
                 WorkspacePersistence.SaveToFileAtomic(CurrentWorkspacePath, cws);
                 _techCache.Invalidate(techPath);
                 RefreshAllOpenLayoutTech();
@@ -11942,7 +11942,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         string? relPath = null;
         if (techPath is not null)
         {
-            try   { relPath = Path.GetRelativePath(workspaceDir, techPath); }
+            try   { relPath = RefPath.ToStored(Path.GetRelativePath(workspaceDir, techPath)); }
             catch { relPath = techPath; }
         }
 
@@ -12106,7 +12106,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         catch { return false; }
         if (defaultTechRef is null) return false;
 
-        var defaultAbsPath = Path.GetFullPath(Path.Combine(workspaceDir, defaultTechRef));
+        var defaultAbsPath = RefPath.Resolve(workspaceDir, defaultTechRef);
         return string.Equals(defaultAbsPath, node.AbsolutePath, StringComparison.OrdinalIgnoreCase);
     }
 

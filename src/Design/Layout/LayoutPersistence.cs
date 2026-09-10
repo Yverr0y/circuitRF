@@ -221,7 +221,7 @@ public static class LayoutPersistence
         foreach (var bmp in view.Shapes.OfType<BitmapShape>())
             if (!string.IsNullOrEmpty(bmp.ImagePathRef) && !Path.IsPathFullyQualified(bmp.ImagePathRef))
                 bmp.ImagePathRef = Path.GetFullPath(
-                    Path.Combine(layoutDir, bmp.ImagePathRef.Replace('/', Path.DirectorySeparatorChar)));
+                    Path.Combine(layoutDir, CircuitRF.Core.RefPath.ToNative(bmp.ImagePathRef)));
     }
 
     // ── Convert LayoutView <-> ClayFile ───────────────────────────────────────

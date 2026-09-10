@@ -130,7 +130,7 @@ public static class ExternalCellRef
         else
         {
             if (baseDir is null) return null;
-            try { direct = Path.GetFullPath(Path.Combine(baseDir, cellRef)); }
+            try { direct = CircuitRF.Core.RefPath.Resolve(baseDir, cellRef); }
             catch { return null; }
         }
 
@@ -182,8 +182,7 @@ public static class ExternalCellRef
 
         try
         {
-            return Path.GetFullPath(
-                Path.Combine(otherRoot, rel.Replace('/', Path.DirectorySeparatorChar)));
+            return CircuitRF.Core.RefPath.Resolve(otherRoot, rel);
         }
         catch { return null; }
     }
@@ -311,7 +310,7 @@ public static class ExternalCellRef
         if (PathTokens.ExpandOrNull(storedPath) is not { } storedPathExpanded) return null;
         try
         {
-            string native = storedPathExpanded.Replace('/', Path.DirectorySeparatorChar);
+            string native = CircuitRF.Core.RefPath.ToNative(storedPathExpanded);
             string abs = Path.IsPathRooted(native)
                 ? native
                 : Path.GetFullPath(Path.Combine(workspaceRoot, native));

@@ -130,7 +130,7 @@ public static class CellReferenceRepair
 
     private static string? SafeCombine(string root, string relPath)
     {
-        try { return Path.GetFullPath(Path.Combine(root, relPath.Replace('/', Path.DirectorySeparatorChar))); }
+        try { return RefPath.Resolve(root, relPath); }
         catch { return null; }
     }
 

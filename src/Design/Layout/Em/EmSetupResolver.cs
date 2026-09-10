@@ -64,7 +64,7 @@ public static class EmSetupResolver
             ? Path.GetDirectoryName(cws)!
             : Path.GetDirectoryName(Path.GetFullPath(cemPath))!;
 
-        return Path.GetFullPath(Path.Combine(baseDir, layoutRef));
+        return CircuitRF.Core.RefPath.Resolve(baseDir, layoutRef);
     }
 
     /// <summary>The inverse of <see cref="ResolveLayoutPath"/>: how an absolute <c>.clay</c> path is

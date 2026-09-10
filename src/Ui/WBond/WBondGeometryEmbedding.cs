@@ -123,7 +123,7 @@ public static class WBondGeometryEmbedding
                 continue;
             }
 
-            string cellDir = Path.GetFullPath(Path.Combine(baseDir, instance.CellRef));
+            string cellDir = RefPath.Resolve(baseDir, instance.CellRef);
             if (!seen.Add(cellDir)) continue;
 
             cells.Add(cellDir);

@@ -126,7 +126,7 @@ public static class SymbolPersistence
         foreach (var bmp in symbol.Primitives.OfType<BitmapPrimitive>())
             if (!string.IsNullOrEmpty(bmp.ImagePathRef) && !Path.IsPathFullyQualified(bmp.ImagePathRef))
                 bmp.ImagePathRef = Path.GetFullPath(
-                    Path.Combine(symbolDir, bmp.ImagePathRef.Replace('/', Path.DirectorySeparatorChar)));
+                    Path.Combine(symbolDir, CircuitRF.Core.RefPath.ToNative(bmp.ImagePathRef)));
     }
 
     // ── Convert Symbol ↔ CsymFile ─────────────────────────────────────────────

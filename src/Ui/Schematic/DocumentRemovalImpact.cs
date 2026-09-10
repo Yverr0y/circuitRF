@@ -111,7 +111,7 @@ public static class DocumentRemovalImpact
             if (techRef is not { Length: > 0 }) continue;
 
             string resolved;
-            try { resolved = Normalize(Path.Combine(Path.GetDirectoryName(clay)!, techRef)); }
+            try { resolved = Normalize(RefPath.Resolve(Path.GetDirectoryName(clay)!, techRef)); }
             catch { continue; }
 
             if (string.Equals(resolved, target, StringComparison.OrdinalIgnoreCase))

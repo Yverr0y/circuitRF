@@ -61,13 +61,13 @@ public static class TechnologyResolver
     {
         if (techRef is not null && clayDir is not null)
         {
-            var path = Path.GetFullPath(Path.Combine(clayDir, techRef));
+            var path = Core.RefPath.Resolve(clayDir, techRef);
             return Load(path, TechResolutionSource.LayoutRef, cache);
         }
 
         if (workspaceDefaultTechRef is not null && workspaceRootDir is not null)
         {
-            var path = Path.GetFullPath(Path.Combine(workspaceRootDir, workspaceDefaultTechRef));
+            var path = Core.RefPath.Resolve(workspaceRootDir, workspaceDefaultTechRef);
             return Load(path, TechResolutionSource.WorkspaceDefault, cache);
         }
 

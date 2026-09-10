@@ -512,7 +512,7 @@ public static class LayoutConvert
             string layoutDir = CellFolder.SubFolderPath(cellDir, ViewType.Layout);
             string clay = Path.Combine(layoutDir, file);
             var view = LayoutPersistence.LoadFromFile(clay);
-            view.TechRef = Path.GetRelativePath(layoutDir, techPath);
+            view.TechRef = CircuitRF.Core.RefPath.ToStored(Path.GetRelativePath(layoutDir, techPath));
             LayoutPersistence.SaveToFile(clay, view);
         }
 

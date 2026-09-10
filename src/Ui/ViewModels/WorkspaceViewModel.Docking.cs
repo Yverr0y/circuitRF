@@ -1282,7 +1282,7 @@ public partial class WorkspaceViewModel
         };
 
         if (abs is null || WorkspaceRootFinder.IsOutside(abs, wsDir)) return null;
-        try   { return Path.GetRelativePath(wsDir, abs); }
+        try   { return RefPath.ToStored(Path.GetRelativePath(wsDir, abs)); }
         catch { return null; }
     }
 

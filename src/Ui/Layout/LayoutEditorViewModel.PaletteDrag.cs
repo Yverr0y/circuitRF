@@ -227,7 +227,7 @@ public sealed partial class LayoutEditorViewModel
             foreach (var d in diagnostics) _messageSink?.Warning(d);
 
         string cellRef;
-        try { cellRef = Path.GetRelativePath(InstanceBaseDir, cellDir); }
+        try { cellRef = RefPath.ToStored(Path.GetRelativePath(InstanceBaseDir, cellDir)); }
         catch { cellRef = cellDir; }
 
         return cellRef;

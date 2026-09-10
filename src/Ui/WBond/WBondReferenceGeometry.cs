@@ -63,7 +63,7 @@ public static class WBondReferenceGeometry
                 continue;
             }
 
-            string cellDir = Path.GetFullPath(Path.Combine(baseDir, instance.CellRef));
+            string cellDir = RefPath.Resolve(baseDir, instance.CellRef);
             if (!seen.Add(cellDir)) continue;
 
             Walk(resolution.View, CellHierarchy.LayoutBaseDirOf(cellDir), missing, seen, depth + 1);

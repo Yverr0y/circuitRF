@@ -743,7 +743,7 @@ public static class SchematicToLayoutGenerator
 
     private static string ToRelative(string baseDir, string targetAbsDir)
     {
-        try { return Path.GetRelativePath(baseDir, targetAbsDir); }
+        try { return RefPath.ToStored(Path.GetRelativePath(baseDir, targetAbsDir)); }
         catch { return targetAbsDir; }
     }
 

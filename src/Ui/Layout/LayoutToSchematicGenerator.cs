@@ -315,7 +315,7 @@ public static class LayoutToSchematicGenerator
             return null;
         }
 
-        string cellRef = Path.GetRelativePath(schematicDir, res.ResolvedCellDir!);
+        string cellRef = RefPath.ToStored(Path.GetRelativePath(schematicDir, res.ResolvedCellDir!));
 
         var symbol = CellSymbolResolver.Resolve(cellRef, schematicDir);
         if (symbol.State == CellSymbolState.PrimaryMissing)

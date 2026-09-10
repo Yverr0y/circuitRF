@@ -81,7 +81,7 @@ public sealed partial class LayoutEditorViewModel
         string cellRef;
         try
         {
-            cellRef = Path.GetRelativePath(effectiveParentDir, cellDir);
+            cellRef = RefPath.ToStored(Path.GetRelativePath(effectiveParentDir, cellDir));
         }
         catch (Exception ex)
         {

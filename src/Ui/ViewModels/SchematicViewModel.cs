@@ -3847,7 +3847,7 @@ public sealed partial class SchematicViewModel : ObservableObject
             cellAbsDir = FindCellDirByName(cellName);
             if (cellAbsDir is null) return false;
 
-            cellRef = Path.GetRelativePath(EditModel.SchematicDirectory, cellAbsDir);
+            cellRef = RefPath.ToStored(Path.GetRelativePath(EditModel.SchematicDirectory, cellAbsDir));
         }
 
         if (CellSymbolResolver.Resolve(cellRef, EditModel.SchematicDirectory ?? "").State

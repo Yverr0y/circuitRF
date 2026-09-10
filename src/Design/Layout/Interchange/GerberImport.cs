@@ -1018,7 +1018,7 @@ public static class GerberImport
             var view = new LayoutView
             {
                 DbuPerMicron = destDbuPerMicron,
-                TechRef = Path.GetRelativePath(layoutDir, techPath),
+                TechRef = CircuitRF.Core.RefPath.ToStored(Path.GetRelativePath(layoutDir, techPath)),
             };
             view.Shapes.AddRange(remaining.Select(s => s.Shape));
             view.Shapes.AddRange(drillShapes);

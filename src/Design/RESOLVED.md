@@ -1,5 +1,63 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## A Windows-authored workspace would not resolve its technology on macOS (owner report, 2026-09-10)
+
+A workspace shared by a Windows colleague opened with
+
+```
+Technology file not found: …/square_patch_antenna_gerber/layout/..\..\square_patch_antenna_gerber.ctech
+```
+
+**A path carrying BOTH separators is the tell.** The `.clay` stored
+`"TechRef": "..\\..\\square_patch_antenna_gerber.ctech"` and the `.cws` stored
+`"DefaultTechRef": "tech\\pcb-4layer_FR-4_62mil_1oz.ctech"`. On Unix a backslash is an ordinary
+filename character, so `Path.Combine(layoutDir, techRef)` produced a single non-existent file whose
+name happens to contain three backslashes — and the failure was reported honestly, quoting exactly
+the path it had built, which is the only reason it was diagnosable at all.
+
+### The convention already existed; two writers did not follow it
+
+`src/Ui/Schematic/WorkspaceRefs.cs` has stated the rule since the stability/passivity brief: **every
+relative reference stored in a document is `/`-separated**, and it even names the trap — "it only
+fails when a workspace crosses platforms, i.e. never on the machine that wrote it." Most writers do
+`Path.GetRelativePath(...).Replace('\\', '/')`. The two that mint a technology reference did not:
+`GerberImport` (which produced this workspace) and `LayoutConvert`'s CLI equivalent, plus the three
+`.cws` `DefaultTechRef` writers in `WorkspaceViewModel` and `LayoutEditorView`'s
+`ComputeRelativeTechRef`.
+
+**And the breakage is one-way, which is why it lasted.** Windows accepts `/` as a separator as well
+as `\`, so a workspace authored on macOS or Linux has always opened on Windows. Only the reverse
+direction fails, and it fails on someone else's machine.
+
+### The fix: tolerant reading, strict writing
+
+`CircuitRF.Core.RefPath` is now the one place a stored ref crosses to a filesystem path and back:
+
+- `ToNative` / `Resolve` accept **either** separator. A reader may not rewrite the documents already
+  out in the world, so every resolution site goes through it — the technology resolver, the cell and
+  EM-setup resolvers, `ExternalCellRef`, the `.wasm` resolver, bitmap refs, the clipboard fragment's
+  rebase, `check`, `.cdd` sources and the `.cws` open-document restore.
+- `ToStored` is what every site that COMPUTES a ref passes its `Path.GetRelativePath` result through,
+  so nothing new leaves this machine in a form the next one cannot read. Null in, null out — a
+  `TechRef` of null means "use the workspace default" and must not become an empty ref.
+
+`RefPath` lives in `src/Core` rather than here because `src/Design`, `src/Ui` and `src/Cli` all need
+it and Design already references Core. `src/Ui/GlobalUsings.cs` **aliases** it
+(`global using RefPath = CircuitRF.Core.RefPath;`) rather than importing `CircuitRF.Core` wholesale —
+that root namespace also holds `ComponentModel`, which would shadow `System.ComponentModel`.
+
+**The one thing given up:** a `\` is a legal character in a Unix filename, so a reference to a file
+genuinely named that way no longer resolves. Since every ref circuitRF writes is separator-normalized,
+a `\` in a stored ref can only be a Windows separator.
+
+**Not converted, deliberately:** git paths (`Revision/`), zip entry names (`Archive/`), kit-relative
+paths from a vendor `PdkImporter`, and `DocLauncher`'s URL-to-file mapping. Those are `/`-only by
+their own format's rule, and the last is a path-traversal guard.
+
+Gates: `tests/Ui.Tests/TechnologyResolverTests` (both resolution branches read a Windows-authored ref)
+and `tests/Ui.Tests/GerberImportEntryTests` (the import's own `TechRef` is written with `/`).
+
+
 ## A Gerber import now completes the substrate from one generic FR-4 board (owner, 2026-09-08)
 
 **This reverses GI2's most emphatic rule, on purpose, and the reversal is narrower than it looks.**

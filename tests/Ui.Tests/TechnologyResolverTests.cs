@@ -161,4 +161,56 @@ public class TechnologyResolverTests : IDisposable
         Assert.NotNull(result.Tech);
         Assert.Empty(result.Diagnostics);
     }
+
+    // ── A workspace authored on Windows, opened on macOS or Linux ─────────────
+    //
+    // Owner report, 2026-09-10: a workspace shared by a Windows colleague opened with
+    // "Technology file not found: …/layout/..\..\square_patch_antenna_gerber.ctech" — a path
+    // carrying BOTH separators, which is the tell. Every ref circuitRF writes is `/`-separated by
+    // convention (WorkspaceRefs states it), but the two technology-ref writers did not follow it,
+    // and Path.Combine on Unix treats `..\..\x.ctech` as one filename containing backslashes.
+    //
+    // The breakage is one-way, which is why it lasted: Windows accepts `/` too, so a workspace
+    // written here has always opened there. These gate the READING half — the files already out in
+    // the world cannot be re-written by a reader.
+
+    [Fact]
+    public void LayoutRef_WithWindowsSeparators_StillResolves()
+    {
+        var clayDir = Path.Combine(_root, "cells", "Amp", "layout");
+        Directory.CreateDirectory(clayDir);
+        WriteTech("cells/Amp/Amp.ctech", StarterTechnologies.MmicGaAs());
+
+        var cache  = new TechnologyCache();
+        var result = TechnologyResolver.Resolve(@"..\Amp.ctech", clayDir, _root, null, cache);
+
+        Assert.Equal(TechResolutionSource.LayoutRef, result.Source);
+        Assert.NotNull(result.Tech);
+        Assert.Equal("MMIC GaAs", result.Tech!.Name);
+    }
+
+    [Fact]
+    public void WorkspaceDefaultTechRef_WithWindowsSeparators_StillResolves()
+    {
+        var clayDir = Path.Combine(_root, "cells", "Amp", "layout");
+        Directory.CreateDirectory(clayDir);
+        WriteTech("tech/pcb-2layer.ctech", StarterTechnologies.Pcb2Layer());
+
+        var cache  = new TechnologyCache();
+        var result = TechnologyResolver.Resolve(null, clayDir, _root, @"tech\pcb-2layer.ctech", cache);
+
+        Assert.Equal(TechResolutionSource.WorkspaceDefault, result.Source);
+        Assert.NotNull(result.Tech);
+    }
+
+    // The writing half: nothing new leaves this machine in a form the next one cannot read. Both
+    // technology-ref writers are covered — the Gerber import (which produced the reported file) and
+    // the CLI's own `convert`, which mints a technology the same way.
+    [Fact]
+    public void RefPath_ToStored_NormalizesSeparators_AndKeepsNullNull()
+    {
+        Assert.Equal("../../x.ctech", CircuitRF.Core.RefPath.ToStored(@"..\..\x.ctech"));
+        Assert.Equal("../../x.ctech", CircuitRF.Core.RefPath.ToStored("../../x.ctech"));
+        Assert.Null(CircuitRF.Core.RefPath.ToStored(null));
+    }
 }

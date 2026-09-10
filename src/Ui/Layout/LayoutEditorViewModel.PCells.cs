@@ -167,7 +167,7 @@ public sealed partial class LayoutEditorViewModel
             foreach (var d in editDiagnostics) _messageSink?.Warning(d);
 
         string newCellRef;
-        try { newCellRef = Path.GetRelativePath(InstanceBaseDir, newCellDir); }
+        try { newCellRef = RefPath.ToStored(Path.GetRelativePath(InstanceBaseDir, newCellDir)); }
         catch { newCellRef = newCellDir; }
 
         if (string.Equals(newCellRef, inst.CellRef, StringComparison.OrdinalIgnoreCase))
