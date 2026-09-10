@@ -24,20 +24,35 @@ using CircuitRF.Engine.Mom;
 
 namespace CircuitRF.Design.Layout.Em;
 
+/// <summary>
+/// <b>RP-1 — which conductor this run terminates on, and who decided.</b> The <c>PlanarProblem</c>
+/// itself cannot say: it is the neutral engine type and knows only a height, so a caller wanting to
+/// REPORT the return plane (the panel, <c>circuitrf explain</c>) would otherwise have to re-derive
+/// R-em-4 from the technology — a second spelling of the rule, which is the one thing this area
+/// keeps refusing to grow.
+/// </summary>
+/// <param name="ConductorName">The stackup entry, or null when the plane came from
+/// <c>Stackup.Bottom = Ground</c> rather than from a conductor.</param>
+/// <param name="TopM">The z the medium terminates at, in metres — a conductor's TOP surface.</param>
+/// <param name="Overridden">True when the <c>.cem</c> named it, false when R-em-4 inferred it.</param>
+public sealed record PlanarReturnPlane(string? ConductorName, double TopM, bool Overridden);
+
 /// <summary>Either a <see cref="PlanarProblem"/>, or a refusal that names what is missing and where
 /// the capability arrives — the same R-mom-17 shape every other refusal in this area uses.</summary>
 public sealed record PlanarExtractionResult(
     PlanarProblem?        Problem,
     string?               Refusal,
-    IReadOnlyList<string> Notes)
+    IReadOnlyList<string> Notes,
+    PlanarReturnPlane?    ReturnPlane = null)
 {
     public bool Ok => Problem is not null && Refusal is null;
 
     public static PlanarExtractionResult No(string refusal, IEnumerable<string>? notes = null)
         => new(null, refusal, notes is null ? [] : [.. notes]);
 
-    public static PlanarExtractionResult Yes(PlanarProblem p, IEnumerable<string>? notes = null)
-        => new(p, null, notes is null ? [] : [.. notes]);
+    public static PlanarExtractionResult Yes(PlanarProblem p, IEnumerable<string>? notes = null,
+                                             PlanarReturnPlane? returnPlane = null)
+        => new(p, null, notes is null ? [] : [.. notes], returnPlane);
 }
 
 public static class PlanarExtractor
@@ -420,7 +435,85 @@ public static class PlanarExtractor
         // the boundary is the metal's top surface whatever a ground entry's `SheetAt` says. Do not
         // "unify" the two: reading `SheetAt` here would let a stray Bottom on a ground entry drop
         // the reference plane by a metal thickness on every technology that carries one.
-        var groundBand = HighestGroundBelow(stack, signal.SheetM);
+        var inferredGround = HighestGroundBelow(stack, signal.SheetM);
+        var groundBand     = inferredGround;
+        bool overridden    = false;
+
+        // ── RP-1: THE .cem MAY NAME THE RETURN PLANE, AND THEN IT MUST SAY SO ─────────────────
+        //
+        // R-em-4 above is the right rule and stays the default — every document written before this
+        // field, and every one that leaves it empty, takes the inferred path bit for bit. What it
+        // cannot express is a per-RUN answer, and there are two ordinary situations that need one:
+        // a board with two designated planes below the structure whose trace is genuinely
+        // referenced to the LOWER of them (an intentionally-voided inner plane), and the routine
+        // "what if" of comparing one structure against two references. The only other way to say
+        // either is to un-tick a plane's "Ground reference" in the TECHNOLOGY — which is shared by
+        // every design that uses it, and which also turns that plane into meshed signal metal
+        // everywhere.
+        //
+        // **This is not the remedy for a bad level set** and must never be used as one. The
+        // 2026-09-10 report that inner-layer via pads dragged the return plane to the bottom of a
+        // board was a LEVEL-selection defect and is fixed in the incidental trim above; an override
+        // that papered over it would leave the levels just as wrong and hide the evidence.
+        //
+        // The refusals below are the substance: an override that quietly produces a
+        // different-looking answer is exactly the failure this whole area is written against.
+        if (settings.GroundStackupLayerName is { Length: > 0 } wantedGround)
+        {
+            var named = stack.FirstOrDefault(b =>
+                b.Layer.Kind == StackupKind.Conductor &&
+                string.Equals(b.Layer.Name, wantedGround, StringComparison.Ordinal));
+
+            // R-rp1-2 — the same shape SignalStackupLayerName's own refusal uses: name the setting,
+            // name the technology. A missing name is a typo or a technology that has moved on, and
+            // silently falling back to R-em-4 would answer a question nobody asked.
+            if (named is null)
+                return PlanarExtractionResult.No(
+                    $"This EM setup names '{wantedGround}' as its return plane, but technology " +
+                    $"'{tech.Name}' has no conductor stackup layer with that name. Name one of " +
+                    $"{ConductorList(stack)}, or clear the setting to let the run resolve the " +
+                    "return plane from the technology's own ground designations.", notes);
+
+            // R-rp1-4, the half that is a REFUSAL rather than a note. A conductor cannot be both the
+            // meshed metal and the laterally infinite plane that metal returns to — one is unknowns
+            // in the matrix, the other is the boundary the Green's function terminates on, and there
+            // is no reading of "both" that the kernel could act on.
+            if (levels.Any(b => b.Index == named.Index))
+                return PlanarExtractionResult.No(
+                    $"This EM setup names '{named.Layer.Name}' as its return plane, but that " +
+                    "conductor is also one of its analysis levels. It cannot be both: an analysis " +
+                    "level is meshed metal carrying unknowns, and the return plane is the laterally " +
+                    "infinite boundary that metal returns to. Either untick it in this setup's " +
+                    "analysis levels, or name a different conductor as the return plane.", notes);
+
+            // R-rp1-3 — R-em-4's own physics, not a limitation of the override: a port returns
+            // through a plane BENEATH the conductor it feeds, so a plane at or above the lowest
+            // level leaves a slab of zero or negative height. Say which level and BOTH heights: the
+            // user is looking at a stackup table and cannot see the analysis levels from there.
+            if (named.TopM >= signal.SheetM - 1e-15)
+                return PlanarExtractionResult.No(
+                    $"This EM setup names '{named.Layer.Name}' as its return plane, but its top " +
+                    $"surface is at {named.TopM * 1e6:G4} µm, which is NOT below the lowest analysis " +
+                    $"level '{signal.Layer.Name}' at {signal.SheetM * 1e6:G4} µm. A " +
+                    "return plane must lie BENEATH the conductor it feeds, or there is no dielectric " +
+                    $"slab between them to solve on. Name a conductor below {signal.SheetM * 1e6:G4} " +
+                    $"µm, or restrict this setup's analysis levels to conductors above " +
+                    $"'{named.Layer.Name}'.", notes);
+
+            groundBand = named;
+            overridden = true;
+
+            // R-rp1-4, the note. Accepting a conductor the technology does not designate is the
+            // POINT of the field — but the `.ctech` and the run then disagree with nothing on screen
+            // to say which won, and the run wins. Say so, here, where the answer is stated.
+            if (!named.Layer.IsGroundReference)
+                notes.Add(
+                    $"'{named.Layer.Name}' is NOT marked as a ground reference in technology " +
+                    $"'{tech.Name}', but this EM setup names it as the return plane, so this run " +
+                    "overrides the technology and terminates on it anyway. It is modelled as a " +
+                    "laterally infinite PEC and its own artwork, if any, is not meshed. That " +
+                    "override applies to this run only; the technology is unchanged.");
+        }
 
         double groundTopM;
         if (groundBand is not null)
@@ -439,13 +532,27 @@ public static class PlanarExtractor
             // least likely to be what anyone wanted. The normal case said nothing at all: the
             // panel's own "Ground reference" row is bound to the CROSS-SECTION readback, which a
             // full-wave run does not produce.
-            notes.Add(
-                $"Every port returns through '{groundBand.Layer.Name}', the ground-designated " +
-                $"conductor at {groundBand.TopM * 1e6:G4} µm — the highest one below the " +
-                $"signal level at {signal.SheetM * 1e6:G4} µm. That plane is the negative " +
-                "terminal of every port in this run and is not selectable per port; it is modelled " +
-                "as laterally infinite. To return through a different conductor, designate that one " +
-                "as the ground reference in the technology editor.");
+            //
+            // R-rp1-5: and it must READ DIFFERENTLY when the `.cem` chose. This note is the only
+            // place the return plane is visible at all, so a run whose plane came from the document
+            // rather than from R-em-4 has to say so here or the two are indistinguishable — which
+            // would make the override precisely the silent-different-answer this note prevents.
+            // Both spellings keep naming the HEIGHT, which is the number the 2%-scale trap is in.
+            notes.Add(overridden
+                ? $"Every port returns through '{groundBand.Layer.Name}' at " +
+                  $"{groundBand.TopM * 1e6:G4} µm, because THIS EM SETUP names it as the return " +
+                  $"plane — {InferredWouldHaveBeen(inferredGround, tech, stack)}. The signal level " +
+                  $"sits at {signal.SheetM * 1e6:G4} µm. That plane is the negative terminal of " +
+                  "every port in this run and is not selectable per port; it is modelled as " +
+                  "laterally infinite. Clear this setup's return plane to go back to the automatic " +
+                  "choice."
+                : $"Every port returns through '{groundBand.Layer.Name}', the ground-designated " +
+                  $"conductor at {groundBand.TopM * 1e6:G4} µm — the highest one below the " +
+                  $"signal level at {signal.SheetM * 1e6:G4} µm. That plane is the negative " +
+                  "terminal of every port in this run and is not selectable per port; it is modelled " +
+                  "as laterally infinite. To return through a different conductor, designate that " +
+                  "one as the ground reference in the technology editor, or name it as this EM " +
+                  "setup's own return plane to override the choice for this run alone.");
 
             // ── A GROUND PLANE SKIPPED OVER IS NOT A GROUND PLANE — IT IS SUBSTRATE ───────────
             //
@@ -764,7 +871,8 @@ public static class PlanarExtractor
                           ? $"{vias.Count} via(s) carry z-directed current between them."
                           : "No via joins them, so the levels couple only through the medium."));
 
-        return PlanarExtractionResult.Yes(problem, notes);
+        return PlanarExtractionResult.Yes(problem, notes,
+            new PlanarReturnPlane(groundBand?.Layer.Name, groundTopM, overridden));
     }
 
     private static EmPoint[] ToPoints(long[] xy, double perDbu)
@@ -1195,6 +1303,36 @@ public static class PlanarExtractor
         seeded.IntersectWith(signalBands.Select(b => b.Index));
         return seeded;
     }
+
+    /// <summary>RP-1: the conductor stackup entries a return-plane override may legally name, for the
+    /// "no layer by that name" refusal. Every conductor, ground-designated or not — R-rp1-4 permits a
+    /// non-designated one, and a list that hid the legal choices would teach the wrong rule in the
+    /// one message a user reads when they have already got the name wrong.</summary>
+    private static string ConductorList(List<Band> stack)
+    {
+        var names = stack
+            .Where(b => b.Layer.Kind == StackupKind.Conductor)
+            .OrderByDescending(b => b.TopM)
+            .Select(b => $"'{b.Layer.Name}'")
+            .ToList();
+        return names.Count == 0 ? "(this technology has no conductor stackup layers)"
+                                : string.Join(", ", names);
+    }
+
+    /// <summary>RP-1: what R-em-4 WOULD have resolved, for the overridden note. Reported because the
+    /// interesting thing about an override is the difference it made, and a user comparing two
+    /// references cannot otherwise see which one they moved away from. All three outcomes of the
+    /// inferred rule are spelled out, the third included: an override can be the only reason a run
+    /// happened at all.</summary>
+    private static string InferredWouldHaveBeen(Band? inferred, Technology tech, List<Band> stack)
+        => inferred is not null
+            ? $"R-em-4 would otherwise have chosen '{inferred.Layer.Name}' at {inferred.TopM * 1e6:G4} µm"
+            : tech.Stackup.Bottom == BoundaryCondition.Ground
+                ? "no conductor below that level is designated as a ground reference, so the run " +
+                  $"would otherwise have taken Stackup.Bottom = Ground at {stack[0].BottomM * 1e6:G4} µm"
+                : "no conductor below that level is designated as a ground reference and " +
+                  "Stackup.Bottom is not Ground, so without this setting the run would have been " +
+                  "refused for having no ground plane at all";
 
     /// <summary><b>R-em-4's own query, in one place.</b> The highest ground-designated conductor whose
     /// TOP SURFACE is at or below <paramref name="sheetM"/> — the plane a conductor at that height

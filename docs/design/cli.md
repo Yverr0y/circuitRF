@@ -660,6 +660,17 @@ as a step: what was being resolved, from where, to what, and by which rule.
   technology and *which* workspace resolved it. The two walks start from different files and can land
   on different workspaces; that is deliberate (§8.1) and is exactly the thing a caller cannot
   otherwise see.
+- **A `.cem` also reports its `return plane`** (RP-1, `brief-em-return-plane-1-explicit-ground-layer.md`
+  R-rp1-8) — the conductor every port in that run returns through, **its height in µm**, and whether
+  it came from R-em-4's inferred rule (the top surface of the highest ground-designated conductor
+  below the lowest analysis level) or from the setup's own `GroundStackupLayerName`. It is the
+  headless half of the run's "Every port returns through …" note, and before RP-1 the answer had no
+  spelling outside a full solve: the panel's own Ground-reference row is bound to the *cross-section*
+  readback, which a full-wave run never produces. **It runs the EXTRACTION, not the analysis** —
+  geometry and a stackup in, a medium out, no solve, so R-aut4-1's no-solve budget is untouched — and
+  it reports what the extraction resolved rather than restating the rule, because a rule restated
+  here is a rule that can disagree with the run. The step is absent when the extraction refuses: the
+  refusal is a `check` answer, and repeating it here would report a plane the run does not have.
 - **`--analysis`** — every declared chain, whether it is runnable, which one would dispatch and for
   which verb, and whether a named inner analysis would be **promoted** to its wrapper (§4). For a
   kind that reads one, it also prints the effective **`MarginThreshold`** in dB, or the word `none`

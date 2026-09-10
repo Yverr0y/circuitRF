@@ -35,6 +35,15 @@ public sealed record EmStackupRow(
     bool   IsSignal,
     bool   IsGround);
 
+/// <summary>
+/// RP-1: one row of the "Return plane" combobox. <see cref="Name"/> is the stackup entry name the
+/// <c>.cem</c> stores (empty for the "(automatic)" row); <see cref="Display"/> is what the list
+/// shows. They are separate because the list MARKS the ground-designated entries and a display
+/// string parsed back into a name would break on the first technology whose layer is called
+/// "Inner 1 (ground reference)".
+/// </summary>
+public sealed record EmReturnPlaneChoice(string Name, string Display);
+
 public sealed partial class EmSetupEditorViewModel : ObservableObject
 {
     /// <summary>Absolute path of the <c>.cem</c>. Never null — R-em-9: a <c>.cem</c> is
@@ -639,6 +648,11 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
 
     [ObservableProperty] private ObservableCollection<string> _conductorLayerChoices = [];
     [ObservableProperty] private string _signalLayerChoice = InferSignalLayer;
+
+    /// <summary>RP-1: the conductor every port returns through. The first row is "(automatic)",
+    /// which writes the empty string and is R-em-4's inferred answer.</summary>
+    [ObservableProperty] private ObservableCollection<EmReturnPlaneChoice> _returnPlaneChoices = [];
+    [ObservableProperty] private EmReturnPlaneChoice? _returnPlaneChoice;
     [ObservableProperty] private bool   _dispersionCorrection;
     [ObservableProperty] private bool   _adaptiveSampling = true;
     [ObservableProperty] private bool   _directVerticalKernel;
@@ -650,6 +664,10 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     [ObservableProperty] private string? _dispersionDisabledReason;
 
     public const string InferSignalLayer = "(infer from the drawn geometry)";
+
+    /// <summary>RP-1: the "(automatic)" row's label — the one that writes an empty
+    /// <see cref="EmSetup.GroundStackupLayerName"/> and leaves R-em-4 to resolve the plane.</summary>
+    public const string AutomaticReturnPlane = "(automatic — the technology's own ground reference)";
 
     private bool _suppressCommit;
 
@@ -1051,6 +1069,21 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         Refresh();
     }
 
+    /// <summary>RP-1: the return plane is a per-RUN answer, so it commits to the document exactly as
+    /// the signal-conductor combo does — and it invalidates the mesh, because the medium the mesh was
+    /// sized against changed.</summary>
+    partial void OnReturnPlaneChoiceChanged(EmReturnPlaneChoice? value)
+    {
+        if (_suppressCommit) return;
+        string wanted = value?.Name ?? "";
+        if (wanted == Working.GroundStackupLayerName) return;
+        var before = SnapshotJson();
+        Working.GroundStackupLayerName = wanted;
+        CommitEdit(before, "Change EM return plane");
+        InvalidateMesh();
+        Refresh();
+    }
+
     partial void OnAnalysisKindChanged(EmAnalysisKind value)
     {
         // The description follows the SELECTION, not the commit — a suppressed or no-op change
@@ -1190,6 +1223,7 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         AcceleratedSolve     = Working.AcceleratedSolve;
         AnalysisKind = Working.AnalysisKind;
         SignalLayerChoice = Working.SignalStackupLayerName is { Length: > 0 } s ? s : InferSignalLayer;
+        SyncReturnPlaneChoice();
         SnpOutputPathText = Working.SnpOutputPathOverride;
         OnPropertyChanged(nameof(SnpOutputPlaceholder));
         RefreshMeshText();
@@ -1929,7 +1963,59 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
             if (l.Kind == StackupKind.Conductor && !l.IsGroundReference)
                 choices.Add(l.Name);
         ConductorLayerChoices = choices;
+        BuildReturnPlaneChoices(tech);
         BuildAnalysisLevelRows(tech);
+    }
+
+    // ── RP-1 — which conductor every port returns through ──────────────────────────────────────
+    //
+    // NOTHING IS FILTERED OUT of this list, and that is the point. R-rp1-4 permits a conductor the
+    // technology does not designate as a ground reference — that is the whole reason the field
+    // exists, since the alternative is un-ticking "Ground reference" in a technology every other
+    // design shares — so a list that showed only the designated ones would hide the legal choices
+    // and teach the wrong rule. They are MARKED instead, so the user can see which way the
+    // technology already leans.
+    //
+    // Deliberately NOT the same list as the "Signal conductor" combo above, which excludes ground
+    // entries: that control asks which single conductor a uniform cross-section is about, and this
+    // one asks what the medium terminates on. Their legal sets are near-complements.
+    private void BuildReturnPlaneChoices(Technology tech)
+    {
+        var rows = new ObservableCollection<EmReturnPlaneChoice>
+        {
+            new("", AutomaticReturnPlane),
+        };
+        foreach (var l in tech.Stackup.Layers)
+            if (l.Kind == StackupKind.Conductor)
+                rows.Add(new EmReturnPlaneChoice(
+                    l.Name, l.IsGroundReference ? $"{l.Name}  — ground reference" : l.Name));
+        ReturnPlaneChoices = rows;
+        SyncReturnPlaneChoice();
+    }
+
+    /// <summary>Projects <see cref="EmSetup.GroundStackupLayerName"/> onto the combobox. A name the
+    /// technology no longer has is NOT silently dropped back to "(automatic)" — the run refuses it
+    /// by name (R-rp1-2), and a panel that quietly cleared the setting would hide the very
+    /// disagreement the refusal exists to report — so a row is added for it.</summary>
+    private void SyncReturnPlaneChoice()
+    {
+        bool wasSuppressed = _suppressCommit;
+        _suppressCommit = true;
+
+        string want = Working.GroundStackupLayerName;
+        var match = ReturnPlaneChoices.FirstOrDefault(
+            c => string.Equals(c.Name, want, StringComparison.Ordinal));
+        // Guarded on a NON-EMPTY list: an empty one means no technology has been read yet (the
+        // layout has not resolved, or this ran before Refresh built the rows), which is not the same
+        // claim as "the technology lacks this name" and must not be reported as one.
+        if (match is null && want.Length > 0 && ReturnPlaneChoices.Count > 0)
+        {
+            match = new EmReturnPlaneChoice(want, $"{want}  — not in this technology");
+            ReturnPlaneChoices.Add(match);
+        }
+        ReturnPlaneChoice = match ?? ReturnPlaneChoices.FirstOrDefault();
+
+        _suppressCommit = wasSuppressed;
     }
 
     // ── L9d/D5 — which conductor levels the PLANAR analysis includes ───────────────────────────

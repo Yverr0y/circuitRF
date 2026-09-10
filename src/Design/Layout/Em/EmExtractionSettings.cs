@@ -38,6 +38,13 @@ namespace CircuitRF.Design.Layout.Em;
 /// single-level spelling of the same thing, and every <c>.cem</c> written before L9d keeps meaning
 /// exactly what it meant.</para>
 /// </param>
+/// <param name="GroundStackupLayerName">
+/// <b>RP-1: which <see cref="StackupKind.Conductor"/> stackup entry every port returns through.</b>
+/// Null — the normal case, and what every <c>.cem</c> written before RP-1 means — is R-em-4's own
+/// inferred answer: the top surface of the highest ground-designated conductor below the lowest
+/// analysis level. Naming one overrides that FOR THIS RUN, without touching the shared technology,
+/// and the named conductor need not be ground-designated there.
+/// </param>
 /// <param name="PortZ0s">
 /// R-cpl-6: explicit per-port reference impedances in D3 order (port 2k−1 is conductor k's near end,
 /// 2k its far end), overriding the near/far defaults. Null — the normal case — means every odd port
@@ -50,7 +57,8 @@ public sealed record EmExtractionSettings(
     Complex?   Port2Z0 = null,
     string?    SubjectDescription = null,
     Complex[]? PortZ0s = null,
-    string[]?  AnalysisLevelNames = null)
+    string[]?  AnalysisLevelNames = null,
+    string?    GroundStackupLayerName = null)
 {
     public static readonly EmExtractionSettings Default = new();
 

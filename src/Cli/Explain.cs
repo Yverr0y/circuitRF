@@ -434,7 +434,51 @@ internal static class Explain
         foreach (var d in resolution.Diagnostics)
             JsonRun.Report(CliDiagnostics.CheckResolverNote(path, d));
 
+        ExplainReturnPlane(setup, resolution, walks);
+
         return resolution.Source is null ? 1 : 0;
+    }
+
+    /// <summary>
+    /// <b>R-rp1-8 — which conductor every port in this run returns through, and who decided.</b>
+    ///
+    /// <para>This is the headless half of the run's own "Every port returns through …" note, and
+    /// before RP-1 the answer had no spelling outside a full solve: the panel's own Ground-reference
+    /// row is bound to the CROSS-SECTION readback, which a full-wave run never produces.</para>
+    ///
+    /// <para><b>It runs the EXTRACTION, not the analysis</b> — geometry and a stackup in, a medium
+    /// out, no solve — and reports what the extraction resolved rather than a transcription of
+    /// R-em-4. That distinction is the whole point: a rule restated here is a rule that can disagree
+    /// with the run, which is precisely what a caller asks this verb to rule out. It is also the
+    /// same call <c>EmRunService</c> makes, through the same flatten, so the levels it resolves are
+    /// the run's levels — and the return plane depends on them.</para>
+    ///
+    /// <para>Silent when the extraction refuses: the refusal is a <c>check</c> answer, and repeating
+    /// it here as a resolution step would report a plane the run does not have.</para>
+    /// </summary>
+    private static void ExplainReturnPlane(
+        EmSetup setup, EmSetupResolution resolution, List<ResolutionStepJson> walks)
+    {
+        if (resolution.Source is not { Technology: { } tech } source) return;
+
+        string from = setup.GroundStackupLayerName is { Length: > 0 } named
+            ? $"this .cem's return plane: '{named}'"
+            : $"technology '{tech.Name}' ground designations";
+
+        var geometry = EmGeometry.Flatten(source.View, source.AbsolutePath);
+        var planar   = PlanarExtractor.Extract(
+            geometry.Shapes, tech, source.DbuPerMicron, 0,
+            setup.ToExtractionSettings(setup.LayoutRef), geometry.GeneratorIds);
+
+        if (planar.ReturnPlane is not { } rp) return;
+
+        walks.Add(new ResolutionStepJson(
+            "return plane", from,
+            $"{rp.ConductorName ?? "Stackup.Bottom = Ground"} at {rp.TopM * 1e6:G4} µm",
+            rp.Overridden
+                ? "named by this EM setup, overriding R-em-4's inferred choice"
+                : "R-em-4: the top surface of the highest ground-designated conductor below the " +
+                  "lowest analysis level"));
     }
 
     // ── --ref ────────────────────────────────────────────────────────────────

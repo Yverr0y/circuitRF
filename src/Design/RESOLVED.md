@@ -1,5 +1,89 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## RP-1 — a `.cem` may name its own return plane, and R-em-4's query turned out to be spelled twice (2026-09-10)
+
+`EmSetup.GroundStackupLayerName` names the conductor every port in one run returns through. **Empty
+means R-em-4** — the top surface of the highest ground-designated conductor below the lowest analysis
+level — so every document written before the field, and every one that leaves it empty, takes the
+inferred path unchanged. It is omitted from the file when empty and needed no `FormatVersion` bump,
+the rule `AnalysisLevelNames` and `PortZ0s` already follow.
+
+Gate 1 was the one that mattered: a two-level fixture extracted with no settings at all, with the
+field null, and with it set to `""` produces the same slab, the same level z's, the same interfaces
+and the same interface materials. **No existing fixture's `PlanarProblem` moved.** The comparison is
+a structural signature rather than record equality, because `PlanarProblem` is a record over ARRAYS
+and its own `Equals` is reference equality on the level list — it would pass on two entirely
+different problems.
+
+### The refusals are the substance, and the fourth case is deliberately not one
+
+- **No conductor by that name** — refused, naming the technology and LISTING every conductor it does
+  have, ground-designated or not. Falling back to R-em-4 would answer a question nobody asked.
+- **A conductor that is also an analysis level** — refused. It cannot be both the meshed metal
+  carrying unknowns and the laterally infinite boundary that metal returns to, and there is no
+  reading of "both" the kernel could act on. Checked BEFORE the height rule, because on the common
+  spelling of this mistake both would fire and the collision is the specific one.
+- **A conductor at or above the lowest level** — refused, naming the level and BOTH heights. This is
+  R-em-4's own physics, not a limitation of the override: a port returns through a plane beneath the
+  conductor it feeds. The heights are in the message because the user is looking at a stackup table
+  and cannot see the analysis levels from there.
+- **A conductor the technology does not designate as ground** — **accepted**, and that is the whole
+  point: the alternative is un-ticking "Ground reference" in a technology every other design shares,
+  which also turns that plane into meshed signal metal everywhere. A note says the technology and the
+  run disagree and that the run won, for this run only. Without it the `.ctech` and the answer
+  disagree with nothing on screen to say which did.
+
+The `.cem` panel's combobox lists **every** conductor behind an "(automatic)" first row and MARKS the
+designated ones rather than filtering the others out — a list that hid the legal choices would teach
+the wrong rule. A name the technology no longer has stays selected, marked as missing, rather than
+being quietly reset: the run refuses it by name, and a panel that cleared the setting would hide the
+disagreement the refusal exists to report.
+
+### The finding the brief asked for: R-em-4's query IS spelled a second time
+
+`HighestGroundBelow` made this a one-site change **within `PlanarExtractor`** — all three of its call
+sites (the incidental-level trim's two probes and the return-plane resolution) go through it. But the
+rule is written a second time in **`CrossSectionExtractor`**, which resolves its own ground with its
+own copy of "highest ground-designated conductor below the signal". The two are not textually
+unifiable as they stand: each extractor has a private `Band` record, and the cross-section rule reads
+`signal.BottomM` where the planar one reads `signal.SheetM` (MIM-6's sheet-surface distinction, which
+kernel A has no notion of). So they are two implementations of one sentence, and they agree today by
+inspection rather than by construction.
+
+**What that costs RP-1 immediately:** `EmRunService` runs BOTH extractors on every launch, so a setup
+that named a return plane and then resolved to kernel A would have run with the field silently
+ignored. `CrossSectionExtractor` now emits a note saying so and naming the analysis-kind setting that
+would honour it. A note rather than an honouring, because teaching that file the override would be a
+third spelling of rules whose entire value is being written once; and not a refusal, because it would
+break `Auto` for anyone who set the field on a uniform line, where kernel A is the right and much
+cheaper answer.
+
+### Two things measured rather than assumed
+
+**On the shipped 4-layer starter the overridden medium legitimately collapses to one region.** All
+three of its dielectrics are the same FR-4, and the two inner coppers are absorbed into their
+neighbours, so a Top Copper trace referenced to Bottom Copper is one homogeneous 1508.2 µm slab and
+`MediumStack` stays null — the L8 one-slab path, which is correct. The intervening layers are carried
+as THICKNESS, not as interfaces. To exercise the stratified half the gate gives the core a different
+εr; then `LayerCount > 1` and the regions sum to the same slab. A gate that asserted "the LayerStack
+carries the intervening layers" against the stock starter alone would have failed for the right
+answer.
+
+**The skipped-plane WARNING is not suppressed under an override, and matters more there.** A
+designated plane between the levels and the chosen return is absorbed into the dielectric — its metal
+modelled as substrate — and the override is precisely how someone reaches that state on purpose.
+
+### `explain` reports it, and is asserted against the extraction
+
+`circuitrf explain <file.cem>` gains a `return plane` step: the conductor, its height in µm, and
+whether R-em-4 or the document chose. It runs the extraction (geometry and a stackup in, a medium
+out) rather than restating the rule, because a rule restated in the CLI is a rule that can disagree
+with the run — which is exactly what a caller asks that verb to rule out. The plane is carried out of
+the extractor on a new `PlanarReturnPlane` beside the problem, because `PlanarProblem` is the neutral
+engine type and knows only a height; a caller wanting the NAME would otherwise have to re-derive
+R-em-4 from the technology. The step is absent when the extraction refuses.
+
+
 ## Stray import artwork on an inner layer set the return plane for the whole run (user report, 2026-09-10)
 
 A patch antenna imported from a board file and drawn on Top Copper reported

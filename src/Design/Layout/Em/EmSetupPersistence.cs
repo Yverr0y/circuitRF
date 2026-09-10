@@ -83,6 +83,14 @@ public sealed class CemFile
     public string LayoutRef     { get; set; } = "";
     public string? SignalStackupLayerName { get; set; }
 
+    /// <summary>
+    /// RP-1: the conductor stackup entry every port returns through. <b>Null when unused</b>
+    /// (WhenWritingNull), so a <c>.cem</c> written before RP-1 loads unchanged and a setup that
+    /// overrides nothing re-serialises byte-identically — no <c>FormatVersion</c> bump, exactly as
+    /// <see cref="AnalysisLevelNames"/> and <see cref="PortZ0s"/> already do.
+    /// </summary>
+    public string? GroundStackupLayerName { get; set; }
+
     public CemFrequency Frequency { get; set; } = new();
 
     public double Port1Z0Real { get; set; } = 50;
@@ -203,6 +211,7 @@ public static class EmSetupPersistence
         Name                   = s.Name,
         LayoutRef              = s.LayoutRef,
         SignalStackupLayerName = s.SignalStackupLayerName is { Length: > 0 } n ? n : null,
+        GroundStackupLayerName = s.GroundStackupLayerName is { Length: > 0 } g ? g : null,
         Frequency = new CemFrequency
         {
             StartExpr = s.Frequency.StartExpr,
@@ -260,6 +269,7 @@ public static class EmSetupPersistence
         Name                   = f.Name,
         LayoutRef              = f.LayoutRef,
         SignalStackupLayerName = f.SignalStackupLayerName ?? "",
+        GroundStackupLayerName = f.GroundStackupLayerName ?? "",
         Frequency              = BuildSpec(f.Frequency),
         Port1Z0                = new Complex(f.Port1Z0Real, f.Port1Z0Imag),
         Port2Z0                = new Complex(f.Port2Z0Real, f.Port2Z0Imag),

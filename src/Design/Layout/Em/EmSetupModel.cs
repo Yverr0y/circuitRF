@@ -67,6 +67,31 @@ public sealed class EmSetup
     public string SignalStackupLayerName { get; set; } = "";
 
     /// <summary>
+    /// <b>RP-1 — the conductor every port in this run returns through, named per run.</b>
+    ///
+    /// <para><b>Empty means R-em-4</b>, the inferred rule (the top surface of the highest
+    /// ground-designated conductor below the lowest analysis level), and every document written
+    /// before this field takes that path bit for bit. It is not "no ground": there is no spelling
+    /// here for a run without a return plane.</para>
+    ///
+    /// <para>It exists because R-em-4 is the right rule stated in the wrong vocabulary for two real
+    /// situations — a board with two designated planes below the structure where the trace is
+    /// genuinely referenced to the LOWER one, and the routine "what if" of comparing the same
+    /// structure against two references. The only other way to say either is to un-tick a plane's
+    /// "Ground reference" in the TECHNOLOGY, which is shared by every design that uses it, and which
+    /// also makes that plane a meshed signal conductor everywhere.</para>
+    ///
+    /// <para>The named conductor need NOT be ground-designated (the run says so in a note), but it
+    /// must exist, must not also be an analysis level, and must lie below the lowest one — see
+    /// <c>PlanarExtractor</c>'s RP-1 block for all four.</para>
+    ///
+    /// <para>Additive and <b>omitted from the file when empty</b>, so a <c>.cem</c> written before
+    /// RP-1 round-trips byte-identically — the same rule <see cref="AnalysisLevelNames"/> and
+    /// <c>PortZ0s</c> already follow, and no <c>FormatVersion</c> bump.</para>
+    /// </summary>
+    public string GroundStackupLayerName { get; set; } = "";
+
+    /// <summary>
     /// <b>L9d/D5 — which conductor levels the planar analysis includes, by stackup entry name.</b>
     ///
     /// <para>Empty — the normal case, and what every pre-L9d <c>.cem</c> has — means "infer": every
@@ -245,6 +270,7 @@ public sealed class EmSetup
         Name                   = Name,
         LayoutRef              = LayoutRef,
         SignalStackupLayerName = SignalStackupLayerName,
+        GroundStackupLayerName = GroundStackupLayerName,
         AnalysisLevelNames     = [.. AnalysisLevelNames],
         Frequency              = Frequency,      // immutable
         Port1Z0                = Port1Z0,
@@ -266,5 +292,6 @@ public sealed class EmSetup
                Port1Z0, Port2Z0,
                subjectDescription ?? (LayoutRef is { Length: > 0 } l ? l : null),
                PortZ0s.Count > 0 ? [.. PortZ0s] : null,
-               AnalysisLevelNames.Count > 0 ? [.. AnalysisLevelNames] : null);
+               AnalysisLevelNames.Count > 0 ? [.. AnalysisLevelNames] : null,
+               GroundStackupLayerName is { Length: > 0 } g ? g : null);
 }

@@ -129,6 +129,28 @@ public static class CrossSectionExtractor
         if (conductorShapes.Count == 0)
             return EmExtractionResult.No(BuildNothingFoundRefusal(shapes, tech, settings), notes);
 
+        // ── RP-1: THIS KERNEL DOES NOT READ THE SETUP'S RETURN-PLANE OVERRIDE, AND SAYS SO ──────
+        //
+        // The field is a `.cem` field, and `EmRunService` runs BOTH extractors on every launch — so
+        // a user who names a return plane and whose setup then resolves to kernel A would otherwise
+        // get a run that ignored it with nothing on screen to say so. That is the exact
+        // silent-different-answer failure RP-1's own refusals exist to prevent, arriving through the
+        // one door RP-1 did not cover.
+        //
+        // A NOTE rather than an honouring of it, and deliberately: RP-1's scope is the planar
+        // kernel's layered medium, and teaching this file the override would be a SECOND spelling of
+        // rules whose whole value is being written once (see src/Design/RESOLVED.md — R-em-4's query
+        // is already spelled twice across the two extractors, which is the finding RP-1 asked for).
+        // A refusal would be worse still: it would break Auto for anyone who set the field on a
+        // uniform line, where kernel A is the right and much cheaper answer.
+        if (settings.GroundStackupLayerName is { Length: > 0 } namedGround)
+            notes.Add(
+                $"This EM setup names '{namedGround}' as its return plane, but that setting is read " +
+                "only by the full-wave planar kernel, and this run was extracted by the " +
+                "cross-section kernel. The ground plane below was resolved from the technology's own " +
+                "ground designations instead. Set this setup's analysis kind to the planar kernel if " +
+                "the named return plane is what you want solved against.");
+
         // ── R-em-4: the ground plane is the TOP SURFACE of the highest ground-designated conductor
         // BELOW the signal. Stackup.Bottom == Ground is only the fallback. Getting this backwards
         // is a whole metal thickness of error, which on 1.6 mm FR-4 is a plausible-looking 2%.

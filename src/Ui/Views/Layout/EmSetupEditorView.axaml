@@ -445,6 +445,23 @@
                           ItemsSource="{Binding ViewModel.ConductorLayerChoices}"
                           SelectedItem="{Binding ViewModel.SignalLayerChoice}"/>
 
+                <!-- ── RP-1: which conductor every port returns through ─────────────────
+                     Nothing is filtered out: R-rp1-4 permits a conductor the technology does not
+                     designate as a ground reference, and a list that hid the legal choices would
+                     teach the wrong rule. The designated ones are MARKED in the row text instead. -->
+                <TextBlock Classes="colhdr" Margin="0,8,0,0" Text="Return plane"
+                           IsVisible="{Binding ViewModel.IsPlanarAnalysis}"/>
+                <ComboBox Classes="cell" HorizontalAlignment="Stretch"
+                          IsVisible="{Binding ViewModel.IsPlanarAnalysis}"
+                          ItemsSource="{Binding ViewModel.ReturnPlaneChoices}"
+                          SelectedItem="{Binding ViewModel.ReturnPlaneChoice}">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Display}"/>
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+
                 <!-- ── L9d/D5: which conductor levels the PLANAR analysis includes ──────────
                      Deliberately separate from the combo above, which is the CROSS-SECTION
                      kernel's own control and means a different thing (which single conductor a
