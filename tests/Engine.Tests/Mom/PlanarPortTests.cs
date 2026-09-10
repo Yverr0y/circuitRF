@@ -149,22 +149,50 @@ public class PlanarPortTests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(PlanarPortReference.CoplanarGround,  "coplanar ground reference")]
-    [InlineData(PlanarPortReference.SecondConductor, "second-conductor")]
-    public void T0_6_ANonGroundPlaneReferenceIsRefusedByName_PointingAtWhereItArrives(
-        PlanarPortReference reference, string fragment)
+    [InlineData(PlanarPortReference.CoplanarGround)]
+    [InlineData(PlanarPortReference.SecondConductor)]
+    public void T0_6_AConductorReferencedEDGEPortIsStillRefused_NamingTheStandardItNeeds(
+        PlanarPortReference reference)
     {
+        // **RP-2a (2026-09-10) made this test's premise half false, and it is updated rather than
+        // loosened.** A conductor reference is no longer refused outright: an INTERNAL DELTA GAP
+        // takes one, as two cuts at one station driven against each other
+        // (TwoCutPortTests). An EDGE port still cannot, and the reason is not bookkeeping —
+        // it has a feed outside its cut, therefore an error box, and its calibration standard would
+        // have to be a COPLANAR line with its own Z_c, β and static capacitance. Calibrating it
+        // against the uniform single-conductor standards PlanarCalibration builds would publish
+        // s-parameters that are plausible and referenced to nothing.
+        //
+        // The assertion that survives unchanged is R-mom-17's: the destination is NAMED, and the
+        // refusal offers a remedy that works today rather than "not implemented".
         var mesh = Slab6x3();
         bool ok = PlanarPorts.TryResolve(
             mesh, new PlanarPort(3, new EmPoint(0, 0.75e-3), PlanarPortSide.MinX, 50.0, 0, reference),
             out _, out string? refusal);
 
         Assert.False(ok);
-        Assert.Contains(fragment, refusal);
-        // L9d — these used to point at "L9". L9 has arrived and neither is built, so the refusal
-        // now names where the capability actually arrives (§10.6's later-work port models) rather
-        // than a phase number that has since gone past. Updated, not loosened: the assertion is
-        // still that the destination is NAMED.
+        Assert.Contains("EDGE port", refusal);
+        Assert.Contains("coplanar calibration standard", refusal);
+        Assert.Contains("internal delta gap", refusal);      // the remedy that exists now
+        Assert.DoesNotContain("not implemented", refusal);
+        _out.WriteLine(refusal!);
+    }
+
+    /// <summary>
+    /// L9d/§0.2 item 2's refusal is untouched by RP-2a — a port driven BETWEEN the two levels a via
+    /// joins is a different OBJECT, not an unbuilt reference, and it still names §10.6.
+    /// </summary>
+    [Fact]
+    public void T0_6b_AViaBetweenLevelsReferenceIsStillRefusedByName()
+    {
+        var mesh = Slab6x3();
+        bool ok = PlanarPorts.TryResolve(
+            mesh, new PlanarPort(3, new EmPoint(0, 0.75e-3), PlanarPortSide.MinX, 50.0, 0,
+                                 PlanarPortReference.ViaBetweenLevels),
+            out _, out string? refusal);
+
+        Assert.False(ok);
+        Assert.Contains("BETWEEN two levels", refusal);
         Assert.Contains("10.6", refusal);
         _out.WriteLine(refusal!);
     }

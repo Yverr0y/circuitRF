@@ -3,6 +3,135 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## RP-2a: the two-cut port — what it costs, and the factor of four nobody would have seen (2026-09-10)
+
+`brief-em-return-plane-2a-two-cut-port-kernel.md`, built on the measurement in the section below.
+**Scope was the engine only** — `PlanarPort`, `PlanarPortResolution`, `PlanarExcitation` — and it
+stayed there: nothing in `src/Design`, nothing in the `.clay`, no UI. Gate:
+`tests/Engine.Tests/Mom/TwoCutPortTests.cs`, 22 tests, ~1 s.
+
+### The bit-identity gate, run before a line of feature code was written (R-rp2a-7)
+
+An existing de-embedded two-port line (`Fr4Line`, coarse mesh, 1/2/5 GHz) and a three-port fixture
+mixing two edge ports with an internal delta gap were solved and their s-matrices dumped as the raw
+bit patterns of all 42 doubles, before the change and again after. **Identical, every bit.** That is
+the whole L8/L9 acceptance set's protection and it is why the two weights are written the way they
+are: `PositiveWeight` **is** `IncidenceSign` for a ground-referenced port — the same value, not a
+rounded relative of it — and the negative block is guarded by `Negative is not null` rather than
+added unconditionally, because `x + 0` is `x` for every double **except −0**, and an unconditional
+empty sum would silently turn a −0 component into +0.
+
+That one-off comparison cannot live in the tree (there is no "before" to compare to once the change
+lands, and a committed golden of raw doubles would be a claim about this machine's vectorisation
+rather than about this code). What is committed instead is the same claim made **in process**: the
+pre-RP-2a arithmetic written out as a named reference and compared bit for bit at each of the three
+sites, including `Solve`'s Y assembly rebuilt from the solution's own current vectors.
+
+### THE NORMALISATION IS A FACTOR OF FOUR, NOT TWO — and it is the whole reason §2a exists
+
+The brief costed the wrong normalisation at a factor of two in `Z_c`. **It is four**, and the
+arithmetic is worth stating because the same reasoning fixes the sign of the whole thing:
+
+With weight `w` on the two blocks, the two gap voltages add around the loop, so the impressed EMF is
+`2w` — and the port current is read back through the *same* column, `i = w(I⁺ − I⁻) = 2w·I_line` when
+the return conductor carries the whole return. So `Z₁₁ = v/i = Z_true/(4w²)`, and **only `w = ½`**
+makes the port report the impedance it is actually looking into. `w = 1` reports a **quarter** of it.
+The single-cut ground-referenced port is the same formula with one gap — `EMF = w`, `i = w·I_line`,
+`Z₁₁ = Z_true/w²` — so its `w = 1` is correct and the two constants are not the same number by
+coincidence.
+
+`w = 1` produces a complete, plausible s-matrix that is **reciprocal and passive**, so gates 3 and 4
+do not catch it. Only an external oracle does.
+
+### Gate 2: coplanar strips against conformal mapping — and it landed at 0.9999 on the first try
+
+The fixture is a **coplanar-strips line in AIR** (ε_eff = 1 exactly, β = k₀ exactly) with the ground
+plane put ~10 transverse extents below so its image is a perturbation, driven by ONE two-cut internal
+delta gap at the centre. The port is a series source, so it looks into two open-circuited CPS stubs in
+series: `Z₁₁ = −2j·Z_c·cot(βℓ/2)` with `Z_c = η₀·K(k)/K(k′)`, `k = S/(S+2W)` — exact for
+zero-thickness perfect conductors in a homogeneous medium (its CPW dual satisfies
+`Z_CPW·Z_CPS = (η₀/2)²` identically), and dependent on nothing in this repository but an AGM.
+
+Measured, `Im(Z₁₁)` ÷ closed form, across eleven combinations:
+
+| W | S | h | f | θ = βℓ/2 | cells/λ | min cells | N | ratio |
+|---|---|---|---|---|---|---|---|---|
+| 0.3 mm | 0.15 mm | 2.5 mm | 10 GHz | 1.0 | 10 | 3 | 34 | **0.9999** |
+| 0.3 mm | 0.15 mm | 2.5 mm | 10 GHz | 1.0 | 40 | 3 | 90 | 1.0083 |
+| 0.3 mm | 0.15 mm | 2.5 mm | 10 GHz | 1.0 | 10 | 6 | 120 | 0.9669 |
+| 0.3 mm | 0.15 mm | 2.5 mm | 10 GHz | 1.0 | 40 | 8 | 374 | 0.9630 |
+| 0.3 mm | 0.15 mm | 2.5 mm | 10 GHz | 0.4 | 10 | 3 | 24 | 1.0284 |
+| 0.3 mm | 0.15 mm | 2.5 mm | 10 GHz | 1.4 | 10 | 3 | 44 | 1.0982 |
+| 0.3 mm | 0.15 mm | 2.5 mm | 4 GHz | 1.0 | 20 | 4 | 90 | 1.0518 |
+| 0.3 mm | 0.15 mm | 2.5 mm | 20 GHz | 1.0 | 20 | 4 | 90 | 0.9373 |
+| 0.3 mm | 0.15 mm | 5.0 mm | 10 GHz | 1.0 | 20 | 4 | 90 | 0.9991 |
+| 0.6 mm | 0.10 mm | 2.5 mm | 10 GHz | 1.0 | 20 | 4 | 90 | 1.0176 |
+| 0.2 mm | 0.60 mm | 5.0 mm | 10 GHz | 1.0 | 20 | 4 | 90 | 0.9485 |
+
+**Every one inside ±10%, and `w = 1` would have put every one at 0.25.** `Re(Z₁₁)` is under 0.05% of
+`|Im|` on the well-resolved cases, as an open stub in a lossless medium must be. The residual spread
+is discretisation, the finite ground plane and open-end fringing; it is not a scaling question, and
+the closed form's own idealisation (zero-thickness metal, no ground plane) accounts for the sign of
+the drift at the extremes. The θ = 1.4 rung is the loosest because it is nearest the λ/4 pole, where
+`cot` is small and everything is amplified.
+
+**Do not read the 0.9999 as accuracy.** It is one rung of a spread that runs 0.937–1.098, on a
+34-unknown mesh; the *conclusion* it supports is which of two normalisations is right, and that
+question only needs a factor of two to be resolvable.
+
+### The audit was complete, and one of the three sites went away
+
+R-rp2a-9 said the one-signed-block assumption lives in exactly three places in `PlanarExcitation` and
+**that is where it was** — no fourth site turned up anywhere in `src`. `Solve`'s Y assembly is now a
+call to `PortCurrent` rather than a second copy of the same loop, which is that file's own headline
+rule (a second copy of the sign convention is where it drifts) and leaves two sites, not three.
+
+Everything else keys off `PlanarPortResolution`, and R-rp2a-10's "grow, do not fork" is what made the
+rest cheap: the negative terminal's counterparts hang off a nullable `PlanarPortTerminal`, so a
+ground-referenced resolution is the record it always was, field for field, and every consumer that
+never asks reads the same bits. **`PlanarPortTerminal` deliberately carries no `Side`, `Direction`,
+`Z0` or `IncidenceSign`** — a port has one polarity and one reference impedance, and a second copy of
+either is how the two would drift apart.
+
+Nothing gates on `Kind == InternalDeltaGap` had to be touched: `PlanarFeedExtension`,
+`PlanarGroundPath` and `PlanarMeshPitchField` all gate on `Edge` or `Internal`, and
+`IsDeembeddable` already excluded an interior cut from every calibration path.
+
+### The two cuts landed on one station on every fixture tried
+
+§6 asks whether the mesher's own gridlines ever force a skew on correct input. **They did not, on any
+of the eleven CPS geometries, the FR-4 mixed fixture or the two-level fixture.** The reason is
+structural rather than luck: the longitudinal gridlines are a property of the whole mesh, not of a
+conductor, so two points at one `x` see the same candidate set — and both cuts are chosen by the same
+nearest-usable-gridline rule. The skew refusal fires only when the two points genuinely disagree, or
+when the mesh offers one conductor a rooftop at a gridline and not the other, which refining fixes.
+
+### What the pair checks refuse, and why each is a refusal rather than an adjustment
+
+- **Different stations** — a port plus a length of line, which solves to a complete and plausible
+  s-matrix for a structure nobody drew. The refusal names both coordinates and the distance.
+- **Levels inferred apart** — L9d/D2's reason with two chances instead of one. Stating BOTH levels is
+  what permits a port whose cuts span levels; inferring them and landing apart is refused.
+- **One rooftop row** — the two blocks cancel exactly, which is a short across the port.
+- **One conductor** — an ordinary internal delta gap wearing a costume. Tested by 4-connectivity over
+  the mesh's own cells on the cut's level, deliberately **in-plane only**: two conductors joined by a
+  via elsewhere are not caught, and are not claimed to be. That is a short in the structure, which the
+  solve reports as one, rather than a port that resolved to the wrong thing.
+
+`CoplanarGround` and `SecondConductor` are **one mechanism and one code path** (R-rp2a-12); both enum
+members survive because the note reads differently — a ground strip against a second signal line — and
+because a coplanar calibration will read them differently again.
+
+### The refusal that stays
+
+A conductor-referenced **EDGE** port is refused, and the refusal names the missing capability rather
+than a phase (R-mom-17): a coplanar calibration standard — a coplanar line with its own `Z_c`, `β` and
+static capacitance. `PlanarCalibration` builds uniform single conductors over the plane and
+`PlanarPortResolution`'s cross-section fields describe one conductor, so calibrating against those
+would publish s-parameters that are plausible and referenced to nothing. The refusal offers the remedy
+that works today — cut it as an interior gap, which has no feed and needs no standard. An internal
+(via-to-plane) port takes no reference at all: its negative terminal *is* the plane, by construction.
+
 ## RP-2's first measurement: the mesh cannot span a slot, and never will (2026-09-10)
 
 `brief-em-return-plane-2-per-port-reference.md` asks, before any solver work, whether the surface

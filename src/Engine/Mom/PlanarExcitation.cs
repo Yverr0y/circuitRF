@@ -29,6 +29,19 @@
 // is what makes Y the actual admittance matrix (the pair (v, i) has to be energy-conjugate). A code
 // that impresses +1 everywhere and then reads currents back with a side-dependent sign produces a
 // smooth, plausible, wrong S₂₁ — a hard π, invisible in a magnitude plot.
+//
+// RP-2a — B'S COLUMN NOW HAS TWO SIGNED BLOCKS WHEN THE PORT HAS TWO CUTS, AND THE RULE ABOVE IS
+// WHAT MAKES THAT SAFE. A conductor-referenced port drives a delta gap in the signal conductor and a
+// second one in the return conductor, at the same station, with opposite sign — so its column
+// carries +w on one row set and −w on the other (w = PlanarPortResolution.TwoCutTerminalWeight, and
+// that record's own note derives it and names the measurement that chose it). Three places in this
+// file spelled the one-block assumption and all three are below; a code that impresses over two
+// blocks and reads back over one is a plausible, WRONG Y that is symmetric anyway, so reciprocity
+// does not catch it.
+//
+// Every ground-referenced port keeps a null negative block and a weight of exactly IncidenceSign, so
+// the arithmetic each of the three sites performs on one is the arithmetic it performed before RP-2a
+// — bit for bit, not to a tolerance, which is what the whole L8/L9 acceptance set rests on.
 
 using System.Numerics;
 using NumFlat;
@@ -52,7 +65,11 @@ public static class PlanarExcitation
     {
         ArgumentNullException.ThrowIfNull(port);
         var rhs = new Vec<Complex>(unknownCount);
-        foreach (int m in port.BasisIndices) rhs[m] = port.IncidenceSign;
+        // PositiveWeight IS IncidenceSign for a ground-referenced port — the same value, not a
+        // rounded relative of it — so this line writes the same bits it wrote before RP-2a.
+        foreach (int m in port.BasisIndices) rhs[m] = port.PositiveWeight;
+        if (port.Negative is { } neg)
+            foreach (int m in neg.BasisIndices) rhs[m] = port.NegativeWeight;
         return rhs;
     }
 
@@ -91,12 +108,7 @@ public static class PlanarExcitation
         var y = new Mat<Complex>(p, p);
         for (int j = 0; j < p; j++)
             for (int i = 0; i < p; i++)
-            {
-                Complex sum = Complex.Zero;
-                var col = currents[j];
-                foreach (int m in ports[i].BasisIndices) sum += col[m];
-                y[i, j] = ports[i].IncidenceSign * sum;
-            }
+                y[i, j] = PortCurrent(currents[j], ports[i]);
 
         return new PlanarPortSolution(y, currents);
     }
@@ -126,7 +138,18 @@ public static class PlanarExcitation
     {
         Complex sum = Complex.Zero;
         foreach (int m in port.BasisIndices) sum += currents[m];
-        return port.IncidenceSign * sum;
+        Complex i = port.PositiveWeight * sum;
+
+        // RP-2a — the second block, and nothing at all when there is not one. The branch is what
+        // keeps a ground-referenced port bit-identical: `x + 0` is x for every double except −0,
+        // and adding an unconditional empty sum would turn a −0 component into +0.
+        if (port.Negative is { } neg)
+        {
+            Complex nsum = Complex.Zero;
+            foreach (int m in neg.BasisIndices) nsum += currents[m];
+            i += port.NegativeWeight * nsum;
+        }
+        return i;
     }
 
     /// <summary>

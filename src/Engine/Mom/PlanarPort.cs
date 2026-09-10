@@ -37,6 +37,33 @@
 // §10.6 lists coplanar, differential, multi-mode and co-simulation ports as later work, and L9's own
 // out-of-scope list keeps them there.
 //
+// ── RP-2a — D3 IS NOW HALF TRUE, AND THE HALF THAT CHANGED IS *TWO CUTS*, NOT A SECOND PLANE ─────
+//
+// A port referenced to DRAWN metal is not a second ground plane and never could be: a LayerStack has
+// exactly two terminations and no interior PEC, so the medium cannot represent one (RP-2's R-rp2-1).
+// What it is instead is TWO CUTS AT ONE STATION — an ordinary delta gap in the signal conductor and a
+// second ordinary delta gap in the RETURN conductor, driven against each other. The incidence column
+// then carries a signed block on each row set rather than one signed block, and NOTHING else moves:
+// same mesh, same basis set, same Z, same factorisation, same Y = BᵀZ⁻¹B.
+//
+// IT IS TWO CUTS BECAUSE IT CANNOT BE ONE. RP-2's own first measurement (CoplanarSlotMeshTests, and
+// src/Engine/Mom/RESOLVED.md) asked whether the surface mesher produces a basis spanning the SLOT
+// between two conductors, so that a single delta gap could be cut across it. The answer is no, and
+// structurally so: every polygon edge is a hard gridline, a cell exists only where a grid row's
+// centre is inside metal, and a basis is a pair of grid-adjacent cells — so a slot of nonzero width
+// always owns at least one metal-free grid row and refining ADDS rows to it. A basis over the slot
+// would be a new basis family (a slot/magnetic-frill unknown) with its own singular treatment, which
+// is a far larger question than a per-port reference.
+//
+// ONLY AN INTERNAL DELTA GAP. An edge port has a feed outside its cut, therefore an error box,
+// therefore a calibration standard — and a coplanar port's standard is a COPLANAR line, with its own
+// Z_c, its own β and its own static capacitance. PlanarCalibration builds uniform lines over the
+// plane and PlanarPortResolution's cross-section fields (WidthM, TransverseLines, …) describe one
+// conductor, so calibrating a coplanar edge port against those standards would produce s-parameters
+// that are plausible and referenced to nothing. That is strictly worse than a refusal, so a
+// conductor-referenced EDGE port is still refused, and the refusal names the capability it is
+// waiting for rather than a phase (R-mom-17).
+//
 // R-msh-2 is honoured throughout: resolution INDEXES by L8b's cell and basis order and never
 // re-sorts it. The one dictionary here is a pure LOOKUP built by a single forward pass over
 // mesh.Bases and never iterated, so nothing on this path depends on hash order.
@@ -110,11 +137,23 @@ public enum PlanarPortKind
 /// </summary>
 public enum PlanarPortReference
 {
-    /// <summary>The stackup's ground plane. The only one L8's kernel can represent.</summary>
+    /// <summary>The stackup's ground plane. The only reference the MEDIUM can represent — see D3.</summary>
     GroundPlane,
-    /// <summary>Coplanar ground conductors either side of the signal line — §10.6, later work.</summary>
+    /// <summary>
+    /// <b>RP-2a — the negative terminal is a drawn coplanar ground conductor.</b> A second cut, in
+    /// that conductor, at the same station as the signal's, driven against it.
+    /// <para>Identical to <see cref="SecondConductor"/> in what the kernel does; the two members
+    /// differ in what the USER means — a ground strip against a second signal line — and that
+    /// difference is what the layout note and a future coplanar calibration read differently.
+    /// Building two code paths for one object would be the way to make them disagree.</para>
+    /// </summary>
     CoplanarGround,
-    /// <summary>A second signal conductor (a differential/balanced port) — §10.6, later work.</summary>
+    /// <summary>
+    /// <b>RP-2a — the negative terminal is a second drawn signal conductor.</b> The same two-cut
+    /// object <see cref="CoplanarGround"/> is; see its remark for why both members exist.
+    /// <para><b>This is not a differential-mode decomposition.</b> It is one port driven between two
+    /// conductors. Multi-mode ports stay §10.6's later work.</para>
+    /// </summary>
     SecondConductor,
     /// <summary>
     /// <b>L9d — a port driven BETWEEN the two levels a via joins</b>, i.e. §0.2 item 2's option (b).
@@ -179,6 +218,23 @@ public enum PlanarPortReference
 /// its cut is the mesh gridline nearest that point, with metal on both sides. Every construction
 /// site that predates this parameter passes nothing and gets exactly the port it always got.
 /// </param>
+/// <param name="NegativeLocation">
+/// <b>RP-2a — a point on the RETURN conductor, for a <see cref="PlanarPortReference.CoplanarGround"/>
+/// or <see cref="PlanarPortReference.SecondConductor"/> port. Null for every ground-referenced
+/// port, which is every port that predates RP-2a.</b>
+///
+/// <para>It is resolved exactly the way <see cref="Location"/> is — the same
+/// <c>TryResolveOnLayer</c>, the same nearest-gridline snap, the same worded refusals — because a
+/// second resolution rule is a second chance for the two terminals to land somewhere nobody
+/// intended (RP-2's R-rp2-2). The two cuts must then be at the same station, on the same level and
+/// in different conductors, and each of those is refused by name rather than adjusted.</para>
+/// </param>
+/// <param name="NegativeLayerIndex">
+/// The return terminal's level, on <see cref="LayerIndex"/>'s terms: null = infer, an explicit index
+/// is honoured as given. <b>Stating BOTH levels is what permits a port whose two cuts are on
+/// different levels</b>; inferring them and landing on two levels is refused, because two terminals
+/// is two chances to do that silently (RP-2a's R-rp2a-3, L9d/D2's reason one level up).
+/// </param>
 public sealed record PlanarPort(
     int                 Number,
     EmPoint             Location,
@@ -187,8 +243,15 @@ public sealed record PlanarPort(
     int?                LayerIndex = null,
     PlanarPortReference Reference  = PlanarPortReference.GroundPlane,
     PlanarPortKind      Kind       = PlanarPortKind.Edge,
-    double?             GroundPathWidthM = null)
+    double?             GroundPathWidthM = null,
+    EmPoint?            NegativeLocation = null,
+    int?                NegativeLayerIndex = null)
 {
+    /// <summary>RP-2a — whether this port's negative terminal is a drawn conductor rather than the
+    /// stackup's ground plane. The two members that say so are one object here (R-rp2a-12).</summary>
+    public bool IsConductorReferenced =>
+        Reference is PlanarPortReference.CoplanarGround or PlanarPortReference.SecondConductor;
+
     /// <summary>The basis direction the port's row is drawn from. <b>Z for an
     /// <see cref="PlanarPortKind.Internal"/> port</b>, whose current leaves the plane down a
     /// via rather than running along the metal — which is why <see cref="Side"/> means nothing to
@@ -221,6 +284,43 @@ public sealed record PlanarPort(
     public double IncidenceSign =>
         Kind == PlanarPortKind.Internal ? +1.0
         : Side is PlanarPortSide.MinX or PlanarPortSide.MinY ? +1.0 : -1.0;
+}
+
+/// <summary>
+/// <b>RP-2a — the RETURN terminal of a conductor-referenced port: the second cut, field for field.</b>
+///
+/// <para><see cref="PlanarPortResolution"/>'s cross-section fields are all singular — one conductor,
+/// one cut, one width — and R-rp2a-10 says that record GROWS rather than forks. So this carries the
+/// negative terminal's counterparts of exactly those fields and hangs off the resolution as a
+/// nullable companion: a ground-referenced resolution is the record it has always been, with a null
+/// here, and every consumer that never asks reads the same bits it always read.</para>
+///
+/// <para>There is deliberately no <c>Side</c>, <c>Direction</c>, <c>Z0</c> or <c>IncidenceSign</c>
+/// here. A port has ONE polarity and ONE reference impedance; the negative terminal's sign is the
+/// positive one's negated, which is a property of the port rather than of the terminal, and putting
+/// a second copy of it here is how the two would drift apart.</para>
+/// </summary>
+public sealed record PlanarPortTerminal(
+    IReadOnlyList<int>    BasisIndices,
+    double                WidthM,
+    double                ReferencePlaneM,
+    double                OuterEdgeM,
+    IReadOnlyList<double> TransverseLines,
+    IReadOnlyList<double> LongitudinalRunM,
+    int                   LayerIndex,
+    int                   CutCellCount   = 0,
+    double                GridWidthM     = 0,
+    double                UndrivenMetalM = 0,
+    double                GapOffsetM     = 0)
+{
+    public int BasisCount => BasisIndices.Count;
+
+    /// <summary>The negative terminal is resolved by the SAME routine the positive one is, so it
+    /// arrives as a full resolution and is narrowed here. Reusing that routine is R-rp2-2.</summary>
+    internal static PlanarPortTerminal From(PlanarPortResolution r) =>
+        new(r.BasisIndices, r.WidthM, r.ReferencePlaneM, r.OuterEdgeM, r.TransverseLines,
+            r.LongitudinalRunM, r.LayerIndex, r.CutCellCount, r.GridWidthM, r.UndrivenMetalM,
+            r.GapOffsetM);
 }
 
 /// <summary>
@@ -292,9 +392,52 @@ public sealed record PlanarPortResolution(
     double                 UndrivenMetalM = 0,
     PlanarPortKind         Kind           = PlanarPortKind.Edge,
     double                 GapOffsetM     = 0,
-    double                 FootprintAreaM2 = 0)
+    double                 FootprintAreaM2 = 0,
+    PlanarPortReference    Reference       = PlanarPortReference.GroundPlane,
+    PlanarPortTerminal?    Negative        = null)
 {
     public int BasisCount => BasisIndices.Count;
+
+    // ── RP-2a — THE NORMALISATION, AND THE MEASUREMENT THAT CHOSE IT ─────────────────────────────
+    //
+    // A two-cut port impresses a gap voltage on EACH of its two cuts, and the two add around the
+    // loop: with ±w on the blocks the loop EMF is 2w, and the port current read back through the
+    // same B is w·(I⁺ − I⁻) = 2w·I_line when the return conductor carries the whole return. So
+    //
+    //     Z₁₁ = v / i = Z_true / (4 w²)
+    //
+    // and only w = ½ makes the port report the impedance it is actually looking into. w = 1 gives a
+    // complete, plausible s-matrix a QUARTER of the right impedance — no symptom, no warning, and
+    // reciprocity and passivity both still hold. (The brief costed that error at a factor of two; it
+    // is four, because w scales the excitation and the read-back alike.)
+    //
+    // The single-cut ground-referenced port is the same formula with ONE gap: EMF = w, i = w·I_line,
+    // Z₁₁ = Z_true/w², so its w = 1 — which is why nothing about it moves and why the two are not
+    // "the same constant" by coincidence.
+    //
+    // **MEASURED, not reasoned into place** (R-rp2a-5). The reasoning above is exactly the shape of
+    // step this file already records getting backwards once (the internal port's SIGN, derived in
+    // prose and caught only by a structure with a known answer). The gate is a coplanar-strips line
+    // against the conformal-mapping closed form Z = η₀·K(k)/K(k′), which is exact for the ideal
+    // structure and independent of everything here:
+    // TwoCutPortTests.Gate2_ACoplanarStripLine_MatchesTheConformalMappingClosedForm.
+    /// <summary>RP-2a — each cut of a two-cut port carries HALF the port's voltage. See the note
+    /// above for the derivation and for the measurement that selected it.</summary>
+    public const double TwoCutTerminalWeight = 0.5;
+
+    /// <summary>
+    /// <b>The incidence weight on this port's POSITIVE block.</b> For every ground-referenced port
+    /// this is <see cref="IncidenceSign"/> itself, bit for bit, which is what makes RP-2a's
+    /// bit-identity gate a statement about arithmetic rather than about tolerance.
+    /// </summary>
+    public double PositiveWeight => Negative is null ? IncidenceSign : IncidenceSign * TwoCutTerminalWeight;
+
+    /// <summary>The weight on the NEGATIVE block — the positive one negated, so the two gaps add
+    /// around the loop. Meaningless (and unread) when <see cref="Negative"/> is null.</summary>
+    public double NegativeWeight => -PositiveWeight;
+
+    /// <summary>RP-2a — whether this port drives a second cut in a drawn return conductor.</summary>
+    public bool IsConductorReferenced => Negative is not null;
 
     /// <summary>
     /// <b>Whether the two-line calibration means anything for this port.</b> An edge port has a feed
@@ -324,7 +467,33 @@ public sealed record PlanarPortResolution(
             PlanarPortKind.Internal    => DescribeInternal(),
             _                               => DescribeEdge(),
         }) +
-        (CutCellCount == 0 && UndrivenMetalM <= 0 ? "" : ConformalNote());
+        (CutCellCount == 0 && UndrivenMetalM <= 0 ? "" : ConformalNote()) +
+        (Negative is null ? "" : DescribeReturn());
+
+    /// <summary>
+    /// <b>RP-2a — what this port RETURNS through, said per port.</b>
+    ///
+    /// <para>The kernel's standing sentence is that the stackup's ground plane is the negative
+    /// terminal of every port in a run and is not selectable per port. That is false of this one,
+    /// and a run can now mix the two, so the fact has to travel with the port rather than with the
+    /// run — a reader of a mixed s-matrix otherwise has no way to tell which reference each column
+    /// is in.</para>
+    /// </summary>
+    private string DescribeReturn()
+    {
+        var n = Negative!;
+        return
+            $" Its negative terminal is NOT the ground plane: it is a second cut, of " +
+            $"{n.BasisCount} basis function(s) spanning {SurfaceMesher.Eng(n.WidthM)}m, in the " +
+            (Reference == PlanarPortReference.CoplanarGround
+                ? "coplanar ground conductor "
+                : "second signal conductor ") +
+            $"you named, at the same station ({(Direction == PlanarBasisDirection.X ? "x" : "y")} = " +
+            $"{SurfaceMesher.Eng(n.ReferencePlaneM)}m) on level {n.LayerIndex}. The two cuts are " +
+            "driven against each other, each carrying half the port's voltage, so the current this " +
+            "port measures is the loop current between those two conductors and the return path is " +
+            "the metal you drew rather than the plane underneath it.";
+    }
 
     /// <summary>
     /// The internal port's own report. Like the gap's it has to say that nothing is de-embedded here
@@ -437,30 +606,31 @@ public static class PlanarPorts
         ArgumentNullException.ThrowIfNull(port);
         resolution = null;
 
-        // ── D3: the ground reference is not negotiable, and the refusal names the alternative ────
+        // ── RP-2a — a port referenced to DRAWN metal is two cuts, and it has its own routine ─────
+        if (port.IsConductorReferenced)
+            return TryResolveTwoCut(mesh, port, out resolution, out refusal);
+
+        // ── D3: the plane is still the only reference the MEDIUM can provide ─────────────────────
         if (port.Reference != PlanarPortReference.GroundPlane)
         {
-            refusal = port.Reference switch
-            {
-                // L9 has now arrived and these are still not built — which is the point of naming
-                // the arrival place rather than a phase number. §10.6 lists differential and
-                // multi-mode ports as later work, and L9's own out-of-scope list keeps them there.
-                PlanarPortReference.CoplanarGround =>
-                    $"Port {port.Number} asks for a coplanar ground reference, and every port this " +
-                    "kernel builds returns through the stackup's ground plane — the delta gap is " +
-                    "across a conductor's own cut, with the plane as the second terminal. A coplanar " +
-                    "return is a different port model, not a different level: §10.6 lists coplanar, " +
-                    "differential and multi-mode ports as later work, and nothing in this repository provides one.",
-                PlanarPortReference.SecondConductor =>
-                    $"Port {port.Number} asks for a second-conductor (differential) reference, and " +
-                    "every port this kernel builds returns through the stackup's ground plane. A " +
-                    "differential pair is a two-mode port, not a two-level one: §10.6 lists coplanar, " +
-                    "differential and multi-mode ports as later work, and nothing in this repository provides one.",
-                // L9d/§0.2 item 2 — the one genuinely new port question this phase had to answer.
-                _ => ViaPortRefusal(port.Number),
-            };
+            // L9d/§0.2 item 2 — the one genuinely new port question that phase had to answer.
+            refusal = ViaPortRefusal(port.Number);
             return false;
         }
+
+        return TryResolveAgainstPlane(mesh, port, out resolution, out refusal);
+    }
+
+    /// <summary>
+    /// The ground-referenced resolution — L9d's level inference and everything under it, unchanged.
+    /// <b>Split out of <see cref="TryResolve"/> so RP-2a's two terminals can each go through it</b>,
+    /// which is R-rp2-2: one resolution rule, used twice, rather than a second one that gets a
+    /// chance to disagree with it.
+    /// </summary>
+    private static bool TryResolveAgainstPlane(PlanarMesh mesh, PlanarPort port,
+                                               out PlanarPortResolution? resolution, out string? refusal)
+    {
+        resolution = null;
 
         // ── L9d/D2 — WHICH LEVEL, and never silently ─────────────────────────────────────────────
         if (port.LayerIndex is { } explicitLayer)
@@ -506,6 +676,226 @@ public static class PlanarPorts
             ". A port's LEVEL is part of its identity: driving the wrong one drives a different " +
             "conductor with the same footprint, which produces a complete and plausible answer for " +
             "a structure that was not drawn. Say which level this port is on.";
+        return false;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // RP-2a — A PORT REFERENCED TO DRAWN METAL: TWO CUTS AT ONE STATION
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// <b>Resolves a conductor-referenced port: the signal cut, the return cut, and the four things
+    /// that must be true of the pair.</b>
+    ///
+    /// <para>Both cuts go through <see cref="TryResolveAgainstPlane"/> — the SAME routine, including
+    /// L9d's level inference and its ambiguity refusal (R-rp2-2/R-rp2a-3). What this adds is only
+    /// the checks that are about the PAIR, and every one of them is a refusal rather than an
+    /// adjustment: a skewed pair, a pair on two levels nobody stated, and a pair that is really one
+    /// conductor all produce a complete and plausible s-matrix for a structure nobody drew.</para>
+    /// </summary>
+    private static bool TryResolveTwoCut(PlanarMesh mesh, PlanarPort port,
+                                         out PlanarPortResolution? resolution, out string? refusal)
+    {
+        resolution = null;
+
+        // ── R-rp2a-11 — ONLY AN INTERNAL DELTA GAP, AND THE REFUSAL NAMES WHAT IS MISSING ────────
+        if (port.Kind != PlanarPortKind.InternalDeltaGap)
+        {
+            refusal = port.Kind == PlanarPortKind.Edge
+                ? $"Port {port.Number} is an EDGE port asking to return through drawn metal, and " +
+                  "that is refused rather than approximated. An edge port has a feed outside its cut, " +
+                  "so it has an error box, and the two-line calibration that removes it needs a " +
+                  "STANDARD in the port's own reference — a coplanar line, with its own Z_c, its own " +
+                  "propagation constant and its own static capacitance. The standards this kernel " +
+                  "builds are uniform single conductors over the ground plane, so calibrating this " +
+                  "port against them would publish s-parameters that are plausible and referenced to " +
+                  "nothing. What is missing is the coplanar calibration standard (§10.6's coplanar " +
+                  "de-embedding); until it exists, cut this port as an internal delta gap instead — " +
+                  "an interior cut has no feed, no error box and needs no standard, and it is " +
+                  "referenced to its own declared Z0 at the gap."
+                : $"Port {port.Number} is an internal (via-to-plane) port asking to return through " +
+                  "drawn metal. Its negative terminal is the ground plane by construction — that is " +
+                  "what the port IS, a gap at the foot of the via that reaches the plane — so there " +
+                  "is nothing for a second cut to be. A port between two pieces of drawn metal is an " +
+                  "internal delta gap with a return conductor named; a port from metal to the plane " +
+                  "is this one, and it takes no reference.";
+            return false;
+        }
+
+        if (port.NegativeLocation is not { } negPoint)
+        {
+            refusal =
+                $"Port {port.Number} names a {(port.Reference == PlanarPortReference.CoplanarGround ? "coplanar ground" : "second-conductor")} " +
+                "reference but does not say WHERE the return conductor is cut. A conductor-referenced " +
+                "port is two cuts driven against each other, so it needs a point on the return metal " +
+                "as well as one on the signal metal; there is no nearest-conductor search, because " +
+                "picking the return silently is picking which loop the answer is about.";
+            return false;
+        }
+
+        // ── The two terminals, each through the one resolution rule ──────────────────────────────
+        if (!TryResolveAgainstPlane(mesh, port with { Reference = PlanarPortReference.GroundPlane },
+                                    out var pos, out refusal))
+            return false;
+
+        var negProbe = port with
+        {
+            Reference  = PlanarPortReference.GroundPlane,
+            Location   = negPoint,
+            LayerIndex = port.NegativeLayerIndex,
+        };
+        if (!TryResolveAgainstPlane(mesh, negProbe, out var neg, out string? negWhy))
+        {
+            // The inner refusal is worded for a port, and here it is worded for a TERMINAL — without
+            // saying which, a user reading "Port 3 is not on any conductor" has two places to look.
+            refusal = $"Port {port.Number}'s RETURN terminal, at " +
+                      $"({SurfaceMesher.Eng(negPoint.X)}m, {SurfaceMesher.Eng(negPoint.Y)}m), did not " +
+                      $"resolve. {negWhy}";
+            return false;
+        }
+
+        // ── R-rp2a-3 — ONE LEVEL, unless the caller stated both ──────────────────────────────────
+        if (pos!.LayerIndex != neg!.LayerIndex &&
+            !(port.LayerIndex.HasValue && port.NegativeLayerIndex.HasValue))
+        {
+            refusal =
+                $"Port {port.Number}'s two cuts were INFERRED onto different levels: the signal cut " +
+                $"on level {pos.LayerIndex}{LayerName(mesh, pos.LayerIndex)} and the return cut on " +
+                $"level {neg.LayerIndex}{LayerName(mesh, neg.LayerIndex)}. A port's level is part of " +
+                "its identity and two terminals is two chances to land on the wrong one silently, so " +
+                "a port spanning levels has to be SAID rather than inferred: state the level of both " +
+                "terminals if that is what you meant, or move one of the two points onto the level " +
+                "the other resolved on.";
+            return false;
+        }
+
+        // ── R-rp2a-4 — TWO DIFFERENT CONDUCTORS, and the two ways that fails are said apart ──────
+        var posSet = new HashSet<int>(pos.BasisIndices);
+        bool sharesRow = false;
+        foreach (int b in neg.BasisIndices) if (posSet.Contains(b)) { sharesRow = true; break; }
+
+        if (sharesRow)
+        {
+            refusal =
+                $"Port {port.Number}'s two cuts landed on the SAME rooftop row — the same basis " +
+                "functions on the same cut of the same metal. Driven against each other those two " +
+                "blocks cancel exactly, which is a short across the port, not a port. The two points " +
+                "are close enough that they resolved to one cut: move the return point onto the " +
+                "return conductor, or refine the mesh if the two conductors are genuinely there and " +
+                "the mesh merged them.";
+            return false;
+        }
+
+        if (pos.LayerIndex == neg.LayerIndex &&
+            SameConductor(mesh, pos.LayerIndex, pos.BasisIndices, neg.BasisIndices))
+        {
+            refusal =
+                $"Port {port.Number}'s two cuts are in the SAME conductor — the metal under the " +
+                $"return point at ({SurfaceMesher.Eng(negPoint.X)}m, {SurfaceMesher.Eng(negPoint.Y)}m) " +
+                $"is continuous with the metal under the signal point at " +
+                $"({SurfaceMesher.Eng(port.Location.X)}m, {SurfaceMesher.Eng(port.Location.Y)}m) on " +
+                $"level {pos.LayerIndex}{LayerName(mesh, pos.LayerIndex)}. A port between two cuts of " +
+                "one conductor is an ordinary internal delta gap wearing a costume: it is already " +
+                "what this kernel builds with no reference at all. Name a genuinely separate " +
+                "conductor as the return, or drop the reference and cut a single gap.";
+            return false;
+        }
+
+        // ── R-rp2a-2 — ONE STATION. A skewed pair is a port plus a length of line ────────────────
+        //
+        // Both cuts snap to gridlines of the SAME grid along the same axis, so two cuts genuinely at
+        // one station agree to the bit; the tolerance below is insurance against a coordinate that
+        // arrived by arithmetic rather than off the grid, scaled to the mesh's own extent.
+        bool alongX = pos.Direction == PlanarBasisDirection.X;
+        var  gLong  = alongX ? mesh.GridX : mesh.GridY;
+        double span = gLong[^1] - gLong[0];
+        double skew = Math.Abs(pos.ReferencePlaneM - neg.ReferencePlaneM);
+
+        if (skew > 1e-12 * Math.Max(span, 1e-12))
+        {
+            string ax = alongX ? "x" : "y";
+            refusal =
+                $"Port {port.Number}'s two cuts are at different stations: the signal cut at " +
+                $"{ax} = {SurfaceMesher.Eng(pos.ReferencePlaneM)}m and the return cut at " +
+                $"{ax} = {SurfaceMesher.Eng(neg.ReferencePlaneM)}m, {SurfaceMesher.Eng(skew)}m apart. " +
+                "That is not one port: it is a port plus that length of line, and it solves to a " +
+                "complete and plausible s-matrix for a structure nobody drew. Place both points at " +
+                "the same station — each cut snaps to the nearest mesh gridline, so two points on " +
+                $"one {ax} take the same gridline unless the mesh offered one conductor a cut there " +
+                "and not the other, which refining the mesh fixes.";
+            return false;
+        }
+
+        resolution = pos with
+        {
+            Reference = port.Reference,
+            Negative  = PlanarPortTerminal.From(neg),
+        };
+        refusal = null;
+        return true;
+    }
+
+    /// <summary>
+    /// <b>Are these two cuts in one piece of metal?</b> A 4-connectivity walk over the cells of one
+    /// level, from the positive cut's own cells, asking whether the negative cut's cells are reached.
+    ///
+    /// <para>It is the mesh's connectivity rather than the artwork's on purpose: what the solve
+    /// drives is cells, and two polygons the mesher merged are one conductor as far as the answer is
+    /// concerned. <b>It is also IN-PLANE only</b> — two conductors joined by a via somewhere else are
+    /// not caught here, and are not claimed to be: that is a short in the structure, which the solve
+    /// reports as one, rather than a port that resolved to the wrong thing.</para>
+    /// </summary>
+    private static bool SameConductor(PlanarMesh mesh, int layerIndex,
+                                      IReadOnlyList<int> fromBases, IReadOnlyList<int> toBases)
+    {
+        int nx = mesh.GridX.Count - 1, ny = mesh.GridY.Count - 1;
+        if (nx < 1 || ny < 1) return false;
+
+        var at = new int[nx * ny];
+        Array.Fill(at, -1);
+        for (int c = 0; c < mesh.Cells.Count; c++)
+        {
+            var cell = mesh.Cells[c];
+            if (cell.LayerIndex == layerIndex) at[cell.IY * nx + cell.IX] = c;
+        }
+
+        var target = new HashSet<int>();
+        foreach (int b in toBases)
+        {
+            target.Add(mesh.Bases[b].CellA);
+            target.Add(mesh.Bases[b].CellB);
+        }
+
+        var seen  = new bool[nx * ny];
+        var stack = new Stack<int>();
+        void Push(int cellIndex)
+        {
+            var c = mesh.Cells[cellIndex];
+            if (c.LayerIndex != layerIndex) return;
+            int k = c.IY * nx + c.IX;
+            if (seen[k]) return;
+            seen[k] = true;
+            stack.Push(k);
+        }
+
+        foreach (int b in fromBases) { Push(mesh.Bases[b].CellA); Push(mesh.Bases[b].CellB); }
+
+        while (stack.Count > 0)
+        {
+            int k  = stack.Pop();
+            int cx = k % nx, cy = k / nx;
+            if (at[k] >= 0 && target.Contains(at[k])) return true;
+
+            foreach (var (dx, dy) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
+            {
+                int qx = cx + dx, qy = cy + dy;
+                if (qx < 0 || qx >= nx || qy < 0 || qy >= ny) continue;
+                int q = qy * nx + qx;
+                if (seen[q] || at[q] < 0) continue;
+                seen[q] = true;
+                stack.Push(q);
+            }
+        }
         return false;
     }
 

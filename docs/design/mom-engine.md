@@ -357,8 +357,43 @@ but wrong numbers.
   for an error that does not exist; it becomes real work at L8. The observable consequence is pinned
   by a test: ∠S₂₁ is exactly −βℓ with no offset.
 - **Ground reference** must be explicit: for microstrip it is the stackup's ground plane; for CPW it is
-  the adjacent coplanar conductors. Get this wrong and everything downstream is wrong. *(v1 builds the
-  ground-plane reference only, for BOTH port types; the other two are refused by name.)*
+  the adjacent coplanar conductors. Get this wrong and everything downstream is wrong. *(Built: the
+  ground-plane reference for every port type, and — since RP-2a — a reference to DRAWN metal for an
+  INTERNAL DELTA GAP, both `CoplanarGround` and `SecondConductor`. A conductor-referenced EDGE port and
+  a port between the two levels of a via are still refused by name.)*
+
+> **RP-2a (2026-09-10) — a conductor-referenced port is TWO CUTS AT ONE STATION, and the sentence above
+> is now only half true.**
+>
+> A port referenced to drawn metal is **not** a second ground plane, and cannot be: a `LayerStack` has
+> exactly two terminations and no interior PEC, so a second reference plane has no representation in
+> the medium at all. What is reachable is the same capability by the other route — a delta gap in the
+> signal conductor and a **second delta gap in the return conductor at the same station**, driven
+> against each other. The incidence column carries a signed block on each row set; the mesh, the basis
+> set, `Z`, the factorisation and `Y = BᵀZ⁻¹B` are all untouched.
+>
+> It is two cuts because it cannot be one. The surface mesher does **not** produce a basis spanning the
+> slot between two conductors and structurally never will (every polygon edge is a hard gridline, a cell
+> exists only where a grid row's centre is inside metal, and a basis is a pair of grid-adjacent cells —
+> so a slot of nonzero width always owns a metal-free row and refining *adds* rows to it). Measured
+> before any solver work; `src/Engine/Mom/RESOLVED.md` carries the table.
+>
+> - **Each cut carries HALF the port's voltage.** The two gaps add around the loop, and the port current
+>   is read back through the same column, so the incidence weight scales `Z₁₁` by `1/w²` — ±1 on both
+>   blocks reports a **quarter** of the right impedance, with no visible symptom. Gated against the
+>   coplanar-strips conformal-mapping closed form `Z = η₀·K(k)/K(k′)`.
+> - **`InternalDeltaGap` only.** A conductor-referenced EDGE port has an error box, and its calibration
+>   standard is a *coplanar* line with its own `Z_c`, `β` and static capacitance. `PlanarCalibration`
+>   builds uniform single conductors over the plane, so it is refused by name, naming the missing
+>   standard — a coplanar de-embedding, which is later work.
+> - **Three things about the PAIR are refused rather than adjusted**: two cuts at different stations (a
+>   port plus a length of line), two cuts *inferred* onto different levels (stating both levels permits
+>   it), and two cuts in one conductor — which is either a short across the port, or an ordinary
+>   internal delta gap wearing a costume.
+> - **A mixed run is legal and is the point**: one solve, one matrix, one medium, port 1 returning
+>   through the plane and port 2 through drawn metal. `PlanarPortResolution.Describe()` therefore says
+>   what each port returns through, per port — the standing "the plane is the negative terminal of every
+>   port in this run" sentence is what a mixed run makes false.
 
 > **Decided and built at L8e (2026-08-05) — a port is a LABEL, not a new shape type.** The "Port tool
 > that snaps to a conductor edge" above is real now, and what it places is an ordinary `LabelShape`
