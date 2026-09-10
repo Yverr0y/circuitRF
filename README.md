@@ -7,7 +7,7 @@
 [![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-blue.svg)](#getting-started)
 [![UI: Avalonia](https://img.shields.io/badge/UI-Avalonia%2012-7B68EE.svg)](https://avaloniaui.net/)
 
-circuitRF is an EDA tool for developing RF circuits.  It can analyze the frequency response and nonlinear behavior of RF circuits — from a handful of components to hierarchical, multi-port designs with thousands of components — using **DC**, **S-parameter**, and **harmonic-balance** analyses, plus first-class **loadpull / sourcepull**. The analyses and the workflow are built around the RF/microwave problem, the file formats are human-readable, and the headline goal is to make loadpull as easy as a few clicks. circuitRF also includes a **layout editor** for PCB and MMIC design — with substrate-aware microstrip components, schematic↔layout generation, and full two-way interchange with **Gerber + Excellon**, **GDSII**, **DXF** and `.kicad_pcb` board files — read, written, and convertible in any direction, from the GUI or from coomand line user `circuitrf convert` — and a **2.5D electromagnetic solver** that analyses that layout geometry using its substrate stackup.
+circuitRF is an EDA tool for developing RF circuits.  It can analyze the frequency response and nonlinear behavior of RF circuits — from a handful of components to hierarchical, multi-port designs with thousands of components — using **DC**, **S-parameter**, and **harmonic-balance** analyses, plus first-class **loadpull / sourcepull**. The analyses and the workflow are built around the RF/microwave problem, the file formats are human-readable, and the headline goal is to make loadpull as easy as a few clicks. circuitRF also includes a **layout editor** for PCB and MMIC design — with substrate-aware microstrip components, schematic↔layout generation, and full two-way interchange with **Gerber + Excellon**, **GDSII**, **DXF** and `.kicad_pcb` board files — read, written, and convertible in any direction, from the GUI or from command line user `circuitrf convert` — and a **2.5D electromagnetic solver** that analyses that layout geometry using its substrate stackup.
 
 circuitRF is for RF practitioners or researchers who can't justify the cost of traditional tools (or find those tools too heavy for a quick investigation): **power-amplifier, LNA, and mixer designers; RF EDA and device-modeling engineers; academic researchers; and capable hobbyists.** It is written in **C# / .NET 10**, with an **Avalonia 12** GUI rendered through **SkiaSharp**, and it was built largely **AI-assisted** (see
 [AI-assisted development](#ai-assisted-development)).
@@ -381,17 +381,21 @@ git clone https://github.com/potatobeanradio/circuitRF.git
 ```
 
 
-### 3. Build and test
+### 3. Build and run
 
 ```bash
 cd circuitRF
 
 dotnet build      # restores packages + compiles everything
-dotnet test       # optional 10-15 min tests; runs the regression test suite
+dotnet run --project src/Ui # from the circuitRF/ directory:
 ```
 
-### 4. Optional — building the device workers
+### 4. Optional — testing & building the device workers
 
+```bash
+dotnet test       # optional 10-15 min of circuitRF development tests
+```
+To build the device workers:
 Needed only for PDKs whose device models ship as **compiled libraries**. `dotnet build` builds the
 workers itself *if a C compiler is on PATH* — with none, it warns and carries on, and such a kit
 refuses at Run.
