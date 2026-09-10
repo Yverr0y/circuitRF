@@ -574,13 +574,18 @@ public sealed class UpdateService
         // second and third row and push the button down with them — the button lands wherever the
         // sentence happens to end, which is the layout the shortening exists to remove.
         //
-        // What the short line drops is what the button itself now says (which version to relaunch
-        // into) and where the setting lives — Settings ▸ Security & Permissions is one line of the
-        // long form and is discoverable from the Settings dialog itself. What it KEEPS is the
-        // instruction, in four words: IMessageSink.PostAction's default drops the button and posts
-        // the text, so a line that made sense only next to a button would leave that user with
-        // nothing to act on.
-        string shortLine = $"{UpdateApp.Name} updated to {to}. Relaunch to start using it.";
+        // SHORTENED AGAIN, to the outcome and nothing else (owner request, 2026-09-10): once the
+        // install has finished there is nothing left to explain, and the row is the download's own
+        // row — the same line that has been reading "installing" while it worked, now reading
+        // "installed" with the button where its bar was. The instruction is the button.
+        //
+        // The one thing this gives up is the four-word instruction the line used to carry for a sink
+        // that cannot render an action (IMessageSink.PostAction's default drops the button and posts
+        // the text). That case cannot arise in circuitRF — the App that installs the relaunch
+        // handler is the one that owns MessagesTool, which implements PostAction — and the build
+        // with no handler at all, harmonicaRF and wBond and any headless sink, still gets the whole
+        // sentence below.
+        string shortLine = $"{UpdateApp.Name} {to} installed";
 
         // With no button, the full sentence, unchanged: it is the only thing telling the user what
         // to do, and a build with no handler (harmonicaRF, wBond, a headless sink) has no other
@@ -590,7 +595,9 @@ public sealed class UpdateService
             + $"Relaunch {UpdateApp.Name} to start using the version. "
             + "Automatic updates can be disabled in Settings, under Security & Permissions.";
 
-        string label = $"Relaunch {UpdateApp.Name}";
+        // Just the verb: the line beside it already names the application, and repeating it there
+        // is half the width of a row that exists to be short.
+        string label = "Relaunch";
         Func<Task>? relaunchHandler = RelaunchRequest.Handler;
 
         // On the download's own row when there is one: its bar and its counter go, and the button

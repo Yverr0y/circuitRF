@@ -37,6 +37,26 @@ public enum FileAccessOperation
 public static class FileAccessDiagnostics
 {
     /// <summary>
+    /// Set by the updater when THIS session applied a macOS bundle exchange and did not manage to
+    /// hand over to the version it installed. It changes one thing: the remedy a protected-folder
+    /// refusal offers.
+    ///
+    /// <para><b>Because in that state the ordinary advice is not merely unhelpful, it is wrong.</b>
+    /// macOS resolves a protected-folder grant against the application identity established when the
+    /// process was LAUNCHED, and the exchange has just moved that bundle out of <c>/Applications</c>
+    /// — so the check is made against something that is no longer installed and fails with no prompt.
+    /// The permission has not been revoked and there is nothing in System Settings to switch on; the
+    /// row the message tells the reader to find may well already be on. Sending someone to change a
+    /// setting that is correct, to fix a session that will fix itself on the next launch, is how the
+    /// 2026-09-10 report was spent (see <c>Updates/AppRelaunch</c>).</para>
+    ///
+    /// <para>A plain settable flag rather than a callback: this project is a LEAF and must stay one,
+    /// the fact is a single bool known once per process, and nothing below the UI may reference the
+    /// updater to ask.</para>
+    /// </summary>
+    public static bool AppBundleReplacedThisSession { get; set; }
+
+    /// <summary>
     /// A diagnostic describing <paramref name="exception"/>, or <c>null</c> when it is not a file
     /// access failure this can improve on — in which case the caller should report as it always has.
     /// Returning null rather than a vague diagnostic is deliberate: a wrong explanation is worse
@@ -58,9 +78,9 @@ public static class FileAccessDiagnostics
         string verb = operation == FileAccessOperation.Saving ? "saving to" : "opening";
 
         if (OperatingSystem.IsMacOS() && TryGetProtectedFolder(path) is var (plain, toggle) && plain is not null)
-            return IsLaunchedFromAppBundle()
-                ? BundledAppRefusal(path, plain, toggle!, verb)
-                : TerminalLaunchRefusal(path, plain, toggle!);
+            return AppBundleReplacedThisSession ? UpdatedInPlaceRefusal(path, plain, verb)
+                 : IsLaunchedFromAppBundle()    ? BundledAppRefusal(path, plain, toggle!, verb)
+                 : TerminalLaunchRefusal(path, plain, toggle!);
 
         return Diagnostic.Create(
             "file.access.denied",
@@ -89,6 +109,27 @@ public static class FileAccessDiagnostics
         "again. If circuitRF is not in that list at all, granting it Full Disk Access under Privacy " +
         "& Security has the same effect.",
         ("path", path), ("plain", plain), ("toggle", toggle), ("verb", verb));
+
+    /// <summary>
+    /// The case where the permission is fine and the SESSION is not: circuitRF replaced its own
+    /// application bundle during this run and kept going, so the identity macOS checks names a copy
+    /// that is no longer there.
+    ///
+    /// <para>It names no System Settings row on purpose. Every other branch here ends by telling the
+    /// reader which toggle to switch on; this one has to say the opposite — leave it alone — because
+    /// the setting is not what is wrong and changing it will not help.</para>
+    /// </summary>
+    private static Diagnostic UpdatedInPlaceRefusal(string path, string plain, string verb) => Diagnostic.Create(
+        "file.access.macos-protected-folder.updated-in-place",
+        DiagnosticSeverity.Error,
+        "macOS is blocking circuitRF from {verb} '{path}', and it is this session only. circuitRF " +
+        "updated itself while it was running. macOS ties an app's access to your {plain} folder to " +
+        "the copy that was running when it started, and the update has just replaced that copy — so " +
+        "the check has nothing left to match and fails without asking. Nothing is wrong with your " +
+        "workspace, and you have not lost a permission. Quit circuitRF and open it again; the new " +
+        "version starts with its own access and this stops. Do not change anything in Privacy & " +
+        "Security — the setting is not what is wrong.",
+        ("path", path), ("plain", plain), ("verb", verb));
 
     /// <summary>
     /// The development case, and the one that wastes the most time: macOS attributes a file request

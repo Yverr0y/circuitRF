@@ -3,6 +3,15 @@ using CircuitRF.Diagnostics;
 namespace CircuitRF.Ui.Tests.Localization;
 
 /// <summary>
+/// Both diagnostic classes below read <see cref="FileAccessDiagnostics.AppBundleReplacedThisSession"/>,
+/// which is process-wide by design — it is one fact established once per launch. Sharing a collection
+/// is what stops the class that SETS it from running beside the class that asserts the ordinary
+/// message; without it the Downloads case failed while the after-update case was mid-flight.
+/// </summary>
+[CollectionDefinition("FileAccessDiagnostics")]
+public sealed class FileAccessDiagnosticsCollection { }
+
+/// <summary>
 /// The macOS protected-folder diagnostic (owner report, 2026-08-27).
 ///
 /// <para>Every workspace under <c>~/Documents</c> failed to open or save with "Access to the path …
@@ -11,6 +20,7 @@ namespace CircuitRF.Ui.Tests.Localization;
 /// .NET surfaces that with the same sentence it uses for a real permissions problem. The raw message
 /// actively misleads: it sends the reader to check permissions that are already correct.</para>
 /// </summary>
+[Collection("FileAccessDiagnostics")]
 public sealed class FileAccessDiagnosticsTests
 {
     private static string Home => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -205,5 +215,63 @@ public sealed class FileAccessDiagnosticsTests
             new UnauthorizedAccessException("denied"));
 
         Assert.DoesNotContain("{", d!.Render(), StringComparison.Ordinal);
+    }
+}
+
+/// <summary>
+/// The refusal that follows an update the application applied to ITSELF (owner report, 2026-09-10).
+///
+/// <para>A workspace on the Desktop and one under Documents were both refused, seconds after an
+/// automatic update, by a session whose launch-time identity named the bundle the update had just
+/// moved aside. The message it produced was the ordinary one: open System Settings, find circuitRF,
+/// switch on "Desktop Folder". There was nothing there to switch on that would have helped — the
+/// permission was intact and the session was not. These pin the branch that says so.</para>
+/// </summary>
+[Collection("FileAccessDiagnostics")]
+public sealed class FileAccessDiagnosticsAfterUpdateTests : IDisposable
+{
+    public void Dispose() => FileAccessDiagnostics.AppBundleReplacedThisSession = false;
+
+    private static string Home => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+    private static string Describe(string relative)
+        => FileAccessDiagnostics.TryDescribe(
+               Path.Combine(Home, relative, "My_EM_Simulation_Example", ".cws"),
+               new UnauthorizedAccessException("Access to the path is denied."))!.Render();
+
+    /// <summary>Both folders from the report, because the session loses ALL of them at once — the
+    /// grant is per folder but the identity that fails to match is one.</summary>
+    [Theory]
+    [InlineData("Desktop")]
+    [InlineData("Documents")]
+    public void AfterAnInPlaceUpdate_TheRemedyIsARelaunchAndNotASetting(string folder)
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+
+        FileAccessDiagnostics.AppBundleReplacedThisSession = true;
+        string text = Describe(folder);
+
+        Assert.Contains("updated itself while it was running", text, StringComparison.Ordinal);
+        Assert.Contains("Quit circuitRF and open it again", text, StringComparison.Ordinal);
+
+        // The whole point. The previous message's instruction was to go and change a setting that
+        // was already correct, which is what the report was spent on.
+        Assert.DoesNotContain("switch on", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Full Disk Access", text, StringComparison.Ordinal);
+        Assert.Contains("Do not change anything in Privacy & Security", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("{", text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Off by default and it stays off, or every ordinary privacy refusal starts telling people to
+    /// relaunch after an update that never happened.
+    /// </summary>
+    [Fact]
+    public void WithNoUpdateApplied_TheOrdinaryDiagnosticIsUnchanged()
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+
+        Assert.False(FileAccessDiagnostics.AppBundleReplacedThisSession);
+        Assert.DoesNotContain("updated itself", Describe("Documents"), StringComparison.Ordinal);
     }
 }

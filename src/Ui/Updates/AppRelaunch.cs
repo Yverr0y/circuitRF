@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
 
 namespace CircuitRF.Ui.Updates;
 
@@ -38,11 +39,31 @@ namespace CircuitRF.Ui.Updates;
 /// per update that applies a swap, and it is the only mechanism that produces the same process a
 /// double-click would.</para>
 ///
-/// <para><b>It is macOS-only and it is a preference, never a requirement.</b> Linux has no TCC and
-/// keeps <c>execv</c>; Windows has no <c>execv</c> and already starts a successor. And when Launch
-/// Services cannot be reached for any reason the caller falls straight back to <c>execv</c>: an
-/// update that leaves the user with a working application and a stale privacy attribution is bad, and
-/// an update that leaves them with no application at all is very much worse.</para>
+/// <para><b>It is macOS-only.</b> Linux has no TCC and keeps <c>execv</c>; Windows has no
+/// <c>execv</c> and already starts a successor.</para>
+///
+/// <para><b>On a macOS bundle it is not a preference — it is the only route, and it recurred once
+/// because it was written as one</b> (owner report, 2026-09-10, beta.15 to beta.16). The Launch
+/// Services hand-over was tried, reported false, and the caller fell through to <c>execv</c> exactly
+/// as it was told to. The kernel's record of what that produced:</para>
+///
+/// <code>
+/// responsible={identifier=com.circuitRF.circuitRF, pid=84025,
+///   responsible_path=~/Library/Application Support/circuitRF/updates/previous/Contents/MacOS/circuitRF,
+///   binary_path=/Applications/circuitRF.app/Contents/MacOS/circuitRF}
+/// System Policy: circuitRF(84025) deny(1) file-read-data ~/Desktop/&lt;workspace&gt;/.cws
+/// </code>
+///
+/// <para><b>The fall-back cannot help, because by the time it runs the damage is already done.</b>
+/// The exchange moves the bundle this process was LAUNCHED from out of <c>/Applications</c> and into
+/// <c>updates/previous</c>, which is not a <c>.app</c> at all — and macOS resolves a protected-folder
+/// grant against the launch-time identity, not the current one. So every process that outlives the
+/// exchange is denied, <c>execv</c>'d or not: the exec does not cause it and staying put does not
+/// avoid it. What the fall-back actually bought was a session that could not open the user's
+/// workspaces and was told to go and change privacy settings that were never wrong. The comment that
+/// called that outcome "bad, but better than no application at all" was weighing the wrong two
+/// things — the swap is durable, so the alternative was never "no application", it was "one more
+/// launch". See <see cref="UpdateStartup"/> for the rule that follows from this.</para>
 /// </summary>
 public static class AppRelaunch
 {
@@ -96,8 +117,23 @@ public static class AppRelaunch
     }
 
     /// <summary>
+    /// How many times the request is made before it is called refused, and how long is left between
+    /// attempts.
+    ///
+    /// <para><b>Retried because the one moment this is ever called is the one moment Launch Services
+    /// is busiest with this exact bundle.</b> The exchange has just happened, and the log of the
+    /// 2026-09-10 failure shows what that sets off in the same second: Finder reporting the bundle
+    /// node has changed, <c>lsd</c> rebuilding the record, and <c>syspolicyd</c> opening a TLS
+    /// connection to assess the newly installed application. A single attempt makes the whole update
+    /// depend on none of that being in the way. Three attempts over half a second cost nothing on the
+    /// path that works — the first one returns — and the fall-back they replace is gone.</para>
+    /// </summary>
+    private const int LaunchAttempts  = 3;
+    private const int RetryDelayMs    = 250;
+
+    /// <summary>
     /// Asks Launch Services to start the bundle <paramref name="executable"/> belongs to, and reports
-    /// whether the request was accepted. False means the caller should fall back to <c>execv</c>.
+    /// whether the request was accepted.
     ///
     /// <para><c>-n</c> is not optional. This process is still alive when the request is made — it exits
     /// a moment later — and without <c>-n</c> Launch Services would see the application already running
@@ -105,17 +141,53 @@ public static class AppRelaunch
     /// update that quietly closes the application instead of restarting it.</para>
     /// </summary>
     public static bool TryRelaunchBundle(string executable, IReadOnlyList<string> args)
-    {
-        if (!OperatingSystem.IsMacOS()) return false;
-        if (BundleRootOf(executable) is not { } bundle) return false;
+        => TryRelaunchBundle(executable, args, out _);
 
-        if (Launcher is { } seam)
+    /// <summary>
+    /// The same, and it says WHY when it fails.
+    ///
+    /// <para><b>The reason is the deliverable, not a nicety.</b> Establishing that the 2026-09-10
+    /// hand-over had not gone through Launch Services took a reconstruction from the unified log —
+    /// counting <c>open</c> processes that were not there and DYLD unnest events that were — and the
+    /// one fact that would have settled it in a line, whether <c>open</c> ran and what it said, was
+    /// the one thing this method knew and threw away. It is now carried out to
+    /// <see cref="UpdateStartup"/>, which puts it in front of the user with the notice.</para>
+    /// </summary>
+    public static bool TryRelaunchBundle(string executable, IReadOnlyList<string> args,
+                                         out string? refusal)
+    {
+        refusal = null;
+
+        if (!OperatingSystem.IsMacOS()) return false;
+
+        if (BundleRootOf(executable) is not { } bundle)
         {
-            try   { return seam(bundle, args); }
-            catch { return false; }
+            refusal = $"'{executable}' is not the main executable of an .app bundle";
+            return false;
         }
 
-        return OpenNewInstance(bundle, args);
+        for (int attempt = 1; ; attempt++)
+        {
+            if (AskOnce(bundle, args, out refusal)) return true;
+            if (attempt >= LaunchAttempts) return false;
+
+            Thread.Sleep(RetryDelayMs);
+        }
+    }
+
+    /// <summary>One request. The seam stands in for <c>open</c> so a test host never launches
+    /// anything; it is retried on the same terms, because what the retry exists to survive is a
+    /// refusal and the seam is how a test produces one.</summary>
+    private static bool AskOnce(string bundle, IReadOnlyList<string> args, out string? refusal)
+    {
+        if (Launcher is { } seam)
+        {
+            refusal = null;
+            try   { if (seam(bundle, args)) return true; refusal = "the launcher refused"; return false; }
+            catch (Exception e) { refusal = e.Message; return false; }
+        }
+
+        return OpenNewInstance(bundle, args, out refusal);
     }
 
     /// <summary>
@@ -129,11 +201,11 @@ public static class AppRelaunch
     /// Relaunch action in the Messages panel, and nothing else.
     ///
     /// <para><b>This is not <see cref="UpdateStartup.HandOverTo"/>, and the difference is that this
-    /// process is a live GUI.</b> The hand-over runs in <c>Main</c> before Avalonia, where
-    /// <c>execv</c> is free: there is no window, nothing unsaved, and no one notices the process
-    /// image change. Here there are windows that have just been asked to save, an exit sequence to
-    /// run, and workers to end — so the successor is an ordinary independent process and this one
-    /// leaves by the front door.</para>
+    /// process is a live GUI.</b> The hand-over runs in <c>Main</c> before Avalonia, where — on the
+    /// platforms that still exec — <c>execv</c> is free: there is no window, nothing unsaved, and no
+    /// one notices the process image change. Here there are windows that have just been asked to
+    /// save, an exit sequence to run, and workers to end — so the successor is an ordinary
+    /// independent process and this one leaves by the front door.</para>
     ///
     /// <para><b>The successor must not start until this process is gone, and that is a correctness
     /// requirement rather than a courtesy.</b> Windows and Linux both hold a single-instance guard
@@ -241,8 +313,10 @@ public static class AppRelaunch
         return pid;
     }
 
-    private static bool OpenNewInstance(string bundle, IReadOnlyList<string> args)
+    private static bool OpenNewInstance(string bundle, IReadOnlyList<string> args, out string? refusal)
     {
+        refusal = null;
+
         try
         {
             var psi = new ProcessStartInfo("/usr/bin/open") { UseShellExecute = false };
@@ -259,14 +333,19 @@ public static class AppRelaunch
             }
 
             using Process? p = Process.Start(psi);
-            if (p is null) return false;
+            if (p is null) { refusal = "open could not be started"; return false; }
 
-            return !p.WaitForExit(LaunchServicesTimeoutMs) || p.ExitCode == 0;
+            if (!p.WaitForExit(LaunchServicesTimeoutMs)) return true;
+            if (p.ExitCode == 0) return true;
+
+            refusal = $"open exited {p.ExitCode}";
+            return false;
         }
-        catch (Exception)
+        catch (Exception e)
         {
-            // No /usr/bin/open, no permission to spawn, a full process table — every one of them means
-            // the same thing here: this route is unavailable, use the one that does not need it.
+            // No /usr/bin/open, no permission to spawn, a full process table. Named rather than
+            // swallowed: this is the branch that took a log reconstruction to rule out.
+            refusal = $"open could not be started: {e.GetType().Name}: {e.Message}";
             return false;
         }
     }

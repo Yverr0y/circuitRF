@@ -171,7 +171,8 @@ This is exactly what Sparkle does, so the approach is well-trodden rather than n
                  Win/Linux: write `current.tmp` and rename it over `current` — never a
                             truncating write (§13.2) — then hand over to the version just
                             pointed at: execv() on Linux, start-it-and-exit on Windows.
-                 macOS:     atomic bundle swap, then execv() the new executable.
+                 macOS:     atomic bundle swap, then hand the launch to Launch Services
+                            (`open -n -a`) — and ONLY that; there is no fall-back.
 ```
 
 **Why the swap happens at launch and not at quit.** Quitting looks tempting but needs a detached helper
@@ -190,10 +191,21 @@ mechanisms differ: the Windows stub sees its child finish and exits with it, so 
 parentless for that one launch. It is otherwise byte-for-byte the process the stub would have created a
 launch later.
 
+**On a macOS bundle the hand-over is Launch Services or nothing** (`src/Ui/Updates/AppRelaunch.cs`
+carries the kernel's own record of both occurrences). Everywhere else `execv` and
+start-and-exit are interchangeable and the fall-back order is a convenience. On a `.app` it is not: the
+exchange moves the bundle the running process was *launched from*, and macOS resolves a protected-folder
+grant against the launch-time identity — so any process that outlives the exchange is denied `~/Documents`
+and `~/Desktop` with no prompt, exec'd or not. There is therefore nothing for a fall-back to preserve, and
+writing one as a preference is how the same bug reached the owner twice (2026-09-04, and again
+2026-09-10 when the preference did exactly what it said and fell through). A hand-over Launch Services will
+not take ends the launch instead: the exchange is durable, the version on disk is the new one, and the next
+ordinary launch is spawned by launchd with an identity that names it.
+
 **This is not the Relaunch button of §10.2.1, and the difference is that this runs in `Main` before
-Avalonia** — no window open, nothing unsaved, so it may exec freely. The button starts from a live GUI
-and therefore leaves by the ordinary Quit instead. Either way the user asked for this launch, and gets the
-version they were told they would get.
+Avalonia** — no window open, nothing unsaved, so it may exec freely on the platforms that still exec. The
+button starts from a live GUI and therefore leaves by the ordinary Quit instead. Either way the user asked
+for this launch, and gets the version they were told they would get.
 
 **Never swap mid-session.** A self-contained .NET app does not load every assembly eagerly and Avalonia
 resolves some resources lazily; replacing the tree underneath a running process is a class of bug that

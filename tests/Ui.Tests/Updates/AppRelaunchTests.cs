@@ -22,6 +22,8 @@ public sealed class AppRelaunchTests : IDisposable
 {
     public void Dispose() => AppRelaunch.Launcher = null;
 
+    private const string Bundled = "/Applications/circuitRF.app/Contents/MacOS/circuitRF";
+
     [Fact]
     public void AMainExecutableInsideABundle_ResolvesToTheBundleRoot()
     {
@@ -83,23 +85,84 @@ public sealed class AppRelaunchTests : IDisposable
     }
 
     /// <summary>
-    /// A refused or unavailable Launch Services request must report false so the caller falls through
-    /// to <c>execv</c>. An update that leaves a stale privacy attribution for one session is bad; one
-    /// that leaves the user with no application at all is very much worse.
+    /// A refused or unavailable Launch Services request must report false rather than claim success —
+    /// and it must SAY WHY. What it reports is the whole of what the caller can put in front of the
+    /// user, and on 2026-09-10 the absence of it cost a reconstruction from the unified log to
+    /// establish something this method had known and discarded.
     /// </summary>
     [Fact]
-    public void ALaunchThatIsRefused_ReportsFalseRatherThanClaimingSuccess()
+    public void ALaunchThatIsRefused_ReportsFalseAndSaysWhy()
     {
         if (!OperatingSystem.IsMacOS()) return;
 
         AppRelaunch.Launcher = (_, _) => false;
-        Assert.False(AppRelaunch.TryRelaunchBundle(
-            "/Applications/circuitRF.app/Contents/MacOS/circuitRF", []));
+        Assert.False(AppRelaunch.TryRelaunchBundle(Bundled, [], out string? refusal));
+        Assert.False(string.IsNullOrWhiteSpace(refusal));
 
         AppRelaunch.Launcher = (_, _) => throw new InvalidOperationException("no Launch Services");
-        Assert.False(AppRelaunch.TryRelaunchBundle(
-            "/Applications/circuitRF.app/Contents/MacOS/circuitRF", []));
+        Assert.False(AppRelaunch.TryRelaunchBundle(Bundled, [], out refusal));
+        Assert.Contains("no Launch Services", refusal!, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// An executable that is not a bundle is refused with a reason too, not silently: on macOS that
+    /// is now the difference between handing over and ending the launch, so "it just returned false"
+    /// is not an acceptable account of it.
+    /// </summary>
+    [Fact]
+    public void ANonBundleRefusal_NamesTheExecutable()
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+
+        Assert.False(AppRelaunch.TryRelaunchBundle("/opt/circuitrf/app-1.0.0/circuitRF", [],
+                                                   out string? refusal));
+        Assert.Contains("app-1.0.0/circuitRF", refusal!, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The request is RETRIED, because the single moment it is ever made is the moment Launch
+    /// Services is busiest with this exact bundle — the exchange has just happened, Finder has just
+    /// seen the node change, <c>lsd</c> is rebuilding the record and Gatekeeper is assessing the new
+    /// application. One attempt made the whole update depend on none of that being in the way, and
+    /// there is no longer a fall-back behind it to absorb the cost of being wrong.
+    /// </summary>
+    [Fact]
+    public void ARequestThatIsRefusedOnce_IsAskedAgain()
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+
+        int asked = 0;
+        AppRelaunch.Launcher = (_, _) => ++asked >= 3;
+
+        Assert.True(AppRelaunch.TryRelaunchBundle(Bundled, [], out _));
+        Assert.Equal(3, asked);
+    }
+
+    /// <summary>And it stops: a route that is genuinely unavailable must not hold the launch.</summary>
+    [Fact]
+    public void ARequestThatIsAlwaysRefused_StopsAsking()
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+
+        int asked = 0;
+        AppRelaunch.Launcher = (_, _) => { asked++; return false; };
+
+        Assert.False(AppRelaunch.TryRelaunchBundle(Bundled, [], out _));
+        Assert.Equal(3, asked);
+    }
+
+    /// <summary>
+    /// The rule the second occurrence produced: on a macOS bundle, Launch Services is the ONLY route
+    /// and <c>execv</c> is not behind it. Every other layout keeps what it had — a versioned-pointer
+    /// install replaces no bundle, so the identity it was launched with still names what is on disk.
+    /// </summary>
+    [Theory]
+    [InlineData("/Applications/circuitRF.app/Contents/MacOS/circuitRF", true)]
+    [InlineData("/opt/circuitrf/app-1.0.0/circuitRF", false)]
+    [InlineData("/usr/local/bin/circuitRF", false)]
+    public void OnlyAMacOsBundleIsRestrictedToLaunchServices(string exe, bool onlyLaunchServices)
+        => Assert.Equal(OperatingSystem.IsMacOS() && onlyLaunchServices,
+                        UpdateStartup.HandsOverThroughLaunchServicesOnly(exe));
 
     /// <summary>An executable that is not in a bundle never reaches the launcher at all.</summary>
     [Fact]

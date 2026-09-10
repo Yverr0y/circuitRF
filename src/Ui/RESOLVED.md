@@ -1,5 +1,98 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## Owner request, 2026-09-10 — the finished-update row says the outcome and nothing else
+
+The Message Panel row that settles a completed auto-update read
+`circuitRF updated to 1.0.0-beta.16. Relaunch to start using it.` beside a `Relaunch circuitRF`
+button. Once the install is done there is nothing left to explain, so it now reads
+`circuitRF 1.0.0-beta.16 installed` beside a `Relaunch` button — the same row that has been showing
+`installing` while it worked, with one word and one control changed. The button is the instruction.
+
+**What that gives up, and why it is safe here.** The old line kept a four-word instruction because
+`IMessageSink.PostAction`'s default DROPS the button and posts the text, so a sink that cannot render
+an action would be left with nothing to act on. That case cannot arise in circuitRF: the `App` that
+installs the relaunch handler is the one that owns `MessagesTool`, which implements `PostAction`. The
+build with no handler at all — harmonicaRF, wBond, any headless sink — still gets the full sentence,
+which is the branch that exists for exactly that reason and is unchanged.
+
+Gate: `tests/Ui.Tests/Updates/RelaunchTests.cs`. Its short-line test now asserts the explanation stays
+OUT (no "Relaunch" in the sentence, no mention of Settings) while the version stays in — the one fact
+the row carries that the button cannot.
+
+## Owner report, 2026-09-10 — blocked from opening workspaces again after an auto-update
+
+beta.15 to beta.16, and the same symptom as 2026-09-04: workspaces on the Desktop *and* under
+Documents refused with the protected-folder diagnostic, seconds after the update, with nothing
+changed and no prompt. The 2026-09-04 fix (hand over through Launch Services rather than `execv`) was
+present in the running build and had not been reverted.
+
+**The kernel says exactly what happened, and the interesting line is the attribution, not the deny.**
+
+```
+tccd  AUTHREQ_ATTRIBUTION: attribution={responsible={identifier=com.circuitRF.circuitRF, pid=84025,
+      responsible_path=~/Library/Application Support/circuitRF/updates/previous/Contents/MacOS/circuitRF,
+      binary_path=/Applications/circuitRF.app/Contents/MacOS/circuitRF}, ...}
+kernel System Policy: circuitRF(84025) deny(1) file-read-data ~/Desktop/<workspace>/.cws
+kernel System Policy: circuitRF(84025) deny(1) file-read-data ~/Documents/<workspace>/.cws
+```
+
+The session is its OWN responsible process — so Launch Services did spawn it, and that half of the
+2026-09-04 fix worked. What it could not survive is that its `responsible_path` — the executable
+recorded when it was launched — is no longer inside an `.app` at all. The exchange had moved it to
+`updates/previous`, and TCC resolves a Documents/Desktop grant against that recorded identity. There
+is nothing there to match, and nothing to prompt about, so it denies in silence.
+
+**What that means, and it is the part the 2026-09-04 write-up got half right.** The `execv` was never
+the mechanism — it was a correlate. **Any** process that outlives the bundle exchange is denied,
+exec'd or not, because the exchange moves the vnode the identity names. So the rule is about the
+process, not the syscall: on a macOS bundle, the launch that applies the swap must not continue.
+
+**Why it recurred: the fix was written as a preference with `execv` behind it.** `HandOverTo` read
+"try Launch Services, else exec", justified by "a stale privacy attribution for one session is bad;
+not starting at all is much worse". Both halves of that trade are wrong. The bad outcome is not
+"stale for one session" — it is a session that cannot open any of the user's work and is told to go
+and change a privacy setting that is already correct. And the alternative was never "no application":
+the exchange is durable, so the version on disk IS the new one and the next ordinary launch has a
+clean identity. The choice was between a broken session and one more launch, and the code chose the
+broken session.
+
+**What the log could NOT say, and what that cost.** Whether `open` had run at all. Establishing it
+took counting `open` processes in the unified log (none, and a control confirmed even a failing
+`open` logs), and DYLD *unnest* events per pid — two VM maps in pid 84025 against one in the launches
+either side of it, which is the same signature `sh` exec'ing `bash` leaves. That is a lot of work for
+a fact `OpenNewInstance` had in its hand and threw away.
+
+Two sandbox reproductions ruled out the obvious causes rather than assuming them: a shell `.app`
+that `renamex_np(RENAME_SWAP)`s its own bundle and then runs `open -n -a`, and the same thing as a
+.NET app running the real `BundleRootOf` + `Process.Start` code. Both hand over cleanly, so neither
+Launch Services staleness after the exchange nor the .NET spawn is the cause; what refused `open` on
+the night remains unidentified, which is precisely why the refusal is now reported rather than
+inferred.
+
+**Fixed in four parts.**
+
+- `UpdateStartup.HandOverTo` splits on `HandsOverThroughLaunchServicesOnly` — a macOS `.app`. There,
+  Launch Services is the only route and `execv` is not behind it; a refusal calls
+  `LeaveTheUpdateForTheNextLaunch`, which records a notice and exits 0. Every other layout, the macOS
+  versioned-pointer install included, keeps exactly what it had: it replaces no bundle, so its
+  launch-time identity still names what is on disk.
+- `AppRelaunch.TryRelaunchBundle` retries, three times over half a second. The one moment it is ever
+  called is the moment Launch Services is busiest with this exact bundle — the same second shows
+  Finder reporting the node changed, `lsd` rebuilding the record and `syspolicyd` opening a TLS
+  connection to assess the new application. With no fall-back behind it, one attempt was too few.
+- It also reports WHY it failed, out to the notice the next launch posts. `open exited 1` in a
+  message is the whole of what this investigation had to reconstruct.
+- `FileAccessDiagnostics.AppBundleReplacedThisSession` — set by the updater when this session
+  exchanged the bundle — replaces the protected-folder message with one that says the permission is
+  intact, the session is not, and to relaunch. It names no System Settings row, which is the only
+  branch here that deliberately does not: the row it would name is very often already switched on.
+
+Gates: `tests/Ui.Tests/Updates/AppRelaunchTests.cs` (the retry, the refusal text, and the truth table
+for which layouts are restricted to Launch Services) and
+`tests/Ui.Tests/Localization/FileAccessDiagnosticsTests.cs`. The two diagnostic test classes share an
+xUnit collection on purpose — the flag is process-wide by design, and without that the class asserting
+the ordinary message ran beside the class that sets it and failed.
+
 ## Owner report, 2026-09-09 — the armed Port tool ignored Escape, `s` and F9
 
 With the Port tool armed from the layout toolbar, Escape did not disarm it and neither `s`/F3

@@ -66,6 +66,15 @@ public static class UpdateStartup
 
             SwapResult result = UpdateSwap.ApplyAtLaunch(site, state, UpdatePaths.Root, running);
 
+            // From here on this process may no longer be trusted to touch a protected folder on
+            // macOS: the exchange has moved the bundle it was LAUNCHED from, and that is the identity
+            // the system resolves a Documents/Desktop grant against. HandOverTo leaves rather than let
+            // that session continue — this flag is the belt for anything that gets past it, so a
+            // refusal explains itself instead of sending the user to Privacy & Security.
+            if (site.Shape == InstallShape.MacOsBundle
+                && result.Outcome is SwapOutcome.BundleSwapped or SwapOutcome.RolledBack)
+                CircuitRF.Diagnostics.FileAccessDiagnostics.AppBundleReplacedThisSession = true;
+
             switch (result.Outcome)
             {
                 case SwapOutcome.AttemptRecorded:
@@ -167,23 +176,25 @@ public static class UpdateStartup
     /// A hand-over that then fails re-arms the reporter rather than leaving this session blind for
     /// the rest of its run.</para>
     ///
-    /// <para><b>Three mechanisms, in a deliberate order.</b> macOS goes through Launch Services —
-    /// <see cref="AppRelaunch"/> has the whole reason, and it is not a stylistic one: an
-    /// <c>execv</c> keeps the launch-time application attribution macOS resolves a protected-folder
-    /// grant against, and the update has just exchanged the bundle that attribution names, so the
-    /// updated session is denied <c>~/Documents</c> until the user quits and launches again. Linux
-    /// keeps <c>execv</c>: it keeps the pid, the process clock and the parent's handle on this
-    /// process, so nothing outside notices the swap at all, and there is no TCC to go stale. On
-    /// Windows, which has no <c>execv</c>, the successor is STARTED and this process exits, which the
-    /// stub sees as its child finishing — so the stub exits too and the new version runs with no
-    /// parent. That is the one visible difference, it lasts for one launch per update, and the
-    /// process itself is byte-for-byte the one the stub would have created from the flipped pointer a
-    /// launch later.</para>
+    /// <para><b>A macOS bundle has exactly ONE mechanism and no fall-back at all.</b> The successor is
+    /// asked for through Launch Services, and if Launch Services will not take it this process
+    /// LEAVES — see <see cref="LeaveTheUpdateForTheNextLaunch"/>. <see cref="AppRelaunch"/> carries
+    /// the evidence; the rule it produces is that once the bundle has been exchanged, every process
+    /// that outlives the exchange is denied every protected folder with no prompt, <c>execv</c>'d or
+    /// not. So there is nothing for a fall-back to preserve: the choice is not between an application
+    /// and no application, it is between an application that cannot open the user's workspaces and
+    /// one more launch. It was written as a preference once, it fell back exactly as instructed, and
+    /// that is how the same bug reached the owner twice.</para>
     ///
-    /// <para><b>Each mechanism falls through to the next</b>, so no route being available can leave
-    /// the user with no application. A Launch Services request that is refused still reaches
-    /// <c>execv</c>, which is precisely the behaviour this method had before — a stale privacy
-    /// attribution for one session is a bad outcome; not starting at all is a much worse one.</para>
+    /// <para><b>Everywhere else keeps what it had, because nothing else has a TCC identity to lose.</b>
+    /// Linux keeps <c>execv</c>: it keeps the pid, the process clock and the parent's handle on this
+    /// process, so nothing outside notices the swap at all. On Windows, which has no <c>execv</c>,
+    /// the successor is STARTED and this process exits, which the stub sees as its child finishing —
+    /// so the stub exits too and the new version runs with no parent. That is the one visible
+    /// difference, it lasts for one launch per update, and the process itself is byte-for-byte the
+    /// one the stub would have created from the flipped pointer a launch later. The macOS
+    /// VERSIONED-POINTER layout is on this side of the line too: it replaces no bundle, so the
+    /// launch-time identity it was given still names the application on disk.</para>
     ///
     /// <para><b>Nothing is at risk in any of them.</b> This runs in <c>Main</c> before Avalonia, so
     /// there is no window, no open workspace and nothing unsaved — which is why it may exec freely,
@@ -195,9 +206,14 @@ public static class UpdateStartup
     {
         Diagnostics.CrashReporter.HandOffToExec();
 
-        // macOS first, and only macOS: launchd must be the one that spawns the successor, or the
-        // updated session inherits an attribution pointing at the bundle this update just replaced.
-        if (AppRelaunch.TryRelaunchBundle(executable, args)) Environment.Exit(0);
+        if (HandsOverThroughLaunchServicesOnly(executable))
+        {
+            if (AppRelaunch.TryRelaunchBundle(executable, args, out string? refusal))
+                Environment.Exit(0);
+
+            LeaveTheUpdateForTheNextLaunch(refusal);   // never returns
+            return;
+        }
 
         // Returns only on failure; on success this process has already become the new one.
         UpdateSwap.ExecReplace(executable, args);
@@ -205,6 +221,48 @@ public static class UpdateStartup
         if (StartSuccessor(executable, args)) Environment.Exit(0);
 
         Diagnostics.CrashReporter.ResumeAfterExec();
+    }
+
+    /// <summary>
+    /// Whether <paramref name="executable"/> is one this process may only hand over to through Launch
+    /// Services — a macOS <c>.app</c>, which is the only layout where applying the update EXCHANGES
+    /// the bundle the running process was launched from.
+    ///
+    /// <para>Separate and named so the rule is one testable expression rather than a condition spelled
+    /// out inside the method that acts on it.</para>
+    /// </summary>
+    internal static bool HandsOverThroughLaunchServicesOnly(string executable)
+        => OperatingSystem.IsMacOS() && AppRelaunch.BundleRootOf(executable) is not null;
+
+    /// <summary>
+    /// Ends this launch with the update installed and unstarted, after Launch Services would not
+    /// start it. Never returns.
+    ///
+    /// <para><b>Leaving is the correct outcome, not a surrender.</b> The exchange is already done and
+    /// already durable, so the version on disk IS the new one and the next ordinary launch — a Dock
+    /// click, a double-clicked workspace, a login item — is spawned by launchd with an identity that
+    /// names it. Carrying on instead would produce a session that is denied <c>~/Documents</c> and
+    /// <c>~/Desktop</c> with no prompt and no way for the user to tell why.</para>
+    ///
+    /// <para><b>The notice is written where a launch that never showed a window can still be heard
+    /// from.</b> <see cref="NoteFirstWindowShown"/> posts it at the first window that does open, which
+    /// is the next launch — and it CARRIES THE REFUSAL, because the whole cost of this bug the second
+    /// time was not knowing whether <c>open</c> had run.</para>
+    /// </summary>
+    private static void LeaveTheUpdateForTheNextLaunch(string? refusal)
+    {
+        try
+        {
+            UpdateStateIo.Update(s => s.PendingNotice =
+                $"{UpdateApp.Name} has finished installing its update, but macOS would not start the "
+                + "new version automatically"
+                + (string.IsNullOrWhiteSpace(refusal) ? "" : $" ({refusal})")
+                + $", so the previous session closed instead. This launch IS the new version — "
+                + "nothing was lost and nothing needs to be repaired.");
+        }
+        catch (Exception) { /* a notice is not worth failing an exit over */ }
+
+        Environment.Exit(0);
     }
 
     /// <summary>
