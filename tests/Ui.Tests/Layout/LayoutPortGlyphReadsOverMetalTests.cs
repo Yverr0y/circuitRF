@@ -10,13 +10,20 @@ namespace CircuitRF.Ui.Tests.Layout;
 /// conductor it annotates.</b> Owner report, 2026-09-09: only one of a port's two end segments
 /// appeared, and both are needed to read the port's width.
 ///
-/// <para><b>Both were being drawn.</b> The marker is the layer's own colour, tinted by
-/// <c>PortMarkerContrastTintAmount</c> for contrast with the BACKGROUND and with nothing else — so
-/// where it crossed that same layer's fill it was not faint, it was invisible. A differential render
-/// of the reported shape is what settles it, and the numbers are in the assertions below: the serif
-/// hanging out over background changed pixels, the one over metal changed <b>zero</b>. A port whose
-/// plane ends inside metal — a notch, a tee, a pad on a pour — could only ever show the end that
-/// happened to stick out.</para>
+/// <para><b>Both were being drawn.</b> A differential render of the reported shape is what settles
+/// it, and the numbers are in the assertions below: the serif hanging out over background changed
+/// pixels, the one over metal changed <b>zero</b>. A port whose plane ends inside metal — a notch, a
+/// tee, a pad on a pour — could only ever show the end that happened to stick out.</para>
+///
+/// <para><b>The cause was paint ORDER, not contrast.</b> It was first read as the marker being too
+/// close to the fill it crossed, and answered with a background-coloured halo under every glyph;
+/// that halo then showed up in its own right, as a pale line alongside the reference-plane bar in a
+/// colour belonging to no part of the port (owner report, same day). What was actually happening is
+/// that <c>DrawLayer</c> batches a layer's fills and outlines into one path each and paints them
+/// after every shape in the layer has been visited, so a port drawn inline in that loop went
+/// UNDERNEATH its own layer's artwork. Ports are now collected out of that loop and drawn above every
+/// layer and every instance (<c>LayoutRenderer.DrawPortGlyphs</c>), the halo is gone, and this test
+/// holds the outcome the report asked for rather than the mechanism first reached for.</para>
 ///
 /// <para>A pixel probe cannot tell a glyph from the artwork under it, so the oracle here is the same
 /// frame rendered WITHOUT the port: whatever differs is the glyph, and nothing else is.</para>

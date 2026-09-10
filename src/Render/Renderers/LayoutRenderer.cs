@@ -659,11 +659,16 @@ public static partial class LayoutRenderer
                         opts.OutlineVertexBudget > 0 ? opts.OutlineVertexBudget : DefaultOutlineVertexBudget,
                         opts.BaseDir ?? "");
 
+                // Every port glyph the layer loop meets, drawn AFTER all of them — see DrawLayer's
+                // own note and DrawPortGlyphs.
+                var deferredPorts = new List<DeferredPort>();
+
                 foreach (var (def, shapes) in resolved)
                 {
                     if (!def.Visible) continue;
                     counters.LayersVisited++;
                     DrawLayer(canvas, def, shapes, conductorAt, ps, dragOverrides, scaleUm, opts, counters,
+                              deferredPorts,
                               tech?.FindFillPattern(def.FillPattern), view.DbuPerMicron, drawOutlines);
                 }
 
@@ -742,6 +747,16 @@ public static partial class LayoutRenderer
                                opts.Overlay?.RulerPastePreview,
                                opts.Overlay?.ShowRulerEndpointHandles == true,
                                view.DisplayUnit, view.DbuPerMicron, theme, ps, scaleUm);
+
+                // ── PORTS, ABOVE EVERY PIECE OF GEOMETRY IN THE FRAME ───────────────────────────
+                // After the layers, the instances, the mesh overlay, the placement ghosts and the
+                // rulers, and before the transient interaction chrome (selection outlines, handles,
+                // marquee, snap marker), which is about the gesture in progress and has to stay
+                // grabbable. Owner instruction, 2026-09-09: a port renders higher than any geometry,
+                // because seeing it is what the glyph is for.
+                if (deferredPorts.Count > 0)
+                    DrawPortGlyphs(canvas, deferredPorts, conductorAt, ps, scaleUm, opts, counters,
+                                   view.DbuPerMicron);
 
                 if (opts.Overlay?.SelectedIndices is { Count: > 0 } selected)
                 {
@@ -986,15 +1001,24 @@ public static partial class LayoutRenderer
                 PortDirection = label.PortDirection, PortLayer = label.PortLayer, Style = label.Style,
                 HAlign = label.HAlign, VAlign = label.VAlign,
             };
-            DrawLabelText(canvas, effective, ps, color, centred: label.IsPort);
             // A port ghost carries its own marker, so what the user is placing looks like what
             // lands. It resolves against the SAME per-frame conductor lookup a committed port uses
-            // (owner request, 2026-08-09: "the ghost's snapping and sizes also need to render live"),
-            // so the width bar spans the real metal and the arrow's length is clamped by the real
-            // conductor — not the no-conductor stand-in a null lookup would fall back to.
+            // (owner request, 2026-08-09: the ghost's snapping and sizes need to render live), so the
+            // width bar spans the real metal and the arrow's length is clamped by the real conductor
+            // — not the no-conductor stand-in a null lookup would fall back to.
+            //
+            // Marker first, name second, and the name in the marker's own tinted colour — the order
+            // and the colour DrawPortGlyphs uses for a committed port, for the same two reasons: the
+            // arrow arrives at the plane the name is centred on, and the glyph reads as one object.
             if (label.IsPort)
+            {
                 DrawPortMarker(canvas, effective, conductorAt, ps, scaleUm, color, background,
                                new LayoutFrameCounters(), PlanarPortKind.Edge);
+                DrawLabelText(canvas, effective, ps,
+                              TintForContrast(color, background, PortMarkerContrastTintAmount),
+                              centred: true);
+            }
+            else DrawLabelText(canvas, effective, ps, color);
             return;
         }
 
@@ -1129,7 +1153,8 @@ public static partial class LayoutRenderer
     private static void DrawLayer(SKCanvas canvas, LayerDef def, List<(int Index, LayoutShape Shape)> shapes,
         LayoutPortDirection.ConductorLookup? conductorAt,
         PathSpace ps, IReadOnlyDictionary<int, LayoutShape> dragOverrides, double scaleUm,
-        LayoutRenderOptions opts, LayoutFrameCounters counters, FillPattern? fillPattern = null,
+        LayoutRenderOptions opts, LayoutFrameCounters counters, List<DeferredPort> deferredPorts,
+        FillPattern? fillPattern = null,
         int dbuPerMicron = LayoutUnits.DefaultDbuPerMicron, bool drawOutlines = true)
     {
         var color = new SKColor(def.Color.R, def.Color.G, def.Color.B);
@@ -1266,11 +1291,30 @@ public static partial class LayoutRenderer
                     ? MarkKindOf(opts.InternalPortMarks, stored)
                     : PlanarPortKind.Edge;
 
-                DrawLabelText(canvas, effective, ps, color, centred: label.IsPort);
+                // ── A PORT IS NOT DRAWN HERE — IT IS HANDED UP TO THE FRAME'S OWN TOP PASS ──────
+                //
+                // This loop draws a label the moment it is reached, but the layer's GEOMETRY does not
+                // reach the canvas until the end of this method: fills, the hairline elision tier and
+                // outlines are all batched into one path each and painted after every shape has been
+                // visited. So anything drawn inline here goes UNDER its own layer's artwork, and a
+                // port on the edge it names is exactly the case where the two coincide — its
+                // reference-plane bar lies along the conductor outline, and the outline (the layer's
+                // own untinted colour) is painted over it (owner report, 2026-09-09: a horizontal
+                // line in a colour that is not the port's).
+                //
+                // <b>A port renders above ALL geometry, always</b> — it is the one annotation a user
+                // must be able to see wherever it falls. Collecting it here and drawing it in
+                // DrawPortGlyphs, after every layer, every instance and every other piece of content,
+                // is what makes that a property of the frame rather than of where the port happens to
+                // sit. See DrawPortGlyphs for the two-pass order that also puts the NAME above every
+                // marker.
                 if (label.IsPort)
-                    DrawPortMarker(canvas, effective, conductorAt, ps, scaleUm, color,
-                                   opts.Theme.Background, counters, portKind,
-                                   opts.PlanarMesh, dbuPerMicron);
+                {
+                    deferredPorts.Add(new DeferredPort(effective, color, portKind));
+                    continue;
+                }
+
+                DrawLabelText(canvas, effective, ps, color);
                 continue;
             }
 
@@ -2315,54 +2359,9 @@ public static partial class LayoutRenderer
     /// light mode and lighter than its layer color in dark mode"). Deliberately stronger than the
     /// snap marker's own tint — a snap marker is transient and a port is permanent artwork the user
     /// has to pick out from the metal it sits on.</summary>
-    private const double PortMarkerContrastTintAmount = 0.45;
-
-    /// <summary>
-    /// How far the port marker's backing halo extends past its own stroke, per side, in device
-    /// pixels.
-    ///
-    /// <para><b>Owner report, 2026-09-09: only one of the port's two end segments appeared, and both
-    /// are needed to read its width.</b> Both were being drawn. A differential render of the
-    /// reported shape settles what was actually happening: the serif hanging out over BACKGROUND
-    /// changed 12 pixels in its own neighbourhood, and the one over METAL changed <b>zero</b>. The
-    /// marker is tinted by <see cref="PortMarkerContrastTintAmount"/> for contrast with the
-    /// BACKGROUND and is otherwise the layer's own colour — so drawn on top of that same layer's fill
-    /// it is not faint, it is invisible. A port whose plane ends inside metal (a notch, a tee, a pad
-    /// on a pour) could only ever show the end that happened to stick out, which is precisely "one
-    /// segment".</para>
-    ///
-    /// <para>A halo fixes the whole marker rather than the serifs alone — the plane bar lying along a
-    /// conductor's own outline had the same problem and read as part of the outline.</para>
-    /// </summary>
-    private const float PortMarkerHaloDevicePixels = 1.75f;
-
-    /// <summary>How much of the background the halo lays down. Not opaque: the marker has to read as
-    /// drawn ON the artwork, not as a hole cut through it.</summary>
-    private const byte PortMarkerHaloAlpha = 205;
-
-    /// <summary>Lays <paramref name="path"/> down in the background's colour, wider than
-    /// <paramref name="stroke"/>, then strokes it — see <see cref="PortMarkerHaloDevicePixels"/> for
-    /// why every port glyph needs it. Shared by all three port kinds: the two INTERNAL kinds sit on
-    /// the metal by definition, so they had the same defect more completely than the edge port that
-    /// exposed it.</summary>
-    private static void StrokeWithHalo(SKCanvas canvas, SKPath path, SKPaint stroke,
-                                       SKColor background, double scaleUm, LayoutFrameCounters counters)
-    {
-        using (var halo = new SKPaint
-        {
-            IsAntialias = true, Style = SKPaintStyle.Stroke,
-            StrokeWidth = stroke.StrokeWidth + DevicePixelsToPathSpace(scaleUm, 2f * PortMarkerHaloDevicePixels),
-            StrokeCap = stroke.StrokeCap, StrokeJoin = stroke.StrokeJoin,
-            Color = background.WithAlpha(PortMarkerHaloAlpha),
-        })
-        {
-            canvas.DrawPath(path, halo);
-            counters.DrawCalls++;
-        }
-
-        canvas.DrawPath(path, stroke);
-        counters.DrawCalls++;
-    }
+    /// <remarks>Internal so a test can name the colour a port's glyph must be, rather than
+    /// re-deriving the tint from a second copy of this number.</remarks>
+    internal const double PortMarkerContrastTintAmount = 0.45;
 
     /// <summary>
     /// How long the direction arrow is, and how long its barbs are, in DBU.
@@ -2712,7 +2711,8 @@ public static partial class LayoutRenderer
             y += DX(hint.WidthDbu * InternalPortGroundPitchOverWidth);
         }
 
-        StrokeWithHalo(canvas, path, paint, background, scaleUm, counters);
+        canvas.DrawPath(path, paint);
+        counters.DrawCalls++;
 
         // The snap, drawn — the same leader an edge port and a gap already use. Only when the mesh
         // put the footprint somewhere other than where the label sits, so a port over its own via
@@ -2724,7 +2724,10 @@ public static partial class LayoutRenderer
             {
                 IsAntialias = true, Style = SKPaintStyle.Stroke,
                 StrokeWidth = DevicePixelsToPathSpace(scaleUm, PortMarkerStrokeDevicePixels * 0.5f),
-                Color = color.WithAlpha(150),
+                // Solid, in the glyph's own tinted colour: a leader thinned by alpha blends toward
+                // whatever it crosses, which is a second colour in a mark that has to read as one.
+                // The half-width dash is already what tells it apart from geometry.
+                Color = color,
                 PathEffect = SKPathEffect.CreateDash([DevicePixelsToPathSpace(scaleUm, 3f),
                                                       DevicePixelsToPathSpace(scaleUm, 3f)], 0),
             };
@@ -2810,7 +2813,8 @@ public static partial class LayoutRenderer
         // a headless shaft through the break is indistinguishable from a stray line. The port's
         // polarity is a number rather than a picture: the run's own note names which way positive
         // current crosses, and the EM Setup panel is where it is set.
-        StrokeWithHalo(canvas, path, paint, background, scaleUm, counters);
+        canvas.DrawPath(path, paint);
+        counters.DrawCalls++;
 
         // The snap, drawn: a leader from the label's own anchor to the cut the mesh put it on. Only
         // when they genuinely differ, so a gap that landed where it was placed carries no extra ink.
@@ -2821,7 +2825,10 @@ public static partial class LayoutRenderer
             {
                 IsAntialias = true, Style = SKPaintStyle.Stroke,
                 StrokeWidth = DevicePixelsToPathSpace(scaleUm, PortMarkerStrokeDevicePixels * 0.5f),
-                Color = color.WithAlpha(150),
+                // Solid, in the glyph's own tinted colour: a leader thinned by alpha blends toward
+                // whatever it crosses, which is a second colour in a mark that has to read as one.
+                // The half-width dash is already what tells it apart from geometry.
+                Color = color,
                 PathEffect = SKPathEffect.CreateDash([DevicePixelsToPathSpace(scaleUm, 3f),
                                                       DevicePixelsToPathSpace(scaleUm, 3f)], 0),
             };
@@ -2843,6 +2850,121 @@ public static partial class LayoutRenderer
         if (marks is null) return PlanarPortKind.Edge;
         foreach (var (x, y, kind) in marks) if (x == label.X && y == label.Y) return kind;
         return PlanarPortKind.Edge;
+    }
+
+    /// <summary>One port met by the layer loop, held back for <see cref="DrawPortGlyphs"/>. The
+    /// colour is its LAYER's, unmodified — the contrast tint is applied once, inside the marker, and
+    /// the name now takes the same one so the whole glyph is a single colour.</summary>
+    private readonly record struct DeferredPort(LabelShape Label, SKColor LayerColor, PlanarPortKind Kind);
+
+    /// <summary>
+    /// Every port glyph in the frame, drawn above all of its geometry.
+    ///
+    /// <para><b>Two passes, markers then names, and that is the point of the second one.</b> A port's
+    /// name is centred on its own anchor and its arrow arrives AT the reference plane, so on an edge
+    /// port the two land on the same few pixels: drawn in one pass the shaft ran straight through the
+    /// text and bisected it (owner report, 2026-09-09). Splitting the pass puts every name above every
+    /// marker — its own and its neighbours' — rather than merely above the one it belongs to.</para>
+    ///
+    /// <para>The name is drawn in the marker's own tinted colour, not the layer's raw one, so a port
+    /// reads as ONE object. Text, bar, serifs, arrow and leader are now all the same single colour.</para>
+    /// <para><b>Why there is no backing halo under the marker, and why there briefly was one.</b>
+    /// Owner report, 2026-09-09: only one of a port's two end segments appeared, and both are needed
+    /// to read its width. A differential render said the serif hanging out over BACKGROUND changed 12
+    /// pixels in its own neighbourhood and the one over METAL changed zero — read as a contrast
+    /// problem, and answered with a background-coloured halo laid under every glyph. That was the
+    /// wrong cause. The marker was not faint against the metal, it was UNDER it, for the reason
+    /// <see cref="DrawLayer"/>'s own note gives. The halo then became visible in its own right: a
+    /// pale line alongside the reference-plane bar, in a colour belonging to no part of the port
+    /// (owner report, same day). Hoisting the glyph here leaves nothing to hide it, so the halo is
+    /// gone and the marker is one tinted colour throughout.</para>
+    /// </summary>
+    private static void DrawPortGlyphs(SKCanvas canvas, List<DeferredPort> ports,
+        LayoutPortDirection.ConductorLookup? conductorAt, PathSpace ps, double scaleUm,
+        LayoutRenderOptions opts, LayoutFrameCounters counters, int dbuPerMicron)
+    {
+        using var knockout = new SKPath();
+        foreach (var (label, _, _) in ports)
+        {
+            if (PortNameKnockout(label, ps, scaleUm) is not { } k) continue;
+            knockout.AddPath(k);
+            k.Dispose();
+        }
+
+        canvas.Save();
+        if (!knockout.IsEmpty) canvas.ClipPath(knockout, SKClipOperation.Difference, antialias: true);
+        foreach (var (label, layerColor, kind) in ports)
+            DrawPortMarker(canvas, label, conductorAt, ps, scaleUm, layerColor,
+                           opts.Theme.Background, counters, kind, opts.PlanarMesh, dbuPerMicron);
+        canvas.Restore();
+
+        foreach (var (label, layerColor, _) in ports)
+            DrawLabelText(canvas, label, ps,
+                          TintForContrast(layerColor, opts.Theme.Background, PortMarkerContrastTintAmount),
+                          centred: true);
+    }
+
+    /// <summary>How wide a gap the port's name keeps clear of its own marker, per side, in device
+    /// pixels. Wide enough that a stroke passing behind a glyph reads as passing BEHIND it rather
+    /// than as touching it, and narrow enough that a short arrow is not visibly chopped in two.</summary>
+    private const float PortNameKnockoutGapDevicePixels = 1.5f;
+
+    /// <summary>
+    /// A port's NAME as an outline in path space, outset by
+    /// <see cref="PortNameKnockoutGapDevicePixels"/> — what <see cref="DrawPortGlyphs"/> clips the
+    /// marker pass OUT of.
+    ///
+    /// <para><b>Painting the name after the marker is not on its own enough to put it on top, now that
+    /// the two are the same colour.</b> A port's arrow arrives AT the reference plane and its name is
+    /// centred on the anchor, so on an edge port they occupy the same few pixels; one tinted colour
+    /// over another tinted colour is a blob, not a label. Removing the glyphs' own footprint from the
+    /// marker is what makes "the text is on top" something the user can actually see, without
+    /// introducing the second colour a background-coloured knockout would.</para>
+    ///
+    /// <para>Built from the same typeface, size, alignment and rotation
+    /// <see cref="DrawLabelText"/> uses — via <c>LayoutTextOutline.ResolveLabelAnchor</c>, the one
+    /// place a label's anchor becomes an aligner and a baseline offset — so the hole cannot drift from
+    /// the glyphs that fill it.</para>
+    /// </summary>
+    private static SKPath? PortNameKnockout(LabelShape label, PathSpace ps, double scaleUm)
+    {
+        if (string.IsNullOrEmpty(label.Text)) return null;
+
+        float sizeUm = System.Math.Max(0.001f, ps.Len(label.Height));
+        using var font = new SKFont(LayoutTextOutline.ResolveTypeface(label.Style), sizeUm);
+        var (align, dy) = LayoutTextOutline.ResolveLabelAnchor(label, font, centred: true);
+
+        // DrawText applies the aligner itself; GetTextPath does not, so it is applied here as the
+        // same leftward shift Skia would have made.
+        float width = font.MeasureText(label.Text);
+        float dx = align switch
+        {
+            SKTextAlign.Center => -width / 2f,
+            SKTextAlign.Right  => -width,
+            _                  => 0f,
+        };
+
+        using var glyphs = font.GetTextPath(label.Text, new SKPoint(dx, dy));
+        if (glyphs is null || glyphs.IsEmpty) return null;
+
+        var outset = new SKPath();
+        using (var widen = new SKPaint
+        {
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = DevicePixelsToPathSpace(scaleUm, 2f * PortNameKnockoutGapDevicePixels),
+            StrokeJoin = SKStrokeJoin.Round, StrokeCap = SKStrokeCap.Round,
+        })
+        {
+            widen.GetFillPath(glyphs, outset);
+        }
+        outset.AddPath(glyphs);   // the glyphs themselves as well as the ring around them
+
+        // Path space is Y-down — the same negated rotation DrawLabelText applies.
+        var m = SKMatrix.CreateTranslation(ps.X(label.X), ps.Y(label.Y));
+        if (label.RotationDegrees != 0)
+            m = m.PreConcat(SKMatrix.CreateRotationDegrees(-(float)label.RotationDegrees));
+        outset.Transform(m);
+        return outset;
     }
 
     private static void DrawPortMarker(SKCanvas canvas, LabelShape label,
@@ -2930,8 +3052,10 @@ public static partial class LayoutRenderer
         }
 
         // The bar, BOTH serifs and the arrow read wherever they fall — over the conductor they
-        // annotate as well as over empty canvas. See PortMarkerHaloDevicePixels for the measurement.
-        StrokeWithHalo(canvas, path, paint, background, scaleUm, counters);
+        // annotate as well as over empty canvas — because the whole glyph is painted above every
+        // layer's geometry. See DrawPortGlyphs.
+        canvas.DrawPath(path, paint);
+        counters.DrawCalls++;
 
         // A leader from the label's own anchor to the plane, drawn only when the two genuinely differ
         // — otherwise the text would look unattached to the marker it names.
@@ -2942,7 +3066,10 @@ public static partial class LayoutRenderer
             {
                 IsAntialias = true, Style = SKPaintStyle.Stroke,
                 StrokeWidth = DevicePixelsToPathSpace(scaleUm, PortMarkerStrokeDevicePixels * 0.5f),
-                Color = color.WithAlpha(150),
+                // Solid, in the glyph's own tinted colour: a leader thinned by alpha blends toward
+                // whatever it crosses, which is a second colour in a mark that has to read as one.
+                // The half-width dash is already what tells it apart from geometry.
+                Color = color,
                 PathEffect = SKPathEffect.CreateDash([DevicePixelsToPathSpace(scaleUm, 3f),
                                                       DevicePixelsToPathSpace(scaleUm, 3f)], 0),
             };

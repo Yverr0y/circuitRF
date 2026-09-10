@@ -946,3 +946,63 @@ own case is unchanged), `tests/Ui.Tests/Layout/LayoutPortGlyphReadsOverMetalTest
 differential render), and `tests/Engine.Tests/Mom/PlanarPortOnANotchTests.cs` (R5b/c, which also
 pins that a uniform feed resolves exactly as it always did).
 
+
+---
+
+## A port's glyph draws above ALL geometry, in ONE colour, with its name on top (2026-09-09)
+
+Owner report, the same day as the halo above and superseding it, in three parts: the port name was
+being **bisected by a line from the marker** and should render on top; a **horizontal line was
+appearing in a colour that is not the port's tinted layer colour**; and **a port renders higher than
+any geometry**, because seeing it is the whole point of the glyph.
+
+**All three were one defect, plus the wrong fix for it.**
+
+`DrawLayer` does not paint a layer's geometry as it walks the layer's shapes: fills, the hairline
+elision tier and outlines are each batched into one path and painted **after every shape has been
+visited**. A label, though, was drawn inline the moment the loop reached it. So every port went
+**underneath its own layer's artwork** — and an edge port is the case where the two coincide
+exactly, since its reference-plane bar lies along the conductor outline that then covered it. That
+outline is the layer's raw, untinted colour: the reported horizontal line. On a port under metal from
+a HIGHER-ZOrder layer the glyph disappeared outright.
+
+The "one of two end segments" report above was read as a contrast problem and answered with a
+background-coloured halo laid under every glyph. The measurement was right and the diagnosis was
+not — the serif over metal changed zero pixels because it was **behind** the fill, not because it
+was too close to it in colour. The halo then became visible in its own right, as the pale line
+beside the plane bar, and it was a second colour in a mark that has to read as one object.
+
+**What changed.** `DrawLayer` collects every `IsPort` label into a per-frame list instead of drawing
+it, and `DrawPortGlyphs` paints them after every layer, every instance, the mesh overlay, the
+placement ghosts and the rulers — and before the transient interaction chrome (selection outlines,
+handles, marquee, snap marker), which is about the gesture in progress and has to stay grabbable.
+The halo is gone from all three port kinds, the leader is solid rather than alpha-thinned, and the
+NAME now takes the marker's own `TintForContrast` colour instead of the layer's raw one.
+
+**Painting the name last is not, on its own, enough to put it on top once the whole glyph is one
+colour.** A port's arrow arrives AT the reference plane and its name is centred on the anchor, so on
+an edge port naming the end it sits on, the two occupy the same few pixels — tint over tint is a
+blob, not a label. `DrawPortGlyphs` therefore clips the marker pass out of the glyphs' own outlines,
+outset by `PortNameKnockoutGapDevicePixels`, so a stroke visibly passes BEHIND the text. The outline
+is built through `LayoutTextOutline.ResolveLabelAnchor`, the one place a label's anchor becomes an
+aligner and a baseline offset, so the hole cannot drift from the glyphs that fill it. A
+background-coloured knockout would have been simpler and would have reintroduced exactly the second
+colour the report was about.
+
+Two passes rather than one per port, markers then names, so a name is above every marker in the
+frame and not merely above its own.
+
+**Ports inside a placed INSTANCE are still not drawn at all** — `DrawInstances` skips `LabelShape`
+outright, a documented gap from L3a, and nothing here changes it.
+
+Gates: `tests/Ui.Tests/Layout/LayoutPortGlyphOnTopTests.cs` — the glyph survives metal drawn over it
+on a higher layer (≥ 90 % of its bare pixel area); every pixel it changes is its tint or a blend
+toward it, in both themes, which is what excludes a halo and an untinted line; and no marker pixel
+lands inside a letter, with the arrow tip asserted to be inside the name's own bbox so that claim
+cannot pass vacuously. `LayoutPortGlyphReadsOverMetalTests` still holds the outcome the earlier
+report asked for; its rationale is rewritten to name the real cause.
+
+*Trap for whoever writes the next port render test:* a port with a STATED direction and no conductor
+under it still draws a marker, at a stand-in width (`LayoutPortDirection.Resolve`'s own documented
+branch). Dropping the polygon is therefore not how you get a name-only reference frame — clearing
+`PortDirection` as well is.
