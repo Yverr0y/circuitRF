@@ -224,13 +224,30 @@ public static class PlanarDeembed
     /// a mesh. Omitting it on an accelerated call throws rather than quietly solving densely, because
     /// a silent dense fallback is exactly the ceiling this phase exists to remove.
     /// </param>
+    /// <param name="potential">
+    /// <b>RP-2c — the per-cell potential the system is driven with, or null for the whole sheet at
+    /// 1 V.</b> A coplanar standard hands its <see cref="PlanarStandard.ModePotential"/> here, so the
+    /// capacitance measured is the one the PORT's mode sees rather than the whole pair's capacitance
+    /// to the plane. Null is L8d's own arithmetic, bit for bit.
+    /// </param>
+    /// <param name="weight">
+    /// What the returned charge sums with, per cell; null totals every cell. See
+    /// <see cref="PlanarStandard.ModeWeight"/>.
+    /// </param>
     public static double StaticCapacitance(PlanarMesh mesh, PlanarKernelTerms staticScalar,
                                            PlanarFillSettings? settings = null,
                                            PlanarFillCores? cores = null,
-                                           double slabHeightM = 0)
+                                           double slabHeightM = 0,
+                                           IReadOnlyList<double>? potential = null,
+                                           IReadOnlyList<double>? weight = null)
     {
         ArgumentNullException.ThrowIfNull(mesh);
         var st = settings ?? PlanarFillSettings.Default;
+
+        if (potential is not null && potential.Count != mesh.Cells.Count)
+            throw new ArgumentException(
+                $"The mode potential has {potential.Count} entries for a mesh of {mesh.Cells.Count} " +
+                "cells.", nameof(potential));
 
         // ── P11 — the accelerated route ───────────────────────────────────────────────────────
         //
@@ -252,7 +269,8 @@ public static class PlanarDeembed
                    ? cores
                    : PlanarFill.BuildGeometryOnlyCores(mesh, st);
 
-            return PlanarStaticAim.Build(gc, staticScalar, slabHeightM, aim).TotalCapacitance();
+            var acc = PlanarStaticAim.Build(gc, staticScalar, slabHeightM, aim);
+            return potential is null ? acc.TotalCapacitance() : acc.ModalCapacitance(potential, weight);
         }
 
         GuardCapacitanceCeiling(mesh, accelerated: false);
@@ -275,11 +293,13 @@ public static class PlanarDeembed
         // is now the fill's own P bit for bit and only the SOLVE's own arithmetic differs.
         int m = mesh.Cells.Count;
         var rhs = new Vec<Complex>(m);
-        for (int i = 0; i < m; i++) rhs[i] = EmConstants.Eps0;
+        if (potential is null) for (int i = 0; i < m; i++) rhs[i] = EmConstants.Eps0;
+        else                   for (int i = 0; i < m; i++) rhs[i] = EmConstants.Eps0 * potential[i];
 
         var q = p.Lu().Solve(rhs);
         Complex total = Complex.Zero;
-        for (int i = 0; i < m; i++) total += q[i];
+        if (weight is null) for (int i = 0; i < m; i++) total += q[i];
+        else                for (int i = 0; i < m; i++) total += weight[i] * q[i];
         return total.Real;
     }
 
@@ -358,8 +378,10 @@ public static class PlanarDeembed
                                              PlanarFillCores? longCores = null)
     {
         var terms = PlanarKernelTerms.StaticScalar(slab);
-        double c1 = StaticCapacitance(shortStd.Mesh, terms, settings, shortCores, slab.HeightM);
-        double c2 = StaticCapacitance(longStd.Mesh,  terms, settings, longCores, slab.HeightM);
+        double c1 = StaticCapacitance(shortStd.Mesh, terms, settings, shortCores, slab.HeightM,
+                                      shortStd.ModePotential, shortStd.ModeWeight);
+        double c2 = StaticCapacitance(longStd.Mesh,  terms, settings, longCores, slab.HeightM,
+                                      longStd.ModePotential, longStd.ModeWeight);
         double dl = longStd.LengthM - shortStd.LengthM;
 
         if (!(dl > 0))
@@ -400,8 +422,10 @@ public static class PlanarDeembed
         var terms = PlanarKernelTerms.StaticScalarAt(
             model ?? InteriorStaticImages.FitScalar(stack, levelZ, levelZ));
 
-        double c1 = StaticCapacitance(shortStd.Mesh, terms, settings, shortCores, referenceHeightM);
-        double c2 = StaticCapacitance(longStd.Mesh,  terms, settings, longCores, referenceHeightM);
+        double c1 = StaticCapacitance(shortStd.Mesh, terms, settings, shortCores, referenceHeightM,
+                                      shortStd.ModePotential, shortStd.ModeWeight);
+        double c2 = StaticCapacitance(longStd.Mesh,  terms, settings, longCores, referenceHeightM,
+                                      longStd.ModePotential, longStd.ModeWeight);
         double dl = longStd.LengthM - shortStd.LengthM;
 
         if (!(dl > 0))

@@ -151,29 +151,29 @@ public class PlanarPortTests(ITestOutputHelper output)
     [Theory]
     [InlineData(PlanarPortReference.CoplanarGround)]
     [InlineData(PlanarPortReference.SecondConductor)]
-    public void T0_6_AConductorReferencedEDGEPortIsStillRefused_NamingTheStandardItNeeds(
+    public void T0_6_AConductorReferenceWithNoReturnPoint_IsRefusedRatherThanSearchedFor(
         PlanarPortReference reference)
     {
-        // **RP-2a (2026-09-10) made this test's premise half false, and it is updated rather than
-        // loosened.** A conductor reference is no longer refused outright: an INTERNAL DELTA GAP
-        // takes one, as two cuts at one station driven against each other
-        // (TwoCutPortTests). An EDGE port still cannot, and the reason is not bookkeeping —
-        // it has a feed outside its cut, therefore an error box, and its calibration standard would
-        // have to be a COPLANAR line with its own Z_c, β and static capacitance. Calibrating it
-        // against the uniform single-conductor standards PlanarCalibration builds would publish
-        // s-parameters that are plausible and referenced to nothing.
+        // **This test's premise has been rewritten twice, by the two phases that moved it.**
         //
-        // The assertion that survives unchanged is R-mom-17's: the destination is NAMED, and the
-        // refusal offers a remedy that works today rather than "not implemented".
+        // Originally: a conductor reference was refused outright. RP-2a (2026-09-10) gave an
+        // INTERNAL DELTA GAP one — two cuts at one station driven against each other — and left an
+        // EDGE port refused, because its error box is a coplanar line and PlanarCalibration built
+        // uniform single conductors. RP-2c (2026-09-10) built that standard, so an edge port takes a
+        // conductor reference too (CoplanarDeembedTests).
+        //
+        // What survives, and is what this now asserts, is the part neither phase changed: a
+        // conductor-referenced port is TWO cuts, so it needs a point on the return metal. There is
+        // no nearest-conductor search, because picking the return silently is picking which loop the
+        // answer is about — R-mom-17, with a remedy rather than "not implemented".
         var mesh = Slab6x3();
         bool ok = PlanarPorts.TryResolve(
             mesh, new PlanarPort(3, new EmPoint(0, 0.75e-3), PlanarPortSide.MinX, 50.0, 0, reference),
             out _, out string? refusal);
 
         Assert.False(ok);
-        Assert.Contains("EDGE port", refusal);
-        Assert.Contains("coplanar calibration standard", refusal);
-        Assert.Contains("internal delta gap", refusal);      // the remedy that exists now
+        Assert.Contains("does not say WHERE the return conductor is cut", refusal);
+        Assert.Contains("no nearest-conductor search", refusal);
         Assert.DoesNotContain("not implemented", refusal);
         _out.WriteLine(refusal!);
     }

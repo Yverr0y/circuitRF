@@ -143,19 +143,45 @@ public static class PlanarFeedExtension
             // would extrude is not on its current path.
             if (port.Kind != PlanarPortKind.Edge) continue;
 
-            if (!TryLevelOf(problem, port, out int layer)) continue;
-
-            var polys = PolysOn(layer);
-            if (!TryEndFace(polys, port, out int polyIndex, out int vertexA, out double edgeS,
-                            out double tLo, out double tHi))
-                continue;
-
             bool alongX  = port.Direction == PlanarBasisDirection.X;
             bool fromLow = port.Side is PlanarPortSide.MinX or PlanarPortSide.MinY;
-            if (!(tHi - tLo > 0)) continue;
 
-            double have = UniformRun(polys[polyIndex], alongX, fromLow, edgeS, tLo, tHi, wanted);
-            double add  = wanted - have;
+            // ── RP-2c — A CONDUCTOR-REFERENCED PORT HAS TWO END FACES, AND THEY GROW TOGETHER ────
+            //
+            // The two cuts must stay at ONE station (R-rp2a-2), so growing the signal conductor's
+            // lead alone would skew the pair and the port would be refused at resolution — with a
+            // message about the user's own artwork, which is now not what moved it. Both terminals
+            // are measured, the SHORTFALL is the larger of the two, and both are extruded by it: the
+            // lead is a uniform section of the port's own cross-section, and a coplanar port's
+            // cross-section is the pair.
+            var terminals = new List<PlanarPort> { port };
+            if (port.IsConductorReferenced && port.NegativeLocation is { } negAt)
+                terminals.Add(port with { Location = negAt, LayerIndex = port.NegativeLayerIndex });
+
+            // Measured first, edited afterwards: two terminals on one level must both see the
+            // pre-edit polygons, and both extrusions replace their own index in place.
+            var measured = new List<(int Layer, int PolyIndex, int VertexA,
+                                     double EdgeS, double TLo, double THi, double Have)>();
+            double add = 0;
+            bool usable = true;
+
+            foreach (var terminal in terminals)
+            {
+                if (!TryLevelOf(problem, terminal, out int layer)) { usable = false; break; }
+
+                var tPolys = PolysOn(layer);
+                if (!TryEndFace(tPolys, terminal, out int polyIndex, out int vertexA, out double edgeS,
+                                out double tLo, out double tHi))
+                { usable = false; break; }
+
+                if (!(tHi - tLo > 0)) { usable = false; break; }
+
+                double have = UniformRun(tPolys[polyIndex], alongX, fromLow, edgeS, tLo, tHi, wanted);
+                measured.Add((layer, polyIndex, vertexA, edgeS, tLo, tHi, have));
+                add = Math.Max(add, wanted - have);
+            }
+
+            if (!usable) continue;
 
             // Nothing shorter than the scan's own step, which is the resolution `have` was measured
             // at — below it the "shortfall" is quantisation, and growing a sliver of lead would put
@@ -163,22 +189,36 @@ public static class PlanarFeedExtension
             if (add <= wanted / UniformitySamples) continue;
 
             double outward = fromLow ? -add : add;
-            if (Obstructed(polys, alongX, edgeS, edgeS + outward, tLo, tHi))
+
+            bool blocked = false;
+            foreach (var m in measured)
+                if (Obstructed(PolysOn(m.Layer), alongX, m.EdgeS, m.EdgeS + outward, m.TLo, m.THi))
+                { blocked = true; break; }
+
+            if (blocked)
             {
                 notes.Add(
                     $"Port {port.Number}'s feed is not uniform for the {fmt(wanted)} the " +
                     "calibration replaces, and the uniform lead that would fix it cannot be grown — " +
                     "there is other metal on this level directly behind the port. The de-embedding " +
                     "therefore removes an error box measured on a straight line from a feed that is " +
-                    "not one; read the result knowing that, or move the neighbouring metal.");
+                    "not one; read the result knowing that, or move the neighbouring metal." +
+                    (terminals.Count > 1
+                        ? " This port returns through drawn metal, so both of its conductors have to " +
+                          "grow by the same amount to keep the two cuts at one station; neither grew."
+                        : ""));
                 continue;
             }
 
-            var grown = ExtrudeFace(polys[polyIndex], vertexA, alongX, outward);
-            var list  = edited[layer] ??= [.. polys];
-            list[polyIndex] = grown;
+            foreach (var m in measured)
+            {
+                var mPolys = PolysOn(m.Layer);
+                var grown  = ExtrudeFace(mPolys[m.PolyIndex], m.VertexA, alongX, outward);
+                var list   = edited[m.Layer] ??= [.. mPolys];
+                list[m.PolyIndex] = grown;
+            }
 
-            leads.Add(new PlanarFeedLead(port.Number, add, edgeS, have));
+            leads.Add(new PlanarFeedLead(port.Number, add, measured[0].EdgeS, measured[0].Have));
         }
 
         if (leads.Count == 0) return (problem, [], notes);

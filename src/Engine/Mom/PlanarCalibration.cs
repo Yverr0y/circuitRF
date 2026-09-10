@@ -102,14 +102,39 @@ public sealed record PlanarCalibrationSettings(
 
 /// <summary>One synthesised uniform line: its mesh, its two ports, and the length between the two
 /// reference planes (which is what γ multiplies, not the drawn length).</summary>
+/// <param name="ModePotential">
+/// <b>RP-2c — the electrostatic problem D7's C_pul is taken from, per CELL, or null for a
+/// single-conductor standard.</b>
+///
+/// <para>A microstrip standard has one conductor and one answer: put the whole sheet at 1 V above
+/// the plane and total its charge. A coplanar standard has two, and the port drives the voltage
+/// BETWEEN them — so the electrostatic problem is the signal conductor at +½ V and the return at
+/// −½ V, and the capacitance that belongs in <c>Z_c = γ/(jωC_pul)</c> is the one that mode sees.
+/// Putting a coplanar standard's whole sheet at 1 V measures the COMMON mode instead: a complete,
+/// plausible reference impedance for a mode the port does not drive.</para>
+/// </param>
+/// <param name="ModeWeight">
+/// What <c>C = Σ wᵢqᵢ</c> sums, per cell — <c>+½</c> on the signal conductor and <c>−½</c> on the
+/// return, so the answer is <c>(Q⁺ − Q⁻)/2</c> per volt. <b>The average rather than one plate's
+/// charge, deliberately:</b> with a ground plane present the two are not exactly equal and opposite,
+/// and the average is the reading that does not depend on which conductor the user happened to name
+/// as the return.
+/// </param>
 public sealed record PlanarStandard(
     PlanarMesh           Mesh,
     PlanarPortResolution Port1,
     PlanarPortResolution Port2,
     double               LengthM,
-    int                  EndRunCells)
+    int                  EndRunCells,
+    IReadOnlyList<double>? ModePotential = null,
+    IReadOnlyList<double>? ModeWeight    = null)
 {
     public IReadOnlyList<PlanarPortResolution> Ports => [Port1, Port2];
+
+    /// <summary>RP-2c — whether this standard is a coplanar pair rather than one conductor over the
+    /// plane. The two differ in their MESH and in their electrostatics; nothing in the calibration
+    /// ALGEBRA asks (R-rp2c-3).</summary>
+    public bool IsCoplanar => ModePotential is not null;
 }
 
 public static class PlanarCalibration
@@ -119,14 +144,19 @@ public static class PlanarCalibration
     // ══════════════════════════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// A uniform line of the port's own cross-section, at least <paramref name="targetLengthM"/>
-    /// between reference planes. The actual length is rounded UP to a whole number of bulk cells and
-    /// is reported on the result — the requested length is never assumed.
+    /// <b>D4's longitudinal half: end run, bulk fill, mirrored end run</b> — the cumulative
+    /// gridlines along the port's own axis, with the length rounded UP to a whole number of bulk
+    /// cells.
+    ///
+    /// <para>Shared by the microstrip and the coplanar builders because it is the same partition:
+    /// both conductors of a coplanar pair are cells of ONE mesh, so they share every longitudinal
+    /// gridline, and a second copy of this arithmetic is a second chance for the two standards to
+    /// discretise a length differently. The operations and their order are L8d's own, so a
+    /// single-conductor standard's coordinates are bit-identical to what it built before RP-2c.</para>
     /// </summary>
-    public static PlanarStandard BuildLine(PlanarPortResolution port, double targetLengthM,
-                                           int endRunCells, string layerName = "Metal")
+    private static double[] LongitudinalPartition(PlanarPortResolution port, double targetLengthM,
+                                                  int endRunCells)
     {
-        ArgumentNullException.ThrowIfNull(port);
         if (endRunCells < 1)
             throw new ArgumentOutOfRangeException(nameof(endRunCells),
                 "A standard needs at least the port's own outer cell reproduced.");
@@ -136,7 +166,6 @@ public static class PlanarCalibration
                 $"calibration standard has to reproduce {endRunCells} of them. Lengthen the feed line: " +
                 "the de-embedding replaces exactly that much of it, so the structure has to have it.");
 
-        // ── The longitudinal partition: end run, bulk fill, mirrored end run ─────────────────────
         var sizes = new List<double>();
         double endLen = 0;
         for (int k = 0; k < endRunCells; k++) { sizes.Add(port.LongitudinalRunM[k]); endLen += port.LongitudinalRunM[k]; }
@@ -157,7 +186,124 @@ public static class PlanarCalibration
 
         var gLong = new double[sizes.Count + 1];
         for (int i = 0; i < sizes.Count; i++) gLong[i + 1] = gLong[i] + sizes[i];
+        return gLong;
+    }
 
+    /// <summary>
+    /// <b>RP-2c/R-rp2c-1 — the standard for a port that returns through drawn metal: BOTH
+    /// conductors, the slot between them, and the DUT's own transverse gridlines verbatim.</b>
+    ///
+    /// <para>D4's rule is unchanged and is the whole point — the standard must rebuild the port's
+    /// neighbourhood exactly — and the neighbourhood is now more than one piece of metal. So the
+    /// transverse partition is <see cref="PlanarPortCrossSection.Lines"/> (the DUT's own gridlines
+    /// at the cut, trimmed to the outermost metal) and a cell exists only where that profile says
+    /// metal. A basis needs both of its cells, so no basis crosses the slot — which is the mesh's
+    /// own structural property, measured in <c>CoplanarSlotMeshTests</c> and not something this
+    /// builder has to arrange.</para>
+    ///
+    /// <para><b>The standard's own two ports are two-cut ports, at the same station (R-rp2c-2).</b>
+    /// They are placed by transverse coordinate and resolved through <see cref="PlanarPorts"/> — the
+    /// one resolution rule, including its skew, level and same-conductor checks — rather than
+    /// assembled here. A standard whose two cuts were skewed would calibrate out a length that is
+    /// not in the DUT, and the check that says so already exists.</para>
+    /// </summary>
+    public static PlanarStandard BuildCoplanarLine(PlanarPortResolution port, double targetLengthM,
+                                                   int endRunCells, string layerName = "Metal")
+    {
+        ArgumentNullException.ThrowIfNull(port);
+        var xs = port.CrossSection
+               ?? throw new InvalidOperationException(
+                      $"Port {port.Number} has no cross-section, so it is not a conductor-referenced " +
+                      "edge port and BuildLine is what builds its standard.");
+
+        var gLong = LongitudinalPartition(port, targetLengthM, endRunCells);
+        var gTran = xs.Lines.ToArray();
+
+        bool alongX = port.Direction == PlanarBasisDirection.X;
+        var  gx     = alongX ? gLong : gTran;
+        var  gy     = alongX ? gTran : gLong;
+
+        int nx = gx.Length - 1, ny = gy.Length - 1;
+        var cells = new List<PlanarCell>(nx * ny);
+        var at    = new int[nx * ny];
+        Array.Fill(at, -1);
+
+        // R-msh-2's (LayerIndex, IY, IX) order, as the single-conductor builder emits it — with the
+        // void intervals skipped, which is the only difference.
+        for (int iy = 0; iy < ny; iy++)
+            for (int ix = 0; ix < nx; ix++)
+            {
+                if (!xs.IsMetal[alongX ? iy : ix]) continue;
+                at[iy * nx + ix] = cells.Count;
+                cells.Add(new PlanarCell(0, ix, iy, gx[ix], gy[iy], gx[ix + 1], gy[iy + 1]));
+            }
+
+        var bases = new List<PlanarBasis>();
+        for (int iy = 0; iy < ny; iy++)
+            for (int ix = 0; ix < nx; ix++)
+            {
+                int a = at[iy * nx + ix];
+                if (a < 0) continue;
+                if (ix + 1 < nx && at[iy * nx + ix + 1] >= 0)
+                    bases.Add(new PlanarBasis(0, a, at[iy * nx + ix + 1], PlanarBasisDirection.X));
+                if (iy + 1 < ny && at[(iy + 1) * nx + ix] >= 0)
+                    bases.Add(new PlanarBasis(0, a, at[(iy + 1) * nx + ix], PlanarBasisDirection.Y));
+            }
+
+        var mesh = new PlanarMesh(cells, bases, [layerName], gx, gy);
+
+        var (sideLo, sideHi) = alongX
+            ? (PlanarPortSide.MinX, PlanarPortSide.MaxX)
+            : (PlanarPortSide.MinY, PlanarPortSide.MaxY);
+
+        EmPoint Pt(double along, double across) =>
+            alongX ? new EmPoint(along, across) : new EmPoint(across, along);
+
+        PlanarPort Std(int number, double along, PlanarPortSide side) =>
+            new(number, Pt(along, xs.PositiveCentreM), side, port.Z0,
+                Reference: port.Reference, Kind: PlanarPortKind.Edge,
+                NegativeLocation: Pt(along, xs.NegativeCentreM));
+
+        var p1 = PlanarPorts.Resolve(mesh, Std(1, gLong[0],  sideLo));
+        var p2 = PlanarPorts.Resolve(mesh, Std(2, gLong[^1], sideHi));
+
+        // ── D7's electrostatic problem, per cell: +½ V on the signal conductor, −½ on the return ──
+        var v = new double[cells.Count];
+        var w = new double[cells.Count];
+        for (int c = 0; c < cells.Count; c++)
+        {
+            int t = alongX ? cells[c].IY : cells[c].IX;
+            double sign = t >= xs.PositiveLo && t <= xs.PositiveHi ? +1.0
+                        : t >= xs.NegativeLo && t <= xs.NegativeHi ? -1.0
+                        : 0.0;
+            v[c] = 0.5 * sign;
+            w[c] = 0.5 * sign;
+        }
+
+        return new PlanarStandard(mesh, p1, p2, p2.ReferencePlaneM - p1.ReferencePlaneM, endRunCells,
+                                  v, w);
+    }
+
+    /// <summary>
+    /// A uniform line of the port's own cross-section, at least <paramref name="targetLengthM"/>
+    /// between reference planes. The actual length is rounded UP to a whole number of bulk cells and
+    /// is reported on the result — the requested length is never assumed.
+    /// </summary>
+    public static PlanarStandard BuildLine(PlanarPortResolution port, double targetLengthM,
+                                           int endRunCells, string layerName = "Metal")
+    {
+        ArgumentNullException.ThrowIfNull(port);
+
+        // ── RP-2c — A CONDUCTOR-REFERENCED PORT'S STANDARD IS A COPLANAR LINE ────────────────────
+        //
+        // Its neighbourhood is two pieces of metal with a slot between them, not one rectangle, and
+        // calibrating it against a rectangle publishes s-parameters that are plausible and
+        // referenced to nothing (RP-2's R-rp2-4). The LONGITUDINAL half of D4 is the same either
+        // way and is shared below; what differs is the cross-section and the standard's own ports.
+        if (port.CrossSection is not null)
+            return BuildCoplanarLine(port, targetLengthM, endRunCells, layerName);
+
+        var gLong = LongitudinalPartition(port, targetLengthM, endRunCells);
         var gTran = port.TransverseLines.ToArray();
 
         bool alongX = port.Direction == PlanarBasisDirection.X;

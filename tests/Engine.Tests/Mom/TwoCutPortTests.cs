@@ -510,24 +510,24 @@ public class TwoCutPortTests(ITestOutputHelper output)
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
-    // GATE 6 — R-rp2a-11. A conductor-referenced EDGE port stays refused, by name.
+    // GATE 6 — R-rp2a-11's refusal, and what RP-2c did to it
     // ══════════════════════════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// <b>An edge port asking to return through drawn metal is refused, and the refusal names the
-    /// capability it is waiting for — the coplanar calibration standard — rather than a phase.</b>
+    /// <b>RP-2a refused a conductor-referenced EDGE port by name, because its error box is a coplanar
+    /// line and <c>PlanarCalibration</c> built uniform single conductors over the plane. RP-2c built
+    /// that standard, so the refusal is gone and this is what stands in its place.</b>
     ///
-    /// <para>R-mom-17's rule, and the reason is not bookkeeping: an edge port has a feed outside its
-    /// cut, so it has an error box, and the standards <c>PlanarCalibration</c> builds are uniform
-    /// single conductors over the plane. Calibrating a coplanar port against one of those publishes
-    /// s-parameters that are plausible and referenced to nothing, which is strictly worse than a
-    /// refusal. The remedy the refusal offers — cut it as an interior gap instead — is one that
-    /// works today.</para>
+    /// <para>The test is kept rather than deleted: R-rp2a-11's requirement was that the refusal name
+    /// the arrival place rather than a phase number, and the counterpart of that requirement, once
+    /// the capability has arrived, is that the port RESOLVES — with the cross-section its standard is
+    /// built from. The de-embedding itself is gated in <c>CoplanarDeembedTests</c>; what belongs here
+    /// is that the kernel no longer turns the port away.</para>
     /// </summary>
     [Theory]
     [InlineData(PlanarPortReference.CoplanarGround)]
     [InlineData(PlanarPortReference.SecondConductor)]
-    public void Gate6_AConductorReferencedEdgePort_IsRefusedNamingTheMissingStandard(
+    public void Gate6_AConductorReferencedEdgePort_ResolvesSinceRp2cBuiltItsStandard(
         PlanarPortReference reference)
     {
         const double f = 10e9, len = 9.5e-3, w = 0.3e-3, s = 0.15e-3;
@@ -535,14 +535,21 @@ public class TwoCutPortTests(ITestOutputHelper output)
         double yc = 0.5 * s + 0.5 * w;
 
         var port = TwoCut(1, 0, yc, -yc, reference, kind: PlanarPortKind.Edge);
-        Assert.False(PlanarPorts.TryResolve(report.Mesh, port, out _, out string? why));
-        _out.WriteLine(why);
+        Assert.True(PlanarPorts.TryResolve(report.Mesh, port, out var res, out string? why),
+                    $"a conductor-referenced EDGE port was refused: {why}");
+        _out.WriteLine(res!.Describe());
 
-        Assert.Contains("EDGE port", why!);
-        Assert.Contains("coplanar calibration standard", why!);
-        Assert.Contains("error box", why!);
-        Assert.Contains("internal delta gap", why!);          // the remedy that works today
-        Assert.DoesNotContain("not implemented", why!);
+        Assert.NotNull(res.Negative);
+        Assert.True(res.IsDeembeddable);
+
+        // The cross-section is the whole of what RP-2c added to the resolution: two conductors and
+        // the slot between them, which is what the coplanar standard is extruded from.
+        var xs = res.CrossSection;
+        Assert.NotNull(xs);
+        Assert.Equal(2, xs.ConductorCount);
+        Assert.True(xs.SlotM > 0);
+        _out.WriteLine($"cross-section: {xs.ConductorCount} conductors over " +
+                       $"{(xs.SpanHiM - xs.SpanLoM) * 1e6:F1} µm, slot {xs.SlotM * 1e6:F1} µm");
     }
 
     /// <summary>An internal (via-to-plane) port takes no reference at all — its negative terminal IS

@@ -324,6 +324,61 @@ public sealed record PlanarPortTerminal(
 }
 
 /// <summary>
+/// <b>RP-2c — the transverse metal profile at a conductor-referenced EDGE port's reference plane,
+/// which is the thing its calibration standard has to rebuild.</b>
+///
+/// <para>A ground-referenced port's neighbourhood is ONE conductor over a plane, and
+/// <see cref="PlanarPortResolution.TransverseLines"/> describes it completely — which is why D4 can
+/// copy those lines into a rectangle and call it the port's error box. A coplanar port's is not:
+/// it is two pieces of metal with a slot between them, and calibrating it against a rectangle
+/// produces s-parameters that are plausible and referenced to nothing (RP-2's R-rp2-4). So the
+/// profile is captured HERE, from the DUT's own mesh at the cut, and the standard is built from
+/// it — the same D4 rule, over a cross-section that is no longer connected.</para>
+///
+/// <para><b>It is the mesh's profile rather than the artwork's</b>, for the reason
+/// <c>SameConductor</c> gives one screen up: what the solve drives is cells, so what the standard
+/// must reproduce is cells. <see cref="Lines"/> are the DUT's own transverse gridlines, trimmed to
+/// the outermost metal — a void interval outside every conductor carries no cell and no basis, so
+/// including it would only make the standard's grid wider than its metal.</para>
+/// </summary>
+/// <param name="Lines">Transverse gridlines, ascending; <c>IsMetal.Count + 1</c> of them.</param>
+/// <param name="IsMetal">Per interval: is there metal spanning the reference plane there.</param>
+/// <param name="PositiveLo">First interval of the conductor the + terminal cut.</param>
+/// <param name="PositiveHi">Last interval of it, inclusive.</param>
+/// <param name="NegativeLo">First interval of the RETURN conductor.</param>
+/// <param name="NegativeHi">Last interval of it, inclusive.</param>
+/// <param name="ConductorCount">How many separate runs of metal cross the plane here. <b>Two is the
+/// coplanar pair the port drives; more is a third conductor whose potential nobody stated</b>, and
+/// the calibration refuses it by name rather than choosing one for it.</param>
+public sealed record PlanarPortCrossSection(
+    IReadOnlyList<double> Lines,
+    IReadOnlyList<bool>   IsMetal,
+    int                   PositiveLo,
+    int                   PositiveHi,
+    int                   NegativeLo,
+    int                   NegativeHi,
+    int                   ConductorCount)
+{
+    /// <summary>The whole profile's transverse span — what <c>CheckFeedClearance</c> must not
+    /// mistake for a neighbour, because every bit of it IS reproduced in the standard.</summary>
+    public double SpanLoM => Lines[0];
+    /// <inheritdoc cref="SpanLoM"/>
+    public double SpanHiM => Lines[^1];
+
+    /// <summary>A transverse coordinate inside the + conductor — where the standard's own signal cut
+    /// is placed.</summary>
+    public double PositiveCentreM => 0.5 * (Lines[PositiveLo] + Lines[PositiveHi + 1]);
+    /// <inheritdoc cref="PositiveCentreM"/>
+    public double NegativeCentreM => 0.5 * (Lines[NegativeLo] + Lines[NegativeHi + 1]);
+
+    /// <summary>The slot width between the two driven conductors — reported, because it is the one
+    /// dimension of a coplanar port that has no counterpart in a microstrip one.</summary>
+    public double SlotM => PositiveHi < NegativeLo
+        ? Lines[NegativeLo] - Lines[PositiveHi + 1]
+        : Lines[PositiveLo] - Lines[NegativeHi + 1];
+}
+
+/// <summary>
 /// What a port resolved to on a particular mesh — R-prt-2's report. Everything a user (or L8e's
 /// panel) needs in order to see where the reference plane actually landed, and everything
 /// <see cref="PlanarCalibration"/> needs in order to rebuild the port's neighbourhood exactly (D4).
@@ -374,6 +429,13 @@ public sealed record PlanarPortTerminal(
 /// conformal feed. Zero under the staircase and on any Manhattan feed. It is reported rather than
 /// silently absorbed because it is the one thing a conformal port does WORSE than a staircased one,
 /// and refining the transverse mesh is what shrinks it.</param>
+/// <param name="CrossSection">
+/// <b>RP-2c — the transverse metal profile at this port's reference plane</b>, for a
+/// conductor-referenced EDGE port and null for every other port. <see cref="PlanarCalibration"/>
+/// builds the coplanar standard from it exactly as it builds a microstrip standard from
+/// <see cref="PlanarPortResolution.TransverseLines"/>; see <see cref="PlanarPortCrossSection"/> for
+/// why one conductor's lines are not enough.
+/// </param>
 public sealed record PlanarPortResolution(
     int                    Number,
     PlanarPortSide         Side,
@@ -394,7 +456,8 @@ public sealed record PlanarPortResolution(
     double                 GapOffsetM     = 0,
     double                 FootprintAreaM2 = 0,
     PlanarPortReference    Reference       = PlanarPortReference.GroundPlane,
-    PlanarPortTerminal?    Negative        = null)
+    PlanarPortTerminal?    Negative        = null,
+    PlanarPortCrossSection? CrossSection   = null)
 {
     public int BasisCount => BasisIndices.Count;
 
@@ -698,27 +761,23 @@ public static class PlanarPorts
     {
         resolution = null;
 
-        // ── R-rp2a-11 — ONLY AN INTERNAL DELTA GAP, AND THE REFUSAL NAMES WHAT IS MISSING ────────
-        if (port.Kind != PlanarPortKind.InternalDeltaGap)
+        // ── AN INTERNAL (VIA-TO-PLANE) PORT TAKES NO REFERENCE — that is what the port IS ────────
+        //
+        // RP-2a refused an EDGE port here too, because a coplanar edge port's error box is a coplanar
+        // line and PlanarCalibration built uniform single conductors over the plane. RP-2c builds the
+        // coplanar standard (PlanarCalibration.BuildCoplanarLine), so the refusal is gone and what
+        // replaces it is the CROSS-SECTION captured below — the profile that standard is built from.
+        // The via port's refusal is untouched and is not the same kind of statement: it is about what
+        // the port is, not about a missing capability.
+        if (port.Kind == PlanarPortKind.Internal)
         {
-            refusal = port.Kind == PlanarPortKind.Edge
-                ? $"Port {port.Number} is an EDGE port asking to return through drawn metal, and " +
-                  "that is refused rather than approximated. An edge port has a feed outside its cut, " +
-                  "so it has an error box, and the two-line calibration that removes it needs a " +
-                  "STANDARD in the port's own reference — a coplanar line, with its own Z_c, its own " +
-                  "propagation constant and its own static capacitance. The standards this kernel " +
-                  "builds are uniform single conductors over the ground plane, so calibrating this " +
-                  "port against them would publish s-parameters that are plausible and referenced to " +
-                  "nothing. What is missing is the coplanar calibration standard (§10.6's coplanar " +
-                  "de-embedding); until it exists, cut this port as an internal delta gap instead — " +
-                  "an interior cut has no feed, no error box and needs no standard, and it is " +
-                  "referenced to its own declared Z0 at the gap."
-                : $"Port {port.Number} is an internal (via-to-plane) port asking to return through " +
-                  "drawn metal. Its negative terminal is the ground plane by construction — that is " +
-                  "what the port IS, a gap at the foot of the via that reaches the plane — so there " +
-                  "is nothing for a second cut to be. A port between two pieces of drawn metal is an " +
-                  "internal delta gap with a return conductor named; a port from metal to the plane " +
-                  "is this one, and it takes no reference.";
+            refusal =
+                $"Port {port.Number} is an internal (via-to-plane) port asking to return through " +
+                "drawn metal. Its negative terminal is the ground plane by construction — that is " +
+                "what the port IS, a gap at the foot of the via that reaches the plane — so there " +
+                "is nothing for a second cut to be. A port between two pieces of drawn metal is an " +
+                "internal delta gap with a return conductor named; a port from metal to the plane " +
+                "is this one, and it takes no reference.";
             return false;
         }
 
@@ -826,13 +885,177 @@ public static class PlanarPorts
             return false;
         }
 
+        // ── RP-2c — AN EDGE PORT'S NEIGHBOURHOOD, WHICH IS WHAT ITS STANDARD HAS TO BE ──────────
+        //
+        // Only an edge port has a feed outside the cut, so only an edge port has an error box and a
+        // standard. An internal delta gap resolves exactly as it did under RP-2a, bit for bit, and
+        // carries no cross-section: there is nothing to calibrate and nothing to build.
+        PlanarPortCrossSection? xsec = null;
+        if (port.Kind == PlanarPortKind.Edge)
+        {
+            // A conformal boundary cell at the port makes the DRIVEN width shorter than the grid
+            // extent, and the single-conductor path handles that by re-centring TransverseLines on
+            // the metal (see TryResolveOnLayer's own note). That re-centring has no meaning across a
+            // slot — two conductors re-centred independently would move the slot — so it is refused
+            // rather than approximated, and the remedy is the setting that caused it.
+            if (pos.CutCellCount > 0 || neg.CutCellCount > 0)
+            {
+                refusal =
+                    $"Port {port.Number} returns through drawn metal AND sits on conformal boundary " +
+                    $"cells ({pos.CutCellCount} cut at the signal cut, {neg.CutCellCount} at the " +
+                    "return cut). A cut cell makes the metal on the reference plane shorter than its " +
+                    "grid extent, and a single conductor's calibration standard absorbs that by " +
+                    "rebuilding the cross-section on the METAL's own extents. Across a slot that is " +
+                    "not available: re-centring the two conductors independently moves the slot " +
+                    "between them, and the slot is most of what sets a coplanar line's impedance. " +
+                    "Set Boundary cells back to \"Staircase\" for this run, or move the port onto a " +
+                    "straight, axis-aligned length of the pair.";
+                return false;
+            }
+
+            // ── A STANDARD IS A SINGLE-LEVEL UNIFORM LINE (D3), SO THE PAIR MUST BE ON ONE ─────
+            //
+            // R-rp2a-3 permits a port whose two cuts are on different levels when both were STATED,
+            // and for an internal delta gap that is fine — it has no standard. An EDGE port does,
+            // and PlanarCalibration builds it on one level: a standard carrying a via is not a
+            // standard, because the algebra's whole model is "box + matched UNIFORM line + box".
+            // Building it on the signal's level anyway would put the return conductor beside the
+            // signal instead of under it, which is a plausible s-parameter set for a line nobody has.
+            if (pos.LayerIndex != neg.LayerIndex)
+            {
+                refusal =
+                    $"Port {port.Number} is an EDGE port whose two cuts are on different levels — " +
+                    $"the signal cut on level {pos.LayerIndex}{LayerName(mesh, pos.LayerIndex)} and " +
+                    $"the return cut on level {neg.LayerIndex}{LayerName(mesh, neg.LayerIndex)}. An " +
+                    "edge port has a feed outside its cut, so it is de-embedded, and its calibration " +
+                    "standard is a uniform line on ONE conductor level: the two-line algebra models " +
+                    "the section between the reference planes as a matched uniform line, and a level " +
+                    "change in the middle of it is a discontinuity in the very thing that is assumed " +
+                    "uniform. Put both cuts on one level, or cut this port as an internal delta gap " +
+                    "instead — an interior cut has no feed and needs no standard, and a two-cut " +
+                    "internal gap spanning levels is supported.";
+                return false;
+            }
+
+            if (!TryCrossSection(mesh, pos, neg, out xsec, out string? why))
+            {
+                refusal = $"Port {port.Number} returns through drawn metal, and the metal profile at " +
+                          $"its reference plane could not be read: {why}";
+                return false;
+            }
+        }
+
         resolution = pos with
         {
-            Reference = port.Reference,
-            Negative  = PlanarPortTerminal.From(neg),
+            Reference    = port.Reference,
+            Negative     = PlanarPortTerminal.From(neg),
+            CrossSection = xsec,
         };
         refusal = null;
         return true;
+    }
+
+    /// <summary>
+    /// <b>RP-2c — the transverse metal profile at a two-cut edge port's reference plane.</b>
+    ///
+    /// <para>An interval carries metal when the cell pair the cut spans is metal on BOTH sides
+    /// there, which is the same question the port's own run asks of itself one conductor at a time.
+    /// The profile is trimmed to the outermost metal: a void interval outside every conductor
+    /// carries no cell and no basis, so it would only make the standard's grid wider than its
+    /// metal.</para>
+    ///
+    /// <para>The plane's own column is recovered from <c>ReferencePlaneM</c> rather than passed
+    /// down, because it IS <c>gLong[highCol]</c> for both sides — an edge port's plane is the shared
+    /// face of its outermost cell pair, whichever end it is. Asserting that here rather than
+    /// threading two more arguments through is deliberate: one derivation, one place to be wrong.</para>
+    /// </summary>
+    private static bool TryCrossSection(PlanarMesh mesh, PlanarPortResolution pos,
+                                        PlanarPortResolution neg,
+                                        out PlanarPortCrossSection? xsec, out string? why)
+    {
+        xsec = null;
+
+        bool alongX = pos.Direction == PlanarBasisDirection.X;
+        var  gLong  = alongX ? mesh.GridX : mesh.GridY;
+        var  gTran  = alongX ? mesh.GridY : mesh.GridX;
+        int  nLong  = gLong.Count - 1, nTran = gTran.Count - 1;
+
+        int highCol = -1;
+        double best = double.PositiveInfinity;
+        for (int k = 1; k < gLong.Count - 1; k++)
+        {
+            double d = Math.Abs(gLong[k] - pos.ReferencePlaneM);
+            if (d < best) { best = d; highCol = k; }
+        }
+        if (highCol < 1 || highCol >= nLong)
+        {
+            why = "its reference plane is not an interior gridline of the mesh.";
+            return false;
+        }
+        int lowCol = highCol - 1;
+
+        int nx = mesh.GridX.Count - 1, ny = mesh.GridY.Count - 1;
+        var at = new int[nx * ny];
+        Array.Fill(at, -1);
+        for (int c = 0; c < mesh.Cells.Count; c++)
+        {
+            var cell = mesh.Cells[c];
+            if (cell.LayerIndex == pos.LayerIndex) at[cell.IY * nx + cell.IX] = c;
+        }
+
+        int CellAt(int iLong, int iTran) => alongX ? at[iTran * nx + iLong] : at[iLong * nx + iTran];
+
+        var metal = new bool[nTran];
+        int first = -1, last = -1;
+        for (int t = 0; t < nTran; t++)
+        {
+            metal[t] = CellAt(lowCol, t) >= 0 && CellAt(highCol, t) >= 0;
+            if (!metal[t]) continue;
+            if (first < 0) first = t;
+            last = t;
+        }
+
+        if (first < 0)
+        {
+            why = "no metal crosses that plane at all.";
+            return false;
+        }
+
+        int n = last - first + 1;
+        var lines   = new double[n + 1];
+        var isMetal = new bool[n];
+        for (int k = 0; k <= n; k++) lines[k]   = gTran[first + k];
+        for (int k = 0; k < n; k++)  isMetal[k] = metal[first + k];
+
+        int conductors = 0;
+        for (int k = 0; k < n; k++)
+            if (isMetal[k] && (k == 0 || !isMetal[k - 1])) conductors++;
+
+        if (!TryRun(0.5 * (pos.TransverseLines[0] + pos.TransverseLines[^1]), out int pLo, out int pHi) ||
+            !TryRun(0.5 * (neg.TransverseLines[0] + neg.TransverseLines[^1]), out int nLo, out int nHi))
+        {
+            why = "one of the two cuts did not land inside a run of metal on that plane.";
+            return false;
+        }
+
+        xsec = new PlanarPortCrossSection(lines, isMetal, pLo, pHi, nLo, nHi, conductors);
+        why  = null;
+        return true;
+
+        bool TryRun(double centre, out int lo, out int hi)
+        {
+            lo = hi = -1;
+            for (int k = 0; k < n; k++)
+            {
+                if (!isMetal[k]) continue;
+                if (centre < lines[k] - 1e-15 || centre > lines[k + 1] + 1e-15) continue;
+                lo = hi = k;
+                while (lo - 1 >= 0 && isMetal[lo - 1]) lo--;
+                while (hi + 1 < n  && isMetal[hi + 1]) hi++;
+                return true;
+            }
+            return false;
+        }
     }
 
     /// <summary>
@@ -1480,7 +1703,13 @@ public static class PlanarPorts
         bool alongX = port.Direction == PlanarBasisDirection.X;
         bool fromLow = port.Side is PlanarPortSide.MinX or PlanarPortSide.MinY;
 
-        double tLo = port.TransverseLines[0], tHi = port.TransverseLines[^1];
+        // RP-2c — a conductor-referenced port's neighbourhood is the whole cross-section, slot and
+        // return included, and every bit of it IS reproduced in the standard. Asking this question
+        // of the signal run alone would report the port's own return conductor as a neighbour that
+        // is not removed correctly, on every coplanar port, always — the same unclearable warning
+        // the 2026-08-12 fix below removed for a different reason.
+        double tLo = port.CrossSection?.SpanLoM ?? port.TransverseLines[0];
+        double tHi = port.CrossSection?.SpanHiM ?? port.TransverseLines[^1];
         double nearest = double.PositiveInfinity;
 
         foreach (var c in mesh.Cells)

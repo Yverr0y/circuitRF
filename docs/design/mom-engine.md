@@ -358,9 +358,10 @@ but wrong numbers.
   by a test: ∠S₂₁ is exactly −βℓ with no offset.
 - **Ground reference** must be explicit: for microstrip it is the stackup's ground plane; for CPW it is
   the adjacent coplanar conductors. Get this wrong and everything downstream is wrong. *(Built: the
-  ground-plane reference for every port type, and — since RP-2a — a reference to DRAWN metal for an
-  INTERNAL DELTA GAP, both `CoplanarGround` and `SecondConductor`. A conductor-referenced EDGE port and
-  a port between the two levels of a via are still refused by name.)*
+  ground-plane reference for every port type; a reference to DRAWN metal — both `CoplanarGround` and
+  `SecondConductor` — for an INTERNAL DELTA GAP since RP-2a and for an EDGE port since RP-2c, which
+  builds the coplanar calibration standard the edge case needs. A port between the two levels of a via
+  is still refused by name.)*
 
 > **RP-2a (2026-09-10) — a conductor-referenced port is TWO CUTS AT ONE STATION, and the sentence above
 > is now only half true.**
@@ -382,10 +383,11 @@ but wrong numbers.
 >   is read back through the same column, so the incidence weight scales `Z₁₁` by `1/w²` — ±1 on both
 >   blocks reports a **quarter** of the right impedance, with no visible symptom. Gated against the
 >   coplanar-strips conformal-mapping closed form `Z = η₀·K(k)/K(k′)`.
-> - **`InternalDeltaGap` only.** A conductor-referenced EDGE port has an error box, and its calibration
->   standard is a *coplanar* line with its own `Z_c`, `β` and static capacitance. `PlanarCalibration`
->   builds uniform single conductors over the plane, so it is refused by name, naming the missing
->   standard — a coplanar de-embedding, which is later work.
+> - **`InternalDeltaGap` only, until RP-2c.** A conductor-referenced EDGE port has an error box, and its
+>   calibration standard is a *coplanar* line with its own `Z_c`, `β` and static capacitance.
+>   `PlanarCalibration` built uniform single conductors over the plane, so the edge case was refused by
+>   name, naming the missing standard. **RP-2c (2026-09-10) built it — see the block below**; the
+>   refusal is gone and the refusals about the PAIR are unchanged and now fire for edge ports too.
 > - **Three things about the PAIR are refused rather than adjusted**: two cuts at different stations (a
 >   port plus a length of line), two cuts *inferred* onto different levels (stating both levels permits
 >   it), and two cuts in one conductor — which is either a short across the port, or an ordinary
@@ -394,6 +396,55 @@ but wrong numbers.
 >   through the plane and port 2 through drawn metal. `PlanarPortResolution.Describe()` therefore says
 >   what each port returns through, per port — the standing "the plane is the negative terminal of every
 >   port in this run" sentence is what a mixed run makes false.
+
+> **RP-2c (2026-09-10) — de-embedding a coplanar edge port. The STANDARD changed; the ALGEBRA did not.**
+>
+> D4's rule is unchanged and is the whole point of this phase: the calibration standard must rebuild the
+> port's neighbourhood *exactly*, and a coplanar port's neighbourhood is three pieces of geometry, not
+> one — signal conductor, slot, return conductor. So `PlanarPortResolution` now carries the transverse
+> METAL PROFILE at its reference plane (`PlanarPortCrossSection`, taken from the DUT's own mesh at the
+> cut), `PlanarCalibration.BuildCoplanarLine` extrudes that profile to the two calibration lengths, and
+> **the standard's own two ports are two-cut ports at one station**, resolved through `PlanarPorts` like
+> any other — the skew, level and same-conductor refusals are the same ones. The two-line trace, the γ
+> branch resolution and the T-matrix cascade are untouched (R-rp2c-3): they are exact regardless of
+> cross-section.
+>
+> - **A de-embedded coplanar uniform section is exact at the two calibration lengths** — |S₁₁| at the
+>   **1e-15** level across five geometries, which is L8d's own microstrip figure and is the measurement
+>   that says the standard IS the port's neighbourhood. γ two ways (the two-line trace against a
+>   travelling-wave fit sharing no algebra with it) agrees to **2.0e-5 … 1.1e-4**, inside L8d's
+>   2.5e-4 … 3.9e-3 microstrip band.
+> - **D7's reference impedance is the MODE's, not the sheet's.** A microstrip standard's C_pul is the
+>   whole sheet at 1 V over the plane; a coplanar pair's port drives the voltage BETWEEN the two
+>   conductors, so the electrostatic problem is +½ V on the signal and −½ V on the return and the
+>   capacitance is `(Q⁺ − Q⁻)/2` per volt. Totalling the sheet's charge instead measures the COMMON
+>   mode — a complete, plausible reference impedance for a mode the port does not drive. Both the dense
+>   and the accelerated (`PlanarStaticAim`) static solves take the mode; the shipped all-ones route is
+>   untouched and is what a single-conductor standard still runs.
+> - **A THIRD conductor at the reference plane is refused by name at calibration setup.** A CPW's far
+>   ground strip has no stated potential, and the two reasonable readings — bonded to the return, or
+>   floating at zero net charge — are far apart. The refusal names both and offers the remedies
+>   (join the grounds before the plane, move the station, cut an interior gap, or read the raw solve).
+> - **The mixed case is the ordinary case** and costs what it costs: one DCIM fit still serves the DUT
+>   and every standard, because the fit depends on (slab, frequency) alone and a standard's SHAPE is not
+>   part of that key. What a coplanar standard costs is unknowns — measured on one port at one length,
+>   **2.86× the single-conductor standard's N and 2.27× its fill-and-solve time**.
+> - **The direct port-to-port coupling residual is much SMALLER with coplanar grounds present.** Measured
+>   against a microstrip control on the same slab, the same mesh and the same frequency: away from the
+>   calibration lengths a coplanar section reads |S₁₁| = 8.2e-6 / 2.3e-5 / 1.6e-4 at 5 / 10 / 20 GHz
+>   against the microstrip's 1.1e-3 / 3.2e-3 / 5.4e-3 — **35–140× lower**, with the same rough f²
+>   scaling. The coplanar mode's return current is beside the line rather than in the plane below it,
+>   so less of the field goes around the structure.
+> - **A conformal cut cell at a conductor-referenced port is refused**, because the single-conductor
+>   path absorbs a cut by re-centring the cross-section on the metal, and re-centring two conductors
+>   independently moves the slot between them — which is most of what sets a coplanar line's impedance.
+> - **An EDGE pair on two LEVELS is refused, even when both were stated.** RP-2a permits that for an
+>   internal delta gap, which has no standard; an edge port's standard is a uniform line on ONE level
+>   (D3), and a level change in the middle of the section the algebra assumes uniform is exactly the
+>   thing a standard may not contain.
+> - **The reference plane is still not user-positionable** (see the L8e block below), and it is now two
+>   planes that must be one: the pair check is what makes them one, and the coordinates the layout draws
+>   are still the engine's own.
 
 > **Decided and built at L8e (2026-08-05) — a port is a LABEL, not a new shape type.** The "Port tool
 > that snaps to a conductor edge" above is real now, and what it places is an ordinary `LabelShape`

@@ -3,6 +3,189 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## RP-2c: de-embedding a coplanar edge port — the STANDARD changed, the algebra did not (2026-09-10)
+
+`brief-em-return-plane-2c-coplanar-deembedding.md`, the arrival of the refusal RP-2a left behind.
+**Scope stayed where RP-2a's did — `src/Engine/Mom` only.** Gate:
+`tests/Engine.Tests/Mom/CoplanarDeembedTests.cs`, 21 tests, ~8 s.
+
+### Gate 2's number, first, because §5 asks for it first
+
+**|S₁₁| at the two calibration lengths is 2.7e-16 … 4.0e-15 across five geometries** — L8d's own
+microstrip figure (8.5e-16) and the measurement that says the standard IS the port's neighbourhood.
+Four equations fix four unknowns, so it is machine zero or it is nothing; a microstrip standard for a
+coplanar port would put it at the 1e-2 level.
+
+| W | S | h | cells/λ | across | DUT N | standard N | worst \|S₁₁\| |
+|---|---|---|---|---|---|---|---|
+| 0.3 mm | 0.15 mm | 2.5 mm | 20 | 12 | 104 | 48 / 62 | **1.13e-15** |
+| 0.3 mm | 0.15 mm | 2.5 mm | 20 | 24 | 194 | 90 / 116 | **3.97e-15** |
+| 0.3 mm | 0.15 mm | 5.0 mm | 20 | 6 | 59 | 43 / 51 | **1.81e-15** |
+| 0.6 mm | 0.10 mm | 5.0 mm | 20 | 12 | 104 | 76 / 90 | **1.19e-15** |
+| 0.2 mm | 0.60 mm | 5.0 mm | 20 | 12 | 104 | 104 / 132 | **9.29e-16** |
+
+### THE FIXTURES ARE CHOSEN, AND THAT IS THE ONE THING TO READ BEFORE TRUSTING THE TABLE
+
+On other geometries the same measurement sits at **1e-6 rather than 1e-15**, and the cause is not the
+coplanar standard. A standard is mirror-symmetric by construction, so its raw `S₁₁` and `S₂₂` must be
+equal; where they are not, `SolveErrorBox` averages them (the right use of a known symmetry) and the
+difference comes back as **exactly** the de-embedded |S₁₁| — the two track each other one for one on
+every fixture measured.
+
+**The control settles the attribution: the same mesh driven by ordinary GROUND-REFERENCED ports shows
+the same |S₁₁ − S₂₂| to within a couple of per cent** (1.14e-6 vs 1.17e-6 at 30 mm; 1.96e-6 vs
+1.70e-6 at 40 mm; 9.67e-7 vs 9.69e-7 at 30 mm / across 24). So it is a property of the fill and the
+solve on that geometry, not of the two-cut incidence column and not of the coplanar cross-section.
+`CoplanarDeembedTests.TheGate2Floor_IsARawMirrorAsymmetryTheGroundReferencedPortShowsToo` asserts that
+ratio, so the claim is runnable rather than prose.
+
+What it is *not*, ruled out by measurement rather than by argument:
+- **not the factorisation** — `UseSymmetricFactorization` true and false give the identical 2.871e-6;
+- **not non-determinism** — the same mesh solved twice in one process is bit-identical, and the cap-1
+  and automatic-parallelism answers agree to the last bit;
+- **not the quadrature settings** — extraction order Constant vs Linear and `UseRadialTable` on vs off
+  move it by 0.1%, not by decades;
+- **not gridline round-off in the standard's own partition** — a fixture whose x grid is *exactly*
+  mirror-symmetric (residual 0.000e0) still reads 1.17e-6.
+
+It is left as a bounded, named floor rather than chased: it is off RP-2c's path, and P5 already
+records that per-entry agreement at 1e-12 is unattainable in this fill for absolute-coordinate
+reasons. **A gate 2 fixture must be checked against its own raw |S₁₁ − S₂₂| before its |S₁₁| is read
+as an accuracy statement.**
+
+### What was built
+
+**`PlanarPortCrossSection`** — the transverse metal profile at a conductor-referenced EDGE port's
+reference plane, captured from the DUT's own mesh at the cut (gridlines, a metal flag per interval,
+the two driven conductors' index ranges, and how many conductors cross the plane), trimmed to the
+outermost metal. It hangs off `PlanarPortResolution` as a nullable companion exactly as RP-2a's
+`PlanarPortTerminal` does, so every port that predates it reads the same bits. **Only an EDGE port
+gets one** — an internal delta gap has no feed, no error box and no standard, so its resolution is
+RP-2a's bit for bit.
+
+**`PlanarCalibration.BuildCoplanarLine`** — D4 over that profile: the same longitudinal partition
+(end run, bulk fill, mirrored end run) with cells emitted only where the profile says metal, so no
+basis crosses the slot. **The standard's own two ports are two-cut EDGE ports at one station**,
+resolved through `PlanarPorts` like any other, which is what puts RP-2a's skew, level and
+same-conductor checks on the standard as well as on the DUT (R-rp2c-2).
+
+**D7's electrostatics became the MODE's.** A microstrip standard's C_pul is the whole sheet at 1 V
+over the plane. A coplanar port drives the voltage BETWEEN two conductors, so the problem is +½ V on
+the signal and −½ V on the return and the capacitance is `(Q⁺ − Q⁻)/2` per volt — the average rather
+than one plate's charge, so the answer does not depend on which conductor the user named as the
+return. `PlanarStandard` carries the per-cell potential and weight; `StaticCapacitance` and
+`PlanarStaticAim.ModalCapacitance` take them. **Totalling the sheet at 1 V instead measures the COMMON
+mode** — a complete, plausible reference impedance for a mode the port does not drive.
+
+### The algebra was not re-derived (R-rp2c-3), and here is the check that says so
+
+γ from ½·tr(M), the branch continuation and the T-matrix cascade are untouched. The evidence that
+they did not need touching is gate 3: **the two-line trace and a travelling-wave fit that shares no
+algebra with it agree on β to 2.0e-5 … 1.1e-4** (across = 24 / 12 / 6), inside L8d's own
+2.5e-4 … 3.9e-3 microstrip band.
+
+### Gate 4 — the closed form, with the feed removed
+
+A CPS line in air against `Z = η₀·K(k)/K(k′)`, de-embedded:
+
+| across | N | Z_c | closed form | ratio | β/k₀ | C_pul ÷ closed form |
+|---|---|---|---|---|---|---|
+| 6  | 59  | 206.80 Ω | 198.21 Ω | 1.0433 | 0.9651 | 0.9250 |
+| 12 | 104 | 200.40 Ω | 198.21 Ω | 1.0110 | 0.9649 | 0.9544 |
+| 24 | 194 | 196.41 Ω | 198.21 Ω | **0.9909** | 0.9649 | 0.9737 |
+
+**Read the last three columns together, not the ratio alone.** The medium is air, so β must be k₀
+*exactly* and C_pul must be `1/(cZ_c)` *exactly*; the solve gets both low and **the two errors partly
+cancel in their quotient**. Quoting 0.99× as the accuracy of this kernel on a coplanar line would be
+reporting a cancellation. The transverse refinement is what moves them, and β/k₀ barely responds to it
+at all (0.9651 → 0.9649) — that is longitudinal discretisation, and it reaches 0.981 at cells/λ = 40.
+None of it is the calibration's: the travelling-wave oracle reads the same β to 1e-4.
+
+### The mixed run, and what a coplanar standard costs (R-rp2c-4)
+
+One solve, one medium, port 1 to the plane and port 2 to a drawn strip: it runs, and the two ports get
+differently-shaped standards (Z_c 294 Ω and 202 Ω — a calibration that had quietly shared one standard
+would report one number twice). **One DCIM fit still serves the DUT and every standard**, because the
+fit's key is (slab, frequency) and a standard's SHAPE is not in it — which is what keeps two shapes
+affordable.
+
+**The cost is unknowns, measured on ONE port at ONE target length so nothing else differs: the
+coplanar standard is N = 269 (154 cells) against the single-conductor standard's N = 94 (56 cells) —
+2.86× the unknowns and 2.27× the fill-and-solve time.** Sub-quadratic because at these sizes the cost
+is the cores and the quadrature rather than the factorisation. On the whole mixed run the standards
+came to 4.07× the DUT's N against 2.39× for the same geometry with both ports on the plane.
+
+### §5's third question: the coupling residual is 35-140× SMALLER with coplanar grounds
+
+L8d identified the drift away from the calibration lengths as direct radiative and surface-wave
+coupling between the ports — f², and not monotone in length. Asked again of a coplanar pair, **against
+a microstrip control on the same slab, the same mesh and the same frequency** (the comparison is
+controlled; the earlier L8d numbers are on FR-4 and are not):
+
+| f | coplanar pair | microstrip control | ratio |
+|---|---|---|---|
+| 5 GHz | 8.2e-6 | 1.1e-3 | 134× |
+| 10 GHz | 2.3e-5 | 3.2e-3 | 139× |
+| 20 GHz | 1.6e-4 | 5.4e-3 | 35× |
+
+The rough f² scaling survives; the magnitude does not. The coplanar mode's return current is beside
+the line rather than in the plane below it, so much less of the field goes around the structure — and
+a de-embedded coplanar answer is correspondingly better than the "few 1e-3 at 2 GHz, few 1e-2 at
+10 GHz" §10.6 records for microstrip.
+
+### What is refused, and why each is a refusal rather than a guess
+
+- **A THIRD conductor crossing the reference plane.** The standard drives the port's PAIR; a CPW's far
+  ground strip has no stated potential, and the two reasonable readings — bonded to the return, or
+  floating at zero net charge — are far apart. Refused at calibration setup, naming the count and four
+  remedies (join the grounds before the plane, move the station, cut an interior gap, or read the raw
+  solve). **This is the narrowing worth knowing about: a three-conductor CPW whose port names one
+  ground is not de-embedded today**, and the object it needs is a multiconductor reference impedance
+  (a bordered electrostatic solve with a floating conductor at zero net charge, under the accelerator
+  as well as the dense path), not a wider tolerance.
+- **A conformal cut cell at a conductor-referenced port.** The single-conductor path absorbs a cut by
+  re-centring the cross-section on the metal's own extents; re-centring two conductors independently
+  moves the SLOT between them, and the slot is most of what sets a coplanar line's impedance. The
+  remedy named is the setting that caused it.
+- **An EDGE pair whose two cuts are on different LEVELS**, even when both were stated. RP-2a permits
+  that for an internal delta gap and is right to — it has no standard. An edge port's standard is a
+  uniform line on ONE level (D3), and building it on the signal's level anyway would put the return
+  conductor beside the signal instead of under it: a plausible s-parameter set for a line nobody has.
+  The remedy named is the internal delta gap, which supports it today.
+
+### Three things that had to change around the edges, each of which would have failed silently
+
+- **`SameCrossSection` compares the whole cross-section**, not just the driven run. Two ports whose
+  signal conductors match cell for cell can still need different standards — a different slot, a
+  different return width, a return on the other side — and sharing one would calibrate port 2 against
+  port 1's line.
+- **`CheckFeedClearance` asks about the cross-section's span**, not the signal run's. Asked of the
+  signal alone it reports the port's own return conductor as un-removed neighbouring metal, on every
+  coplanar port, always — the same unclearable-warning failure the 2026-08-12 fix removed for a
+  different reason.
+- **`PlanarFeedExtension` grows BOTH conductors, by the larger shortfall.** Growing the signal's lead
+  alone skews the pair, and the port is then refused at resolution — with a message about the user's
+  own artwork, which is no longer what moved it. If either terminal's lead is obstructed, neither
+  grows and the note says why.
+
+### The one structural change on the shipped path, and its gate
+
+D4's longitudinal partition was lifted out of `BuildLine` into `LongitudinalPartition` so the coplanar
+builder could use it rather than copy it — a second copy of that arithmetic is a second chance for the
+two standards to discretise a length differently. `CoplanarDeembedTests.Gate1` writes the pre-RP-2c
+body out as a named reference and compares every gridline **bit for bit**, the way RP-2a's own gate 1
+wrote out the pre-RP-2a incidence loop; a ground-referenced standard also still carries no mode
+potential and no cross-section, so its electrostatics is the shipped all-ones route untouched.
+
+**Two RP-2a tests asserted the refusal this brief removes and were rewritten rather than deleted** —
+`TwoCutPortTests.Gate6_…ResolvesSinceRp2cBuiltItsStandard` now asserts the capability and its
+cross-section, and `PlanarPortTests.T0_6` asserts the part neither phase changed (a conductor
+reference with no return point is refused; there is no nearest-conductor search). Nothing else was
+un-refused: the via-to-plane port still takes no reference, and RP-2a's skew, level, same-row and
+same-conductor checks all still fire — now on edge ports too, which is where they had never run. One
+refusal was ADDED rather than removed (the level-spanning edge pair above), which is the shape a
+capability arriving usually has: the new path has a boundary of its own.
+
 ## RP-2a: the two-cut port — what it costs, and the factor of four nobody would have seen (2026-09-10)
 
 `brief-em-return-plane-2a-two-cut-port-kernel.md`, built on the measurement in the section below.

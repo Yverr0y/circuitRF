@@ -432,10 +432,47 @@ public sealed class PlanarStaticAim
     /// </summary>
     public double TotalCapacitance()
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-
         var b = new Complex[_m];
         for (int i = 0; i < _m; i++) b[i] = EmConstants.Eps0;
+
+        var q = SolveCharge(b);
+
+        Complex total = Complex.Zero;
+        for (int i = 0; i < _m; i++) total += q[i];
+        return total.Real;
+    }
+
+    /// <summary>
+    /// <b>RP-2c — the same solve, driven by a per-cell POTENTIAL and totalled with a per-cell
+    /// WEIGHT.</b> A coplanar calibration standard's C_pul is the capacitance the port's own mode
+    /// sees — signal at +½ V, return at −½ V — and totalling the sheet's charge at 1 V would measure
+    /// the common mode instead. See <see cref="PlanarStandard.ModePotential"/>.
+    ///
+    /// <para><see cref="TotalCapacitance"/> is not routed through this: it builds its own all-ε₀
+    /// right-hand side and totals unweighted, so the shipped arithmetic is untouched.</para>
+    /// </summary>
+    public double ModalCapacitance(IReadOnlyList<double> potential, IReadOnlyList<double>? weight)
+    {
+        ArgumentNullException.ThrowIfNull(potential);
+        if (potential.Count != _m)
+            throw new ArgumentException(
+                $"The mode potential has {potential.Count} entries for {_m} cells.", nameof(potential));
+
+        var b = new Complex[_m];
+        for (int i = 0; i < _m; i++) b[i] = EmConstants.Eps0 * potential[i];
+
+        var q = SolveCharge(b);
+
+        Complex total = Complex.Zero;
+        if (weight is null) for (int i = 0; i < _m; i++) total += q[i];
+        else                for (int i = 0; i < _m; i++) total += weight[i] * q[i];
+        return total.Real;
+    }
+
+    /// <summary>The GMRES solve and its convergence refusal, shared by the two readings above.</summary>
+    private Complex[] SolveCharge(Complex[] b)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
 
         var q = PlanarGmres.Solve(Multiply, ApplyPreconditioner, b, _st.StaticTolerance,
                                   _st.MaxIterations, _st.Restart,
@@ -454,9 +491,7 @@ public sealed class PlanarStaticAim
                 "near field (NearRadiusFactor), raise ProjectionOrder, or clear PlanarFillSettings.Aim " +
                 "to solve this standard's static system densely.");
 
-        Complex total = Complex.Zero;
-        for (int i = 0; i < _m; i++) total += q[i];
-        return total.Real;
+        return q;
     }
 
     /// <summary><c>y = P x</c>, accelerated: the sparse near-field correction plus one FFT

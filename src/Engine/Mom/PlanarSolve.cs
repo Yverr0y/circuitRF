@@ -654,6 +654,28 @@ public sealed class PlanarPortCalibrator
         if (a.BasisCount != b.BasisCount) return false;
         if (a.TransverseLines.Count != b.TransverseLines.Count) return false;
 
+        // ── RP-2c — TWO PORTS SHARE A STANDARD ONLY IF THEY SHARE THE WHOLE NEIGHBOURHOOD ────────
+        //
+        // A coplanar port's standard is built from its cross-section, so two ports whose signal
+        // conductors match cell for cell can still need DIFFERENT standards: a different slot, a
+        // different return width, or a return on the other side. Comparing only the driven run would
+        // hand port 2 a standard built for port 1's slot — a complete, plausible calibration
+        // referenced to the wrong line.
+        if ((a.CrossSection is null) != (b.CrossSection is null)) return false;
+        if (a.CrossSection is { } xa && b.CrossSection is { } xb)
+        {
+            if (xa.IsMetal.Count != xb.IsMetal.Count) return false;
+            if (xa.PositiveLo != xb.PositiveLo || xa.PositiveHi != xb.PositiveHi) return false;
+            if (xa.NegativeLo != xb.NegativeLo || xa.NegativeHi != xb.NegativeHi) return false;
+            for (int i = 0; i < xa.IsMetal.Count; i++)
+            {
+                if (xa.IsMetal[i] != xb.IsMetal[i]) return false;
+                double da = xa.Lines[i + 1] - xa.Lines[i];
+                double db = xb.Lines[i + 1] - xb.Lines[i];
+                if (Math.Abs(da - db) > Tol * Math.Max(da, db)) return false;
+            }
+        }
+
         for (int i = 1; i < a.TransverseLines.Count; i++)
         {
             double da = a.TransverseLines[i] - a.TransverseLines[i - 1];
@@ -1044,6 +1066,34 @@ public static class PlanarSolve
                     // Z0 instead.)
 
                     sw.Restart();
+
+                    // ── RP-2c — A THIRD CONDUCTOR AT THE PLANE IS A REFUSAL, NOT A GUESS ─────────
+                    //
+                    // The coplanar standard reproduces the port's own neighbourhood, and D7 drives
+                    // it as a PAIR: signal at +½ V, return at −½ V. A third piece of metal crossing
+                    // the same plane — the far ground strip of a CPW whose port named only one of
+                    // them, or a neighbouring line — has no stated potential, and the two readings
+                    // available differ by more than a rounding: bond it to the return (the CPW
+                    // reading) or leave it floating at whatever potential carries zero net charge
+                    // (the coupled-line reading). Choosing silently publishes a reference impedance
+                    // for a mode nobody asked for, which is R-rp2-4's own failure one level down.
+                    if (ports[i].CrossSection is { ConductorCount: > 2 } xs3)
+                        throw new InvalidOperationException(
+                            $"Port {ports[i].Number} returns through drawn metal, and " +
+                            $"{xs3.ConductorCount} separate conductors cross its reference plane — " +
+                            "the two this port drives, and " +
+                            $"{xs3.ConductorCount - 2} more. De-embedding it needs a calibration " +
+                            "standard that is the port's own neighbourhood, and this kernel builds " +
+                            "the coplanar PAIR: the signal conductor at +½ V and the named return " +
+                            "at −½ V. The extra metal has no stated potential, and the two " +
+                            "reasonable answers are far apart — tied to the return (a CPW with two " +
+                            "ground strips) or floating at zero net charge (a neighbouring line) — " +
+                            "so it is not chosen here. Join the ground strips before the reference " +
+                            "plane so the pair is genuinely two conductors, move the port to a " +
+                            "station where only the pair crosses it, cut this port as an internal " +
+                            "delta gap instead (an interior cut has no feed, no error box and needs " +
+                            "no standard), or turn de-embedding off and read the raw solve — those " +
+                            "s-parameters include the port discontinuity and are for diagnostics only.");
 
                     // ── R-dcl-1..4 (brief-em-deembed-ceiling-closeout.md), RE-POINTED AT P11 —
                     // refuse a de-embedded run AT SETUP, honestly, rather than let it succeed here
