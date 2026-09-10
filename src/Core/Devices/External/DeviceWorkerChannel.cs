@@ -140,7 +140,13 @@ public sealed class DeviceWorkerChannel(IDeviceWorkerTransport transport) : IDis
 
         if (!transport.IsAlive) message.Append(" The worker process has exited.");
 
-        string errors = transport.RecentErrorOutput;
+        // A non-null inner means the failure came from the WIRE — the write, the read, or a reply
+        // that would not parse — rather than from a refusal the worker sent in-band. On the wire
+        // case the worker is gone or going and its own last line is the whole report, so waiting for
+        // it is right; on an in-band refusal the worker is alive and must not be blocked on.
+        string errors = inner is null
+            ? transport.RecentErrorOutput
+            : transport.ErrorOutputAfterConnectionFailure();
         if (!string.IsNullOrWhiteSpace(errors))
             message.Append(Environment.NewLine).Append("Worker output:").Append(Environment.NewLine).Append(errors);
 

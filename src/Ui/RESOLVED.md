@@ -1,5 +1,27 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## A view test read for a spelling the view had deliberately stopped using (2026-09-10)
+
+`EmPanelDeclutterTests.TheButtonCluster_IsTopRightAligned_SoItLandsOnTheOutputFileRow` failed on a
+tree nobody had touched. It searched the `.cem` header for the literal
+`<StackPanel Grid.Column="1" Orientation="Horizontal"` and for `HorizontalAlignment="Right"` on it.
+The 2026-09-09 header work replaced that Grid with `ShrinkThenOverflowPanel` — because a Grid gets
+the shrink order right and the POSITION wrong, laying the button cluster on top of the Output file
+box at a narrow window — and that panel places its second child at the right edge itself. **The
+attribute the test was reading for is absent by design; its absence was the fix, not a regression.**
+
+The requirement has not moved since 2026-08-12 and the test still asserts all of it: the right-hand
+half now as the panel's own contract (two children, content first, buttons second — which
+`EmSetupHeaderShrinksTests` states too), and the two halves that are this test's own — the cluster's
+`VerticalAlignment="Top"`, and the output-file row coming before the layout row, which is what makes
+top-alignment land on it.
+
+**The general point, since this is the second time this file has been rewritten rather than
+loosened:** a view test that matches a raw XAML SUBSTRING pins the spelling, not the property. Read
+the document (`XDocument`, the sibling file's approach) and assert the structure, so a legitimate
+re-layout fails only when it actually breaks the requirement.
+
+
 ## Owner request, 2026-09-10 — the finished-update row says the outcome and nothing else
 
 The Message Panel row that settles a completed auto-update read

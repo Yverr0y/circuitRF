@@ -7,6 +7,7 @@
 // a test cannot pass by nothing having been produced at all).
 
 using System.Numerics;
+using System.Xml.Linq;
 using CircuitRF.Engine.Mom;
 using CircuitRF.Ui.Layout;
 using CircuitRF.Ui.Layout.Em;
@@ -226,31 +227,51 @@ public class EmPanelDeclutterTests
     [Fact]
     public void TheButtonCluster_IsTopRightAligned_SoItLandsOnTheOutputFileRow()
     {
-        // UPDATED, not loosened (owner request, 2026-08-12: "move the Mesh, Simulate, Undo, Redo,
-        // Save and Save As buttons up one row so they are on the same row as the Output file, and
-        // have them hug the right side"). This asserted BOTTOM alignment before, which put the
-        // cluster on the Change Layout button's baseline — the 2026-08-11 arrangement this replaces.
+        // UPDATED TWICE, not loosened. The requirement has not moved since 2026-08-12 (owner: "move
+        // the Mesh, Simulate, Undo, Redo, Save and Save As buttons up one row so they are on the
+        // same row as the Output file, and have them hug the right side"); what has moved is HOW the
+        // right-hand half is expressed, and this test was still reading for the old spelling.
         //
-        // The mechanism is the same trick against the other end: the identity block's FIRST row is
-        // the output-file row, so top-aligning the cluster lands on it with no margin arithmetic to
-        // go stale. Both halves are asserted — the alignment, and the row order it depends on.
-        string xaml = File.ReadAllText(RepoFile("src/Ui/Views/Layout/EmSetupEditorView.axaml"));
+        // It asserted a header Grid with the cluster in `Grid.Column="1"` carrying
+        // HorizontalAlignment="Right". The 2026-09-09 header work replaced that Grid with
+        // ShrinkThenOverflowPanel — because a Grid gets the shrink order right and the POSITION
+        // wrong, laying the buttons on top of the Output file box at a narrow window. That panel
+        // places its SECOND child at the right edge itself, so the attribute the test was reading
+        // for is gone by design and its absence is correct rather than a regression.
+        //
+        // So the right-hand half is now asserted as the panel's own contract (content first, buttons
+        // second), and the two halves that are still this test's own are asserted unchanged: the TOP
+        // alignment, and the row order it depends on.
+        var doc = XDocument.Load(RepoFile("src/Ui/Views/Layout/EmSetupEditorView.axaml"));
 
-        int cluster = xaml.IndexOf(
-            "<StackPanel Grid.Column=\"1\" Orientation=\"Horizontal\"", StringComparison.Ordinal);
-        Assert.True(cluster > 0, "the button cluster is no longer the header Grid's second column");
+        var panel = doc.Descendants()
+            .SingleOrDefault(e => e.Name.LocalName == "ShrinkThenOverflowPanel");
+        Assert.True(panel is not null, "the header row is no longer a ShrinkThenOverflowPanel, so "
+                                     + "nothing is placing the button cluster at the right edge");
 
-        int clusterEnd = xaml.IndexOf('>', cluster);
-        string open = xaml[cluster..clusterEnd];
-        Assert.Contains("HorizontalAlignment=\"Right\"", open, StringComparison.Ordinal);
-        Assert.Contains("VerticalAlignment=\"Top\"", open, StringComparison.Ordinal);
-        Assert.Contains("Name=\"MeshButton\"", xaml[cluster..], StringComparison.Ordinal);
+        var children = panel!.Elements().ToList();
+        Assert.Equal(2, children.Count);
+
+        // Second child — the trailing block, which the panel hugs to the right edge and never draws
+        // over the content.
+        var cluster = children[1];
+        Assert.Equal("StackPanel", cluster.Name.LocalName);
+        Assert.Equal("Horizontal", cluster.Attribute("Orientation")?.Value);
+        Assert.Contains(cluster.Descendants(), e => e.Attribute("Name")?.Value == "MeshButton");
+
+        // Top rather than a margin: the identity block's FIRST row is the output-file row, so
+        // aligning to the top of the block lands on it with no number to go stale.
+        Assert.Equal("Top", cluster.Attribute("VerticalAlignment")?.Value);
 
         // Output file ABOVE the layout reference — that ordering is what makes top-alignment land on
-        // the output-file row rather than on Change Layout.
-        Assert.True(xaml.IndexOf("Name=\"BrowseSnpOutputButton\"", StringComparison.Ordinal)
-                    < xaml.IndexOf("Name=\"ChangeLayoutButton\"", StringComparison.Ordinal),
-                    "the output-file row must be the identity block's FIRST row");
+        // the output-file row rather than on Change Layout. Read from the identity block itself, in
+        // document order, rather than from raw string offsets.
+        var identity = children[0];
+        var pickers = identity.Descendants()
+            .Select(e => e.Attribute("Name")?.Value)
+            .Where(n => n is "BrowseSnpOutputButton" or "ChangeLayoutButton")
+            .ToList();
+        Assert.Equal(["BrowseSnpOutputButton", "ChangeLayoutButton"], pickers);
     }
 
     [Fact]

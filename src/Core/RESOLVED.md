@@ -6,6 +6,39 @@ only for findings that are still true, still surprising, and would cost someone 
 rediscover. Mirrors `src/Ui/DataDisplay/RESOLVED.md`'s own pattern.
 
 
+## A dead worker's last words were lost to the THREAD POOL, not to the pipe (2026-09-10)
+
+`AWorkerThatDiesImmediately_StillReportsWhatItSaidOnTheWayOut` failed again — the guard on the race
+where a worker that dies during start-up is reported with the one line that explains it still in
+flight. The flush that was added to close it was already there and correct in shape; two things in
+it were wrong.
+
+**1. `Task.Run(...).Wait(FlushTimeout)` measures the thread pool, not the pipe.** The wait ran as a
+pool item, so under a full test run — or any solve with every core busy — the two-second bound could
+expire *with the wait never having started*. That is why the guard looked load-dependent and why an
+isolated run always passed: the failure was a saturated pool, which is exactly the condition a full
+suite creates. It is a **dedicated background thread** now, which starts regardless of what the pool
+is doing. `WaitForExit()` with no timeout is still the overload — it is the only one that also waits
+for the redirected readers to reach end of stream — and it still runs off-thread so a grandchild
+holding the pipe open cannot wedge the failure path.
+
+**2. `HasExited` is an instant question, and the report is composed inside the window.** The old
+flush returned immediately unless the process had *already* been reaped, so a worker that wrote its
+reason and closed its pipes could lose by microseconds: the read ends in EOF, the failure is built,
+and the answer is "not exited yet, so nothing to wait for". `DeviceWorkerChannel.Failed` now asks
+through `ErrorOutputAfterConnectionFailure()` when — and only when — the failure came from the WIRE
+(a non-null inner: the write, the read, or a reply that would not parse). An in-band refusal has a
+null inner and still reads `RecentErrorOutput`, which never blocks: that worker is alive and well and
+must not be stalled for two seconds per refusal.
+
+**And the `_flushed` latch is set only on SUCCESS.** Latching a wait that timed out would skip the
+real flush later — the same empty report, by a different route.
+
+**A single green full-solution run does not prove this closed** (the original was ~1 in 17). The
+test's own header states the standard: it must be run repeatedly under load to mean anything, and an
+isolated pass is evidence of nothing either way.
+
+
 ## The net contract had to answer about a TYPE, not only about a model (AUT-10, 2026-09-08)
 
 AUT-8 gave `InstanceNetContract.Expected(ComponentModel)` — asked of the CONSTRUCTED model, so a

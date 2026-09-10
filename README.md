@@ -395,6 +395,13 @@ dotnet run --project src/Ui # from the circuitRF/ directory:
 ```bash
 dotnet test       # optional 10-15 min of circuitRF development tests
 ```
+
+A handful of loadpull tests read lab-measured `.spl`/`.lpcwave` files that are third-party data held
+under terms that do not permit redistribution, so they have never been committed here. On a fresh
+clone those tests report as **Skipped**, naming the path they wanted — they never fail, and a fresh
+clone is green without them. Your own measurements in either format, dropped at those paths, exercise
+the same code.
+
 To build the device workers:
 Needed only for PDKs whose device models ship as **compiled libraries**. `dotnet build` builds the
 workers itself *if a C compiler is on PATH* — with none, it warns and carries on, and such a kit

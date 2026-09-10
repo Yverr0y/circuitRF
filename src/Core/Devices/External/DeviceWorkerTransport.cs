@@ -43,6 +43,17 @@ public interface IDeviceWorkerTransport : IDisposable
     /// the exception rather than left in a log the user will not think to open.
     /// </summary>
     string RecentErrorOutput { get; }
+
+    /// <summary>
+    /// The same lines, read on a path where the CONNECTION has already failed — so a worker that is
+    /// in the act of dying is waited for rather than merely asked whether it has finished.
+    ///
+    /// <para><see cref="RecentErrorOutput"/> is read on healthy paths too (a worker refusing a point
+    /// in-band is alive and well), so it may never block on a live process. A broken pipe is the one
+    /// case where blocking is right: the worker is gone or going, and its last words are the whole
+    /// report. Default implementation for a transport with no process behind it.</para>
+    /// </summary>
+    string ErrorOutputAfterConnectionFailure() => RecentErrorOutput;
 }
 
 /// <summary>
@@ -370,9 +381,15 @@ public sealed class ProcessDeviceWorkerTransport : IDeviceWorkerTransport
     {
         get
         {
-            FlushErrorOutput();
+            FlushErrorOutput(evenIfNotYetReaped: false);
             lock (_errorGate) return string.Join(Environment.NewLine, _errorLines);
         }
+    }
+
+    public string ErrorOutputAfterConnectionFailure()
+    {
+        FlushErrorOutput(evenIfNotYetReaped: true);
+        lock (_errorGate) return string.Join(Environment.NewLine, _errorLines);
     }
 
     private int _flushed;
@@ -405,16 +422,47 @@ public sealed class ProcessDeviceWorkerTransport : IDeviceWorkerTransport
     /// <para>Only ever waits on a process that has ALREADY exited, so nothing is slowed down while a
     /// worker is alive and merely refusing a request in-band.</para>
     /// </summary>
-    private void FlushErrorOutput()
+    /// <param name="evenIfNotYetReaped">
+    /// Wait even though <see cref="Process.HasExited"/> still says false. Only the connection-failure
+    /// path passes true: <c>HasExited</c> is an instant question, and a worker that wrote its reason
+    /// and closed its pipes can lose that race by microseconds — the read ends in EOF, the report is
+    /// composed, and the answer is "not exited yet, so nothing to wait for" with the one line that
+    /// mattered still in flight. On a healthy path this stays false, so a live worker is never
+    /// blocked on.
+    /// </param>
+    private void FlushErrorOutput(bool evenIfNotYetReaped)
     {
-        bool exited;
-        try { exited = _process.HasExited; } catch { return; }
+        if (Volatile.Read(ref _flushed) != 0) return;
 
-        if (!exited) return;
-        if (Interlocked.Exchange(ref _flushed, 1) != 0) return;
+        if (!evenIfNotYetReaped)
+        {
+            bool exited;
+            try { exited = _process.HasExited; } catch { return; }
+            if (!exited) return;
+        }
 
-        try { Task.Run(() => { try { _process.WaitForExit(); } catch { } }).Wait(FlushTimeout); }
-        catch { /* the diagnostic is a courtesy; it must never become the failure */ }
+        // A DEDICATED THREAD, not Task.Run. This is the half that made the guard load-dependent: a
+        // thread-pool item does not start until the pool gets to it, and under a full test run — or
+        // a solve with every core busy — the two-second bound expires with the wait never having
+        // begun. The measurement then reads exactly like the race it was added to close, which is
+        // how it survived. A thread starts regardless of what the pool is doing.
+        //
+        // WaitForExit() with NO timeout is still the overload, because it is the only one that also
+        // waits for the redirected readers to reach end of stream. It runs off-thread so a
+        // grandchild holding the pipe open cannot wedge the failure path.
+        bool completed;
+        try
+        {
+            var waiter = new Thread(() => { try { _process.WaitForExit(); } catch { } })
+                { IsBackground = true, Name = "worker-exit-flush" };
+            waiter.Start();
+            completed = waiter.Join(FlushTimeout);
+        }
+        catch { return; /* the diagnostic is a courtesy; it must never become the failure */ }
+
+        // Latched only on SUCCESS. Latching a wait that timed out would skip the real flush later,
+        // which is the same empty report by a different route.
+        if (completed) Volatile.Write(ref _flushed, 1);
     }
 
     /// <summary>
