@@ -767,3 +767,182 @@ experimental — the picker offers only None/Topography, and the machinery is ke
 `.cdd` still loads. Adding a second, rectangular-grid raster path beside a withheld one is not this
 brief's call to make. The readout names the first flagged termination and how many there are, which is
 the reading the map exists for.
+
+## Ports: six defects in the marker and the excitation, over one session (2026-09-09)
+
+Six owner reports, all about the same port. R1 and R2 are contradictory as stated, and the first
+attempt at each broke the other — that is the interesting part and it is recorded rather than tidied
+away. R5 found that the layout editor and the EM engine were deriving "how wide is this port" two
+independent ways and disagreeing by a whole edge.
+
+### What moves is the MARKER, not the label
+
+`X`/`Y` never changed in any of these. An edge port's plane bar and arrow are drawn at the conductor
+END (`PortHint.PlaneX`/`PlaneY`) and sized to that conductor's width, all of it re-derived every
+frame from `LayoutPortDirection.LookupFor`. Every defect below is that derivation reading something
+it should not.
+
+### R1 — a placed port moved when a layer was switched on
+
+Toggling a layer's visibility moved a placed port. `LookupFor` resolved the conductor by taking the
+FIRST entry of `LayoutHitTest.HitStack`, and two things were wrong with borrowing a CLICK's ordering:
+
+1. **`HitStack` skips layers marked not `Visible`/`Selectable`** — right for a click, and it made a
+   port's geometry a function of view state.
+2. **ZOrder-descending puts a POUR ahead of the trace lying on it** whenever the pour's layer draws
+   on top. Fixing (1) alone would have traded an unstable answer for a stably wrong one.
+
+Measured on the reporting board (a Top Copper trace at `ZOrder` 0 crossing an `Inner 1` pour at
+`ZOrder` 10), sweeping 2,539 port positions over the region where both carry metal: **337 moved when
+the pour was switched on; 0 after.** Worst case the plane jumped 4.81 mm, the width went 1.04 mm →
+10.27 mm, and the direction flipped R0 → R90.
+
+### R2 — a drag was attracted to hidden layers, and R1's first fix is what caused it
+
+The first fix made the lookup ignore visibility entirely. That satisfies R1 and **directly breaks
+R2**: on the same board, with the pour hidden, **9,483 sampled positions resolved onto the invisible
+pour**. Dragging a port anywhere over it measured metal that was not on screen.
+
+The two requirements cannot both be met by one rule, and they do not have to be — **they are
+questions about different MOMENTS**:
+
+- A port **COMMITS** to a conductor layer at a GESTURE (placement, or a move). That asks about
+  VISIBLE metal, so nothing invisible can attract it. `LabelShape.PortLayer` records the answer.
+- **At rest** it asks only about the layer it committed to, ignoring visibility — so no toggle moves
+  it.
+
+A port is never resting and being dragged at once, so the rules never meet. After it:
+`onHidden=0` (was 9,483) and `moved=0 of 2,539`. Null `PortLayer` — every `.clay` written before —
+takes the VISIBLE half, which is the safe one: such a port is never attracted to metal the user
+cannot see, and it commits the first time it is touched.
+
+**The visibility gate is `Visible` alone, not `Visible && Selectable`.** `HitStack` needs both
+because it answers "what did the user CLICK"; this asks "what metal is on screen", which is the gate
+`LayoutSnapQuery` already applies to every snap feature. **And the SMALLEST conductor wins, not the
+topmost** — which is what `ConductorUnderShape` (the shapes-only form, used by the clipboard and
+`DocumentExtents`) has always returned, so the two forms no longer disagree about where a port is.
+
+*Worth knowing:* the geometry snap was never the problem. It gates every feature source on `Visible`
+and offered **0 candidates from the hidden pour out of 4,316** on that board. Measuring it first is
+what kept the fix off the snap query.
+
+### R3 — the arrow did not turn until the mouse was released
+
+The reseat rule (`ReseatMovedPortDirections`) ran only at COMMIT, so the arrow held its old angle for
+the whole gesture and snapped round on release — the one moment it is no longer any use for aiming.
+`LayoutPortDirection.Reseat` is now the single derivation, called by both the live drag-override
+clone and the commit, with the commit's own guards (a selection carrying geometry or an instance is
+moving the CONDUCTOR too, so nothing is re-seated) mirrored in the preview.
+
+**That exposed a latent bug worth its own note.** `SetShapeFieldCommand` always notified `Full`, and
+`LayoutEditorViewModel`'s change handler CLEARS the `.cem`'s published internal-port marks on any
+kind but `Updated`, because anything else can renumber ports. Re-seating a port renumbers nothing —
+so committing such a drag wiped the marks and every internal port in the drawing flashed to an edge
+port's bar-and-arrow. It has an optional `LayoutChangeInfo` now; the reseat sites pass
+`Updated([i])`. Caught by `InternalPortDragRenderTests`, which the layer stamp made fire on every
+port drag rather than only on a direction change.
+
+### R4 — a port dropped on one feature of a polygon drew itself on another
+
+**Nothing was snapping, and this one is independent of the other three.** Every part of an edge
+port's plane came from the conductor's BOUNDING BOX: `PlaneOf` returns a box edge and `SpanAt`'s
+default cut is taken at that box edge. For a straight run of metal the box IS the conductor and both
+are exact — the case they were written for. **A real imported polygon is not one feature.** The
+reporting board's Top Copper is a SINGLE polygon carrying three:
+
+| x | y extent | height |
+| --- | --- | --- |
+| 103.5–103.8 mm | 41.44–42.66 | 1.21 mm (blob) |
+| 105.25–105.6 mm | 42.17–42.77 | 0.60 mm (narrow trace) |
+| 106.0–109.63 mm | 41.60–43.40 | 1.80 mm (rectangle) |
+
+Its box spans all three and describes none of them. A port facing R90 anywhere on that polygon had
+its plane placed at the BOX's bottom edge — a y only the left blob reaches — so the marker was drawn
+over the left blob wherever on the metal the port was dropped. The one port that always looked right
+is the one sitting exactly on the box's own `MaxX`.
+
+`FaceAlong` walks the shape's own flattened outline from the anchor, opposite the direction, and
+returns the local face; `FromOutline` picks the direction from the nearest of the four. Plane, width
+AND the arrow's length clamp are all measured there now. `Resolve`'s own inference was still calling
+`FromBbox` directly and had to be routed through `DirectionAt` — deriving it a second way is exactly
+how a placed port comes to disagree with its own marker.
+
+**`FaceAlong` reads the RUN the port is in, not the nearest crossing**, and that is not a detail: a
+port sitting EXACTLY on an end face — which is where a user puts one — has a crossing at distance
+zero on BOTH sides, so R0 and R180 tie at 0 and the tie-break picks the wrong one. Reading the run
+gives the near face 0 and the far face the conductor's length, which is the difference between "this
+port faces the end" and "this port faces backwards".
+
+*Not a bug, and it surprised me first:* a port on the narrow trace facing its lower edge measures the
+CONTIGUOUS metal at that edge, which on a connected polygon can be the whole run. That is the honest
+answer for a shared face — the defect was measuring a run 2,000 DBU away, not measuring a wide one.
+
+`EmPortExtraction` reads none of this — it re-derives the side from exact flattened geometry and
+refuses rather than guessing, and a port over metal on more than one conductor level is still ITS
+refusal to make ("a port's LEVEL is part of its identity"). All of the above picks a stable conductor
+to draw a marker against; it does not decide what runs.
+
+### R5 — the bar overlapped artwork it does not touch, and the EXCITATION was somewhere else entirely
+
+The port was moved onto the wall of a NOTCH — the shape a connector cutout makes. Three separate
+things were wrong there, and the third is the serious one.
+
+**(a) The bar measured the metal BEHIND the face, not the face.** `SpanAt` cuts a scanline just
+inside the face and keeps the contiguous run of METAL it crosses. Where the face is a conductor's end
+that is the same answer, which is every case it was written for. At a notch the metal keeps going
+past the face: the boundary at x = 103.935 mm runs y 41.437 → 42.290 (0.853 mm), but above 42.290 the
+conductor turns and carries on right, so a scanline one part-in-a-thousand inside the wall stayed in
+metal to y = 42.650 and reported **1.213 mm — 42% too long, centred 0.18 mm above the port**.
+`EdgeAt` measures the boundary chain lying ON the face instead. Where both apply they agree, so it is
+a refinement and not a second opinion; it is also better at something the scanline could not do at
+all — two fingers ending on the same face line are two edges, and the port gets the one it is
+standing on.
+
+**(b) The excitation was on the wrong edge.** `PlanarPorts` marched in from the mesh's own boundary
+and stopped at the first metal it met, reading only the port's TRANSVERSE coordinate. Correct while
+the row crosses one run of metal — every uniform feed, every fixture in `PlanarPortTests` — and
+silently wrong the moment it crosses two. Measured on this board: **both ports resolved to
+plane = 109.6192 mm, width = 1.800 mm.** They drove the same edge, 5.7 mm from where one of them was,
+with no refusal and nothing on screen to say so. Reading the port's longitudinal coordinate and
+taking the run it is ON fixes it; a label beyond the metal still lands on the run it is beyond, which
+is what preserves the documented "may sit just off the end face it names".
+
+**(c) Then it still drove 1.213 mm, and an EDGE is where the metal STOPS.** The transverse walk asked
+only "is there a rooftop straddling the plane here", which stays true past the end of the wall.
+Driving those rooftops injects current into the middle of unbroken metal — a delta gap, not an edge
+feed. One extra lookup (the cell just outside the face must be empty) settles it; it cannot fail at
+the seed, because `outer` is by construction the outermost metal column of the seed's own run. The
+METAL walk is narrowed by the same test deliberately, rather than letting the difference fall into
+`UndrivenMetalM`: that field means "a conformal cell declined to pair here" and carries that
+explanation in words. Metal that never ended at this face is not undriven — it is not this port's
+cross-section.
+
+The sequence, on the reporting board: `plane 109.6192 / w 1.800` → `103.9245 / 1.213` →
+**`103.9245 / 0.853`**, which is the wall, and which is what the editor now draws for the same port.
+**The marker and the excitation agreeing is the point** — before this they were two independent
+derivations of "how wide is this port" and they disagreed by 42% on one and by a whole edge on the
+other.
+
+### R6 — only one of the port's two end segments appeared
+
+Both were being drawn. The marker is the layer's own colour, tinted by
+`PortMarkerContrastTintAmount` for contrast with the BACKGROUND and with nothing else — so where it
+crossed that same layer's fill it was not faint, it was **invisible**. A differential render (the
+frame without the port is the oracle; a pixel probe cannot tell a glyph from the artwork under it)
+measured the serif hanging out over background at 12 changed pixels and the one buried in metal at
+**zero**. A port whose plane ends inside metal — a notch, a tee, a pad on a pour — could only ever
+show the end that happened to stick out, which is exactly "one segment".
+
+A background-coloured halo under the whole path fixes the bar, both serifs and the arrow together:
+35 and 22 changed pixels after. **Applied to all three port kinds**, because the two INTERNAL ones
+sit on the metal by definition and had the same defect more completely than the edge port that
+exposed it.
+
+Gates: `tests/Ui.Tests/Layout/LayoutPortStableUnderLayerVisibilityTests.cs` (R1–R3, including the
+live drag preview asserted mid-gesture and the commit agreeing with it),
+`tests/Ui.Tests/Layout/LayoutPortOnMultiFeaturePolygonTests.cs` (R4/R5a, on a scale model of that
+polygon — plus the notch, two fingers on one face, and a straight run proving the box arithmetic's
+own case is unchanged), `tests/Ui.Tests/Layout/LayoutPortGlyphReadsOverMetalTests.cs` (R6, the
+differential render), and `tests/Engine.Tests/Mom/PlanarPortOnANotchTests.cs` (R5b/c, which also
+pins that a uniform feed resolves exactly as it always did).
+

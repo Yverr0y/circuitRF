@@ -932,8 +932,11 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
             ? (target.X, target.Y)
             : LayoutSnapping.SnapPoint(wx, wy, Model.SnapDbu, suspend);
 
+        // onLayer: null — a PLACEMENT is a gesture, so it asks what VISIBLE metal is here. That is
+        // what keeps a port from landing on a layer the user has switched off, and it is the moment
+        // the port's own PortLayer commitment is made (LayoutPortDirection.LookupFor states the rule).
         var conductorAt = LayoutPortDirection.LookupFor(Model, Technology, InstanceBaseDir);
-        if (conductorAt(sx, sy) is not { } conductor) return null;
+        if (conductorAt(sx, sy, null) is not { } conductor) return null;
 
         // The same visibility floor an ordinary committed label gets — a port marker that renders
         // sub-pixel is a port the user cannot see they placed (the L1-fix default-zoom lesson).
@@ -955,6 +958,9 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
             // box alone (as this did) is what let a port on a tapered PCell be stamped with a
             // direction its own marker then disagreed with.
             PortDirection = LayoutPortDirection.DirectionAt(conductor, sx, sy),
+            // The conductor the user could SEE when they placed it. Null for artwork inside a placed
+            // instance, which owns no top-level layer and is not visibility-filtered anyway.
+            PortLayer     = conductor.Shape?.Layer,
         };
     }
 
@@ -2557,24 +2563,36 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         if (!anyPort) return null;
 
         var conductorAt = LayoutPortDirection.LookupFor(Model, Technology, InstanceBaseDir);
-        LayoutRotation? InferredAt(long x, long y) =>
-            conductorAt(x, y) is { } info ? LayoutPortDirection.DirectionAt(info, x, y) : null;
 
         IUiCommand? combined = null;
         foreach (int i in shapeIndices)
         {
             if (Model.Shapes[i] is not LabelShape { IsPort: true } port) continue;
 
-            var before = InferredAt(port.X, port.Y);
-            if (InferredAt(port.X + dx, port.Y + dy) is not { } adopted) continue;  // landed off the metal
-            if (adopted == before || port.PortDirection == adopted) continue;
+            // The SAME decision the live preview drew throughout the drag — one function, so the
+            // arrow the user released over is the arrow that gets written.
+            var seat = LayoutPortDirection.Reseat(conductorAt, port, dx, dy);
+            if (!seat.Changed) continue;
 
             // "Move" rather than a name of its own: CompositeCommand takes its description from the
             // LAST command, and this rides along with a move rather than being one of its own.
-            var stated = port.PortDirection;
-            IUiCommand cmd = new Commands.Layout.SetShapeFieldCommand<LayoutRotation?>(
-                Model, "Move", stated, adopted, v => port.PortDirection = v);
-            combined = combined is null ? cmd : new CompositeCommand(combined, cmd);
+            // Updated, not Full: neither field changes the shape list's content or its order, and a
+            // Full here CLEARS the .cem's internal-port marks — see SetShapeFieldCommand's own note.
+            var asUpdate = LayoutChangeInfo.Updated([i]);
+            if (seat.DirectionChanged)
+            {
+                var stated = port.PortDirection;
+                IUiCommand cmd = new Commands.Layout.SetShapeFieldCommand<LayoutRotation?>(
+                    Model, "Move", stated, seat.Direction, v => port.PortDirection = v, asUpdate);
+                combined = combined is null ? cmd : new CompositeCommand(combined, cmd);
+            }
+            if (seat.LayerChanged)
+            {
+                var wasLayer = port.PortLayer;
+                IUiCommand cmd = new Commands.Layout.SetShapeFieldCommand<LayerKey?>(
+                    Model, "Move", wasLayer, seat.Layer, v => port.PortLayer = v, asUpdate);
+                combined = combined is null ? cmd : new CompositeCommand(combined, cmd);
+            }
         }
         return combined;
     }
@@ -3809,10 +3827,36 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         if (!duplicating && _selectDragKind == SelectDragKind.Move && (_moveLiveDx != 0 || _moveLiveDy != 0))
         {
             var dict = new Dictionary<int, LayoutShape>();
-            foreach (var idx in MovableSelectedIndices(_selectedIndices))
+            // Owner report, 2026-09-09: a port's orientation did not update while it was being
+            // dragged, only on mouse-up. The reseat rule ran only at COMMIT, so the
+            // arrow held its old angle for the whole gesture and turned on release, which is the one
+            // moment it is no longer any use for aiming. Built only when the selection actually holds
+            // a port, so an ordinary shape drag pays nothing for it.
+            LayoutPortDirection.ConductorLookup? portConductorAt = null;
+            var movable = MovableSelectedIndices(_selectedIndices);
+            // EXACTLY ReseatMovedPortDirections' own guards, because the preview and the commit have
+            // to answer the same question: a selection that also carries geometry (or an instance) is
+            // moving the CONDUCTOR along with the port, and their relative geometry cannot change —
+            // so nothing is re-seated, and the preview must not turn an arrow the commit will leave
+            // alone.
+            bool reseatPorts = _selectedInstanceIndices.Count == 0
+                && movable.Count > 0
+                && movable.All(i => Model.Shapes[i] is LabelShape);
+
+            foreach (var idx in movable)
             {
                 var clone = LayoutGeometry.Clone(Model.Shapes[idx]);
                 LayoutGeometry.TranslateBy(clone, _moveLiveDx, _moveLiveDy);
+
+                if (reseatPorts && clone is LabelShape { IsPort: true } portClone
+                    && Model.Shapes[idx] is LabelShape original)
+                {
+                    portConductorAt ??= LayoutPortDirection.LookupFor(Model, Technology, InstanceBaseDir);
+                    var seat = LayoutPortDirection.Reseat(portConductorAt, original, _moveLiveDx, _moveLiveDy);
+                    portClone.PortDirection = seat.Direction;
+                    portClone.PortLayer     = seat.Layer;
+                }
+
                 dict[idx] = clone;
             }
             dragOverrides = dict;

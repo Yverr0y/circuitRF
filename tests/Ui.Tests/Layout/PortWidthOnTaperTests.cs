@@ -173,7 +173,7 @@ public class PortWidthOnTaperTests
         // carries no shape, and the bounding box is the honest fallback — the marker still draws.
         var bb = new Bbox(0, 0, Um(10000), Um(2900));
         var hint = LayoutPortDirection.Resolve(
-            (x, y) => new LayoutPortDirection.ConductorInfo(bb, null),
+            (x, y, onLayer) => new LayoutPortDirection.ConductorInfo(bb, null),
             Port(0, Um(1450), LayoutRotation.R0));
 
         Assert.NotNull(hint);

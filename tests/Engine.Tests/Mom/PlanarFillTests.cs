@@ -24,7 +24,13 @@ public class PlanarFillTests
     /// by "the" cell size rather than by each cell's own area passes on a uniform mesh and fails here.
     /// Dimensions are realistic (sub-millimetre) so the numbers are the ones production sees.
     /// </summary>
-    public static PlanarMesh Grid(double[] gx, double[] gy)
+    /// <param name="metalAt">
+    /// Which grid positions carry metal, or null for a full slab — every caller before the notch
+    /// fixture (<c>PlanarPortOnANotchTests</c>) passes null and gets exactly the mesh it always did.
+    /// A position without metal contributes no cell and no basis, which is what lets a fixture have
+    /// a row whose metal STOPS somewhere other than the mesh's own edge.
+    /// </param>
+    public static PlanarMesh Grid(double[] gx, double[] gy, Func<int, int, bool>? metalAt = null)
     {
         int nx = gx.Length - 1, ny = gy.Length - 1;
         var cells = new List<PlanarCell>();
@@ -32,6 +38,7 @@ public class PlanarFillTests
         for (int iy = 0; iy < ny; iy++)
             for (int ix = 0; ix < nx; ix++)
             {
+                if (metalAt is not null && !metalAt(ix, iy)) { at[iy * nx + ix] = -1; continue; }
                 at[iy * nx + ix] = cells.Count;
                 cells.Add(new PlanarCell(0, ix, iy, gx[ix], gy[iy], gx[ix + 1], gy[iy + 1]));
             }
@@ -40,8 +47,11 @@ public class PlanarFillTests
         for (int iy = 0; iy < ny; iy++)
             for (int ix = 0; ix < nx; ix++)
             {
-                if (ix + 1 < nx) bases.Add(new PlanarBasis(0, at[iy * nx + ix], at[iy * nx + ix + 1], PlanarBasisDirection.X));
-                if (iy + 1 < ny) bases.Add(new PlanarBasis(0, at[iy * nx + ix], at[(iy + 1) * nx + ix], PlanarBasisDirection.Y));
+                if (at[iy * nx + ix] < 0) continue;
+                if (ix + 1 < nx && at[iy * nx + ix + 1] >= 0)
+                    bases.Add(new PlanarBasis(0, at[iy * nx + ix], at[iy * nx + ix + 1], PlanarBasisDirection.X));
+                if (iy + 1 < ny && at[(iy + 1) * nx + ix] >= 0)
+                    bases.Add(new PlanarBasis(0, at[iy * nx + ix], at[(iy + 1) * nx + ix], PlanarBasisDirection.Y));
             }
 
         return new PlanarMesh(cells, bases, ["Metal"], gx, gy);

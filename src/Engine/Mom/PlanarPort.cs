@@ -735,12 +735,45 @@ public static class PlanarPorts
 
         if (!internalGap)
         {
-            // ── March in from the named side until metal appears: that column IS the outer one (D2)
+            // ── March in from the named side to the RUN OF METAL THE PORT IS ON (D2) ────────────
+            //
+            // This used to march from the mesh's own edge and stop at the FIRST metal it met,
+            // reading only the port's transverse coordinate — "the transverse coordinate is all that
+            // is read", as the note above still says for the clamp. That is right while the port's
+            // row crosses exactly ONE run of metal, which is every uniform feed and every test
+            // fixture, and it is why it stood so long.
+            //
+            // **It is silently wrong the moment the row crosses two.** Owner report, 2026-09-09: a
+            // port placed on the wall of a NOTCH in a connector cutout resolved to
+            // side = MaxX, plane = 109.6192 mm — the far edge of a polygon 5.7 mm away, and the
+            // SAME plane the other port had already claimed. Both ports drove one edge: a complete,
+            // plausible two-port answer for a structure nobody drew, with no refusal and nothing on
+            // screen to say so. A row through a slot, a gap, or two separate conductors on one layer
+            // is the same shape of error.
+            //
+            // The port's LONGITUDINAL coordinate is what disambiguates, and it costs nothing to read.
+            // The run CONTAINING it wins; failing that the nearest one, which is what preserves the
+            // documented allowance that "its label may legitimately sit just off the end face it
+            // names" — a label beyond the metal still lands on the run it is beyond, exactly as the
+            // old march did. Single-run rows resolve cell for cell as before.
+            double lCoordEdge = alongX ? port.Location.X : port.Location.Y;
+
             outer = -1;
-            for (int k = 0; k < nLong; k++)
+            double bestRunD = double.PositiveInfinity;
+            for (int c = 0; c < nLong; )
             {
-                int i = fromLow ? k : nLong - 1 - k;
-                if (CellAt(i, seedT) >= 0) { outer = i; break; }
+                if (CellAt(c, seedT) < 0) { c++; continue; }
+
+                int runLo = c;
+                while (c + 1 < nLong && CellAt(c + 1, seedT) >= 0) c++;
+                int runHi = c++;
+
+                double a = gLong[runLo], b = gLong[runHi + 1];
+                double d = lCoordEdge < a ? a - lCoordEdge : lCoordEdge > b ? lCoordEdge - b : 0;
+                if (d >= bestRunD) continue;
+
+                bestRunD = d;
+                outer    = fromLow ? runLo : runHi;
             }
 
             if (outer < 0)
@@ -863,10 +896,35 @@ public static class PlanarPorts
         //
         // Under the staircase every metal-bearing pair is paired, so this scan reproduces the old one
         // cell for cell and every pre-conformal port is bit-identical.
+        // ── AN EDGE PORT'S RUN IS THE END FACE, AND AN END IS WHERE THE METAL STOPS ─────────────
+        //
+        // Owner report, 2026-09-09: a port on the wall of a notch was drawn 0.853 mm wide (the wall)
+        // and driven 1.213 mm (the wall PLUS the metal that carries on past it toward the feed).
+        // The transverse walk asked only "is there a rooftop straddling the plane here", and at a
+        // notch the answer stays yes well past the end of the edge: the metal above the wall is
+        // continuous through the plane because the conductor turns and keeps going.
+        //
+        // Driving those rooftops is not an edge feed. Current there is injected in the MIDDLE of
+        // unbroken metal — a delta gap, not an end — so the structure solved is not the one drawn,
+        // and the marker and the excitation disagreed about the port's own width.
+        //
+        // The test is one lookup: the cell just OUTSIDE the face must be empty. On a uniform feed it
+        // is empty across the whole width and every pre-existing port resolves cell for cell as
+        // before; it can never fail at the seed, because `outer` is by construction the outermost
+        // metal column of the seed's own run.
+        //
+        // It narrows the METAL walk below by the same test, deliberately, rather than letting the
+        // difference fall into UndrivenMetalM: that field means "metal at the plane a conformal cell
+        // declined to pair", and it carries that explanation in words. Metal that never ended here is
+        // not undriven — it is not this port's cross-section at all.
+        int outside = fromLow ? outer - 1 : outer + 1;
+        bool EndsHere(int t) =>
+            internalGap || outside < 0 || outside >= nLong || CellAt(outside, t) < 0;
+
         bool HasBasis(int t)
         {
             int a = CellAt(lowCol, t), b = CellAt(highCol, t);
-            return a >= 0 && b >= 0 && byPair.ContainsKey((a, b, port.Direction));
+            return a >= 0 && b >= 0 && byPair.ContainsKey((a, b, port.Direction)) && EndsHere(t);
         }
 
         if (!HasBasis(seedT))
@@ -888,8 +946,8 @@ public static class PlanarPorts
 
         // …and, separately, how far the METAL runs, so the note can say what was left out.
         int mLo = lo, mHi = hi;
-        while (mLo - 1 >= 0    && CellAt(lowCol, mLo - 1) >= 0 && CellAt(highCol, mLo - 1) >= 0) mLo--;
-        while (mHi + 1 < nTran && CellAt(lowCol, mHi + 1) >= 0 && CellAt(highCol, mHi + 1) >= 0) mHi++;
+        while (mLo - 1 >= 0    && CellAt(lowCol, mLo - 1) >= 0 && CellAt(highCol, mLo - 1) >= 0 && EndsHere(mLo - 1)) mLo--;
+        while (mHi + 1 < nTran && CellAt(lowCol, mHi + 1) >= 0 && CellAt(highCol, mHi + 1) >= 0 && EndsHere(mHi + 1)) mHi++;
 
         double PlaneMetal(int t)
         {

@@ -983,7 +983,7 @@ public static partial class LayoutRenderer
             {
                 Layer = label.Layer, X = label.X, Y = label.Y, Text = label.Text,
                 Height = effectiveHeight, RotationDegrees = label.RotationDegrees, IsPort = label.IsPort,
-                PortDirection = label.PortDirection, Style = label.Style,
+                PortDirection = label.PortDirection, PortLayer = label.PortLayer, Style = label.Style,
                 HAlign = label.HAlign, VAlign = label.VAlign,
             };
             DrawLabelText(canvas, effective, ps, color, centred: label.IsPort);
@@ -2318,6 +2318,53 @@ public static partial class LayoutRenderer
     private const double PortMarkerContrastTintAmount = 0.45;
 
     /// <summary>
+    /// How far the port marker's backing halo extends past its own stroke, per side, in device
+    /// pixels.
+    ///
+    /// <para><b>Owner report, 2026-09-09: only one of the port's two end segments appeared, and both
+    /// are needed to read its width.</b> Both were being drawn. A differential render of the
+    /// reported shape settles what was actually happening: the serif hanging out over BACKGROUND
+    /// changed 12 pixels in its own neighbourhood, and the one over METAL changed <b>zero</b>. The
+    /// marker is tinted by <see cref="PortMarkerContrastTintAmount"/> for contrast with the
+    /// BACKGROUND and is otherwise the layer's own colour — so drawn on top of that same layer's fill
+    /// it is not faint, it is invisible. A port whose plane ends inside metal (a notch, a tee, a pad
+    /// on a pour) could only ever show the end that happened to stick out, which is precisely "one
+    /// segment".</para>
+    ///
+    /// <para>A halo fixes the whole marker rather than the serifs alone — the plane bar lying along a
+    /// conductor's own outline had the same problem and read as part of the outline.</para>
+    /// </summary>
+    private const float PortMarkerHaloDevicePixels = 1.75f;
+
+    /// <summary>How much of the background the halo lays down. Not opaque: the marker has to read as
+    /// drawn ON the artwork, not as a hole cut through it.</summary>
+    private const byte PortMarkerHaloAlpha = 205;
+
+    /// <summary>Lays <paramref name="path"/> down in the background's colour, wider than
+    /// <paramref name="stroke"/>, then strokes it — see <see cref="PortMarkerHaloDevicePixels"/> for
+    /// why every port glyph needs it. Shared by all three port kinds: the two INTERNAL kinds sit on
+    /// the metal by definition, so they had the same defect more completely than the edge port that
+    /// exposed it.</summary>
+    private static void StrokeWithHalo(SKCanvas canvas, SKPath path, SKPaint stroke,
+                                       SKColor background, double scaleUm, LayoutFrameCounters counters)
+    {
+        using (var halo = new SKPaint
+        {
+            IsAntialias = true, Style = SKPaintStyle.Stroke,
+            StrokeWidth = stroke.StrokeWidth + DevicePixelsToPathSpace(scaleUm, 2f * PortMarkerHaloDevicePixels),
+            StrokeCap = stroke.StrokeCap, StrokeJoin = stroke.StrokeJoin,
+            Color = background.WithAlpha(PortMarkerHaloAlpha),
+        })
+        {
+            canvas.DrawPath(path, halo);
+            counters.DrawCalls++;
+        }
+
+        canvas.DrawPath(path, stroke);
+        counters.DrawCalls++;
+    }
+
+    /// <summary>
     /// How long the direction arrow is, and how long its barbs are, in DBU.
     ///
     /// <para><b>The arrow is bounded by the metal it points into, never by its own preferred size.</b>
@@ -2573,7 +2620,7 @@ public static partial class LayoutRenderer
         LayoutPortDirection.ConductorLookup? conductorAt, LabelShape label,
         LayoutPortDirection.PortHint hint)
     {
-        if (conductorAt?.Invoke(label.X, label.Y) is not { Shape: { } shape } info) return hint;
+        if (conductorAt?.Invoke(label.X, label.Y, label.PortLayer) is not { Shape: { } shape } info) return hint;
 
         bool alongX = hint.Direction is LayoutRotation.R0 or LayoutRotation.R180;
         var span = LayoutPortDirection.SpanAt(
@@ -2665,8 +2712,7 @@ public static partial class LayoutRenderer
             y += DX(hint.WidthDbu * InternalPortGroundPitchOverWidth);
         }
 
-        canvas.DrawPath(path, paint);
-        counters.DrawCalls++;
+        StrokeWithHalo(canvas, path, paint, background, scaleUm, counters);
 
         // The snap, drawn — the same leader an edge port and a gap already use. Only when the mesh
         // put the footprint somewhere other than where the label sits, so a port over its own via
@@ -2764,8 +2810,7 @@ public static partial class LayoutRenderer
         // a headless shaft through the break is indistinguishable from a stray line. The port's
         // polarity is a number rather than a picture: the run's own note names which way positive
         // current crosses, and the EM Setup panel is where it is set.
-        canvas.DrawPath(path, paint);
-        counters.DrawCalls++;
+        StrokeWithHalo(canvas, path, paint, background, scaleUm, counters);
 
         // The snap, drawn: a leader from the label's own anchor to the cut the mesh put it on. Only
         // when they genuinely differ, so a gap that landed where it was placed carries no extra ink.
@@ -2884,8 +2929,9 @@ public static partial class LayoutRenderer
             path.LineTo(tipX + DX(abx), tipY - DX(aby));
         }
 
-        canvas.DrawPath(path, paint);
-        counters.DrawCalls++;
+        // The bar, BOTH serifs and the arrow read wherever they fall — over the conductor they
+        // annotate as well as over empty canvas. See PortMarkerHaloDevicePixels for the measurement.
+        StrokeWithHalo(canvas, path, paint, background, scaleUm, counters);
 
         // A leader from the label's own anchor to the plane, drawn only when the two genuinely differ
         // — otherwise the text would look unattached to the marker it names.

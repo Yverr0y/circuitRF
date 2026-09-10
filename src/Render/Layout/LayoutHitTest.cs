@@ -61,6 +61,20 @@ public static class LayoutHitTest
     /// <c>Selectable == false</c>; unknown layers resolve through <see cref="FallbackPalette"/> and
     /// are always selectable.
     /// </summary>
+    /// <param name="ignoreLayerVisibility">
+    /// <b>Answer as if every layer were visible and selectable.</b> For a CLICK that would be wrong —
+    /// a user cannot pick what they cannot see — so it is off by default and every interactive caller
+    /// leaves it off. It exists for the one caller whose question is not "what did the user click"
+    /// but "what artwork is at this point": <see cref="LayoutPortDirection.LookupFor(LayoutView,
+    /// Technology?, string, long)"/>, which resolves the conductor a port's marker is drawn against.
+    ///
+    /// <para><b>Owner report, 2026-09-09: a placed port moved when another layer's visibility was
+    /// switched on.</b> A port marker is drawn at the conductor END and sized to that
+    /// conductor's width, so reading this filter made a port's geometry a function of VIEW state: show
+    /// a second layer and the lookup returned a different shape, and the plane bar, the arrow and the
+    /// reported width all relocated onto it. Visible/Selectable say what may be SEEN and PICKED; they
+    /// say nothing about what is drawn in the design, and a port never moves because of them.</para>
+    /// </param>
     /// <param name="portMarkerRegion">
     /// A port label's pick region, when the caller can supply one. <b>Ports are picked by their MARK
     /// rather than by their anchor</b> (2026-08-25), and the mark's position depends on the port's
@@ -69,7 +83,8 @@ public static class LayoutHitTest
     /// every caller predating the change gets and is a strictly usable pick region.
     /// </param>
     public static IReadOnlyList<int> HitStack(LayoutView view, Technology? tech, long x, long y, long tolDbu,
-                                              Func<LabelShape, Bbox>? portMarkerRegion = null)
+                                              Func<LabelShape, Bbox>? portMarkerRegion = null,
+                                              bool ignoreLayerVisibility = false)
     {
         tolDbu = Math.Max(tolDbu, 0);
         var layerMap = tech?.Layers.ToDictionary(l => l.Key);
@@ -87,7 +102,7 @@ public static class LayoutHitTest
             LayerDef def = layerMap is not null && layerMap.TryGetValue(shape.Layer, out var found)
                 ? found
                 : FallbackPalette.For(shape.Layer);
-            if (!def.Visible || !def.Selectable) continue;
+            if (!ignoreLayerVisibility && (!def.Visible || !def.Selectable)) continue;
 
             if (shape is LabelShape { IsPort: true } portLabel && portMarkerRegion is not null)
             {

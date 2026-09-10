@@ -2148,3 +2148,48 @@ and the sideband `Y_NN` entries second, and either fallback is stated once with 
 (`wsprobe.hb-cache-over-budget`). **The brief's §4 arithmetic omits the certificates, and on a large
 design they are the larger half** — `16·nnz` bytes per entry against `16·N_int²` for the `Y_NN` it
 guards. They are counted in the projection for that reason.
+
+## An edge port resolved to the wrong edge, and drove past the end of the one it named (2026-09-09)
+
+Owner report on a connector-cutout board: a port placed on the wall of a NOTCH in the top-copper
+polygon. Two independent defects in `PlanarPorts`, both invisible on a uniform feed and both exposed
+by that one shape.
+
+**1. The march inward read only the port's TRANSVERSE coordinate.** It started at the mesh's own
+boundary on the named side and stopped at the first metal it met. That is correct while the port's
+row crosses ONE run of metal — every uniform feed, and every fixture in `PlanarPortTests` — which is
+why it stood so long. Measured on the reported board, both ports resolved to
+`plane = 109.6192 mm, width = 1.800 mm`: **they drove the same edge**, 5.7 mm from where one of them
+actually was. Nothing refused and nothing warned — a complete, plausible two-port answer for a
+structure nobody drew. A row through a slot, a gap, or two separate conductors on one layer is the
+same shape of error.
+
+The port's LONGITUDINAL coordinate disambiguates it and costs one extra loop. The run CONTAINING it
+wins; failing that the nearest, which is what preserves the documented allowance that a label "may
+legitimately sit just off the end face it names" — a label beyond the metal still lands on the run it
+is beyond, exactly as the old march did.
+
+**2. The transverse run then walked past the end of the edge.** `HasBasis` asked only "is there a
+rooftop straddling the plane here", and at a notch that stays true well past the wall, because above
+the wall the conductor turns and keeps going. Driving those rooftops injects current into the MIDDLE
+of unbroken metal — a delta gap, not an edge feed — so the structure solved was not the one drawn,
+and the layout editor's marker and the excitation disagreed about the port's own width.
+
+**An END is where the metal STOPS**, and the test is one lookup: the cell just OUTSIDE the face must
+be empty. On a uniform feed it is empty across the whole width, so every pre-existing port resolves
+cell for cell as before. It can never fail at the seed, because `outer` is by construction the
+outermost metal column of the seed's own run.
+
+It narrows the METAL walk by the same test deliberately, rather than letting the difference fall into
+`UndrivenMetalM`. That field means "metal at the plane a conformal cell declined to pair", and it
+carries that explanation in words; metal that never ended at this face is not undriven, it is not
+this port's cross-section at all.
+
+Sequence on the reporting board: `109.6192 mm / 1.800 mm` -> `103.9245 mm / 1.213 mm` ->
+`103.9245 mm / 0.853 mm`, which is the wall. `src/Render/RESOLVED.md` carries the other half — the
+layout editor was measuring the same port three different wrong ways at the same time, and the two
+halves agreeing is the point.
+
+Gate: `tests/Engine.Tests/Mom/PlanarPortOnANotchTests.cs`. `PlanarFillTests.Grid` gained an optional
+metal mask so a fixture can have a row whose metal stops somewhere other than the mesh's own edge;
+every caller before it passes null and gets the mesh it always did.

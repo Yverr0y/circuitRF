@@ -157,7 +157,7 @@ public class LayoutPortOnInstancePinTests : IDisposable
         var (top, baseDir) = TopWithTaper();
         var lookup = LayoutPortDirection.LookupFor(top, tech: null, baseDir);
 
-        var info = Assert.NotNull(lookup(Length / 2, 0));
+        var info = Assert.NotNull(lookup(Length / 2, 0, null));
         Assert.Null(info.Pin);   // no pin claimed — this point names none
 
         var h = Assert.NotNull(LayoutPortDirection.Resolve(lookup,
@@ -266,7 +266,7 @@ public class LayoutPortOnInstancePinTests : IDisposable
 
         foreach (var (x, y) in new (long, long)[] { (0, 0), (Length, 0), (Length / 2, 0) })
         {
-            var info = Assert.NotNull(lookup(x, y));
+            var info = Assert.NotNull(lookup(x, y, null));
             var stamped = LayoutPortDirection.DirectionAt(info, x, y);
             var inferred = Assert.NotNull(LayoutPortDirection.Resolve(lookup,
                 new LabelShape { X = x, Y = y, Text = "P1", IsPort = true })).Direction;

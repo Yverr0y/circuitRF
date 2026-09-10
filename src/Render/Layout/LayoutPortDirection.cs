@@ -215,7 +215,17 @@ public static class LayoutPortDirection
     /// which is exactly what "Update Layout from Schematic" produces — see
     /// <see cref="LookupFor(LayoutView, Technology?, string, long)"/>).
     /// </summary>
-    public delegate ConductorInfo? ConductorLookup(long x, long y);
+    /// <param name="onLayer">
+    /// <b>The layer the port has already COMMITTED to, when it has one</b>
+    /// (<see cref="LabelShape.PortLayer"/>) — restrict the search to it, and pay no attention to
+    /// whether that layer is currently shown. Null asks the other question: <i>what visible metal is
+    /// here</i>, which is what a placement or a drag is entitled to ask and what re-stamps the
+    /// commitment.
+    ///
+    /// <para>The split is the whole of how two owner requirements that pull opposite ways are both
+    /// kept — see <see cref="LookupFor(LayoutView, Technology?, string, long)"/>.</para>
+    /// </param>
+    public delegate ConductorInfo? ConductorLookup(long x, long y, LayerKey? onLayer);
 
     /// <summary>The unit vector current flows along, entering the structure. Integer, because the
     /// four cases are axis-aligned by construction.</summary>
@@ -368,6 +378,191 @@ public static class LayoutPortDirection
         return width > 0 ? (width, (long)System.Math.Round(0.5 * (lo + hi))) : null;
     }
 
+    /// <summary>
+    /// <b>Where the conductor's edge is, LOCALLY, in the direction the port names.</b> Walks the
+    /// shape's own outline from the anchor, OPPOSITE <paramref name="direction"/> (current flows away
+    /// from the face and into the metal), and returns the first crossing — the along-coordinate of
+    /// the face the port is standing on.
+    ///
+    /// <para><b>Why this exists (owner report, 2026-09-09: a port dropped on the big rectangle at
+    /// one end of a polygon kept drawing itself over the trace at the other end).</b> Everything about an
+    /// edge port's plane was measured from the conductor's BOUNDING BOX:
+    /// <see cref="PlaneOf"/> returns a box edge, and <see cref="SpanAt"/>'s default cut is at that
+    /// box edge. For a straight run of metal the box IS the conductor and both are exact — which is
+    /// the case they were written for. <b>A real imported polygon is not one feature.</b> On the
+    /// reporting board a single Top Copper polygon carries three: a blob at x≈103.5 mm (1.21 mm
+    /// tall), a narrow 0.60 mm trace at x≈105.4, and a 1.80 mm rectangle from x≈106.0 to 109.63. Its
+    /// bounding box spans all three and describes none of them, so a port on the narrow trace had its
+    /// plane drawn at the BOX's bottom edge — 0.73 mm below the anchor and 1.8 mm to the left of it,
+    /// measuring 0.37 mm of the far blob's metal instead of the trace it was placed on. The port had
+    /// not moved; it had never been drawn where it was put.</para>
+    ///
+    /// <para>Only the port sitting exactly on a box edge escaped it, which is why P1 — at the
+    /// polygon's own <c>MaxX</c> — always looked right and nothing else did.</para>
+    ///
+    /// <para>Null when the anchor is not on the metal in that direction, which is the caller's cue to
+    /// fall back to the bounding box exactly as before — an instance, or a shape the flattener
+    /// declines, has no outline to walk.</para>
+    /// </summary>
+    private static long? FaceAlong(LayoutShape shape, LayoutRotation direction, long x, long y)
+    {
+        var ring = OutlineOf(shape);
+        if (ring is null || ring.Length < 6) return null;
+
+        bool alongX  = direction is LayoutRotation.R0 or LayoutRotation.R180;
+        bool fromLow = direction is LayoutRotation.R0 or LayoutRotation.R90;
+
+        double at     = alongX ? x : y;   // the coordinate the face is measured in
+        double across = alongX ? y : x;   // the line the walk runs along
+
+        var hits = new List<double>();
+        int n = ring.Length / 2;
+        for (int i = 0; i < n; i++)
+        {
+            int j = (i + 1) % n;
+            double ta = alongX ? ring[2 * i + 1] : ring[2 * i];
+            double tb = alongX ? ring[2 * j + 1] : ring[2 * j];
+
+            // Half-open in the transverse coordinate, so a vertex exactly on the line counts once.
+            if (!((ta <= across && tb > across) || (tb <= across && ta > across))) continue;
+
+            double a = alongX ? ring[2 * i] : ring[2 * i + 1];
+            double b = alongX ? ring[2 * j] : ring[2 * j + 1];
+            hits.Add(a + (across - ta) / (tb - ta) * (b - a));
+        }
+
+        if (hits.Count < 2) return null;
+        hits.Sort();
+
+        // ── THE RUN THE PORT IS IN, NOT THE NEAREST CROSSING ──────────────────────────────────
+        // Pairs of crossings bound the metal, exactly as SpanAt reads them. Taking the nearest
+        // crossing on the naming side instead is wrong for the case that matters most: a port
+        // sitting EXACTLY on an end face (which is where a user puts one) has a crossing at distance
+        // zero on BOTH sides, so R0 and R180 tie at 0 and the wrong one wins the tie-break. Reading
+        // the run gives that port a far face 4,000 DBU away and a near face at 0, which is the whole
+        // difference between "this port faces the end" and "this port faces backwards".
+        double best = double.MaxValue, lo = 0, hi = 0;
+        for (int i = 0; i + 1 < hits.Count; i += 2)
+        {
+            double a = hits[i], b = hits[i + 1];
+            double d = at < a ? a - at : at > b ? at - b : 0;
+            if (d >= best) continue;
+            best = d; lo = a; hi = b;
+        }
+        if (best == double.MaxValue) return null;
+
+        return (long)System.Math.Round(fromLow ? lo : hi);
+    }
+
+    /// <summary>
+    /// Which way a port at <paramref name="x"/>,<paramref name="y"/> faces, from the shape's OWN
+    /// outline: the nearest of the four cardinal edges under it, with current flowing away from that
+    /// edge into the metal.
+    ///
+    /// <para>The local counterpart of <see cref="FromBbox"/>, and preferred over it wherever there is
+    /// an outline to walk — see <see cref="FaceAlong"/> for the board that made the difference
+    /// visible. Falls back to null (and so to the box) when the anchor is not on the metal.</para>
+    /// </summary>
+    private static LayoutRotation? FromOutline(LayoutShape shape, long x, long y)
+    {
+        LayoutRotation? best = null;
+        double bestD = double.MaxValue;
+
+        foreach (var dir in new[] { LayoutRotation.R0, LayoutRotation.R90, LayoutRotation.R180, LayoutRotation.R270 })
+        {
+            if (FaceAlong(shape, dir, x, y) is not { } face) continue;
+            double d = System.Math.Abs((dir is LayoutRotation.R0 or LayoutRotation.R180 ? x : y) - face);
+            if (d >= bestD) continue;
+            bestD = d;
+            best = dir;
+        }
+        return best;
+    }
+
+    /// <summary>How far off the face a boundary segment may lie and still be part of it. The outline
+    /// is flattened at <c>tolDbu: 1</c> and an axis-aligned face's crossing is exact, so this is a
+    /// rounding allowance and nothing more.</summary>
+    private const long FaceTouchTolDbu = 2;
+
+    /// <summary>
+    /// <b>The conductor EDGE the port stands on</b> — the maximal chain of outline segments lying ON
+    /// the face, measured across <paramref name="direction"/>, containing the port's own transverse
+    /// position. Its length and its centre.
+    ///
+    /// <para><b>Why this is not <see cref="SpanAt"/> (owner report, 2026-09-09: the port's marks
+    /// overlapped artwork above the conductor it names, and should be limited to the edge it stands
+    /// on).</b> <see cref="SpanAt"/> cuts a scanline just INSIDE the face and keeps the
+    /// contiguous run of METAL it crosses. Where the face is a conductor's end that is the same
+    /// answer, which is every case it was written for. It is a different answer wherever the metal
+    /// keeps going past the face — a NOTCH. On the reporting board the port sits on a notch's left
+    /// wall: the boundary at x = 103.935 mm runs y 41.437 → 42.290 (0.853 mm), but above 42.290 the
+    /// metal continues to the RIGHT toward the feed, so a scanline one part-in-a-thousand inside the
+    /// wall stays in metal all the way to y = 42.650 and reported 1.213 mm — a bar 42% too long,
+    /// centred 0.18 mm above the port, overlapping artwork the port does not touch.</para>
+    ///
+    /// <para><b>Where both apply they agree</b>, so this is a refinement and not a second opinion: a
+    /// rectangle's end face, a taper's narrow end, an isolated feed all have a boundary chain exactly
+    /// as long as the metal behind it. Where they differ, the EDGE is what an edge port drives.</para>
+    ///
+    /// <para>It is also better at something <see cref="SpanAt"/> could not do: two fingers ending on
+    /// the SAME face line are two chains, and the port gets the one it is standing on rather than a
+    /// scanline's nearest run.</para>
+    ///
+    /// <para>Null when no boundary lies on the face — an oblique end cut, a curve, or a face that
+    /// came from the bounding box rather than from the outline. The caller then falls back to
+    /// <see cref="SpanAt"/>, which is what every port had before.</para>
+    /// </summary>
+    private static (long Width, long Centre)? EdgeAt(
+        LayoutShape shape, LayoutRotation direction, long faceAlong, long acrossAt)
+    {
+        var ring = OutlineOf(shape);
+        if (ring is null || ring.Length < 6) return null;
+
+        bool alongX = direction is LayoutRotation.R0 or LayoutRotation.R180;
+
+        var spans = new List<(long Lo, long Hi)>();
+        int n = ring.Length / 2;
+        for (int i = 0; i < n; i++)
+        {
+            int j = (i + 1) % n;
+            long a = alongX ? ring[2 * i] : ring[2 * i + 1];
+            long b = alongX ? ring[2 * j] : ring[2 * j + 1];
+
+            // BOTH ends on the face — a segment merely crossing it is not part of it.
+            if (System.Math.Abs(a - faceAlong) > FaceTouchTolDbu) continue;
+            if (System.Math.Abs(b - faceAlong) > FaceTouchTolDbu) continue;
+
+            long ta = alongX ? ring[2 * i + 1] : ring[2 * i];
+            long tb = alongX ? ring[2 * j + 1] : ring[2 * j];
+            if (ta == tb) continue;                       // a degenerate segment spans no edge
+            spans.Add(ta < tb ? (ta, tb) : (tb, ta));
+        }
+        if (spans.Count == 0) return null;
+
+        // Chain them: a flattened outline arrives as many short collinear pieces, and an edge broken
+        // into fragments would report a fraction of itself.
+        spans.Sort(static (p, q) => p.Lo.CompareTo(q.Lo));
+        var merged = new List<(long Lo, long Hi)> { spans[0] };
+        foreach (var sp in spans.Skip(1))
+        {
+            var last = merged[^1];
+            if (sp.Lo - last.Hi <= FaceTouchTolDbu) merged[^1] = (last.Lo, System.Math.Max(last.Hi, sp.Hi));
+            else merged.Add(sp);
+        }
+
+        (long Lo, long Hi) best = merged[0];
+        long bestD = long.MaxValue;
+        foreach (var m in merged)
+        {
+            long d = acrossAt < m.Lo ? m.Lo - acrossAt : acrossAt > m.Hi ? acrossAt - m.Hi : 0;
+            if (d >= bestD) continue;
+            bestD = d; best = m;
+        }
+
+        long width = best.Hi - best.Lo;
+        return width > 0 ? (width, best.Lo + width / 2) : null;
+    }
+
     /// <summary>The shape's outer ring as a flat x,y array, or null when it has none to give.
     /// A polygon answers directly; anything curved is flattened at a tolerance fine enough that the
     /// span it yields is exact to the DBU.</summary>
@@ -447,13 +642,15 @@ public static class LayoutPortDirection
 
     /// <summary>The same search, returning the SHAPE — which is what a width measurement needs and
     /// what a bounding box has already thrown away.</summary>
-    public static LayoutShape? ConductorUnderShape(IReadOnlyList<LayoutShape> shapes, long x, long y)
+    public static LayoutShape? ConductorUnderShape(IReadOnlyList<LayoutShape> shapes, long x, long y,
+                                                   LayerKey? onLayer = null)
     {
         LayoutShape? best = null;
         double bestArea = double.MaxValue;
         foreach (var s in shapes)
         {
             if (s is LabelShape or BitmapShape) continue;
+            if (onLayer is { } want && s.Layer != want) continue;
             var bb = LayoutGeometry.BboxOf(s);
             if (bb.IsEmpty) continue;
             if (x < bb.MinX || x > bb.MaxX || y < bb.MinY || y > bb.MaxY) continue;
@@ -495,7 +692,7 @@ public static class LayoutPortDirection
     {
         if (!label.IsPort) return null;
 
-        var info = conductorAt?.Invoke(label.X, label.Y);
+        var info = conductorAt?.Invoke(label.X, label.Y, label.PortLayer);
 
         if (label.PortDirection is { } stated)
         {
@@ -523,8 +720,11 @@ public static class LayoutPortDirection
             return new PortHint(pin.Direction, pin.WidthDbu, Inferred: true, pin.X, pin.Y,
                                 LengthAheadOf(inf.Box, pin.X, pin.Y, pin.Direction));
 
-        var dir = FromBbox(inf.Box, label.X, label.Y);
-        return Measured(inf, dir, label, Inferred: true);
+        // DirectionAt, not FromBbox: the SAME inference the Port tool stamps with, which prefers the
+        // shape's own outline over its bounding box. Deriving it a second way here is how a placed
+        // port came to disagree with its own marker, and it is why a port on one feature of a
+        // multi-feature polygon was pointed at a face belonging to a different one.
+        return Measured(inf, DirectionAt(inf, label.X, label.Y), label, Inferred: true);
     }
 
     /// <summary>
@@ -539,19 +739,56 @@ public static class LayoutPortDirection
     {
         var (px, py) = PlaneOf(info.Box, dir);
         long width = WidthAcross(info.Box, dir);
+        long length = LengthAlong(info.Box, dir);
 
         bool alongX = dir is LayoutRotation.R0 or LayoutRotation.R180;
-        if (info.Shape is { } shape &&
-            SpanAt(shape, info.Box, dir, alongX ? label.Y : label.X) is { } span)
+        bool fromLow = dir is LayoutRotation.R0 or LayoutRotation.R90;
+
+        if (info.Shape is { } shape)
         {
-            width = span.Width;
-            // The plane's own transverse centre moves with the metal: on an off-centre or curved run
-            // the face's midpoint is not the box's midpoint, and a bar centred on the box would sit
-            // beside the conductor rather than across it.
-            if (alongX) py = span.Centre; else px = span.Centre;
+            // The LOCAL face, when the outline can give one — the box's own edge otherwise, which is
+            // what every port got before and is still exact for a straight run of metal.
+            long? face = FaceAlong(shape, dir, label.X, label.Y);
+            if (face is { } f)
+            {
+                if (alongX) px = f; else py = f;
+                // How much metal runs ahead of THIS face, rather than the whole box's extent — the
+                // arrow is clamped by it (ArrowGeometry), so a port on a short feature of a long
+                // polygon no longer draws an arrow sized for the polygon.
+                long far = alongX ? (fromLow ? info.Box.MaxX : info.Box.MinX)
+                                  : (fromLow ? info.Box.MaxY : info.Box.MinY);
+                length = System.Math.Abs(far - f);
+            }
+
+            // Cut just INSIDE the face rather than at it: a cut lying along the face's own edge is
+            // degenerate (SpanInsetOverLength states why). Measured from the local face when there
+            // is one, so the width is the metal the port is standing on.
+            long? cut = null;
+            if (face is { } ff)
+            {
+                long inset = System.Math.Max(1, (long)(System.Math.Max(length, 1) * SpanInsetOverLength));
+                cut = fromLow ? ff + inset : ff - inset;
+            }
+
+            long across = alongX ? label.Y : label.X;
+
+            // The EDGE first — what an edge port actually drives — and the metal behind the face only
+            // where there is no boundary on it to measure (an oblique cut, a curve, a box-derived
+            // face). The two agree wherever both apply; see EdgeAt for the notch where they do not.
+            var span = (face is { } fe ? EdgeAt(shape, dir, fe, across) : null)
+                       ?? SpanAt(shape, info.Box, dir, across, cut);
+
+            if (span is { } sp)
+            {
+                width = sp.Width;
+                // The plane's own transverse centre moves with the metal: on an off-centre or curved
+                // run the face's midpoint is not the box's midpoint, and a bar centred on the box
+                // would sit beside the conductor rather than across it.
+                if (alongX) py = sp.Centre; else px = sp.Centre;
+            }
         }
 
-        return new PortHint(dir, width, Inferred, px, py, LengthAlong(info.Box, dir));
+        return new PortHint(dir, width, Inferred, px, py, length);
     }
 
     /// <summary>
@@ -562,17 +799,118 @@ public static class LayoutPortDirection
     /// way is how a placed port comes to disagree with its own marker.
     /// </summary>
     public static LayoutRotation DirectionAt(ConductorInfo info, long x, long y) =>
-        info.Pin is { } pin ? pin.Direction : FromBbox(info.Box, x, y);
+        info.Pin is { } pin ? pin.Direction
+        // The shape's own outline when there is one — the bounding box describes a multi-feature
+        // polygon's faces not at all (see FaceAlong). The box remains the answer for an instance,
+        // and for anything the flattener declines.
+        : info.Shape is { } shape && FromOutline(shape, x, y) is { } local ? local
+        : FromBbox(info.Box, x, y);
 
-    /// <summary>Top-level shapes only — the cheap form, and all a hand-drawn layout ever needs.</summary>
+    /// <summary>What a port should COMMIT to after being moved by <paramref name="dx"/>,
+    /// <paramref name="dy"/> — the direction it faces and the conductor layer it measures.
+    ///
+    /// <para><b>One function, called from two places that must not disagree:</b> the live drag
+    /// preview (which draws the answer while the pointer is still down) and the drag's commit (which
+    /// writes it). Owner report, 2026-09-09: a port's orientation did not update while it was being
+    /// dragged, only once the mouse was released. The rule lived only in the commit
+    /// path, so the arrow sat at its old angle for the whole gesture and then snapped round on
+    /// release, which is the one moment a user cannot aim with it. Deriving it a second time in the
+    /// preview is how the two come to disagree, so there is only one derivation.</para>
+    ///
+    /// <para><b><paramref name="visibleAt"/> must be a lookup asked with a null <c>onLayer</c></b> —
+    /// a move is a GESTURE, so it asks about metal the user can see, and its answer is what re-stamps
+    /// <see cref="LabelShape.PortLayer"/>.</para>
+    ///
+    /// <para><b>An explicit rotation still survives an ordinary nudge.</b> The trigger is not "the
+    /// port moved" but "the ARTWORK's own answer under the port changed" — the inference at the old
+    /// anchor versus the new one. Sliding a port along the face it already names infers the same
+    /// direction at both ends and leaves a user's rotation alone; crossing to a different face is the
+    /// case where the stated direction has stopped describing where the port is.</para>
+    /// </summary>
+    public readonly record struct PortReseat(LayoutRotation? Direction, LayerKey? Layer,
+                                             bool DirectionChanged, bool LayerChanged)
+    {
+        public bool Changed => DirectionChanged || LayerChanged;
+    }
+
+    /// <inheritdoc cref="PortReseat"/>
+    public static PortReseat Reseat(ConductorLookup visibleAt, LabelShape port, long dx, long dy)
+    {
+        var unchanged = new PortReseat(port.PortDirection, port.PortLayer, false, false);
+        if (!port.IsPort) return unchanged;
+
+        // Landed off the metal: nothing under the new anchor has anything to say, so the port keeps
+        // what it had rather than being reset to a guess.
+        if (visibleAt(port.X + dx, port.Y + dy, null) is not { } after) return unchanged;
+
+        var before = visibleAt(port.X, port.Y, null) is { } b
+            ? DirectionAt(b, port.X, port.Y)
+            : (LayoutRotation?)null;
+        var adopted = DirectionAt(after, port.X + dx, port.Y + dy);
+
+        bool dirChanged = adopted != before && port.PortDirection != adopted;
+        var layer = after.Shape?.Layer;
+        bool layerChanged = layer != port.PortLayer;
+
+        return new PortReseat(dirChanged ? adopted : port.PortDirection,
+                              layerChanged ? layer : port.PortLayer,
+                              dirChanged, layerChanged);
+    }
+
+    /// <summary>Top-level shapes only — the cheap form, and all a hand-drawn layout ever needs.
+    /// It knows no technology, so it has no visibility to consult; a port's committed layer still
+    /// narrows it, which is what keeps an exported picture measuring the same metal the editor
+    /// drew.</summary>
     public static ConductorLookup LookupFor(IReadOnlyList<LayoutShape> shapes) =>
-        (x, y) => ConductorUnderShape(shapes, x, y) is { } s
+        (x, y, onLayer) => ConductorUnderShape(shapes, x, y, onLayer) is { } s
             ? new ConductorInfo(LayoutGeometry.BboxOf(s), null, s)
             : null;
 
     /// <summary>
-    /// The full form: top-level shapes FIRST (exact hit-testing, so a click on an edge counts and a
-    /// hidden or non-selectable layer does not), then placed instances.
+    /// The full form: top-level shapes FIRST (exact hit-testing, so a click on an edge counts), then
+    /// placed instances.
+    ///
+    /// <para><b>Two owner requirements pull in opposite directions, and this is where they are
+    /// reconciled.</b> (1) a placed port must never move on its own — so its geometry may not depend
+    /// on which layers are switched on. (2) a drag must not be attracted to metal on a layer that is
+    /// switched off — so it may not see metal that is not on screen. Resolve the
+    /// conductor against the VISIBLE artwork every time and (1) breaks; resolve it against ALL
+    /// artwork and (2) breaks. Both were shipped, in that order, and each broke the other.</para>
+    ///
+    /// <para><b>The reconciliation is that the two questions belong to different MOMENTS.</b> A port
+    /// COMMITS to a conductor layer at a user gesture — placement, or a move — and
+    /// <see cref="LabelShape.PortLayer"/> records which. That gesture asks about VISIBLE metal, so
+    /// nothing invisible can ever attract it. At rest the port asks only about the layer it already
+    /// committed to, and pays no attention to whether that layer is currently shown, so no visibility
+    /// toggle can move it. The two rules never meet, because a port is never resting and being
+    /// dragged at the same time.</para>
+    ///
+    /// <list type="bullet">
+    /// <item><paramref name="onLayer"/> given (a committed port): shapes on THAT layer only,
+    /// visibility ignored.</item>
+    /// <item><paramref name="onLayer"/> null (a gesture, or a port written before
+    /// <see cref="LabelShape.PortLayer"/> existed): shapes on VISIBLE layers only.</item>
+    /// </list>
+    ///
+    /// <para><b>Visibility here means <see cref="LayerDef.Visible"/> alone, deliberately, not
+    /// <c>Visible &amp;&amp; Selectable</c>.</b> `LayoutHitTest.HitStack` requires both because it
+    /// answers "what did the user CLICK", and a locked layer may not be clicked. This asks "what
+    /// metal is on screen", and a locked layer's metal is on screen — it is the same gate
+    /// `LayoutSnapQuery` applies to every snap feature, so a port's marker and the snap that placed
+    /// it can no longer disagree about what is there.</para>
+    ///
+    /// <para><b>The SMALLEST conductor at the point wins, not the topmost.</b> `HitStack` orders
+    /// ZOrder-descending because that is what a click means, and borrowing it put a POUR ahead of the
+    /// trace lying on it whenever the pour's layer draws on top — measured on the reporting board, a
+    /// trace on ZOrder 0 crossing a pour on ZOrder 10. Smallest area is what a user pointed at, and
+    /// it is what <see cref="ConductorUnderShape"/> — the shapes-only form used by the clipboard and
+    /// <c>DocumentExtents</c> — has always returned, so the two forms no longer disagree about where
+    /// a port is.</para>
+    ///
+    /// <para>Genuinely ambiguous artwork — a port over metal on more than one conductor level — is
+    /// still a REFUSAL, and it is <c>EmPortExtraction</c>'s to make ("a port's LEVEL is part of its
+    /// identity"). This picks a stable conductor to draw a marker against; it does not decide what
+    /// runs.</para>
     ///
     /// <para><b>Why instances have to be in here (owner report, 2026-08-09: "placing a port does not
     /// set a direction, when I placed it by clicking on the metal").</b> A layout built by "Update
@@ -595,16 +933,45 @@ public static class LayoutPortDirection
     /// onto a pin has, and correctly declines to claim a pin the user placed the port merely NEAR.</para>
     /// </summary>
     public static ConductorLookup LookupFor(LayoutView view, Technology? tech, string baseDir, long tolDbu = 0)
-        => (x, y) =>
+    {
+        // Built once per lookup — which is once per frame, not once per port — for the same reason
+        // LayoutSnapQuery builds its own: a real process stack is hundreds of layers, and a linear
+        // scan per candidate shape is what this replaces.
+        var visible = new Dictionary<LayerKey, bool>(tech?.Layers.Count ?? 0);
+        if (tech is { } t)
+            foreach (var l in t.Layers)
+                visible.TryAdd(l.Key, l.Visible);   // FIRST wins, matching every other layer lookup
+
+        bool IsVisible(LayerKey key) =>
+            visible.TryGetValue(key, out bool v) ? v : FallbackPalette.For(key).Visible;
+
+        return (x, y, onLayer) =>
         {
-            foreach (int i in LayoutHitTest.HitStack(view, tech, x, y, tolDbu))
+            LayoutShape? best = null;
+            Bbox bestBox = default;
+            double bestArea = double.MaxValue;
+
+            // ignoreLayerVisibility: this decides for itself, by the rule in the summary — a
+            // committed port narrows by LAYER instead, and must not be filtered by what is shown.
+            foreach (int i in LayoutHitTest.HitStack(view, tech, x, y, tolDbu, ignoreLayerVisibility: true))
             {
-                if (view.Shapes[i] is LabelShape or BitmapShape) continue;
-                var bb = LayoutGeometry.BboxOf(view.Shapes[i]);
-                // The SHAPE, not only its box: a top-level conductor can be measured at the end face,
-                // and for anything that changes width along its length the box is the wrong number.
-                if (!bb.IsEmpty) return new ConductorInfo(bb, null, view.Shapes[i]);
+                var shape = view.Shapes[i];
+                if (shape is LabelShape or BitmapShape) continue;
+                if (onLayer is { } want ? shape.Layer != want : !IsVisible(shape.Layer)) continue;
+
+                var bb = LayoutGeometry.BboxOf(shape);
+                if (bb.IsEmpty) continue;
+
+                double area = (double)(bb.MaxX - bb.MinX) * (bb.MaxY - bb.MinY);
+                if (area >= bestArea) continue;   // ties keep the earlier (topmost) candidate
+                bestArea = area;
+                bestBox = bb;
+                best = shape;
             }
+
+            // The SHAPE, not only its box: a top-level conductor can be measured at the end face,
+            // and for anything that changes width along its length the box is the wrong number.
+            if (best is not null) return new ConductorInfo(bestBox, null, best);
 
             foreach (int i in LayoutHitTest.HitInstanceStack(view, tech, baseDir, x, y, tolDbu))
             {
@@ -616,6 +983,7 @@ public static class LayoutPortDirection
 
             return null;
         };
+    }
 
     /// <summary>
     /// The pin of <paramref name="inst"/>'s sub-cell that <paramref name="x"/>,<paramref name="y"/>

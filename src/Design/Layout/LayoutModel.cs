@@ -511,6 +511,30 @@ public sealed class LabelShape : LayoutShape
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public LayoutRotation? PortDirection { get; set; }
 
+    /// <summary>
+    /// <b>The layer of the conductor this port COMMITTED to</b>, stamped by the Port tool at
+    /// placement and re-stamped whenever the port is dragged. Meaningful only when
+    /// <see cref="IsPort"/>; null when the port sits on a placed instance's artwork rather than on a
+    /// top-level shape (an instance answers with its own pin, which no top-level layer names).
+    ///
+    /// <para><b>It exists because two owner requirements are otherwise mutually exclusive</b>
+    /// (2026-09-09). A placed port must never move on its own, which means the marker's geometry
+    /// may not depend on which layers are switched on; and a drag must not be attracted to metal on
+    /// a layer that is switched off. Resolving the
+    /// conductor against visible artwork alone breaks the first; against all artwork breaks the
+    /// second. Recording WHICH conductor layer the port committed to, at the moment the user could
+    /// see it, satisfies both — <c>LayoutPortDirection.LookupFor</c>'s own summary states the rule
+    /// once and is where it is enforced.</para>
+    ///
+    /// <para><b>Null still means "work it out", exactly as <see cref="PortDirection"/>'s null does</b>
+    /// — that is what every <c>.clay</c> written before this field carries, and such a port resolves
+    /// against the VISIBLE artwork (the safe half: a legacy port is never attracted to metal the user
+    /// cannot see, and it commits the first time it is touched). Additive: no <c>FormatVersion</c>
+    /// bump, omitted from the file entirely when null.</para>
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public LayerKey? PortLayer { get; set; }
+
     /// <summary>Additive (no <c>.clay</c> <c>FormatVersion</c> bump) — a newly-placed label always
     /// defaults to Regular; edited via the Properties Inspector.</summary>
     public LabelFontStyle Style { get; set; } = LabelFontStyle.Regular;
