@@ -954,10 +954,33 @@ public partial class LayoutEditorView : UserControl
             doc.ActiveViewModel.ReportMissingInstanceCellRefs(cellRefs);
     }
 
-    private void OnZoomToFit(object? sender, RoutedEventArgs e) => LayoutCanvasCtrl.ZoomToFit();
-    private void OnZoomIn(object? sender, RoutedEventArgs e)    => LayoutCanvasCtrl.ZoomIn();
-    private void OnZoomOut(object? sender, RoutedEventArgs e)   => LayoutCanvasCtrl.ZoomOut();
-    private void OnZoom1To1(object? sender, RoutedEventArgs e)  => LayoutCanvasCtrl.Zoom1To1();
+    private void OnZoomToFit(object? sender, RoutedEventArgs e) { LayoutCanvasCtrl.ZoomToFit();  LayoutCanvasCtrl.Focus(); }
+    private void OnZoomIn(object? sender, RoutedEventArgs e)    { LayoutCanvasCtrl.ZoomIn();     LayoutCanvasCtrl.Focus(); }
+    private void OnZoomOut(object? sender, RoutedEventArgs e)   { LayoutCanvasCtrl.ZoomOut();    LayoutCanvasCtrl.Focus(); }
+    private void OnZoom1To1(object? sender, RoutedEventArgs e)  { LayoutCanvasCtrl.Zoom1To1();   LayoutCanvasCtrl.Focus(); }
+
+    /// <summary>
+    /// Every tool button hands the keyboard back to the canvas.
+    ///
+    /// <para><b>Owner report, 2026-09-09:</b> with the Port tool armed from the toolbar, Escape did
+    /// not disarm it and neither <c>s</c>/F3 (geometry snap) nor F9 (snap distance) did anything.
+    /// None of those keys were broken — they simply never arrived. Clicking a <c>Button</c> gives it
+    /// keyboard focus, and every one of those shortcuts is read either by
+    /// <c>LayoutCanvas.OnKeyDown</c> (which needs the canvas focused) or by this view's own
+    /// <c>OnViewKeyDownTunnel</c>, whose first line is <c>IsKeyboardFocusWithin</c> — so after
+    /// arming a tool the keyboard belonged to the toolbar.</para>
+    ///
+    /// <para><b>Why it shows up on Port and not on Rectangle.</b> For a drag tool the first press on
+    /// the canvas focuses it (<c>TakeKeyboardFocus</c>) and the gesture is still in progress, so
+    /// Escape works from then on. Port and Via commit on a SINGLE click — the only gesture that
+    /// would move focus into the canvas is the one that places the port — so between arming and
+    /// placing there was no way to reach the keyboard at all.</para>
+    ///
+    /// <para>The Schematic Editor's tool buttons have always done this (<c>OnSelectTool</c>,
+    /// <c>OnWireTool</c>, <c>OnPlacePin</c> …); these buttons drive a <c>Command</c> binding rather
+    /// than a click handler and were simply never given the same half.</para>
+    /// </summary>
+    private void OnToolButtonClick(object? sender, RoutedEventArgs e) => LayoutCanvasCtrl.Focus();
 
     // ── Rotate (mirrors the Schematic Editor's own pair) ──────────────────────────────────────
     // Routed to ActiveViewModel, not the base session VM, so rotating while pushed into a sub-cell

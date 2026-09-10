@@ -2222,6 +2222,22 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         // reassignment below. Without it the OS window outlives its workspace and reopening that
         // workspace shows the same file in two windows.
         CloseFloatedDocumentsOwnedByWorkspace(CurrentWorkspacePath);
+
+        // Every "which document do File-menu commands act on" override is dropped with the tracking
+        // below, and that is not housekeeping — it is what stops a SAVE performed in the workspace
+        // being opened from writing a file belonging to the workspace being left.
+        //
+        // ResolveActiveDocumentForCommands answers `_focusedWindowDocument` FIRST, and that field is
+        // a bare reference to a Document object, not a lookup: nothing about the reassignments below
+        // invalidates it. `_activeDocumentPane` is already guarded (ActiveDocumentPaneInShell checks
+        // the pane is still in `Layout`) and `_factory.DocumentDock` is repointed by
+        // CreateDefaultLayout — this field was the one that could outlive the switch. Since
+        // `_openDocsByPath` is cleared wholesale on the next line, a non-null value here at this
+        // instant can only be a document this workspace no longer has.
+        _focusedWindowDocument   = null;
+        _focusedWindowIsToolOnly = false;
+        _activeDocumentPane      = null;
+
         _openDocsByPath.Clear();
         _scratchDocs.Clear();
         _scratchSymbols.Clear();

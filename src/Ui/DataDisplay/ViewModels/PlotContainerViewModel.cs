@@ -156,6 +156,21 @@ public partial class PlotContainerViewModel : ViewModelBase
         if (value is null) return;
         value.LibraryChanged            += (_, _) => OnLibraryEntryCountChanged();
         value.Entries.CollectionChanged += (_, _) => OnLibraryEntryCountChanged();
+
+        // And rebuild the strips NOW, against the library that has just arrived.
+        //
+        // Owner report, 2026-09-09: every plot's Y-axis label honoured the dataset aliases except a
+        // Smith chart's, which kept showing the file stem. The alias resolution was never the
+        // problem — this ORDER was. A Rect plot's Y label is drawn inside the Skia canvas and is
+        // recomputed from the live library on EVERY frame (PlotControl.Render builds its own
+        // `aliasFor`), so it picks an alias up whenever one exists. Smith/Polar labels are external
+        // strips, computed once per rebuild and cached on LabelStripViewModel.AutoLabel — and the
+        // constructor's first UpdateLabelStrips() runs while `Library` is still null, because
+        // `Library` is set by the object initializer AFTER the constructor body (see the note above).
+        // So the strips were built with `aliasFor` returning null, and nothing rebuilt them: the
+        // subscriptions wired just above only fire on a LATER library mutation, which reopening a
+        // .cdd never performs.
+        UpdateLabelStrips();
     }
 
     // ---- PlotNeedsRedraw event (forwarded from Inspector) -----------

@@ -1,5 +1,34 @@
 # DataDisplay — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## Owner report, 2026-09-09 — every plot honoured the dataset aliases except the Smith chart
+
+A `.cdd` with two aliased sources ("Edge Port", "Internal Port") rendered those aliases in every Rect
+plot's Y-axis label and the raw file stem in the Smith chart's.
+
+**The alias resolution was never the problem — the ORDER was.** The two label paths are not the same
+mechanism and only one of them is recomputed per frame:
+
+* A Rect plot's Y label is drawn INSIDE the Skia canvas. `PlotControl.Render` builds its own
+  `aliasFor` delegate from the live library on every frame, so the label picks an alias up whenever
+  one exists, however late it arrives.
+* Smith and Polar labels are EXTERNAL strips. `PlotContainerViewModel.UpdateLabelStrips` computes
+  them once and caches the result on `LabelStripViewModel.AutoLabel`; `AxisLabelControl` renders that
+  string and falls back to `Trace.Description` — the file stem — when it is null.
+
+The container's constructor calls `UpdateLabelStrips()`, and at that moment `Library` is still null:
+it is set by the OBJECT INITIALIZER, which runs after the constructor body (the existing comment on
+`OnLibraryChanged` says exactly this, about the subscriptions). So `aliasFor` returned null and the
+strips were built from file stems. Nothing rebuilt them afterwards — the two subscriptions wired in
+`OnLibraryChanged` fire on a LATER library mutation, and reopening a `.cdd` performs none.
+
+Reopening a `.cdd` is precisely this shape: `LoadPlotContainerConfigAsync` loads every source, stamps
+every alias, and builds the whole `Plot` — traces and all — BEFORE constructing the container. The
+plot therefore had its final trace list at the one moment the labels were computed without a library.
+
+`OnLibraryChanged` now rebuilds the strips against the library that has just arrived. Gate:
+`tests/Ui.Tests/SmithLabelStripAliasTests.cs`, which builds the container in that same order and
+covers Polar as well — it goes through the identical path and was wrong for the identical reason.
+
 ## Owner report, 2026-09-08 — the WSProbe metric picker read as an ellipsis
 
 `TraceDataItem`'s WSProbe constructor built one string and used it for both jobs:

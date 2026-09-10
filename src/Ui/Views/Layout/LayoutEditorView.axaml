@@ -140,22 +140,22 @@
                                 Background="{DynamicResource SystemControlForegroundBaseLowBrush}"/>
 
                         <Button Classes.ToolActive="{Binding ActiveViewModel.ActiveTool, Converter={StaticResource EnumEqualsBool}, ConverterParameter=Select}"
-                                Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Select"
+                                Click="OnToolButtonClick" Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Select"
                                 ToolTip.Tip="Select" Padding="6,3">
                             <mi:MaterialIcon Kind="CursorDefault" Width="16" Height="16"/>
                         </Button>
                         <Button Classes.ToolActive="{Binding ActiveViewModel.ActiveTool, Converter={StaticResource EnumEqualsBool}, ConverterParameter=Rect}"
-                                Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Rect"
+                                Click="OnToolButtonClick" Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Rect"
                                 ToolTip.Tip="Rectangle" Padding="6,3">
                             <mi:MaterialIcon Kind="RectangleOutline" Width="16" Height="16"/>
                         </Button>
                         <Button Classes.ToolActive="{Binding ActiveViewModel.ActiveTool, Converter={StaticResource EnumEqualsBool}, ConverterParameter=RoundedRect}"
-                                Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="RoundedRect"
+                                Click="OnToolButtonClick" Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="RoundedRect"
                                 ToolTip.Tip="Rounded Rectangle" Padding="6,3">
                             <mi:MaterialIcon Kind="SquareRoundedOutline" Width="16" Height="16"/>
                         </Button>
                         <Button Classes.ToolActive="{Binding ActiveViewModel.ActiveTool, Converter={StaticResource EnumEqualsBool}, ConverterParameter=Circle}"
-                                Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Circle"
+                                Click="OnToolButtonClick" Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Circle"
                                 ToolTip.Tip="Circle (center-radius)" Padding="6,3">
                             <!-- A plain outline, not VectorCircle: that glyph draws the four vertex
                                  handles of an editable path, which reads as "polygon" beside the
@@ -163,17 +163,17 @@
                             <mi:MaterialIcon Kind="CircleOutline" Width="16" Height="16"/>
                         </Button>
                         <Button Classes.ToolActive="{Binding ActiveViewModel.ActiveTool, Converter={StaticResource EnumEqualsBool}, ConverterParameter=Polygon}"
-                                Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Polygon"
+                                Click="OnToolButtonClick" Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Polygon"
                                 ToolTip.Tip="Polygon  (double-click/Enter to close, Backspace removes last vertex)" Padding="6,3">
                             <mi:MaterialIcon Kind="VectorPolygon" Width="16" Height="16"/>
                         </Button>
                         <Button Classes.ToolActive="{Binding ActiveViewModel.ActiveTool, Converter={StaticResource EnumEqualsBool}, ConverterParameter=Path}"
-                                Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Path"
+                                Click="OnToolButtonClick" Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Path"
                                 ToolTip.Tip="Path (trace)" Padding="6,3">
                             <mi:MaterialIcon Kind="VectorLine" Width="16" Height="16"/>
                         </Button>
                         <Button Classes.ToolActive="{Binding ActiveViewModel.ActiveTool, Converter={StaticResource EnumEqualsBool}, ConverterParameter=Label}"
-                                Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Label"
+                                Click="OnToolButtonClick" Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Label"
                                 ToolTip.Tip="Label" Padding="6,3">
                             <mi:MaterialIcon Kind="LabelOutline" Width="16" Height="16"/>
                         </Button>
@@ -181,7 +181,7 @@
                              single click, no drag; disabled with a reason (R13a) on a technology whose
                              stackup has no via layer, per ViaToolAvailability. -->
                         <Button Classes.ToolActive="{Binding ActiveViewModel.ActiveTool, Converter={StaticResource EnumEqualsBool}, ConverterParameter=Via}"
-                                Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Via"
+                                Click="OnToolButtonClick" Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Via"
                                 IsEnabled="{Binding ActiveViewModel.ViaToolAvailability.CanExecute}"
                                 ToolTip.Tip="{Binding ActiveViewModel.ViaToolTipText}" Padding="6,3">
                             <mi:MaterialIcon Kind="RecordCircleOutline" Width="16" Height="16"/>
@@ -193,7 +193,7 @@
                              the geometry at extraction time (and refused when ambiguous), never
                              stored on the shape where it would go stale under an edit. -->
                         <Button Classes.ToolActive="{Binding ActiveViewModel.ActiveTool, Converter={StaticResource EnumEqualsBool}, ConverterParameter=Port}"
-                                Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Port"
+                                Click="OnToolButtonClick" Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Port"
                                 ToolTip.Tip="Port — click a conductor end to place an EM port (auto-numbered)" Padding="6,3">
                             <mi:MaterialIcon Kind="TargetVariant" Width="16" Height="16"/>
                         </Button>
@@ -205,7 +205,7 @@
                              tool here already uses. This is the IN-DESIGN ruler, nothing to do with
                              the ruler strip along the canvas edge. -->
                         <Button Classes.ToolActive="{Binding ActiveViewModel.ActiveTool, Converter={StaticResource EnumEqualsBool}, ConverterParameter=Ruler}"
-                                Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Ruler"
+                                Click="OnToolButtonClick" Command="{Binding ActiveViewModel.SetActiveToolCommand}" CommandParameter="Ruler"
                                 ToolTip.Tip="Ruler  (D) — click two points to measure (Shift locks to 0/45/90°; Ctrl+K clears every ruler)" Padding="6,3">
                             <mi:MaterialIcon Kind="Ruler" Width="16" Height="16"/>
                         </Button>

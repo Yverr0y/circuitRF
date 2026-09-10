@@ -1,5 +1,65 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## Owner report, 2026-09-09 — the armed Port tool ignored Escape, `s` and F9
+
+With the Port tool armed from the layout toolbar, Escape did not disarm it and neither `s`/F3
+(geometry snap) nor F9 (snap distance) did anything.
+
+**None of those keys were broken.** Clicking a `Button` gives it keyboard focus, and every one of
+those shortcuts is read either by `LayoutCanvas.OnKeyDown` — which only runs while the canvas is
+focused — or by `LayoutEditorView.OnViewKeyDownTunnel`, whose first line is
+`if (!LayoutCanvasCtrl.IsKeyboardFocusWithin) return;`. So from the moment a tool was armed the
+keyboard belonged to the toolbar, and the layout editor's whole single-key vocabulary was inert.
+
+**Why it surfaced on Port and not on Rectangle.** For a DRAG tool the first press on the canvas
+focuses it (`TakeKeyboardFocus`) and the gesture is still running, so Escape works from then on —
+the dead window between arming and drawing is invisible. Port and Via commit on a SINGLE click, so
+the only gesture that would move focus into the canvas is the one that places the port: between
+arming and placing there was no way to reach the keyboard at all.
+
+The Schematic Editor has never had this — `OnSelectTool`, `OnWireTool`, `OnPlacePin` and the rest all
+end in `SchematicCanvasCtrl.Focus()`. The layout tool buttons drive a `Command` binding instead of a
+click handler and were simply never given the same half; they now carry
+`Click="OnToolButtonClick"` alongside the command, and the four zoom buttons hand focus back too.
+Gate: `tests/Ui.Tests/LayoutToolButtonFocusTests.cs`, which scans the `.axaml` so a tool button added
+later without the handler fails there rather than being found by arming it and pressing Escape.
+
+## A workspace switch left `_focusedWindowDocument` pointing into the workspace it left (2026-09-09)
+
+Found while investigating a report that saving a `.cem` opened from an unarchived copy of a workspace
+overwrote the equivalent file in the ORIGINAL workspace. **This is not proven to be that report's
+route** — see the note at the end — but it is a real way for one to exist and it is closed.
+
+`ResolveActiveDocumentForCommands()` is where File ▸ Save, Save As, Close Window, Run, the exports and
+the undo target all decide which document they act on, and it answers `_focusedWindowDocument` FIRST.
+That field is a bare reference to a `Document` object, not a lookup, so nothing about a workspace
+switch invalidates it: `SwitchToWorkspace` cleared `_activeUndoTarget` and `_lastActiveSchematicDoc`
+but not this one, and `_factory.DocumentDock` is repointed by `CreateDefaultLayout` while
+`_activeDocumentPane` is already guarded by `ActiveDocumentPaneInShell`. It was the one term of the
+three that could outlive the switch — and a stale value there means a save performed in the workspace
+being OPENED writes a file belonging to the workspace being LEFT, at its old path, with nothing on
+screen to say so.
+
+It is cleared alongside the tracking now, which is unambiguously correct at that point: the next line
+is `_openDocsByPath.Clear()`, so any non-null value is a document this workspace no longer has.
+
+**Two related asymmetries were left alone deliberately, and are worth knowing about.**
+`ResetToBlankShell` force-closes every docked document (`ForceCloseDockable`) and then re-populates
+`_openDocsByPath` with the torn-off survivors; `SwitchToWorkspace` does neither — it drops the
+tracking and lets the whole `DocumentDock` tree go with the `Layout` reassignment. So a FOREIGN
+torn-off document that survives a switch is untracked afterwards, which `Save All`, the quit prompt
+and `HasAnyDirtyWork` all read as "not open". Changing that is a behaviour change with a wide blast
+radius and is not this fix.
+
+**What the report's own evidence says.** In the reporting workspace pair the old copy's `results/`
+directory was modified at 21:23 and its `.cem` written at 21:27, while the FIRST write of any kind
+into the unarchived copy was an hour later. Everything relative in both `.cws`/`.cwsuser` files is
+correct and travels (`OpenDocuments`, `ActiveDocumentPath` and the dock layout are all
+workspace-relative, and the extractor rewrites nothing), and only three call sites write a `.cem` at
+all. That pattern is equally consistent with the original workspace still being open in its own
+window and being simulated and saved there — two tabs with the same file name and nothing in the tab
+title to tell them apart. That question is open.
+
 ## Save and Save As… on the document tab's own context menu (owner, 2026-09-09)
 
 Asked for below "Reveal in Finder": a Save and a Save As… that act on the tab that was right-clicked,
