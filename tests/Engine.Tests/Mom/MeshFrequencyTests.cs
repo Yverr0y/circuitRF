@@ -67,32 +67,47 @@ public class MeshFrequencyTests
     }
 
     [Fact]
-    public void OnANarrowConductor_LoweringIt_CanRAISETheUnknownCount()
+    public void OnANarrowConductor_LoweringIt_STILLSaves_TheOldFindingWasTheMarcherDefect()
     {
-        // THE FINDING, and it is the opposite of what the control is for. The saving is not merely
-        // sub-quadratic — on some geometry it is NEGATIVE.
+        // THIS TEST USED TO ASSERT THE OPPOSITE, and the reversal is the whole point of it.
         //
-        // The outermost edge cell is EdgeFractionOfReference × the conductor WIDTH (R-msh-5); the
-        // bulk cell is λ_g/N. Coarsening the λ cap widens the gap the graded fan has to bridge
-        // between the two, and past some point the fan costs more cells than the bulk saves. On the
-        // 72 µm GaAs line the axial pitch also stops responding entirely — MinCellsAcrossConductor
-        // caps it at a quarter of the conductor's own run — so the fan's growth is all that is left.
+        // It was written on a measured finding: 2 mm × 72 µm on 100 µm GaAs, sweep top 20 GHz, gave
+        // N = 773 / 705 / 2,014 at mesh frequencies of 20 / 10 / 5 GHz — quartering the mesh
+        // frequency nearly TRIPLED the unknown count. The explanation attached to it, here and in
+        // this directory's CLAUDE.md §6, was that the outermost edge cell is anchored to the
+        // conductor WIDTH while the bulk cell is λ_g/N, so coarsening the λ cap widens the gap the
+        // graded fan has to bridge, and past some point the fan costs more than the bulk saves.
         //
-        // Measured, 2 mm × 72 µm on 100 µm GaAs, sweep top 20 GHz: N = 773 / 705 / 2,014 at mesh
-        // frequencies of 20 / 10 / 5 GHz. This is why M0's own accuracy benchmark reports N per row
-        // rather than assuming it fell, and why the panel must show the unknown count rather than
-        // letting a user assume a lower mesh frequency is always cheaper.
+        // That explanation was WRONG, and M0 (brief-em-transmission-line-mesh.md) found out why: the
+        // grading marcher collapsed into a uniform run at the FINEST cell size on the approach to
+        // every attractor, and a wider bulk cell gives that collapsed run further to crawl. The fan
+        // was not spending the saving — the crawl was. Same fixture with
+        // SurfaceMesher.PartitionGraded: N = 297 / 229 / 212, monotone.
+        //
+        // Measured down to f_mesh = 0.5 GHz on five fixtures (both starters, 72 µm to 2.9 mm wide,
+        // 2 mm to 50 mm long) and it is monotone non-increasing on every one. The old marcher was
+        // not merely non-monotone there: a 100 µm × 50 mm FR-4 line at f_mesh = 1 GHz meshed at
+        // N = 15,614 against 348 now — three times past UnknownCeiling, i.e. a run REFUSED entirely
+        // because of a grading defect.
+        //
+        // What survives unchanged is the sub-quadratic half (the test above): the transverse pitch
+        // is set by MinCellsAcrossConductor, so a 2× drop in mesh frequency is ~2.5×, not 4×.
         var p = PlanarLineFixtures.GaAsLine(2e-3, 20e9);
 
-        int atTop  = SurfaceMesher.Mesh(p, PlanarMeshSettings.Default).UnknownCount;
-        int atHalf = SurfaceMesher.Mesh(p, PlanarMeshSettings.Default with { MeshFrequencyHz = 10e9 })
-                                  .UnknownCount;
-        int atQtr  = SurfaceMesher.Mesh(p, PlanarMeshSettings.Default with { MeshFrequencyHz = 5e9 })
-                                  .UnknownCount;
+        int previous = int.MaxValue;
+        foreach (double? meshFreq in new double?[] { null, 10e9, 5e9, 2e9, 1e9, 0.5e9 })
+        {
+            int n = SurfaceMesher.Mesh(p, PlanarMeshSettings.Default with { MeshFrequencyHz = meshFreq })
+                                 .UnknownCount;
+            Assert.True(n <= previous,
+                $"mesh frequency {(meshFreq is null ? "sweep top" : meshFreq / 1e9 + " GHz")} " +
+                $"cost N = {n}, more than the rung above it ({previous}) — lowering the mesh " +
+                "frequency must not make the mesh bigger.");
+            previous = n;
+        }
 
-        Assert.True(atHalf < atTop, $"halving still saves here: {atTop} -> {atHalf}");
-        Assert.True(atQtr > atTop,
-            $"quartering must be measured to COST here, not saved: {atTop} -> {atQtr}");
+        // And it does actually fall, rather than being flat all the way down.
+        Assert.True(previous < SurfaceMesher.Mesh(p, PlanarMeshSettings.Default).UnknownCount);
     }
 
     [Fact]
@@ -178,7 +193,7 @@ public class MeshFrequencyTests
         var p = Fr4Hero(20e9);
 
         var below = SurfaceMesher.Mesh(p, PlanarMeshSettings.Default with { MeshFrequencyHz = 10e9 });
-        string note = Assert.Single(below.Notes, n => n.Contains("was sized at", StringComparison.Ordinal));
+        string note = Assert.Single(below.Notes, n => n.Contains("Sized at", StringComparison.Ordinal));
 
         // The trade is stated in EFFECTIVE cells/λ at the sweep's top — a physical quantity — not in
         // hertz. Default is 20 cells/λ; at half the mesh frequency the sweep's top sees 10.
@@ -193,7 +208,7 @@ public class MeshFrequencyTests
                  })
         {
             var r = SurfaceMesher.Mesh(p, s);
-            Assert.DoesNotContain(r.Notes, n => n.Contains("was sized at", StringComparison.Ordinal));
+            Assert.DoesNotContain(r.Notes, n => n.Contains("Sized at", StringComparison.Ordinal));
         }
     }
 
@@ -245,9 +260,8 @@ public class MeshFrequencyTests
 
         // So the note must not claim a cap, and must name what actually set the pitch.
         Assert.DoesNotContain(low.Notes, n => n.Contains("Cell size capped", StringComparison.Ordinal));
-        string note = Assert.Single(low.Notes, n => n.Contains("did NOT set the cell size", StringComparison.Ordinal));
-        Assert.Contains("narrowest conductor run", note, StringComparison.Ordinal);
-        Assert.Contains("WILL NOT CHANGE THIS MESH", note, StringComparison.Ordinal);
+        string note = Assert.Single(low.Notes, n => n.Contains("do NOT set this mesh", StringComparison.Ordinal));
+        Assert.Contains("narrowest metal", note, StringComparison.Ordinal);
 
         // …and it names the control that IS live, because "your artwork is the problem" is accurate
         // and useless. On the reported file the edge mesh is 42% of the unknowns.
@@ -255,14 +269,14 @@ public class MeshFrequencyTests
         Assert.DoesNotContain("turn the edge mesh off",
                               Assert.Single(SurfaceMesher.Mesh(p, s with { MeshFrequencyHz = 1e9, EdgeMesh = false })
                                                          .Notes,
-                                            n => n.Contains("did NOT set the cell size", StringComparison.Ordinal)),
+                                            n => n.Contains("do NOT set this mesh", StringComparison.Ordinal)),
                               StringComparison.Ordinal);
 
         // …and where the cap DOES bind the wording is untouched: same geometry, same settings, at a
         // mesh frequency high enough that λ_g/5 is the smaller of the two.
         var bound = SurfaceMesher.Mesh(p, s with { MeshFrequencyHz = 4e12 });
         Assert.Contains(bound.Notes, n => n.Contains("Cell size capped", StringComparison.Ordinal));
-        Assert.DoesNotContain(bound.Notes, n => n.Contains("did NOT set the cell size", StringComparison.Ordinal));
+        Assert.DoesNotContain(bound.Notes, n => n.Contains("do NOT set this mesh", StringComparison.Ordinal));
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -297,11 +311,11 @@ public class MeshFrequencyTests
         // never a clamp — so the report still solves and still reports the number that was asked for.
         Assert.NotEqual(PlanarBudgetVerdict.Refused, one.Verdict);
         Assert.Contains(one.Notes, n => n.Contains("At 1 cell across", StringComparison.Ordinal));
-        Assert.Contains(one.Notes, n => n.Contains("Cells across the narrowest conductor is set to 1",
+        Assert.Contains(one.Notes, n => n.Contains("Cells across: 1 (default 4)",
                                                    StringComparison.Ordinal));
 
         // …and the default says nothing at all, so an untouched setup's report is unchanged.
-        Assert.DoesNotContain(four.Notes, n => n.Contains("Cells across the narrowest conductor is set to",
+        Assert.DoesNotContain(four.Notes, n => n.Contains("Cells across:",
                                                           StringComparison.Ordinal));
 
         // Below 1 is clamped by Resolved rather than throwing — it is not a value the UI can produce.

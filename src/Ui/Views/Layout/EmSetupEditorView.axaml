@@ -424,13 +424,11 @@
                              "Cross-section" heading produced. -->
                         <StackPanel IsVisible="{Binding ViewModel.HasNotes}" Margin="0,6,0,0" Spacing="2">
                             <TextBlock Classes="colhdr" FontWeight="SemiBold" Text="Notes"/>
-                            <ItemsControl ItemsSource="{Binding ViewModel.Notes}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="10" Opacity="0.75"/>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
+                            <!-- ONE block, not an ItemsControl of them — an ItemsControl selects one
+                                 LINE at a time and copying a report out means dragging each note
+                                 separately (owner instruction, 2026-09-09). -->
+                            <SelectableTextBlock Text="{Binding ViewModel.NotesText}"
+                                                 TextWrapping="Wrap" FontSize="10" Opacity="0.75"/>
                         </StackPanel>
                     </StackPanel>
                 </Grid>
@@ -731,21 +729,17 @@
                       ColumnSpacing="6"
                       IsVisible="{Binding ViewModel.MeshReport, Converter={x:Static ObjectConverters.IsNotNull}}">
                     <TextBlock Grid.Row="0" Grid.Column="0" Classes="colhdr" Text="Unknowns"/>
-                    <TextBlock Grid.Row="0" Grid.Column="1" FontSize="11" Text="{Binding ViewModel.MeshReport.UnknownCount}"/>
+                    <SelectableTextBlock Grid.Row="0" Grid.Column="1" FontSize="11" Text="{Binding ViewModel.MeshReport.UnknownCount}"/>
                     <TextBlock Grid.Row="1" Grid.Column="0" Classes="colhdr" Text="Smallest cell"/>
-                    <TextBlock Grid.Row="1" Grid.Column="1" FontSize="11" Text="{Binding ViewModel.MeshReport.MinCellLength}"/>
+                    <SelectableTextBlock Grid.Row="1" Grid.Column="1" FontSize="11" Text="{Binding ViewModel.MeshReport.MinCellLength}"/>
                     <TextBlock Grid.Row="2" Grid.Column="0" Classes="colhdr" Text="Largest cell"/>
-                    <TextBlock Grid.Row="2" Grid.Column="1" FontSize="11" Text="{Binding ViewModel.MeshReport.MaxCellLength}"/>
+                    <SelectableTextBlock Grid.Row="2" Grid.Column="1" FontSize="11" Text="{Binding ViewModel.MeshReport.MaxCellLength}"/>
                     <TextBlock Grid.Row="3" Grid.Column="0" Classes="colhdr" Text="Truncation half-extent"/>
-                    <TextBlock Grid.Row="3" Grid.Column="1" FontSize="11" Text="{Binding ViewModel.MeshReport.TruncationHalfExtent}"/>
+                    <SelectableTextBlock Grid.Row="3" Grid.Column="1" FontSize="11" Text="{Binding ViewModel.MeshReport.TruncationHalfExtent}"/>
                 </Grid>
-                <ItemsControl ItemsSource="{Binding ViewModel.MeshNotes}" Margin="0,4,0,0">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="10" Opacity="0.8"/>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                <SelectableTextBlock Text="{Binding ViewModel.MeshNotesText}" Margin="0,4,0,0"
+                                     IsVisible="{Binding ViewModel.HasMeshNotes}"
+                                     TextWrapping="Wrap" FontSize="10" Opacity="0.8"/>
 
                   </StackPanel>
                 </Border>
@@ -754,7 +748,7 @@
                 <Border Classes="group" IsVisible="{Binding ViewModel.IsPlanarAnalysis}">
                   <StackPanel Spacing="2">
                 <TextBlock Classes="grouphdr" Text="Surface mesh"/>
-                <Grid ColumnDefinitions="180,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
+                <Grid ColumnDefinitions="180,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                       ColumnSpacing="6" RowSpacing="3">
                     <TextBlock Grid.Row="0" Grid.Column="0" Classes="colhdr" Text="Cells per wavelength" VerticalAlignment="Center"/>
                     <TextBox   Grid.Row="0" Grid.Column="1" Classes="num" Tag="CellsPerWavelength"
@@ -769,7 +763,7 @@
                     <TextBox   Grid.Row="1" Grid.Column="1" Classes="num" Tag="PlanarMinCellsAcross"
                                Text="{Binding ViewModel.PlanarMinCellsAcrossText}"
                                LostFocus="OnFieldLostFocus" KeyDown="OnFieldKeyDown"
-                               ToolTip.Tip="Cells across the narrowest conductor — the transverse cell size. The mesh uses whichever is smaller, this or the wavelength cap, so on artwork with fine features this is the setting that decides the cell count. Lowering it coarsens the mesh, but not always the cell count: the edge-mesh cells are sized from the conductor width and do not move, so the graded fan can cost back what the bulk saved. 1 means no transverse current variation is representable at all."/>
+                               ToolTip.Tip="Cells across the narrowest conductor — the transverse cell size. With Transmission line off, the mesh uses whichever is smaller, this or the wavelength cap, in BOTH directions, so on artwork with fine features this is the only setting that can change the cell count. With it on, this sets the pitch across the current and Cells per wavelength sets it along. Lowering it always coarsens the mesh. 1 means no transverse current variation is representable at all."/>
                     <TextBlock Grid.Row="2" Grid.Column="0" Classes="colhdr" Text="Edge mesh" VerticalAlignment="Center"/>
                     <CheckBox  Grid.Row="2" Grid.Column="1" Name="PlanarEdgeMeshCheck" FontSize="11"
                                Content="Refine at conductor edges"
@@ -793,13 +787,25 @@
                     <!-- M0's fifth control, and the only one that is a PERFORMANCE knob. Edited in
                          the sweep's own frequency unit through the same staged-text committer every
                          other dimensioned field here uses; blank means "max sweep". -->
-                    <TextBlock Grid.Row="5" Grid.Column="0" Classes="colhdr" Text="Mesh frequency" VerticalAlignment="Center"/>
-                    <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                    <!-- The seventh control, and the one that makes the two wavelength controls
+                         work at all on a transmission line. Owner report, 2026-09-09: lowering
+                         Cells per wavelength or Mesh frequency did not reduce the cell count, and it
+                         could not, because the pitch is the SAME min in both axes and the geometry
+                         term wins in both. With this on the two are orthogonal — wavelength along
+                         the current, narrowness across it. Placed directly under the two settings it
+                         governs, because it is the answer to "why does that number do nothing". -->
+                    <TextBlock Grid.Row="5" Grid.Column="0" Classes="colhdr" Text="Transmission line" VerticalAlignment="Center"/>
+                    <CheckBox  Grid.Row="5" Grid.Column="1" Name="PlanarTransmissionLineMeshCheck" FontSize="11"
+                               Content="Follow the direction of current"
+                               IsChecked="{Binding ViewModel.PlanarTransmissionLineMesh}"
+                               ToolTip.Tip="Makes Cells per wavelength and Cells across conductor orthogonal instead of competing. Off, the cell size is the smaller of the two in BOTH directions, so on artwork with fine features the wavelength settings cannot change the mesh at all. On, the cell is sized by wavelength ALONG the current and by the conductor width ACROSS it. The direction is measured per point from the metal, so a bend is followed rather than averaged, and no cell is ever finer than it would have been with this off."/>
+                    <TextBlock Grid.Row="6" Grid.Column="0" Classes="colhdr" Text="Mesh frequency" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal" Spacing="4">
                         <TextBox Classes="num" Tag="MeshFrequency" Width="110"
                                  Text="{Binding ViewModel.PlanarMeshFrequencyText}"
                                  PlaceholderText="{Binding ViewModel.MeshFrequencyPlaceholder}"
                                  LostFocus="OnFieldLostFocus" KeyDown="OnFieldKeyDown"
-                                 ToolTip.Tip="The frequency the cell-size cap is sized at. Leave blank to use the maximum of the frequency sweep. Sizing the mesh lower than the sweep's max gives fewer unknowns and a faster run, at the cost of resolution at the top of the band — the notes below say what the trade actually is."/>
+                                 ToolTip.Tip="The frequency the cell-size cap is sized at. Leave blank to use the maximum of the frequency sweep. Sizing the mesh lower than the sweep's max gives fewer unknowns and a faster run, at the cost of resolution at the top of the band — the notes below say what the trade actually is. If lowering it does not change the unknown count, the wavelength cap is not what is setting the cell size: turn on Transmission line, or lower Cells across conductor."/>
                         <TextBlock FontSize="11" VerticalAlignment="Center" Opacity="0.7"
                                    Text="{Binding ViewModel.MeshFrequencyUnit}"/>
                     </StackPanel>
@@ -808,16 +814,12 @@
                            Foreground="{DynamicResource CrfWarningBrush}"
                            Text="{Binding ViewModel.PlanarMeshFieldError}"
                            IsVisible="{Binding ViewModel.PlanarMeshFieldError, Converter={x:Static ObjectConverters.IsNotNull}}"/>
-                <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
+                <SelectableTextBlock FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
                            Text="{Binding ViewModel.PlanarMeshSummary}"
                            IsVisible="{Binding ViewModel.PlanarMeshReport, Converter={x:Static ObjectConverters.IsNotNull}}"/>
-                <ItemsControl ItemsSource="{Binding ViewModel.PlanarMeshNotes}" Margin="0,4,0,0">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="10" Opacity="0.8"/>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                <SelectableTextBlock Text="{Binding ViewModel.PlanarMeshNotesText}" Margin="0,4,0,0"
+                                     IsVisible="{Binding ViewModel.HasPlanarMeshNotes}"
+                                     TextWrapping="Wrap" FontSize="10" Opacity="0.8"/>
 
                 <!-- R-res-8: the heat map's scale, with its UNITS and its NORMALISATION, in the
                      engine's own words. An unlabelled ramp over an unstated normalisation is

@@ -55,19 +55,30 @@ public sealed class PlanarP5TranslationClassTests(ITestOutputHelper output)
     /// counting method (canonical orientation, quantisation 1e-6 · smallest edge, unordered pairs)
     /// and the counts the classifier produces on the same meshes (ordered band pairs, 180° rotation
     /// folded, the τ band in the key).</summary>
+    /// <summary>
+    /// <b>Re-pinned at M0 (2026-09-09) — the MESH moved, so every class count did.</b>
+    /// <c>SurfaceMesher.PartitionGraded</c> replaced the grading marcher that collapsed a fan into a
+    /// uniform run at the finest cell size on the approach to every attractor, so the bulk spacings
+    /// these classes are counted over are different spacings. That is exactly what the comment in
+    /// <c>P5_1</c> says will turn this red, and the cell COUNT is unchanged on five of the seven
+    /// (only the GaAs line, where the collapse dominated, moves at all: 414 cells → 162).
+    /// <b>Pre-M0 values, for the record</b> — hero 18,036 / 21,056 · 80 mm 70,494 / 82,264 ·
+    /// 256 mm 118,188 / 137,688 · taper 20 mm 10,430 / 11,298 · taper 60 mm 16,888 / 18,252 ·
+    /// GaAs 85,905 pairs / 40,656 / 47,632 · coupled 106,608 / 115,287.
+    /// </summary>
     public static IEnumerable<object[]> Seven()
     {
         var fr4 = GroundedSlab.Fr4Starter;
         double w = PlanarLineFixtures.Fr4HeroWidthM;
-        yield return ["FR-4 hero 2.9 × 20 mm, 10 GHz", PlanarLineFixtures.Fr4Line(20e-3, 10e9), 10e9, 44_253L, 18_036, 21_056];
-        yield return ["FR-4 line 80 mm, 10 GHz", PlanarLineFixtures.Fr4Line(80e-3, 10e9), 10e9, 554_931L, 70_494, 82_264];
-        yield return ["FR-4 line 256 mm, 6 GHz", PlanarLineFixtures.Fr4Line(256e-3, 6e9), 6e9, 1_961_190L, 118_188, 137_688];
-        yield return ["FR-4 taper 2.9 → 0.5 mm, 20 mm", PlanarLineFixtures.Taper(fr4, 2.9e-3, 0.5e-3, 20e-3, 10e9), 10e9, 265_356L, 10_430, 11_298];
-        yield return ["FR-4 taper 60 mm", PlanarLineFixtures.Taper(fr4, 2.9e-3, 0.5e-3, 60e-3, 10e9), 10e9, 500_500L, 16_888, 18_252];
-        yield return ["GaAs line 72 µm × 2 mm, 20 GHz", PlanarLineFixtures.GaAsLine(2e-3, 20e9), 20e9, 85_905L, 40_656, 47_632];
+        yield return ["FR-4 hero 2.9 × 20 mm, 10 GHz", PlanarLineFixtures.Fr4Line(20e-3, 10e9), 10e9, 44_253L, 18_313, 21_582];
+        yield return ["FR-4 line 80 mm, 10 GHz", PlanarLineFixtures.Fr4Line(80e-3, 10e9), 10e9, 554_931L, 71_401, 84_078];
+        yield return ["FR-4 line 256 mm, 6 GHz", PlanarLineFixtures.Fr4Line(256e-3, 6e9), 6e9, 1_961_190L, 136_497, 160_710];
+        yield return ["FR-4 taper 2.9 → 0.5 mm, 20 mm", PlanarLineFixtures.Taper(fr4, 2.9e-3, 0.5e-3, 20e-3, 10e9), 10e9, 265_356L, 10_433, 11_303];
+        yield return ["FR-4 taper 60 mm", PlanarLineFixtures.Taper(fr4, 2.9e-3, 0.5e-3, 60e-3, 10e9), 10e9, 500_500L, 16_899, 18_269];
+        yield return ["GaAs line 72 µm × 2 mm, 20 GHz", PlanarLineFixtures.GaAsLine(2e-3, 20e9), 20e9, 13_203L, 11_375, 13_474];
         yield return ["two coupled 40 mm lines", PlanarLineFixtures.Problem(fr4, 10e9,
                           PlanarLineFixtures.Rect(0, -w - 0.5 * w, 40e-3, -0.5 * w),
-                          PlanarLineFixtures.Rect(0, 0.5 * w, 40e-3, w + 0.5 * w)), 10e9, 603_351L, 106_608, 115_287];
+                          PlanarLineFixtures.Rect(0, 0.5 * w, 40e-3, w + 0.5 * w)), 10e9, 603_351L, 107_978, 116_205];
     }
 
     /// <summary>The brief's counting method, verbatim: unordered pairs, the pair oriented so that

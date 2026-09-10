@@ -187,7 +187,9 @@ public sealed class PlanarP3MultiLevelFillTests
         string digest = Digest(z);
         _out.WriteLine($"N = {mesh.Bases.Count}: SHA-256 of the assembled Z = {digest}");
         // P5 re-pinned this literal (was C30C787B…F90263, the P4 value) — see P2_1's P5 note.
-        Assert.Equal("BF177C91149D1505076628785C09C4918F31EE795CAAC7FD18520A23D07EC34B", digest);
+        // M0 re-pinned it again (was BF177C91…EC34B) because the MESHER moved, not the fill — see
+        // P2_1's M0 note.
+        Assert.Equal("F3895ADCE49E0932E5E42F9E738EEC76108174328D9611BF5AC0BA734CC7B5F5", digest);
 
         // And the matrix is exactly symmetric — the mirror is a copy, whichever direction it runs.
         for (int i = 0; i < z.RowCount; i++)

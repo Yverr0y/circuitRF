@@ -67,6 +67,13 @@ public sealed class CemPlanarMesh
     /// — the same rule <see cref="BoundaryCells"/> and <see cref="MeshFrequencyHz"/> follow.
     /// </summary>
     public int? MinCellsAcrossConductor { get; set; }
+
+    /// <summary>
+    /// The transmission-line mesh. <b>Nullable, and omitted at its default of false</b>, so a
+    /// <c>.cem</c> written before this control existed gains no byte — the same rule every control
+    /// added after the first three follows.
+    /// </summary>
+    public bool? TransmissionLineMesh { get; set; }
 }
 
 public sealed class CemFile
@@ -242,6 +249,9 @@ public static class EmSetupPersistence
             MinCellsAcrossConductor =
                 s.PlanarMesh.MinCellsAcrossConductor == PlanarMeshSettings.DefaultMinCellsAcrossConductor
                     ? null : s.PlanarMesh.MinCellsAcrossConductor,
+            TransmissionLineMesh =
+                s.PlanarMesh.TransmissionLineMesh == PlanarMeshSettings.DefaultTransmissionLineMesh
+                    ? null : s.PlanarMesh.TransmissionLineMesh,
         },
     };
 
@@ -274,7 +284,9 @@ public static class EmSetupPersistence
                                      pm.BoundaryCells ?? PlanarMeshSettings.DefaultBoundaryCells,
                                      pm.MeshFrequencyHz,
                                      pm.MinCellsAcrossConductor
-                                         ?? PlanarMeshSettings.DefaultMinCellsAcrossConductor)
+                                         ?? PlanarMeshSettings.DefaultMinCellsAcrossConductor,
+                                     pm.TransmissionLineMesh
+                                         ?? PlanarMeshSettings.DefaultTransmissionLineMesh)
             : PlanarMeshSettings.Default,
     };
 

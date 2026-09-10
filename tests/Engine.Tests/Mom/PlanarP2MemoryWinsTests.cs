@@ -90,7 +90,12 @@ public sealed class PlanarP2MemoryWinsTests
         // its translation class's representative, which sits with the outer cell at the origin, so
         // the last bits move everywhere — including the scalar block P4 left untouched. The bridge
         // is PlanarP5TranslationClassTests' diagonal-scale gate against the retained P4 reference.
-        Assert.Equal("BF177C91149D1505076628785C09C4918F31EE795CAAC7FD18520A23D07EC34B", digest);
+        // M0 re-pinned it once more (was BF177C91…EC34B, the P5 value), and this time NOTHING about
+        // the fill changed: SurfaceMesher.PartitionGraded replaced the grading marcher, so this
+        // fixture's GRID is different — same 297 cells, different gridlines — and a different mesh
+        // is a different matrix. brief-em-transmission-line-mesh.md M0; the bridge is
+        // MeshGradingTests, which gates the mesh itself.
+        Assert.Equal("F3895ADCE49E0932E5E42F9E738EEC76108174328D9611BF5AC0BA734CC7B5F5", digest);
     }
 
     [Fact]

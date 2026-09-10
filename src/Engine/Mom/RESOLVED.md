@@ -2121,3 +2121,421 @@ by 0.063 dB, so it needs a convergence study before it can ship. Both are in tha
 
 **Gates.** `MeshFrequencyTests.CellsAcrossTheConductor_SetsTheTransversePitch_AndIsNeverClampedOrRefused`
 and `MeshFrequencyUiTests.MinCellsAcross_RoundTrips_OmitsAtItsDefault_AndMovesTheStalenessHash`.
+
+
+## M0 — the grading marcher crawled into the far end of every interval (2026-09-09)
+
+`brief-em-transmission-line-mesh.md` M0. The biggest cell-count finding of that whole investigation,
+and it is a defect rather than a control: **a graded fan silently stopped grading whenever it
+APPROACHED an attractor, and became a uniform run at the finest cell size instead.**
+
+### The mechanism
+
+`BuildGridLines` graded through `BoundaryMesher.PartitionFractions`, whose step is a half-step
+look-ahead **clamped to the end of the interval**:
+
+```
+s = min( h(x), h(min(length, x + s/2)) )
+```
+
+The far end of an interval is very often an attractor — a conductor edge is both a hard gridline and
+an edge-mesh attractor — and the size field AT an attractor is `c0` by definition. So the first step
+whose look-ahead reaches the end reads `c0`, and so does every step after it. With the derived growth
+ratio at its 3.0 ceiling (r − 1 = 2) the clamp fires the moment the remaining distance falls below
+half a cell, which on a graded fan is immediately.
+
+The NEAR end always graded correctly, because the field GROWS away from an attractor and the
+look-ahead therefore never bound. **Only the approach failed** — which is why nothing caught it: a
+test written on the first cells of an interval passes throughout.
+
+Measured, 100 µm × 50 mm FR-4 at 10 GHz, cells/λ = 20: **184 gridlines in x, of which 110 were
+consecutive 3 µm steps over the last 330 µm.** The near end read 3, 9, 27, 81, 243, 714 µm — a
+textbook ratio-3 fan — and then the far end read 714 µm followed immediately by 6 µm, with nothing
+in between.
+
+### The fix — closed form, no look-ahead, no clamp
+
+`SurfaceMesher.PartitionGraded`. The field `h(x) = c₀ + g·d` is Lipschitz in `g`, so the largest step
+whose own far end the field still admits can be SOLVED for:
+
+```
+for each attractor at distance d AHEAD of x:
+    s ≤ (d ≤ c₀)  ?  c₀  :  (c₀ + g·d) / (1 + g)
+s = min(h(x), those)
+```
+
+The second branch is the `s` satisfying `s = h(x + s)`. Once `d ≤ c₀` that formula returns MORE than
+`d` — the step crosses the attractor — and the binding constraint becomes the field's own floor, so
+the branch is `c₀` there. The two agree at `d = c₀`, so the constraint is **continuous**, which is
+what preserves the translation invariance the continuous size field was chosen for in the first place
+(see `Mesh`'s growth-ratio derivation for the knife edge a discontinuity introduced last time).
+**Attractors BEHIND need no term at all** — stepping forward only increases their distance.
+
+Same rescale, same `minCells` floor, same `(0,1]` fraction contract as the marcher it replaces.
+**`BoundaryMesher.PartitionFractions` is untouched** — it is kernel A's cross-section mesher and every
+kernel-A number in `HISTORY.md` sits on it.
+
+On the same trace: **184 → 79 gridlines**, tail reading 714.6, 232, 77.5, 25.8, 8.6, 2.9 µm.
+
+### What it does to cell counts — and it is NOT uniformly cheaper
+
+| fixture (FR-4, 10 GHz unless stated, cells/λ = 20, edge mesh on) | before | after |
+|---|---|---|
+| 100 µm × 50 mm | 1,656 cells / N 3,119 | **711 / 1,334** |
+| 100 µm × 50 mm, cells/λ = 10 | 1,314 / 2,473 | **414 / 773** |
+| 200 µm × 10 mm | 180 / 331 | 198 / 365 |
+| 2.9 mm × 20 mm (hero) | 297 / 552 | 297 / 552 — unchanged |
+| 2.9 mm × 20 mm at 20 GHz | 708 / 1,345 | 720 / 1,368 |
+| 72 µm × 2 mm GaAs at 20 GHz | 414 / 773 | **162 / 297** |
+
+**The brief's own sentence "monotonic and cheaper at every rung" is wrong about the second half, and
+its own table said so** — 264/220/198/176/154/154 against 220/200/180/160/180/200 is MORE cells at
+8, 6, 4 and 3 across. The correct statement is: a properly graded down-fan costs more cells than the
+old "one big step, then two crawl cells" wherever the interval was too short for the crawl to run,
+and dramatically fewer wherever it was long enough for the crawl to dominate. **Long thin artwork —
+PCB traces, which is the geometry the brief is about — is entirely the second case.**
+
+### Two non-monotonicities closed, and they were ONE bug
+
+**`MinCellsAcrossConductor`** (200 µm × 10 mm, across = 8/6/4/3/2/1):
+
+| | 8 | 6 | 4 | 3 | 2 | 1 |
+|---|---|---|---|---|---|---|
+| before | 220 | 200 | 180 | 160 | **180** | **200** |
+| after | 264 | 220 | 198 | 176 | 154 | 154 |
+
+**`MeshFrequencyHz` on a narrow conductor** — recorded in `CLAUDE.md` §6 as a measured negative
+result ("on a narrow conductor, lowering the mesh frequency RAISES N"). 72 µm × 2 mm GaAs, sweep top
+20 GHz, N at f_mesh = 20 / 10 / 5 GHz:
+
+| | 20 GHz | 10 GHz | 5 GHz |
+|---|---|---|---|
+| before | 773 | 705 | **2,014** |
+| after | **297** | **229** | **212** |
+
+**That was never the edge fan legitimately spending back what the bulk saved** — the explanation both
+CLAUDE.md and the test carried. It was this marcher: coarsening the bulk pitch widens the gap the
+crawl has to cover, so the wasted cells grow. Both ladders are monotonic now.
+
+### The accuracy question — measured once, in a scratch harness, and it is decisive
+
+The brief flagged that the marcher moves de-embedded S21 by 0.063 dB on the 200 µm × 10 mm fixture at
+2 GHz, and hypothesised that the OLD mesh — carrying 110 extra cells right at the port, where the edge
+singularity is — might be accidentally MORE accurate there. **It is not.** Convergence study, same
+fixture, de-embedded, mesh sized at 10 GHz, dense path:
+
+| cells/λ | N before | S21 dB @2 GHz | N after | S21 dB @2 GHz |
+|---|---|---|---|---|
+| 20 | 331 | **−2.5523** | 365 | **−2.4908** |
+| 40 | 841 | −2.4983 | 586 | −2.4940 |
+| 80 | 1,164 | −2.4974 | 1,045 | −2.4956 |
+| 100 | 1,402 | −2.4973 | 1,266 | −2.4900 |
+| 120 | 1,572 | −2.4957 | 1,504 | −2.4893 |
+| 160 | 1,997 | −2.4958 | 1,980 | −2.4908 |
+| 200 | 2,456 | −2.4951 | 2,456 | −2.4910 |
+
+Both sequences settle inside a ±0.005 dB band around ≈ −2.493, which is this fixture's own mesh
+sensitivity at that refinement. **At the SHIPPING mesh the old marcher is 0.057 dB outside that band
+and the new one is inside it** — as |ΔS| against each sequence's own finest rung, **8.2e-3 before,
+1e-4 after**, and the 8.2e-3 is past this kernel's own stated de-embedding accuracy (~6.0e-3 at
+10 GHz, §5). Same story on S11 @2 GHz (−3.6348 before vs −3.7188 after, against a limit of ≈ −3.712).
+
+**At 10 GHz the hypothesis is not refuted, merely small**: limit ≈ −2.190, old reads −2.1777
+(|ΔS| 1.3e-3) and new −2.1693 (|ΔS| 2.9e-3), so the extra port cells DO buy something there — about
+0.008 dB, an order below what they cost at 2 GHz, and both are inside 6.0e-3.
+
+Read per unknown rather than per rung the answer is not close: the new marcher reaches its converged
+value at N = 365, and the old one is still 0.007 dB out at N = 841.
+
+**cells/λ = 240 and above cannot be measured on the dense path** — de-embedding's own calibration
+standard needs 5,720 unknowns there and is refused by `UnknownCeiling`. 200 is the finest rung.
+
+### What MOVES, and has not been re-measured
+
+Every kernel-B number taken on a mesh with the edge mesh ON is potentially affected; the fixtures
+above are the ones measured. Specifically **`CLAUDE.md` §5's mesh-frequency table** (FR-4 hero
+1–20 GHz: N = 1,345 / 552 / 348 with worst |ΔS| 2.97e-3 / 1.50e-2 / 1.58e-1) was taken on the old
+marcher — its N column is now 1,368 / 552 / 314 and **its |ΔS| column has not been re-run**, because
+that measurement is `MeshFrequencyAccuracyTests`, `Category=Benchmark`. The qualitative conclusion it
+supports (halving is defensible, quartering is not) is not in doubt; the digits are stale.
+
+**A mesh with the edge mesh OFF is bit-identical** — no attractors ⇒ `BuildGridLines` takes its
+ungraded branch ⇒ the marcher is never reached. Asserted on three fixtures against counts pinned from
+the pre-M0 tree.
+
+### The named trap
+
+**A marching mesher's step must be consistent with the field at the step's OWN far end, and a
+look-ahead clamped to an interval boundary is not that.** The clamp reads the field at a point the
+step does not reach, and where that boundary is itself an attractor it reads the field's global
+minimum. The failure is invisible in every observable a mesher publishes — the tiling is exact, the
+cells are valid, the solve is smooth — and shows up only as a cell count that will not fall when the
+pitch is coarsened. If a grading knob ever again "does nothing" or "does the opposite", measure the
+STEPS along one axis before believing any explanation about fans trading against bulk.
+
+### Gates
+
+`tests/Engine.Tests/Mom/MeshGradingTests.cs`, 15 tests, **29 ms**, no solve anywhere:
+no collapsed run · every adjacent cell pair inside the derived growth ratio (the fan grades
+approaching an edge as well as leaving one) · cell count non-increasing over the cells-across ladder ·
+translation invariance at 3.7 mm in coordinates as well as counts · bit-identity to the pre-M0 mesh
+with the edge mesh off. **9 of the 15 fail on the pre-M0 marcher**, verified by pointing
+`BuildGridLines` back at it and running them — a gate nothing can fail is not a gate.
+
+
+## M2 — the transmission-line mesh: the two settings become orthogonal (2026-09-09)
+
+**Owner report, made three times before it was understood, and the third time was the one that
+landed.** Lowering *Cells per wavelength* did not reduce the cell count. Lowering *Mesh frequency*
+did not reduce it either. Not "reduced it less than expected" — **did not move it at all, at any
+value.**
+
+### The cause, and it is one line of arithmetic
+
+```
+hx = min(λ_g/CellsPerWavelength, narrowX/MinCellsAcrossConductor)
+hy = min(λ_g/CellsPerWavelength, narrowY/MinCellsAcrossConductor)
+```
+
+**The SAME min in both axes.** On any artwork whose metal is narrower than a λ cell the geometry term
+wins in *both* directions, and the two wavelength controls are then structurally inert — nothing the
+user types can reach the mesh.
+
+Reproduced on the owner's own `.cem` (a connector cutout, 6.07 × 1.96 mm, 370 µm narrowest in x and
+360 µm in y, one polygon with a right-angle bend in it, only **5** hard/attractor grid lines per
+axis so the count really is the bulk pitch):
+
+| Transmission line | cells/λ | mesh frequency | grid | cells | N |
+|---|---|---|---|---|---|
+| off | 20 | 10 GHz | 77 × 39 | 1,838 | **3,521** |
+| off | 20 | 100 MHz | 77 × 39 | 1,838 | **3,521** |
+| off | 10 | 10 GHz | 77 × 39 | 1,838 | **3,521** |
+| off | 5 | 10 GHz | 77 × 39 | 1,838 | **3,521** |
+| off | 5 | 100 MHz | 77 × 39 | 1,838 | **3,521** |
+| **on** | 20 | 10 GHz | 49 × 39 | 1,052 | **1,971** |
+| **on** | 10 | 10 GHz | 45 × 38 | 920 | **1,715** |
+| **on** | 5 | 10 GHz | 44 × 38 | 888 | **1,652** |
+| **on** | 20 | 100 MHz | 44 × 38 | 889 | **1,652** |
+
+The setup shipped with `CellsPerWavelength: 5` **and** `MeshFrequencyHz: 100 MHz` — both knobs already
+at the floor. λ_g/5 at 100 MHz on that stack is ~0.37 m against 360 µm of metal: four orders of
+magnitude apart, so the λ term could never bind. **A note already said so** (the non-binding-λ note,
+shipped 2026-09-09). A note about a dead control is not a working control.
+
+### The fix is the owner's own sentence
+
+> "The 2 settings can be orthogonal to each other. For a transmission line running east-west, the
+> `narrowest_metal / CellsAcross` setting is a north-south setting and the `CellsPerWavelength` is an
+> east-west setting. It doesn't have to be one or the other."
+> "CellsPerWavelength should always be in the direction of the current."
+> "Make sure to follow the bends of the geometry to guess which way the current is going."
+
+That is also the physics. **Across** a line the current carries the 1/√d edge singularity and the
+width must be resolved. **Along** it the current varies on the scale of a wavelength, so
+λ_g/CellsPerWavelength is the whole requirement, and taking a min with the narrowness there refines
+for a singularity that is not present.
+
+`PlanarMeshSettings.TransmissionLineMesh` (default **off**; `.cem` under the omit-at-default rule, a
+panel checkbox, one undo entry, and a term in `EmSnpProvenance.MeshHash`).
+
+### Why it is a FIELD and not one angle — "follow the bends"
+
+D8 is one tensor-product grid and a cell cannot rotate. **But the grid lines need not be uniform**, and
+that is enough: an east-then-north L-bend wants a coarse x pitch over its horizontal arm and a fine
+one only where the vertical arm stands, and the transpose in y. Both are an ordinary non-uniform
+tensor grid. So every point of the metal states what it needs in x and in y, and a column takes the
+finest need in it (`PlanarMeshPitchField`).
+
+Nothing about `PlanarCell.IX/IY`, the rooftop cell pair, or `RectangleIntegrals`' axis-aligned closed
+forms is touched. Route C — cells that actually rotate — remains a second mesher and is not this.
+
+**The direction at a point is the direction of the LONGEST local chord**, and the width is the chord
+across it. The first version took the *shortest* chord as the transverse direction, which is right in
+the middle of a strip and catastrophic near a rim: a scan line nearly tangent to an edge cuts a chord
+one sampling step long, so the "width" collapsed to ~1 µm and a plain 10 mm line meshed at **2.27
+million cells**. A setting turned on to make the mesh smaller made it 11,000× bigger.
+
+### Three guards, each of which was needed because it failed first
+
+1. **It may only COARSEN.** Every pitch is floored at the one the per-axis rule would have used. A
+   local width is a sampled quantity and must never be allowed to drive the mesh finer than a direct
+   measurement of the polygons.
+2. **The floor is applied BEFORE the aspect cap, and the order is load-bearing.** Capping the along
+   pitch at 64× an *unfloored* rim-sliver width pinned it to 476 µm against a λ cell of 715 µm — so
+   *Cells per wavelength was still inert with the setting on*, which is the entire bug.
+3. **`minCells` is 1 on the field path.** `PartitionGraded`'s floor works by *discarding* the marched
+   partition for a uniform one. Any single number computed from a varying field is wrong somewhere:
+   the finest value re-subdivided the whole interval at the narrowest neck (65 cells where the field
+   asked for 20, i.e. exactly the mesh the setting was turned on to avoid), and the field's integral
+   over-counts. The enforcement pass already guarantees the cap cell by cell against the field's own
+   value, so the floor is redundant rather than merely awkward. **This was the single biggest of the
+   three** — it alone took the owner's file from 3,235 to 1,971.
+
+The field is **Lipschitz-smoothed** at the edge fan's own growth ratio, and that is not optional: a
+column-wise minimum is a step function, and L8b already paid for a discontinuous size field once
+(moving the same rectangle 3.7 mm changed the mesh by 33%).
+
+### The honest cost: the edge fan grows
+
+**It is asserted on the PITCH, not on the cell count**, and the difference is a finding. A coarser bulk
+gives the graded fan at every conductor edge further to climb, and the fan's ratio is clamped at 3×
+per cell, so each attractor costs about log₃(coarser/finer) extra cells. On artwork that is mostly rim
+and hardly any bulk — an 8-segment taper — that outweighs the bulk saving and the count rises
+slightly: **728 → 858 / 805 / 741 at cells/λ 20 / 10 / 5**. Every cell is the same size or larger; there
+are simply more fan cells. The mesher says so in its own note whenever the bulk pitch spans more than
+3× across the artwork, and names the edge mesh as what removes the fan.
+
+### The ports are a CHECK, not the source — a deliberate reversal of the brief
+
+The brief (and the owner's first suggestion) took the direction FROM the port orientation, and for a
+straight line that is exactly right. **It cannot survive "follow the bends":** two ports state one
+direction between them, and an east-then-north bend's two ports state 45° — the direction of neither
+arm. Its area moment says 45° too, so the two agree and agreement proves nothing. So the metal is
+measured per point, and the ports are used only to report a *disagreement*: a port sitting on a face
+the local field says is along the current rather than across it means one of the two is wrong, and the
+user is the one who can tell which.
+
+`SurfaceMesher.Mesh` takes the ports as an optional trailing argument, and **`PlanarKernel.Mesh` and
+the EM panel both pass them** — the panel's pre-solve unknown count and the run's must not disagree,
+which is exactly the defect P12 fixed for the accelerated ceiling.
+
+### Gates
+
+`tests/Engine.Tests/Mom/TransmissionLineMeshTests.cs`, 10 tests, **2 s**, no solve anywhere. The first
+two are the bug itself, written to fail if the two settings ever go back to competing — including an
+**equality** assertion that the knob is inert with the setting off, so if that ever stops being true
+someone is told rather than left with a pointless control. Then: it only ever coarsens the bulk cell ·
+off is bit-identical, ports or no ports · it survives `Auto` · the aspect cap binds on the field ·
+translation invariance at 3.7 mm · and the bend test, which asserts **each arm keeps its own
+transverse resolution** rather than a cell count, because that is the property "following the bend"
+actually means.
+
+**A fixture note worth keeping:** a straight x-directed line does NOT show this defect — it is 10 mm
+long measured along x, so `narrowX/4` is 2.5 mm and the λ cap does bind in x. The bug needs artwork
+narrow in **both** axes, which is why the fixture here is a right-angle bend. A 10 mm line is also
+fan-dominated (about 10 of its 15 x lines), so the bulk pitch cannot show through it at all; the
+orthogonality test uses 50 mm.
+
+---
+
+## M4 — the LOCAL edge reference length (2026-09-09)
+
+**Owner report, the fifth round of one complaint**, and the first four rounds answered the wrong
+half of it. The complaint, in the owner's own terms: there is a floor on the cell count that no
+setting reaches; 1 cell across the conductor still renders more than 20 across the wide metal; a
+mesh frequency of 0.001 GHz still renders more than 10 cells along the current. And, once the file
+was measured: *the narrow trace's edge mesh continues into the wider transmission line even though
+it is not needed for accuracy there.*
+
+### What the owner's own file measured
+
+The owner's own connector-cutout `.cem` (a top-to-inner transition), driven headlessly through
+`EmSetupResolver` + `PlanarExtractor` + `SurfaceMesher` (a scratch console, not a test):
+
+| setting | cells |
+|---|---|
+| as saved (TLM on, edge on, across = 1, cells/λ = 2, f_mesh = 1 MHz) | **513** |
+| cells/λ 2 → 5 → 10 → 20 | 513 / 513 / 513 / 513 |
+| f_mesh 1 MHz → 1 GHz → 5 GHz → 10 GHz | 513 / 513 / 513 / 520 |
+| **edge mesh OFF** | **71** |
+| across 1 → 2 → 4 → 8 | 513 / 630 / 881 / 2,028 |
+
+**Three separate facts, and only one of them was a defect.**
+
+1. **The two λ knobs are genuinely inert here and the mesher is right to say so.** At 1 MHz
+   λ_g = 143 m against a 6.065 × 1.963 mm part — **4.2e-5 λ_g across**. Nothing about that is
+   fixable; wavelength is five orders of magnitude from binding.
+2. **"1 cell" is unreachable, and not because of any setting.** A tensor grid must carry a gridline
+   on every axis-parallel conductor edge or the metal is not where it was drawn. This artwork
+   contributes **4 distinct vertical-edge X coordinates and 9 horizontal Y** — a floor of 4 × 9
+   lines before any control is consulted. Measured floor with every knob at its coarsest: 71 cells.
+   (It also carries two **5 µm slivers** — hard Y lines at 848/853 µm and 1213/1218 µm — which pin
+   `MinCellEdgeM` at 5 µm no matter what. That is artwork, not meshing.)
+3. **The 513 was the EDGE FAN, essentially in its entirety**, and that is what nobody had measured
+   in four rounds. Dumping the attractors settles it: all 4 X attractors and 5 of the 9 Y attractors
+   raise a fan, each ~6–7 gridlines wide (10.6, 31.8, 95.3, … / 10.8, 32.3, 96.9, 290.7, 872.1 µm),
+   and 4 × 7 ≈ 29 against a `gridX` of 30. **The bulk pitch contributes a handful of lines; the fans
+   contribute the rest.**
+
+### The defect, stated exactly
+
+`EdgeReferenceLength` returned **one scalar for the whole layout** — 3% of the narrowest conductor
+*anywhere* — and that one cell was then placed at **every** conductor edge. So a single narrow
+feature makes the fan at every wide trace's rim ten times finer than that rim needs, and a fan's
+length is `log_r(bulk/c₀)` cells, so the surplus is spent on gridlines that **cross the entire
+tensor grid**. On the owner's file: 3% of 360 µm = 10.8 µm applied to metal 3.6 mm wide.
+
+`PlanarEdgeReference.CellSize` is not an escape — it measured the identical 513, because with the
+transmission-line mesh on `min(hx, hy)` is pinned to the same global minimum.
+
+### The fix
+
+**`PlanarEdgeReference.LocalConductorWidth`**, now what `PlanarKernel.Mesh` and the EM panel's
+preview both pass. Each attractor carries its own `c₀`, 3% of the metal measured **perpendicular to
+that edge, at that edge** (`SurfaceMesher.LocalWidthAt`, `EdgeAttractor`, `GradedAttractor`).
+
+Three things about it are load-bearing:
+
+- **The grading rate `g` is UNCHANGED** — still derived from the global narrowest conductor. The
+  size field is still `h(x) = min_i [c₀_i + g·|x − a_i|]`; only its floors move. A single `g` is
+  also what keeps the field Lipschitz at one rate, which is what L8b's translation invariance rests
+  on.
+- **Every `c₀_i` is floored at the global `c₀`, so the mode may only COARSEN.** `h_local ≥ h_global`
+  pointwise ⇒ the cell count is bounded above by `ConductorWidth`'s, structurally. This matters
+  because a local width is a **sampled** quantity: without the floor a sampling artefact on unseen
+  artwork could refine the mesh of someone who reached for the setting to shrink it. Same invariant,
+  same reason, as `PlanarMeshPitchField`'s own floor.
+- **The width is `min(perpendicular run, the edge's own length)`, and the second term is the
+  end-cap case rather than a guard.** On a W × L patch the two side edges' perpendicular run is W —
+  the scale the 1/√d crowding decays over, and correct. The two END CAPS' perpendicular run is L,
+  and taking it would size a long line's end-cap fan on the line's *length*; the crowding there is
+  set by the width. `min` is W in both cases and needs no test for which kind of edge it is.
+  Sampled at 5 interior points and reduced by **MEDIAN, not minimum** — a rim carries notches,
+  treads and corner slivers, and the minimum lands in one of them.
+
+Measured on the owner's file: **513 → 420** as saved, **641 → 540** with the transmission-line mesh
+off, **1,829 → 1,698** at the shipped defaults. A uniform line is **bit-identical**, as it must be.
+
+### Two traps this hit, both caught by its own gates
+
+- **A new enum value falls into the WRONG BRANCH of a two-way `?:` and nothing says so.**
+  `EdgeReferenceLength` read `kind == ConductorWidth ? narrowest : cellSize`, so
+  `LocalConductorWidth` silently took the **CellSize** arm — deriving `g` from a `c₀` four times
+  finer, and making a **uniform line mesh differently from itself** (198 → 176 cells) when a uniform
+  line has no local widths to find. It is now written as `kind == CellSize ? cellSize : narrowest`,
+  so the DEFAULT arm is the geometry one. The gate that caught it is
+  `OnAUniformLine_TheLocalReferenceChangesNothing`, which exists precisely because a uniform line is
+  the one fixture where the answer is knowable in advance.
+- **A pointwise coarser FIELD does not give pointwise coarser CELLS.** `PartitionGraded` rescales
+  each interval to land exactly on its endpoints (`xs[i] * length / last`), so a coarser field can
+  leave a slightly shorter remainder cell against a hard gridline — measured at 4% below the global
+  mesh's finest cell. The **count** is the invariant; `MinCellEdgeM` is not, and the gate says so
+  with a 10% band rather than pretending otherwise.
+
+### What it does NOT do, and cannot
+
+**It does not stop a fan crossing the part**, which is the other half of what the owner described.
+An x-attractor refines a **column over the full height of the grid** — that is what a tensor product
+is. Localising it in the other axis means merging cells back afterwards, which produces T-junctions,
+which the rooftop basis (a pair sharing a cell edge) and `RectangleIntegrals`' axis-aligned closed
+forms do not admit. That is a second mesher, not a setting. This makes each fan **shorter**; it does
+not make it **narrower**.
+
+**The user's own remedy is still the large one on this file: the edge mesh off, 513 → 71.** And it
+is the consistent setting for what was asked — 1 cell across already means no transverse basis
+function and no edge singularity resolved, so paying 442 cells for a fan that resolves it anyway is
+buying nothing.
+
+### The notes, and why they were part of the defect
+
+The mesher **had been saying** cells/λ and mesh frequency were inert on this artwork, and that the
+edge mesh was the one live control. Nobody read it: it was one clause in the middle of a 90-word
+paragraph, under three other paragraphs. **Owner instruction: an engineer does not read a paragraph
+in a side panel.** Every note in `SurfaceMesher` and `PlanarMeshPitchField` was cut to its numbers
+and its remedy — the reasoning belongs in the source, which is where it now is exclusively — and the
+panel's notes became **ONE `SelectableTextBlock` per list rather than an `ItemsControl` of them**,
+because an `ItemsControl` selects one LINE at a time and copying a mesh report out meant dragging
+each note separately. `NotesText` / `MeshNotesText` / `PlanarMeshNotesText` join with a blank line.
+
+**Diagnosis that is built and then not read is the same defect as diagnosis that is not built.**
+This one cost four rounds.

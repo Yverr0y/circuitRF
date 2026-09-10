@@ -143,8 +143,8 @@ public class PlanarRimGradingTests(ITestOutputHelper output)
         foreach (var n in curved.Notes) _out.WriteLine($"[disc]  {n}");
         foreach (var n in square.Notes) _out.WriteLine($"[hero]  {n}");
 
-        Assert.Contains(curved.Notes, n => n.Contains("NO edge grading was actually applied", StringComparison.Ordinal));
-        Assert.DoesNotContain(square.Notes, n => n.Contains("NO edge grading was actually applied", StringComparison.Ordinal));
+        Assert.Contains(curved.Notes, n => n.Contains("NO edge grading was applied", StringComparison.Ordinal));
+        Assert.DoesNotContain(square.Notes, n => n.Contains("NO edge grading was applied", StringComparison.Ordinal));
     }
 
     [Fact]

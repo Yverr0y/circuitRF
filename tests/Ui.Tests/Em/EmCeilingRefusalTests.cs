@@ -228,8 +228,22 @@ public class EmCeilingRefusalTests
                            new System.Numerics.Complex(50, 0)),
         };
 
+        // TWO changes here, and both are about keeping this test on its own subject — that a MESH
+        // refusal carries its report — rather than on whatever refuses first.
+        //
+        // `Deembed: false`, because the thing that refused first was de-embedding's own calibration
+        // STANDARD (a separate, wider mesh: "Port 1's calibration standard needs 5,324 unknowns"),
+        // which throws a plain InvalidOperationException and has nothing to do with the DUT's report.
+        // That was always the case; it only surfaced when the DUT stopped refusing.
+        //
+        // cells/λ = 40, because the DUT stopped refusing at 10 once the LOCAL edge reference landed
+        // (PlanarEdgeReference.LocalConductorWidth, 2026-09-09): this taper's fans used to be sized
+        // on the metal at its 100 Ω end EVERYWHERE, and that alone was most of the count. A test
+        // about a refusal needs a mesh that refuses, so this asks for one instead of pinning the old
+        // number — and the UnknownCount assertion below still proves the refusal is the DUT's own.
         var ex = Assert.Throws<PlanarMeshRefusedException>(
-            () => new PlanarKernel().Solve(x.Problem!, Planar(10), ports, [5e9]));
+            () => new PlanarKernel().Solve(x.Problem!, Planar(40), ports, [5e9],
+                                           new PlanarSolveSettings(Deembed: false)));
 
         // The message is the refusal…
         Assert.Equal(ex.Report.Refusal, ex.Message);

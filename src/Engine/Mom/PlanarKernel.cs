@@ -211,11 +211,16 @@ public sealed class PlanarKernel
     /// parameter of the same name.</param>
     /// <param name="lengthFormat">Owner request, 2026-08-15 — see <see cref="SurfaceMesher.Mesh"/>'s
     /// own parameter of the same name.</param>
+    /// <param name="ports">M2 — read only by <see cref="PlanarMeshSettings.TransmissionLineMesh"/>,
+    /// and only to CHECK the direction the metal gave. <b>Optional, and it must stay optional</b>:
+    /// the EM panel calls this before any port has resolved, and a pre-solve unknown count that
+    /// disagreed with the run's would be exactly the defect P12 fixed in the ceiling.</param>
     public PlanarMeshReport Mesh(PlanarProblem problem, PlanarMeshSettings settings,
                                 RunControl? control = null, bool accelerated = false,
-                                SurfaceMesher.PlanarLengthFormat? lengthFormat = null)
-        => SurfaceMesher.Mesh(problem, settings, PlanarEdgeReference.ConductorWidth, control,
-                              accelerated: accelerated, lengthFormat: lengthFormat);
+                                SurfaceMesher.PlanarLengthFormat? lengthFormat = null,
+                                IReadOnlyList<PlanarPort>? ports = null)
+        => SurfaceMesher.Mesh(problem, settings, PlanarEdgeReference.LocalConductorWidth, control,
+                              accelerated: accelerated, lengthFormat: lengthFormat, ports: ports);
 
     /// <summary>
     /// Mesh → resolve ports → sweep → <see cref="DataSet"/>.
@@ -276,7 +281,7 @@ public sealed class PlanarKernel
         var report = Mesh(meshed, meshSettings, control,
                           accelerated: SurfaceMesher.UsesAcceleratedCeiling(
                               st.Fill?.Aim is not null, meshed.RequiresGeneralKernel),
-                          lengthFormat: lengthFormat);
+                          lengthFormat: lengthFormat, ports: ports);
         if (!report.CanSolve) throw new PlanarMeshRefusedException(report);
 
         ct.ThrowIfCancellationRequested();
@@ -350,7 +355,7 @@ public sealed class PlanarKernel
         var report   = Mesh(meshed, meshSettings,
                             accelerated: SurfaceMesher.UsesAcceleratedCeiling(
                                 st0.Fill?.Aim is not null, meshed.RequiresGeneralKernel),
-                            lengthFormat: lengthFormat);
+                            lengthFormat: lengthFormat, ports: ports);
         if (!report.CanSolve) throw new PlanarMeshRefusedException(report);
 
         var resolved = PlanarPorts.ResolveAll(report.Mesh, ports);

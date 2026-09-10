@@ -185,7 +185,47 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     /// once (owner report, 2026-08-11).</summary>
     public bool HasNotes => Notes.Count > 0;
 
-    partial void OnNotesChanged(ObservableCollection<string> value) => OnPropertyChanged(nameof(HasNotes));
+    partial void OnNotesChanged(ObservableCollection<string> value)
+    {
+        OnPropertyChanged(nameof(HasNotes));
+        OnPropertyChanged(nameof(NotesText));
+    }
+
+    // ── ONE selectable block per notes list, not one per note ──────────────────────────────────
+    //
+    // Owner instruction, 2026-09-09: an ItemsControl of SelectableTextBlocks selects ONE LINE AT A
+    // TIME, so copying a mesh report out of the panel — to put in a mail, a ticket, or a message to
+    // whoever wrote the mesher — means selecting and copying every line separately. These join the
+    // notes into a single string so one drag takes the lot. The lists stay as they are: they are
+    // what the tests read, and what a future per-note severity would hang off.
+    //
+    // A BLANK LINE between notes, not one newline. Each note is its own sentence or two and they run
+    // together otherwise; the panel is narrow enough that every note wraps.
+    public string NotesText => string.Join("\n\n", Notes);
+
+    /// <inheritdoc cref="NotesText"/>
+    public string MeshNotesText => string.Join("\n\n", MeshNotes);
+
+    /// <inheritdoc cref="NotesText"/>
+    public string PlanarMeshNotesText => string.Join("\n\n", PlanarMeshNotes);
+
+    /// <summary>Gates the planar notes block, so an empty one takes no height at all.</summary>
+    public bool HasPlanarMeshNotes => PlanarMeshNotes.Count > 0;
+
+    /// <summary>As <see cref="HasPlanarMeshNotes"/>, for the cross-section mesh's own notes.</summary>
+    public bool HasMeshNotes => MeshNotes.Count > 0;
+
+    partial void OnMeshNotesChanged(ObservableCollection<string> value)
+    {
+        OnPropertyChanged(nameof(MeshNotesText));
+        OnPropertyChanged(nameof(HasMeshNotes));
+    }
+
+    partial void OnPlanarMeshNotesChanged(ObservableCollection<string> value)
+    {
+        OnPropertyChanged(nameof(PlanarMeshNotesText));
+        OnPropertyChanged(nameof(HasPlanarMeshNotes));
+    }
     [ObservableProperty] private ObservableCollection<EmStackupRow> _stackupRows = [];
     [ObservableProperty] private string _layoutStatus = "";
     [ObservableProperty] private string _technologyName = "";
@@ -540,6 +580,20 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     /// <see cref="PlanarMeshSettings.DefaultMinCellsAcrossConductor"/> for what the mesher warns
     /// about and why it never refuses.</summary>
     [ObservableProperty] private string _planarMinCellsAcrossText     = "";
+
+    /// <summary>
+    /// The transmission-line mesh — the SEVENTH control, and the one that makes the two wavelength
+    /// controls work at all on a transmission line.
+    ///
+    /// <para>Owner report, 2026-09-09, three times: lowering Cells per wavelength or Mesh frequency
+    /// did not reduce the cell count. It could not — the pitch is
+    /// <c>min(λ_g/CellsPerWavelength, narrowest/CellsAcross)</c> in BOTH axes, so on artwork whose
+    /// metal is narrower than a λ cell the geometry term wins everywhere and both wavelength knobs
+    /// are inert at every value. With this on the two become ORTHOGONAL — λ along the current,
+    /// narrowness across it — and each always moves the mesh in its own direction. Measured on the
+    /// owner's own connector cutout: N = 3,521 at cells/λ = 20, 10 and 5 alike with it off; 1,971 /
+    /// 1,715 / 1,652 with it on.</para></summary>
+    [ObservableProperty] private bool   _planarTransmissionLineMesh;
 
     /// <summary>
     /// M0's mesh-frequency control, staged as text like every other dimensioned field in this panel.
@@ -944,6 +998,25 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         Refresh();
     }
 
+    /// <summary>
+    /// <b>The transmission-line mesh, committed on the click like the edge-mesh checkbox.</b>
+    ///
+    /// <para><b><see cref="PlanarMeshSettings.Auto"/> is NOT cleared here</b>, and the reason is
+    /// <see cref="OnPlanarBoundaryCellsChanged"/>'s: this is not a resolution, it is which DIRECTION
+    /// the resolutions apply in, and Auto has no opinion about the direction of current flow.
+    /// Clearing Auto would also pin the cell size the instant a user ticked this, which is a
+    /// different mesh for a reason they never asked for.</para></summary>
+    partial void OnPlanarTransmissionLineMeshChanged(bool value)
+    {
+        if (_suppressCommit) return;
+        if (value == Working.PlanarMesh.TransmissionLineMesh) return;
+        var before = SnapshotJson();
+        Working.PlanarMesh = Working.PlanarMesh with { TransmissionLineMesh = value };
+        CommitEdit(before, "Change transmission-line mesh");
+        InvalidateMesh();
+        Refresh();
+    }
+
     /// <summary>The conformal-boundary-cells control. Deliberately NOT routed through
     /// <see cref="CommitMeshField"/> — that committer is for staged TEXT fields, and this is a
     /// closed choice that commits on selection, exactly like the edge-mesh checkbox above.
@@ -1140,6 +1213,7 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         PlanarEdgeCellsText          = pm.EdgeCells.ToString(CultureInfo.InvariantCulture);
         PlanarMinCellsAcrossText     = pm.MinCellsAcrossConductor.ToString(CultureInfo.InvariantCulture);
         PlanarEdgeMesh               = pm.EdgeMesh;
+        PlanarTransmissionLineMesh   = pm.TransmissionLineMesh;
         PlanarBoundaryCells          = pm.BoundaryCells;
         PlanarMeshFrequencyText      = pm.MeshFrequencyHz is { } mf
             ? (mf / ViewModels.FreqUnitHelper.Multiplier(MeshFrequencyUnit))
@@ -1566,6 +1640,8 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         // the run does not solve — and, worse, the port's own mark would have no footprint to
         // measure and would silently stay at its glyph size. The ports here are the ones the last
         // refresh resolved; with none, this is exactly the old behaviour.
+        _pendingPlanarPorts = PlanarPorts.Count > 0 ? [.. PlanarPorts] : [];
+
         return PlanarPorts.Count > 0
             ? PlanarGroundPath.Extend(extraction.Problem!, PlanarPorts).Problem
             : extraction.Problem;
@@ -1579,13 +1655,23 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     private LayoutUnit _pendingDisplayUnit  = LayoutUnit.Um;
     private int        _pendingDbuPerMicron = LayoutUnits.DefaultDbuPerMicron;
 
+    /// <summary>The ports the mesh preview is computed against — a snapshot taken on the UI thread
+    /// beside the two format inputs above, for the same reason: <see cref="ComputePlanarMesh"/> runs
+    /// on a pool thread and may not read live view-model state.</summary>
+    private IReadOnlyList<PlanarPort> _pendingPlanarPorts = [];
+
     /// <summary>The POOLABLE half: pure, and touches no view-model state. Safe on any thread because
     /// <paramref name="problem"/> is an already-extracted snapshot.</summary>
     public PlanarMeshReport ComputePlanarMesh(PlanarProblem problem, RunControl? control)
-        => SurfaceMesher.Mesh(problem, Working.PlanarMesh, PlanarEdgeReference.ConductorWidth, control,
+        => SurfaceMesher.Mesh(problem, Working.PlanarMesh, PlanarEdgeReference.LocalConductorWidth, control,
                               accelerated: SurfaceMesher.UsesAcceleratedCeiling(
                                   Working.AcceleratedSolve, problem.RequiresGeneralKernel),
-                              lengthFormat: EmLengthFormat.For(_pendingDisplayUnit, _pendingDbuPerMicron));
+                              lengthFormat: EmLengthFormat.For(_pendingDisplayUnit, _pendingDbuPerMicron),
+                              // M2 — the transmission-line mesh CHECKS the direction against the
+                              // ports, so the preview must be handed the same ones the run will use
+                              // or the panel's unknown count and Simulate's would disagree. Captured
+                              // by PreparePlanarMesh on the UI thread, like the two format inputs.
+                              ports: _pendingPlanarPorts);
 
     /// <summary>The UI-THREAD half again: adopt the report and everything that follows from it.</summary>
     public void AdoptPlanarMeshReport(PlanarMeshReport report)

@@ -174,12 +174,19 @@ public static class EmSnpProvenance
     /// sets the transverse pitch directly, so it changes the cells, the unknowns and the answer.
     /// <b>Appended at the END and only when it is off its default</b>, so every <c>.snp</c> stamped
     /// before this control existed keeps the hash it already carries and does not read as stale.</para>
+    ///
+    /// <para><b><see cref="PlanarMeshSettings.TransmissionLineMesh"/> too</b> (2026-09-09) — it
+    /// changes both pitches and follows the artwork's bends, so it changes the cells, the unknowns
+    /// and the answer more than any other mesh control does. <b>Appended at the END and only when
+    /// on</b>, for the same reason.</para>
     /// </summary>
     public static string MeshHash(PlanarMeshSettings m)
         => Sha($"{m.Auto}|{m.CellsPerWavelength}|{m.EdgeMesh}|{m.EdgeCells}|{m.BoundaryCells}|" +
                $"{(m.MeshFrequencyHz is { } f ? R(f) : "auto")}" +
                (m.MinCellsAcrossConductor == PlanarMeshSettings.DefaultMinCellsAcrossConductor
-                    ? "" : $"|across={m.MinCellsAcrossConductor}"));
+                    ? "" : $"|across={m.MinCellsAcrossConductor}") +
+               (m.TransmissionLineMesh == PlanarMeshSettings.DefaultTransmissionLineMesh
+                    ? "" : $"|tline={m.TransmissionLineMesh}"));
 
     /// <summary>
     /// A port's identity for staleness purposes is its number, its POSITION, its inferred side and

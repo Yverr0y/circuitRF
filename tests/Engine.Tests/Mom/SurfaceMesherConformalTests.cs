@@ -268,11 +268,11 @@ public class SurfaceMesherConformalTests(ITestOutputHelper output)
         var stair = SurfaceMesher.Mesh(Disc(), Settings(PlanarBoundaryCells.Staircase));
         var cut   = SurfaceMesher.Mesh(Disc(), Settings(PlanarBoundaryCells.Conformal));
 
-        Assert.Contains(stair.Notes, n => n.Contains("approximated by a STAIRCASE"));
+        Assert.Contains(stair.Notes, n => n.Contains("are STAIRCASED"));
         // §4 — the staircasing note must stop CLAIMING a staircase when the cells are conformal, and
         // so must the edge-mesh note beside it.
-        Assert.DoesNotContain(cut.Notes, n => n.Contains("approximated by a STAIRCASE"));
-        Assert.DoesNotContain(cut.Notes, n => n.Contains("approximated by a staircase"));
+        Assert.DoesNotContain(cut.Notes, n => n.Contains("are STAIRCASED"));
+        Assert.DoesNotContain(cut.Notes, n => n.Contains("are staircased"));
         Assert.Contains(cut.Notes, n => n.Contains("CONFORMAL"));
 
         foreach (var n in cut.Notes) _out.WriteLine($"[conformal] {n}");
