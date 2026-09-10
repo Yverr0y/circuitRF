@@ -1,5 +1,74 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## Stray import artwork on an inner layer set the return plane for the whole run (user report, 2026-09-10)
+
+A patch antenna imported from a board file and drawn on Top Copper reported
+
+> Every port returns through 'Bottom Copper', the ground-designated conductor at 35 µm — the highest
+> one below the signal level at 335 µm.
+
+The plane directly under the patch is Inner 1, 300 µm below it. Every word of the note was true, and
+the run it described was wrong by a factor of 5.6 in substrate height.
+
+### The signal level was not the layer anyone drew on
+
+`PlanarExtractor` took its analysis levels as *every signal conductor that carries artwork*, and
+`signal = levels[0]` — the LOWEST — is what R-em-4 asks its ground question of. The import had brought
+in the inner-layer annular pads of the connector's two through-holes: two 0.485 mm circles on Inner 2,
+which is a signal conductor, carrying artwork, and lower than Top Copper. That made Inner 2 the signal
+level, and "the highest designated ground BELOW the signal" then could not see Inner 1 at all.
+
+**What happens to the plane that is passed over is worse than being unused.** `BuildMediumStack`
+absorbs any conductor band that is not an analysis level into a neighbouring dielectric, so Inner 1's
+18 µm of copper was modelled as 18 µm of FR-4. The real ground plane did not merely fail to be the
+reference — it left the physics entirely, and nothing said so.
+
+### Ports decide one question, and deliberately not the level set
+
+The obvious fix — seed the levels from the ports, grow across drawn vias — was implemented, and the
+MIM acceptance fixtures refused it immediately: a capacitor's bottom plate is coupled to its top plate
+by the capacitor dielectric and by *nothing else*, so no port and no via reaches it, and
+`MimCapacitorTests` lost `Metal1` from all three of its level assertions. A parasitic stacked patch, a
+broadside-coupled pair and a floating shield are the same shape. **Field coupling is what a full-wave
+kernel is for; a rule that can only follow metal cannot be the one that decides what gets meshed.**
+
+So port reachability answers one narrow question instead. The default is still every level with
+artwork; what changed is that the LOWEST level — the only one that sets the return plane — is dropped
+when **both** of these hold:
+
+- no port sits on it and no drawn via joins it to one that does, **and**
+- dropping it moves the return plane to a *higher* designated ground.
+
+Neither half alone would do. Unreachability cannot condemn a level (that MIM plate), and moving the
+return plane cannot either (that is what a lower conductor legitimately does). Only the conjunction
+describes metal that is in the way rather than in the structure. It iterates, because an import that
+left one such layer usually left two, and it never empties the level list.
+
+**R-em-4's own query is now factored out as `HighestGroundBelow`**, because the check has to ask it of
+a level it is considering discarding, and a second spelling of that query is a second chance to get
+R-em-4 wrong. It is the one place the rule is written.
+
+### A designated plane between the levels and the return is now named
+
+Reachable only by listing the levels explicitly, and worth a sentence when it happens: such a plane
+cannot be chosen (a return must sit beneath the conductor it feeds), is absorbed into the surrounding
+dielectric as above, and the run otherwise never mentions it. The note states what becomes of it, not
+merely that it was not used.
+
+### Not fixed here, and the reason is structural
+
+The report also asked for a per-port return layer. **The ground plane is not a property of a port** —
+it is a boundary condition of the medium, present in every `G(r, r')` evaluation and therefore in
+every entry of the MoM matrix, on top of which the ports are `Y = BᵀZ⁻¹B`. `BuildMediumStack` ends in
+`new LayerStack(Termination.Pec, layers, Termination.Air)`, and a `LayerStack` has exactly two
+terminations: a PEC can sit at either end and nowhere in between, so a second reference plane has no
+representation at all. `PlanarPort.cs`' D3 says the same in the kernel's vocabulary. The reachable
+version of that capability is a port referenced to *meshed* metal —
+`PlanarPortReference.CoplanarGround` / `.SecondConductor` — which is
+`docs/sonnet-briefs/brief-em-return-plane-2-per-port-reference.md`. A per-run override of the plane,
+which needs no kernel change, is `brief-em-return-plane-1-explicit-ground-layer.md`.
+
+
 ## A Windows-authored workspace would not resolve its technology on macOS (owner report, 2026-09-10)
 
 A workspace shared by a Windows colleague opened with

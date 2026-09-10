@@ -254,10 +254,29 @@ public static class PlanarExtractor
         // Through L8 this block picked exactly ONE level and refused every other case, because the
         // Green's function had one. It now selects a SET: the names the .cem gives, else the single
         // name R-em-4b's older field gives, else every signal conductor that actually carries
-        // artwork. Ordered bottom-to-top because R-via-5 and R-msh-2 both index by that order.
+        // artwork — less, in that last case, whatever the incidental-metal check below discards.
+        // Ordered bottom-to-top because R-via-5 and R-msh-2 both index by that order.
         var signalBands = conductorShapes.Select(c => c.Band).Distinct().OrderBy(b => b.SheetM).ToList();
 
+        // ── WHICH LEVELS THE PORTS CAN REACH — not the level set, a REACHABILITY oracle ──────
+        //
+        // A level is reachable when a port sits on it, or when a DRAWN via joins it to one that is.
+        // This is deliberately NOT used as the level set, and the reason is worth stating because it
+        // is the obvious design and it is wrong: a MIM capacitor's bottom plate is coupled to its top
+        // plate by the capacitor dielectric and by nothing else — no port, no via — so seeding the
+        // levels from the ports would silently drop half of every capacitor in the acceptance
+        // fixtures. A parasitic stacked patch, a broadside-coupled pair and a floating shield are the
+        // same shape. Field coupling is exactly what a full-wave kernel is FOR; a rule that can only
+        // follow metal cannot be the one that decides what gets meshed.
+        //
+        // What it IS used for is one narrow question, below: whether the lowest level — the one that
+        // sets the return plane for the entire run — is part of the structure or incidental metal.
+        var portReach = LevelsThePortsReach(
+            shapes, binding, viaShapes.Select(v => v.Entry).Concat(regionViaShapes.Select(v => v.Entry)),
+            signalBands, out int portsSeen, out int portsUnresolved);
+
         List<Band> levels;
+        var incidental = new List<Band>();
         if (settings.AnalysisLevelNames is { Length: > 0 } wantedLevels)
         {
             levels = [];
@@ -295,15 +314,82 @@ public static class PlanarExtractor
         else
         {
             levels = signalBands;
+
+            // ── INCIDENTAL METAL MUST NOT SET THE RETURN PLANE ────────────────────────────────
+            //
+            // R-em-4 asks for the highest designated ground below the LOWEST level, so the lowest
+            // level alone decides the reference plane for every port in the run. A Gerber import of
+            // a 4-layer board brings in the inner-layer annular pads of every through-hole, which is
+            // artwork on a signal conductor and therefore a level — and, being the lowest, the one
+            // that answers that question. Two 0.485 mm rings nobody drew on purpose then pushed the
+            // return plane past the real ground plane to the bottom of the board: a patch antenna
+            // was solved over 1.67 mm of FR-4 instead of 0.3 mm, with its actual ground plane
+            // absorbed into the dielectric as substrate. Nothing said so. User-reported, 2026-09-10.
+            //
+            // The test is BOTH halves and neither alone would do. A level no port reaches may be
+            // perfectly real (that MIM plate), so unreachability cannot condemn it; and a level that
+            // moves the return plane may be exactly what the user drew, so movement cannot either.
+            // Only the conjunction — unreachable AND it drags the reference plane below a nearer
+            // designated ground — describes metal that is in the way rather than in the structure.
+            //
+            // Iterative, because an import that left one such layer commonly left two.
+            if (portReach.Count > 0)
+            {
+                while (levels.Count > 1 && !portReach.Contains(levels[0].Index))
+                {
+                    var asIs    = HighestGroundBelow(stack, levels[0].SheetM);
+                    var without = HighestGroundBelow(stack, levels[1].SheetM);
+                    if (without is null || (asIs is not null && without.TopM <= asIs.TopM)) break;
+
+                    incidental.Add(levels[0]);
+                    levels = [.. levels.Skip(1)];
+                }
+            }
+
+            // Ports exist but none of them named a signal conductor, so the check above could not
+            // run at all. Saying which is the difference between "nothing was wrong" and "your ports
+            // could not be read" — a port label whose own drawing layer is not bound to a conductor
+            // entry is the shape this takes in practice.
+            else if (portsSeen > 0 && portsUnresolved == portsSeen)
+                notes.Add($"{portsSeen} port label(s) are present but none of them resolves to a " +
+                          "signal conductor layer, so this run could not check whether the conductor " +
+                          "setting its return plane is one you are feeding. Place each port on the " +
+                          "conductor it feeds, or list the analysis levels explicitly.");
         }
+
+        if (incidental.Count > 0)
+            notes.Add(
+                $"{string.Join(", ", incidental.Select(b => $"'{b.Layer.Name}'"))} " +
+                $"{(incidental.Count == 1 ? "carries artwork but no port reaches it, and it sits" : "carry artwork but no port reaches them, and they sit")} " +
+                $"BELOW everything that is fed — so including " +
+                $"{(incidental.Count == 1 ? "it" : "them")} would have put the return plane on a " +
+                $"conductor further down the stackup than " +
+                $"'{HighestGroundBelow(stack, levels[0].SheetM)?.Layer.Name ?? "the stack's own boundary"}', " +
+                $"which is the plane under the metal being fed. " +
+                $"{(incidental.Count == 1 ? "It was" : "They were")} left out of this run and " +
+                $"{(incidental.Count == 1 ? "its shapes are" : "their shapes are")} not meshed. " +
+                "That is what is wanted for the inner-layer pads a board import brings in with every " +
+                "through-hole; it is NOT what is wanted for a real conductor on a lower level, which " +
+                "you can put back by ticking it in this EM setup's analysis levels.");
 
         // Artwork on a signal layer the analysis does not include is DROPPED, and said so — a shape
         // that silently vanishes from a full-wave solve is the failure this note exists to prevent.
+        //
+        // The SENTENCE depends on who chose, and that distinction is the whole point of the note. "…
+        // are NOT in this EM setup's analysis levels … add them to the setup's level list" is true
+        // and useful when the user typed the list; said of a set the EXTRACTOR derived from the
+        // ports, it blames the user for a decision they never made and sends them looking for a
+        // setting that is empty. Name the rule that dropped them instead, and the one thing that
+        // overrides it.
         var levelIndices = levels.Select(b => b.Index).ToHashSet();
-        int droppedLevels = signalBands.Count(b => !levelIndices.Contains(b.Index));
-        if (droppedLevels > 0)
-            notes.Add($"{droppedLevels} signal conductor layer(s) carry artwork but are NOT in this " +
-                      $"EM setup's analysis levels ({string.Join(", ", levels.Select(b => $"'{b.Layer.Name}'"))}). " +
+        var incidentalIdx = incidental.Select(b => b.Index).ToHashSet();
+        var dropped      = signalBands
+            .Where(b => !levelIndices.Contains(b.Index) && !incidentalIdx.Contains(b.Index))
+            .ToList();
+        string levelList = string.Join(", ", levels.Select(b => $"'{b.Layer.Name}'"));
+        if (dropped.Count > 0)
+            notes.Add($"{dropped.Count} signal conductor layer(s) carry artwork but are NOT in this " +
+                      $"EM setup's analysis levels ({levelList}). " +
                       "Their shapes are not meshed and contribute nothing to the answer. Add them to " +
                       "the setup's level list if they are part of the structure.");
 
@@ -334,10 +420,7 @@ public static class PlanarExtractor
         // the boundary is the metal's top surface whatever a ground entry's `SheetAt` says. Do not
         // "unify" the two: reading `SheetAt` here would let a stray Bottom on a ground entry drop
         // the reference plane by a metal thickness on every technology that carries one.
-        var groundBand = stack
-            .Where(b => b.Layer.Kind == StackupKind.Conductor && b.Layer.IsGroundReference && b.TopM <= signal.SheetM)
-            .OrderByDescending(b => b.TopM)
-            .FirstOrDefault();
+        var groundBand = HighestGroundBelow(stack, signal.SheetM);
 
         double groundTopM;
         if (groundBand is not null)
@@ -363,6 +446,39 @@ public static class PlanarExtractor
                 "terminal of every port in this run and is not selectable per port; it is modelled " +
                 "as laterally infinite. To return through a different conductor, designate that one " +
                 "as the ground reference in the technology editor.");
+
+            // ── A GROUND PLANE SKIPPED OVER IS NOT A GROUND PLANE — IT IS SUBSTRATE ───────────
+            //
+            // R-em-4 asks for the highest designated ground BELOW THE LOWEST LEVEL, so a designated
+            // plane sitting between the levels cannot be chosen and is not otherwise mentioned. What
+            // then happens to it is worse than being ignored: BuildMediumStack absorbs any conductor
+            // band that is not a level into a NEIGHBOURING DIELECTRIC, so the plane leaves the
+            // physics entirely — 18 µm of copper becomes 18 µm of FR-4 — and the run reports a
+            // perfectly ordinary result for a structure referenced to a plane four times further
+            // away than the real one. Every part of that is silent today.
+            //
+            // A note rather than a refusal, and deliberately: with levels seeded from the ports this
+            // is reachable only when someone listed the levels themselves, and a plane with a large
+            // enough opening under the structure is a thing a user may legitimately mean to skip.
+            // It states what happens to the plane, not merely that it was not used.
+            var skipped = stack
+                .Where(b => b.Layer.Kind == StackupKind.Conductor && b.Layer.IsGroundReference &&
+                            b.TopM > groundBand.TopM + 1e-15 && b.BottomM < levels[^1].SheetM - 1e-15)
+                .OrderBy(b => b.TopM)
+                .ToList();
+            if (skipped.Count > 0)
+                notes.Add(
+                    $"WARNING: {string.Join(", ", skipped.Select(b => $"'{b.Layer.Name}'"))} " +
+                    $"{(skipped.Count == 1 ? "is a ground-designated conductor" : "are ground-designated conductors")} " +
+                    $"lying BETWEEN the analysis levels and the return plane chosen above. A return " +
+                    "plane must sit beneath the conductor it feeds, and this one does not, so it was " +
+                    "passed over — and a conductor that is neither a level nor the return plane is " +
+                    "absorbed into the surrounding dielectric, which means it is not in this solve at " +
+                    "ALL: its metal is modelled as substrate. If the structure is referenced to it, " +
+                    "the answer will be wrong by the ratio of the two heights and will not look it. " +
+                    "Restrict this EM setup's analysis levels to the conductors above that plane, or " +
+                    "untick its \"Ground reference\" in the technology editor so it is meshed as " +
+                    "ordinary metal.");
         }
         else if (tech.Stackup.Bottom == BoundaryCondition.Ground)
         {
@@ -1007,6 +1123,96 @@ public static class PlanarExtractor
     }
 
     // ── Stackup -> z bands (restated from CrossSectionExtractor, not shared — see the header) ──
+
+    /// <summary>
+    /// <b>The analysis levels the PORTS imply: the levels they sit on, plus everything a drawn via
+    /// joins to those, intersected with the levels that actually carry artwork.</b>
+    ///
+    /// <para>Resolution is by LAYER KEY, not by geometry, and that is the whole of it: a port's
+    /// <see cref="LabelShape.PortLayer"/> is the conductor it committed to at placement, and its own
+    /// drawing layer is what every port placed before that field existed has. Point-in-polygon would
+    /// be more general and is deliberately not done here — it would need the flattened artwork, which
+    /// does not exist until the levels are known, and the fallback below is already the safe
+    /// direction. <c>EmPortExtraction</c> resolves a port geometrically against the finished mesh and
+    /// is unaffected; this is only which levels get built.</para>
+    ///
+    /// <para><b>Empty means "no opinion", never "no levels".</b> A layout with no port labels — which
+    /// is what nearly every extraction test hands <see cref="Extract"/> — returns empty here and
+    /// takes the artwork rule unchanged.</para>
+    /// </summary>
+    private static HashSet<int> LevelsThePortsReach(
+        IReadOnlyList<LayoutShape>       shapes,
+        Dictionary<LayerKey, List<Band>> binding,
+        IEnumerable<StackupLayer>        drawnViaEntries,
+        List<Band>                       signalBands,
+        out int                          portsSeen,
+        out int                          portsUnresolved)
+    {
+        portsSeen = portsUnresolved = 0;
+
+        var seeded = new HashSet<int>();
+        foreach (var s in shapes)
+        {
+            if (s is not LabelShape { IsPort: true } label) continue;
+            portsSeen++;
+
+            var band = SignalBandFor(label.PortLayer, binding) ?? SignalBandFor(label.Layer, binding);
+            if (band is null) { portsUnresolved++; continue; }
+            seeded.Add(band.Index);
+        }
+
+        if (seeded.Count == 0) return [];
+
+        // ── Carry the seed across DRAWN vias, to a fixpoint ──────────────────────────────────
+        //
+        // The artwork says a via is there; the STACKUP says which two conductors it joins
+        // (BuildVias' own rule, restated rather than re-derived). Only entries that some shape
+        // actually landed on are considered — a via kind declared in the technology and never drawn
+        // joins nothing on this board, and letting it pull in a level would put the technology back
+        // in charge of what is being solved.
+        //
+        // A fixpoint rather than one pass because via kinds chain: L1-L2 then L2-L3 reaches L3 from a
+        // port on L1, and the loop cost is bounded by the number of levels.
+        var spans = drawnViaEntries
+            .Where(e => e.SpanFromLayer is { Length: > 0 } && e.SpanToLayer is { Length: > 0 })
+            .Select(e => (From: e.SpanFromLayer!, To: e.SpanToLayer!))
+            .Distinct()
+            .ToList();
+
+        for (bool grew = true; grew;)
+        {
+            grew = false;
+            foreach (var (from, to) in spans)
+            {
+                var a = signalBands.FirstOrDefault(b => string.Equals(b.Layer.Name, from, StringComparison.Ordinal));
+                var b2 = signalBands.FirstOrDefault(b => string.Equals(b.Layer.Name, to, StringComparison.Ordinal));
+                if (a is null || b2 is null) continue;          // an end that is ground, or carries nothing
+                if (seeded.Contains(a.Index) && seeded.Add(b2.Index)) grew = true;
+                if (seeded.Contains(b2.Index) && seeded.Add(a.Index)) grew = true;
+            }
+        }
+
+        seeded.IntersectWith(signalBands.Select(b => b.Index));
+        return seeded;
+    }
+
+    /// <summary><b>R-em-4's own query, in one place.</b> The highest ground-designated conductor whose
+    /// TOP SURFACE is at or below <paramref name="sheetM"/> — the plane a conductor at that height
+    /// returns through. Factored out because the incidental-level check above has to ask it of a
+    /// level it is considering DISCARDING, and a second spelling of this query would be a second
+    /// chance to get R-em-4 wrong.</summary>
+    private static Band? HighestGroundBelow(List<Band> stack, double sheetM) => stack
+        .Where(b => b.Layer.Kind == StackupKind.Conductor && b.Layer.IsGroundReference && b.TopM <= sheetM)
+        .OrderByDescending(b => b.TopM)
+        .FirstOrDefault();
+
+    /// <summary>The non-ground conductor band a drawing layer binds to, if any — the same question
+    /// the classification loop asks of every artwork shape, asked the same way so a port and the
+    /// metal under it cannot land on different levels.</summary>
+    private static Band? SignalBandFor(LayerKey? key, Dictionary<LayerKey, List<Band>> binding)
+        => key is { } k && binding.TryGetValue(k, out var bands)
+            ? bands.FirstOrDefault(b => b.Layer.Kind == StackupKind.Conductor && !b.Layer.IsGroundReference)
+            : null;
 
     /// <summary><see cref="SheetM"/> is where this band's zero-thickness ANALYSIS SHEET sits, which
     /// is not the same question as where the band is. Every level-z, slab-height and medium-cut

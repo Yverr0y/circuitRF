@@ -468,7 +468,7 @@
                     </Expander.Header>
                     <StackPanel Spacing="2">
                         <TextBlock FontSize="10" Opacity="0.75" TextWrapping="Wrap"
-                                   Text="Which conductor levels the full-wave solve meshes, bottom-to-top. Leave all unchecked to include every level that carries artwork."/>
+                                   Text="Which conductor levels the full-wave solve meshes, bottom-to-top. Leave all unchecked to include every level that carries artwork — except one lying below everything the ports feed, which is left out so that stray artwork cannot move the return plane. Tick it to put it back."/>
                         <ScrollViewer MaxHeight="180" VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled">
                             <ItemsControl ItemsSource="{Binding ViewModel.AnalysisLevelRows}">
