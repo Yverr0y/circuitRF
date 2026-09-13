@@ -43,9 +43,14 @@ public static class DocAntennaFixtures
             dir = dir.Parent;
         }
         throw new InvalidOperationException(
-            "The antenna documentation figures read their design out of testdata/antenna/, and no "
-          + $"circuitrf.slnx was found above '{AppContext.BaseDirectory}'.");
+            "The documentation figures that read a committed design out of testdata/ need the "
+          + $"repository root, and no circuitrf.slnx was found above '{AppContext.BaseDirectory}'.");
     });
+
+    /// <summary>The repository root, for the other fixtures that read a committed <c>testdata/</c>
+    /// design rather than building a second copy of it — <see cref="DocCoupledLineFixtures"/> reads
+    /// AN-01's coupled pair through it. One walk, one failure message.</summary>
+    internal static string RepoRootPath => RepoRoot.Value;
 
     private static string Example(params string[] parts) =>
         Path.Combine([RepoRoot.Value, "testdata", "antenna", .. parts]);

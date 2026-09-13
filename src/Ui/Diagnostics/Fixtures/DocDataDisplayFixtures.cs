@@ -222,6 +222,19 @@ public static class DocDataDisplayFixtures
     }
 
     /// <summary>
+    /// Draw a trace DASHED, through the trace card's own line-style picker — for the one figure whose
+    /// point is that two curves coincide. Two coincident solid lines are indistinguishable from one.
+    /// </summary>
+    internal static void Dashed(TraceRowViewModel trace)
+    {
+        var item = PlotInspectorViewModel.LineModes.FirstOrDefault(
+                       m => !m.IsOff && m.Type == LineType.Dashed)
+            ?? throw new InvalidOperationException(
+                "The trace card no longer offers a dashed line style.");
+        trace.SelectedLineMode = item;
+    }
+
+    /// <summary>
     /// The Data Display with load-pull contours drawn on the Γ plane, referenced to the impedance
     /// the grid itself was swept in (<see cref="DocRunData.LoadpullGridZ0"/>).
     ///

@@ -237,33 +237,45 @@ public static class FigureCatalog
 
         // ── Application note AN-01 ────────────────────────────────────────────────────────────
         //
-        // THREE FIGURES OF ONE PIECE OF METAL, AND THAT IS THE ARGUMENT. The note's whole claim is
-        // that deleting a port label changes the excitation and not the structure, so the first two
-        // rows must be identical in every respect except the labels - same fixture artwork, same
-        // capture size, same framing. Read at different sizes they would invite the reader to look
-        // for a difference in the geometry, which is the misconception being corrected.
+        // The pair the note is about, drawn as it is SIMULATED. It was once drawn twice - once with
+        // all four ports and once with two - because the note argued from the difference between
+        // them; the rewrite of 2026-09-13 dropped that argument, and a figure of a coupled pair with
+        // ports on only one of its lines is a trap for a designer scrolling past a page titled "put
+        // a port on every end" (owner). Deleted rather than left unreferenced: an Id in this catalog
+        // IS the placeholder key a page cites, and a row nothing cites rots quietly.
         new("an01-coupled-pair-4port", DocLayoutFixtures.CoupledPairFourPorts, 882, 192, null,
             "Two parallel microstrips with an edge port on each end of each line - 254 um wide, "
           + "3.83 mm long, 246 um apart. All four ports are present, so both lines are driven and "
           + "both are terminated in 50 ohms."),
 
-        new("an01-coupled-pair-2port", DocLayoutFixtures.CoupledPairTwoPorts, 882, 192, null,
-            "The same metal with ports 3 and 4 deleted. The upper line is still there, still meshed "
-          + "and still coupled to the lower one - it has lost its terminations, not its existence, "
-          + "and is now open at both ends."),
-
         new("an01-coupled-pair-isolated-feeds", DocLayoutFixtures.CoupledPairIsolatedFeeds, 882, 468, null,
-            "The remedy: the same coupled section, with 4 mm of line at each port and the other "
-          + "conductor held 6 mm away there. The de-embedding calibration assumes a port's feed is "
-          + "an isolated uniform line, and a neighbour carrying a port of its own has to be 5 "
-          + "substrate heights clear of it - here it is 6.38. Measured on this geometry the result "
-          + "is passive at every frequency; with the ports on the coupled section it is refused."),
+            "The same coupled section with 4 mm of line at each port and the other conductor held "
+          + "6 mm away there - 6.38 substrate heights, against the 5 a neighbour carrying a port of "
+          + "its own needs. Where the two ports of a plane cannot be calibrated together, this is "
+          + "what gives each of them the isolated uniform feed the standard assumes."),
 
         new("an01-coupled-pair-coarse-mesh", DocLayoutFixtures.CoupledPairCoarseMesh, 882, 192, null,
-            "The same pair meshed at cells per wavelength 5 with cells across 2. One cell lands across "
-          + "each 254 um conductor and the cells along the line are a large fraction of its length. "
-          + "This mesh is too coarse, but the note shows by measurement that it is not what made the "
-          + "answer wrong."),
+            "The same pair meshed at cells per wavelength 5 with cells across 2, well below the 20 "
+          + "and 4 the mesh opens at. One cell lands across each 254 um conductor and the cells "
+          + "along the line are a large fraction of its length; two of the reference planes end up "
+          + "inside the drawn metal."),
+
+        // AN-01's RESULT figures. Static, because a full-wave sweep is not free and the answer does
+        // not change between regenerations - see DocCoupledLineFixtures for the arrangement, which
+        // is the antenna patterns' one.
+        new("an01-coupled-pair-return-loss", DocCoupledLineFixtures.ReturnLoss, 820, 520,
+            WindowFrame.Titled("circuitRF - Data Display"),
+            "Return loss at both ends of the driven line, 1-7 GHz. S(1,1) and S(2,2) are the two "
+          + "ends of one uniform 254 um conductor, so they lie on top of each other; a run in which "
+          + "they separate has an asymmetry the geometry does not.",
+            Static: true),
+
+        new("an01-coupled-pair-through-coupled", DocCoupledLineFixtures.ThroughAndCoupled, 820, 520,
+            WindowFrame.Titled("circuitRF - Data Display"),
+            "Through and coupled on the same axes. S(2,1) is the far end of the driven line; S(3,1) "
+          + "is the near end of its neighbour - the backward-coupled port, and the number a "
+          + "coupled-line design is usually about.",
+            Static: true),
 
         new("layout-rulers", DocLayoutFixtures.LayoutRulers, 1100, 700,
             WindowFrame.Titled("circuitRF - Layout editor"),

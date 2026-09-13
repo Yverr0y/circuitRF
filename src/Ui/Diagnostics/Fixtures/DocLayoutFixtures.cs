@@ -543,20 +543,20 @@ public static class DocLayoutFixtures
         return (view, xc, yc);
     }
 
-    // ── App note AN-01: a coupled pair, with and without the second line's ports ────────────────
+    // ── App note AN-01: the coupled pair, and the same pair with isolated feeds ─────────────────
 
     /// <summary>
-    /// <b>Two parallel microstrips, drawn once and used by both AN-01 port figures.</b>
+    /// <b>Two parallel microstrips, drawn once and used by every AN-01 figure of the plain pair.</b>
     ///
     /// <para>The dimensions are the ones the app note reasons about, in microns: 254 wide, 3830
     /// long, 246 apart edge to edge. They are stated here rather than parameterised because the
     /// note quotes them in its own prose and the two must not be free to drift — a figure whose
     /// gap is not the gap the text computes a coupling from is worse than no figure.</para>
     ///
-    /// <para><b>Both lines are always present.</b> That is the entire subject of the note: deleting
-    /// a port label removes a port, never the metal, so the pair of figures this feeds differ in
-    /// their LABELS and in nothing else. Building the artwork in one place is what guarantees
-    /// that.</para>
+    /// <para><b>Both lines are always present</b>, in every figure fed from here: a port label is a
+    /// port, never a piece of metal. Building the artwork in one place is what keeps the coupled
+    /// section identical between the plain pair and <see cref="CoupledPairIsolatedFeeds"/>, where
+    /// the whole claim is that only the feeds changed.</para>
     /// </summary>
     private static (LayoutView View, LayerKey Top, long Len, long W, long Gap) CoupledPair()
     {
@@ -602,27 +602,6 @@ public static class DocLayoutFixtures
         view.Shapes.Add(PortLabel(top, "2", len, yA, LayoutRotation.R180, h));
         view.Shapes.Add(PortLabel(top, "3", 0,   yB, LayoutRotation.R0,   h));
         view.Shapes.Add(PortLabel(top, "4", len, yB, LayoutRotation.R180, h));
-
-        return Framed(new LayoutDocument("Coupled pair", EditorVm(view)), 880, 190,
-                      marginX: 0.32, marginY: 0.10);
-    }
-
-    /// <summary>
-    /// <b>AN-01, the two-port setup: the SAME metal with ports 3 and 4 deleted.</b>
-    ///
-    /// <para>Read beside <see cref="CoupledPairFourPorts"/> this is the whole point of the note. The
-    /// upper line has not gone anywhere — it is still drawn, still meshed and still coupled to the
-    /// lower one — it has simply lost the two 50 ohm terminations that were holding it, and is now
-    /// open at both ends.</para>
-    /// </summary>
-    public static FigureScene CoupledPairTwoPorts()
-    {
-        var (view, top, len, w, gap) = CoupledPair();
-        long h = AppNotePortLabelHeight;
-        long yA = w / 2;
-
-        view.Shapes.Add(PortLabel(top, "1", 0,   yA, LayoutRotation.R0,   h));
-        view.Shapes.Add(PortLabel(top, "2", len, yA, LayoutRotation.R180, h));
 
         return Framed(new LayoutDocument("Coupled pair", EditorVm(view)), 880, 190,
                       marginX: 0.32, marginY: 0.10);
