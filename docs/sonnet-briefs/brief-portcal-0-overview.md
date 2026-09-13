@@ -1,6 +1,6 @@
 # Brief — a port whose feed has a neighbour is de-embedded against the wrong structure: the series
 
-**Status:** briefs 1 and 2 done, 3–4 to write · **Date:** 2026-09-12 · **Area:** `src/Engine/Mom` (port calibration)
+**Status:** briefs 1, 2 and 3 done, 4 to write · **Date:** 2026-09-12 · **Area:** `src/Engine/Mom` (port calibration)
 **Requirement tag for the series:** `R-pcal-n`
 
 ---
@@ -151,15 +151,16 @@ free win.
 
 ## 4. The briefs, in the order they are worth doing
 
-**Brief 1 has reported (2026-09-12).** Its findings are in `src/Engine/Mom/RESOLVED.md`, "PCAL1 — how
-much clearance a calibrated port actually needs". **None of 2, 3 or 4 was made unnecessary**, and
-briefs 3 and 4 are no longer provisional — their scope is now set by measurement.
+**Briefs 1, 2 and 3 have reported (2026-09-12).** Their findings are in `src/Engine/Mom/RESOLVED.md`,
+"PCAL1 — how much clearance a calibrated port actually needs", "PCAL2" and "PCAL3". **Brief 4 was not
+made unnecessary by 3**: a driven neighbour needs 2–3× the clearance of a passive one, so a design 3
+makes safe can still be refused.
 
 | # | Brief | Status after PCAL1 |
 |---|---|---|
 | 1 | **The investigation** — `brief-portcal-1-investigation.md` | **Done.** The clearance law is `s/h`: the neighbour's distance in SUBSTRATE HEIGHTS, and line width is inert (a 4× change in w moves the threshold 5 %). |
 | 2 | **Stop publishing the bad answer** — `brief-portcal-2-refuse-not-warn.md` | **Done (2026-09-12).** Independent of 1's outcome and now carrying 1's numbers: the threshold must be its own setting, **5 h for a neighbour carrying a port and 2 h for one that does not**, and the margin it reports is `s/h`, because nothing the solve already computes bounds the error. |
-| 3 | **A passive neighbour inside the port profile** — `brief-portcal-3-passive-neighbour.md` | **Write it second.** The premise holds — one driven mode, roughly half the clearance requirement — but "a passive neighbour may be benign" is **refuted**: at 246 µm it is 18.0 dB out in S₁₁. A **ground pour is not a separate case** (the neighbour's own width is inert to within 2 %), which is a scope reduction. |
+| 3 | **A passive neighbour inside the port profile** — `brief-portcal-3-passive-neighbour.md` | **Done (2026-09-12).** The standard reproduces the neighbour and the fixture that was 18.0 dB out in S₁₁ and non-passive at 3 of 7 points comes back **at the A-vs-B floor and passive at every point** — at six of its seven frequencies. The seventh is the finding: a reproduced neighbour is open at both ends, so the STANDARD resonates at βL = nπ, and those points are named rather than fixed. Standards double, 4.57× → 9.14× the DUT's unknowns. `src/Engine/Mom/RESOLVED.md`, "PCAL3". |
 | 4 | **Calibration groups and a modal error box** — `brief-portcal-4-modal-error-box.md` | **Write it third, and it is still the expensive one.** Brief 3 does not subsume it: a driven neighbour needs 2–3× the clearance of a passive one, so a design 3 makes safe can still be refused. |
 
 **Three findings that change how the rest of the series should be read:**

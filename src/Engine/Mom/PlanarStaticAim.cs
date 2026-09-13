@@ -451,7 +451,15 @@ public sealed class PlanarStaticAim
     /// <para><see cref="TotalCapacitance"/> is not routed through this: it builds its own all-ε₀
     /// right-hand side and totals unweighted, so the shipped arithmetic is untouched.</para>
     /// </summary>
-    public double ModalCapacitance(IReadOnlyList<double> potential, IReadOnlyList<double>? weight)
+    /// <param name="floating">
+    /// <b>PCAL3 — the cells of a conductor connected to nothing, whose net charge is zero and whose
+    /// potential is therefore an UNKNOWN.</b> One further right-hand side spans it; see
+    /// <see cref="PlanarDeembed.StaticCapacitance"/> for why it is neither the line's potential nor
+    /// ground, and for the 12.3 % the choice is worth on the series' own fixture. Null is RP-2c's
+    /// arithmetic bit for bit, and the second solve is not run at all.
+    /// </param>
+    public double ModalCapacitance(IReadOnlyList<double> potential, IReadOnlyList<double>? weight,
+                                   IReadOnlyList<double>? floating = null)
     {
         ArgumentNullException.ThrowIfNull(potential);
         if (potential.Count != _m)
@@ -462,6 +470,21 @@ public sealed class PlanarStaticAim
         for (int i = 0; i < _m; i++) b[i] = EmConstants.Eps0 * potential[i];
 
         var q = SolveCharge(b);
+
+        if (floating is not null)
+        {
+            var bf = new Complex[_m];
+            for (int i = 0; i < _m; i++) bf[i] = EmConstants.Eps0 * floating[i];
+            var qf = SolveCharge(bf);
+
+            Complex qa = Complex.Zero, qb = Complex.Zero;
+            for (int i = 0; i < _m; i++) { qa += floating[i] * q[i]; qb += floating[i] * qf[i]; }
+            if (qb != Complex.Zero)
+            {
+                Complex alpha = -qa / qb;
+                for (int i = 0; i < _m; i++) q[i] += alpha * qf[i];
+            }
+        }
 
         Complex total = Complex.Zero;
         if (weight is null) for (int i = 0; i < _m; i++) total += q[i];

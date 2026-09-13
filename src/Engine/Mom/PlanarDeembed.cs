@@ -81,12 +81,29 @@ public sealed record PlanarErrorBox(
     double  RejectedResidual);
 
 /// <summary>The whole per-port calibration at one frequency: γ, the error box, and Z_c.</summary>
+/// <param name="NeighbourResonanceDegrees">
+/// <b>PCAL3 — how far this frequency is from the reproduced NEIGHBOUR's own half-wave resonance, in
+/// degrees of electrical length, and <c>NaN</c> on every port whose standard has no neighbour in
+/// it.</b>
+///
+/// <para>A widened standard contains a conductor that is open at both ends and driven by nothing, so
+/// it is a resonator — at <c>βL = nπ</c> its own standing wave dominates the standard's 2-port and
+/// the two-line cascade stops describing a single mode. <b>The DUT's neighbour does not resonate
+/// there</b>: it is whatever length the user drew, and the standard's length is chosen by
+/// <see cref="PlanarCalibration.SuggestDeltas"/>. So this is an artefact of the instrument and it is
+/// reported rather than absorbed — measured on the series' own fixture at |ΔS| 0.22 against a floor
+/// of 0.052, while every frequency more than ~25° away sits AT that floor.</para>
+///
+/// <para>Taken over both standards this frequency actually read (the short line and the selected long
+/// one), because the error box is solved from the pair and either one resonating contaminates it.</para>
+/// </param>
 public sealed record PlanarPortCalibration(
     int                            PortNumber,
     PlanarCalibration.GammaResult  Gamma,
     PlanarErrorBox                 Box,
     Complex                        Zc,
-    double                         CPerMetre);
+    double                         CPerMetre,
+    double                         NeighbourResonanceDegrees = double.NaN);
 
 public static class PlanarDeembed
 {
@@ -234,12 +251,27 @@ public static class PlanarDeembed
     /// What the returned charge sums with, per cell; null totals every cell. See
     /// <see cref="PlanarStandard.ModeWeight"/>.
     /// </param>
+    /// <param name="floating">
+    /// <b>PCAL3 — the cells of a conductor that is present but connected to NOTHING, which is a
+    /// CONSTRAINT rather than a potential and is why it cannot ride on <paramref name="potential"/>.</b>
+    /// An unconnected passive trace beside a calibrated feed carries zero NET charge and floats to
+    /// whatever potential that implies; it is not at the line's potential (which would measure the
+    /// two of them bonded together) and it is not at ground (which is a ground pour, a different
+    /// structure). Both readings are complete and plausible and they are <b>12.3 % apart</b> at
+    /// s/h = 0.27 on the series' own fixture, which lands directly on Z_c and therefore on every
+    /// published s-parameter.
+    ///
+    /// <para>It costs ONE extra right-hand side and no extra factorisation: solve for the unit
+    /// potential and for the mask, then take the combination whose net charge on the mask is zero.
+    /// Null is RP-2c's arithmetic, bit for bit.</para>
+    /// </param>
     public static double StaticCapacitance(PlanarMesh mesh, PlanarKernelTerms staticScalar,
                                            PlanarFillSettings? settings = null,
                                            PlanarFillCores? cores = null,
                                            double slabHeightM = 0,
                                            IReadOnlyList<double>? potential = null,
-                                           IReadOnlyList<double>? weight = null)
+                                           IReadOnlyList<double>? weight = null,
+                                           IReadOnlyList<double>? floating = null)
     {
         ArgumentNullException.ThrowIfNull(mesh);
         var st = settings ?? PlanarFillSettings.Default;
@@ -270,7 +302,8 @@ public static class PlanarDeembed
                    : PlanarFill.BuildGeometryOnlyCores(mesh, st);
 
             var acc = PlanarStaticAim.Build(gc, staticScalar, slabHeightM, aim);
-            return potential is null ? acc.TotalCapacitance() : acc.ModalCapacitance(potential, weight);
+            return potential is null ? acc.TotalCapacitance()
+                                     : acc.ModalCapacitance(potential, weight, floating);
         }
 
         GuardCapacitanceCeiling(mesh, accelerated: false);
@@ -296,7 +329,27 @@ public static class PlanarDeembed
         if (potential is null) for (int i = 0; i < m; i++) rhs[i] = EmConstants.Eps0;
         else                   for (int i = 0; i < m; i++) rhs[i] = EmConstants.Eps0 * potential[i];
 
-        var q = p.Lu().Solve(rhs);
+        var lu = p.Lu();
+        var q  = lu.Solve(rhs);
+
+        // PCAL3 — the floating conductor's own potential is the unknown, so a SECOND right-hand side
+        // (the mask at 1 V) spans it and the combination that leaves its net charge at zero is the
+        // one the structure is actually in. Same factorisation; one more back-substitution.
+        if (floating is not null)
+        {
+            var rhsF = new Vec<Complex>(m);
+            for (int i = 0; i < m; i++) rhsF[i] = EmConstants.Eps0 * floating[i];
+            var qf = lu.Solve(rhsF);
+
+            Complex qa = Complex.Zero, qb = Complex.Zero;
+            for (int i = 0; i < m; i++) { qa += floating[i] * q[i]; qb += floating[i] * qf[i]; }
+            if (qb != Complex.Zero)
+            {
+                Complex alpha = -qa / qb;
+                for (int i = 0; i < m; i++) q[i] += alpha * qf[i];
+            }
+        }
+
         Complex total = Complex.Zero;
         if (weight is null) for (int i = 0; i < m; i++) total += q[i];
         else                for (int i = 0; i < m; i++) total += weight[i] * q[i];
@@ -379,9 +432,11 @@ public static class PlanarDeembed
     {
         var terms = PlanarKernelTerms.StaticScalar(slab);
         double c1 = StaticCapacitance(shortStd.Mesh, terms, settings, shortCores, slab.HeightM,
-                                      shortStd.ModePotential, shortStd.ModeWeight);
+                                      shortStd.ModePotential, shortStd.ModeWeight,
+                                      shortStd.FloatingPotential);
         double c2 = StaticCapacitance(longStd.Mesh,  terms, settings, longCores, slab.HeightM,
-                                      longStd.ModePotential, longStd.ModeWeight);
+                                      longStd.ModePotential, longStd.ModeWeight,
+                                      longStd.FloatingPotential);
         double dl = longStd.LengthM - shortStd.LengthM;
 
         if (!(dl > 0))
@@ -423,9 +478,11 @@ public static class PlanarDeembed
             model ?? InteriorStaticImages.FitScalar(stack, levelZ, levelZ));
 
         double c1 = StaticCapacitance(shortStd.Mesh, terms, settings, shortCores, referenceHeightM,
-                                      shortStd.ModePotential, shortStd.ModeWeight);
+                                      shortStd.ModePotential, shortStd.ModeWeight,
+                                      shortStd.FloatingPotential);
         double c2 = StaticCapacitance(longStd.Mesh,  terms, settings, longCores, referenceHeightM,
-                                      longStd.ModePotential, longStd.ModeWeight);
+                                      longStd.ModePotential, longStd.ModeWeight,
+                                      longStd.FloatingPotential);
         double dl = longStd.LengthM - shortStd.LengthM;
 
         if (!(dl > 0))

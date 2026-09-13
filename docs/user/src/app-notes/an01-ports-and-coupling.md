@@ -163,6 +163,10 @@ inside the 2700 µm of line the calibration standard reproduces. … Move the fe
 neighbour, or put the port where the line is already isolated.
 </pre>
 
+**That message is about a neighbour with a port on it**, which is what this structure has. Delete ports 3
+and 4 and the same 246 µm stops being a refusal: the neighbour goes into the calibration standard
+instead, and the run publishes. [The section on that](#passive) is below.
+
 Passivity is deliberately **not** what triggers it. A non-passive result is a *symptom* with several
 possible causes, some of them legitimate at the 10<sup>-3</sup> level, so refusing on it would block runs
 that are fine. The refusal is on a measurable geometric fact about the port, and passivity goes on being
@@ -297,9 +301,50 @@ the circuit if you need the planes back at the coupled section's own ends.
 <p>The neighbour's distance is what matters, and it scales with <b>substrate height</b> — not with line
 width, and not with the neighbour's width. A neighbour that <b>carries a port of its own</b> needs about
 <b>5 substrate heights</b>; one that carries none — a passive trace, a ground pour — needs about
-<b>2</b>. Those are the numbers circuitRF enforces, and a run that breaches them is
-<a href="#refused">refused rather than published</a>.</p>
+<b>2</b>. Those are the numbers circuitRF enforces. A breach by a neighbour that carries a port is
+<a href="#refused">refused rather than published</a>; a breach by one that does not is
+<a href="#passive">handled for you</a>, and is the section directly below.</p>
 </div>
+
+### And if the neighbour carries no port, none of this is needed {#passive}
+
+<div class="callout note">
+<span class="label">What changed since this note was written</span>
+<p>The three options above are for a neighbour that <b>carries a port of its own</b> — the case this
+note is about, and the expensive one. <b>A neighbour that carries no port needs no redesign at all
+now</b>: circuitRF puts it into the calibration standard and runs.</p>
+</div>
+
+Everything in this note so far is about two *driven* coupled lines. The commoner case on a real board is
+a conductor that is simply near the feed and has no port on it: the other half of a differential pair you
+are not driving, an adjacent net, a ground pour. That case leaves **one driven mode** at the reference
+plane, so the error box can stay the single number it has always been — and the fix is not to move your
+metal, it is to make the standard resemble your metal.
+
+So the standard is **widened to contain the neighbour**, copied from your own mesh at your own gridlines,
+with the gap reproduced as a gap and the neighbour driven by nothing, exactly as it is in your structure.
+The run says what it took in:
+
+<pre>
+Its calibration standard reproduces 1 neighbouring conductor(s) beside the feed, the nearest
+246 µm away, over the whole of the standard's run: the profile spans 0 µm to 754 µm across,
+against 0 µm to 254 µm for the port's own conductor. …
+Port 1's feed is clear: no other conductor within the 2700 µm of line the calibration standard
+reproduces.
+</pre>
+
+On the very geometry this note opened with — the same 246 µm, with the neighbour's two ports deleted —
+that is the difference between **18.0 dB out in S(1,1) at 1 GHz, non-passive at 3 of 7 frequencies** and
+an answer inside the two kernels' own agreement floor, passive at every point.
+
+Three things are still declined, each by name, and each falls back to the refusal above: a neighbour that
+**bends, ends or changes width** inside the run the standard reproduces (a standard is a uniform
+extrusion, and guessing would invent metal you did not draw); a neighbour **on another conductor level**
+(nothing has been measured about one); and a neighbour **carrying a port**, which is this note's own case
+and needs the modal error box it does not have. There is one cost and one caveat: the standards get
+about twice as large, which the run reports, and the reproduced neighbour is open at both ends, so where
+the standard is half a wavelength long it resonates — the run lists those frequencies, and they are a
+property of the standard's length rather than of your design.
 
 <div class="callout note">
 <span class="label">Why the solver cannot just do this for you</span>

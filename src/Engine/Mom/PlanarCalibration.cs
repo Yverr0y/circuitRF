@@ -100,12 +100,37 @@ namespace CircuitRF.Engine.Mom;
 /// <see cref="PlanarConductors"/> — the port list is in hand at the call site and the answer is a
 /// fact about the structure, not a setting.</para>
 /// </param>
+/// <param name="IncludePassiveNeighbours">
+/// <b>PCAL3/R-pcal3-1 — whether a passive neighbour inside
+/// <paramref name="PassiveNeighbourClearanceHeights"/> is put INTO the port's calibration standard
+/// rather than refusing the run.</b> On, because a refusal is what the user gets otherwise and the
+/// metal is reproducible; off is how the pre-PCAL3 answer is reproduced for comparison, which is
+/// what every measurement in the findings was taken against.
+///
+/// <para>It changes nothing on a feed that is already clear. The widening is attempted only where a
+/// PASSIVE breach was measured, which since PCAL2 is a refusal — so a run that passes today builds
+/// the profile it builds today (R-pcal3-4).</para>
+/// </param>
+/// <param name="NeighbourExtensionCells">
+/// <b>R-pcal3-3 — how far past each reference plane the standard's neighbour runs, in bulk cells of
+/// the port's own line.</b> The DUT's neighbour carries on past the port; the standard's has to stop
+/// somewhere, and leaving it open at the plane, shorting it, and running it past are three different
+/// structures with three different error boxes.
+///
+/// <para><b>0 — flush with the driven line, open at both ends — and it is MEASURED rather than
+/// reasoned about</b> (<c>src/Engine/Mom/RESOLVED.md</c>, PCAL3 §3). What is not negotiable is that
+/// both standards of a pair treat the neighbour identically, which they do by construction here:
+/// the extension is the same number of cells on the short line and on the long one, so D5's γ is
+/// measuring the length between the planes and not the difference between two end treatments.</para>
+/// </param>
 public sealed record PlanarCalibrationSettings(
     double EndRunHeights                     = 3.0,
     double ShortLineHeights                  = 3.0,
     double TargetElectricalDegrees           = 60.0,
     double DrivenNeighbourClearanceHeights   = 5.0,
-    double PassiveNeighbourClearanceHeights  = 2.0)
+    double PassiveNeighbourClearanceHeights  = 2.0,
+    bool   IncludePassiveNeighbours          = true,
+    int    NeighbourExtensionCells           = 0)
 {
     public static readonly PlanarCalibrationSettings Default = new();
 
@@ -156,6 +181,12 @@ public sealed record PlanarCalibrationSettings(
 /// and the average is the reading that does not depend on which conductor the user happened to name
 /// as the return.
 /// </param>
+/// <param name="FloatingPotential">
+/// <b>PCAL3 — the cells of a conductor that is in the standard but connected to nothing.</b> Its net
+/// charge is zero and its potential is an unknown, which is a CONSTRAINT and cannot be expressed as
+/// an entry of <paramref name="ModePotential"/>; <see cref="PlanarDeembed.StaticCapacitance"/> spans
+/// it with one further right-hand side. Null on every standard but a widened one.
+/// </param>
 public sealed record PlanarStandard(
     PlanarMesh           Mesh,
     PlanarPortResolution Port1,
@@ -163,7 +194,8 @@ public sealed record PlanarStandard(
     double               LengthM,
     int                  EndRunCells,
     IReadOnlyList<double>? ModePotential = null,
-    IReadOnlyList<double>? ModeWeight    = null)
+    IReadOnlyList<double>? ModeWeight    = null,
+    IReadOnlyList<double>? FloatingPotential = null)
 {
     public IReadOnlyList<PlanarPortResolution> Ports => [Port1, Port2];
 
@@ -256,37 +288,13 @@ public static class PlanarCalibration
         var gTran = xs.Lines.ToArray();
 
         bool alongX = port.Direction == PlanarBasisDirection.X;
-        var  gx     = alongX ? gLong : gTran;
-        var  gy     = alongX ? gTran : gLong;
-
-        int nx = gx.Length - 1, ny = gy.Length - 1;
-        var cells = new List<PlanarCell>(nx * ny);
-        var at    = new int[nx * ny];
-        Array.Fill(at, -1);
 
         // R-msh-2's (LayerIndex, IY, IX) order, as the single-conductor builder emits it — with the
-        // void intervals skipped, which is the only difference.
-        for (int iy = 0; iy < ny; iy++)
-            for (int ix = 0; ix < nx; ix++)
-            {
-                if (!xs.IsMetal[alongX ? iy : ix]) continue;
-                at[iy * nx + ix] = cells.Count;
-                cells.Add(new PlanarCell(0, ix, iy, gx[ix], gy[iy], gx[ix + 1], gy[iy + 1]));
-            }
-
-        var bases = new List<PlanarBasis>();
-        for (int iy = 0; iy < ny; iy++)
-            for (int ix = 0; ix < nx; ix++)
-            {
-                int a = at[iy * nx + ix];
-                if (a < 0) continue;
-                if (ix + 1 < nx && at[iy * nx + ix + 1] >= 0)
-                    bases.Add(new PlanarBasis(0, a, at[iy * nx + ix + 1], PlanarBasisDirection.X));
-                if (iy + 1 < ny && at[(iy + 1) * nx + ix] >= 0)
-                    bases.Add(new PlanarBasis(0, a, at[(iy + 1) * nx + ix], PlanarBasisDirection.Y));
-            }
-
-        var mesh = new PlanarMesh(cells, bases, [layerName], gx, gy);
+        // void intervals skipped, which is the only difference. PCAL3 shares the builder rather than
+        // keeping a second copy of it; the cells and bases it emits here are the ones this method
+        // emitted before, in the same order.
+        var (mesh, cells) = BuildProfileMesh(port.Direction, gLong, gTran,
+                                             (_, t) => xs.IsMetal[t], layerName);
 
         var (sideLo, sideHi) = alongX
             ? (PlanarPortSide.MinX, PlanarPortSide.MaxX)
@@ -326,9 +334,19 @@ public static class PlanarCalibration
     /// is reported on the result — the requested length is never assumed.
     /// </summary>
     public static PlanarStandard BuildLine(PlanarPortResolution port, double targetLengthM,
-                                           int endRunCells, string layerName = "Metal")
+                                           int endRunCells, string layerName = "Metal",
+                                           PlanarCalibrationSettings? settings = null)
     {
         ArgumentNullException.ThrowIfNull(port);
+
+        // ── PCAL3 — A FEED WITH A PASSIVE NEIGHBOUR GETS THE NEIGHBOUR IN ITS STANDARD ───────────
+        //
+        // The profile is widened at setup by PlanarPorts.TryWidenForNeighbours, which is where the
+        // port list and the threshold are; by the time the standard is built the answer is a fact on
+        // the resolution. Null on every port whose feed is clear, so this branch is not taken on any
+        // run that passes today.
+        if (port.Neighbourhood is not null)
+            return BuildNeighbourLine(port, targetLengthM, endRunCells, layerName, settings);
 
         // ── RP-2c — A CONDUCTOR-REFERENCED PORT'S STANDARD IS A COPLANAR LINE ────────────────────
         //
@@ -379,6 +397,140 @@ public static class PlanarCalibration
         var p2 = PlanarPorts.Resolve(mesh, new PlanarPort(2, Pt(gLong[^1]), sideHi, port.Z0));
 
         return new PlanarStandard(mesh, p1, p2, p2.ReferencePlaneM - p1.ReferencePlaneM, endRunCells);
+    }
+
+
+    /// <summary>
+    /// <b>PCAL3/R-pcal3-1 — the standard for a port whose feed has a PASSIVE neighbour: the port's
+    /// own conductor, the gap, and the neighbour, all from the DUT's own transverse gridlines.</b>
+    ///
+    /// <para>D4's rule is unchanged and is again the whole point — the standard must rebuild the
+    /// port's neighbourhood exactly — and the neighbourhood is now more than one piece of metal. The
+    /// mesh is built exactly as <see cref="BuildCoplanarLine"/>'s is, from the same shared builder,
+    /// because "a cell exists only where the profile says metal" is the same sentence in both cases
+    /// and a second copy of it is a second chance for the two to disagree.</para>
+    ///
+    /// <para><b>What is NOT the same is who is driven.</b> The standard's two ports are single-cut
+    /// ports on the port's own conductor, referenced to the ground plane exactly as the DUT's port
+    /// is; the neighbour has no port in the standard because it has none in the DUT. That is what
+    /// keeps this the CHEAP half of the series: one driven mode at the reference plane, and D6's
+    /// per-port scalar error box still describes it.</para>
+    ///
+    /// <para><b>R-pcal3-3 — what the neighbour does at the standard's ends is a decision.</b> The
+    /// DUT's neighbour carries on past the port; the standard's has to stop somewhere, and open,
+    /// shorted and run-past are three different structures with three different error boxes. It is
+    /// <see cref="PlanarCalibrationSettings.NeighbourExtensionCells"/>, it is measured rather than
+    /// argued (the findings carry the numbers), and the one thing that is not negotiable is that
+    /// BOTH standards of a pair treat it identically — otherwise D5's γ is measuring the difference
+    /// between the two treatments rather than the length between them.</para>
+    /// </summary>
+    public static PlanarStandard BuildNeighbourLine(PlanarPortResolution port, double targetLengthM,
+                                                    int endRunCells, string layerName = "Metal",
+                                                    PlanarCalibrationSettings? settings = null)
+    {
+        ArgumentNullException.ThrowIfNull(port);
+        var nb = port.Neighbourhood
+              ?? throw new InvalidOperationException(
+                     $"Port {port.Number} has no widened profile, so BuildLine is what builds its " +
+                     "standard.");
+
+        var s     = settings ?? PlanarCalibrationSettings.Default;
+        int ext   = Math.Max(0, s.NeighbourExtensionCells);
+        var gCore = LongitudinalPartition(port, targetLengthM, endRunCells);
+
+        // The neighbour's own ends, when they are asked to run past the port plane, are bulk cells of
+        // the port's own line — the same cell size D4 fills the standard's middle with, so nothing
+        // here introduces a discretisation the DUT does not have.
+        var gLong = new double[gCore.Length + 2 * ext];
+        double bulk = port.BulkCellM;
+        for (int k = 0; k < gCore.Length; k++) gLong[ext + k] = gCore[k] + ext * bulk;
+        for (int k = ext - 1; k >= 0; k--)     gLong[k] = gLong[k + 1] - bulk;
+        for (int k = 0; k < ext; k++)          gLong[ext + gCore.Length + k] = gLong[ext + gCore.Length + k - 1] + bulk;
+
+        int nLongCore = gCore.Length - 1;
+        bool Present(int col, int t) =>
+            nb.IsMetal[t] && (!nb.IsOwn(t) || (col >= ext && col < ext + nLongCore));
+
+        var (mesh, cells) = BuildProfileMesh(port.Direction, gLong, nb.Lines, Present, layerName);
+
+        bool alongX = port.Direction == PlanarBasisDirection.X;
+        var (sideLo, sideHi) = alongX
+            ? (PlanarPortSide.MinX, PlanarPortSide.MaxX)
+            : (PlanarPortSide.MinY, PlanarPortSide.MaxY);
+
+        EmPoint Pt(double along) =>
+            alongX ? new EmPoint(along, nb.OwnCentreM) : new EmPoint(nb.OwnCentreM, along);
+
+        var p1 = PlanarPorts.Resolve(mesh, new PlanarPort(1, Pt(gLong[ext]),             sideLo, port.Z0));
+        var p2 = PlanarPorts.Resolve(mesh, new PlanarPort(2, Pt(gLong[ext + nLongCore]), sideHi, port.Z0));
+
+        // ── D7's electrostatic problem: the port drives its OWN conductor and nothing else ───────
+        //
+        // The whole sheet at 1 V — what a single-conductor standard takes — would put the neighbour
+        // at the line's own potential and measure the capacitance of the two of them bonded
+        // together: a complete, plausible reference impedance for a mode the port does not drive,
+        // which is RP-2c's own failure one conductor over.
+        // And the neighbour's own potential is an UNKNOWN, not a zero: it is connected to nothing, so
+        // its NET charge is zero and it floats to whatever that implies. Grounding it instead is a
+        // different structure — a ground pour — and the two readings are 12.3 % apart at s/h = 0.27
+        // on the series' own fixture, which lands on Z_c and therefore on every published
+        // s-parameter. PlanarDeembed.StaticCapacitance spans it with one extra right-hand side.
+        var v = new double[cells.Count];
+        var w = new double[cells.Count];
+        var f = new double[cells.Count];
+        for (int c = 0; c < cells.Count; c++)
+        {
+            int t = alongX ? cells[c].IY : cells[c].IX;
+            bool own = nb.IsOwn(t);
+            v[c] = w[c] = own ? 1.0 : 0.0;
+            f[c] = own ? 0.0 : 1.0;
+        }
+
+        return new PlanarStandard(mesh, p1, p2, p2.ReferencePlaneM - p1.ReferencePlaneM, endRunCells,
+                                  v, w, f);
+    }
+
+    /// <summary>
+    /// The mesh of a profiled standard: a tensor grid with a cell only where the profile says metal,
+    /// and a rooftop only where both of a pair's cells exist. Shared by the coplanar builder and
+    /// PCAL3's widened one — R-msh-2's (LayerIndex, IY, IX) ordering is honoured by construction,
+    /// because the loops emit cells in exactly that order.
+    /// </summary>
+    private static (PlanarMesh Mesh, List<PlanarCell> Cells) BuildProfileMesh(
+        PlanarBasisDirection direction, double[] gLong, IReadOnlyList<double> gTranLines,
+        Func<int, int, bool> present, string layerName)
+    {
+        bool alongX = direction == PlanarBasisDirection.X;
+        var  gTran  = gTranLines is double[] a ? a : [.. gTranLines];
+        var  gx     = alongX ? gLong : gTran;
+        var  gy     = alongX ? gTran : gLong;
+
+        int nx = gx.Length - 1, ny = gy.Length - 1;
+        var cells = new List<PlanarCell>(nx * ny);
+        var at    = new int[nx * ny];
+        Array.Fill(at, -1);
+
+        for (int iy = 0; iy < ny; iy++)
+            for (int ix = 0; ix < nx; ix++)
+            {
+                if (!present(alongX ? ix : iy, alongX ? iy : ix)) continue;
+                at[iy * nx + ix] = cells.Count;
+                cells.Add(new PlanarCell(0, ix, iy, gx[ix], gy[iy], gx[ix + 1], gy[iy + 1]));
+            }
+
+        var bases = new List<PlanarBasis>();
+        for (int iy = 0; iy < ny; iy++)
+            for (int ix = 0; ix < nx; ix++)
+            {
+                int c = at[iy * nx + ix];
+                if (c < 0) continue;
+                if (ix + 1 < nx && at[iy * nx + ix + 1] >= 0)
+                    bases.Add(new PlanarBasis(0, c, at[iy * nx + ix + 1], PlanarBasisDirection.X));
+                if (iy + 1 < ny && at[(iy + 1) * nx + ix] >= 0)
+                    bases.Add(new PlanarBasis(0, c, at[(iy + 1) * nx + ix], PlanarBasisDirection.Y));
+            }
+
+        return (new PlanarMesh(cells, bases, [layerName], gx, gy), cells);
     }
 
     /// <summary>
@@ -473,9 +625,9 @@ public static class PlanarCalibration
         var deltas = SuggestDeltas(slab, fLoHz, fHiHz, settings);
 
         var set = new PlanarStandard[deltas.Length + 1];
-        set[0] = BuildLine(port, shortTarget, k);
+        set[0] = BuildLine(port, shortTarget, k, settings: settings);
         for (int i = 0; i < deltas.Length; i++)
-            set[i + 1] = BuildLine(port, set[0].LengthM + deltas[i], k);
+            set[i + 1] = BuildLine(port, set[0].LengthM + deltas[i], k, settings: settings);
 
         return set;
     }

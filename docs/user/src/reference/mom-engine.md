@@ -618,10 +618,11 @@ radiates cannot be cleanly de-embedded.**
   least a few substrate heights of separation, and more at the top of your band.*
 - **Do not lengthen the feed to fix accuracy.** It does not work — the coupling is direct, not through
   the line — and it costs solve time. This is the counter-intuitive one, and it is measured.
-- **Keep the feed's own cross-section uniform for the calibration's run**, and keep other metal out of
-  that run. The solver grows the uniform lead it needs, but **a lead lengthens a feed, it cannot move a
-  neighbour sideways.** Metal running alongside the port inside the calibration's own run is a
-  **refusal**, not a warning — see [the validity condition](#validity) directly below.
+- **Keep the feed's own cross-section uniform for the calibration's run.** The solver grows the uniform
+  lead it needs, but **a lead lengthens a feed, it cannot move a neighbour sideways.** A neighbour that
+  **carries a port of its own** inside the calibration's run is a **refusal**, not a warning; one that
+  carries no port is **reproduced in the standard** instead, as long as it runs straight past the port —
+  see [the validity condition](#validity) directly below.
 - **Use a feed width the mesh can resolve.** The edge mesh needs several cells across the conductor; a
   feed narrower than a few cells is under-resolved exactly where the port excitation is applied. *Rule
   of thumb: at least 3–5 cells across the feed width, which is what the default mesh settings give you
@@ -633,12 +634,12 @@ radiates cannot be cleanly de-embedded.**
 - **Watch the band, not just the centre.** Everything above degrades with frequency. If your structure
   is fine at 2 GHz and strange at 12 GHz, suspect the port before the geometry.
 
-### The validity condition: an isolated feed {#validity}
+### The validity condition: the standard has to be the feed's own neighbourhood {#validity}
 
-The calibration standard is an **isolated uniform line** of the port's own cross-section. That is not a
-tolerance, it is what the standard *is* — so when another conductor sits inside the run of line the
-standard reproduces, the error box is measured on a structure that is not the one being corrected, and
-the peel divides that mismatch by a₂₁², which is of order 10⁻⁴ at 1 GHz.
+The calibration standard is a **uniform line of the port's own cross-section**. That is not a tolerance,
+it is what the standard *is* — so when the standard's cross-section is not the feed's, the error box is
+measured on a structure that is not the one being corrected, and the peel divides that mismatch by a₂₁²,
+which is of order 10⁻⁴ at 1 GHz.
 
 **The error that produces is not mild.** Measured against the exact cross-section answer on two straight
 254 µm microstrips 246 µm apart on 0.9 mm FR-4, ports at all four ends:
@@ -655,10 +656,10 @@ the answer non-passive at every point.
 
 **So the clearance is a condition, it is enforced, and it is two numbers:**
 
-| The nearest other conductor | Clearance it needs |
-|---|---|
-| carries a port of its own | **5 substrate heights** |
-| carries no port (a passive trace, a ground pour) | **2 substrate heights** |
+| The nearest other conductor | Clearance it needs | Inside it |
+|---|---|---|
+| carries a port of its own | **5 substrate heights** | **refused** |
+| carries no port (a passive trace, a ground pour) | **2 substrate heights** | **put into the standard** |
 
 Both are measured across the port's own profile, over the run of line the standard reproduces, and both
 scale with **substrate height** — not with line width, and not with the neighbour's width. That was
@@ -666,6 +667,42 @@ measured rather than assumed: a 4× change in line width moves the threshold by 
 behaves like a 254 µm trace to within 2%. A neighbour carrying a port needs 2–3× the clearance of one
 that does not, because it brings a second port's error box and the mutual terms with it; one number for
 both cases would either refuse designs that are fine or pass designs that are 18 dB wrong.
+
+#### A neighbour that carries no port is reproduced, not refused {#passive-neighbour}
+
+A conductor that is merely *there* — a passive trace, an adjacent net, a ground pour — leaves **one
+driven mode** at the reference plane, so the error box can stay what it has always been. The standard is
+therefore **widened to contain it**: the neighbour is copied out of your own mesh, at your own gridlines,
+with the gap between the two conductors reproduced as a gap, and it is driven by nothing in the standard
+exactly as it is driven by nothing in your structure. The run says what it took in, and the clearance
+margin then reads clear because everything inside a port's profile *is* reproduced.
+
+On the 246 µm case above, with the neighbour's ports deleted, that takes the answer from **18.0 dB out in
+S₁₁ and non-passive at 3 of 7 frequencies** to **within the two kernels' own agreement floor and passive
+at every one**.
+
+Three things are declined by name rather than guessed at, and each falls back to the refusal:
+
+- **A neighbour that bends, ends or changes width** inside the run the standard reproduces. A standard is
+  a uniform extrusion; guessing what such a conductor should become in it would be inventing metal you
+  did not draw.
+- **A neighbour on another conductor level.** Nothing has been measured about one, so nothing is assumed.
+- **A neighbour carrying a port.** Two driven conductors support two modes at one reference plane and the
+  error box is one scalar per port — reproducing the metal does not give it a second mode to describe.
+
+<div class="callout warn">
+<span class="label">The widened standard has a resonance of its own, and the run names it</span>
+<p>The neighbour in the standard is <b>open at both ends</b>, so it is a resonator: where the standard is
+a half wavelength long the neighbour's own standing wave dominates it and the two-line calibration stops
+measuring a single mode. <b>Your neighbour does not resonate there</b> — it is whatever length you
+drew — so this is a property of the instrument, and the frequencies within 25° of it are listed in the
+run's notes. Everything outside those points comes back at the accuracy floor. Narrow the sweep past
+them, or give the feeds the clearance and have no neighbour reproduced at all.</p>
+</div>
+
+A wider profile is also a **wider standard on every frequency of every run**, and standards already
+dominate a de-embedded solve. On the fixture this was developed against they go from 4.6× to 9.1× the
+DUT's own unknowns. The run reports both numbers.
 
 Three things are deliberately **not** neighbours:
 

@@ -1,6 +1,6 @@
 # `testdata/portcal` — the port-calibration clearance fixtures
 
-Two cells, one technology, and a `.cem` on each. They exist because the port-calibration series
+Three cells, one technology, and a `.cem` on each. They exist because the port-calibration series
 (`docs/sonnet-briefs/brief-portcal-0-overview.md`) needs a failing case and a passing one that differ
 in **nothing but the separation of the feeds**, and because every measurement in PCAL1's findings
 (`src/Engine/Mom/RESOLVED.md`, "PCAL1 — how much clearance a calibrated port actually needs") was made
@@ -8,6 +8,7 @@ on this geometry.
 
 ```
 dotnet run --project src/Cli -- em testdata/portcal/coupled-pair/em/coupled-pair.cem
+dotnet run --project src/Cli -- em testdata/portcal/coupled-pair-passive/em/coupled-pair-passive.cem
 dotnet run --project src/Cli -- em testdata/portcal/separated-pair/em/separated-pair.cem
 ```
 
@@ -25,6 +26,19 @@ heights, against the 5 a neighbour that carries a port of its own needs — and 
 having written no `.sNp`. Run it with `DeembedOutsideCalibrationValidity: true` in the `.cem` to see
 what it used to publish: **non-passive at 6 of the 7 frequencies** (worst σ_max 1.0041), with S₂₁
 22.6 dB adrift of the oracle at 1 GHz, and a provenance line on the Touchstone saying so. N = 298.
+
+**`coupled-pair-passive`** — `coupled-pair` with **ports 3 and 4 deleted**, and nothing else changed:
+the same two rectangles, the same 246 µm, the same `.cem`. The second conductor is therefore present,
+passive and undriven — which is PCAL1's measured case 2, and the commonest shape of this problem on a
+real board.
+
+Until PCAL3 it was **refused** like its four-port sibling, at 0.27 substrate heights against the 2 a
+portless neighbour needs. Since PCAL3 the calibration standard **reproduces the neighbour** instead and
+the run publishes: 18.0 dB out in S₁₁ at 1 GHz and non-passive at 3 of 7 points becomes |ΔS| inside the
+kernel-A-vs-kernel-B agreement floor and passive at every point. The standards roughly double, from
+4.57× to 9.14× the DUT's own unknowns, which the run's own cost note states. See `src/Engine/Mom/
+RESOLVED.md`, "PCAL3", for the measurement and for the one frequency it does not cover — the standard's
+own neighbour resonance, which the run names.
 
 **`separated-pair`** — the identical coupled section with 4 mm of line added at each port and the
 other conductor held **6 mm** away there (5746 µm edge to edge = **6.38 substrate heights**, against
@@ -44,7 +58,7 @@ which is how R-pcal2-6 was proved; see `src/Engine/Mom/RESOLVED.md`, "PCAL2".
 |---|---|---|
 | **PCAL2** (`brief-portcal-2-refuse-not-warn.md`) | `coupled-pair` | **done** — refuses, naming port 1 and 246 µm, exits non-zero and writes no `.sNp` |
 | **PCAL2** | `separated-pair` | **done** — runs clean and byte-identically; widened from 4 mm to 6 mm of separation for it, see above |
-| **PCAL3** (`brief-portcal-3-passive-neighbour.md`) | `coupled-pair` with ports 3 and 4 **deleted** | the passive-neighbour gate: 18.0 dB out in S₁₁ at 1 GHz today, and it must come back inside the floor and passive |
+| **PCAL3** (`brief-portcal-3-passive-neighbour.md`) | `coupled-pair-passive` | **done** — the passive-neighbour gate: was 18.0 dB out in S₁₁ at 1 GHz, now inside the floor and passive, with the neighbour reproduced in the standard |
 | **PCAL4** (`brief-portcal-4-modal-error-box.md`) | `coupled-pair` as drawn | the driven-neighbour gate — the case the series was opened on; nothing else substitutes |
 
 ## What is deliberately not here

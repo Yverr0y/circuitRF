@@ -415,7 +415,56 @@ public sealed class PlanarPortCalibrator
         _shortLength = set[0].LengthM;
         _deltas      = new double[set.Length - 1];
         for (int i = 1; i < set.Length; i++) _deltas[i - 1] = set[i].LengthM - set[0].LengthM;
+
+        // PCAL3 — a widened standard's neighbour spans the standard's WHOLE meshed length, open at
+        // both ends, so its own half-wave resonances are at βL = nπ. The span is a property of the
+        // mesh and is taken once here; whether a frequency is near one is asked per frequency, from
+        // the MEASURED β rather than from the pre-solve estimate.
+        _hasNeighbour   = port.Neighbourhood is not null;
+        _standardSpanM  = new double[set.Length];
+        for (int i = 0; i < set.Length; i++)
+        {
+            var g = port.Direction == PlanarBasisDirection.X ? set[i].Mesh.GridX : set[i].Mesh.GridY;
+            _standardSpanM[i] = g[^1] - g[0];
+        }
     }
+
+    private readonly bool     _hasNeighbour;
+    private readonly double[] _standardSpanM;
+
+    /// <summary>
+    /// <b>PCAL3 — how far βL is from the nearest nπ, in degrees, over the two standards this
+    /// frequency reads.</b> NaN when the standard reproduces no neighbour, which is every port whose
+    /// feed was clear and therefore every run that passed before PCAL3.
+    /// </summary>
+    private double NeighbourResonanceDegrees(double beta, int pick)
+    {
+        if (!_hasNeighbour || !(beta > 0)) return double.NaN;
+        double worst = double.PositiveInfinity;
+        foreach (int i in (int[])[0, pick + 1])
+        {
+            double theta = beta * _standardSpanM[i];
+
+            // n = 0 is NOT a resonance and the distinction is not pedantry: below its first half
+            // wave a standard's βL passes through every small angle on the way up, and a window
+            // around nπ that admits n = 0 flags the whole bottom of every sweep — on the series'
+            // own fixture it flagged 1 GHz, where the answer is at the floor.
+            double n = Math.Round(theta / Math.PI);
+            if (n < 1) continue;
+
+            double d = Math.Abs(theta - n * Math.PI) * 180.0 / Math.PI;
+            worst = Math.Min(worst, d);
+        }
+        return worst;
+    }
+
+    /// <summary>
+    /// <b>How close to its own resonance a reproduced neighbour may be before the point is flagged —
+    /// 25°, and it is measured rather than chosen for roundness.</b> On the series' own fixture the
+    /// error is at the A-vs-B floor (|ΔS| ≈ 0.04 against a floor of 0.052) out to 27° from nπ and
+    /// climbs to 0.07 at 20°, 0.145 at 6° and 0.22 at the resonance itself.
+    /// </summary>
+    public const double NeighbourResonanceGuardDegrees = 25.0;
 
     /// <summary>
     /// γ, the error box and Z_c at one frequency. Steps the branch state; call in increasing
@@ -507,7 +556,8 @@ public sealed class PlanarPortCalibrator
 
         return new PlanarPortCalibration(
             portNumber, g, box,
-            PlanarDeembed.CharacteristicImpedance(g.Gamma, _cPerMetre, fHz), _cPerMetre);
+            PlanarDeembed.CharacteristicImpedance(g.Gamma, _cPerMetre, fHz), _cPerMetre,
+            NeighbourResonanceDegrees(g.Beta, pick));
     }
 
     private double _prevF;
@@ -672,6 +722,26 @@ public sealed class PlanarPortCalibrator
                 if (xa.IsMetal[i] != xb.IsMetal[i]) return false;
                 double da = xa.Lines[i + 1] - xa.Lines[i];
                 double db = xb.Lines[i + 1] - xb.Lines[i];
+                if (Math.Abs(da - db) > Tol * Math.Max(da, db)) return false;
+            }
+        }
+
+        // ── PCAL3 — AND ONLY IF THEY SHARE THE WIDENED PROFILE TOO ──────────────────────────────
+        //
+        // Same sentence as RP-2c's directly above, one conductor over: two ports whose own runs match
+        // cell for cell can have neighbours at different distances, or one neighbour and two. Sharing
+        // a standard across that would calibrate port 2 against port 1's neighbourhood — a complete,
+        // plausible error box for a structure that is not there.
+        if ((a.Neighbourhood is null) != (b.Neighbourhood is null)) return false;
+        if (a.Neighbourhood is { } na && b.Neighbourhood is { } nbb)
+        {
+            if (na.IsMetal.Count != nbb.IsMetal.Count) return false;
+            if (na.OwnLo != nbb.OwnLo || na.OwnHi != nbb.OwnHi) return false;
+            for (int i = 0; i < na.IsMetal.Count; i++)
+            {
+                if (na.IsMetal[i] != nbb.IsMetal[i]) return false;
+                double da = na.Lines[i + 1] - na.Lines[i];
+                double db = nbb.Lines[i + 1] - nbb.Lines[i];
                 if (Math.Abs(da - db) > Tol * Math.Max(da, db)) return false;
             }
         }
@@ -1091,28 +1161,90 @@ public static class PlanarSolve
         // being replaced by an isolated line, and a neighbour is simply part of the structure.
         var calSt = st.Calibration ?? PlanarCalibrationSettings.Default;
         var clearances = new List<PlanarFeedClearance>();
+        var widenNotes = new List<string>();
         if (st.Deembed)
         {
-            var conductors = PlanarConductors.Of(mesh);
-            foreach (var p in ports)
-            {
-                var c = PlanarPorts.MeasureFeedClearance(
+            var conductors  = PlanarConductors.Of(mesh);
+            double endRunM  = calSt.EndRunHeights * slab.HeightM;
+            double drivenM  = calSt.DrivenNeighbourClearanceHeights  * slab.HeightM;
+            double passiveM = calSt.PassiveNeighbourClearanceHeights * slab.HeightM;
+            var    widened  = new List<PlanarPortResolution>(ports);
+
+            PlanarFeedClearance? Measure(PlanarPortResolution p) =>
+                PlanarPorts.MeasureFeedClearance(
                     mesh, p, ports,
-                    endRunM:          calSt.EndRunHeights * slab.HeightM,
-                    drivenRequiredM:  calSt.DrivenNeighbourClearanceHeights  * slab.HeightM,
-                    passiveRequiredM: calSt.PassiveNeighbourClearanceHeights * slab.HeightM,
+                    endRunM:          endRunM,
+                    drivenRequiredM:  drivenM,
+                    passiveRequiredM: passiveM,
                     slabHeightM:      slab.HeightM,
                     conductors:       conductors);
+
+            for (int i = 0; i < widened.Count; i++)
+            {
+                var c = Measure(widened[i]);
+
+                // ── PCAL3/R-pcal3-1 — A PASSIVE BREACH IS A PROFILE TO WIDEN, NOT A RUN TO REFUSE ──
+                //
+                // The metal is reproducible: it carries no port, so there is still one driven mode at
+                // the reference plane and D6's per-port scalar error box still describes it. What was
+                // missing was any way for a conductor OUTSIDE the profile to get INSIDE it — the
+                // profile machinery itself has been multi-conductor since RP-2c.
+                //
+                // Attempted only on a PASSIVE breach, which is the whole of R-pcal3-4's proof that
+                // nothing passing today changes: a clear feed measures Breached = false and never
+                // reaches this line, and a DRIVEN breach is brief 4's and is declined by name inside.
+                if (c is { Breached: true, Neighbour: PlanarNeighbourClass.Passive } &&
+                    calSt.IncludePassiveNeighbours)
+                {
+                    var wider = PlanarPorts.TryWidenForNeighbours(
+                        mesh, widened[i], ports,
+                        PlanarCalibration.EndRunCellsFor(widened[i], slab, st.Calibration),
+                        passiveM, conductors, out string? declined);
+
+                    if (wider is not null)
+                    {
+                        widened[i] = wider;
+                        c = Measure(wider);            // whatever is STILL outside the profile
+                        widenNotes.Add(wider.Neighbourhood!.Describe(fmt));
+                    }
+                    else
+                    {
+                        // R-pcal3-2 — a decline falls through to today's behaviour, which since
+                        // PCAL2 is the refusal below. It is said by name either way, because a
+                        // refusal whose cause the user cannot see is one they cannot act on.
+                        //
+                        // A null with NO reason means the widening found nothing to take in, which
+                        // is the ordinary answer for a clear feed — but the clearance predicate has
+                        // just said this feed is not clear, and only this call site knows both
+                        // halves. So the metal that breached is not on the port's own conductor
+                        // level at the port's own reference plane, and that is what is said.
+                        widenNotes.Add(declined ??
+                            $"Port {widened[i].Number}'s feed has metal " +
+                            $"{fmt(c.NearestM)} away that does not cross the port's own reference " +
+                            "plane on the port's own conductor level — it is on another level, " +
+                            "behind the end face, or it begins further into the structure. A " +
+                            "calibration standard is a uniform extrusion of what crosses that " +
+                            "plane, so there is nothing there for it to reproduce. (PCAL1 measured " +
+                            "no case of metal on another level at all, so nothing is assumed about " +
+                            "one here.)");
+                    }
+                }
+
                 if (c is not null) clearances.Add(c);
             }
+
+            ports = widened;
         }
 
         foreach (var p in ports)
         {
             notes.Add(p.Describe());
+            if (p.Neighbourhood is { } nbh) notes.Add(nbh.Describe(fmt));
             foreach (var c in clearances)
                 if (c.PortNumber == p.Number) notes.Add(c.Margin(fmt));
         }
+        foreach (string w in widenNotes)
+            if (!notes.Contains(w)) notes.Add(w);
 
         var breaches = clearances.FindAll(c => c.Breached);
         if (breaches.Count > 0)
@@ -1442,6 +1574,7 @@ public static class PlanarSolve
         var z0 = PlanarExcitation.ReferenceImpedances(ports);
         var points = new List<PlanarFrequencyPoint>(freqs.Length);
         var flaggedBand = new List<double>();
+        var flaggedResonance = new List<double>();
 
         // D5's capture: the ONE frequency and ONE port whose basis currents the heat map needs.
         int capturePort = -1;
@@ -1663,6 +1796,8 @@ public static class PlanarSolve
                     zc[i]    = c.Zc;
                     gam[i]   = c.Gamma.Gamma;
                     if (!c.Gamma.Usable) flaggedBand.Add(f);
+                    if (c.NeighbourResonanceDegrees < PlanarPortCalibrator.NeighbourResonanceGuardDegrees
+                        && !flaggedResonance.Contains(f)) flaggedResonance.Add(f);
                 }
 
                 // R-fed-2 — the lead comes off BEFORE renormalisation: "matched" means matched in
@@ -1803,6 +1938,7 @@ public static class PlanarSolve
             {
                 foreach (var c in calibrators) c.RestartBranchContinuation();
                 flaggedBand.Clear();
+                flaggedResonance.Clear();
                 var outp = new Dictionary<int, (Mat<Complex>, List<PlanarPortCalibration>, double)>();
                 // One stage for the whole replay — most of it is cache hits, so per-point stages here
                 // would flicker through every frequency for no information.
@@ -1836,6 +1972,7 @@ public static class PlanarSolve
             {
                 foreach (var c in calibrators) c.RestartBranchContinuation();
                 flaggedBand.Clear();
+                flaggedResonance.Clear();
                 var outp = new Dictionary<double, (Mat<Complex>, List<PlanarPortCalibration>, double)>();
                 control?.BeginStage("replaying calibration", all.Count, "point(s)");
                 foreach (double f in all)
@@ -2467,6 +2604,30 @@ public static class PlanarSolve
                         "reached rather than assuming the requested tolerance was met."));
 
         if (st.Deembed && PassivityNote(points, z0) is { } passivity) notes.Add(passivity);
+
+        // ── PCAL3 — THE INSTRUMENT'S OWN RESONANCE, NAMED RATHER THAN PUBLISHED SILENTLY ────────
+        //
+        // A standard widened to reproduce a passive neighbour contains a conductor open at both ends
+        // and driven by nothing, so at βL = nπ it is a resonator and the two-line cascade stops
+        // describing one mode. The DUT's neighbour is a different length and does not resonate
+        // there — this is the instrument, not the design — and every other frequency comes back AT
+        // the A-vs-B floor, which is why the points are named rather than the run refused.
+        if (flaggedResonance.Count > 0)
+        {
+            flaggedResonance.Sort();
+            notes.Add(
+                $"{flaggedResonance.Count} of {freqs.Length} frequency point(s) sit within " +
+                $"{PlanarPortCalibrator.NeighbourResonanceGuardDegrees:F0}° of a HALF-WAVE RESONANCE " +
+                "of the passive neighbour the calibration standard reproduces — first at " +
+                $"{SurfaceMesher.Eng(flaggedResonance[0])}Hz. That conductor is open at both ends " +
+                "in the standard, so at βL = nπ its own standing wave dominates the standard's " +
+                "response and the two-line calibration stops measuring a single mode; the " +
+                "de-embedded s-parameters at those points carry a much larger error than the rest " +
+                "of the sweep (measured at |ΔS| 0.22 against 0.04 elsewhere on the fixture this was " +
+                "developed against). It is a property of the STANDARD's length, not of your design: " +
+                "your neighbour is whatever length you drew. Narrow the sweep past those points, " +
+                "separate the feeds so no neighbour has to be reproduced, or read them knowing this.");
+        }
 
         if (flaggedBand.Count > 0)
             notes.Add($"{flaggedBand.Count} of {freqs.Length} frequency point(s) fall outside the " +

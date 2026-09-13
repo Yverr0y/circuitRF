@@ -379,6 +379,76 @@ public sealed record PlanarPortCrossSection(
 }
 
 /// <summary>
+/// <b>PCAL3 — the transverse metal profile a calibrated feed's standard has to rebuild when the feed
+/// is NOT alone: the port's own conductor plus every PASSIVE neighbour inside the clearance
+/// distance.</b>
+///
+/// <para>It is <see cref="PlanarPortCrossSection"/>'s shape, one requirement lighter and one
+/// requirement heavier. Lighter, because nothing here is driven but the port's own run — a passive
+/// neighbour has no port, leaves one driven mode at the reference plane, and so the error box stays
+/// the per-port scalar D6 already solves for. Heavier, because the profile is no longer read off one
+/// gridline: a standard is a uniform extrusion, so every conductor in it has to be uniform over the
+/// run the standard reproduces, and one that is not is DECLINED by name rather than guessed at
+/// (R-pcal3-2).</para>
+///
+/// <para><b>The neighbour is reproduced from the DUT's own gridlines, exactly as the port's own
+/// conductor already is</b> — same rule as D4, one conductor wider. <see cref="IsMetal"/> is false
+/// over the gap between them, so no basis crosses it and the standard's mesh has the slot the DUT
+/// has.</para>
+///
+/// <para><b>Why the port's own conductor is not simply "interval OwnLo..OwnHi of a cross-section":</b>
+/// <see cref="PlanarPortResolution.CrossSection"/> being non-null is what makes a port
+/// conductor-referenced, drives a two-cut standard and puts ±½ V on two conductors. None of that is
+/// true here — this port drives ONE cut against the ground plane and the neighbour is driven by
+/// nothing — so it is a separate field rather than a reuse that would have to be told apart
+/// everywhere it is read.</para>
+/// </summary>
+/// <param name="Lines">Transverse gridlines, ascending; <c>IsMetal.Count + 1</c> of them. The DUT's
+/// own, verbatim.</param>
+/// <param name="IsMetal">Per interval: is there metal spanning the reference plane there.</param>
+/// <param name="OwnLo">First interval of the port's OWN conductor.</param>
+/// <param name="OwnHi">Last interval of it, inclusive.</param>
+/// <param name="NeighbourCount">How many separate passive conductors were taken in. Reported,
+/// because "the standard got wider" is a cost and the user is entitled to know what bought it.</param>
+/// <param name="NearestM">The nearest included neighbour's lateral gap from the port's own
+/// conductor — the distance that would have been the breach.</param>
+public sealed record PlanarPortNeighbourhood(
+    IReadOnlyList<double> Lines,
+    IReadOnlyList<bool>   IsMetal,
+    int                   OwnLo,
+    int                   OwnHi,
+    int                   NeighbourCount,
+    double                NearestM)
+{
+    /// <summary>The whole profile's transverse span — what <c>MeasureFeedClearance</c> must not
+    /// report as a neighbour, because every bit of it IS reproduced in the standard.</summary>
+    public double SpanLoM => Lines[0];
+    /// <inheritdoc cref="SpanLoM"/>
+    public double SpanHiM => Lines[^1];
+
+    /// <summary>A transverse coordinate inside the port's own conductor — where the standard's own
+    /// two cuts are placed.</summary>
+    public double OwnCentreM => 0.5 * (Lines[OwnLo] + Lines[OwnHi + 1]);
+
+    /// <summary>Is this interval part of the port's own conductor? The electrostatic problem D7
+    /// solves on the standard is driven on exactly these cells and on no others.</summary>
+    public bool IsOwn(int interval) => interval >= OwnLo && interval <= OwnHi;
+
+    /// <summary>What the widening did, for the run's notes.</summary>
+    public string Describe(SurfaceMesher.PlanarLengthFormat? fmt = null)
+    {
+        var f = fmt ?? (v => SurfaceMesher.Eng(v) + "m");
+        return
+            $"Its calibration standard reproduces {NeighbourCount} neighbouring conductor(s) beside " +
+            $"the feed, the nearest {f(NearestM)} away, over the whole of the standard's run: the " +
+            $"profile spans {f(SpanLoM)} to {f(SpanHiM)} across, against {f(Lines[OwnLo])} to " +
+            $"{f(Lines[OwnHi + 1])} for the port's own conductor. The neighbour carries no port, so " +
+            "the error box is still the scalar one; it is present in the standard and driven by " +
+            "nothing, exactly as it is in the structure.";
+    }
+}
+
+/// <summary>
 /// <b>PCAL2 — what the nearest piece of metal beside a calibrated feed IS.</b> PCAL1 measured four
 /// candidate cases and found three of them distinct; the fourth, a flare or pad on the port's OWN
 /// net, is <see cref="PlanarFeedExtension"/>'s job and is not a neighbour at all, so it never
@@ -578,6 +648,16 @@ public sealed class PlanarFeedClearanceRefusedException : InvalidOperationExcept
 /// <see cref="PlanarPortResolution.TransverseLines"/>; see <see cref="PlanarPortCrossSection"/> for
 /// why one conductor's lines are not enough.
 /// </param>
+/// <param name="Neighbourhood">
+/// <b>PCAL3 — the WIDENED transverse profile, when this feed has a passive neighbour close enough
+/// that the standard has to contain it</b>, and null on every port whose feed is clear. It is not
+/// produced by <see cref="PlanarPorts.Resolve"/>: resolving a port is a question about one port and
+/// one mesh, and this one needs the run's whole port list (to tell a passive neighbour from a driven
+/// one) and the slab (for the threshold), so <see cref="PlanarSolve"/> asks
+/// <see cref="PlanarPorts.TryWidenForNeighbours"/> at setup and carries the answer back on the
+/// resolution. A run whose feeds are all clear never takes that path and its ports are the records
+/// they have always been (R-pcal3-4).
+/// </param>
 public sealed record PlanarPortResolution(
     int                    Number,
     PlanarPortSide         Side,
@@ -599,7 +679,8 @@ public sealed record PlanarPortResolution(
     double                 FootprintAreaM2 = 0,
     PlanarPortReference    Reference       = PlanarPortReference.GroundPlane,
     PlanarPortTerminal?    Negative        = null,
-    PlanarPortCrossSection? CrossSection   = null)
+    PlanarPortCrossSection? CrossSection   = null,
+    PlanarPortNeighbourhood? Neighbourhood = null)
 {
     public int BasisCount => BasisIndices.Count;
 
@@ -1905,8 +1986,13 @@ public static class PlanarPorts
         // of the signal run alone would report the port's own return conductor as a neighbour that
         // is not removed correctly, on every coplanar port, always — the same unclearable warning
         // the 2026-08-12 fix below removed for a different reason.
-        double tLo = port.CrossSection?.SpanLoM ?? port.TransverseLines[0];
-        double tHi = port.CrossSection?.SpanHiM ?? port.TransverseLines[^1];
+        // PCAL3 — a WIDENED profile is reproduced in the standard just as literally as a coplanar
+        // port's return is, so the same sentence applies to it: everything inside the profile is not
+        // a neighbour. This is what makes the refusal clear itself once the widening has happened,
+        // and — just as important — what leaves a SECOND neighbour outside the widened span still
+        // measured, from the widened edge, and still able to refuse the run.
+        double tLo = port.Neighbourhood?.SpanLoM ?? port.CrossSection?.SpanLoM ?? port.TransverseLines[0];
+        double tHi = port.Neighbourhood?.SpanHiM ?? port.CrossSection?.SpanHiM ?? port.TransverseLines[^1];
         double nearestDriven  = double.PositiveInfinity;
         double nearestPassive = double.PositiveInfinity;
 
@@ -1969,6 +2055,245 @@ public static class PlanarPorts
             : new PlanarFeedClearance(port.Number,
                   double.IsInfinity(nearestPassive) ? PlanarNeighbourClass.None : PlanarNeighbourClass.Passive,
                   nearestPassive, passiveRequiredM, slabHeightM, endRunM);
+    }
+
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // PCAL3 — PUTTING THE NEIGHBOUR IN THE PROFILE
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// <b>R-pcal3-1 — a conductor within the clearance distance of a calibrated feed, carrying no
+    /// port, joins that port's PROFILE and therefore its calibration standard.</b> Returns the port
+    /// with a <see cref="PlanarPortNeighbourhood"/> on it, or null with <paramref name="declined"/>
+    /// saying which conductor could not be taken in and why.
+    ///
+    /// <para><b>The fix is on the standard's side and it has to be.</b> The overview's §2 rules out
+    /// the tempting alternative — have the solver separate the feeds — because the lead
+    /// <see cref="PlanarFeedExtension"/> grows is peelable only while it is collinear and uniform,
+    /// and routing two feeds apart needs a bend, which the peel cannot remove. So the standard is
+    /// made to reproduce the port's actual neighbourhood instead of the neighbourhood being made to
+    /// match the standard.</para>
+    ///
+    /// <para><b>Only a PASSIVE neighbour, and only on the port's own level.</b> A neighbour carrying
+    /// a port supports a second mode at the reference plane against D6's per-port SCALAR error box,
+    /// which is a different piece of algebra and is brief 4; PCAL1 measured no case of metal on
+    /// another level at all, so there is no evidence either way and nothing is read into its
+    /// silence. Both are declined by name rather than attempted.</para>
+    ///
+    /// <para><b>R-pcal3-2 — the standard is a uniform extrusion, so every conductor in it must be
+    /// uniform.</b> A neighbour that bends, ends or changes width inside the run the standard
+    /// reproduces cannot be extruded, and guessing what it should become costs more than declining.
+    /// The run checked is D4's own — <paramref name="endRunCells"/> of the DUT's own cells marching
+    /// inward, which is exactly the region the standard copies VERBATIM and exactly the region the
+    /// port's own conductor is already held to. Using a different length here would mean the
+    /// standard's two conductors were held to two different uniformity rules.</para>
+    /// </summary>
+    /// <param name="allPorts">Every port of the run, so a neighbour carrying one can be told from
+    /// one that does not.</param>
+    /// <param name="endRunCells">D4's own end run, in the port's own cells.</param>
+    /// <param name="passiveRequiredM">The lateral distance a passive neighbour has to be beyond
+    /// before it stops mattering — <see cref="PlanarCalibrationSettings.PassiveNeighbourClearanceHeights"/>
+    /// × h. Anything further away is left outside the profile, because a profile wider than it needs
+    /// to be costs unknowns on every standard of every run, forever.</param>
+    public static PlanarPortResolution? TryWidenForNeighbours(
+        PlanarMesh mesh, PlanarPortResolution port,
+        IReadOnlyList<PlanarPortResolution> allPorts,
+        int endRunCells, double passiveRequiredM,
+        PlanarConductors conductors, out string? declined)
+    {
+        ArgumentNullException.ThrowIfNull(mesh);
+        ArgumentNullException.ThrowIfNull(port);
+        ArgumentNullException.ThrowIfNull(allPorts);
+        ArgumentNullException.ThrowIfNull(conductors);
+        declined = null;
+
+        string Who() => $"Port {port.Number}'s feed";
+
+        if (!port.IsDeembeddable || endRunCells < 1) return null;
+
+        if (port.CrossSection is not null)
+        {
+            declined =
+                $"{Who()} returns through drawn metal, and widening a coplanar profile to take in a " +
+                "passive neighbour is not attempted: that standard already drives two conductors at " +
+                "±½ V and a third piece of metal beside them has no stated potential — the same " +
+                "ambiguity the third-conductor refusal names one step further out.";
+            return null;
+        }
+
+        if (port.CutCellCount > 0)
+        {
+            declined =
+                $"{Who()} is meshed with conformal boundary cells ({port.CutCellCount} of the port's " +
+                "own cells are cut), so its profile is the METAL's extents rather than the grid's and " +
+                "a neighbour's gridlines would not line up with it. Set Boundary cells to " +
+                "\"Staircase\" for this run, or separate the feeds.";
+            return null;
+        }
+
+        bool alongX  = port.Direction == PlanarBasisDirection.X;
+        var  gLong   = alongX ? mesh.GridX : mesh.GridY;
+        var  gTran   = alongX ? mesh.GridY : mesh.GridX;
+        int  nLong   = gLong.Count - 1, nTran = gTran.Count - 1;
+        bool fromLow = port.Side is PlanarPortSide.MinX or PlanarPortSide.MinY;
+
+        int nx = mesh.GridX.Count - 1;
+        var at = new int[nx * (mesh.GridY.Count - 1)];
+        Array.Fill(at, -1);
+        for (int c = 0; c < mesh.Cells.Count; c++)
+        {
+            var cell = mesh.Cells[c];
+            if (cell.LayerIndex == port.LayerIndex) at[cell.IY * nx + cell.IX] = c;
+        }
+
+        int CellAt(int iLong, int iTran)
+        {
+            if ((uint)iLong >= (uint)nLong || (uint)iTran >= (uint)nTran) return -1;
+            return alongX ? at[iTran * nx + iLong] : at[iLong * nx + iTran];
+        }
+
+        // A cell in no basis is not in the solve, so it is not metal for this purpose either —
+        // PlanarConductors.CarriesCurrent, and the conformal taper that measured the difference.
+        bool Metal(int iLong, int iTran)
+        {
+            int ci = CellAt(iLong, iTran);
+            return ci >= 0 && conductors.CarriesCurrent(ci);
+        }
+
+        // ── The end run's columns, marching INWARD from the port, exactly as D4 copies them ──────
+        int planeIdx = 0;
+        double best = double.PositiveInfinity;
+        for (int k = 0; k < gLong.Count; k++)
+        {
+            double d = Math.Abs(gLong[k] - port.ReferencePlaneM);
+            if (d < best) { best = d; planeIdx = k; }
+        }
+        int outer = fromLow ? planeIdx - 1 : planeIdx;
+        if (outer < 0 || outer >= nLong) return null;
+
+        int Column(int j) => fromLow ? outer + j : outer - j;
+        if (Column(endRunCells - 1) < 0 || Column(endRunCells - 1) >= nLong) return null;
+
+        // ── The port's own run, read off the mesh and cross-checked against the resolution ───────
+        double ownCentre = 0.5 * (port.TransverseLines[0] + port.TransverseLines[^1]);
+        int seedT = IndexOf(gTran, ownCentre);
+        if (seedT < 0 || !Metal(outer, seedT)) return null;
+
+        int oLo = seedT, oHi = seedT;
+        while (oLo - 1 >= 0    && Metal(outer, oLo - 1)) oLo--;
+        while (oHi + 1 < nTran && Metal(outer, oHi + 1)) oHi++;
+
+        if (oHi - oLo + 1 != port.BasisCount) return null;
+        for (int i = 0; i <= oHi - oLo; i++)
+            if (Math.Abs(gTran[oLo + i] - port.TransverseLines[i]) > 1e-12 * Math.Max(1.0, Math.Abs(gTran[oLo + i])))
+                return null;
+
+        // ── Walk outward on each side, taking in every passive conductor still inside the
+        //    threshold and measuring the next gap from the edge the last one moved to ────────────
+        var  mine    = new HashSet<int>(conductors.LabelsOf(mesh, port));
+        var  driven  = conductors.LabelsCarryingAPort(mesh, allPorts);
+        int  spanLo = oLo, spanHi = oHi;
+        int  taken  = 0;
+        double nearest = double.PositiveInfinity;
+
+        for (int dir = 0; dir < 2 && declined is null; dir++)
+        {
+            bool up = dir == 0;
+            while (true)
+            {
+                int edge = up ? spanHi + 1 : spanLo;          // the gridline the span currently ends on
+                int t = up ? spanHi + 1 : spanLo - 1;
+                while (t >= 0 && t < nTran && !Metal(outer, t)) t += up ? 1 : -1;
+                if (t < 0 || t >= nTran) break;               // nothing further out on this side
+
+                double gap = up ? gTran[t] - gTran[edge] : gTran[edge] - gTran[t + 1];
+                if (gap >= passiveRequiredM) break;           // clear, and a profile is never wider
+                                                              // than it has to be
+
+                int nLoT = t, nHiT = t;
+                while (nLoT - 1 >= 0    && Metal(outer, nLoT - 1)) nLoT--;
+                while (nHiT + 1 < nTran && Metal(outer, nHiT + 1)) nHiT++;
+
+                int label = conductors.LabelOf(CellAt(outer, t));
+                if (driven.Contains(label))
+                {
+                    declined =
+                        $"{Who()} has a conductor {SurfaceMesher.Eng(gap)}m away that CARRIES A PORT " +
+                        "of its own. Two driven conductors at one reference plane support two modes, " +
+                        "and this kernel's error box is one scalar per port — reproducing the metal " +
+                        "in the standard does not fix that, so it is not attempted here.";
+                    break;
+                }
+                if (mine.Contains(label))
+                {
+                    declined =
+                        $"{Who()} has metal {SurfaceMesher.Eng(gap)}m away that is part of the port's " +
+                        "OWN net, reaching the reference plane as a separate run. A standard " +
+                        "reproducing it would be two conductors the structure shorts together " +
+                        "somewhere this profile cannot see.";
+                    break;
+                }
+
+                if (gap < nearest) nearest = gap;
+                taken++;
+                if (up) spanHi = nHiT; else spanLo = nLoT;
+            }
+        }
+
+        if (declined is not null) return null;
+
+        // ── NOTHING WITHIN THE THRESHOLD CROSSES THIS PORT'S OWN PLANE, ON THIS PORT'S OWN LEVEL ──
+        //
+        // Which is the ordinary answer for a clear feed, and is therefore NOT a decline: a null with
+        // no reason means "there was nothing to widen". Whether that leaves a breach standing is a
+        // question about the CLEARANCE, which this function does not measure and the caller does —
+        // <see cref="PlanarSolve"/> says so there, where both halves are in hand.
+        if (taken == 0) return null;
+
+        // ── R-pcal3-2 — EVERY conductor in the profile has to survive the extrusion ──────────────
+        int n = spanHi - spanLo + 1;
+        var lines   = new double[n + 1];
+        var isMetal = new bool[n];
+        var labels  = new int[n];
+        for (int k = 0; k <= n; k++) lines[k] = gTran[spanLo + k];
+        for (int k = 0; k < n; k++)
+        {
+            isMetal[k] = Metal(outer, spanLo + k);
+            labels[k]  = isMetal[k] ? conductors.LabelOf(CellAt(outer, spanLo + k)) : -1;
+        }
+
+        for (int j = 1; j < endRunCells; j++)
+        {
+            int col = Column(j);
+            for (int k = 0; k < n; k++)
+            {
+                bool m = Metal(col, spanLo + k);
+                if (m == isMetal[k] && (!m || conductors.LabelOf(CellAt(col, spanLo + k)) == labels[k]))
+                    continue;
+
+                double station = 0.5 * (gLong[col] + gLong[col + 1]);
+                declined =
+                    $"{Who()} has a neighbouring conductor that is not uniform over the " +
+                    $"{SurfaceMesher.Eng(Math.Abs(station - port.OuterEdgeM))}m of line the " +
+                    "calibration standard reproduces: at " +
+                    $"{(alongX ? "x" : "y")} = {SurfaceMesher.Eng(station)}m the metal " +
+                    $"{SurfaceMesher.Eng(0.5 * (lines[k] + lines[k + 1]))}m across " +
+                    (m ? "appears where the reference plane has none"
+                       : isMetal[k] ? "has ended or moved" : "belongs to a different conductor") +
+                    ". A calibration standard is a uniform extrusion, so a neighbour that bends, " +
+                    "ends or changes width inside that run cannot be put in it — and guessing what " +
+                    "it should become there would move metal the user did not draw. Separate the " +
+                    "feeds, or lengthen the neighbour so it runs straight past the port.";
+                return null;
+            }
+        }
+
+        return port with
+        {
+            Neighbourhood = new PlanarPortNeighbourhood(
+                lines, isMetal, oLo - spanLo, oHi - spanLo, taken, nearest),
+        };
     }
 
     private static string LayerName(PlanarMesh mesh, int layerIndex)

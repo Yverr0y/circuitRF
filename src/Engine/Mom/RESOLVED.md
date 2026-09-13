@@ -4947,6 +4947,231 @@ at 3.5750 GHz for the resonance located at 3.56511 GHz. Routine tier.
 `EmPanelDeclutterTests.RunStartText_NamesTheBlocksThatFollowTheSweep_AndQuotesNoDuration` holds the
 plan clauses and scans the sentence for any spelling of a duration.
 
+## PCAL3 — the calibration standard contains the passive neighbour now (2026-09-12)
+
+`docs/sonnet-briefs/brief-portcal-3-passive-neighbour.md`, following PCAL2 directly below. The finding
+it acts on is PCAL1's §3: a neighbour that carries no port is **not** benign — at the 246 µm the series
+opened on it is 18.0 dB out in S₁₁ at 1 GHz and non-passive at 3 of 7 points — but it is a *milder and
+different* failure, needing about half the clearance a driven one does, and it leaves **one driven mode**
+at the reference plane. So D6's per-port scalar error box still describes it, and the whole fix is to put
+the metal in the standard rather than to ask the user to move it.
+
+**It works, and the number is the one gate 1 asked for at six of seven frequencies.** On the committed
+fixture (`testdata/portcal/coupled-pair-passive`, the coupled pair with ports 3 and 4 deleted), against
+kernel A's exact four-port reduced with the neighbour's ports terminated in Γ = +1:
+
+| | max \|ΔS\| | worst ΔS₁₁ | worst ΔS₂₁ | worst σ_max | non-passive |
+|---|---|---|---|---|---|
+| kernel-A-vs-B floor (s = 9 mm) | 0.0522 | 3.13 dB | 0.35 dB | 0.9995 | 0 / 7 |
+| **before** (PCAL2's refusal, overridden) | 0.8734 | 17.98 dB | 8.17 dB | 1.0059 | **3 / 7** |
+| **after** | **0.0898** | 2.66 dB | 0.64 dB | 0.9995 | **0 / 7** |
+
+Per frequency, against that 0.0522 floor: **1 GHz 0.0421 · 2 GHz 0.0408 · 3 GHz 0.0411 · 4 GHz 0.0448 ·
+5 GHz 0.0521 · 6 GHz 0.0898 · 7 GHz 0.0405.** Six of the seven are *at or below* the floor; the seventh
+is §4's subject and is the one thing this phase did not close.
+
+Everything below was measured with a scratch console harness in Release against `PlanarSolve.Run` and
+`QuasiStaticKernel.Solve` directly — not a test, per the standing rule about the `Benchmark` tier — on
+the overview's own settings (cells/λ 5, cells across 2, transmission-line current model, accelerated
+solve, adaptive sampling off so every published point is a solved point).
+
+### 1. What was built, and the one place the machinery did NOT already exist
+
+`PlanarPortNeighbourhood` on `PlanarPortResolution`, `PlanarPorts.TryWidenForNeighbours`, and
+`PlanarCalibration.BuildNeighbourLine`. The profile machinery has been multi-conductor since RP-2c —
+`PlanarPortCrossSection` carries `Lines[]` plus `IsMetal[]`, D4 builds the standard from the DUT's own
+gridlines verbatim, and `SpanLoM`/`SpanHiM` already tell `CheckFeedClearance` that everything inside a
+profile is reproduced. **What was missing was any way for a conductor OUTSIDE the profile to get
+INSIDE it**, and that is the whole of the new code. The coplanar builder's mesh loop and the widened
+one's are now one shared `BuildProfileMesh`; the coplanar path emits the same cells and bases in the
+same order it always did.
+
+**It is a separate field rather than a reuse of `CrossSection`, and that is load-bearing.** A non-null
+`CrossSection` is what *makes* a port conductor-referenced: it dispatches to the two-cut standard, drives
+±½ V on two conductors, and changes `IsConductorReferenced`. None of that is true here — this port drives
+one cut against the ground plane and the neighbour is driven by nothing — so reusing the record would
+have meant telling the two cases apart at every site that reads it.
+
+**The widening is attempted only on a PASSIVE breach**, which since PCAL2 is a refusal. That is the whole
+of R-pcal3-4's proof that nothing passing today changes: a clear feed measures `Breached = false` and
+never reaches the call.
+
+**The clearance predicate clears itself.** `MeasureFeedClearance` reads `Neighbourhood?.SpanLoM/SpanHiM`
+the same way it reads a coplanar cross-section's, so after widening the same function reports the feed
+clear — and, just as important, a SECOND neighbour still outside the widened span is still measured, from
+the widened edge, and can still refuse the run.
+
+### 2. R-pcal3-3 — what the neighbour does at the standard's ends: FLUSH AND OPEN, measured
+
+The DUT's neighbour carries on past the port; the standard's has to stop somewhere. Two of the brief's
+three were measured (`PlanarCalibrationSettings.NeighbourExtensionCells`, which is how they were
+measured and which ships at 0):
+
+| the standard's neighbour | max \|ΔS\| | worst ΔS₁₁ |
+|---|---|---|
+| **flush with the driven line, open at both ends** (`0`) | **0.0898** | 2.66 dB |
+| extended 2 bulk cells past each reference plane (`2`) | 0.7997 | 19.15 dB |
+| extended 6 bulk cells (`6`) | 0.7996 | 15.86 dB |
+
+**Extending it is barely better than not reproducing the neighbour at all** (0.87), and the reason is
+that it puts an open-circuited stub a few cells long immediately *outside* the reference plane — i.e.
+inside the error box — which the DUT does not have. Flush is also what this fixture's own DUT is:
+its neighbour ends one cell past the reference plane, exactly as the driven line does. **Shorting the
+neighbour to ground was not measured**; a standard containing a ground attachment is a structure this
+builder does not make, and §4 says why it would not have helped anyway (a shorted strip of length L
+resonates at λ/2 too).
+
+What is NOT negotiable, and is true by construction here: **both standards of a pair treat the neighbour
+identically** — the same number of extension cells on the short line and on the long one — or D5's γ is
+measuring the difference between two end treatments rather than the length between two planes.
+
+### 3. The neighbour's ELECTROSTATIC boundary condition is a third answer, and it is worth 12.3 %
+
+D7 takes Z_c = γ/(jωC_pul) and C_pul from the difference of two standards' static capacitance. With a
+second conductor in the standard there are three complete, plausible readings, and they are far apart.
+Measured on the widened standard set at s/h = 0.27 (C_pul, pF/m):
+
+| the neighbour is… | C_pul | vs the answer |
+|---|---|---|
+| at the line's own potential (what a single-conductor standard does: the whole sheet at 1 V) | 74.139 | **+48.0 %** |
+| held at 0 V (a *grounded* pour — a different structure) | 57.094 | **+14.0 %** |
+| **floating at zero net charge** (an unconnected trace, which is what it is) | **50.089** | — |
+
+The spread collapses with separation (grounded is +0.4 % at s/h = 1.5, the whole sheet still +88 %), which
+is exactly the signature the de-embedded answer showed: with the neighbour GROUNDED the residual error was
+0.1201 / 0.0622 / 0.0822 at s/h = 0.27 / 0.50 / 1.00 — coupling-dependent; with it FLOATING it is
+0.0898 / 0.0928 / 0.0900 — **flat**, which is what a residual that no longer depends on the coupling looks
+like.
+
+**Floating is a CONSTRAINT, not a potential, which is why it could not ride on `ModePotential`.** The
+conductor's potential is an unknown fixed by Q = 0. `PlanarStandard.FloatingPotential` carries its mask
+and `PlanarDeembed.StaticCapacitance` spans it with **one extra right-hand side and no extra
+factorisation**: solve for the unit potential and for the mask, then take the combination whose net charge
+on the mask is zero. `PlanarStaticAim.ModalCapacitance` does the same on the accelerated route. Null is
+RP-2c's arithmetic bit for bit and the second solve is not run at all.
+
+**The whole-sheet reading is the one a naive implementation gets**, because it is what `potential = null`
+already means, and at +48 % it renormalises every published s-parameter while looking entirely normal.
+
+### 4. THE ONE THING THIS PHASE DID NOT CLOSE: the widened standard is a RESONATOR
+
+**The 6 GHz point in the table at the top is not noise and it is not the mesh. It is the standard's own
+neighbour ringing.** The reproduced neighbour is open at both ends, so at βL = nπ its standing wave
+dominates the standard's 2-port and the two-line cascade stops describing a single mode.
+
+Three measurements pin it, and the third is the one that settles it:
+
+1. **It moves with the standard's LENGTH, not with anything else.** `TargetElectricalDegrees` sizes Δℓ,
+   and on a 25-point 1–7 GHz sweep the spike sits exactly at the selected long standard's λ/2:
+
+   | target | standards (mm) | predicted λ/2 of the long one | observed spike |
+   |---|---|---|---|
+   | 40° | 5.54 / 18.47 / 11.08 | 7.56 GHz (out of band) | none; a smooth climb to 0.104 at 7 GHz |
+   | 60° (shipped) | 5.54 / 25.87 / 12.93 | **6.48 GHz** | **6.50 GHz, 0.219** |
+   | 80° | 5.54 / 31.41 / 16.63 | **5.04 GHz** | **5.00 GHz, 0.210** |
+
+2. **Past its own resonance the error COLLAPSES**, which no ordinary error source does: at 80° the sweep
+   reads 0.210 at 5.00 GHz and then **0.016 / 0.007 / 0.012 / 0.015** at 5.5–6.5 GHz — an order of
+   magnitude *below* the A-vs-B floor.
+3. **It is non-monotone in the mesh** (0.0898 / 0.2251 / 0.1230 at cells/λ 5-across-2, 10-across-4,
+   20-across-8) while every off-resonance point moves ~1 %. A sharp feature sampled at a fixed grid
+   frequency does that; a discretisation error does not.
+
+**It is the INSTRUMENT, not the design.** The DUT's neighbour is 3.83 mm and resonates near 22 GHz; the
+standard's is 12.93 mm because `SuggestDeltas` chose that length.
+
+**And it is essentially unavoidable at this band ratio, which is why it is reported rather than fixed.**
+A standard needs Δℓ ≈ λ_g/6 at the band's geometric mean, which on a 7:1 band is 0.44 λ_g at the band's
+TOP — so the long standard is already near half a wavelength there before `ShortLineHeights` is added. Two
+fixes were costed and **not taken**:
+
+- **Resonance-aware separation selection.** `SelectSeparation` is a pure function of the Δℓ set and the
+  predicted β, so penalising a candidate whose L is near nπ costs nothing at run time. It would have
+  worked at 40° and at 80° — and **it cannot work on the shipped 60°**, because on this fixture the two
+  long standards come out at 25.87 and 12.93 mm, a ratio of 2.0006, so they resonate at the *same*
+  frequency. Shipping a lever that does not move the gate fixture is the "name a remedy without asking
+  whether it binds" defect this area has already recorded three times.
+- **One extra separation per widened port**, chosen to break that ratio. It works, and it costs another
+  standard mesh and its `PlanarSolveContext` on a step that R-pcal3-5 already shows doubling.
+
+So `PlanarPortCalibrator.NeighbourResonanceDegrees` computes βL from the **measured** γ over the two
+standards a frequency actually reads, and `PlanarSolve` names every point within
+`NeighbourResonanceGuardDegrees` (**25°**) of nπ in a note. **n = 0 is excluded and that is not
+pedantry** — below its first half wave a standard's βL passes through every small angle on the way up, and
+a window that admitted n = 0 flagged 1 GHz, where the answer is at the floor. 25° is measured: the error
+is at the floor out to ~27° below nπ and climbs to 0.07 at 20°, 0.145 at 6° and 0.219 at the resonance.
+It over-flags by one point on this fixture (7 GHz reads 14° past nπ and is at the floor) and the window is
+left symmetric rather than fitted to one geometry.
+
+### 5. Two things that were NOT the explanation, and were checked rather than assumed
+
+- **Conductor thickness.** Kernel A meshes 35 µm of metal and kernel B a zero-thickness sheet, and PCAL1
+  recorded thickness as part of the A-vs-B floor — so at 246 µm, where the gap capacitance is large, it
+  was the obvious suspect. **Measured false**: at t = 1 µm the floor falls to 0.0423 and the residual
+  excess at s/h = 0.27 is 0.0306 against 0.0376 at 35 µm. It moves both numbers and explains neither.
+- **The mesh.** Off-resonance, refining from cells/λ 5-across-2 to 20-across-8 moves the answer from
+  0.0421 to 0.0430 at 1 GHz. A finer mesh has nothing to find here.
+
+### 6. R-pcal3-5 — what the wider standard cost, reported before it was accepted
+
+On the fixture, per port: standards of N = 149 / 292 / 201 become N = 298 / 584 / 402 — **4.57× the DUT's
+unknowns becomes 9.14×**, and a 7-point sweep goes from 3.44 s to 6.84 s. That is close to exactly double,
+which is what taking one more conductor of the same width into the profile should cost, and it is on the
+step that already dominates a de-embedded run.
+
+**It was not judged unreasonable, and the comparison that decides it is not "before".** The alternative to
+a widened standard on this geometry is not a cheaper answer — it is PCAL2's refusal and no `.sNp` at all.
+The cost note is the one already printed on every de-embedded run; nothing new reports it.
+
+A profile is never wider than it has to be: the outward walk stops at the first gap that reaches
+`PassiveNeighbourClearanceHeights`, so a neighbour already clear is left outside and costs nothing.
+
+### 7. R-pcal3-2 — what is declined, and why the decline is not a silent null
+
+Three cases fall through to PCAL2's refusal, each named:
+
+- **A neighbour that bends, ends or changes width** inside the run the standard reproduces. The uniformity
+  check is over D4's own end run — `EndRunCellsFor` cells of the DUT's own longitudinal run — deliberately
+  the same region the port's OWN conductor is held to, because two conductors of one standard held to two
+  different uniformity rules is a rule nobody can state.
+- **A neighbour carrying a port.** Brief 4, and the boundary is asserted rather than left to prose.
+- **Metal on the port's own net reaching the plane as a separate run**, which the standard would reproduce
+  as two conductors the structure shorts together somewhere the profile cannot see.
+
+**A fourth case is the caller's, not the function's.** `TryWidenForNeighbours` returns a null with NO
+reason when it finds nothing within the threshold crossing the port's own plane on the port's own level —
+which is the ordinary answer for a clear feed. Whether that leaves a breach standing is a question about
+the CLEARANCE, which the function does not measure, so `PlanarSolve` writes that sentence, where both
+halves are in hand: the breaching metal is on another level, behind the end face, or begins further in.
+Returning a decline from inside the function instead made the "nothing to widen" case claim a failure,
+which is what its own test caught.
+
+**A conformally cut port is declined too**, by name: its profile is the METAL's extents rather than the
+grid's (R-cut-4), so a neighbour's gridlines would not line up with it.
+
+### 8. How R-pcal3-4's byte-identity was proved
+
+The same way PCAL2 proved its own, and for the same reason a `git stash` is the wrong instrument: a
+`git worktree` at the pre-change HEAD, one build, `separated-pair` run on both sides. The two `.s4p`
+files are **identical on every line but `circuitRF-EM written:`**, and the `.npy` is identical with no
+exclusion at all. The engine-side half is `AClearFeedIsUntouched_AndItsStandardIsTheOneItAlwaysWas`,
+which asserts on the standard's COORDINATES because that is what D4 is a construction of.
+
+### 9. What was not measured, so that nothing is read into the silence
+
+- **A neighbour on another conductor level.** PCAL1 measured none, so there is no evidence either way;
+  this phase declines it by name rather than attempting it.
+- **A ground pour that is actually grounded.** PCAL1's "pour" was a 5 mm-wide trace with no port and no
+  via, i.e. floating, and §3's boundary condition is right for it. A pour with a via to the reference
+  plane is a *grounded* conductor and §3's table says the two readings differ by 14 % at s/h = 0.27. The
+  mesh can tell them apart — a ground attachment basis is visible in `PlanarConductors` — and nothing
+  here does.
+- **More than one neighbour, or neighbours on both sides.** The walk handles both and neither was
+  measured; the fixture has one.
+- **A widened COPLANAR port.** Declined by name: that standard already drives two conductors at ±½ V and
+  a third piece of metal beside them has no stated potential, which is the ambiguity the third-conductor
+  refusal names one step further out.
+
 ## PCAL2 — a clearance breach is a REFUSAL now, and the threshold is two numbers (2026-09-12)
 
 `docs/sonnet-briefs/brief-portcal-2-refuse-not-warn.md`, following PCAL1 directly below. The finding
