@@ -1,5 +1,113 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## brief-stackup-render-7-copy.md, 2026-09-13 — copy the cross-section to the clipboard
+
+Right-click the stackup drawing ▸ **Copy**, or press Ctrl/⌘+C on the Stackup tab, and the whole
+cross-section is on the clipboard as PDF, SVG and a 2× bitmap together.
+`src/Ui/Layout/StackupGraphicExport.cs` is the whole of it — 190 lines, of which none is clipboard
+code. Gates: `tests/Ui.Tests/Stackup/StackupCopyTests.cs` (30) and `StackupCopyPolicyTests.cs` (8),
+green with `Stackup*`/`Tech*`/`Doc*`/`Render*`/`Svg*` (1,795) and `Firewall.Tests` alongside.
+
+### The brief's own instruction held: no clipboard code was written
+
+The write is `PlotExporter.SetClipboardDataAsync` (Windows bypass, text fallback), the page is
+`PagePlacement.Letter`, and the three writers are `PlotDocumentWriter`'s. The one place this file
+could have drifted from `WBondGraphicExport` was the raster: wBond hand-rolls its own
+`SKBitmap`-scale-encode, and this calls `PlotDocumentWriter.BuildPngBytes` instead, which is the same
+arithmetic plus `PlotDocumentScope` — so the bitmap is built to the same standard as the PDF and the
+SVG beside it rather than to a fourth one. `WBondGraphicExport.MarginFraction` went from `private` to
+`internal` and is referenced rather than copied.
+
+### Transparency costs THIS drawing a real hole, and that is where the work was
+
+Every other copy path in the application treats its background as a backdrop, so honouring
+`ClipboardRenderPolicy`'s `TransparentBackground` is a matter of not painting it. **The stackup uses
+its background colour as PAINT**: `StackupRenderer` fills a plated via's bore with `theme.Background`
+so the hole reads as a drill that removed material — the fix the owner asked for on 2026-09-13, when
+a barrel "rendered strangely… 2 vertical lines with a gap".
+
+The near miss is the interesting part. Simply *not painting* the bore does not make it transparent:
+the bands are drawn BEFORE the barrels, so an unpainted bore shows the dielectric the via passes
+through — which is that same reported defect, now baked into the one artifact that leaves the
+application. **A hole has to be cut in what is behind it**, and the only thing behind it is the bands.
+`StackupRenderer.ClipBands` does that: one even-odd clip path — the scene rect plus every bore — around
+the band pass only. Barrel walls lie outside their own bore and a label crossing one is ink drawn on
+top, so neither is clipped. For a plated barrel the bore is the space BETWEEN the walls, not the whole
+rect (`BoreOf`), or a via whose layer colour carries alpha would have see-through walls.
+
+**Why a clip and not `SKBlendMode.Clear`**, which is the obvious way to punch a hole on a raster: Skia's
+SVG device does not record blend modes at all and its PDF device only approximates them, so the hole
+would be right in the bitmap and wrong in the two richest formats — invisible exactly where it
+matters. A clip is an ordinary primitive in both. Verified rather than assumed, on the shipped 2-layer
+PCB technology: the raster's bore pixel is `#00000000` with the wall and the band beside it still
+painted; the SVG carries a `<clipPath>` with `clip-rule="evenodd"`; and the PDF, rasterised back
+through `sips`, has a 7-px transparent stripe through the middle of the drawing where the bore is.
+
+`StackupRenderer.Draw` took an optional `transparentBackground` parameter for this, on
+`LayoutRenderOptions.TransparentBackground`'s precedent. It defaults to false, so the on-screen canvas
+is untouched.
+
+### Skia numbers SVG clip ids from a PROCESS-GLOBAL counter, so "byte-identical" needed a definition
+
+R-stk7-1's determinism gate asks that copying the same stackup twice produce the same bytes. It does
+not, in SVG, as soon as anything clips: Skia's SVG device writes `id="cl_9"` and then `id="cl_f"` for
+two documents composed one after the other in the same process — a hex counter that is never reset.
+One id per document, on the transparent path only (the opaque path generates none at all).
+
+The gate renumbers those ids from zero and compares everything else exactly
+(`StackupCopyTests.CanonicalSvg`), so the failure it exists for — a layout pass reading a dictionary in
+hash order — still fails it. The PDF is compared raw, on both paths, because it carries no such ids.
+**Worth knowing beyond this brief:** any two SVGs this application writes in one process that contain a
+clip, a gradient or an image will differ by these ids, and a test comparing them byte for byte will
+flake. `PlotDocumentWriter` already repairs one Skia SVG defect (`SvgFontNormalizer.RepairPositionLists`)
+and normalising the id counter there would fix it for every caller — not done here, because that writer
+is shared with `circuitrf render` and its own byte-for-byte CLI gates, and this brief's area is two
+files.
+
+### "While the drawing has focus" is unsatisfiable, and BUBBLING is what replaces it
+
+R-stk7-4 asks for the keystroke "while the drawing has focus", with the drawing's focus as the
+discriminator if Ctrl+C is already taken in the tab. **`StackupCanvas` cannot have focus** — R-stk2-10
+keeps it non-focusable on purpose, because a focusable control inside the drawing's `ScrollViewer`
+re-points Page Up/Down at the drawing, and `TechEditorView.TargetScrollViewer` walks up from whatever
+holds focus. So the brief's discriminator does not exist here.
+
+Routing gives the same rule by a different route. The other two key handlers on this view TUNNEL
+(Esc, and the Page Up/Down scroller) because both have to beat a control that would otherwise
+swallow the key. This one is the only handler on the view that BUBBLES, and that is the whole design:
+a control with its own meaning for Ctrl+C — a card's field, the filter box, the open inline value
+editor — handles it first and this is never called. What reaches it is a Ctrl+C nothing in the tab
+claimed. Two further guards are not duplicates of that: it acts only on the Stackup tab (the editor
+has four, and claiming the keystroke on the other three would break plain text copy for nothing), and
+it refuses a `TextBox`/`SelectableTextBlock` source outright, because **Avalonia's text box only marks
+Ctrl+C handled when it actually copied something** — a Ctrl+C typed into a field with an empty
+selection does reach the view, and answering it with a picture is not what was asked.
+
+The decision is a static predicate, `TechEditorView.CopyKeystrokeTakes(key, modifiers, tabIndex,
+source)`, for the reason `StackupCanvas.PressAt`/`RightClickAt` are seams: there is no application
+host in this test project to route a real keystroke through. The routing itself is a source scan.
+
+### What the fit does, and the one thing it cannot preserve
+
+The scene is rebuilt at the PAGE's width (792 pt) and scaled uniformly into the page's usable area,
+centred. Every shipped technology fits at the margin scale of 0.88 — the height only binds past
+roughly twenty bands, which is where a copy of the scrolled pane would have been cropping for some
+time. A 28-band stack scales to about 0.4 and is small but complete, which is the right trade for a
+picture whose failure mode is a missing layer.
+
+**What is not preserved is the pane's own width**, and it must not be: the scene's two columns FLEX
+with the width, so a picture composed at whatever the user's pane happened to be would carry that
+width into a document. The page width is the one number that makes two copies of one stackup the same
+picture.
+
+### Not done, and visible rather than quiet
+
+`Edit ▸ Copy` in the window menu still does nothing for a Technology document —
+`WorkspaceViewModel.InvokeClipboardAsync` dispatches on the active document's type and has no
+`TechDocument` branch. Wiring it needs a `RequestCopy` on `TechDocument` (the shape the layout and
+wBond documents already use) and is more than this brief's stated area, which names two files. The
+right-click item and the keystroke are both reachable without it.
+
 ## brief-stackup-render-6-context-menu.md, 2026-09-13 — right-click the cross-section
 
 Right-click a band, a barrel or the background and get a menu built from what is under the pointer:

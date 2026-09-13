@@ -86,21 +86,95 @@ public static class StackupRenderer
     /// what "outside the band" means.</summary>
     public static SKRect OutlineRectFor(SKRect rect) => SKRect.Inflate(rect, SelectionGap, SelectionGap);
 
+    /// <summary>
+    /// Clips the band pass so that nothing is painted inside a via's bore, and returns the save
+    /// count to restore to. Used only on the transparent-background path.
+    ///
+    /// <para><b>Why a clip and not "just skip the bore fill".</b> The bands are painted BEFORE the
+    /// barrels, so a bore that is simply left unpainted shows the dielectric the via passes through —
+    /// which is the picture the owner reported as wrong on 2026-09-13 ("2 vertical lines with a
+    /// gap"), not transparency. A hole has to be cut in what is behind it, and the only thing behind
+    /// it is the bands.</para>
+    ///
+    /// <para><b>Why a clip and not <c>SKBlendMode.Clear</c>.</b> Clear erases what is already on the
+    /// surface, which is right on a raster and is not recorded at all by Skia's SVG device and only
+    /// approximated by its PDF one — and those two are the richest formats this drawing is copied in,
+    /// so the failure would be invisible where it matters most. A clip is an ordinary primitive in
+    /// both. Even-odd over one outer rect plus the bores is the spelling that needs no difference
+    /// clip, which SVG does not express either.</para>
+    ///
+    /// <para>Only the BAND pass is clipped. A barrel's walls lie outside its own bore, and a label
+    /// that happens to cross one is ink drawn on top — it is not what the hole is cut through.</para>
+    /// </summary>
+    private static int ClipBands(SKCanvas canvas, StackupScene scene)
+    {
+        int saved = canvas.Save();
+
+        using var path = new SKPath { FillType = SKPathFillType.EvenOdd };
+        path.AddRect(new SKRect(0, 0, scene.Width, scene.Height));
+
+        bool any = false;
+        foreach (var barrel in scene.Barrels)
+        {
+            if (BoreOf(barrel) is not { } bore) continue;
+            path.AddRect(bore);
+            any = true;
+        }
+
+        if (any) canvas.ClipPath(path, SKClipOperation.Intersect, antialias: true);
+        return saved;
+    }
+
+    /// <summary>
+    /// The hole in a barrel — the part a drill removed — or null when the via has no hole.
+    ///
+    /// <para>For a plated barrel that is the space BETWEEN the two walls, not the whole rect: the
+    /// walls are metal and the band behind them is what they are drawn against, so cutting them out
+    /// too would leave a via whose walls are see-through wherever the technology gave that layer a
+    /// colour with alpha in it. An unplated hole has no walls, so all of it is the hole.</para>
+    /// </summary>
+    private static SKRect? BoreOf(StackupBarrel barrel)
+    {
+        switch (barrel.Look)
+        {
+            case StackupViaLook.SolidFill:
+                return null;                        // metal all the way through; nothing was drilled
+
+            case StackupViaLook.PlatedBarrel:
+                var bore = new SKRect(barrel.Rect.Left + barrel.WallPx, barrel.Rect.Top,
+                                      barrel.Rect.Right - barrel.WallPx, barrel.Rect.Bottom);
+                return bore.Width > 0 ? bore : null;   // walls that meet leave no bore to cut
+
+            default:
+                return barrel.Rect;                 // an unplated hole is the bore and nothing else
+        }
+    }
+
+    /// <param name="transparentBackground">
+    /// Paint no ground at all: the destination supplies it. The pane's own background rect is
+    /// skipped, and — the part that is not obvious — <b>every via bore becomes a real hole</b>
+    /// rather than a disc of the pane colour, so what shows through a drilled hole is whatever the
+    /// picture was pasted onto. See <see cref="ClipBands"/> for why that needs a clip rather than
+    /// simply not painting the bore.
+    /// </param>
     public static void Draw(
-        SKCanvas canvas, StackupScene scene, StackupRenderTheme theme, StackupOverlay? overlay = null)
+        SKCanvas canvas, StackupScene scene, StackupRenderTheme theme, StackupOverlay? overlay = null,
+        bool transparentBackground = false)
     {
         ArgumentNullException.ThrowIfNull(canvas);
         ArgumentNullException.ThrowIfNull(scene);
         ArgumentNullException.ThrowIfNull(theme);
         overlay ??= StackupOverlay.Empty;
 
-        canvas.DrawRect(new SKRect(0, 0, scene.Width, scene.Height), new SKPaint { Color = theme.Background });
+        if (!transparentBackground)
+            canvas.DrawRect(new SKRect(0, 0, scene.Width, scene.Height), new SKPaint { Color = theme.Background });
         if (scene.IsTooNarrow) { DrawLabels(canvas, scene, theme); return; }
 
         using var fill   = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill   };
         using var stroke = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke };
 
         // ── Bands ────────────────────────────────────────────────────────────────────────────────
+        int bandsClip = transparentBackground ? ClipBands(canvas, scene) : canvas.Save();
         foreach (var band in scene.Bands)
         {
             fill.Color = band.Fill is { } rgba ? new SKColor(rgba.R, rgba.G, rgba.B, rgba.A) : theme.DielectricFill;
@@ -110,6 +184,7 @@ public static class StackupRenderer
             stroke.StrokeWidth = band.IsGroundReference ? GroundEdgeWidth : BandEdgeWidth;
             canvas.DrawRect(band.Rect, stroke);
         }
+        canvas.RestoreToCount(bandsClip);
 
         // ── Barrels ──────────────────────────────────────────────────────────────────────────────
         stroke.StrokeWidth = BandEdgeWidth;
@@ -128,7 +203,11 @@ public static class StackupRenderer
             // bore is painted in the pane's own ground first and the walls go on top of it — the
             // convention every cross-section drawing of a plated through-hole uses — and one outline
             // around the whole barrel then binds the two walls into one object.
-            if (barrel.Look != StackupViaLook.SolidFill)
+            //
+            // With no ground to paint it in, the same convention is kept by REMOVING the bands from
+            // the bore instead (ClipBands, above) — so the hole is a hole, and what shows through it
+            // is whatever the picture was pasted onto rather than the dielectric behind the via.
+            if (barrel.Look != StackupViaLook.SolidFill && !transparentBackground)
             {
                 fill.Color = theme.Background;
                 canvas.DrawRect(barrel.Rect, fill);

@@ -26,8 +26,11 @@ namespace CircuitRF.Ui.WBond;
 /// </summary>
 internal static class WBondGraphicExport
 {
-    /// <summary>Fraction of the page left as margin on every side.</summary>
-    private const float MarginFraction = 0.06f;
+    /// <summary>Fraction of the page left as margin on every side. Internal because
+    /// <c>StackupGraphicExport</c> frames its own page with THIS constant rather than a second copy
+    /// of the number — two graphic copies from one application that margined their pages differently
+    /// would be a difference nobody chose.</summary>
+    internal const float MarginFraction = 0.06f;
 
     /// <summary>2× the page, matching <c>PlotExporter</c>'s own bitmap scale.</summary>
     private const float BitmapScale = 2.0f;

@@ -28,6 +28,20 @@ public partial class TechEditorView : UserControl
         // what makes the key scroll the pane instead.
         AddHandler(KeyDownEvent, OnScrollKeyDown, RoutingStrategies.Tunnel);
 
+        // R-stk7-4 — Ctrl/Cmd+C copies the cross-section as a picture.
+        //
+        // BUBBLING, and the only one of the three handlers here that is: the brief asks for the
+        // keystroke "while the drawing has focus", and the drawing CANNOT have focus — R-stk2-10
+        // keeps StackupCanvas non-focusable on purpose, because a focusable control inside the
+        // drawing's ScrollViewer re-points Page Up/Down at the drawing. So focus cannot be the
+        // discriminator, and a tunnelling handler would take Ctrl+C away from every text box in the
+        // tab before the box ever saw it. Bubbling gives exactly the rule the brief asked for by a
+        // different route: a control that has its own meaning for the keystroke — a card's text
+        // box, the filter box, the open inline editor — handles it first and this is never called.
+        // What is left over is a Ctrl+C nothing in the tab claimed, and on the Stackup tab that means
+        // the picture. See OnCopyKeyDown.
+        AddHandler(KeyDownEvent, OnCopyKeyDown);
+
         // R-stk3-9 — Esc clears the stackup selection.
         //
         // TUNNELLING FROM THE VIEW, and not a key handler on the drawing, which is what brief 3
@@ -192,6 +206,57 @@ public partial class TechEditorView : UserControl
 
         doc.ViewModel.ClearStackupSelection();
         e.Handled = true;
+    }
+
+    // ── Copy the cross-section (R-stk7-4) ─────────────────────────────────────────────────────────
+
+    /// <summary>The Stackup tab's index in <c>SectionTabs</c> — the same 1 that
+    /// <see cref="TargetScrollViewer"/> resolves to <c>StackupList</c>.</summary>
+    private const int StackupTabIndex = 1;
+
+    /// <summary>
+    /// R-stk7-4's keystroke. Copies the whole cross-section as a picture, exactly as the right-click
+    /// menu's Copy does — one implementation, reached two ways.
+    ///
+    /// <para><b>It only ever sees a keystroke nothing else wanted</b> (see the handler registration
+    /// for why this one bubbles while the other two tunnel), and it takes that keystroke only on the
+    /// STACKUP tab: this editor has four tabs and the other three have no picture to copy, so
+    /// claiming Ctrl+C there would break the plain text copy for no gain.</para>
+    ///
+    /// <para>The <c>TextBox</c> check is belt and braces rather than a duplicate of the routing rule.
+    /// Avalonia's text box only marks Ctrl+C handled when it actually copied something, so a Ctrl+C
+    /// typed into a field with nothing selected reaches here — and putting a picture on the clipboard
+    /// because the user's selection was empty is not what they asked for.</para>
+    /// </summary>
+    private async void OnCopyKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Handled || StackupDrawing is null) return;
+        if (!CopyKeystrokeTakes(e.Key, e.KeyModifiers, SectionTabs?.SelectedIndex ?? -1, e.Source)) return;
+
+        // BEFORE the await, not after: the keystroke has finished routing by the time the copy
+        // completes, and marking it handled then would mark nothing.
+        e.Handled = true;
+        await StackupDrawing.CopyPictureAsync();
+    }
+
+    /// <summary>
+    /// The decision above, without the event — the same kind of seam <c>StackupCanvas.PressAt</c> and
+    /// <c>RightClickAt</c> are, and for the same reason: this test project has no application host to
+    /// route a real keystroke through, and the routing is not the part that could be got wrong.
+    /// </summary>
+    internal static bool CopyKeystrokeTakes(Key key, KeyModifiers modifiers, int tabIndex, object? source)
+    {
+        if (key != Key.C) return false;
+        if ((modifiers & (KeyModifiers.Control | KeyModifiers.Meta)) == 0) return false;
+
+        // Ctrl+Shift+C and Ctrl+Alt+C are other gestures in other applications and are not this one.
+        if ((modifiers & (KeyModifiers.Shift | KeyModifiers.Alt)) != 0) return false;
+
+        // This editor has four tabs and only one of them has a picture to copy. Claiming Ctrl+C on
+        // the other three would break the plain text copy there for no gain.
+        if (tabIndex != StackupTabIndex) return false;
+
+        return source is not (TextBox or SelectableTextBlock);
     }
 
     // ── The cross-section's context menu (R-stk6-1) ───────────────────────────────────────────────

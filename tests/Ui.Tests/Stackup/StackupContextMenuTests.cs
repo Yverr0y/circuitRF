@@ -646,13 +646,17 @@ public class StackupContextMenuTests
         Assert.Equal(StackupCardText.FillTip,   ToolTip.GetTip(Item(v, StackupCardText.Fill)));
     }
 
-    // ── Copy is brief 7's, and ships disabled rather than absent (§0) ────────────────────────────
+    // ── Copy — brief 6 shipped it disabled; brief 7 (R-stk7-4) is what enables it ────────────────
 
+    /// <summary>
+    /// The last item on every menu, on every kind of target, and now ENABLED — the shape brief 6
+    /// reserved so that the menu would not change under the user when the feature arrived.
+    /// </summary>
     [Theory]
     [InlineData(StackupKind.Conductor)]
     [InlineData(StackupKind.Dielectric)]
     [InlineData(StackupKind.Via)]
-    public void EveryMenuEndsWithADisabledCopyPlaceholder(StackupKind kind)
+    public void EveryMenuEndsWithCopy(StackupKind kind)
     {
         var vm = Editor();
         var canvas = Canvas(vm);
@@ -661,8 +665,35 @@ public class StackupContextMenuTests
         var items = MenuAt(canvas, vm, name);
         var copy = (MenuItem)items[^1];
         Assert.Equal("Copy", (string?)copy.Header);
-        Assert.False(copy.IsEnabled);
+        Assert.True(copy.IsEnabled);
+        Assert.Equal(StackupCardText.CopyPictureTip, ToolTip.GetTip(copy));
         Assert.IsType<Separator>(items[^2]);
+    }
+
+    /// <summary>
+    /// R-stk7-3/R-stk7-4 at the gesture: the menu's Copy composes the SAME picture wherever it was
+    /// raised from, because what it copies is the whole drawing rather than whatever was
+    /// right-clicked — and the right-click SELECTS its target on the way past, which must not reach
+    /// the picture either.
+    /// </summary>
+    [Fact]
+    public void CopyComposesTheSamePictureFromEveryTarget()
+    {
+        var vm = Editor();
+        var canvas = Canvas(vm);
+        var theme = StackupRenderTheme.Light;
+
+        string expected = StackupGraphicExport.BuildSvgString(vm.Working, theme);
+
+        foreach (var kind in new[] { StackupKind.Conductor, StackupKind.Dielectric, StackupKind.Via })
+        {
+            string name = vm.Working.Stackup.Layers.First(l => l.Kind == kind).Name;
+            MenuAt(canvas, vm, name);                      // selects that entry, as a right-click does
+            Assert.Equal(name, vm.SelectedStackupLayerName);
+
+            Assert.Equal(expected, StackupGraphicExport.BuildSvgString(vm.Working, theme),
+                StringComparer.Ordinal);
+        }
     }
 
     // ── R-stk6-7 — THE SOURCE SCAN ──────────────────────────────────────────────────────────────

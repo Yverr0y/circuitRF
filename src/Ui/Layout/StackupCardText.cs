@@ -86,4 +86,17 @@ public static class StackupCardText
         "Which fill model to solve this via with. BOTH values are metal — this is not the question " +
         "of whether the hole is plated, which is the item above. Plated is a hollow barrel with a " +
         "wall of the stated thickness; Solid is filled edge to edge.";
+
+    // ── Copy the drawing (R-stk7-4) ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// What the menu's Copy item promises, and it says the two things a reader cannot otherwise tell:
+    /// that the WHOLE stackup goes rather than the part that happens to be scrolled into view, and
+    /// that what lands is a picture rather than the technology as data (which is what File ▸ Export
+    /// and the .ctech merge are for).
+    /// </summary>
+    public const string CopyPictureTip =
+        "Copies the whole cross-section to the clipboard as a picture — every layer, not just the " +
+        "part scrolled into view — ready to paste into a document, a slide or a message. " +
+        "Ctrl/Cmd+C does the same. To copy the stackup as DATA, export or merge the technology.";
 }

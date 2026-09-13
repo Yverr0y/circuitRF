@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using CircuitRF.Design.Layout;
@@ -136,16 +137,30 @@ public sealed partial class StackupCanvas
         return mi;
     }
 
+    // ── Copy (R-stk7-4) ───────────────────────────────────────────────────────────────────────────
+
     /// <summary>
-    /// Brief 7's, and a placeholder until it lands — shipped DISABLED rather than absent, so the
-    /// menu is built once and its shape does not change under the user when the feature arrives.
+    /// R-stk7-4 — on every target and on empty space alike, because what it copies is the whole
+    /// drawing rather than whatever was right-clicked.
+    ///
+    /// <para>It copies the WHOLE stackup at the page's width, not the scrolled window (R-stk7-2), and
+    /// without a selection outline or any other overlay (R-stk7-3) — so a Copy taken with a band
+    /// selected and one taken with nothing selected put the same picture on the clipboard. The work
+    /// is <see cref="StackupGraphicExport"/>'s; this is the gesture.</para>
     /// </summary>
-    private static MenuItem CopyItem()
+    private MenuItem CopyItem()
     {
-        var mi = new MenuItem { Header = "Copy", IsEnabled = false };
-        ToolTip.SetTip(mi, "Copying the cross-section as a picture is not available yet.");
+        var mi = new MenuItem { Header = "Copy" };
+        ToolTip.SetTip(mi, StackupCardText.CopyPictureTip);
+        mi.Click += async (_, _) => await CopyPictureAsync();
         return mi;
     }
+
+    /// <summary>The copy itself, without a menu or a keystroke — the same seam
+    /// <see cref="PressAt"/> and <see cref="RightClickAt"/> are, so the gate can take it without an
+    /// input device or a clipboard.</summary>
+    internal Task CopyPictureAsync()
+        => StackupGraphicExport.CopyToClipboardAsync(this, _viewModel?.Working);
 
     // ── Conductor ─────────────────────────────────────────────────────────────────────────────────
 
