@@ -283,14 +283,23 @@ public class TechEditorStackupTabLayoutTests
         var block = code[map..code.IndexOf("};", map, StringComparison.Ordinal)];
         Assert.Contains("1 => StackupList,", block);
 
-        // The drawing's ScrollViewer holds the canvas and nothing else — no focusable sibling that
-        // could put focus inside it.
+        // The drawing's ScrollViewer holds the canvas and ONE focusable sibling — brief 4's inline
+        // edit box (R-stk4-2), which is a TextBox and therefore could put focus inside this scroller
+        // while it is open. Nothing else may join it: no row control, no button.
         var tab = StackupTab();
         int canvas = Require(tab, "<ctrl:StackupCanvas");
         int close  = tab.IndexOf("</ScrollViewer>", canvas, StringComparison.Ordinal);
         Assert.True(close > canvas);
-        Assert.DoesNotContain("<TextBox", tab[canvas..close]);
-        Assert.DoesNotContain("<Button", tab[canvas..close]);
+
+        var inside = tab[canvas..close];
+        Assert.DoesNotContain("<TextBox", inside);
+        Assert.DoesNotContain("<Button", inside);
+        Assert.Contains("<ctrl:SchematicInlineEditBox x:Name=\"StackupInlineEdit\"", inside);
+
+        // …and because it IS focusable, the scroll handler excuses it by name rather than letting it
+        // resolve to the drawing's own scroller. Without this line, Page Up typed into an open editor
+        // scrolls the label the box is sitting on out of the pane.
+        Assert.Contains("if (ReferenceEquals(e.Source, StackupInlineEdit)) return;", code);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────────

@@ -46,6 +46,20 @@ public partial class TechEditorView : UserControl
         // activation through this same hook; this one never subscribed, which is the whole bug.
         DataContextChanged += OnDataContextChanged;
 
+        // R-stk4-2. The drawing and the box are siblings in one Panel; this is what joins them. The
+        // canvas owns the half that needs the scene (which label was hit, what it seeds from, where
+        // exactly it goes) and the box stays the host's, because the three-key contract below is
+        // wired to it here.
+        StackupInlineEditor = new StackupInlineEditor(StackupInlineEdit);
+        StackupDrawing.InlineEditor = StackupInlineEditor;
+
+        // Focus needs a visual root, so the editor raises this rather than taking focus itself.
+        // Posted at Input priority for the same reason SchematicView posts its own: the box has just
+        // been made visible and is not yet realised, and Focus() on an unrealised control does
+        // nothing at all.
+        StackupInlineEditor.Opened += () =>
+            Dispatcher.UIThread.Post(() => StackupInlineEdit.Focus(), DispatcherPriority.Input);
+
         // The destination follows the visible tab (TechEditorViewModel.HelpDestinationFor) — this
         // window edits four unrelated things and no one chapter covers all of them.
         HelpButton.Click += (_, _) =>
@@ -58,6 +72,38 @@ public partial class TechEditorView : UserControl
 
     private TechDocument? _subscribedDoc;
     private TechEditorViewModel? _subscribedVm;
+
+    /// <summary>The one inline editor over the cross-section (brief 4). Internal for the gate, which
+    /// has no application host to raise a real double-click in.</summary>
+    internal StackupInlineEditor StackupInlineEditor { get; }
+
+    // ── The three-key contract (R-stk4-6) ─────────────────────────────────────────────────────────
+    //
+    // The host's to wire, and stated here for both surfaces that host this box: SchematicInlineEditBox
+    // raises nothing and handles no key itself, which is exactly what lets two hosts adopt it without
+    // either changing behaviour.
+    //
+    //   Return    commits, and marks the key handled.
+    //   LostFocus commits. This is the one that costs the user an edit if it is missed.
+    //   Escape    reverts — closes the box, writes nothing.
+
+    private void OnStackupInlineEditKeyDown(object? sender, KeyEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case Key.Return or Key.Enter:
+                StackupInlineEditor.Commit();
+                e.Handled = true;
+                break;
+            case Key.Escape:
+                StackupInlineEditor.Revert();
+                e.Handled = true;
+                break;
+        }
+    }
+
+    private void OnStackupInlineEditLostFocus(object? sender, RoutedEventArgs e)
+        => StackupInlineEditor.Commit();
 
     private void OnDataContextChanged(object? sender, System.EventArgs e)
     {
@@ -126,6 +172,14 @@ public partial class TechEditorView : UserControl
     private void OnEscapeKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key != Key.Escape) return;
+
+        // R-stk4-6's two jobs for one key. This handler TUNNELS, so it gets there before the open
+        // box's own KeyDown — and the first Esc belongs to the box: it reverts the edit and the
+        // selection stands. Returning without handling is what lets the keystroke carry on down to
+        // it. The second Esc, with the box shut, falls through to the line below and clears the
+        // selection.
+        if (StackupDrawing?.InlineEditIsOpen == true) return;
+
         if (DataContext is not TechDocument doc) return;
         if (doc.ViewModel.SelectedStackupLayerName is null) return;
 
@@ -194,6 +248,14 @@ public partial class TechEditorView : UserControl
         // An open dropdown owns all four keys — it is navigating its own items, and the list behind
         // it is not what the user is looking at.
         if (e.Source is ComboBox { IsDropDownOpen: true }) return;
+
+        // R-stk2-10, which brief 4 is the first thing to test. The inline edit box is the ONLY
+        // focusable control inside the drawing's ScrollViewer, so without this line Page Up/Down
+        // typed into an open editor would resolve to the DRAWING's scroller and scroll the label the
+        // box is sitting on out of the pane — the exact quiet re-pointing R-stk2-10 exists to
+        // prevent. Home and End are already excused for any text input by PanelScrollKeys.ActionFor;
+        // these two are not, because a row's text box is not something anyone pages through.
+        if (ReferenceEquals(e.Source, StackupInlineEdit)) return;
 
         var action = PanelScrollKeys.ActionFor(e.Key, e.Source is TextBox);
         if (action is null) return;

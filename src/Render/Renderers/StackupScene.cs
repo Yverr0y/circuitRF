@@ -246,6 +246,23 @@ public sealed class StackupScene
     public const float SpecSize     = 11.5f;
     public const float NoteSize     = 13f;
 
+    /// <summary>
+    /// The point size a label of this style is measured — and therefore drawn — at.
+    ///
+    /// <para>Here rather than in the renderer because it is a LAYOUT fact: it is what the scene
+    /// measured the piece with, and <c>StackupRenderer.FontFor</c> now reads it back instead of
+    /// keeping a second copy. brief 4's inline editor is the caller that made the difference visible
+    /// — a box opened over a label has to be the size of the text it covers, and a size table that
+    /// had drifted from the measurement would be wrong with nothing saying so.</para>
+    /// </summary>
+    public static float FontSizeFor(StackupLabelStyle style) => style switch
+    {
+        StackupLabelStyle.BandName   => BandNameSize,
+        StackupLabelStyle.ColumnName => BandNameSize,
+        StackupLabelStyle.Note       => NoteSize,
+        _                            => SpecSize,
+    };
+
     /// <summary>Horizontal padding around every measured label. Two abutting pieces of one sentence
     /// are therefore separated by <c>2 × LabelPadX + PieceGap</c>, which is what makes R-stk1-9's
     /// "no two label rects intersect" hold for a sentence built out of several of them.</summary>

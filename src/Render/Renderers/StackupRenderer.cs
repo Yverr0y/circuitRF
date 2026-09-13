@@ -232,11 +232,21 @@ public static class StackupRenderer
         }
     }
 
-    private static SKFont FontFor(StackupLabelStyle style) => style switch
-    {
-        StackupLabelStyle.BandName   => new SKFont(SkiaFonts.PlexSemiBold, StackupScene.BandNameSize),
-        StackupLabelStyle.ColumnName => new SKFont(SkiaFonts.PlexSemiBold, StackupScene.BandNameSize),
-        StackupLabelStyle.Note     => new SKFont(SkiaFonts.PlexSemiBold, StackupScene.NoteSize),
-        _                          => new SKFont(SkiaFonts.PlexRegular,  StackupScene.SpecSize),
-    };
+    /// <summary>
+    /// The face and size one label style is drawn in.
+    ///
+    /// <para>The SIZE comes from <see cref="StackupScene.FontSizeFor"/> rather than from a second
+    /// switch here, because brief 4's inline editor opens at the size the label under it was drawn at
+    /// and a box sized from a stale copy of this table would be the wrong height with nothing saying
+    /// so. The FACE stays here: the scene does not draw, and nothing outside this file needs it.</para>
+    /// </summary>
+    private static SKFont FontFor(StackupLabelStyle style) => new(
+        style switch
+        {
+            StackupLabelStyle.BandName   => SkiaFonts.PlexSemiBold,
+            StackupLabelStyle.ColumnName => SkiaFonts.PlexSemiBold,
+            StackupLabelStyle.Note       => SkiaFonts.PlexSemiBold,
+            _                            => SkiaFonts.PlexRegular,
+        },
+        StackupScene.FontSizeFor(style));
 }

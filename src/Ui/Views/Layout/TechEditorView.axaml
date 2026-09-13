@@ -669,7 +669,33 @@
                     <ScrollViewer Grid.Row="1" Margin="6,0,6,0"
                                   VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
-                        <ctrl:StackupCanvas ViewModel="{Binding ViewModel}"/>
+                        <!-- R-stk4-2. A Panel, so the ONE inline edit box is a sibling of the
+                             drawing rather than a child of it, sharing its origin: the box is placed
+                             by Margin, and inside a ScrollViewer a margin is in CONTENT coordinates,
+                             so the box scrolls with the drawing it is sitting on.
+
+                             One box, hidden at rest, reused for every label. Never one per label —
+                             and it is the schematic editor's own SchematicInlineEditBox, unchanged,
+                             because that class already carries the StyleKeyOverride, the baseline
+                             placement and the Skia width measurement that took three reports to get
+                             right. The attributes below are SchematicView.axaml's, for the same
+                             reason it states them: they are what the control's own constants mean. -->
+                        <Panel>
+                            <ctrl:StackupCanvas x:Name="StackupDrawing" ViewModel="{Binding ViewModel}"/>
+
+                            <ctrl:SchematicInlineEditBox x:Name="StackupInlineEdit"
+                                     IsVisible="False"
+                                     FontSize="11"
+                                     FontFamily="{DynamicResource IBMPlexSans}"
+                                     Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                                     TextAlignment="Left"
+                                     Padding="4,2"
+                                     MinHeight="0"
+                                     HorizontalAlignment="Left"
+                                     VerticalAlignment="Top"
+                                     LostFocus="OnStackupInlineEditLostFocus"
+                                     KeyDown="OnStackupInlineEditKeyDown"/>
+                        </Panel>
                     </ScrollViewer>
 
                     <!-- Transparent and 6 px: a grab strip, not a rule. The card Border below already

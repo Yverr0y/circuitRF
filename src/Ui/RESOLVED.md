@@ -1,5 +1,107 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## brief-stackup-render-4-inline-edit.md, 2026-09-13 — editing a value ON the cross-section
+
+Double-click a name, a thickness, a σ, an εr, a tanδ, a µr or a via wall thickness on the drawing and
+a text box opens in place. `src/Ui/Controls/StackupInlineEditor.cs` is the whole of it; the box is
+`SchematicInlineEditBox`, used as-is and **not modified**. Gate:
+`tests/Ui.Tests/Stackup/StackupInlineEditTests.cs` (53 tests).
+
+### The brief's one precondition is met for six fields and not for the seventh — and it does not matter
+
+R-stk4-1: `SchematicInlineEditBox.WidthFor` measures with `SkiaFonts.PlexRegular`, so the label the
+box opens over must be drawn in that face. **It is, for the six spec values** — the scene draws every
+`Spec` piece in `PlexRegular` at `SpecSize`. **A band's NAME is `PlexSemiBold` at `BandNameSize`**,
+which brief 1 implemented deliberately (it measures each piece with the face it will actually draw,
+which is what makes R-stk1-9's no-overlap property true) and which brief 1's own text does not say.
+
+It was still the right call not to "fix" either side. The measurement is of what the **box** draws,
+and the box draws `PlexRegular` (`FontFamily="{DynamicResource IBMPlexSans}"`, exactly as
+`SchematicView.axaml` declares it) — so the width is right for its own content, which is what
+`WidthFor` exists to get right. The box's background is opaque, so it covers the label rather than
+sitting beside it, and the semibold glyphs underneath are not visible to disagree with. Nudging the
+margin — the "fix" the brief warns about — would have made a correct placement wrong.
+
+### The staged strings carry no unit, so `SelectValueOnly` selects the whole string
+
+The brief's example is `"1.6 mm" selects "1.6"`. On this surface no staged string looks like that:
+`LayoutUnits.Format` returns the NUMBER ONLY, and the drawing draws the unit as its own separate
+label piece with `StackupField.None` (R-stk1-10), so a thickness stages `"1.6"` and
+`InlineEdit.ValueSelectionLength` returns the whole length. The outcome is the same — type, and you
+replace the value — and `SelectValueOnly` is called anyway, because it is the contract every inline
+editor here honours and a later change to how a value is staged must not silently turn "type over the
+number" into "type over the number and its unit". The gate asserts the RULE plus a direct check that
+the rule still leaves a real unit standing, rather than asserting the brief's spelling.
+
+### Seed from the staged string: it matters in exactly one place, and that place is a via
+
+Six of the seven seeds happen to equal what the drawing already shows, because the scene formats them
+with the same calls the row VM does — R-stk1-10's own rule, and the reason a drawing-first edit cannot
+rewrite a value the user did not touch. **The seventh does not: a via whose wall thickness the process
+never stated draws `"0"` and stages `""`**, and `""` is the string whose commit means *clear it*.
+Seeding from the drawing there would turn "unstated" into "zero" on the first Return.
+
+### Two labels are conditional, so two of the seven fields cannot always be edited from the drawing
+
+µr is drawn only when it is not 1 (the engineering convention), and a wall thickness only on a
+plated-FILL via. Both are always on the card. This is a real consequence of brief 1's text rules and
+not a defect — but it is why the gate builds its own fixture rather than using a shipped board, which
+has neither.
+
+### `Span` is refused as well as `None`
+
+R-stk4-3 says "a `Label` hit whose `StackupField` is not `None`", but §4 says a span is not typed — it
+is a pair of conductor names, from the card's combos and brief 5's drag. Its label carries
+`StackupField.Span` so selection and reporting work, so the open has to decline two values, not one.
+
+### R-stk4-2, measured rather than assumed
+
+The brief asks for the margin-inside-a-`ScrollViewer` question to be verified, because the fallback
+(close the editor on scroll) is a different design. It was: a `ScrollContentPresenter` arranges its
+content at a NEGATIVE offset and leaves everything inside it alone, so a child's `Margin` is in
+CONTENT coordinates and the box travels with the drawing. Measured with the presenter directly — a
+whole `ScrollViewer` is a templated control and would find no theme in this test project, which is
+the very failure `SchematicInlineEditBox.StyleKeyOverride` documents.
+
+### The real control runs headlessly, so nothing in this gate is a stand-in
+
+`SchematicInlineEditBox` constructs, opens, measures its text against Skia and pre-selects the value
+with no application host — checked before the design was settled, because `CircuitRF.Ui.Tests.csproj`
+says tests must not call Avalonia runtime APIs and a `TextBox` is the first thing under these briefs
+that could have needed one. What genuinely needs a host is `Focus()` and an arrange pass, which is why
+the editor **raises `Opened`** instead of focusing itself (the view posts the focus at `Input`
+priority, as `SchematicView` does) and why the hosting half is a source scan.
+
+### R-stk2-10 was about to be broken quietly, and this is the brief that broke it
+
+The inline edit box is a `TextBox`. Putting it in the drawing's `ScrollViewer` (R-stk4-2 requires
+exactly that) puts **the first focusable control** inside a scroller whose whole point, per R-stk2-10,
+is that nothing inside it can hold focus — because `TechEditorView.TargetScrollViewer` resolves Page
+Up / Page Down by walking up from whatever does. Page Up typed into an open editor would have scrolled
+the label the box is sitting on out of the pane. `OnScrollKeyDown` now excuses that one control by
+reference (`Home`/`End` were already excused for any text input by `PanelScrollKeys.ActionFor`;
+Page Up/Down were not, because a row's text box is not something anyone pages through), and brief 2's
+own test was widened from "no `TextBox` in there" to "exactly this one, and the scroll handler names
+it".
+
+### One commit, not two
+
+Hiding a focused box raises `LostFocus`, and `LostFocus` is itself a commit path — so one Return would
+have committed twice. `Commit` closes the box FIRST (which R-stk4-7 requires for its own reason: the
+commit rebuilds every row VM and the scene, so a box still open is pointing at a rect that no longer
+exists), and closing clears `IsOpen`, which is what makes the second call a no-op. There is no
+separate re-entrancy flag, because that would be a second piece of state saying what `IsOpen` already
+says.
+
+### `FontSizeFor` moved to the scene rather than being copied
+
+R-stk4-4's sketch passes `scene.LabelFontSize`, which does not exist — the scene has three sizes, one
+per label style, and the mapping lived in `StackupRenderer.FontFor`. A box opened over a label has to
+be the size of the text it covers, so the SIZE half of that switch is now
+`StackupScene.FontSizeFor(style)` and the renderer reads it back; the FACE half stays in the renderer,
+because the scene does not draw. A second copy would have drifted with nothing saying so.
+
+
 ## brief-stackup-render-3-selection.md, 2026-09-13 — click a band, land on its fields
 
 Selection on `TechEditorViewModel`, an outline on the drawing, a shaded card, `ScrollIntoView`, and

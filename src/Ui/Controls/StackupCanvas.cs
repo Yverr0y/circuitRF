@@ -171,6 +171,11 @@ public sealed class StackupCanvas : Control
     /// </summary>
     private void OnStackupChanged()
     {
+        // R-stk4-8, FIRST: an undo, a redo, an edit committed from the card below — every one of them
+        // rebuilds the scene, and a box left open is pointing at a rect that no longer exists. A
+        // commit made through the box has already closed it (R-stk4-7), so this is a no-op there.
+        _inlineEdit?.Close();
+
         _cache.Invalidate();
         InvalidateMeasure();
         InvalidateVisual();
@@ -226,7 +231,15 @@ public sealed class StackupCanvas : Control
     {
         base.OnPointerPressed(e);
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
-        if (!PressAt(e.GetPosition(this))) return;
+        var p = e.GetPosition(this);
+        if (!PressAt(p)) return;
+
+        // R-stk4-3. The second press of a double-click, and only the second: a single click that
+        // opened an editor would be an editor the user only meant to click past — InlineEditText's
+        // own doc comment records that finding. The first press has already selected, and this one
+        // selects the same entry again on its way through.
+        if (e.ClickCount == 2) DoubleClickAt(p);
+
         e.Handled = true;
     }
 
@@ -274,6 +287,41 @@ public sealed class StackupCanvas : Control
     /// <summary>What the pointer is over, for the tests and for nobody else — the renderer is handed
     /// <see cref="Overlay"/>, which is built from this.</summary>
     internal string? HoverLayer => _hoverLayer;
+
+    // ── The inline editor (brief 4) ───────────────────────────────────────────────────────────────
+
+    private StackupInlineEditor? _inlineEdit;
+
+    /// <summary>
+    /// The box this canvas opens over a double-clicked value, handed in by the host.
+    ///
+    /// <para>The BOX is the host's — it is a sibling in the host's panel, because a box floated over
+    /// this control has to be laid out beside it rather than inside it, and because the host is what
+    /// wires the three-key contract to it. What the canvas owns is the half that needs the scene:
+    /// which label was hit, what it seeds from and where exactly it goes.</para>
+    /// </summary>
+    internal StackupInlineEditor? InlineEditor
+    {
+        get => _inlineEdit;
+        set => _inlineEdit = value;
+    }
+
+    /// <summary>Whether an inline editor is open over this drawing — the gate
+    /// <c>TechEditorView.OnEscapeKeyDown</c> checks so that <c>Esc</c> reverts the edit before it
+    /// clears the selection (R-stk4-6).</summary>
+    internal bool InlineEditIsOpen => _inlineEdit?.IsOpen == true;
+
+    /// <summary>
+    /// R-stk4-3's gesture, without the pointer event — the same seam <see cref="PressAt"/> is, and
+    /// for the same reason.
+    /// </summary>
+    /// <returns>True when a box was opened.</returns>
+    internal bool DoubleClickAt(Point p)
+    {
+        if (_inlineEdit is null || _viewModel is null) return false;
+        var scene = _cache.Current ?? _cache.Get(_viewModel.Working, (float)Bounds.Width);
+        return _inlineEdit.TryOpen(scene, _viewModel, (float)p.X, (float)p.Y);
+    }
 
     /// <summary>The overlay this canvas would hand the renderer right now.</summary>
     internal StackupOverlay CurrentOverlay => Overlay;
