@@ -86,7 +86,32 @@ public static class TechPersistence
         DrcRules             = [.. tech.DrcRules],
     };
 
-    private static Technology FromFileModel(CtechFile file) => new()
+    private static Technology FromFileModel(CtechFile file)
+    {
+        ClampDrawLanes(file.Stackup);
+        return FromFileModelCore(file);
+    }
+
+    /// <summary>
+    /// R-stk5-8. <c>StackupLayer.DrawLaneFraction</c> is a fraction of the drawn band column, and a
+    /// hand-edited file carrying 7 (or -0.5) would put a barrel off the page — where it cannot be
+    /// seen, cannot be hovered and cannot be dragged back. Clamped on READ rather than refused: the
+    /// field is a drawing position, and a picture is never worth failing a load over.
+    ///
+    /// <para>Clamped here rather than in the property setter so the model stays a plain data class,
+    /// and so what is clamped is exactly what came off disk — a value the application itself wrote is
+    /// already in range.</para>
+    /// </summary>
+    private static void ClampDrawLanes(Stackup stackup)
+    {
+        foreach (var layer in stackup.Layers)
+        {
+            if (layer.DrawLaneFraction is not { } f) continue;
+            layer.DrawLaneFraction = double.IsNaN(f) ? null : Math.Clamp(f, 0d, 1d);
+        }
+    }
+
+    private static Technology FromFileModelCore(CtechFile file) => new()
     {
         Name                 = file.Name,
         DefaultDisplayUnit   = file.DefaultDisplayUnit,

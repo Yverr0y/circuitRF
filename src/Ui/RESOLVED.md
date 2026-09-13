@@ -1,5 +1,103 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## brief-stackup-render-5-drag.md, 2026-09-13 — three drags on one surface
+
+Drag a band up or down to reorder it, drag a via barrel to move its span or slide it sideways, drag
+one of its grippers to move a single end. `src/Ui/Controls/StackupDragController.cs` is the state
+machine; `StackupCanvas` forwards pointer events to it and nothing else. Gate:
+`tests/Ui.Tests/Stackup/StackupDragTests.cs` (15 tests), plus three additions to
+`TechPersistenceTests` for the model field. All green; `Firewall.Tests` unchanged.
+
+### The multi-step reorder had to become one function, not a loop over the one-step one
+
+`MoveStackupLayer(row, ±1)` swaps a band with the next non-via band and commits. Calling it four
+times for a four-band drag would push **four** undo entries, and one `Ctrl-Z` would put the band back
+one place — which reads as a broken undo, and is the failure R-stk5-2 exists to prevent.
+
+`TechEditorViewModel.MoveStackupLayerTo(row, targetBandIndex)` is the whole move as one `CommitEdit`,
+and **`MoveStackupLayer` is now written in terms of it** rather than left as a second copy of the
+via-skipping walk. The index it takes counts BANDS, not list slots, which is what makes it obey
+R-stk5-1's two rules by construction instead of by restating them: a via row is refused (its list
+position is not z), and the band VALUES rotate through the band SLOTS while every via entry stays
+exactly where it is in the list.
+
+**Rotating the values is exactly what a run of adjacent swaps does**, which is the reason the two
+agree. That is not obvious and is worth stating: it would have been easy to write the move as
+"remove the entry and insert it at the target list index", which is a different operation — it
+carries the entry PAST the vias and changes their indices, and on a stackup whose vias lie between
+its bands it lands somewhere else entirely. The gate builds exactly that stackup, because **neither
+shipped technology has one**: both list every via after every band, so the "step over the via" rule
+is unexercised by the shipped data.
+
+### The dominant axis is read once, at the threshold, and never revisited
+
+A barrel carries two drags on one grab — vertical re-spans it, horizontal slides it laterally — so
+R-stk5-10 locks the axis at the moment the gesture passes the movement threshold. Without that, a
+barrel re-spans itself because the hand drifted upward while sliding it sideways, which is a silent
+wrong edit rather than a visible one.
+
+The threshold itself (4 px) is the other half: below it the gesture is brief 3's click. Without a
+threshold every click nudges the stack, because a press and a release at the "same" place differ by a
+pixel or two on any real pointing device.
+
+### Nothing is written while the pointer is down, and the stack does not re-flow under it
+
+What moves during a drag is the OVERLAY — a translucent ghost of the thing being dragged, and for a
+reorder an insertion line on the band boundary it would drop on. The scene is rebuilt on release and
+not before. Re-laying the drawing out on every pointer move would slide the drop target out from
+under the hand aiming at it.
+
+`StackupOverlay` gained `DragInsertY` for that line (the ghost's own field was already there from
+brief 1). It is a **y**, not a rect, because the line spans the band column and the scene now
+publishes that column as `StackupScene.BandColumn` — added for the lateral drag, which turns a
+pointer x into the fraction it stores and would not put the barrel back under the pointer if it
+re-derived the column instead of reading the one the renderer drew (R-stk1-1, from the input side).
+
+### Two clamps that had to be clamps, not refusals at release
+
+A gripper drag may not cross the other end and may not coincide with it — a via spanning one
+conductor connects nothing — and a barrel drag may not stretch when it reaches the top or bottom
+copper. All three are **clamped during the gesture**: a drag that ended in a message would be one the
+user has to undo by reading. The barrel case is the interesting one: the whole span stops rather than
+one end clamping while the other keeps going, because a barrel that silently changes LENGTH when it
+hits the end of the stack is a via nobody asked for.
+
+Snapping to conductors only is not a convenience either. A via terminating on a dielectric is not
+expressible in the model and never should become so.
+
+### A drag spans the commit it makes, so everything it holds is held by NAME
+
+R-stk3-1's rule, at the one point in this brief where it could be broken. `ApplySnapshot` replaces
+`Working` with a freshly deserialized technology and rebuilds every row VM, so a controller holding a
+`StackupLayer` or a row VM across its own release would be pointing at a dead object. It holds the
+layer's name and resolves it at release.
+
+**The same trap bit the gate.** A commit mutates the entry in place *before* it replaces `Working`,
+so a test that captured `via` before a drag and compared `via.SpanFromLayer` afterwards was comparing
+a value with itself — the assertion passed for the wrong reason on a correct implementation, and
+would have passed on a broken one. The span is captured as STRINGS.
+
+### `ReleaseAt` measures the canvas by the SCENE, not by `Bounds`
+
+"Releasing outside the canvas cancels" needs an extent, and the two candidates are the same rectangle
+by construction — `MeasureOverride` returns the scene's own width and height. The scene is the one of
+the pair that exists before a layout pass, so the gesture answers the same question in the
+application and in a gate that never arranged anything. Three of the gate's first failures were
+releases that had wandered past the drawing's height and been correctly cancelled, which is the
+behaviour working rather than a test problem.
+
+### `Esc` now has three jobs, and the order is fixed
+
+`TechEditorView.OnEscapeKeyDown` tunnels, so it sees the key first. An open inline editor still wins
+(brief 4's revert); a live drag comes next and cancels; brief 3's clear-selection is last. A drag and
+an open box cannot both be live — opening the box needs a press the box has swallowed — so the two
+upper cases do not actually compete.
+
+Pointer CAPTURE is taken on the press and only when something was armed, and released after the
+gesture in `OnPointerReleased`. Avalonia raises that event while the capture is still held, which is
+what makes the order work; dropping capture first would raise `PointerCaptureLost` and cancel the
+drag before it committed. `HarmonicaCanvas` uses the same sequence.
+
 ## brief-stackup-render-4-inline-edit.md, 2026-09-13 — editing a value ON the cross-section
 
 Double-click a name, a thickness, a σ, an εr, a tanδ, a µr or a via wall thickness on the drawing and

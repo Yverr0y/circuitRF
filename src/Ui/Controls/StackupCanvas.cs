@@ -13,10 +13,13 @@ namespace CircuitRF.Ui.Controls;
 /// <summary>
 /// The stackup cross-section, in the Technology Editor's Stackup tab, above the cards.
 ///
-/// <h3>It draws, and it SELECTS. It does not edit</h3>
-/// <para>brief 2 was deliberately read-only; brief 3 adds the one pointer gesture — a click selects,
-/// hover marks what a click would take — and nothing else. No drag, no menu, no inline editor: those
-/// are briefs 4-6, and each is small precisely because this one carries the hosting.</para>
+/// <h3>It draws, it SELECTS, and it hosts two gestures that edit THROUGH the view model</h3>
+/// <para>brief 2 was read-only; brief 3 added the click; brief 4 the double-click that opens an
+/// inline editor; brief 5 the drags — reorder a band, re-span a via, slide one sideways. None of them
+/// writes <c>Working.Stackup.Layers</c> here and none pushes an undo entry of its own: every one goes
+/// through the function the card below already calls, which is the rule the whole series is built on
+/// (series overview §0). The placement arithmetic they read is <see cref="StackupScene"/>'s, and the
+/// drag STATE MACHINE is <see cref="StackupDragController"/>'s; this control is the hosting.</para>
 ///
 /// <h3>Selection is the VIEW MODEL's, held by name</h3>
 /// <para>This control neither owns nor caches what is selected. It writes
@@ -53,6 +56,7 @@ public sealed class StackupCanvas : Control
             nameof(ViewModel), o => o.ViewModel, (o, v) => o.ViewModel = v);
 
     private readonly StackupSceneCache _cache = new();
+    private readonly StackupDragController _drag = new();
     private TechEditorViewModel? _viewModel;
     private bool _hooked;
 
@@ -176,6 +180,11 @@ public sealed class StackupCanvas : Control
         // commit made through the box has already closed it (R-stk4-7), so this is a no-op there.
         _inlineEdit?.Close();
 
+        // The same reason, for the drag: a committed edit, an undo or a redo rebuilds the scene, and
+        // a ghost or an insertion line left over from a gesture is chrome pointing at rects that no
+        // longer exist. A gesture that committed has already reset itself, so this is a no-op there.
+        _drag.Cancel();
+
         _cache.Invalidate();
         InvalidateMeasure();
         InvalidateVisual();
@@ -198,11 +207,11 @@ public sealed class StackupCanvas : Control
 
     /// <summary>What the renderer is told about this frame's transient state. Rebuilt per paint from
     /// the two pieces of state above, so there is no third copy to keep in step.</summary>
-    private StackupOverlay Overlay => new()
+    private StackupOverlay Overlay => _drag.Decorate(new StackupOverlay
     {
         HoverLayer    = _hoverLayer,
         SelectedLayer = _viewModel?.SelectedStackupLayerName,
-    };
+    });
 
     /// <summary>
     /// The scene coordinates of a pointer event.
@@ -212,11 +221,12 @@ public sealed class StackupCanvas : Control
     /// position relative to this control IS a scene position. No transform, and no second one to keep
     /// in step with the renderer's.</para>
     /// </summary>
-    private StackupHit? HitAt(Point p)
-    {
-        var scene = _cache.Current ?? _cache.Get(_viewModel?.Working, (float)Bounds.Width);
-        return scene.HitTest((float)p.X, (float)p.Y);
-    }
+    private StackupHit? HitAt(Point p) => SceneNow().HitTest((float)p.X, (float)p.Y);
+
+    /// <summary>The scene this canvas is showing right now — the one the renderer drew, per R-stk1-1,
+    /// which is what makes a hit-test and a drag answer about the picture the user is looking at.</summary>
+    private StackupScene SceneNow()
+        => _cache.Current ?? _cache.Get(_viewModel?.Working, (float)Bounds.Width);
 
     /// <summary>
     /// R-stk3-2. A <c>Band</c> or <c>ViaBarrel</c> hit selects that entry; a <c>Label</c> hit selects
@@ -233,6 +243,12 @@ public sealed class StackupCanvas : Control
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
         var p = e.GetPosition(this);
         if (!PressAt(p)) return;
+
+        // Captured on the PRESS, before it is known whether this becomes a drag: capture is what makes
+        // the moves and the release keep arriving once the pointer leaves the control, and taking it
+        // at the threshold instead would lose the first frames of a drag that left the pane. Only
+        // when something was armed — a press on the background captures nothing.
+        if (_drag.IsArmed) e.Pointer.Capture(this);
 
         // R-stk4-3. The second press of a double-click, and only the second: a single click that
         // opened an editor would be an editor the user only meant to click past — InlineEditText's
@@ -251,6 +267,11 @@ public sealed class StackupCanvas : Control
     {
         if (_viewModel is null) return false;
         _viewModel.SelectedStackupLayerName = HitAt(p)?.LayerName;
+
+        // R-stk5-3. ARMED, not started: below the movement threshold this whole gesture is the
+        // selection above and nothing else, which is why the selection is written here on the press
+        // rather than waiting to find out whether a drag happened.
+        _drag.Arm(SceneNow(), (float)p.X, (float)p.Y);
         return true;
     }
 
@@ -262,11 +283,83 @@ public sealed class StackupCanvas : Control
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
-        MoveAt(e.GetPosition(this));
+        MoveAt(e.GetPosition(this), e.KeyModifiers.HasFlag(KeyModifiers.Alt));
     }
 
     /// <summary>The hover half of the same seam. <see cref="HoverLayer"/> reads back what it decided.</summary>
-    internal void MoveAt(Point p) => SetHover(HitAt(p)?.LayerName);
+    internal void MoveAt(Point p, bool freeLane = false)
+    {
+        // A live drag FREEZES the hover mark. Hover says "this is what a click would take", and while
+        // the pointer is dragging one thing across others that sentence is false — a hover outline
+        // chasing the pointer across bands the drag is passing over reads as a second selection.
+        if (_drag.Update(SceneNow(), (float)p.X, (float)p.Y, freeLane)) { InvalidateVisual(); return; }
+        if (_drag.IsDragging) return;
+
+        SetHover(HitAt(p)?.LayerName);
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        base.OnPointerReleased(e);
+        if (e.InitialPressMouseButton != MouseButton.Left) return;
+
+        bool wrote = ReleaseAt(e.GetPosition(this));
+
+        // AFTER the gesture, not before: dropping capture raises PointerCaptureLost, which cancels —
+        // and Avalonia raises this event while the capture is still held, which is what makes the
+        // order work (the same sequence HarmonicaCanvas uses).
+        if (ReferenceEquals(e.Pointer.Captured, this)) e.Pointer.Capture(null);
+        if (wrote) e.Handled = true;
+    }
+
+    /// <summary>
+    /// R-stk5-2/R-stk5-6's commit point, and R-stk5-3's "releasing outside the canvas cancels".
+    ///
+    /// <para>The pointer is captured for the duration of a drag, so a release beyond the control's
+    /// own bounds still arrives here — which is exactly the case that has to cancel rather than
+    /// commit, because the drop target the user was aiming at is not on this drawing.</para>
+    /// </summary>
+    /// <returns>True when the gesture wrote something.</returns>
+    internal bool ReleaseAt(Point p)
+    {
+        // Against the SCENE's extent and not Bounds. The two are the same rectangle by construction —
+        // MeasureOverride returns the scene's own width and height — and the scene is the one of the
+        // pair that exists before a layout pass, so the gesture answers the same question in the app
+        // and in a gate that never arranged anything.
+        var scene = SceneNow();
+        bool inside = p.X >= 0 && p.Y >= 0 && p.X <= scene.Width && p.Y <= scene.Height;
+        bool wrote = false;
+
+        if (inside && _viewModel is not null && _drag.IsDragging) wrote = _drag.Release(_viewModel);
+        else _drag.Cancel();
+
+        // A committed drag repaints through StackupChanged; a cancelled one has to drop its own
+        // chrome, and there is nothing else to raise it.
+        if (!wrote) InvalidateVisual();
+        return wrote;
+    }
+
+    /// <summary>R-stk5-3's <c>Esc</c>, and the pointer-capture-lost case. Returns true when there was
+    /// a gesture to abandon — which is what tells <c>TechEditorView.OnEscapeKeyDown</c> to stop here
+    /// rather than fall through to brief 3's clear-selection.</summary>
+    internal bool CancelDrag()
+    {
+        if (!_drag.Cancel()) return false;
+        InvalidateVisual();
+        return true;
+    }
+
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        base.OnPointerCaptureLost(e);
+        CancelDrag();
+    }
+
+    /// <summary>The live gesture, for the gate.</summary>
+    internal StackupDragKind DragKind => _drag.Kind;
+
+    /// <summary>What a release would do right now, for the gate.</summary>
+    internal StackupDragController Drag => _drag;
 
     protected override void OnPointerExited(PointerEventArgs e)
     {

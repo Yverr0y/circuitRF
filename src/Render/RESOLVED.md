@@ -1,5 +1,24 @@
 # src/Render — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## brief-stackup-render-5-drag.md, 2026-09-13 — what the drags needed FROM the scene (two things)
+
+The gesture code is in `src/Ui`; the detail is in `src/Ui/RESOLVED.md`. What landed here:
+
+- **`StackupScene.BandColumn`** — the column the bands and the barrels share, published rather than
+  re-derived. The lateral drag turns a pointer x into the fraction it stores, and a second copy of
+  the column arithmetic would write a number that does not put the barrel back under the pointer.
+  R-stk1-1 from the input side.
+- **`StackupOverlay.DragInsertY`** — R-stk5-3's insertion line, as a y rather than a rect, because
+  the line spans `BandColumn` and the scene already knows how wide that is. Drawn in the SELECTION
+  colour rather than the ghost's: the ghost is a translucent copy of what is moving and the line is a
+  decision about where it goes, and the one thing that must never happen is the two reading as one
+  smear.
+
+`StackupScene.LaneCentre` also now falls back to `StackupLayer.DrawLaneFraction` when the caller's
+options name no lane — options first, since those carry a drag in flight. That is why the clipboard
+export and the documentation figures honour a user-placed barrel with no code of their own. The
+field's own rules are in `src/Design/RESOLVED.md` (STK5).
+
 ## 2026-09-13 — the stackup scene: one layout pass, two readers (brief-stackup-render-1-scene.md)
 
 `StackupScene` + `StackupRenderer` + `StackupRenderTheme`, headless, below the firewall. The scene is

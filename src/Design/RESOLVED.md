@@ -1,5 +1,63 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## STK5 — `StackupLayer.DrawLaneFraction`: a drawing position that must never become geometry (2026-09-13)
+
+brief-stackup-render-5-drag.md R-stk5-7. One additive nullable `double?` on `StackupLayer`, in the
+via block: where the barrel is DRAWN across the width of a stackup cross-section, 0 at the band
+column's left edge and 1 at its right. Null means "wherever the drawing puts it" — the automatic lane
+spread, and what every technology written before the field means.
+
+### Why a fraction and not a coordinate
+
+The drawn band's width is the PANE's, and changes when the pane is resized. A stored pixel offset
+would drift every time the user dragged the splitter, and two vias aligned at one width would
+separate at another. The lateral drag's snap grid is a fixed count of divisions for the same reason:
+a grid whose spacing came from the pane would store a different number for the same gesture after a
+resize.
+
+### It is a drawing position and nothing else, and that is a TEST
+
+A stackup is a cross-section of a laterally infinite sandwich. A via ENTRY is a KIND of connection
+between two named conductors — not one hole at one place — and every via drawn on its drawing layer
+is an instance of it. So this field has no physical meaning at all, and it is one careless read away
+from acquiring one; the failure mode if it ever does is an answer that changes when someone tidies up
+a picture.
+
+`StackupDragTests.ATechnologyDifferingOnlyInTheLaneFraction_ExtractsIdentically` takes every shipped
+technology, sets every via's lane to a different value, and extracts both through
+`PlanarExtractor.Extract`. The comparison is `EmSnpProvenance.GeometryHash` **plus an
+element-for-element walk** of the levels, the vias and the medium stack — not record equality, for
+the reason the ground-override gate already records here: `PlanarProblem` is a record over ARRAYS and
+its own `Equals` is reference equality on the level list, so it would pass on two entirely different
+problems.
+
+### No `FormatVersion` bump, and the no-churn claim is asserted rather than assumed
+
+`TechPersistence` serialises `Stackup` directly with `DefaultIgnoreCondition = WhenWritingNull`, so a
+null field writes nothing and no existing `.ctech` changes by one byte — the
+`SheetAt`/`PresentWithLayer`/`Fill` precedent. `TechPersistenceTests` pins that against **committed
+fixture text** written before the field existed, not against a re-serialisation of the same object: a
+re-serialisation agrees with whatever the writer currently does, including writing a field it should
+not. It also asserts the string does not appear in any shipped technology's own output.
+
+### Clamped on read, in `TechPersistence` and not in the property
+
+A hand-edited file carrying 7 (or −0.5) would put a barrel off the page, where it cannot be seen,
+hovered or dragged back. `FromFileModel` clamps to [0, 1] — and refuses nothing, because the field is
+a picture and a picture is never worth failing a load over. It is clamped there rather than in the
+setter so `StackupLayer` stays a plain data class and so what is clamped is exactly what came off
+disk; a value the application itself wrote is already in range (`TechEditorViewModel.SetViaDrawLane`
+clamps on the way in). `NaN` reads back as null rather than as a clamp of a value that has no order.
+
+### The honouring needed no plumbing, because brief 1 had already left the seam
+
+`StackupScene.LaneCentre` already took an explicit per-via lane from `StackupSceneOptions`. It now
+falls back to the entry's own field when the options name none — options first, because THAT is a
+drag in flight and has to win over what the technology still says until the release commits it. One
+consequence worth having: every reader of a technology draws the barrel where the user put it with no
+code of its own — the Stackup tab, the clipboard export (brief 7) and the documentation figures
+(brief 8) alike.
+
 ## GVIA-1 — a via that CROSSES the return plane is classified from the plane's artwork, per via (2026-09-12)
 
 User-reported. A board with an **inner ground plane** analysed from one outer conductor lost **every

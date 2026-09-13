@@ -423,4 +423,149 @@ public class TechPersistenceTests
         // air gap paid for it — Metal2 is still exactly 3 µm above Metal1 (2.55 + 0.25 + 0.2).
         Assert.Equal(["Metal2", "Air", "MIM Metal", "MIM Dielectric", "Metal1", "GaAs", "Backside Metal"], physical);
     }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    //  R-stk5-8 — StackupLayer.DrawLaneFraction: round-trip, no churn, and the clamp on read
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>The fixture the no-churn gate is pinned against: exactly what a <c>.ctech</c> of this
+    /// technology looked like BEFORE <c>DrawLaneFraction</c> existed. Committed text, not a
+    /// re-serialisation of the same object — re-serialising would agree with whatever the writer
+    /// currently does, including writing a field it should not.</summary>
+    private const string LaneFixtureCtech = """
+{
+  "FormatVersion": 1,
+  "Name": "LaneFixture",
+  "DefaultDisplayUnit": "Um",
+  "DefaultSnapDbu": 0,
+  "DefaultFlattenTolDbu": 0,
+  "DefaultLabelHeightDbu": 0,
+  "DefaultViaPadDbu": 0,
+  "DefaultViaDrillDbu": 0,
+  "Layers": [],
+  "Stackup": {
+    "Top": "Open",
+    "Bottom": "Ground",
+    "Layers": [
+      {
+        "Kind": "Conductor",
+        "Name": "A",
+        "ThicknessDbu": 1000,
+        "Epsr": 1,
+        "TanD": 0,
+        "Mur": 1,
+        "SigmaSm": 58000000,
+        "DrawingLayers": [],
+        "IsGroundReference": false
+      },
+      {
+        "Kind": "Dielectric",
+        "Name": "D",
+        "ThicknessDbu": 5000,
+        "Epsr": 4.4,
+        "TanD": 0,
+        "Mur": 1,
+        "SigmaSm": 0,
+        "DrawingLayers": [],
+        "IsGroundReference": false
+      },
+      {
+        "Kind": "Conductor",
+        "Name": "B",
+        "ThicknessDbu": 1000,
+        "Epsr": 1,
+        "TanD": 0,
+        "Mur": 1,
+        "SigmaSm": 58000000,
+        "DrawingLayers": [],
+        "IsGroundReference": true
+      },
+      {
+        "Kind": "Via",
+        "Name": "V",
+        "ThicknessDbu": 0,
+        "Epsr": 1,
+        "TanD": 0,
+        "Mur": 1,
+        "SigmaSm": 0,
+        "DrawingLayers": [],
+        "IsGroundReference": false,
+        "Fill": "Solid",
+        "SpanFromLayer": "A",
+        "SpanToLayer": "B"
+      }
+    ]
+  },
+  "DrcRules": []
+}
+""";
+
+    private static Technology LaneFixture() => new()
+    {
+        Name = "LaneFixture",
+        DefaultDisplayUnit = LayoutUnit.Um,
+        Stackup = new Stackup
+        {
+            Layers =
+            [
+                new StackupLayer { Kind = StackupKind.Conductor,  Name = "A", ThicknessDbu = 1000, SigmaSm = 5.8e7 },
+                new StackupLayer { Kind = StackupKind.Dielectric, Name = "D", ThicknessDbu = 5000, Epsr = 4.4 },
+                new StackupLayer { Kind = StackupKind.Conductor,  Name = "B", ThicknessDbu = 1000, SigmaSm = 5.8e7, IsGroundReference = true },
+                new StackupLayer { Kind = StackupKind.Via,        Name = "V", Fill = ViaFillKind.Solid, SpanFromLayer = "A", SpanToLayer = "B" },
+            ],
+        },
+    };
+
+    /// <summary>Newlines only. <c>System.Text.Json</c>'s indented writer takes the platform's newline,
+    /// and this fixture pins the CONTENT of the file — which is what "no existing file changes by one
+    /// byte" is a claim about — rather than which machine wrote it.</summary>
+    private static string Lf(string s) => s.Replace("\r\n", "\n");
+
+    [Fact]
+    public void DrawLaneFraction_RoundTripsExactly()
+    {
+        var tech = LaneFixture();
+        tech.Stackup.Layers.Single(l => l.Kind == StackupKind.Via).DrawLaneFraction = 0.375;
+
+        var restored = TechPersistence.Deserialize(TechPersistence.Serialize(tech));
+
+        Assert.Equal(0.375, restored.Stackup.Layers.Single(l => l.Kind == StackupKind.Via).DrawLaneFraction);
+        Assert.Equal(TechPersistence.Serialize(tech), TechPersistence.Serialize(restored));
+    }
+
+    /// <summary>
+    /// <b>No existing file changes by one byte.</b> The field is additive and nullable and
+    /// <c>TechPersistence</c> serialises with <c>WhenWritingNull</c>, which is exactly why it needed
+    /// no <c>FormatVersion</c> bump — and that is asserted here rather than assumed, against text
+    /// written before the field existed.
+    /// </summary>
+    [Fact]
+    public void ATechnologyWithNoLaneSet_SerializesByteIdenticallyToTheFileWrittenBeforeTheFieldExisted()
+    {
+        Assert.Equal(Lf(LaneFixtureCtech), Lf(TechPersistence.Serialize(LaneFixture())));
+        Assert.DoesNotContain("DrawLaneFraction", TechPersistence.Serialize(LaneFixture()), StringComparison.Ordinal);
+
+        // …and every shipped technology too, which is the population that actually ships as files.
+        foreach (var entry in ShippedTechnologies.All)
+            Assert.DoesNotContain("DrawLaneFraction",
+                TechPersistence.Serialize(ShippedTechnologies.Load(entry.Id)), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A hand-edited file cannot put a barrel off the page. Clamped on READ rather than refused: the
+    /// field is a drawing position, and a picture is never worth failing a load over.
+    /// </summary>
+    [Theory]
+    [InlineData(7.5, 1.0)]
+    [InlineData(-2.0, 0.0)]
+    [InlineData(0.25, 0.25)]
+    public void AnOutOfRangeLaneClampsOnRead(double written, double expected)
+    {
+        var tech = LaneFixture();
+        tech.Stackup.Layers.Single(l => l.Kind == StackupKind.Via).DrawLaneFraction = written;
+
+        var restored = TechPersistence.Deserialize(TechPersistence.Serialize(tech));
+
+        Assert.Equal(expected, restored.Stackup.Layers.Single(l => l.Kind == StackupKind.Via).DrawLaneFraction);
+    }
 }

@@ -245,6 +245,28 @@ public sealed class StackupLayer
     /// change mid-solver.</summary>
     public string? SpanFromLayer { get; set; }
     public string? SpanToLayer { get; set; }
+
+    /// <summary>
+    /// Where this via is DRAWN across the width of a stackup cross-section, as a fraction of the drawn
+    /// band from 0 (left edge) to 1 (right edge). Null means "wherever the drawing puts it" — the
+    /// automatic lane assignment, and what every technology written before this field means.
+    ///
+    /// <para><b>This is a drawing position and nothing else.</b> A stackup is a cross-section of a
+    /// laterally infinite sandwich; a via entry is a KIND of connection between two named conductors,
+    /// not one hole at one place, and every via drawn on its drawing layer is an instance of it. Nothing
+    /// in the extraction, the solver or any export may read this field, and a test asserts that a
+    /// technology differing only in this value extracts identically (R-stk5-9).</para>
+    ///
+    /// <para>A fraction rather than a coordinate because the drawn band's width is the pane's, and
+    /// changes when the pane is resized; a stored pixel offset would drift every time.</para>
+    ///
+    /// <para>Additive, nullable, no <c>.ctech</c> <c>FormatVersion</c> bump — the
+    /// <see cref="SheetAt"/>/<see cref="PresentWithLayer"/>/<see cref="Fill"/> pattern. Meaningless
+    /// (ignored) on a non-Via entry. A hand-edited file carrying a value outside [0, 1] is CLAMPED on
+    /// read (<c>TechPersistence</c>), not refused and not honoured — the field cannot put a barrel off
+    /// the page, and a drawing position is never worth failing a load over.</para>
+    /// </summary>
+    public double? DrawLaneFraction { get; set; }
 }
 
 public sealed class Stackup

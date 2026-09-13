@@ -972,20 +972,102 @@ public sealed partial class TechEditorViewModel : ObservableObject
     internal void MoveStackupLayer(StackupLayerRowViewModel row, int direction)
     {
         if (!row.CanMove) return;
+        int band = BandIndexOf(row.Layer);
+        if (band < 0) return;
 
-        int index = Working.Stackup.Layers.IndexOf(row.Layer);
-        if (index < 0) return;
+        MoveStackupLayerTo(
+            row, band + Math.Sign(direction),
+            direction < 0 ? $"Move {row.Layer.Name} up" : $"Move {row.Layer.Name} down");
+    }
 
-        int other = index + direction;
-        while (other >= 0 && other < Working.Stackup.Layers.Count &&
-               Working.Stackup.Layers[other].Kind == StackupKind.Via)
-            other += direction;
-        if (other < 0 || other >= Working.Stackup.Layers.Count) return;
+    /// <summary>
+    /// R-stk5-2. Moves a Conductor or Dielectric entry to <paramref name="targetBandIndex"/> in the
+    /// z order — <b>the whole move, as ONE undo entry</b>.
+    ///
+    /// <para>This is what <see cref="MoveStackupLayer"/> is now written in terms of, and the reason
+    /// it exists is brief 5's drag: dragging the top copper of a nine-entry stack to the bottom
+    /// crosses four bands, and four single-step calls would push four undo entries so that one
+    /// Ctrl-Z put it back one place. That reads as a broken undo. One snapshot, one description,
+    /// one entry.</para>
+    ///
+    /// <para><b>The index counts BANDS, not list slots</b> (<see cref="BandIndexOf"/>), which is what
+    /// makes it obey R-stk5-1's two rules by construction rather than by repeating them: a via row is
+    /// refused outright because its list position is not z and never was, and the band VALUES rotate
+    /// through the band slots while every via entry stays exactly where it is in the list. Rotating
+    /// the values rather than moving the entry is precisely what a run of adjacent
+    /// <see cref="MoveStackupLayer"/> swaps does, which is why the two agree for every single-step
+    /// case and why a multi-step drag lands where the equivalent run of button clicks would.</para>
+    /// </summary>
+    internal void MoveStackupLayerTo(
+        StackupLayerRowViewModel row, int targetBandIndex, string? description = null)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        if (!row.CanMove) return;
+
+        var layers = Working.Stackup.Layers;
+        var slots  = BandSlots();
+        int from   = slots.IndexOf(layers.IndexOf(row.Layer));
+        if (from < 0) return;
+
+        int to = Math.Clamp(targetBandIndex, 0, slots.Count - 1);
+        if (to == from) return;
 
         var before = SnapshotJson();
-        (Working.Stackup.Layers[index], Working.Stackup.Layers[other]) =
-            (Working.Stackup.Layers[other], Working.Stackup.Layers[index]);
-        CommitEdit(before, direction < 0 ? $"Move {row.Layer.Name} up" : $"Move {row.Layer.Name} down");
+
+        var bands = new List<StackupLayer>(slots.Count);
+        foreach (int slot in slots) bands.Add(layers[slot]);
+        bands.RemoveAt(from);
+        bands.Insert(to, row.Layer);
+        for (int i = 0; i < slots.Count; i++) layers[slots[i]] = bands[i];
+
+        CommitEdit(before, description ?? $"Move {row.Layer.Name} to position {to + 1}");
+    }
+
+    /// <summary>The raw list indices of the non-via entries, in order. The z order IS this sequence;
+    /// a via sits outside it (R-stk5-1).</summary>
+    private List<int> BandSlots()
+    {
+        var layers = Working.Stackup.Layers;
+        var slots  = new List<int>(layers.Count);
+        for (int i = 0; i < layers.Count; i++)
+            if (layers[i].Kind != StackupKind.Via) slots.Add(i);
+        return slots;
+    }
+
+    /// <summary>Where <paramref name="layer"/> sits in the z order, counting bands only, or -1 for a
+    /// via and for an entry that is not in this stackup.</summary>
+    internal int BandIndexOf(StackupLayer layer)
+    {
+        if (layer is null || layer.Kind == StackupKind.Via) return -1;
+        int band = 0;
+        foreach (var l in Working.Stackup.Layers)
+        {
+            if (ReferenceEquals(l, layer)) return band;
+            if (l.Kind != StackupKind.Via) band++;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// R-stk5-10's write, and the one edit in this editor that changes nothing about the technology
+    /// except the picture of it. Null clears the lane back to the drawing's own spread.
+    ///
+    /// <para>It goes through <see cref="CommitEdit"/> like every other edit here — a cosmetic value
+    /// is still a value in the <c>.ctech</c>, so it dirties the editor, it undoes, and it saves. What
+    /// it must never do is reach anything downstream of the drawing, which is R-stk5-9's gate rather
+    /// than this comment.</para>
+    /// </summary>
+    internal void SetViaDrawLane(StackupLayerRowViewModel row, double? fraction)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        if (!row.IsVia) return;
+
+        double? v = fraction is { } f && !double.IsNaN(f) ? Math.Clamp(f, 0d, 1d) : null;
+        if (Nullable.Equals(row.Layer.DrawLaneFraction, v)) return;
+
+        var before = SnapshotJson();
+        row.Layer.DrawLaneFraction = v;
+        CommitEdit(before, $"Move {row.Layer.Name} laterally");
     }
 
     // ── DRC rules ──────────────────────────────────────────────────────────────

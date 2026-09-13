@@ -549,11 +549,31 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
     private void CommitSpan(bool from, string value)
     {
         string? v = value == SpanNone ? null : value;
-        if (from ? Layer.SpanFromLayer == v : Layer.SpanToLayer == v) return;
+        CommitSpanPair(
+            from ? v : Layer.SpanFromLayer,
+            from ? Layer.SpanToLayer : v,
+            $"Set {Layer.Name} span");
+    }
+
+    /// <summary>
+    /// Writes BOTH ends of the span as one edit — the one writer, which the two combo boxes above and
+    /// brief 5's canvas drags all go through.
+    ///
+    /// <para>It exists because R-stk5-4's barrel drag moves both ends together and R-stk5-6 requires
+    /// that to be ONE undo entry: two calls to the per-end path would leave the user pressing Ctrl-Z
+    /// twice to put a barrel back where it was, and — worse — the state between the two writes is a
+    /// span whose ends have crossed, which is a shape neither the validator nor the drawing should
+    /// ever be asked about. Routing the per-end setters through here as well is what keeps the drag
+    /// and the combo boxes from being two answers to the same question.</para>
+    /// </summary>
+    internal void CommitSpanPair(string? from, string? to, string description)
+    {
+        if (Layer.SpanFromLayer == from && Layer.SpanToLayer == to) return;
 
         var before = _owner.SnapshotJson();
-        if (from) Layer.SpanFromLayer = v; else Layer.SpanToLayer = v;
-        _owner.CommitEdit(before, $"Set {Layer.Name} span");
+        Layer.SpanFromLayer = from;
+        Layer.SpanToLayer   = to;
+        _owner.CommitEdit(before, description);
     }
 
     /// <summary>Commits the plated-wall thickness. Blank clears it — which is the correct value for a

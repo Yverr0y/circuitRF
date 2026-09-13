@@ -321,6 +321,17 @@ public sealed class StackupScene
     /// <summary>The pane was too narrow for a label column, so the specs moved onto the bands.</summary>
     public bool LabelColumnDropped { get; private init; }
 
+    /// <summary>
+    /// The column the bands and the barrels share — every band's rect spans it exactly, and a via's
+    /// lane fraction is measured across it.
+    ///
+    /// <para>Here rather than re-derived by a caller, for R-stk1-1's reason: brief 5's lateral drag
+    /// turns a pointer x into the fraction it stores, and a second copy of the column arithmetic
+    /// would write a number that does not put the barrel back under the pointer. Empty
+    /// (<c>SKRect.Empty</c>) when the scene drew no bands.</para>
+    /// </summary>
+    public SKRect BandColumn { get; private init; }
+
     /// <summary>The topmost thing at <paramref name="x"/>, <paramref name="y"/>, or <c>null</c> for
     /// the background.</summary>
     public StackupHit? HitTest(float x, float y)
@@ -599,6 +610,9 @@ public sealed class StackupScene
             ConductorsCompressed  = conductorScale.Compressed,
             DielectricsCompressed = dielectricScale.Compressed,
             LabelColumnDropped    = dropLabels,
+            BandColumn            = bands.Count == 0
+                ? SKRect.Empty
+                : new SKRect(bandLeft, stackTop, bandRight, stackBottom),
         };
         foreach (var band in bands)     scene._rectByName.TryAdd(band.Name,   band.Rect);
         foreach (var barrel in barrels) scene._rectByName.TryAdd(barrel.Name, barrel.Rect);
@@ -752,8 +766,15 @@ public sealed class StackupScene
         float lo   = bandLeft + half + 1f;
         float hi   = bandLeft + bandWidth - half - 1f;
 
+        // The caller's override first — that is a drag IN FLIGHT, which has to win over what the
+        // technology still says until the release commits it. Then the entry's own persisted lane
+        // (R-stk5-7), so every reader of a technology draws the barrel where the user put it without
+        // any plumbing of its own: the tab, the clipboard export and the documentation figures.
         if (options.ViaLanes is { } lanes && lanes.TryGetValue(via.Name, out float lane))
             return Math.Clamp(bandLeft + bandWidth * Math.Clamp(lane, 0f, 1f), lo, hi);
+
+        if (via.DrawLaneFraction is { } stored && !double.IsNaN(stored))
+            return Math.Clamp(bandLeft + bandWidth * (float)Math.Clamp(stored, 0d, 1d), lo, hi);
 
         // With the specs on the bands there is no left-hand caption strip to stay out of and no room
         // to spread: the lanes crowd into the gutter reserved for them at the right edge instead.

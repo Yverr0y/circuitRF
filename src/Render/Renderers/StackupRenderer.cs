@@ -21,6 +21,17 @@ public sealed record StackupOverlay
 
     /// <summary>Where a drag would land, in scene coordinates, or null (brief 5).</summary>
     public (float Left, float Top, float Right, float Bottom)? DragGhost { get; init; }
+
+    /// <summary>
+    /// R-stk5-3's insertion line: the scene y of the band boundary a reorder drag would drop
+    /// between, or null.
+    ///
+    /// <para>A y and not a rect, because the line spans the band column and the scene already knows
+    /// how wide that is (<see cref="StackupScene.BandColumn"/>). The GHOST says what is moving and
+    /// this says where it lands; a drawing with only one of the two leaves the user guessing which
+    /// gap the drop takes.</para>
+    /// </summary>
+    public float? DragInsertY { get; init; }
 }
 
 /// <summary>
@@ -44,6 +55,11 @@ public static class StackupRenderer
     public const float GroundEdgeWidth = 2.5f;
 
     public const float SelectionWidth = 2f;
+
+    /// <summary>R-stk5-3's insertion line. Heavier than the selection outline because it is the one
+    /// mark on the drawing that says what a release will DO, and it is drawn over bands whose own
+    /// edges are already a pixel wide.</summary>
+    public const float InsertionWidth = 3f;
 
     /// <summary>The hover outline is the SAME outline, lighter — R-stk3-4 asks for a lighter mark,
     /// not a differently shaped one, so a band the pointer is over reads as "this is what a click
@@ -171,6 +187,17 @@ public static class StackupRenderer
         {
             fill.Color = theme.DragGhost;
             canvas.DrawRect(new SKRect(ghost.Left, ghost.Top, ghost.Right, ghost.Bottom), fill);
+        }
+
+        // The insertion line last of the drag chrome, so it stays readable over its own ghost. It is
+        // the SELECTION colour rather than the ghost's: the ghost is a translucent copy of the thing
+        // being moved and the line is a decision about where it goes, and the one thing that must
+        // never happen is the two reading as one smear.
+        if (overlay.DragInsertY is { } insertY && scene.BandColumn.Width > 0)
+        {
+            stroke.Color       = theme.Selection;
+            stroke.StrokeWidth = InsertionWidth;
+            canvas.DrawLine(scene.BandColumn.Left, insertY, scene.BandColumn.Right, insertY, stroke);
         }
 
         // R-stk1-5 / §5: grippers are SUBTLE — drawn only when the overlay says this via is hovered

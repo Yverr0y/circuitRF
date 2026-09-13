@@ -180,6 +180,13 @@ public partial class TechEditorView : UserControl
         // selection.
         if (StackupDrawing?.InlineEditIsOpen == true) return;
 
+        // R-stk5-3's third job for this key, between the two above it. A live drag outranks the
+        // clear-selection below — Esc mid-drag means "forget this gesture", and clearing the
+        // selection as well would throw away the entry the user is still looking at. It cannot
+        // collide with the box: a drag and an open editor cannot both be live, because opening the
+        // box rebuilds nothing and starting a drag needs a press the box has swallowed.
+        if (StackupDrawing?.CancelDrag() == true) { e.Handled = true; return; }
+
         if (DataContext is not TechDocument doc) return;
         if (doc.ViewModel.SelectedStackupLayerName is null) return;
 
