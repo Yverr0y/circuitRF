@@ -3,6 +3,173 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## PCAL7 — the mode-separation refusal is drawn on the RIGHT quantity, and so is the other one (2026-09-13)
+
+`docs/sonnet-briefs/brief-portcal-7-separation-gate.md`. PCAL6 ended by pointing at a different
+remedy from the one it tried — **draw the refusal on the quasi-static separation and demote the
+measured one to a diagnostic** — declined to take it on one data point, and wrote this brief to get
+the measurement first. The measurement was made, and **it refutes the brief's own title.** The gate
+does not move. What changed is the sentence a refused user reads, which named a remedy that does not
+bind on the case that actually fires.
+
+### The one instruction, honoured: every candidate is scored on the ANSWER
+
+R-pcal7-1 exists because PCAL6 failed by inferring an improvement from a reported quantity. So the
+whole of M1 is **93 de-embedded points scored against the kernel-A oracle**, each with its own
+A-vs-B floor re-measured on the same geometry, and not one conclusion below rests on a residual.
+
+**The harness is the shipped path with the gate lifted** — committed technology, generated cells,
+`EmRunService.Run` (the call the Simulate button and `circuitrf em` both make) in Release, kernel B
+against kernel A on the same file, `PlanarCalibrationSettings.ModeSeparationFloorDegrees`
+temporarily set to 1e-9 so a refused run can be scored at all. That constant is the only edit, and
+it is the only way to see the answer behind a refusal: the floor has no `.cem` field, by design.
+**It was validated before it was trusted**, exactly as PCAL6's was: `coupled-pair` 1–7 GHz comes
+back 0.0303 / 0.0296 / 0.0331 / 0.0374 / 0.0408 / 0.0434 / 0.0454 against a floor of 0.0521 — every
+digit of §PCAL4's published table.
+
+### M1 — the measured separation swings 9× and the answer does not move
+
+The lever PCAL6 identified is Δℓ, and through the shipped path Δℓ is chosen from the SWEEP's band —
+so a band scan at one frequency is a Δℓ ladder made of ordinary runs. `coupled-pair` as committed
+(254 µm lines 246 µm apart on 0.9 mm FR-4), at its own mesh, scored at **200 MHz**:
+
+| band | Δℓ (mm) | measured ° | electrostatic ° | null-space gap | max \|ΔS\| | floor | ×floor |
+|---|---|---|---|---|---|---|---|
+| 200 MHz alone | 153.4 | 2.42 | 4.32 | 3.4e-6 | 0.11021 | 0.1488 | 0.741 |
+| 200–400 MHz | 109.2 | 1.15 | 3.07 | 1.8e-5 | 0.10987 | 0.1482 | 0.741 |
+| 200–500 MHz | 98.1 | 0.83 | 2.75 | 4.3e-5 | 0.10969 | 0.1485 | 0.738 |
+| 200–600 MHz | 88.7 | 0.57 | 2.49 | 1.1e-4 | 0.10947 | 0.1478 | 0.740 |
+| **200–700 MHz** | 81.4 | **0.36 — refused** | 2.28 | 8.4e-5 | **0.10926** | 0.1480 | 0.738 |
+| **200–800 MHz** | 77.6 | **0.26 — refused** | 2.18 | 1.8e-4 | **0.10914** | 0.1480 | 0.737 |
+
+**The measured separation falls by 9.3× and the de-embedded answer improves by 1%.** The two rows a
+run refuses on today are the two BEST answers in the ladder. The same shape holds at 100 MHz (six
+bands, measured 0.92°–1.89°, answer 0.12976–0.12987 — flat to four digits) and at 300 MHz.
+`NullSpaceGap` rises 50× across the ladder while the answer is flat, which is PCAL1 §5 measured again
+on the modal quantities: **it does not predict the de-embedding error, and it does not predict
+indeterminacy either.**
+
+So M1's question — *does the oracle error ever go bad while the quasi-static separation is healthy?*
+— is answered **no, on this family**, and the brief's candidate (a) survives that test.
+
+### M2 — and then the same family produced the two cases that kill (a), (c) and (d)
+
+A gate is decided by what it lets through, so the family was extended until something published
+nonsense. Two did, and **they fail through different quantities:**
+
+| case | measured ° | electrostatic ° | null-space gap | max \|ΔS\| | floor | ×floor |
+|---|---|---|---|---|---|---|
+| **pair 4.4 mm apart, 500 MHz, 500 MHz–2 GHz** | **0.026** | 0.517 | 9.7e-9 | **0.9986** | 0.0732 | **13.6** |
+| same, 500 MHz–1.8 GHz | 0.041 | 0.551 | 8.2e-10 | 0.9987 | 0.0734 | **13.6** |
+| same, 500 MHz–1.5 GHz | 0.069 | 0.581 | 7.5e-10 | 0.0530 | 0.0735 | 0.72 |
+| **equal-width TRIPLE, 246 µm, 200 MHz, 200–800 MHz** | 0.53 | **0.28** | 0.579 | **1.1131** | 0.1480 | **7.5** |
+
+Read the first three rows together: the failure is a **cliff at a measured separation of about
+0.05°**, not a slope — 0.069° is fine and 0.041° is 13.6× the floor, on the same metal at the same
+frequency with a 5 % change of Δℓ. `|ΔS| > 1` on a matrix whose entries cannot exceed 1 is the modal
+assignment having swapped, which is exactly the indeterminacy `ModeSeparationFloorDegrees` exists
+for. **Its electrostatic separation reads 0.517°, over the floor** — so this run passes the setup
+guard and is caught only by the per-frequency one.
+
+The triple is the mirror image: **its electrostatics reads 0.28°, under the floor, while its measured
+separation reads 0.53°, over it.** It is caught only by the setup guard.
+
+| candidate | what the measurement says |
+|---|---|
+| **(a) gate on the quasi-static separation** | **publishes the 13.6×-floor case.** Refuted. |
+| **(b) keep the gate, lower the floor** | the cliff is under 0.05° on the symmetric pair, but the ASYMMETRIC pair (254/508 µm, 4.4 mm apart, 500 MHz) degrades smoothly and crosses its own floor at a measured **0.33°** — 0.57° → 0.795× floor, 0.49° → 0.804, 0.39° → 0.838, 0.36° → 0.945, 0.33° → **1.067**. No single lowered floor is right on both geometries, which is the brief's §4(b) objection, now measured instead of asserted. |
+| **(c) gate on `NullSpaceGap`** | **9.7e-9 on the 13.6×-floor case** — four orders BELOW what it reads on rows whose answers are perfect. Refuted. |
+| **(d) refuse only when BOTH are under the floor** | the AND is never satisfied by either catastrophe (one has 0.517°, the other 0.53°). **Publishes both.** Refuted. |
+| **what ships** | the OR of the two, spelled as two gates in two places — and it catches both. |
+
+**The gate stays where it is. So does the other one.** No candidate in the brief's own table is safe,
+and the arrangement the brief proposed to simplify away is the only one in the set that catches
+everything found.
+
+### R-pcal7-5, answered the other way: the per-frequency guard is not a second spelling
+
+§5 argued that if the gate moved to the quasi-static quantity the per-frequency refusal would be
+redundant and must be DELETED. It is the reverse that is true, and the 0.026°/0.517° row is the
+proof: **the setup guard passes that run.** `GuardModeSeparation` asks a property of the
+cross-section, which is why it is the trustworthy one and also why it cannot say whether a
+particular pair of standards will manage to measure it — PCAL6/M5 already wrote that sentence, and
+this is what it costs if you act on it. Two questions, two places, both load-bearing.
+`ThePerFrequencyGateRefusesAGroupTheSetupGatePassed` and
+`TheSetupGateRefusesAGroupThePerFrequencyGateWouldHavePassed` gate it structurally, on one fixture,
+by placing a floor between the two readings at a frequency where they disagree in each direction.
+
+### R-pcal7-3 — the population, and it is empty because nothing moved
+
+No run's s-parameters change: the only code change is a message and one number added to a note.
+Bit-identity is by construction, and `AGroupedSweepThatCalibratesTodayIsBitIdentical` still holds its
+pre-PCAL6 literals to the last bit. **The populations that would have moved are worth recording
+anyway**, since they are what the decision was taken against: candidate (a) would have newly
+REFUSED 2 of the 93 points measured (the triple at 200 MHz, and a pair 3.6–4.4 mm apart at 100 MHz)
+and newly PUBLISHED 8, two of which are the catastrophes above.
+
+### The honest cost of keeping the gate: it over-refuses, and by how much
+
+Of the 8 points in the family that the shipped floor refuses, **6 had answers comfortably inside
+their floor** (0.72–0.74× it — in three cases the best answer of their own ladder), one was
+marginally over (1.07×), and one was the 13.6× catastrophe. That is a real price and it is not hidden
+here. The only lever left that would reduce it is the floor's VALUE, which R-pcal7-4 puts outside
+this brief; the measurement above is what a future brief on it would start from, and its warning is
+that 0.33° is already bad on an asymmetric pair while 0.069° is still fine on a symmetric one, so the
+value cannot be chosen from one geometry.
+
+### R-pcal7-7 — the refusal named a remedy that does not bind, and now names two that do
+
+`GuardModeSeparation` asks the quasi-static question at every REQUESTED frequency before a standard
+is solved (PCAL6/R-pcal6-7), so a group that reaches the per-frequency refusal has, on every
+non-adaptive sweep, already been found separable in principle. **Its remedy sentence — "separate the
+feeds" — was therefore advice for the case that cannot reach it.** It now branches on the pair of
+numbers it already prints, and when the electrostatic figure is over the floor it names the two
+levers PCAL7 measured:
+
+- **the BAND**, because Δℓ is chosen from it — the ladder above is that lever, 0.26° to 1.15° on the
+  same metal at the same frequency, with the published s-parameters moving 1%;
+- **the MESH**, and this is the bigger of the two. The same fixture over the same decade band at
+  200 MHz reads **0.19° with the edge mesh off and 2.94° with it on** — the refusal and a clean
+  publish. The measured separation is taken off the STANDARDS' discretisation; the electrostatic one
+  barely moves (4.70° against 4.82°), which is what makes the pair of numbers readable.
+
+The old sentence survives for the branch it belongs to: an adaptive sweep solves points the setup
+guard never saw, and the quasi-static separation is not monotone in frequency.
+
+### A thing the harness established about this repository's own fixture, worth knowing
+
+**`GroupSeparationRefusalTests`' refusal was an artefact of the mesh it chose for speed.** That test
+ran the owner's sweep shape at `CellsPerWavelength = 2, EdgeMesh = false` "because what is gated is a
+set of DECISIONS" — and at that mesh the de-embedded answer is max |ΔS| **0.994 against an A-vs-B
+floor of 0.995**. Nothing there is measurable by either kernel; the refusal is correct and is about
+the discretisation. At the fixture's own mesh the identical sweep publishes at every point, 0.1102
+against a floor of 0.1483 at 200 MHz. Cells-per-wavelength is inert on this geometry (2, 3 and 4 give
+bit-identical answers with the edge mesh on) — **the edge mesh is the whole variable.** The test is
+`GroupSeparationRemedyTests` now and says both halves, the second one tagged `Category=Benchmark`
+because it is ~27 s in Release.
+
+### What was changed in the code
+
+- `PlanarSolve.RecordGroupDiagnostics` — the per-point `MODAL CALIBRATION` line carries the
+  electrostatic separation beside the measured one, on every run and not only on a refusal. Free: the
+  group's modal medium is extracted once and cached.
+- `PlanarSolve`'s per-frequency refusal — the remedy branches on which of the two numbers is under
+  the floor, as above.
+- Nothing else. No gate moved, no floor moved, no standard grew, no solve was added.
+
+### Gates
+
+`tests/Engine.Tests/Mom/PlanarGroupSeparationTests.cs` (10 tests, ~19 s) — PCAL6's eight, unchanged
+and still passing on their own literals, plus the two that hold PCAL7's finding.
+`tests/Ui.Tests/Em/GroupSeparationRemedyTests.cs` — the routine refusal-and-remedy gate (0.9 s) and
+the `Category=Benchmark` publish (1 m 4 s under a test build).
+
+**The 93-point table is a harness and not a test**, per the standing rule: committed technology,
+generated two- and three-conductor cells, the real `EmRunService.Run` in Release, kernel A on the
+same files, the floor fixture being the same cross-section with its conductors moved 9 mm apart. It
+is reproducible by setting `ModeSeparationFloorDegrees` to a negligible value and sweeping
+(widths, gap, frequency, band) — the band being how Δℓ is reached from outside the engine.
+
 ## PCAL6 — which separation a grouped port calibrates on, and the brief that was wrong about its own defect (2026-09-13)
 
 `docs/sonnet-briefs/brief-portcal-6-separation-selection.md`. The brief opened on the last wall
@@ -166,7 +333,20 @@ separation to a reported diagnostic** — and it is deliberately NOT taken here.
 gate on ONE data point, and the gate exists because at equal eigenvalues the modal basis is decided
 by round-off. It needs its own measurement: a family of groups spanning the floor, each de-embedded
 answer scored against the oracle, to establish whether a small MEASURED separation ever corresponds
-to a bad answer. That is a brief, not a change.
+to a bad answer.
+
+**That is `docs/sonnet-briefs/brief-portcal-7-separation-gate.md`**, written rather than left as a
+sentence here, and it carries the one instruction this brief earned the hard way: score the ANSWER
+against the oracle, never a reported quantity.
+
+> **PCAL7 ran that measurement the same day and the remedy pointed at above is REFUTED — do not take
+> it.** Ninety-three de-embedded points against the oracle say the paragraph above is right about its
+> own family and wrong as a general rule: a pair 4.4 mm apart at 500 MHz reads a measured separation
+> of 0.026° with an ELECTROSTATIC separation of 0.517°, over the floor, and the answer behind that
+> refusal is max |ΔS| 0.999 against an A-vs-B floor of 0.073. Drawing the refusal on the
+> quasi-static quantity publishes it. The single data point this section rested on was real and is
+> reproduced — the measured separation under-reading by 4× with a perfectly good answer — but it
+> generalises to a FAMILY and not to the gate. See §PCAL7 above; both gates stay.
 
 ### M4 — one decision point, and a group's choice no longer remembers the sweep
 

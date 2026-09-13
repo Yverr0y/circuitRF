@@ -9,6 +9,10 @@
 // finding, the recovery drawn from it, and the two properties the brief asked for on their own terms
 // (one decision point, and a choice that does not depend on sweep history).
 //
+// PCAL7 then asked whether the per-frequency refusal is drawn on the wrong quantity and should be
+// deleted in favour of the setup guard's; the answer is no, and the last two tests here are why.
+// `docs/sonnet-briefs/brief-portcal-7-separation-gate.md`; RESOLVED.md, "PCAL7".
+//
 // The geometry is the series' own coupled pair on 0.9 mm FR-4, driven at both ends of both
 // conductors — the case PCAL1 measured and PCAL4 turned into a calibration group.
 
@@ -327,5 +331,109 @@ public sealed class PlanarGroupSeparationTests(ITestOutputHelper output)
             last = err;
         }
         Assert.True(last < 0.15, $"|ratio − 1| = {last:F3} at 30 mm — expected the plateau");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // PCAL7 — TWO GATES, TWO QUANTITIES, AND NEITHER IS A SECOND SPELLING OF THE OTHER
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // `docs/sonnet-briefs/brief-portcal-7-separation-gate.md` asked whether the per-frequency
+    // refusal is drawn on the wrong quantity and should move onto the quasi-static one — which
+    // would make it redundant with the setup guard and delete it. The measurement (RESOLVED.md,
+    // §PCAL7, 93 de-embedded points scored against the kernel-A oracle) says no: each gate catches a
+    // failure the other misses, and the answers behind those two failures are 13.6x and 7.5x their
+    // own A-vs-B floor. What is gated HERE is the structural half of that — that the two questions
+    // have different answers on one fixture, so neither gate can stand in for the other. The
+    // accuracy half is a harness, per the standing rule.
+
+    /// <summary>Both separations for a single-point band, which is what a run built on that band
+    /// would measure — the measured one off the solved cascade, the quasi-static one off the group's
+    /// own electrostatics.</summary>
+    private (double Measured, double QuasiStatic) BothAt(PlanarPortResolution port, double fHz)
+    {
+        var cal = new PlanarPortCalibrator(port, Slab, fHz, fHz);
+        var gc  = cal.ModalAt(
+            () => PlanarFrequencyKernel.FromPair(PlanarLineFixtures.Kernel(Slab, fHz)), fHz);
+        var pair = (gc.Box.ModeSeparationDegrees, cal.QuasiStaticModeSeparationDegrees(fHz));
+        output.WriteLine($"{SurfaceMesherEng(fHz)}: measured {pair.Item1:F3}°, " +
+                         $"electrostatics {pair.Item2:F3}°");
+        return pair;
+
+        static string SurfaceMesherEng(double f) => $"{f / 1e9:F0} GHz";
+    }
+
+    /// <summary>
+    /// <b>The per-frequency gate refuses a group the setup gate has already passed.</b> At 1 GHz on
+    /// this fixture the electrostatics puts the two modes further apart than the standards managed
+    /// to measure them, so a floor placed between the two readings is cleared by the quasi-static
+    /// question and failed by the measured one. That is not hypothetical caution: PCAL7 measured a
+    /// pair 4.4 mm apart at 500 MHz whose electrostatics read 0.517° — over the shipped floor, so
+    /// the setup guard passes it — and whose measured separation read 0.026°; with the floor lifted
+    /// it published max |ΔS| 0.999 against an A-vs-B floor of 0.073.
+    /// </summary>
+    [Fact]
+    public void ThePerFrequencyGateRefusesAGroupTheSetupGatePassed()
+    {
+        var (problem, mesh, ports) = Board();
+        var (port, _) = GroupedPort();
+
+        var (measured, quasiStatic) = BothAt(port, 1e9);
+        Assert.True(measured < quasiStatic,
+                    $"measured {measured:F3}° is not below the electrostatic {quasiStatic:F3}° — " +
+                    "this test needs the reading the standards UNDER-report to place its floor");
+
+        var floor = PlanarCalibrationSettings.Default with
+        {
+            ModeSeparationFloorDegrees = 0.5 * (measured + quasiStatic),
+        };
+        var ex = Assert.Throws<PlanarFeedClearanceRefusedException>(
+            () => PlanarSolve.Run(problem, mesh, ports, [1e9],
+                                  new PlanarSolveSettings(Calibration: floor)));
+        output.WriteLine(ex.Message);
+
+        // The SWEEP's refusal, not the setup guard's — the two are told apart by their first clause.
+        Assert.Contains("are calibrated together as one group, and at", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("would be calibrated together", ex.Message, StringComparison.Ordinal);
+
+        // R-pcal7-7 — and because the electrostatic figure is OVER the floor, the remedy it names is
+        // the one that binds on this case: the band and the mesh, not the feeds. PCAL7 measured both
+        // levers moving the same point by 4.4x and 15x respectively while the published
+        // s-parameters moved by 1%.
+        Assert.Contains("narrowing the sweep", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("standards' own MESH", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Your metal is not the problem", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <b>And the reverse, which is why the setup gate cannot be dropped either.</b> At 7 GHz the
+    /// measured separation OVER-reads the electrostatic one on this fixture, so a floor between them
+    /// is failed by the quasi-static question and cleared by the measured one — the run stops before
+    /// a standard is solved rather than publishing. PCAL7's own instance of this is an equal-width
+    /// triple at 200 MHz: electrostatics 0.28°, measured 0.53° (over the shipped floor), and with
+    /// the floor lifted it published 1.11 in max |ΔS| against a floor of 0.148.
+    /// </summary>
+    [Fact]
+    public void TheSetupGateRefusesAGroupThePerFrequencyGateWouldHavePassed()
+    {
+        var (problem, mesh, ports) = Board();
+        var (port, _) = GroupedPort();
+
+        var (measured, quasiStatic) = BothAt(port, 7e9);
+        Assert.True(quasiStatic < measured,
+                    $"electrostatic {quasiStatic:F3}° is not below the measured {measured:F3}°");
+
+        var floor = PlanarCalibrationSettings.Default with
+        {
+            ModeSeparationFloorDegrees = 0.5 * (measured + quasiStatic),
+        };
+        var ex = Assert.Throws<PlanarFeedClearanceRefusedException>(
+            () => PlanarSolve.Run(problem, mesh, ports, [7e9],
+                                  new PlanarSolveSettings(Calibration: floor)));
+        output.WriteLine(ex.Message);
+
+        Assert.Contains("would be calibrated together as one group", ex.Message, StringComparison.Ordinal);
+        // Its remedy is the one about the METAL, and it stays that way: this refusal is the case
+        // where the cross-section itself cannot be told apart.
+        Assert.Contains("Separate the feeds", ex.Message, StringComparison.Ordinal);
     }
 }

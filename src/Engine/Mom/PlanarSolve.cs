@@ -2285,8 +2285,19 @@ public static class PlanarSolve
             // At zero separation the cascade's two eigenvalues coincide, the null space of (M − μI)
             // is a plane rather than a line, and which line in it is which mode is decided by
             // round-off. A modal de-embedding built on that is smooth, plausible and wrong, which is
-            // the one outcome this whole series exists to remove — so the run falls through to
-            // PCAL2's own refusal, whose remedy (separate the feeds) is the remedy here too.
+            // the one outcome this whole series exists to remove.
+            //
+            // ── PCAL7/R-pcal7-5 — WHY THIS GUARD SURVIVES ALONGSIDE THE SETUP ONE ──────────────
+            //
+            // PCAL7 asked whether this per-frequency question is a second spelling of the setup
+            // guard's and should be deleted. It is not, and the measurement is what says so: on a
+            // pair 4.4 mm apart at 500 MHz the ELECTROSTATIC separation reads 0.517°, over the
+            // floor, so the setup guard passes — and the measured one reads 0.026°, and the answer
+            // the run would have published is max |ΔS| 0.999 against an A-vs-B floor of 0.073,
+            // 13.6x the floor and not physical. Neither number catches the other's failure: an
+            // equal-width triple whose electrostatics reads 0.28° publishes 1.11 in |ΔS| with a
+            // MEASURED separation of 0.53°, over the floor. Two questions, two places, and each is
+            // load-bearing. See src/Engine/Mom/RESOLVED.md, PCAL7.
             if (b.ModeSeparationDegrees < calSt.ModeSeparationFloorDegrees)
             {
                 var breaches = clearances.FindAll(cc => g.PortNumbers.Contains(cc.PortNumber));
@@ -2308,6 +2319,24 @@ public static class PlanarSolve
                 // standard until it reads high does not make the answer good.
                 double qs = cal.QuasiStaticModeSeparationDegrees(f);
 
+                // ── PCAL7/R-pcal7-7 — THE REMEDY THAT BINDS IS NOT THE SAME ONE IN BOTH CASES ────
+                //
+                // GuardModeSeparation has already asked the quasi-static question at EVERY requested
+                // frequency before a single standard was solved (R-pcal6-7), so a group that reaches
+                // this line has metal whose modes ARE separable at this frequency and a pair of
+                // standards that could not resolve them. "Separate the feeds" is the right advice
+                // for the other case and does not bind here, and PCAL7 measured what does: the
+                // calibration separation Δℓ is chosen from the SWEEP's band, so the band is the
+                // lever. On the series' own pair at 200 MHz, a 200-400 MHz band reads 1.15° and a
+                // 200-800 MHz band reads 0.26° on the same metal — and the two de-embedded answers
+                // differ by 1% (0.1099 against 0.1091 in max |ΔS|, floor 0.148). So narrowing the
+                // band is free of accuracy, which is why it is named first.
+                //
+                // The other spelling survives for the case that can still reach here — an adaptive
+                // sweep solves points the setup guard never saw, and the quasi-static separation is
+                // not monotone in frequency (PCAL6/M5).
+                bool instrument = qs >= calSt.ModeSeparationFloorDegrees;
+
                 throw new PlanarFeedClearanceRefusedException(
                     $"Ports {string.Join(", ", g.PortNumbers)} are calibrated together as one group, " +
                     $"and at {SurfaceMesher.Eng(f)}Hz their {b.ModeCount} modes are not separable: the " +
@@ -2318,9 +2347,23 @@ public static class PlanarSolve
                     "modal error box is extracted from the " +
                     "eigenvectors of the two standards' cascade, and at equal eigenvalues those " +
                     "eigenvectors are not determined at all — the de-embedded s-parameters would be " +
-                    "smooth, plausible and wrong rather than visibly bad. Separate the feeds by at " +
-                    "least the driven clearance so each port calibrates on its own, or move the port " +
-                    "plane to a station where the conductors are not coupled.",
+                    "smooth, plausible and wrong rather than visibly bad. " +
+                    (instrument
+                        ? "Your metal is not the problem — the electrostatic figure above is over the " +
+                          "floor, so these modes are far enough apart in principle and it is this pair " +
+                          "of standards that could not tell them apart. Two things move that " +
+                          "measurement and neither of them changes your design. The calibration " +
+                          "separation is chosen from the SWEEP's band, so narrowing the sweep (raising " +
+                          "its lower edge or lowering its upper one) picks a different one: measured " +
+                          "on this series' own coupled pair, the same 200 MHz point reads 0.26° over a " +
+                          "200 MHz - 800 MHz band and 1.15° over a 200 MHz - 400 MHz one, while the " +
+                          "published s-parameters move by 1%. And the measurement is made on the " +
+                          "standards' own MESH: turning the edge mesh on moved that same point from " +
+                          "0.19° to 2.94°. Separating the feeds by at least the driven clearance also " +
+                          "works, by removing the group altogether."
+                        : "Separate the feeds by at " +
+                          "least the driven clearance so each port calibrates on its own, or move the " +
+                          "port plane to a station where the conductors are not coupled."),
                     breaches);
             }
 
@@ -2329,10 +2372,17 @@ public static class PlanarSolve
                 modes[m] = $"{b.ElectricalDegrees[m]:F1}° / ε_eff " +
                            $"{EffectivePermittivityOf(b.Gamma[m], f):F3} / Z_c " +
                            $"{(gc.Zc[m] * gc.ReportedZcScale[m]).Real:F2}Ω";
+            // PCAL7 — the ELECTROSTATIC separation is reported beside the measured one at every
+            // point, not only on a refusal. They are the same quantity asked of two different
+            // things, PCAL6/M1 measured that the measured one swings by 17x over a Δℓ ladder the
+            // electrostatic one is constant across, and a reader handed only the measured number
+            // cannot tell a degenerate cross-section from a standard that could not resolve one.
+            // It costs nothing: the medium is extracted once per group and cached.
             groupDiagnostics.Add(
                 $"{SurfaceMesher.Eng(f)}Hz, ports {string.Join("+", g.PortNumbers)}: modes " +
                 string.Join(" · ", modes) +
-                $"; separation {b.ModeSeparationDegrees:F2}°, cascade residual {b.CascadeResidual:E2}, " +
+                $"; separation {b.ModeSeparationDegrees:F2}°, electrostatics " +
+                $"{cal.QuasiStaticModeSeparationDegrees(f):F2}°, cascade residual {b.CascadeResidual:E2}, " +
                 $"pair {b.ReciprocalPairResidual:E2}, gauge {b.GaugeResidual:E2}, " +
                 $"null-space gap {b.NullSpaceGap:E2}, sign margin {b.SignMargin:F3}.");
         }

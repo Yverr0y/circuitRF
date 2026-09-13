@@ -1,6 +1,6 @@
 # Brief — a port whose feed has a neighbour is de-embedded against the wrong structure: the series
 
-**Status:** the series is COMPLETE — briefs 1, 2, 3, 4 and 6 all done · **Date:** 2026-09-13 · **Area:** `src/Engine/Mom` (port calibration)
+**Status:** the series is COMPLETE — briefs 1, 2, 3, 4, 6 and 7 all reported · **Date:** 2026-09-13 · **Area:** `src/Engine/Mom` (port calibration)
 **Requirement tag for the series:** `R-pcal-n`
 
 ---
@@ -165,6 +165,7 @@ and brief 4 is what stops it being refused.
 | 4 | **Calibration groups and a modal error box** — `brief-portcal-4-modal-error-box.md` | **Done (2026-09-12).** The coupled pair the series opened on de-embeds to the A-vs-B floor and is passive across the band. `src/Engine/Mom/RESOLVED.md`, "PCAL4". |
 | 5 | **A group's feed leads, a cut cell's clearance, a severed conductor** — no brief; owner report | **Done (2026-09-12).** `src/Engine/Mom/RESOLVED.md`, "PCAL5". |
 | 6 | **Which separation a grouped port calibrates on** — `brief-portcal-6-separation-selection.md` | **Reported (2026-09-13), and it refuted its own framing AND its own remedy.** The selection rule is innocent: at the bottom of a band `ModeSeparationDegrees` is not the modes' distance, because the SHORT standard — 3 substrate heights, 1.5° of line at 200 MHz — cannot separate them at any Δℓ, and the near-zero readings a run refuses on are two corrupt curves crossing. Regrowing that standard was built and then removed: measured against the cross-section oracle it makes the published answer WORSE at every frequency. The refusal stands and now reports both numbers. Separately measured and reassuring: an ordinary grouped run is below the well-separated floor at every point down to 100 MHz. `src/Engine/Mom/RESOLVED.md`, "PCAL6". |
+| 7 | **The mode-separation refusal is drawn on the wrong quantity** — `brief-portcal-7-separation-gate.md` | **Reported (2026-09-13), and the measurement refutes the brief's own title.** 93 de-embedded points scored against the kernel-A oracle: over a 9× swing of the measured separation the answer moves by 1%, and the two points it refuses on are the two BEST answers of their ladder — so brief 6's diagnosis holds. But the same family produced two runs that publish nonsense, and they fail through DIFFERENT quantities: a pair whose electrostatics reads 0.517° (over the floor) and whose measurement reads 0.026° publishes 13.6× its floor, and an equal-width triple whose electrostatics reads 0.28° while its measurement reads 0.53° publishes 7.5× its floor. Candidates (a), (c) and (d) each publish one of them; the shipped arrangement — the quasi-static question at setup, the measured one per frequency — catches both. **Nothing moved.** What changed is the refusal's remedy, which named the feeds and now names the two levers that bind: the sweep's BAND (0.26° → 1.15° on the same metal) and the MESH (0.19° → 2.94° with the edge mesh on). `src/Engine/Mom/RESOLVED.md`, "PCAL7". |
 
 **One thing §0's "the machinery mostly exists already" got wrong, and it is worth recording**: it
 does, up to the point where a 2N×2N cascade has to be formed from raw port scattering. A series delta
