@@ -1,5 +1,75 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## 2026-09-13 — beta.18 → beta.19 crashed on Relaunch, and the fix for it had not shipped yet
+
+The owner's third macOS auto-update crash on Relaunch, reported against a fix made on 2026-09-11.
+**The fix was never able to run.** The hand-over is performed by the OUTGOING version, and
+`NativeLaunch.cs` (commit "A session that has exchanged its own bundle can no longer load an
+assembly") landed AFTER `1.0.0-beta.18` was tagged — `git merge-base --is-ancestor` puts it in
+beta.19 only. beta.18 therefore applied this exchange with the old `Process.Start` hand-over and died
+exactly as before. beta.19 → beta.20 is the first update the fix can act on.
+
+**The crash report proves which session it was, in one line.** Its header reads
+`Version: 1.0.0-beta.18` while its own Binary Images entry for the same path reads
+`com.circuitRF.circuitRF (1.0.0-beta.19)`. The header is the identity the process launched with; the
+image row is read at report time. They can only disagree for a process whose bundle was exchanged
+underneath it — the swap-applying launch. Parent was `launchd` (so the Relaunch button's Launch
+Services request had worked), and it died 300 ms in, at `Main` → `ThePreStub` → `PreStubWorker` →
+`DispatchManagedException`, with no window ever shown. Worth keeping: **that pair of version strings
+is a cheaper discriminator than any log reconstruction.**
+
+The update itself is durable and was applied — `/Applications/circuitRF.app` is beta.19 — so the
+user's next ordinary launch is the new version. `SwapOutcome.SwapAlreadyApplied` is what stops the
+next launch exchanging the pair back, and it did its job.
+
+### The audit that followed found one branch that would still have thrown: the ROLLBACK
+
+Reading the whole post-exchange path in beta.19 for anything else that needs a first-time assembly
+load turned up `UpdateStateIo.Save`. **Reading and writing state are not the same set of assemblies**:
+`JsonSerializer.Deserialize` does not load `System.IO.Pipelines`, and `JsonSerializer.Serialize` does.
+Every branch of `RunBeforeUi` below the swap writes state.
+
+The ordinary update path survived **by accident.** `UpdateSwap.SwapBundle` persists `SwapInProgress`
+one line before `AtomicFile.SwapDirectories`, for an unrelated durability reason, and that write
+happens to warm the serializer. **`Revert` has no such neighbour** — it exchanges the bundles back and
+the caller's very first act is the state write that records the blacklist entry, clears
+`LaunchAttempts` and leaves the notice explaining what happened. That write would have thrown
+`FileNotFoundException: System.IO.Pipelines`, on the one launch where the user is already stranded on
+a version that will not start: silently losing the blacklist entry and the notice if the throw were
+caught, aborting the process if it were not — which is how this same class of failure presented in
+beta.18.
+
+`UpdateStateIo.PrimeWritePath()` now runs once in `RunBeforeUi`, beside the
+`AppBundleReplacedThisSession` write that is there for exactly the same reason. Unconditional: a test
+for "will this launch exchange anything" would have to agree with `UpdateSwap.ApplyAtLaunch` for ever,
+and being wrong brings the crash back silently. Measured cost of the priming, 0.63 ms.
+
+### Measured, not reasoned — the exchange harness, rebuilt
+
+Two `dotnet publish -p:PublishSingleFile` console apps in `X.app/Contents/MacOS/`, structurally
+different (one carries 400 KB of padding, so the bundle offsets differ — two builds of the same
+project are byte-identical in layout and the swap is invisible), exchanged with the updater's own
+`renamex_np(RENAME_SWAP)` from inside the running one. Then every call the hand-over makes:
+
+| after the exchange | warm (shipping order) | cold (no pre-swap write) |
+| --- | --- | --- |
+| File I/O, reflection | OK | OK |
+| `JsonSerializer.Serialize` | **OK** | **FAIL** — `System.IO.Pipelines` |
+| `posix_spawn` (`NativeLaunch`, beta.19) | **OK** | **OK** |
+| `Process.Start` (beta.18) | **FAIL** — `System.Diagnostics.Process` | **FAIL** |
+
+So beta.19's hand-over is sound on the real mechanism, beta.18's failure is reproduced exactly, and
+the priming is load-bearing rather than defensive. Gate: `HandOverAfterBundleExchangeTests`, which now
+also pins the priming's ORDER and pins that `Revert` has no pre-exchange write of its own.
+
+### The standing rule this makes explicit
+
+**Before reporting any updater fix as shipped, run
+`git merge-base --is-ancestor <fix-commit> <latest-tag>`.** A fix to the hand-over cannot be exercised
+by the update that delivers it; the first update it can act on is the one after the release
+containing it. This is the second time that has been the answer to "you said this was fixed".
+
+
 ## 2026-09-12 — the antenna pattern figures, and the two defects drawing them exposed
 
 `reference/antennas.html` gained three figures — the two principal-plane cuts, the 3D surface, and

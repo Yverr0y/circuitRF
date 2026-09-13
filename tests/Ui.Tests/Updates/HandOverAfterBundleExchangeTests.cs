@@ -133,6 +133,49 @@ public sealed class HandOverAfterBundleExchangeTests
                     + "swap — see NativeLaunch for the measurement.");
     }
 
+    /// <summary>
+    /// Serialising state is a post-exchange call on every branch, and it loads an assembly that
+    /// DESERIALISING never did — so the write path is made resident before anything moves.
+    ///
+    /// <para>Measured on a pair of exchanged single-file bundles, with and without the priming: with
+    /// it the post-exchange write succeeds; without it, <c>System.IO.Pipelines</c> cannot be loaded
+    /// and the write throws. It used to survive only because <c>UpdateSwap.SwapBundle</c> persists
+    /// <c>SwapInProgress</c> one line before the exchange for an unrelated durability reason — and
+    /// <c>Revert</c>, the rollback, has no such neighbour.</para>
+    /// </summary>
+    [Fact]
+    public void TheStateWritePathIsMadeResidentBeforeTheExchange()
+    {
+        string run = Body(Source("UpdateStartup.cs"), "public static void RunBeforeUi(");
+
+        int prime = run.IndexOf("UpdateStateIo.PrimeWritePath", StringComparison.Ordinal);
+        int swap  = run.IndexOf("UpdateSwap.ApplyAtLaunch", StringComparison.Ordinal);
+
+        Assert.True(prime >= 0,
+                    "RunBeforeUi no longer primes the state WRITE path. Every branch below the swap "
+                    + "writes state, and JsonSerializer.Serialize loads System.IO.Pipelines — which a "
+                    + "session that has exchanged its own bundle cannot load at all.");
+        Assert.True(prime < swap,
+                    "The priming has to happen BEFORE the exchange. After it, it is the crash.");
+    }
+
+    /// <summary>
+    /// And the rollback is the branch that has no accidental warming of its own: it writes the
+    /// blacklist entry and the notice AFTER <c>Revert</c> has exchanged the bundles back. This pins
+    /// the shape rather than the ordering, so the reason the priming exists cannot quietly go away.
+    /// </summary>
+    [Fact]
+    public void TheRollbackBranchWritesStateAfterTheExchangeAndHasNoWarmingOfItsOwn()
+    {
+        string swapSource = Source("UpdateSwap.cs");
+        string revert     = Body(swapSource, "private static SwapResult Revert(");
+
+        int exchange = revert.IndexOf("AtomicFile.SwapDirectories", StringComparison.Ordinal);
+        Assert.True(exchange >= 0, "Revert no longer exchanges the bundles — repoint this test.");
+
+        Assert.DoesNotContain("persist(", revert[..exchange]);
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>Where a standard utility actually is, or null on a platform that has no such thing —

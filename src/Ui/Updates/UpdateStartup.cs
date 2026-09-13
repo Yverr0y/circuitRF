@@ -74,6 +74,11 @@ public static class UpdateStartup
             if (site.Shape == InstallShape.MacOsBundle)
                 CircuitRF.Diagnostics.FileAccessDiagnostics.AppBundleReplacedThisSession = true;
 
+            // BEFORE the exchange, for exactly the reason above and one this launch cannot avoid:
+            // every branch below WRITES state after the swap has happened, and serialising loads an
+            // assembly that reading never did. UpdateStateIo.PrimeWritePath carries the measurement.
+            UpdateStateIo.PrimeWritePath();
+
             SwapResult result = UpdateSwap.ApplyAtLaunch(site, state, UpdatePaths.Root, running);
 
             // From here on this process may no longer be trusted to touch a protected folder on

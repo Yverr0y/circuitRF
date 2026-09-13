@@ -221,6 +221,42 @@ public static class UpdateStateIo
         catch { /* non-critical */ }
     }
 
+    /// <summary>
+    /// Makes the JSON <b>write</b> path resident. Called once before anything exchanges the bundle
+    /// this process reads its own assemblies from; costs 0.63 ms and is never needed again.
+    ///
+    /// <para><b>Reading and writing are not the same set of assemblies, and that is the whole
+    /// content of this method.</b> <see cref="Load"/> deserialises, which does not touch
+    /// <c>System.IO.Pipelines</c>; <see cref="Save"/> serialises, which does. A single-file
+    /// application re-opens its own executable BY PATH for every first-time assembly load, so after a
+    /// macOS bundle exchange that load cannot happen at all — and <c>UpdateStartup.RunBeforeUi</c>
+    /// writes state on every post-exchange branch it has (the swap record, the rollback record, the
+    /// notice a hand-over leaves behind). Measured on a pair of exchanged single-file bundles:</para>
+    ///
+    /// <code>
+    /// System.IO.FileNotFoundException: Could not load file or assembly
+    ///   'System.IO.Pipelines, Version=10.0.0.0, …'. The system cannot find the file specified.
+    /// </code>
+    ///
+    /// <para><b>It was surviving by accident.</b> <c>UpdateSwap.SwapBundle</c> persists
+    /// <c>SwapInProgress</c> one line before the exchange, for an unrelated durability reason, and
+    /// that write happened to warm the serializer — so the ordinary update path worked. The ROLLBACK
+    /// path has no such write: <c>Revert</c> exchanges the bundles back and the caller's first act is
+    /// a state write. That one would have thrown, on the one launch where the user is already in
+    /// trouble, losing the blacklist entry and the notice that explains what happened — or aborting
+    /// the process, which is how the same class of failure presented in beta.18. Priming here makes
+    /// every branch safe by construction instead of by a neighbour's side effect.</para>
+    ///
+    /// <para>Unconditional on purpose. A test for "is an exchange going to happen this launch" would
+    /// have to agree with <c>UpdateSwap.ApplyAtLaunch</c> for ever, and being wrong about it brings
+    /// the crash back silently — which is not a trade worth 0.63 ms.</para>
+    /// </summary>
+    public static void PrimeWritePath()
+    {
+        try   { _ = JsonSerializer.Serialize(new UpdateState(), Opts); }
+        catch { /* nothing here is worth failing a launch over; the priming is best effort */ }
+    }
+
     /// <summary>Load, mutate, save — so a partial write cannot clobber the other fields.</summary>
     public static void Update(Action<UpdateState> mutate)
     {
