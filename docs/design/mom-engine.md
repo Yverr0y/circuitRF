@@ -1447,3 +1447,166 @@ caps far apart with a long line between them grow N quickly; the accelerated (AI
 §10.7 ceiling refusals are the existing answer, not anything new here. The user-facing EM reference
 page's "Cannot" list tracks the same boundary at every stage — §10.9's rule that the two documents
 must not contradict applies here verbatim.
+
+### 10.13 The low-frequency end of the band, and why "do not calibrate" does not reach it
+
+**Status: investigated 2026-09-13. > Built at LF2 the same day** — the substitution in "What this leaves" below is what shipped (`PlanarSolveSettings.SubstituteConductionBelowFitFloor`, on by default); the write-up is `src/Engine/Mom/RESOLVED.md` §LF2. Everything measured here stands unchanged.
+
+LF1 (`src/Engine/Mom/RESOLVED.md` §LF1) left
+`Dcim.CanFitAtFrequency` refusing below k₀H = 1e-4 and named two ways out: raise the sweep's lower
+edge, or ask for 0 Hz, which `PlanarDcSolve` answers exactly. A third was proposed — publish an
+UNCALIBRATED full-wave point down there, on the reasoning that a port discontinuity is a reactance
+and therefore has nothing left to remove at low frequency, so the calibration is the part that should
+be dropped rather than the frequency. It is a good argument and it is measurably wrong, for a reason
+that has nothing to do with low frequency. This section records the measurements, because the
+negative result is worth more than the refusal it was testing.
+
+**What the report was about.** A four-port imported PCB, 0.9 mm of εr 4.4 between the signal level
+and the ground plane, swept 100 MHz – 1 GHz with de-embedding on and the mesh pinned at 2 GHz. On
+that stack the fit floor is **5.30 MHz**, not the 3.4 MHz LF1 quotes — that figure is LF1's own
+1.4 mm worked example, and the floor is `1e-4·c/(2πH)`.
+
+**Method.** A scratch harness drives `SurfaceMesher` → `PlanarSolveContext` →
+`PlanarFrequencyKernel` directly, which is below `PlanarSolve.Run` and therefore below the guard, so
+an arbitrarily low frequency can be asked for; `PlanarKernel.Solve` supplies the calibrated
+comparison on the same geometry. Two fixtures: §10.7's 20 mm × 2.9 mm FR-4 hero on 1.6 mm, and a
+20 mm × 1.7 mm line on 0.9 mm standing in for the reported board's cross-section. The mesh is built
+once per sweep and held fixed, so nothing in a column can be a change of N.
+
+#### (a) The raw answer is the PORT, at every frequency — and refining the mesh makes it worse
+
+Raw against de-embedded |S₂₁| on the hero line, straight off `PlanarFrequencyPoint`:
+
+| f | raw \|S₂₁\| (N = 24) | raw \|S₂₁\| (N = 94) | de-embedded \|S₂₁\| (N = 94) |
+|---|---|---|---|
+| 10 MHz | −59.64 dB | — | — |
+| 50 MHz | — | −63.38 dB | −0.050 dB |
+| 100 MHz | −39.64 dB | −57.36 dB | −0.021 dB |
+| 200 MHz | — | −51.32 dB | −0.016 dB |
+| 500 MHz | — | −43.18 dB | −0.030 dB |
+| 1 GHz | −19.12 dB | −36.52 dB | −0.061 dB |
+
+**The raw column rises at exactly 6 dB per octave** (50 → 100 → 200 MHz: +6.02, +6.04 dB), which is
+a SERIES CAPACITANCE and nothing else. A 20 mm piece of copper reads as −60 dB of insertion loss at
+10 MHz. This is not a degraded version of the right answer; it is a measurement of the excitation.
+§10.6's delta gap drives the structure against the plane through the field, and `RESOLVED.md` §LF1 §4
+already states the consequence in the DC context — a source in series with its own rooftop means
+"every line would read as an open at both ends". The raw solve is that open, at every frequency, and
+the calibration is what removes it.
+
+**And the capacitance is a mesh artifact, so it cannot be corrected for.** The gap is one cell wide,
+so a finer mesh is a smaller gap: at 100 MHz the 94-unknown mesh is **17.7 dB further from the
+truth** than the 24-unknown one (0.022 pF against 0.17 pF of implied series C). Refining the mesh —
+the one lever that improves every other number in this kernel — moves the uncalibrated answer away
+from the structure's own response. This is the same quantity §LF1 §5(a) records as `1/|a₂₁|²`
+growing 6.9 → 24.7 → 2,413 from 2 GHz to 100 MHz; it is a₂₁ ∝ ω seen from the other side.
+
+#### (b) The fit does go jagged below the floor, at a few percent — measured, and then moot
+
+The one quantity the gap capacitance does NOT corrupt is the line-to-ground capacitance, because the
+gap is not in series with it: it is `Z₁₂` of the port pair's own T, and it is a clean probe of the
+kernel. Widened DCIM throughout, mesh fixed:
+
+| k₀H | f (1.6 mm) | C (pF), N = 24 | C (pF), N = 94 | scalar fit residual | G_A images |
+|---|---|---|---|---|---|
+| 1.0e-4 … 3.4e-4 | 3–10 MHz | 1.5142 | 4.0863 | 1.9e-8 … 1.9e-7 | 12–15 |
+| 5.0e-5 | 1.5 MHz | 1.5142 | 4.0863 | 1.5e-5 | 10 |
+| 3.4e-5 | 1.0 MHz | 1.5155 | 4.0824 | 4.3e-3 | 10 |
+| 2.4e-5 | 700 kHz | 1.4717 | 4.0171 | 4.0e-2 | **1** |
+| 1.0e-5 | 300 kHz | 1.5463 | 4.1733 | 9.4e-2 | **1** |
+| 3.4e-6 | 100 kHz | 1.6341 | 4.3515 | 1.3e-1 | **1** |
+
+Flat to five digits above k₀H ≈ 5e-5 and **non-monotonic below it**, +8.0 % / −2.8 % on the coarse
+mesh and +6.5 % / −1.7 % on the fine one — the same shape on both, so it is the kernel and not the
+mesh. The break sits within a factor of 1.2 of `Dcim`'s own documented 6e-5, measured there by a
+completely different route (spectral |ΔG_q| against direct Sommerfeld integration; here, a converged
+physical capacitance). **So the answer to "does it merely bias, or does it go jagged" is: it goes
+jagged, by a few percent, and it starts where the residual table says it starts.**
+
+**A detail worth keeping: the vector kernel's fit residual is not an alarm.** `FitResidual` on G_A
+stays between 7e-13 and 6e-10 the whole way down — three to six decades better than G_q's — while its
+image count collapses from 12–15 to **one**. A single-image fit reproduces its own samples perfectly
+and carries no stack information at all, so a guard keyed on the residual alone would never fire on
+the vector potential. The image count is the observable that moves.
+
+#### (c) Below ~20 MHz the binding constraint is the calibration standard, not the kernel
+
+`TargetElectricalDegrees` = 60 makes a standard's length go as 1/f, and its N with it. Measured on
+the 94-unknown hero DUT, one `PlanarKernel.Solve` per frequency:
+
+| f | standard N | verdict at the dense 5,000 ceiling |
+|---|---|---|
+| 20 MHz | 7,507 | refused |
+| 10 MHz | 14,955 | refused |
+| 5 MHz | 29,858 | refused |
+| 3 MHz | 49,724 | refused |
+
+**De-embedding on this fixture stops at ~20 MHz dense and ~12 MHz accelerated — both well ABOVE the
+kernel's own 2.98 MHz floor.** So even a perfect Green's function at 1 MHz is unreachable through the
+present calibration, and §LF1 §5(b)'s observation on the reported board (a 9,690-unknown standard at
+100 MHz against a 311-unknown DUT) is the general case rather than that board's bad luck.
+
+#### (d) Where de-embedding stops being trustworthy is higher still
+
+The de-embedded phase slope must be flat in frequency for a quasi-TEM line. On the same fixture:
+
+| f | 2 GHz | 1 GHz | 500 MHz | 200 MHz | 100 MHz | 50 MHz |
+|---|---|---|---|---|---|---|
+| S₂₁ deg/GHz | −37.90 | −37.85 | −37.52 | −33.69 | −17.79 | **+48.20** |
+
+11 % low at 200 MHz, 53 % low at 100 MHz, sign-inverted at 50 MHz. This is a coarse fixture and
+§LF1 §5(a)'s shipping-mesh measurement of the same effect reads 46 % at 100 MHz, so the two agree on
+the magnitude and the mechanism. **The practical reading is that the bottom decade of an ordinary
+100 MHz – 1 GHz sweep is already inside the amplified regime**, which is a live concern for existing
+runs and not only for the band below the refusal.
+
+**The GROUPED half of that has since been measured and closed, and it was worse than (d) suggests**
+(`src/Engine/Mom/RESOLVED.md` §PCAL6, 2026-09-13). Where two ports share a reference plane the same
+amplification lands on a quantity a refusal is drawn on: `ModeSeparationDegrees` at 200 MHz reads
+between 0.05× and 17× the modes' actual distance depending on Δℓ, so a group whose modes are
+comfortably separable is refused at a Δℓ where two corrupt curves happen to cross. What governs it
+is the SHORT calibration standard's own electrical length — `ShortLineHeights` = 3 substrate heights
+is 1.5° of line at 200 MHz — and a run that hits the floor now regrows it to 20° and calibrates
+again. **That does not touch (d)'s own measurement**, which is about a single-port peel and still
+stands: what closes (d) is the port model named under "What this leaves" below.
+
+#### (e) The DC solve converges; a microwave mesh is too coarse for it
+
+`PlanarDcSolve`'s port Y on an isolated line is rank 1 by construction — no conduction path to ground
+means Z does not exist — and it measures that way to 1e-14, so R comes off the admittance directly as
+1/g. Against the sheet answer `R_s·L/W` = 3.3973 mΩ:
+
+| mesh built at | N | R_dc | vs sheet |
+|---|---|---|---|
+| 1 GHz | 24 | 2.5480 mΩ | 0.750× |
+| 2 GHz | 24 | 2.5480 mΩ | 0.750× |
+| 5 GHz | 45 | 2.9120 mΩ | 0.857× |
+| 10 GHz | 94 | 3.1547 mΩ | 0.929× |
+| 20 GHz | 247 | 3.2760 mΩ | 0.964× |
+| 40 GHz | 943 | 3.3366 mΩ | 0.982× |
+
+Monotone and convergent, which is the reassuring half. The other half is that **a mesh built for
+2 GHz reads the DC resistance 25 % low** — LF1 §4's "~11 % on a coarse mesh" is the same effect
+measured on a less coarse one. Any answer that leans on the conduction solve therefore has to say
+something about the mesh, because the mesh a user pins for a microwave sweep is not the mesh their
+DC point wants.
+
+#### What this leaves
+
+**"Do not calibrate" is refuted, and not for a reason about frequency.** With a delta-gap edge port
+the uncalibrated answer is never the structure's own response at any frequency, and it degrades under
+mesh refinement. The proposal's own premise stands — there really is nothing left to remove down
+there — but the present port needs removing regardless of what it is in series with.
+
+**The enabling change is the PORT, not the kernel and not the calibration.** What makes 0 Hz work is
+that `PlanarDcSolve` uses a different port model: the terminals are the conductor's end cells against
+the ground node, not a cut in the metal. A port of that shape at AC would have an a₂₁ that does not
+vanish with ω, which is precisely what §LF1 §5(a) names as the thing that would close the
+de-embedding amplification and records as not built. It is the same change twice: it removes the
+amplification at 100 MHz that (d) measures on today's runs, and it is what would let a
+sub-floor point be published without a calibration at all. That makes it a better target than the
+static-kernel work, which only addresses (b) — the smallest of the four walls.
+
+**Until it exists, the reachable options below the floor are the two LF1 already named, plus
+substituting the conduction solve** at the caller's request with a note saying so and a word about
+the mesh. The DCIM fit is the last of the four constraints to bite, not the first.

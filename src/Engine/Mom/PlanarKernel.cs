@@ -182,6 +182,72 @@ public sealed class PlanarKernel
     }
 
     /// <summary>
+    /// <b>PCAL6/M3 — a group's mode-separation refusal that a LONGER SHORT STANDARD would clear
+    /// applies that remedy instead of naming it.</b> §LF3's sentence, one wall further along: a run
+    /// that already knows the answer should not be asking a person to type it, and here the sentence
+    /// would be about a calibration standard, which is not a thing the user drew.
+    ///
+    /// <para><b>Why the short standard and not a different Δℓ.</b> PCAL6/M1 laddered Δℓ at a fixed
+    /// short line and found the measured separation NOT monotone in it — on the series' own pair at
+    /// 200 MHz it reads 4.92° at Δℓ = 10.5 mm, 0.18° at 130 mm and 1.10° at 171 mm, against a
+    /// quasi-static truth that rises smoothly from 0.29° to 4.77°. The near-zero is two corrupt
+    /// curves CROSSING, not a degeneracy. Choosing among candidates on that number would therefore
+    /// pick by where the crossing happens to fall — and worse, the candidate that "clears the floor"
+    /// is not the accurate one: at Δℓ = 54.6 mm the separation reads a comfortable 2.15° with the
+    /// even mode's β 10 % wrong, while at 171 mm it reads 1.10° with that β exact. The short
+    /// standard's own electrical length is what actually governs the extraction, and
+    /// <see cref="PlanarCalibrationSettings.GroupShortLineDegrees"/> carries the measurement.</para>
+    ///
+    /// <para><b>One retry, keyed on a TYPE, and only where the electrostatics disagrees with the
+    /// measurement.</b> A group whose quasi-static separation is ALSO under the floor is genuinely
+    /// degenerate, nothing is retried, and the refusal stands with the remedy it names today
+    /// (R-pcal6-6). The work repeated is the sweep up to the first refusing point — which is the
+    /// bottom of the band, where the refusal lives — against a run that would otherwise have
+    /// produced nothing at all.</para>
+    ///
+    /// <para><b>The cost is real and is stated in the note.</b> On 0.9 mm FR-4 at 200 MHz the short
+    /// standard goes from 3.83 mm (76 unknowns) to 50.75 mm (762), and the long one grows by the
+    /// same absolute length; the pair a frequency actually solves goes from ~1,620 unknowns to
+    /// ~3,030, i.e. <b>1.9x</b>. It buys a measured separation of 0.92-1.00x the truth in place of
+    /// 0.27-0.30x.</para>
+    /// </summary>
+    private static PlanarSolveResult RunWithGroupShortLineRetry(
+        PlanarProblem meshed, PlanarMesh mesh, IReadOnlyList<PlanarPortResolution> resolved,
+        IReadOnlyList<double> freqsHz, ref PlanarSolveSettings st, RunControl? control,
+        IReadOnlyList<PlanarFeedLead>? leads, SurfaceMesher.PlanarLengthFormat? lengthFormat,
+        ref string? note)
+    {
+        try
+        {
+            return PlanarSolve.Run(meshed, mesh, resolved, freqsHz, st, control, leads, lengthFormat);
+        }
+        catch (PlanarGroupModesRefusedException ex)
+        {
+            var calSt = st.Calibration ?? PlanarCalibrationSettings.Default;
+            st = st with
+            {
+                Calibration = calSt with
+                {
+                    GroupShortLineDegrees = PlanarCalibrationSettings.UsableLoDegrees,
+                },
+            };
+            var result = PlanarSolve.Run(meshed, mesh, resolved, freqsHz, st, control, leads,
+                                         lengthFormat);
+            note =
+                $"A calibration group's modes read {ex.MeasuredDegrees:F3}° apart at " +
+                $"{SurfaceMesher.Eng(ex.FrequencyHz)}Hz against a {calSt.ModeSeparationFloorDegrees:F2}° " +
+                $"floor, while its own electrostatics puts them {ex.QuasiStaticDegrees:F3}° apart — so " +
+                $"the SHORT standard, {(lengthFormat ?? SurfaceMesher.DefaultLengthFormat)(ex.ShortLengthM)} " +
+                "long and therefore carrying " +
+                "almost no phase at the bottom of this band, was the thing that could not measure " +
+                $"them. This run rebuilt it at {PlanarCalibrationSettings.UsableLoDegrees:F0}° " +
+                "electrical and calibrated again. A group's modes are separated by the two standards' " +
+                "cascade, and a standard shorter than a degree or two cannot separate anything.";
+            return result;
+        }
+    }
+
+    /// <summary>
     /// R-via-6's refusal, asked at whatever the top of the sweep actually is. The wavenumber is taken
     /// in the fastest-slowing medium anywhere in the stack — the same rule R-msh-3 uses for the mesh —
     /// because that is the shortest wavelength any part of the via can see.
@@ -289,6 +355,89 @@ public sealed class PlanarKernel
         control?.BeginStage("resolving ports onto the mesh");
         var resolved = PlanarPorts.ResolveAll(report.Mesh, ports);
 
+        // ── LF3 — A MESH THAT SEVERS A CONDUCTOR RE-MESHES ITSELF, CHEAPEST REMEDY FIRST ───────
+        //
+        // PCAL5's refusal offers two remedies and a user cannot be expected to know which. On a real
+        // board the wrong one (the edge mesh) costs 4x the DUT's unknowns AND 4x every calibration
+        // standard, because a standard reproduces the DUT's own gridlines verbatim; staircasing the
+        // same artwork cost 2%. But staircase does not always work — on the mitred pair in
+        // ConformalConductionTests only resolving the rim does — so both are tried, in cost order,
+        // and the first that actually restores conduction is kept.
+        //
+        // This is not a quality trade. A cut cell that carries no rooftop is a MESHING artefact:
+        // staircasing removes it and the edge mesh resolves it, and neither is an approximation of
+        // the severed answer, which is simply wrong. If neither clears it, nothing is kept and
+        // PlanarSolve.Run raises PCAL5's refusal exactly as before.
+        var severedNote = (string?)null;
+        {
+            var severed = PlanarConductors.FindSeveredConductors(meshed, report.Mesh, resolved);
+            if (severed.Count > 0)
+            {
+                var s0 = severed[0];
+                string who = string.Join(" and ", s0.Islands.Select(
+                    g => g.Count == 1 ? $"port {g[0]}" : "ports " + string.Join(", ", g)));
+                int was = report.Mesh.Bases.Count;
+
+                // The refusal's own two remedies, and both together — nothing else. Each is MESHED
+                // and re-asked, and the CHEAPEST that actually restores conduction wins. Trying them
+                // in a guessed order would take the edge mesh on a board where staircase alone was
+                // enough, which is the expensive mistake this exists to stop; and on the mitred pair
+                // in ConformalConductionTests neither alone is enough and the pair of them is.
+                // Meshing is milliseconds against a fill, and this only runs on a sweep that would
+                // otherwise have refused outright.
+                (string What, PlanarMeshSettings Settings)[] candidates =
+                [
+                    ("staircased the boundary",
+                     meshSettings with { BoundaryCells = PlanarBoundaryCells.Staircase }),
+                    ("turned the edge mesh on", meshSettings with { EdgeMesh = true }),
+                    ("staircased the boundary and turned the edge mesh on",
+                     meshSettings with { BoundaryCells = PlanarBoundaryCells.Staircase,
+                                         EdgeMesh = true }),
+                ];
+
+                string?           bestWhat = null;
+                PlanarMeshReport? bestMesh = null;
+                IReadOnlyList<PlanarPortResolution>? bestPorts = null;
+
+                foreach (var (what, candidate) in candidates)
+                {
+                    if (candidate.EdgeMesh == meshSettings.EdgeMesh &&
+                        candidate.BoundaryCells == meshSettings.BoundaryCells) continue;
+
+                    PlanarMeshReport retry;
+                    try
+                    {
+                        retry = Mesh(meshed, candidate, control,
+                                     accelerated: SurfaceMesher.UsesAcceleratedCeiling(
+                                         st.Fill?.Aim is not null, meshed.RequiresGeneralKernel),
+                                     lengthFormat: lengthFormat, ports: ports);
+                    }
+                    catch (PlanarMeshRefusedException) { continue; }
+                    if (!retry.CanSolve) continue;
+                    if (bestMesh is not null &&
+                        retry.Mesh.Bases.Count >= bestMesh.Mesh.Bases.Count) continue;
+
+                    var retryPorts = PlanarPorts.ResolveAll(retry.Mesh, ports);
+                    if (PlanarConductors.FindSeveredConductors(meshed, retry.Mesh, retryPorts).Count > 0)
+                        continue;
+
+                    bestWhat = what; bestMesh = retry; bestPorts = retryPorts;
+                }
+
+                if (bestMesh is not null)
+                {
+                    severedNote =
+                        $"The mesh severed '{meshed.Layers[s0.LayerIndex].Name}' between {who}, so " +
+                        $"this run {bestWhat} instead (N = {bestMesh.Mesh.Bases.Count:N0} against " +
+                        $"{was:N0}). A cut cell carries no rooftop where its metal reaches only one " +
+                        "side of a shared edge, and across an oblique rim that can cut a conductor " +
+                        "in two.";
+                    report   = bestMesh;
+                    resolved = bestPorts!;
+                }
+            }
+        }
+
         // D5 — the heat map rides along with the sweep the panel already pays for: default to port 1
         // at the lowest swept frequency, which is where a user starts looking. Both are selectable
         // (PlanarSolveSettings), and a caller that wants no map passes 0.
@@ -301,10 +450,40 @@ public sealed class PlanarKernel
         var midpoint = MidpointRuleVerdict(meshed, fHi);
         if (!midpoint.Ok) throw new InvalidOperationException(midpoint.Reason);
 
-        var sweep = PlanarSolve.Run(meshed, report.Mesh, resolved, freqsHz, st, control, leads,
-                                    lengthFormat);
+        // ── LF3 — AND A DE-EMBEDDING CEILING THE ACCELERATOR WOULD CLEAR TURNS IT ON ────────────
+        //
+        // Caught here because this is where the settings live. One retry, on the one signal that
+        // means "recoverable"; everything the accelerator cannot fix still refuses as before. The
+        // work repeated is the setup up to the first oversized standard — sub-second — against a
+        // run the user would otherwise have had to start again by hand anyway.
+        string? acceleratorNote = null;
+        string? shortLineNote   = null;
+        PlanarSolveResult sweep;
+        try
+        {
+            sweep = RunWithGroupShortLineRetry(meshed, report.Mesh, resolved, freqsHz, ref st,
+                                               control, leads, lengthFormat, ref shortLineNote);
+        }
+        catch (PlanarAcceleratorWouldFitException ex)
+        {
+            st = st with
+            {
+                Fill = (st.Fill ?? PlanarFillSettings.Default) with { Aim = PlanarAimSettings.Default },
+            };
+            acceleratorNote =
+                $"Port {ex.PortNumber}'s de-embedding standard needs {ex.StandardUnknowns:N0} " +
+                $"unknowns, past the {SurfaceMesher.UnknownCeiling:N0} a dense solve allows, so this " +
+                $"run turned the ACCELERATED solve on (ceiling {SurfaceMesher.AcceleratedUnknownCeiling:N0}). " +
+                "A standard reproduces the port's own gridlines and grows as the frequency falls, so " +
+                "it is usually larger than the board itself.";
+            sweep = RunWithGroupShortLineRetry(meshed, report.Mesh, resolved, freqsHz, ref st,
+                                               control, leads, lengthFormat, ref shortLineNote);
+        }
 
         var notes = new List<string>(report.Notes);
+        if (severedNote is not null) notes.Add(severedNote);
+        if (acceleratorNote is not null) notes.Add(acceleratorNote);
+        if (shortLineNote is not null) notes.Add(shortLineNote);
         notes.AddRange(groundNotes);
         notes.AddRange(feedNotes);
         notes.AddRange(sweep.Notes);

@@ -282,24 +282,46 @@ public sealed class PlanarBudgetTests
     // =========================================================================================
 
     [Fact]
-    public void T4_5_D8_TheNearDCHoleIsARefusalNow_AndItsNeighbourStillSolves()
+    public void T4_5_D8_TheNearDCHoleIsCLOSED_TwoWays_AndItsNeighbourStillSolves()
     {
         // L8e recorded a 6 Hz point spending 50 s and ending in a raw framework exception with no
         // refusal attached, and left it because nothing could reach it. M1's adaptive scheme chooses
-        // its own frequencies, so it can. R-mlp-3's shape: the refusal is measured next to the case
-        // it is NOT allowed to catch.
+        // its own frequencies, so it can. R-mlp-3's shape: the guard is measured next to the case it
+        // is NOT allowed to catch.
+        //
+        // LF2 closed the hole a SECOND time and from further up: a point down there is now taken out
+        // of the sweep before a fit is attempted at all, so it never reaches the array dimension.
+        // D8's refusal is still what a caller measuring the FIT gets, and it still names the failure.
         var line = PlanarLineFixtures.Fr4Line(8e-3, 6e9);
         var (mesh, ports) = PlanarLineFixtures.MeshAndPorts(line, PlanarLineFixtures.Coarse);
+        var measuring = new PlanarSolveSettings(Deembed: false,
+                                                SubstituteConductionBelowFitFloor: false);
 
         var ex = Assert.Throws<InvalidOperationException>(
-            () => PlanarSolve.Run(line, mesh, ports, [6.0, 2e9], new PlanarSolveSettings(Deembed: false)));
+            () => PlanarSolve.Run(line, mesh, ports, [6.0, 2e9], measuring));
         Assert.Contains("6 Hz", ex.Message.Replace("6Hz", "6 Hz"), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Array dimensions", ex.Message);
 
-        // …and the legitimate neighbour runs. 2 GHz on 1.6 mm FR-4 is k₀H = 0.067, so
-        // PathExtent·k₀H = 20 — comfortably past the point where the fit stops seeing the stack.
+        // ── AND ON THE SHIPPED PATH THE SAME POINT IS AN ANSWER, WITHOUT GOING NEAR THE FIT ──────
+        //
+        // Asserted on the COUNTERS rather than on the clock: no kernel was fitted for that point and
+        // the sweep built no core for it, which is the structural statement "it never got there".
+        // L8e's 50 seconds were spent inside the fit this never enters.
+        var sub = PlanarSolve.Run(line, mesh, ports, [6.0, 2e9], new PlanarSolveSettings(Deembed: false));
+        Assert.Equal(2, sub.Points.Count);
+        Assert.Equal(6.0, sub.Points[0].FrequencyHz);
+        Assert.Equal(0.0, sub.Points[0].KernelFitMs);
+        Assert.Equal(0.0, sub.Points[0].S[1, 0].Imaginary);
+        Assert.Contains(sub.Notes, n => n.Contains("the 0 Hz conduction solve"));
+
+        // …and the legitimate neighbour runs, unchanged by either. 2 GHz on 1.6 mm FR-4 is
+        // k₀H = 0.067, so PathExtent·k₀H = 20 — comfortably past the point where the fit stops
+        // seeing the stack.
         var ok = PlanarSolve.Run(line, mesh, ports, [2e9], new PlanarSolveSettings(Deembed: false));
         Assert.Single(ok.Points);
+        for (int r = 0; r < 2; r++)
+            for (int c = 0; c < 2; c++)
+                Assert.Equal(ok.Points[0].S[r, c], sub.Points[1].S[r, c]);
 
         _out.WriteLine(ex.Message);
     }

@@ -652,12 +652,44 @@ public sealed record PlanarFeedClearance(
 /// <see cref="PlanarMeshRefusedException"/> is: the precedent is the mesh ceiling, which already
 /// stops a run that would take twenty minutes to produce nothing usable.
 /// </summary>
-public sealed class PlanarFeedClearanceRefusedException : InvalidOperationException
+public class PlanarFeedClearanceRefusedException : InvalidOperationException
 {
     public IReadOnlyList<PlanarFeedClearance> Breaches { get; }
 
     public PlanarFeedClearanceRefusedException(string message, IReadOnlyList<PlanarFeedClearance> breaches)
         : base(message) => Breaches = breaches;
+}
+
+/// <summary>
+/// <b>PCAL6 — the mode-separation refusal a LONGER SHORT STANDARD would still be allowed to try.</b>
+///
+/// <para>It is a separate TYPE rather than a sentence for the reason §LF3 already records about the
+/// accelerator retry: a recovery keyed on a message is a recovery that fires on the wrong refusal
+/// the first time anyone rewords one. Raised only by the per-frequency guard, and only while
+/// <see cref="PlanarCalibrationSettings.GroupShortLineDegrees"/> is still below what the retry would
+/// ask for — so a run that has already been retried carries the plain refusal and stops, which is
+/// R-pcal6-6.</para>
+///
+/// <para>The SETUP guard never raises it, and that is a measurement rather than an oversight: its
+/// quantity is the quasi-static separation, which is a property of the cross-section and of Δℓ and
+/// does not move when the short standard grows. A setup refusal is a statement about the metal, and
+/// lengthening a standard cannot answer it.</para>
+/// </summary>
+/// <param name="FrequencyHz">Where the measurement fell below the floor.</param>
+/// <param name="MeasuredDegrees">What it read there.</param>
+/// <param name="QuasiStaticDegrees">What the electrostatics says the same quantity is — the number
+/// that separates "these modes are genuinely degenerate" from "this standard could not measure
+/// them".</param>
+/// <param name="ShortLengthM">The short standard the measurement was made on.</param>
+public sealed class PlanarGroupModesRefusedException(
+    string message, IReadOnlyList<PlanarFeedClearance> breaches,
+    double frequencyHz, double measuredDegrees, double quasiStaticDegrees, double shortLengthM)
+    : PlanarFeedClearanceRefusedException(message, breaches)
+{
+    public double FrequencyHz        { get; } = frequencyHz;
+    public double MeasuredDegrees    { get; } = measuredDegrees;
+    public double QuasiStaticDegrees { get; } = quasiStaticDegrees;
+    public double ShortLengthM       { get; } = shortLengthM;
 }
 
 /// <summary>

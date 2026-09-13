@@ -3,6 +3,330 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## PCAL6 — which separation a grouped port calibrates on, and the brief that was wrong about its own defect (2026-09-13)
+
+`docs/sonnet-briefs/brief-portcal-6-separation-selection.md`. The brief opened on the last wall
+§LF3 left standing: a four-port grouped board where **200 MHz is refused in one sweep and accepted
+in another**, same metal, same ports, same group, same floor. Its own §4 warned that the obvious fix
+— make `PlanarCalibration.SelectSeparation` separability-aware — was refuted by measurement, and
+made isolating why (M1) a milestone in its own right. **It was right to, and the isolation refutes
+the brief's framing as well as the obvious fix.**
+
+### M1 — the measured separation is not |Δγ|·Δℓ, and the variable is the SHORT standard
+
+The brief's §4 offered three answers and asked M1 to pick one. The answer is **(1) — the measured
+separation is wrong** — and the ladder says where it breaks, which is not where §4 looked.
+
+**The Δℓ ladder, short line and frequency held, on the series' own coupled pair (254 µm lines
+246 µm apart on 0.9 mm FR-4, ports at all four ends), at 200 MHz.** `ModeSeparationDegrees` against
+the same quantity taken from the group's own electrostatics, which is Δβ·Δℓ with Δβ a property of
+the cross-section and therefore exactly proportional to Δℓ:
+
+| Δℓ (mm) | quasi-static ° | measured ° | ratio | measured β per mode | quasi-static β |
+|---|---|---|---|---|---|
+| 10.53 | 0.288 | 4.924 | **17.1** | 0.285, 6.760 | 6.911, 7.389 |
+| 20.11 | 0.554 | 3.948 | 7.13 | 3.417, 6.837 | 6.911, 7.392 |
+| 30.64 | 0.847 | 3.075 | 3.63 | 5.117, 6.865 | 6.911, 7.394 |
+| 45.00 | 1.247 | 2.469 | 1.98 | 5.927, 6.883 | 6.911, 7.395 |
+| 54.58 | 1.514 | 2.148 | 1.42 | 6.205, 6.890 | 6.911, 7.395 |
+| 70.86 | 1.967 | 1.655 | 0.84 | 6.491, 6.897 | 6.911, 7.396 |
+| 100.54 | 2.795 | 0.829 | 0.30 | 6.763, 6.904 | 6.911, 7.396 |
+| **130.22** | 3.622 | **0.182** | **0.05** | 6.906, 6.907 | 6.911, 7.397 |
+| 171.39 | 4.770 | 1.102 | 0.23 | 6.911, 7.021 | 6.911, 7.397 |
+| 220.22 | 6.132 | 2.380 | 0.39 | 6.913, 7.101 | 6.911, 7.397 |
+
+**Read the last two columns, not the first three.** The quasi-static β per mode is stable to four
+digits across the whole ladder, as it must be. The MEASURED ones are not: mode 0 climbs from 0.285
+to 6.913 and mode 1 from 6.760 to 7.101 against a truth of 7.397, and **the two extracted curves
+CROSS at Δℓ ≈ 130 mm.** The near-zero separation there — which is what a run refuses on — is two
+corrupt numbers happening to be equal. It is not a degeneracy, and no property of the metal is
+involved.
+
+**So Δℓ is not the variable. The short standard is.** Δℓ held at 100 mm, ℓ₁ laddered, three
+couplings (0.27 / 1 / 2 substrate heights) and two frequencies; the column that orders every row is
+the short standard's own ELECTRICAL length:
+
+| β·ℓ₁ | ℓ₁ (mm) | ratio at 200 MHz | at 400 MHz | at 500 MHz | at 1 GHz |
+|---|---|---|---|---|---|
+| 1.5° | 3.83 | **0.27-0.30** | — | — | — |
+| 3.0° | 3.83 | — | 0.59-0.73 | — | — |
+| 3.8° | 3.83 | — | — | 0.83 | — |
+| 4.2° | 10.53 | 0.83-0.93 | — | — | — |
+| 7.6° | 3.83 / 7.66 | — | — | 0.97 | 0.97 |
+| 8.0-8.5° | 20.11 / 10.53 | 0.90-0.96 | 0.97-0.98 | — | — |
+| 14-16° | 35.43 / 20.11 | 0.92-1.04 | 1.00 | 1.00 | — |
+| 20-41° | 50.75 / 30-60 | 0.92-1.04 | 1.00 | 1.00 | 1.01 |
+
+The knee is at about 8° and the plateau from about 14°, on every coupling and at every frequency
+tried. The shipped short standard is `ShortLineHeights` = 3 substrate heights, which on 0.9 mm FR-4
+is **1.5° at 200 MHz** — the worst row in the table.
+
+**Why the short standard and not Δℓ, structurally.** `ShortLineHeights` sizes ℓ₁ in substrate
+heights because that is the scale the two error boxes' evanescent fields decay on, and a SCALAR
+calibration needs nothing more: D6 reads ℓ₁ only to fix a gauge. The modal one does — the `T(ℓ₁)·F`
+equation, (4) in `PlanarModalCalibration`'s own header, is what separates the modes' own gauges,
+and as `E(ℓ₁) → I` it stops
+distinguishing them. The failure is frequency-dependent because D6's peel divides by a₂₁² (LF1 §5a),
+so the same geometric shortfall is amplified 25× from 1 GHz to 200 MHz.
+
+### What the brief got wrong about itself, in as many words
+
+- **§4's option (2) is refuted on the CODE, not by measurement.** It reads: *"`BuildSet` builds
+  element 0 from `SuggestLengths(slab, fLo, fHi)`, which also depends on the band — so changing
+  `fLo` moved the short line as well as the deltas. The two runs above are therefore not a clean
+  comparison of Δℓ."* `SuggestLengths` returns `s.ShortLineHeights * slab.HeightM` for its first
+  element. **It does not depend on the band at all.** The two runs in §4's own table were a clean
+  comparison of Δℓ, and their result — the longer separation measuring 2.8× worse — is real and is
+  the ladder's Δℓ = 130-171 mm region.
+- **§3's candidate count is quoted against the wrong constant.** The brief says
+  `n = ceil(log(fHi/fLo) / log 8)`; `SuggestDeltas` divides by `DesignBandRatioPerSeparation` = 4,
+  not by `BandRatioPerSeparation` = 8. Every number in §3's own table is right — they were computed
+  with 4 — so only the formula in the prose is wrong.
+- **§4's headline framing ("a longer Δℓ should separate the modes proportionally better") is
+  sound as physics and useless as a rule**, because the reported quantity is not the modes'
+  distance. Measured at 200 MHz: at Δℓ = 54.6 mm the separation reads a comfortable 2.15° with the
+  even mode's β **10 % wrong**, and at Δℓ = 171 mm it reads 1.10° with that same β exact. **The
+  candidate that clears the floor is not the accurate one**, which is the strongest possible
+  argument against a separability-aware selection and is why `SelectSeparation`'s scoring is
+  unchanged.
+
+### M2/M3 — the decision: a recovery on the short standard, not a selection rule
+
+`PlanarCalibrationSettings.GroupShortLineDegrees`, **0 by default**, is a minimum electrical length
+for a GROUP's short standard at the band's bottom. At 0 nothing anywhere changes, which is how
+R-pcal6-1 is met by construction rather than by measurement. `PlanarKernel.Solve` turns it on for
+**one retry**, keyed on `PlanarGroupModesRefusedException` — a TYPE, for §LF3's own recorded reason
+— and only where the group's quasi-static separation clears the floor while the measured one does
+not. Where BOTH are under it the modes are genuinely degenerate, nothing is retried, and the refusal
+stands with the remedy it names today (R-pcal6-6). The retry's target is
+`UsableLoDegrees` = 20°: TRL's own floor, asked of the short standard rather than only of Δℓ, and
+every row of the ℓ₁ table is on its plateau there.
+
+**Measured end to end**, on the four-port `coupled-pair` fixture over 0 Hz + 100 MHz … 1 GHz — the
+owner's own sweep shape — through `EmRunService.Run`: the run reads **0.192° at 200 MHz against a
+4.701° quasi-static**, regrows the short standard, and publishes the whole decade, 200 MHz now
+reading **4.72°**. On the synthetic 200 MHz – 1 GHz sweep the same recovery turns a refusal into
+**Ok in 10.4 s**, and the point it refused on re-reads **2.86° against a quasi-static 2.839°** —
+ratio 1.008, exactly where the ladder said it would land.
+
+**The cost is real and is not another standard.** The short standard is the CHEAP one, so growing it
+is nothing like adding a separation. On 0.9 mm FR-4 at 200 MHz it goes from 3.83 mm (76 unknowns) to
+50.75 mm (762), and the long one grows by the same absolute length (1,546 → ~2,270): the pair a
+frequency actually solves goes from ~1,620 unknowns to ~3,030, **1.9×**. R-pcal6-5's own subject —
+`SuggestDeltas` growing — did not arise: no candidate was added, because no selection rule changed.
+
+### M4 — one decision point, and a group's choice no longer remembers the sweep
+
+`PlanarPortCalibrator.SelectedIndexAt` is now the only place that answers "which separation does
+this frequency use", and all four sites R-pcal6-3 names ask it — including `NeededAt`, which decides
+which standard meshes are SOLVED at all. **There was a live violation**: the setup guard predicted β
+from `PlanarCalibration.EstimateBeta` while the sweep predicted it from the previous solved point,
+so a run could report about one standard and calibrate against another.
+
+For a GROUP the input is the quasi-static modal β — a property of the cross-section and of that
+frequency alone, built once from the two extreme standards' electrostatics at no Green's-function
+cost, and measured at 0.1-0.8 % against the full-wave answer over 200 MHz – 1 GHz, against the
+15-20 % `EstimateBeta` is known to run low by. **A port that is not in a group keeps `ExpectedBeta`
+exactly**, which is both the brief's declared scope and what makes every ungrouped run bit-identical
+by construction. The BRANCH continuation stays history-dependent everywhere and has to: it is a
+continuation by definition, and L9e/M1 already recorded that predicting it from the pre-solve
+estimate is a coin flip on the 2π branch.
+
+**§5's defect is therefore fixed for groups and recorded for everything else.** A single-port
+calibration still picks its separation from the previous point's measured β, so two sweeps
+containing one frequency can still publish two different S there. Nothing in this brief's scope
+touches it; it is `SelectedIndexAt`'s own doc comment, where the next person to look will find it.
+
+### M5 — the setup guard, and the question R-pcal6-7 asked
+
+R-pcal6-7 offered three ways out and the measurement takes the third and then the second.
+
+- **Its first option is backwards.** "Bring the quasi-static quantity into agreement with the
+  measured one" assumes the measured one is right. It is the quasi-static one that is right — it is
+  stable to four digits across a ladder over which the measured one swings by 17× — so there is
+  nothing to bring into agreement, and the gap is stated rather than closed: **at the shipped short
+  standard the two disagree by 3.4× at 200 MHz on the routine fixture, and by 24× on the same
+  fixture run over the owner's own sweep shape (0.192° measured against 4.701°).** That is what the
+  per-frequency refusal now reports, in the
+  same sentence, because the pair of numbers is what separates "these modes are degenerate" from
+  "this standard could not measure them".
+- **Its second option binds, and it is free.** Asking only at `fLo` is genuinely not enough, and not
+  for a subtle reason: Δβ is exactly proportional to frequency, so if Δℓ were fixed the band's
+  bottom would provably be the worst point — but `SuggestDeltas` hands out one separation per
+  sub-band and the selection steps DOWN to a shorter one as the frequency rises, dropping the
+  product by most of that step at every switch. On the series' own pair over 100 MHz – 1 GHz, where
+  the candidates are 171.0 mm and 54.1 mm and the switch falls at 298 MHz: **2.38° at the band's
+  bottom against 2.24° just above the switch.** A band with four candidates has four such steps.
+  `GuardModeSeparation` now asks at every requested frequency and names the one it found; the
+  question is arithmetic on an electrostatic solve the run already owes.
+- **What it still cannot do is predict the per-frequency refusal**, and that is the honest statement
+  rather than a hedge: the setup guard's quantity does not move when the short standard grows, which
+  is exactly the property that makes it useful for deciding whether to RETRY and useless for
+  predicting whether the measurement will fail.
+
+### What the `.cem` still cannot say, and one thing that was left alone
+
+- `GroupShortLineDegrees` has no `.cem` field and should not get one before someone asks: it is a
+  recovery knob, its only two values in practice are 0 and `UsableLoDegrees`, and a user setting it
+  by hand would be choosing a calibration standard's length, which is not a thing they drew.
+- **The refusal's own remedy sentence is unchanged** (R-pcal6-6). It still says "separate the feeds"
+  — which is the right advice when the refusal survives the retry, because a refusal that survives
+  the retry IS about the metal.
+
+### Gates
+
+`tests/Engine.Tests/Mom/PlanarGroupSeparationTests.cs` (10 tests, ~27 s) —
+`AGroupedSweepThatCalibratesTodayIsBitIdentical` asserts EXACT equality against eight S entries
+measured on the pre-PCAL6 tree in a worktree at HEAD, which is R-pcal6-1 and the reason §LF1 §5(b)'s
+objection no longer applies; `TheSameFrequencyIsRefusedInOneSweepAndAcceptedInAnother` is §1 rows 1
+and 4 reduced to a fixture (100 MHz – 1 GHz publishes 200 MHz at 1.63°, 200 MHz – 1 GHz refuses the
+same point at 0.405°); `TheRefusedSweepRecoversOnALongerShortStandard_AndSaysSo`,
+`GenuinelyDegenerateModesAreNotRetried`, `TheSeparationAFrequencyUsesDoesNotDependOnTheSweep`,
+`TheWorstQuasiStaticSeparationIsNotAlwaysAtTheBandsBottom`, `TheSetupGuardAsksAtEveryFrequency`, and
+the two ladder measurements. `tests/Ui.Tests/Em/GroupSeparationRecoveryTests.cs` is the end-to-end,
+through `EmRunService.Run` on the owner's own sweep shape, 3 s.
+
+**Two of those tests are 13.6 s and 7.6 s, which is over this repository's ~5 s `Category=Benchmark`
+threshold, and they are deliberately untagged.** They are the brief's central claim and the only
+routine coverage of it; tagging them would put the defect back out of reach of a plain `dotnet test`,
+which is what §8 asked them not to be. The cost is ~21 s on a project that runs in ~3.5 min, it is
+dominated by the 171 mm calibration standards a decade band needs at 200 MHz, and it is stated here
+rather than hidden.
+
+## LF3 — two refusals that name a remedy now apply it (2026-09-13)
+
+Owner report, on the board of §LF2: a run refused with PCAL5's severed-conductor message, which names
+two remedies. The owner picked the expensive one. On that board the edge mesh is **1,197 unknowns
+against 304** — and every calibration standard reproduces the DUT's gridlines verbatim, so it is 4x
+the standards too — while staircasing the same artwork is **311**, a 2 % change. Then the run refused
+again, on a de-embedding ceiling whose own first remedy is "turn the accelerated solve on".
+
+**A run that already knows the answer should not be asking a person to type it**, especially when the
+sentence is about a calibration standard, which is not a thing the user drew. Both are now applied by
+`PlanarKernel.Solve` — which is where the settings live — and both say what they did.
+
+**The severed retry evaluates the refusal's remedies and keeps the CHEAPEST that works**, rather than
+taking them in order. Staircase, edge mesh, and both together; each is meshed and re-asked, and only
+a candidate that actually restores conduction is eligible. Ordering by guess would take the edge mesh
+on a board where staircase alone was enough, which is the mistake this exists to stop. It is not a
+quality trade either way: a cut cell that carries no rooftop is a MESHING artefact, staircasing
+removes it and the edge mesh resolves it, and neither approximates the severed answer — which is
+simply wrong. Nothing is kept if none of the three clears it, and `PlanarSolve.Run` then raises
+PCAL5's refusal exactly as before.
+
+**Both remedies are needed, which is why the candidate list is not just the cheap one.** On the
+owner's board staircase alone clears it (311). On `ConformalConductionTests`' mitred pair NEITHER
+alone does **once the feed leads are grown** — conformal 308, staircase 310, edge 1,245, all severed —
+and staircase-plus-edge-mesh at 1,006 is what conducts. That distinction is worth stating on its own:
+`TheEdgeMeshRestoresConduction_UnderEitherBoundaryModel` measures the RAW problem, where the edge mesh
+alone is enough at N = 876. **The geometry a run actually meshes is the ground-path- and feed-extended
+one**, and a remedy that binds on the drawn artwork can fail on it. The gate is written on the
+extended problem and through `PlanarKernel.Mesh` (which passes
+`PlanarEdgeReference.LocalConductorWidth` — a bare `SurfaceMesher.Mesh` silently measures a different
+mesh), and it asserts the run landed on the cheapest working candidate rather than naming one.
+
+**The ceiling retry is keyed on a TYPE, not on a sentence.** `PlanarAcceleratorWouldFitException`
+is raised only in the one recoverable case — dense, past the dense ceiling, inside the accelerated
+one, single-level — and `PlanarKernel.Solve` catches that alone, turns the accelerator on and re-runs
+once. Every other ceiling case keeps the full refusal it had, because there is nothing to recover
+with; `P11_ADenseDeembeddedRun_IsRefusedAtSetup_AndTheRefusalNamesTheAccelerator` now asks at 400 MHz
+instead of 1 GHz so its standard is past the accelerated ceiling too, which is what keeps it testing
+the refusal rather than the retry. The repeated work is setup up to the first oversized standard —
+sub-second — against a run the user would otherwise have restarted by hand.
+
+**Measured end to end on the reported board**, as `EmRunService.Run` performs it: 0 Hz + 500 MHz +
+1 GHz went from two consecutive refusals to **Ok in 6.5 s**, recovering onto staircase (311 against
+304) and reporting the DC point at 7.753 mΩ. 300 MHz – 1 GHz in 8 points is Ok in 16.2 s.
+
+**What is still refused on that board, and it is neither of these.** The authored 0–1 GHz sweep now
+reaches PCAL4's mode-separation guard at 200 MHz (0.178° against a 0.50° floor) — the third wall.
+
+> **Closed by §PCAL6, 2026-09-13, and the diagnosis above is wrong.** The selection rule is innocent:
+> `ModeSeparationDegrees` is not the modes' distance at the bottom of a band, because the SHORT
+> standard — 3 substrate heights, which is 1.5° of line at 200 MHz — cannot separate them at any Δℓ.
+> The run now measures the same quantity from the group's own electrostatics, and where the two
+> disagree it regrows the short standard and calibrates again rather than refusing. Nothing in the
+> selection changed, so "it changes de-embedded answers for every grouped port" no longer applies —
+> a run that passes today is bit-identical by construction.
+
+Gates: `ConformalConductionTests.AMeshThatSeversAConductorRemeshesItselfOnTheCHEAPESTRemedyThatWorks`
+and `…ARunThatWasNEVERSeveredSaysNothing_AndTheRecoveredOneMatchesItExactly`,
+`EmDeembedCeilingTests.LF3_ADenseCeilingTheAcceleratorWouldClear_IsSignalledForTheCallerToFix`.
+
+## LF2 — a point below the fit's floor carries the conduction answer (2026-09-13)
+
+LF1 left `Dcim.CanFitAtFrequency` refusing below k₀H = 1e-4 and named two ways out: raise the
+sweep's lower edge, or ask for 0 Hz. The owner asked for a third — publish an UNCALIBRATED full-wave
+point down there, since a port discontinuity is a reactance and therefore has nothing left to remove
+at low frequency, so the calibration looks like the part that should be dropped rather than the
+frequency. It is a good argument. It was measured, it is wrong, and the measurement is the reason
+this change is what it is. `docs/design/mom-engine.md` §10.13 carries the tables; the short version:
+
+- **The raw uncalibrated answer is the PORT, at every frequency.** Raw |S₂₁| on the 20 mm hero line
+  rises at exactly 6 dB per octave (−63.38 / −57.36 / −51.32 dB at 50 / 100 / 200 MHz) against a
+  de-embedded −0.050 / −0.021 / −0.016 — a series capacitance and nothing else. A 20 mm piece of
+  copper reads as −60 dB of insertion loss at 10 MHz. **And the gap is one cell wide, so refining
+  the mesh makes it worse**: at 100 MHz the 94-unknown mesh is 17.7 dB further from the truth than
+  the 24-unknown one. It is not a degraded version of the right answer and it cannot be corrected for.
+- **Below ~20 MHz the binding constraint is not the fit anyway.** The calibration standard's N goes
+  as 1/f — measured 7,507 / 14,955 / 29,858 / 49,724 at 20 / 10 / 5 / 3 MHz against a 94-unknown
+  DUT — so de-embedding is refused an octave or more above the kernel's own 2.98 MHz floor.
+- **The fit does go jagged below the floor, and that is the least of it.** The line-to-ground
+  capacitance (the one quantity the gap does not corrupt) is flat to five digits above k₀H ≈ 5e-5
+  and non-monotonic below, +8.0 %/−2.8 % coarse and +6.5 %/−1.7 % on a 5× finer mesh — same shape,
+  so it is the kernel. That break is within 1.2× of the 6e-5 `MinElectricalThicknessForWidenedFit`'s
+  header records, found by a completely different route.
+
+**So the points below the floor take the conduction answer, and the refusal moves behind a flag.**
+`PlanarSolveSettings.SubstituteConductionBelowFitFloor` defaults true; false restores L9e/D8's
+refusal verbatim, which is what a caller MEASURING the fit wants. The split happens beside LF1's own
+0 Hz split, above everything else, so **every remaining point's arithmetic is bit-identical** — the
+gate asserts that as exact equality against a sweep that never saw a sub-floor frequency, not as a
+tolerance. One conduction solve serves 0 Hz and every substituted point, because solving it twice
+would be two chances to disagree.
+
+**`Dcim.IsBelowFitFloor` is the only spelling of the question.** `CanFitAtFrequency` asks it and so
+does the partition; two spellings would be two answers waiting to disagree at the boundary, which is
+the one place it would matter. `Dcim.LowestFittableFrequency` is beside it for the same reason — the
+refusal and the note quote the same number.
+
+**What the substitution omits is reactance, and that is why it is defensible rather than a fudge:
+its error SHRINKS as the frequency falls while the fit's grows.** The neglected term is ωL/(2Z₀) —
+on a 20 nH trace, −44 dB of S₁₁ and 0.36° of S₂₁ phase at 5 MHz, −64 dB and 0.036° at 500 kHz.
+
+**It also closes L8e's 6 Hz hole a second time and from further up.** That point now never reaches
+`SpectralGreens` at all, so it cannot reach the array-dimension throw; `PlanarBudgetTests.T4_5`
+asserts that on the COUNTERS (no kernel fitted, imaginary part exactly zero) rather than on the
+clock, and keeps D8's refusal beside it under the flag.
+
+**The note is one sentence, and the mesh clause is in it on purpose.** The conduction answer is read
+on whatever mesh the sweep was given, and a mesh pinned for a microwave run is a crude resistor
+ladder: measured against `R_s·L/W` on the 20 mm hero, **0.750× at a 2 GHz mesh**, 0.857× at 5 GHz,
+0.929× at 10 GHz, 0.982× at 40 GHz. LF1 §4's "~11 % on a coarse mesh" is the same effect measured on
+a less coarse one. A user who pins 2 GHz for an RF sweep and then reads a resistance off it is out
+by a quarter, and nothing else in the run would tell them.
+
+**Not done, and it is the thing worth doing next.** The enabling change for everything above is the
+PORT, not the kernel and not the calibration. What makes 0 Hz work is that `PlanarDcSolve` uses
+conduction terminals — the conductor's end cells against the ground node — rather than a cut in the
+metal. A port of that shape at AC has an a₂₁ that does not vanish with ω, which is exactly what
+LF1 §5(a) names as the thing that would close the de-embedding amplification and records as not
+built. It is the same change twice: it removes the amplification that §10.13(d) measures on today's
+100 MHz runs (phase slope 11 % low at 200 MHz, 53 % low at 100 MHz, sign-inverted at 50 MHz), and it
+is what would let a sub-floor point be published without a calibration at all.
+
+**One hole this change opened, found by the owner and closed: the severed-conductor check moved
+above the split.** PCAL5's check sat below it, so a sweep with no fitted point in it — 0 Hz alone, or
+a band entirely under the floor — returned early and never asked. That is the worst place to skip it:
+the conduction solve answers a disconnected port with EXACTLY zero by design (§LF1 §4), so a severed
+mesh would publish a clean, exact, entirely wrong open circuit with nothing anywhere to say so. The
+question needs only the problem, the mesh and the ports, none of which a frequency changes, so it is
+now asked once for every sweep shape at no cost. `ConformalConductionTests.ASeveredConductorRefuses…`
+is a Theory over all four shapes, because all four leave `PlanarSolve.Run` by different routes.
+
+Gates: `PlanarDcPointTests` (four LF2 tests beside LF1's), `PlanarBudgetTests.T4_5`, and
+`ConformalConductionTests.ASeveredConductorRefusesWHATEVERShapeTheSweepIs`.
+
 ## LF1 — the DC point, and the low-frequency end of the band (2026-09-13)
 
 Owner report, two refusals on one real board (a 1.4 mm four-layer PCB, four ports, 100 MHz – 1 GHz):
@@ -166,10 +490,16 @@ past the dense 5,000 ceiling (it runs with the accelerated solve on, whose ceili
 calibration GROUP's modes separate as f·Δℓ, so the same board refuses at 200 MHz (0.178°) and 250 MHz
 (0.413°) against `ModeSeparationFloorDegrees` = 0.5 — **while PASSING at 100 MHz**, because
 `PlanarCalibration.SelectSeparation` picks a longer standard there. That last one looks like a defect
-rather than a limit: the selection rule optimises a single mode's 60° target and does not consider
-modal separability, so a frequency whose modes ARE separable with an available standard is refused for
-the one the rule happened to pick. Not acted on here — it changes de-embedded answers for every
-grouped port.
+rather than a limit.
+
+> **§PCAL6 (2026-09-13) took it, and the guess in this paragraph was wrong.** The selection rule is
+> not what refuses those points; the MEASUREMENT is. `ModeSeparationDegrees` at 200 MHz on that
+> board reads a fraction of the modes' actual distance, and what governs it is the SHORT standard's
+> own electrical length — 3 substrate heights is 1.5° at 200 MHz — rather than Δℓ. A longer Δℓ helps
+> non-monotonically and the candidate that clears the floor is measurably not the accurate one. The
+> fix is a recovery on the short standard, `SelectSeparation` is unchanged, and this paragraph's own
+> reason for not acting ("it changes de-embedded answers for every grouped port") therefore does not
+> apply: a grouped run that passes today is bit-identical.
 
 ## PCAL5 — a calibration group's feed leads, a cut cell's clearance, and a severed conductor (2026-09-12)
 

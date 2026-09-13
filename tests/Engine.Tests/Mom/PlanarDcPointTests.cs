@@ -5,6 +5,7 @@
 // calculation reads that row. So the gates here are a closed-form sheet resistance on one side and
 // an exact identity matrix on the other, with nothing in between that a tolerance could hide.
 
+using System.Linq;
 using System.Numerics;
 using CircuitRF.Engine.Mom;
 using CircuitRF.Engine.Tests.Mom.Support;
@@ -201,25 +202,136 @@ public sealed class PlanarDcPointTests
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
-    // THE FULL-WAVE KERNEL STILL REFUSES THE NEIGHBOURHOOD OF DC — AND NAMES THIS
+    // LF2 — A POINT BELOW THE FIT'S FLOOR CARRIES THE CONDUCTION ANSWER
+    //
+    // The refusal L9e/D8 put here is not gone, it is behind a flag (SubstituteConductionBelowFitFloor)
+    // — because a caller MEASURING the fit wants it and a caller USING the fit wants a run that
+    // finishes. What makes the substitution defensible rather than a fudge is that the thing it
+    // omits (reactance) shrinks as the frequency falls while the thing the fit gets wrong grows, so
+    // the two error curves cross somewhere and the floor is a defensible place to put the crossing.
+    // docs/design/mom-engine.md §10.13 is the measurement.
     // ══════════════════════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public void TheRefusalBelowTheFitsFloorNamesTheDcPointAsTheThingThatDoesWork()
+    public void TheRefusalBelowTheFitsFloorIsSTILLTHERE_AndStillNamesTheDcPoint()
     {
         var problem = PlanarLineFixtures.Fr4Line(20e-3, 6e9);
         var (mesh, ports) = PlanarLineFixtures.MeshAndPorts(problem, PlanarLineFixtures.Coarse);
+        var measuring = new PlanarSolveSettings(Deembed: false,
+                                                SubstituteConductionBelowFitFloor: false);
 
         // 100 kHz on 1.6 mm FR-4 is k₀H = 3.4e-6 — below the widened fit's own floor, and the point
         // of the sentence is that the remedy it names is reachable rather than hypothetical.
         var ex = Assert.Throws<InvalidOperationException>(
-            () => PlanarSolve.Run(problem, mesh, ports, [1e5, 2e9], new PlanarSolveSettings(Deembed: false)));
+            () => PlanarSolve.Run(problem, mesh, ports, [1e5, 2e9], measuring));
         _out.WriteLine(ex.Message);
         Assert.Contains("0 Hz", ex.Message);
 
         // …and it IS reachable: the same sweep with the lower edge AT zero runs.
-        var ok = PlanarSolve.Run(problem, mesh, ports, [0, 2e9], new PlanarSolveSettings(Deembed: false));
+        var ok = PlanarSolve.Run(problem, mesh, ports, [0, 2e9], measuring);
         Assert.Equal(2, ok.Points.Count);
+    }
+
+    [Fact]
+    public void APointBelowTheFloorIsTheCONDUCTIONRow_AndTheACPointsAreUnchangedByIt()
+    {
+        var problem = PlanarLineFixtures.Fr4Line(20e-3, 6e9);
+        var (mesh, ports) = PlanarLineFixtures.MeshAndPorts(problem, PlanarLineFixtures.Coarse);
+        var st = new PlanarSolveSettings(Deembed: false);
+
+        var without = PlanarSolve.Run(problem, mesh, ports, [2e9, 5e9], st);
+        var with    = PlanarSolve.Run(problem, mesh, ports, [0, 1e5, 1e6, 2e9, 5e9], st);
+
+        Assert.Equal(5, with.Points.Count);
+        Assert.Equal([0.0, 1e5, 1e6, 2e9, 5e9], with.Points.Select(p => p.FrequencyHz));
+
+        // ── THE SUB-FLOOR ROWS ARE THE 0 Hz ROW, AT THE USER'S OWN FREQUENCIES ───────────────────
+        //
+        // Bit-identical rather than close: one conduction solve serves all of them, so two rows
+        // that differed at all would mean it had been solved twice.
+        foreach (int i in (int[])[1, 2])
+            for (int r = 0; r < 2; r++)
+                for (int c = 0; c < 2; c++)
+                    Assert.Equal(with.Points[0].S[r, c], with.Points[i].S[r, c]);
+
+        // Real, uncalibrated, and RawS IS S — a point that was not calibrated says so rather than
+        // carrying an identity box that pretends it was.
+        foreach (int i in (int[])[1, 2])
+        {
+            Assert.Empty(with.Points[i].Calibrations);
+            Assert.Equal(with.Points[i].S[1, 0], with.Points[i].RawS[1, 0]);
+            Assert.Equal(0.0, with.Points[i].S[1, 0].Imaginary);
+        }
+
+        // ── AND THE POINTS THAT WERE FITTED ARE BIT-IDENTICAL TO A SWEEP THAT NEVER SAW THESE ────
+        //
+        // The split happens beside LF1's own, above everything else, so nothing downstream has a
+        // sub-floor frequency to branch on. Exact equality, because that is a claim about the code
+        // path and not about a tolerance.
+        for (int i = 0; i < without.Points.Count; i++)
+        {
+            Assert.Equal(without.Points[i].FrequencyHz, with.Points[i + 3].FrequencyHz);
+            for (int r = 0; r < 2; r++)
+                for (int c = 0; c < 2; c++)
+                    Assert.Equal(without.Points[i].S[r, c], with.Points[i + 3].S[r, c]);
+        }
+
+        foreach (var n in with.Notes) _out.WriteLine("  " + n);
+        var note = Assert.Single(with.Notes, n => n.Contains("the 0 Hz conduction solve"));
+
+        // The note has to carry three things and no more: the boundary, which points moved, and
+        // that the reactance is not in them. It is ONE sentence on purpose.
+        Assert.Contains("2.982 MHz", note);          // Dcim.LowestFittableFrequency on 1.6 mm
+        Assert.Contains("no reactance", note);
+        Assert.Contains("mesh", note);               // a coarse mesh reads the resistance low
+        Assert.DoesNotContain(". ", note);           // one sentence, because a sentence gets read
+    }
+
+    [Fact]
+    public void ASweepENTIRELYBelowTheFloorIsAnAnswer_WithNoZeroHzInIt()
+    {
+        var problem = PlanarLineFixtures.Fr4Line(20e-3, 6e9);
+        var (mesh, ports) = PlanarLineFixtures.MeshAndPorts(problem, PlanarLineFixtures.Coarse);
+
+        var run = PlanarSolve.Run(problem, mesh, ports, [1e5, 1e6, 2e6],
+                                  new PlanarSolveSettings(Deembed: true));
+
+        Assert.Equal(3, run.Points.Count);
+        Assert.DoesNotContain(run.Points, p => p.FrequencyHz == 0.0);
+        Assert.True(run.Points[0].S[1, 0].Magnitude > 0.9999);
+
+        // Nothing was fitted and nothing was calibrated, and the run reports that rather than a
+        // standard count for standards it never built — the same claim LF1's DC-only sweep makes.
+        Assert.Equal(0, run.StandardCount);
+        Assert.Equal(0, run.CoreFillCount);
+        Assert.Contains(run.Notes, n => n.Contains("the 0 Hz conduction solve"));
+    }
+
+    [Fact]
+    public void TheSubstitutionAndTheRefusalAskTheSAMEQuestion()
+    {
+        // Two spellings of "is this point below the floor" is two answers waiting to disagree at the
+        // boundary, which is the one place it would matter. Dcim.IsBelowFitFloor is the only one.
+        const double h = 1.6e-3;
+        double fFloor  = Dcim.LowestFittableFrequency(h);
+        _out.WriteLine($"floor on {h * 1e3:F1} mm = {fFloor / 1e6:F4} MHz");
+
+        foreach (double f in (double[])[0.5 * fFloor, 0.999 * fFloor, fFloor, 1.001 * fFloor, 2 * fFloor])
+        {
+            double k0 = 2.0 * Math.PI * f / EmConstants.C0;
+            bool below = Dcim.IsBelowFitFloor(k0, h);
+            bool fits  = Dcim.CanFitAtFrequency(k0, h).Ok;
+            _out.WriteLine($"  {f / 1e6,10:F4} MHz  below={below,-5} fits={fits}");
+            Assert.NotEqual(below, fits);
+        }
+
+        // And the sweep partitions on exactly that: a point at the floor is FITTED, not substituted.
+        var problem = PlanarLineFixtures.Fr4Line(20e-3, 6e9);
+        var (mesh, ports) = PlanarLineFixtures.MeshAndPorts(problem, PlanarLineFixtures.Coarse);
+        var run = PlanarSolve.Run(problem, mesh, ports, [fFloor, 2e9],
+                                  new PlanarSolveSettings(Deembed: false));
+        Assert.DoesNotContain(run.Notes, n => n.Contains("the 0 Hz conduction solve"));
+        Assert.NotEqual(0.0, run.Points[0].S[1, 0].Imaginary);
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════

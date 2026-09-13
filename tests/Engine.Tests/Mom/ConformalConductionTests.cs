@@ -132,6 +132,136 @@ public sealed class ConformalConductionTests(ITestOutputHelper output)
     /// on ONE polygon — end up in different conduction islands. That is the whole finding: the mesh
     /// is well formed, the solve would converge, and the answer would be a passive open circuit.
     /// </summary>
+    /// <summary>
+    /// <b>LF2 — and the sweep asks BEFORE it splits 0 Hz and the sub-floor points off.</b>
+    ///
+    /// <para>The check used to sit below that split, so a sweep with no fitted point in it returned
+    /// early and never asked — and that is the worst place to skip it. The conduction solve answers
+    /// a disconnected port with EXACTLY zero by design (LF1 §4), so a severed mesh publishes a
+    /// clean, exact open circuit with nothing anywhere to say so. All three sweep shapes are asked
+    /// here because all three take different paths out of <c>PlanarSolve.Run</c>.</para>
+    /// </summary>
+    [Theory]
+    [InlineData("AC only")]
+    [InlineData("DC only")]
+    [InlineData("below the fit floor only")]
+    [InlineData("DC and AC")]
+    public void ASeveredConductorRefusesWHATEVERShapeTheSweepIs(string shape)
+    {
+        var (problem, ports) = Pair(812.8);
+        var mesh = SurfaceMesher.Mesh(problem, Mesh(PlanarBoundaryCells.Conformal)).Mesh;
+        var resolved = PlanarPorts.ResolveAll(mesh, ports);
+        Assert.NotEmpty(PlanarConductors.FindSeveredConductors(problem, mesh, resolved));
+
+        double[] freqs = shape switch
+        {
+            "AC only"                  => [F],
+            "DC only"                  => [0.0],
+            "below the fit floor only" => [1e5, 1e6],
+            _                          => [0.0, F],
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => PlanarSolve.Run(problem, mesh, resolved, freqs,
+                                  new PlanarSolveSettings(Deembed: false)));
+        output.WriteLine($"{shape}: {ex.Message[..96]}…");
+        Assert.Contains("SEVERED", ex.Message);
+    }
+
+    /// <summary>
+    /// <b>LF3 — the KERNEL re-meshes rather than handing the user a choice of two remedies.</b>
+    ///
+    /// <para>Owner report: told "turn the edge mesh on, or set Boundary cells to Staircase", a user
+    /// picked the edge mesh — the expensive one. On the board this came from that is 4x the DUT's
+    /// unknowns AND 4x every calibration standard, because a standard reproduces the DUT's own
+    /// gridlines; staircasing the same artwork cost 2%. But staircase does NOT always clear it —
+    /// on this fixture only resolving the rim does — so both are tried in cost order.</para>
+    ///
+    /// <para>The gate is fixture-independent on purpose: it computes what each remedy would cost and
+    /// asserts the run landed on the CHEAPEST one that actually restores conduction. That holds on
+    /// a board where staircase is enough and on one where it is not, which is the property, rather
+    /// than naming a remedy this one fixture happens to need.</para>
+    /// </summary>
+    [Fact]
+    public void AMeshThatSeversAConductorRemeshesItselfOnTheCHEAPESTRemedyThatWorks()
+    {
+        var (problem, ports) = Pair(812.8);
+
+        // The premise, asked of the geometry the KERNEL meshes — the ground-path- and feed-extended
+        // problem, not the raw one. On this fixture that distinction matters: raw, the edge mesh
+        // alone clears it; extended, neither remedy alone does and the pair of them does.
+        var (g0, _, _)  = PlanarGroundPath.Extend(problem, ports);
+        var (ext, _, _) = PlanarFeedExtension.Extend(g0, ports, null);
+
+        int CostIfItWorks(PlanarMeshSettings ms)
+        {
+            // Through the KERNEL's own mesh wrapper — it passes PlanarEdgeReference.LocalConductorWidth,
+            // and a bare SurfaceMesher.Mesh here silently measures a different mesh.
+            var rep = new PlanarKernel().Mesh(ext, ms, ports: ports);
+            if (!rep.CanSolve) return int.MaxValue;
+            var rp = PlanarPorts.ResolveAll(rep.Mesh, ports);
+            return PlanarConductors.FindSeveredConductors(ext, rep.Mesh, rp).Count == 0
+                ? rep.Mesh.Bases.Count : int.MaxValue;
+        }
+
+        Assert.Equal(int.MaxValue, CostIfItWorks(Mesh(PlanarBoundaryCells.Conformal)));
+
+        // Exactly the three the kernel will try: the refusal's two remedies and both together.
+        int best = int.MaxValue;
+        foreach (var ms in (PlanarMeshSettings[])[
+            Mesh(PlanarBoundaryCells.Staircase),
+            Mesh(PlanarBoundaryCells.Conformal, edge: true),
+            Mesh(PlanarBoundaryCells.Staircase, edge: true)])
+            best = Math.Min(best, CostIfItWorks(ms));
+
+        output.WriteLine($"cheapest remedy that restores conduction: N = {best:N0}");
+        Assert.True(best < int.MaxValue, "no remedy works — the fixture moved");
+
+        var result = new PlanarKernel().Solve(
+            problem, Mesh(PlanarBoundaryCells.Conformal), ports, [F],
+            new PlanarSolveSettings(Deembed: false));
+
+        foreach (var n in result.Notes) output.WriteLine("  " + n);
+        var note = Assert.Single(result.Notes, n => n.Contains("The mesh severed"));
+
+        // It has to say WHICH conductor, BETWEEN WHICH PORTS, and what it cost — a user who is not
+        // told the count will go looking for it.
+        Assert.Contains("Metal", note);
+        Assert.Contains("port 1", note);
+        Assert.Contains($"N = {best:N0}", note);
+
+        // The CHEAPEST one that works, not the first one tried.
+        Assert.Equal(best, result.MeshReport.Mesh.Bases.Count);
+        Assert.Empty(PlanarConductors.FindSeveredConductors(ext, result.MeshReport.Mesh, result.Ports));
+        // NOT asserted on |S₂₁| being "large". With de-embedding off the raw answer is dominated by
+        // the delta-gap port rather than by the structure at every frequency (mom-engine.md §10.13a),
+        // so a magnitude gate here would be measuring the excitation. The structural statement — the
+        // meshed conductor conducts, and the run landed on the cheapest mesh that makes it so — is
+        // the claim; the companion test below pins the NUMBERS against that mesh asked for directly.
+    }
+
+    [Fact]
+    public void ARunThatWasNEVERSeveredSaysNothing_AndTheRecoveredOneMatchesItExactly()
+    {
+        var (problem, ports) = Pair(812.8);
+        var st = new PlanarSolveSettings(Deembed: false);
+
+        // The remedy this fixture needs, asked for explicitly — no recovery, no note.
+        var direct = new PlanarKernel().Solve(
+            problem, Mesh(PlanarBoundaryCells.Staircase, edge: true), ports, [F], st);
+        Assert.DoesNotContain(direct.Notes, n => n.Contains("The mesh severed"));
+
+        // …and the conformal run that recovered onto it lands on the same mesh and the same numbers,
+        // bit for bit, because it IS that mesh rather than something like it.
+        var recovered = new PlanarKernel().Solve(
+            problem, Mesh(PlanarBoundaryCells.Conformal), ports, [F], st);
+        Assert.Contains(recovered.Notes, n => n.Contains("The mesh severed"));
+        Assert.Equal(direct.MeshReport.Mesh.Bases.Count, recovered.MeshReport.Mesh.Bases.Count);
+        for (int r = 0; r < 4; r++)
+            for (int c = 0; c < 4; c++)
+                Assert.Equal(direct.Solve.Points[0].S[r, c], recovered.Solve.Points[0].S[r, c]);
+    }
+
     [Fact]
     public void AMitreThatCarriesNoRooftopSeversItsConductor_AndIsFound()
     {

@@ -20,6 +20,24 @@ using RfCore;
 namespace CircuitRF.Engine.Mom;
 
 /// <summary>
+/// <b>LF3 — a de-embedding ceiling the ACCELERATOR would clear, raised so the caller can act on it
+/// rather than a user being told to go and turn a switch on.</b>
+///
+/// <para>Thrown only in the one case that is recoverable without changing an answer: the run is
+/// dense, one standard is past the dense ceiling, and it is inside the accelerated one. Every other
+/// ceiling case stays the ordinary refusal it was, because there is nothing to recover with.
+/// <c>PlanarKernel.Solve</c> is what catches it — it owns the settings — and re-runs once with the
+/// accelerator on. This type exists so that retry is keyed on the ONE recoverable case rather than
+/// on matching a sentence.</para>
+/// </summary>
+public sealed class PlanarAcceleratorWouldFitException(int portNumber, int standardUnknowns,
+                                                       string message) : Exception(message)
+{
+    public int PortNumber       { get; } = portNumber;
+    public int StandardUnknowns { get; } = standardUnknowns;
+}
+
+/// <summary>
 /// The two Green's-function kernels at one frequency — mesh-independent, so one fit serves the DUT
 /// and every calibration standard at that frequency.
 /// </summary>
@@ -477,6 +495,10 @@ public sealed class PlanarPortCalibrator
     /// <summary>PCAL4 — does this calibrator own a multi-conductor group's standard set?</summary>
     public bool IsGroup => _groupPorts is not null;
 
+    /// <summary>The SHORT standard's realised plane-to-plane length. PCAL6 reports it on the
+    /// mode-separation refusal, because it is the quantity that refusal is actually about.</summary>
+    public double ShortLengthM => _shortLength;
+
     /// <summary>PCAL4 — the run's ports this calibrator covers, in its standards' conductor
     /// order.</summary>
     public IReadOnlyList<int> GroupPortNumbers => _groupPorts ?? [];
@@ -506,8 +528,7 @@ public sealed class PlanarPortCalibrator
         int n = medium.ModeCount;
         if (n < 2) return double.PositiveInfinity;
 
-        double dl = _deltas[PlanarCalibration.SelectSeparation(
-            _deltas, PlanarCalibration.EstimateBeta(_slab, fHz))];
+        double dl = _deltas[SelectedIndexAt(fHz)];
 
         double worst = double.PositiveInfinity;
         for (int i = 0; i < n; i++)
@@ -540,7 +561,7 @@ public sealed class PlanarPortCalibrator
             work.Commit();
         }
 
-        int pick = PlanarCalibration.SelectSeparation(_deltas, ExpectedBeta(fHz));
+        int pick = SelectedIndexAt(fHz);
         var slots  = _rawCache[fHz];
         var sShort = slots[0]!.Value;
         var sLong  = slots[pick + 1]!.Value;
@@ -664,7 +685,7 @@ public sealed class PlanarPortCalibrator
         }
 
         double expect = ExpectedBeta(fHz);
-        int    pick   = PlanarCalibration.SelectSeparation(_deltas, expect);
+        int    pick   = SelectedIndexAt(fHz);
 
         var slots  = _rawCache[fHz];
         var sShort = slots[0]!.Value;              // Mat<T> is a struct, so these are Nullable<Mat<T>>
@@ -775,8 +796,47 @@ public sealed class PlanarPortCalibrator
     /// unchanged, and the per-frequency choice still ranges over all of them. What changed is only
     /// which of them get filled at each frequency.</para>
     /// </summary>
-    private int[] NeededAt(double fHz) =>
-        [0, 1 + PlanarCalibration.SelectSeparation(_deltas, ExpectedBeta(fHz))];
+    private int[] NeededAt(double fHz) => [0, 1 + SelectedIndexAt(fHz)];
+
+    /// <summary>
+    /// <b>PCAL6/R-pcal6-3 — THE ONE PLACE THAT DECIDES WHICH SEPARATION A FREQUENCY USES.</b>
+    /// <see cref="QuasiStaticModeSeparationDegrees"/>, <see cref="ModalAt"/>, <see cref="At"/> and
+    /// <see cref="NeededAt"/> all ask it, and <see cref="NeededAt"/> is the one that matters: it
+    /// decides which standard meshes are SOLVED at all. A rule reachable from three of the four
+    /// means a run solves one standard and calibrates against another, silently — and until PCAL6
+    /// the setup guard genuinely did ask a different question from the sweep, because it predicted β
+    /// from <see cref="PlanarCalibration.EstimateBeta"/> while the sweep predicted it from the
+    /// previous point.
+    ///
+    /// <para><b>PCAL6/R-pcal6-4 — a GROUP's choice does not depend on the frequencies before
+    /// it.</b> It is made on the quasi-static modal β, which is a property of the group's own
+    /// cross-section and of this frequency alone: <see cref="PlanarModalMedium"/> is built once from
+    /// the two extreme standards' electrostatics, costs no Green's-function fit, and PCAL6/M1
+    /// measured it against the full-wave answer at 0.1-0.8 % over 200 MHz - 1 GHz — far better than
+    /// the ±20 % the choice needs and better than <see cref="PlanarCalibration.EstimateBeta"/>'s own
+    /// 15-20 %. The mean over modes is what is handed over, exactly as
+    /// <see cref="ModalAt"/> already averages for the branch prediction.</para>
+    ///
+    /// <para><b>A port that is not in a group keeps <see cref="ExpectedBeta"/>, unchanged</b> — that
+    /// is the whole of a single-port calibration's selection and it is outside this brief's scope,
+    /// so every ungrouped run is bit-identical by construction rather than by measurement. Its
+    /// history dependence is real, is what §5 describes, and is recorded rather than fixed here.</para>
+    ///
+    /// <para>The BRANCH continuation is a different question and stays on
+    /// <see cref="ExpectedBeta"/>: it is a continuation by definition and has no history-free
+    /// spelling (L9e/M1's own note says why predicting it from the pre-solve estimate is a coin flip
+    /// on the 2π branch).</para>
+    /// </summary>
+    public int SelectedIndexAt(double fHz)
+    {
+        if (_groupPorts is null)
+            return PlanarCalibration.SelectSeparation(_deltas, ExpectedBeta(fHz));
+
+        var medium = Medium();
+        double mean = 0;
+        for (int m = 0; m < medium.ModeCount; m++) mean += medium.Beta(fHz, m);
+        return PlanarCalibration.SelectSeparation(_deltas, mean / medium.ModeCount);
+    }
 
     /// <summary>
     /// How many standard meshes <see cref="PrepareAt"/> would fill at this frequency — 0 when it is
@@ -1164,7 +1224,16 @@ public sealed record PlanarSolveSettings(
     PlanarAdaptiveSettings?    Adaptive    = null,
     int?                       MaxDegreeOfParallelism = null,
     PlanarFarFieldSettings?    FarField    = null,
-    bool                       DeembedOutsideCalibrationValidity = false)
+    bool                       DeembedOutsideCalibrationValidity = false,
+    /// <summary>
+    /// <b>LF2 — a requested point below <see cref="Dcim.LowestFittableFrequency"/> carries the
+    /// 0 Hz conduction solve instead of refusing the sweep.</b> On by default: the alternative is a
+    /// run that stops, and what the conduction answer omits (reactance) is the part that is on its
+    /// way to nothing as the frequency falls, so the substitution's error SHRINKS down the band
+    /// where the fit's grows. Set false to get L9e/D8's refusal back verbatim — which is what a
+    /// caller wants when it is measuring the fit rather than using it.
+    /// </summary>
+    bool                       SubstituteConductionBelowFitFloor = true)
 {
     public static readonly PlanarSolveSettings Default = new();
 }
@@ -1182,20 +1251,38 @@ public static class PlanarSolve
     /// <b>PCAL4/R-pcal4-6 — refuse a calibration group whose modes the cascade eigenproblem cannot
     /// separate, at SETUP.</b> See <see cref="PlanarPortCalibrator.QuasiStaticModeSeparationDegrees"/>
     /// for why the question can be asked before a single frequency has been solved.
+    ///
+    /// <para><b>PCAL6/R-pcal6-7 — asked at EVERY requested frequency, not only at the band's
+    /// bottom, and that is a correction rather than caution.</b> The quasi-static separation is
+    /// Δβ·Δℓ and Δβ is exactly proportional to frequency, so if Δℓ were fixed the bottom of the band
+    /// would provably be the worst point. It is not fixed: <see cref="PlanarCalibration.SuggestDeltas"/>
+    /// hands out one separation per sub-band and the selection steps DOWN to a shorter one as the
+    /// frequency rises, so the product drops by most of that step at every switch. Measured on the
+    /// series' own pair over 100 MHz - 1 GHz, where the candidates are 171.0 mm and 54.1 mm and the
+    /// switch is at 298 MHz: 2.38° at the band's bottom against <b>2.24° just above the switch</b>.
+    /// A band with four candidates has four such steps. The question costs arithmetic on an
+    /// electrostatic solve the run already owes, so it is asked at all of them.</para>
     /// </summary>
     internal static void GuardModeSeparation(PlanarPortCalibrator cal, PlanarPortResolution port,
-                                             double fLoHz, PlanarCalibrationSettings calSt,
+                                             IReadOnlyList<double> freqsHz,
+                                             PlanarCalibrationSettings calSt,
                                              SurfaceMesher.PlanarLengthFormat fmt)
     {
-        double sep = cal.QuasiStaticModeSeparationDegrees(fLoHz);
-        if (sep >= calSt.ModeSeparationFloorDegrees) return;
+        double worst = double.PositiveInfinity, at = 0;
+        foreach (double f in freqsHz)
+        {
+            if (!(f > 0)) continue;
+            double sep = cal.QuasiStaticModeSeparationDegrees(f);
+            if (sep < worst) { worst = sep; at = f; }
+        }
+        if (!(worst < calSt.ModeSeparationFloorDegrees)) return;
 
         var g = port.Group!;
         throw new PlanarFeedClearanceRefusedException(
             $"Ports {string.Join(", ", g.PortNumbers)} would be calibrated together as one group — " +
             $"their feeds are mutually coupled, the nearest pair {fmt(g.NearestM)} apart — but their " +
-            $"{g.ConductorCount} modes are not separable: at {SurfaceMesher.Eng(fLoHz)}Hz the closest " +
-            $"pair differs by {sep:F3}° of electrical length over the calibration separation, against " +
+            $"{g.ConductorCount} modes are not separable: at {SurfaceMesher.Eng(at)}Hz the closest " +
+            $"pair differs by {worst:F3}° of electrical length over the calibration separation, against " +
             $"a floor of {calSt.ModeSeparationFloorDegrees:F2}°. The modal error box is extracted from " +
             "the eigenvectors of the two standards' cascade, and at equal eigenvalues those " +
             "eigenvectors are not determined at all. Separate the feeds by at least the driven " +
@@ -1212,6 +1299,40 @@ public static class PlanarSolve
     /// </summary>
     private static PlanarFrequencyPoint DcPoint(PlanarDcResult dc) =>
         new(0.0, dc.S, dc.S, [], KernelFitMs: 0, DutMs: dc.ElapsedMs, CalibrationMs: 0);
+
+    /// <summary>
+    /// <b>LF2 — a point below the fit's floor, carrying the conduction solve's answer.</b> Exactly
+    /// <see cref="DcPoint"/>'s shape at a non-zero frequency, and for the same reasons: its RawS IS
+    /// its S because there is no reactance to remove, and it carries no calibration because it was
+    /// not calibrated. The frequency is the user's own, so a <c>.sNp</c> has the rows it asked for.
+    /// </summary>
+    private static PlanarFrequencyPoint ConductionPoint(double fHz, PlanarDcResult dc, double ms) =>
+        new(fHz, dc.S, dc.S, [], KernelFitMs: 0, DutMs: ms, CalibrationMs: 0);
+
+    /// <summary>
+    /// <b>One sentence, because a sentence is what gets read.</b> It has to carry three things and
+    /// no more: where the boundary is, which points moved, and that the reactance is not in them.
+    /// The mesh clause is there because the conduction answer is read on whatever mesh the sweep
+    /// was given, and a mesh pinned for a microwave run is a crude resistor ladder — measured at
+    /// 0.750x of a 20 mm trace's true resistance on a 2 GHz mesh, 0.982x on a 40 GHz one
+    /// (docs/design/mom-engine.md §10.13(e)).
+    /// </summary>
+    private static string ConductionSubstitutionNote(
+        IReadOnlyList<double> fs, double stackHeightM, double meshHz)
+    {
+        string which = fs.Count == 1
+            ? $"the {SurfaceMesher.Eng(fs[0])}Hz point carries"
+            : $"{fs.Count} points ({SurfaceMesher.Eng(fs[0])}Hz to "
+              + $"{SurfaceMesher.Eng(fs[^1])}Hz) carry";
+        // The L8d entry point builds its problem with no mesh frequency at all, so the clause that
+        // names one is conditional rather than printing "the 0Hz mesh".
+        string onMesh = meshHz > 0
+            ? $", read on the {SurfaceMesher.Eng(meshHz)}Hz mesh (a coarse mesh reads resistance low)"
+            : "; a coarse mesh reads resistance low";
+        return $"Below {SurfaceMesher.Eng(Dcim.LowestFittableFrequency(stackHeightM))}Hz the "
+             + $"full-wave fit has no valid range, so {which} the 0 Hz conduction solve — "
+             + $"resistance only, no reactance{onMesh}.";
+    }
 
     /// <summary>
     /// <b>The error box of a port that has no error box</b> — a₁₁ = 0, a₂₂ = 0, a₂₁ = 1, i.e. a
@@ -1301,6 +1422,72 @@ public static class PlanarSolve
         var freqs = freqsHz.ToArray();
         Array.Sort(freqs);
 
+        // ── DOES THE MESHED STRUCTURE CONDUCT WHERE THE ARTWORK DOES? (2026-09-12) ──────────────
+        //
+        // Before anything is filled, because a severed conductor makes every number after this point
+        // meaningless and costs a full sweep to discover.
+        //
+        // LF2 MOVED IT ABOVE THE 0 Hz AND SUB-FLOOR SPLIT, AND THAT IS NOT TIDYING.
+        //
+        // It used to sit below them, so a sweep with no fitted point in it — 0 Hz alone, or a band
+        // entirely under the fit's floor — returned early and never asked. That is the WORST place
+        // to skip it: the conduction solve answers a disconnected port with EXACTLY zero by design
+        // (LF1 §4 — the island's own free nodes settle at the driven potential, so the number comes
+        // off the component graph rather than out of the solve), so a severed mesh publishes a
+        // clean, exact, entirely wrong open circuit with nothing anywhere to say so. The question
+        // needs only the problem, the mesh and the ports, none of which a frequency changes, so
+        // there is no cost to asking it once for every sweep shape. A rooftop exists only where both cells'
+        // share of the edge is swept by metal, so a conformally cut oblique rim can decline every
+        // rooftop across a bend and cut the conductor in two — and NOTHING downstream notices: the
+        // matrix is well formed, the solve converges, and the answer is a smooth, plausible OPEN
+        // CIRCUIT that is passive at every frequency, so R-prt-15's own gate is silent too.
+        //
+        // This is the same judgement PCAL2 made about the clearance breach and for the same reason:
+        // a `.sNp` on disk carries no notes, so a run that cannot produce a usable answer has to stop
+        // rather than publish one with a caveat attached to the window it came from.
+        {
+            var severed = PlanarConductors.FindSeveredConductors(problem, mesh, ports);
+            if (severed.Count > 0)
+            {
+                var s = severed[0];
+                string islands = string.Join(" and ", s.Islands.Select(
+                    g => g.Count == 1 ? $"port {g[0]}" : "ports " + string.Join(", ", g)));
+
+                // ── NAME ONLY REMEDIES THAT BIND (the standing rule, broken three times here) ────
+                //
+                // "Raise Cells per wavelength" is the obvious sentence and it is INERT on exactly
+                // this artwork: the pitch at a mitre is set by the metal's own width and by the
+                // detail floor, not by λ, so on the fixture this was measured on the mesh is
+                // bit-identical at cells/λ 5, 10, 20 and 40 — severed at every one of them, and
+                // raising MinCellsAcrossConductor from 2 to 4 does not clear it either. What was
+                // measured to restore conduction is resolving the RIM, which is the edge mesh; and,
+                // where the cells are cut, staircasing them.
+                bool anyCut = false;
+                foreach (var cell in mesh.Cells) if (cell.IsCut) { anyCut = true; break; }
+
+                string remedy = anyCut
+                    ? "Turn the EDGE MESH on — that resolves the rim and is what was measured to " +
+                      "restore conduction here — or set Boundary cells back to \"Staircase\", which " +
+                      "removes the cut cells altogether."
+                    : "Turn the EDGE MESH on: that is what resolves a rim, and it is what was " +
+                      "measured to restore conduction here.";
+
+                throw new InvalidOperationException(
+                    "The mesh has SEVERED a conductor the artwork draws as one piece: on " +
+                    $"'{problem.Layers[s.LayerIndex].Name}', {islands} stand on the same polygon and " +
+                    "no chain of basis functions joins them, so no current can pass between them " +
+                    "however this structure is driven. The s-parameters would read as an OPEN " +
+                    "CIRCUIT — smooth, plausible and passive at every frequency, which is why " +
+                    "nothing else here catches it. A rooftop is only built where the shared edge of " +
+                    "two cells is swept by metal on both sides, and at an oblique rim — a mitre, a " +
+                    "taper flank, a chamfer — a coarse mesh can fail that right across a conductor. " +
+                    remedy + " Raising Cells per wavelength is NOT a remedy here: where the metal is " +
+                    "narrower than a wavelength cell the pitch is set by the geometry and that " +
+                    "setting cannot move this mesh at all.");
+            }
+        }
+
+
         // ── LF1 — 0 Hz IS TAKEN OUT OF THE SWEEP BEFORE ANYTHING ELSE READS IT ──────────────────
         //
         // It is not a frequency this machinery can carry: the kernel is written in k₀, the
@@ -1317,21 +1504,55 @@ public static class PlanarSolve
             freqs = freqs[firstAc..];
         }
 
+        // ── LF2 — AND SO ARE THE POINTS BELOW THE FIT'S OWN FLOOR, FOR THE SAME REASON ──────────
+        //
+        // L9e/D8's refusal stood here because below k₀H = 1e-4 the fit is fitting roundoff. What it
+        // could not say is that the fit is the LAST of four walls at the bottom of a band, not the
+        // first: the calibration standard's N goes as 1/f and is refused an octave or more higher,
+        // the de-embedding peel divides by a₂₁ ∝ ω, and the raw uncalibrated answer is the delta
+        // gap rather than the structure at ANY frequency (docs/design/mom-engine.md §10.13). None
+        // of those has a knob, and all four of them stop mattering at 0 Hz, where the problem is a
+        // conduction network with an exact answer. So the points down there take that answer.
+        //
+        // Split HERE, beside 0 Hz and above everything else, for the reason LF1 gives: nothing
+        // below this line then has a sub-floor frequency to branch on, and every remaining point's
+        // arithmetic is bit-identical to what it was before this existed.
+        double stackHeightM = problem.RequiresGeneralKernel ? problem.EffectiveStack.TopZ
+                                                            : slab.HeightM;
+        double[] subFloor = [];
+        if (st.SubstituteConductionBelowFitFloor && stackHeightM > 0)
+        {
+            int firstFit = 0;
+            while (firstFit < freqs.Length &&
+                   Dcim.IsBelowFitFloor(2.0 * Math.PI * freqs[firstFit] / EmConstants.C0,
+                                        stackHeightM))
+                firstFit++;
+            if (firstFit > 0) { subFloor = freqs[..firstFit]; freqs = freqs[firstFit..]; }
+        }
+
         if (freqs.Length == 0)
         {
-            // A sweep of nothing but DC. The mesh is already built and the ports already resolved,
-            // so there is an exact answer here and no reason to refuse it.
+            // A sweep of nothing but DC and points below the fit's floor. The mesh is already built
+            // and the ports already resolved, so there is an exact answer here and no reason to
+            // refuse it.
             var only = PlanarDcSolve.Solve(problem, mesh, ports, leads);
             notes.AddRange(only.Notes);
+            var onlyPoints = new List<PlanarFrequencyPoint>(1 + subFloor.Length);
+            if (wantDc) onlyPoints.Add(DcPoint(only));
+            for (int i = 0; i < subFloor.Length; i++)
+                onlyPoints.Add(ConductionPoint(subFloor[i],
+                                               only, i == 0 && !wantDc ? only.ElapsedMs : 0));
+            if (subFloor.Length > 0)
+                notes.Add(ConductionSubstitutionNote(subFloor, stackHeightM, problem.MaxFrequencyHz));
             return new PlanarSolveResult
             {
-                Points        = [DcPoint(only)],
+                Points        = onlyPoints,
                 CoreFillCount = 0,
                 UnknownCount  = mesh.Bases.Count,
                 StandardCount = 0,
                 CoreBuildMs   = 0,
                 Notes         = notes,
-                SolvedPointCount = 1,
+                SolvedPointCount = onlyPoints.Count,
             };
         }
 
@@ -1365,7 +1586,7 @@ public static class PlanarSolve
         // 0 Hz is not a frequency this guard has anything to say about: it is not fitted at all, it
         // is solved as a conduction network (PlanarDcSolve), and asking a question about k₀H of a
         // point where k₀ = 0 would refuse the one case that is exact.
-        double stackH = general ? problem.EffectiveStack.TopZ : slab.HeightM;
+        double stackH = stackHeightM;
         double fLoAc  = 0;
         foreach (double f in freqs) if (f > 0) { fLoAc = f; break; }
         if (fLoAc > 0)
@@ -1449,60 +1670,6 @@ public static class PlanarSolve
             MaxDegreeOfParallelism = cap,
             Budget                 = parallelBudget,
         };
-
-        // ── DOES THE MESHED STRUCTURE CONDUCT WHERE THE ARTWORK DOES? (2026-09-12) ──────────────
-        //
-        // Before anything is filled, because a severed conductor makes every number after this point
-        // meaningless and costs a full sweep to discover. A rooftop exists only where both cells'
-        // share of the edge is swept by metal, so a conformally cut oblique rim can decline every
-        // rooftop across a bend and cut the conductor in two — and NOTHING downstream notices: the
-        // matrix is well formed, the solve converges, and the answer is a smooth, plausible OPEN
-        // CIRCUIT that is passive at every frequency, so R-prt-15's own gate is silent too.
-        //
-        // This is the same judgement PCAL2 made about the clearance breach and for the same reason:
-        // a `.sNp` on disk carries no notes, so a run that cannot produce a usable answer has to stop
-        // rather than publish one with a caveat attached to the window it came from.
-        {
-            var severed = PlanarConductors.FindSeveredConductors(problem, mesh, ports);
-            if (severed.Count > 0)
-            {
-                var s = severed[0];
-                string islands = string.Join(" and ", s.Islands.Select(
-                    g => g.Count == 1 ? $"port {g[0]}" : "ports " + string.Join(", ", g)));
-
-                // ── NAME ONLY REMEDIES THAT BIND (the standing rule, broken three times here) ────
-                //
-                // "Raise Cells per wavelength" is the obvious sentence and it is INERT on exactly
-                // this artwork: the pitch at a mitre is set by the metal's own width and by the
-                // detail floor, not by λ, so on the fixture this was measured on the mesh is
-                // bit-identical at cells/λ 5, 10, 20 and 40 — severed at every one of them, and
-                // raising MinCellsAcrossConductor from 2 to 4 does not clear it either. What was
-                // measured to restore conduction is resolving the RIM, which is the edge mesh; and,
-                // where the cells are cut, staircasing them.
-                bool anyCut = false;
-                foreach (var cell in mesh.Cells) if (cell.IsCut) { anyCut = true; break; }
-
-                string remedy = anyCut
-                    ? "Turn the EDGE MESH on — that resolves the rim and is what was measured to " +
-                      "restore conduction here — or set Boundary cells back to \"Staircase\", which " +
-                      "removes the cut cells altogether."
-                    : "Turn the EDGE MESH on: that is what resolves a rim, and it is what was " +
-                      "measured to restore conduction here.";
-
-                throw new InvalidOperationException(
-                    "The mesh has SEVERED a conductor the artwork draws as one piece: on " +
-                    $"'{problem.Layers[s.LayerIndex].Name}', {islands} stand on the same polygon and " +
-                    "no chain of basis functions joins them, so no current can pass between them " +
-                    "however this structure is driven. The s-parameters would read as an OPEN " +
-                    "CIRCUIT — smooth, plausible and passive at every frequency, which is why " +
-                    "nothing else here catches it. A rooftop is only built where the shared edge of " +
-                    "two cells is swept by metal on both sides, and at an oblique rim — a mitre, a " +
-                    "taper flank, a chamfer — a coarse mesh can fail that right across a conductor. " +
-                    remedy + " Raising Cells per wavelength is NOT a remedy here: where the metal is " +
-                    "narrower than a wavelength cell the pitch is set by the geometry and that " +
-                    "setting cannot move this mesh at all.");
-            }
-        }
 
         var sw    = Stopwatch.StartNew();
         var dut   = new PlanarSolveContext(mesh, ports, fillSt, levels, slab.HeightM);
@@ -1909,6 +2076,23 @@ public static class PlanarSolve
                         if (nStd <= stdCeiling) continue;
 
                         var stdSizes = stdSet.Select(z => z.Mesh.Bases.Count.ToString("N0"));
+
+                        // ── LF3 — IF THE ACCELERATOR WOULD CLEAR THIS, SAY SO TO THE CALLER ──────
+                        //
+                        // The refusal below names turning it on as its first remedy, which means the
+                        // run already knows the answer and is asking a person to type it. That is a
+                        // knob nobody can be expected to find from a sentence about a calibration
+                        // standard, and it changes no answer — P11 put the standards' static
+                        // capacitance solve on the accelerator too, so an accelerated run is judged
+                        // against one ceiling throughout. Only the recoverable case is signalled;
+                        // past the accelerated ceiling, or already accelerated, the refusal stands.
+                        if (!accStd && !general && nStd <= SurfaceMesher.AcceleratedUnknownCeiling)
+                            throw new PlanarAcceleratorWouldFitException(
+                                ports[i].Number, nStd,
+                                $"Port {ports[i].Number}'s calibration standard needs {nStd:N0} " +
+                                $"unknowns, past the {stdCeiling:N0}-unknown dense ceiling and " +
+                                $"inside the accelerated one.");
+
                         throw new InvalidOperationException(
                             $"Port {ports[i].Number}'s calibration standard needs {nStd:N0} unknowns " +
                             $"to solve for its reference impedance, past the {stdCeiling:N0}-unknown " +
@@ -1968,7 +2152,7 @@ public static class PlanarSolve
                     // costs no fit at all — and it is the same quantity to the accuracy the two
                     // routes agree to. Asked at the band's BOTTOM, where the separation in electrical
                     // length is smallest and where PCAL1 measured the conditioning to be worst.
-                    if (cal.IsGroup) GuardModeSeparation(cal, ports[i], fLo, calSt, fmt);
+                    if (cal.IsGroup) GuardModeSeparation(cal, ports[i], freqs, calSt, fmt);
 
                     setupMs += sw.Elapsed.TotalMilliseconds;
                     cores  += cal.MeshCount;
@@ -2083,7 +2267,8 @@ public static class PlanarSolve
         double worstPalindrome = 0;
         double worstModeCoupling = 0;
 
-        void RecordGroupDiagnostics(double f, PlanarPortGroupProfile g, PlanarGroupCalibration gc)
+        void RecordGroupDiagnostics(double f, PlanarPortGroupProfile g, PlanarGroupCalibration gc,
+                                    PlanarPortCalibrator cal)
         {
             var b = gc.Box;
             if (b.ModeSeparationDegrees < worstSeparation) { worstSeparation = b.ModeSeparationDegrees; worstSeparationF = f; }
@@ -2105,18 +2290,42 @@ public static class PlanarSolve
             if (b.ModeSeparationDegrees < calSt.ModeSeparationFloorDegrees)
             {
                 var breaches = clearances.FindAll(cc => g.PortNumbers.Contains(cc.PortNumber));
-                throw new PlanarFeedClearanceRefusedException(
+
+                // ── PCAL6 — THE SAME QUANTITY, ASKED OF THE ELECTROSTATICS, IS WHAT SAYS WHICH
+                //    OF THE TWO THINGS THIS IS ───────────────────────────────────────────────────
+                //
+                // "These modes are genuinely degenerate" and "this standard could not measure them"
+                // read identically on the measured number alone, and PCAL6/M1 measured that the
+                // second is what the owner's board actually hit: with the shipped 3 h short line the
+                // measured separation is 0.27-0.30x the quasi-static one at 200 MHz. The
+                // quasi-static one does not move when the short standard grows, so a run whose two
+                // numbers disagree has something left to try and a run whose two numbers AGREE does
+                // not. PlanarKernel.Solve is what tries it; this decides only whether there is
+                // anything to try, and says so by TYPE (see PlanarGroupModesRefusedException).
+                double qs   = cal.QuasiStaticModeSeparationDegrees(f);
+                double want = PlanarCalibration.GroupShortLineM(
+                    slab, fLo, PlanarCalibrationSettings.UsableLoDegrees);
+                bool retryable = qs >= calSt.ModeSeparationFloorDegrees
+                              && want > cal.ShortLengthM * 1.05;
+
+                string message =
                     $"Ports {string.Join(", ", g.PortNumbers)} are calibrated together as one group, " +
                     $"and at {SurfaceMesher.Eng(f)}Hz their {b.ModeCount} modes are not separable: the " +
                     $"closest pair differs by {b.ModeSeparationDegrees:F3}° of electrical length over " +
                     $"the calibration separation, against a floor of " +
-                    $"{calSt.ModeSeparationFloorDegrees:F2}°. The modal error box is extracted from the " +
+                    $"{calSt.ModeSeparationFloorDegrees:F2}° (the group's own electrostatics puts the " +
+                    $"same quantity at {qs:F3}°, on a short standard of {fmt(cal.ShortLengthM)}). The " +
+                    "modal error box is extracted from the " +
                     "eigenvectors of the two standards' cascade, and at equal eigenvalues those " +
                     "eigenvectors are not determined at all — the de-embedded s-parameters would be " +
                     "smooth, plausible and wrong rather than visibly bad. Separate the feeds by at " +
                     "least the driven clearance so each port calibrates on its own, or move the port " +
-                    "plane to a station where the conductors are not coupled.",
-                    breaches);
+                    "plane to a station where the conductors are not coupled.";
+
+                throw retryable
+                    ? new PlanarGroupModesRefusedException(message, breaches, f,
+                                                           b.ModeSeparationDegrees, qs, cal.ShortLengthM)
+                    : new PlanarFeedClearanceRefusedException(message, breaches);
             }
 
             var modes = new string[b.ModeCount];
@@ -2438,7 +2647,7 @@ public static class PlanarSolve
                 }
 
                 if (!gc.Usable) flaggedBand.Add(f);
-                RecordGroupDiagnostics(f, g, gc);
+                RecordGroupDiagnostics(f, g, gc, calibrators[byPort[i]]);
             }
 
             for (int i = 0; i < p; i++)
@@ -3424,12 +3633,20 @@ public static class PlanarSolve
             foreach (string refusal in polSet.Refusals) notes.Add(refusal);
         }
 
-        // ── LF1 — and the DC point goes back on the front ───────────────────────────────────────
-        if (wantDc)
+        // ── LF1/LF2 — and the points that were taken off the front go back on it ────────────────
+        //
+        // One conduction solve serves both: 0 Hz and every sub-floor point are the SAME answer at
+        // different labels, and solving it twice would be two chances to disagree.
+        if (wantDc || subFloor.Length > 0)
         {
             var dc = PlanarDcSolve.Solve(problem, mesh, ports, leads);
             notes.AddRange(dc.Notes);
-            points.Insert(0, DcPoint(dc));
+            for (int i = subFloor.Length - 1; i >= 0; i--)
+                points.Insert(0, ConductionPoint(subFloor[i],
+                                                 dc, i == 0 && !wantDc ? dc.ElapsedMs : 0));
+            if (subFloor.Length > 0)
+                notes.Add(ConductionSubstitutionNote(subFloor, stackHeightM, problem.MaxFrequencyHz));
+            if (wantDc) points.Insert(0, DcPoint(dc));
         }
 
         return new PlanarSolveResult

@@ -408,12 +408,11 @@ public static class Dcim
                                                   DcimSettings? settings = null)
     {
         double kh = k0 * stackHeightM;
-        if (kh >= MinElectricalThicknessForWidenedFit) return EmSuitability.Yes;
+        if (!IsBelowFitFloor(k0, stackHeightM)) return EmSuitability.Yes;
 
         // The lowest frequency this stack CAN be fitted at — the number the caller actually needs,
         // rather than the dimensionless one it is derived from.
-        double fMin = MinElectricalThicknessForWidenedFit * EmConstants.C0
-                      / (2.0 * Math.PI * stackHeightM);
+        double fMin = LowestFittableFrequency(stackHeightM);
 
         string deep = kh < MinElectricalThicknessForFit
             ? " Below k₀H = " + $"{MinElectricalThicknessForFit:G3}" +
@@ -434,6 +433,22 @@ public static class Dcim
             $"{SurfaceMesher.Eng(fMin)}Hz. Raise the sweep's lower edge to it, or ask for 0 Hz " +
             $"itself — a DC point is solved as a conduction network and needs no fit.");
     }
+
+    /// <summary>
+    /// <b>The predicate <see cref="CanFitAtFrequency"/> refuses on, on its own.</b> LF2 substitutes
+    /// the conduction solve for the points below the floor instead of refusing the sweep, and a
+    /// second spelling of "is this point below the floor" is a second answer waiting to disagree
+    /// with this one at the boundary — so both the refusal and the substitution ask this.
+    /// </summary>
+    public static bool IsBelowFitFloor(double k0, double stackHeightM) =>
+        k0 * stackHeightM < MinElectricalThicknessForWidenedFit;
+
+    /// <summary>
+    /// The lowest frequency the widened fit reaches on this stack — the number a caller reports,
+    /// rather than the dimensionless one it comes from. 5.30 MHz on 0.9 mm, 3.41 MHz on 1.4 mm.
+    /// </summary>
+    public static double LowestFittableFrequency(double stackHeightM) =>
+        MinElectricalThicknessForWidenedFit * EmConstants.C0 / (2.0 * Math.PI * stackHeightM);
 
     /// <summary>Below this the fit never sampled the scale being asked about — see
     /// <see cref="ValidatedRhoOverLambdaLayered"/>, item 2. Stack-independent by construction.</summary>

@@ -287,13 +287,13 @@ public sealed class PlanarCalibrationGroupTests(ITestOutputHelper output)
         };
 
         var ex = Assert.Throws<PlanarFeedClearanceRefusedException>(
-            () => PlanarSolve.GuardModeSeparation(cal, port, 1e9, strict, v => $"{v * 1e6:F0} µm"));
+            () => PlanarSolve.GuardModeSeparation(cal, port, [1e9], strict, v => $"{v * 1e6:F0} µm"));
         output.WriteLine(ex.Message);
         Assert.Contains("not separable", ex.Message, StringComparison.Ordinal);
         Assert.Contains("Separate the feeds", ex.Message, StringComparison.Ordinal);
 
         // …and the shipped floor lets this fixture through, which is the other half of the claim.
-        PlanarSolve.GuardModeSeparation(cal, port, 1e9, PlanarCalibrationSettings.Default,
+        PlanarSolve.GuardModeSeparation(cal, port, [1e9], PlanarCalibrationSettings.Default,
                                         v => $"{v * 1e6:F0} µm");
     }
 

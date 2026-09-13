@@ -1,6 +1,6 @@
 # Brief — a port whose feed has a neighbour is de-embedded against the wrong structure: the series
 
-**Status:** the series is COMPLETE — briefs 1, 2, 3 and 4 all done · **Date:** 2026-09-12 · **Area:** `src/Engine/Mom` (port calibration)
+**Status:** the series is COMPLETE — briefs 1, 2, 3, 4 and 6 all done · **Date:** 2026-09-13 · **Area:** `src/Engine/Mom` (port calibration)
 **Requirement tag for the series:** `R-pcal-n`
 
 ---
@@ -151,17 +151,20 @@ free win.
 
 ## 4. The briefs, in the order they are worth doing
 
-**All four briefs have reported (2026-09-12).** Their findings are in `src/Engine/Mom/RESOLVED.md`,
-"PCAL1 — how much clearance a calibrated port actually needs", "PCAL2", "PCAL3" and "PCAL4". **Brief 4
-was not made unnecessary by 3**: a driven neighbour needs 2–3× the clearance of a passive one, so a
-design 3 makes safe can still be refused — and brief 4 is what stops it being refused.
+**All four briefs have reported (2026-09-12), and so has brief 6 (2026-09-13).** Their findings are
+in `src/Engine/Mom/RESOLVED.md`, "PCAL1 — how much clearance a calibrated port actually needs",
+"PCAL2", "PCAL3", "PCAL4", "PCAL5" and "PCAL6". **Brief 4 was not made unnecessary by 3**: a driven
+neighbour needs 2–3× the clearance of a passive one, so a design 3 makes safe can still be refused —
+and brief 4 is what stops it being refused.
 
 | # | Brief | Status after PCAL1 |
 |---|---|---|
 | 1 | **The investigation** — `brief-portcal-1-investigation.md` | **Done.** The clearance law is `s/h`: the neighbour's distance in SUBSTRATE HEIGHTS, and line width is inert (a 4× change in w moves the threshold 5 %). |
 | 2 | **Stop publishing the bad answer** — `brief-portcal-2-refuse-not-warn.md` | **Done (2026-09-12).** Independent of 1's outcome and now carrying 1's numbers: the threshold must be its own setting, **5 h for a neighbour carrying a port and 2 h for one that does not**, and the margin it reports is `s/h`, because nothing the solve already computes bounds the error. |
 | 3 | **A passive neighbour inside the port profile** — `brief-portcal-3-passive-neighbour.md` | **Done (2026-09-12).** The standard reproduces the neighbour and the fixture that was 18.0 dB out in S₁₁ and non-passive at 3 of 7 points comes back **at the A-vs-B floor and passive at every point** — at six of its seven frequencies. The seventh is the finding: a reproduced neighbour is open at both ends, so the STANDARD resonates at βL = nπ, and those points are named rather than fixed. Standards double, 4.57× → 9.14× the DUT's unknowns. `src/Engine/Mom/RESOLVED.md`, "PCAL3". |
-| 4 | **Calibration groups and a modal error box** — `brief-portcal-4-modal-error-box.md` | **Write it third, and it is still the expensive one.** Brief 3 does not subsume it: a driven neighbour needs 2–3× the clearance of a passive one, so a design 3 makes safe can still be refused. |
+| 4 | **Calibration groups and a modal error box** — `brief-portcal-4-modal-error-box.md` | **Done (2026-09-12).** The coupled pair the series opened on de-embeds to the A-vs-B floor and is passive across the band. `src/Engine/Mom/RESOLVED.md`, "PCAL4". |
+| 5 | **A group's feed leads, a cut cell's clearance, a severed conductor** — no brief; owner report | **Done (2026-09-12).** `src/Engine/Mom/RESOLVED.md`, "PCAL5". |
+| 6 | **Which separation a grouped port calibrates on** — `brief-portcal-6-separation-selection.md` | **Done (2026-09-13), and it refuted its own framing.** The selection rule is innocent: at the bottom of a band `ModeSeparationDegrees` is not the modes' distance, because the SHORT standard — 3 substrate heights, 1.5° of line at 200 MHz — cannot separate them at any Δℓ, and the near-zero readings a run refuses on are two corrupt curves crossing. A run that hits the floor regrows the short standard to 20° electrical and calibrates again; `SelectSeparation` is unchanged, so a run that passes today is bit-identical. `src/Engine/Mom/RESOLVED.md`, "PCAL6". |
 
 **One thing §0's "the machinery mostly exists already" got wrong, and it is worth recording**: it
 does, up to the point where a 2N×2N cascade has to be formed from raw port scattering. A series delta

@@ -143,6 +143,32 @@ namespace CircuitRF.Engine.Mom;
 /// coupled pair the series opened on and the three-conductor case the brief's own gate 3 asks for,
 /// and refuses a wider group by name rather than discovering the cost at run time.
 /// </param>
+/// <param name="GroupShortLineDegrees">
+/// <b>PCAL6/R-pcal6-2 — the SHORT standard's own minimum electrical length, at the band's bottom,
+/// for a calibration GROUP. 0 turns it off, which is the shipped default and is what makes every
+/// run that passes today bit-identical.</b>
+///
+/// <para><b>It exists because PCAL6/M1 measured that the short standard — not Δℓ — is what decides
+/// whether a group's modes can be measured at all.</b> <see cref="ShortLineHeights"/> sizes the
+/// short line in SUBSTRATE HEIGHTS, which is a statement about how far the two error boxes'
+/// evanescent fields reach and says nothing about phase. A scalar calibration needs nothing more:
+/// D6 reads ℓ₁ only to fix a gauge. The MODAL one does — the <c>T(ℓ₁)·F</c> equation, (4) in
+/// <see cref="PlanarModalCalibration"/>'s own header, is what separates the modes' own gauges, and
+/// as <c>E(ℓ₁) → I</c> it stops distinguishing them. On
+/// 0.9 mm FR-4 the shipped 3 h is <b>1.5° at 200 MHz</b>, and there the extracted separation reads
+/// <b>0.27-0.30× the truth</b> — which is how a group whose modes ARE separable is refused.</para>
+///
+/// <para><b>Measured, on three couplings (0.27 / 1 / 2 h) at 200 and 400 MHz, Δℓ fixed:</b> the
+/// ratio of the measured separation to the quasi-static one is 0.27-0.78 at 1.5°, 0.59-0.73 at 3°,
+/// 0.83-0.93 at 4.2°, 0.90-0.98 at 8°, and on its plateau (0.92-1.00) from 14° up. 20° is
+/// <see cref="PlanarCalibrationSettings.UsableLoDegrees"/> — TRL's own floor, asked of the short
+/// standard rather than only of Δℓ — and every measured row is on the plateau there.</para>
+///
+/// <para><b>It is a RECOVERY setting and not a default, and R-pcal6-1 is why.</b> Applying it to
+/// every grouped run would change de-embedded answers for every grouped port, which is the exact
+/// objection §LF1 §5(b) declined this work on. <c>PlanarKernel.Solve</c> turns it on for ONE retry,
+/// and only after a sweep has actually been refused on the mode-separation floor.</para>
+/// </param>
 /// <param name="ModeSeparationFloorDegrees">
 /// <b>PCAL4/R-pcal4-2 and R-pcal4-6 — how far apart two modes' electrical lengths must be, over the
 /// separation a frequency actually read, before the cascade eigenproblem can tell them apart.</b>
@@ -161,7 +187,8 @@ public sealed record PlanarCalibrationSettings(
     int    NeighbourExtensionCells           = 0,
     bool   IncludeDrivenGroups               = true,
     int    MaxCalibrationGroupSize           = 3,
-    double ModeSeparationFloorDegrees        = 0.5)
+    double ModeSeparationFloorDegrees        = 0.5,
+    double GroupShortLineDegrees             = 0.0)
 {
     public static readonly PlanarCalibrationSettings Default = new();
 
@@ -724,6 +751,15 @@ public static class PlanarCalibration
         return deltas;
     }
 
+    /// <summary>
+    /// <b>PCAL6 — the short standard's length for a stated electrical length at the band's
+    /// bottom.</b> From the same pre-solve ε_eff ≈ (εᵣ+1)/2 that <see cref="DeltaAt"/> uses, and
+    /// deliberately so: that estimate runs 15-20 % low, so the realised line comes out LONGER than
+    /// asked, which is the safe direction for a floor.
+    /// </summary>
+    public static double GroupShortLineM(GroundedSlab slab, double fLoHz, double degrees) =>
+        degrees * Math.PI / 180.0 / EstimateBeta(slab, Math.Max(fLoHz, 1.0));
+
     private static double DeltaAt(GroundedSlab slab, double fHz, PlanarCalibrationSettings s)
     {
         // ε_eff is not known before a solve; (εᵣ+1)/2 is the standard crude microstrip estimate, and
@@ -744,8 +780,17 @@ public static class PlanarCalibration
         PlanarPortResolution port, GroundedSlab slab, double fLoHz, double fHiHz,
         PlanarCalibrationSettings? settings = null)
     {
+        var s = settings ?? PlanarCalibrationSettings.Default;
         int k = EndRunCellsFor(port, slab, settings);
         var (shortTarget, _) = SuggestLengths(slab, fLoHz, fHiHz, settings);
+
+        // ── PCAL6/R-pcal6-2 — A GROUP'S SHORT STANDARD HAS TO CARRY PHASE, NOT ONLY CLEARANCE ───
+        //
+        // Off unless PlanarKernel.Solve's retry turned it on, so every run that passes today builds
+        // the standard it builds today, to the bit. See GroupShortLineDegrees for the measurement.
+        if (port.Group is not null && s.GroupShortLineDegrees > 0)
+            shortTarget = Math.Max(shortTarget, GroupShortLineM(slab, fLoHz, s.GroupShortLineDegrees));
+
         var deltas = SuggestDeltas(slab, fLoHz, fHiHz, settings);
 
         var set = new PlanarStandard[deltas.Length + 1];

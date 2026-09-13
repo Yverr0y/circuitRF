@@ -250,16 +250,57 @@ public class EmDeembedCeilingTests(ITestOutputHelper output)
         Assert.True(mesh.Bases.Count <= SurfaceMesher.UnknownCeiling,
             "the fixture's own DUT must be solvable, or this tests the wrong refusal");
 
+        // LF3 — 400 MHz rather than P11's own 1 GHz, and the frequency is the POINT. A standard's
+        // length goes as 1/f, so the same fixture's standard is past the ACCELERATED ceiling here
+        // and the accelerator cannot rescue it. That is what keeps this the refusal it always was;
+        // the case the accelerator WOULD fit is the next test, and it is no longer this exception.
         var ex = Assert.Throws<InvalidOperationException>(() => PlanarSolve.Run(
-            problem, mesh, ports, [1e9, 5e9],
+            problem, mesh, ports, [400e6, 5e9],
             new PlanarSolveSettings(Fill: PlanarFillSettings.Default, Deembed: true)));
 
         _out.WriteLine(ex.Message);
+        Assert.IsNotType<PlanarAcceleratorWouldFitException>(ex);
         Assert.Contains("calibration standard needs", ex.Message, StringComparison.Ordinal);
         Assert.Contains("Turn ON the accelerated solve", ex.Message, StringComparison.Ordinal);
         Assert.Contains($"{SurfaceMesher.AcceleratedUnknownCeiling:N0} unknowns", ex.Message,
                         StringComparison.Ordinal);
         Assert.Contains($"N = {mesh.Bases.Count:N0}", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <b>LF3 — the one recoverable ceiling is SIGNALLED, not refused.</b>
+    ///
+    /// <para>Owner report: a real board refused with a sentence whose first remedy was "turn the
+    /// accelerated solve on". A run that already knows the answer should not be asking a person to
+    /// go and type it — especially not one phrased in terms of a calibration standard, which is not
+    /// a thing the user drew. So the one case that is recoverable without changing an answer (dense,
+    /// past the dense ceiling, inside the accelerated one) raises its own type and
+    /// <c>PlanarKernel.Solve</c> turns the accelerator on and re-runs.</para>
+    /// </summary>
+    [Fact]
+    public void LF3_ADenseCeilingTheAcceleratorWouldClear_IsSignalledForTheCallerToFix()
+    {
+        var (problem, mesh, ports) = WidePortFixture();
+
+        var ex = Assert.Throws<PlanarAcceleratorWouldFitException>(() => PlanarSolve.Run(
+            problem, mesh, ports, [1e9, 5e9],
+            new PlanarSolveSettings(Fill: PlanarFillSettings.Default, Deembed: true)));
+
+        _out.WriteLine($"port {ex.PortNumber}, standard N = {ex.StandardUnknowns:N0}");
+        Assert.Equal(ports[0].Number, ex.PortNumber);
+        Assert.InRange(ex.StandardUnknowns,
+                       SurfaceMesher.UnknownCeiling + 1, SurfaceMesher.AcceleratedUnknownCeiling);
+
+        // …and the same run with the accelerator already on is not signalled at all, which is what
+        // makes the retry terminate rather than loop.
+        var accelerated = new PlanarSolveSettings(
+            Fill: PlanarFillSettings.Default with { Aim = PlanarAimSettings.Default }, Deembed: true);
+        var slab = Ro4350;
+        int endRun = PlanarCalibration.EndRunCellsFor(ports[0], slab);
+        Assert.All(PlanarCalibration.BuildSet(ports[0], slab, 1e9, 5e9),
+                   z => Assert.True(z.Mesh.Bases.Count <= SurfaceMesher.AcceleratedUnknownCeiling));
+        _out.WriteLine($"end run {endRun} cells; accelerated ceiling clears every standard");
+        Assert.NotNull(accelerated.Fill!.Aim);
     }
 
     /// <summary>
