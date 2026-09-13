@@ -157,3 +157,129 @@ Two mechanical traps met on the way:
   to 0.0008 dB, so the return-loss figure drew as a single trace with two Y-axis label strips beside
   it. `DocDataDisplayFixtures.Dashed` sets the second trace's line style through the trace card's own
   picker; the coincidence is then the thing the reader can see.
+
+---
+
+## Illustrating the MoM chapter's worked example (2026-09-13)
+
+Eight figures were added to `reference/mom-engine.html`'s worked example — the artwork, the stackup,
+the ports, the mesh settings, the mesh, and three plots of the solved bend — plus two links to AN-01.
+`DocMomBendFixtures` builds all of them. A ninth, `DocConformalMeshFixtures`, illustrates the
+Conformal boundary cells section; it is described at the end.
+
+**The artwork is BUILT in the fixture, which is the deliberate exception to the rule
+`DocAntennaFixtures` states.** The antenna page is written *about* `testdata/antenna/`, so a second
+copy under `src/Ui` would drift from the design the page quotes. This page is an *instruction*: it
+tells a reader to draw two rectangles at four stated coordinates, and the figures have to be of
+exactly those coordinates. There is no file for them to be a copy of, so the constants live once, in
+the fixture, beside a comment saying the prose quotes them.
+
+### The figures falsified two paragraphs of the prose, which is the point of adding them
+
+Putting the panel's own mesh report next to hand-written arithmetic is what caught it:
+
+- The page computed the mesh from **λ_g ≈ 16.5 mm and a 20 mm run** — neither of which is this
+  structure. The real numbers are λ_g = 563 mil at 10 GHz, 400 mil arms, 351 cells and 654 unknowns.
+- A sentence claiming the conductor width sets the cell size here was wrong by 2 %: λ_g/20 is
+  28.1 mil and the 114 mil width over 4 cells is 28.5, so the **wavelength cap** wins, barely. Both
+  numbers are printed in the figure beside it now.
+
+Same shape as AN-01's own lesson one file up: prose is not regenerated, so the cheapest guard is to
+put the tool's own report in the picture next to the sentence that paraphrases it.
+
+### A second data source on one plot is a LOAD, not a refresh
+
+`DataSourceLibraryViewModel.RefreshAvailableDataSources` only enumerates `results/*.npy` into
+`AvailableDataSources`; `Entries` — the loaded library — grows only through `LoadFileAsync`. And
+`TraceRowViewModel.SourceSelectorVisible` is gated on **two loaded entries**. So a figure that merely
+wrote a second results file beside the first gets no per-trace Source combo and every trace silently
+comes from the selected one. `DocDataDisplayFixtures.PlotFor` takes an `also` list for this, and
+`PickSource` refuses by name rather than falling back.
+
+### Every trace-card edit needs the card as a FUNCTION, not a reference
+
+`TraceRowViewModel.ApplySelectedTransform` ends in `RebuildAndNotify`, which replaces the inspector's
+rows — so the rule `DocAntennaFixtures` learned on cube-axis edits applies to the transform combo and
+the left/right axis toggle too. `Card`, `SetTransform`, `PickSource` and `UseRightAxis` now live in
+`DocDataDisplayFixtures` so there is one copy of it.
+
+### Cropping to the mesh settings
+
+`FigureCrop.Around` needs something NAMED to crop to, so `EmSetupEditorView.axaml`'s surface-mesh
+`Border` is now `Name="SurfaceMeshGroup"`. Two things about the row size: the group includes the
+mesh **summary and notes**, which are worth keeping (they carry the unknown count, the return plane,
+and what the edge mesh cost), and a frame shorter than the group trims from the **bottom**, so 430 px
+cut a sentence mid-word. 560 fits it.
+
+### Two small traps met on the way
+
+- **The `.sNp` an EM run writes is `RI`, not `MA`.** Reading columns 2 and 3 as magnitude and angle
+  gives a smooth, plausible, completely wrong table — which is what the first hand-check of the bend
+  produced.
+- **`dotnet run --project src/Cli --nologo -- …` swallows the verb** and prints the usage banner with
+  exit code 0. Drop the `--nologo`.
+
+### The committed `docs/user` drift, re-measured
+
+The stale-output problem recorded above is unchanged and now numbers **59 files**: 47 figures, one
+toolbar manifest, and 11 pages (pages drift because figures are inlined into them). Measured the way
+the memory note prescribes — `git worktree add` at HEAD, regenerate there, and diff — which takes
+about four minutes and is the only way to separate your own figures from the drift. Generating into a
+**scratch directory instead of `docs/user` does not work for pages**: every emitted page carries a
+`Source: <path>` comment built from the out directory, so all 40-odd of them differ for that reason
+alone. Regenerate in place and `git checkout` the drift list afterwards.
+
+### The conformal-against-staircase comparison is ONE figure, not two
+
+`DocConformalMeshFixtures.StaircaseVersusConformal` puts two `LayoutCanvas`es in one picture, so a
+reader cannot be looking at one of them under a caption about the other. `DocLayoutFixtures.Framed`
+was split for it: `FramedCanvas` hands back the control and the after-layout viewport write, and
+`Framed` is now a two-line wrapper. The viewport arithmetic stays in one place because that is the
+part with the cropping trap in it.
+
+Three things the figure needs that are not obvious:
+
+- **The mesh has to be COARSE and the edge mesh OFF.** At the shipping settings the cells at a
+  conductor rim are a few per cent of the conductor width, so the boundary treatment — the only thing
+  the figure is of — is drawn smaller than a reader can see, and the graded edge rows are a second
+  striking pattern along exactly the edge they are meant to be looking at. `CellsPerWavelength: 10`,
+  `EdgeMesh: false`, `MinCellsAcrossConductor: 3` at a 3 GHz mesh frequency puts the flank across
+  about one cell every two or three columns, which is the regime in which a staircase looks like one.
+- **The mesh frequency is the LOW end of the band, not the top.** The cell cap goes down with
+  frequency, and small cells are exactly what hides a staircase.
+- **Every settings field is stated rather than defaulted.** The two panels must differ in exactly one
+  field; taking the rest from `PlanarMeshSettings.Default` would let a changed default break that
+  silently.
+
+The overlay draws conformal cut cells only above a zoom floor (`WouldDecimatePlanarMesh`, and its own
+header records the owner report behind it), so a panel too small would have drawn the conformal side
+as staircase rectangles and the figure would have shown two identical meshes. At 430 x 330 on this
+taper it clears the floor comfortably.
+
+**Checking the figure: `qlmanage` is not a reliable ruler for this one.** It renders a wide, short SVG
+at roughly 1.16x whatever `-s` asks for and crops the overflow, so the right-hand panel looked cut off
+when it was not. The SVG's own clip rects settle it — the two canvases are at x = 1 and x = 451, both
+430 x 330, inside a 900-wide frame — and a temporary copy with a shifted `viewBox` renders the far
+panel on its own.
+
+### The figures found two renderer bugs that no test could have (2026-09-13)
+
+Both reported against the new port and Smith figures, both fixed in `src/Render` and written up in
+that project's own `RESOLVED.md`: `SaveLayer` content never reaches an SVG (the Smith grid), and
+`SKClipOperation.Difference` reaches it inverted (the port glyph, clipped to the inside of its own
+numeral). **Neither is a docs bug**, and the same regeneration redrew every other figure carrying a
+Smith chart or a port — `plot-smith-data`, `plot-loadpull-contours`, `data-display`,
+`harmonica-instrument`, `ports-edge`, `ports-internal`, `ports-internal-gap`,
+`ports-gap-mesh-width`, the three AN-01 coupled-pair figures and both antenna patch figures.
+
+**The lesson for this factory is that it is the only vector-export consumer anyone looks at.** The
+application draws these charts correctly on screen every day and had done for as long as the layer
+existed; what surfaced the defect was a person reading a committed `.svg`. A figure is therefore a
+cheap, permanent smoke test for the export path — worth remembering the next time one "looks wrong"
+and the obvious explanation is the fixture.
+
+**And the port label's size is a proportion judgement, not the fix.** A port's name is centred on
+the same anchor its arrow points at, and the renderer knocks the name out of the marker so the text
+reads on top; a numeral much larger than the arrowhead takes the head with it. On the 114 mil bend
+the barb is at most 0.22 of the width — 25 mil — so `DocMomBendFixtures.PortLabelHeight` is 22 mil,
+a little over one barb.

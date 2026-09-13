@@ -801,7 +801,11 @@
                 </Border>
 
                 <!-- ── L8b/L8e: the surface mesh, the R17 verdict and the heat map ── -->
-                <Border Classes="group" IsVisible="{Binding ViewModel.IsPlanarAnalysis}">
+                <!-- Named so the user docs can CROP to it: the MoM chapter's worked example shows
+                     the mesh settings on their own rather than a 2,000 px panel, and the crop is
+                     taken from the live visual tree by this name (FigureCrop.Around). Renaming it
+                     fails the docs build rather than silently photographing the wrong rows. -->
+                <Border Classes="group" Name="SurfaceMeshGroup" IsVisible="{Binding ViewModel.IsPlanarAnalysis}">
                   <StackPanel Spacing="2">
                 <TextBlock Classes="grouphdr" Text="Surface mesh"/>
                 <Grid ColumnDefinitions="180,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"

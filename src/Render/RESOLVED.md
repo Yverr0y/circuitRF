@@ -2059,3 +2059,86 @@ the zoom, and of nothing else.
 Board A, all layers, Release scratch console: pan **9.1 → 10.4 ms** at 1600×1000 and **7.1 → 9.1 ms**
 at 3200×2000 — the per-tile spatial query, paid on build frames only. Against 300 ms and 408 ms
 un-tiled, and the identity figures above are unchanged.
+
+---
+
+## Two constructs that are right on a raster canvas and do not exist in SVG (2026-09-13)
+
+Both were reported as figure bugs — *"the smith chart rendering does not show the axis grid lines"*
+and *"I can't see the port arrowheads … also I don't see the port side lines"* — and both are the
+same class of defect: a Skia call that the raster backend honours and the **SVG device cannot
+express**, so the application looked correct and every export was wrong. Neither had ever been
+caught, because nothing compared a vector export against what the canvas draws.
+
+Both premises are now pinned by tests that assert the Skia behaviour directly
+(`tests/Ui.Tests/VectorExportClipAndLayerTests.cs`), because a fix that rests on an undocumented
+backend limitation is worth nothing if the limitation is misremembered.
+
+### `SaveLayer` content does not reach the file at all
+
+`AxesRenderer.DrawSmithGrid` drew the constant-R and constant-X family into one `SaveLayer` at full
+opacity and composited the layer once — which is what fixed the stippled crossings recorded above,
+and is the natural way to say "an overlap is the same colour as a single stroke".
+
+**An `SKSvgCanvas` handed one circle inside a `SaveLayer` emits an empty `<svg>`.** So every
+exported Smith chart carried its outline, its real axis and its grid numbers over a blank disc: the
+user-doc figures, `circuitrf plot`, `circuitrf render --data`, and the application's own File ▸
+Export. Verified by counting: `plot-smith-data.svg` held exactly **one** `<ellipse>` — the r = 0
+outline — where the grid is about 27 arcs.
+
+**The replacement needs no layer, and it is a property of Skia rather than a trick: one `DrawPath`
+fills its path once however much that path overlaps itself, while N draws composite N times.**
+Measured on two crossing circles stroked at 50 % black — one path reads **127** at the crossing,
+two draws read **63**. So the whole family is accumulated as its own stroked OUTLINE
+(`SKPaint.GetFillPath`) into one `SKPath` and filled once, at the alpha the layer used to carry. A
+masked arc is trimmed by `SKPath.Op(…, Intersect)` against the same even-odd exclusion region the
+clip used — the region is identical, it just has to be applied to the geometry instead of to the
+canvas so everything can share one draw.
+
+**The raster output is unchanged**, which is the thing to check when replacing a compositing
+mechanism: the grey-tone histogram of a 520 px light-theme Smith render is the same before and
+after to within antialiasing noise (the three real populations, 160 / 184 / 208, come back at
+411 / 1011 / 1265 px against 411 / 1012 / 1333).
+
+### `SKClipOperation.Difference` survives — INVERTED
+
+`LayoutRenderer.DrawPortGlyphs` knocks the port's NAME out of the marker pass so the text reads on
+top of an arrow that arrives at the same anchor. It did that with a `Difference` clip.
+
+**SVG has no difference operator.** Skia's device writes any clip as a `<clipPath>` holding the raw
+path, so on the way out the knock-out becomes an **intersect**: the marker is drawn only where the
+name is. In `mom-bend-ports.svg` the whole glyph — the reference-plane bar spanning the port width,
+its serifs and the direction arrow — was clipped down to the inside of the numeral "1", which is why
+a reader could see neither the arrowhead nor the port's width. On screen it was correct, which is
+what kept it hidden.
+
+**An even-odd exclusion says the same thing in a form SVG has**: an enclosing rectangle plus the
+hole, filled `EvenOdd`, clipped `Intersect` — the emitted clip carries `clip-rule="evenodd"` and
+means what it meant here. `LayoutRenderer.ExclusionOf` builds it, and the rectangle is the union of
+the canvas clip and the hole's own bounds, because a hole reaching outside the rectangle would read
+as one more crossing and be filled IN rather than cut out. `AxesRenderer.EvenOddExclusionPath` was
+already doing this for the Smith masks; nothing else in `src/Render` used a difference clip.
+
+**The bug's reach was every port in every export**, not just the one figure that surfaced it: the
+same regeneration redrew `ports-edge`, `ports-internal`, `ports-internal-gap`,
+`ports-gap-mesh-width`, all three AN-01 coupled-pair figures and both antenna patch figures.
+
+### One more instance, found and deliberately NOT fixed
+
+`ContourRenderer.DrawTopoMapFill` composites its colour bands the same way, through one
+`SaveLayer` at `TopoLayerAlpha` — so **a contour trace whose fill is set to Topo map exports with
+no fill at all**, by the same mechanism. It is left alone here for two reasons: no shipped figure
+selects that fill, so there is nothing to check a change against by eye; and the obvious
+replacement is not free of risk. The bands are NESTED `>=`-threshold regions painted over one
+another, so they cannot share one path the way the Smith arcs can — each has its own colour. Making
+them disjoint annuli (`Geq(k)` minus `Geq(k+1)`) and painting each once at the layer's alpha is the
+arithmetic equivalent, but adjacent annuli then share an antialiased boundary and each contributes
+partial coverage to it, which shows as a light hairline seam between every pair of bands. Anyone
+fixing it should build a figure that actually selects Topo map first, and check the seams.
+
+### What to take from it
+
+A vector export is a **different renderer**, and the parts of Skia it does not implement fail
+silently and selectively. Anything that reaches for a layer, a blend mode or a non-intersect clip in
+`src/Render` should be assumed absent from an export until a test says otherwise — the two in
+`VectorExportClipAndLayerTests` are the pattern.

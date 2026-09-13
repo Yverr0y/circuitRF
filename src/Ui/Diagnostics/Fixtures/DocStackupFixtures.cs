@@ -43,6 +43,22 @@ public static class DocStackupFixtures
     public static FigureScene MmicCrossSection() => CrossSection(StarterTechnologies.MmicGaAs());
 
     /// <summary>
+    /// <b>The PCB starter technology's stackup</b> — the three bands the MoM chapter's worked example
+    /// runs on, and the plated through-hole that spans them.
+    ///
+    /// <para>It is here rather than drawn by hand in that chapter for the reason the whole file
+    /// exists: the example's prose quotes 1.6 mm, ε<sub>r</sub> 4.4, tanδ 0.02 and 1 oz copper, and
+    /// this picture reads all four off the <c>Technology</c> a reader's own New Workspace hands
+    /// them. If the shipped stackup moves, the figure moves with it and the prose is the only thing
+    /// left to fix.</para>
+    ///
+    /// <para>Shorter than the MMIC figure because the stack is: two conductors and one dielectric,
+    /// against seven bands.</para>
+    /// </summary>
+    public static FigureScene PcbCrossSection() => CrossSection(
+        StarterTechnologies.Pcb2Layer(), height: 260);
+
+    /// <summary>
     /// <b>The capacitor module on its own, MIM-7</b> — the same real technology, windowed to the
     /// bands between the two interconnect metals so the three things a reader of the MIM section
     /// needs are legible at reading size: the plate metal, the tied dielectric under it (with the

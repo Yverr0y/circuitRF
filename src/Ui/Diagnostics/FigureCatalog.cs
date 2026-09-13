@@ -277,6 +277,81 @@ public static class FigureCatalog
           + "coupled-line design is usually about.",
             Static: true),
 
+        // ── The MoM chapter's conformal-boundary-cell section ────────────────────────────────────
+        //
+        // ONE row, not two, because the figure IS the comparison: two canvases in one picture, so a
+        // reader cannot be looking at one of them under a caption about the other. The size is two
+        // 430x330 panels plus the gap, their headings, and a little slack.
+        new("mom-conformal-vs-staircase", DocConformalMeshFixtures.StaircaseVersusConformal,
+            900, 372, null,
+            "The same Klopfenstein taper meshed twice, differing in one setting. Left, staircase: a "
+          + "cell is either in the metal or out of it, so the curved flank is approximated by whole "
+          + "cells and the meshed outline is not the drawn one. Right, conformal: the boundary cells "
+          + "are cut to follow the metal, and the meshed shape IS the drawn shape. The mesh is "
+          + "coarser than the shipping default and edge refinement is off, so that the boundary "
+          + "treatment is the only thing there is to see."),
+
+        // ── The MoM chapter's worked example: a 50 ohm line with a right-angle bend ──────────────
+        //
+        // Five pictures of the DESIGN, in the order the page's own steps build it, and three of the
+        // RESULT. The artwork is built by DocMomBendFixtures rather than read out of testdata/ -
+        // that file's own note says why this page is the exception to the rule the antenna page
+        // states. The frame is 560x620 on square artwork so the fit stays WIDTH-bound, which is the
+        // regime DocLayoutFixtures.Framed is reliable in.
+
+        new("mom-bend-layout", DocMomBendFixtures.Layout, 560, 620, null,
+            "Step 1: two rectangles on Top Copper, 400 mil by 114 mil and 114 mil by 400 mil, "
+          + "overlapping in the corner square that makes them one conductor. The square is left "
+          + "unmitred deliberately - the bend is what the exercise measures."),
+
+        new("mom-bend-stackup", DocStackupFixtures.PcbCrossSection, 862, 262, null,
+            "Step 2: the stackup the PCB starter technology hands you, drawn in cross-section. "
+          + "1.6 mm of FR-4 between 35 um of top copper and the bottom copper that is the ground "
+          + "reference - the heavy blue edge - with the plated through-hole spanning them. Heights "
+          + "are not to scale; every thickness is printed."),
+
+        new("mom-bend-ports", DocMomBendFixtures.Ports, 560, 620, null,
+            "Step 3: an edge port at the centre of each end face, with the bar marking where "
+          + "current crosses into the structure and the arrow saying which way it flows in. A label "
+          + "at a corner is equally close to two edges and is refused by name rather than guessed."),
+
+        new("mom-bend-mesh-settings", DocMomBendFixtures.MeshSettings, 600, 560, null,
+            "Step 4: the mesh settings, on their defaults, cropped out of the EM Setup panel. Under "
+          + "them is the engine's own report - the unknown count, the cell count, the largest cell "
+          + "and what set it, what the ports return through, and what the edge mesh cost - which is "
+          + "what the Mesh button produces without solving anything."),
+
+        new("mom-bend-mesh", DocMomBendFixtures.Mesh, 560, 620, null,
+            "The same defaults, drawn: the tensor grid over the metal, with the edge mesh's graded "
+          + "cells along every conductor edge and the wavelength pitch in the interior. Current "
+          + "density has a 1/sqrt(d) singularity at an edge, and this is what resolving it costs."),
+
+        // The three RESULT figures. Static, because a de-embedded full-wave sweep is not free and
+        // the answer does not change between regenerations - the arrangement AN-01's own plots and
+        // the antenna patterns use.
+        new("mom-bend-smith", DocMomBendFixtures.SmithS11, 760, 620,
+            WindowFrame.Titled("circuitRF - Data Display"),
+            "Step 6: S(1,1) of the solved bend on its own Smith chart, 1-10 GHz. The locus leaves "
+          + "the centre and runs clockwise below the real axis, which is what an unmitred corner's "
+          + "excess shunt capacitance looks like when it is not yet a number.",
+            Static: true),
+
+        new("mom-bend-mag-phase", DocMomBendFixtures.MagnitudeAndPhase, 880, 560,
+            WindowFrame.Titled("circuitRF - Data Display"),
+            "The same run against frequency: |S(1,1)| and |S(2,1)| in dB on the left axis, and "
+          + "their phases in degrees - dashed - on the right. Two quantities whose ranges have "
+          + "nothing to do with each other share a plot only because the trace card can move one of "
+          + "them to the right-hand axis.",
+            Static: true),
+
+        new("mom-bend-em-vs-circuit", DocMomBendFixtures.EmVersusCircuit, 880, 560,
+            WindowFrame.Titled("circuitRF - Data Display"),
+            "Step 7: the same S(1,1), solved and modelled. The solid traces are the EM run; the "
+          + "dashed ones are MLIN-MBEND-MLIN with the same width, the same 286 mil arms and the "
+          + "same substrate, picked per trace through the trace card's own Source combo. Magnitude "
+          + "on the left, phase on the right.",
+            Static: true),
+
         new("layout-rulers", DocLayoutFixtures.LayoutRulers, 1100, 700,
             WindowFrame.Titled("circuitRF - Layout editor"),
             "Three ruler annotations on the same artwork: a trace width, a free-angle clearance "

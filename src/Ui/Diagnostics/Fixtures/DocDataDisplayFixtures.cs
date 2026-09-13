@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -33,11 +35,32 @@ public static class DocDataDisplayFixtures
     /// Select one of the documentation's results files as the active data source, exactly as the
     /// toolbar's source picker does.
     /// </summary>
-    private static DataDisplayDocumentViewModel Sourced(string logicalId)
+    /// <param name="also">
+    /// Further results files to LOAD into the library alongside the selected one, for a figure whose
+    /// traces come from more than one run.
+    ///
+    /// <para>Loading is what a second entry takes: <c>RefreshAvailableDataSources</c> only
+    /// ENUMERATES what is in the results directory, and the per-trace Source combo appears once the
+    /// library holds two loaded entries (<c>TraceRowViewModel.SourceSelectorVisible</c>). A figure
+    /// that merely wrote a second file beside the first would therefore have no Source combo on its
+    /// cards and every trace would silently come from the selected one.</para>
+    /// </param>
+    private static DataDisplayDocumentViewModel Sourced(
+        string logicalId, IReadOnlyList<string>? also = null)
     {
         var vm = Document();
         var lib = vm.Window.DataSourceLibrary;
         lib.RefreshAvailableDataSources();
+
+        foreach (var extra in also ?? [])
+        {
+            string abs = lib.ResolveAbs(extra)
+                ?? throw new InvalidOperationException(
+                    $"The documentation results file '{extra}' does not resolve under the docs "
+                  + "results root, so a figure comparing two runs cannot load it.");
+            Await(lib.LoadFileAsync(abs));
+        }
+
         Await(lib.SelectDataSourceAsync(logicalId));
         if (lib.SelectedEntry is null)
             throw new InvalidOperationException(
@@ -56,8 +79,9 @@ public static class DocDataDisplayFixtures
     /// </summary>
     internal static (DataDisplayDocumentViewModel Doc, PlotContainerViewModel Plot) PlotFor(
         string logicalId, PlotType type, bool contour = false, int traces = 1,
-        (double W, double H)? size = null, Action<PlotContainerViewModel>? before = null)
-        => Plotted(logicalId, type, contour, traces, size, before);
+        (double W, double H)? size = null, Action<PlotContainerViewModel>? before = null,
+        IReadOnlyList<string>? also = null)
+        => Plotted(logicalId, type, contour, traces, size, before, also);
 
     /// <summary><see cref="Centred"/>, for the same reason.</summary>
     internal static Action<Control> CentredPlot(PlotContainerViewModel plot) => Centred(plot);
@@ -76,9 +100,10 @@ public static class DocDataDisplayFixtures
     /// pattern plot after its traces exist is one whose traces were picked under the other rule.</param>
     private static (DataDisplayDocumentViewModel Doc, PlotContainerViewModel Plot) Plotted(
         string logicalId, PlotType type, bool contour = false, int traces = 1,
-        (double W, double H)? size = null, Action<PlotContainerViewModel>? before = null)
+        (double W, double H)? size = null, Action<PlotContainerViewModel>? before = null,
+        IReadOnlyList<string>? also = null)
     {
-        var vm = Sourced(logicalId);
+        var vm = Sourced(logicalId, also);
         var display = vm.Window.DataDisplay
             ?? throw new InvalidOperationException("The Data Display document has no active tab.");
 
@@ -219,6 +244,76 @@ public static class DocDataDisplayFixtures
                 $"The trace card offers no signal called '{label}'. It offers: "
               + string.Join(", ", trace.AvailableSignals.Select(s => s.Label)) + ".");
         trace.SelectedSignal = item;
+    }
+
+    // ── Driving a trace card, by what things ARE rather than by where they sit ────────────────
+    //
+    //  EVERY ONE OF THESE TAKES THE CARD AS A FUNCTION, not as a reference. Almost every edit here
+    //  ends in RebuildAndNotify, which REPLACES the inspector's TraceRowViewModels — so a reference
+    //  held across two edits is a live object for the first and a discarded one for the second, and
+    //  writing to a discarded one throws nothing and changes nothing. DocAntennaFixtures records
+    //  what that looked like when it happened: a figure that came out configured for the first
+    //  trace and seeded for the second, with a plausible curve and a wrong label.
+
+    /// <summary>The n-th trace card, re-fetched from the live collection on every call.</summary>
+    internal static Func<TraceRowViewModel> Card(PlotContainerViewModel plot, int index) => () =>
+        index < plot.Inspector.Traces.Count
+            ? plot.Inspector.Traces[index]
+            : throw new InvalidOperationException(
+                $"A documentation figure expected at least {index + 1} trace card(s) and the plot "
+              + $"has {plot.Inspector.Traces.Count}.");
+
+    /// <summary>Set the card's one transform combo, and refuse a transform it has DISABLED — a
+    /// figure set to one would be showing a state the interface refuses.</summary>
+    internal static void SetTransform(Func<TraceRowViewModel> card, CubeTransform transform)
+    {
+        var item = card().TraceTransformItems.FirstOrDefault(i => i.Transform == transform)
+            ?? throw new InvalidOperationException(
+                $"The trace card offers no '{transform}' transform.");
+        if (!item.Enabled)
+            throw new InvalidOperationException(
+                $"The trace card offers '{transform}' but has it DISABLED on this plot, so a figure "
+              + "set to it would be showing a state the interface refuses.");
+        card().SelectedTransformItem = item;
+    }
+
+    /// <summary>
+    /// Point one trace at one of the library's loaded results files, through the card's own Source
+    /// combo — the control that appears once a display holds two datasets.
+    ///
+    /// <para>Matched by the entry's FILE, never by position: the combo's order follows the library's
+    /// and a figure that took item 0 would draw the other run's curve after any change to it, in
+    /// silence.</para>
+    /// </summary>
+    internal static void PickSource(Func<TraceRowViewModel> card, string logicalId)
+    {
+        if (!card().SourceSelectorVisible)
+            throw new InvalidOperationException(
+                $"The trace card has no Source combo, so a figure cannot point this trace at "
+              + $"'{logicalId}'. It appears once the display holds two loaded datasets — pass the "
+              + "second one as PlotFor's `also`.");
+
+        var item = card().AvailableSourceEntries.FirstOrDefault(
+                       i => !i.IsAddFromFile && i.Entry is { } e
+                         && string.Equals(Path.GetFileName(e.FilePath), logicalId,
+                                          StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException(
+                $"The trace card's Source combo offers no '{logicalId}'. It offers: "
+              + string.Join(", ", card().AvailableSourceEntries.Select(i => i.DisplayText)) + ".");
+
+        card().SelectedSourceItem = item;
+    }
+
+    /// <summary>Move a trace to the RIGHT-hand y-axis, through the card's own left/right toggle —
+    /// for a figure carrying two quantities whose ranges have nothing to do with each other.</summary>
+    internal static void UseRightAxis(Func<TraceRowViewModel> card)
+    {
+        if (card().UseSecondaryAxis) return;
+        card().ToggleSecondaryAxisCommand.Execute(null);
+        if (!card().UseSecondaryAxis)
+            throw new InvalidOperationException(
+                "The trace card's secondary-axis toggle did not move the trace to the right-hand "
+              + "axis, so the figure would draw a phase against a decibel scale.");
     }
 
     /// <summary>

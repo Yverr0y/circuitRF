@@ -759,6 +759,15 @@ mesh that was going to be solved anyway, and a second electrostatic solve with t
 removed, which is what the modal impedances need.
 
 <div class="callout note">
+<span class="label">There is an application note about exactly this</span>
+<p><a href="../app-notes/an01-ports-and-coupling.html">AN-01 — Coupled lines, EM ports, terminations
+and de-embedding</a> is the worked version of this section: which kernel a coupled pair wants in the
+first place, where its four ports go, what the calibration group prints when it forms, what to do when
+it cannot, and how to compare two port arrangements without fooling yourself. It runs on a committed
+fixture, so every number in it is one command away.</p>
+</div>
+
+<div class="callout note">
 <span class="label">What the group's answer is referenced to</span>
 <p>Each mode's characteristic impedance is <code>γ/(jωC)</code> with a modal capacitance, which is the
 same construction a single line's is — so it inherits the same quasi-static limitation, and the run
@@ -941,6 +950,12 @@ has to decide what to do with the cells the edge passes through. Two options:
   staircase.
 - **Conformal** — the boundary cells are **cut** to follow the metal: one straight cut through an
   otherwise rectangular cell.
+
+{{ui: mom-conformal-vs-staircase}}
+
+The setting is **Boundary cells** in the EM Setup panel's Surface mesh group, and it is the only thing
+that differs between those two pictures. Look at the flank rather than at the interior: the two meshes
+are the same grid, and what changes is what happens to the cells the outline passes through.
 
 ### What it buys, measured
 
@@ -1296,11 +1311,19 @@ vertical arm:     from (286 mil, 0)    to (400 mil, 400 mil)
 They overlap in the corner square, which is what makes it one conductor. Leave the corner square — an
 unmitred bend is the thing being measured.
 
+{{ui: mom-bend-layout}}
+
 ### 2. Set the stackup
 
 Nothing to do. The stackup comes from the technology, and the EM Setup panel shows it back to you:
 `FR-4 1.6 mm εr 4.4 tanδ 0.02` between `Top Copper 35 µm` and the ground plane. Check the **Ground
 reference** row reads the ground plane and not something else.
+
+{{ui: mom-bend-stackup}}
+
+That is the whole stack this run sees. The soldermask, the silkscreen and the outline are drawing
+layers with no stackup band, so they are not in the solve at all — see [The stackup](stackup.html) for
+which drawing layers become physics and which do not.
 
 ### 3. Place ports
 
@@ -1310,18 +1333,42 @@ flows in. If either says "ambiguous", the label is on a corner — move it.
 
 Leave both reference impedances at 50 Ω.
 
+{{ui: mom-bend-ports}}
+
+The two ports are on **different faces** here, which is the arrangement de-embedding likes: they are
+as far apart as this piece of artwork allows, and neither feed runs alongside the other. A structure
+whose two ports leave the same edge is the one to look at twice — see
+[De-embedding](#deembedding), whose rules of thumb are all consequences of one fact, that port-to-port
+coupling is the error floor.
+
 ### 4. Choose a mesh
 
 Leave the mesh on its defaults for the first run and press **Mesh** — not Simulate. Read the mesh
 report:
 
 - **Unknowns**: expect a few hundred. Well under the ceiling.
-- **Smallest / largest cell**: the smallest should be a small fraction of 114 mil — that is the edge
-  mesh doing its job.
+- **The largest cell, and what set it**: the report names whichever of the two caps was binding, which
+  is the question every later mesh change turns on.
+- **The finest cell**: a small fraction of 114 mil — that is the edge mesh doing its job. The notes say
+  how many graded cells it put at each edge and what they cost.
 
-At 10 GHz on FR-4, λ_g ≈ 16.5 mm, so λ_g/20 ≈ 0.8 mm gives roughly 24 cells along a 20 mm run and about
-6 across the width, before edge refinement. A few hundred unknowns is the expected answer, and a number
-wildly different from that means something is wrong with the geometry or the layer mapping.
+{{ui: mom-bend-mesh-settings}}
+
+Those are the numbers "defaults" means, and the summary under them is the report. The two you will
+change first if you change anything are **Cells per wavelength** and **Cells across conductor** — and
+which of the two actually binds depends on the geometry, which is what **This metal is** decides. On
+this structure the two land within 2 % of each other — λ_g/20 is 28.1 mil and the 114 mil width over
+4 cells is 28.5 — so the wavelength cap wins by a whisker, and the report says which.
+
+Pressing Mesh also draws the grid over the artwork, which is worth looking at once:
+
+{{ui: mom-bend-mesh}}
+
+The arithmetic behind it: at 10 GHz on this stack λ_g is 563 mil, so λ_g/20 is 28 mil — about 14 cells
+along each 400 mil arm and 4 across the 114 mil width, which the edge mesh then refines to 9 by adding
+three graded cells at each edge. That comes out at **351 cells and 654 unknowns**, which is the few
+hundred the step above says to expect. A number wildly different from that means something is wrong
+with the geometry or the layer mapping, not with the mesh settings.
 
 ### 5. Set the sweep and run
 
@@ -1332,15 +1379,37 @@ reports how many points it actually solved.
 
 ### 6. Read the result
 
-The result opens in the [Data Display](data-display.html). Plot |S₂₁| in dB and |S₁₁| in dB against
-frequency.
+The result opens in the [Data Display](data-display.html). Two plots are worth making, and they answer
+different questions.
 
-| What to look for | What it means |
-|---|---|
-| \|S₂₁\| close to 0 dB at 1 GHz, falling smoothly | Ordinary conductor and dielectric loss on FR-4 |
-| \|S₁₁\| low at 1 GHz, rising with frequency | The bend's shunt capacitance beginning to matter |
-| A smooth ∠S₂₁, roughly −βℓ | The electrical length of the two arms |
-| Σ\|S\|² slightly below 1, smooth | Passive and lossy, as expected |
+**S₁₁ on a Smith chart** says what KIND of mismatch this is, which no magnitude plot can:
+
+{{ui: mom-bend-smith}}
+
+It is one clean spiral. At 1 GHz the point sits almost exactly at the centre — a 50 Ω line into 50 Ω
+is matched, and the bend is electrically tiny — and it winds **clockwise** and **outward** from there.
+The winding is the two arms' electrical length, which is why it is one full turn across the band; the
+outward drift is the discontinuity itself, growing with frequency. An ideal corner between two
+perfectly matched lines would sit at the centre for the whole sweep, so **everything you can see here
+is the bend**, and how far out the locus has travelled by the top of the band is how much of it there
+is.
+
+**Magnitude and phase against frequency** is where the numbers are. Put |S₁₁| and |S₂₁| in dB on the
+left axis and both phases on the right — the trace card has a left/right toggle for exactly this, and
+without it the dB curves flatten into the bottom of a frame scaled for ±180°:
+
+{{ui: mom-bend-mag-phase}}
+
+| What to look for | What it means | What this run gives |
+|---|---|---|
+| \|S₂₁\| close to 0 dB at 1 GHz, falling smoothly | Ordinary conductor and dielectric loss on FR-4 | −0.05 dB at 1 GHz, −2.9 dB at 10 GHz |
+| \|S₁₁\| low at 1 GHz, rising with frequency | The bend's shunt capacitance beginning to matter | −39 dB at 1 GHz, −7.1 dB at 10 GHz |
+| A smooth ∠S₂₁, roughly −βℓ | The electrical length of the two arms | −36°/GHz at the bottom of the band steepening to −45°/GHz at the top, 360° in all — one wrap. The steepening is dispersion |
+| Σ\|S\|² slightly below 1, smooth | Passive and lossy, as expected | 0.989 at 1 GHz falling to 0.70 at 10 GHz |
+
+Your own numbers will not match these to the last digit — the mesh is a function of the cell sizes
+your build's defaults produce — but every one of the four shapes should be there, and a result that
+breaks one of them is a setup problem rather than a physics one.
 
 ### 7. Sanity-check it against the circuit model
 
@@ -1351,10 +1420,27 @@ Build the same thing in a schematic from [MLIN](components.html#mlin) and
 analysis over the same band. Overlay the two in one Data Display — the EM result is a Touchstone file,
 so [add it as a second data source](data-display.html#free-floating) and put both traces on one plot.
 
-They should agree closely at the bottom of the band and separate at the top. **If they disagree at
-1 GHz, something is wrong with your setup, not with the physics** — check, in this order: the line width
-(is it really 50 Ω on this stack?), the substrate (does the schematic's MLIN carry the same
-ε<sub>r</sub> and h?), the ground reference, and the port sides.
+Give each MLIN **286 mil** of length, not 400: the bend model owns the corner square, and its reference
+planes are that square's two edges. 400 − 114 = 286 either side. Leave every substrate parameter
+unstated — the microstrip family's own defaults are 1.6 mm of ε<sub>r</sub> 4.4 FR-4 with tanδ 0.02 and
+35 µm of copper, which is this stackup exactly, and restating them is a second place for the two to
+disagree.
+
+{{ui: mom-bend-em-vs-circuit}}
+
+They should agree closely at the bottom of the band and separate at the top, and they do: on this run
+the two S₁₁ phases are 2° apart at 1 GHz and 46° apart at 10 GHz, and the two magnitudes cross at
+4.4 GHz. Below the crossing the closed-form bend reads a few dB **more** reflection than the solve
+(−29.9 dB against −39.4 dB at 1 GHz — a difference between two numbers that are both negligible);
+above it the solve keeps climbing while the model levels off, and by 10 GHz the model is reading
+−8.0 dB where the structure gives −7.1 dB. **That divergence is the whole reason to own an EM
+solver**: the formula was fitted on a family of bends and has a validity range, and the top of this
+band is at the edge of it.
+
+**If they disagree at 1 GHz, something is wrong with your setup, not with the physics** — check, in
+this order: the line width (is it really 50 Ω on this stack?), the substrate (does the schematic's
+MLIN carry the same ε<sub>r</sub> and h?), the arm lengths (286, not 400), the ground reference, and the
+port sides.
 
 ### 8. Refine once
 
@@ -1374,4 +1460,6 @@ Touchstone picks the new result up with no further action. See
 <a href="layout-editor.html">The Layout Editor</a> · <a href="cli.html#em">Running an EM setup
 headless</a> · <a href="wbond.html">wBond</a> (3D bondwires) ·
 <a href="components.html#mlin">The microstrip component family</a> ·
-<a href="data-display.html">The Data Display</a>.</p>
+<a href="data-display.html">The Data Display</a> ·
+<a href="../app-notes/an01-ports-and-coupling.html">AN-01</a> — coupled lines, where their ports go,
+and how two coupled feeds are de-embedded together.</p>

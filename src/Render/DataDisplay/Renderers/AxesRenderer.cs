@@ -669,12 +669,15 @@ namespace CircuitRF.Render.DataDisplay
             // because opaque over opaque is opaque; the layer is then composited once.
             using var minorPaint = StrokePaint(theme.GridColor.WithAlpha(255), gridSw);
 
-            // Only the ALPHA of a SaveLayer paint matters — it is what the finished layer is
-            // composited with.
-            using var arcLayerPaint = new SKPaint
+            // WHAT THE FAMILY IS FINALLY PAINTED WITH: the grid colour at the transparency the
+            // layer used to apply, as a FILL — because what is drawn is the arcs' stroked OUTLINE,
+            // accumulated into one path. See the note above `family` below.
+            using var arcFillPaint = new SKPaint
             {
-                Color = SKColors.Black.WithAlpha(
-                    (byte)Math.Clamp(axes.MinorTransparencyScale * 255.0, 0, 255))
+                Color = theme.GridColor.WithAlpha(
+                    (byte)Math.Clamp(axes.MinorTransparencyScale * 255.0, 0, 255)),
+                Style       = SKPaintStyle.Fill,
+                IsAntialias = true,
             };
 
             using var realAxis = new SKPath();
@@ -755,49 +758,78 @@ namespace CircuitRF.Render.DataDisplay
                 return p;
             }
 
-            canvas.SaveLayer(arcLayerPaint);
+            // ── ONE PATH, ONE DRAW, AND THE SVG EXPORT IS WHY ──────────────────────────────
+            //
+            // This used to be a `SaveLayer` at full opacity with every arc stroked into it, the
+            // layer composited once — which is the natural way to say "an overlap is the same
+            // colour as a single stroke" and is what fixed the stippled crossings (see
+            // src/Render/RESOLVED.md). It is correct on a raster canvas and it is DROPPED ENTIRELY
+            // by Skia's SVG device: a layer's contents do not appear in the output at all. So every
+            // exported Smith chart — every user-doc figure, every `circuitrf plot`, every File >
+            // Export — carried its outline, its real axis and its numbers over a blank disc, with
+            // no grid. Verified directly: an `SKSvgCanvas` handed one circle inside a SaveLayer
+            // emits an empty `<svg>`.
+            //
+            // The replacement gets the same property WITHOUT a layer, and it is a property of Skia
+            // rather than a trick: **one `DrawPath` fills its path once, however much that path
+            // overlaps itself**, while N separate draws composite N times. Measured on two crossing
+            // circles at 50% black — one path reads 127 at the crossing, two draws read 63. So the
+            // whole family is accumulated as its own STROKED OUTLINE into one path and filled once,
+            // at the transparency the layer used to carry.
+            //
+            // A masked arc is trimmed by a path OP against the same even-odd exclusion region the
+            // clip used, rather than by a clip — the region is identical, it just has to be applied
+            // to the geometry instead of to the canvas so that everything can share one draw.
+            using var family = new SKPath { FillType = SKPathFillType.Winding };
 
-            for (int i = 0; i < rCircles.Length; i++)
+            void AccumulateArc(float cx, float cy, float pxR, SKPath? mask)
             {
-                var (cx, cy, pxR, rVal) = rCircles[i];
-                if (pxR <= 0 || !float.IsFinite(pxR)) continue;
+                if (pxR <= 0 || !float.IsFinite(pxR)) return;
 
-                // r = 0 IS the unit circle — the chart's outline. It is drawn after this layer,
-                // at full strength like the real axis, and never inside it: it is not one of the
-                // arcs the transparency is for.
-                if (rVal == 0) continue;
+                using var circle = new SKPath();
+                circle.AddCircle(cx, cy, pxR);
 
-                var paint = minorPaint;
+                using var ribbon = new SKPath();
+                if (!minorPaint.GetFillPath(circle, ribbon) || ribbon.IsEmpty) return;
 
-                if (rMaskTable.TryGetValue(i, out int[]? xMaskIndices))
-                {
-                    float realY = tf.PrimaryToCanvas(0.0, 0.0).Y;
-                    var maskedCircles = xMaskIndices
-                        .SelectMany(xi =>
-                        {
-                            var (xcx, xcy, xr, _) = xCircles[xi];
-                            return new[] { (xcx, xcy, xr), (xcx, 2f * realY - xcy, xr) };
-                        });
+                if (mask is null) { family.AddPath(ribbon); return; }
 
-                    canvas.Save();
-                    using var clipPath = EvenOddExclusionPath(maskedCircles);
-                    canvas.ClipPath(clipPath, SKClipOperation.Intersect, antialias: true);
-                    canvas.DrawCircle(cx, cy, pxR, paint);
-                    canvas.Restore();
-                }
-                else
-                {
-                    canvas.DrawCircle(cx, cy, pxR, paint);
-                }
+                using var trimmed = ribbon.Op(mask, SKPathOp.Intersect);
+                if (trimmed is { IsEmpty: false }) family.AddPath(trimmed);
             }
 
             float realAxisY = tf.PrimaryToCanvas(0.0, 0.0).Y;
 
+            for (int i = 0; i < rCircles.Length; i++)
+            {
+                var (cx, cy, pxR, rVal) = rCircles[i];
+
+                // r = 0 IS the unit circle — the chart's outline. It is drawn after the family, at
+                // full strength like the real axis, and never inside it: it is not one of the arcs
+                // the transparency is for.
+                if (rVal == 0) continue;
+
+                if (rMaskTable.TryGetValue(i, out int[]? xMaskIndices))
+                {
+                    var maskedCircles = xMaskIndices
+                        .SelectMany(xi =>
+                        {
+                            var (xcx, xcy, xr, _) = xCircles[xi];
+                            return new[] { (xcx, xcy, xr), (xcx, 2f * realAxisY - xcy, xr) };
+                        });
+
+                    using var mask = EvenOddExclusionPath(maskedCircles);
+                    AccumulateArc(cx, cy, pxR, mask);
+                }
+                else
+                {
+                    AccumulateArc(cx, cy, pxR, null);
+                }
+            }
+
             for (int i = 0; i < xCircles.Length; i++)
             {
                 var (cx, cy, pxR, _) = xCircles[i];
-                if (pxR <= 0 || !float.IsFinite(pxR)) continue;
-
                 float conjCy = 2f * realAxisY - cy;
 
                 if (xMaskTable.TryGetValue(i, out int[]? rMaskIndices))
@@ -805,21 +837,18 @@ namespace CircuitRF.Render.DataDisplay
                     var maskCircles = rMaskIndices
                         .Select(ri => { var (rcx, rcy, rr, _) = rCircles[ri]; return (rcx, rcy, rr); });
 
-                    canvas.Save();
-                    using var clipPath = EvenOddExclusionPath(maskCircles);
-                    canvas.ClipPath(clipPath, SKClipOperation.Intersect, antialias: true);
-                    canvas.DrawCircle(cx,     cy,     pxR, minorPaint);
-                    canvas.DrawCircle(cx,     conjCy, pxR, minorPaint);
-                    canvas.Restore();
+                    using var mask = EvenOddExclusionPath(maskCircles);
+                    AccumulateArc(cx, cy,     pxR, mask);
+                    AccumulateArc(cx, conjCy, pxR, mask);
                 }
                 else
                 {
-                    canvas.DrawCircle(cx,     cy,     pxR, minorPaint);
-                    canvas.DrawCircle(cx,     conjCy, pxR, minorPaint);
+                    AccumulateArc(cx, cy,     pxR, null);
+                    AccumulateArc(cx, conjCy, pxR, null);
                 }
             }
 
-            canvas.Restore();                       // composite the arc layer, once
+            canvas.DrawPath(family, arcFillPaint);
 
             canvas.DrawPath(realAxis, smithPaint);
 

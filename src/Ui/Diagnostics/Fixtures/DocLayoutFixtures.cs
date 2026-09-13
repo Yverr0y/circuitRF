@@ -59,7 +59,7 @@ public static class DocLayoutFixtures
     }
 
     /// <summary>A named layer of the starter technology, or a hard failure naming what it does have.</summary>
-    private static LayerKey Layer(Technology tech, string name)
+    internal static LayerKey Layer(Technology tech, string name)
     {
         foreach (var l in tech.Layers) if (l.Name == name) return l.Key;
         throw new InvalidOperationException(
@@ -67,7 +67,7 @@ public static class DocLayoutFixtures
           + string.Join(", ", tech.Layers.Select(l => l.Name)) + ".");
     }
 
-    private static LayoutEditorViewModel EditorVm(LayoutView view)
+    internal static LayoutEditorViewModel EditorVm(LayoutView view)
         => new(view) { Technology = StarterTechnologies.Pcb2Layer() };
 
     // ── The artwork the SNAP GLYPHS are queried against ───────────────────────
@@ -357,7 +357,7 @@ public static class DocLayoutFixtures
     /// 20 mm, the ordinary case, would give. A wide low-impedance end, a genuinely narrower high one,
     /// and an aspect ratio near 2:1 puts both markers on screen at a size a reader can compare.</para>
     /// </summary>
-    private static LayoutView KlopfTaper()
+    internal static LayoutView KlopfTaper()
     {
         var tech = StarterTechnologies.Pcb2Layer();
         var view = new LayoutView
@@ -405,7 +405,7 @@ public static class DocLayoutFixtures
     /// the difference is only in whether the run's notes say "inferred" — so nothing about the
     /// picture depends on the choice.</para>
     /// </summary>
-    private static LabelShape PortLabel(LayerKey layer, string text, long x, long y,
+    internal static LabelShape PortLabel(LayerKey layer, string text, long x, long y,
                                         LayoutRotation direction, long heightDbu)
         => new()
         {
@@ -773,8 +773,22 @@ public static class DocLayoutFixtures
     /// for both either crops the arrows or shrinks the part to fit slack it does not need.
     /// </param>
     /// <param name="marginY">Slack across that axis. Small: nothing reaches far this way.</param>
-    private static FigureScene Framed(LayoutDocument doc, int width, int height,
+    internal static FigureScene Framed(LayoutDocument doc, int width, int height,
                                       double marginX = 0.30, double marginY = 0.10)
+    {
+        var (control, apply) = FramedCanvas(doc, width, height, marginX, marginY);
+        return new FigureScene(control) { AfterLayout = _ => apply() };
+    }
+
+    /// <summary>
+    /// <see cref="Framed"/>'s body, handed back as a control and the write that has to run again
+    /// after layout — for a figure that puts more than one canvas in the same picture (the
+    /// staircase-against-conformal comparison is two of these side by side). Keeping the viewport
+    /// arithmetic in one place is the point: it is the part with the cropping trap in it.
+    /// </summary>
+    internal static (Control Control, Action Apply) FramedCanvas(
+        LayoutDocument doc, int width, int height,
+        double marginX = 0.30, double marginY = 0.10)
     {
         var canvas = new LayoutCanvas
         {
@@ -809,6 +823,6 @@ public static class DocLayoutFixtures
         // depends on an ordering this fixture cannot see. Writing the same viewport twice is
         // idempotent, so it does not have to know.
         canvas.SetViewport(vp);
-        return new FigureScene(framed) { AfterLayout = _ => canvas.SetViewport(vp) };
+        return (framed, () => canvas.SetViewport(vp));
     }
 }

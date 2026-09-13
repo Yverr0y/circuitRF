@@ -3200,7 +3200,11 @@ public static partial class LayoutRenderer
         }
 
         canvas.Save();
-        if (!knockout.IsEmpty) canvas.ClipPath(knockout, SKClipOperation.Difference, antialias: true);
+        if (!knockout.IsEmpty)
+        {
+            using var exclusion = ExclusionOf(knockout, canvas);
+            canvas.ClipPath(exclusion, SKClipOperation.Intersect, antialias: true);
+        }
         foreach (var (_, label, layerColor, kind) in ports)
             DrawPortMarker(canvas, label, conductorAt, ps, scaleUm, layerColor,
                            opts.Theme.Background, counters, kind, opts.PlanarMesh, dbuPerMicron);
@@ -3210,6 +3214,37 @@ public static partial class LayoutRenderer
             DrawLabelText(canvas, label, ps,
                           TintForContrast(layerColor, opts.Theme.Background, PortMarkerContrastTintAmount),
                           centred: true);
+    }
+
+    /// <summary>
+    /// "Everywhere except <paramref name="hole"/>", as a path that can be clipped with
+    /// <see cref="SKClipOperation.Intersect"/> — an enclosing rectangle and the hole, filled
+    /// EVEN-ODD.
+    ///
+    /// <para><b>This exists because <c>SKClipOperation.Difference</c> does not survive a vector
+    /// export, and it does not survive it INVERTED.</b> Skia's SVG device writes any clip as a
+    /// <c>&lt;clipPath&gt;</c> holding the raw path, and SVG has no difference operator — so a
+    /// knock-out clip is re-read as an intersect and the marker is drawn only WHERE THE NAME IS.
+    /// Measured on the MoM chapter's own port figure: the whole port glyph — the reference-plane
+    /// bar, its serifs and the direction arrow — was clipped down to the inside of the numeral "1",
+    /// which is why a reader could see neither. On screen it was correct, which is what made it
+    /// invisible for as long as it was.</para>
+    ///
+    /// <para>An even-odd exclusion says the same thing in a form SVG has: the emitted clip carries
+    /// <c>clip-rule="evenodd"</c> and means what it meant here. Same pixels on a raster canvas, and
+    /// the same picture in every export.</para>
+    /// </summary>
+    private static SKPath ExclusionOf(SKPath hole, SKCanvas canvas)
+    {
+        // The rectangle has to ENCLOSE the hole, or the part of the hole outside it reads as one
+        // more crossing and is filled IN rather than cut out.
+        var box = SKRect.Union(canvas.LocalClipBounds, hole.Bounds);
+        box.Inflate(1f, 1f);
+
+        var exclusion = new SKPath { FillType = SKPathFillType.EvenOdd };
+        exclusion.AddRect(box);
+        exclusion.AddPath(hole);
+        return exclusion;
     }
 
     /// <summary>How wide a gap the port's name keeps clear of its own marker, per side, in device
