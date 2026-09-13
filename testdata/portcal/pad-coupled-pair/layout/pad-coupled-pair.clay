@@ -1,0 +1,132 @@
+{
+  "FormatVersion": 1,
+  "DbuPerMicron": 1000,
+  "DisplayUnit": "Um",
+  "SnapDbu": 1000,
+  "AngleMode": "AnyAngle",
+  "Shapes": [
+    {
+      "$type": "Poly",
+      "Layer": {
+        "Layer": 1,
+        "Datatype": 0
+      },
+      "Xy": [
+        0,
+        0,
+        3830000,
+        0,
+        3830000,
+        -152400,
+        4388800,
+        -152400,
+        4388800,
+        406400,
+        3830000,
+        406400,
+        3830000,
+        254000,
+        0,
+        254000
+      ]
+    },
+    {
+      "$type": "Poly",
+      "Layer": {
+        "Layer": 1,
+        "Datatype": 0
+      },
+      "Xy": [
+        0,
+        1066800,
+        3830000,
+        1066800,
+        3830000,
+        914400,
+        4388800,
+        914400,
+        4388800,
+        1473200,
+        3830000,
+        1473200,
+        3830000,
+        1320800,
+        0,
+        1320800
+      ]
+    },
+    {
+      "$type": "Label",
+      "Layer": {
+        "Layer": 1,
+        "Datatype": 0
+      },
+      "X": 0,
+      "Y": 127000,
+      "Text": "1",
+      "Height": 120000,
+      "Rotation": "R0",
+      "IsPort": true,
+      "PortDirection": "R0",
+      "PortLayer": {
+        "Layer": 1,
+        "Datatype": 0
+      }
+    },
+    {
+      "$type": "Label",
+      "Layer": {
+        "Layer": 1,
+        "Datatype": 0
+      },
+      "X": 4388800,
+      "Y": 127000,
+      "Text": "2",
+      "Height": 120000,
+      "Rotation": "R0",
+      "IsPort": true,
+      "PortDirection": "R180",
+      "PortLayer": {
+        "Layer": 1,
+        "Datatype": 0
+      }
+    },
+    {
+      "$type": "Label",
+      "Layer": {
+        "Layer": 1,
+        "Datatype": 0
+      },
+      "X": 0,
+      "Y": 1193800,
+      "Text": "3",
+      "Height": 120000,
+      "Rotation": "R0",
+      "IsPort": true,
+      "PortDirection": "R0",
+      "PortLayer": {
+        "Layer": 1,
+        "Datatype": 0
+      }
+    },
+    {
+      "$type": "Label",
+      "Layer": {
+        "Layer": 1,
+        "Datatype": 0
+      },
+      "X": 4388800,
+      "Y": 1193800,
+      "Text": "4",
+      "Height": 120000,
+      "Rotation": "R0",
+      "IsPort": true,
+      "PortDirection": "R180",
+      "PortLayer": {
+        "Layer": 1,
+        "Datatype": 0
+      }
+    }
+  ],
+  "Instances": []
+}

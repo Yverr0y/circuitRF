@@ -392,6 +392,7 @@ src/Engine/Mom/PlanarSolve.cs|A sweep needs at least one frequency.
 src/Engine/Mom/PlanarSolve.cs|Port {ports[i].Number} returns through drawn metal, and 
 src/Engine/Mom/PlanarSolve.cs|Port {ports[i].Number} sits on conductor level {ports[i].LayerIndex} at 
 src/Engine/Mom/PlanarSolve.cs|Port {ports[i].Number}'s calibration standard needs {nStd:N0} unknowns 
+src/Engine/Mom/PlanarSolve.cs|The mesh has SEVERED a conductor the artwork draws as one piece: on 
 src/Engine/Mom/PlanarSolve.cs|The sweep's lowest frequency is {SurfaceMesher.Eng(fLo)}Hz. 
 src/Engine/Mom/PlanarSolve.cs|This mesh was built without a level list, so the general kernel has no height to 
 src/Engine/Mom/PlanarStaticAim.cs|Expected a vector of length {_m}, got {x.Length}.

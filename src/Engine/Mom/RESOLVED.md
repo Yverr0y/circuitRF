@@ -3,6 +3,133 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## PCAL5 — a calibration group's feed leads, a cut cell's clearance, and a severed conductor (2026-09-12)
+
+Owner report: a two-port coupled section on a real board — an imported PCB, two 254 µm traces
+246 µm apart mitring at 45° into 558.8 µm pads — would not simulate. It refused unless "de-embed
+outside the calibration's validity" was switched on, and with it on it published **S₁₁ = −0.02 dB and
+S₂₁ = −52.6 dB at 1 GHz on a 3.83 mm through line, non-passive at 51 of 51 points.** The PCAL series
+had just shipped and its own fixtures all pass; this is what none of them could reach.
+
+**Three independent defects, each of which alone leaves the file unusable.** They were separated by
+bisecting the board rather than by reading the code, and each half works on its own:
+
+| what was run | S₁₁ @1 GHz | S₂₁ @1 GHz | passive |
+|---|---|---|---|
+| one real arm alone — trace + mitre + pad, 2 ports, no neighbour | −17.90 dB | −0.08 dB | 51/51 |
+| two straight coupled lines, same dims, 4 ports, no pads | −19.09 dB | −0.11 dB | 51/51 |
+| an isolated 254 µm × 3.83 mm line (the textbook answer for a 117 Ω line) | −18.47 dB | −0.07 dB | 51/51 |
+| **the board as drawn** | **−0.02 dB** | **−52.6 dB** | **0/51** |
+| the board with all three fixed | −19.42 dB | −0.08 dB | 51/51 |
+
+### 1. A calibration group whose members grew a feed lead was declined, and it should not have been
+
+R-pcal4-6 declined any group with a grown lead, reasoning that R-fed-2's peel is
+`S_ij *= exp(γ_iℓ_i + γ_jℓ_j)` — one γ per PORT — while a group's region carries one per MODE. The
+algebra is right and **the geometry is not**: the members of a group share a reference plane and
+therefore the same cross-section question, so `PlanarFeedExtension` grows them all a lead, and those
+leads are collinear, equal in length and side by side at the group's own separation. **Together they
+ARE a uniform N-conductor section of exactly the cross-section the group's standard reproduces**, so
+the peel is a matched length of the GROUP's modes.
+
+The machinery was already there and one line was missing. `PlanarFeedExtension.Peel` is called on
+`PlanarDeembed.ApplyBlocks`' output — i.e. in the MODAL basis, before `ModalToTerminal` — so index
+`slot[k]` is mode k, and `gam[slot[k]]` was simply never assigned for a grouped port. It is
+`gc.Box.Gamma[k]` now.
+
+**The gate that replaces the decline: every member must peel the SAME length**
+(`PlanarFeedExtension.CommonPeelLength`). A mode runs on all of the group's conductors at once, so
+"how far has this mode travelled" has one answer for the group or none, and `Peel` is index-wise and
+can express nothing else. Unequal leads also mean the grown region is not one cross-section — past
+the shorter lead's end the other conductor is not there — so the arithmetic and the geometry fail
+together.
+
+**That case is NOT reachable by drawing, and the measurement is worth recording because it is why
+there is no fixture for it.** A group already requires its members to share a reference plane; the
+plane is one cell in from the lead's outer end; and `Extend` quantises the lead by the uniformity
+scan's own step. Two pads differing by 300 µm in length produced leads of 2151.563 µm and
+1856.25 µm — outer ends 4.69 µm apart — and the run was declined by the PLANE test first. Aligning
+the drawn edge to the lead's own end to the nanometre did not close it either. The gate is a guard
+on `Peel`'s precondition, unit-tested exactly, and it is what would stop a silent wrong peel if the
+plane tolerance were ever loosened.
+
+**`PlanarFeedExtension.PeelLengthM` exists because the subtraction now has two callers** — the peel
+and the group's gate — at different times in the run. Two spellings of it would be two chances for
+the gate and the peel it gates to disagree, silently, since both produce plausible lengths.
+
+**R-pcal4-1's bit-identity holds and was checked rather than argued**: all five committed PCAL
+fixtures (`coupled-pair`, `separated-pair`, `coupled-asym`, `coupled-triple`,
+`coupled-pair-passive`) produce Touchstone files identical to HEAD's, line for line, built from a
+worktree at HEAD. A group that grew no lead reads peel = 0 for every member and `Peel` returns its
+argument untouched.
+
+**The new fixture is `testdata/portcal/pad-coupled-pair`, and the reason it had to exist is the
+finding under this one**: every PCAL fixture is a straight line with its ports at the drawn ends, so
+**not one of them ever grows a lead**, so R-pcal4-6's decline was never once exercised against a
+group it should have allowed. A port that lands on a PAD is what a real board is made of.
+
+### 2. A cut cell's GRID RECTANGLE is not its metal, and the clearance check was reading the rectangle
+
+`PlanarPorts.MeasureFeedClearance` measured every cell by `PlanarCell.XMin…YMax`, whose own doc says
+that for a cut cell it BOUNDS the metal rather than equalling it. At a shallow oblique rim the
+overhang is most of a cell, so where a port's profile edge falls under it the gap computes as
+**exactly zero** — metal that is not there, at a distance that cannot be argued with.
+
+Measured on the owner's file, one setting changed and nothing else:
+
+- `BoundaryCells: Conformal` → *"Port 3's feed clearance is 0 substrate heights — 0 µm to the nearest
+  other conductor"*, and the run refuses.
+- `BoundaryCells: Staircase` → *"Port 3's feed is clear"*.
+
+It reads `Region` now, for both the transverse test and the longitudinal station. **`Region` is null
+on every Manhattan cell, so a staircased mesh is bit-identical** — the same rule R-cut-2 holds
+everywhere else.
+
+### 3. A conductor the mesh has SEVERED now refuses, because nothing else could see it
+
+A rooftop exists only where the shared edge of two adjacent cells is swept by metal on both sides
+(R-cut-4's `Anchored` test, all-or-nothing over a support's strips). At an oblique rim a coarse mesh
+can fail that right across a conductor — and **every observable a solve publishes stays healthy**:
+the matrix is well formed, the solve converges, the answer is smooth, and it is **passive at every
+frequency**, so R-prt-15's own gate is silent too. What is published is an OPEN CIRCUIT.
+
+`PlanarConductors.FindSeveredConductors` asks whether two ports standing on ONE drawn polygon can
+reach each other through the basis graph, and `PlanarSolve` refuses before it fills anything.
+
+**Asking it of the PORTS and the ARTWORK, rather than of the basis graph alone, is the whole design.**
+A conformal taper routinely meshes with dozens of cut cells that carry no basis at all — slivers of
+its own metal that R-cut-4 declines to drive — and those are separate one-cell "conductors" in the
+basis graph on every such run (`PlanarConductors.CarriesCurrent`'s own note records this, and PCAL2's
+clearance check was already burned by it once). A whole-graph comparison would fire on all of them.
+The port question fires only where the answer actually changes.
+
+**It under-reports on purpose**: two ports on polygons that merely touch are physically one conductor
+and are not grouped, and a one-port polygon has nothing to be disconnected from. An under-report
+leaves today's behaviour.
+
+**The remedy the refusal names had to be measured, and the obvious one is INERT.** "Raise Cells per
+wavelength" is the sentence anyone would write and it does nothing here: the pitch at a mitre is set
+by the metal's own width and by the detail floor, so on the engine fixture the mesh is bit-identical
+at cells/λ 5, 10, 20 and 40 — severed at all four — and raising `MinCellsAcrossConductor` from 2 to 4
+does not clear it either. What was measured to restore conduction is **the edge mesh**, under either
+boundary model, and — where the cells are cut — staircasing them. The refusal says both, and says
+outright that Cells per wavelength is not a remedy. That is the fourth time this directory has had to
+be told to check whether a named remedy binds.
+
+**One thing it turned up that is worth knowing separately**: on a coarse enough mesh a STAIRCASED
+mitre severs too, not only a conformal one. The engine fixture is severed with the edge mesh off
+under both boundary models. So this is not a conformal-cells defect with a staircase escape hatch; it
+is a coarse-rim defect that conformal cells reach sooner.
+
+### 4. What the owner had to do, and what it cost
+
+The board could only be run by switching on "de-embed outside the calibration's validity", which is
+the setting that exists to publish a known-bad answer with a caveat on the file. It did exactly that.
+The three fixes together mean the same file now runs with the setting OFF and no caveat — which is
+the outcome the whole PCAL series was for.
+
+---
+
 ## TRP, peak EIRP, and Stop — antenna feedback, 2026-09-11
 
 User feedback relayed by the owner: "do we have TRP, peak EIRP?", and — separately — an EM run that

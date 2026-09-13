@@ -2072,8 +2072,22 @@ public static class PlanarPorts
         for (int ci = 0; ci < mesh.Cells.Count; ci++)
         {
             var c = mesh.Cells[ci];
-            double t0 = alongX ? c.YMin : c.XMin;
-            double t1 = alongX ? c.YMax : c.XMax;
+
+            // ── A CUT CELL'S METAL IS ITS REGION, NOT ITS GRID RECTANGLE (2026-09-12) ───────────
+            //
+            // `PlanarCell.XMin…YMax` is the GRID rectangle, and its own doc says that for a cut cell
+            // it BOUNDS the metal rather than equalling it. Asking the clearance question of the
+            // rectangle therefore measures a neighbour that is not there: at a 45° bend the cut
+            // cell's box overhangs the metal by most of a cell, and where the port's profile edge
+            // happens to sit under that overhang the gap comes out as EXACTLY ZERO. Measured on a
+            // real board — the same file, the same geometry, the same everything else, reported
+            // "port 3's feed clearance is 0 substrate heights, 0 µm to the nearest other conductor"
+            // with `Conformal` and "port 3's feed is clear" with `Staircase`, and the zero refused
+            // the run. `Region` is null on every Manhattan cell, so a staircased mesh is
+            // bit-identical to what this did before — the same rule R-cut-2 holds everywhere else.
+            var region = c.Region;
+            double t0 = alongX ? (region?.YMin ?? c.YMin) : (region?.XMin ?? c.XMin);
+            double t1 = alongX ? (region?.YMax ?? c.YMax) : (region?.XMax ?? c.XMax);
             if (t1 > tLo + 1e-15 && t0 < tHi - 1e-15) continue;   // inside the feed's own profile
 
             // A cell no rooftop pairs with carries no current and is not in the solve at all, so it
@@ -2103,8 +2117,9 @@ public static class PlanarPorts
             // it always has a lateral gap of zero. On a near-edge test that cell re-fires the warning
             // on every extended taper — reintroducing the unclearable warning one line below the fix
             // for it. A cell is judged by where most of it sits.
-            double l0 = alongX ? c.XMin : c.YMin;
-            double l1 = alongX ? c.XMax : c.YMax;
+            // The METAL's own longitudinal extent, for the same reason as the transverse pair above.
+            double l0 = alongX ? (region?.XMin ?? c.XMin) : (region?.YMin ?? c.YMin);
+            double l1 = alongX ? (region?.XMax ?? c.XMax) : (region?.YMax ?? c.YMax);
             double mid = 0.5 * (l0 + l1);
             double along = fromLow ? mid - port.OuterEdgeM : port.OuterEdgeM - mid;
             if (along < -endRunM || along > endRunM) continue;

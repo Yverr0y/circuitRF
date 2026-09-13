@@ -184,6 +184,151 @@ public class PlanarFeedExtensionTests(ITestOutputHelper output)
                 Assert.Equal(0.0, (back[i, j] - s[i, j]).Magnitude, 12);
     }
 
+    // ── PeelLengthM — the one subtraction, in one place (PCAL5, 2026-09-12) ─────────────────────
+    //
+    // It became a function because PCAL4's calibration groups have to ask the same question at a
+    // different time: a group is peeled back to ONE plane, so every member has to peel the same
+    // length before a group may form at all. Two spellings of the subtraction would be two chances
+    // for the gate and the peel it gates to disagree — silently, since both are plausible numbers.
+
+    [Theory]
+    [InlineData(PlanarPortSide.MinX)]
+    [InlineData(PlanarPortSide.MinY)]
+    [InlineData(PlanarPortSide.MaxX)]
+    [InlineData(PlanarPortSide.MaxY)]
+    public void ThePeelLengthIsThePlaneToTheDrawnEdge_WhicheverEndThePortIsOn(PlanarPortSide side)
+    {
+        // The lead runs OUTWARD, so the plane is always inboard of the drawn edge by the same
+        // amount whichever end of the structure the port sits on — and the answer is a positive
+        // length either way. Getting the sign wrong on one side puts the reference plane two lead
+        // lengths out and is invisible in a magnitude plot.
+        bool fromLow = side is PlanarPortSide.MinX or PlanarPortSide.MinY;
+        double drawnEdge = fromLow ? 4.0e-3 : 9.0e-3;
+        double plane     = fromLow ? 3.4e-3 : 9.6e-3;          // 600 µm of lead left to come off
+
+        var port = Port(side, plane);
+        var lead = new PlanarFeedLead(1, LengthM: 700e-6, DrawnEdgeM: drawnEdge, ExistingUniformM: 0);
+
+        Assert.Equal(600e-6, PlanarFeedExtension.PeelLengthM(port, lead), 12);
+    }
+
+    [Fact]
+    public void APortThatGrewNoLeadPeelsExactlyZero()
+    {
+        var port = Port(PlanarPortSide.MinX, 3.4e-3);
+        Assert.Equal(0.0, PlanarFeedExtension.PeelLengthM(port, null));
+        Assert.Equal(0.0, PlanarFeedExtension.PeelLengthM(
+            port, new PlanarFeedLead(1, LengthM: 0, DrawnEdgeM: 4.0e-3, ExistingUniformM: 0)));
+    }
+
+    [Fact]
+    public void APlaneInsideTheDrawnMetalComesBackNEGATIVE_RatherThanClamped()
+    {
+        // The outermost cell is longer than the whole lead, so there is no positive length to take
+        // off. Each caller says something different about that — the scalar peel peels nothing and
+        // names the port, a calibration group declines to form — so the number is returned rather
+        // than clamped here, where neither sentence is available.
+        var port = Port(PlanarPortSide.MinX, 4.2e-3);
+        var lead = new PlanarFeedLead(1, LengthM: 100e-6, DrawnEdgeM: 4.0e-3, ExistingUniformM: 0);
+
+        Assert.True(PlanarFeedExtension.PeelLengthM(port, lead) < 0);
+    }
+
+    // ── CommonPeelLength — PCAL5's gate on a calibration GROUP ──────────────────────────────────
+    //
+    // A group's error box is MODAL: each row of the de-embedded matrix is a MODE, and a mode runs on
+    // every conductor of the group at once. `Peel` is index-wise, so it can express one length per
+    // row and nothing else — hence one length for the group, or no group.
+
+    [Fact]
+    public void AGroupWhoseMembersGrewNoLeadPeelsZero_WhichIsPCAL4Unchanged()
+    {
+        var group = new[] { Port(PlanarPortSide.MaxX, 9.0e-3, 1), Port(PlanarPortSide.MaxX, 9.0e-3, 3) };
+
+        var peel = PlanarFeedExtension.CommonPeelLength(group, leads: null, toleranceM: 1e-12);
+        Assert.True(peel.Ok);
+        Assert.Equal(0.0, peel.LengthM);
+    }
+
+    [Fact]
+    public void AGroupWhoseMembersGrewTHESAMELeadPeelsIt()
+    {
+        // The real case: both ports land on pads at one station, so R-fed-1 grows both the same lead.
+        var group = new[] { Port(PlanarPortSide.MaxX, 6.524e-3, 2), Port(PlanarPortSide.MaxX, 6.524e-3, 4) };
+        PlanarFeedLead[] leads =
+        [
+            new(2, LengthM: 2151.563e-6, DrawnEdgeM: 4.3888e-3, ExistingUniformM: 548.438e-6),
+            new(4, LengthM: 2151.563e-6, DrawnEdgeM: 4.3888e-3, ExistingUniformM: 548.438e-6),
+        ];
+
+        var peel = PlanarFeedExtension.CommonPeelLength(group, leads, toleranceM: 1e-12);
+        Assert.True(peel.Ok);
+        Assert.Equal(6.524e-3 - 4.3888e-3, peel.LengthM, 12);
+    }
+
+    [Fact]
+    public void AGroupWhoseLeadsDIFFERIsRefused_NamingTheMemberAndBothLengths()
+    {
+        // Not reachable by drawing — the shared-plane requirement gets there first, and
+        // CommonPeelLength's own doc records the measurement that says so. It is a guard on `Peel`'s
+        // precondition, and a guard that is never asserted is a guard nobody can rely on.
+        var group = new[] { Port(PlanarPortSide.MaxX, 6.524e-3, 2), Port(PlanarPortSide.MaxX, 6.524e-3, 4) };
+        PlanarFeedLead[] leads =
+        [
+            new(2, LengthM: 2151.563e-6, DrawnEdgeM: 4.3888e-3, ExistingUniformM: 0),
+            new(4, LengthM: 1851.563e-6, DrawnEdgeM: 4.6888e-3, ExistingUniformM: 0),
+        ];
+
+        var peel = PlanarFeedExtension.CommonPeelLength(group, leads, toleranceM: 1e-12);
+        Assert.False(peel.Ok);
+        Assert.Equal(4, peel.UnequalPort);
+        Assert.Equal(0, peel.NegativePort);
+        Assert.Equal(6.524e-3 - 4.3888e-3, peel.LengthM, 12);
+        Assert.Equal(6.524e-3 - 4.6888e-3, peel.UnequalLengthM, 12);
+    }
+
+    [Fact]
+    public void AGroupMemberWhosePlaneIsInsideItsMetalIsRefusedSeparately()
+    {
+        // A different sentence, because a different thing is wrong: there is no positive length to
+        // peel at all, and the remedy is a finer mesh at the port rather than redrawn artwork.
+        var group = new[] { Port(PlanarPortSide.MaxX, 6.524e-3, 2), Port(PlanarPortSide.MaxX, 4.2e-3, 4) };
+        PlanarFeedLead[] leads =
+        [
+            new(2, LengthM: 2151.563e-6, DrawnEdgeM: 4.3888e-3, ExistingUniformM: 0),
+            new(4, LengthM: 100e-6,      DrawnEdgeM: 4.3888e-3, ExistingUniformM: 0),
+        ];
+
+        var peel = PlanarFeedExtension.CommonPeelLength(group, leads, toleranceM: 1e-12);
+        Assert.False(peel.Ok);
+        Assert.Equal(4, peel.NegativePort);
+        Assert.Equal(0, peel.UnequalPort);
+    }
+
+    [Fact]
+    public void TheToleranceIsRoundOffOnly_AndAMeshCellIsNowhereNearIt()
+    {
+        // Two leads that differ by a picometre are the same lead; two that differ by a micron are
+        // not. The gap between those is nine orders wide, which is why this number needs no tuning.
+        var group = new[] { Port(PlanarPortSide.MaxX, 6.524e-3, 2), Port(PlanarPortSide.MaxX, 6.524e-3, 4) };
+        PlanarFeedLead[] Pair(double secondEdge) =>
+        [
+            new(2, LengthM: 2151.563e-6, DrawnEdgeM: 4.3888e-3, ExistingUniformM: 0),
+            new(4, LengthM: 2151.563e-6, DrawnEdgeM: secondEdge, ExistingUniformM: 0),
+        ];
+
+        Assert.True(PlanarFeedExtension.CommonPeelLength(
+            group, Pair(4.3888e-3 + 1e-12), toleranceM: 2.7e-12).Ok);
+        Assert.False(PlanarFeedExtension.CommonPeelLength(
+            group, Pair(4.3888e-3 + 1e-6), toleranceM: 2.7e-12).Ok);
+    }
+
+    private static PlanarPortResolution Port(PlanarPortSide side, double planeM, int number = 1)
+        => new(number, side,
+               side is PlanarPortSide.MinX or PlanarPortSide.MaxX
+                   ? PlanarBasisDirection.X : PlanarBasisDirection.Y,
+               50.0, [0], 1.0, 254e-6, planeM, planeM, [0.0, 254e-6], [0.0]);
+
     [Fact]
     public void PeelingNothingIsBitIdentical()
     {

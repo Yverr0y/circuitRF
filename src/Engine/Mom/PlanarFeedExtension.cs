@@ -234,6 +234,104 @@ public static class PlanarFeedExtension
     }
 
     /// <summary>
+    /// <b>R-fed-2 — how much of one port's grown lead sits between its reference plane and the
+    /// user's own drawn metal edge</b>, which is what <see cref="Peel"/> takes back off.
+    ///
+    /// <para>The plane is one CELL in from the metal (D2), and after <see cref="Extend"/> the metal
+    /// is the lead's outer end, so what comes off is the lead MINUS that outermost cell — the half
+    /// the error box already owns. It is measured from the resolution rather than assumed, because
+    /// the outermost cell's size is the mesher's decision and edge grading makes it small.</para>
+    ///
+    /// <para><b>A NEGATIVE result is meaningful and is returned as one</b>: the outermost cell is
+    /// longer than the whole lead, so the plane landed inside the user's drawn metal. Peeling a
+    /// negative length would add line that is not uniform there, so every caller declines instead —
+    /// which is a different sentence in each of them, and is why this returns the number rather than
+    /// clamping it.</para>
+    ///
+    /// <para>It exists as a function because two callers need the same quantity at different times:
+    /// <c>PlanarSolve</c>'s peel, and PCAL4's calibration-group formation, which has to know whether
+    /// every member of a group peels the SAME length before it may form one. Two spellings of this
+    /// subtraction would be two chances for the group's gate and the peel it gates to disagree.</para>
+    /// </summary>
+    public static double PeelLengthM(PlanarPortResolution port, PlanarFeedLead? lead)
+    {
+        ArgumentNullException.ThrowIfNull(port);
+        if (lead is null || !(lead.LengthM > 0)) return 0;
+
+        return port.Side is PlanarPortSide.MinX or PlanarPortSide.MinY
+            ? lead.DrawnEdgeM - port.ReferencePlaneM
+            : port.ReferencePlaneM - lead.DrawnEdgeM;
+    }
+
+    /// <summary>
+    /// <b>What <see cref="CommonPeelLength"/> found</b>: the one length a calibration group may be
+    /// peeled by, or which member made that impossible.
+    /// </summary>
+    /// <param name="LengthM">The common peel length, when <see cref="Ok"/>.</param>
+    /// <param name="UnequalPort">The first member whose peel differs from the rest, or 0.</param>
+    /// <param name="UnequalLengthM">That member's own peel length.</param>
+    /// <param name="NegativePort">The first member whose plane landed inside its drawn metal, or 0.
+    /// There is no positive length to peel there at all.</param>
+    public readonly record struct PlanarGroupPeel(
+        double LengthM, int UnequalPort = 0, double UnequalLengthM = 0, int NegativePort = 0)
+    {
+        /// <summary>One length describes the whole group, so it may be peeled.</summary>
+        public bool Ok => UnequalPort == 0 && NegativePort == 0;
+    }
+
+    /// <summary>
+    /// <b>PCAL5 — the single length a calibration group's automatic feed leads may be peeled by.</b>
+    ///
+    /// <para>A group's error box is MODAL: after <c>PlanarDeembed.ApplyBlocks</c> each of its rows is
+    /// a MODE, and a mode runs on every conductor of the group at once. So "how far along has this
+    /// travelled" has one answer for the group or none, and <see cref="Peel"/> — which is index-wise
+    /// — can only express the one. Where the members' leads differ, the longer one is also beside no
+    /// second conductor for part of its run, so the grown region is not one cross-section either;
+    /// the arithmetic and the geometry fail together, which is why one test covers both.</para>
+    ///
+    /// <para><b>A group NONE of whose members grew a lead reads 0 and is Ok</b>, which is the
+    /// overwhelmingly common answer and is PCAL4 unchanged.</para>
+    ///
+    /// <para><b>On reachability, so nobody removes this as dead code.</b> Ordinary artwork does not
+    /// get here: a group already requires its members to share a reference plane, the plane is one
+    /// cell in from the lead's outer end, and <see cref="Extend"/> quantises how much lead it grows —
+    /// so two members with different DRAWN edges come out at outer ends a few µm apart and are
+    /// declined by the plane test first. Measured while trying to build a fixture for this: pads
+    /// 300 µm apart in length gave leads of 2151.563 µm and 1856.25 µm, i.e. outer ends 4.69 µm
+    /// apart. This is a guard on <see cref="Peel"/>'s own precondition, not a case anyone reaches by
+    /// drawing — and it is what would stop a silent wrong peel if the plane tolerance were ever
+    /// loosened or the lead's quantisation changed.</para>
+    /// </summary>
+    /// <param name="members">The group's port resolutions, in any order.</param>
+    /// <param name="leads">Every lead the run grew, or null when it grew none.</param>
+    /// <param name="toleranceM">How far apart two members' peel lengths may be and still count as
+    /// one. A round-off tolerance only — see <c>PlanarSolve.GroupPeelToleranceFraction</c>.</param>
+    public static PlanarGroupPeel CommonPeelLength(
+        IReadOnlyList<PlanarPortResolution> members,
+        IReadOnlyList<PlanarFeedLead>? leads,
+        double toleranceM)
+    {
+        ArgumentNullException.ThrowIfNull(members);
+
+        double common = double.NaN;
+        foreach (var member in members)
+        {
+            PlanarFeedLead? lead = null;
+            if (leads is not null)
+                foreach (var l in leads) if (l.PortNumber == member.Number) { lead = l; break; }
+
+            double peel = PeelLengthM(member, lead);
+            if (peel < 0) return new PlanarGroupPeel(0, NegativePort: member.Number);
+
+            if (double.IsNaN(common)) { common = peel; continue; }
+            if (Math.Abs(peel - common) > toleranceM)
+                return new PlanarGroupPeel(common, member.Number, peel);
+        }
+
+        return new PlanarGroupPeel(double.IsNaN(common) ? 0 : common);
+    }
+
+    /// <summary>
     /// R-fed-2 — remove the leads <see cref="Extend"/> grew, bringing every reference plane back to
     /// the user's own drawn metal edge.
     ///
@@ -249,9 +347,16 @@ public static class PlanarFeedExtension
     /// reference and would put a reflection back that was never there.</para>
     /// </summary>
     /// <param name="sAtZc">De-embedded S at the leads' outer reference planes, referenced to Z_c.</param>
-    /// <param name="lengthsM">Per port, how much lead sits between its reference plane and the drawn
-    /// edge. Zero for a port that grew none.</param>
-    /// <param name="gamma">Per port, the propagation constant its calibration measured.</param>
+    /// <param name="lengthsM">Per matrix index, how much lead sits between the reference plane and
+    /// the drawn edge. Zero where none was grown.</param>
+    /// <param name="gamma">Per matrix index, the propagation constant its calibration measured.
+    ///
+    /// <para><b>On a CALIBRATION GROUP's rows the index is a MODE, not a port</b> (PCAL4 —
+    /// <c>PlanarDeembed.ApplyBlocks</c> hands back the group's rows in its modal basis, and this is
+    /// called before <c>ModalToTerminal</c>). So the entry is that mode's γ_m, and <b>every member of
+    /// one group must carry the same length</b>: a mode is a combination of the group's conductors,
+    /// so "how far along has this mode travelled" has one answer for the group or none. That is
+    /// gated where the group forms, not here.</para></param>
     public static Mat<Complex> Peel(Mat<Complex> sAtZc,
                                     IReadOnlyList<double> lengthsM,
                                     IReadOnlyList<Complex> gamma)

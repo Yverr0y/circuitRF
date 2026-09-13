@@ -122,4 +122,132 @@ public sealed class PlanarConductors
         a = Find(a); b = Find(b);
         if (a != b) _parent[b] = a;
     }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // A DRAWN CONDUCTOR THE MESH HAS SEVERED (2026-09-12)
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// <b>Two ports on ONE drawn polygon that cannot reach each other through the basis graph.</b>
+    /// The metal the user drew is continuous and the solve's conduction graph is not, so no current
+    /// can pass between them however the structure is excited.
+    /// </summary>
+    /// <param name="LayerIndex">The conductor level the polygon is on.</param>
+    /// <param name="PolygonIndex">Which of that level's polygons.</param>
+    /// <param name="Islands">The port numbers, grouped by what each group can reach. Two or more
+    /// groups is the finding; the ports within one group are fine with each other.</param>
+    public sealed record PlanarSeveredConductor(
+        int LayerIndex, int PolygonIndex, IReadOnlyList<IReadOnlyList<int>> Islands);
+
+    /// <summary>
+    /// <b>Does the meshed structure conduct where the drawn artwork does?</b> Returns one entry per
+    /// drawn polygon whose ports have been split into more than one conduction island, and an empty
+    /// list — the overwhelmingly common answer — when nothing is severed.
+    ///
+    /// <para><b>Why this is asked at all.</b> A rooftop exists only where the shared edge of two
+    /// adjacent cells is swept by metal in both (R-cut-4's <c>Anchored</c> test, which is
+    /// all-or-nothing over a support's strips). On a conformally cut mesh a shallow oblique rim can
+    /// therefore decline EVERY rooftop across a bend, and the conductor is cut in two with nothing
+    /// to say so: the matrix is well formed, the solve converges, and the published s-parameters are
+    /// a smooth, plausible OPEN CIRCUIT. Measured on a 45° bend at cells/λ 5 with the edge mesh off:
+    /// S₂₁ = −42 dB and S₁₁ = −0.02 dB on a 3.8 mm through line whose answer is −0.08 dB and
+    /// −19.3 dB, <b>passive at every frequency</b>, so R-prt-15 cannot see it either. The same file
+    /// with <c>Staircase</c> boundary cells, or with the edge mesh on, is correct.</para>
+    ///
+    /// <para><b>The artwork is the ground truth and the PORTS are the probe</b>, which is what keeps
+    /// this off every legitimately undriven sliver. A conformal taper routinely meshes with dozens of
+    /// cut cells that carry no basis at all — <see cref="CarriesCurrent"/>'s own note — and those are
+    /// separate one-cell "conductors" in the basis graph on every such run. Comparing the whole basis
+    /// graph against the whole artwork would fire on all of them. Asking only whether two PORTS on
+    /// one drawn polygon can reach each other asks exactly the question whose answer changes a
+    /// published number.</para>
+    ///
+    /// <para>It can only UNDER-report, deliberately: two ports on polygons that merely touch are
+    /// physically one conductor and are not grouped here, and a one-port polygon has nothing to be
+    /// disconnected from. An under-report leaves today's behaviour, which is what shipped.</para>
+    /// </summary>
+    public static IReadOnlyList<PlanarSeveredConductor> FindSeveredConductors(
+        PlanarProblem problem, PlanarMesh mesh, IReadOnlyList<PlanarPortResolution> ports)
+    {
+        ArgumentNullException.ThrowIfNull(problem);
+        ArgumentNullException.ThrowIfNull(mesh);
+        ArgumentNullException.ThrowIfNull(ports);
+
+        var conn = Of(mesh);
+
+        // (layer, polygon) → the ports standing on it, each with the label it can reach.
+        var byPolygon = new Dictionary<(int Layer, int Poly), List<(int Number, int Label)>>();
+
+        foreach (var port in ports)
+        {
+            // A point that is certainly INSIDE the metal: a cell's metal centroid, not the port's
+            // own location, which sits on the rim where containment is a coin toss.
+            if (!TryInteriorPoint(conn, mesh, port, out var probe, out int label)) continue;
+            if ((uint)port.LayerIndex >= (uint)problem.Layers.Count) continue;
+
+            var polys = problem.Layers[port.LayerIndex].Polygons;
+            for (int k = 0; k < polys.Count; k++)
+            {
+                if (!Polygon2D.ContainsStrict(polys[k].Outer, probe)) continue;
+
+                bool inHole = false;
+                foreach (var hole in polys[k].HoleRings)
+                    if (Polygon2D.ContainsStrict(hole, probe)) { inHole = true; break; }
+                if (inHole) continue;
+
+                var key = (port.LayerIndex, k);
+                if (!byPolygon.TryGetValue(key, out var list))
+                    byPolygon[key] = list = [];
+                list.Add((port.Number, label));
+                break;
+            }
+        }
+
+        var severed = new List<PlanarSeveredConductor>();
+        foreach (var (key, list) in byPolygon)
+        {
+            if (list.Count < 2) continue;
+
+            var islands = new Dictionary<int, List<int>>();
+            foreach (var (number, label) in list)
+            {
+                if (!islands.TryGetValue(label, out var group)) islands[label] = group = [];
+                group.Add(number);
+            }
+            if (islands.Count < 2) continue;
+
+            var groups = new List<IReadOnlyList<int>>();
+            foreach (var group in islands.Values) { group.Sort(); groups.Add(group); }
+            groups.Sort((a, b) => a[0].CompareTo(b[0]));
+            severed.Add(new PlanarSeveredConductor(key.Layer, key.Poly, groups));
+        }
+
+        severed.Sort((a, b) => a.LayerIndex != b.LayerIndex
+            ? a.LayerIndex.CompareTo(b.LayerIndex)
+            : a.PolygonIndex.CompareTo(b.PolygonIndex));
+        return severed;
+    }
+
+    /// <summary>A point inside one of the port's own cells, and the conduction label it carries.
+    /// False for a port whose bases do not resolve onto cells at all.</summary>
+    private static bool TryInteriorPoint(
+        PlanarConductors conn, PlanarMesh mesh, PlanarPortResolution port,
+        out EmPoint point, out int label)
+    {
+        point = default;
+        label = -1;
+
+        foreach (int bi in port.BasisIndices)
+        {
+            if ((uint)bi >= (uint)mesh.Bases.Count) continue;
+            var b = mesh.Bases[bi];
+            if ((uint)b.CellA >= (uint)mesh.Cells.Count) continue;
+
+            var cell = mesh.Cells[b.CellA];
+            point = new EmPoint(cell.CentroidX, cell.CentroidY);
+            label = conn.LabelOf(b.CellA);
+            return true;
+        }
+        return false;
+    }
 }

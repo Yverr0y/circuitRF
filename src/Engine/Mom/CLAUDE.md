@@ -847,6 +847,24 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
   amplification is set by a₂₁, and a₂₁ is set by the OUTERMOST CELL: with `EdgeMesh` off that cell is
   a bulk cell and 1/a₂₁² is a few hundred; with edge grading on (the default) it is 3% of the width
   and 1/a₂₁² reaches 1e4. Several 12–20 mm tapers at 1–5 GHz measured σ_max ≈ 0.99 either way.
+- **A CUT CELL IS NOT ITS RECTANGLE, and two things downstream were reading the rectangle** (PCAL5,
+  2026-09-12). `PlanarCell.XMin…YMax` is the GRID rectangle and its own doc says it BOUNDS a cut
+  cell's metal rather than equalling it. (a) `MeasureFeedClearance` measured every cell by it, so at a
+  shallow oblique rim the overhang put a neighbour at **exactly 0 µm** and refused the run — same
+  file, `Conformal` says "0 substrate heights", `Staircase` says "clear". It reads `Region` now, and
+  since `Region` is null on every Manhattan cell a staircased mesh is bit-identical. (b) Nothing asked
+  whether the meshed structure still CONDUCTS where the artwork does: a rooftop exists only where both
+  cells' share of their common edge is swept by metal, so a coarse oblique rim can decline every
+  rooftop across a conductor and **every observable stays healthy — well-formed matrix, converged
+  solve, smooth answer, PASSIVE at every frequency**, and what is published is an OPEN CIRCUIT.
+  `PlanarConductors.FindSeveredConductors` asks whether two ports on ONE drawn polygon can reach each
+  other through the basis graph, and `PlanarSolve` REFUSES before filling. **Asked of the ports and
+  the artwork, never of the basis graph alone** — a conformal taper's undriven slivers are separate
+  one-cell "conductors" on every run and a whole-graph test would fire on all of them. **A STAIRCASED
+  mitre severs too on a coarse enough mesh**, so this is a coarse-rim defect that conformal cells
+  reach sooner, not a conformal-cells defect. The refusal names the EDGE MESH (measured to restore
+  conduction under either boundary model) and says outright that **Cells per wavelength is NOT a
+  remedy** — the mesh is bit-identical at cells/λ 5, 10, 20 and 40 and severed at all four.
 - **`CheckFeedClearance` had no upper bound on `along`** (fixed 2026-08-12) — it computed the distance
   along the feed and then only used it to skip cells BEHIND the port, so `nearest` was the smallest
   lateral gap anywhere on the board. It fired on every part ever wider than its port, could not be
@@ -893,10 +911,21 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
     refuse; at 254/432/660 µm the same geometry measures 0.61° and runs.
   - **Also declined by name**: a neighbour whose port is at another station (one standard is cut at
     ONE plane), a group mixing driven and undriven conductors (two electrostatic rules), a
-    non-uniform conductor, a coplanar or cut port, a grown FEED LEAD on any member (a lead is one
-    propagation constant and a group's region has one per mode), and
-    `MaxCalibrationGroupSize` = 3. **A decline now travels WITH the refusal** — a refusal discards
-    the run's notes, which silently lost PCAL3's declines too.
+    non-uniform conductor, a coplanar or cut port, and `MaxCalibrationGroupSize` = 3. **A decline
+    now travels WITH the refusal** — a refusal discards the run's notes, which silently lost PCAL3's
+    declines too.
+  - **PCAL5 (2026-09-12) — A GROWN FEED LEAD IS NO LONGER A DECLINE; IT IS PEELED MODALLY.** The old
+    rule ("a lead is one propagation constant and a group's region has one per mode") was right about
+    the algebra and wrong about the geometry: a group's members share a plane, so `PlanarFeedExtension`
+    grows them all a lead, and those leads are collinear, EQUAL and side by side at the group's own
+    separation — together a uniform N-conductor section of the very cross-section the standard
+    reproduces. `Peel` already ran in the modal basis (on `ApplyBlocks`' output, before
+    `ModalToTerminal`); the one missing line was `gam[slot[k]] = gc.Box.Gamma[k]`. **What replaces the
+    decline is `PlanarFeedExtension.CommonPeelLength`: every member must peel the SAME length**, since
+    a mode runs on all the group's conductors at once. **No PCAL1-4 fixture could reach any of this —
+    every one is a straight line with its ports at the drawn ends, so not one ever grows a lead**;
+    `testdata/portcal/pad-coupled-pair` is the shape that does, and a port landing on a PAD is what a
+    real board is made of. `RESOLVED.md` §PCAL5.
   - **Cost: no more MESH than PCAL3's widened profile** — same metal, same 9.14× the DUT's unknowns
     on the series' fixture, ~8 % more wall clock for twice the ports. What it adds is N excitations
     on a mesh already being solved and a SECOND electrostatic medium ([L] = μ₀ε₀[C₀]⁻¹).

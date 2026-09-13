@@ -1217,6 +1217,18 @@ public static class PlanarSolve
     public const double InteriorCPulResidualCeiling = 1e-6;
 
     /// <summary>
+    /// <b>PCAL5 — how far apart two members of a calibration group's automatic feed leads may be
+    /// before the group is declined</b>, as a fraction of the calibration's own end run.
+    ///
+    /// <para>This is a ROUND-OFF tolerance and nothing else. R-fed-1 grows every member's lead from
+    /// one station to one end run, so the lengths come out equal to the last bit and the subtraction
+    /// <c>|plane − drawn edge|</c> is the only thing between them and exact equality. Any difference
+    /// that is not round-off is at least one mesh cell — nine or more orders above this — so there is
+    /// no middle ground for a looser value to buy and no tuning question here.</para>
+    /// </summary>
+    public const double GroupPeelToleranceFraction = 1e-9;
+
+    /// <summary>
     /// L8d's own entry point, unchanged: a single conductor level on one grounded slab. Delegates to
     /// the problem-taking overload with the one-level problem this describes, so both paths share
     /// one implementation and the one-level one still fits through <see cref="PlanarKernelPair"/>.
@@ -1351,6 +1363,60 @@ public static class PlanarSolve
             Budget                 = parallelBudget,
         };
 
+        // ── DOES THE MESHED STRUCTURE CONDUCT WHERE THE ARTWORK DOES? (2026-09-12) ──────────────
+        //
+        // Before anything is filled, because a severed conductor makes every number after this point
+        // meaningless and costs a full sweep to discover. A rooftop exists only where both cells'
+        // share of the edge is swept by metal, so a conformally cut oblique rim can decline every
+        // rooftop across a bend and cut the conductor in two — and NOTHING downstream notices: the
+        // matrix is well formed, the solve converges, and the answer is a smooth, plausible OPEN
+        // CIRCUIT that is passive at every frequency, so R-prt-15's own gate is silent too.
+        //
+        // This is the same judgement PCAL2 made about the clearance breach and for the same reason:
+        // a `.sNp` on disk carries no notes, so a run that cannot produce a usable answer has to stop
+        // rather than publish one with a caveat attached to the window it came from.
+        {
+            var severed = PlanarConductors.FindSeveredConductors(problem, mesh, ports);
+            if (severed.Count > 0)
+            {
+                var s = severed[0];
+                string islands = string.Join(" and ", s.Islands.Select(
+                    g => g.Count == 1 ? $"port {g[0]}" : "ports " + string.Join(", ", g)));
+
+                // ── NAME ONLY REMEDIES THAT BIND (the standing rule, broken three times here) ────
+                //
+                // "Raise Cells per wavelength" is the obvious sentence and it is INERT on exactly
+                // this artwork: the pitch at a mitre is set by the metal's own width and by the
+                // detail floor, not by λ, so on the fixture this was measured on the mesh is
+                // bit-identical at cells/λ 5, 10, 20 and 40 — severed at every one of them, and
+                // raising MinCellsAcrossConductor from 2 to 4 does not clear it either. What was
+                // measured to restore conduction is resolving the RIM, which is the edge mesh; and,
+                // where the cells are cut, staircasing them.
+                bool anyCut = false;
+                foreach (var cell in mesh.Cells) if (cell.IsCut) { anyCut = true; break; }
+
+                string remedy = anyCut
+                    ? "Turn the EDGE MESH on — that resolves the rim and is what was measured to " +
+                      "restore conduction here — or set Boundary cells back to \"Staircase\", which " +
+                      "removes the cut cells altogether."
+                    : "Turn the EDGE MESH on: that is what resolves a rim, and it is what was " +
+                      "measured to restore conduction here.";
+
+                throw new InvalidOperationException(
+                    "The mesh has SEVERED a conductor the artwork draws as one piece: on " +
+                    $"'{problem.Layers[s.LayerIndex].Name}', {islands} stand on the same polygon and " +
+                    "no chain of basis functions joins them, so no current can pass between them " +
+                    "however this structure is driven. The s-parameters would read as an OPEN " +
+                    "CIRCUIT — smooth, plausible and passive at every frequency, which is why " +
+                    "nothing else here catches it. A rooftop is only built where the shared edge of " +
+                    "two cells is swept by metal on both sides, and at an oblique rim — a mitre, a " +
+                    "taper flank, a chamfer — a coarse mesh can fail that right across a conductor. " +
+                    remedy + " Raising Cells per wavelength is NOT a remedy here: where the metal is " +
+                    "narrower than a wavelength cell the pitch is set by the geometry and that " +
+                    "setting cannot move this mesh at all.");
+            }
+        }
+
         var sw    = Stopwatch.StartNew();
         var dut   = new PlanarSolveContext(mesh, ports, fillSt, levels, slab.HeightM);
         double setupMs = sw.Elapsed.TotalMilliseconds;
@@ -1431,31 +1497,60 @@ public static class PlanarSolve
                         continue;
                     }
 
-                    // ── R-pcal4-6 — A GROWN FEED LEAD IS DECLINED BY NAME ───────────────────────
+                    // ── PCAL5 — A GROWN FEED LEAD IS PEELED MODALLY, WHEN THE GROUP SHARES ONE ──
                     //
-                    // R-fed-2 peels a lead as S_ij *= exp(γ_iℓ_i + γ_jℓ_j), which is a statement
-                    // about ONE γ per port. A group's ports carry N modes, and a lead grown on one
-                    // conductor of a coupled pair is not a matched section of any single one of them
-                    // — it is a length of a DIFFERENT cross-section, whose own modes this calibration
-                    // never measured. Peeling it with a modal γ would remove a length of line that
-                    // is not there.
-                    string? leadHolder = null;
-                    if (leads is { Count: > 0 })
-                        foreach (var lead in leads)
-                            if (lead.LengthM > 0 && profile.PortNumbers.Contains(lead.PortNumber))
-                                leadHolder ??= $"port {lead.PortNumber} ({fmt(lead.LengthM)})";
-
-                    if (leadHolder is not null)
+                    // R-pcal4-6 declined every group whose members had grown a lead, on the grounds
+                    // that R-fed-2's peel states ONE γ per port while a group's region carries one
+                    // per MODE. That reasoning is right about the algebra and wrong about the
+                    // geometry, and the case it refuses is the one real boards are made of: a port
+                    // lands on a PAD, the pad is shorter than the end run, and R-fed-1 grows a lead
+                    // — on every member of the group, since they share a reference plane and the
+                    // same cross-section question. The leads are then collinear, of equal length,
+                    // and side by side at the group's own separation, so together they ARE a uniform
+                    // N-conductor section of exactly the cross-section the group's standard
+                    // reproduces. The peel is a matched length of the GROUP's modes, and
+                    // PlanarFeedExtension.Peel already runs in the modal basis (it is applied to
+                    // ApplyBlocks' output, before ModalToTerminal) — all it was missing was γ_m.
+                    //
+                    // WHAT STILL HAS TO BE TRUE, and it is the whole gate: every member peels the
+                    // SAME length. A mode is a combination of the group's conductors, so "how far
+                    // has this mode travelled" has one answer for the group or none; peeling
+                    // different lengths on different rows of a modal matrix is not a length of line
+                    // at all. Unequal leads also mean the grown region is not one cross-section —
+                    // past the shorter lead's end only the other conductor is there.
+                    //
+                    // A group NONE of whose members grew a lead measures 0 for every member, takes
+                    // this branch trivially, and is bit-identical to PCAL4 (R-pcal4-1's own rule).
+                    var members = new List<PlanarPortResolution>(profile.PortNumbers.Count);
+                    foreach (int num in profile.PortNumbers)
                     {
-                        widenNotes.Add(
-                            $"Ports {string.Join(", ", profile.PortNumbers)} would form one " +
-                            "calibration group, but the solver had to grow a feed lead on " +
-                            $"{leadHolder} to reach a uniform port cross-section. A lead is peeled as " +
-                            "a matched length of the port's OWN line, which is one propagation " +
-                            "constant; a group's port region has one per mode, and the lead is not a " +
-                            "matched section of any of them because the second conductor is not " +
-                            "beside it there. Draw the feed long enough that no lead is needed, or " +
-                            "separate the feeds.");
+                        var member = widened.Find(q => q.Number == num);
+                        if (member is not null) members.Add(member);
+                    }
+
+                    var peel = PlanarFeedExtension.CommonPeelLength(
+                        members, leads, GroupPeelToleranceFraction * endRunM);
+
+                    if (!peel.Ok)
+                    {
+                        string who = string.Join(", ", profile.PortNumbers);
+                        widenNotes.Add(peel.NegativePort != 0
+                            ? $"Ports {who} would form one calibration group, but port " +
+                              $"{peel.NegativePort}'s automatic feed lead is shorter than the " +
+                              "outermost mesh cell, so its reference plane sits inside your drawn " +
+                              "metal rather than on its edge. A group is peeled back to ONE plane, " +
+                              "and there is no positive length to peel here. Raise Cells per " +
+                              "wavelength — a finer mesh at the port puts the plane back on the edge."
+                            : $"Ports {who} would form one calibration group, but the automatic feed " +
+                              "leads they need are not the same length " +
+                              $"({fmt(peel.LengthM)} against {fmt(peel.UnequalLengthM)} on port " +
+                              $"{peel.UnequalPort}). One group is calibrated at ONE plane and its " +
+                              "error box is modal, so a lead is peeled as a matched length of the " +
+                              "GROUP's modes — and a mode runs on every conductor at once, so it has " +
+                              "one length or none. Where the leads differ the longer one is beside " +
+                              "no second conductor for part of its run, which is a different " +
+                              "cross-section again. Draw both feeds to the same length, or separate " +
+                              "them.");
                         continue;
                     }
 
@@ -1580,10 +1675,7 @@ public static class PlanarSolve
             for (int i = 0; i < ports.Count; i++)
             {
                 if (!byNumber.TryGetValue(ports[i].Number, out var lead)) continue;
-                bool fromLow = ports[i].Side is PlanarPortSide.MinX or PlanarPortSide.MinY;
-                double d = fromLow
-                    ? lead.DrawnEdgeM - ports[i].ReferencePlaneM
-                    : ports[i].ReferencePlaneM - lead.DrawnEdgeM;
+                double d = PlanarFeedExtension.PeelLengthM(ports[i], lead);
 
                 // A negative value means the outermost cell is longer than the whole lead, so the
                 // plane landed INSIDE the user's own metal. Peeling a negative length would add line
@@ -2245,6 +2337,14 @@ public static class PlanarSolve
                 for (int k = 0; k < g.ConductorCount; k++)
                 {
                     zModal[slot[k]] = gc.Zc[k];
+
+                    // PCAL5 — after ApplyBlocks this row IS mode k, so the automatic feed lead is
+                    // peeled with the MODE's own γ, not a per-conductor one. `peelM` already carries
+                    // one length for the whole group: the gate where the group formed declined it
+                    // otherwise, which is the condition under which "this mode has travelled ℓ"
+                    // means anything at all. A group that grew no lead has peelM = 0 here and
+                    // Peel returns its argument untouched, so nothing about PCAL4 moves.
+                    gam[slot[k]]     = gc.Box.Gamma[k];
                     handled[slot[k]] = true;
                     for (int m = 0; m < g.ConductorCount; m++)
                         transform[slot[k], slot[m]] = gc.Tv[k, m];

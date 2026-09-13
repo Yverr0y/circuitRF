@@ -1,0 +1,44 @@
+{
+  "FormatVersion": 1,
+  "Name": "pad-coupled-pair",
+  "LayoutRef": "pad-coupled-pair/layout/pad-coupled-pair.clay",
+  "SignalStackupLayerName": "Top Copper (1 oz)",
+  "Frequency": {
+    "StartExpr": "1",
+    "StopExpr": "7",
+    "StepExpr": "",
+    "NumPoints": 7,
+    "Mode": "PointCount",
+    "Kind": "Linear",
+    "StartUnit": "GHz",
+    "StopUnit": "GHz",
+    "StepUnit": "Hz"
+  },
+  "Port1Z0Real": 50,
+  "Port1Z0Imag": 0,
+  "Port2Z0Real": 50,
+  "Port2Z0Imag": 0,
+  "Mesh": {
+    "MinCellsAcrossWidth": 6,
+    "EdgeCells": 3,
+    "EdgeFractionOfWidth": 0.03,
+    "EdgeGrowthRatio": 1.7,
+    "TruncationHeights": 20,
+    "TruncationTailCells": 12
+  },
+  "DispersionCorrection": true,
+  "ResonanceSearch": false,
+  "RadiationPattern": false,
+  "AnalysisKind": "Planar",
+  "AcceleratedSolve": true,
+  "AdaptiveSampling": false,
+  "PlanarMesh": {
+    "Auto": false,
+    "CellsPerWavelength": 5,
+    "EdgeMesh": true,
+    "EdgeCells": 2,
+    "MinCellsAcrossConductor": 2,
+    "CurrentModel": "TransmissionLine",
+    "MeshFrequencyHz": 7000000000.0
+  }
+}

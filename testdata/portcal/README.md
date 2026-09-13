@@ -1,6 +1,6 @@
 # `testdata/portcal` — the port-calibration clearance fixtures
 
-Six cells, one technology, and a `.cem` on each. They exist because the port-calibration series
+Seven cells, one technology, and a `.cem` on each. They exist because the port-calibration series
 (`docs/sonnet-briefs/brief-portcal-0-overview.md`) needs a failing case and a passing one that differ
 in **nothing but the separation of the feeds**, and because every measurement in PCAL1's findings
 (`src/Engine/Mom/RESOLVED.md`, "PCAL1 — how much clearance a calibrated port actually needs") was made
@@ -13,6 +13,7 @@ dotnet run --project src/Cli -- em testdata/portcal/separated-pair/em/separated-
 dotnet run --project src/Cli -- em testdata/portcal/coupled-asym/em/coupled-asym.cem
 dotnet run --project src/Cli -- em testdata/portcal/coupled-triple/em/coupled-triple.cem
 dotnet run --project src/Cli -- em testdata/portcal/offset-pair/em/offset-pair.cem
+dotnet run --project src/Cli -- em testdata/portcal/pad-coupled-pair/em/pad-coupled-pair.cem
 ```
 
 ## What each one is
@@ -72,6 +73,24 @@ unequal on purpose**: three conductors of EQUAL width at this spacing have two m
 in electrical length at 1 GHz and are REFUSED for it (the floor is 0.5°), which is R-pcal4-6 working
 and is worth knowing about.
 
+**`pad-coupled-pair`** — **PCAL5's fixture, and the first one here whose ports do not sit on the end
+of a straight line.** Two 254 µm lines 812.8 µm apart, each ending in a 558.8 µm square pad, the two
+pads 508 µm apart edge to edge — 0.56 substrate heights, well inside the 5 a driven neighbour needs.
+So the far plane's two ports are a calibration group AND the pad is shorter than the 2700 µm the
+standard reproduces, which makes `PlanarFeedExtension` grow each of them a 2151.563 µm lead.
+
+Until PCAL5 that was a **refusal**, and by name: PCAL4's R-pcal4-6 declined any group whose members
+had grown a lead, because R-fed-2's peel states one γ per port while a group's region carries one per
+mode. The geometry says otherwise — both leads are grown, collinear, equal in length and side by side
+at the group's own separation, so together they are a uniform two-conductor section of exactly the
+cross-section the group's standard reproduces, and the peel is a matched length of the GROUP's modes.
+It runs now, as two groups, passive, with no caveat on the file.
+
+**It exists because no other fixture here could reach that code at all** — every one of the others is
+a straight line with its ports at the drawn ends, so not one of them ever grows a lead. That is why
+PCAL4 shipped with the decline in it and nothing caught it until a real board hit it: a port that
+lands on a PAD is what a board is made of.
+
 **`offset-pair`** — the coupled pair with the neighbour **shorter and offset**, so its two ports sit at
 a different station. The neighbour carries ports, so it is not PCAL3's case; the ports do not share a
 reference plane, so it is not PCAL4's either. It is what **still refuses**, and it is the commoner
@@ -88,6 +107,7 @@ shape on a real board — PCAL2's own gates moved onto it when `coupled-pair` st
 | **PCAL4** | `coupled-asym` | **done** — gate 4, the asymmetric pair |
 | **PCAL4** | `coupled-triple` | **done** — gate 3, a group of three |
 | **PCAL2/PCAL4** | `offset-pair` | **done** — what still refuses, and where PCAL2's own gates live now |
+| **PCAL5** | `pad-coupled-pair` | **done** — a group whose every member grew a feed lead, peeled with the MODE's own γ; `tests/Ui.Tests/Em/PadTerminatedGroupTests.cs` |
 
 ## What is deliberately not here
 
