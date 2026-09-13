@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:lay="using:CircuitRF.Ui.Layout"
              xmlns:conv="using:CircuitRF.Ui.Converters"
+             xmlns:ctrl="using:CircuitRF.Ui.Controls"
              xmlns:mi="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
              x:Class="CircuitRF.Ui.Views.Layout.TechEditorView"
              x:DataType="lay:TechDocument"
@@ -177,6 +178,29 @@
         </Style>
         <Style Selector="ListBox.rows ListBoxItem:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent"/>
+        </Style>
+
+        <!-- ── The conductor card's drawing-layer picker (R-stk2-8) ─────────────
+             Three across, four down: twelve layers visible at once where four were, in less
+             vertical space than the four took.
+
+             THE ROW HEIGHT IS PINNED HERE, and that is what makes "a MaxHeight admitting exactly
+             four rows" a true statement rather than a hopeful one. The theme's own CheckBox measures
+             about 35 px — which is where the old typed MaxHeight="140" came from — and it is free to
+             change on a theme upgrade, at which point a typed 140 would admit three rows or five and
+             nothing would say so. MinHeight has to be zeroed as well: Avalonia clamps Height UP to
+             MinHeight, so the theme's would simply win.
+
+             The picker is NOT virtualized — a UniformGrid items panel cannot be. That is deliberate
+             and it is the same bargain the file's own note at the top of these styles describes: the
+             bounded height plus the filter box above it is what keeps a several-hundred-layer
+             technology affordable, because only what fits is ever realized. -->
+        <Style Selector="ListBox.layerpicker CheckBox">
+            <Setter Property="MinHeight" Value="0"/>
+            <Setter Property="Height" Value="{x:Static lay:TechEditorMetrics.DrawingLayerRowHeight}"/>
+            <Setter Property="Padding" Value="6,0,0,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
     </UserControl.Styles>
 
@@ -513,7 +537,36 @@
 
             <!-- Stackup ────────────────────────────────────────────────────── -->
             <TabItem Header="{Binding ViewModel.StackupTabHeader}">
-                <DockPanel>
+                <!-- ── FOUR rows, not the five the sections below might suggest ──────────────────
+                     header / drawing / splitter / the cards pane, where the cards pane is the filter
+                     row and the card list TOGETHER in one DockPanel.
+
+                     They have to share a row. A GridSplitter resizes the definitions immediately
+                     before and immediately after itself, so a filter row of its own between the
+                     splitter and the cards would be the thing the splitter grew and shrank — an Auto
+                     row holding one text box. Putting the filter INSIDE the bottom pane is also what
+                     it means: the owner moved it down because it filters the cards and has nothing to
+                     do with the drawing, and "belongs to the bottom pane" and "is in the bottom
+                     pane's row" should be the same statement.
+
+                     A DockPanel cannot express a splitter between two proportional panes at all,
+                     which is why this stopped being one. -->
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <!-- The drawing takes what is left over, and neither pane can be dragged out
+                             of existence. -->
+                        <RowDefinition Height="*"
+                                       MinHeight="{x:Static lay:TechEditorMetrics.StackupDrawingMinHeight}"/>
+                        <RowDefinition Height="Auto"/>
+                        <!-- R-stk2-6: the card list OPENS at roughly one conductor card and the
+                             splitter is there for anyone who wants it the other way round. The height
+                             tracks the card template rather than being a pixel count typed here —
+                             see TechEditorMetrics. -->
+                        <RowDefinition Height="{x:Static lay:TechEditorMetrics.StackupCardPaneOpeningHeight}"
+                                       MinHeight="{x:Static lay:TechEditorMetrics.StackupCardPaneMinHeight}"/>
+                    </Grid.RowDefinitions>
+
                     <!-- TWO rows, and which control is on which is the whole point of the arrangement:
                          the things you ACT with are on the top row (the two boundary conditions, and the
                          three Add buttons at the right edge), and the things you READ are on the row
@@ -524,7 +577,7 @@
                          starred spacer has run out: the Add buttons are then trimmed at the right edge
                          rather than painting over the Bottom combo beside them, which is what a Grid
                          does when its Auto columns no longer fit. -->
-                    <Grid DockPanel.Dock="Top" RowDefinitions="Auto,Auto" RowSpacing="4"
+                    <Grid Grid.Row="0" RowDefinitions="Auto,Auto" RowSpacing="4"
                           ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto" Margin="6,6" ClipToBounds="True">
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Top:" VerticalAlignment="Center" FontSize="11" Margin="0,0,4,0"/>
                         <ComboBox Grid.Row="0" Grid.Column="1" Classes="cell"
@@ -594,10 +647,36 @@
                         </WrapPanel>
                     </Grid>
 
+                    <!-- ── The drawing (R-stk2-7) ────────────────────────────────────────────────
+                         VERTICAL only. The scene fits the pane's width by construction (brief 1 §2),
+                         so a horizontal scrollbar appearing here would mean the scene got its own
+                         width wrong — and it would mean the drawing and a brief-3 click no longer
+                         agree about where anything is.
+
+                         The canvas measures to the scene's intrinsic height, which is what there is
+                         to scroll: a 20-layer stack does not fit and is not squeezed until it does. -->
+                    <ScrollViewer Grid.Row="1" Margin="6,0,6,0"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <ctrl:StackupCanvas ViewModel="{Binding ViewModel}"/>
+                    </ScrollViewer>
+
+                    <!-- Transparent and 6 px: a grab strip, not a rule. The card Border below already
+                         draws the only line this seam needs. -->
+                    <!-- ResizeBehavior stated rather than inferred: the default resolves it from the
+                         splitter's own alignment, which is a property somebody could change for a
+                         cosmetic reason and silently re-point what the drag moves. -->
+                    <GridSplitter Grid.Row="2" Height="6" ResizeDirection="Rows"
+                                  ResizeBehavior="PreviousAndNext"
+                                  HorizontalAlignment="Stretch" Background="Transparent"/>
+
+                    <!-- ── The cards pane: the filter row and the cards it filters ───────────────── -->
+                    <DockPanel Grid.Row="3">
+
                     <!-- The stackup rows are cards, not a column grid, so the filter row has only
                          the one control to align: the search box sits at the left edge the cards
                          start at. -->
-                    <Grid DockPanel.Dock="Top" ColumnDefinitions="220,Auto" ColumnSpacing="6" Margin="6,0,6,4">
+                    <Grid DockPanel.Dock="Top" ColumnDefinitions="220,Auto" ColumnSpacing="6" Margin="6,4,6,4">
                         <TextBox Grid.Column="0" Classes="filter" x:Name="StackupFilterBox"
                                  Text="{Binding ViewModel.StackupFilter, Mode=TwoWay}"
                                  PlaceholderText="Filter by stackup layer name..."
@@ -869,13 +948,33 @@
                                                              PlaceholderText="Filter layers…"
                                                              Text="{Binding DrawingLayerFilter, Mode=TwoWay}"/>
                                                 </StackPanel>
-                                                <ListBox Classes="rows" Margin="70,0,0,0" MaxHeight="140"
+                                                <!-- THREE ACROSS, FOUR DOWN, AND STILL VIRTUALIZED.
+                                                     The items are chunked into rows of three by the
+                                                     row VM and this list scrolls the ROWS, because
+                                                     the obvious spelling — a UniformGrid items panel
+                                                     over the flat item list — is not a virtualizing
+                                                     panel and would realize all 377 of an imported
+                                                     process's drawing layers per conductor card. See
+                                                     FilteredDrawingLayerRows. -->
+                                                <ListBox Classes="rows layerpicker" Margin="70,0,0,0"
+                                                         MaxHeight="{x:Static lay:TechEditorMetrics.DrawingLayerPickerMaxHeight}"
                                                          SelectionMode="Single"
-                                                         ItemsSource="{Binding FilteredDrawingLayerOptions}">
+                                                         ItemsSource="{Binding FilteredDrawingLayerRows}">
                                                     <ListBox.ItemTemplate>
-                                                        <DataTemplate x:DataType="lay:DrawingLayerCheckItem">
-                                                            <CheckBox Content="{Binding Name}" IsChecked="{Binding IsChecked}"
-                                                                      FontSize="11" Margin="0,0,8,0"/>
+                                                        <DataTemplate x:DataType="lay:DrawingLayerCheckRow">
+                                                            <UniformGrid Columns="{x:Static lay:TechEditorMetrics.DrawingLayerPickerColumns}">
+                                                                <CheckBox Content="{Binding A.Name}" IsChecked="{Binding A.IsChecked}"
+                                                                          FontSize="11" Margin="0,0,8,0"
+                                                                          ToolTip.Tip="{Binding A.Name}"/>
+                                                                <CheckBox Content="{Binding B.Name}" IsChecked="{Binding B.IsChecked}"
+                                                                          IsVisible="{Binding HasB}"
+                                                                          FontSize="11" Margin="0,0,8,0"
+                                                                          ToolTip.Tip="{Binding B.Name}"/>
+                                                                <CheckBox Content="{Binding C.Name}" IsChecked="{Binding C.IsChecked}"
+                                                                          IsVisible="{Binding HasC}"
+                                                                          FontSize="11" Margin="0,0,8,0"
+                                                                          ToolTip.Tip="{Binding C.Name}"/>
+                                                            </UniformGrid>
                                                         </DataTemplate>
                                                     </ListBox.ItemTemplate>
                                                 </ListBox>
@@ -886,7 +985,8 @@
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>
-                </DockPanel>
+                    </DockPanel>
+                </Grid>
             </TabItem>
 
             <!-- DRC rules ──────────────────────────────────────────────────── -->

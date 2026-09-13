@@ -1,5 +1,101 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## brief-stackup-render-2-canvas-and-tab.md, 2026-09-13 — the drawing in the tab, and the tab's re-layout
+
+`StackupCanvas` + the Stackup tab's four-row Grid + the 3 x 4 drawing-layer picker. Read-only, as the
+brief scopes it: the canvas handles no pointer event, which is what keeps briefs 3-7 reviewable.
+Gates: `tests/Ui.Tests/Stackup/StackupCanvasTests.cs` and `TechEditorStackupTabLayoutTests.cs`.
+
+### Four things the brief could not have known, each of which changed what was built
+
+**1. `Theme` is already taken, and shadowing it would be worse than renaming.** §1's sketch spells
+the canvas's colour bundle `public StackupRenderTheme Theme`. `StyledElement.Theme` already exists —
+it is the STYLING theme, a `ControlTheme` — so the property is a compile error without `new`, and
+`new` would leave a `Theme="..."` attribute in any `.axaml` meaning whichever of the two the compiler
+picked. It is `StackupTheme`, which is the answer `WBondProfileCanvas` reached first (`WireTheme`,
+`LayoutTheme`) for exactly this reason.
+
+**2. A `UniformGrid` items panel is not virtualized, and using one would have undone the fix this
+control exists because of.** R-stk2-8 asks for "an `ItemsPanelTemplate` of `UniformGrid Columns=3`"
+and warns, correctly, that it is not virtualizing — then leaves the bargain to be verified. It does
+not hold: the picker's own view model records that a real process carries several hundred drawing
+layers (an imported one measured 377), that the WrapPanel this control replaced realized ~10,000
+controls on that tab, and that **"the view virtualizes it, which is what makes it cheap."** A
+`UniformGrid` items panel over the flat option list realizes and ARRANGES every option per conductor
+card — same order of magnitude, reintroduced to save two rows of height.
+
+So the three-across-ness moved from the ITEMS PANEL to the ITEM TEMPLATE: `ApplyDrawingLayerFilter`
+chunks `FilteredDrawingLayerOptions` into `FilteredDrawingLayerRows` of three
+(`DrawingLayerCheckRow`, three named cells rather than a list, so a realized row costs three controls
+and not three plus an `ItemsControl`), the `ListBox` keeps its default `VirtualizingStackPanel`, and
+the row template is the `UniformGrid`. Identical picture, four realized rows instead of 377 items.
+The gate is that the list binds the chunked rows and declares no `ItemsPanel` of its own.
+
+**3. "A MaxHeight admitting exactly four rows" is only true if the ROW height is ours.** The old
+`MaxHeight="140"` was four rows of the theme's ~35 px CheckBox — true when it was typed, and free to
+become three rows or five on a theme upgrade with nothing saying so. The picker's item style now pins
+the row height from `TechEditorMetrics.DrawingLayerRowHeight` and the MaxHeight is four of them by
+arithmetic. **`MinHeight` has to be zeroed in the same style**: Avalonia clamps `Height` UP to
+`MinHeight`, so the theme's 32 would simply win and the explicit height would do nothing.
+
+**4. A `GridSplitter` resizes the definitions either side of ITSELF, so the filter row cannot have
+one of its own.** §2's five-row spelling (header / drawing / splitter / filter / cards) makes the
+splitter's "next" the Auto row holding one text box, which is then the thing a drag grows and
+shrinks. The tab is FOUR rows, with the filter row and the card list sharing the bottom one inside a
+`DockPanel` — which is also what the move MEANS: the owner put the filter below the splitter because
+it belongs to the bottom pane. `ResizeBehavior="PreviousAndNext"` is stated rather than inferred from
+alignment, so a cosmetic alignment change cannot re-point what the drag moves.
+
+### Where the sizes live, and which of them are binding
+
+`src/Ui/Layout/TechEditorMetrics.cs`, read by the `.axaml` through `x:Static` — which is what keeps
+the source-scan tests from being tautologies: a scan for "the ListBox binds its MaxHeight to the
+constant" plus arithmetic on the constant is a statement about what the control does, where a typed
+number would make both halves worthless.
+
+Two kinds of number, and the file says which is which. The picker's row height, its MaxHeight and the
+two pane minimums are PINNED — what is written is what the control does. `ConductorCardHeight` is
+NOMINAL: a sum over the conductor card's template whose field rows the theme sizes, not us. That is
+allowed, because its only job is R-stk2-6's OPENING split, which is a starting position a user drags
+off in a second — and it tracks the template, so adding a row to the card changes
+`ConductorCardFieldRows` rather than leaving a magic 280 somewhere that quietly stops matching.
+
+R-stk2-9 wants a conductor card MEASURED, and there is no arrange pass in this test project to
+measure one in. What stands in for it is that stated height against a ceiling placed BETWEEN the card
+as it is and the card as it was with the 140 px picker — so the gate fails if the picker grows back.
+
+### The scene cache is keyed on the Technology's REFERENCE, and that is not a shortcut
+
+`ApplySnapshot` — the one choke point for a committed edit, an undo and a redo — assigns `Working` a
+freshly deserialized instance every time. A changed stackup IS a changed reference. What reference
+identity cannot see is an in-flight mutation (a row VM writes `Layer.ThicknessDbu` in place before
+calling `CommitEdit`), and nothing asks it to: the cache is invalidated by `StackupChanged`, which is
+raised from that same method.
+
+`StackupChanged` is raised LAST in `ApplySnapshot`, after `Working` is replaced and the row
+collections rebuilt — the drawing reads `Working` directly, so a cue raised any earlier would rebuild
+the scene from the technology the edit replaced.
+
+The canvas invalidates MEASURE as well as visual on that cue. A thickness edit changes the scene's
+HEIGHT; a visual-only invalidation repaints the new bands inside the old height, which is the drawing
+correct and the scrollbar lying about it.
+
+### Page Up / Page Down did not need defending, but it needed knowing why
+
+`TechEditorView.TargetScrollViewer` scrolls the `ScrollViewer` the FOCUSED control sits inside,
+falling back to the visible tab's row list. Adding a second scrollable pane to this tab is exactly the
+kind of change that silently re-points a keystroke — and what stops it is that `StackupCanvas` sets
+`Focusable = false`, so nothing inside the drawing's `ScrollViewer` can ever hold focus. That is a
+line of code with a reason, not an omission, and it has a test of its own.
+
+### Verified as a picture, not only as a test
+
+DocGen was run into a scratch directory (nothing under `docs/` touched — brief 8 owns the figure
+churn) and the regenerated `tech-editor-stackup` figure confirms it: the cross-section draws in the
+tab above the cards, the filter row and card list sit below the splitter in a 280 px pane, and the
+picker renders three across and four down with its filter box above it.
+
+
 ## Owner request, 2026-09-13 — the simulation's progress bar stays at the BOTTOM of the Messages list
 
 "If a new message appears in the Message panel, make sure it scrolls to the bottom. (And keep the

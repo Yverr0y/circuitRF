@@ -329,6 +329,21 @@ public sealed partial class TechEditorViewModel : ObservableObject
     /// </summary>
     public event Action<string, Technology>? TechLiveChanged;
 
+    /// <summary>
+    /// Raised after every committed edit, undo and redo — the stackup drawing's cue to rebuild its
+    /// scene. Fired from <see cref="ApplySnapshot"/> for the same reason
+    /// <see cref="TechLiveChanged"/> is: it is the one place <see cref="Working"/> is replaced.
+    ///
+    /// <para>That single wire is what makes the drawing live for EVERY edit path at once — a card's
+    /// text box, a card's combo, an Add button, an undo, a redo, and every edit briefs 4-6 add. There
+    /// is no second place to remember (R-stk2-3).</para>
+    ///
+    /// <para>No payload, deliberately: the subscriber reads <see cref="Working"/>, which this event
+    /// is the announcement of. A <c>Technology</c> argument would be a second clone per edit for a
+    /// reader that is already looking at the first.</para>
+    /// </summary>
+    public event Action? StackupChanged;
+
     /// <summary>Fired after a successful save with the absolute path — the workspace's cue to
     /// call <c>TechnologyCache.Invalidate(path)</c>, which is what fires L0c's live-refresh seam.</summary>
     public event Action<string>? TechSaved;
@@ -470,6 +485,11 @@ public sealed partial class TechEditorViewModel : ObservableObject
         // half-applied edits or silently stop updating after the first undo. Reusing `json` (already
         // in hand) rather than re-serializing Working is the "one extra deserialize" the brief notes.
         TechLiveChanged?.Invoke(FilePath, TechPersistence.Deserialize(json));
+
+        // Last, after Working has been replaced and every row collection rebuilt: the drawing reads
+        // Working directly, so a cue raised any earlier would rebuild the scene from the technology
+        // this edit replaced.
+        StackupChanged?.Invoke();
     }
 
     private void RebuildAll()

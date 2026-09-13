@@ -191,6 +191,21 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
     /// </summary>
     public ObservableCollection<DrawingLayerCheckItem> FilteredDrawingLayerOptions { get; } = [];
 
+    /// <summary>
+    /// <see cref="FilteredDrawingLayerOptions"/> chunked into rows of
+    /// <see cref="TechEditorMetrics.DrawingLayerPickerColumns"/> — <b>what the conductor picker
+    /// actually binds to</b> since R-stk2-8 made it three across.
+    ///
+    /// <para><b>The chunking is what keeps the picker virtualized</b>, and that is the whole reason it
+    /// exists. The obvious spelling of "three across" is a <c>UniformGrid</c> items panel, and a
+    /// <c>UniformGrid</c> is not a virtualizing panel: on the 377-layer technology the comment above
+    /// names, it would realize and arrange all 377 CheckBoxes per conductor card — the same order of
+    /// magnitude as the WrapPanel that arrangement replaced, reintroduced to save two rows of height.
+    /// A <c>VirtualizingStackPanel</c> over ROWS realizes four of these, each holding three
+    /// CheckBoxes, and looks identical.</para>
+    /// </summary>
+    public ObservableCollection<DrawingLayerCheckRow> FilteredDrawingLayerRows { get; } = [];
+
     [ObservableProperty] private string _drawingLayerFilter = "";
 
     partial void OnDrawingLayerFilterChanged(string value) => ApplyDrawingLayerFilter();
@@ -488,6 +503,13 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
         foreach (var o in DrawingLayerOptions)
             if (q.Length == 0 || o.Name.Contains(q, StringComparison.OrdinalIgnoreCase))
                 FilteredDrawingLayerOptions.Add(o);
+
+        FilteredDrawingLayerRows.Clear();
+        for (int i = 0; i < FilteredDrawingLayerOptions.Count; i += TechEditorMetrics.DrawingLayerPickerColumns)
+            FilteredDrawingLayerRows.Add(new DrawingLayerCheckRow(
+                FilteredDrawingLayerOptions[i],
+                i + 1 < FilteredDrawingLayerOptions.Count ? FilteredDrawingLayerOptions[i + 1] : null,
+                i + 2 < FilteredDrawingLayerOptions.Count ? FilteredDrawingLayerOptions[i + 2] : null));
     }
 
     /// <summary>Binds exactly one drawing layer (or none) — the single-select path.</summary>
@@ -678,4 +700,32 @@ public sealed partial class DrawingLayerCheckItem : ObservableObject
     }
 
     partial void OnIsCheckedChanged(bool value) => _owner.SetDrawingLayerChecked(Key, value);
+}
+
+/// <summary>
+/// Up to three <see cref="DrawingLayerCheckItem"/>s, side by side — one row of the conductor card's
+/// 3 x 4 drawing-layer picker (R-stk2-8).
+///
+/// <para>THREE NAMED CELLS, not a list, and deliberately: the row template binds three CheckBoxes
+/// and nothing iterates, so a realized row costs three controls rather than three plus an
+/// ItemsControl and its presenter. The last row of an un-even list carries nulls, which the template
+/// hides — a blank cell, which is what the fourth column of a three-column grid looks like anyway.
+/// The column count is <see cref="TechEditorMetrics.DrawingLayerPickerColumns"/>; changing it means
+/// changing this type, which is the honest amount of work for changing the shape of a grid.</para>
+/// </summary>
+public sealed class DrawingLayerCheckRow
+{
+    public DrawingLayerCheckRow(DrawingLayerCheckItem a, DrawingLayerCheckItem? b, DrawingLayerCheckItem? c)
+    {
+        A = a;
+        B = b;
+        C = c;
+    }
+
+    public DrawingLayerCheckItem  A { get; }
+    public DrawingLayerCheckItem? B { get; }
+    public DrawingLayerCheckItem? C { get; }
+
+    public bool HasB => B is not null;
+    public bool HasC => C is not null;
 }
