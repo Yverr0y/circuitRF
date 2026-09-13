@@ -681,7 +681,20 @@
                              right. The attributes below are SchematicView.axaml's, for the same
                              reason it states them: they are what the control's own constants mean. -->
                         <Panel>
-                            <ctrl:StackupCanvas x:Name="StackupDrawing" ViewModel="{Binding ViewModel}"/>
+                            <ctrl:StackupCanvas x:Name="StackupDrawing" ViewModel="{Binding ViewModel}">
+                                <!-- R-stk6-1. ONE ContextMenu instance, declared once here on the
+                                     control; StackupCanvas never constructs or opens one of its own.
+                                     That is LayoutEditorView.axaml's own fix, adopted verbatim,
+                                     because the bug it fixes is the one this pattern exists for:
+                                     building and manually opening a menu per right-click STACKED
+                                     them. The canvas only RECORDS the click; Avalonia opens this
+                                     menu itself and raises Opening, which rebuilds ItemsSource
+                                     fresh — never reusing item instances, whose Click handlers
+                                     would then fire N times on the Nth opening. -->
+                                <ctrl:StackupCanvas.ContextMenu>
+                                    <ContextMenu Opening="OnStackupContextMenuOpening"/>
+                                </ctrl:StackupCanvas.ContextMenu>
+                            </ctrl:StackupCanvas>
 
                             <ctrl:SchematicInlineEditBox x:Name="StackupInlineEdit"
                                      IsVisible="False"
@@ -817,9 +830,9 @@
                                                           ItemsSource="{Binding ConductorMaterialChoices}"
                                                           SelectedItem="{Binding SelectedConductorMaterial, Mode=TwoWay}"
                                                           ToolTip.Tip="Fills the conductivity field with a metal's bulk value at 20 °C — copper 5.8e7, silver 6.3e7, gold 4.1e7, aluminium 3.77e7, nickel 1.43e7 S/m. A shortcut only: the field beside it stays typeable and is what gets saved, and a value matching none of these shows as Custom. Real plated or alloyed metal runs below the handbook figure, so lower it if your process states one."/>
-                                                <CheckBox Content="Ground reference" FontSize="11" Margin="8,0,0,0"
+                                                <CheckBox Content="{x:Static lay:StackupCardText.GroundReference}" FontSize="11" Margin="8,0,0,0"
                                                           IsChecked="{Binding IsGroundReference}"
-                                                          ToolTip.Tip="Marks this conductor as a ground-reference plane for microstrip substrate resolution."/>
+                                                          ToolTip.Tip="{x:Static lay:StackupCardText.GroundReferenceTip}"/>
                                             </StackPanel>
 
                                             <!-- MIM-6. The full-wave planar kernel solves a conductor
@@ -851,13 +864,13 @@
                                                      know what the control is for, and hovering the control
                                                      assumes you already do. Same text, so the two cannot
                                                      drift into saying different things. -->
-                                                <TextBlock Text="Metal thickness goes to:" Width="140" FontSize="11"
+                                                <TextBlock Text="{x:Static lay:StackupCardText.SheetAt}" Width="140" FontSize="11"
                                                            VerticalAlignment="Center" TextWrapping="Wrap"
-                                                           ToolTip.Tip="The full-wave planar solver has no thickness for metal — a conductor is a sheet at one height — so this conductor's thickness has to be given to the dielectric on one side of it. The layer above (the default, and what every technology written before this field means) leaves the substrate under the line exactly as you entered it, which is what the closed-form microstrip models agree with. The substrate below grows the substrate by this metal, which is what a thin-film capacitor's LOWER plate needs so the modelled plate gap is the capacitor dielectric alone. The stack height never changes either way."/>
+                                                           ToolTip.Tip="{x:Static lay:StackupCardText.SheetAtTip}"/>
                                                 <ComboBox Classes="cell" MinWidth="160"
                                                           ItemsSource="{Binding SheetAtChoices}"
                                                           SelectedItem="{Binding SelectedSheetAt, Mode=TwoWay}"
-                                                          ToolTip.Tip="The full-wave planar solver has no thickness for metal — a conductor is a sheet at one height — so this conductor's thickness has to be given to the dielectric on one side of it. The layer above (the default, and what every technology written before this field means) leaves the substrate under the line exactly as you entered it, which is what the closed-form microstrip models agree with. The substrate below grows the substrate by this metal, which is what a thin-film capacitor's LOWER plate needs so the modelled plate gap is the capacitor dielectric alone. The stack height never changes either way.">
+                                                          ToolTip.Tip="{x:Static lay:StackupCardText.SheetAtTip}">
                                                     <ComboBox.ItemTemplate>
                                                         <DataTemplate>
                                                             <TextBlock Text="{Binding Converter={StaticResource SheetAtLabel}}"/>
@@ -901,13 +914,13 @@
                                                  interconnect unchanged. "(none)" is a continuous
                                                  dielectric and is what every other entry means. -->
                                             <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding IsDielectric}">
-                                                <TextBlock Text="Patterned with:" Width="86" FontSize="11"
+                                                <TextBlock Text="{x:Static lay:StackupCardText.PresentWith}" Width="86" FontSize="11"
                                                            VerticalAlignment="Center" TextWrapping="Wrap"
-                                                           ToolTip.Tip="For a patterned thin film such as a capacitor dielectric: the conductor it is deposited under. Name the conductor directly ABOVE this entry. An EM run carries this dielectric only when that conductor is one of its analysis levels; otherwise it enters the medium as air at the same thickness and the run says so in its notes. Leave as (none) for an ordinary, laterally continuous dielectric."/>
+                                                           ToolTip.Tip="{x:Static lay:StackupCardText.PresentWithTip}"/>
                                                 <ComboBox Classes="cell" MinWidth="110"
                                                           ItemsSource="{Binding PresentWithChoices}"
                                                           SelectedItem="{Binding SelectedPresentWith, Mode=TwoWay}"
-                                                          ToolTip.Tip="For a patterned thin film such as a capacitor dielectric: the conductor it is deposited under. Name the conductor directly ABOVE this entry. An EM run carries this dielectric only when that conductor is one of its analysis levels; otherwise it enters the medium as air at the same thickness and the run says so in its notes. Leave as (none) for an ordinary, laterally continuous dielectric."/>
+                                                          ToolTip.Tip="{x:Static lay:StackupCardText.PresentWithTip}"/>
                                             </StackPanel>
 
                                             <!-- Via span (R-via-3). Shown ONLY for a via, and shown at
@@ -929,9 +942,9 @@
 
                                             <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding IsVia}">
                                                 <TextBlock Text="Fill:" Width="70" FontSize="11" VerticalAlignment="Center"/>
-                                                <CheckBox Content="Plated" FontSize="11"
+                                                <CheckBox Content="{x:Static lay:StackupCardText.Plated}" FontSize="11"
                                                           IsChecked="{Binding IsPlated, Mode=TwoWay}"
-                                                          ToolTip.Tip="Whether these holes are metal at all. Unticked means a non-plated hole — a mounting hole, a routed cutout, a castellation that was not plated — which is drawn exactly as it is but is NOT extracted as a vertical conductor by an EM run. Plated is the default and is what every technology means when it says nothing."/>
+                                                          ToolTip.Tip="{x:Static lay:StackupCardText.PlatedTip}"/>
                                                 <ComboBox Classes="cell" MinWidth="90"
                                                           IsVisible="{Binding IsPlated}"
                                                           ItemsSource="{Binding FillChoices}"

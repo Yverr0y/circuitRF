@@ -925,14 +925,26 @@ public sealed partial class TechEditorViewModel : ObservableObject
     private void AddStackupLayer(StackupKind kind)
     {
         var before = SnapshotJson();
-        Working.Stackup.Layers.Add(new StackupLayer
-        {
-            Kind         = kind,
-            Name         = NextFreeStackupName(kind),
-            ThicknessDbu = LayoutUnits.ToDbu(1m, LayoutUnit.Um, LayoutUnits.DefaultDbuPerMicron),
-        });
+        Working.Stackup.Layers.Add(NewStackupLayer(kind));
         CommitEdit(before, $"Add {kind} stackup layer");
     }
+
+    /// <summary>
+    /// The entry the "＋ Conductor" / "＋ Dielectric" / "＋ Via" buttons add, unattached.
+    ///
+    /// <para>Factored out for R-stk6-4, which requires that a via added from the drawing's context
+    /// menu and a via added from the button be <b>the same entry</b> but for its name and its span.
+    /// That is a promise about <see cref="StackupLayer.Plated"/>, <see cref="StackupLayer.Fill"/>,
+    /// <see cref="StackupLayer.WallThicknessDbu"/> and the starting thickness all at once, and the
+    /// only version of it that cannot drift is one constructor both paths call — a second initializer
+    /// listing the same fields agrees right up until one of them gains another.</para>
+    /// </summary>
+    private StackupLayer NewStackupLayer(StackupKind kind) => new()
+    {
+        Kind         = kind,
+        Name         = NextFreeStackupName(kind),
+        ThicknessDbu = LayoutUnits.ToDbu(1m, LayoutUnit.Um, LayoutUnits.DefaultDbuPerMicron),
+    };
 
     /// <summary>
     /// GI3 R-gi3-8's other half. The flat <c>$"New {kind}"</c> this used to write meant that clicking
@@ -950,6 +962,89 @@ public sealed partial class TechEditorViewModel : ObservableObject
             var candidate = $"{bare} {i}";
             if (!existing.Contains(candidate)) return candidate;
         }
+    }
+
+    // ── R-stk6-4 — Add Via, from the dielectric that was right-clicked ────────────────────────────
+
+    /// <summary>
+    /// The conductors immediately above and below <paramref name="dielectric"/> in the z order —
+    /// the span a via added at that dielectric gets.
+    ///
+    /// <para><b>The walk skips dielectrics AND via entries.</b> A run of two dielectrics with no
+    /// metal between them is ordinary (prepreg on core), so "the layer above" is not "the previous
+    /// list entry"; and a via entry has no z band of its own and sits outside the order entirely
+    /// (R-stk5-1), so a via lying between two bands in list order must not stop either walk.</para>
+    ///
+    /// <para>Either end may be null — a dielectric above the top metal has nothing to span up to, a
+    /// solder mask below the bottom metal nothing to span down to — which is what
+    /// <see cref="AddViaAroundRefusal"/> turns into a disabled menu item rather than a via with one
+    /// end unset.</para>
+    /// </summary>
+    internal (string? Above, string? Below) ConductorsAround(StackupLayer dielectric)
+    {
+        ArgumentNullException.ThrowIfNull(dielectric);
+        var layers = Working.Stackup.Layers;
+        int at = layers.IndexOf(dielectric);
+        if (at < 0) return (null, null);
+
+        string? Walk(int step)
+        {
+            for (int i = at + step; i >= 0 && i < layers.Count; i += step)
+                if (layers[i].Kind == StackupKind.Conductor) return layers[i].Name;
+            return null;
+        }
+
+        return (Walk(-1), Walk(+1));
+    }
+
+    /// <summary>
+    /// Why "Add Via" is not offered on <paramref name="row"/>, or null when it is.
+    ///
+    /// <para><b>Disabled with a reason, never enabled then refused.</b> The reason names the SIDE
+    /// that has no metal, because that is the half the user can act on — moving the dielectric, or
+    /// adding the conductor it is missing.</para>
+    /// </summary>
+    internal string? AddViaAroundRefusal(StackupLayerRowViewModel row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        if (!row.IsDielectric) return "Add Via places a via across a dielectric; this entry is not one.";
+
+        var (above, below) = ConductorsAround(row.Layer);
+        return (above, below) switch
+        {
+            (null, null) => $"There is no conductor above or below \"{row.Layer.Name}\" for a via to span.",
+            (null, _)    => $"There is no conductor above \"{row.Layer.Name}\" for a via to span up to.",
+            (_, null)    => $"There is no conductor below \"{row.Layer.Name}\" for a via to span down to.",
+            _            => null,
+        };
+    }
+
+    /// <summary>
+    /// R-stk6-4. Adds a via spanning the two conductors <paramref name="dielectricRow"/> lies
+    /// between, and SELECTS it — which scrolls the card list to its card, where the drawing layer
+    /// and the wall thickness the new entry still needs are.
+    ///
+    /// <para>One <see cref="CommitEdit"/>, so one Ctrl-Z removes it. No-ops when
+    /// <see cref="AddViaAroundRefusal"/> has something to say; the menu item is disabled in that case
+    /// and this is the belt to its braces.</para>
+    /// </summary>
+    internal void AddViaSpanningAround(StackupLayerRowViewModel dielectricRow)
+    {
+        ArgumentNullException.ThrowIfNull(dielectricRow);
+        if (AddViaAroundRefusal(dielectricRow) is not null) return;
+
+        var (above, below) = ConductorsAround(dielectricRow.Layer);
+
+        var before = SnapshotJson();
+        var via = NewStackupLayer(StackupKind.Via);
+        via.SpanFromLayer = above;
+        via.SpanToLayer   = below;
+        Working.Stackup.Layers.Add(via);
+        CommitEdit(before, $"Add via spanning {above} to {below}");
+
+        // AFTER the commit, and by NAME: the commit rebuilt every row VM, so `via` itself is already
+        // a dead reference by the time this line runs (R-stk3-1).
+        SelectedStackupLayerName = via.Name;
     }
 
     internal void RemoveStackupLayer(StackupLayerRowViewModel row)

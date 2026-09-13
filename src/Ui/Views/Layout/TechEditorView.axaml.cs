@@ -194,6 +194,25 @@ public partial class TechEditorView : UserControl
         e.Handled = true;
     }
 
+    // ── The cross-section's context menu (R-stk6-1) ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Rebuilds the ONE menu's items, fresh, on every opening.
+    ///
+    /// <para><b>Fresh, and never reused.</b> Reusing item instances across openings and re-subscribing
+    /// their <c>Click</c> would fire an action N times on the Nth opening — the exact mistake the
+    /// one-instance pattern exists to prevent, and the one the Layout Editor already paid for.</para>
+    ///
+    /// <para>No pending target means no right-click reached the drawing (the menu was opened some
+    /// other way, or a target was already consumed), so the opening is CANCELLED rather than shown
+    /// with whatever the previous one built.</para>
+    /// </summary>
+    private void OnStackupContextMenuOpening(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (StackupDrawing?.ConsumeContextMenuTarget() is not { } p) { e.Cancel = true; return; }
+        if (sender is ContextMenu menu) menu.ItemsSource = StackupDrawing.BuildContextMenuItems(p);
+    }
+
     private void OnActivationFocusRequested()
     {
         _subscribedDoc?.ConsumeActivationFocus();

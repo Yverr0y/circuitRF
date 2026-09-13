@@ -1,0 +1,89 @@
+namespace CircuitRF.Ui.Layout;
+
+/// <summary>
+/// The words the Stackup tab uses for the handful of CLOSED-CHOICE fields that appear in two places
+/// at once — on an entry's card, and (brief 6, R-stk6-8) on the cross-section's context menu.
+///
+/// <h3>Why these strings are here rather than typed into the .axaml</h3>
+/// <para>R-stk6-8 states two constraints on the menu: <b>the labels are the card's labels, verbatim</b>,
+/// and <b>the tooltips come with them</b>. "Metal thickness goes to:" was deliberately reworded away
+/// from an earlier spelling that could not be answered without knowing what a conductor's z <i>band</i>
+/// is — a word the control never defined — and re-inventing it in a second place is exactly how the
+/// two come to ask different questions. A constant referenced from both is the only version of that
+/// rule the next change cannot miss.</para>
+///
+/// <para>The .axaml reads these through <c>{x:Static}</c>, the same way it already reads
+/// <see cref="TechEditorMetrics"/>'s pinned sizes — so this is not a second copy of the card's text,
+/// it IS the card's text. It also collapses a duplication the card already carried: each of these
+/// tooltips was written out twice there, once on the label and once on the control beside it, with a
+/// comment asking that the two not drift.</para>
+///
+/// <h3>What is NOT here</h3>
+/// <para>The drawing-layer rows' label, which is <c>StackupLayerRowViewModel.DrawingLayersLabel</c> —
+/// it is already one string chosen by the row's kind ("Drawing layers:" for a conductor, "Drawing
+/// layer:" for a via), and the menu reads the row's own property rather than restating it.</para>
+/// </summary>
+public static class StackupCardText
+{
+    // ── Conductor: the ground-reference flag ──────────────────────────────────────────────────────
+
+    public const string GroundReference = "Ground reference";
+
+    public const string GroundReferenceTip =
+        "Marks this conductor as a ground-reference plane for microstrip substrate resolution.";
+
+    // ── Conductor: which neighbour absorbs the metal's thickness (MIM-6) ──────────────────────────
+
+    public const string SheetAt = "Metal thickness goes to:";
+
+    public const string SheetAtTip =
+        "The full-wave planar solver has no thickness for metal — a conductor is a sheet at one " +
+        "height — so this conductor's thickness has to be given to the dielectric on one side of " +
+        "it. The layer above (the default, and what every technology written before this field " +
+        "means) leaves the substrate under the line exactly as you entered it, which is what the " +
+        "closed-form microstrip models agree with. The substrate below grows the substrate by this " +
+        "metal, which is what a thin-film capacitor's LOWER plate needs so the modelled plate gap " +
+        "is the capacitor dielectric alone. The stack height never changes either way.";
+
+    // ── Dielectric: the conductor a patterned thin film is deposited under (MIM-7) ────────────────
+
+    public const string PresentWith = "Patterned with:";
+
+    public const string PresentWithTip =
+        "For a patterned thin film such as a capacitor dielectric: the conductor it is deposited " +
+        "under. Name the conductor directly ABOVE this entry. An EM run carries this dielectric " +
+        "only when that conductor is one of its analysis levels; otherwise it enters the medium as " +
+        "air at the same thickness and the run says so in its notes. Leave as (none) for an " +
+        "ordinary, laterally continuous dielectric.";
+
+    // ── Via: is the hole metal at all (GI1 R-gi1-2) ───────────────────────────────────────────────
+
+    /// <summary>The card's own spelling, on its "Fill:" row where the word "Plated" sits beside the
+    /// fill combo and cannot be read as anything else. The MENU spells it
+    /// <see cref="PlatedHoleMenu"/>, because there the two meanings of the word are two adjacent
+    /// items — see R-stk6-5.</summary>
+    public const string Plated = "Plated";
+
+    /// <summary>R-stk6-5's spelling of the same flag. <c>StackupLayer.Plated</c> and
+    /// <c>ViaFillKind.Plated</c> are different things with the same word, and on the menu they are
+    /// one item apart; "Plated hole" is the one of the two that names a HOLE.</summary>
+    public const string PlatedHoleMenu = "Plated hole";
+
+    public const string PlatedTip =
+        "Whether these holes are metal at all. Unticked means a non-plated hole — a mounting hole, " +
+        "a routed cutout, a castellation that was not plated — which is drawn exactly as it is but " +
+        "is NOT extracted as a vertical conductor by an EM run. Plated is the default and is what " +
+        "every technology means when it says nothing.";
+
+    // ── Via: the fill MODEL, whose two values are both conductive (R-stk6-5) ──────────────────────
+
+    public const string Fill = "Fill";
+
+    public const string FillPlated = "Plated (hollow barrel)";
+    public const string FillSolid  = "Solid (filled)";
+
+    public const string FillTip =
+        "Which fill model to solve this via with. BOTH values are metal — this is not the question " +
+        "of whether the hole is plated, which is the item above. Plated is a hollow barrel with a " +
+        "wall of the stated thickness; Solid is filled edge to edge.";
+}

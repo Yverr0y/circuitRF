@@ -1,5 +1,89 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## brief-stackup-render-6-context-menu.md, 2026-09-13 — right-click the cross-section
+
+Right-click a band, a barrel or the background and get a menu built from what is under the pointer:
+delete labelled by kind, Add Via on a dielectric, the plated-hole flag and the fill model as two
+separate items, and the four remaining closed-choice parameters. `src/Ui/Controls/StackupCanvas.ContextMenu.cs`
+is the whole of it; `TechEditorView.axaml` declares the one `ContextMenu` and its `Opening` handler
+rebuilds `ItemsSource`. Gate: `tests/Ui.Tests/Stackup/StackupContextMenuTests.cs` (41 tests). All
+green, with `Stackup*`/`Tech*` (811) and `Firewall.Tests` alongside.
+
+### The brief's premise about the tooltips was half right, and the half that was wrong is the useful half
+
+R-stk6-8: *"These five carry long tooltips on the card because they are the fields nobody can answer
+from the name alone."* Three of them do — Ground reference, Metal thickness goes to, Patterned with.
+**The two drawing-layer rows carry no tooltip on the card at all**, and never have. So "the tooltips
+come with them" could not be satisfied for those two by copying anything, and inventing one for the
+menu alone would have created exactly the second wording the same requirement's first constraint
+forbids. What the menu does have to say about drawing layers — that its list is bounded and the full
+picker is on the card — is on the overflow item, where it is true of the menu rather than of the
+field.
+
+### The labels and tooltips moved into a constant, because "verbatim" cannot be held any other way
+
+R-stk6-8 asks that the menu's labels be the card's *character for character*. A test that compares two
+typed copies passes on the day it is written and says nothing afterwards. `src/Ui/Layout/StackupCardText.cs`
+holds the three labels and four tooltips, the `.axaml` reads them through `{x:Static lay:…}` (the same
+route it already used for `TechEditorMetrics`' pinned sizes), and the menu reads the same fields. Drift
+is not expressible.
+
+**It also collapsed a duplication the card already carried.** Each of the two long tooltips was written
+out twice in `TechEditorView.axaml` — once on the label, once on the control beside it — with a comment
+asking that the two not drift. That comment is now a compiler fact.
+
+**Three existing tests in `TechEditorHelpAndStackupSummaryTests` asserted the literal was typed into the
+`.axaml` and had to be re-pointed** at the constant. They assert strictly more than before (the words,
+the label's binding, the control's binding, and that no typed copy is left), and the "no typed copy
+left" check has to strip XML comments first — the card's own comments quote the wording at length
+while explaining why it is worded that way. That is the same trap the C# source scan carries, one
+markup language along.
+
+### `ToggleType` is correct here, and the codebase's own warning against it does not apply
+
+`HarmonicaView.axaml.cs` says **"Never `ToggleType`"** and builds its check glyphs out of `Icon`
+instead. That warning is specifically about `ToggleType` *combined with* `Icon`: the Fluent `MenuItem`
+template gives the check glyph and the icon the same leading slot and they fight for it. None of these
+items sets an `Icon`, so plain `ToggleType` is the right spelling — which is what `ReadoutStripView`
+already does for its own icon-free radio rows. Recorded so the next reader does not "fix" it in the
+direction of the warning.
+
+### The centre of a band is not on the band
+
+A via barrel is drawn ACROSS the bands it spans and takes hit-test precedence over them (`Hits` is in
+draw order, topmost last). On the shipped four-layer board the **middle of every conductor is a via**,
+so a test that aimed at `band.Rect.Mid` right-clicked the through-hole and got the via's menu. The
+gate's `PointOn` samples across the rect and takes the first point that actually resolves to the entry
+it wants. This is correct behaviour, not a defect — but it is worth knowing that "the middle of the
+thing" is the wrong coordinate on this drawing, for any future test or figure.
+
+### One constructor, not two initializers
+
+R-stk6-4 requires that a via added from the menu and one added with the "＋ Via" button be the same
+entry but for its name and its span. Writing a second `new StackupLayer { … }` in `AddViaSpanningAround`
+would have satisfied that on the day and then diverged silently the first time the button's entry gained
+a field — the failure is invisible, because both paths keep producing a valid via. `NewStackupLayer(kind)`
+is what both call, and the gate compares every other field of the two entries rather than the ones it
+remembered to list.
+
+### The drawing-layer submenu is bounded, and what it will not truncate is what is bound
+
+An imported process carries several hundred drawing layers (377 measured), which is why the card's own
+picker is filtered and virtualized. The submenu shows twelve — deliberately the card picker's own
+`Columns × Rows`, so the two surfaces show the same amount before either asks the user to narrow —
+and **bound layers are taken first and never dropped**. A submenu that hid the very binding the user
+right-clicked to check would be worse than no submenu. The overflow item names the count it left out
+and points at the card.
+
+### What was deliberately not done
+
+- **Deleting a conductor a via's span names leaves that via unresolvable, and stays that way.**
+  `TechValidation` reports it, the card flags it, R-stk1-6 draws it as a refusal marker. Deleting the
+  via too, or re-pointing its span, would make one deletion do two things. Pinned by a test.
+- **No confirmation dialog on delete.** Undo is the confirmation and it was already there.
+- **Copy ships disabled**, not absent — brief 7's, and the menu's shape should not change under the
+  user when it lands.
+
 ## brief-stackup-render-5-drag.md, 2026-09-13 — three drags on one surface
 
 Drag a band up or down to reorder it, drag a via barrel to move its span or slide it sideways, drag

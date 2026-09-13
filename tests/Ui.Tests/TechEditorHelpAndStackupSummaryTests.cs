@@ -94,24 +94,37 @@ public sealed class TechEditorHelpAndStackupSummaryTests
     /// <summary>
     /// The tooltip has to be on the LABEL as well as the control: the words are what a reader hovers
     /// when they do not know what the control is for, and hovering the control assumes they do.
+    ///
+    /// <para><b>The wording moved out of the .axaml and into <see cref="StackupCardText"/></b>
+    /// (R-stk6-8, 2026-09-13), because brief 6 puts these same fields on the cross-section's context
+    /// menu and requires the menu's labels and tooltips to be the CARD's, verbatim. So what this
+    /// test now checks is stronger than what it checked before: rather than two typed copies that
+    /// happen to match today, the label, the control beside it and the menu item all read one
+    /// constant, and drift is not expressible. The assertions are the same three facts — the row
+    /// exists, the label carries the explanation, and so does the control.</para>
     /// </summary>
     [Theory]
-    [InlineData("Metal thickness goes to:", "has no thickness for metal")]
-    [InlineData("Patterned with:",          "the conductor it is deposited under")]
-    public void TheLabel_CarriesTheSameExplanationAsTheControlBesideIt(string label, string fragment)
+    [InlineData("SheetAt",     "Metal thickness goes to:", "has no thickness for metal")]
+    [InlineData("PresentWith", "Patterned with:",          "the conductor it is deposited under")]
+    public void TheLabel_CarriesTheSameExplanationAsTheControlBesideIt(
+        string constant, string label, string fragment)
     {
+        // The words themselves are still exactly these words.
+        Assert.Equal(label, (string)typeof(StackupCardText).GetField(constant)!.GetRawConstantValue()!);
+        Assert.Contains(fragment, (string)typeof(StackupCardText).GetField(constant + "Tip")!.GetRawConstantValue()!);
+
         var axaml = Axaml();
 
-        var i = axaml.IndexOf("Text=\"" + label + "\"", StringComparison.Ordinal);
+        var i = axaml.IndexOf("Text=\"{x:Static lay:StackupCardText." + constant + "}\"", StringComparison.Ordinal);
         Assert.True(i >= 0, $"the Stackup tab must still carry a \"{label}\" label");
 
         var block = axaml[i..Math.Min(axaml.Length, i + 900)];
-        Assert.Contains("ToolTip.Tip=", block);
-        Assert.Contains(fragment, block);
+        Assert.Contains("ToolTip.Tip=\"{x:Static lay:StackupCardText." + constant + "Tip}\"", block);
 
         // On the label AND on the combo, so the two cannot drift into saying different things.
-        Assert.True(Regex.Matches(axaml, Regex.Escape(fragment)).Count >= 2,
-            $"\"{fragment}\" should appear on both the {label} label and the control beside it");
+        Assert.True(
+            Regex.Matches(axaml, Regex.Escape("{x:Static lay:StackupCardText." + constant + "Tip}")).Count >= 2,
+            $"the {label} explanation should be on both the label and the control beside it");
     }
 
     // ── The relabelled thickness-absorption row ───────────────────────────────
@@ -128,7 +141,9 @@ public sealed class TechEditorHelpAndStackupSummaryTests
     {
         var axaml = Axaml();
 
-        Assert.Contains("Text=\"Metal thickness goes to:\"", axaml);
+        // The words live in StackupCardText since R-stk6-8 — see the theory above for why.
+        Assert.Equal("Metal thickness goes to:", StackupCardText.SheetAt);
+        Assert.Contains("Text=\"{x:Static lay:StackupCardText.SheetAt}\"", axaml);
         Assert.DoesNotContain("EM sheet at", axaml);
 
         // The combo still binds the enum itself; only its ItemTemplate is converted.

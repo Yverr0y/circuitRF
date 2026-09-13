@@ -41,7 +41,7 @@ namespace CircuitRF.Ui.Controls;
 /// <c>ScrollViewer</c> has its horizontal bar disabled: a horizontal scrollbar here would mean the
 /// scene got its own width wrong.</para>
 /// </summary>
-public sealed class StackupCanvas : Control
+public sealed partial class StackupCanvas : Control
 {
     /// <summary>The width to lay a scene out at when the measure constraint gives none — a design
     /// surface, a measure outside a <c>ScrollViewer</c> with a horizontal bar. Wide enough for the
@@ -240,6 +240,20 @@ public sealed class StackupCanvas : Control
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
+
+        // R-stk6-1. The right-click only SELECTS and RECORDS; it neither builds nor opens a menu.
+        // The one ContextMenu instance is declared on this control in TechEditorView.axaml, and
+        // Avalonia opens it itself and raises Opening — which is where ItemsSource is rebuilt.
+        //
+        // Deliberately NOT e.Handled = true, for LayoutCanvas's own stated reason: handling the press
+        // risks suppressing Avalonia's right-click-opens-ContextMenu gesture recognition, and then
+        // nothing opens at all.
+        if (e.GetCurrentPoint(this).Properties.IsRightButtonPressed)
+        {
+            RightClickAt(e.GetPosition(this));
+            return;
+        }
+
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
         var p = e.GetPosition(this);
         if (!PressAt(p)) return;
