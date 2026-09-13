@@ -28,6 +28,16 @@ public partial class TechEditorView : UserControl
         // what makes the key scroll the pane instead.
         AddHandler(KeyDownEvent, OnScrollKeyDown, RoutingStrategies.Tunnel);
 
+        // R-stk3-9 — Esc clears the stackup selection.
+        //
+        // TUNNELLING FROM THE VIEW, and not a key handler on the drawing, which is what brief 3
+        // sketched. The canvas is deliberately NOT focusable (R-stk2-10: a focusable control inside
+        // the drawing's ScrollViewer re-points Page Up/Down at the drawing, because TargetScrollViewer
+        // below walks up from whatever holds focus) — and the owner's ask is "pressing Esc will
+        // unselect", not "pressing Esc while the drawing happens to have focus", so the handler had to
+        // cover the card list as well either way. One handler covers both surfaces.
+        AddHandler(KeyDownEvent, OnEscapeKeyDown, RoutingStrategies.Tunnel);
+
         // The scroll handler above is TUNNELLING FROM THIS CONTROL, so it only ever sees a keystroke
         // that is already routing through this view — which means something inside the view has to
         // hold focus for Page Up/Down to work at all. On first open nothing does: the tab is
@@ -47,16 +57,80 @@ public partial class TechEditorView : UserControl
     }
 
     private TechDocument? _subscribedDoc;
+    private TechEditorViewModel? _subscribedVm;
 
     private void OnDataContextChanged(object? sender, System.EventArgs e)
     {
         if (_subscribedDoc is not null) _subscribedDoc.ActivationFocusRequested -= OnActivationFocusRequested;
+        if (_subscribedVm is not null) _subscribedVm.PropertyChanged -= OnViewModelPropertyChanged;
+        _subscribedVm = null;
+
         _subscribedDoc = DataContext as TechDocument;
         if (_subscribedDoc is null) return;
+
+        _subscribedVm = _subscribedDoc.ViewModel;
+        _subscribedVm.PropertyChanged += OnViewModelPropertyChanged;
 
         _subscribedDoc.ActivationFocusRequested += OnActivationFocusRequested;
         // Activated BEFORE the view bound — the first-open case — so the request is sitting pending.
         if (_subscribedDoc.ConsumeActivationFocus()) FocusForScrollingDeferred();
+    }
+
+    // ── The stackup selection scrolls the card list to its card (R-stk3-5) ─────
+
+    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(TechEditorViewModel.SelectedStackupLayerName))
+            ScrollStackupSelectionIntoView();
+    }
+
+    /// <summary>
+    /// Brings the selected entry's card into view, so a click on a band lands on its fields.
+    ///
+    /// <para><b>Posted at Background priority, and not run inline.</b> The view model may have just
+    /// cleared the stackup filter (R-stk3-5 — a selection the filter would hide clears it, because a
+    /// click that appears to do nothing is worse than a filter the user has to re-type), which
+    /// rebuilds <c>FilteredStackupLayers</c> SYNCHRONOUSLY but leaves the <c>ListBox</c> to arrange
+    /// later. <c>ScrollIntoView</c> against containers that have not been re-materialised scrolls to
+    /// the wrong place or to nothing. This is the same deferral
+    /// <see cref="FocusForScrollingDeferred"/> already makes in this file for the same reason — and
+    /// deliberately not a timer.</para>
+    /// </summary>
+    private void ScrollStackupSelectionIntoView()
+    {
+        var row = _subscribedVm?.SelectedStackupLayerRow;
+        if (row is null) return;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            // Re-read rather than closing over `row`: at Background priority an edit, an undo or a
+            // second click may have landed in between, and every one of those replaces the row VMs.
+            if (_subscribedVm?.SelectedStackupLayerRow is { } current)
+                StackupList?.ScrollIntoView(current);
+        }, DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// R-stk3-9. Clears the selection — which clears the drawing's outline, the card's shading and
+    /// the <c>ListBox</c>'s own selection together, because all three read the one property.
+    ///
+    /// <para>It does NOT put back a filter the selection cleared, and it scrolls nowhere. Undoing the
+    /// filter clear on <c>Esc</c> would make <c>Esc</c> a second undo, which it is not.</para>
+    ///
+    /// <para><b>Precedence, for brief 4 (R-stk4-6):</b> while an inline editor is open, <c>Esc</c>
+    /// reverts the edit and the selection stands; a second <c>Esc</c>, with no editor open, clears the
+    /// selection. This handler tunnels, so it gets there first — brief 4's gate is therefore a check
+    /// HERE for "is an editor open", returning without handling so the editor's own handler takes it.
+    /// Nothing opens an inline editor yet, so there is nothing to check for.</para>
+    /// </summary>
+    private void OnEscapeKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape) return;
+        if (DataContext is not TechDocument doc) return;
+        if (doc.ViewModel.SelectedStackupLayerName is null) return;
+
+        doc.ViewModel.ClearStackupSelection();
+        e.Handled = true;
     }
 
     private void OnActivationFocusRequested()

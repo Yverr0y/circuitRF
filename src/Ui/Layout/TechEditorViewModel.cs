@@ -189,6 +189,20 @@ public sealed partial class TechEditorViewModel : ObservableObject
     /// </summary>
     private void ApplyStackupFilter()
     {
+        // R-stk3-7: emptying the collection a ListBox is bound to makes it drop its own SelectedItem
+        // and push the null back. The selection is the view model's and is held by NAME; a projection
+        // being rebuilt says nothing about it. See SelectedStackupLayerRow's setter.
+        bool priorSuppress = _suppressSelectionSync;
+        _suppressSelectionSync = true;
+        try
+        {
+            ApplyStackupFilterCore();
+        }
+        finally { _suppressSelectionSync = priorSuppress; }
+    }
+
+    private void ApplyStackupFilterCore()
+    {
         var q = StackupFilter.Trim();
         FilteredStackupLayers.Clear();
 
@@ -502,6 +516,12 @@ public sealed partial class TechEditorViewModel : ObservableObject
         RebuildStackup();
         RebuildDrcRules();
         ApplyFilters();   // every rebuild replaces the row VMs — the filtered views must follow
+
+        // LAST, and after ApplyFilters: the selection is held by NAME precisely because every row VM
+        // above was just destroyed and rebuilt (R-stk3-1), and the ListBox's SelectedItem has to be an
+        // item the filtered projection now holds — so the projection has to exist first.
+        SyncStackupSelection();
+
         Revalidate();
     }
 
@@ -669,6 +689,116 @@ public sealed partial class TechEditorViewModel : ObservableObject
             (Working.Layers[other].ZOrder, Working.Layers[index].ZOrder);
         CommitEdit(before, direction < 0 ? $"Move {row.Layer.Name} up" : $"Move {row.Layer.Name} down");
     }
+
+    // ── Selection: the drawing and the cards point at one thing (brief 3) ─────────────────────────
+
+    /// <summary>
+    /// The stackup entry the drawing and the card list are both pointing at, by
+    /// <c>StackupLayer.Name</c> — null when nothing is selected.
+    ///
+    /// <para><b>By NAME, and not by a row VM or a <c>StackupLayer</c> reference.</b>
+    /// <see cref="ApplySnapshot"/> assigns <see cref="Working"/> a freshly deserialized instance and
+    /// <see cref="RebuildStackup"/> then clears and rebuilds every
+    /// <see cref="StackupLayerRowViewModel"/>, so EVERY object identity in the stackup is destroyed
+    /// on every committed edit, undo and redo. A held reference survives none of those, and a
+    /// selection that silently evaporates on the first edit is worse than no selection at all
+    /// (R-stk3-1).</para>
+    ///
+    /// <para>A rename is the one case a name does not survive, and it is handled where the rename
+    /// happens — <see cref="StackupLayerRowViewModel.CommitName"/> re-points this when it renamed the
+    /// selected entry (R-stk3-8). Names are unique by construction for new entries
+    /// (<see cref="NextFreeStackupName"/>) and a duplicate is a validation problem the editor already
+    /// reports; on a duplicate the selection resolves to the FIRST match, stated rather than guarded
+    /// against.</para>
+    ///
+    /// <para>Both surfaces read this one property; neither owns it.</para>
+    /// </summary>
+    [ObservableProperty] private string? _selectedStackupLayerName;
+
+    /// <summary>
+    /// The card list's own <c>SelectedItem</c>, two-way (R-stk3-7).
+    ///
+    /// <para><c>StackupList</c> is <c>SelectionMode="Single"</c> and two selection models on one list
+    /// is a fight, so the <c>ListBox</c>'s selection is DRIVEN from
+    /// <see cref="SelectedStackupLayerName"/> and drives it back — clicking a card selects its band
+    /// and clicking a band highlights its card. <see cref="_suppressSelectionSync"/> breaks the
+    /// re-entrancy, on the same pattern <see cref="_suppressBoundaryCommit"/> already uses here.</para>
+    /// </summary>
+    public StackupLayerRowViewModel? SelectedStackupLayerRow
+    {
+        get => _selectedStackupLayerRow;
+        set
+        {
+            // A CONTROL'S WRITE-BACK IS NOT A SELECTION. Everything below <see cref="_suppressSelectionSync"/>
+            // guards — rebuilding FilteredStackupLayers, and this property being re-pointed by
+            // SyncStackupSelection — makes a bound ListBox null its own SelectedItem and push that
+            // null back through the two-way binding. Taken at face value it would clear the selection
+            // on every committed edit, every undo and every keystroke in the filter box: exactly the
+            // evaporating selection holding the name rather than a reference exists to prevent.
+            if (_suppressSelectionSync) return;
+
+            if (!SetProperty(ref _selectedStackupLayerRow, value)) return;
+            SelectedStackupLayerName = value?.Layer.Name;
+        }
+    }
+
+    private StackupLayerRowViewModel? _selectedStackupLayerRow;
+    private bool _suppressSelectionSync;
+
+    partial void OnSelectedStackupLayerNameChanged(string? value)
+    {
+        // R-stk3-5 — A SELECTION THE FILTER WOULD HIDE CLEARS THE FILTER.
+        //
+        // ApplyStackupFilter builds FilteredStackupLayers from StackupFilter, so a click on a band
+        // whose name the filter excludes would scroll to nothing at all, silently — which is the
+        // outcome that makes the feature feel broken rather than limited. The entire purpose of the
+        // click is to land on that entry's fields. Clear it; do not narrow it and do not warn about
+        // it. Assigning "" re-runs ApplyStackupFilter through OnStackupFilterChanged.
+        //
+        // Here rather than in the code-behind, so it holds for brief 6's context-menu selections too.
+        if (value is { Length: > 0 } && !Matches(value, StackupFilter.Trim()))
+            StackupFilter = "";
+
+        SyncStackupSelection();
+    }
+
+    /// <summary>
+    /// Re-points <see cref="SelectedStackupLayerRow"/> and every row's
+    /// <see cref="StackupLayerRowViewModel.IsSelected"/> at the row VMs that exist NOW.
+    ///
+    /// <para>Called from <see cref="OnSelectedStackupLayerNameChanged"/> and from
+    /// <see cref="RebuildAll"/> — the second is what makes R-stk3-1 true, because a rebuild has just
+    /// thrown away every row VM the selection was pointing at.</para>
+    /// </summary>
+    private void SyncStackupSelection()
+    {
+        var name = SelectedStackupLayerName;
+        StackupLayerRowViewModel? match = null;
+
+        foreach (var r in StackupLayers)
+        {
+            bool selected = match is null && name is not null &&
+                            string.Equals(r.Layer.Name, name, System.StringComparison.Ordinal);
+            r.IsSelected = selected;
+            if (selected) match = r;
+        }
+
+        // The BACKING FIELD, under the guard — never the public setter, which exists for the
+        // ListBox's half of the two-way link and would write the name straight back at us.
+        bool prior = _suppressSelectionSync;
+        _suppressSelectionSync = true;
+        try
+        {
+            if (!ReferenceEquals(_selectedStackupLayerRow, match))
+                SetProperty(ref _selectedStackupLayerRow, match, nameof(SelectedStackupLayerRow));
+        }
+        finally { _suppressSelectionSync = prior; }
+    }
+
+    /// <summary>R-stk3-9. <c>Esc</c> clears the outline, the card shading and the <c>ListBox</c>
+    /// selection together — and deliberately does NOT put back a filter this selection cleared.
+    /// Undoing that on <c>Esc</c> would make <c>Esc</c> a second undo, which it is not.</summary>
+    public void ClearStackupSelection() => SelectedStackupLayerName = null;
 
     // ── Stackup ────────────────────────────────────────────────────────────────
 

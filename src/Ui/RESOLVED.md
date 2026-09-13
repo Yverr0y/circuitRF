@@ -1,5 +1,82 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## brief-stackup-render-3-selection.md, 2026-09-13 — click a band, land on its fields
+
+Selection on `TechEditorViewModel`, an outline on the drawing, a shaded card, `ScrollIntoView`, and
+`Esc`. Gate: `tests/Ui.Tests/Stackup/StackupSelectionTests.cs` (28 tests).
+
+### One deliberate divergence from the brief: `Esc` is not a key handler on the canvas
+
+R-stk3-9 says to wire `Esc` on the canvas (`Focusable = true`, take focus on pointer press) **and**
+as a tunnelling handler on the tab. **The first half was not done, and must not be.** Brief 2's
+R-stk2-10 makes the canvas deliberately non-focusable, with a test (`TheCanvasTakesNoFocus…`), because
+`TechEditorView.TargetScrollViewer` resolves Page Up / Page Down by walking up from whatever holds
+focus — so a focusable control inside the drawing's own `ScrollViewer` re-points those keys at the
+drawing, and they must keep scrolling the CARD list.
+
+The second half subsumes the first anyway. The owner's ask is "pressing `Esc` will unselect", not
+"pressing `Esc` while the drawing happens to have focus", so the handler had to reach the card list
+regardless; one tunnelling handler on the view covers both surfaces and needs no focus anywhere.
+Pointer input needs no focus either, so the click gesture is unaffected. `OnEscapeKeyDown` carries
+the note brief 4 needs: it tunnels, so **it** is where R-stk4-6's "is an inline editor open" check
+goes, returning unhandled so the editor's own handler takes the keystroke.
+
+### The trap the brief named, and the second one it did not
+
+**Named, and real: a held reference survives nothing.** `ApplySnapshot` assigns `Working` a freshly
+deserialized `Technology` and `RebuildStackup` clears and rebuilds every `StackupLayerRowViewModel`,
+so every object identity in the stackup dies on every committed edit, undo and redo. The selection is
+a `StackupLayer.Name`. `RebuildAll` re-resolves it — **after `ApplyFilters()`, not before**, because
+the `ListBox`'s `SelectedItem` has to be an item the filtered projection now holds.
+
+**Not named: a bound `ListBox` pushes its own coerced selection back, and that write-back is not a
+selection.** `SelectedItem` is two-way (R-stk3-7 asks for exactly that), and emptying the collection a
+`ListBox` is bound to makes it drop its `SelectedItem` and push the null through the binding.
+`ApplyStackupFilter` empties `FilteredStackupLayers` on **every keystroke in the filter box and every
+committed edit**, so taken at face value that write-back clears the selection constantly and
+silently — which is the same evaporating selection holding the name rather than a reference exists to
+prevent, arriving by a different route. So `_suppressSelectionSync` guards two things, not one: the
+programmatic re-point in `SyncStackupSelection`, and the whole of `ApplyStackupFilter`. Same shape as
+the Match Designer's slider write-back (`match-undo-slider-writeback`): a coercing control's write-back
+is not an edit.
+
+`SyncStackupSelection` therefore writes the **backing field** under the guard and never the public
+setter, which exists for the `ListBox`'s half of the link alone. The gate is
+`AFilterKeystrokeDoesNotClearTheSelection`, which simulates the write-back by clearing
+`SelectedStackupLayerRow` on every `CollectionChanged`.
+
+### Smaller findings
+
+- **The outline is inflated in one place.** `StackupRenderer.OutlineRectFor` applies
+  `SelectionGap = 3`, and the selected outline, the hover outline and the test all call it. The gap
+  is not cosmetic: a stroke is centred on its rect, so `SelectionGap - SelectionWidth / 2` has to
+  clear `GroundEdgeWidth / 2` or the outline lies on top of the ground reference's heavy edge — the
+  one distinguishing mark on the whole picture (brief 1 §1), and exactly what someone selecting that
+  band is looking at.
+- **Hover is the canvas's; selection is the view model's.** Hover is one pointer over one drawing, it
+  survives nothing and nobody else reads it. Putting it on the view model would make a mouse sweep
+  raise a property change per band on a type the card list is bound to.
+- **A hovered band that is also selected draws the selected outline only** — the two are the same
+  rect, so drawing both would merely thicken it. Hover is drawn first and skipped when the names match.
+- **A selection change repaints and does not re-measure.** The outline is overlay chrome over rects
+  the scene already placed, so `InvalidateMeasure` here would drop and rebuild the whole scene per
+  click. Only `SetHover` and the `SelectedStackupLayerName` notification invalidate visual.
+- **`ScrollIntoView` is posted at `Background`.** The filter clear rebuilds `FilteredStackupLayers`
+  synchronously but the `ListBox` arranges later, and scrolling to a container that has not been
+  re-materialised scrolls to the wrong place. The posted action **re-reads** the selected row rather
+  than closing over it, because an edit landing in between replaces every row VM. Same deferral
+  `FocusForScrollingDeferred` already makes in that file; not a timer.
+- **The card's shade is a `Classes.selected` style, not a `ListBoxItem:selected` one.** `ListBox.rows`
+  flattens the theme's own selection chrome deliberately (these lists hold editable fields and are not
+  selected from), and the selection being shown is the view model's, not the control's.
+  `CrfStackupSelectedCardBrush` is a low-alpha literal of `ColorRole.Layout.Selection`'s light value,
+  on `CrfTileBorderBrush`'s stated convention — one semi-transparent value for both variants — because
+  the alternative is a fourth hand-wired brush in each of the three `Application` classes.
+- **The canvas exposes `PressAt` / `MoveAt` / `HoverLayer` / `CurrentOverlay` as internal seams**, for
+  the same reason `MeasureForWidth` and `SceneCache` already exist: there is no input device and no
+  headless render in this test project.
+
+
 ## brief-stackup-render-2-canvas-and-tab.md, 2026-09-13 — the drawing in the tab, and the tab's re-layout
 
 `StackupCanvas` + the Stackup tab's four-row Grid + the 3 x 4 drawing-layer picker. Read-only, as the

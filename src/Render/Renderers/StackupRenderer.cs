@@ -45,6 +45,31 @@ public static class StackupRenderer
 
     public const float SelectionWidth = 2f;
 
+    /// <summary>The hover outline is the SAME outline, lighter — R-stk3-4 asks for a lighter mark,
+    /// not a differently shaped one, so a band the pointer is over reads as "this is what a click
+    /// would take" rather than as a second kind of state.</summary>
+    public const float HoverWidth = 1.5f;
+
+    /// <summary>How much of <see cref="StackupRenderTheme.Selection"/> the hover outline keeps.</summary>
+    public const byte HoverAlpha = 90;
+
+    /// <summary>
+    /// How far OUTSIDE a band's own edge the selection outline sits (R-stk3-3).
+    ///
+    /// <para>It has to clear the heaviest edge the picture draws, which is the ground reference's
+    /// <see cref="GroundEdgeWidth"/> — that mark is the one distinguishing feature of the whole
+    /// drawing (brief 1 §1) and a selection outline laid on top of it would hide exactly the thing
+    /// the user selected the band to look at. A stroke is centred on its rect, so the ground edge
+    /// reaches <c>GroundEdgeWidth / 2</c> outward and the selection's own inner face reaches
+    /// <c>SelectionGap - SelectionWidth / 2</c>; this value keeps the second clear of the first.</para>
+    /// </summary>
+    public const float SelectionGap = 3f;
+
+    /// <summary>Where the outline around <paramref name="rect"/> goes — the one place the gap is
+    /// applied, so the selected outline, the hovered outline and the tests cannot separately decide
+    /// what "outside the band" means.</summary>
+    public static SKRect OutlineRectFor(SKRect rect) => SKRect.Inflate(rect, SelectionGap, SelectionGap);
+
     public static void Draw(
         SKCanvas canvas, StackupScene scene, StackupRenderTheme theme, StackupOverlay? overlay = null)
     {
@@ -122,12 +147,24 @@ public static class StackupRenderer
 
         DrawLabels(canvas, scene, theme);
 
-        // ── Selection, then grippers, on top ─────────────────────────────────────────────────────
+        // ── Hover, then selection, then grippers, on top ─────────────────────────────────────────
+        //
+        // Hover FIRST, so that a band which is both hovered and selected shows the selected outline:
+        // the two are the same rect and the last one drawn is the one that is seen.
+        if (overlay.HoverLayer is { Length: > 0 } hovered &&
+            !string.Equals(hovered, overlay.SelectedLayer, StringComparison.Ordinal) &&
+            scene.RectOf(hovered) is { } hoverRect)
+        {
+            stroke.Color       = theme.Selection.WithAlpha(HoverAlpha);
+            stroke.StrokeWidth = HoverWidth;
+            canvas.DrawRect(OutlineRectFor(hoverRect), stroke);
+        }
+
         if (overlay.SelectedLayer is { Length: > 0 } selected && scene.RectOf(selected) is { } rect)
         {
             stroke.Color       = theme.Selection;
             stroke.StrokeWidth = SelectionWidth;
-            canvas.DrawRect(rect, stroke);
+            canvas.DrawRect(OutlineRectFor(rect), stroke);
         }
 
         if (overlay.DragGhost is { } ghost)

@@ -180,6 +180,17 @@
             <Setter Property="Background" Value="Transparent"/>
         </Style>
 
+        <!-- R-stk3-6: the stackup card whose band is selected in the drawing above.
+             SHADE, not outline — the owner asked for the group background, so the clicked band and
+             the fields below are unmistakably the same thing. Driven by the row VM's IsSelected, NOT
+             by ListBoxItem:selected: the selection is the view model's (held by NAME, because every
+             row VM is destroyed on every committed edit) and the ListBox's own is a second view of
+             it, kept in step by TechEditorViewModel.SelectedStackupLayerRow. The chrome that WOULD
+             have come from :selected is flattened away three styles above, deliberately. -->
+        <Style Selector="Border.stackupcard.selected">
+            <Setter Property="Background" Value="{DynamicResource CrfStackupSelectedCardBrush}"/>
+        </Style>
+
         <!-- ── The conductor card's drawing-layer picker (R-stk2-8) ─────────────
              Three across, four down: twelve layers visible at once where four were, in less
              vertical space than the four took.
@@ -684,7 +695,13 @@
                         <TextBlock Grid.Column="1" Classes="filtercount" Text="{Binding ViewModel.StackupFilterSummary}"/>
                     </Grid>
 
+                    <!-- R-stk3-7: ONE selection model, two surfaces. SelectedItem is two-way against the
+                         view model, which holds the selection by NAME and is what the drawing above
+                         reads — so clicking a card selects its band and clicking a band shades its
+                         card. Two independent selections on one list is a fight; this is the list
+                         losing it on purpose. -->
                     <ListBox Classes="rows" x:Name="StackupList" ItemsSource="{Binding ViewModel.FilteredStackupLayers}"
+                             SelectedItem="{Binding ViewModel.SelectedStackupLayerRow, Mode=TwoWay}"
                              Margin="6,0,6,4" SelectionMode="Single">
                             <ListBox.ItemTemplate>
                                 <DataTemplate x:DataType="lay:StackupLayerRowViewModel">
@@ -701,7 +718,8 @@
                                                Text="Vias — outside the top-to-bottom order (each one spans two conductors)"
                                                FontSize="10" Margin="2,10,0,2"
                                                Foreground="{DynamicResource SystemBaseMediumColor}"/>
-                                    <Border BorderBrush="{DynamicResource CrfTileBorderBrush}" BorderThickness="1" CornerRadius="4"
+                                    <Border Classes="stackupcard" Classes.selected="{Binding IsSelected}"
+                                            BorderBrush="{DynamicResource CrfTileBorderBrush}" BorderThickness="1" CornerRadius="4"
                                             Margin="0,3" Padding="8,6">
                                         <StackPanel Spacing="4">
                                             <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">

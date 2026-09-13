@@ -422,6 +422,26 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
 
     private bool _showsViaGroupHeader;
 
+    /// <summary>
+    /// R-stk3-6. True on the one row <see cref="TechEditorViewModel.SelectedStackupLayerName"/>
+    /// resolves to; the card's <c>Border</c> shades its whole background from it, so the thing the
+    /// user clicked in the drawing and the fields they are now looking at are visibly the same thing.
+    ///
+    /// <para>SHADE, not outline, and at a low alpha: the card's own text and its <c>needsvalue</c>
+    /// field marking both have to stay legible on top of it.</para>
+    ///
+    /// <para>Set by the owner alone (<c>SyncStackupSelection</c>) — a row does not decide whether it
+    /// is selected, because the selection is one thing shared with the drawing and a row that set its
+    /// own would be a second copy of it.</para>
+    /// </summary>
+    public bool IsSelected
+    {
+        get => _isSelected;
+        internal set => SetProperty(ref _isSelected, value);
+    }
+
+    private bool _isSelected;
+
     public StackupLayerRowViewModel(StackupLayer layer, TechEditorViewModel owner)
     {
         Layer = layer;
@@ -564,9 +584,20 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
     {
         var name = StagedName.Trim();
         if (name.Length == 0 || name == Layer.Name) { RefreshFromModel(); return; }
+
+        // R-stk3-8. The selection is held by NAME (see TechEditorViewModel.SelectedStackupLayerName),
+        // which survives everything ApplySnapshot destroys — except a rename, which is the one edit
+        // that changes the key itself. Asked BEFORE the write, because the old name is what the
+        // selection is still spelled as, and re-pointed AFTER the commit, because the commit rebuilds
+        // every row VM and re-resolves the selection against the name it had going in. Without this,
+        // renaming the entry you are looking at deselects it.
+        bool wasSelected = string.Equals(_owner.SelectedStackupLayerName, Layer.Name, StringComparison.Ordinal);
+
         var before = _owner.SnapshotJson();
         Layer.Name = name;
         _owner.CommitEdit(before, $"Rename stackup layer to {name}");
+
+        if (wasSelected) _owner.SelectedStackupLayerName = name;
     }
 
     public void CommitThickness()

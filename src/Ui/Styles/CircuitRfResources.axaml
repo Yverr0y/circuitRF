@@ -54,6 +54,22 @@
         <SolidColorBrush x:Key="CrfForeignBandBrush" Color="#33E8A33D"/>
         <SolidColorBrush x:Key="CrfForeignAccentBrush" Color="#E8A33D"/>
 
+        <!-- R-stk3-6: the Stackup tab's card for the entry selected in the cross-section drawing.
+             The owner asked for the GROUP BACKGROUND to be shaded, so the connection between the band
+             they clicked and the fields they are now looking at is unmistakable.
+
+             The colour is ColorRole.Layout.Selection's own light value (30,110,220) — the same
+             highlight the drawing outlines the band in, and the same one the layout editor marks a
+             selected shape with — held at a LOW alpha because the card's text and its needsvalue
+             field marking both sit on top of it and both have to stay legible. Semi-transparent so
+             one value serves both variants, same convention as CrfTileBorderBrush above.
+
+             A literal rather than a DynamicResource off the active theme: the three Application
+             classes each wire CrfWarningBrush to ColorTheme by hand, and a fourth hand-wired brush in
+             three places is three places to forget. If this ever needs to follow a custom .ccolor,
+             it joins CrfWarningBrush's wiring rather than growing its own. -->
+        <SolidColorBrush x:Key="CrfStackupSelectedCardBrush" Color="#221E6EDC"/>
+
         <!-- TM1 R-tm1-12: the Project Tree row a move-drop would land in. Follows the active accent
              so it reads as "this is where it goes" rather than as a state, and is held at 0.3 opacity
              because the row's own LABEL sits on top of it — an opaque accent fill would hide the name
