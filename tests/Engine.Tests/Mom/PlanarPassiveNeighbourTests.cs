@@ -186,8 +186,14 @@ public sealed class PlanarPassiveNeighbourTests(ITestOutputHelper output)
         output.WriteLine(declined!);
         Assert.Contains("CARRIES A PORT", declined, StringComparison.Ordinal);
 
+        // PCAL4 — the grouping is turned OFF here on purpose. This gate is PCAL2's: a DRIVEN
+        // neighbour that the calibration cannot describe is a refusal. PCAL4 describes one KIND of
+        // driven neighbour — two ports sharing a reference plane — with a modal error box, and this
+        // synthetic pair is exactly that kind, so with the grouping on it runs. What is asserted
+        // here is still what has to hold: everything PCAL4 declines, and everything it is switched
+        // off for, still refuses rather than publishing.
         var ex = Assert.Throws<PlanarFeedClearanceRefusedException>(
-            () => PlanarSolve.Run(problem, mesh, ports, [F]));
+            () => PlanarSolve.Run(problem, mesh, ports, [F], new PlanarSolveSettings(Calibration: PlanarCalibrationSettings.Default with { IncludeDrivenGroups = false })));
         Assert.All(ex.Breaches, b => Assert.Equal(PlanarNeighbourClass.Driven, b.Neighbour));
     }
 

@@ -441,13 +441,33 @@ public sealed class PlanarKernel
         var rejct  = new double[nf * np];
         var usable = new double[nf];
 
+        // PCAL4 — a port calibrated as part of a MODAL group has no per-port γ, Z_c or C_pul: those
+        // quantities belong to the group's MODES, and there are as many of them as there are
+        // conductors. Its slot is filled with NaN rather than left at zero, because a zero in a
+        // diagnostics cube reads as a measurement; the per-mode numbers are in the run's notes.
+        Array.Fill(eeff,  double.NaN);
+        Array.Fill(atten, double.NaN);
+        Array.Fill(cpul,  double.NaN);
+        Array.Fill(elDeg, double.NaN);
+        Array.Fill(resid, double.NaN);
+        Array.Fill(rejct, double.NaN);
+        for (int i = 0; i < gamma.Length; i++) { gamma[i] = Complex.NaN; zc[i] = Complex.NaN; }
+
+        // …and the slot a calibration lands in is its own PORT NUMBER's, not its position in the
+        // list. That was always an assumption — an internal delta gap owns no calibration and is
+        // skipped, so the list has never been one entry per port — and PCAL4 is where it becomes
+        // wrong rather than merely fragile: a run with one group and one ordinary port hands back
+        // ONE calibration, whose numbers would otherwise be filed under the group's first port.
+        var slotOf = new Dictionary<int, int>(np);
+        for (int p = 0; p < np; p++) slotOf[ports[p].Number] = p;
+
         for (int i = 0; i < nf; i++)
         {
             var pt = sweep.Points[i];
             int flagged = 0;
-            for (int p = 0; p < np && p < pt.Calibrations.Count; p++)
+            foreach (var c in pt.Calibrations)
             {
-                var c = pt.Calibrations[p];
+                if (!slotOf.TryGetValue(c.PortNumber, out int p)) continue;
                 int o = i * np + p;
                 gamma[o] = c.Gamma.Gamma;
                 zc[o]    = c.Zc;

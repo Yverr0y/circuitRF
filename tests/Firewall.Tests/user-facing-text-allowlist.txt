@@ -797,3 +797,21 @@ src/Engine/NdfCalculator.cs|ndf.assembly-mismatch: the active assembly is {m.Row
 src/Engine/SParameterEngine.cs|ndf.assembly-mismatch: component {k} is '{netlist.Components[k].InstancePath}' 
 src/Engine/SParameterEngine.cs|ndf.assembly-mismatch: the passive elaboration has {passive.Nodes.Count} node(s) 
 src/Engine/SParameterEngine.cs|{NdfPassivation.CannotPassivateKey}: this design has a user-scaled active 
+
+# PCAL4 (brief-portcal-4-modal-error-box.md) — internal invariants between engine components, not
+# messages a user can reach. Every one of them fires only if one part of the modal calibration hands
+# another part an object of the wrong shape: a standard without its conductor map, a port list that
+# does not contain a group's own ports, a 2N-port that is not 2N. The DECISIONS a user can actually
+# provoke — a group that cannot be formed, modes too close to separate, a group past the size cap —
+# are refusals carried on PlanarFeedClearanceRefusedException and surfaced through
+# em.refused.port-clearance, which is the Diagnostic this gate is asking for.
+src/Engine/Mom/PlanarCalibration.cs|Port {port.Number} is not in a calibration group, so BuildLine is what builds 
+src/Engine/Mom/PlanarDeembed.cs|Port index {r} is out of range or covered by two error boxes.
+src/Engine/Mom/PlanarDeembed.cs|Port {i} has no error box.
+src/Engine/Mom/PlanarDeembed.cs|The conductor map has {conductorOfCell.Count} entries for a mesh of 
+src/Engine/Mom/PlanarModalCalibration.cs|A {n}-conductor calibration group's standards are {2 * n}-ports, not 
+src/Engine/Mom/PlanarModalCalibration.cs|MoM: a modal calibration matrix is singular — the calibration group's 
+src/Engine/Mom/PlanarModalMedium.cs|A calibration group's standard must carry its per-cell conductor map.
+src/Engine/Mom/PlanarSolve.cs|Calibration group port {g.PortNumbers[k]} is not in the run's port list.
+src/Engine/Mom/PlanarSolve.cs|This calibrator owns no calibration group.
+src/Engine/Mom/PlanarStaticAim.cs|The drive potential has {potential.Count} entries for {_m} cells.

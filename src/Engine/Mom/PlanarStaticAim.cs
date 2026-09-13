@@ -492,6 +492,25 @@ public sealed class PlanarStaticAim
         return total.Real;
     }
 
+    /// <summary>
+    /// <b>PCAL4 — the charge vector itself, for a per-cell potential.</b> A calibration GROUP's
+    /// reference impedance is a capacitance MATRIX, which is N of these solves against one drive
+    /// each rather than one solve and one total, so the reading and the summation have to come
+    /// apart. <see cref="TotalCapacitance"/> and <see cref="ModalCapacitance"/> are untouched and go
+    /// on building their own right-hand sides, so nothing that ships today changes route.
+    /// </summary>
+    public Complex[] ChargeFor(IReadOnlyList<double> potential)
+    {
+        ArgumentNullException.ThrowIfNull(potential);
+        if (potential.Count != _m)
+            throw new ArgumentException(
+                $"The drive potential has {potential.Count} entries for {_m} cells.", nameof(potential));
+
+        var b = new Complex[_m];
+        for (int i = 0; i < _m; i++) b[i] = EmConstants.Eps0 * potential[i];
+        return SolveCharge(b);
+    }
+
     /// <summary>The GMRES solve and its convergence refusal, shared by the two readings above.</summary>
     private Complex[] SolveCharge(Complex[] b)
     {

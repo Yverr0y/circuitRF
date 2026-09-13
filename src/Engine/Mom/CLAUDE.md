@@ -859,6 +859,49 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
   redundant M₁₁ equation; `a₂₁`'s cancels only for **identical** ports.
 - A calibration standard must be built from the DUT's own port resolution (`BuildLine`), never
   re-meshed; reusing a plain-line calibration on a stepped DUT moved the answer 1.8e-1.
+- **PCAL4 — TWO PORTS ON CONDUCTORS COUPLED AT ONE REFERENCE PLANE ARE ONE CALIBRATION GROUP**
+  (`PlanarPorts.TryFormCalibrationGroup`, `PlanarCalibration.BuildGroupLine`,
+  `PlanarModalCalibration`, `PlanarModalMedium`, `PlanarDeembed.ApplyBlocks`/`ModalToTerminal`).
+  N coupled conductors support N modes there, so the GROUP is the unit of calibration: one
+  N-conductor 2N-port standard built from the DUT's own gridlines, one MODAL error box of N×N blocks,
+  one γ and one Z_c per mode. **The scalar path is untouched and a run with no group is byte-identical**
+  — `PlanarDeembed.Apply` still ships, `ApplyBlocks` is a separate method, and the grouping is
+  attempted only on a DRIVEN breach, which since PCAL2 is a refusal.
+  - **It rests on `Y = F X⁻¹ F`**, the two error boxes of a standard being exact mirror images (D4).
+    That is what makes it a closed form instead of multiline TRL's optimisation: no reflect standard.
+  - **D5' is the palindromic reduction** — det M = 1 makes the characteristic polynomial palindromic,
+    so s = μ + 1/μ takes degree 2N to degree N, and at N = 1 it IS `cosh(γΔℓ) = ½tr(M)`. **The reduced
+    polynomial's constant term is c_N, NOT c_N·q₀** — the factor of two is invisible in every other
+    property the polynomial has.
+  - **THE PRE-PEEL IS NOT AN OPTIMISATION.** Forming T divides by S_RL and a series delta gap has
+    a₂₁ ∝ ω, so M = T₂T₁⁻¹ cancels |S_RL|^{−2N}: 1e8 at N = 1 (survivable, D5's own low-frequency
+    amplification) and **1e16 at N = 2**. A crude per-conductor SCALAR box peeled off both standards
+    first is a SIMILARITY, so γ is untouched and the true box is X̂·X̃; without it every residual reads
+    ~1 at the bottom of the band and the answer is non-passive at 4 of 7 points. `RESOLVED.md` §PCAL4 §2.
+  - **The modal gauge is `Ti = (Tvᵀ)⁻¹`, which is NOT R-gen-3a's REPORTING convention** (exactly 2×
+    for a symmetric pair). Only the strict biorthogonal one makes the modal-to-terminal wave map
+    complex-orthogonal, which is what makes `B² = (A12⁰)⁻¹(A21⁰)ᵀ` come out diagonal; only R-gen-3a's
+    reads in the ohms kernel A and a coupled-line designer mean. `PlanarModalMedium.ReportedZcScale`
+    carries e_m and the notes print `Z_c,m·e_m`. Publishing the gauge's own value is R-gen-3a's trap
+    from the other side.
+  - **One sign per mode is left, and no bilinear condition can remove it** — reciprocity, A22's
+    symmetry and the de-embedded line are all quadratic in the gauge. It is decided by correlating
+    A21ˢ's rows with Tv's columns and the margin is reported (0.95-0.995 measured).
+  - **DEGENERATE MODES ARE A REFUSAL, ASKED AT SETUP** from the ELECTROSTATICS
+    (`QuasiStaticModeSeparationDegrees`), falling through to PCAL2's own refusal.
+    `ModeSeparationFloorDegrees` = 0.5°. Three EQUAL-width conductors at 246 µm measure 0.369° and
+    refuse; at 254/432/660 µm the same geometry measures 0.61° and runs.
+  - **Also declined by name**: a neighbour whose port is at another station (one standard is cut at
+    ONE plane), a group mixing driven and undriven conductors (two electrostatic rules), a
+    non-uniform conductor, a coplanar or cut port, a grown FEED LEAD on any member (a lead is one
+    propagation constant and a group's region has one per mode), and
+    `MaxCalibrationGroupSize` = 3. **A decline now travels WITH the refusal** — a refusal discards
+    the run's notes, which silently lost PCAL3's declines too.
+  - **Cost: no more MESH than PCAL3's widened profile** — same metal, same 9.14× the DUT's unknowns
+    on the series' fixture, ~8 % more wall clock for twice the ports. What it adds is N excitations
+    on a mesh already being solved and a SECOND electrostatic medium ([L] = μ₀ε₀[C₀]⁻¹).
+  - **Members of one group share ONE standard** (`SameCrossSection`'s own early return); without it
+    an asymmetric pair builds the identical 2N-port mesh once per port. The two ENDS still do not.
 - **`PlanarPortCalibrator` is stateful and must be stepped in increasing frequency order** (the
   driver sorts). Under adaptive insertion, cache raw matrices per frequency and **replay** — predicting
   βΔℓ from the pre-solve ε_eff runs 15–20% low and coin-flips the 2π branch.
@@ -891,6 +934,9 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
 | **`PlanarAdaptiveSettings.Search`** | **`null` = OFF** | ANT-9. `EmSetup.ResonanceSearch`, persisted in the `.cem` (nullable, omitted at its default), reachable from the EM panel under the adaptive checkbox. **The only setting in circuitRF that lets a sweep publish a frequency the user did not ask for** — capped (`MaxAddedPoints` 24), every added point flagged on its own `PlanarFrequencyPoint.AddedBySearch` and listed in `PlanarSolveResult.AddedFrequencies`, f₀/Q/BW in `PlanarSolveResult.Resonances` and in the `.npy` diagnostics group on a `resonance` axis. **Nested inside `Adaptive` rather than beside it** because it seeds from the interpolant refinement builds; `ResonanceSearch && !AdaptiveSampling` is a WARNING naming the remedy, never a silent no-op. |
 | `PlanarSolveSettings.CurrentDensityPortNumber` / `…FrequencyHz` | null | captured during the existing sweep, no second factorisation |
 | `PlanarFillSettings.DirectVerticalKernel` | `false` | ẑẑ from `SommerfeldIntegral.EvaluateInterior`; skips the ρ/λ refusal and says so |
+| **`PlanarCalibrationSettings.IncludeDrivenGroups`** | **`true`** | PCAL4. Whether ports whose feeds are mutually within `DrivenNeighbourClearanceHeights` are calibrated TOGETHER as one group with one modal error box, rather than refusing the run. **No `.cem` field**, exactly like `IncludePassiveNeighbours` — off is how the pre-PCAL4 answer is reproduced for comparison, and is what PCAL2's own engine-side refusal gates now pass. It changes nothing on a feed that is already clear. |
+| **`PlanarCalibrationSettings.MaxCalibrationGroupSize`** | **3** | A COST gate, not an algebraic one: the algebra is written for any N, but N conductors make the standard a 2N-port carrying all of them at every separation and every frequency, and the modes have to stay separable on top of that. Covers the coupled pair and the three-conductor case; a wider group is refused by name. |
+| **`PlanarCalibrationSettings.ModeSeparationFloorDegrees`** | **0.5** | How far apart two of a group's modes must be in electrical length over the separation a frequency reads, before the cascade eigenproblem can tell them apart. Below it the null space of (M − μI) is a plane and the modal basis is decided by round-off, so the run REFUSES rather than publishing something smooth and wrong. Asked at SETUP from the electrostatics, and again on the MEASURED separation per point. |
 | **`PlanarFillSettings.Aim`** | **`null` = OFF, but REACHABLE from the panel since 2026-08-14** | `EmSetup.AcceleratedSolve`, persisted in the `.cem`. **It MOVES the ceiling** (`brief-em-aim-ceiling.md`, 2026-08-14) — see `SurfaceMesher.AcceleratedUnknownCeiling` below — on a single-level mesh. **Since P12 a multi-level/via mesh is no longer refused** (`PlanarBorderedAimOperator`) — but the WIDER CEILING is still not applied to one, and **that question is now asked in exactly one place — `SurfaceMesher.UsesAcceleratedCeiling(aimOn, multiLevel)`**, because the pre-solve mesh verdict and `PlanarSolveContext` had been answering it DIFFERENTLY (the report judged a via mesh at 12,000 and the run then refused it at 5,000, quoting the dense ceiling). P12 measured the ladder that would move it (healthy to N = 15,192, past the 12,000) and left the behaviour alone: **owner's decision**, and it is now `=> aimOn;` in one function. See `RESOLVED.md` §P12 for why it was not taken (the border's TIME is set by N_z, not by N). The refusal names turning it on as the first remedy whenever doing so would let the mesh run. |
 | **`PlanarFillSettings.UseSymmetricFactorization`** | **`true` = P7's in-place complex-symmetric LDLᵀ** | Z is complex-symmetric bit for bit, so the dense solve is an `SymmetricFactorization`, not an LU: half the arithmetic, parallel over the trailing update under the SAME one cap the fill spends, and written INTO the matrix — `PlanarSystem.Matrix` throws after `Factor()`. `false` restores NumFlat's general LU, kept reachable as the oracle exactly as `UseRadialTable = false` is. **Unpivoted, which is standard for MoM matrices and is not a theorem** — the gate is a residual, and `SymmetricFactorization.GrowthFactor` / `SmallestPivotRatio` are computed on every factorisation at no cost. |
 | **`PlanarFillSettings.TrackFactorizationResidual`** | **`false`** | Keeps a copy of Z so every solve reports `‖Zx − b‖/‖b‖` on `PlanarSystem.LastResidual`. That copy is a whole N×N matrix — the memory P7 removed — so it is a diagnostic, never a default. |

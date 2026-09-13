@@ -76,8 +76,14 @@ public sealed class PlanarFeedClearanceTests
         _out.WriteLine("  " + margin.Margin());
 
         var (dprob, dm, dp) = Pair(2.5, driven: true);
+        // PCAL4 — the grouping is turned OFF here on purpose. This gate is PCAL2's: a DRIVEN
+        // neighbour that the calibration cannot describe is a refusal. PCAL4 describes one KIND of
+        // driven neighbour — two ports sharing a reference plane — with a modal error box, and this
+        // synthetic pair is exactly that kind, so with the grouping on it runs. What is asserted
+        // here is still what has to hold: everything PCAL4 declines, and everything it is switched
+        // off for, still refuses rather than publishing.
         var ex = Assert.Throws<PlanarFeedClearanceRefusedException>(
-            () => PlanarSolve.Run(dprob, dm, dp, [F]));
+            () => PlanarSolve.Run(dprob, dm, dp, [F], new PlanarSolveSettings(Calibration: PlanarCalibrationSettings.Default with { IncludeDrivenGroups = false })));
         _out.WriteLine("driven, 2.5 h: " + ex.Message);
 
         Assert.All(ex.Breaches, b => Assert.Equal(PlanarNeighbourClass.Driven, b.Neighbour));
@@ -94,8 +100,14 @@ public sealed class PlanarFeedClearanceTests
     public void TheRefusalNamesThePortTheDistanceAndBothWaysOut()
     {
         var (problem, mesh, ports) = Pair(0.27, driven: true);   // the series' own 246 µm
+        // PCAL4 — the grouping is turned OFF here on purpose. This gate is PCAL2's: a DRIVEN
+        // neighbour that the calibration cannot describe is a refusal. PCAL4 describes one KIND of
+        // driven neighbour — two ports sharing a reference plane — with a modal error box, and this
+        // synthetic pair is exactly that kind, so with the grouping on it runs. What is asserted
+        // here is still what has to hold: everything PCAL4 declines, and everything it is switched
+        // off for, still refuses rather than publishing.
         var ex = Assert.Throws<PlanarFeedClearanceRefusedException>(
-            () => PlanarSolve.Run(problem, mesh, ports, [F]));
+            () => PlanarSolve.Run(problem, mesh, ports, [F], new PlanarSolveSettings(Calibration: PlanarCalibrationSettings.Default with { IncludeDrivenGroups = false })));
         _out.WriteLine(ex.Message);
 
         Assert.Equal(4, ex.Breaches.Count);
@@ -114,7 +126,8 @@ public sealed class PlanarFeedClearanceTests
     {
         var (problem, mesh, ports) = Pair(0.27, driven: true);
         var r = PlanarSolve.Run(problem, mesh, ports, [F],
-            new PlanarSolveSettings(DeembedOutsideCalibrationValidity: true));
+            new PlanarSolveSettings(DeembedOutsideCalibrationValidity: true,
+                Calibration: PlanarCalibrationSettings.Default with { IncludeDrivenGroups = false }));
 
         Assert.Equal(4, r.FeedClearances.Count);
         Assert.All(r.FeedClearances, c => Assert.True(c.Breached));

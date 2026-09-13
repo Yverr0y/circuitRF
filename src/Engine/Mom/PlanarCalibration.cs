@@ -123,6 +123,34 @@ namespace CircuitRF.Engine.Mom;
 /// the extension is the same number of cells on the short line and on the long one, so D5's γ is
 /// measuring the length between the planes and not the difference between two end treatments.</para>
 /// </param>
+/// <param name="IncludeDrivenGroups">
+/// <b>PCAL4/R-pcal4-1 — whether ports whose feeds are mutually within
+/// <paramref name="DrivenNeighbourClearanceHeights"/> are CALIBRATED TOGETHER, as one group with one
+/// modal error box, rather than refusing the run.</b> On, for PCAL3's reason one conductor over: a
+/// refusal is what the user gets otherwise and the metal is reproducible. Off is how the
+/// pre-PCAL4 answer is reproduced for comparison, which is what every measurement in the findings
+/// was taken against.
+///
+/// <para>It changes nothing on a feed that is already clear: the grouping is attempted only where a
+/// DRIVEN breach was measured, which since PCAL2 is a refusal — so a run that passes today keeps the
+/// per-port scalar box it has always had, bit for bit.</para>
+/// </param>
+/// <param name="MaxCalibrationGroupSize">
+/// <b>PCAL4/R-pcal4-7 — how many conductors one calibration group may hold, and it is a COST gate
+/// rather than an algebraic one.</b> The algebra is written for any N. What is not free is the
+/// standard: N conductors make it a 2N-port whose mesh carries all of them, at every separation and
+/// at every frequency, and its N modes have to stay separable on top of that. <b>3</b> covers the
+/// coupled pair the series opened on and the three-conductor case the brief's own gate 3 asks for,
+/// and refuses a wider group by name rather than discovering the cost at run time.
+/// </param>
+/// <param name="ModeSeparationFloorDegrees">
+/// <b>PCAL4/R-pcal4-2 and R-pcal4-6 — how far apart two modes' electrical lengths must be, over the
+/// separation a frequency actually read, before the cascade eigenproblem can tell them apart.</b>
+/// At zero the two eigenvalues of M coincide, the null space of (M − μI) is a plane rather than a
+/// line, and which line in it is which mode is not a question the arithmetic can answer — so a
+/// nearly-degenerate group is DECLINED by name rather than de-embedded against a modal basis decided
+/// by round-off. The measured distance is reported on every point whether or not it trips.
+/// </param>
 public sealed record PlanarCalibrationSettings(
     double EndRunHeights                     = 3.0,
     double ShortLineHeights                  = 3.0,
@@ -130,7 +158,10 @@ public sealed record PlanarCalibrationSettings(
     double DrivenNeighbourClearanceHeights   = 5.0,
     double PassiveNeighbourClearanceHeights  = 2.0,
     bool   IncludePassiveNeighbours          = true,
-    int    NeighbourExtensionCells           = 0)
+    int    NeighbourExtensionCells           = 0,
+    bool   IncludeDrivenGroups               = true,
+    int    MaxCalibrationGroupSize           = 3,
+    double ModeSeparationFloorDegrees        = 0.5)
 {
     public static readonly PlanarCalibrationSettings Default = new();
 
@@ -187,6 +218,18 @@ public sealed record PlanarCalibrationSettings(
 /// an entry of <paramref name="ModePotential"/>; <see cref="PlanarDeembed.StaticCapacitance"/> spans
 /// it with one further right-hand side. Null on every standard but a widened one.
 /// </param>
+/// <param name="GroupPorts">
+/// <b>PCAL4 — the 2N ports of a calibration GROUP's standard</b>, conductors 1..N at the low end
+/// followed by the same conductors at the high end, and null on every one-conductor standard. The
+/// block split <see cref="PlanarModalCalibration.SToT"/> takes is exactly that ordering, so the
+/// first N ports ARE one side of the 2N-port by construction rather than by a convention someone
+/// has to remember.
+/// </param>
+/// <param name="ConductorOfCell">
+/// <b>PCAL4 — which conductor of the group each cell belongs to, or −1.</b> The reference impedance
+/// of a group is a capacitance MATRIX, and a matrix needs to know which charge belongs to which
+/// conductor; a single-conductor standard totals the whole sheet and carries none of this.
+/// </param>
 public sealed record PlanarStandard(
     PlanarMesh           Mesh,
     PlanarPortResolution Port1,
@@ -195,9 +238,17 @@ public sealed record PlanarStandard(
     int                  EndRunCells,
     IReadOnlyList<double>? ModePotential = null,
     IReadOnlyList<double>? ModeWeight    = null,
-    IReadOnlyList<double>? FloatingPotential = null)
+    IReadOnlyList<double>? FloatingPotential = null,
+    IReadOnlyList<PlanarPortResolution>? GroupPorts = null,
+    IReadOnlyList<int>?  ConductorOfCell = null)
 {
-    public IReadOnlyList<PlanarPortResolution> Ports => [Port1, Port2];
+    public IReadOnlyList<PlanarPortResolution> Ports => GroupPorts ?? [Port1, Port2];
+
+    /// <summary>PCAL4 — how many conductors this standard carries; 1 on everything else.</summary>
+    public int ConductorCount => GroupPorts is null ? 1 : GroupPorts.Count / 2;
+
+    /// <summary>PCAL4 — is this a calibration GROUP's standard, i.e. a 2N-port?</summary>
+    public bool IsGroup => GroupPorts is not null;
 
     /// <summary>RP-2c — whether this standard is a coplanar pair rather than one conductor over the
     /// plane. The two differ in their MESH and in their electrostatics; nothing in the calibration
@@ -338,6 +389,15 @@ public static class PlanarCalibration
                                            PlanarCalibrationSettings? settings = null)
     {
         ArgumentNullException.ThrowIfNull(port);
+
+        // ── PCAL4 — A FEED IN A CALIBRATION GROUP GETS EVERY CONDUCTOR OF THE GROUP, DRIVEN ─────
+        //
+        // Decided at setup by PlanarPorts.TryFormCalibrationGroup, which is where the port list and
+        // the threshold are; by the time the standard is built the answer is a fact on the
+        // resolution. Null on every port that is not in a multi-conductor group, so this branch is
+        // not taken on any run that passes today.
+        if (port.Group is not null)
+            return BuildGroupLine(port, targetLengthM, endRunCells, layerName);
 
         // ── PCAL3 — A FEED WITH A PASSIVE NEIGHBOUR GETS THE NEIGHBOUR IN ITS STANDARD ───────────
         //
@@ -488,6 +548,70 @@ public static class PlanarCalibration
 
         return new PlanarStandard(mesh, p1, p2, p2.ReferencePlaneM - p1.ReferencePlaneM, endRunCells,
                                   v, w, f);
+    }
+
+    /// <summary>
+    /// <b>PCAL4/R-pcal4-1 — the standard for a calibration GROUP: every conductor of the group, the
+    /// gaps between them, and a port on each conductor at each end.</b>
+    ///
+    /// <para>D4's rule is unchanged and is still the whole point — the standard rebuilds the port
+    /// region exactly — and the region is now N conductors that are all DRIVEN. That is the one
+    /// thing separating this from <see cref="BuildNeighbourLine"/>, whose extra conductor has no
+    /// port because it has none in the DUT: here every conductor has one, so the standard is a
+    /// 2N-port, the error box is <see cref="PlanarModalCalibration"/>'s N×N blocks, and the
+    /// electrostatics is a capacitance MATRIX rather than one number with a floating constraint.</para>
+    ///
+    /// <para><b>Port order is conductors 1..N at the low end, then the same conductors at the high
+    /// end</b>, which is the block split every piece of the modal algebra assumes. Both ends' cuts
+    /// sit at the transverse centre of their own conductor and are resolved through
+    /// <see cref="PlanarPorts"/> — the one resolution rule, including its skew, level and
+    /// same-conductor checks — rather than assembled here.</para>
+    ///
+    /// <para><b>There is no neighbour extension setting here and there must not be one.</b> PCAL3's
+    /// reproduced neighbour is open at both ends and therefore a resonator, which is what
+    /// <c>NeighbourExtensionCells</c> exists to measure; a group's conductors are all driven from
+    /// their own ports, exactly as the DUT's are, so the structure has no undriven stub in it at
+    /// all.</para>
+    /// </summary>
+    public static PlanarStandard BuildGroupLine(PlanarPortResolution port, double targetLengthM,
+                                                int endRunCells, string layerName = "Metal")
+    {
+        ArgumentNullException.ThrowIfNull(port);
+        var g = port.Group
+             ?? throw new InvalidOperationException(
+                    $"Port {port.Number} is not in a calibration group, so BuildLine is what builds " +
+                    "its standard.");
+
+        var gLong = LongitudinalPartition(port, targetLengthM, endRunCells);
+        int n = g.ConductorCount;
+
+        var (mesh, cells) = BuildProfileMesh(port.Direction, gLong, g.Lines,
+                                             (_, t) => g.ConductorOf[t] >= 0, layerName);
+
+        bool alongX = port.Direction == PlanarBasisDirection.X;
+        var (sideLo, sideHi) = alongX
+            ? (PlanarPortSide.MinX, PlanarPortSide.MaxX)
+            : (PlanarPortSide.MinY, PlanarPortSide.MaxY);
+
+        EmPoint Pt(double along, double across) =>
+            alongX ? new EmPoint(along, across) : new EmPoint(across, along);
+
+        var ports = new PlanarPortResolution[2 * n];
+        for (int k = 0; k < n; k++)
+        {
+            double c = g.CentreM(k);
+            ports[k]     = PlanarPorts.Resolve(mesh, new PlanarPort(k + 1,     Pt(gLong[0],  c), sideLo, port.Z0));
+            ports[n + k] = PlanarPorts.Resolve(mesh, new PlanarPort(n + k + 1, Pt(gLong[^1], c), sideHi, port.Z0));
+        }
+
+        // Which conductor each cell belongs to — D7's capacitance MATRIX is assembled against this.
+        var conductorOfCell = new int[cells.Count];
+        for (int c = 0; c < cells.Count; c++)
+            conductorOfCell[c] = g.ConductorOf[alongX ? cells[c].IY : cells[c].IX];
+
+        return new PlanarStandard(
+            mesh, ports[0], ports[n], ports[n].ReferencePlaneM - ports[0].ReferencePlaneM,
+            endRunCells, GroupPorts: ports, ConductorOfCell: conductorOfCell);
     }
 
     /// <summary>

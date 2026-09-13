@@ -287,6 +287,27 @@ public sealed class PlanarSolveContext
 }
 
 /// <summary>
+/// <summary>
+/// <b>PCAL4 — one calibration GROUP's answer at one frequency</b>: the modal error box, each mode's
+/// Z_c, and the transformation back to the terminal ports the user asked for.
+/// </summary>
+/// <param name="Box">The N×N error box, in the modal basis whose gauge
+/// <see cref="PlanarModalCalibration"/> fixed and whose SIGNS it agreed with <paramref name="Tv"/>
+/// about.</param>
+/// <param name="Zc">Z_c,m per mode — D7's γ/(jωC) with a modal C.</param>
+/// <param name="Tv">The voltage modal matrix: column m is mode m's terminal voltage pattern.</param>
+/// <param name="ModeCouplingResidual">What the lossless modal reduction discarded in [C].</param>
+/// <param name="Usable">Whether every mode's βΔℓ is inside TRL's usable interval at this
+/// frequency — one mode outside it makes the whole group's box unusable, because the box is
+/// solved from all of them at once.</param>
+public sealed record PlanarGroupCalibration(
+    PlanarModalErrorBox    Box,
+    IReadOnlyList<Complex> Zc,
+    Mat<double>            Tv,
+    IReadOnlyList<double>  ReportedZcScale,
+    double                 ModeCouplingResidual,
+    bool                   Usable);
+
 /// One port's calibration, built once and stepped across a sweep.
 ///
 /// <para><b>It is STATEFUL and must be stepped in increasing frequency order</b>, because both branch
@@ -420,6 +441,10 @@ public sealed class PlanarPortCalibrator
         // both ends, so its own half-wave resonances are at βL = nπ. The span is a property of the
         // mesh and is taken once here; whether a frequency is near one is asked per frequency, from
         // the MEASURED β rather than from the pre-solve estimate.
+        // PCAL4 — a group's standards carry 2N ports and the run's port numbers ride on the
+        // profile, in the standard's own conductor order.
+        _groupPorts     = set[0].IsGroup ? port.Group!.PortNumbers : null;
+
         _hasNeighbour   = port.Neighbourhood is not null;
         _standardSpanM  = new double[set.Length];
         for (int i = 0; i < set.Length; i++)
@@ -431,6 +456,120 @@ public sealed class PlanarPortCalibrator
 
     private readonly bool     _hasNeighbour;
     private readonly double[] _standardSpanM;
+
+    // ── PCAL4 — the group's own state. Null on every ordinary calibrator, which is every one that
+    //    exists on a run that passes today. ──────────────────────────────────────────────────────
+    private readonly IReadOnlyList<int>? _groupPorts;
+    private PlanarModalMedium?           _medium;
+    private Complex[]?                   _prevGamma;
+
+    /// <summary>PCAL4 — does this calibrator own a multi-conductor group's standard set?</summary>
+    public bool IsGroup => _groupPorts is not null;
+
+    /// <summary>PCAL4 — the run's ports this calibrator covers, in its standards' conductor
+    /// order.</summary>
+    public IReadOnlyList<int> GroupPortNumbers => _groupPorts ?? [];
+
+    /// <summary>
+    /// <b>PCAL4 — the quasi-static modal description of the group's cross-section</b>, from its own
+    /// two extreme standards. Frequency-independent, so it is built once and kept, exactly as D7's
+    /// scalar <c>C_pul</c> is; and like it, this is what builds the LONGEST standard's cores even
+    /// when no frequency selected it.
+    /// </summary>
+    private PlanarModalMedium Medium() =>
+        _medium ??= PlanarModalMedium.Extract(Standards[0], Standards[^1], _slab,
+                                              _standards[0].Settings,
+                                              _standards[0].Cores, _standards[^1].Cores);
+
+    /// <summary>
+    /// <b>PCAL4/R-pcal4-6 — the group's mode separation at one frequency, from the ELECTROSTATICS,
+    /// before any Green's-function fit.</b> The smallest |β_i − β_j|·Δℓ over mode pairs, in degrees,
+    /// over the separation that frequency would select. It is the quantity the measured
+    /// <see cref="PlanarModalErrorBox.ModeSeparationDegrees"/> reports, asked of the quasi-static
+    /// modes instead — available at setup, so a group that cannot be calibrated is refused before
+    /// the sweep is paid for rather than in the middle of it.
+    /// </summary>
+    public double QuasiStaticModeSeparationDegrees(double fHz)
+    {
+        var medium = Medium();
+        int n = medium.ModeCount;
+        if (n < 2) return double.PositiveInfinity;
+
+        double dl = _deltas[PlanarCalibration.SelectSeparation(
+            _deltas, PlanarCalibration.EstimateBeta(_slab, fHz))];
+
+        double worst = double.PositiveInfinity;
+        for (int i = 0; i < n; i++)
+            for (int j = i + 1; j < n; j++)
+                worst = Math.Min(worst,
+                    Math.Abs(medium.Beta(fHz, i) - medium.Beta(fHz, j)) * dl * 180.0 / Math.PI);
+        return worst;
+    }
+
+    /// <summary>PCAL4 — the group's quasi-static modal description, for a caller that wants to
+    /// report ε_eff per mode or the reference impedance's own accuracy separately (R-pcal4-4).</summary>
+    public PlanarModalMedium GroupMedium() => Medium();
+
+    /// <summary>
+    /// <b>PCAL4 — γ per mode, the modal error box and each mode's Z_c at one frequency.</b> The
+    /// group's analogue of <see cref="At"/>, and stateful in the same way and for the same reason:
+    /// the 2π branch of every mode is continued from the previous point, and near a mode crossing
+    /// the assignment to modes is made against that prediction rather than against an ordering
+    /// (R-pcal4-3).
+    /// </summary>
+    public PlanarGroupCalibration ModalAt(Func<PlanarFrequencyKernel> kernelFor, double fHz)
+    {
+        ArgumentNullException.ThrowIfNull(kernelFor);
+        if (_groupPorts is null)
+            throw new InvalidOperationException("This calibrator owns no calibration group.");
+
+        if (PrepareAt(kernelFor, fHz) is { } work)
+        {
+            foreach (var solve in work.Solves) solve();
+            work.Commit();
+        }
+
+        int pick = PlanarCalibration.SelectSeparation(_deltas, ExpectedBeta(fHz));
+        var slots  = _rawCache[fHz];
+        var sShort = slots[0]!.Value;
+        var sLong  = slots[pick + 1]!.Value;
+
+        var medium = Medium();
+        int n = medium.ModeCount;
+        double dl = _deltas[pick];
+
+        // The prediction: the previous frequency's own β per mode scaled by frequency, or the
+        // electrostatic estimate at the first point. It is the ONLY thing that assigns a measured
+        // mode to a mode of the cross-section, so it is per mode and never an average.
+        var expect = new double[n];
+        for (int m = 0; m < n; m++)
+            expect[m] = (_prevGamma is null ? medium.Beta(fHz, m)
+                                            : _prevGamma[m].Imaginary * (fHz / _prevF)) * dl;
+
+        var box = PlanarModalCalibration.Solve(sShort, sLong, _shortLength, _shortLength + dl,
+                                               expect, medium.Tv);
+
+        _prevGamma = [.. box.Gamma];
+        _prevF     = fHz;
+
+        // SelectSeparation and the branch prediction below both need ONE β for the group; the mean
+        // over modes is what they get, and it only has to be right to ~20% for either.
+        double mean = 0;
+        for (int m = 0; m < n; m++) mean += box.Gamma[m].Imaginary;
+        _prevBeta = mean / n;
+
+        var zc = new Complex[n];
+        bool usable = true;
+        for (int m = 0; m < n; m++)
+        {
+            zc[m] = medium.Zc(box.Gamma[m], fHz, m);
+            usable &= box.ElectricalDegrees[m] >= PlanarCalibrationSettings.UsableLoDegrees
+                   && box.ElectricalDegrees[m] <= PlanarCalibrationSettings.UsableHiDegrees;
+        }
+
+        return new PlanarGroupCalibration(box, zc, medium.Tv,
+                                          medium.ReportedZcScale, medium.ModeCouplingResidual, usable);
+    }
 
     /// <summary>
     /// <b>PCAL3 — how far βL is from the nearest nπ, in degrees, over the two standards this
@@ -681,9 +820,10 @@ public sealed class PlanarPortCalibrator
     /// </summary>
     public void RestartBranchContinuation()
     {
-        _prevBeta = double.NaN;
-        _prevF    = 0;
-        _prevA21  = null;
+        _prevBeta  = double.NaN;
+        _prevF     = 0;
+        _prevA21   = null;
+        _prevGamma = null;
     }
 
     /// <summary>
@@ -700,6 +840,29 @@ public sealed class PlanarPortCalibrator
     public static bool SameCrossSection(PlanarPortResolution a, PlanarPortResolution b, int endRunCells)
     {
         const double Tol = 1e-12;
+
+        // ── PCAL4 — TWO PORTS OF ONE GROUP SHARE ONE STANDARD, BY CONSTRUCTION ──────────────────
+        //
+        // A group's standard is built from the GROUP's profile, which is the same object for every
+        // member, so the members' OWN conductors need not match at all — on an asymmetric pair they
+        // legitimately do not, and comparing them would build the identical 2N-port mesh once per
+        // port and solve it once per port at every frequency.
+        if (a.Group is { } ag && b.Group is { } bg &&
+            ag.PortNumbers.Count == bg.PortNumbers.Count &&
+            ag.ConductorOf.Count == bg.ConductorOf.Count)
+        {
+            bool sameGroup = true;
+            for (int i = 0; i < ag.PortNumbers.Count && sameGroup; i++)
+                if (ag.PortNumbers[i] != bg.PortNumbers[i]) sameGroup = false;
+            for (int i = 0; i < ag.ConductorOf.Count && sameGroup; i++)
+            {
+                if (ag.ConductorOf[i] != bg.ConductorOf[i]) { sameGroup = false; break; }
+                double da = ag.Lines[i + 1] - ag.Lines[i];
+                double db = bg.Lines[i + 1] - bg.Lines[i];
+                if (Math.Abs(da - db) > Tol * Math.Max(da, db)) sameGroup = false;
+            }
+            if (sameGroup) return true;
+        }
 
         if (a.BasisCount != b.BasisCount) return false;
         if (a.TransverseLines.Count != b.TransverseLines.Count) return false;
@@ -742,6 +905,27 @@ public sealed class PlanarPortCalibrator
                 if (na.IsMetal[i] != nbb.IsMetal[i]) return false;
                 double da = na.Lines[i + 1] - na.Lines[i];
                 double db = nbb.Lines[i + 1] - nbb.Lines[i];
+                if (Math.Abs(da - db) > Tol * Math.Max(da, db)) return false;
+            }
+        }
+
+        // ── PCAL4 — AND ONLY IF THEY ARE THE SAME SHAPE OF GROUP ────────────────────────────────
+        //
+        // The same sentence again, N conductors over. Two groups share a standard only if they have
+        // the same conductors at the same spacings in the same order; sharing across that would
+        // calibrate one group against another's cross-section, which is a complete, plausible modal
+        // error box for a port region that is not there. The two ends of one coupled pair DO match,
+        // which is what makes a four-port run cost two group standards rather than four.
+        if ((a.Group is null) != (b.Group is null)) return false;
+        if (a.Group is { } ga && b.Group is { } gb)
+        {
+            if (ga.ConductorOf.Count != gb.ConductorOf.Count) return false;
+            if (ga.ConductorCount != gb.ConductorCount) return false;
+            for (int i = 0; i < ga.ConductorOf.Count; i++)
+            {
+                if (ga.ConductorOf[i] != gb.ConductorOf[i]) return false;
+                double da = ga.Lines[i + 1] - ga.Lines[i];
+                double db = gb.Lines[i + 1] - gb.Lines[i];
                 if (Math.Abs(da - db) > Tol * Math.Max(da, db)) return false;
             }
         }
@@ -984,6 +1168,32 @@ public sealed record PlanarSolveSettings(
 public static class PlanarSolve
 {
     /// <summary>
+    /// <b>PCAL4/R-pcal4-6 — refuse a calibration group whose modes the cascade eigenproblem cannot
+    /// separate, at SETUP.</b> See <see cref="PlanarPortCalibrator.QuasiStaticModeSeparationDegrees"/>
+    /// for why the question can be asked before a single frequency has been solved.
+    /// </summary>
+    internal static void GuardModeSeparation(PlanarPortCalibrator cal, PlanarPortResolution port,
+                                             double fLoHz, PlanarCalibrationSettings calSt,
+                                             SurfaceMesher.PlanarLengthFormat fmt)
+    {
+        double sep = cal.QuasiStaticModeSeparationDegrees(fLoHz);
+        if (sep >= calSt.ModeSeparationFloorDegrees) return;
+
+        var g = port.Group!;
+        throw new PlanarFeedClearanceRefusedException(
+            $"Ports {string.Join(", ", g.PortNumbers)} would be calibrated together as one group — " +
+            $"their feeds are mutually coupled, the nearest pair {fmt(g.NearestM)} apart — but their " +
+            $"{g.ConductorCount} modes are not separable: at {SurfaceMesher.Eng(fLoHz)}Hz the closest " +
+            $"pair differs by {sep:F3}° of electrical length over the calibration separation, against " +
+            $"a floor of {calSt.ModeSeparationFloorDegrees:F2}°. The modal error box is extracted from " +
+            "the eigenvectors of the two standards' cascade, and at equal eigenvalues those " +
+            "eigenvectors are not determined at all. Separate the feeds by at least the driven " +
+            "clearance so each port calibrates on its own, or move the port plane to a station where " +
+            "the conductors are not coupled.",
+            []);
+    }
+
+    /// <summary>
     /// <b>The error box of a port that has no error box</b> — a₁₁ = 0, a₂₂ = 0, a₂₁ = 1, i.e. a
     /// through. An internal delta gap takes this, which makes <see cref="PlanarDeembed.Apply"/>'s
     /// algebra the identity on that port's row and column while every de-embedded port beside it is
@@ -1160,6 +1370,7 @@ public static class PlanarSolve
         // Only when de-embedding is ON. With it off there is no calibration standard, nothing is
         // being replaced by an isolated line, and a neighbour is simply part of the structure.
         var calSt = st.Calibration ?? PlanarCalibrationSettings.Default;
+        int groupCount = 0;
         var clearances = new List<PlanarFeedClearance>();
         var widenNotes = new List<string>();
         if (st.Deembed)
@@ -1178,6 +1389,83 @@ public static class PlanarSolve
                     passiveRequiredM: passiveM,
                     slabHeightM:      slab.HeightM,
                     conductors:       conductors);
+
+            // ── PCAL4/R-pcal4-1 — A DRIVEN BREACH IS A CALIBRATION GROUP, NOT A RUN TO REFUSE ────
+            //
+            // It comes FIRST because a group changes the profile every one of its member ports is
+            // then measured against: once ports 1 and 3 share a standard that reproduces both
+            // conductors, neither of them has a neighbour any more, and asking the clearance question
+            // before the grouping would have both of them refuse the run they are about to fix.
+            //
+            // Attempted only on a DRIVEN breach, which since PCAL2 is a refusal — a clear feed
+            // measures Breached = false and never reaches this line, which is the whole of
+            // R-pcal4-1's "a group of one is today's case and must remain bit-identical".
+            if (calSt.IncludeDrivenGroups)
+            {
+                for (int i = 0; i < widened.Count; i++)
+                {
+                    if (widened[i].Group is not null) continue;
+                    var c0 = Measure(widened[i]);
+                    if (c0 is not { Breached: true, Neighbour: PlanarNeighbourClass.Driven }) continue;
+
+                    var profile = PlanarPorts.TryFormCalibrationGroup(
+                        mesh, widened[i], ports,
+                        PlanarCalibration.EndRunCellsFor(widened[i], slab, st.Calibration),
+                        drivenM, Math.Max(2, calSt.MaxCalibrationGroupSize), conductors,
+                        out string? groupDeclined);
+
+                    if (profile is null)
+                    {
+                        // A null with NO reason means the walk found nothing to group, which is the
+                        // ordinary answer for a clear feed — but the clearance predicate has just
+                        // said this feed is not clear, so PCAL3's own sentence applies unchanged and
+                        // only this call site knows both halves.
+                        widenNotes.Add(groupDeclined ??
+                            $"Port {widened[i].Number}'s feed has metal " +
+                            $"{fmt(c0.NearestM)} away carrying a port, that does not cross THIS " +
+                            "port's own reference plane on its own conductor level — it is on " +
+                            "another level, behind the end face, or it begins further into the " +
+                            "structure. A calibration standard is a uniform extrusion of what " +
+                            "crosses that plane, so there is nothing there for a group to be made " +
+                            "of.");
+                        continue;
+                    }
+
+                    // ── R-pcal4-6 — A GROWN FEED LEAD IS DECLINED BY NAME ───────────────────────
+                    //
+                    // R-fed-2 peels a lead as S_ij *= exp(γ_iℓ_i + γ_jℓ_j), which is a statement
+                    // about ONE γ per port. A group's ports carry N modes, and a lead grown on one
+                    // conductor of a coupled pair is not a matched section of any single one of them
+                    // — it is a length of a DIFFERENT cross-section, whose own modes this calibration
+                    // never measured. Peeling it with a modal γ would remove a length of line that
+                    // is not there.
+                    string? leadHolder = null;
+                    if (leads is { Count: > 0 })
+                        foreach (var lead in leads)
+                            if (lead.LengthM > 0 && profile.PortNumbers.Contains(lead.PortNumber))
+                                leadHolder ??= $"port {lead.PortNumber} ({fmt(lead.LengthM)})";
+
+                    if (leadHolder is not null)
+                    {
+                        widenNotes.Add(
+                            $"Ports {string.Join(", ", profile.PortNumbers)} would form one " +
+                            "calibration group, but the solver had to grow a feed lead on " +
+                            $"{leadHolder} to reach a uniform port cross-section. A lead is peeled as " +
+                            "a matched length of the port's OWN line, which is one propagation " +
+                            "constant; a group's port region has one per mode, and the lead is not a " +
+                            "matched section of any of them because the second conductor is not " +
+                            "beside it there. Draw the feed long enough that no lead is needed, or " +
+                            "separate the feeds.");
+                        continue;
+                    }
+
+                    for (int j = 0; j < widened.Count; j++)
+                        if (profile.PortNumbers.Contains(widened[j].Number))
+                            widened[j] = widened[j] with { Group = profile };
+
+                    widenNotes.Add(profile.Describe(fmt));
+                }
+            }
 
             for (int i = 0; i < widened.Count; i++)
             {
@@ -1234,6 +1522,7 @@ public static class PlanarSolve
             }
 
             ports = widened;
+            foreach (var pr in ports) if (pr.Group is not null) groupCount++;
         }
 
         foreach (var p in ports)
@@ -1250,8 +1539,20 @@ public static class PlanarSolve
         if (breaches.Count > 0)
         {
             if (!st.DeembedOutsideCalibrationValidity)
+            {
+                // ── R-pcal3-2 / R-pcal4-6 — THE DECLINE TRAVELS WITH THE REFUSAL ────────────────
+                //
+                // A refusal discards the run's notes, so a "this is why the standard could not be
+                // built" sentence collected above never reaches anyone: the user sees the clearance
+                // refusal and no reason why the machinery that exists to fix it did not. Both PCAL3's
+                // widening and PCAL4's grouping write their declines into `widenNotes`, and this is
+                // where they become part of the sentence the run actually says.
+                string why = widenNotes.Count == 0 ? ""
+                    : "\n\nWhy this feed's calibration standard could not simply reproduce the " +
+                      "neighbour: " + string.Join(" ", widenNotes);
                 throw new PlanarFeedClearanceRefusedException(
-                    PlanarFeedClearance.RefusalFor(breaches, fmt), breaches);
+                    PlanarFeedClearance.RefusalFor(breaches, fmt) + why, breaches);
+            }
 
             // R-pcal2-2 — the override is explicit and it is NOT silent. The note says it here and
             // the run service writes the same fact into the Touchstone's provenance block, because
@@ -1479,6 +1780,17 @@ public static class PlanarSolve
                             "simpler stack beneath it, or turn de-embedding off and read the raw " +
                             "solve — those s-parameters include the port discontinuity and are for " +
                             "diagnostics only.");
+                    // ── R-pcal4-6 — THE SAME QUESTION, ASKED AT SETUP, FROM THE ELECTROSTATICS ──
+                    //
+                    // The measured separation is not known until a frequency has been solved, and
+                    // refusing there costs the whole sweep's Green's-function fits first. The
+                    // QUASI-STATIC one is known as soon as the group's own standards have been
+                    // solved electrostatically — which is work the run owes anyway (D7') and which
+                    // costs no fit at all — and it is the same quantity to the accuracy the two
+                    // routes agree to. Asked at the band's BOTTOM, where the separation in electrical
+                    // length is smallest and where PCAL1 measured the conditioning to be worst.
+                    if (cal.IsGroup) GuardModeSeparation(cal, ports[i], fLo, calSt, fmt);
+
                     setupMs += sw.Elapsed.TotalMilliseconds;
                     cores  += cal.MeshCount;
                     standards += cal.MeshCount;
@@ -1575,6 +1887,77 @@ public static class PlanarSolve
         var points = new List<PlanarFrequencyPoint>(freqs.Length);
         var flaggedBand = new List<double>();
         var flaggedResonance = new List<double>();
+
+        // ── PCAL4/gate 5 — the modal diagnostics, per frequency, kept for the run's notes ────────
+        //
+        // R-pcal4-2's mode separation and R-pcal4-3's discarded residuals are most needed exactly
+        // where the conditioning is worst, which PCAL1 measured is the BOTTOM of the band (D6's
+        // 1/a₂₁² amplification). So the worst of each is reported with the frequency it happened at
+        // rather than as a sweep average, which would hide the one point that matters.
+        var groupDiagnostics = new List<string>();
+        double worstSeparation = double.PositiveInfinity, worstSeparationF = 0;
+        double worstCascade = 0, worstCascadeF = 0;
+        double worstGauge = 0, worstGaugeF = 0;
+        double worstSign = 1.0, worstSignF = 0;
+        double worstQuasiStatic = 0, worstQuasiStaticF = 0;
+        double worstNullGap = 0, worstNullGapF = 0;
+        double worstPalindrome = 0;
+        double worstModeCoupling = 0;
+
+        void RecordGroupDiagnostics(double f, PlanarPortGroupProfile g, PlanarGroupCalibration gc)
+        {
+            var b = gc.Box;
+            if (b.ModeSeparationDegrees < worstSeparation) { worstSeparation = b.ModeSeparationDegrees; worstSeparationF = f; }
+            if (b.CascadeResidual > worstCascade) { worstCascade = b.CascadeResidual; worstCascadeF = f; }
+            if (b.GaugeResidual > worstGauge) { worstGauge = b.GaugeResidual; worstGaugeF = f; }
+            if (b.SignMargin < worstSign) { worstSign = b.SignMargin; worstSignF = f; }
+            if (b.QuasiStaticBetaError > worstQuasiStatic) { worstQuasiStatic = b.QuasiStaticBetaError; worstQuasiStaticF = f; }
+            if (b.NullSpaceGap > worstNullGap) { worstNullGap = b.NullSpaceGap; worstNullGapF = f; }
+            worstPalindrome   = Math.Max(worstPalindrome, b.PalindromeResidual);
+            worstModeCoupling = Math.Max(worstModeCoupling, gc.ModeCouplingResidual);
+
+            // ── R-pcal4-6 — DEGENERATE MODES ARE A REFUSAL, NOT A NOTE ──────────────────────────
+            //
+            // At zero separation the cascade's two eigenvalues coincide, the null space of (M − μI)
+            // is a plane rather than a line, and which line in it is which mode is decided by
+            // round-off. A modal de-embedding built on that is smooth, plausible and wrong, which is
+            // the one outcome this whole series exists to remove — so the run falls through to
+            // PCAL2's own refusal, whose remedy (separate the feeds) is the remedy here too.
+            if (b.ModeSeparationDegrees < calSt.ModeSeparationFloorDegrees)
+            {
+                var breaches = clearances.FindAll(cc => g.PortNumbers.Contains(cc.PortNumber));
+                throw new PlanarFeedClearanceRefusedException(
+                    $"Ports {string.Join(", ", g.PortNumbers)} are calibrated together as one group, " +
+                    $"and at {SurfaceMesher.Eng(f)}Hz their {b.ModeCount} modes are not separable: the " +
+                    $"closest pair differs by {b.ModeSeparationDegrees:F3}° of electrical length over " +
+                    $"the calibration separation, against a floor of " +
+                    $"{calSt.ModeSeparationFloorDegrees:F2}°. The modal error box is extracted from the " +
+                    "eigenvectors of the two standards' cascade, and at equal eigenvalues those " +
+                    "eigenvectors are not determined at all — the de-embedded s-parameters would be " +
+                    "smooth, plausible and wrong rather than visibly bad. Separate the feeds by at " +
+                    "least the driven clearance so each port calibrates on its own, or move the port " +
+                    "plane to a station where the conductors are not coupled.",
+                    breaches);
+            }
+
+            var modes = new string[b.ModeCount];
+            for (int m = 0; m < b.ModeCount; m++)
+                modes[m] = $"{b.ElectricalDegrees[m]:F1}° / ε_eff " +
+                           $"{EffectivePermittivityOf(b.Gamma[m], f):F3} / Z_c " +
+                           $"{(gc.Zc[m] * gc.ReportedZcScale[m]).Real:F2}Ω";
+            groupDiagnostics.Add(
+                $"{SurfaceMesher.Eng(f)}Hz, ports {string.Join("+", g.PortNumbers)}: modes " +
+                string.Join(" · ", modes) +
+                $"; separation {b.ModeSeparationDegrees:F2}°, cascade residual {b.CascadeResidual:E2}, " +
+                $"pair {b.ReciprocalPairResidual:E2}, gauge {b.GaugeResidual:E2}, " +
+                $"null-space gap {b.NullSpaceGap:E2}, sign margin {b.SignMargin:F3}.");
+        }
+
+        static double EffectivePermittivityOf(Complex gamma, double fHz)
+        {
+            double b = gamma.Imaginary / (2.0 * Math.PI * fHz / EmConstants.C0);
+            return b * b;
+        }
 
         // D5's capture: the ONE frequency and ONE port whose basis currents the heat map needs.
         int capturePort = -1;
@@ -1755,14 +2138,28 @@ public static class PlanarSolve
                 if (ownStage)
                     control?.BeginStage($"{FormatHz(f)} — de-embedding", calibrators.Count);
 
-                var perCal = new PlanarPortCalibration[calibrators.Count];
+                var perCal   = new PlanarPortCalibration[calibrators.Count];
+                var perGroup = new PlanarGroupCalibration?[calibrators.Count];
                 for (int j = 0; j < calibrators.Count; j++)
                 {
                     if (ownStage)
                         control?.SetStageLabel(
                             $"{FormatHz(f)} — calibration standard {j + 1} of {calibrators.Count}");
-                    perCal[j] = calibrators[j].At(kernelFor, f);
+                    if (calibrators[j].IsGroup) perGroup[j] = calibrators[j].ModalAt(kernelFor, f);
+                    else                        perCal[j]   = calibrators[j].At(kernelFor, f);
                     if (ownStage) control?.TickStage();
+                }
+
+                // ── PCAL4 — the BLOCK peel, taken only when some port is in a group ──────────────
+                //
+                // R-pcal4-1: a run with no multi-conductor group must produce the bytes it produces
+                // today, and the surest way to guarantee that is for it to run the same code below,
+                // not the same arithmetic re-expressed over 1×1 matrices — which is the same
+                // arithmetic in a different ORDER, and a different order is a different last bit.
+                if (groupCount > 0)
+                {
+                    var res = DeembedGroupsAt(f, raw, perCal, perGroup, cals);
+                    return (res, cals, sw.Elapsed.TotalMilliseconds);
                 }
 
                 var boxes = new PlanarErrorBox[ports.Count];
@@ -1806,6 +2203,88 @@ public static class PlanarSolve
                 s = PlanarDeembed.Renormalise(atZc, zc, z0);
             }
             return (s, cals, sw.Elapsed.TotalMilliseconds);
+        }
+
+        /// <summary>
+        /// <b>PCAL4 — the peel when at least one calibration group is present.</b> The group's rows
+        /// and columns of the de-embedded matrix are MODAL ports at their own Z_c,m; every other
+        /// port's are what they always were. <see cref="PlanarDeembed.ModalToTerminal"/> turns the
+        /// first back into the terminal ports the user asked for and renormalises the lot in one
+        /// step, through Z, because the modal-to-terminal half is a change of port VARIABLES and has
+        /// no meaning as a renormalisation.
+        /// </summary>
+        Mat<Complex> DeembedGroupsAt(double f, Mat<Complex> raw,
+                                     PlanarPortCalibration[] perCal,
+                                     PlanarGroupCalibration?[] perGroup,
+                                     List<PlanarPortCalibration> cals)
+        {
+            int p = ports.Count;
+            var blocks    = new List<PlanarDeembed.PlanarBlockBox>(p);
+            var zModal    = new Complex[p];
+            var gam       = new Complex[p];
+            var transform = new Mat<Complex>(p, p);
+            var handled   = new bool[p];
+
+            for (int i = 0; i < p; i++)
+            {
+                if (handled[i] || ports[i].Group is not { } g) continue;
+                var gc = perGroup[byPort[i]]!;
+
+                var slot = new int[g.ConductorCount];
+                for (int k = 0; k < g.ConductorCount; k++)
+                {
+                    slot[k] = -1;
+                    for (int j = 0; j < p; j++) if (ports[j].Number == g.PortNumbers[k]) slot[k] = j;
+                    if (slot[k] < 0)
+                        throw new InvalidOperationException(
+                            $"Calibration group port {g.PortNumbers[k]} is not in the run's port list.");
+                }
+
+                blocks.Add(new PlanarDeembed.PlanarBlockBox(slot, gc.Box.A11, gc.Box.A12,
+                                                            gc.Box.A21, gc.Box.A22));
+                for (int k = 0; k < g.ConductorCount; k++)
+                {
+                    zModal[slot[k]] = gc.Zc[k];
+                    handled[slot[k]] = true;
+                    for (int m = 0; m < g.ConductorCount; m++)
+                        transform[slot[k], slot[m]] = gc.Tv[k, m];
+                }
+
+                if (!gc.Usable) flaggedBand.Add(f);
+                RecordGroupDiagnostics(f, g, gc);
+            }
+
+            for (int i = 0; i < p; i++)
+            {
+                if (handled[i]) continue;
+                transform[i, i] = Complex.One;
+
+                if (!ports[i].IsDeembeddable)
+                {
+                    blocks.Add(One(i, IdentityBox));
+                    zModal[i] = z0[i];
+                    gam[i]    = Complex.Zero;
+                    continue;
+                }
+
+                var c = perCal[byPort[i]];
+                cals.Add(c with { PortNumber = ports[i].Number });
+                blocks.Add(One(i, c.Box));
+                zModal[i] = c.Zc;
+                gam[i]    = c.Gamma.Gamma;
+                if (!c.Gamma.Usable) flaggedBand.Add(f);
+                if (c.NeighbourResonanceDegrees < PlanarPortCalibrator.NeighbourResonanceGuardDegrees
+                    && !flaggedResonance.Contains(f)) flaggedResonance.Add(f);
+            }
+
+            var atZc = PlanarFeedExtension.Peel(PlanarDeembed.ApplyBlocks(raw, blocks), peelM, gam);
+            return PlanarDeembed.ModalToTerminal(atZc, transform, zModal, z0);
+
+            static PlanarDeembed.PlanarBlockBox One(int index, PlanarErrorBox b)
+            {
+                Mat<Complex> M(Complex v) { var m = new Mat<Complex>(1, 1); m[0, 0] = v; return m; }
+                return new PlanarDeembed.PlanarBlockBox([index], M(b.A11), M(b.A21), M(b.A21), M(b.A22));
+            }
         }
 
         int    solvedCount = freqs.Length;
@@ -2627,6 +3106,45 @@ public static class PlanarSolve
                 "developed against). It is a property of the STANDARD's length, not of your design: " +
                 "your neighbour is whatever length you drew. Narrow the sweep past those points, " +
                 "separate the feeds so no neighbour has to be reproduced, or read them knowing this.");
+        }
+
+        // ── PCAL4/gate 5 — THE MODAL DIAGNOSTICS, PER FREQUENCY, IN THE RUN'S OWN NOTES ────────
+        //
+        // R-pcal4-2 and R-pcal4-3 both ask for these to be REPORTED rather than merely acted on, and
+        // PCAL1 measured why the summary has to name its frequency: the error is worst at the BOTTOM
+        // of the band in every case measured, so a sweep average would hide exactly the point that
+        // decides whether the answer is usable. The per-point lines follow the summary.
+        if (groupDiagnostics.Count > 0)
+        {
+            notes.Add(
+                $"MODAL CALIBRATION over {groupDiagnostics.Count} point(s). Worst mode separation " +
+                $"{worstSeparation:F2}° at {SurfaceMesher.Eng(worstSeparationF)}Hz (floor " +
+                $"{calSt.ModeSeparationFloorDegrees:F2}°) — this is the quantity that decides whether " +
+                "the modes can be told apart at all, and everything else here is conditional on it. " +
+                $"Worst discarded cascade residual {worstCascade:E2} at " +
+                $"{SurfaceMesher.Eng(worstCascadeF)}Hz; worst modal-gauge residual {worstGauge:E2} at " +
+                $"{SurfaceMesher.Eng(worstGaugeF)}Hz; worst eigenvector null-space gap " +
+                $"{worstNullGap:E2} at {SurfaceMesher.Eng(worstNullGapF)}Hz; smallest per-mode sign " +
+                $"margin {worstSign:F3} at {SurfaceMesher.Eng(worstSignF)}Hz; characteristic " +
+                $"polynomial palindrome residual {worstPalindrome:E2}. These are honest measures of " +
+                "what the modal extraction discarded and of how well determined its choices were; " +
+                "they are NOT an error bound, and PCAL1 measured that the scalar versions of them are " +
+                "not even correlated with the de-embedding error (src/Engine/Mom/RESOLVED.md, PCAL1 " +
+                "§5).");
+
+            notes.Add(
+                $"MODAL REFERENCE IMPEDANCE (R-pcal4-4, reported SEPARATELY from the de-embedding's " +
+                "own accuracy because they are two different things). Z_c,m = γ_m/(jωC_m) takes γ " +
+                "full-wave from the calibration and C from the standards' own electrostatics, so the " +
+                "reference impedance is quasi-static and the de-embedding is not. The two routes' β " +
+                $"disagree by at most {worstQuasiStatic:P2} at " +
+                $"{SurfaceMesher.Eng(worstQuasiStaticF)}Hz, which is the size of that quasi-static " +
+                $"assumption on this cross-section; the lossless modal reduction of [C] discarded at " +
+                $"most {worstModeCoupling:E2} of its own diagonal. A run in which these are large has " +
+                "a perfectly good de-embedding and a reference impedance that is out by about that " +
+                "much, and the two should never be read as one figure of merit.");
+
+            foreach (string line in groupDiagnostics) notes.Add("  " + line);
         }
 
         if (flaggedBand.Count > 0)

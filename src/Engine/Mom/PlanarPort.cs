@@ -449,6 +449,76 @@ public sealed record PlanarPortNeighbourhood(
 }
 
 /// <summary>
+/// <b>PCAL4 — a CALIBRATION GROUP: the ports whose feeds are mutually within the clearance distance
+/// at one reference plane, and the transverse profile their shared standard reproduces.</b>
+///
+/// <para>R-pcal4-1. Two ports on conductors that are coupled at the plane support TWO modes there,
+/// and no assignment of scalars to those two ports can represent that — so the GROUP, not the port,
+/// becomes the unit of calibration: one shared standard carrying every conductor, one modal error
+/// box, and <see cref="PlanarModalCalibration"/>'s N×N blocks in place of D6's three scalars. <b>A
+/// group of one is today's case and takes today's code path</b>, unchanged and bit for bit: this
+/// record is null on every port that is not in a multi-conductor group.</para>
+///
+/// <para>It is deliberately NOT <see cref="PlanarPortNeighbourhood"/> with a flag. That record says
+/// "there is metal in my standard that nothing drives", and every site that reads it — the floating
+/// electrostatic constraint, the single-cut standard ports, the resonance guard — is wrong for a
+/// conductor that carries a port of its own. The two shapes look alike and mean opposite things
+/// about who is driven, which is exactly the distinction PCAL1 measured at a factor of 2-3 in
+/// required clearance.</para>
+/// </summary>
+/// <param name="Lines">Transverse gridlines, ascending, spanning every conductor of the group —
+/// the DUT's own, verbatim, exactly as D4 takes them for one conductor.</param>
+/// <param name="ConductorOf">Per interval: which conductor of the group, or −1 for the gaps.</param>
+/// <param name="PortNumbers">The DUT port standing on each conductor, in the same order — so
+/// conductor k of the standard is port <c>PortNumbers[k]</c> of the run.</param>
+/// <param name="NearestM">The smallest lateral gap inside the group: the distance that would have
+/// been the breach.</param>
+public sealed record PlanarPortGroupProfile(
+    IReadOnlyList<double> Lines,
+    IReadOnlyList<int>    ConductorOf,
+    IReadOnlyList<int>    PortNumbers,
+    double                NearestM)
+{
+    /// <summary>How many conductors, hence how many modes and how many ports.</summary>
+    public int ConductorCount => PortNumbers.Count;
+
+    /// <summary>The whole profile's transverse span — what <c>MeasureFeedClearance</c> must not
+    /// report as a neighbour, because every bit of it IS reproduced in the standard.</summary>
+    public double SpanLoM => Lines[0];
+    /// <inheritdoc cref="SpanLoM"/>
+    public double SpanHiM => Lines[^1];
+
+    /// <summary>Which conductor of the group a given port number stands on, or −1.</summary>
+    public int IndexOfPort(int portNumber)
+    {
+        for (int k = 0; k < PortNumbers.Count; k++) if (PortNumbers[k] == portNumber) return k;
+        return -1;
+    }
+
+    /// <summary>A transverse coordinate inside conductor k — where the standard's own cut goes.</summary>
+    public double CentreM(int conductor)
+    {
+        int lo = -1, hi = -1;
+        for (int t = 0; t < ConductorOf.Count; t++)
+            if (ConductorOf[t] == conductor) { if (lo < 0) lo = t; hi = t; }
+        return lo < 0 ? Lines[0] : 0.5 * (Lines[lo] + Lines[hi + 1]);
+    }
+
+    /// <summary>What the grouping did, for the run's notes.</summary>
+    public string Describe(SurfaceMesher.PlanarLengthFormat? fmt = null)
+    {
+        var f = fmt ?? (v => SurfaceMesher.Eng(v) + "m");
+        return
+            $"Ports {string.Join(", ", PortNumbers)} form one CALIBRATION GROUP: their feeds are " +
+            $"mutually coupled at the reference plane, the nearest pair {f(NearestM)} apart. They " +
+            $"share one {ConductorCount}-conductor calibration standard and one MODAL error box of " +
+            $"{ConductorCount}×{ConductorCount} blocks, because {ConductorCount} coupled conductors " +
+            $"support {ConductorCount} modes there and a per-port scalar box cannot represent them. " +
+            $"The profile spans {f(SpanLoM)} to {f(SpanHiM)} across.";
+    }
+}
+
+/// <summary>
 /// <b>PCAL2 — what the nearest piece of metal beside a calibrated feed IS.</b> PCAL1 measured four
 /// candidate cases and found three of them distinct; the fourth, a flare or pad on the port's OWN
 /// net, is <see cref="PlanarFeedExtension"/>'s job and is not a neighbour at all, so it never
@@ -680,7 +750,8 @@ public sealed record PlanarPortResolution(
     PlanarPortReference    Reference       = PlanarPortReference.GroundPlane,
     PlanarPortTerminal?    Negative        = null,
     PlanarPortCrossSection? CrossSection   = null,
-    PlanarPortNeighbourhood? Neighbourhood = null)
+    PlanarPortNeighbourhood? Neighbourhood = null,
+    PlanarPortGroupProfile? Group          = null)
 {
     public int BasisCount => BasisIndices.Count;
 
@@ -1991,8 +2062,10 @@ public static class PlanarPorts
         // a neighbour. This is what makes the refusal clear itself once the widening has happened,
         // and — just as important — what leaves a SECOND neighbour outside the widened span still
         // measured, from the widened edge, and still able to refuse the run.
-        double tLo = port.Neighbourhood?.SpanLoM ?? port.CrossSection?.SpanLoM ?? port.TransverseLines[0];
-        double tHi = port.Neighbourhood?.SpanHiM ?? port.CrossSection?.SpanHiM ?? port.TransverseLines[^1];
+        double tLo = port.Group?.SpanLoM ?? port.Neighbourhood?.SpanLoM ?? port.CrossSection?.SpanLoM
+                  ?? port.TransverseLines[0];
+        double tHi = port.Group?.SpanHiM ?? port.Neighbourhood?.SpanHiM ?? port.CrossSection?.SpanHiM
+                  ?? port.TransverseLines[^1];
         double nearestDriven  = double.PositiveInfinity;
         double nearestPassive = double.PositiveInfinity;
 
@@ -2132,62 +2205,19 @@ public static class PlanarPorts
             return null;
         }
 
-        bool alongX  = port.Direction == PlanarBasisDirection.X;
-        var  gLong   = alongX ? mesh.GridX : mesh.GridY;
-        var  gTran   = alongX ? mesh.GridY : mesh.GridX;
-        int  nLong   = gLong.Count - 1, nTran = gTran.Count - 1;
-        bool fromLow = port.Side is PlanarPortSide.MinX or PlanarPortSide.MinY;
+        var probe = FeedProfileProbe.For(mesh, port, endRunCells, conductors);
+        if (probe is null) return null;
 
-        int nx = mesh.GridX.Count - 1;
-        var at = new int[nx * (mesh.GridY.Count - 1)];
-        Array.Fill(at, -1);
-        for (int c = 0; c < mesh.Cells.Count; c++)
-        {
-            var cell = mesh.Cells[c];
-            if (cell.LayerIndex == port.LayerIndex) at[cell.IY * nx + cell.IX] = c;
-        }
+        bool alongX  = probe.AlongX;
+        var  gLong   = probe.GLong;
+        var  gTran   = probe.GTran;
+        int  nTran   = probe.NTran;
+        int  outer   = probe.Outer;
+        int  oLo     = probe.OwnLo, oHi = probe.OwnHi;
 
-        int CellAt(int iLong, int iTran)
-        {
-            if ((uint)iLong >= (uint)nLong || (uint)iTran >= (uint)nTran) return -1;
-            return alongX ? at[iTran * nx + iLong] : at[iLong * nx + iTran];
-        }
-
-        // A cell in no basis is not in the solve, so it is not metal for this purpose either —
-        // PlanarConductors.CarriesCurrent, and the conformal taper that measured the difference.
-        bool Metal(int iLong, int iTran)
-        {
-            int ci = CellAt(iLong, iTran);
-            return ci >= 0 && conductors.CarriesCurrent(ci);
-        }
-
-        // ── The end run's columns, marching INWARD from the port, exactly as D4 copies them ──────
-        int planeIdx = 0;
-        double best = double.PositiveInfinity;
-        for (int k = 0; k < gLong.Count; k++)
-        {
-            double d = Math.Abs(gLong[k] - port.ReferencePlaneM);
-            if (d < best) { best = d; planeIdx = k; }
-        }
-        int outer = fromLow ? planeIdx - 1 : planeIdx;
-        if (outer < 0 || outer >= nLong) return null;
-
-        int Column(int j) => fromLow ? outer + j : outer - j;
-        if (Column(endRunCells - 1) < 0 || Column(endRunCells - 1) >= nLong) return null;
-
-        // ── The port's own run, read off the mesh and cross-checked against the resolution ───────
-        double ownCentre = 0.5 * (port.TransverseLines[0] + port.TransverseLines[^1]);
-        int seedT = IndexOf(gTran, ownCentre);
-        if (seedT < 0 || !Metal(outer, seedT)) return null;
-
-        int oLo = seedT, oHi = seedT;
-        while (oLo - 1 >= 0    && Metal(outer, oLo - 1)) oLo--;
-        while (oHi + 1 < nTran && Metal(outer, oHi + 1)) oHi++;
-
-        if (oHi - oLo + 1 != port.BasisCount) return null;
-        for (int i = 0; i <= oHi - oLo; i++)
-            if (Math.Abs(gTran[oLo + i] - port.TransverseLines[i]) > 1e-12 * Math.Max(1.0, Math.Abs(gTran[oLo + i])))
-                return null;
+        int  CellAt(int iLong, int iTran) => probe.CellAt(iLong, iTran);
+        bool Metal(int iLong, int iTran)  => probe.Metal(iLong, iTran);
+        int  Column(int j)                => probe.Column(j);
 
         // ── Walk outward on each side, taking in every passive conductor still inside the
         //    threshold and measuring the next gap from the edge the last one moved to ────────────
@@ -2294,6 +2324,351 @@ public static class PlanarPorts
             Neighbourhood = new PlanarPortNeighbourhood(
                 lines, isMetal, oLo - spanLo, oHi - spanLo, taken, nearest),
         };
+    }
+
+    /// <summary>
+    /// <b>The transverse profile at one port's reference plane, read off the DUT's own mesh.</b>
+    /// Shared by PCAL3's <see cref="TryWidenForNeighbours"/> and PCAL4's
+    /// <see cref="TryFormCalibrationGroup"/> because it is the same question — where the port's own
+    /// conductor is, which columns D4's end run copies, and which cells carry current — and two
+    /// copies of it are two chances for a passive neighbour and a driven one to be found in
+    /// different places.
+    /// </summary>
+    internal sealed class FeedProfileProbe
+    {
+        public required bool AlongX { get; init; }
+        public required IReadOnlyList<double> GLong { get; init; }
+        public required IReadOnlyList<double> GTran { get; init; }
+        public required int NLong { get; init; }
+        public required int NTran { get; init; }
+        public required bool FromLow { get; init; }
+        public required int Outer { get; init; }
+        public required int OwnLo { get; init; }
+        public required int OwnHi { get; init; }
+        internal required int Nx { get; init; }
+        internal required int[] At { get; init; }
+        internal required PlanarConductors Conductors { get; init; }
+
+        public int CellAt(int iLong, int iTran)
+        {
+            if ((uint)iLong >= (uint)NLong || (uint)iTran >= (uint)NTran) return -1;
+            return AlongX ? At[iTran * Nx + iLong] : At[iLong * Nx + iTran];
+        }
+
+        /// <summary>A cell in no basis is not in the solve, so it is not metal for this purpose
+        /// either — <see cref="PlanarConductors.CarriesCurrent"/>, and the conformal taper that
+        /// measured the difference.</summary>
+        public bool Metal(int iLong, int iTran)
+        {
+            int ci = CellAt(iLong, iTran);
+            return ci >= 0 && Conductors.CarriesCurrent(ci);
+        }
+
+        /// <summary>The j-th column of D4's end run, marching INWARD from the port.</summary>
+        public int Column(int j) => FromLow ? Outer + j : Outer - j;
+
+        public static FeedProfileProbe? For(PlanarMesh mesh, PlanarPortResolution port,
+                                            int endRunCells, PlanarConductors conductors)
+        {
+            bool alongX  = port.Direction == PlanarBasisDirection.X;
+            var  gLong   = alongX ? mesh.GridX : mesh.GridY;
+            var  gTran   = alongX ? mesh.GridY : mesh.GridX;
+            int  nLong   = gLong.Count - 1, nTran = gTran.Count - 1;
+            bool fromLow = port.Side is PlanarPortSide.MinX or PlanarPortSide.MinY;
+
+            int nx = mesh.GridX.Count - 1;
+            var at = new int[nx * (mesh.GridY.Count - 1)];
+            Array.Fill(at, -1);
+            for (int c = 0; c < mesh.Cells.Count; c++)
+            {
+                var cell = mesh.Cells[c];
+                if (cell.LayerIndex == port.LayerIndex) at[cell.IY * nx + cell.IX] = c;
+            }
+
+            // ── The end run's columns, marching INWARD from the port, exactly as D4 copies them ──
+            int planeIdx = 0;
+            double best = double.PositiveInfinity;
+            for (int k = 0; k < gLong.Count; k++)
+            {
+                double d = Math.Abs(gLong[k] - port.ReferencePlaneM);
+                if (d < best) { best = d; planeIdx = k; }
+            }
+            int outer = fromLow ? planeIdx - 1 : planeIdx;
+            if (outer < 0 || outer >= nLong) return null;
+
+            var probe = new FeedProfileProbe
+            {
+                AlongX = alongX, GLong = gLong, GTran = gTran, NLong = nLong, NTran = nTran,
+                FromLow = fromLow, Outer = outer, OwnLo = 0, OwnHi = 0, Nx = nx, At = at,
+                Conductors = conductors,
+            };
+
+            if (probe.Column(endRunCells - 1) < 0 || probe.Column(endRunCells - 1) >= nLong) return null;
+
+            // ── The port's own run, read off the mesh and cross-checked against the resolution ───
+            double ownCentre = 0.5 * (port.TransverseLines[0] + port.TransverseLines[^1]);
+            int seedT = IndexOf(gTran, ownCentre);
+            if (seedT < 0 || !probe.Metal(outer, seedT)) return null;
+
+            int oLo = seedT, oHi = seedT;
+            while (oLo - 1 >= 0    && probe.Metal(outer, oLo - 1)) oLo--;
+            while (oHi + 1 < nTran && probe.Metal(outer, oHi + 1)) oHi++;
+
+            if (oHi - oLo + 1 != port.BasisCount) return null;
+            for (int i = 0; i <= oHi - oLo; i++)
+                if (Math.Abs(gTran[oLo + i] - port.TransverseLines[i]) >
+                    1e-12 * Math.Max(1.0, Math.Abs(gTran[oLo + i])))
+                    return null;
+
+            return probe.WithOwnRun(oLo, oHi);
+        }
+
+        private FeedProfileProbe WithOwnRun(int lo, int hi) => new()
+        {
+            AlongX = AlongX, GLong = GLong, GTran = GTran, NLong = NLong, NTran = NTran,
+            FromLow = FromLow, Outer = Outer, OwnLo = lo, OwnHi = hi, Nx = Nx, At = At,
+            Conductors = Conductors,
+        };
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // PCAL4 — THE CALIBRATION GROUP
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// <b>R-pcal4-1 — the ports whose feeds are mutually within the DRIVEN clearance distance at one
+    /// reference plane form a group, and the group is the unit of calibration.</b> Returns the
+    /// profile their shared standard reproduces, or null with <paramref name="declined"/> saying
+    /// which conductor could not be taken in and why.
+    ///
+    /// <para><b>A group of one is not a group</b> — this returns null with no reason there, exactly
+    /// as <see cref="TryWidenForNeighbours"/> does, and the port keeps D6's scalar error box and
+    /// every byte of today's answer (R-pcal4-1's "must remain bit-identical").</para>
+    ///
+    /// <para><b>What is declined, by name, rather than attempted</b> (R-pcal4-6): a neighbour that
+    /// carries no port (that is PCAL3's, and a standard cannot hold one driven and one floating
+    /// conductor under two different electrostatic rules); a neighbour whose port is somewhere else
+    /// entirely, so the two feeds do not share a plane and no single standard describes them; metal
+    /// on the port's own net; a coplanar or conformally cut port; a neighbour that is not uniform
+    /// over the run the standard reproduces; and a group larger than
+    /// <paramref name="maxGroupSize"/>.</para>
+    /// </summary>
+    /// <param name="drivenRequiredM">The lateral distance a neighbour carrying a port has to be
+    /// beyond before the two calibrate independently —
+    /// <see cref="PlanarCalibrationSettings.DrivenNeighbourClearanceHeights"/> × h.</param>
+    /// <param name="maxGroupSize">
+    /// How many conductors one group may hold. <b>It is a cost gate rather than an algebraic one</b>
+    /// (R-pcal4-7): the standard is a 2N-port whose mesh carries every conductor, so N conductors
+    /// cost N times the transverse extent on every standard of the set and N² entries in every block
+    /// of the error box, and the modes have to stay separable on top of that.
+    /// </param>
+    public static PlanarPortGroupProfile? TryFormCalibrationGroup(
+        PlanarMesh mesh, PlanarPortResolution port,
+        IReadOnlyList<PlanarPortResolution> allPorts,
+        int endRunCells, double drivenRequiredM, int maxGroupSize,
+        PlanarConductors conductors, out string? declined)
+    {
+        ArgumentNullException.ThrowIfNull(mesh);
+        ArgumentNullException.ThrowIfNull(port);
+        ArgumentNullException.ThrowIfNull(allPorts);
+        ArgumentNullException.ThrowIfNull(conductors);
+        declined = null;
+
+        string Who() => $"Port {port.Number}'s feed";
+
+        if (!port.IsDeembeddable || endRunCells < 1) return null;
+
+        if (port.CrossSection is not null)
+        {
+            declined =
+                $"{Who()} returns through drawn metal, and a conductor-referenced port cannot join a " +
+                "calibration group: its own standard already drives two conductors at ±½ V, so a " +
+                "third driven conductor beside them is a differential-port question rather than this " +
+                "one (mom-engine.md §10.6).";
+            return null;
+        }
+
+        if (port.CutCellCount > 0)
+        {
+            declined =
+                $"{Who()} is meshed with conformal boundary cells ({port.CutCellCount} of the port's " +
+                "own cells are cut), so its profile is the METAL's extents rather than the grid's and " +
+                "a neighbour's gridlines would not line up with it. Set Boundary cells to " +
+                "\"Staircase\" for this run, or separate the feeds.";
+            return null;
+        }
+
+        var probe = FeedProfileProbe.For(mesh, port, endRunCells, conductors);
+        if (probe is null) return null;
+
+        var gTran = probe.GTran;
+        int nTran = probe.NTran;
+        int outer = probe.Outer;
+
+        // ── Walk outward on each side, taking in every conductor that carries a port of its own at
+        //    THIS plane and is still inside the driven threshold ────────────────────────────────
+        var mine   = new HashSet<int>(conductors.LabelsOf(mesh, port));
+        var driven = conductors.LabelsCarryingAPort(mesh, allPorts);
+
+        int spanLo = probe.OwnLo, spanHi = probe.OwnHi;
+        double nearest = double.PositiveInfinity;
+        var members = new List<(int Lo, int Hi, PlanarPortResolution Port)>
+        {
+            (probe.OwnLo, probe.OwnHi, port),
+        };
+
+        double planeTol = 1e-9 * Math.Max(1.0, Math.Abs(port.ReferencePlaneM));
+
+        for (int dir = 0; dir < 2 && declined is null; dir++)
+        {
+            bool up = dir == 0;
+            while (true)
+            {
+                int edge = up ? spanHi + 1 : spanLo;
+                int t = up ? spanHi + 1 : spanLo - 1;
+                while (t >= 0 && t < nTran && !probe.Metal(outer, t)) t += up ? 1 : -1;
+                if (t < 0 || t >= nTran) break;
+
+                double gap = up ? gTran[t] - gTran[edge] : gTran[edge] - gTran[t + 1];
+                if (gap >= drivenRequiredM) break;       // clear, and a group is never wider than
+                                                          // it has to be
+
+                int nLoT = t, nHiT = t;
+                while (nLoT - 1 >= 0    && probe.Metal(outer, nLoT - 1)) nLoT--;
+                while (nHiT + 1 < nTran && probe.Metal(outer, nHiT + 1)) nHiT++;
+
+                int label = conductors.LabelOf(probe.CellAt(outer, t));
+
+                if (mine.Contains(label))
+                {
+                    declined =
+                        $"{Who()} has metal {SurfaceMesher.Eng(gap)}m away that is part of the port's " +
+                        "OWN net, reaching the reference plane as a separate run. A standard " +
+                        "reproducing it would be two conductors the structure shorts together " +
+                        "somewhere this profile cannot see.";
+                    break;
+                }
+
+                if (!driven.Contains(label))
+                {
+                    declined =
+                        $"{Who()} has a conductor {SurfaceMesher.Eng(gap)}m away that carries NO port, " +
+                        "beside one that does. A calibration group's conductors are all driven and a " +
+                        "widened profile's neighbour is floating at zero net charge, and one standard " +
+                        "cannot hold both rules at once — the reference impedance it measures would " +
+                        "belong to neither structure. Separate the undriven metal from this pair, or " +
+                        "give it a port of its own so the group describes it.";
+                    break;
+                }
+
+                // The neighbour's own port has to be AT THIS PLANE, or the two feeds are not one
+                // port region and one standard cannot describe them both.
+                PlanarPortResolution? peer = null;
+                int found = 0;
+                foreach (var q in allPorts)
+                {
+                    if (q.Number == port.Number) continue;
+                    bool onIt = false;
+                    foreach (int l in conductors.LabelsOf(mesh, q)) if (l == label) { onIt = true; break; }
+                    if (!onIt) continue;
+                    found++;
+                    if (q.IsDeembeddable && q.Side == port.Side && q.Direction == port.Direction &&
+                        q.LayerIndex == port.LayerIndex &&
+                        Math.Abs(q.ReferencePlaneM - port.ReferencePlaneM) <= planeTol)
+                        peer = q;
+                }
+
+                if (peer is null)
+                {
+                    declined =
+                        $"{Who()} has a conductor {SurfaceMesher.Eng(gap)}m away carrying a port of " +
+                        (found == 0 ? "its own that does not reach this reference plane"
+                                    : $"its own ({found} port(s) on it), none of which sits at this " +
+                                      "reference plane facing the same way") +
+                        ". A calibration group is one standard cut at ONE plane, so its ports have to " +
+                        "share that plane: the two modes it separates are the modes AT the plane. " +
+                        "Bring the two ports to the same station, or separate the feeds.";
+                    break;
+                }
+
+                if (peer.CrossSection is not null || peer.CutCellCount > 0)
+                {
+                    declined =
+                        $"{Who()} is coupled to port {peer.Number}, which is " +
+                        (peer.CrossSection is not null
+                            ? "conductor-referenced (it returns through drawn metal)"
+                            : "meshed with conformal boundary cells") +
+                        ". Every conductor of a calibration group has to be cut the same way, because " +
+                        "the standard is one mesh.";
+                    break;
+                }
+
+                if (members.Count >= maxGroupSize)
+                {
+                    declined =
+                        $"{Who()} would be in a CALIBRATION GROUP of more than {maxGroupSize} " +
+                        "conductors: it is coupled to more driven metal than that. A group of N " +
+                        $"conductors needs a {2 * maxGroupSize}-port " +
+                        "standard carrying all of them, solved at every frequency, and its N modes " +
+                        "have to stay separable — so the group size is capped rather than left to " +
+                        "grow. Separate the feeds, or de-embed fewer of these ports.";
+                    break;
+                }
+
+                if (gap < nearest) nearest = gap;
+                members.Add((nLoT, nHiT, peer));
+                if (up) spanHi = nHiT; else spanLo = nLoT;
+            }
+        }
+
+        if (declined is not null) return null;
+        if (members.Count < 2) return null;          // a group of one is not a group
+
+        // ── R-pcal4-6 — EVERY conductor of the group has to survive the extrusion ──────────────
+        int n = spanHi - spanLo + 1;
+        var lines  = new double[n + 1];
+        var labels = new int[n];
+        for (int k = 0; k <= n; k++) lines[k] = gTran[spanLo + k];
+        for (int k = 0; k < n; k++)
+            labels[k] = probe.Metal(outer, spanLo + k) ? conductors.LabelOf(probe.CellAt(outer, spanLo + k)) : -1;
+
+        for (int j = 1; j < endRunCells; j++)
+        {
+            int col = probe.Column(j);
+            for (int k = 0; k < n; k++)
+            {
+                bool m = probe.Metal(col, spanLo + k);
+                int lab = m ? conductors.LabelOf(probe.CellAt(col, spanLo + k)) : -1;
+                if (lab == labels[k]) continue;
+
+                double station = 0.5 * (probe.GLong[col] + probe.GLong[col + 1]);
+                declined =
+                    $"{Who()} is in a calibration group with a conductor that is not uniform over the " +
+                    $"{SurfaceMesher.Eng(Math.Abs(station - port.OuterEdgeM))}m of line the " +
+                    "calibration standard reproduces: at " +
+                    $"{(probe.AlongX ? "x" : "y")} = {SurfaceMesher.Eng(station)}m the metal " +
+                    $"{SurfaceMesher.Eng(0.5 * (lines[k] + lines[k + 1]))}m across " +
+                    (m ? labels[k] < 0 ? "appears where the reference plane has none"
+                                       : "belongs to a different conductor"
+                       : "has ended or moved") +
+                    ". A calibration standard is a uniform extrusion, so every conductor in it has to " +
+                    "run straight past the plane. Separate the feeds, or lengthen the coupled section.";
+                return null;
+            }
+        }
+
+        // ── The profile: conductors numbered by transverse position, ports in the same order ────
+        members.Sort((a, b) => a.Lo.CompareTo(b.Lo));
+        var conductorOf = new int[n];
+        Array.Fill(conductorOf, -1);
+        var portNumbers = new int[members.Count];
+        for (int k = 0; k < members.Count; k++)
+        {
+            portNumbers[k] = members[k].Port.Number;
+            for (int t = members[k].Lo; t <= members[k].Hi; t++) conductorOf[t - spanLo] = k;
+        }
+
+        return new PlanarPortGroupProfile(lines, conductorOf, portNumbers, nearest);
     }
 
     private static string LayerName(PlanarMesh mesh, int layerIndex)

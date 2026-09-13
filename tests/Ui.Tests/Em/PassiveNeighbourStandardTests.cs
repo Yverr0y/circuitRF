@@ -119,10 +119,15 @@ public sealed class PassiveNeighbourStandardTests(ITestOutputHelper output) : ID
     /// second mode to describe. Without this the two fixtures could not tell a widening that works
     /// from one that quietly widened everything.
     /// </summary>
+    ///
+    /// <para><b>The fixture moved at PCAL4 and this gate's meaning did not.</b> `coupled-pair` is a
+    /// calibration GROUP now and runs; what still reaches PCAL2's refusal by way of a driven
+    /// neighbour the widening will not touch is `offset-pair`, whose neighbour carries ports at a
+    /// different station and so shares no plane with this one.</para>
     [Fact]
-    public void Gate3_TheDrivenPairIsStillRefused_AndSaysWhyItCannotBeWidened()
+    public void Gate3_ADrivenNeighbourIsStillRefused_AndSaysWhyItCannotBeWidened()
     {
-        var (setup, source) = Fixture("coupled-pair");
+        var (setup, source) = Fixture("offset-pair");
         var r = EmRunService.Run(OnePoint(setup), source, _results);
 
         output.WriteLine(r.Error ?? "(not refused)");

@@ -466,45 +466,8 @@ public static class ModalDecomposition
         var l    = Symmetrise(rlgc.L);
         var lInv = Symmetrise(RlgcExtractor.Invert(l));
 
-        // 2 — the lossless problem: [C]v = λ[L]⁻¹v, λ = 1/v_p². Both sides real symmetric definite.
-        var cReal = RealPart(c);
-
-        Mat<double> vRaw;
-        Vec<double> dRaw;
-        try
-        {
-            var gevd = MatrixDecompositions.Gevd(cReal, lInv);
-            vRaw = gevd.V;
-            dRaw = gevd.D;
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            throw new InvalidOperationException(
-                "MoM: the lossless modal eigenproblem [C]v = λ[L]⁻¹v could not be solved. Both " +
-                "matrices must be symmetric positive definite; a degenerate cross-section (a " +
-                "conductor with no capacitance to anything, or two conductors solved as one) is " +
-                "the usual cause.", ex);
-        }
-
-        // 3 — R-gen-7. Order the modes by a PHYSICAL property, never by whatever LAPACK returned.
-        var order = SortModes(vRaw, dRaw, n);
-
-        var tv     = new Mat<double>(n, n);
-        var lambda = new double[n];
-        for (int m = 0; m < n; m++)
-        {
-            int src = order[m];
-            lambda[m] = dRaw[src];
-
-            // Sign is arbitrary in an eigenvector; pin it so a re-run reports the same Tv. Purely
-            // cosmetic — every quantity below is invariant to it.
-            int big = 0;
-            for (int k = 1; k < n; k++)
-                if (Math.Abs(vRaw[k, src]) > Math.Abs(vRaw[big, src])) big = k;
-            double sign = vRaw[big, src] < 0 ? -1.0 : 1.0;
-
-            for (int k = 0; k < n; k++) tv[k, m] = sign * vRaw[k, src];
-        }
+        // 2/3 — the lossless problem and its ordering, shared with PCAL4's modal port calibration.
+        var tv = VoltageModalMatrix(RealPart(c), lInv, out var lambda);
 
         return FromVoltageModalMatrix(rlgc, tv, lambda);
     }
@@ -649,6 +612,66 @@ public static class ModalDecomposition
     /// end is which: <see cref="GeneralModes.TryIdentifyEvenOdd"/> names the modes from their sign
     /// pattern, not from their position.</para>
     /// </summary>
+    /// <summary>
+    /// <b>The lossless modal eigenproblem [C]v = λ[L]⁻¹v, and R-gen-7's physical ordering of its
+    /// answer.</b> λ = 1/v_p,m²; the columns of the returned matrix are the voltage eigenvectors,
+    /// signed so a re-run reports the same matrix.
+    ///
+    /// <para>Extracted so that <b>PCAL4's modal port calibration asks the same question of the same
+    /// code</b> rather than keeping a second GEVD. What it may NOT share is what
+    /// <see cref="FromVoltageModalMatrix"/> does next: that rescales <c>Ti</c> to R-gen-3a's
+    /// REPORTING convention, and a modal port calibration needs the strict biorthogonal
+    /// <c>Ti = (Tvᵀ)⁻¹</c> instead — under which, and only under which, the modal-to-terminal wave
+    /// map is complex-orthogonal and PCAL4's gauge condition holds. Both normalisations are correct
+    /// and they are for different purposes; the eigenproblem underneath them is one.</para>
+    ///
+    /// <para>The column NORMALISATION is whatever the GEVD returned and deliberately not touched:
+    /// every quantity either caller derives is invariant to it (scaling column m by c scales that
+    /// mode's capacitance by c² and its Z_c by 1/c², and the two cancel).</para>
+    /// </summary>
+    public static Mat<double> VoltageModalMatrix(Mat<double> cReal, Mat<double> lInv,
+                                                 out double[] lambda)
+    {
+        int n = cReal.RowCount;
+
+        Mat<double> vRaw;
+        Vec<double> dRaw;
+        try
+        {
+            var gevd = MatrixDecompositions.Gevd(cReal, lInv);
+            vRaw = gevd.V;
+            dRaw = gevd.D;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            throw new InvalidOperationException(
+                "MoM: the lossless modal eigenproblem [C]v = λ[L]⁻¹v could not be solved. Both " +
+                "matrices must be symmetric positive definite; a degenerate cross-section (a " +
+                "conductor with no capacitance to anything, or two conductors solved as one) is " +
+                "the usual cause.", ex);
+        }
+
+        // R-gen-7. Order the modes by a PHYSICAL property, never by whatever LAPACK returned.
+        var order = SortModes(vRaw, dRaw, n);
+
+        var tv = new Mat<double>(n, n);
+        lambda = new double[n];
+        for (int m = 0; m < n; m++)
+        {
+            int src = order[m];
+            lambda[m] = dRaw[src];
+
+            // Sign is arbitrary in an eigenvector; pin it so a re-run reports the same Tv.
+            int big = 0;
+            for (int k = 1; k < n; k++)
+                if (Math.Abs(vRaw[k, src]) > Math.Abs(vRaw[big, src])) big = k;
+            double sign = vRaw[big, src] < 0 ? -1.0 : 1.0;
+
+            for (int k = 0; k < n; k++) tv[k, m] = sign * vRaw[k, src];
+        }
+        return tv;
+    }
+
     private static int[] SortModes(Mat<double> v, Vec<double> d, int n)
     {
         var idx = new int[n];

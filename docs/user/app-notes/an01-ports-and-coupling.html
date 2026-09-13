@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>circuitRF — AN-01 — Ports, terminations and de-embedding</title>
+<title>circuitRF — AN-01 — EM Ports, terminations and de-embedding</title>
 <link rel="icon" href="../assets/img/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../assets/css/circuitrf-docs.css">
 <!--
@@ -28,9 +28,9 @@
 <hr class="doc-headrule">
 
 <main class="page">
-  <p class="breadcrumb"><a href="../index.html">Docs</a> › <a href="index.html">App Notes</a> › AN-01 Ports and de-embedding</p>
+  <p class="breadcrumb"><a href="../index.html">Docs</a> › <a href="index.html">App Notes</a> › AN-01 EM Ports and de-embedding</p>
 
-  <h1>AN-01 — Ports, terminations and de-embedding</h1>
+  <h1>AN-01 — EM Ports, terminations and de-embedding</h1>
   <p class="lede">The same layout simulated with four ports and with two gives different S11. Two separate things are going on, only one of them is physics, and the other one is not a mesh problem.</p>
 
 <nav class="toc">
@@ -41,7 +41,8 @@
 <li><a href="#termination">Answer 1: a port is a termination, and deleting one does not delete the metal</a></li>
 <li><a href="#proof">Showing that on the data</a></li>
 <li><a href="#unusable">Answer 2: neither run was usable, and circuitRF said so</a>
-  <ul><li><a href="#refused">circuitRF refuses this run now</a></li></ul></li>
+  <ul><li><a href="#refused">A run that cannot be calibrated is refused</a></li></ul></li>
+<li><a href="#group">Two ports on coupled conductors: calibrated together</a></li>
 <li><a href="#cause">Finding the cause: a controlled experiment</a></li>
 <li><a href="#notmesh">What did <em>not</em> fix it</a></li>
 <li><a href="#fix">What to do about it</a></li>
@@ -255,26 +256,23 @@ single continuous 3.83 mm trace are 34 dB apart. They are not — and coupling c
 because terminating the <em>other</em> line cannot switch off conduction along <em>this</em> one.</p>
 <p><strong>So the honest reading of the comparison this note opened with is: two wrong answers, wrong by
 different amounts.</strong></p>
-<h3 id="refused">circuitRF refuses this run now</h3>
-<div class="callout warn">
-<span class="label">What changed since this note was written</span>
-<p>Everything above still describes the physics exactly. What no longer happens is the <b>publishing</b>:
-a run whose calibrated port has another conductor inside the length the calibration standard reproduces
-is <b>refused</b>, and <b>no Touchstone is written</b>.</p>
-</div>
-<p>The note quoted in <a href="#unusable">the section above</a> was accurate and said the right thing. The problem was
-what it was attached to: <strong>a <code>.s4p</code> on disk carries no notes.</strong> Whoever opened that file next — in the
-Data Display, in a circuit, next month — saw a plausible curve and nothing else. So the diagnosis is now
-a refusal, on the <em>cause</em> rather than on the symptom:</p>
+<h3 id="refused">A run that cannot be calibrated is refused</h3>
+<p>The <code>NOT PASSIVE</code> note above is accurate and says the right thing. It is also not enough on its own:
+<strong>a <code>.s4p</code> on disk carries no notes.</strong> Whoever opens that file next — in the Data Display, in a
+circuit, next month — sees a plausible curve and nothing else. So a port whose feed the calibration
+cannot account for is a refusal, on the <em>cause</em> rather than on the symptom, and <strong>no Touchstone is
+written</strong>:</p>
 <pre>
 Calibrated port feeds are not isolated: port 1 has other metal 246 µm away (0.27 substrate
 heights, against the 5 a neighbour that carries a port of its own needs); port 2 … That is
 inside the 2700 µm of line the calibration standard reproduces. … Move the feed away from its
 neighbour, or put the port where the line is already isolated.
 </pre>
-<p><strong>That message is about a neighbour with a port on it</strong>, which is what this structure has. Delete ports 3
-and 4 and the same 246 µm stops being a refusal: the neighbour goes into the calibration standard
-instead, and the run publishes. <a href="#passive">The section on that</a> is below.</p>
+<p><strong>That message is about a neighbour with a port on it</strong>, and it is reached when that port is <em>not</em> at
+the same reference plane as this one — which is the commonest shape on a real board and the one no
+single calibration standard can describe. The same 246 µm with the neighbour's ports on the plane this
+one shares is <a href="#group">calibrated as a group</a> instead; with no ports on the neighbour at all, the
+neighbour goes into the standard and the run publishes (<a href="#passive">below</a>).</p>
 <p>Passivity is deliberately <strong>not</strong> what triggers it. A non-passive result is a <em>symptom</em> with several
 possible causes, some of them legitimate at the 10<sup>-3</sup> level, so refusing on it would block runs
 that are fine. The refusal is on a measurable geometric fact about the port, and passivity goes on being
@@ -284,6 +282,46 @@ reported as the diagnostic it is.</p>
 de-embedding off</strong> and read the raw solve, which includes the port discontinuity; or turn on <strong>&quot;de-embed
 outside the calibration's validity&quot;</strong>, which publishes the de-embedded answer and stamps the Touchstone
 with a line saying the calibration was applied outside the geometry it is valid for.</p>
+<h2 id="group">Two ports on coupled conductors: calibrated together</h2>
+<p><strong>This is the geometry this note opened with, and it needs no redesign at all.</strong> Where the neighbour
+carries a port at the same reference plane as yours, the two are calibrated <em>together</em>.</p>
+<p>The calibration's difficulty here is not that there is metal near the feed — a neighbour with no port
+on it is simply <a href="#passive">copied into the standard</a>, because it leaves <strong>one</strong> driven mode at the
+reference plane and the error box can stay a single number per port. Two <em>driven</em> conductors do not:
+they support <strong>two</strong> modes there, with different propagation constants and different characteristic
+impedances, and no pair of per-port numbers can describe them. So the unit of calibration stops being
+the port and becomes the <strong>group</strong>:</p>
+<ul>
+<li><strong>one standard carrying both conductors</strong>, built from your own mesh at your own gridlines, with a
+port on each conductor at each end — so it is a four-port standard for a pair;</li>
+<li><strong>one modal error box</strong>, whose blocks are matrices rather than scalars;</li>
+<li><strong>one γ and one Z_c per mode</strong>, both reported per frequency.</li>
+</ul>
+<pre>
+Ports 1, 3 form one CALIBRATION GROUP: their feeds are mutually coupled at the reference plane,
+the nearest pair 246 µm apart. They share one 2-conductor calibration standard and one MODAL
+error box of 2×2 blocks, because 2 coupled conductors support 2 modes there and a per-port
+scalar box cannot represent them. The profile spans 0 µm to 754 µm across.
+  1 GHz, ports 1+3: modes 40.2° / ε_eff 2.718 / Z_c 71.53Ω · 42.8° / ε_eff 3.073 / Z_c 157.51Ω;
+  separation 2.55°, …
+</pre>
+<p>On this note's own geometry that is the difference between <strong>22.6 dB out in S(2,1) at 1 GHz and
+non-passive nearly everywhere</strong> and <strong>inside the two kernels' own agreement floor at every
+frequency</strong>, with S(2,1) within 0.04 dB of exact. The odd and even mode impedances above agree with
+the cross-section kernel's own to 9.9 % and 2.2 %, which is that comparison's floor and not this
+calibration's.</p>
+<p><strong>The modes come out of the standard, never out of an assumption.</strong> Even and odd is right for two
+identical lines and wrong for almost anything else, so the modal basis is extracted from the
+standard's own response — and how far apart the modes are is reported on every run, because that is
+the number everything else rests on. If two of them are too close to tell apart, the run <strong>refuses</strong>
+rather than publishing a smooth, plausible, wrong answer.</p>
+<p>A group is declined, and the clearance refusal comes back, when the conductors do not all cross one
+plane, when one of them carries no port (a driven conductor and a floating one cannot share one
+standard), when one is not uniform over the run the standard reproduces, when the port needed an
+automatic feed lead, or when the group would be larger than three conductors.</p>
+<p><strong>It costs almost nothing over the passive case.</strong> The standard carries the same metal either way, so
+it is the same mesh and the same ~9× the DUT's unknowns; the four-port coupled pair runs about 8 %
+slower than the two-port passive one.</p>
 <h2 id="cause">Finding the cause: a controlled experiment</h2>
 <p>To separate the two effects, the geometry above was rebuilt as a synthetic case with nothing else in
 it — two straight 254 µm lines, 246 µm apart, 3.83 mm long, on the same 0.9 mm FR-4. No import, no pads,
@@ -368,12 +406,9 @@ non-passive at 48 of the 51 frequencies. The same failure, in the same direction
 end of the band, on geometry with no import, no bends and no pads in it. (It is not the same size — the
 original board is worse — because that one also has pads, a flare at two ports and a coarser mesh. The
 mechanism is what reproduces, not the magnitude.)</p>
-<p>And the run names the reason, once for each port:</p>
-<blockquote>
-<p>Port 1's feed has other metal <strong>246 µm away</strong>, inside the 2.7 mm the calibration standard assumes is
-empty. The de-embedding replaces the port's neighbourhood with an isolated line of the same width, so
-whatever is closer than that is not removed correctly.</p>
-</blockquote>
+<p>The reason is the port's own neighbourhood: every port here has other metal <strong>246 µm away</strong>, inside
+the 2.7 mm of line the calibration standard reproduces. The de-embedding replaces that neighbourhood
+with an isolated line of the same width, so whatever is closer than that is not removed correctly.</p>
 <p>The planar kernel de-embeds each edge port with a <strong>two-line calibration</strong>: it solves calibration
 standards beside your structure and peels the port discontinuity off the raw answer. Those standards are
 <em>isolated uniform lines</em>. Here every port sits on a coupled pair from its very first cell, so the error
@@ -420,8 +455,19 @@ mesh — and was still non-passive at 48 of 51 points.</li>
 being applied to the wrong structure, a finer mesh just computes the wrong thing more accurately.</p>
 </div>
 <h2 id="fix">What to do about it</h2>
-<p>The calibration needs the port's feed to be an isolated uniform line for the length of the standard.
-There are three ways to give it one, and <strong>only the last involves changing your artwork</strong>.</p>
+<div class="callout note">
+<span class="label">Which cases this section is for</span>
+<p>Two ports at one reference plane on conductors coupled right up to it — this note's own
+geometry — need none of what follows: they are <a href="#group">calibrated as a group</a> and the run
+publishes. So is a neighbour with no port on it, which goes <a href="#passive">into the
+standard</a>. What is refused, and what the three options below are for, is a neighbour the
+calibration cannot describe: one whose own port is somewhere <i>else</i>, one that bends or ends
+inside the standard's run, one on another conductor level, or a group whose modes are too close to
+separate.</p>
+</div>
+<p>The calibration needs the port's feed to be a uniform line the standard can reproduce, for the length
+of the standard. There are three ways to give it one, and <strong>only the last involves changing your
+artwork</strong>.</p>
 <h3 id="usexsec">1. Check whether you need the planar kernel at all</h3>
 <p>A <strong>uniform cross-section</strong> — straight coupled lines, a single transmission line, a broadside pair —
 is solved by the <a href="../reference/mom-engine.html">cross-section kernel</a> per unit length. It has no
@@ -529,22 +575,18 @@ the circuit if you need the planes back at the coupled section's own ends.</p>
 <p>The neighbour's distance is what matters, and it scales with <b>substrate height</b> — not with line
 width, and not with the neighbour's width. A neighbour that <b>carries a port of its own</b> needs about
 <b>5 substrate heights</b>; one that carries none — a passive trace, a ground pour — needs about
-<b>2</b>. Those are the numbers circuitRF enforces. A breach by a neighbour that carries a port is
-<a href="#refused">refused rather than published</a>; a breach by one that does not is
-<a href="#passive">handled for you</a>, and is the section directly below.</p>
+<b>2</b>. Those are the numbers circuitRF enforces, and <b>what a breach costs you now depends on what
+the neighbour is</b>: one carrying a port <i>at the same reference plane</i> is
+<a href="#group">calibrated with yours</a>, one carrying no port is
+<a href="#passive">put into the standard</a> — the section directly below — and only a neighbour that
+is neither is <a href="#refused">refused rather than published</a>.</p>
 </div>
 <h3 id="passive">And if the neighbour carries no port, none of this is needed</h3>
-<div class="callout note">
-<span class="label">What changed since this note was written</span>
-<p>The three options above are for a neighbour that <b>carries a port of its own</b> — the case this
-note is about, and the expensive one. <b>A neighbour that carries no port needs no redesign at all
-now</b>: circuitRF puts it into the calibration standard and runs.</p>
-</div>
-<p>Everything in this note so far is about two <em>driven</em> coupled lines. The commoner case on a real board is
-a conductor that is simply near the feed and has no port on it: the other half of a differential pair you
-are not driving, an adjacent net, a ground pour. That case leaves <strong>one driven mode</strong> at the reference
-plane, so the error box can stay the single number it has always been — and the fix is not to move your
-metal, it is to make the standard resemble your metal.</p>
+<p>Most of this note is about two <em>driven</em> coupled lines. The commoner case on a real board is a
+conductor that is simply near the feed and has no port on it: the other half of a differential pair
+you are not driving, an adjacent net, a ground pour. <strong>That one needs no redesign either.</strong> It leaves
+<strong>one driven mode</strong> at the reference plane, so the error box can stay a single number per port — and
+the fix is not to move your metal, it is to make the standard resemble your metal.</p>
 <p>So the standard is <strong>widened to contain the neighbour</strong>, copied from your own mesh at your own gridlines,
 with the gap reproduced as a gap and the neighbour driven by nothing, exactly as it is in your structure.
 The run says what it took in:</p>
@@ -562,7 +604,7 @@ an answer inside the two kernels' own agreement floor, passive at every point.</
 <strong>bends, ends or changes width</strong> inside the run the standard reproduces (a standard is a uniform
 extrusion, and guessing would invent metal you did not draw); a neighbour <strong>on another conductor level</strong>
 (nothing has been measured about one); and a neighbour <strong>carrying a port</strong>, which is this note's own case
-and needs the modal error box it does not have. There is one cost and one caveat: the standards get
+and is <a href="#group">calibrated as a group</a> rather than reproduced. There is one cost and one caveat: the standards get
 about twice as large, which the run reports, and the reproduced neighbour is open at both ends, so where
 the standard is half a wavelength long it resonates — the run lists those frequencies, and they are a
 property of the standard's length rather than of your design.</p>
@@ -615,31 +657,44 @@ comparing against the cross-section kernel at every point:</p>
 <th>Neighbour</th>
 <th>Clearance it needs</th>
 <th>On the 0.9 mm board above</th>
+<th>Inside that, circuitRF…</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>A conductor with a <strong>port on it</strong></td>
+<td>A conductor with a <strong>port on it, at the same reference plane</strong></td>
 <td>about <strong>5 × the substrate height</strong></td>
 <td>≈ 4.5 mm</td>
+<td><a href="#group">calibrates the two together</a></td>
+</tr>
+<tr>
+<td>A conductor with a <strong>port on it, somewhere else</strong></td>
+<td>about <strong>5 × the substrate height</strong></td>
+<td>≈ 4.5 mm</td>
+<td><a href="#refused">refuses the run</a></td>
 </tr>
 <tr>
 <td>A conductor with <strong>no port</strong> — a passive trace, a ground pour</td>
 <td>about <strong>2 × the substrate height</strong></td>
 <td>≈ 1.8 mm</td>
+<td><a href="#passive">puts it in the standard</a></td>
 </tr>
 </tbody>
 </table>
-<p>Three things are worth knowing about that table.</p>
+<p>Four things are worth knowing about that table.</p>
 <ul>
 <li><strong>It is the substrate height that matters, not the line width.</strong> Making the lines four times wider
 moved the requirement by 5 %. Making the substrate four times thinner moved it by nearly four times.
 A ground pour behaves exactly like a thin trace at the same distance: the neighbour's own width does
 not enter.</li>
-<li><strong>The message the solver prints today quotes 2.7 mm on this board</strong> — three substrate heights, which
-is the length of the calibration standard rather than a measured requirement. At exactly that
-distance the coupled pair above is still wrong enough to be non-passive, so treat the printed figure
-as a floor and not as a target.</li>
+<li><strong>The clearance and the standard's own length are two different numbers, and the run prints both.</strong>
+The margin is the neighbour's distance <em>in substrate heights against the requirement</em> — &quot;0.27
+substrate heights, against the 5 a neighbour that carries a port of its own needs&quot;. Separately, the
+run says the metal is inside the 2.7 mm of line the standard reproduces. The first is the measured
+requirement; the second is how far in the standard looks. Do not read one for the other.</li>
+<li><strong>You get the margin even when nothing is wrong.</strong> Every de-embedded port reports its own clearance
+in substrate heights on every run, so &quot;comfortable&quot; and &quot;just passed&quot; are distinguishable without
+re-running anything.</li>
 <li><strong>A pad or flare on the port's <em>own</em> conductor is a different thing and is already handled</strong> —
 circuitRF grows a uniform lead for it and removes it exactly, which is the automatic feed lead
 reported in the notes. What the table is about is metal belonging to something else.</li>
@@ -695,8 +750,12 @@ answer to change when you do.</p>
 <td>Run notes</td>
 </tr>
 <tr>
-<td>No port whose feed has other metal inside the calibration length</td>
-<td><strong>Enforced</strong> — the run is refused (see <a href="#refused">below</a>)</td>
+<td>No port whose feed has metal the calibration cannot account for</td>
+<td><strong>Enforced</strong> — a neighbour sharing the plane is <a href="#group">calibrated with it</a>, one carrying no port is <a href="#passive">put in the standard</a>, anything else is <a href="#refused">refused</a></td>
+</tr>
+<tr>
+<td>For a calibration group: the modes are separable, and the run says by how much</td>
+<td>Run notes — <code>MODAL CALIBRATION</code>, per frequency</td>
 </tr>
 <tr>
 <td>Every port's feed-clearance margin comfortable, not marginal</td>

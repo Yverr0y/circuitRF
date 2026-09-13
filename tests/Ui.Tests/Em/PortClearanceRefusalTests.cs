@@ -63,13 +63,22 @@ public sealed class PortClearanceRefusalTests(ITestOutputHelper output) : IDispo
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
-    // GATE 1 — the coupled pair REFUSES, names the port and the distance, and writes no .sNp
+    // GATE 1 — a driven neighbour that cannot be CALIBRATED WITH refuses, names the port and the
+    // distance, and writes no .sNp
+    //
+    // **The fixture moved at PCAL4 and the gate did not.** `coupled-pair` was this gate's geometry
+    // until PCAL4 made it runnable — its two ports at each plane now form a CALIBRATION GROUP with
+    // one modal error box, which is the whole of that brief. What still refuses, and is the
+    // commoner shape on a real board, is `offset-pair`: the same two conductors 246 µm apart, with
+    // the neighbour's own ports at a DIFFERENT station, so there is no one plane a shared standard
+    // could be cut at. The refusal, its wording, its diagnostic id and its "writes no file" half
+    // are unchanged; only the geometry that reaches it is.
     // ══════════════════════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public void Gate1_TheCoupledPairIsRefused_NamesPort1And246um_AndWritesNoTouchstone()
+    public void Gate1_ADrivenNeighbourThatCannotBeGroupedIsRefused_NamesPort1And246um_AndWritesNoTouchstone()
     {
-        var (setup, source) = Fixture("coupled-pair");
+        var (setup, source) = Fixture("offset-pair");
         var r = EmRunService.Run(OnePoint(setup), source, _results);
 
         output.WriteLine(r.Error ?? "(not refused)");
@@ -88,6 +97,11 @@ public sealed class PortClearanceRefusalTests(ITestOutputHelper output) : IDispo
         // mesh-ceiling refusal's is.
         Assert.NotNull(r.Diagnostic);
         Assert.Equal("em.refused.port-clearance", r.Diagnostic!.Id);
+
+        // PCAL4/R-pcal4-6 — the refusal carries the reason the machinery that exists to fix this
+        // did not apply. A refusal discards the run's notes, so without this the user sees the
+        // clearance sentence and no word about why no calibration group was formed.
+        Assert.Contains("reference plane", r.Error!, StringComparison.Ordinal);
     }
 
     /// <summary>Gate 1's other half, and gate 5's: the CLI takes the same decision, says the same
@@ -96,7 +110,7 @@ public sealed class PortClearanceRefusalTests(ITestOutputHelper output) : IDispo
     public void Gate1_TheCliRefusesTheSameGeometry_AndExitsNonZero()
     {
         string repo = RepoRoot();
-        string cem  = Path.Combine(Portcal, "coupled-pair", "em", "coupled-pair.cem");
+        string cem  = Path.Combine(Portcal, "offset-pair", "em", "offset-pair.cem");
 
         var (exit, stdout, stderr) = RunCli(repo, "em", cem);
         output.WriteLine($"exit {exit}\nstdout:\n{stdout}\nstderr:\n{stderr}");
@@ -185,7 +199,7 @@ public sealed class PortClearanceRefusalTests(ITestOutputHelper output) : IDispo
     [Fact]
     public void Gate3_WithTheOverrideTheFileIsWritten_AndItsProvenanceRecordsTheBreach()
     {
-        var (setup, source) = Fixture("coupled-pair");
+        var (setup, source) = Fixture("offset-pair");
         var s = OnePoint(setup);
         s.DeembedOutsideCalibrationValidity = true;
 
@@ -281,7 +295,7 @@ public sealed class PortClearanceRefusalTests(ITestOutputHelper output) : IDispo
         // Asserted on the run's own behaviour rather than on the settings object, because a setting
         // the panel stores and nothing reads is the exact failure this repository has paid for
         // before (see AcceleratedSolveUiTests' header).
-        var (setup, source) = Fixture("coupled-pair");
+        var (setup, source) = Fixture("offset-pair");
 
         var refused = EmRunService.Run(OnePoint(setup), source, _results);
         Assert.Equal(EmRunStatus.Refused, refused.Status);

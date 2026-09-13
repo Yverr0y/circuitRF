@@ -1,6 +1,6 @@
 # Brief — a port whose feed has a neighbour is de-embedded against the wrong structure: the series
 
-**Status:** briefs 1, 2 and 3 done, 4 to write · **Date:** 2026-09-12 · **Area:** `src/Engine/Mom` (port calibration)
+**Status:** the series is COMPLETE — briefs 1, 2, 3 and 4 all done · **Date:** 2026-09-12 · **Area:** `src/Engine/Mom` (port calibration)
 **Requirement tag for the series:** `R-pcal-n`
 
 ---
@@ -151,10 +151,10 @@ free win.
 
 ## 4. The briefs, in the order they are worth doing
 
-**Briefs 1, 2 and 3 have reported (2026-09-12).** Their findings are in `src/Engine/Mom/RESOLVED.md`,
-"PCAL1 — how much clearance a calibrated port actually needs", "PCAL2" and "PCAL3". **Brief 4 was not
-made unnecessary by 3**: a driven neighbour needs 2–3× the clearance of a passive one, so a design 3
-makes safe can still be refused.
+**All four briefs have reported (2026-09-12).** Their findings are in `src/Engine/Mom/RESOLVED.md`,
+"PCAL1 — how much clearance a calibrated port actually needs", "PCAL2", "PCAL3" and "PCAL4". **Brief 4
+was not made unnecessary by 3**: a driven neighbour needs 2–3× the clearance of a passive one, so a
+design 3 makes safe can still be refused — and brief 4 is what stops it being refused.
 
 | # | Brief | Status after PCAL1 |
 |---|---|---|
@@ -162,6 +162,14 @@ makes safe can still be refused.
 | 2 | **Stop publishing the bad answer** — `brief-portcal-2-refuse-not-warn.md` | **Done (2026-09-12).** Independent of 1's outcome and now carrying 1's numbers: the threshold must be its own setting, **5 h for a neighbour carrying a port and 2 h for one that does not**, and the margin it reports is `s/h`, because nothing the solve already computes bounds the error. |
 | 3 | **A passive neighbour inside the port profile** — `brief-portcal-3-passive-neighbour.md` | **Done (2026-09-12).** The standard reproduces the neighbour and the fixture that was 18.0 dB out in S₁₁ and non-passive at 3 of 7 points comes back **at the A-vs-B floor and passive at every point** — at six of its seven frequencies. The seventh is the finding: a reproduced neighbour is open at both ends, so the STANDARD resonates at βL = nπ, and those points are named rather than fixed. Standards double, 4.57× → 9.14× the DUT's unknowns. `src/Engine/Mom/RESOLVED.md`, "PCAL3". |
 | 4 | **Calibration groups and a modal error box** — `brief-portcal-4-modal-error-box.md` | **Write it third, and it is still the expensive one.** Brief 3 does not subsume it: a driven neighbour needs 2–3× the clearance of a passive one, so a design 3 makes safe can still be refused. |
+
+**One thing §0's "the machinery mostly exists already" got wrong, and it is worth recording**: it
+does, up to the point where a 2N×2N cascade has to be formed from raw port scattering. A series delta
+gap makes |S₂₁| ~ 1e-4 at the bottom of a band, and the cancellation in T₂T₁⁻¹ is of order
+|S₂₁|^{−2N} — 1e8 at one conductor, which D5 already survives, and **1e16 at two, which is every digit
+a double has.** Brief 4's own §2 is about the similarity transform that removes it; the point for
+anyone reading this overview is that "the algebra generalises" and "the arithmetic generalises" were
+not the same claim.
 
 **Three findings that change how the rest of the series should be read:**
 

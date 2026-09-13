@@ -4947,6 +4947,272 @@ at 3.5750 GHz for the resonance located at 3.56511 GHz. Routine tier.
 `EmPanelDeclutterTests.RunStartText_NamesTheBlocksThatFollowTheSweep_AndQuotesNoDuration` holds the
 plan clauses and scans the sentence for any spelling of a duration.
 
+## PCAL4 — a calibration GROUP and a modal error box; the coupled pair the series opened on now runs (2026-09-12)
+
+`docs/sonnet-briefs/brief-portcal-4-modal-error-box.md`, the last of the series and the expensive
+one. The case: two ports on conductors that are coupled AT the reference plane. PCAL1 measured it at
+**22.6 dB out in S₂₁ at 1 GHz and non-passive at 48 of 51 points**; PCAL2 made it a refusal; PCAL3
+could not reach it, because reproducing the neighbour in the standard does not give D6's per-port
+SCALAR error box a second mode to describe.
+
+**It works, and on all three committed fixtures the de-embedded answer is BELOW the kernel-A-vs-
+kernel-B agreement floor at every frequency**, against a gate that only asked for within 0.005 of it:
+
+| fixture | what it is | A-vs-B floor | before (PCAL2's refusal, overridden) | **after** |
+|---|---|---|---|---|
+| `coupled-pair` | two 254 µm lines, 246 µm apart (s/h = 0.27), 4 ports | 0.0521 | 0.985 | **0.0454** |
+| `coupled-asym` | 254 µm beside 508 µm, same gap, 4 ports | 0.0521 | — | **0.0456** |
+| `coupled-triple` | 254 / 432 / 660 µm, same gaps, 6 ports | 0.0521 | — | **0.0469** |
+
+Per frequency on the pair, against that 0.0521 floor: **1 GHz 0.0303 · 2 GHz 0.0296 · 3 GHz 0.0331 ·
+4 GHz 0.0374 · 5 GHz 0.0408 · 6 GHz 0.0434 · 7 GHz 0.0454.** S₂₁ was 22.64 dB adrift at 1 GHz and is
+**0.04 dB**; S₁₁ was 19.01 dB adrift and is 2.08 dB, against the floor's own 3.13 dB there.
+
+Everything below was measured with the committed fixtures through the real `circuitrf em` verb
+against the cross-section kernel on the same files, in Release — not a test, per the standing rule
+about measuring with a harness rather than the `Benchmark` tier. The floor was re-measured for each
+fixture by moving its conductors 9 mm apart and comparing the two kernels there; all three read
+**0.0521**, which is PCAL1's own 0.0522 to the last digit it quoted.
+
+### 1. The algebra, and the one structural fact a simulator has that a lab does not
+
+Real multiline TRL needs a reflect standard because its two error boxes are unrelated. **D4 builds
+both of a standard's boxes as exact mirror images**, so with X the left box's 2N×2N wave cascade and
+F the forward/backward flip, `Y = F X⁻¹ F` — exactly, as the general reverse-a-network identity. That
+is what turns multimode TRL from an optimisation into a closed form here, and it is asserted rather
+than assumed (`PlanarModalCalibrationTests.TheMirrorErrorBoxIsTheFlippedInverse`, 1e-16).
+
+Two similarity statements with the SAME W = X·blkdiag(Ψ,Ψ) follow, and between them they are the
+whole method:
+
+    M ≡ T(ℓ₂)T(ℓ₁)⁻¹ = W·blkdiag(E(Δℓ), E(Δℓ)⁻¹)·W⁻¹            E(ℓ) = diag(e^{−γ_m ℓ})
+    T(ℓ₁)·F          = W·[[0, E(ℓ₁)], [E(ℓ₁)⁻¹, 0]]·W⁻¹
+
+- **D5' — γ is still a closed form and still needs no eigensolver.** det M = 1 makes M's
+  characteristic polynomial PALINDROMIC, so substituting s = μ + 1/μ = 2cosh(γΔℓ) reduces degree 2N
+  to degree N. At N = 1 that reduction *is* `cosh(γΔℓ) = ½tr(M)`. Coefficients by
+  Faddeev–LeVerrier, roots by Durand–Kerner, both written here for the reason L8a's Bessel functions
+  and D5's own `acosh` were. **The constant term of the reduced polynomial is c_N and not c_N·q₀**,
+  and the factor of two between them is invisible in every other property the polynomial has — it
+  cost the first day of this work and is now its own gate.
+- **D6' — the eigenvectors leave 2N scalars free; the second statement pins N of them** (one ratio
+  per mode) and says that **4N²−2N other entries must vanish**, which is `CascadeResidual`.
+- **The last N are pinned by RECIPROCITY**: the box is reciprocal only for the per-mode rescaling
+  `B² = (A12⁰)⁻¹(A21⁰)ᵀ`, **and that right-hand side must come out DIAGONAL** — forced by Ψ being
+  complex-orthogonal, and its off-diagonal is `GaugeResidual`. That prediction was not obvious in
+  advance and it holds to 1e-14 on synthetic data and to 1e-10 on the fixture.
+- **(5) leaves a SIGN per mode and no bilinear condition can ever remove it** — reciprocity, the
+  symmetry of A22 and the de-embedded line are all quadratic in the modal gauge. It is removed by the
+  only linear comparison available (§3) and its margin is reported.
+
+### 2. WITHOUT THE PRE-PEEL THIS FAILS OUTRIGHT, AND THAT IS THE FINDING WORTH MOST HERE
+
+Forming T from S divides by S_RL. A port is a series delta gap, so `a₂₁ ∝ ω`, and at the bottom of a
+band |S_RL| ~ 1e-4 and T ~ 1e4. M = T₂T₁⁻¹ then has O(1) entries computed as a cancellation of order
+|S_RL|^{−2N}: **1e8 at N = 1, which is D5's own documented low-frequency amplification and
+survivable, and 1e16 at N = 2, which is every digit a double has.**
+
+Measured, on the fixture, before and after:
+
+| at 1 GHz | palindrome | cascade | gauge | null-space gap | ε_eff reported | worst σ_max | non-passive |
+|---|---|---|---|---|---|---|---|
+| no pre-peel | 0.732 | 1.00 | 1.19 | 0.954 | **1.56 and 6.66** | **1.9081** | **4 / 7** |
+| pre-peel | 2.7e-12 | 1.4e-10 | 1.4e-10 | 2.5e-9 | 2.718 and 3.073 | 1.0023 | 1 / 7 |
+
+**The cure is a SIMILARITY, so it costs no accuracy at all.** Peel a crude per-conductor scalar box
+off BOTH standards first: with X̂ block-diagonal and its mirror Ŷ = F X̂⁻¹F, the peeled pair is
+`T̃(ℓ) = X̂⁻¹T(ℓ)Ŷ⁻¹ = (X̂⁻¹X)·T_line(ℓ)·(F(X̂⁻¹X)⁻¹F)` — the same structure with X replaced by X̂⁻¹X, so
+every eigenvalue and therefore every γ_m is untouched, and the true box is recovered at the end as
+X̂·X̃. The crude box is **D5 and D6 on the 2×2 sub-matrix of (port k at each end)** — the scalar
+calibration of each conductor pretending the others are not there. It is not a physical description
+of a coupled pair and does not have to be: **a preconditioner only has to be well SCALED.**
+
+The synthetic gate is unchanged by it (machine precision either way), which is the point — it is a
+conditioning fix, not an arithmetic one, and the gate that would have caught its absence is the
+FIXTURE.
+
+### 3. D7' — the reference impedance, and the R-gen-3a trap seen from the other side
+
+`Z_c,m = γ_m/(jωC_m)` with `C_m = (Tvᵀ[C]Tv)_mm`, which at one conductor is D7 exactly. [C] and [C₀]
+come from DIFFERENCING the two standards' own static capacitance MATRICES (N drives, one
+factorisation per mesh per medium), [L] = μ₀ε₀[C₀]⁻¹, and Tv from
+`ModalDecomposition.VoltageModalMatrix` — **the same GEVD kernel A's own general modal path uses**,
+extracted for this rather than copied.
+
+**The gauge requires `Ti = (Tvᵀ)⁻¹`, and that is NOT R-gen-3a's reporting convention.** Under the
+strict biorthogonal normalisation the modal-to-terminal wave map is complex-ORTHOGONAL, which is what
+makes (5)'s right-hand side diagonal; R-gen-3a instead takes `Ti_m = Tib_m/‖Tib_m‖²`, which for a
+symmetric pair is exactly **2×** and is the convention a coupled-line designer and kernel A both
+mean by Z_e and Z_o. Both are correct and they are for different purposes. **Publishing the gauge's
+own value is R-gen-3a's own trap from the other side** — a reference impedance that is a plausible
+number in units nobody else uses, and that would disagree with kernel A by a factor of two on this
+very fixture. `PlanarModalMedium.ReportedZcScale` carries e_m and the run's notes print
+`Z_c,m·e_m`.
+
+Two further normalisations do NOT matter and nothing tries to fix them: Tv's column LENGTHS (scaling
+column m by c scales C_m by c² and Z_c,m by 1/c², and the modal wave amplitude is invariant — the
+columns are normalised to largest-entry 1 purely so the REPORT reads in ohms rather than at 1e8),
+and the overall scale of the modal gauge.
+
+**Against kernel A on the pair, which is a genuine cross-check because nothing here reads it:**
+
+| | odd mode | even mode |
+|---|---|---|
+| Z_c, this file (1 GHz) | 71.53 Ω | 157.51 Ω |
+| Z_c, kernel A | 65.11 Ω | 154.08 Ω |
+| ε_eff, this file | 2.718 | 3.073 |
+| ε_eff, kernel A | 2.5065 | 3.0358 |
+
++9.9 % and +2.2 % on Z_c, +8.4 % and +1.2 % on ε_eff — and **the odd mode is the worse one in both,
+which is the A-vs-B floor's own signature**: the odd mode lives in the gap, where a 35 µm metal
+against a zero-thickness sheet differs most (PCAL3 §5 measured the same thing from the other end).
+
+**The SIGN of each mode is decided by the one linear comparison available**: A21 in the terminal
+basis is Ψ·A21ˢ, and a feed region connects each port predominantly to its own conductor, so row m of
+A21ˢ follows column m of Tv. The decision is taken on the PHASE of that correlation relative to the
+mode with the largest one, because every mode's correlation carries the same unknown common factor.
+It is a binary choice with a reported margin on [0, 1]; **measured at 0.95–0.995 on every fixture and
+every frequency**, i.e. nowhere near the coin toss.
+
+### 4. R-pcal4-4's separability, as a number rather than a caveat
+
+γ is full-wave and C is quasi-static, so the de-embedding's accuracy and the reference impedance's
+are two different things and the run reports them separately. On the pair the two routes' β disagree
+by **at most 0.74 % (at 2 GHz)**, and the lossless modal reduction of [C] discards at most 5.9e-11 of
+its own diagonal. A run where those are large has a perfectly good de-embedding and a reference
+impedance that is out by about that much; one figure of merit would hide which.
+
+### 5. What the passivity gate did NOT reach, and the two experiments that say why
+
+Gate 1 asked for the answer to be passive across the band. **It is passive at 5 of 7 points and sits
+0.23 % and 0.06 % over at 1 and 2 GHz** (σ_max 1.0023 and 1.0006 on the pair; 1.0022/1.0006 asym;
+1.0027/1.0006 triple), against 0 / 7 for the same geometry with its conductors 9 mm apart. The
+engine's own 1e-3 tolerance flags one point of the seven.
+
+Two experiments, and they point in opposite directions, which is what makes them worth having:
+
+- **Conductor thickness 35 µm → 1 µm.** |ΔS| collapses from **0.0454 to 0.0197** (and to
+  0.0053–0.0070 above 3 GHz), so what is left of the |ΔS| residue IS the A-vs-B thickness gap and not
+  this calibration. **And σ_max is bit-identical** — 1.0023 and 1.0006 at 1 and 2 GHz either way.
+- **Mesh, cells/λ 5-across-2 → 10-across-4** (N 298 → 324, standards to N = 922). σ_max moves
+  1.0023 → **1.0026**, i.e. not down.
+
+So the passivity excess is **neither the A-vs-B floor nor discretisation**. It scales as f⁻² and
+vanishes above 3 GHz, which is D6's own 1/a₂₁² amplification of the raw solve at the bottom of a
+band, on a port region that now carries two modes instead of one. It is reported rather than fixed,
+and it is smaller than the |ΔS| the run is already inside.
+
+### 6. R-pcal4-7 — the cost, and it is the surprise of this phase
+
+**A calibration group costs no more MESH than PCAL3's widened profile**, because the metal in the
+standard is the same metal. On the pair, both are `N = 298 / 584 / 402 / 350 / 636 / 454` against a
+DUT of 298 — **9.14× the DUT's unknowns, the identical figure PCAL3 records**, and 2 calibrations
+over 4 de-embedded ports rather than PCAL3's 2 over 2.
+
+Wall clock, 7 points, Release, same machine: **`coupled-pair-passive` (PCAL3, 2 ports) 9.6 s ·
+`coupled-pair` (PCAL4, 4 ports) 10.4 s · `coupled-asym` 13.0 s · `coupled-triple` (6 ports, DUT
+N = 447) 23.0 s.** So the group is **~8 % over PCAL3 for twice the ports.**
+
+What a group actually adds is (a) N port excitations on a mesh that was going to be solved anyway —
+multi-RHS on one factorisation — and (b) a SECOND electrostatic medium, because [L] = μ₀ε₀[C₀]⁻¹
+needs the air-filled solve as well as the dielectric one. That doubles the electrostatic step, which
+is not where a de-embedded run's time is.
+
+**Members of one group share ONE standard**, which is load-bearing rather than tidy: without it an
+asymmetric pair builds and solves the identical 2N-port mesh once per port (measured: 4 calibrations
+and 12 standard meshes instead of 2 and 6). The two ENDS of a line still do not share, for the reason
+already on the record — their end grading is not exactly mirror-symmetric.
+
+### 7. R-pcal4-6 — what is declined, and every decline is by name
+
+- **A neighbour whose port is at a different station.** The commonest shape on a real board, and the
+  one `testdata/portcal/offset-pair` is: a group is one standard cut at ONE plane, and two ports that
+  do not share a plane do not share the modes at it.
+- **A neighbour carrying no port, beside one that does.** PCAL3's widened conductor floats at zero
+  net charge and a group's conductors are all driven; one standard cannot hold both rules, and the
+  reference impedance it measured would belong to neither structure.
+- **Metal on the port's own net**, a coplanar or conformally cut port, a neighbour that is not
+  uniform over the run the standard reproduces, and a group past
+  `MaxCalibrationGroupSize` (3) — each by name.
+- **A grown FEED LEAD on any member.** R-fed-2 peels a lead as one propagation constant per port; a
+  group's port region has one per mode, and the lead is not a matched section of any of them because
+  the second conductor is not beside it there. Peeling it with a modal γ would remove a length of
+  line that is not there.
+- **MODES TOO CLOSE TO SEPARATE — and this one is a REFUSAL, at SETUP.** At zero separation the
+  cascade's two eigenvalues coincide, the null space of (M − μI) is a plane rather than a line, and
+  which line in it is which mode is decided by round-off. The question is asked of the
+  ELECTROSTATICS (`PlanarPortCalibrator.QuasiStaticModeSeparationDegrees`), which is available before
+  a single Green's function has been fitted, and it falls through to PCAL2's own refusal — whose
+  remedy, separate the feeds, is the remedy here too. **Measured:** three conductors of EQUAL width at
+  246 µm refuse at **0.369°** against the shipped floor of 0.5°; making them 254 / 432 / 660 µm takes
+  the same geometry to **0.61° at 1 GHz and 1.93° at 7 GHz**, which runs (cascade residual 8.8e-8 at
+  the bottom, 1.2e-12 at the top). The pair itself runs from 2.55° to 8.57°.
+
+**A refusal discards the run's notes, so the decline now travels WITH the refusal** rather than being
+collected and thrown away — that was true of PCAL3's declines too and is fixed for both.
+
+### 8. R-pcal4-5 — kernel A is still not an input, and the case for taking it got WEAKER
+
+Kernel A solves a coupled cross-section exactly and in milliseconds, and it would hand over γ_m, Tv
+and Z_c,m complete. **Gate 1 IS kernel A**, so taking it makes the gate a tautology — `PlanarDeembed`'s
+own header, unchanged. And the case is weaker here than in the scalar case rather than stronger: the
+one quantity a coupled cross-section makes genuinely hard is **γ_m**, which this file measures
+full-wave and which kernel A does not compute at all (its γ is quasi-TEM). What is taken from the
+electrostatics is only what D7 already takes — a capacitance, on kernel B's own mesh, from kernel B's
+own static Green's function — and §3's table is what that separation buys: an independent comparison
+instead of an assumption.
+
+### 9. R-pcal4-1's byte-identity, and how it was proved
+
+A `git worktree` at the pre-change HEAD, one build, both untouched fixtures run on each side.
+`separated-pair`'s `.s4p` is **identical on every line but `circuitRF-EM written:`** and its `.npy`
+is identical **with no exclusion at all**; `coupled-pair-passive` (PCAL3's own gate) likewise. The
+mechanism is not a tolerance: the grouping is attempted only on a DRIVEN breach, which since PCAL2 is
+a refusal, so a clear feed never reaches any of it — and `PlanarDeembed.Apply` is untouched, with
+`ApplyBlocks` a separate method, because the same arithmetic over 1×1 matrices is the same arithmetic
+in a different ORDER and a different order is a different last bit.
+
+### 10. The tests that had to change, and why none of them is a regression
+
+`coupled-pair` was PCAL2's own refusal fixture and is PCAL4's gate fixture; it cannot be both. Four
+`PortClearanceRefusalTests` gates and one `PassiveNeighbourStandardTests` gate move to
+**`offset-pair`** — the same two conductors at the same 246 µm, with the neighbour's ports at a
+different station, so no one plane exists for a shared standard and PCAL2's refusal is reached with
+its wording, its diagnostic id and its writes-no-file half all unchanged. Three engine-side gates in
+`PlanarFeedClearanceTests` and one in `PlanarPassiveNeighbourTests` keep their synthetic driven pair
+and turn `IncludeDrivenGroups` OFF explicitly, because what they assert is PCAL2's rule and it still
+holds for everything PCAL4 declines. That is the whole of the fallout across `Engine.Tests` (972 Mom
+tests) and `Ui.Tests`.
+
+### 11. Two defects this phase found in code it did not write
+
+- **The `"planar"` diagnostics cubes filed a port's γ, Z_c and C_pul by the calibration's POSITION IN
+  A LIST rather than by its port number.** That was always an assumption — an internal delta gap owns
+  no calibration and is skipped, so the list has never been one entry per port — and PCAL4 is where it
+  becomes wrong rather than merely fragile: a run with one group and one ordinary port hands back ONE
+  calibration, whose numbers would have been filed under the group's first port. `PlanarKernel` maps
+  by `PortNumber` now.
+- **A port calibrated as part of a group has no per-port γ, Z_c or C_pul**, because those quantities
+  belong to the group's MODES and there are as many as there are conductors. Its slot in those cubes
+  is filled with **NaN** rather than left at zero: a zero in a diagnostics cube reads as a
+  measurement. The per-mode numbers are in the run's notes; a `mode` axis for them would be a cube
+  whose length varies per group, which a `DataCube` has no way to express.
+
+### 12. What was NOT measured, so that nothing is read into the silence
+
+- **A group on another conductor level, or a group of conductor-referenced (coplanar) ports.** Both
+  declined by name; PCAL1 measured no multi-level case at all, and a coplanar group is
+  `mom-engine.md` §10.6's differential-port work rather than this.
+- **A group larger than three.** The algebra is written for any N and the cap is a cost gate; nothing
+  above three has been solved, and the two things that would decide it are the standard's size and
+  whether N modes stay separable.
+- **A group whose members' modes CROSS inside the band.** The branch assignment scores every
+  permutation against the prediction rather than following an ordering, which is what R-pcal4-3 asks
+  for, and it is gated on synthetic data — but no fixture here has a crossing in it.
+- **A widened (PCAL3) profile and a group in the same standard.** Declined by name; §7.
+- **Whether the passivity excess of §5 is also present in the SCALAR path at the same separation.**
+  The scalar path refuses that geometry, so there is nothing to compare against.
+
 ## PCAL3 — the calibration standard contains the passive neighbour now (2026-09-12)
 
 `docs/sonnet-briefs/brief-portcal-3-passive-neighbour.md`, following PCAL2 directly below. The finding

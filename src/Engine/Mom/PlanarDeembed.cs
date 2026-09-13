@@ -219,6 +219,120 @@ public static class PlanarDeembed
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
+    // PCAL4 — THE SAME PEEL, WITH BLOCKS
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// <b>One error box over one GROUP of the run's ports</b> — a 1×1 block for an ordinary port and
+    /// an N×N one for a calibration group, in <see cref="PlanarModalCalibration"/>'s own basis.
+    /// </summary>
+    /// <param name="PortIndices">Which rows/columns of the measured s-matrix this block covers, in
+    /// the block's own order.</param>
+    public sealed record PlanarBlockBox(
+        IReadOnlyList<int> PortIndices,
+        Mat<Complex> A11, Mat<Complex> A12, Mat<Complex> A21, Mat<Complex> A22);
+
+    /// <summary>
+    /// <b>PCAL4 — <see cref="Apply"/> with the scalars promoted to blocks, and it is the SAME
+    /// derivation.</b> With Γ_e, Γ_i and A21 block-diagonal over the groups,
+    /// <c>S_meas = Γ_e + A21ᵀ(I − SΓ_i)⁻¹S A21</c>, so <c>Y = A21⁻ᵀ(S_meas − Γ_e)A21⁻¹</c> makes that
+    /// <c>Y = (I − SΓ_i)⁻¹S</c> and <c>S = Y(I + Γ_i Y)⁻¹</c> — one inverse, any port count, and it
+    /// degenerates to <see cref="Apply"/>'s division by <c>a₂₁(i)·a₂₁(j)</c> exactly when every block
+    /// is 1×1.
+    ///
+    /// <para><b>It is a separate method and <see cref="Apply"/> is untouched, on purpose.</b> A run
+    /// with no multi-conductor group must produce the bytes it produces today (R-pcal4-1), and the
+    /// surest way to guarantee that is for it to run the same code — not the same arithmetic
+    /// re-expressed over 1×1 matrices, which is the same arithmetic in a different ORDER.</para>
+    /// </summary>
+    public static Mat<Complex> ApplyBlocks(Mat<Complex> sMeasured, IReadOnlyList<PlanarBlockBox> boxes)
+    {
+        ArgumentNullException.ThrowIfNull(boxes);
+        int p = sMeasured.RowCount;
+
+        var gammaE = new Mat<Complex>(p, p);
+        var gammaI = new Mat<Complex>(p, p);
+        var a21    = new Mat<Complex>(p, p);
+        var seen   = new bool[p];
+
+        foreach (var b in boxes)
+        {
+            int n = b.PortIndices.Count;
+            for (int i = 0; i < n; i++)
+            {
+                int r = b.PortIndices[i];
+                if ((uint)r >= (uint)p || seen[r])
+                    throw new ArgumentException(
+                        $"Port index {r} is out of range or covered by two error boxes.", nameof(boxes));
+                seen[r] = true;
+                for (int j = 0; j < n; j++)
+                {
+                    int c = b.PortIndices[j];
+                    gammaE[r, c] = b.A11[i, j];
+                    gammaI[r, c] = b.A22[i, j];
+                    a21[r, c]    = b.A21[i, j];
+                }
+            }
+        }
+        for (int i = 0; i < p; i++)
+            if (!seen[i])
+                throw new ArgumentException($"Port {i} has no error box.", nameof(boxes));
+
+        var a21Inv = PlanarModalCalibration.Invert(a21);
+        var y = PlanarModalCalibration.Transpose(a21Inv)
+              * PlanarModalCalibration.Sub(sMeasured, gammaE) * a21Inv;
+
+        // M = I + Γ_i Y, then S = Y·M⁻¹, solved as Mᵀ Sᵀ = Yᵀ rather than by forming an inverse —
+        // Apply's own arrangement, kept so the two read as the one method they are.
+        var m = gammaI * y;
+        for (int i = 0; i < p; i++) m[i, i] += Complex.One;
+
+        var mt = PlanarModalCalibration.Transpose(m);
+        var lu = mt.Lu();
+        var s  = new Mat<Complex>(p, p);
+        for (int r = 0; r < p; r++)
+        {
+            var rhs = new Vec<Complex>(p);
+            for (int c = 0; c < p; c++) rhs[c] = y[r, c];
+            var col = lu.Solve(rhs);
+            for (int c = 0; c < p; c++) s[r, c] = col[c];
+        }
+        return s;
+    }
+
+    /// <summary>
+    /// <b>PCAL4/D7' — the de-embedded answer, from MODAL ports at their own Z_c,m to the TERMINAL
+    /// ports the user asked for, at their declared Z₀.</b>
+    ///
+    /// <para>It goes through Z rather than through a renormalisation because the modal-to-terminal
+    /// step is a change of PORT VARIABLES, not of reference impedance: <c>v = Tv·ṽ</c> and
+    /// <c>i = Ti·ĩ</c> with <c>Ti = (Tvᵀ)⁻¹</c>, so <c>[Z]_terminal = Tv·[Z]_modal·Tvᵀ</c> and there
+    /// is nothing to renormalise until the terminal impedance exists. <see cref="RFNetwork.SToZ"/>
+    /// and <see cref="RFNetwork.ZToS"/> do both ends — R-mom-14, no second conversion.</para>
+    ///
+    /// <para><paramref name="transform"/> is the whole run's block-diagonal Tv: a group's own Tv over
+    /// its member ports, and 1 on the diagonal for every ordinary port, whose "modal" port IS its
+    /// terminal port.</para>
+    /// </summary>
+    public static Mat<Complex> ModalToTerminal(Mat<Complex> sModal, Mat<Complex> transform,
+                                               IReadOnlyList<Complex> zModal,
+                                               IReadOnlyList<Complex> z0)
+    {
+        ArgumentNullException.ThrowIfNull(zModal);
+        ArgumentNullException.ThrowIfNull(z0);
+
+        var zm = new Complex[zModal.Count];
+        for (int i = 0; i < zm.Length; i++) zm[i] = zModal[i];
+
+        var z = RFNetwork.SToZ(sModal, zm);
+        var t = transform * z * PlanarModalCalibration.Transpose(transform);
+
+        var newZ = new Complex[z0.Count];
+        for (int i = 0; i < newZ.Length; i++) newZ[i] = z0[i];
+        return RFNetwork.ZToS(t, newZ);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
     // D7 — the reference impedance
     // ══════════════════════════════════════════════════════════════════════════════════════════
 
@@ -354,6 +468,133 @@ public static class PlanarDeembed
         if (weight is null) for (int i = 0; i < m; i++) total += q[i];
         else                for (int i = 0; i < m; i++) total += weight[i] * q[i];
         return total.Real;
+    }
+
+    /// <summary>
+    /// <b>PCAL4/D7' — the N×N static capacitance MATRIX of a calibration group's standard.</b>
+    /// Conductor k is driven at 1 V with every other conductor at 0 V, and
+    /// <c>C[j,k] = Σ_{cells of j} q</c> — the Maxwell capacitance matrix, negative off the diagonal.
+    ///
+    /// <para>It is <see cref="StaticCapacitance"/>'s arithmetic with N right-hand sides instead of
+    /// one, and on the dense route it is <b>one factorisation and N back-substitutions</b>: a group
+    /// of N conductors costs N times the summation, not N times the solve. The accelerated route has
+    /// no factorisation to share and pays N GMRES solves.</para>
+    ///
+    /// <para><b>The result is COMPLEX and that is R-mom-6, not sloppiness</b> — <c>Y = jω·C</c> is
+    /// exactly <c>G + jωC</c> when the loss rides in the imaginary part, so a mode's shunt
+    /// admittance stays one complex number and there is no separate G matrix to get wrong. The
+    /// scalar path above returns <c>.Real</c> because D7's Z_c takes a double; nothing there
+    /// changes.</para>
+    /// </summary>
+    /// <param name="conductorOfCell">Which conductor each cell belongs to, or −1 for none.</param>
+    /// <param name="conductorCount">How many conductors — the matrix order.</param>
+    public static Mat<Complex> StaticCapacitanceMatrix(
+        PlanarMesh mesh, PlanarKernelTerms staticScalar,
+        IReadOnlyList<int> conductorOfCell, int conductorCount,
+        PlanarFillSettings? settings = null, PlanarFillCores? cores = null,
+        double slabHeightM = 0)
+    {
+        ArgumentNullException.ThrowIfNull(mesh);
+        ArgumentNullException.ThrowIfNull(conductorOfCell);
+        if (conductorOfCell.Count != mesh.Cells.Count)
+            throw new ArgumentException(
+                $"The conductor map has {conductorOfCell.Count} entries for a mesh of " +
+                $"{mesh.Cells.Count} cells.", nameof(conductorOfCell));
+
+        var st = settings ?? PlanarFillSettings.Default;
+        int m  = mesh.Cells.Count;
+        var result = new Mat<Complex>(conductorCount, conductorCount);
+
+        var drives = new double[conductorCount][];
+        for (int k = 0; k < conductorCount; k++)
+        {
+            drives[k] = new double[m];
+            for (int i = 0; i < m; i++) drives[k][i] = conductorOfCell[i] == k ? 1.0 : 0.0;
+        }
+
+        void Accumulate(int k, IReadOnlyList<Complex> q)
+        {
+            for (int i = 0; i < m; i++)
+            {
+                int j = conductorOfCell[i];
+                if (j >= 0) result[j, k] += q[i];
+            }
+        }
+
+        if (st.Aim is { } aim)
+        {
+            if (!(slabHeightM > 0))
+                throw new ArgumentOutOfRangeException(nameof(slabHeightM), slabHeightM,
+                    "An ACCELERATED static capacitance solve needs the slab height: P8's near-radius " +
+                    "floor is 2h and h cannot be read off a mesh. Pass the problem's own Slab.HeightM.");
+
+            GuardCapacitanceCeiling(mesh, accelerated: true);
+
+            var gc = cores is not null && ReferenceEquals(cores.Mesh, mesh)
+                   ? cores
+                   : PlanarFill.BuildGeometryOnlyCores(mesh, st);
+            var acc = PlanarStaticAim.Build(gc, staticScalar, slabHeightM, aim);
+
+            for (int k = 0; k < conductorCount; k++) Accumulate(k, acc.ChargeFor(drives[k]));
+            return result;
+        }
+
+        GuardCapacitanceCeiling(mesh, accelerated: false);
+
+        var c = cores is { HasPairCores: true } && ReferenceEquals(cores.Mesh, mesh)
+              ? cores
+              : PlanarFill.BuildCores(mesh, st);
+        var p = PlanarFill.ScalarPotentialMatrix(c, staticScalar.With(st.Order, c.RhoFloorM));
+        var lu = p.Lu();
+
+        for (int k = 0; k < conductorCount; k++)
+        {
+            var rhs = new Vec<Complex>(m);
+            for (int i = 0; i < m; i++) rhs[i] = EmConstants.Eps0 * drives[k][i];
+            Accumulate(k, lu.Solve(rhs));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// <b>PCAL4/D7' — [C] per unit length for a group, by DIFFERENCING the two standards'
+    /// capacitance matrices.</b> D7's own construction, one conductor wider: the two standards are
+    /// identical except for the bulk cells in the middle, so every end effect cancels EXACTLY rather
+    /// than being neglected.
+    /// </summary>
+    /// <param name="airFilled">
+    /// <b>Solve the same geometry with the dielectric removed.</b> The modal voltage matrix needs
+    /// [L], and the quasi-TEM relation <c>[L] = μ₀ε₀[C₀]⁻¹</c> is the only route to it that does not
+    /// import a second kernel's answer. It doubles the electrostatic solves and is reported as such
+    /// (R-pcal4-7).
+    /// </param>
+    public static Mat<Complex> CapacitanceMatrixPerMetre(
+        PlanarStandard shortStd, PlanarStandard longStd, GroundedSlab slab,
+        IReadOnlyList<int> shortConductorOfCell, IReadOnlyList<int> longConductorOfCell,
+        int conductorCount, bool airFilled,
+        PlanarFillSettings? settings = null,
+        PlanarFillCores? shortCores = null, PlanarFillCores? longCores = null)
+    {
+        ArgumentNullException.ThrowIfNull(shortStd);
+        ArgumentNullException.ThrowIfNull(longStd);
+
+        var medium = airFilled ? slab with { Material = new EmMaterial(1.0, 0.0) } : slab;
+        var terms  = PlanarKernelTerms.StaticScalar(medium);
+
+        var c1 = StaticCapacitanceMatrix(shortStd.Mesh, terms, shortConductorOfCell, conductorCount,
+                                         settings, shortCores, slab.HeightM);
+        var c2 = StaticCapacitanceMatrix(longStd.Mesh, terms, longConductorOfCell, conductorCount,
+                                         settings, longCores, slab.HeightM);
+
+        double dl = longStd.LengthM - shortStd.LengthM;
+        if (!(dl > 0))
+            throw new InvalidOperationException("The two calibration standards have the same length.");
+
+        var c = new Mat<Complex>(conductorCount, conductorCount);
+        for (int i = 0; i < conductorCount; i++)
+            for (int j = 0; j < conductorCount; j++)
+                c[i, j] = (c2[i, j] - c1[i, j]) / dl;
+        return c;
     }
 
     /// <summary>

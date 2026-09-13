@@ -620,9 +620,10 @@ radiates cannot be cleanly de-embedded.**
   the line — and it costs solve time. This is the counter-intuitive one, and it is measured.
 - **Keep the feed's own cross-section uniform for the calibration's run.** The solver grows the uniform
   lead it needs, but **a lead lengthens a feed, it cannot move a neighbour sideways.** A neighbour that
-  **carries a port of its own** inside the calibration's run is a **refusal**, not a warning; one that
-  carries no port is **reproduced in the standard** instead, as long as it runs straight past the port —
-  see [the validity condition](#validity) directly below.
+  **carries a port of its own** inside the calibration's run is never just a warning: if its port is at
+  the **same reference plane** as yours the two are [calibrated together](#group), and otherwise the run
+  is **refused**. One that carries no port is **reproduced in the standard** instead, as long as it runs
+  straight past the port — see [the validity condition](#validity) directly below.
 - **Use a feed width the mesh can resolve.** The edge mesh needs several cells across the conductor; a
   feed narrower than a few cells is under-resolved exactly where the port excitation is applied. *Rule
   of thumb: at least 3–5 cells across the feed width, which is what the default mesh settings give you
@@ -654,11 +655,17 @@ Non-passive at 48 of 51 frequencies, and **a finer mesh does not help** — it c
 more accurately. Doubling the cells per wavelength on a real board moved S₁₁ by at most 0.19 dB and left
 the answer non-passive at every point.
 
+**That table is what the two-line calibration does on this geometry when it is forced to describe it
+with one scalar per port.** It is the size of the error the condition below exists to prevent — not
+what circuitRF publishes for this structure, which [calibrates those four ports as a
+group](#group) and comes back at the accuracy floor.
+
 **So the clearance is a condition, it is enforced, and it is two numbers:**
 
 | The nearest other conductor | Clearance it needs | Inside it |
 |---|---|---|
-| carries a port of its own | **5 substrate heights** | **refused** |
+| carries a port of its own, at the SAME reference plane | **5 substrate heights** | **calibrated together, as one group** |
+| carries a port of its own, somewhere else | **5 substrate heights** | **refused** |
 | carries no port (a passive trace, a ground pour) | **2 substrate heights** | **put into the standard** |
 
 Both are measured across the port's own profile, over the run of line the standard reproduces, and both
@@ -688,7 +695,8 @@ Three things are declined by name rather than guessed at, and each falls back to
   did not draw.
 - **A neighbour on another conductor level.** Nothing has been measured about one, so nothing is assumed.
 - **A neighbour carrying a port.** Two driven conductors support two modes at one reference plane and the
-  error box is one scalar per port — reproducing the metal does not give it a second mode to describe.
+  per-port error box is one scalar — reproducing the metal does not give it a second mode to describe.
+  That case has its own treatment: [a calibration group](#group).
 
 <div class="callout warn">
 <span class="label">The widened standard has a resonance of its own, and the run names it</span>
@@ -703,6 +711,62 @@ them, or give the feeds the clearance and have no neighbour reproduced at all.</
 A wider profile is also a **wider standard on every frequency of every run**, and standards already
 dominate a de-embedded solve. On the fixture this was developed against they go from 4.6× to 9.1× the
 DUT's own unknowns. The run reports both numbers.
+
+#### Two ports on coupled conductors are calibrated TOGETHER {#group}
+
+Where the neighbour **carries a port of its own at the same reference plane**, reproducing it is not
+enough: two coupled conductors support **two modes** there, with different propagation constants and
+different characteristic impedances, and no pair of scalars can describe them. Those ports form a
+**calibration group** instead, and the group — not the port — becomes the unit of calibration:
+
+- **one standard carrying every conductor of the group**, built from your own mesh at your own
+  gridlines exactly as a one-conductor standard is, with a port on each conductor at each end;
+- **one MODAL error box** whose blocks are N×N, solved from that standard's own cascade;
+- **one propagation constant and one characteristic impedance per mode**, both reported.
+
+On the same 246 µm pair as above — the case this whole section opened on — that takes the answer from
+**22.6 dB out in S₂₁ at 1 GHz and non-passive at almost every point** to **inside the two kernels'
+own agreement floor at every frequency**, with S₂₁ within 0.04 dB of exact. It is measured on a
+symmetric pair, an **asymmetric** pair and a **three**-conductor group, because a symmetric pair is
+the one case where assuming even and odd modes would also have worked.
+
+**The modes are extracted from the standard, never assumed.** Even and odd is the right answer for
+two identical lines and the wrong answer for almost anything else — unequal widths, unequal spacings,
+three conductors — so the modal basis comes out of the standards' own cascade, and **how far apart
+the modes are is reported on every run**. That number is the one everything else rests on.
+
+<div class="callout warn">
+<span class="label">Modes that are too close together are refused, not approximated</span>
+<p>If two of a group's modes have nearly the same electrical length, there is no arithmetic that can
+tell them apart: the answer would be smooth, plausible and wrong, which is the failure this whole
+section exists to remove. The run <b>refuses</b> instead, at setup, naming the separation it measured
+and the floor it needed — and the remedy is the same one the clearance refusal names: separate the
+feeds, or move the port plane to a station where the conductors are not coupled. Measured: three
+conductors of <i>equal</i> width at 246 µm are refused; the same three at 254 / 432 / 660 µm are
+calibrated.</p>
+</div>
+
+A group is declined — and the run falls back to the clearance refusal — when its conductors do not
+all cross one plane, when one of them carries no port (a driven conductor and a floating one cannot
+share one standard), when one is not uniform over the run the standard reproduces, when the port
+needed an [automatic feed lead](#feed) (a lead is a matched length of ONE propagation constant, and a
+group's port region has one per mode), or when the group would be larger than three conductors.
+
+**The group's own cost is the surprise**: its standard carries the same metal a widened one does, so
+it is the same mesh and the same **9.1× the DUT's unknowns**, and a four-port coupled pair runs about
+8 % slower than the two-port passive case. What it adds is one port excitation per conductor on a
+mesh that was going to be solved anyway, and a second electrostatic solve with the dielectric
+removed, which is what the modal impedances need.
+
+<div class="callout note">
+<span class="label">What the group's answer is referenced to</span>
+<p>Each mode's characteristic impedance is <code>γ/(jωC)</code> with a modal capacitance, which is the
+same construction a single line's is — so it inherits the same quasi-static limitation, and the run
+reports how far the full-wave and quasi-static propagation constants disagree <b>separately</b> from
+everything else. A run where that number is large has a perfectly good de-embedding and a reference
+impedance that is out by about that much; they are two different things and one figure of merit would
+hide which.</p>
+</div>
 
 Three things are deliberately **not** neighbours:
 
