@@ -66,10 +66,46 @@ namespace CircuitRF.Engine.Mom;
 /// comes out systematically ABOVE the target. Aiming at 90° put the 20 GHz point at 202°, past π,
 /// where the branch wraps. Aiming low costs nothing at the other end: 60/√3.16 = 34° is still well
 /// clear of 20°.</param>
+/// <param name="DrivenNeighbourClearanceHeights">
+/// <b>PCAL2/R-pcal2-4 — how far a neighbouring conductor THAT CARRIES A PORT has to be from a
+/// calibrated feed, laterally, before the two-line calibration is valid. A breach is a refusal.</b>
+///
+/// <para><b>It is separate from <see cref="EndRunHeights"/> and the two must never be collapsed
+/// again.</b> They were one constant until PCAL2, and the engine tested clearance at 3 h because
+/// that is how far inward the standard reproduces the DUT's own cells. Those are different
+/// quantities: <see cref="EndRunHeights"/> is a LENGTH ALONG the feed and sizes every calibration
+/// standard (already 4.57× the DUT's unknowns on the fixture and 6.51× on the board), so raising it
+/// to buy clearance would pay for the clearance in solve time. This one is a distance ACROSS and
+/// costs nothing.</para>
+///
+/// <para><b>5, and the number is measured.</b> PCAL1 swept a coupled pair against the exact
+/// cross-section oracle and found the error follows the neighbour's distance in SUBSTRATE HEIGHTS —
+/// a 4× change in line width moves the threshold by 5 %, and the neighbour's own width is inert to
+/// within 2 % (a 5 mm pour behaves like a 254 µm trace). The requirement came out at ≈ 4 h on a
+/// 0.9 mm substrate and ≈ 5.5 h on a 0.225 mm one; s/h is a good variable rather than an exact
+/// invariant, and 5 covers both families. At the 3 h the engine used to test, the coupled pair is
+/// still 0.169 out in |ΔS| — 3.3× the A-vs-B floor — and non-passive.</para>
+/// </param>
+/// <param name="PassiveNeighbourClearanceHeights">
+/// <b>PCAL2/R-pcal2-4 — the same distance for a neighbour that carries NO port.</b>
+///
+/// <para><b>Two numbers rather than one, because the two cases are 2-3× apart and one number would
+/// either refuse designs that are fine or pass designs that are 18 dB wrong.</b> A passive
+/// neighbour leaves one driven mode at the reference plane and PCAL1 measured its threshold at
+/// ≈ 2 h on both substrate heights — against 4-5.5 h for a driven one, which carries the second
+/// port's own error box and the mutual terms as well. <b>It is not benign</b>: at 246 µm
+/// (s/h = 0.27) a passive neighbour is 18.0 dB out in S₁₁ at 1 GHz.</para>
+///
+/// <para>Whether a neighbour carries a port is decided on the MESH, by
+/// <see cref="PlanarConductors"/> — the port list is in hand at the call site and the answer is a
+/// fact about the structure, not a setting.</para>
+/// </param>
 public sealed record PlanarCalibrationSettings(
-    double EndRunHeights           = 3.0,
-    double ShortLineHeights        = 3.0,
-    double TargetElectricalDegrees = 60.0)
+    double EndRunHeights                     = 3.0,
+    double ShortLineHeights                  = 3.0,
+    double TargetElectricalDegrees           = 60.0,
+    double DrivenNeighbourClearanceHeights   = 5.0,
+    double PassiveNeighbourClearanceHeights  = 2.0)
 {
     public static readonly PlanarCalibrationSettings Default = new();
 

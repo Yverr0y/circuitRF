@@ -822,6 +822,18 @@ public sealed class PlanarSolveResult
     /// </summary>
     public IReadOnlyList<PlanarResonance> Resonances { get; init; } = [];
 
+    /// <summary>
+    /// <b>PCAL2/R-pcal2-5 — how close each de-embedded port's feed came to its neighbour</b>, one
+    /// entry per de-embeddable port, in port order. Empty when de-embedding was off, when no port
+    /// is de-embeddable, or when there was no end run to scan.
+    ///
+    /// <para>A <see cref="PlanarFeedClearance.Breached"/> entry can only be here when the run was
+    /// explicitly allowed to de-embed outside the calibration's validity — otherwise the run was
+    /// refused and produced no result at all. That is what makes this list the thing the Touchstone
+    /// writer keys its own caveat line off.</para>
+    /// </summary>
+    public IReadOnlyList<PlanarFeedClearance> FeedClearances { get; init; } = [];
+
     public double TotalKernelMs      { get { double s = 0; foreach (var p in Points) s += p.KernelFitMs;    return s; } }
     public double TotalDutMs         { get { double s = 0; foreach (var p in Points) s += p.DutMs;          return s; } }
     public double TotalCalibrationMs { get { double s = 0; foreach (var p in Points) s += p.CalibrationMs;  return s; } }
@@ -853,6 +865,23 @@ public sealed class PlanarSolveResult
 /// R-emp-13's "cap 1 and cap 8 produce bit-identical results" a statement about one implementation
 /// rather than about two that agree.</para>
 /// </param>
+/// <param name="DeembedOutsideCalibrationValidity">
+/// <b>PCAL2/R-pcal2-2 — de-embed and publish even where the two-line calibration is not valid,
+/// instead of refusing.</b> Off by default, which is the refusal.
+///
+/// <para><b>It is named for what it does rather than for the check it turns off</b>, because that
+/// is what it does: the answer still comes out of a calibration measured on an isolated line that
+/// the DUT's port does not have, and the file is still wrong in the way
+/// <see cref="PlanarFeedClearance"/> describes. There are real reasons to want it — comparing
+/// against a previous run, debugging, or knowing the port region is not where your answer lives —
+/// and there is no reason for it to be quiet about itself: the run says so in its notes and the
+/// Touchstone the run service writes says so in its provenance block, which is the half that
+/// survives the file being opened somewhere else a month later.</para>
+///
+/// <para>The other way past a refusal is <see cref="Deembed"/> = false, which is a different
+/// answer rather than the same answer with a caveat: the raw solve includes the port
+/// discontinuity.</para>
+/// </param>
 /// <param name="FarField">
 /// <b>ANT-4 — the radiated pattern, and it is a SETTING that defaults to off.</b> Null computes
 /// none, so every measured number in §L8c, §L8d and §L9d is reproducible by leaving it null and the
@@ -869,7 +898,8 @@ public sealed record PlanarSolveSettings(
     double                     CurrentDensityFrequencyHz = 0,
     PlanarAdaptiveSettings?    Adaptive    = null,
     int?                       MaxDegreeOfParallelism = null,
-    PlanarFarFieldSettings?    FarField    = null)
+    PlanarFarFieldSettings?    FarField    = null,
+    bool                       DeembedOutsideCalibrationValidity = false)
 {
     public static readonly PlanarSolveSettings Default = new();
 }
@@ -1046,13 +1076,62 @@ public static class PlanarSolve
         double setupMs = sw.Elapsed.TotalMilliseconds;
         int    cores   = 1;
 
-        // ── R-prt-2/3: what the ports resolved to, and whether their feeds are clear ─────────────
+        // ── R-prt-2/3 + PCAL2: what the ports resolved to, and whether their feeds are clear ─────
+        //
+        // PCAL2/R-pcal2-1 — A BREACH IS A REFUSAL NOW, NOT A NOTE.
+        //
+        // It used to be a note, and the note was accurate and well worded; the problem was that the
+        // artefact it was attached to outlived it. A `.s4p` on disk carries no notes, so the next
+        // person to open it in the Data Display saw a plausible curve that was 22 dB out in S21 and
+        // non-passive at 48 of 51 points. The precedent is the mesh-ceiling refusal directly above:
+        // stop a run that cannot produce a usable answer, name the quantity that made it unusable,
+        // and name the setting that answers it.
+        //
+        // Only when de-embedding is ON. With it off there is no calibration standard, nothing is
+        // being replaced by an isolated line, and a neighbour is simply part of the structure.
+        var calSt = st.Calibration ?? PlanarCalibrationSettings.Default;
+        var clearances = new List<PlanarFeedClearance>();
+        if (st.Deembed)
+        {
+            var conductors = PlanarConductors.Of(mesh);
+            foreach (var p in ports)
+            {
+                var c = PlanarPorts.MeasureFeedClearance(
+                    mesh, p, ports,
+                    endRunM:          calSt.EndRunHeights * slab.HeightM,
+                    drivenRequiredM:  calSt.DrivenNeighbourClearanceHeights  * slab.HeightM,
+                    passiveRequiredM: calSt.PassiveNeighbourClearanceHeights * slab.HeightM,
+                    slabHeightM:      slab.HeightM,
+                    conductors:       conductors);
+                if (c is not null) clearances.Add(c);
+            }
+        }
+
         foreach (var p in ports)
         {
             notes.Add(p.Describe());
-            string? warn = PlanarPorts.CheckFeedClearance(
-                mesh, p, (st.Calibration ?? PlanarCalibrationSettings.Default).EndRunHeights * slab.HeightM);
-            if (warn is not null) notes.Add(warn);
+            foreach (var c in clearances)
+                if (c.PortNumber == p.Number) notes.Add(c.Margin(fmt));
+        }
+
+        var breaches = clearances.FindAll(c => c.Breached);
+        if (breaches.Count > 0)
+        {
+            if (!st.DeembedOutsideCalibrationValidity)
+                throw new PlanarFeedClearanceRefusedException(
+                    PlanarFeedClearance.RefusalFor(breaches, fmt), breaches);
+
+            // R-pcal2-2 — the override is explicit and it is NOT silent. The note says it here and
+            // the run service writes the same fact into the Touchstone's provenance block, because
+            // this note does not survive the file and the whole finding was that the file outlives
+            // its notes.
+            notes.Add(
+                "The de-embedding was applied OUTSIDE the condition it is valid under, because " +
+                "\"de-embed outside the calibration's validity\" is on: " +
+                string.Join(", ", breaches.ConvertAll(b => $"port {b.PortNumber} at " +
+                    (double.IsNaN(b.Heights) ? fmt(b.NearestM) : $"{b.Heights:0.##} substrate heights"))) +
+                ". These s-parameters are not a measurement of this structure and should not be " +
+                "compared with one; the Touchstone this run writes says so on its own face.");
         }
 
         // ── R-fed-2: how much of each auto-grown lead sits between the plane and the drawn edge ──
@@ -2487,6 +2566,7 @@ public static class PlanarSolve
             StandardCount = standards,
             CoreBuildMs   = coreBuildMs,
             Notes         = notes,
+            FeedClearances = clearances,
             CapturedCurrents    = captured,
             CapturedFrequencyHz = capturedF,
             CapturedPortNumber  = captured is null ? 0 : st.CurrentDensityPortNumber,

@@ -324,6 +324,51 @@ public sealed class EmSetup
     /// </summary>
     public double ReferenceInputPowerDbm { get; set; }
 
+    /// <summary>
+    /// <b>PCAL2/R-pcal2-3 — de-embed the ports, or publish the raw solve. ON by default, and this
+    /// is the first user-reachable switch it has ever had.</b> Planar kernel only.
+    ///
+    /// <para><c>PlanarSolveSettings.Deembed</c> has existed in the engine since L8d and no
+    /// <c>.cem</c> field exposed it, so the remedy the mesh-ceiling refusal has been recommending
+    /// in prose — "turn de-embedding off and read the raw solve instead" — could not be followed
+    /// from the GUI or from <c>circuitrf em</c> at all. It is also one of the two ways past PCAL2's
+    /// own clearance refusal, and a refusal that names an unreachable remedy is not a remedy.</para>
+    ///
+    /// <para><b>Turned off, the s-parameters include the port discontinuity</b> — the delta-gap
+    /// excitation's own external reflection, which is what the two-line calibration exists to
+    /// remove — so they are referenced to the port cell rather than to your drawn metal edge and are
+    /// for diagnostics rather than for a circuit. The run says so in its notes. Nothing about kernel
+    /// A is affected: a cross-section solve has no calibration step to turn off.</para>
+    ///
+    /// <para>Nullable + omitted at its default (on) in the <c>.cem</c>, the same polarity
+    /// <see cref="AdaptiveSampling"/> uses, so a file written before this existed loads and
+    /// re-serialises byte-identically.</para>
+    /// </summary>
+    public bool Deembed { get; set; } = true;
+
+    /// <summary>
+    /// <b>PCAL2/R-pcal2-2 — publish a de-embedded answer even where the two-line calibration is not
+    /// valid, instead of refusing. OFF by default, which is the refusal.</b> Planar kernel only.
+    ///
+    /// <para>A port whose feed has another conductor inside the run of line the calibration standard
+    /// reproduces is de-embedded against a structure that is not the one being corrected, and the
+    /// peel divides that mismatch by a₂₁² (~10⁴ at 1 GHz). Measured on a coupled pair: 22 dB of
+    /// error in S₂₁ at the bottom of the band, non-passive at 48 of 51 points. Until PCAL2 that
+    /// shipped as a note attached to a file that carries no notes.</para>
+    ///
+    /// <para><b>Named for what it does, not for the check it suppresses</b>, because the check is
+    /// not the thing being turned off — the arithmetic still runs outside its validity and the
+    /// answer is still wrong in the way the refusal describes. There are real reasons to want it
+    /// anyway (comparing against a previous run, debugging, or knowing the port region is not where
+    /// your answer lives), and none for it to be quiet: <b>the Touchstone gains a provenance line
+    /// recording that the de-embedding was applied outside its validity</b>, which is the half that
+    /// survives the file being opened somewhere else.</para>
+    ///
+    /// <para>Nullable + omitted at its default in the <c>.cem</c>, so a file written before it
+    /// existed loads and re-serialises byte-identically.</para>
+    /// </summary>
+    public bool DeembedOutsideCalibrationValidity { get; set; }
+
     /// <summary>Workspace-relative override for the written <c>.snp</c>. Empty = the predictable
     /// path <c>EmRunService</c> derives from the layout and setup names (R-em-19).</summary>
     public string SnpOutputPathOverride { get; set; } = "";
@@ -348,6 +393,8 @@ public sealed class EmSetup
         ResonanceSearch        = ResonanceSearch,
         DirectVerticalKernel   = DirectVerticalKernel,
         AcceleratedSolve       = AcceleratedSolve,
+        Deembed                = Deembed,
+        DeembedOutsideCalibrationValidity = DeembedOutsideCalibrationValidity,
         RadiationPattern       = RadiationPattern,
         ReferenceInputPowerDbm = ReferenceInputPowerDbm,
         SnpOutputPathOverride  = SnpOutputPathOverride,

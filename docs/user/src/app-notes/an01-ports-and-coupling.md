@@ -14,7 +14,8 @@ keywords: S11, ports, coupling, de-embedding, passivity, EM, coupled lines, term
 <li><a href="#structure">The structure</a></li>
 <li><a href="#termination">Answer 1: a port is a termination, and deleting one does not delete the metal</a></li>
 <li><a href="#proof">Showing that on the data</a></li>
-<li><a href="#unusable">Answer 2: neither run was usable, and circuitRF said so</a></li>
+<li><a href="#unusable">Answer 2: neither run was usable, and circuitRF said so</a>
+  <ul><li><a href="#refused">circuitRF refuses this run now</a></li></ul></li>
 <li><a href="#cause">Finding the cause: a controlled experiment</a></li>
 <li><a href="#notmesh">What did <em>not</em> fix it</a></li>
 <li><a href="#fix">What to do about it</a></li>
@@ -141,6 +142,38 @@ because terminating the *other* line cannot switch off conduction along *this* o
 **So the honest reading of the comparison this note opened with is: two wrong answers, wrong by
 different amounts.**
 
+### circuitRF refuses this run now {#refused}
+
+<div class="callout warn">
+<span class="label">What changed since this note was written</span>
+<p>Everything above still describes the physics exactly. What no longer happens is the <b>publishing</b>:
+a run whose calibrated port has another conductor inside the length the calibration standard reproduces
+is <b>refused</b>, and <b>no Touchstone is written</b>.</p>
+</div>
+
+The note quoted in [the section above](#unusable) was accurate and said the right thing. The problem was
+what it was attached to: **a `.s4p` on disk carries no notes.** Whoever opened that file next — in the
+Data Display, in a circuit, next month — saw a plausible curve and nothing else. So the diagnosis is now
+a refusal, on the *cause* rather than on the symptom:
+
+<pre>
+Calibrated port feeds are not isolated: port 1 has other metal 246 µm away (0.27 substrate
+heights, against the 5 a neighbour that carries a port of its own needs); port 2 … That is
+inside the 2700 µm of line the calibration standard reproduces. … Move the feed away from its
+neighbour, or put the port where the line is already isolated.
+</pre>
+
+Passivity is deliberately **not** what triggers it. A non-passive result is a *symptom* with several
+possible causes, some of them legitimate at the 10<sup>-3</sup> level, so refusing on it would block runs
+that are fine. The refusal is on a measurable geometric fact about the port, and passivity goes on being
+reported as the diagnostic it is.
+
+There are two ways to get a number out of the geometry as drawn, both in
+[Solver options](../reference/em-setup.html#deembedding) and neither of them quiet: turn **port
+de-embedding off** and read the raw solve, which includes the port discontinuity; or turn on **"de-embed
+outside the calibration's validity"**, which publishes the de-embedded answer and stamps the Touchstone
+with a line saying the calibration was applied outside the geometry it is valid for.
+
 ## Finding the cause: a controlled experiment {#cause}
 
 To separate the two effects, the geometry above was rebuilt as a synthetic case with nothing else in
@@ -240,23 +273,33 @@ would do with a measured fixture.
 ### 3. Give every port an isolated feed {#isolate}
 
 If neither of the above applies, the structure has to supply the isolated run. Same coupled section as
-before, unchanged — 3 mm of line added at each port with the other conductor held 4 mm away there:
+before, unchanged — 4 mm of line added at each port with the other conductor held 6 mm away there:
 
 {{ui: an01-coupled-pair-isolated-feeds}}
 
 | f (GHz) | S(1,1) | S(2,1) | S(3,1) | σ<sub>max</sub> |
 |---|---|---|---|---|
-| 1.0 | −10.07 dB | −0.49 dB | −34.32 dB | 0.9986 |
-| 2.2 | −5.34 dB | −1.64 dB | −22.05 dB | 0.9966 |
-| 3.4 | −4.01 dB | −2.48 dB | −18.77 dB | 0.9934 |
-| 4.6 | −4.06 dB | −2.78 dB | −14.05 dB | 0.9905 |
-| 5.8 | −4.95 dB | −2.60 dB | −11.26 dB | 0.9904 |
-| 7.0 | −7.65 dB | −1.69 dB | −11.05 dB | 0.9901 |
+| 1.0 | −8.71 dB | −0.69 dB | −26.60 dB | 0.9983 |
+| 2.2 | −4.56 dB | −2.03 dB | −22.27 dB | 0.9956 |
+| 3.4 | −3.79 dB | −2.76 dB | −16.33 dB | 0.9907 |
+| 4.6 | −4.37 dB | −2.63 dB | −13.25 dB | 0.9901 |
+| 5.8 | −7.52 dB | −1.49 dB | −12.78 dB | 0.9896 |
+| 7.0 | −26.85 dB | −0.74 dB | −11.61 dB | 0.9884 |
 
-Same mesh settings, same kernel, same sweep. **Passive at every frequency**, no `NOT PASSIVE` note, no
-port-feed note, and S(2,1) behaves like a transmission line again. As in option 2, the 6 mm of extra
-line is genuinely part of the structure now and comes out in the circuit if you need the planes back
-at the coupled section's own ends.
+Same mesh settings, same kernel, same sweep. **Passive at every frequency**, no `NOT PASSIVE` note, and
+S(2,1) behaves like a transmission line again. Every port reports its own clearance — *"6.38 substrate
+heights, against the 5 a neighbour that carries a port of its own needs"* — which is the margin, not just
+a pass. As in option 2, the 8 mm of extra line is genuinely part of the structure now and comes out in
+the circuit if you need the planes back at the coupled section's own ends.
+
+<div class="callout note">
+<span class="label">How much clearance is enough, measured</span>
+<p>The neighbour's distance is what matters, and it scales with <b>substrate height</b> — not with line
+width, and not with the neighbour's width. A neighbour that <b>carries a port of its own</b> needs about
+<b>5 substrate heights</b>; one that carries none — a passive trace, a ground pour — needs about
+<b>2</b>. Those are the numbers circuitRF enforces, and a run that breaches them is
+<a href="#refused">refused rather than published</a>.</p>
+</div>
 
 <div class="callout note">
 <span class="label">Why the solver cannot just do this for you</span>
@@ -376,7 +419,8 @@ answer to change when you do.
 | Check | Where it is reported |
 |---|---|
 | No `NOT PASSIVE` note, at any frequency | Run notes |
-| No port whose feed has other metal inside the calibration length | Per-port notes |
+| No port whose feed has other metal inside the calibration length | **Enforced** — the run is refused (see [below](#refused)) |
+| Every port's feed-clearance margin comfortable, not marginal | Per-port notes, in substrate heights |
 | Every port's reference plane on the drawn metal edge, not inside it | Per-port notes |
 | Adaptive sampling **converged** | Run notes |
 | The kernel `Auto` would have picked is the one that ran, or you know why not | Run notes |

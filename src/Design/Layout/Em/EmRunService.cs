@@ -512,6 +512,13 @@ public static class EmRunService
                 Fill = setup.DirectVerticalKernel || setup.AcceleratedSolve
                     ? fill
                     : PlanarSolveSettings.Default.Fill,
+                // PCAL2 — the two port-calibration switches. `Deembed` has been in the engine since
+                // L8d with no .cem field to reach it, which made the mesh-ceiling refusal's own
+                // recommended remedy ("turn de-embedding off and read the raw solve") impossible to
+                // follow from either the GUI or the CLI. The second one is the explicit,
+                // self-declaring way past the clearance refusal below.
+                Deembed = setup.Deembed,
+                DeembedOutsideCalibrationValidity = setup.DeembedOutsideCalibrationValidity,
             };
             // ANT-9 — the one combination the panel can express and the engine cannot honour. The
             // search bisects toward a zero crossing of Im(Z_in) that it finds in the interpolant
@@ -529,6 +536,18 @@ public static class EmRunService
                                   lengthFormat);
         }
         catch (OperationCanceledException) { throw; }
+        catch (PlanarFeedClearanceRefusedException ex)
+        {
+            // PCAL2/R-pcal2-1 — a REFUSAL, reported the way the mesh ceiling directly below is
+            // reported and for the same reason: it reads as "this geometry cannot be de-embedded,
+            // and here is the quantity that says so", not as "circuitRF broke". No .sNp is written
+            // because nothing past this point runs, which is the whole point — a note does not
+            // survive onto the file and the file is what the next person opens.
+            var d = EmDiagnostics.Forwarded("port-clearance", ex.Message);
+            return new EmRunResult(EmRunStatus.Refused, null, null, null, null, null,
+                ex.Message, warnings, Notes: notes, Errors: errors, Kind: choice.Kind,
+                KernelName: choice.KernelName, Diagnostic: d);
+        }
         catch (PlanarMeshRefusedException ex)
         {
             // R17's ceiling is a REFUSAL, not a crash, and its diagnosis lives in the mesh report's
@@ -579,7 +598,7 @@ public static class EmRunService
         try
         {
             WritePlanarSnp(solved.Data, ResolveSnpBasePath(resultsRoot, setup),
-                           problem, setup, ports.Ports);
+                           problem, setup, ports.Ports, solved.Solve);
         }
         catch (Exception ex)
         {
@@ -597,7 +616,7 @@ public static class EmRunService
     /// <summary>The same exporter, the same options, the planar provenance stamp (D9).</summary>
     private static void WritePlanarSnp(
         DataSet data, string snpBasePath, PlanarProblem problem, EmSetup setup,
-        IReadOnlyList<PlanarPort> ports)
+        IReadOnlyList<PlanarPort> ports, PlanarSolveResult? solve = null)
     {
         string? group = null;
         foreach (var g in data.Groups)
@@ -613,7 +632,12 @@ public static class EmRunService
             HeaderComments: EmSnpProvenance.BuildHeader(
                 problem, setup.PlanarMesh, ports,
                 setup.Name is { Length: > 0 } n ? n : Path.GetFileNameWithoutExtension(snpBasePath),
-                setup.LayoutRef, DateTimeOffset.Now));
+                setup.LayoutRef, DateTimeOffset.Now,
+                // PCAL2/R-pcal2-2 — the caveat rides on the FILE, because the finding was that the
+                // file outlives the notes. Empty on every run that did not de-embed outside the
+                // calibration's validity, so an ordinary .sNp is byte-identical to one written
+                // before this existed.
+                EmSnpProvenance.ValidityCaveats(solve)));
 
         Directory.CreateDirectory(Path.GetDirectoryName(snpBasePath)!);
 

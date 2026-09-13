@@ -19,7 +19,8 @@ keywords: EM, electromagnetic, cem, ports, mesh, extraction, simulate layout, su
 <li><a href="#ports">Ports</a></li>
 <li><a href="#mesh">Mesh — the uniform-line kernel</a></li>
 <li><a href="#surface-mesh">Surface mesh — the full-wave kernel</a></li>
-<li><a href="#solver">Solver options</a></li>
+<li><a href="#solver">Solver options</a>
+  <ul><li><a href="#deembedding">Port de-embedding</a></li></ul></li>
 <li><a href="#stackup">Stackup</a></li>
 <li><a href="#blocked">When Simulate is greyed out</a></li>
 <li><a href="#results">Where the results land</a></li>
@@ -240,8 +241,10 @@ a run is about to be too big *before* you start it.
 
 ## Solver options {#solver}
 
-Four switches, all of which either change how the same answer is computed or trade time for memory. None
-of them changes what is being solved.
+Six switches. Four of them either change how the same answer is computed or trade time for memory, and
+change nothing about what is being solved. The two port-de-embedding switches are different in kind and
+are described last: one of them changes the answer, and the other publishes an answer circuitRF would
+otherwise refuse to write.
 
 **Vertical (via) kernel — "Integrate G_A^zz directly"** *(off by default)*. Replaces the fitted Green's
 function with direct numerical integration for the one term that couples vias to each other. It costs
@@ -270,8 +273,57 @@ and says so.
 **Cores.** How many cores the full-wave solver may use at once. *Automatic* uses the whole machine.
 Lowering it leaves cores free for other work and makes the run slower; **it never changes the answer.**
 
-Every one of these four disables itself with a stated reason when it does not apply, rather than sitting
-enabled and doing nothing.
+### Port de-embedding {#deembedding}
+
+**"De-embed the ports"** *(on by default, full-wave only)*. The full-wave kernel drives each edge port
+with a gap across the metal, and that gap has a reflection of its own that is not part of your circuit.
+De-embedding measures it on a two-line calibration standard and removes it, so what you get back is
+referenced to **your drawn metal edge**. See
+[the full-wave kernel's own page](mom-engine.html#deembedding) for the arithmetic and its validity
+condition.
+
+Turn it off to read the **raw solve** instead. Those s-parameters include the port discontinuity, are
+referenced to the port cell rather than to your metal, and are for diagnostics rather than for a circuit
+— the run says so in its notes. It is also much faster, because every calibration standard is skipped,
+and those standards are most of a de-embedded run's solve time.
+
+**"De-embed outside the calibration's validity"** *(off by default, full-wave only)*. The calibration
+standard is an **isolated uniform line** of the port's own cross-section. When another conductor sits
+inside the run of line that standard reproduces, the error box is measured on a structure that is not the
+one being corrected — and the peel divides that mismatch by a quantity of order 10⁻⁴, so a small error in
+the standard becomes a large one in your answer. **A run in that condition is refused**, naming the port,
+the distance and what that class of neighbour needs:
+
+<pre>
+Calibrated port feeds are not isolated: port 1 has other metal 246 µm away (0.27 substrate
+heights, against the 5 a neighbour that carries a port of its own needs)…
+</pre>
+
+Ticking this box publishes that answer anyway. The answer is still wrong in exactly the way the refusal
+describes; what changes is that you asked for it. **The Touchstone it writes gains a provenance line
+saying so**, so the file still carries the caveat when it is opened somewhere else, months later, by
+somebody who never saw the run:
+
+<pre>
+! circuitRF-EM caveat: the port de-embedding was applied OUTSIDE the geometry it is valid for:
+! port 1 at 0.27 h (needs 5), … These s-parameters are not a measurement of this structure.
+</pre>
+
+There are good reasons to want it — comparing against a previous run, debugging, or simply knowing the
+port region is not where your answer lives. There is no good reason for it to be quiet, which is why it
+is never quiet.
+
+<div class="callout note">
+<span class="label">Every run that de-embeds reports its margin</span>
+<p>Each port's note carries the distance to its nearest other conductor <b>in substrate heights</b>,
+whether or not it is a problem: <i>"Port 1's feed clearance is 6.38 substrate heights — 5746 µm to the
+nearest other conductor, which carries a port of its own and so needs 5."</i> A pass/fail with no
+distance tells you nothing about how close you came.</p>
+</div>
+
+Every one of these disables itself with a stated reason when it does not apply, rather than sitting
+enabled and doing nothing — the override, for instance, is disabled outright when de-embedding is off,
+because there is then no calibration to apply outside anything.
 
 ## Stackup {#stackup}
 

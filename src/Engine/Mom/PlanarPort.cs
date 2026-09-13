@@ -379,6 +379,148 @@ public sealed record PlanarPortCrossSection(
 }
 
 /// <summary>
+/// <b>PCAL2 — what the nearest piece of metal beside a calibrated feed IS.</b> PCAL1 measured four
+/// candidate cases and found three of them distinct; the fourth, a flare or pad on the port's OWN
+/// net, is <see cref="PlanarFeedExtension"/>'s job and is not a neighbour at all, so it never
+/// reaches this enum.
+/// </summary>
+public enum PlanarNeighbourClass
+{
+    /// <summary>No other conductor inside the run of line the calibration standard reproduces.</summary>
+    None,
+
+    /// <summary>A separate conductor carrying no port — a passive trace, or a ground pour, which
+    /// PCAL1 measured to be the same case to within 2 %: the neighbour's own width does not enter.
+    /// One driven mode at the reference plane, and ≈ 2 substrate heights of clearance needed.</summary>
+    Passive,
+
+    /// <summary>A separate conductor carrying a port of its own. Two modes at the reference plane
+    /// against a per-port SCALAR error box, and 4-5.5 substrate heights of clearance needed — 2-3×
+    /// the passive case.</summary>
+    Driven,
+}
+
+/// <summary>
+/// <b>PCAL2/R-pcal2-5 — how much clear space one calibrated feed has, reported on every run that
+/// de-embeds.</b> A pass/fail with no distance is how a threshold change becomes invisible.
+///
+/// <para><b>The margin is in SUBSTRATE HEIGHTS and there is deliberately no error bound.</b> PCAL1
+/// looked for one and the negative result is structural: <c>PlanarDeembed.SolveErrorBox</c>'s
+/// arguments are the two calibration standards and not the DUT, so its consistency and rejected
+/// residuals are bit-for-bit identical between a run that is 22 dB wrong and one at the floor. σ_max
+/// detects the failure well and estimates it not at all — it is non-monotonic in the error, with the
+/// worst case measured reporting a SMALLER passivity excess than a case with half the error. So the
+/// only honest quantitative thing to report is the geometry, in the variable the error was measured
+/// to follow.</para>
+/// </summary>
+/// <param name="PortNumber">The port this is about.</param>
+/// <param name="Neighbour">What the nearest other conductor is, or <see cref="PlanarNeighbourClass.None"/>.</param>
+/// <param name="NearestM">Its lateral distance from the port's own profile. Infinity when there is none.</param>
+/// <param name="RequiredM">What <see cref="Neighbour"/>'s class needs, in metres.</param>
+/// <param name="SubstrateHeightM">h, so the margin can be stated in the units the error follows. 0
+/// when the caller did not supply it, which leaves <see cref="Heights"/> NaN and decides nothing.</param>
+/// <param name="EndRunM">The run of line the calibration standard reproduces — the region scanned.</param>
+public sealed record PlanarFeedClearance(
+    int                  PortNumber,
+    PlanarNeighbourClass Neighbour,
+    double               NearestM,
+    double               RequiredM,
+    double               SubstrateHeightM,
+    double               EndRunM)
+{
+    /// <summary>Is the calibration being applied outside the condition it is valid under?</summary>
+    public bool Breached => Neighbour != PlanarNeighbourClass.None && NearestM < RequiredM;
+
+    /// <summary>The margin, in substrate heights — the variable PCAL1 measured the error to follow.</summary>
+    public double Heights => SubstrateHeightM > 0 ? NearestM / SubstrateHeightM : double.NaN;
+
+    /// <inheritdoc cref="Heights"/>
+    public double RequiredHeights => SubstrateHeightM > 0 ? RequiredM / SubstrateHeightM : double.NaN;
+
+    private string Which => Neighbour == PlanarNeighbourClass.Driven
+        ? "carries a port of its own"
+        : "carries no port";
+
+    private string Needs => double.IsNaN(RequiredHeights)
+        ? $"needs {Fmt(RequiredM, null)}"
+        : $"needs {RequiredHeights:0.#}";
+
+    private static string Fmt(double metres, SurfaceMesher.PlanarLengthFormat? fmt)
+        => (fmt ?? SurfaceMesher.DefaultLengthFormat)(metres);
+
+    /// <summary>R-pcal2-5 — the one line every de-embedded port reports, breached or not.</summary>
+    public string Margin(SurfaceMesher.PlanarLengthFormat? fmt = null)
+        => Neighbour == PlanarNeighbourClass.None
+            ? $"Port {PortNumber}'s feed is clear: no other conductor within the {Fmt(EndRunM, fmt)} " +
+              "of line the calibration standard reproduces."
+            : $"Port {PortNumber}'s feed clearance is " +
+              (double.IsNaN(Heights) ? Fmt(NearestM, fmt) : $"{Heights:0.##} substrate heights") +
+              $" — {Fmt(NearestM, fmt)} to the nearest other conductor, which {Which} and so {Needs}.";
+
+    /// <summary>
+    /// R-pcal2-1 — <b>one port's half of the refusal: the port, the distance, and what it needed.</b>
+    /// The explanation and the remedies are said once for the whole run by
+    /// <see cref="RefusalFor"/>, because four ports of one coupled pair breach together and four
+    /// copies of the same three paragraphs is a message nobody reads to the end of.
+    /// </summary>
+    public string Breach(SurfaceMesher.PlanarLengthFormat? fmt = null)
+        => $"port {PortNumber} has other metal {Fmt(NearestM, fmt)} away" +
+           (double.IsNaN(Heights) ? "" : $" ({Heights:0.##} substrate heights, against the " +
+                                         $"{RequiredHeights:0.#} a neighbour that {Which} needs)");
+
+    /// <summary>
+    /// R-pcal2-1 — <b>the refusal.</b> The diagnosis is the sentence this check has always carried;
+    /// what PCAL2 adds is the consequence, and the two ways past it — both of which have to be
+    /// reachable, or this is a refusal that names a remedy nobody can follow.
+    /// </summary>
+    public static string RefusalFor(IReadOnlyList<PlanarFeedClearance> breaches,
+                                    SurfaceMesher.PlanarLengthFormat? fmt = null)
+    {
+        ArgumentNullException.ThrowIfNull(breaches);
+        var parts = new List<string>(breaches.Count);
+        foreach (var b in breaches) parts.Add(b.Breach(fmt));
+        double endRun = breaches.Count > 0 ? breaches[0].EndRunM : 0;
+
+        return (breaches.Count == 1 ? "A calibrated port's feed is not isolated: " : "Calibrated port feeds are not isolated: ") +
+               string.Join("; ", parts) +
+               $". That is inside the {Fmt(endRun, fmt)} of line the calibration standard " +
+               "reproduces. The de-embedding replaces the port's neighbourhood with an isolated line " +
+               "of the same width, so whatever is closer than that is not removed correctly — " +
+               "measured on a coupled pair, 22 dB of error in S21 at the bottom of the band and an " +
+               "answer that is not passive at 48 of 51 points, which used to be published with a " +
+               "note and nothing on the file to carry it. Move the feed away from its neighbour, or " +
+               "put the port where the line is already isolated. To get an answer out of this " +
+               "geometry as drawn, either turn port de-embedding OFF and read the raw solve (it " +
+               "includes the port discontinuity and is for diagnostics), or turn ON \"de-embed " +
+               "outside the calibration's validity\", which publishes the de-embedded answer and " +
+               "records on the Touchstone that the calibration was applied outside it.";
+    }
+
+    /// <summary>The pre-PCAL2 sentence, for the one-threshold
+    /// <see cref="PlanarPorts.CheckFeedClearance"/> overload.</summary>
+    public string LegacyWarning(SurfaceMesher.PlanarLengthFormat? fmt = null)
+        => $"Port {PortNumber}'s feed has other metal {Fmt(NearestM, fmt)} away, inside the " +
+           $"{Fmt(RequiredM, fmt)} the calibration standard assumes is empty. The de-embedding " +
+           "replaces the port's neighbourhood with an isolated line of the same width, so whatever " +
+           "is closer than that is not removed correctly. Move the feed away, or read the result " +
+           "knowing this.";
+}
+
+/// <summary>
+/// <b>PCAL2/R-pcal2-1 — a calibrated port's feed clearance is breached, so the run is REFUSED.</b>
+/// Caught by the run service and reported as a refusal, exactly as
+/// <see cref="PlanarMeshRefusedException"/> is: the precedent is the mesh ceiling, which already
+/// stops a run that would take twenty minutes to produce nothing usable.
+/// </summary>
+public sealed class PlanarFeedClearanceRefusedException : InvalidOperationException
+{
+    public IReadOnlyList<PlanarFeedClearance> Breaches { get; }
+
+    public PlanarFeedClearanceRefusedException(string message, IReadOnlyList<PlanarFeedClearance> breaches)
+        : base(message) => Breaches = breaches;
+}
+
+/// <summary>
 /// What a port resolved to on a particular mesh — R-prt-2's report. Everything a user (or L8e's
 /// panel) needs in order to see where the reference plane actually landed, and everything
 /// <see cref="PlanarCalibration"/> needs in order to rebuild the port's neighbourhood exactly (D4).
@@ -1684,21 +1826,76 @@ public static class PlanarPorts
     }
 
     /// <summary>
-    /// R-prt-3 — the feed must be uniform and isolated for the distance the calibration replaces.
-    /// Returns a WARNING, not a refusal: a user may knowingly accept a crowded feed, and the number
-    /// they need in order to decide is the measured clearance, not a yes/no.
+    /// R-prt-3 / PCAL2 — the feed must be uniform and isolated for the distance the calibration
+    /// replaces. Returns a WARNING, not a refusal, and asks ONE threshold of every neighbour: the
+    /// pre-PCAL2 shape, kept for callers that have no port list to classify a neighbour with.
+    /// <b>Every decision it makes is <see cref="MeasureFeedClearance"/>'s</b> — there is no second
+    /// predicate and no second threshold here.
     /// </summary>
     public static string? CheckFeedClearance(PlanarMesh mesh, PlanarPortResolution port,
                                              double requiredM)
     {
+        var c = MeasureFeedClearance(mesh, port, [port], endRunM: requiredM,
+                                     drivenRequiredM: requiredM, passiveRequiredM: requiredM,
+                                     slabHeightM: 0);
+        return c is { Breached: true } ? c.LegacyWarning() : null;
+    }
+
+    /// <summary>
+    /// <b>PCAL2 — how much clear space a calibrated port's feed actually has, and what the nearest
+    /// thing in it IS.</b> The whole of the clearance predicate lives here; <see cref="PlanarSolve"/>
+    /// decides what to do about the answer and <c>CheckFeedClearance</c> above renders the old
+    /// sentence from it.
+    ///
+    /// <para><b>The region scanned is the calibration's own end run, and the threshold is a distance
+    /// ACROSS it.</b> Those are two settings now (<see cref="PlanarCalibrationSettings.EndRunHeights"/>
+    /// and the two clearance heights beside it) because they are two quantities: the standard
+    /// reproduces the DUT's cells for <paramref name="endRunM"/> INWARD from the port, and that is
+    /// the length whose surroundings it assumes are empty. Letting the scan's length grow with the
+    /// threshold instead would make the check fire on ordinary circuit structure several
+    /// millimetres down a clean feed — metal the standard never sees — which is the unclearable
+    /// warning the 2026-08-12 midpoint fix below already had to cure once.</para>
+    ///
+    /// <para>Returns null when the question does not arise: a port with no feed, or a zero-length
+    /// end run.</para>
+    /// </summary>
+    /// <param name="allPorts">Every port of the run, so a neighbouring conductor that carries one
+    /// can be told from one that does not — PCAL1 measured those two cases 2-3× apart in the
+    /// clearance they need. Pass the port itself and nothing else to ask the one-threshold
+    /// question.</param>
+    /// <param name="endRunM">How far inward from the port the calibration standard reproduces the
+    /// DUT's own cells — <see cref="PlanarCalibrationSettings.EndRunHeights"/> × h.</param>
+    /// <param name="slabHeightM">The substrate height, so the margin can be reported in the units
+    /// PCAL1 measured the error to follow. 0 leaves <see cref="PlanarFeedClearance.Heights"/> NaN
+    /// and changes no decision.</param>
+    public static PlanarFeedClearance? MeasureFeedClearance(
+        PlanarMesh mesh, PlanarPortResolution port,
+        IReadOnlyList<PlanarPortResolution> allPorts,
+        double endRunM, double drivenRequiredM, double passiveRequiredM, double slabHeightM,
+        PlanarConductors? conductors = null)
+    {
         ArgumentNullException.ThrowIfNull(mesh);
         ArgumentNullException.ThrowIfNull(port);
-        if (!(requiredM > 0)) return null;
+        ArgumentNullException.ThrowIfNull(allPorts);
+        if (!(endRunM > 0)) return null;
 
         // An internal delta gap has no feed and no calibration standard, so there is no length of
         // line this warning could be about. Saying nothing is the answer; warning about a neighbour
         // that is not being replaced by anything would be noise the user cannot act on.
         if (!port.IsDeembeddable) return null;
+
+        var conn = conductors ?? PlanarConductors.Of(mesh);
+
+        // ── WHOSE METAL IS IT? (PCAL2) ───────────────────────────────────────────────────────
+        //
+        // Three answers, and the middle one is the one that was missing. The port's OWN conductor
+        // is not a neighbour at all — a flare or pad on the port's own net is R-fed-1's job, it
+        // grows a collinear lead and peels it exactly, and PCAL1 measured that case passive with
+        // this check silent. A separate conductor CARRYING A PORT needs 4-5.5 h. A separate
+        // conductor carrying none needs ≈ 2 h. Turning the first into a refusal would refuse every
+        // taper in the repository.
+        var mine   = new HashSet<int>(conn.LabelsOf(mesh, port));
+        var driven = conn.LabelsCarryingAPort(mesh, allPorts);
 
         bool alongX = port.Direction == PlanarBasisDirection.X;
         bool fromLow = port.Side is PlanarPortSide.MinX or PlanarPortSide.MinY;
@@ -1710,13 +1907,23 @@ public static class PlanarPorts
         // the 2026-08-12 fix below removed for a different reason.
         double tLo = port.CrossSection?.SpanLoM ?? port.TransverseLines[0];
         double tHi = port.CrossSection?.SpanHiM ?? port.TransverseLines[^1];
-        double nearest = double.PositiveInfinity;
+        double nearestDriven  = double.PositiveInfinity;
+        double nearestPassive = double.PositiveInfinity;
 
-        foreach (var c in mesh.Cells)
+        for (int ci = 0; ci < mesh.Cells.Count; ci++)
         {
+            var c = mesh.Cells[ci];
             double t0 = alongX ? c.YMin : c.XMin;
             double t1 = alongX ? c.YMax : c.XMax;
-            if (t1 > tLo + 1e-15 && t0 < tHi - 1e-15) continue;   // inside the feed's own width
+            if (t1 > tLo + 1e-15 && t0 < tHi - 1e-15) continue;   // inside the feed's own profile
+
+            // A cell no rooftop pairs with carries no current and is not in the solve at all, so it
+            // cannot be a neighbour — see PlanarConductors.CarriesCurrent, and the conformal taper
+            // that measured the difference.
+            if (!conn.CarriesCurrent(ci)) continue;
+
+            int label = conn.LabelOf(ci);
+            if (mine.Contains(label)) continue;                   // the port's own net, not a neighbour
 
             // ── IS THIS CELL IN THE FEED REGION AT ALL? (fixed 2026-08-12) ──────────────────────
             //
@@ -1724,7 +1931,7 @@ public static class PlanarPorts
             // BEHIND the port — there was no upper bound at all, so the scan ran to the far end of
             // the structure and `nearest` came back as the smallest lateral gap ANYWHERE on the
             // board. That is not the quantity this warning's own text describes ("inside the
-            // {required}m the calibration standard assumes is empty"), and the difference is not
+            // {endRun}m the calibration standard assumes is empty"), and the difference is not
             // cosmetic: it fired on every part that is ever wider than its port — every taper, stub
             // and tee — including feeds that are demonstrably clean. A warning that cannot be
             // cleared is one users learn to skip, and this is the one that has to stay readable,
@@ -1732,7 +1939,7 @@ public static class PlanarPorts
             // cannot move a neighbour sideways.
             //
             // The station is the cell's MIDPOINT, not its near edge, and that is load-bearing rather
-            // than tidy. R-fed-1 sizes the lead so the feed is uniform for EXACTLY `requiredM`, so
+            // than tidy. R-fed-1 sizes the lead so the feed is uniform for EXACTLY the end run, so
             // the DUT's own flare always begins at the region's far boundary and the cell straddling
             // it always has a lateral gap of zero. On a near-edge test that cell re-fires the warning
             // on every extended taper — reintroducing the unclearable warning one line below the fix
@@ -1741,19 +1948,27 @@ public static class PlanarPorts
             double l1 = alongX ? c.XMax : c.YMax;
             double mid = 0.5 * (l0 + l1);
             double along = fromLow ? mid - port.OuterEdgeM : port.OuterEdgeM - mid;
-            if (along < -requiredM || along > requiredM) continue;
+            if (along < -endRunM || along > endRunM) continue;
 
-            double across = t0 >= tHi ? t0 - tHi : tLo - t1;
-            nearest = Math.Min(nearest, Math.Max(across, 0));
+            double across = Math.Max(t0 >= tHi ? t0 - tHi : tLo - t1, 0);
+            if (driven.Contains(label)) nearestDriven  = Math.Min(nearestDriven,  across);
+            else                        nearestPassive = Math.Min(nearestPassive, across);
         }
 
-        if (double.IsInfinity(nearest) || nearest >= requiredM) return null;
+        // Each class is judged against its OWN threshold, and the one reported is the one that is
+        // worst off relative to what it needs — not the one that is physically nearest. A passive
+        // trace at 1.9 h beside a driven one at 3 h is a clean passive neighbour and a breached
+        // driven one, and the message has to be about the second.
+        double dRatio = nearestDriven  / Math.Max(drivenRequiredM,  double.Epsilon);
+        double pRatio = nearestPassive / Math.Max(passiveRequiredM, double.Epsilon);
 
-        return $"Port {port.Number}'s feed has other metal {SurfaceMesher.Eng(nearest)}m away, inside " +
-               $"the {SurfaceMesher.Eng(requiredM)}m the calibration standard assumes is empty. The " +
-               "de-embedding replaces the port's neighbourhood with an isolated line of the same " +
-               "width, so whatever is closer than that is not removed correctly. Move the feed away, " +
-               "or read the result knowing this.";
+        return dRatio <= pRatio
+            ? new PlanarFeedClearance(port.Number,
+                  double.IsInfinity(nearestDriven) ? PlanarNeighbourClass.None : PlanarNeighbourClass.Driven,
+                  nearestDriven, drivenRequiredM, slabHeightM, endRunM)
+            : new PlanarFeedClearance(port.Number,
+                  double.IsInfinity(nearestPassive) ? PlanarNeighbourClass.None : PlanarNeighbourClass.Passive,
+                  nearestPassive, passiveRequiredM, slabHeightM, endRunM);
     }
 
     private static string LayerName(PlanarMesh mesh, int layerIndex)

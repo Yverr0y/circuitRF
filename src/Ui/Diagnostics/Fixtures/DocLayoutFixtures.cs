@@ -633,10 +633,17 @@ public static class DocLayoutFixtures
     ///
     /// <para>This is the note's remedy, drawn. The coupled section in the middle is the SAME
     /// 254 um / 246 um / 3.83 mm pair as <see cref="CoupledPairFourPorts"/> - the circuit under
-    /// study has not been changed. What has been added is 3 mm of line at each port with the other
-    /// conductor 4 mm away, which is what the two-line calibration standard assumes is there and is
+    /// study has not been changed. What has been added is 4 mm of line at each port with the other
+    /// conductor 6 mm away, which is what the two-line calibration standard assumes is there and is
     /// what it did not have before. Measured: the coupled-feed version comes back non-passive at 48
     /// of 51 frequencies; this one is passive at every frequency, on the same mesh settings.</para>
+    ///
+    /// <para><b>The separation is 6 mm rather than 4 because PCAL2 made the clearance a REFUSAL and
+    /// gave it a measured number</b> (5 substrate heights for a neighbour that carries a port of its
+    /// own). At 4 mm this drawing is 4.16 substrate heights apart on the 0.9 mm stackup the note
+    /// measures on - inside the threshold, so the remedy figure would have been a design circuitRF
+    /// now declines to publish. The dimensions here track
+    /// <c>testdata/portcal/separated-pair</c>, which is the same drawing as a committed fixture.</para>
     ///
     /// <para>The upper line is drawn as overlapping rectangles rather than one traced outline
     /// because that is how it is built in the reproduction the note quotes, and the union is the
@@ -648,8 +655,8 @@ public static class DocLayoutFixtures
         var top  = Layer(tech, "Top Copper");
 
         long w = Um(254), lc = Um(3830), gap = Um(246);
-        long feed = Um(3000);           // isolated run at each port - longer than the 2.7 mm standard
-        long sep  = Um(4000);           // how far the two feeds are held apart
+        long feed = Um(4000);           // isolated run at each port - longer than the 2.7 mm standard
+        long sep  = Um(6000);           // how far the two feeds are held apart (6.38 h edge to edge)
         long x0 = feed, x1 = feed + lc, tot = feed + lc + feed;
         long yB = w + gap;
 
@@ -677,7 +684,7 @@ public static class DocLayoutFixtures
         view.Shapes.Add(PortLabel(top, "3", 0,   sep + w / 2, LayoutRotation.R0,   h));
         view.Shapes.Add(PortLabel(top, "4", tot, sep + w / 2, LayoutRotation.R180, h));
 
-        return Framed(new LayoutDocument("Coupled pair, isolated feeds", EditorVm(view)), 880, 400,
+        return Framed(new LayoutDocument("Coupled pair, isolated feeds", EditorVm(view)), 880, 466,
                       marginX: 0.32, marginY: 0.10);
     }
 

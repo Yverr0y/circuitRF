@@ -193,6 +193,22 @@ public sealed class CemFile
     /// </summary>
     public bool?   RadiationPattern      { get; set; }
 
+    /// <summary>
+    /// PCAL2/R-pcal2-3 — port de-embedding. <b>Null means ON</b>, the opposite polarity to most of
+    /// the flags here and the same one <see cref="AdaptiveSampling"/> uses, because the default is
+    /// on: a <c>.cem</c> written before this was reachable has no field, loads with de-embedding
+    /// enabled, and re-serialises with no field. Only an explicit opt-OUT is ever written.
+    /// </summary>
+    public bool?   Deembed               { get; set; }
+
+    /// <summary>
+    /// PCAL2/R-pcal2-2 — <b>null means off</b>, which is what every <c>.cem</c> written before the
+    /// clearance refusal existed means and what the refusal itself means. Same nullable +
+    /// omit-at-default rule as <see cref="AcceleratedSolve"/>, so such a file loads AND
+    /// re-serialises byte-identically.
+    /// </summary>
+    public bool?   DeembedOutsideCalibrationValidity { get; set; }
+
     /// <summary>The dBm TRP and peak EIRP are referenced to. Same nullable + omit-at-default rule
     /// as <see cref="RadiationPattern"/> above: 0 dBm is the default and writes nothing, so a
     /// `.cem` from before this existed loads AND re-serialises byte-identically.</summary>
@@ -289,6 +305,9 @@ public static class EmSetupPersistence
         ResonanceSearch       = s.ResonanceSearch ? true : null,
         DirectVerticalKernel  = s.DirectVerticalKernel ? true : null,
         AcceleratedSolve      = s.AcceleratedSolve ? true : null,
+        Deembed               = s.Deembed ? null : false,
+        DeembedOutsideCalibrationValidity =
+            s.DeembedOutsideCalibrationValidity ? true : null,
         RadiationPattern      = s.RadiationPattern ? true : null,
         ReferenceInputPowerDbm = s.ReferenceInputPowerDbm != 0.0 ? s.ReferenceInputPowerDbm : null,
         SnpOutputPathOverride = s.SnpOutputPathOverride is { Length: > 0 } p ? p : null,
@@ -340,6 +359,8 @@ public static class EmSetupPersistence
         ResonanceSearch       = f.ResonanceSearch ?? false,
         DirectVerticalKernel  = f.DirectVerticalKernel ?? false,
         AcceleratedSolve      = f.AcceleratedSolve ?? false,
+        Deembed               = f.Deembed ?? true,
+        DeembedOutsideCalibrationValidity = f.DeembedOutsideCalibrationValidity ?? false,
         RadiationPattern      = f.RadiationPattern ?? false,
         ReferenceInputPowerDbm = f.ReferenceInputPowerDbm ?? 0.0,
         SnpOutputPathOverride = f.SnpOutputPathOverride ?? "",

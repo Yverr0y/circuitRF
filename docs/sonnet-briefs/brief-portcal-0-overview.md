@@ -1,6 +1,6 @@
 # Brief — a port whose feed has a neighbour is de-embedded against the wrong structure: the series
 
-**Status:** brief 1 done, 2–4 to write · **Date:** 2026-09-12 · **Area:** `src/Engine/Mom` (port calibration)
+**Status:** briefs 1 and 2 done, 3–4 to write · **Date:** 2026-09-12 · **Area:** `src/Engine/Mom` (port calibration)
 **Requirement tag for the series:** `R-pcal-n`
 
 ---
@@ -59,17 +59,23 @@ A finer mesh computes the wrong error box more accurately.
 
 ### 1b. Separating the feeds fixes it completely
 
-The same coupled section, with **3 mm of line at each port and the other conductor 4 mm away there**,
+The same coupled section, with **4 mm of line at each port and the other conductor 6 mm away there**,
 same mesh settings, same kernel:
 
 | f (GHz) | S₁₁ | S₂₁ | S₃₁ | σ_max |
 |---|---|---|---|---|
-| 1.0 | −10.07 dB | −0.49 dB | −34.32 dB | 0.9986 |
-| 3.4 | −4.01 dB | −2.48 dB | −18.77 dB | 0.9934 |
-| 7.0 | −7.65 dB | −1.69 dB | −11.05 dB | 0.9901 |
+| 1.0 | −8.71 dB | −0.69 dB | −26.60 dB | 0.9983 |
+| 3.4 | −3.79 dB | −2.76 dB | −16.33 dB | 0.9907 |
+| 7.0 | −26.85 dB | −0.74 dB | −11.61 dB | 0.9884 |
 
-**Passive at every frequency, no port-feed note, no passivity note.** So the mechanism is confirmed:
+**Passive at every frequency, no clearance breach, no passivity note.** So the mechanism is confirmed:
 it is the neighbour inside the standard's length, and nothing else.
+
+**Re-measured 2026-09-12 on the widened fixture.** `separated-pair` held its neighbour 4 mm away until
+PCAL2, which is 4.16 substrate heights — inside the 5 the shipped driven threshold asks for, so the
+series' own clean case would have been refused. It is 6 mm (6.38 h) now, and the numbers above are that
+geometry's. The earlier table, at 4 mm, read −10.07/−0.49/−34.32/0.9986 at 1 GHz; the difference is the
+extra electrical length, not a change of mechanism.
 
 ---
 
@@ -152,7 +158,7 @@ briefs 3 and 4 are no longer provisional — their scope is now set by measureme
 | # | Brief | Status after PCAL1 |
 |---|---|---|
 | 1 | **The investigation** — `brief-portcal-1-investigation.md` | **Done.** The clearance law is `s/h`: the neighbour's distance in SUBSTRATE HEIGHTS, and line width is inert (a 4× change in w moves the threshold 5 %). |
-| 2 | **Stop publishing the bad answer** — `brief-portcal-2-refuse-not-warn.md` | **Write it first.** Independent of 1's outcome and now carrying 1's numbers: the threshold must be its own setting, **5 h for a neighbour carrying a port and 2 h for one that does not**, and the margin it reports is `s/h`, because nothing the solve already computes bounds the error. |
+| 2 | **Stop publishing the bad answer** — `brief-portcal-2-refuse-not-warn.md` | **Done (2026-09-12).** Independent of 1's outcome and now carrying 1's numbers: the threshold must be its own setting, **5 h for a neighbour carrying a port and 2 h for one that does not**, and the margin it reports is `s/h`, because nothing the solve already computes bounds the error. |
 | 3 | **A passive neighbour inside the port profile** — `brief-portcal-3-passive-neighbour.md` | **Write it second.** The premise holds — one driven mode, roughly half the clearance requirement — but "a passive neighbour may be benign" is **refuted**: at 246 µm it is 18.0 dB out in S₁₁. A **ground pour is not a separate case** (the neighbour's own width is inert to within 2 %), which is a scope reduction. |
 | 4 | **Calibration groups and a modal error box** — `brief-portcal-4-modal-error-box.md` | **Write it third, and it is still the expensive one.** Brief 3 does not subsume it: a driven neighbour needs 2–3× the clearance of a passive one, so a design 3 makes safe can still be refused. |
 
@@ -186,8 +192,8 @@ Build them as a workspace with:
   conductor below, `Bottom: Ground`;
 - **coupled**: two rectangles, 254 µm × 3830 µm, lower edges at y = 0 and y = 500 µm, an edge port at
   each end of each;
-- **fedpair**: the same coupled section, plus a 3 mm run at each port with the second conductor
-  displaced 4 mm in y there;
+- **fedpair**: the same coupled section, plus a 4 mm run at each port with the second conductor
+  displaced 6 mm in y there (4 mm until PCAL2 — see §1b);
 - `.cem`: 1–7 GHz, 51 points, `AnalysisKind: Planar` (Auto picks Kernel A on the coupled one, which is
   the oracle — run it both ways), `AcceleratedSolve: true`, PlanarMesh `{Auto: false,
   CellsPerWavelength: 5, EdgeCells: 2, MinCellsAcrossConductor: 2, CurrentModel: TransmissionLine,

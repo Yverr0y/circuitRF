@@ -4947,6 +4947,148 @@ at 3.5750 GHz for the resonance located at 3.56511 GHz. Routine tier.
 `EmPanelDeclutterTests.RunStartText_NamesTheBlocksThatFollowTheSweep_AndQuotesNoDuration` holds the
 plan clauses and scans the sentence for any spelling of a duration.
 
+## PCAL2 — a clearance breach is a REFUSAL now, and the threshold is two numbers (2026-09-12)
+
+`docs/sonnet-briefs/brief-portcal-2-refuse-not-warn.md`, following PCAL1 directly below. The finding
+it acts on: a port whose feed had a neighbour was de-embedded against an isolated-line standard, which
+on the series' coupled pair is **22 dB of error in S₂₁ at 1 GHz and non-passive at 48 of 51 points** —
+and the answer was published with a note attached to it. **A `.s4p` on disk carries no notes.** The
+next person to open it saw a plausible curve.
+
+### 1. What refuses, and what does not
+
+`PlanarSolve.Run` now throws `PlanarFeedClearanceRefusedException` at SETUP — before the first
+Green's-function fit — when any de-embedded port's feed has another conductor closer than that
+neighbour's class requires. `EmRunService` catches it beside the mesh-ceiling refusal and returns
+`EmRunStatus.Refused` with `em.refused.port-clearance`, so `circuitrf em` exits 1 with the run
+service's own sentence and **writes no `.sNp`** — the GUI and the CLI take one decision from one
+place, which `Gate5_TheThresholdAndThePredicateExistExactlyOnce` asserts as a comment-stripped source
+scan rather than as prose.
+
+**Passivity was deliberately NOT made a refusal.** It is a symptom with several causes, some of them
+legitimate at the 1e-3 level, and refusing on it would block runs that are fine. The refusal is on the
+*cause* — a measurable geometric fact about the port — and `NOT PASSIVE` goes on being reported as the
+diagnostic it is.
+
+### 2. The threshold is TWO numbers, on `PlanarCalibrationSettings`, and it is not `EndRunHeights`
+
+`DrivenNeighbourClearanceHeights = 5.0` and `PassiveNeighbourClearanceHeights = 2.0`, both PCAL1's
+recommendation. They are separate from `EndRunHeights` (3.0, unchanged) and the separation is
+load-bearing in two independent ways:
+
+- **`EndRunHeights` is a length ALONG the feed** and sizes every calibration standard — already 4.57×
+  the DUT's unknowns on the fixture and 6.51× on the board. Raising it to buy clearance would pay for
+  the clearance in solve time.
+- **The clearance is a distance ACROSS**, and costs nothing. So the scan region stays the standard's
+  own run (`EndRunHeights × h` longitudinally) while the threshold applies laterally. Letting the
+  scan's LENGTH grow with the threshold instead was tried and rejected: at 5 h the scan reaches 4.5 mm
+  down a clean feed and finds ordinary circuit structure the standard never sees — on `separated-pair`
+  it reports the coupled section itself, 4 mm away, as the port's neighbour. That is the unclearable
+  warning the 2026-08-12 midpoint fix already had to cure once.
+
+### 3. THREE classes of nearby metal, and two of them are not neighbours at all
+
+`PlanarConductors` (new) labels every mesh cell by connected conductor, **from the BASIS list rather
+than from the polygons** — a rooftop basis exists for exactly those adjacent cell pairs that are both
+metal, so the basis list already is the conduction graph of the meshed structure, vias included. A
+second answer derived from the drawn polygons would disagree wherever the mesher staircased or cut.
+
+| the nearest metal | verdict |
+|---|---|
+| the port's OWN conductor | not a neighbour — `PlanarFeedExtension`'s job, and it peels its lead exactly |
+| inside the port's declared cross-section (a coplanar return) | not a neighbour — all of it is reproduced in the standard |
+| a separate conductor carrying a port | driven, 5 h |
+| a separate conductor carrying none | passive, 2 h |
+
+**The own-net rule is not a nicety; without it the refusal refuses every taper in the repository.**
+R-fed-1 sizes its lead to `EndRunHeights`, which is now SMALLER than the clearance threshold, so the
+DUT's own flare begins inside the scanned region by construction.
+
+### 4. The finding that cost the most: a cell with no basis is not a conductor
+
+**Measured, not reasoned about.** The conformal mesh of the Klopfenstein taper `EmCeilingRefusalTests`
+runs on has 3,504 cells and **33 connected components** — 32 of which are single cut cells that no
+rooftop pairs with, slivers of the taper's OWN metal that R-cut-4 declines to drive. Labelled as
+one-cell conductors carrying no port, they made PCAL2 refuse that taper at 0.13 substrate heights from
+its own artwork, with a message naming metal the user would have had to hunt for.
+
+A cell in no basis carries no unknown, no current and no contribution to any answer: it is not in the
+solve. So it cannot make a calibration wrong, and `PlanarConductors.CarriesCurrent` excludes it. This
+is the one defect in this phase that a synthetic fixture would never have produced — it needed a
+conformal mesh of real artwork.
+
+### 5. The two `.cem` settings
+
+- **`Deembed`** (null = ON). `PlanarSolveSettings.Deembed` had existed since L8d with **no `.cem`
+  field to reach it**, so the mesh-ceiling refusal's own recommended remedy — "turn de-embedding off
+  and read the raw solve instead" — could not be followed from the GUI or from `circuitrf em` at all.
+  A refusal that names an unreachable remedy is not a remedy.
+- **`DeembedOutsideCalibrationValidity`** (null = off). Named for what it DOES rather than for the
+  check it suppresses, because the check is not the thing being turned off: the arithmetic still runs
+  outside its validity and the answer is still wrong in the way the refusal describes.
+
+Both follow the omit-at-default rule, so every `.cem` on disk gains no byte, and both are on the
+Solver options group of the EM panel with the override disabled outright when de-embedding is off.
+
+### 6. The caveat rides on the FILE, because the file is what outlives the notes
+
+`EmProvenanceStamp.CaveatPrefix` (`! circuitRF-EM caveat: `) and `EmSnpProvenance.ValidityCaveats` /
+`ReadCaveats`. A run that de-embedded outside validity stamps one line naming every breached port and
+its margin in substrate heights; every other run stamps none, so an ordinary `.sNp` is byte-identical
+to one written before PCAL2. It reads back off the file, which is the assertion `Gate3` makes — a
+caveat nothing can read back has the same defect one step further on.
+
+**It is deliberately NOT in the provenance HASH.** Adding `Deembed` to `MeshHash` or `PortHash` would
+mark every `.snp` in existence stale and would itself break the byte-identity R-pcal2-6 asks for. The
+consequence, stated rather than hidden: a raw-solve `.snp` reads as current against a de-embedding
+setup, the same gap `AdaptiveSampling` and `DispersionCorrection` already have.
+
+### 7. No error bound, and the reason is PCAL1's
+
+R-pcal2-5's margin is reported as **s/h on every de-embedded port, breached or not** — a pass/fail with
+no distance is how a threshold change becomes invisible. There is no error estimate beside it and none
+was attempted: `PlanarDeembed.SolveErrorBox`'s arguments are the two standards and the DUT is not an
+input, so both residuals are bit-for-bit identical between the run that is 22 dB wrong and the run at
+the floor, and σ_max is non-monotonic in the error. Geometry is the only honest quantitative thing to
+report here.
+
+### 8. The fixture moved, and that was the owner's call
+
+**`testdata/portcal/separated-pair` held its neighbour 4 mm away, which is 4.16 substrate heights on
+its own 0.9 mm stackup — inside the shipped driven threshold of 5.** So the brief's own R-pcal2-4
+(5 h) and its own gate 2 (`separated-pair` runs clean) could not both hold. PCAL1's measured
+requirement at h = 0.9 mm is ≈ 3.9 h, so the fixture was fine on its own stackup and refused by a
+threshold sized to cover the 0.225 mm case as well (≈ 5.5 h there).
+
+Put to the owner with three options (ship 4 h and leave the fixture; ship 5 h and widen it; ship 5 h
+and let it refuse). **Decision: ship 5 h and widen the fixture**, to 6 mm — 5746 µm edge to edge =
+6.38 h. The re-measured numbers replaced the tables that quoted the old geometry in
+`brief-portcal-0-overview.md` §1b, `an01-ports-and-coupling.md` §3 and `testdata/portcal/README.md`,
+and the AN-01 figure fixture was redrawn to the same dimensions.
+
+### 9. How R-pcal2-6's byte-identity was actually proved
+
+Not by assertion. A `git worktree` at the pre-change HEAD was built, handed a copy of the **widened**
+layout, and run; the post-change build was run on the same geometry; the two `.s4p` files are
+**identical on every line but `circuitRF-EM written:`**, which the file carries by design. (A `git
+stash` would have been the full suite twice plus a restore with a half-finished change at risk — a
+worktree costs one build.) That comparison is a manual step and stays one: there is no golden
+Touchstone in `testdata/portcal` by policy. What is gated on every run is the clearance DECISION on
+the committed geometry, asked of the same function the solver asks, at no solve cost —
+`Gate2_TheSeparatedPairClearsBothThresholds_WithItsMarginStated`, which asserts the margin as a number
+so a threshold change cannot pass unnoticed. The end-to-end clean run is beside it in the
+`Category=Benchmark` tier at 40 s.
+
+### 10. The one existing test that had to change, and why it is not a regression
+
+`CoplanarDeembedTests.Gate5_AMixedCalibrationRuns_AndItsCostIsReported` builds an all-plane run purely
+as a COST BASELINE against a mixed one. PCAL2 refuses that baseline **correctly**: treating port 2 as a
+plain microstrip puts the return strip 150 µm (0.03 h) from a feed the standard reproduces as an
+isolated line — the test's own comment already said the clearance warning "would be right to fire".
+Nothing reads that run's s-parameters, only its standard count and its clock, so it now asks for
+`DeembedOutsideCalibrationValidity: true` explicitly. That is the whole of the fallout across
+`Engine.Tests` (2,220 tests) and `Ui.Tests`.
+
 ## PCAL1 — how much clearance a calibrated port actually needs (2026-09-12)
 
 `docs/sonnet-briefs/brief-portcal-1-investigation.md`. Measurement and a decision; **no production

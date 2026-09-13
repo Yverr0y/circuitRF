@@ -14,7 +14,8 @@ keywords: EM, electromagnetic, method of moments, MoM, planar solver, full wave,
 <li><a href="#can-cannot">What can and cannot be simulated</a></li>
 <li><a href="#implementation">For advanced users: how circuitRF implements MoM</a></li>
 <li><a href="#ports">Ports</a></li>
-<li><a href="#deembedding">De-embedding</a></li>
+<li><a href="#deembedding">De-embedding</a>
+  <ul><li><a href="#validity">The validity condition: an isolated feed</a></li></ul></li>
 <li><a href="#adaptive">Adaptive frequency sampling</a></li>
 <li><a href="#resonance-search">The resonance search</a></li>
 <li><a href="#conformal">Conformal boundary cells</a></li>
@@ -619,8 +620,8 @@ radiates cannot be cleanly de-embedded.**
   the line — and it costs solve time. This is the counter-intuitive one, and it is measured.
 - **Keep the feed's own cross-section uniform for the calibration's run**, and keep other metal out of
   that run. The solver grows the uniform lead it needs, but **a lead lengthens a feed, it cannot move a
-  neighbour sideways.** Metal running alongside the port inside the calibration's own run is still a
-  limitation and is still warned about.
+  neighbour sideways.** Metal running alongside the port inside the calibration's own run is a
+  **refusal**, not a warning — see [the validity condition](#validity) directly below.
 - **Use a feed width the mesh can resolve.** The edge mesh needs several cells across the conductor; a
   feed narrower than a few cells is under-resolved exactly where the port excitation is applied. *Rule
   of thumb: at least 3–5 cells across the feed width, which is what the default mesh settings give you
@@ -631,6 +632,63 @@ radiates cannot be cleanly de-embedded.**
   is set by the mesh at the cut, not by radiation between feeds.
 - **Watch the band, not just the centre.** Everything above degrades with frequency. If your structure
   is fine at 2 GHz and strange at 12 GHz, suspect the port before the geometry.
+
+### The validity condition: an isolated feed {#validity}
+
+The calibration standard is an **isolated uniform line** of the port's own cross-section. That is not a
+tolerance, it is what the standard *is* — so when another conductor sits inside the run of line the
+standard reproduces, the error box is measured on a structure that is not the one being corrected, and
+the peel divides that mismatch by a₂₁², which is of order 10⁻⁴ at 1 GHz.
+
+**The error that produces is not mild.** Measured against the exact cross-section answer on two straight
+254 µm microstrips 246 µm apart on 0.9 mm FR-4, ports at all four ends:
+
+| f | S₁₁ (exact) | S₁₁ (de-embedded) | S₂₁ (exact) | S₂₁ (de-embedded) |
+|---|---|---|---|---|
+| 1.0 GHz | −19.09 dB | −0.08 dB | **−0.11 dB** | **−22.75 dB** |
+| 3.4 GHz | −9.91 dB | −0.85 dB | −0.84 dB | −13.23 dB |
+| 7.0 GHz | −6.52 dB | −4.01 dB | −1.88 dB | −13.07 dB |
+
+Non-passive at 48 of 51 frequencies, and **a finer mesh does not help** — it computes the wrong error box
+more accurately. Doubling the cells per wavelength on a real board moved S₁₁ by at most 0.19 dB and left
+the answer non-passive at every point.
+
+**So the clearance is a condition, it is enforced, and it is two numbers:**
+
+| The nearest other conductor | Clearance it needs |
+|---|---|
+| carries a port of its own | **5 substrate heights** |
+| carries no port (a passive trace, a ground pour) | **2 substrate heights** |
+
+Both are measured across the port's own profile, over the run of line the standard reproduces, and both
+scale with **substrate height** — not with line width, and not with the neighbour's width. That was
+measured rather than assumed: a 4× change in line width moves the threshold by 5%, and a 5 mm ground pour
+behaves like a 254 µm trace to within 2%. A neighbour carrying a port needs 2–3× the clearance of one
+that does not, because it brings a second port's error box and the mutual terms with it; one number for
+both cases would either refuse designs that are fine or pass designs that are 18 dB wrong.
+
+Three things are deliberately **not** neighbours:
+
+- **Metal on the port's own net** — a flare, a pad, the structure the port is attached to. That is what
+  [the automatic feed extension](#feed) is for, and it removes its lead exactly.
+- **A coplanar port's own return conductor**, and everything else inside the port's declared
+  cross-section. All of it is reproduced in the standard.
+- **Metal outside the run of line the standard reproduces.** A coupled section several millimetres down
+  a clean feed is part of your circuit, not part of the port's neighbourhood.
+
+**Every de-embedded run reports its margin**, breached or not, in substrate heights — the variable the
+error was measured to follow. There is deliberately **no error bound**: nothing the solve already
+computes tracks the size of this error. The de-embedding residuals cannot, structurally — they are
+computed from the two standards and the DUT is not an input, so they are bit-for-bit identical between a
+run that is 22 dB wrong and one at the accuracy floor. σ_max detects the failure well and estimates it
+not at all; it is not even monotone in the error.
+
+What to do about a refusal, in the order worth trying: check whether you need the full-wave kernel at all
+(a uniform cross-section is solved exactly and far more cheaply by the
+[uniform-line kernel](#can-cannot)); move the **ports** to where the line is already isolated and
+de-embed the extra length in the circuit; or give the feeds an isolated run in the artwork. The two
+switches in [Solver options](em-setup.html#deembedding) are the ways to get a number out of the geometry
+as drawn — the raw solve, or the de-embedded answer with the file marked.
 
 ### What a good and a bad de-embedded result look like
 

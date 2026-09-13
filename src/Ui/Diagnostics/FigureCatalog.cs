@@ -237,11 +237,12 @@ public static class FigureCatalog
           + "and still coupled to the lower one - it has lost its terminations, not its existence, "
           + "and is now open at both ends."),
 
-        new("an01-coupled-pair-isolated-feeds", DocLayoutFixtures.CoupledPairIsolatedFeeds, 882, 402, null,
-            "The remedy: the same coupled section, with 3 mm of line at each port and the other "
-          + "conductor held 4 mm away there. The de-embedding calibration assumes a port's feed is "
-          + "an isolated uniform line for 2.7 mm - now it is. Measured on this geometry the result "
-          + "is passive at every frequency; with the ports on the coupled section it is not."),
+        new("an01-coupled-pair-isolated-feeds", DocLayoutFixtures.CoupledPairIsolatedFeeds, 882, 468, null,
+            "The remedy: the same coupled section, with 4 mm of line at each port and the other "
+          + "conductor held 6 mm away there. The de-embedding calibration assumes a port's feed is "
+          + "an isolated uniform line, and a neighbour carrying a port of its own has to be 5 "
+          + "substrate heights clear of it - here it is 6.38. Measured on this geometry the result "
+          + "is passive at every frequency; with the ports on the coupled section it is refused."),
 
         new("an01-coupled-pair-coarse-mesh", DocLayoutFixtures.CoupledPairCoarseMesh, 882, 192, null,
             "The same pair meshed at cells per wavelength 5 with cells across 2. One cell lands across "

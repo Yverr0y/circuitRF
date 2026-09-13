@@ -358,8 +358,15 @@ public class CoplanarDeembedTests(ITestOutputHelper output)
         var rMixed  = PlanarSolve.Run(problem, report.Mesh, mixed, [f]);
         swMixed.Stop();
 
+        // PCAL2 — the all-plane run is the COST BASELINE and nothing else, and PCAL2 refuses it on
+        // its merits: treating port 2 as a plain microstrip puts the return strip 150 µm (0.03 h)
+        // from a feed the standard reproduces as an isolated line, which is precisely the breach
+        // R-pcal2-1 now stops. That is the right verdict about the physics and the wrong thing to
+        // happen to a stopwatch, so this one run is explicitly allowed outside the calibration's
+        // validity. Nothing below reads its s-parameters — only its standard count and its clock.
         var swPlane = System.Diagnostics.Stopwatch.StartNew();
-        var rPlane  = PlanarSolve.Run(problem, report.Mesh, both, [f]);
+        var rPlane  = PlanarSolve.Run(problem, report.Mesh, both, [f],
+            new PlanarSolveSettings(DeembedOutsideCalibrationValidity: true));
         swPlane.Stop();
 
         _out.WriteLine($"mixed : {rMixed.StandardCount} standard mesh(es), core fills " +
