@@ -187,15 +187,21 @@ public static class LayoutClipper
         var info = new RingInfo[rings.Count];
         for (int i = 0; i < rings.Count; i++) info[i] = RingInfo.Of(rings[i]);
 
+        // The y-band index, built lazily per ring: the two terms below that a bounding box cannot help
+        // are exactly the two a band CAN. Null for a ring too small to be worth indexing, which every
+        // query below falls back over. See RingBands.
+        var bands = new RingBands?[rings.Count];
+        RingBands? BandsOf(int i) => bands[i] ??= RingBands.Build(rings[i]);
+
         for (int i = 1; i < rings.Count; i++)
         {
             var hole = rings[i];
             foreach (var v in EnumeratePoints(hole))
-                if (!PointInOrOnRing(outer, v.X, v.Y)) return false;
-            if (RingsIntersect(hole, outer, info[i], info[0])) return false;
+                if (!PointInOrOnRing(outer, BandsOf(0), v.X, v.Y)) return false;
+            if (RingsIntersect(hole, outer, info[i], info[0], BandsOf(i), BandsOf(0))) return false;
 
             for (int j = i + 1; j < rings.Count; j++)
-                if (RingsIntersect(hole, rings[j], info[i], info[j])) return false;
+                if (RingsIntersect(hole, rings[j], info[i], info[j], BandsOf(i), BandsOf(j))) return false;
         }
         return true;
     }
@@ -249,34 +255,56 @@ public static class LayoutClipper
     }
 
     /// <summary>
-    /// Ray-cast containment. <b>The one term no box helps</b> — a ray has to see every segment it can
-    /// cross, so there is nothing to reject — and after the two prefilters in
-    /// <see cref="HolesAreValid"/> it is what is left: ~155 ms of the 0.30 s that reading a
-    /// Gerber-imported board's 1,573 holed shapes now costs, nearly all of it on the one 228-hole
-    /// pour.
+    /// Ray-cast containment. <b>The one term no BOX helps</b> — a ray has to see every segment it can
+    /// cross, so there is nothing a bounding box can reject — which is why, after the two box
+    /// prefilters in <see cref="HolesAreValid"/>, this was one of the two terms left standing.
     ///
     /// <para><b>Gating <see cref="OnSegment"/> behind the segment's own box was tried and MEASURED NO
     /// BETTER</b> — 0.34 s against a 0.30-0.34 s spread for this, i.e. inside the noise. The
     /// point-lies-on-this-segment test is three multiplies on values already in registers, so four
     /// integer compares and a branch per segment buy back about what they cost; the simpler code
-    /// wins on a tie. Cutting this further needs an INDEX over the outer ring — segments bucketed by
-    /// y, so a cast at height <c>py</c> visits one band instead of all N — which is a different piece
-    /// of work with a build cost of its own, and is not done here.</para>
+    /// wins on a tie.</para>
+    ///
+    /// <para><b>What did work is the <see cref="RingBands"/> index</b> — segments bucketed by y, so a
+    /// cast at height <c>py</c> visits one band instead of all N. That was recorded here as "a
+    /// different piece of work, not done", and it was done on 2026-09-12 when a workspace holding
+    /// three imported boards took ~9 s to open. See <c>src/Design/RESOLVED.md</c>.</para>
     /// </summary>
-    private static bool PointInOrOnRing(long[] ring, long px, long py)
+    private static bool PointInOrOnRing(long[] ring, RingBands? bands, long px, long py)
     {
         int n = ring.Length / 2;
         if (n < 3) return false;
-        bool inside = false;
-        for (int i = 0, j = n - 1; i < n; j = i++)
+
+        if (bands is null)
         {
-            double xi = ring[2 * i], yi = ring[2 * i + 1];
-            double xj = ring[2 * j], yj = ring[2 * j + 1];
-            if (OnSegment(px, py, xi, yi, xj, yj)) return true;
-            bool crosses = (yi > py) != (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi;
-            if (crosses) inside = !inside;
+            bool all = false;
+            for (int i = 0, j = n - 1; i < n; j = i++)
+                if (Cast(ring, i, j, px, py, ref all)) return true;
+            return all;
         }
+
+        // A segment whose y-extent does not straddle py can neither contain the point nor be crossed
+        // by the ray, so it changes neither answer — which is what makes visiting one band the same
+        // computation as visiting all N. The band is indexed by SEGMENT j (the pair j -> j+1), and the
+        // pair is then read in the same (i, j) order the unindexed loop reads it in, so the crossing
+        // arithmetic is bit-for-bit what it always was.
+        bool inside = false;
+        foreach (int j in bands.SegmentsAt(py))
+            if (Cast(ring, (j + 1) % n, j, px, py, ref inside)) return true;
         return inside;
+    }
+
+    /// <summary>One segment's contribution to <see cref="PointInOrOnRing"/> — true means the point is
+    /// ON it and the answer is settled; otherwise <paramref name="inside"/> flips if the ray crosses.
+    /// Extracted so the indexed and unindexed walks cannot drift into two arithmetics.</summary>
+    private static bool Cast(long[] ring, int i, int j, long px, long py, ref bool inside)
+    {
+        double xi = ring[2 * i], yi = ring[2 * i + 1];
+        double xj = ring[2 * j], yj = ring[2 * j + 1];
+        if (OnSegment(px, py, xi, yi, xj, yj)) return true;
+        bool crosses = (yi > py) != (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi;
+        if (crosses) inside = !inside;
+        return false;
     }
 
     private static bool OnSegment(double px, double py, double ax, double ay, double bx, double by)
@@ -300,7 +328,8 @@ public static class LayoutClipper
     /// give the same answer — <see cref="SegmentsIntersect"/> is symmetric in its two segments — so
     /// this picks the one that is fast.</para>
     /// </summary>
-    private static bool RingsIntersect(long[] a, long[] b, in RingInfo ia, in RingInfo ib)
+    private static bool RingsIntersect(long[] a, long[] b, in RingInfo ia, in RingInfo ib,
+                                      RingBands? ba, RingBands? bb)
     {
         // A ZERO-LENGTH segment reports as meeting ANYTHING, wherever the two rings are — so this
         // case has to be answered before the boxes get a say, and it is the one place a box reject
@@ -315,10 +344,11 @@ public static class LayoutClipper
             (ib.HasZeroLengthSegment && ia.Segments > 0)) return true;
 
         if (!Overlap(ia, ib)) return false;
-        return a.Length >= b.Length ? ScanAgainst(a, b, ib) : ScanAgainst(b, a, ia);
+        return a.Length >= b.Length ? ScanAgainst(a, b, ib, bb) : ScanAgainst(b, a, ia, ba);
     }
 
-    private static bool ScanAgainst(long[] scanned, long[] against, in RingInfo againstBox)
+    private static bool ScanAgainst(long[] scanned, long[] against, in RingInfo againstBox,
+                                    RingBands? againstBands)
     {
         int na = scanned.Length / 2, nb = against.Length / 2;
         for (int i = 0; i < na; i++)
@@ -331,6 +361,21 @@ public static class LayoutClipper
             if (Math.Max(ax0, ax1) < againstBox.MinX || Math.Min(ax0, ax1) > againstBox.MaxX ||
                 Math.Max(ay0, ay1) < againstBox.MinY || Math.Min(ay0, ay1) > againstBox.MaxY)
                 continue;
+
+            // THE RING'S box is what the reject above can use, and on the pair this exists for — a
+            // hole against the outer ring that contains it — that box rejects nothing, because the
+            // hole is inside it. The band index is the same reject at SEGMENT granularity: two
+            // segments that meet share a point, so their y-extents overlap, so a segment outside this
+            // one's band of `against` cannot be met by it.
+            if (againstBands is not null)
+            {
+                foreach (int j in againstBands.SegmentsOverlapping(Math.Min(ay0, ay1), Math.Max(ay0, ay1)))
+                {
+                    var (bx0, by0, bx1, by1) = RingSegment(against, j, nb);
+                    if (SegmentsIntersect(ax0, ay0, ax1, ay1, bx0, by0, bx1, by1)) return true;
+                }
+                continue;
+            }
 
             for (int j = 0; j < nb; j++)
             {
@@ -368,4 +413,175 @@ public static class LayoutClipper
     }
 
     private static double Cross(double ax, double ay, double bx, double by) => ax * by - ay * bx;
+
+    /// <summary>
+    /// The ring size at which <see cref="RingBands"/> starts being built. Below it the scan an index
+    /// would replace is already short enough that building one costs more than it saves, so a smaller
+    /// ring is walked whole.
+    ///
+    /// <para>Internal because a differential test over rings BELOW it proves nothing about the index —
+    /// it would not have been built. <c>LayoutClipperHoleValidityTests</c> reads this rather than
+    /// hard-coding a number that could drift out from under it and quietly make that corpus
+    /// vacuous.</para>
+    /// </summary>
+    internal const int RingIndexMinimumSegments = 48;
+
+    /// <summary>
+    /// A ring's segments bucketed by y, so a query that can only interact with one horizontal band of
+    /// the ring visits that band instead of all N segments.
+    ///
+    /// <para><b>What it buys, and why a bounding box could not.</b> <see cref="HolesAreValid"/>'s box
+    /// prefilters kill the pairs that provably cannot meet, and on an ordinary pour that is nearly all
+    /// of them. Two terms are structurally beyond them: the point-in-ring cast, because a ray has to
+    /// see every segment it could cross; and a hole tested against the outer ring that CONTAINS it,
+    /// whose box therefore rejects nothing. Both reduce to the same fact — two things that meet share
+    /// a point, so their y-extents overlap — which is a band lookup.</para>
+    ///
+    /// <para>Measured on the pour that motivated this, a Gerber import with 28 holes carrying 59,996
+    /// vertices against a 271-vertex outer ring (2026-09-12): 379 ms for that one shape, 453 ms for
+    /// the board's 445 holed shapes, 575 ms to read the whole 10.6 MB file. See
+    /// <c>src/Design/RESOLVED.md</c> for what those became.</para>
+    ///
+    /// <para><b>It is a candidate filter, never a decision.</b> Every segment a query returns still
+    /// goes through the same unchanged arithmetic; the index only declines to hand over segments that
+    /// could not have changed the answer. That is what keeps
+    /// <c>LayoutClipperHoleValidityTests</c>' differential gate against the unfiltered algorithm
+    /// meaningful — it is the only thing that says so.</para>
+    /// </summary>
+    private sealed class RingBands
+    {
+        private const int MaxBands = 4096;
+
+        /// <summary>Roughly how many segments a band should hold. Small enough that a query is short,
+        /// large enough that a segment spanning several bands is not copied into many of them.</summary>
+        private const int TargetPerBand = 4;
+
+        private readonly int[] _starts;   // CSR: _bands + 1 offsets into _items
+        private readonly int[] _items;    // segment indices, grouped by band
+        private readonly long _minY, _span;
+        private readonly int _bands;
+
+        // Dedupe for the ranged query: a segment tall enough to sit in several bands must still be
+        // handed over once. Stamps rather than a cleared bitmap, so a query costs only what it returns.
+        private readonly int[] _stamp;
+        private int[] _gathered;
+        private int _generation;
+
+        private RingBands(int[] starts, int[] items, long minY, long span, int bands, int segments)
+        {
+            _starts = starts; _items = items; _minY = minY; _span = span; _bands = bands;
+            _stamp = new int[segments];
+            _gathered = new int[Math.Min(segments, 64)];
+        }
+
+        /// <summary>Null when the ring is too small to index, degenerate, or so dominated by tall
+        /// segments that the index would hold more copies than it saves lookups.</summary>
+        public static RingBands? Build(long[] xy)
+        {
+            int n = xy.Length / 2;
+            if (n < RingIndexMinimumSegments) return null;
+
+            long minY = xy[1], maxY = xy[1];
+            for (int i = 3; i < xy.Length; i += 2)
+            {
+                long y = xy[i];
+                if (y < minY) minY = y; else if (y > maxY) maxY = y;
+            }
+
+            long span = maxY - minY;
+            if (span <= 0) return null;   // a ring flat in y has one band, which is no index at all
+
+            int bands = Math.Clamp(n / TargetPerBand, 1, MaxBands);
+            // (y - minY) * bands must not overflow. Coordinates are DBU and nothing real comes close,
+            // but a hand-written file is not obliged to be real.
+            while (bands > 1 && span > long.MaxValue / bands) bands /= 2;
+            if (bands < 2) return null;
+
+            // Two passes, CSR. A segment goes in every band its y-extent touches — and if that adds up
+            // to far more entries than segments, the ring is mostly tall segments and the index would
+            // be a copy of itself per band. Coarsen, then give up rather than pay for it.
+            int[] counts;
+            long total;
+            while (true)
+            {
+                counts = new int[bands + 1];
+                total = 0;
+                for (int i = 0; i < n; i++)
+                {
+                    int j = i + 1 == n ? 0 : i + 1;
+                    int lo = BandOf(xy[2 * i + 1], minY, span, bands);
+                    int hi = BandOf(xy[2 * j + 1], minY, span, bands);
+                    if (lo > hi) (lo, hi) = (hi, lo);
+                    for (int b = lo; b <= hi; b++) counts[b]++;
+                    total += hi - lo + 1;
+                }
+                if (total <= 8L * n || bands <= 4) break;
+                bands /= 4;
+            }
+            if (total > 8L * n) return null;
+
+            var starts = new int[bands + 1];
+            int running = 0;
+            for (int b = 0; b < bands; b++) { starts[b] = running; running += counts[b]; }
+            starts[bands] = running;
+
+            var fill = (int[])starts.Clone();
+            var items = new int[running];
+            for (int i = 0; i < n; i++)
+            {
+                int j = i + 1 == n ? 0 : i + 1;
+                int lo = BandOf(xy[2 * i + 1], minY, span, bands);
+                int hi = BandOf(xy[2 * j + 1], minY, span, bands);
+                if (lo > hi) (lo, hi) = (hi, lo);
+                for (int b = lo; b <= hi; b++) items[fill[b]++] = i;
+            }
+
+            return new RingBands(starts, items, minY, span, bands, n);
+        }
+
+        private static int BandOf(long y, long minY, long span, int bands)
+        {
+            if (y <= minY) return 0;
+            if (y >= minY + span) return bands - 1;
+            return (int)((y - minY) * bands / (span + 1));
+        }
+
+        /// <summary>The segments whose y-extent can contain <paramref name="y"/>. Segment <c>i</c> is
+        /// the pair <c>i -> i+1</c> (wrapping), which is <see cref="RingSegment"/>'s numbering.</summary>
+        public ReadOnlySpan<int> SegmentsAt(long y)
+        {
+            if (y < _minY || y > _minY + _span) return default;
+            int b = BandOf(y, _minY, _span, _bands);
+            return _items.AsSpan(_starts[b], _starts[b + 1] - _starts[b]);
+        }
+
+        /// <summary>The segments whose y-extent can overlap <paramref name="lo"/>..<paramref name="hi"/>,
+        /// each returned once. The single-band case — most of them — hands back the band itself with
+        /// nothing copied.</summary>
+        public ReadOnlySpan<int> SegmentsOverlapping(double lo, double hi)
+        {
+            if (hi < _minY || lo > _minY + _span) return default;
+
+            // RingSegment hands its caller doubles; these came from the same long[] this index was
+            // built from, so the conversion is exact — and rounded OUTWARD regardless, because a band
+            // range that is one too wide costs a few extra segment tests while one that is too narrow
+            // would drop an intersection.
+            int bLo = BandOf((long)Math.Floor(lo), _minY, _span, _bands);
+            int bHi = BandOf((long)Math.Ceiling(hi), _minY, _span, _bands);
+            if (bLo == bHi) return _items.AsSpan(_starts[bLo], _starts[bLo + 1] - _starts[bLo]);
+
+            _generation++;
+            int count = 0;
+            for (int b = bLo; b <= bHi; b++)
+                for (int k = _starts[b]; k < _starts[b + 1]; k++)
+                {
+                    int seg = _items[k];
+                    if (_stamp[seg] == _generation) continue;
+                    _stamp[seg] = _generation;
+                    if (count == _gathered.Length) Array.Resize(ref _gathered, _gathered.Length * 2);
+                    _gathered[count++] = seg;
+                }
+            return _gathered.AsSpan(0, count);
+        }
+    }
 }

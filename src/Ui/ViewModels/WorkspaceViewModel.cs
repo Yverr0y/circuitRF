@@ -2102,12 +2102,16 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     /// <see cref="RegenerateAllGeneratedCells"/> with the pass itself moved OFF the UI thread, for the
     /// workspace open — where it is the largest thing standing between the user and a window.
     ///
-    /// <para>Measured at 663 ms on the owner's workspace (2026-09-04), and it is not incidental:
-    /// <see cref="GeneratedCellsLifecycle.RegenerateAll"/> READS EVERY <c>.clay</c> UNDER THE
-    /// WORKSPACE to find the PCell snapshots in them, so a workspace holding one 27 MB imported board
-    /// pays that board's whole read here as well as at the open. It is framework-free by design and
-    /// touches nothing thread-affine, so the only thing that has to come back is what it wants to
-    /// say — buffered and posted here rather than from the working thread.</para>
+    /// <para>Measured at 663 ms on the owner's workspace (2026-09-04), and it was not incidental:
+    /// <see cref="GeneratedCellsLifecycle.RegenerateAll"/> visits EVERY <c>.clay</c> UNDER THE
+    /// WORKSPACE to find the PCell snapshots in them, and it used to LOAD each one to ask — so a
+    /// workspace holding a few imported boards paid all of their reading here, for dictionaries that
+    /// are usually not there at all (4.72 s on a three-board workspace, 2026-09-12). It now asks
+    /// <see cref="LayoutPersistence.MightCarryPCellSnapshots"/> first and loads only a layout that
+    /// says yes, which put the same workspace at 76 ms. It stays off the UI thread regardless: it is
+    /// framework-free by design and touches nothing thread-affine, so the only thing that has to come
+    /// back is what it wants to say — buffered and posted here rather than from the working
+    /// thread.</para>
     ///
     /// <para><b>Awaited, never fire-and-forget.</b> The whole point of the pass is to warm the
     /// generated-cell cache BEFORE any layout referencing it opens; started and not waited for, a

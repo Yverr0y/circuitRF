@@ -171,15 +171,85 @@ public static class LayoutPersistence
     public static LayoutView LoadFromFile(string path) => LoadFromFile(path, default, null);
 
     /// <summary>
+    /// Whether the <c>.clay</c> at <paramref name="path"/> can carry any
+    /// <see cref="LayoutView.PCellSnapshots"/> at all — answered by TOKENIZING the file rather than by
+    /// building the document, for the caller whose only interest in a whole workspace's layouts is
+    /// that one small dictionary.
+    ///
+    /// <para><b>Why it exists.</b> Reading a layout is not proportional to how big the file looks, and
+    /// on a Gerber-imported board it is seconds rather than milliseconds — almost none of it the JSON
+    /// parse, for the reason <see cref="LoadFromFile(string, CancellationToken, Action{int, int})"/>
+    /// gives about <see cref="LayoutClipper.EnsureValidHoles"/>. The generated-cell pass on workspace
+    /// open reads EVERY layout under the workspace to find these snapshots, so a workspace holding a
+    /// few imported boards paid all of that before its window was usable, for dictionaries that in the
+    /// overwhelming common case are not there at all. Measured on a three-board workspace
+    /// (2026-09-12): 4.96 s of loading became 0.07 s of tokenizing.</para>
+    ///
+    /// <para><b>A NO is only sound because it is a WELL-FORMED no, which is why this tokenizes rather
+    /// than searching the text for the name.</b> The caller's next decision is whether it has seen
+    /// every snapshot in the workspace — and a file it could not read is one it must assume carries
+    /// some. A substring search answers "not mentioned" for a corrupt file just as confidently as for
+    /// a sound one, which would turn an unreadable layout into a licence to collect cells it might
+    /// still be using. So the scan runs to the end of the document when the property is absent, and a
+    /// file that does not parse throws out of here exactly as <see cref="LoadFromFile(string)"/> would
+    /// have. (Absent-and-well-formed is a genuine no even if the file would later fail to BIND: a
+    /// document with no such property has no snapshot names to contribute, whatever else is wrong
+    /// with it.)</para>
+    ///
+    /// <para>True over-reports deliberately — a null or empty dictionary still answers true — because
+    /// a true answer is an instruction to load the file and ask it properly, and that load is what
+    /// used to happen unconditionally. Property names are matched case-insensitively because
+    /// <see cref="JsonOpts"/> is: a file spelling it in another case still LOADS its snapshots, so
+    /// this must not be the thing that hides them.</para>
+    /// </summary>
+    /// <exception cref="JsonException">The file is not well-formed JSON.</exception>
+    public static bool MightCarryPCellSnapshots(string path)
+    {
+        var bytes = GzipTextFile.ReadAllBytesAutoGzip(path);
+        var json = new ReadOnlySpan<byte>(bytes);
+        if (json.StartsWith(Utf8Bom)) json = json[Utf8Bom.Length..];
+
+        var reader = new Utf8JsonReader(json, isFinalBlock: true, state: default);
+
+        // Depth 1 is the file model's own properties — a nested object of the same name (a label's
+        // text is not one, but nothing says a future shape could not have such a field) is not it.
+        while (reader.Read())
+        {
+            if (reader.TokenType != JsonTokenType.PropertyName || reader.CurrentDepth != 1)
+                continue;
+            if (reader.ValueTextEquals(PCellSnapshotsUtf8)
+                || string.Equals(reader.GetString(), nameof(ClayFile.PCellSnapshots),
+                                 StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Skip the VALUE, not the property name — Read() above has not consumed it yet.
+            reader.Read();
+            reader.Skip();
+        }
+
+        return false;
+    }
+
+    private static ReadOnlySpan<byte> Utf8Bom => [0xEF, 0xBB, 0xBF];
+
+    private static ReadOnlySpan<byte> PCellSnapshotsUtf8 =>
+        "PCellSnapshots"u8;
+
+    /// <summary>
     /// <see cref="LoadFromFile(string)"/>, reported on and interruptible — for the caller that has
     /// moved this read onto a background thread and owes the user a progress row and a Cancel.
     ///
-    /// <para><b>Both hooks land on the SHAPE LOOP, and that is where the time is.</b> Reading a
-    /// layout is not proportional to how big the file looks: <see cref="LayoutClipper.EnsureValidHoles"/>
-    /// runs over every shape, and on a Gerber-imported board — thousands of composited pours, each
-    /// with hundreds of holes — that is seconds to tens of seconds, against a JSON parse measured in
-    /// hundreds of milliseconds. So the loop is both the only place a cancel can land promptly and the
-    /// only phase with an honest denominator; the parse ahead of it is one indeterminate step.</para>
+    /// <para><b>Both hooks land on the SHAPE LOOP, because that is the only phase with an honest
+    /// denominator</b> — the parse ahead of it is one indeterminate step, and a cancel can only land
+    /// promptly between shapes.</para>
+    ///
+    /// <para><b>It is no longer where the time is, and that is worth stating because it WAS.</b>
+    /// <see cref="LayoutClipper.EnsureValidHoles"/> runs over every shape, and on a Gerber-imported
+    /// board — composited pours, each with hundreds of holes — it used to be seconds to tens of
+    /// seconds against a JSON parse of a few hundred milliseconds. Since <c>RingBands</c>
+    /// (2026-09-12) the 10.6 MB board that motivated this reads in 68 ms of which 24 ms is the hole
+    /// check, so the parse is now the larger half again. The hooks stay where they are: a big enough
+    /// file is still a wait, and the shape loop is still the only place they can honestly go.</para>
     ///
     /// <para>Cancelling throws <see cref="OperationCanceledException"/> rather than returning a
     /// half-built view — a partially loaded layout is indistinguishable from a corrupt one to
@@ -367,5 +437,19 @@ public static class GzipTextFile
             return reader.ReadToEnd();
         }
         return Encoding.UTF8.GetString(bytes);
+    }
+
+    /// <summary><see cref="ReadAllTextAutoGzip"/> without the decode — for a reader that works in
+    /// UTF-8 bytes (<see cref="Utf8JsonReader"/>) and would only have to encode the string back.</summary>
+    public static byte[] ReadAllBytesAutoGzip(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        if (bytes.Length < 2 || bytes[0] != GzipMagic[0] || bytes[1] != GzipMagic[1]) return bytes;
+
+        using var input  = new MemoryStream(bytes);
+        using var gzip   = new GZipStream(input, CompressionMode.Decompress);
+        using var output = new MemoryStream();
+        gzip.CopyTo(output);
+        return output.ToArray();
     }
 }

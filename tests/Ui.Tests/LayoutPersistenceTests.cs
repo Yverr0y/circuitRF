@@ -1,6 +1,7 @@
 using System.IO;
 using System.IO.Compression;
 using System.Text;
+using System.Text.Json;
 using CircuitRF.Ui.Layout;
 
 namespace CircuitRF.Ui.Tests;
@@ -279,5 +280,115 @@ public class LayoutPersistenceTests
         Assert.Equal(LabelHAlign.Right, restored.HAlign);
         Assert.Equal(LabelVAlign.Top, restored.VAlign);
         Assert.Equal(alignedJson, LayoutPersistence.Serialize(LayoutPersistence.Deserialize(alignedJson)));
+    }
+
+    // ── The PCell-snapshot sniff (owner report, 2026-09-12: a workspace took seconds to OPEN) ──
+
+    /// <summary>
+    /// <see cref="LayoutPersistence.MightCarryPCellSnapshots"/> exists so the generated-cell pass on
+    /// workspace open can skip a layout without loading it, and it is only safe to skip on a NO. So
+    /// the gate is agreement with the full load: whenever the loaded view has snapshots, the sniff
+    /// must have said so — and a layout with none, INCLUDING one whose own content spells the name,
+    /// must be skippable, since that is the case the whole thing exists to make cheap.
+    /// </summary>
+    [Fact]
+    public void MightCarryPCellSnapshots_NeverMissesSnapshotsTheLoadFinds()
+    {
+        var without = BuildFullFixture();
+        // The name occurring INSIDE the document is not the property: a text search would say yes here
+        // and pay the load this exists to avoid.
+        without.Shapes.Add(new LabelShape
+        {
+            Layer = new LayerKey(1, 0), Text = nameof(LayoutView.PCellSnapshots), Height = 1000,
+        });
+        without.SchematicPCellSnapshots["X1"] = new Dictionary<string, PCellValue>();
+
+        var with = BuildFullFixture();
+        with.PCellSnapshots["mline_ab12"] = new PCellSnapshot(
+            "wire.mline", new Dictionary<string, PCellValue> { ["w"] = PCellValue.Real(120.0) },
+            TechIdentity: null, SignalLayerNameOverride: null, GroundLayerNameOverride: null);
+
+        foreach (var (view, expected) in new[] { (without, false), (with, true) })
+        {
+            var path = Path.GetTempFileName();
+            try
+            {
+                LayoutPersistence.SaveToFile(path, view);
+                bool sniffed = LayoutPersistence.MightCarryPCellSnapshots(path);
+                bool loaded = LayoutPersistence.LoadFromFile(path).PCellSnapshots.Count > 0;
+
+                Assert.Equal(expected, loaded);
+                Assert.Equal(loaded, sniffed);
+            }
+            finally { File.Delete(path); }
+        }
+    }
+
+    /// <summary>
+    /// The two ways a file can carry the property without the writer having spelled it the writer's
+    /// way: gzipped (<see cref="GzipTextFile"/> is what the sniff reads through, not File.ReadAllText)
+    /// and hand-edited in another case (the reader's own JsonSerializerOptions are case-insensitive,
+    /// so such a file DOES load its snapshots and the sniff must not be the thing that hides them).
+    /// </summary>
+    [Fact]
+    public void MightCarryPCellSnapshots_SeesThroughGzip_AndIgnoresCase()
+    {
+        const string hand = """
+        {
+          "FormatVersion": 1,
+          "DbuPerMicron": 1000,
+          "pcellsnapshots": {
+            "mline_ab12": { "GeneratorId": "wire.mline", "Parameters": {} }
+          },
+          "Shapes": [],
+          "Instances": []
+        }
+        """;
+
+        var plainPath = Path.GetTempFileName();
+        var gzPath = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(plainPath, hand);
+            using (var fs = File.Create(gzPath))
+            using (var gz = new GZipStream(fs, CompressionMode.Compress))
+            using (var writer = new StreamWriter(gz, Encoding.UTF8))
+                writer.Write(hand);
+
+            // The premise: this file really does load a snapshot, in both spellings on disk.
+            Assert.Single(LayoutPersistence.LoadFromFile(plainPath).PCellSnapshots);
+            Assert.Single(LayoutPersistence.LoadFromFile(gzPath).PCellSnapshots);
+
+            Assert.True(LayoutPersistence.MightCarryPCellSnapshots(plainPath));
+            Assert.True(LayoutPersistence.MightCarryPCellSnapshots(gzPath));
+        }
+        finally
+        {
+            File.Delete(plainPath);
+            File.Delete(gzPath);
+        }
+    }
+
+    /// <summary>
+    /// The reason this TOKENIZES rather than searching the text. The caller's next decision is whether
+    /// it has seen every snapshot in the workspace, and a layout nobody could read is one it must
+    /// assume carries some — so an unreadable file has to fail here exactly as the full load fails,
+    /// rather than come back as a confident "not mentioned" and license a prune.
+    /// </summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("{ this is not a layout")]
+    [InlineData("{\"FormatVersion\": 1, \"Shapes\": [{\"$type\": \"Rect\"")]
+    [InlineData("{\"FormatVersion\": 1, \"Shapes\": [], \"Instances\": []} and then some")]
+    public void MightCarryPCellSnapshots_ThrowsOnAFileThatDoesNotParse(string content)
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, content);
+            Assert.ThrowsAny<JsonException>(() => LayoutPersistence.LoadFromFile(path));
+            Assert.ThrowsAny<JsonException>(() => LayoutPersistence.MightCarryPCellSnapshots(path));
+        }
+        finally { File.Delete(path); }
     }
 }

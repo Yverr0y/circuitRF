@@ -258,4 +258,125 @@ public sealed class LayoutClipperHoleValidityTests
         Assert.True(valid   > 200, $"only {valid} valid cases — the corpus stopped covering the accept path");
         Assert.True(invalid > 200, $"only {invalid} invalid cases — the corpus stopped covering the reject path");
     }
+
+    // ── The y-band index (2026-09-12) ───────────────────────────────────────────────────────────
+    //
+    // A second filter went in below the box prefilters — segments bucketed by y, so the point-in-ring
+    // cast and the hole-against-its-own-outer-ring test visit one band instead of all N. It has the
+    // same licence and the same gate: it may only decline to hand over segments that provably cannot
+    // change the answer, and the proof is agreement with the unfiltered algorithm.
+    //
+    // The corpus above CANNOT test it. The index has a minimum size below which it is not built at
+    // all, and every ring up there is under it — so these run the same shapes at a size that indexes.
+
+    /// <summary>
+    /// The two terms the index actually changes, at a size where it is built: many-vertex holes inside
+    /// a many-vertex outer ring (the point-in-ring cast, and the hole-vs-outer test whose box rejects
+    /// nothing because the hole is inside that box), and many-vertex holes against each other.
+    /// </summary>
+    [Fact]
+    public void OverARandomizedCorpusOfINDEXEDRings_TheIndexedAndUnfilteredAlgorithmsNeverDisagree()
+    {
+        var rng = new Random(20260912);
+        int valid = 0, invalid = 0, indexed = 0;
+
+        for (int trial = 0; trial < 400; trial++)
+        {
+            // Over the index's own minimum — asserted, not assumed, because a corpus that fell under
+            // it would pass this whole test while never building an index at all.
+            int outerVerts = rng.Next(LayoutClipper.RingIndexMinimumSegments + 16, 400);
+            var rings = new List<long[]> { Ngon(50_000, 50_000, 40_000, outerVerts, rng.NextDouble()) };
+            Assert.True(outerVerts >= LayoutClipper.RingIndexMinimumSegments);
+            indexed++;
+
+            bool adversarial = rng.Next(2) == 0;
+            int holes = rng.Next(1, 6);
+            var taken = new HashSet<int>();
+
+            for (int h = 0; h < holes; h++)
+            {
+                int holeVerts = rng.Next(LayoutClipper.RingIndexMinimumSegments + 2, 260);
+                long cx, cy, r;
+                if (adversarial)
+                {
+                    // Straddling the outer ring, overlapping each other, and sharing vertices with it —
+                    // the configurations where a band that excluded one segment too many would show.
+                    cx = 50_000 + rng.Next(-6, 7) * 8_000;
+                    cy = 50_000 + rng.Next(-6, 7) * 8_000;
+                    r  = rng.Next(1, 5) * 6_000;
+                }
+                else
+                {
+                    int cell = rng.Next(9);
+                    if (!taken.Add(cell)) continue;       // one hole per cell keeps them disjoint
+                    cx = 30_000 + cell % 3 * 20_000;
+                    cy = 30_000 + cell / 3 * 20_000;
+                    r  = 7_000;
+                }
+                rings.Add(Ngon(cx, cy, r, holeVerts, rng.NextDouble()));
+            }
+
+            bool expected = BruteForce(rings);
+            bool actual   = LayoutClipper.HolesAreValid(rings);
+            Assert.True(expected == actual,
+                $"trial {trial}: indexed={actual}, unfiltered={expected}, " +
+                $"outer={rings[0].Length / 2} holes=" + string.Join("/", rings.Skip(1).Select(r => r.Length / 2)));
+
+            if (expected) valid++; else invalid++;
+        }
+
+        Assert.True(valid   > 40, $"only {valid} valid cases — the corpus stopped covering the accept path");
+        Assert.True(invalid > 40, $"only {invalid} invalid cases — the corpus stopped covering the reject path");
+        Assert.Equal(400, indexed);
+    }
+
+    /// <summary>
+    /// The shape of the pour this was built for, and the one the box prefilters are blind to: holes
+    /// carrying FAR more vertices than the ring that contains them, so the outer ring's box rejects
+    /// none of their segments and its own y-extent covers every one of theirs.
+    /// </summary>
+    [Fact]
+    public void HolesWithFarMoreVerticesThanTheirOuterRing_AgreeWithTheUnfilteredAlgorithm()
+    {
+        var rings = new List<long[]> { Ngon(50_000, 50_000, 45_000, LayoutClipper.RingIndexMinimumSegments + 16) };
+        for (int h = 0; h < 6; h++)
+            rings.Add(Ngon(50_000 + (h % 3 - 1) * 18_000, 50_000 + (h / 3 * 2 - 1) * 14_000,
+                           6_000, 900, h * 0.1));
+
+        Assert.True(BruteForce(rings));
+        AssertAgrees([.. rings]);
+
+        // And the same set with one hole pushed out through the boundary, so the accept is not the
+        // only answer this configuration can produce.
+        rings[3] = Ngon(50_000, 50_000, 60_000, 900);
+        Assert.False(BruteForce(rings));
+        AssertAgrees([.. rings]);
+    }
+
+    /// <summary>
+    /// A ring whose segments are nearly all TALL — the case that makes a y-band index degenerate,
+    /// since each segment lands in many bands. It must still agree; whether it is indexed at all is
+    /// the index's own business.
+    /// </summary>
+    [Fact]
+    public void ATallSegmentedRing_AgreesWithTheUnfilteredAlgorithm()
+    {
+        // A comb: 80 teeth running the full height of the shape, so every segment spans every band.
+        var comb = new List<long>();
+        for (int i = 0; i < 80; i++)
+        {
+            long x = i * 1_000;
+            comb.Add(x); comb.Add(0);
+            comb.Add(x + 400); comb.Add(100_000);
+        }
+        for (int i = 79; i >= 0; i--)
+        {
+            long x = i * 1_000;
+            comb.Add(x + 600); comb.Add(100_000);
+            comb.Add(x + 900); comb.Add(0);
+        }
+
+        AssertAgrees([.. comb], Rect(2_000, 40_000, 300, 300));
+        AssertAgrees([.. comb], Rect(-9_000, -9_000, 300, 300));
+    }
 }

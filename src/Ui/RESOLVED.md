@@ -25750,3 +25750,104 @@ its own pinned case.
 Gate: `AntennaFeedbackRound2Tests.APatternTrace_IsBornWithTheRightDecibel` (four new rows) and
 `AMetricsDefaultIsNone_ButEveryDecibelIsStillOffered`, which asserts the seed and the picker in one
 test so a later narrowing of either cannot pass alone.
+
+## Opening a workspace read every layout in it, whole (owner, 2026-09-12)
+
+A workspace with **no layout open at all** — no restored document, `DocumentOrder` empty — took
+seconds to open. The three boards in it were Gerber imports, 26 MB of `.clay` between them.
+
+**Nothing was opening them. The generated-cell pass was reading them.**
+`GeneratedCellsLifecycle.RegenerateAll` walks every `.clay` under the workspace to collect the
+`PCellSnapshots` it must rebuild, and the only way it had to ask that question was
+`LayoutPersistence.LoadFromFile` — the full document. Then, for all three boards,
+`view.PCellSnapshots.Count == 0` and the whole thing was dropped on the floor. The pass's own
+doc-comment already recorded 663 ms on a different workspace and named the cause; what had not been
+noticed is that the cost is not proportional to the bytes.
+
+**Measured on the reported workspace (four `.clay`, 26 MB):**
+
+| | Release | Debug |
+|---|---|---|
+| load every layout | 762 ms | 4,721 ms |
+| tokenize for the property, load only a file that has it | 77 ms | 76 ms |
+
+**Where the time actually was, and why it is not the JSON.** One 10.6 MB board with only 1,971
+shapes cost 575 ms of the 762, and **465 ms of that was `LayoutClipper.EnsureValidHoles`** — 445 of
+its polygons are pours with holes (1,067 holes, 202k hole vertices). The remaining term in that
+check is the point-in-ring test, which no bounding box helps and which `LayoutClipper`'s own remarks
+already flag: it is O(hole vertices x outer-ring segments). By contrast a board with **33,283**
+shapes and no holes loads in 63 ms. So file size predicts nothing here; holes do.
+
+**The fix is `LayoutPersistence.MightCarryPCellSnapshots`** — find out whether the property is there
+without building the document.
+
+**It tokenizes with `Utf8JsonReader`; a text search for the name would have been wrong, and the
+existing test caught it.** `RegenerateAll`'s next decision is `sawEverything` — whether the live set
+is complete enough to prune generated cells on — and a layout nobody could read is one it must
+assume carries snapshots. A substring search answers "not mentioned" for a corrupt file exactly as
+confidently as for a sound one, which turns an unreadable layout into a licence to delete artwork
+something might still be using. `ThePrune_RefusesToRun_WhenALayoutCouldNotBeRead` went red on the
+first attempt, on a `.clay` holding `{ this is not a layout` — readable as text, so the search said
+no, so the prune ran. The tokenizing version scans to the end of the document when the property is
+absent and throws on a file that does not parse, exactly as the load would have. A well-formed
+document with no such property is a genuine no even if it would later fail to BIND: it has no
+snapshot names to contribute whatever else is wrong with it.
+
+Skipping the `.clay` whose own content spells `PCellSnapshots` (a label's text) is part of the gate,
+not an incidental: it is exactly the case a text search gets wrong in the cheap direction.
+
+Gates: `LayoutPersistenceTests.MightCarryPCellSnapshots_*` (three), and the pre-existing
+`GeneratedCellCachePersistenceTests` prune trio, which is what made the first attempt fail.
+
+**This was the smaller half, and the note first left the larger one open.** `EnsureValidHoles` cost
+~465 ms (Release) / ~4.5 s (Debug) whenever that board was genuinely OPENED, and the owner came back
+with the symptom that names it: the UI freezing on an open with no layout in it. See the next
+section — the `.cem` documents were reading the same board on the UI thread, and the read itself has
+since been fixed.
+
+## …and the UI froze on a `.cem`, which reads its board on the UI thread (owner, 2026-09-12)
+
+Round two of the same report. The workspace-open pass above was fixed and the open still felt worse,
+not better — and the owner named what the session actually holds: **a `.csch`, a `.cdd` and two
+`.cem`s. No layout open at all.**
+
+**A `.cem` opens its board.** `OpenOrActivateEmSetup` calls `vm.Refresh()` synchronously, and
+`Refresh` resolves the layout the setup names — which is a full `LayoutPersistence.LoadFromFile` of
+the referenced `.clay`. One of the two `.cem`s here names the 10.6 MB imported board. **That is the
+freeze**, and the restore loop runs on the UI thread, so nothing repaints for the duration.
+
+The extraction is NOT the expensive part, which is worth stating because it is where one would look:
+
+| stage | Release | Debug |
+|---|---|---|
+| resolve — reads the `.clay` | 558 ms | **4,544 ms** |
+| `EmGeometry.Flatten` | 0 ms | 0 ms |
+| `CrossSectionExtractor.Extract` | 0 ms | 0 ms |
+| `PlanarExtractor.Extract` | 1 ms | 1 ms |
+
+**The app being run is the Debug build** (the running process is `src/Ui/bin/Debug/net10.0`), which
+is where seconds rather than half-seconds come from. Measured both ways rather than assumed.
+
+**So the fix had to be the read itself** — `LayoutClipper`'s `RingBands` y-band index, recorded in
+`src/Design/RESOLVED.md`. What the whole open sequence costs on the reported workspace, measured end
+to end:
+
+| | Release | Debug |
+|---|---|---|
+| generated-cell pass (4 layouts) | 762 ms → **77 ms** | 4,721 ms → **122 ms** |
+| restore, `.cem` #1 | ~100 ms → **78 ms** | ~102 ms → **115 ms** |
+| restore, `.cem` #2 (the 10.6 MB board) | ~560 ms → **97 ms** | 4,545 ms → **133 ms** |
+| **total** | ~1.4 s → **288 ms** | **~9.4 s → 421 ms** |
+
+**Two things stay true and are reported rather than fixed, because neither is now a freeze:**
+
+- **The `.cem`'s first resolve is still on the UI thread.** The restore already reads `.clay`
+  documents ahead of time, on a background thread, behind a cancellable progress row
+  (`PreloadRestoredLayoutsAsync`) — but that pass collects only entries of kind `layout`, so the
+  board a `.cem` names is not in it. At ~130 ms it is no longer worth the plumbing; on a board
+  several times larger it would be.
+- **Every settings change in the EM editor re-reads the whole board.** `Refresh()` is called from 16
+  places — each mesh field, each conductor-layer choice, each sweep-unit change — and each one
+  re-resolves, which is a fresh read from disk. That is `EmSetupResolver`'s deliberate design (the
+  geometry is read at use time so a layout edit is picked up, and never embedded in the `.cem`), so
+  it is a caching decision rather than a bug, and it went from ~4.5 s per click to ~130 ms.

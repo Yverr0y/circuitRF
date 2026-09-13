@@ -135,7 +135,22 @@ public static class GeneratedCellsLifecycle
             if (skipPaths is not null && skipPaths.Contains(Path.GetFullPath(clayPath))) continue;
 
             LayoutView view;
-            try { view = LayoutPersistence.LoadFromFile(clayPath); }
+            try
+            {
+                // A layout carrying no snapshots contributes nothing to this pass, and establishing
+                // that must not cost a full load. It used to: this runs on WORKSPACE OPEN, over every
+                // layout under the workspace, and loading an imported board is seconds rather than
+                // milliseconds (LayoutPersistence.LoadFromFile's own remarks say why). A workspace
+                // holding three of them spent 4.96 s here before its window was usable, and found no
+                // snapshots in any of them — the overwhelming common case.
+                //
+                // The sniff answers that in 0.07 s and answers it conservatively: anything but a
+                // definite no still loads the file and asks it properly, and a file that does not
+                // parse throws, which is what keeps `sawEverything` — and therefore the prune below —
+                // honest about a layout nobody could read.
+                if (!LayoutPersistence.MightCarryPCellSnapshots(clayPath)) continue;
+                view = LayoutPersistence.LoadFromFile(clayPath);
+            }
             catch { sawEverything = false; continue; }
             if (view.PCellSnapshots.Count == 0) continue;
 

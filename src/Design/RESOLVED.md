@@ -5532,3 +5532,63 @@ through in the order they are stored and `RingToPath64` does not orient them, so
 hole wound the SAME way as its outer ring is not a hole at all — it just adds winding, and the test
 reads as "the hole was ignored". Real holes arrive correctly wound (from `FromClipperTree`, or through
 `EnsureValidHoles` on load); a hand-written one in a test must be wound opposite the outer ring.
+
+## `LayoutClipper` — the two terms a bounding box cannot reach (owner, 2026-09-12)
+
+`HolesAreValid` gained box prefilters on 2026-09-04 and they work: on an ordinary pour essentially
+every hole-vs-hole pair dies on its box. **Two terms are structurally beyond a box**, and on a real
+Gerber import they were the whole cost:
+
+- the **point-in-ring** cast, because a ray has to see every segment it could cross — the file's own
+  comment already said no box helps here;
+- a hole tested against the **outer ring that contains it**, whose box therefore rejects nothing.
+
+Profiled on the pour that motivated this — 28 holes carrying **59,996 vertices** against a
+**271-vertex** outer ring, one shape of 1,674 in a 10.6 MB board:
+
+| term | ms |
+|---|---|
+| hole vs. hole | 221 |
+| point in outer ring (every hole vertex) | 108 |
+| hole vs. outer ring | 42 |
+| **that one shape** | **379** |
+| the board's 445 holed shapes | 453 |
+| reading the whole 10.6 MB file | 575 |
+
+**Note which way round that pour is.** The prefilter's own reasoning — "a hole lies inside the outer
+ring's box, so reject the OUTER's thousands against the hole's small box" — assumes the outer ring is
+the long one. Here each hole has ~2,142 vertices against the outer's 271, so the length-based choice
+inverts and scans the hole against the outer's box, which contains it and rejects nothing.
+
+**The fix is `RingBands`: segments bucketed by y, CSR, built lazily per ring.** Both terms reduce to
+the same fact — *two things that meet share a point, so their y-extents overlap* — which is a band
+lookup. The point cast visits the band containing `py`; a segment test visits the bands its own
+y-extent covers, deduped by stamp so a tall segment is handed over once.
+
+| | before | after |
+|---|---|---|
+| the 445 holed shapes (Release) | 453 ms | **24 ms** |
+| reading the 10.6 MB board (Release) | 575 ms | **68 ms** |
+| reading it in **Debug**, which is what the owner runs | 4,791 ms | **112 ms** |
+
+**It is a candidate filter, never a decision** — every segment a band returns still goes through the
+unchanged arithmetic, and `PointInOrOnRing`'s two walks share one `Cast` helper so the indexed and
+unindexed paths cannot drift into two arithmetics. The `(i, j)` pairing is preserved exactly, not
+merely equivalently: the crossing test divides, and swapping a segment's endpoints is algebraically
+identical but not bit-identical.
+
+**The differential gate is the only thing that makes any of this safe, and the existing one could not
+see it.** `LayoutClipperHoleValidityTests` compares against a verbatim copy of the unfiltered
+algorithm, but every ring in its corpus is *below the size at which an index is built* — it passed
+without the new code ever running. So `RingIndexMinimumSegments` is now internal and the three new
+cases read it rather than hard-coding a number that could drift and quietly make them vacuous:
+
+- a 400-trial randomized corpus of 64-400-vertex outer rings with 50-260-vertex holes, adversarial
+  and disjoint in equal measure, asserting both answers stay represented;
+- holes with far MORE vertices than the ring containing them — the shape above, the one the boxes
+  are blind to, in both the valid and the escaped-through-the-boundary arrangement;
+- an 80-tooth comb, where every segment spans every band, which is the case that makes a y-index
+  degenerate.
+
+Corollaries recorded elsewhere: `src/Ui/RESOLVED.md` for the two symptoms that led here (a workspace
+open that read every layout, and a `.cem` that reads its board on the UI thread).
