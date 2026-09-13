@@ -4946,3 +4946,234 @@ have passed on an extra grid point. Measured on the mismatched-line fixture: 11 
 at 3.5750 GHz for the resonance located at 3.56511 GHz. Routine tier.
 `EmPanelDeclutterTests.RunStartText_NamesTheBlocksThatFollowTheSweep_AndQuotesNoDuration` holds the
 plan clauses and scans the sentence for any spelling of a duration.
+
+## PCAL1 — how much clearance a calibrated port actually needs (2026-09-12)
+
+`docs/sonnet-briefs/brief-portcal-1-investigation.md`. Measurement and a decision; **no production
+code changed.** What the series opened on is in `brief-portcal-0-overview.md`: an edge port whose
+feed has a neighbour is de-embedded against a standard that is an *isolated* uniform line, and on a
+coupled pair that is 22 dB of error in S₂₁ at 1 GHz, published with a note.
+
+Three things were unknown and each of them sized a different fix: how much clearance is enough and
+what it scales with; whether a passive neighbour fails like a driven one; and whether the error is
+predictable from something the solver already computes. All three now have numbers.
+
+### 0. How it was measured, and why the geometry is the coupled pair rather than `fedpair`
+
+The brief's R-pcal1-1 says "take the `fedpair` geometry and sweep the feed separation". **It was swept
+on the plain coupled pair instead, and that is deliberate.** §2 of the same brief forbids building the
+oracle out of kernel B, and requires kernel A where the geometry allows it. `fedpair` has bends, so
+kernel A cannot solve it and the only available oracle would have been another kernel-B answer — the
+one thing the brief rules out. The plain pair is a **uniform cross-section at every separation**, so
+kernel A is exact at every point of the sweep and the oracle is the same instrument throughout. The
+price is that the neighbour runs the DUT's whole length rather than only the feed; that makes the
+measurement *pessimistic* about clearance, never optimistic, and §1b of the overview already shows the
+feed region is what governs.
+
+Everything below is a scratch console harness (`Release`, outside the repo) calling
+`PlanarKernel.Solve` and `QuasiStaticKernel.Solve` directly — not a test, per the standing rule about
+measuring with a harness rather than the `Benchmark` tier. **Adaptive sampling was turned OFF** so that
+every published point is a solved point and a |ΔS| is a measurement rather than a property of an
+interpolant. Seven frequencies (1…7 GHz), cells/λ 5, cells across 2, transmission-line current model,
+accelerated solve — the overview's own settings.
+
+**Gate 0, run before anything new was measured:** the harness reproduces the overview's §1 table to the
+digit (1 GHz: S₁₁ −19.09/−0.08, S₂₁ −0.11/−22.75, σ_max 0.9992/1.0008; 7 GHz: −6.52/−4.01,
+−1.88/−13.07, 1.0041). The committed fixture run through the real `circuitrf em` verb gives the same
+N = 298 and the same σ_max 1.0041, so the harness and the product path are the same solve.
+
+### 1. R-pcal1-1 — the clearance law, and the floor that has to be subtracted first
+
+**There is an A-vs-B agreement floor, it is not a mesh artefact, and every threshold below is stated
+relative to it.** At a separation where the pair is effectively two isolated lines, kernel A and
+kernel B still differ by **|ΔS| ≈ 0.052** (h = 0.9 mm, w = 254 µm) — 3.1 dB in S₁₁ at 1 GHz, where
+|S₁₁| is small and a fixed absolute error is enormous in decibels. Refining the mesh does not move it:
+
+| cells/λ | cells across | N | worst σ_max | max ΔS₁₁ dB | max ΔS₂₁ dB | max ΔS |
+|---|---|---|---|---|---|---|
+| 5 | 2 | 298 | 0.9995 | 3.13 | 0.35 | 0.0522 |
+| 10 | 4 | 324 | 0.9995 | 3.24 | 0.37 | 0.0546 |
+| 20 | 4 | 324 | 0.9995 | 3.24 | 0.37 | 0.0546 |
+| 20 | 8 | 376 | 0.9995 | 3.23 | 0.38 | 0.0542 |
+
+(The mesh study above is at s = 9 mm, where the pair is well past any clearance threshold.)
+
+Conductor thickness accounts for part of it and only at the top of the band: dropping t from 35 µm to
+1 µm takes the 7 GHz floor from 0.048 to 0.016 and leaves the 1 GHz floor at 0.042. That is a change
+to kernel A's geometry alone — kernel B meshes a zero-thickness sheet and reads `ThicknessM` only for
+the loss model — which is the point: the floor is the two kernels modelling the same drawing
+differently.
+What remains is a quasi-TEM cross-section against a full-wave sheet, and it is a property of the
+comparison, not of the de-embedding.
+
+**The sweep, driven pair (four ports), h = 0.9 mm, w = 254 µm, 3.83 mm long:**
+
+| s (µm) | s/h | s/w | worst σ_max | non-passive | max ΔS₁₁ dB | max ΔS₂₁ dB | max ΔS | worst at |
+|---|---|---|---|---|---|---|---|---|
+| 246 | 0.27 | 0.97 | 1.0041 | 6 / 7 | 19.01 | 22.64 | 0.985 | 1 GHz |
+| 450 | 0.50 | 1.77 | 1.0038 | 7 / 7 | 18.67 | 30.11 | 0.978 | 1 GHz |
+| 900 | 1.00 | 3.54 | 1.0062 | 5 / 7 | 17.92 | 23.13 | 0.922 | 1 GHz |
+| 1350 | 1.50 | 5.31 | 1.0092 | 3 / 7 | 15.34 | 10.26 | 0.692 | 1 GHz |
+| 1800 | 2.00 | 7.09 | 1.0105 | 2 / 7 | 8.69 | 3.27 | 0.477 | 1 GHz |
+| 2700 | 3.00 | 10.63 | 1.0047 | 1 / 7 | 2.80 | 0.35 | 0.169 | 1 GHz |
+| 3150 | 3.50 | 12.40 | 1.0024 | 1 / 7 | 3.01 | 0.35 | 0.095 | 1 GHz |
+| 3600 | 4.00 | 14.17 | 1.0010 | 1 / 7 | 3.09 | 0.35 | 0.055 | 1 GHz |
+| 4050 | 4.50 | 15.94 | 1.0002 | 0 / 7 | 3.11 | 0.35 | 0.052 | — floor |
+| 5400 | 6.00 | 21.26 | 0.9995 | 0 / 7 | 3.12 | 0.35 | 0.052 | — floor |
+| 10800 | 12.0 | 42.52 | 0.9995 | 0 / 7 | 3.13 | 0.35 | 0.052 | — floor |
+
+The transition is bracketed on both sides, with passing and failing separations either side of it, and
+**the error is worst at the bottom of the band in every single case** — which is the 1/a₂₁²
+amplification D6's own passivity note names, and it means a spot check at the design frequency is the
+worst possible place to look.
+
+### 2. R-pcal1-2 — it scales with SUBSTRATE HEIGHT, and not with line width
+
+Defining the threshold as *the smallest s at which |ΔS| is back within 0.005 of that case's own
+well-separated floor*:
+
+| case | h | w | neighbour | s_threshold | **s/h** | s/w |
+|---|---|---|---|---|---|---|
+| driven | 0.9 mm | 254 µm | 254 µm | 3.5 mm | **3.9** | 13.8 |
+| driven | 0.9 mm | 1016 µm | 1016 µm | 3.35 mm | **3.7** | 3.3 |
+| driven | 0.225 mm | 254 µm | 254 µm | 1.24 mm | **5.5** | 5.0 |
+| passive | 0.9 mm | 254 µm | 254 µm | 1.9 mm | **2.1** | 7.5 |
+| passive | 0.9 mm | 254 µm | 5 mm pour | 2.0 mm | **2.2** | 7.9 |
+| passive | 0.225 mm | 254 µm | 254 µm | 0.40 mm | **1.8** | 1.6 |
+
+**Line width is inert.** A 4× change in w at fixed h moves the threshold by 5 % (3.9 → 3.7 s/h) while
+moving s/w by 4.2×. The neighbour's own width is inert too: a 5 mm pour behaves like a 254 µm trace to
+within 2 % at every separation (0.878 vs 0.871 at s = 246 µm, 0.189 vs 0.181 at s = 900 µm).
+
+**And the collapse under s/h is good but NOT exact, which is the negative half R-pcal1-2 asks for.**
+Over a 4× change in h the driven threshold moves from 3.9 to 5.5 substrate heights — a 1.4× spread,
+against 4.5× for s/w and 3× for absolute length and 3× for s/λ_g. So h is the controlling length and
+the others are not, but "s/h" is a good variable rather than an exact invariant. With two usable
+substrate heights an exponent cannot be claimed and none is claimed here. The *passive* family
+collapses much better (1.8 vs 2.1 over the same 4×), which is consistent with the driven error
+carrying the second port's box and the mutual terms as well as the port's own neighbourhood.
+
+**A third substrate height was tried and measured nothing — recorded rather than dropped.** At
+h = 3.6 mm with w = 254 µm the A-vs-B floor is **0.535**, and the answer is non-passive at 4 of 7
+points at *every* separation out to s/h = 7. A 254 µm line on a 3.6 mm substrate is w/h = 0.07 and the
+slab is 0.15 λ₀ thick at 7 GHz; neither kernel is describing the same object any more, so there is no
+oracle and therefore no measurement. It is also a reminder that a neighbour is not the only thing that
+can make this kernel non-passive, which the overview's §6 already declines to claim.
+
+### 3. R-pcal1-3 — a passive neighbour is NOT benign; it is about twice as tolerant
+
+Same metal, same separations, ports removed from the neighbouring line so it is present and undriven.
+The oracle is kernel A's exact four-port reduced with ports 3 and 4 terminated in Γ = +1 — and that
+oracle is sound, because its own well-separated floor is the same 0.052 the four-port comparison has.
+
+| s/h | driven, max ΔS | passive, max ΔS | driven non-passive | passive non-passive |
+|---|---|---|---|---|
+| 0.27 | 0.985 | 0.871 | 6 / 7 | 3 / 7 |
+| 0.50 | 0.978 | 0.616 | 7 / 7 | 2 / 7 |
+| 1.00 | 0.922 | 0.181 | 5 / 7 | 1 / 7 |
+| 1.50 | 0.692 | 0.079 | 3 / 7 | 0 / 7 |
+| 2.00 | 0.477 | 0.058 | 2 / 7 | 0 / 7 |
+| 3.00 | 0.169 | 0.053 | 1 / 7 | 0 / 7 |
+
+At the separation the series opened on, the passive case is **18.0 dB wrong in S₁₁ and 8.1 dB wrong in
+S₂₁ at 1 GHz** and non-passive at 3 of 7 points. So brief 3's premise is confirmed in the direction
+that matters — it is a *different and milder* failure, needing roughly **half** the clearance — but its
+optimistic reading ("if a passive neighbour is benign, brief 3 is unnecessary") is refuted. A passive
+neighbour at s/h < 1, which is an entirely ordinary PCB spacing, is catastrophic.
+
+### 4. R-pcal1-4 — which neighbour classes are actually distinct
+
+Four candidate cases, and only **three** of them are distinct:
+
+1. **A separate net carrying a port** (driven). Two modes at the reference plane, a scalar error box.
+   Worst case, threshold ≈ 4–6 h. Brief 4.
+2. **A separate net carrying no port** (passive trace). One driven mode. Threshold ≈ 2 h. Brief 3.
+3. **A ground pour beside the feed — NOT a distinct case.** Measured at 20× the line width and it is
+   case 2 to within 2 % at every separation. The neighbour's width does not enter. Brief 3 covers it
+   with no special handling, which is a scope *reduction* for that brief.
+4. **A flare or pad on the port's OWN net — distinct, and already handled.** `PlanarFeedExtension`
+   grows a collinear uniform lead and peels it exactly, and the clearance warning is deliberately
+   silent on an extended taper (`PlanarFeedExtensionTests.TheClearanceWarningFallsSILENTOnAnExtendedTaper_ButNotOnARealNeighbour`).
+   Measured here on a 254 µm line with a 1016 µm × 500 µm pad at each port end, ports on the pads:
+   **passive at every frequency** (worst σ_max 0.9992), no clearance note, no passivity note, and the
+   response tracks the bare line's at the top of the band. So the original board's port 2 reporting
+   "other metal 0 m away" is not a third mechanism: it is one of `PlanarFeedExtension`'s own declines —
+   a lead that would have run into other metal on the same level — which leaves the flare inside the
+   required run. The blocker there is a *neighbour*, so it reduces to case 1 or 2.
+
+### 5. R-pcal1-5 — neither residual predicts the error, and it is structural, not bad luck
+
+`ConsistencyResidual` and `RejectedResidual` are **bit-for-bit identical** between the run that is
+22 dB wrong and the run that is at the floor:
+
+| f | s = 246 µm (ΔS = 0.985) | | s = 7.2 mm (ΔS = 0.052) | |
+|---|---|---|---|---|
+| | consistency | rejected | consistency | rejected |
+| 1 GHz | 4.7e-12 | 2.237e-5 | 3.6e-12 | 2.237e-5 |
+| 4 GHz | 2.7e-12 | 1.157e-4 | 2.7e-12 | 1.157e-4 |
+| 7 GHz | 2.5e-13 | 1.050e-3 | 3.1e-13 | 1.050e-3 |
+
+**And they must be.** `PlanarDeembed.SolveErrorBox`'s arguments are the two calibration standards'
+s-matrices and nothing else — the DUT is not an input. The standards are isolated lines of the port's
+own cross-section, which do not change when the DUT's neighbour moves, so the residual is *blind by
+construction* to the thing being asked about. This settles the area's standing question in the
+direction it always suspected: **it is an honest measure of what was discarded, and it is not a
+predictor of accuracy — here it is not even correlated with it.** (It is not useless: a degenerate
+isotropic mesh tried during this work drove `RejectedResidual` to 1.09, i.e. the sign was decided by
+noise, and that *was* a true report of a broken calibration.)
+
+**σ_max is a good detector and a useless estimator.** Spearman ρ between max |ΔS| and σ_max is 0.62
+(driven), 0.39 (passive), 0.72 pooled — and worse than the number suggests, because it is
+**non-monotonic exactly where it matters**: the worst case measured (ΔS = 0.985) reports σ_max = 1.0041
+while a case with *half* the error (ΔS = 0.477) reports 1.0105. As a detector it is much better: in
+both families every separation whose error exceeded ~3× the floor was flagged non-passive at one point
+or more, and every separation at the floor was not. The misses are in the band between 1× and 1.6× the
+floor (passive at s/h = 1.5 is 1.5× the floor and passes the passivity check).
+
+**So brief 2 cannot report an error bound.** Nothing the solve already computes tracks the magnitude.
+What it *can* report quantitatively is the geometric margin — the neighbour's distance in substrate
+heights — because that is the variable the error actually follows.
+
+### 6. R-pcal1-6 — the decision
+
+**The engine's present threshold is the right VARIABLE and the wrong NUMBER, and it is the wrong
+number for a second reason: it is one number where two are needed.**
+
+`PlanarSolve` calls `CheckFeedClearance` with `EndRunHeights × h` = 3 h = 2.7 mm on this stackup. Three
+substrate heights is a length in the right units — the measurement confirms h is the controlling length
+— but at *exactly* 3 h the driven pair is still 0.169 out in |ΔS| (3.3× the floor) and non-passive.
+Driven needs ≈ 4 h at 0.9 mm and ≈ 5.5 h at 0.225 mm; passive needs ≈ 2 h at both.
+
+| brief | verdict | what changes |
+|---|---|---|
+| **2 — refuse, not warn** | **Write it. Unchanged in shape, and now carries numbers.** | The clearance threshold must become **its own setting, separate from `EndRunHeights`** — today they are the same constant, so raising the clearance would lengthen every calibration standard and standards already dominate the run. Recommended value: **5 substrate heights for a neighbour that carries a port, 2 for one that does not.** R-pcal2-5's "report the margin" should report **s/h**, and R-pcal2-5's optional error bound is **not available** — §5 above. |
+| **3 — passive neighbour in the profile** | **Write it, second. Premise confirmed, optimistic reading refuted.** | Its own clearance target is ≈ 2 h, not brief 4's. **A ground pour is not a separate case** and needs no special handling — scope reduction. Its gate should be the passive fixture at s/h ≈ 0.27, which is 18 dB wrong today. |
+| **4 — modal error box** | **Write it, third, and it remains the expensive one.** | It is not made unnecessary by 3: the driven case needs 2–3× the clearance of the passive one, so a design that 3 makes safe can still be refused for a driven neighbour. Its gate stays the overview's own coupled pair against the kernel-A oracle. |
+
+**No brief was deleted and no fifth one is warranted** — the three neighbour classes that remain map
+one-to-one onto briefs 2, 3 and 4 as they already stand.
+
+**What was NOT measured, so that nothing is read into the silence:**
+
+- **A neighbour on another conductor level.** Every case swept here is co-planar with the port. There
+  is no evidence either way about a trace or plane on a different level inside the clearance distance.
+- **Frequency as an independent variable.** The whole sweep is 1–7 GHz on one stackup, and the error
+  is worst at the bottom of it in every case — which is D6's own 1/a₂₁² and is expected. Whether the
+  threshold in s/h itself moves with frequency was not separated out.
+- **A third substrate height.** 3.6 mm was tried and could not be used (§2); the law rests on 0.225 mm
+  and 0.9 mm, which is the 4× the brief asked for and no more.
+- **A narrow line below 254 µm.** At w = 64 µm the transmission-line mesher's aspect-ratio cap raises
+  the longitudinal pitch as the artwork widens, and past s = 3.6 mm the 3.83 mm line resolves to one
+  cell and the port refuses by name ("only one cell long in the direction current would flow"). Raising
+  cells/wavelength does not move it and lengthening the line does not either. That case is bracketed
+  only up to s/h = 3, where it agrees with the others; the mesher interaction is worth knowing about
+  on its own account.
+
+### 7. The fixture
+
+`testdata/portcal/` — a workspace, a 0.9 mm FR-4 two-layer technology, and two cells: `coupled-pair`
+(the failing case: refuses nothing today, warns on all four ports, non-passive at 6 of 7 points) and
+`separated-pair` (the same coupled section with 4 mm of isolated feed at each port: no clearance note,
+no passivity note). Both carry a `.cem` at the overview's own mesh settings, so
+`circuitrf em testdata/portcal/<cell>/em/<cell>.cem` reproduces the measurement with no harness.
+`testdata/portcal/README.md` says which brief consumes which.

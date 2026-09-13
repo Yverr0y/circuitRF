@@ -220,6 +220,35 @@ public static class FigureCatalog
           + "will actually use - the two mesh cells either side of the cut - so it can be read "
           + "against the gridlines under it. Without a mesh it reverts to a fixed legible width."),
 
+        // ── Application note AN-01 ────────────────────────────────────────────────────────────
+        //
+        // THREE FIGURES OF ONE PIECE OF METAL, AND THAT IS THE ARGUMENT. The note's whole claim is
+        // that deleting a port label changes the excitation and not the structure, so the first two
+        // rows must be identical in every respect except the labels - same fixture artwork, same
+        // capture size, same framing. Read at different sizes they would invite the reader to look
+        // for a difference in the geometry, which is the misconception being corrected.
+        new("an01-coupled-pair-4port", DocLayoutFixtures.CoupledPairFourPorts, 882, 192, null,
+            "Two parallel microstrips with an edge port on each end of each line - 254 um wide, "
+          + "3.83 mm long, 246 um apart. All four ports are present, so both lines are driven and "
+          + "both are terminated in 50 ohms."),
+
+        new("an01-coupled-pair-2port", DocLayoutFixtures.CoupledPairTwoPorts, 882, 192, null,
+            "The same metal with ports 3 and 4 deleted. The upper line is still there, still meshed "
+          + "and still coupled to the lower one - it has lost its terminations, not its existence, "
+          + "and is now open at both ends."),
+
+        new("an01-coupled-pair-isolated-feeds", DocLayoutFixtures.CoupledPairIsolatedFeeds, 882, 402, null,
+            "The remedy: the same coupled section, with 3 mm of line at each port and the other "
+          + "conductor held 4 mm away there. The de-embedding calibration assumes a port's feed is "
+          + "an isolated uniform line for 2.7 mm - now it is. Measured on this geometry the result "
+          + "is passive at every frequency; with the ports on the coupled section it is not."),
+
+        new("an01-coupled-pair-coarse-mesh", DocLayoutFixtures.CoupledPairCoarseMesh, 882, 192, null,
+            "The same pair meshed at cells per wavelength 5 with cells across 2. One cell lands across "
+          + "each 254 um conductor and the cells along the line are a large fraction of its length. "
+          + "This mesh is too coarse, but the note shows by measurement that it is not what made the "
+          + "answer wrong."),
+
         new("layout-rulers", DocLayoutFixtures.LayoutRulers, 1100, 700,
             WindowFrame.Titled("circuitRF - Layout editor"),
             "Three ruler annotations on the same artwork: a trace width, a free-angle clearance "

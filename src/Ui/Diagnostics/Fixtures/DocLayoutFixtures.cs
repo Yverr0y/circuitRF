@@ -543,6 +543,188 @@ public static class DocLayoutFixtures
         return (view, xc, yc);
     }
 
+    // ── App note AN-01: a coupled pair, with and without the second line's ports ────────────────
+
+    /// <summary>
+    /// <b>Two parallel microstrips, drawn once and used by both AN-01 port figures.</b>
+    ///
+    /// <para>The dimensions are the ones the app note reasons about, in microns: 254 wide, 3830
+    /// long, 246 apart edge to edge. They are stated here rather than parameterised because the
+    /// note quotes them in its own prose and the two must not be free to drift — a figure whose
+    /// gap is not the gap the text computes a coupling from is worse than no figure.</para>
+    ///
+    /// <para><b>Both lines are always present.</b> That is the entire subject of the note: deleting
+    /// a port label removes a port, never the metal, so the pair of figures this feeds differ in
+    /// their LABELS and in nothing else. Building the artwork in one place is what guarantees
+    /// that.</para>
+    /// </summary>
+    private static (LayoutView View, LayerKey Top, long Len, long W, long Gap) CoupledPair()
+    {
+        var tech = StarterTechnologies.Pcb2Layer();
+        var top  = Layer(tech, "Top Copper");
+
+        long w = Um(254), len = Um(3830), gap = Um(246);
+
+        var view = new LayoutView
+        {
+            DbuPerMicron = Dbu,
+            DisplayUnit  = tech.DefaultDisplayUnit,
+            SnapDbu      = tech.DefaultSnapDbu,
+        };
+
+        // Line A, then line B above it. Rectangles rather than one polygon: they are two separate
+        // conductors and nothing in this figure should suggest otherwise.
+        view.Shapes.Add(new RectShape { Layer = top, X1 = 0, Y1 = 0,       X2 = len, Y2 = w });
+        view.Shapes.Add(new RectShape { Layer = top, X1 = 0, Y1 = w + gap, X2 = len, Y2 = w + gap + w });
+
+        return (view, top, len, w, gap);
+    }
+
+    /// <summary>The label height every AN-01 figure uses. Small relative to the line length, because
+    /// a port label's text is drawn outward from its anchor and is not inside the bounding box the
+    /// canvas frames on — a large one on a part this slender pushes its own glyphs off the edge.</summary>
+    private static long AppNotePortLabelHeight => Um(120);
+
+    /// <summary>
+    /// <b>AN-01, the four-port setup: an edge port on each end of each line.</b>
+    ///
+    /// <para>Every port points INWARD, which is what an edge port means at both ends of a line, and
+    /// the four together are the configuration the note calls the honest one — the second line is
+    /// driven and terminated rather than left to float.</para>
+    /// </summary>
+    public static FigureScene CoupledPairFourPorts()
+    {
+        var (view, top, len, w, gap) = CoupledPair();
+        long h = AppNotePortLabelHeight;
+        long yA = w / 2, yB = w + gap + w / 2;
+
+        view.Shapes.Add(PortLabel(top, "1", 0,   yA, LayoutRotation.R0,   h));
+        view.Shapes.Add(PortLabel(top, "2", len, yA, LayoutRotation.R180, h));
+        view.Shapes.Add(PortLabel(top, "3", 0,   yB, LayoutRotation.R0,   h));
+        view.Shapes.Add(PortLabel(top, "4", len, yB, LayoutRotation.R180, h));
+
+        return Framed(new LayoutDocument("Coupled pair", EditorVm(view)), 880, 190,
+                      marginX: 0.32, marginY: 0.10);
+    }
+
+    /// <summary>
+    /// <b>AN-01, the two-port setup: the SAME metal with ports 3 and 4 deleted.</b>
+    ///
+    /// <para>Read beside <see cref="CoupledPairFourPorts"/> this is the whole point of the note. The
+    /// upper line has not gone anywhere — it is still drawn, still meshed and still coupled to the
+    /// lower one — it has simply lost the two 50 ohm terminations that were holding it, and is now
+    /// open at both ends.</para>
+    /// </summary>
+    public static FigureScene CoupledPairTwoPorts()
+    {
+        var (view, top, len, w, gap) = CoupledPair();
+        long h = AppNotePortLabelHeight;
+        long yA = w / 2;
+
+        view.Shapes.Add(PortLabel(top, "1", 0,   yA, LayoutRotation.R0,   h));
+        view.Shapes.Add(PortLabel(top, "2", len, yA, LayoutRotation.R180, h));
+
+        return Framed(new LayoutDocument("Coupled pair", EditorVm(view)), 880, 190,
+                      marginX: 0.32, marginY: 0.10);
+    }
+
+    /// <summary>
+    /// <b>AN-01, the same coupled section with an isolated feed to every port.</b>
+    ///
+    /// <para>This is the note's remedy, drawn. The coupled section in the middle is the SAME
+    /// 254 um / 246 um / 3.83 mm pair as <see cref="CoupledPairFourPorts"/> - the circuit under
+    /// study has not been changed. What has been added is 3 mm of line at each port with the other
+    /// conductor 4 mm away, which is what the two-line calibration standard assumes is there and is
+    /// what it did not have before. Measured: the coupled-feed version comes back non-passive at 48
+    /// of 51 frequencies; this one is passive at every frequency, on the same mesh settings.</para>
+    ///
+    /// <para>The upper line is drawn as overlapping rectangles rather than one traced outline
+    /// because that is how it is built in the reproduction the note quotes, and the union is the
+    /// same conductor either way. Nothing here depends on the vertex list.</para>
+    /// </summary>
+    public static FigureScene CoupledPairIsolatedFeeds()
+    {
+        var tech = StarterTechnologies.Pcb2Layer();
+        var top  = Layer(tech, "Top Copper");
+
+        long w = Um(254), lc = Um(3830), gap = Um(246);
+        long feed = Um(3000);           // isolated run at each port - longer than the 2.7 mm standard
+        long sep  = Um(4000);           // how far the two feeds are held apart
+        long x0 = feed, x1 = feed + lc, tot = feed + lc + feed;
+        long yB = w + gap;
+
+        var view = new LayoutView
+        {
+            DbuPerMicron = Dbu,
+            DisplayUnit  = tech.DefaultDisplayUnit,
+            SnapDbu      = tech.DefaultSnapDbu,
+        };
+
+        // Line A runs straight through; line B comes down to it only for the coupled section.
+        view.Shapes.Add(new RectShape { Layer = top, X1 = 0,      Y1 = 0,   X2 = tot,    Y2 = w });
+        view.Shapes.Add(new RectShape { Layer = top, X1 = 0,      Y1 = sep, X2 = x0 + w, Y2 = sep + w });
+        view.Shapes.Add(new RectShape { Layer = top, X1 = x0,     Y1 = yB,  X2 = x0 + w, Y2 = sep + w });
+        view.Shapes.Add(new RectShape { Layer = top, X1 = x0,     Y1 = yB,  X2 = x1,     Y2 = yB + w });
+        view.Shapes.Add(new RectShape { Layer = top, X1 = x1 - w, Y1 = yB,  X2 = x1,     Y2 = sep + w });
+        view.Shapes.Add(new RectShape { Layer = top, X1 = x1 - w, Y1 = sep, X2 = tot,    Y2 = sep + w });
+
+        // Bigger than AppNotePortLabelHeight: this figure spans 9.83 mm rather than 3.83, so the
+        // label that is legible on the other three is a smudge here. Sized to the same FRACTION of
+        // the drawn extent, which is what "legible" actually tracks.
+        long h = Um(300);
+        view.Shapes.Add(PortLabel(top, "1", 0,   w / 2,       LayoutRotation.R0,   h));
+        view.Shapes.Add(PortLabel(top, "2", tot, w / 2,       LayoutRotation.R180, h));
+        view.Shapes.Add(PortLabel(top, "3", 0,   sep + w / 2, LayoutRotation.R0,   h));
+        view.Shapes.Add(PortLabel(top, "4", tot, sep + w / 2, LayoutRotation.R180, h));
+
+        return Framed(new LayoutDocument("Coupled pair, isolated feeds", EditorVm(view)), 880, 400,
+                      marginX: 0.32, marginY: 0.10);
+    }
+
+    /// <summary>
+    /// <b>AN-01, the mesh that produced the bad answer</b> — the same pair at cells/wavelength 5,
+    /// meshed by the real mesher.
+    ///
+    /// <para>The figure exists because the number in the note's prose ("one cell across a 254 um
+    /// conductor, and roughly two along a 3.83 mm line") is hard to believe until it is seen. Ten
+    /// GHz is the mesh frequency so the picture is the one the note's sweep produced; the settings
+    /// are otherwise the ones the reported .cem carried, which is why they are spelled out rather
+    /// than taken from <c>PlanarMeshSettings.Default</c>.</para>
+    ///
+    /// <para><b>A mesh that comes back empty fails the docs build.</b> A picture of bare metal
+    /// captioned as a mesh would teach the opposite of what this note is for.</para>
+    /// </summary>
+    public static FigureScene CoupledPairCoarseMesh()
+    {
+        var (view, top, len, w, gap) = CoupledPair();
+        long h = AppNotePortLabelHeight;
+        long yA = w / 2, yB = w + gap + w / 2;
+
+        view.Shapes.Add(PortLabel(top, "1", 0,   yA, LayoutRotation.R0,   h));
+        view.Shapes.Add(PortLabel(top, "2", len, yA, LayoutRotation.R180, h));
+        view.Shapes.Add(PortLabel(top, "3", 0,   yB, LayoutRotation.R0,   h));
+        view.Shapes.Add(PortLabel(top, "4", len, yB, LayoutRotation.R180, h));
+
+        var vm     = EditorVm(view);
+        var tech   = StarterTechnologies.Pcb2Layer();
+        var planar = PlanarExtractor.Extract(view.Shapes, tech, Dbu, 7e9);
+        if (!planar.Ok) throw new InvalidOperationException(
+            "AN-01's coarse-mesh figure could not extract its own artwork: " + planar.Refusal);
+
+        var report = SurfaceMesher.Mesh(planar.Problem!, new PlanarMeshSettings(
+            Auto: false, CellsPerWavelength: 5, EdgeMesh: true, EdgeCells: 2,
+            MinCellsAcrossConductor: 2, CurrentModel: PlanarCurrentModel.TransmissionLine));
+        if (report.Mesh.Cells.Count == 0) throw new InvalidOperationException(
+            "AN-01's coarse-mesh figure meshed to nothing, so it would show bare metal under a "
+          + "caption describing a mesh.");
+
+        vm.PlanarMeshReport = report;
+        vm.ShowPlanarMesh   = true;
+
+        return Framed(new LayoutDocument("Coupled pair", vm), 880, 190,
+                      marginX: 0.32, marginY: 0.10);
+    }
+
     /// <summary>
     /// <b>The same gap, with the surface mesh computed</b> — so the break is drawn at the width the
     /// solver will actually use instead of at the legibility fraction.

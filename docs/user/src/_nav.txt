@@ -67,3 +67,7 @@ reference/antennas.html        | Patch antennas: the pattern, the numbers that g
 == Tools
 reference/harmonicarf.html | Interactive harmonic load-pull on one device, at the speed of a mouse drag.
 reference/wbond.html       | Bondwire arrays: geometry, the 3D kernel, and S-parameters out.
+
+== Application notes
+app-notes/index.html                    | Worked investigations of questions that come up on real boards.
+app-notes/an01-ports-and-coupling.html  | AN-01: what a port terminates, why a coupled neighbour breaks the calibration, and how to tell a bad EM result from a good one.

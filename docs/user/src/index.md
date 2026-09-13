@@ -21,6 +21,11 @@ ground up, with worked examples.</p>
 <p>The complete technical reference. Every analysis, every component, the layout and EM engines, the
 file formats and the two bundled tools.</p>
 </a>
+<a class="card" href="app-notes/index.html">
+<h3>Application Notes →</h3>
+<p>Worked investigations of questions that only come up on a real board — what was measured, what it
+meant, and what to do differently.</p>
+</a>
 </div>
 
 {{search: hero}}

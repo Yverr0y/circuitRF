@@ -58,3 +58,49 @@ compares integers. Before it has run there is no UI thread to be off, so an earl
 rather than wrongly flagged. It also keeps `CrashReporter` free of any Avalonia reference. Held by
 `CrashReporterTests.EveryNote_CarriesItsThread_AndMarksTheOnesThatAreNotTheUiThread` and
 `TheHeader_RecordsHowTheProcessIsExecutingCode_NotOnlyWhatItRunsOn`.
+
+---
+
+## Adding a docs page in a NEW section: two traps, both silent (2026-09-12, AN-01)
+
+Found while adding `docs/user/src/app-notes/` — the first section outside `reference/`,
+`quick-start/` and `new-user-guide/`. Neither trap produces an error; both produce a page that
+generates cleanly and is wrong.
+
+**1. The middle breadcrumb segment IS the directory name, slugified.**
+`HtmlEmitter.Breadcrumb` links every segment except the last, and builds the href by
+`Slugify(segment) + "/index.html"` where `Slugify` is `ToLowerInvariant().Replace(' ', '-')`. So a
+page in `app-notes/` whose front matter says `breadcrumb: Docs > Application Notes > …` emits a link
+to `application-notes/index.html`, which does not exist. **Nothing checks it** — the orphan check is
+over `_nav.txt`, not over hrefs. The fix is to spell the middle segment so it slugifies to the real
+directory (`Docs > App Notes > …`). The existing sections hide this because their section word
+already equals their directory (`Reference` → `reference/`). A section INDEX page is unaffected: its
+section name is the last segment and last segments are not linked, which is why
+`reference/index.md` can say `Docs > Reference Guide` and be fine.
+
+A cheap guard, worth running after any docs change, is a site-wide href existence sweep over
+`docs/user/**/*.html`; it takes under a second and would have caught this.
+
+**2. `DocLayoutFixtures.Framed` does not centre correctly at extreme aspect ratios.**
+Its arithmetic (zoom = min(w/worldW, h/worldH), then an x0 that centres) is right, and it is right on
+screen for the existing figures — all of which are between about 1.3:1 and 3:1. On a 5:1 part in a
+4.6:1 frame the rendered result came out with the content scaled ~1.15× about the top-left rather
+than centred, so it overran the right edge and cropped the outermost port while leaving a large left
+margin. Root cause not chased; the practical rule is:
+
+- **Keep the figure WIDTH-limited**, i.e. choose `height` so `height/worldH > width/worldW`. That is
+  the regime every correctly-framed existing figure is in (`ports-edge` frames exactly as computed).
+- **Then leave real slack** — `marginX: 0.32` put the four-port coupled-pair figure comfortably
+  inside its frame at 880×190, where 0.12 and 0.22 both cropped it.
+- **Verify by rendering, do not trust the arithmetic.** `qlmanage -t -s 1200 -o <dir> fig.svg`
+  produces a PNG that can be read directly. Note that qlmanage does not draw the port bar/arrow
+  markers — the reference figure `ports-edge.svg` behaves the same way, so a missing marker in a
+  qlmanage render is the renderer, not the figure.
+
+**3. Unrelated: the committed `docs/user` output is STALE against the current build.** A regeneration
+with no source change rewrites ~65 figures and pages — a toolbar icon (`SineWave` → `none`), a
+Settings string, a ~2 px shift in the wBond profile figure, and others. These are real content
+drift, not the hex-id churn and not the three known nondeterministic families: they are stable across
+two consecutive runs and differ from `HEAD`. So `tools/DocGen/check-docs-current.sh` fails on a clean
+tree for reasons that predate any current change, and anyone adding one page must revert the other 65
+rather than commit them.
