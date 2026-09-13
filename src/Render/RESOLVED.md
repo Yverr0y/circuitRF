@@ -1,5 +1,136 @@
 # src/Render — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## 2026-09-13 — the stackup scene: one layout pass, two readers (brief-stackup-render-1-scene.md)
+
+`StackupScene` + `StackupRenderer` + `StackupRenderTheme`, headless, below the firewall. The scene is
+a record of named rectangles; the renderer paints them and computes nothing, and brief 2's control
+will hit-test the same rects rather than re-deriving band positions. Gate:
+`tests/Ui.Tests/Stackup/StackupSceneTests.cs`, 51 tests over all five shipped technologies.
+
+### The owner removed the leader lines, so the placement has to carry the correspondence alone
+
+R-stk1-9's rule 3 pushes two colliding labels apart and joins each back to its band with a leader.
+That is what this drew first; the owner looked at it and asked for the angled callout lines to go. So
+there is no `StackupLeader` type, no leader pass, and no `Stackup.Leader` colour role.
+
+**What replaced them is not nothing, and the test says which properties are real.** The label column
+follows the stack's own order, and a group whose name is not on its band LEADS with that layer's name.
+What is NOT asserted is that a label is the nearest one to its own band — symmetric push-apart
+re-centres a whole cluster about the mean of its members' ideal centres, so a label genuinely can end
+up further from its band than a neighbour's is. Measured on the 20-hairline case, not argued.
+
+### A drilled hole is a VOID, not the bands showing through
+
+Owner, 2026-09-13: the plated barrel "renders strangely… 2 vertical lines with a gap". It was drawn
+as two metal walls with nothing between them, so the dielectric showed through the bore and the eye
+read two separate thin vias rather than one barrel with a hole in it. **A drill removes material**, so
+the bore is now painted in the pane's own ground first and the walls go on top of it — the convention
+every cross-section drawing of a plated through-hole uses — with one outline around the whole barrel
+binding the two walls into one object. An unplated hole is the same void with no walls at all, which
+is exactly what it is.
+
+The barrel also widened from `DocStackupFixtures`' 16 px to 22, with the wall scaling over 3-6 px
+rather than 2-5. At the old proportions the bore dominated the walls and the barrel still read as two
+lines. **It is not to scale against the bands and never could be** — a 0.3 mm drill through a 1.6 mm
+board is a tenth of this picture's own vertical compression — so the width is chosen to be legible and
+the real wall thickness is printed beside it.
+
+### The spec says as little as it can, and µr at 1 is not drawn at all
+
+Owner, 2026-09-13: keep the text short to save space in the image. Every word in a spec is drawn on
+every band, so the picture pays for each one. Gone: **"thick"** (a length with a unit on a band of a
+cross-section is its thickness — it said so nine times on a seven-band stack), **"barrel"** from
+"plated barrel", and "ground **reference**". Gone too are the sentence's commas, for the separate
+reason below.
+
+**µr is printed only when it is not 1.** That is the engineering convention and it saves a whole
+quantity on very nearly every dielectric anyone draws. The consequence is real and is the trade: with
+no label there is nothing for brief 4 to double-click, so a non-magnetic dielectric's µr is edited
+from the card only — which always shows the field. A magnetic one has both. `MurIsLabelledOnlyWhenItIsNotOne`
+pins both halves so this cannot be "simplified" into always-hidden.
+
+### "Half as thick draws half as tall" is anchored at the THICKEST, not the thinnest
+
+The brief writes the proportional branch as `h = hMin · t/tMin`. Every anchor in
+`[hMin/tMin, hMax/tMax]` is exactly proportional and satisfies the range; this one uses `hMax/tMax`,
+which spends the whole budget. **The reason is the commonest stack in the application**: a two-layer
+board whose two copper layers are the same weight and whose one substrate has nothing to be
+proportional against. Anchored at the thinnest, every kind with one distinct thickness draws at its
+FLOOR — 1.6 mm of FR-4 four pixels taller than 35 µm of copper. Anchored at the thickest it draws at
+110 px against 36, which is the picture `DocStackupFixtures` already makes.
+
+The ranges are conductor 16-36 px and dielectric 20-110 px, and **they were chosen against the
+shipped technologies rather than picked**: the 4-layer board's conductors are exactly 2:1 (1 oz outers,
+half-ounce inners) and its dielectrics 5.25:1, so both stay in the proportional branch at budgets of
+2.25 and 5.5. The MMIC's 12:1 conductors and 500:1 dielectrics compress, which is the case R-stk1-4's
+flags exist for.
+
+### Three things the brief specified that the measured text would not support
+
+Each was found by rendering the picture and looking at it, not by reasoning about it.
+
+- **A spec is several labels AND every label is padded, so the pieces cannot abut.** Padding every
+  piece on all four sides puts adjacent rects of one sentence in contact, which is the overlap the
+  rule forbids. The horizontal padding is therefore small (1.5 px) with a strictly positive
+  `PieceGap` on top, and **the sentence's commas are gone** — a comma as its own piece takes a leading
+  gap and reads as "0.0006 , tanδ". Quantities are separated by a wider gap instead.
+- **Labels WRAP, because a label that runs off the right edge is a value nobody can read and brief 4
+  cannot edit.** A dielectric's full spec is nine pieces; a via's span names two conductors. The span
+  is emitted as three pieces (from, arrow, to) so a narrow column can break between the names, and the
+  top boundary note as two so it can break before its aside.
+- **The label column's width is a CONSTRAINT on the band column, not its leftover.** `WidestToken`
+  measures the widest unbreakable piece the scene can emit — names and formatted values, which are the
+  only two that can be long — and the band column yields to it down to its floor, dropping the label
+  column entirely if even that will not do. Without this, "Top Copper (1 oz) → Bottom Copper (1 oz)"
+  ran past the right edge on every PCB technology at 460 px. It is not an absolute guarantee and
+  cannot be: a name longer than the pane has nowhere to go, and truncating it would print a value that
+  is not the value.
+
+### The narrow mode puts the specs BELOW the stack, not on the bands
+
+§2 says the specs move onto the band when the label column is dropped. That was written before the
+text was measured. A dielectric's spec wraps to three lines in a 290-pixel column against a band that
+is 21 pixels tall, so every spec lands over a band that is not its own and **the picture asserts a
+correspondence that is false** — verified by rendering it. Beneath the stack, in stack order, each
+group leading with its layer's name, costs vertical space in a pane that scrolls anyway and says
+nothing untrue. A band's name is never on-band in that mode, for the same reason.
+
+### A null `Fill` draws SOLID here and reads as Plated on the card
+
+R-stk1-7's table is explicit: `Plated`/null + `Fill` `Solid`/null is a filled barrel. That is also the
+only defensible drawing — a hollow barrel needs a wall thickness and an entry with no fill model
+stated has none, so drawing one means inventing the number the look exists to show.
+**`StackupLayerRowViewModel.RefreshFromModel` defaults a null `Fill` to `Plated` instead**
+(`SelectedFill = Layer.Fill ?? ViaFillKind.Plated`), so on a hand-authored technology that omits the
+field the card's combo box and the drawing disagree. Every shipped technology states it, so nothing
+ships wrong today. **Brief 6 owns the plated↔solid menu and should settle which default is the real
+one** — not by changing the drawing to match the card, but by deciding what a missing `Fill` means and
+saying it in one place.
+
+### `StackupField` was already taken, and the second one broke the build
+
+`CircuitRF.Design.Layout.StackupField` has named the six numeric stackup fields since
+`StackupFieldReadiness`. Declaring the brief's enum of the same name in `CircuitRF.Render` made
+`StackupField` an ambiguous reference in **every** `src/Ui` file — both namespaces are global usings
+there — and `StackupLayerRowViewModel` stopped compiling. The existing enum is widened with `None`,
+`Name` and `Span` instead; `Problem`'s own `_` arm answers null for all three, which is correct rather
+than an omission. `None` is deliberately value 0 so `default(StackupField)` is not `Thickness`.
+
+The same trap one level up: the test namespace is `CircuitRF.Ui.Tests.StackupRender`, not
+`…Tests.Stackup` as the folder is. A namespace segment named `Stackup` shadows the `Stackup` TYPE for
+every file under `CircuitRF.Ui.Tests`, and two existing test files stop compiling.
+
+### `Default.ccolor` carries 18 of ~60 roles, and the new ones were not added to it
+
+The brief says a new role must go into the shipped `.ccolor` "or it resolves to nothing, silently".
+**It does not**: `ColorTheme.Resolve` falls back to `ColorTheme.BuiltIn` for any role a theme omits,
+and the shipped file has omitted every `Layout.*`, `Harmonica.*` and `Match.*` role since they were
+added. `Default.ccolor` is a partial overlay, not the palette; `BuiltIn` is the palette, and that is
+where the eight `Stackup.*` defaults went. `ColorThemeTests.DefaultPresetFile_MatchesBuiltIn` passes
+through the same fallback, which is why it never caught the drift and should not be read as proof the
+file is complete.
+
+
 ## 2026-09-12 — a 3D pattern is 11 MB of SVG, and a FIGURE of one is now 750 KB
 
 Found building the user-doc antenna figures. A document draws the surface as one filled PATH per

@@ -19,8 +19,25 @@
 
 namespace CircuitRF.Design.Layout;
 
-/// <summary>Which numeric field of a <see cref="StackupLayer"/> a check is about.</summary>
-public enum StackupField { Thickness, Sigma, Epsr, TanD, Mur, WallThickness }
+/// <summary>
+/// Which field of a <see cref="StackupLayer"/> something is about.
+///
+/// <para>The six NUMERIC members are what <see cref="StackupFieldReadiness.Problem"/> answers for, and
+/// they are the whole of what this file needs. <see cref="None"/>, <see cref="Name"/> and
+/// <see cref="Span"/> were added for the stackup cross-section
+/// (docs/sonnet-briefs/brief-stackup-render-1-scene.md R-stk1-10), which has to say which value a
+/// piece of text would edit and has two answers this enum did not carry: a layer's name, and the
+/// pair of conductor names a via spans. <b>They were added HERE rather than as a second
+/// <c>StackupField</c> in <c>src/Render</c></b> — <c>src/Ui</c> consumes both namespaces wholesale
+/// through its global usings, so a second enum of this name is an ambiguous reference in every file
+/// that uses either.</para>
+///
+/// <para><see cref="Problem"/> answers null for all three, through its own <c>_</c> arm, and that is
+/// correct rather than an omission: a name is checked by <c>NameValidator</c> and a span by
+/// <c>TechValidation</c>'s own resolution pass, and neither is a question an EM run's numeric
+/// readiness can answer.</para>
+/// </summary>
+public enum StackupField { None, Name, Thickness, Sigma, Epsr, TanD, Mur, WallThickness, Span }
 
 /// <summary>
 /// Per-field readiness for the EM path. Every predicate mirrors a check <see cref="TechValidation"/>

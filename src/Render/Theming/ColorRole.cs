@@ -105,6 +105,56 @@ public static class ColorRole
     public const string LayoutDrcWarning = "Layout.DrcWarning";
     public const string LayoutDrcWaived  = "Layout.DrcWaived";
 
+    // ── Stackup cross-section (docs/sonnet-briefs/brief-stackup-render-1-scene.md §7) ────────────
+    //
+    // The Technology Editor's stackup drawing. Eight roles, and deliberately no more: a conductor's
+    // fill and a via barrel's fill are NOT here, because they are the technology's own drawing-layer
+    // colours (R-stk1-5) and a role would be a second, silently diverging answer to the same
+    // question — the same reasoning the Layout block above gives for layer colours. The selection
+    // outline is <see cref="LayoutSelection"/>, so a selected band and a selected shape in the
+    // layout editor are one colour; a refusal marker is <see cref="SystemWarning"/>. There is no
+    // leader-line role because the drawing has no leader lines — the owner asked for the callout
+    // lines to go (2026-09-13).
+
+    /// <summary>The pane the cross-section is drawn on.</summary>
+    public const string StackupBackground = "Stackup.Background";
+
+    /// <summary>Every band's outline, and a via barrel's. The GROUND-designated conductor takes
+    /// <see cref="StackupGroundAccent"/> at a heavier width instead — it is the one band a reader has
+    /// to be able to find.</summary>
+    public const string StackupBandEdge = "Stackup.BandEdge";
+
+    /// <summary>A dielectric's fill. Neutral grey in both variants and NOT read from the technology
+    /// (owner): a dielectric is not something anyone draws on, so it has no drawing layer to take a
+    /// colour from. Carries its own alpha.</summary>
+    public const string StackupDielectricFill = "Stackup.DielectricFill";
+
+    /// <summary>The ground reference's heavy band edge, and the accent text that names it — one role
+    /// rather than two because they say the same thing about the same band, in two places.</summary>
+    public const string StackupGroundAccent = "Stackup.GroundAccent";
+
+    /// <summary>Every label OUTSIDE a band: the spec column, the via names, the boundary notes.</summary>
+    public const string StackupLabelInk = "Stackup.LabelInk";
+
+    /// <summary>
+    /// A band's own name, which sits ON the band.
+    ///
+    /// <para><b>Its two defaults are identical on purpose</b>, exactly as the harmonicaRF marker-band
+    /// roles' are. A band's fill is the TECHNOLOGY's colour and is the same in light and dark, so ink
+    /// that followed the variant would vanish into copper in the dark one — a bug that was already
+    /// found once in <c>DocStackupFixtures</c> and is not to be re-introduced. It is still a role, so
+    /// a user whose technology uses dark metals can change it.</para>
+    /// </summary>
+    public const string StackupOnBandInk = "Stackup.OnBandInk";
+
+    /// <summary>A via barrel's end gripper — drawn only while that via is hovered or selected. Its own
+    /// role rather than <see cref="LayoutSelection"/>'s: a gripper is a thing to grab, not a statement
+    /// about what is selected, which is the same distinction <see cref="LayoutPCellHandle"/> makes.</summary>
+    public const string StackupGripper = "Stackup.Gripper";
+
+    /// <summary>The translucent ghost drawn at a drag's destination. Carries its own alpha.</summary>
+    public const string StackupDragGhost = "Stackup.DragGhost";
+
     // ── harmonicaRF (harmonicarf.md §7.9, D7) ────────────────────────────────────────────────────
     //
     // D7: these live in the SHARED role vocabulary rather than a second role system of their own.
@@ -263,6 +313,8 @@ public static class ColorRole
         LayoutEmMeshConductor, LayoutEmMeshInterface, LayoutEmMeshTruncation,
         LayoutPlanarMeshCell,
         LayoutDrcError, LayoutDrcWarning, LayoutDrcWaived,
+        StackupBackground, StackupBandEdge, StackupDielectricFill, StackupGroundAccent,
+        StackupLabelInk, StackupOnBandInk, StackupGripper, StackupDragGhost,
         HarmonicaBackground, HarmonicaAxisLine, HarmonicaAxisText, HarmonicaReadoutText,
         HarmonicaGridLine, HarmonicaSmithGrid,
         HarmonicaIsoline, HarmonicaIsolineLabel,

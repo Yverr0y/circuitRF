@@ -144,6 +144,19 @@ public sealed class ColorTheme
             [ColorRole.WBondSelected]  = new( 46,  36,  42),
             [ColorRole.WBondEnvelope]  = new(165,  64, 130,  52),
 
+            // ── Stackup cross-section (brief-stackup-render-1-scene.md §7), LIGHT ───────────────
+            // DielectricFill is the exact translucent grey DocStackupFixtures' figures already use —
+            // the picture this drawing is specified against. OnBandInk is identical in both variants
+            // on purpose; see ColorRole.StackupOnBandInk for why.
+            [ColorRole.StackupBackground]     = new(248, 248, 246),
+            [ColorRole.StackupBandEdge]       = new(110, 110, 120,  90),
+            [ColorRole.StackupDielectricFill] = new(120, 130, 145,  60),
+            [ColorRole.StackupGroundAccent]   = new( 30, 130, 200),
+            [ColorRole.StackupLabelInk]       = new( 60,  60,  66),
+            [ColorRole.StackupOnBandInk]      = new( 25,  25,  30),
+            [ColorRole.StackupGripper]        = new(210, 120,  20),
+            [ColorRole.StackupDragGhost]      = new( 30, 110, 220,  90),
+
             // Match Designer. Absorbed carries its own ALPHA rather than a lighter grey: dimming has
             // to read as dimming over whatever the preview's background happens to be.
             [ColorRole.MatchAbsorbed]  = new( 60,  60,  66, 105),
@@ -229,6 +242,16 @@ public sealed class ColorTheme
             [ColorRole.WBondWireVertex] = new(142, 122, 255),
             [ColorRole.WBondSelected]  = new(244, 241, 243),
             [ColorRole.WBondEnvelope]  = new(214, 122, 182,  60),
+
+            // ── Stackup cross-section, DARK ────────────────────────────────────────────────────
+            [ColorRole.StackupBackground]     = new( 34,  34,  36),
+            [ColorRole.StackupBandEdge]       = new(170, 170, 185, 110),
+            [ColorRole.StackupDielectricFill] = new(150, 160, 175,  60),
+            [ColorRole.StackupGroundAccent]   = new( 90, 180, 255),
+            [ColorRole.StackupLabelInk]       = new(212, 212, 216),
+            [ColorRole.StackupOnBandInk]      = new( 25,  25,  30),
+            [ColorRole.StackupGripper]        = new(255, 175,  60),
+            [ColorRole.StackupDragGhost]      = new( 90, 165, 255,  90),
 
             [ColorRole.MatchAbsorbed]  = new(214, 214, 222, 100),
             [ColorRole.MatchNegative]  = new(255, 118, 110),
