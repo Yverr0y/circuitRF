@@ -569,7 +569,13 @@ namespace RfCore
 
         // Returns the port count N such that `tokens` partitions evenly into
         // complete N-port frequency blocks AND each block's first token is a
-        // strictly increasing positive number (i.e. looks like a frequency sweep).
+        // strictly increasing non-negative number (i.e. looks like a frequency sweep).
+        //
+        // NON-NEGATIVE rather than positive since 2026-09-13: an EM result may legitimately carry a
+        // DC row (PlanarDcSolve), and a file whose first frequency is 0 would otherwise fail this
+        // sniff for every N and fall through to "cannot infer". Strict increase still does the work
+        // — a 0 anywhere but the first block is rejected exactly as before — and a negative token is
+        // still not a frequency.
         private static int? TryInferPortsFromTotalTokens(List<double> tokens)
         {
             int total = tokens.Count;
@@ -585,7 +591,7 @@ namespace RfCore
                 for (int b = 0; b < numBlocks; b++)
                 {
                     double freq = tokens[b * blockSize];
-                    if (freq <= 0.0 || freq <= prevFreq) { valid = false; break; }
+                    if (freq < 0.0 || freq <= prevFreq) { valid = false; break; }
                     prevFreq = freq;
                 }
                 if (valid) return N;

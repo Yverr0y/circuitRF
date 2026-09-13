@@ -282,8 +282,22 @@ public sealed class PlanarP2MemoryWinsTests
         var problem = PlanarLineFixtures.Fr4Line(20e-3, 10e9);
         var (mesh, ports) = PlanarLineFixtures.MeshAndPorts(problem, PlanarLineFixtures.Coarse);
 
-        var run = PlanarSolve.Run(mesh, ports, slab, [1e9, 5e9, 10e9, 15e9, 20e9],
-                                  PlanarSolveSettings.Default with { Deembed = true });
+        // ── LF1 — THE SWEEP IS RUN THROUGH THE PRE-LF1 SAMPLING PATH FOR THIS GATE ──────────────
+        //
+        // LF1 widens the DCIM sampling path at any frequency where the shipped default does not reach
+        // Dcim.CalibratedPathProduct, which on 1.6 mm FR-4 is everything below ~2 GHz — i.e. exactly
+        // one point of this sweep, the 1 GHz one. So the digests below would move, and a bare re-pin
+        // would accept ANY change rather than that one. `WidenForStack = false` is what the setting
+        // exists for: it reproduces the arithmetic these literals were pinned on, so P4/P5/P7's own
+        // claims are still assertions about this tree. The widened sweep is measured against it
+        // BELOW, point by point, which is the part that says LF1 moved one point and no other.
+        var preLf1 = PlanarSolveSettings.Default with
+        {
+            Deembed = true,
+            Dcim    = DcimSettings.Default with { WidenForStack = false },
+        };
+
+        var run = PlanarSolve.Run(mesh, ports, slab, [1e9, 5e9, 10e9, 15e9, 20e9], preLf1);
 
         string digest = Digest([.. run.Points.Select(p => p.S)]);
         _out.WriteLine($"5-point de-embedded sweep, N = {mesh.Bases.Count}: SHA-256 of the published " +
@@ -302,9 +316,8 @@ public sealed class PlanarP2MemoryWinsTests
         // P7 claims — the factorisation moved, and nothing else did.
         var throughTheOldLu = PlanarSolve.Run(
             mesh, ports, slab, [1e9, 5e9, 10e9, 15e9, 20e9],
-            PlanarSolveSettings.Default with
+            preLf1 with
             {
-                Deembed = true,
                 Fill = PlanarFillSettings.Default with { UseSymmetricFactorization = false },
             });
         string luDigest = Digest([.. throughTheOldLu.Points.Select(p => p.S)]);
@@ -322,6 +335,36 @@ public sealed class PlanarP2MemoryWinsTests
         // …and the pre-P2 digest, which differs. Recorded so the claim "M2 moves the last bits" is a
         // measurement in the tree rather than a sentence in a write-up.
         Assert.NotEqual("2D6BD9EC94335D05B02EB00621EFA821C5961727267F1802A2EE454BE90AAC5F", digest);
+
+        // ── LF1 — WHICH POINTS THE WIDENING MOVED, MEASURED RATHER THAN ARGUED ──────────────────
+        //
+        // The shipped path, against the pre-LF1 one above, point by point. 5/10/15/20 GHz are past
+        // Dcim.CalibratedPathProduct on this slab already, so ForStackAtFrequency hands their
+        // settings straight back and their matrices must be BIT-identical — not "close", identical,
+        // which is a statement about a code path rather than about a tolerance. 1 GHz is at product
+        // 10 and does move; how far is reported rather than asserted at a threshold, because the
+        // point of the measurement is the size of it.
+        var shipped = PlanarSolve.Run(mesh, ports, slab, [1e9, 5e9, 10e9, 15e9, 20e9],
+                                      PlanarSolveSettings.Default with { Deembed = true });
+
+        for (int i = 0; i < run.Points.Count; i++)
+        {
+            double f = run.Points[i].FrequencyHz;
+            double worst = 0;
+            var a = run.Points[i].S;
+            var b = shipped.Points[i].S;
+            for (int r = 0; r < a.RowCount; r++)
+                for (int c = 0; c < a.ColCount; c++)
+                    worst = Math.Max(worst, (a[r, c] - b[r, c]).Magnitude);
+
+            bool widened = DcimSettings.Default.PathExtent * (2 * Math.PI * f / EmConstants.C0)
+                           * slab.HeightM < Dcim.CalibratedPathProduct;
+            _out.WriteLine($"  {f / 1e9,5:F0} GHz  product " +
+                           $"{DcimSettings.Default.PathExtent * (2 * Math.PI * f / EmConstants.C0) * slab.HeightM,6:F1}" +
+                           $"  {(widened ? "widened" : "unchanged")}  worst |ΔS| = {worst:E2}");
+
+            if (!widened) Assert.Equal(0.0, worst);
+        }
     }
 
     // =========================================================================================

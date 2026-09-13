@@ -3,6 +3,174 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## LF1 — the DC point, and the low-frequency end of the band (2026-09-13)
+
+Owner report, two refusals on one real board (a 1.4 mm four-layer PCB, four ports, 100 MHz – 1 GHz):
+a DC point in the EM setup was refused outright, and so was the sweep's own lower edge at 100 MHz.
+The ask was that a low-frequency run simply work, with at most a brief note saying what the engine
+did — "an RF designer won't read it if the text is too long."
+
+### 1. The 100 MHz refusal was L9b's R-dcm-4, and its stated reason for not fixing it is measurably wrong
+
+R-dcm-4 recorded the right fix and declined to make it, in these words: *"a frequency-aware path
+extent IS the right fix, and it is NOT a one-line change — the sample budget has to rise with the
+extent (a wider path at a fixed `Samples` is a sparser one), and `DcimSettings.Samples` is what L8a's
+whole accuracy table is calibrated against."*
+
+**The sample budget does not have to rise. It has to stay exactly where it is.** Sweeping
+(`PathExtent`, `Samples`) together against `SommerfeldIntegral.Evaluate` on five grounded stacks
+(FR-4 at 1.4 / 1.6 / 0.2 mm, GaAs 0.1 mm, alumina 0.635 mm), worst |ΔG_q| over ρ/H ∈ [0.02, 100] as a
+fraction of the free-space kernel — the SCALED measure a fill experiences:
+
+| f (FR-4 1.4 mm) | PathExtent | 512 samples | 1024 | 2048 |
+|---|---|---|---|---|
+| 300 MHz | 682 | **4.3e-7** | 9.3e-7 | 5.0e-6 |
+| 100 MHz | 2045 | **3.3e-7** | 5.9e-7 | 5.0e-6 |
+| 30 MHz  | 6816 | **1.9e-7** | 3.4e-7 | 9.7e-7 |
+| 10 MHz  | 20449 | **6.7e-8** | 4.1e-7 | 6.9e-6 |
+
+512 is the best column at every extent and every frequency tried, and the fit RESIDUAL degrades by
+one to two orders as samples rise. The mechanism is the fit rather than the sampling: Prony raises its
+order until the residual meets tolerance, and over-sampling a smooth function drives the
+linear-prediction least squares toward rank deficiency, so the extra rows buy noise. **So the widening
+is free** — 11–27 ms per kernel across the whole band, against 10–30 ms for the shipped default.
+
+### 2. The target is not a new number — it is the product the shipped default already delivers
+
+`PathExtent` is in units of k₀ and the stack's image structure lives at k_ρ ~ 1/H, so what decides
+whether the fit sees the stack is `PathExtent·k₀H`. **What that product means geometrically is the
+near-field REACH in substrate heights**: the path stops at k_ρ = PathExtent·k₀, so the finest
+structure it ever saw is ρ = 1/(PathExtent·k₀) = H/product. `PathExtent` = 300 on 1.6 mm FR-4 at
+2 GHz is a product of **20**, i.e. ρ = H/20 — and every accuracy figure recorded for this kernel was
+measured in that neighbourhood. `Dcim.CalibratedPathProduct` = 20 holds that reach fixed whatever the
+frequency, which is what "the same fit, lower down the band" has to mean.
+
+Scaled |ΔG_q| on FR-4 1.4 mm, default against widened:
+
+| k₀H | f | default (product) | widened to 20 |
+|---|---|---|---|
+| 6.7e-2 | 2.28 GHz | 4.7e-5 (20) | 4.7e-5 — unchanged, already there |
+| 8.8e-3 | 300 MHz | 6.6e-5 (2.6) | 2.2e-6 |
+| 2.9e-3 | 100 MHz | **9.6e-3** (0.88) | 1.2e-7 |
+| 1.0e-3 | 34 MHz | **2.6e-2** (0.30) | 8.0e-7 |
+| 3.0e-4 | 10 MHz | **2.5e-2** (0.09) | 9.1e-8 |
+| 1.0e-4 | 3.4 MHz | **6.8e-3** (0.03) | 1.1e-8 |
+
+**It only ever widens**, so every frequency where the default already reaches 20 takes bit-identical
+arithmetic. On the two starter substrates that is FR-4 at 2 GHz and above — and **NOT GaAs at any
+shipped frequency**: 100 µm GaAs at 2 GHz is a product of 1.26, barely above R-dcm-4's own guard, and
+its scaled error there is **3.9e-3 against 4.7e-8 widened**. That is five orders, on a substrate this
+kernel ships accuracy figures for, and it is the single largest accuracy change in this work.
+
+`PlanarP2MemoryWinsTests.P2_6` is the gate that says so: it runs its pinned sweep through
+`DcimSettings.WidenForStack = false` (which exists only for that purpose), reproduces P4/P5/P7's
+literals bit for bit, and then measures the shipped path point by point — 5/10/15/20 GHz move by
+**exactly 0**, and the 1 GHz point (product 10.1) by 9.1e-7.
+
+### 3. What the widening cannot reach, and why the floor is where it is
+
+Below k₀H ≈ 8e-5 the failure moves from the path into the FIT: the remainder left after the direct
+term, the quasi-static constant and the poles is small enough that Prony is fitting roundoff. Measured
+on all five stacks, widened throughout, and the break is in the same place on all five — which is what
+makes it a property of k₀H rather than of a stack:
+
+| k₀H | 1.0e-4 | 8e-5 | 6e-5 | 4e-5 | 3e-5 | 1e-5 |
+|---|---|---|---|---|---|---|
+| scaled &#124;ΔG_q&#124; | ≤4e-7 | ≤3e-7 | 1.6e-4 | 3.4e-4 | 1.4e-2 | 3.5e-2 |
+| fit residual | ≤3e-6 | ≤2e-6 | 5e-4 | 1.4e-3 | 2.9e-2 | 1.3e-1 |
+
+`Dcim.MinElectricalThicknessForWidenedFit` = 1e-4, the first decade above the break — **3.4 MHz on
+1.4 mm FR-4, 48 MHz on 100 µm GaAs**. `MinElectricalThicknessForFit` (1e-6) is kept for the separate
+thing it describes: the point where the full-wave correction is entirely below roundoff and a 6 Hz
+point ends in a raw array-dimension throw.
+
+### 4. The DC point is not a limit taken inside the sweep — it is a different solve
+
+**The full-wave kernel has no ω = 0 case and not for a tolerance reason.** The MPIE splits into a
+vector-potential term scaling with ω and a scalar-potential term scaling with 1/ω, so at ω = 0 the
+system is undefined, and so is every ingredient: the Green's function is written in k₀, the DCIM path
+is a multiple of k₀, and the radial table is sized against a wavelength that does not exist.
+
+**What DC actually is, is a conduction problem.** At ω = 0 the charge term enforces ∇·J = 0 and the
+vector potential contributes nothing, leaving E = Z_s J on the metal with a divergence-free current —
+Ohm's law on a resistor network, with an exact answer and no fit in it. `PlanarDcSolve` builds that
+network **on the rooftop basis**, one resistor per basis function, which is the same statement
+`PlanarConductors` already makes ("the basis list already IS the conduction graph of the meshed
+structure"). Nothing re-derives connectivity from the drawn polygons; that second answer would
+disagree with the solve's wherever the mesher staircased, cut or dropped a sliver.
+
+**The one place it departs from the AC port model, and it has to.** A delta gap at a conductor's end
+face drives the structure against the plane THROUGH THE FIELD, and at DC there is no field to drive it
+through. Modelled as a source in series with its own rooftop — which is what the AC excitation vector
+is — every line would read as an open at both ends and a solid piece of copper would publish S = I.
+What an edge port IS at DC is the end of that conductor against its reference, so the terminals are
+the conductor's end cells and the ground node. The kinds that genuinely ARE a cut in metal (the
+internal delta gap; the via-to-plane port, whose gap is at the foot of the via) cut the network.
+
+**A port with no DC path gets EXACTLY zero, and that is a graph question answered on the graph.** It
+does not come out of the solve that way — the island's free nodes settle at the driven potential to
+~1e-16 and the current is that residual times some thousands of siemens, so it reads ~1e-12 S, which
+is indistinguishable from a real, very large leakage resistance. The series-MIM-cap case is the whole
+reason this file exists, so the component structure decides it and the numerical solve is asked only
+about the entries it can determine.
+
+**Two things are explicit rather than hidden.** The reference plane sits at the port's outermost cell
+rather than on the gridline one half-cell in (worth ~11 % of a 20 mm line's resistance on a coarse
+mesh); and R-fed-1's grown feed lead is peeled as the series resistance it is at DC, through
+`Y′ = (I + Y·R)⁻¹·Y` — which is defined for a SINGULAR Y, and therefore for the open-port case whose
+Z does not exist.
+
+`PecSheetResistance` is **1 µΩ/sq, and the limit is the S CONVERSION rather than the network.** The
+nodal solve is happy at any value; `Y → S` inverts `I + Z₀·Y`, and at 1 nΩ/sq that matrix has entries
+of ~7e9 on a 50 Ω port, costing ten digits and publishing |S₂₁| = 0.99997 — a worse answer than the
+larger resistance gives.
+
+### 5. What is still in the way at the bottom of a band, measured and NOT fixed here
+
+Both refusals the owner reported are gone, and on their own board a DC + 500 MHz + 1 GHz sweep now
+writes a `.s4p` whose 0 Hz row reads S₂₁ = S₄₃ = 0.99992 (7.75 mΩ of trace) and exactly 0 between the
+two isolated arms. **Two further walls sit above it, both pre-existing, both about DE-EMBEDDING rather
+than about the kernel, and both reachable now only because the kernel's own refusal moved out of the
+way.**
+
+**(a) The peel's own conditioning.** The port is necessarily a series delta gap, so a₂₁ ∝ ω and D6's
+peel divides by a₂₁². Measured on the 20 mm FR-4 hero line, de-embedded, edge mesh off — the phase
+slope must be flat in frequency for a quasi-TEM line, and the amplification is `1/|a₂₁|²` read off the
+run's own error box:
+
+| f | 1/&#124;a₂₁&#124;² | S₂₁ phase (deg/GHz) | error vs the plateau |
+|---|---|---|---|
+| 2 GHz | 6.9 | −34.42 | — |
+| 1 GHz | 24.7 | −34.41 | 0 % |
+| 500 MHz | 96 | −34.23 | 0.6 % |
+| 300 MHz | 265 | −33.37 | 3 % |
+| 200 MHz | 597 | −31.30 | 9 % |
+| 100 MHz | 2,413 | −18.53 | **46 %** |
+
+The calibration's own extracted ε_eff degrades with it (3.30 at 1 GHz → 3.05 at 100 MHz → 2.80 at
+50 MHz), and the box's consistency residual stays at 1e-14 throughout, so the ALGEBRA is exact and what
+is amplified is a modelling difference between the standard and the DUT. **σ_max ≤ 1 at every point,
+so R-prt-15 does not catch it.**
+
+**No note was written for it, deliberately.** The amplification is computable per point but is not a
+predictor across mesh settings: with the edge mesh ON the same fixture reads 1/|a₂₁|² = 1.25e5 at
+100 MHz with a 14 % phase error, and 312 at 2 GHz with none — so any threshold on it both over- and
+under-warns. A note keyed on a quantity that does not track the error would be the "name a remedy that
+does not bind" failure one step over. What WOULD close it is a port model whose a₂₁ does not vanish
+with ω; `CLAUDE.md` §5 already records that a true edge port would remove it and is not built.
+
+**(b) The two-line calibration's own cost and conditioning at low frequency.** A standard is
+`TargetElectricalDegrees` = 60 long and reproduces the DUT's transverse gridlines verbatim, so its N
+grows as 1/f: on the owner's board the 100 MHz standard is **9,690 unknowns against a DUT of 311**,
+past the dense 5,000 ceiling (it runs with the accelerated solve on, whose ceiling is 12,000). And a
+calibration GROUP's modes separate as f·Δℓ, so the same board refuses at 200 MHz (0.178°) and 250 MHz
+(0.413°) against `ModeSeparationFloorDegrees` = 0.5 — **while PASSING at 100 MHz**, because
+`PlanarCalibration.SelectSeparation` picks a longer standard there. That last one looks like a defect
+rather than a limit: the selection rule optimises a single mode's 60° target and does not consider
+modal separability, so a frequency whose modes ARE separable with an available standard is refused for
+the one the rule happened to pick. Not acted on here — it changes de-embedded answers for every
+grouped port.
+
 ## PCAL5 — a calibration group's feed leads, a cut cell's clearance, and a severed conductor (2026-09-12)
 
 Owner report: a two-port coupled section on a real board — an imported PCB, two 254 µm traces

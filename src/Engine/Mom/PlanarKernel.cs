@@ -479,7 +479,15 @@ public sealed class PlanarKernel
                 rejct[o] = c.Box.RejectedResidual;
                 if (!c.Gamma.Usable) flagged++;
             }
-            usable[i] = flagged == 0 ? 1 : 0;
+            // LF1 — the 0 Hz point is NaN, not 1. The comment twenty lines up says a zero in a
+            // diagnostics cube reads as a measurement; a ONE reads as one just as hard, and DC is
+            // solved as a conduction network with no calibration in it at all (PlanarDcSolve), so
+            // "nothing was flagged" and "nothing was measured" must not arrive here as one value.
+            //
+            // Asked of the FREQUENCY rather than of the calibration count, deliberately narrow: a
+            // run with de-embedding off also carries no calibrations and has published 1 here since
+            // L8e, and re-pointing that is a separate decision about a cube people already read.
+            usable[i] = pt.FrequencyHz <= 0 ? double.NaN : flagged == 0 ? 1 : 0;
         }
 
         ds.AddToGroup(DiagnosticsGroup, "Gamma",              new DataCube(Ax2(), gamma));

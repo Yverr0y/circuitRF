@@ -29,11 +29,15 @@ public partial class MessagesTool : Tool, IMessageSink
         var entry = new MessageEntry(level, text, filePath, System.DateTime.Now);
 
         // Always post on the UI thread — callers may be on background threads in 6e.
-        if (Dispatcher.UIThread.CheckAccess())
-            Messages.Add(entry);
-        else
-            Dispatcher.UIThread.Post(() => Messages.Add(entry));
+        OnUi(() => Insert(entry));
     }
+
+    /// <summary>
+    /// <b>A new message lands ABOVE any row whose operation is still running</b> — owner request,
+    /// 2026-09-13: "keep the simulation progress bar at the bottom of the messages list". The rule
+    /// itself is <see cref="MessageOrdering"/>'s, so it can be gated without a dispatcher.
+    /// </summary>
+    private void Insert(MessageEntry entry) => MessageOrdering.Insert(Messages, entry);
 
     /// <summary>
     /// A message with an ACTION link on the end of it — see <see cref="IMessageSink.PostAction"/>.
@@ -44,7 +48,7 @@ public partial class MessagesTool : Tool, IMessageSink
                            System.Func<System.Threading.Tasks.Task> action)
     {
         var entry = new MessageEntry(level, text, null, System.DateTime.Now, actionLabel, action);
-        OnUi(() => Messages.Add(entry));
+        OnUi(() => Insert(entry));
     }
 
     /// <summary>
@@ -60,6 +64,8 @@ public partial class MessagesTool : Tool, IMessageSink
             // denominator yet, and a bar sitting at 0% reads as stalled rather than starting.
             ProgressIndeterminate = true,
             ProgressPercent       = 0,
+            // The row goes to the BOTTOM and stays there until the operation settles — see Insert.
+            IsLiveProgress        = true,
         };
 
         OnUi(() => Messages.Add(entry));

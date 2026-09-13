@@ -79,12 +79,23 @@ public sealed class PlanarFrequencyKernel
     /// The kernel one frequency of <paramref name="problem"/> needs. <b>The one-level branch is
     /// literally L8d's own call</b>, so R-mlp-1's bit-identity is a property of the code path rather
     /// than of a tolerance.
+    ///
+    /// <para><b>And this is the ONE place the sampling path is widened for a low frequency</b>
+    /// (<see cref="Dcim.ForStackAtFrequency"/>). Every fit in the application arrives here — the
+    /// sweep, the adaptive sweep's own probes, the resonance search, the current-density recompute —
+    /// so putting it anywhere else would leave one of them fitting a path that cannot see the stack,
+    /// silently and only at the bottom of a band. It is a no-op at every frequency where the default
+    /// already reaches <see cref="Dcim.CalibratedPathProduct"/>, which is what keeps §L8/§L9's
+    /// recorded numbers bit-identical.</para>
     /// </summary>
     public static PlanarFrequencyKernel Fit(
         PlanarProblem problem, double fHz,
         PlanarExtractionOrder order = PlanarExtractionOrder.Constant, DcimSettings? dcim = null)
     {
         ArgumentNullException.ThrowIfNull(problem);
+        dcim = Dcim.ForStackAtFrequency(dcim, 2.0 * Math.PI * fHz / EmConstants.C0,
+                                        problem.RequiresGeneralKernel ? problem.EffectiveStack.TopZ
+                                                                      : problem.Slab.HeightM);
         return problem.RequiresGeneralKernel
             ? new PlanarFrequencyKernel(
                   new PlanarKernelSet(new LayeredSpectralGreens(problem.EffectiveStack, fHz),
@@ -1194,6 +1205,15 @@ public static class PlanarSolve
     }
 
     /// <summary>
+    /// <b>The 0 Hz point, in the shape every other point of the sweep has.</b> Its RawS IS its S —
+    /// there is no port discontinuity to remove at DC, because a discontinuity is a reactance — and
+    /// it carries no calibrations for the same reason, which is the honest thing for a point that was
+    /// not calibrated rather than an identity box pretending it was.
+    /// </summary>
+    private static PlanarFrequencyPoint DcPoint(PlanarDcResult dc) =>
+        new(0.0, dc.S, dc.S, [], KernelFitMs: 0, DutMs: dc.ElapsedMs, CalibrationMs: 0);
+
+    /// <summary>
     /// <b>The error box of a port that has no error box</b> — a₁₁ = 0, a₂₂ = 0, a₂₁ = 1, i.e. a
     /// through. An internal delta gap takes this, which makes <see cref="PlanarDeembed.Apply"/>'s
     /// algebra the identity on that port's row and column while every de-embedded port beside it is
@@ -1280,6 +1300,41 @@ public static class PlanarSolve
         // Ascending, because both branch resolutions are continuations (PlanarPortCalibrator).
         var freqs = freqsHz.ToArray();
         Array.Sort(freqs);
+
+        // ── LF1 — 0 Hz IS TAKEN OUT OF THE SWEEP BEFORE ANYTHING ELSE READS IT ──────────────────
+        //
+        // It is not a frequency this machinery can carry: the kernel is written in k₀, the
+        // calibration standard is an electrical length, and the de-embedding peel divides by a₂₁ ∝ ω.
+        // Splitting it out HERE rather than special-casing it downstream is what keeps every other
+        // point's arithmetic bit-identical — nothing below this line has a zero to branch on — and it
+        // is why PlanarDcSolve can be an independent, testable answer instead of a limit taken inside
+        // a sweep. It is spliced back on at the end, first, which is where a .sNp wants it.
+        bool wantDc = freqs.Length > 0 && freqs[0] <= 0;
+        if (wantDc)
+        {
+            int firstAc = 0;
+            while (firstAc < freqs.Length && freqs[firstAc] <= 0) firstAc++;
+            freqs = freqs[firstAc..];
+        }
+
+        if (freqs.Length == 0)
+        {
+            // A sweep of nothing but DC. The mesh is already built and the ports already resolved,
+            // so there is an exact answer here and no reason to refuse it.
+            var only = PlanarDcSolve.Solve(problem, mesh, ports, leads);
+            notes.AddRange(only.Notes);
+            return new PlanarSolveResult
+            {
+                Points        = [DcPoint(only)],
+                CoreFillCount = 0,
+                UnknownCount  = mesh.Bases.Count,
+                StandardCount = 0,
+                CoreBuildMs   = 0,
+                Notes         = notes,
+                SolvedPointCount = 1,
+            };
+        }
+
         double fLo = freqs[0], fHi = freqs[^1];
 
         bool general = problem.RequiresGeneralKernel;
@@ -1304,12 +1359,44 @@ public static class PlanarSolve
         // refusal attached, and left it because nothing could reach it from the EM panel. Adaptive
         // frequency sampling (M1) chooses its own points, so it can — and a scheme that picks a
         // frequency there must be stopped by a refusal rather than by an out-of-range array.
+        //
+        // ── LF1 — AND IT IS ASKED OF THE LOWEST NON-ZERO POINT ──────────────────────────────────
+        //
+        // 0 Hz is not a frequency this guard has anything to say about: it is not fitted at all, it
+        // is solved as a conduction network (PlanarDcSolve), and asking a question about k₀H of a
+        // point where k₀ = 0 would refuse the one case that is exact.
         double stackH = general ? problem.EffectiveStack.TopZ : slab.HeightM;
-        var lowFreq = Dcim.CanFitAtFrequency(
-            2.0 * Math.PI * fLo / EmConstants.C0, stackH, st.Dcim);
-        if (!lowFreq.Ok)
-            throw new InvalidOperationException(
-                $"The sweep's lowest frequency is {SurfaceMesher.Eng(fLo)}Hz. " + lowFreq.Reason);
+        double fLoAc  = 0;
+        foreach (double f in freqs) if (f > 0) { fLoAc = f; break; }
+        if (fLoAc > 0)
+        {
+            var lowFreq = Dcim.CanFitAtFrequency(2.0 * Math.PI * fLoAc / EmConstants.C0, stackH);
+            if (!lowFreq.Ok)
+                throw new InvalidOperationException(
+                    $"The sweep's lowest frequency is {SurfaceMesher.Eng(fLoAc)}Hz. " + lowFreq.Reason);
+
+            // ── LF1 — SAY SO WHEN THE PATH WAS WIDENED, ONCE, AND IN ONE LINE ───────────────────
+            //
+            // The widening happens per frequency inside PlanarFrequencyKernel.Fit and is invisible
+            // in the answer: there is no refusal, no warning and no cost. An RF designer still has
+            // to be able to find out that the bottom of their band was fitted differently from the
+            // top, so the run says which points were widened and stops there — the derivation lives
+            // in Dcim.CalibratedPathProduct, not in the Messages panel.
+            var baseDcim = st.Dcim ?? DcimSettings.Default;
+            double khLo  = 2.0 * Math.PI * fLoAc / EmConstants.C0 * stackH;
+            if (baseDcim.PathExtent * khLo < Dcim.CalibratedPathProduct)
+            {
+                // The highest frequency that needed nothing — everything below it was widened.
+                double fPlain = Dcim.CalibratedPathProduct * EmConstants.C0
+                                / (2.0 * Math.PI * stackH * baseDcim.PathExtent);
+                double widest = Dcim.ForStackAtFrequency(
+                    baseDcim, 2.0 * Math.PI * fLoAc / EmConstants.C0, stackH).PathExtent;
+                notes.Add(
+                    $"Below {SurfaceMesher.Eng(fPlain)}Hz the Green's function's sampling path widens " +
+                    $"as the frequency falls — {widest:N0}·k₀ at {SurfaceMesher.Eng(fLoAc)}Hz — so the " +
+                    "fit still sees the stack. Same sample count, same cost.");
+            }
+        }
 
         // ── L9d/§0.2 item 4 — G_A^zz's OWN range is a REFUSAL, not a note, and this is the caller
         //    that acts on the answer the fill has been asking for since L9c.
@@ -3335,6 +3422,14 @@ public static class PlanarSolve
             if (firstPol.Reference is { } reference) notes.Add(reference.Note);
             if (polSet.CoCrossVerdict.Ok) notes.Add(PlanarPolarization.MeshFloorNote);
             foreach (string refusal in polSet.Refusals) notes.Add(refusal);
+        }
+
+        // ── LF1 — and the DC point goes back on the front ───────────────────────────────────────
+        if (wantDc)
+        {
+            var dc = PlanarDcSolve.Solve(problem, mesh, ports, leads);
+            notes.AddRange(dc.Notes);
+            points.Insert(0, DcPoint(dc));
         }
 
         return new PlanarSolveResult

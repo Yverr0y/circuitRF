@@ -158,6 +158,20 @@ public sealed partial class MessageEntry : ObservableObject
     public double ProgressValue => _progressPercent ?? 0;
 
     /// <summary>
+    /// <b>Whether this row belongs to an operation that is still running</b> — which is what keeps it
+    /// at the BOTTOM of the list while the operation posts ordinary messages above it (owner request,
+    /// 2026-09-13: "keep the simulation progress bar at the bottom of the messages list").
+    ///
+    /// <para>It is not <see cref="HasProgress"/>. That asks whether a BAR is drawn, and the two part
+    /// company at both ends: a settled row keeps its bar when it was finished with
+    /// <c>keepBar: true</c>, and an indeterminate row that has not yet been given a percentage
+    /// has one from the start. Liveness is a fact about the operation, so it is set when the row is
+    /// created by <c>BeginProgress</c> and cleared by whichever
+    /// <see cref="IProgressMessage"/> call settles it — never inferred from what is on screen.</para>
+    /// </summary>
+    public bool IsLiveProgress { get; internal set; }
+
+    /// <summary>
     /// The operation this row's bar is drawing, when it can be stopped — what the bar's right-click
     /// Cancel acts on. Null on an ordinary message and on a run that offers no cancellation.
     ///

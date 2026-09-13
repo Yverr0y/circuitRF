@@ -81,7 +81,20 @@ public sealed record DcimSettings(
     /// </summary>
     int    BranchSamples = 0,
     /// <summary>Half-width of that block, in units of k₀.</summary>
-    double BranchExtent  = 1.0)
+    double BranchExtent  = 1.0,
+    /// <summary>
+    /// <b>LF1 — whether <see cref="Dcim.ForStackAtFrequency"/> may widen
+    /// <see cref="PathExtent"/> as the frequency falls. On, and the only reason to turn it off is to
+    /// reproduce a number recorded before it existed.</b>
+    ///
+    /// <para>It is not an accuracy trade and it is not a cost trade — the measurement in
+    /// <see cref="Dcim.CalibratedPathProduct"/> is one-directional and the fit costs the same either
+    /// way. What it buys is a gate: the sweeps §L8/§L9 pinned by digest can be re-run through the
+    /// arithmetic they were pinned on, so "the widening moved this point and no other" is an
+    /// assertion in the tree rather than a sentence in a write-up
+    /// (<c>PlanarP2MemoryWinsTests.P2_6</c>).</para>
+    /// </summary>
+    bool   WidenForStack = true)
 {
     public static readonly DcimSettings Default = new();
 }
@@ -289,41 +302,137 @@ public static class Dcim
     public const double MinElectricalThicknessForFit = GroundedSlab.MinElectricalThickness;
 
     /// <summary>
-    /// <b>L9b's R-dcm-4, turned into a check.</b> <see cref="DcimSettings.PathExtent"/> is a
-    /// statement in units of k₀, while the stack's image structure lives at k_ρ ~ 1/H, which does
-    /// not move with frequency. So what actually decides whether the fit SEES the stack is
-    /// <c>PathExtent·k₀H</c>, and on the 1.4 mm PCB stack that product falls through 1 between
-    /// 300 MHz and 100 MHz — below which the error GROWS as the frequency falls (measured: 3.8e-3
-    /// at 300 MHz, 2.9e-2 at 100 MHz), which is not a floor and is not the oracle.
+    /// <b>The product <c>PathExtent·k₀H</c> the SHIPPED default actually delivers at the frequencies
+    /// this kernel was calibrated at — and therefore the target a low-frequency run is widened to.</b>
+    ///
+    /// <para>It is not a new number. <see cref="DcimSettings.PathExtent"/> = 300 on 1.6 mm FR-4 at
+    /// 2 GHz (k₀H = 0.067) is a product of 20, and every accuracy figure recorded for this kernel was
+    /// measured at products in that neighbourhood. What the product means geometrically is the
+    /// NEAR-FIELD REACH in substrate heights: the sampling path stops at k_ρ = PathExtent·k₀, so the
+    /// finest spatial structure it ever saw is ρ = 1/(PathExtent·k₀) = H/product. Holding the product
+    /// fixed therefore holds the reach fixed at ρ = H/20 whatever the frequency, which is exactly what
+    /// "the same fit, lower down the band" has to mean.</para>
+    ///
+    /// <para><b>Measured (FR-4 1.4 mm, 512 samples, worst |ΔG| over ρ/H ∈ [0.02, 100] as a fraction of
+    /// the free-space kernel — the SCALED measure a matrix fill experiences):</b></para>
+    /// <code>
+    ///   k₀H      f        default (PathExtent 300)      widened to product 20
+    ///   6.7e-2   2.28 GHz   4.7e-5  (product 20)          4.7e-5  (unchanged — already there)
+    ///   8.8e-3   300 MHz    6.6e-5  (product 2.6)         2.2e-6
+    ///   2.9e-3   100 MHz    9.6e-3  (product 0.88)        1.2e-7
+    ///   1.0e-3    34 MHz    2.6e-2  (product 0.30)        8.0e-7
+    ///   3.0e-4    10 MHz    2.5e-2  (product 0.09)        9.1e-8
+    ///   1.0e-4   3.4 MHz    6.8e-3  (product 0.03)        1.1e-8
+    /// </code>
+    /// </summary>
+    public const double CalibratedPathProduct = 20.0;
+
+    /// <summary>
+    /// <b>L9b's R-dcm-4, ACTED ON rather than refused — and the sample budget does NOT rise with the
+    /// extent, which is the one thing the refusal it replaces got wrong.</b>
+    ///
+    /// <para>R-dcm-4 recorded the right fix and declined to make it: "a frequency-aware path extent IS
+    /// the right fix, and it is NOT a one-line change — the sample budget has to rise with the extent
+    /// (a wider path at a fixed <see cref="DcimSettings.Samples"/> is a sparser one)". <b>Measured, it
+    /// is the other way round.</b> Sweeping (PathExtent, Samples) together against
+    /// <see cref="SommerfeldIntegral.Evaluate"/> on five grounded stacks, 512 samples is the best
+    /// column at every extent tried and every frequency tried; 1024 and 2048 are consistently WORSE,
+    /// by one to two orders on the fit residual. The reason is the fit, not the sampling: Prony raises
+    /// its order until the residual meets tolerance, and over-sampling a smooth function drives the
+    /// linear-prediction least squares towards rank deficiency, so the extra rows buy noise. On
+    /// FR-4 1.4 mm at 100 MHz, widened to product 20: 512 samples → 1.2e-7, 1024 → 5.9e-7,
+    /// 2048 → 5.0e-6.</para>
+    ///
+    /// <para><b>So the widening is free.</b> The path is longer at the same sample count and the fit
+    /// costs what it always cost — measured at 11-27 ms per kernel across the whole band, against
+    /// 10-30 ms for the shipped default. Nothing about the sweep's cost model changes.</para>
+    ///
+    /// <para><b>It only ever widens.</b> At a frequency where the default already reaches
+    /// <see cref="CalibratedPathProduct"/> this returns <paramref name="settings"/> itself, so every
+    /// run at or above ~2 GHz on a 1.6 mm board — which is every recorded measurement in
+    /// <c>HISTORY.md</c> §L8 and §L9 — takes bit-identical arithmetic.</para>
+    ///
+    /// <para>A caller that has set its own <see cref="DcimSettings.PathExtent"/> deliberately is
+    /// still widened, because the widening is a statement about what the STACK needs at this
+    /// frequency and a hand-set 300 is not a request for a fit that cannot see the stack. Setting one
+    /// LARGER than the target is honoured untouched.</para>
+    /// </summary>
+    /// <param name="k0">Free-space wavenumber at this frequency.</param>
+    /// <param name="stackHeightM">The stack's own thickness — <c>GroundedSlab.HeightM</c> on the
+    /// one-layer path, <c>LayerStack.TopZ</c> on the general one. The same quantity
+    /// <see cref="CanFitAtFrequency"/> is asked about.</param>
+    public static DcimSettings ForStackAtFrequency(DcimSettings? settings, double k0,
+                                                   double stackHeightM)
+    {
+        var s  = settings ?? DcimSettings.Default;
+        double kh = k0 * stackHeightM;
+        if (!s.WidenForStack || !(kh > 0)) return s;
+
+        double needed = CalibratedPathProduct / kh;
+        return needed > s.PathExtent ? s with { PathExtent = needed } : s;
+    }
+
+    /// <summary>
+    /// <b>How far down the band <see cref="ForStackAtFrequency"/> can carry a fit, in k₀H.</b>
+    ///
+    /// <para>Below this the widening stops working and the failure is in the FIT rather than in the
+    /// path: the remainder left after the direct term, the quasi-static constant and the poles are
+    /// peeled off becomes small enough that Prony is fitting roundoff. Measured on five grounded
+    /// stacks (FR-4 1.4 mm and 1.6 mm and 0.2 mm, GaAs 0.1 mm, alumina 0.635 mm), widened to
+    /// <see cref="CalibratedPathProduct"/> throughout, worst scaled |ΔG_q| against direct Sommerfeld
+    /// integration — and the break is in the SAME place on all five, which is what makes it a
+    /// property of k₀H rather than of a stack:</para>
+    /// <code>
+    ///   k₀H     1.0e-4   8e-5     6e-5     4e-5     3e-5     1e-5
+    ///   |ΔG_q|  ≤4e-7    ≤3e-7    1.6e-4   3.4e-4   1.4e-2   3.5e-2
+    ///   fit res ≤3e-6    ≤2e-6    5e-4     1.4e-3   2.9e-2   1.3e-1
+    /// </code>
+    /// <para>1e-4 is the first decade above the break, which on 1.4 mm FR-4 is <b>3.4 MHz</b> and on
+    /// 100 µm GaAs is <b>48 MHz</b>. <see cref="MinElectricalThicknessForFit"/> (1e-6) is two decades
+    /// below that and is kept for what it separately describes — the point where the full-wave
+    /// correction is entirely below roundoff and the run ends in a raw array-dimension throw.</para>
+    /// </summary>
+    public const double MinElectricalThicknessForWidenedFit = 1e-4;
+
+    /// <summary>
+    /// <b>The low-frequency gate, and what is left of it once the fit widens itself.</b>
+    ///
+    /// <para>L9b's R-dcm-4 refusal — "raise DcimSettings.PathExtent to at least 530" — is gone, because
+    /// <see cref="ForStackAtFrequency"/> now does exactly that and the measurement in its header says
+    /// it costs nothing. What remains is the band the widening cannot reach
+    /// (<see cref="MinElectricalThicknessForWidenedFit"/>), and there the remedy is not a knob: it is
+    /// either a higher lower edge or the DC point, which <c>PlanarDcSolve</c> answers exactly and
+    /// without a fit at all.</para>
     /// </summary>
     public static EmSuitability CanFitAtFrequency(double k0, double stackHeightM,
                                                   DcimSettings? settings = null)
     {
         double kh = k0 * stackHeightM;
+        if (kh >= MinElectricalThicknessForWidenedFit) return EmSuitability.Yes;
 
-        if (!(kh > MinElectricalThicknessForFit))
-            return EmSuitability.No(
-                $"At this frequency the stack is k₀H = {kh:G3} thick, below the full-wave fit's " +
-                $"floor of {MinElectricalThicknessForFit:G3}. Two separate things break there and " +
-                $"neither is recoverable: every wave correction is more than twelve orders below the " +
-                $"static answer, so the fit is computing nothing StaticGreens/LayeredStaticGreens " +
-                $"would not give exactly; and the per-frequency radial remainder table is sized " +
-                $"against the wavelength, which at this frequency is astronomical — a 6 Hz point " +
-                $"spends 50 s and ends in a raw 'Array dimensions exceeded supported range', with no " +
-                $"refusal attached, which is what this one exists to replace. Raise the sweep's " +
-                $"lower edge, or use the static kernel for the DC limit.");
+        // The lowest frequency this stack CAN be fitted at — the number the caller actually needs,
+        // rather than the dimensionless one it is derived from.
+        double fMin = MinElectricalThicknessForWidenedFit * EmConstants.C0
+                      / (2.0 * Math.PI * stackHeightM);
 
-        double product = (settings ?? DcimSettings.Default).PathExtent * kh;
-        return product >= 1.0
-            ? EmSuitability.Yes
-            : EmSuitability.No(
-                $"At this frequency PathExtent·k₀H = {product:G3}, i.e. the sampling path stops " +
-                $"before it reaches the k_ρ ~ 1/H scale the stack's own image structure lives at, so " +
-                $"the fit does not see the stack. This is not a floor the error settles onto — it " +
-                $"GROWS as the frequency falls: measured on a 1.4 mm PCB stack, 3.8e-3 at 300 MHz " +
-                $"and 2.9e-2 at 100 MHz. Raise DcimSettings.PathExtent to at least " +
-                $"{1.0 / kh:F0} (and Samples with it, since a wider path at a fixed sample count is " +
-                $"a sparser one), or raise the sweep's lower edge.");
+        string deep = kh < MinElectricalThicknessForFit
+            ? " Below k₀H = " + $"{MinElectricalThicknessForFit:G3}" +
+              " there is nothing to fit at all: every wave correction is more than twelve orders " +
+              "below the static answer, and the per-frequency radial remainder table is sized " +
+              "against a wavelength that is astronomical — a 6 Hz point spends 50 s and ends in a " +
+              "raw 'Array dimensions exceeded supported range'."
+            : "";
+
+        return EmSuitability.No(
+            $"At this frequency the stack is k₀H = {kh:G3} thick, below the full-wave fit's floor of " +
+            $"{MinElectricalThicknessForWidenedFit:G3}. The sampling path is widened automatically as " +
+            $"the frequency falls — that is what carries the fit down to here — but below this floor " +
+            $"the failure is in the fit rather than in the path: the remainder left after the direct " +
+            $"term, the quasi-static constant and the poles is small enough that Prony is fitting " +
+            $"roundoff, and the scaled error jumps from 3e-7 to 1.4e-2 over half a decade of " +
+            $"frequency.{deep} On this stack the lowest frequency that will fit is " +
+            $"{SurfaceMesher.Eng(fMin)}Hz. Raise the sweep's lower edge to it, or ask for 0 Hz " +
+            $"itself — a DC point is solved as a conduction network and needs no fit.");
     }
 
     /// <summary>Below this the fit never sampled the scale being asked about — see

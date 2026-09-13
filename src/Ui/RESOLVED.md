@@ -1,5 +1,50 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## Owner request, 2026-09-13 — the simulation's progress bar stays at the BOTTOM of the Messages list
+
+"If a new message appears in the Message panel, make sure it scrolls to the bottom. (And keep the
+simulation progress bar at the bottom of the messages list)."
+
+**Two halves, and only one of them was a scroll problem.**
+
+**The order.** `MessagesTool.Post` appended, and a long run is exactly the thing that posts messages
+WHILE it is running — the EM sweep's notes, a mesh warning, an engine diagnostic. So the live row
+walked up the log as the run talked, leaving the moving bar somewhere in the middle and the newest
+text stranded below it. A new message now lands ABOVE the last still-running row
+(`MessageOrdering`, a pure function of the list so it can be gated without a dispatcher —
+`MessagesTool` marshals to the UI thread and then calls it).
+
+**And it is the LAST live row, not a trailing block of them — the EM run is why.** That run owns two
+rows, a sweep row carrying the bar and a stage row naming the current step, and it settles the STAGE
+row first, then posts its twenty-odd notes, then settles the sweep row with its summary. Under a
+trailing-only rule the settled stage row breaks the chain and every note lands below the live bar,
+which is the arrangement the request is about. Searching back from the last live row and then over the
+contiguous live block it ends keeps a run's own rows together at the bottom whatever order it settles
+them in.
+
+**Liveness is NOT `HasProgress`, and the two part company at both ends.** `HasProgress` asks whether a
+BAR is drawn: a row finished with `keepBar: true` keeps one, and an indeterminate row has one from the
+start. Reading it would let a settled download row hold messages above it for the rest of the session.
+`MessageEntry.IsLiveProgress` is set by `BeginProgress` and cleared by whichever `IProgressMessage`
+call settles the row (`Finish`, `Complete`, `CompleteWithAction`) — a fact about the operation, never
+inferred from what is on screen. Only a trailing run is skipped, so once a run is over the log's order
+is exactly what it always was, and a run owning two live rows (a sweep row and a stage row) keeps both
+together.
+
+**The scroll.** The 2026-08-14 fix (defer to `DispatcherPriority.Loaded` so the layout pass has run)
+was right and is kept, but `ScrollToEnd` alone is `Extent`-based, and with the panel virtualizing the
+extent past the realised window is an ESTIMATE from the rows it has measured. A log whose rows differ
+in height — a wrapped 300-character engine note beside a one-line message, which is precisely what an
+EM run posts — lands short of the bottom. It now calls `ScrollIntoView(last)` first, which is a request
+about an ITEM rather than about a distance, and then `ScrollToEnd` to remove whatever the estimate was
+still off by.
+
+**And the view's `CollectionChanged` subscription now unsubscribes first.** `DataContextChanged` fires
+again every time the panel is re-docked, and the old handler kept the previous tool — and this view —
+alive and scrolling for the rest of the session.
+
+Gate: `tests/Ui.Tests/MessageOrderingTests.cs`.
+
 ## 2026-09-13 — beta.18 → beta.19 crashed on Relaunch, and the fix for it had not shipped yet
 
 The owner's third macOS auto-update crash on Relaunch, reported against a fix made on 2026-09-11.

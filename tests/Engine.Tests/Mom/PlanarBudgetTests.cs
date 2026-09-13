@@ -305,35 +305,55 @@ public sealed class PlanarBudgetTests
     }
 
     [Fact]
-    public void T4_6_D8_TheRDCM4Band_IsRefusedWithTheREMEDY_NotSilentlyFitted()
+    public void T4_6_LF1_TheRDCM4Band_IsWIDENED_NotRefused()
     {
-        // L9b's R-dcm-4, recorded there and deliberately not acted on: PathExtent is a statement in
-        // units of k₀ while the stack's image structure lives at k_ρ ~ 1/H, so PathExtent·k₀H is
-        // what decides whether the fit sees the stack — and on a 1.4 mm stack it falls through 1
-        // between 300 and 100 MHz, with the error GROWING as the frequency falls.
-        //
-        // THE DECISION, so that neither option is left open (D8's own instruction): a frequency-aware
-        // path extent IS the right fix, and it is NOT a one-line change — the sample budget has to
-        // rise with the extent (a wider path at a fixed Samples is a sparser one), and DcimSettings.
-        // Samples is what L8a's whole accuracy table is calibrated against. Changing a shipped
-        // default on an unmeasured sample budget would be exactly the plausible-wrong-answer failure
-        // this phase exists to avoid. So what ships is the REFUSAL, carrying L9b's measured numbers
-        // and naming the extent the user would need — and re-tuning (PathExtent, Samples) together
-        // against L8a's own oracle sweep is named as its own job rather than done blind.
+        // L9b's R-dcm-4 shipped as a REFUSAL naming the PathExtent the user would need, on the
+        // grounds that the frequency-aware extent "is NOT a one-line change — the sample budget has
+        // to rise with the extent". LF1 measured that premise and it is FALSE: 512 samples is the
+        // best column at every extent and every frequency tried (Dcim.ForStackAtFrequency's header
+        // carries the table), so the widening costs nothing and the refusal is gone.
         double h = 1.4e-3;
         double K(double f) => 2 * Math.PI * f / EmConstants.C0;
 
-        Assert.True(Dcim.CanFitAtFrequency(K(1e9), h).Ok);
+        // The whole band R-dcm-4 refused now fits.
+        Assert.True(Dcim.CanFitAtFrequency(K(1e9),   h).Ok);
         Assert.True(Dcim.CanFitAtFrequency(K(300e6), h).Ok);
+        Assert.True(Dcim.CanFitAtFrequency(K(50e6),  h).Ok);
+        Assert.True(Dcim.CanFitAtFrequency(K(5e6),   h).Ok);
 
-        var no = Dcim.CanFitAtFrequency(K(50e6), h);
+        // …and it fits because the PATH moved, not because a check was deleted. The product is held
+        // at the value the shipped default delivers at the frequencies this kernel was calibrated at.
+        foreach (double f in new[] { 1e9, 300e6, 100e6, 50e6, 5e6 })
+        {
+            var widened = Dcim.ForStackAtFrequency(null, K(f), h);
+            _out.WriteLine($"{f / 1e6,8:F1} MHz: k₀H = {K(f) * h:E2}, default product " +
+                           $"{DcimSettings.Default.PathExtent * K(f) * h:F2} → PathExtent " +
+                           $"{widened.PathExtent:N0}, product {widened.PathExtent * K(f) * h:F2}, " +
+                           $"Samples {widened.Samples}");
+            Assert.Equal(Dcim.CalibratedPathProduct, widened.PathExtent * K(f) * h, 6);
+            Assert.Equal(DcimSettings.Default.Samples, widened.Samples);
+        }
+
+        // ── IT ONLY EVER WIDENS ─────────────────────────────────────────────────────────────────
+        //
+        // Which is what keeps every recorded §L8/§L9 number bit-identical: at 2 GHz on the 1.6 mm
+        // FR-4 starter the default already reaches the calibrated product, so the settings object
+        // that comes back is the one that went in.
+        double hStarter = GroundedSlab.Fr4Starter.HeightM;
+        Assert.Same(DcimSettings.Default, Dcim.ForStackAtFrequency(DcimSettings.Default,
+                                                                   K(2e9), hStarter));
+        Assert.Same(DcimSettings.Default, Dcim.ForStackAtFrequency(DcimSettings.Default,
+                                                                   K(20e9), hStarter));
+
+        // ── AND THE FLOOR IT CANNOT REACH IS STILL A REFUSAL, NAMING WHAT DOES WORK ──────────────
+        var no = Dcim.CanFitAtFrequency(K(1e6), h);
         Assert.False(no.Ok);
-        Assert.Contains("PathExtent", no.Reason);
-        Assert.Contains("2.9e-2", no.Reason);
-
-        _out.WriteLine($"1.4 mm stack: PathExtent·k₀H = {DcimSettings.Default.PathExtent * K(1e9) * h:F1} " +
-                       $"at 1 GHz, {DcimSettings.Default.PathExtent * K(300e6) * h:F1} at 300 MHz, " +
-                       $"{DcimSettings.Default.PathExtent * K(50e6) * h:F2} at 50 MHz.");
+        Assert.Contains("0 Hz", no.Reason);            // the DC point, which needs no fit at all
+        Assert.Contains("3.408 MHz", no.Reason);       // the lowest frequency THIS stack will fit
         _out.WriteLine(no.Reason!);
+
+        // The opt-out exists only so a pre-LF1 number can be reproduced, and it does nothing else.
+        var off = DcimSettings.Default with { WidenForStack = false };
+        Assert.Same(off, Dcim.ForStackAtFrequency(off, K(50e6), h));
     }
 }

@@ -32,6 +32,7 @@ internal sealed class LiveProgressMessage(MessageEntry entry, Action<Action> mar
         => marshal(() =>
         {
             Entry.Level = level;
+            Entry.IsLiveProgress = false;
 
             // Onto the END of the row: after the counter when there is one, so the outcome reads as
             // the tail of the sentence rather than landing mid-row before the bar.
@@ -69,6 +70,7 @@ internal sealed class LiveProgressMessage(MessageEntry entry, Action<Action> mar
         => marshal(() =>
         {
             Entry.Level = level;
+            Entry.IsLiveProgress = false;
             Entry.Text  = text;
             Entry.ProgressText          = null;
             Entry.ProgressIndeterminate = false;
@@ -84,6 +86,7 @@ internal sealed class LiveProgressMessage(MessageEntry entry, Action<Action> mar
         => marshal(() =>
         {
             Entry.Level = level;
+            Entry.IsLiveProgress = false;
             Entry.Text  = text;
             Entry.ProgressText          = null;
             Entry.ProgressIndeterminate = false;

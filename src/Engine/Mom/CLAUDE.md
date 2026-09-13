@@ -400,6 +400,16 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
   its DIRECTION is required rather than inferred (a label mid-conductor is equidistant from all four
   edges). **A delta gap is a SERIES source: a centred gap gives S₁₃ = −S₂₃, measured to 16 digits.**
   `PlanarPortResolution.IsDeembeddable` is the one place the two kinds are distinguished downstream.
+- **LF1 — `PlanarDcSolve` is the 0 Hz point, and it is NOT a frequency of this sweep.** `PlanarSolve.Run`
+  takes 0 out of the frequency array before anything else reads it and splices the point back on the
+  front, so nothing below that line has a zero to branch on and every AC point is bit-identical with
+  and without it. The solve is a CONDUCTION network on the rooftop basis — one resistor per basis
+  function, the same conduction graph `PlanarConductors` already reads — and its ports are terminal
+  PAIRS rather than delta gaps, because a delta gap drives the structure against the plane through the
+  FIELD and there is no field at DC (modelled as a series source it would publish S = I for a solid
+  piece of copper). A port with no DC path gets **exactly** zero, decided on the component graph rather
+  than read off a solve whose residual times a few thousand siemens looks like a large leakage. A sweep
+  of nothing but 0 Hz is an answer, not a refusal. `RESOLVED.md` §LF1.
 - **R-fed-1. The solver grows its own calibration feed** (`PlanarFeedExtension`, 2026-08-12), before
   meshing, by extruding each port's own polygon outward from its drawn end face by whatever uniform
   line the calibration is short of. **The user never adds a feed line to their artwork** — §10.6 now
@@ -1002,8 +1012,9 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
 | `Dcim.ValidatedRhoOverLambdaInteriorHorizontal` | 1.0 | a **note, never a refusal** |
 | `GroundedSlab.MinElectricalThickness` | k₀H ≥ 1e-6 | kernel limit |
 | `MinUngroundedElectricalThickness` | 0.05 (k₀H) | bracketed by 0.021 failing / 0.105 passing; **mechanism NOT isolated**, and the refusal says so |
-| `Dcim.CanFitAtFrequency` | k₀H < 1e-6, or `PathExtent·k₀H < 1` | near-DC refusal, asked of the sweep's lowest point |
-| near-field floor | ρ/λ = `1/(2π·PathExtent)` = 5.3e-4 at `PathExtent = 300` | derived, stack-independent |
+| `Dcim.CanFitAtFrequency` | **k₀H < 1e-4** | near-DC refusal, asked of the sweep's lowest NON-ZERO point. R-dcm-4's `PathExtent·k₀H < 1` half is **gone** — the path widens itself now (next row); what is left is the floor the widening cannot reach, where the failure is the FIT rather than the path. Names the DC point as the thing that does work there. |
+| **`Dcim.CalibratedPathProduct`** | **20** | **LF1 — `PathExtent` is widened per frequency (`Dcim.ForStackAtFrequency`, called in `PlanarFrequencyKernel.Fit` and nowhere else) so `PathExtent·k₀H` holds at the product the SHIPPED default delivers at 2 GHz on 1.6 mm FR-4. Geometrically it is the near-field reach, ρ = H/20, held fixed down the band.** It only ever widens, so every run already at or above the product is bit-identical — which is FR-4 at ≥ 2 GHz and **not GaAs at any shipped frequency** (100 µm GaAs at 2 GHz was at product 1.26 and 3.9e-3 scaled; it is 4.7e-8 now). `Samples` does NOT rise with it — measured, and R-dcm-4's claim that it must is false. `DcimSettings.WidenForStack = false` reproduces a pre-LF1 number and exists for that alone. `RESOLVED.md` §LF1. |
+| near-field floor | ρ/λ = `1/(2π·PathExtent)`, i.e. ρ = H/(PathExtent·k₀H) | derived, stack-independent. With LF1's widening the floor in METRES is pinned at **H/20 at every frequency** rather than tracking the wavelength. |
 
 - `Dcim.WithinValidatedRange` is reported by `PlanarSolve` as a **note, never a refusal**.
 - **De-embedding accuracy is limited by RADIATION and surface-wave coupling between ports, not the
@@ -1019,9 +1030,13 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
 - **Fit accuracy is not uniform in Σ = z + z′.** `|e^{−jk_z0Σ}| = e^{−k_ρΣ}` kills the evanescent
   spectrum: G_A on a grounded stack improves with height, G_q on a thick low-εᵣ substrate degrades
   ~20× at Σ/λ = 0.30.
-- **`PathExtent` is in units of k₀ while a stack's image structure lives at `k_ρ ~ 1/H`**, so
+- ~~**`PathExtent` is in units of k₀ while a stack's image structure lives at `k_ρ ~ 1/H`**, so
   `300·k₀H` decides whether the fit sees the stack; below ~300 MHz on a 1.4 mm stack the error grows
-  as frequency falls. Recorded, not acted on.
+  as frequency falls. Recorded, not acted on.~~ **ACTED ON at LF1 (2026-09-13)** — the first clause is
+  still exactly why, and the path now widens with falling frequency to hold the product at
+  `Dcim.CalibratedPathProduct`. R-dcm-4's stated reason for not doing it (that `Samples` must rise with
+  the extent) was measured and is **false**: 512 is the best sample count at every extent and every
+  frequency tried, so the widening costs nothing. `RESOLVED.md` §LF1.
 - The conductor-width edge reference sits **~0.35% low** on static capacitance; kept because the
   cell-size alternative measures N = 7,562 on an ordinary GaAs line, over R17's ceiling.
 - **Conductor loss is not modelled** — the sheet is PEC; `PlanarConductorLayer.SigmaSm`/`ThicknessM`

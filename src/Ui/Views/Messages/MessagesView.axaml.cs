@@ -13,15 +13,27 @@ namespace CircuitRF.Ui.Views.Messages;
 
 public partial class MessagesView : UserControl
 {
+    private MessagesTool? _subscribed;
+
     public MessagesView()
     {
         InitializeComponent();
-        // Auto-scroll to newest message when the Messages collection changes.
+        // Auto-scroll to newest message when the Messages collection changes. UNSUBSCRIBED first:
+        // DataContextChanged fires again every time this view is re-docked, and the old handler kept
+        // the previous tool — and this view — alive and scrolling for the rest of the session.
         DataContextChanged += (_, _) =>
         {
-            if (DataContext is MessagesTool tool)
-                tool.Messages.CollectionChanged += (_, _) => ScrollToBottom();
+            if (_subscribed is not null) _subscribed.Messages.CollectionChanged -= OnMessagesChanged;
+            _subscribed = DataContext as MessagesTool;
+            if (_subscribed is not null) _subscribed.Messages.CollectionChanged += OnMessagesChanged;
         };
+    }
+
+    private void OnMessagesChanged(object? sender,
+                                   System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (e.Action != System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
+            ScrollToBottom();
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
@@ -62,8 +74,19 @@ public partial class MessagesView : UserControl
         => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
             var listBox = this.FindControl<ListBox>("MessagesListBox");
-            var scroll  = listBox?.FindDescendantOfType<ScrollViewer>();
-            scroll?.ScrollToEnd();
+            if (listBox is null) return;
+
+            // ── SCROLL THE LAST ITEM INTO VIEW, THEN scroll to the end ──────────────────────────
+            //
+            // `ScrollToEnd` alone is `Extent`-based, and with the panel virtualizing, `Extent` past
+            // the realised window is an ESTIMATE from the rows it has measured — so a log whose rows
+            // differ in height (a wrapped 300-character engine note beside a one-line message, which
+            // is exactly what an EM run posts) lands short of the bottom. `ScrollIntoView` asks the
+            // panel to realise that item and bring it in, which is a request about an item rather
+            // than about a distance. Both, in this order, because the first settles which rows exist
+            // and the second removes whatever the estimate was still off by.
+            if (listBox.ItemCount > 0) listBox.ScrollIntoView(listBox.ItemCount - 1);
+            listBox.FindDescendantOfType<ScrollViewer>()?.ScrollToEnd();
         }, Avalonia.Threading.DispatcherPriority.Loaded);
 
     /// <summary>
