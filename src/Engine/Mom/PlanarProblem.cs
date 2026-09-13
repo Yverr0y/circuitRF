@@ -68,8 +68,15 @@ public sealed record PlanarPolygon(
     /// Standard even–odd crossing test. The half-open <c>&lt;=</c>/<c>&gt;</c> comparison on the y
     /// interval is what makes a vertex lying exactly on the scan line count once rather than twice —
     /// a Manhattan layout puts a great many vertices on gridlines, so this is not a rare case.
+    ///
+    /// <para><b>Public because the extractor answers a question about ONE RING.</b> A plane layer's
+    /// artwork is a pour whose voids hold isolated islands, and deciding which of that copper is the
+    /// plane (GVIA-1) is a test against a hole ring on its own rather than against a whole polygon —
+    /// which <see cref="Contains"/> cannot express. A second even–odd test written in
+    /// <c>src/Design</c> would be a copy of this one that drifts on exactly the boundary case the
+    /// comment above is about, so the one implementation is shared instead.</para>
     /// </summary>
-    internal static bool RingContains(IReadOnlyList<EmPoint> ring, double x, double y)
+    public static bool RingContains(IReadOnlyList<EmPoint> ring, double x, double y)
     {
         bool inside = false;
         int n = ring.Count;

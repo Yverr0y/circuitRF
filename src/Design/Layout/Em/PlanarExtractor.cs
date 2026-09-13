@@ -1193,7 +1193,49 @@ public static class PlanarExtractor
                 // kernel on, and it must only happen when there is something general to say.
                 levels.Count > 1 ? levelZ[i] : double.NaN);
 
-        var vias = BuildVias(viaShapes, regionViaPolys, levels, perDbu, notes, groundBand);
+        // GVIA-1 — the plane's own artwork, classified once, is what tells a ground stitch from a
+        // signal via passing through. It is built from the SAME polygons R-fg-2 reads above, so the
+        // copper a via is tested against is the copper the run reports the size of.
+        var planeMetal = new PlaneMetal(groundOutlinePolys);
+
+        // GVIA-2 — the artwork on a conductor that is NOT in this analysis, flattened ON DEMAND.
+        //
+        // `conductorShapes` already holds every shape on every bound conductor layer, including the
+        // bands the level loop above skipped, so nothing new is read from the layout — this is the
+        // same RegionsToMesh -> Flatten -> ToPoints chain a level takes, which is the part that must
+        // not drift. It runs only when a via actually bypassed the plane, and only for the band that
+        // via's own span names, so an ordinary run never enters it.
+        var farMetalCache = new Dictionary<int, IReadOnlyList<PlanarPolygon>>();
+        IReadOnlyList<PlanarPolygon> FarMetal(int bandIndex)
+        {
+            if (farMetalCache.TryGetValue(bandIndex, out var cached)) return cached;
+
+            var built = new List<PlanarPolygon>();
+            foreach (var (shape, band) in conductorShapes)
+            {
+                if (band.Index != bandIndex) continue;
+                long ftol = LayoutFlattener.ResolveTolDbu(shape, tech);
+                foreach (var region in RegionsToMesh(shape, tech))
+                {
+                    IReadOnlyList<long[]> rings;
+                    try { rings = LayoutFlattener.Flatten(region, ftol); }
+                    catch (ArgumentOutOfRangeException) { continue; }
+                    if (rings.Count == 0 || rings[0].Length < 6) continue;
+
+                    var fOuter = ToPoints(rings[0], perDbu);
+                    var fHoles = new List<IReadOnlyList<EmPoint>>();
+                    for (int i = 1; i < rings.Count; i++)
+                        if (rings[i].Length >= 6) fHoles.Add(ToPoints(rings[i], perDbu));
+                    built.Add(new PlanarPolygon(fOuter, fHoles.Count == 0 ? null : fHoles));
+                }
+            }
+
+            farMetalCache[bandIndex] = built;
+            return built;
+        }
+
+        var vias = BuildVias(viaShapes, regionViaPolys, levels, perDbu, notes, groundBand,
+                             stack, planeMetal, FarMetal, polysByLevel);
 
         // MIM-4 — a STRATIFIED medium turns the general kernel on even at one level. Before this
         // brief that case could not arise: a stratified region under the lowest level was refused at
@@ -1428,10 +1470,192 @@ public static class PlanarExtractor
         return (new LayerStack(Termination.Pec, layers, Termination.Air), levelZ, note);
     }
 
+    /// <summary>Is (x, y) on any of these polygons? Box-filtered, then the polygon's own even-odd
+    /// test — the same rule everywhere metal is tested for coverage.</summary>
+    private static bool Covers(IReadOnlyList<PlanarPolygon> polys, double x, double y)
+    {
+        foreach (var p in polys)
+        {
+            var b = p.Bounds();
+            if (x < b.MinX || x > b.MaxX || y < b.MinY || y > b.MaxY) continue;
+            if (p.Contains(x, y)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>The vertex average of a footprint's outline — a representative point for asking what
+    /// is above and below a DRAWN via, which is a small compact shape by construction.</summary>
+    private static (double X, double Y) Centroid(PlanarPolygon poly)
+    {
+        double cx = 0, cy = 0;
+        foreach (var p in poly.Outer) { cx += p.X; cy += p.Y; }
+        int n = Math.Max(poly.Outer.Count, 1);
+        return (cx / n, cy / n);
+    }
+
     private static bool SameMaterial(EmMaterial a, EmMaterial b) =>
         Math.Abs(a.EpsR - b.EpsR) <= 1e-12 &&
         Math.Abs(a.TanD - b.TanD) <= 1e-12 &&
         Math.Abs(a.MuR  - b.MuR)  <= 1e-12;
+
+
+    /// <summary>What a via entry's declared span resolved to (GVIA-1). Three answers rather than
+    /// two because a barrel that crosses the return plane has no per-ENTRY answer at all — the
+    /// terminals are known, and whether any given via actually reaches them is a per-SHAPE question
+    /// the artwork answers.</summary>
+    private enum ViaSpan
+    {
+        /// <summary>Ignored, and one of BuildVias' counters says why.</summary>
+        Rejected,
+
+        /// <summary>Both terminals resolved from the technology, for every via on the entry.</summary>
+        Fixed,
+
+        /// <summary>The barrel crosses the return plane: the terminals are the analysis level and
+        /// the plane, but only for the footprints that actually land on plane copper.</summary>
+        CrossesPlane,
+    }
+
+
+    /// <summary>
+    /// <b>GVIA-1 — WHICH COPPER DRAWN ON THE RETURN PLANE IS ACTUALLY THE PLANE.</b>
+    ///
+    /// <para>A board with an inner ground plane draws that plane as a pour with VOIDS in it, and
+    /// every signal via that passes through the plane sits in one — usually with its own annular
+    /// pad drawn as a separate island INSIDE the void, because that pad is copper on that layer too.
+    /// So "is this via on plane copper?" and "is this via connected to the plane?" are different
+    /// questions, and only the second one is the physics. Measured on the reported board: a
+    /// containment test against the plane layer's artwork grounds all 327 vias, and 61 of them are
+    /// sitting on isolated 0.11 mm² pads inside antipads.</para>
+    ///
+    /// <para><b>The rule is enclosure, not area.</b> A polygon whose outline lies inside a VOID of
+    /// another polygon on the same layer is separated from that polygon by construction — that is
+    /// what a void is — so it is an island and not the plane. Everything else is the plane. The
+    /// obvious alternative, "the biggest pour wins", is rejected: a board with two genuine ground
+    /// pours has two planes and picking one of them by area would silently drop the stitching on the
+    /// other. Nesting deeper than one level (an island inside an island's own void) stays an island,
+    /// which is the conservative direction — an unclassified via is dropped and reported, exactly as
+    /// it is today.</para>
+    ///
+    /// <para>Not used for R-fg-2's published plane SIZE, deliberately: that number is the outline
+    /// this run reads and changing what it measures is a separate question from which vias reach
+    /// ground.</para>
+    /// </summary>
+    private sealed class PlaneMetal
+    {
+        private readonly record struct Box(double MinX, double MinY, double MaxX, double MaxY)
+        {
+            public bool Holds(double x, double y) => x >= MinX && x <= MaxX && y >= MinY && y <= MaxY;
+            public bool Holds(in Box b) => b.MinX >= MinX && b.MaxX <= MaxX &&
+                                           b.MinY >= MinY && b.MaxY <= MaxY;
+        }
+
+        private static Box BoundsOf(IReadOnlyList<EmPoint> ring)
+        {
+            double x0 = double.PositiveInfinity, y0 = double.PositiveInfinity;
+            double x1 = double.NegativeInfinity, y1 = double.NegativeInfinity;
+            foreach (var p in ring)
+            {
+                if (p.X < x0) x0 = p.X;
+                if (p.Y < y0) y0 = p.Y;
+                if (p.X > x1) x1 = p.X;
+                if (p.Y > y1) y1 = p.Y;
+            }
+            return new Box(x0, y0, x1, y1);
+        }
+
+        private readonly (PlanarPolygon Poly, Box Outer, Box[] Holes)[] _plane;
+
+        /// <summary>How many of the plane layer's polygons are isolated islands rather than plane.</summary>
+        public int Islands { get; }
+
+        /// <summary>True when there is plane copper to test against at all.</summary>
+        public bool Any => _plane.Length > 0;
+
+        public PlaneMetal(IReadOnlyList<PlanarPolygon> groundPolys)
+        {
+            int n = groundPolys.Count;
+            var outer = new Box[n];
+            var holes = new Box[n][];
+            for (int i = 0; i < n; i++)
+            {
+                outer[i] = BoundsOf(groundPolys[i].Outer);
+                var hr = groundPolys[i].HoleRings;
+                holes[i] = new Box[hr.Count];
+                for (int h = 0; h < hr.Count; h++) holes[i][h] = BoundsOf(hr[h]);
+            }
+
+            var keep = new List<(PlanarPolygon, Box, Box[])>(n);
+            for (int i = 0; i < n; i++)
+            {
+                if (groundPolys[i].Outer.Count < 3) continue;
+                if (Enclosed(groundPolys, outer, holes, i)) { Islands++; continue; }
+                keep.Add((groundPolys[i], outer[i], holes[i]));
+            }
+            _plane = [.. keep];
+        }
+
+        /// <summary>Is polygon <paramref name="i"/>'s outline inside a VOID of some other polygon on
+        /// this layer? Tested on one vertex of its outline, which is enough because plane artwork
+        /// arrives as non-intersecting rings — a shape is wholly inside a void or wholly outside
+        /// it.</summary>
+        private static bool Enclosed(
+            IReadOnlyList<PlanarPolygon> polys, Box[] outer, Box[][] holes, int i)
+        {
+            var probe = polys[i].Outer[0];
+            for (int q = 0; q < polys.Count; q++)
+            {
+                if (q == i) continue;
+                if (!outer[q].Holds(outer[i])) continue;
+                var hr = polys[q].HoleRings;
+                for (int h = 0; h < hr.Count; h++)
+                {
+                    if (!holes[q][h].Holds(outer[i])) continue;
+                    if (PlanarPolygon.RingContains(hr[h], probe.X, probe.Y)) return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>True when (x, y) lands on copper that IS the plane.
+        ///
+        /// <para>Deliberately not <see cref="PlanarPolygon.Contains"/>, and only for the reason a
+        /// bound gives: a plane pour carries a void per through-hole, so Contains walks every hole
+        /// ring of a ~15,000-vertex polygon for every via on the board. Each ring is skipped by its
+        /// own box here instead, and the ring test itself is the SAME even-odd function Contains
+        /// calls — there is no second containment rule, only a cheaper way to reach it. Measured on
+        /// the reported board: 200 ms to 24 ms over 327 vias.</para></summary>
+        public bool Carries(double x, double y)
+        {
+            foreach (var (poly, box, holes) in _plane)
+            {
+                if (!box.Holds(x, y)) continue;
+                if (!PlanarPolygon.RingContains(poly.Outer, x, y)) continue;
+
+                bool inVoid = false;
+                var hr = poly.HoleRings;
+                for (int h = 0; h < hr.Count && !inVoid; h++)
+                    inVoid = holes[h].Holds(x, y) && PlanarPolygon.RingContains(hr[h], x, y);
+
+                if (!inVoid) return true;
+            }
+            return false;
+        }
+
+        /// <summary>True when any vertex of <paramref name="poly"/>, or its own centroid, lands on
+        /// the plane. A drawn footprint is not a point and its centroid can fall in a void the
+        /// footprint straddles, so a touch anywhere counts — a via that reaches plane copper is
+        /// connected to it.</summary>
+        public bool Touches(PlanarPolygon poly)
+        {
+            double cx = 0, cy = 0;
+            foreach (var p in poly.Outer) { cx += p.X; cy += p.Y; }
+            if (poly.Outer.Count > 0 && Carries(cx / poly.Outer.Count, cy / poly.Outer.Count)) return true;
+            foreach (var p in poly.Outer)
+                if (Carries(p.X, p.Y)) return true;
+            return false;
+        }
+    }
 
 
     /// <summary>
@@ -1458,18 +1682,49 @@ public static class PlanarExtractor
     /// nearly as large as the plate itself. Both kinds share every rule below — the span and the
     /// conductivity come from the stackup entry, and the noSpan / unknownLevels / notAdjacent /
     /// toGround / wrongGround accounting is one accounting.</para>
+    ///
+    /// <para><b>GVIA-1 — a THROUGH via is the one case where the stackup cannot answer alone, and
+    /// the artwork decides PER SHAPE.</b> Everything above rests on "a board plates every via of a
+    /// given kind between the same two layers", which is true of the BARREL and says nothing about
+    /// what the barrel touches on the way. A plated through-hole on a board with an inner ground
+    /// plane spans top copper to bottom copper whatever it is for; whether it is a ground stitch or
+    /// a signal via is decided by the plane's own artwork — pour copper at that point, or a void.
+    /// Both are ordinary and both are in every such board.</para>
+    ///
+    /// <para>So when an entry's span CROSSES this run's return plane — one named conductor is an
+    /// analysis level, the other is below the plane, and the plane lies between them — each drawn
+    /// footprint is classified on its own: landing on plane copper makes it a ground attachment,
+    /// and landing in a void (or on an isolated island in one) leaves it a via to a conductor this
+    /// analysis does not have, which is dropped and counted exactly as before. That is the physics
+    /// as well as the request: an unbroken plane decouples the two halves of the board, so the top
+    /// half's model is its own metal plus the stitching that reaches the plane, and a via that
+    /// passes through a void ends in mid-dielectric where this kernel has no basis to put it.</para>
+    ///
+    /// <para><b>This fires only where the previous behaviour dropped EVERY via with the wrongGround
+    /// note</b> — it cannot change a span that resolves today, and it needs no technology edit: the
+    /// `.ctech` already says the barrel goes top to bottom, which is true.</para>
     /// </summary>
     private static List<PlanarVia> BuildVias(
         List<(ViaShape Shape, StackupLayer Entry)> viaShapes,
         List<(PlanarPolygon Poly, StackupLayer Entry)> regionViaPolys,
-        List<Band> levels, double perDbu, List<string> notes, Band? groundBand = null)
+        List<Band> levels, double perDbu, List<string> notes, Band? groundBand = null,
+        List<Band>? stack = null, PlaneMetal? planeMetal = null,
+        Func<int, IReadOnlyList<PlanarPolygon>>? farMetal = null,
+        IReadOnlyList<PlanarPolygon>[]? levelPolys = null)
     {
         var vias = new List<PlanarVia>();
         if (viaShapes.Count == 0 && regionViaPolys.Count == 0) return vias;
 
+        // `toGround` counts only the vias whose ENTRY names the plane. A via that got there by
+        // crossing is counted by `stitched` and reported by the crossing note, deliberately: both
+        // notes firing said "266 vias go to the plane" twice in a row, which is exactly the noise
+        // that makes a run's notes unread (owner, 2026-09-12).
         int noSpan = 0, unknownLevels = 0, notAdjacent = 0, toGround = 0, wrongGround = 0;
         int pointVias = 0, regionVias = 0, regionPolys = 0;
+        int stitched = 0, passedThrough = 0, carriedAway = 0;
         var wrongGroundNames = new List<string>();
+        string? crossedName = null;
+        int crossedFarIndex = -1, crossedLevel = -1;
 
         // ── Which two terminals does this stackup entry name? ─────────────────────────────────
         //
@@ -1489,12 +1744,13 @@ public static class PlanarExtractor
         // to some OTHER ground-designated pour is a finite conductor the kernel does not mesh, and
         // turning it into an attachment would silently model a different structure. The refusal must
         // not simply disappear — that is the failure mode L9's own FINDING 2 is about.
-        bool Terminals(StackupLayer entry, int count, out int lower, out int upper)
+        ViaSpan Terminals(StackupLayer entry, int count, out int lower, out int upper)
         {
             lower = upper = 0;
 
             string? from = entry.SpanFromLayer, to = entry.SpanToLayer;
-            if (from is not { Length: > 0 } || to is not { Length: > 0 }) { noSpan += count; return false; }
+            if (from is not { Length: > 0 } || to is not { Length: > 0 })
+            { noSpan += count; return ViaSpan.Rejected; }
 
             int a  = levels.FindIndex(b => string.Equals(b.Layer.Name, from, StringComparison.Ordinal));
             int b2 = levels.FindIndex(b => string.Equals(b.Layer.Name, to,   StringComparison.Ordinal));
@@ -1504,31 +1760,82 @@ public static class PlanarExtractor
                 string missing = a < 0 ? from : to;
                 int meshed     = a < 0 ? b2   : a;
 
-                if (meshed < 0) { unknownLevels += count; return false; }
+                if (meshed < 0) { unknownLevels += count; return ViaSpan.Rejected; }
 
-                if (groundBand is null ||
-                    !string.Equals(groundBand.Layer.Name, missing, StringComparison.Ordinal))
+                if (groundBand is not null &&
+                    string.Equals(groundBand.Layer.Name, missing, StringComparison.Ordinal))
                 {
-                    wrongGround += count;
-                    if (!wrongGroundNames.Contains(missing)) wrongGroundNames.Add(missing);
-                    return false;
+                    lower = PlanarVia.GroundTerminal;
+                    upper = meshed;
+                    toGround += count;
+                    return ViaSpan.Fixed;
                 }
 
-                lower = PlanarVia.GroundTerminal;
-                upper = meshed;
-                toGround += count;
-                return true;
+                // ── GVIA-1 — the barrel CROSSES the return plane, so the artwork decides ────────
+                //
+                // Narrow on purpose, and every clause earns its place. The far conductor must be a
+                // real conductor in this stackup (a name that matches nothing is a technology
+                // error, not a through via); the plane must sit wholly BETWEEN the two, which is
+                // what makes "it passes through the plane" a statement about this stack rather
+                // than about the two names; and there must be plane artwork to read, because with
+                // none of it every via would classify the same way and the classification would be
+                // a guess wearing a measurement's clothes. Any of those missing and this is the
+                // wrongGround refusal it has always been.
+                if (groundBand is not null && stack is not null && planeMetal is { Any: true })
+                {
+                    var far = stack.FirstOrDefault(b =>
+                        b.Layer.Kind == StackupKind.Conductor &&
+                        string.Equals(b.Layer.Name, missing, StringComparison.Ordinal));
+
+                    if (far is not null &&
+                        far.TopM <= groundBand.BottomM + 1e-15 &&
+                        groundBand.TopM <= levels[meshed].SheetM + 1e-15)
+                    {
+                        lower = PlanarVia.GroundTerminal;
+                        upper = meshed;
+                        crossedName ??= missing;
+                        crossedFarIndex = far.Index;
+                        crossedLevel    = meshed;
+                        return ViaSpan.CrossesPlane;
+                    }
+                }
+
+                wrongGround += count;
+                if (!wrongGroundNames.Contains(missing)) wrongGroundNames.Add(missing);
+                return ViaSpan.Rejected;
             }
 
             lower = Math.Min(a, b2);
             upper = Math.Max(a, b2);
-            if (upper != lower + 1) { notAdjacent += count; return false; }
-            return true;
+            if (upper != lower + 1) { notAdjacent += count; return ViaSpan.Rejected; }
+            return ViaSpan.Fixed;
+        }
+
+        // ── GVIA-2 — a via that bypasses the plane: does it CARRY THE STRUCTURE AWAY? ─────────
+        //
+        // "Landed in a void" and "joins the two outer conductors" are different sets, and only the
+        // second one damages the answer. A drill with nothing on the far side is a hole; a via with
+        // metal on the analysis level AND on the conductor beyond the plane is a SIGNAL via, and the
+        // structure this run solves continues through it into metal the run does not contain — the
+        // s-parameters simply stop there. Measured on the reported board: 61 bypass the plane and 60
+        // of them are that second kind, so reporting the first number alone would have described
+        // the smaller fact.
+        //
+        // Both halves are tested, never assumed from the span: the stackup says where the barrel
+        // LANDS, and whether there is copper there is a question about the artwork.
+        void CountBypass(int level, double x, double y)
+        {
+            passedThrough++;
+            if (farMetal is null || crossedFarIndex < 0 || levelPolys is null) return;
+            if (!Covers(levelPolys[level], x, y)) return;
+            if (!Covers(farMetal(crossedFarIndex), x, y)) return;
+            carriedAway++;
         }
 
         foreach (var (shape, entry) in viaShapes)
         {
-            if (!Terminals(entry, 1, out int lower, out int upper)) continue;
+            var span = Terminals(entry, 1, out int lower, out int upper);
+            if (span == ViaSpan.Rejected) continue;
 
             // The equal-area square, centred on the via: side = d·√π/2.
             double d = shape.DrillSize * perDbu;
@@ -1536,6 +1843,16 @@ public static class PlanarExtractor
             if (!(d > 0)) continue;
             double half = 0.5 * d * Math.Sqrt(Math.PI) / 2.0;
             double cx = shape.X * perDbu, cy = shape.Y * perDbu;
+
+            // GVIA-1 — a round barrel is tested at its CENTRE, which is the whole of the question
+            // for it: an antipad is drawn larger than the drill it clears, so a via either sits in
+            // the void or sits on the pour, and no part of the barrel is on the other side of that
+            // answer. The drawn footprints below are not points and are tested as areas.
+            if (span == ViaSpan.CrossesPlane)
+            {
+                if (!planeMetal!.Carries(cx, cy)) { CountBypass(upper, cx, cy); continue; }
+                stitched++;
+            }
 
             vias.Add(new PlanarVia(lower, upper,
                 [new PlanarPolygon([new EmPoint(cx - half, cy - half), new EmPoint(cx + half, cy - half),
@@ -1565,12 +1882,79 @@ public static class PlanarExtractor
             var entry = group.Key;
             int shapeCount = group.Count();
 
-            if (!Terminals(entry, shapeCount, out int lower, out int upper)) continue;
+            var span = Terminals(entry, shapeCount, out int lower, out int upper);
+            if (span == ViaSpan.Rejected) continue;
 
-            vias.Add(new PlanarVia(lower, upper, [.. group.Select(g => g.Poly)], entry.SigmaSm));
+            // GVIA-1 — the group still becomes ONE PlanarVia, for the overlap reason above, but it
+            // carries only the footprints that reach the plane. Splitting the survivors into one
+            // record each would re-introduce exactly the double-counted metal the grouping exists
+            // to prevent; dropping the group because some of it passed through would lose the part
+            // that stitches.
+            List<PlanarPolygon> footprints;
+            if (span == ViaSpan.CrossesPlane)
+            {
+                // ONE pass: each drawn footprint is either kept or counted, never both and never
+                // matched back by value — two identical rectangles drawn on top of each other are
+                // equal as records and must still be two shapes in the accounting.
+                footprints = [];
+                foreach (var (poly, _) in group)
+                {
+                    if (planeMetal!.Touches(poly)) { footprints.Add(poly); continue; }
+                    var c = Centroid(poly);
+                    CountBypass(upper, c.X, c.Y);
+                }
+
+                stitched += footprints.Count;
+                if (footprints.Count == 0) continue;
+                shapeCount = footprints.Count;
+            }
+            else footprints = [.. group.Select(g => g.Poly)];
+
+            vias.Add(new PlanarVia(lower, upper, footprints, entry.SigmaSm));
             regionVias++;
             regionPolys += shapeCount;
         }
+
+        // SHORT, for the warning's own reason (owner, 2026-09-12): a run whose notes are paragraphs
+        // is a run whose notes are skipped, and this one fires on every board of this shape. What
+        // survives is the two counts, what decided them, and that the technology is fine — the last
+        // because "my `.ctech` must be wrong" is the conclusion a user otherwise reaches. Everything
+        // cut was either reference material (what an attachment basis IS — the BACKSIDE note's job)
+        // or already in the WARNING beside it (what a pass-through costs, and solving the other
+        // side). The island clause stays and is worth its length: "the via IS on my gnd layer, why
+        // is it not grounded" is the one question this note exists to pre-empt.
+        if (stitched > 0 || passedThrough > 0)
+            notes.Add(
+                $"{stitched} via(s) on this entry stitch to '{groundBand!.Layer.Name}'; " +
+                $"{passedThrough} pass through a void in it and are ignored. The entry spans " +
+                $"'{crossedName}' on the far side of the plane, so each via was classified from the " +
+                "plane's own artwork — copper under it, or a clearance — not from the technology, " +
+                "which needs no change." +
+                (planeMetal!.Islands > 0
+                    ? $" ({planeMetal.Islands} shape(s) on '{groundBand.Layer.Name}' are isolated " +
+                      "islands inside a void rather than the plane, so a via landing on one is not " +
+                      "grounded.)"
+                    : string.Empty));
+
+        // ── GVIA-2 — the one of those two counts that is a WARNING ───────────────────────────
+        //
+        // Separate note, deliberately, and it is not folded into the sentence above. That one
+        // reports a decision the run made correctly; this one reports that the structure does not
+        // END where this analysis does, which is the user's problem rather than the extractor's.
+        //
+        // THREE SENTENCES, and the brevity is the requirement rather than a style preference
+        // (owner, 2026-09-12): a designer does not read a paragraph, and a warning nobody reads
+        // warns nobody. So it carries only what cannot be worked out from anywhere else — the
+        // count, the two conductors, the plane, that they are NOT modelled, and what to do. The
+        // reasoning behind it is in this file and in RESOLVED.md, which is where reasoning belongs;
+        // resist restating it here, because every clause added costs the sentence that matters.
+        if (carriedAway > 0)
+            notes.Add(
+                $"WARNING: {carriedAway} via(s) join '{levels[crossedLevel].Layer.Name}' to " +
+                $"'{crossedName}' without touching '{groundBand!.Layer.Name}'. These are signal " +
+                "vias, not stitches: they are NOT modelled, so the structure continues where these " +
+                "s-parameters stop. Solve the other side as its own run and join them there, or " +
+                "analyse a region these vias do not leave.");
 
         if (toGround > 0)
             notes.Add($"{toGround} of them are BACKSIDE vias, running from a signal level down to " +

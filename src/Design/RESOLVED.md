@@ -1,5 +1,127 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## GVIA-1 — a via that CROSSES the return plane is classified from the plane's artwork, per via (2026-09-12)
+
+User-reported. A board with an **inner ground plane** analysed from one outer conductor lost **every
+via it had**. `PlanarExtractor.BuildVias` resolved a via's two terminals from the stackup entry's
+`SpanFromLayer`/`SpanToLayer` alone — correct, and documented as "the artwork says WHERE a via is;
+the stackup says WHICH TWO CONDUCTORS it joins" — so a plated through-hole declared top-copper to
+bottom-copper named a conductor that is neither an analysis level nor the return plane, fell into the
+`wrongGround` counter, and was dropped with a note. On the reported board that was **327 of 327**:
+top copper solved over a plane it was not stitched to, which is a complete, plausible, wrong answer
+for a structure nobody drew.
+
+**The technology is not wrong and editing it cannot fix this.** Every barrel on that board really
+does run top to bottom; whether a given one is a ground stitch or a signal via is decided by the
+PLANE's own artwork — pour copper at that point, or a void. Both are ordinary and both are on every
+such board. So the span stays a per-ENTRY fact and the TERMINATION became a per-SHAPE one, in exactly
+the case that used to be a flat refusal: when the entry's span crosses this run's return plane (one
+named conductor is an analysis level, the other is below the plane, and the plane lies between them),
+each drawn footprint is tested against the plane. On plane copper → a `PlanarVia.GroundTerminal`
+attachment basis. In a void → dropped and counted, as before.
+
+`Terminals` became tri-state (`ViaSpan.Rejected` / `Fixed` / `CrossesPlane`) rather than growing a
+second resolution path, so the per-entry answers keep their single spelling. Gate:
+`tests/Ui.Tests/Em/GroundViaThroughPlaneTests.cs` (9), whose first two tests are that a span which
+resolved BEFORE this is bit-for-bit what it was — the new branch is reachable only from the refusal.
+
+### FINDING 1 — "copper on the plane layer" is the wrong test, and it gets every via wrong
+
+The obvious implementation is containment against the ground layer's artwork. **Measured on the
+reported board it grounds all 327 vias**, including the 61 that must not be.
+
+A plane layer is a pour with a VOID per through-hole it clears, and inside most of those voids is a
+small ISLAND — the signal via's own annular pad, which is copper drawn on that layer and is not the
+plane. The reported board carries 62 polygons on its plane layer: one 269-vertex pour with 61 voids,
+and 61 isolated 0.113 mm² pads, one inside each void. Metal ≠ plane; the question is connectivity.
+
+**The rule is enclosure, not area.** A polygon whose outline lies inside a void of another polygon on
+that layer is separated from it by construction — that is what a void is. Everything else is the
+plane. The tempting alternative, "the largest pour is the plane", is rejected: a board with two
+genuine ground pours has two planes, and ranking by area would silently drop the stitching on one of
+them. Deeper nesting stays an island, which is the conservative direction — an unclassified via is
+dropped and reported, which is the old behaviour.
+
+With that rule the reported board splits **266 stitched / 61 passed through**, and the split was
+reproduced independently in a throwaway Python pass over the raw `.clay` before any C# was written.
+
+### FINDING 2 — `PlanarPolygon.Contains` is the wrong shape for this, for a cost reason only
+
+A plane pour carries a void per through-hole, so `Contains` walks every hole ring of a ~15,000-vertex
+polygon for every via on the board: extraction went **18 ms → 200 ms**. `PlaneMetal` keeps a bounding
+box per RING and skips each void by its own box, which is **34 ms**. The ring test itself is
+`PlanarPolygon.RingContains`, made **public** for this — a second even–odd test written in
+`src/Design` would be a copy that drifts on exactly the on-the-scan-line boundary case that
+function's own comment is about, so the one implementation is shared across the firewall instead.
+
+### GVIA-2 — the via that bypasses the plane and JOINS the two outer conductors
+
+Owner's follow-up: what happens to a via that really does connect top copper to bottom copper
+without touching the plane, and should the count be reported? It **is** ignored — it is part of the
+"land in a void" count — but **"landed in a void" and "joins the two outer conductors" are different
+sets**, and only the second one damages the answer. Measured on the reported board: **61 bypass the
+plane and 60 of them have copper on BOTH outer conductors.** (The owner's own estimate was 0, so the
+number was worth measuring rather than reasoning about.) The remaining one has copper on the bottom
+only, and one more of the 61 is a drilled hole with nothing on the far side.
+
+Those 60 are signal vias. The structure this run solves CONTINUES through them into metal the run
+does not contain, the s-parameters stop there, and **nothing else in the result says a path ended
+early** — which is why this is a `WARNING:` note of its own rather than a clause in the paragraph
+about via counts. It is also not a setting anyone can turn on: one laterally infinite plane is what
+the Green's function terminates on, so the two sides of an unbroken plane are two problems.
+
+**Three sentences, and the brevity is a requirement rather than a style preference** (owner): a
+designer does not read a paragraph, so a long warning warns nobody. It carries the count, the two
+conductors, the plane, that they are NOT modelled, and what to do — and nothing else, because every
+clause added costs the sentence that matters. The reasoning lives here and in the code comments,
+which is where reasoning belongs. Gated three ways in `GroundViaThroughPlaneTests`, since a note
+with no length gate grows back: an absolute cap, a sentence count, and a RELATIVE one — it must stay
+under half the companion note's length, which is the rule stated in a form that survives whatever
+layer names a given board has.
+
+**Both ends are tested against the ARTWORK, never inferred from the span.** The stackup says where a
+barrel LANDS; whether there is copper there is a question about the drawing, and warning on the span
+alone would make the number mostly drilled holes. The far conductor's shapes are flattened ON
+DEMAND — `conductorShapes` already holds every shape on every bound conductor layer including the
+bands the level loop skips, so nothing new is read, it is the same
+`RegionsToMesh`→`Flatten`→`ToPoints` chain a level takes, and an ordinary run never enters it.
+Extraction on the reported board: 34 ms → 38 ms.
+
+### Both notes are short, and one of them stopped firing twice
+
+Same instruction applied to the companion (owner). It went **1,050 → 423 characters**, and what
+survives is the two counts, what decided them, and *that the technology needs no change* — the last
+because "my `.ctech` must be wrong" is the conclusion a user otherwise reaches from a note about a
+via span. What was cut was either reference material (what an attachment basis IS) or already in the
+WARNING beside it. **The island clause stays and earns its length**: "the via IS on my gnd layer, why
+is it not grounded" is the one question this note exists to pre-empt.
+
+**The BACKSIDE note no longer fires for a crossed via.** `toGround` counts only the vias whose ENTRY
+names the plane; a via that got there by crossing is counted by `stitched`. Before this, a board of
+this shape got "266 vias go to the plane" twice in a row in different words — 370 characters of pure
+duplicate, and exactly the noise that makes a run's notes unread.
+
+Net on the reported board: **1,420 characters of via notes became 728**, and one of the two is a
+warning that now stands out instead of being the third paragraph.
+
+### What it does NOT change
+
+* The published plane SIZE (R-fg-2) still measures every shape on the return plane, islands included.
+  That number is the outline this run reads, and what it should measure is a separate question from
+  which vias reach ground. On the reported board the islands are 3.6 mm² against 2,050.
+* Nothing in the `.cem` or the `.ctech` — there is no new setting, and none is wanted: the case this
+  fires in produced no vias at all, so an opt-out would only restore a model with no stitching in it.
+* The flipped-stack path needs nothing of its own. `stack`, `levels` and `groundBand` are all in the
+  same frame by the time `BuildVias` runs, so analysing the conductor on the OTHER side of the plane
+  classifies the identical vias identically — gated.
+
+### What it does not fix
+
+The reported board still refuses: 393,718 unknowns against this kernel's 5,000 ceiling, which is the
+whole-board size and was true before this change (the 10,709 new via unknowns are 2.7% of it). The
+remedy is the refusal's own — analyse a smaller region.
+
+
 ## RF3 — a painted pour arrives as a region, not as 29,000 scanlines (2026-09-12)
 
 `docs/sonnet-briefs/brief-rasterfill-3-coalesce-raster-fill-on-import.md`. `LayoutRasterFillCoalesce`
