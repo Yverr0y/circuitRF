@@ -185,6 +185,19 @@ In the Data Display:
 - **The 3D surface** is for seeing that a pattern is not the shape you assumed, and for the picture that
   goes in a report. The principal-plane cuts say more.
 
+Both, on the [worked example](#example) below, at 5.85 GHz:
+
+{{ui: antenna-pattern-cuts}}
+
+The two planes are 3 dB down at θ = 40° (H-plane) and θ = 75° (E-plane). That difference is the
+infinite ground plane, and the [beamwidth caveat](#numbers) below is about this pair of curves.
+
+{{ui: antenna-pattern-3d}}
+
+The same data at the same frequency, on a 20 dB scale rather than the cuts' 40 dB: one broadside
+lobe, no sidelobe, and no null until exact grazing. The surface shows that the shape holds in every
+azimuth; the cuts are what you read a level off.
+
 ## Reading the numbers {#numbers}
 
 ### Which gain
@@ -209,6 +222,19 @@ The denominator is the power **accepted** at the port, never the incident power:
 the port admittance, and counting it twice is the classic double count. Total efficiency — the one that
 does include mismatch — is `RadiationEfficiencyDb + 10·log10(1 − |S11|²)`, which is exactly what
 `TrpDbm` is at the default 0 dBm reference.
+
+{{ui: antenna-efficiency-sweep}}
+
+Radiation efficiency varies strongly across the band: 22.6 % at 5.3 GHz, 69.3 % at its maximum, and
+62.6 % at the 5.85 GHz the [worked example](#example) quotes. **Quote it with the frequency it was
+read at.**
+
+The maximum is at **5.94 GHz — the parallel resonance, not the 5.81 GHz series resonance the feed is
+matched at.** The two are 130 MHz apart on this patch and only the lower one is matched, so the
+best-radiating frequency and the best-matched frequency are not the same. The three gains split along
+that line: `GainDbi` follows the efficiency and peaks at 5.94 GHz (5.14 dBi), while `RealizedGainDbi`
+carries the mismatch and peaks at 5.85 GHz (4.50 dBi). Which one you quote decides which of the two
+frequencies looks best.
 
 **The mismatch factor is 1 − |S<sub>11</sub>|², read from the same published, de-embedded
 s-parameter the S cube carries** — so the two gains differ by exactly that and by nothing else:

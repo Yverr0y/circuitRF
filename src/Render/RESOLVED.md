@@ -1,5 +1,34 @@
 # src/Render — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## 2026-09-12 — a 3D pattern is 11 MB of SVG, and a FIGURE of one is now 750 KB
+
+Found building the user-doc antenna figures. A document draws the surface as one filled PATH per
+facet, because `drawVertices` is not recorded by a vector device (ANT-10's note below). The 91 x 360
+grid an EM far-field run publishes is 64,800 facets at about 170 bytes each: an **11 MB** SVG,
+against 340 KB for the largest figure in the whole user documentation, and comparable in PDF.
+
+`PlotDocumentScope.Enter` now takes `budgetSurfaces`, and `StrideFor` applies the existing facet
+budget when it is set. The antenna figure is **750 KB**, a 14x reduction, and is not distinguishable
+from the full one — `PatternMesh.Build` keeps the endpoints of both angle axes at every stride, so
+the silhouette, the peak direction and the nulls do not move. That is what makes it a tessellation
+choice rather than a change to what the picture claims.
+
+**Only `UiArtworkGenerator` sets it, and the distinction is deliberate.** A user-doc figure is placed
+at one width on one page, where a 1° facet is far under a pixel. An ordinary export is archival — the
+reader opens it at whatever size they like — and `circuitrf render`'s own `--detail full` already
+states this repository's rule for a document: what is STORED is what is drawn, with the LOD tiers an
+opt-in. So an export still writes every facet, and `Pattern3DDrawPathTests` still gates it at over
+4,000 paths.
+
+**Left for the owner, not decided here:** an ordinary SVG or PDF export of a far-field pattern is
+still that 11 MB file, and it is large enough to be awkward in an illustration tool. Whether an
+export should take a budget too, or offer the choice the way `render --detail` does, is a product
+question rather than a figure one.
+
+Full detail stays the rule for a LIVE frame, where it is nearly free: one `drawVertices` call puts
+all 64,800 facets up in 5.6 ms, which is why the budget was only ever reached during a drag.
+
+
 ## User report, 2026-09-12 — Top Copper went missing when zoomed out, "like some kind of XOR"
 
 **It was a boolean cancel, and the description was exact.** On an imported Gerber board, zooming out

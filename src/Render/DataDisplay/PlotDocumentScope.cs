@@ -44,20 +44,43 @@ namespace CircuitRF.Render.DataDisplay;
 public static class PlotDocumentScope
 {
     [ThreadStatic] private static int _depth;
+    [ThreadStatic] private static int _budgeted;
 
     /// <summary>True while this thread is drawing a document page.</summary>
     public static bool IsActive => _depth > 0;
 
+    /// <summary>
+    /// <b>True while the document being drawn is a FIGURE at a known printed size</b>, and a
+    /// surface may therefore be tessellated to the renderer's facet budget instead of drawn whole.
+    ///
+    /// <para>An ordinary export is archival: the reader may open it at any size, so it gets every
+    /// facet the grid has. A user-doc figure is placed at one width on one page, where a 1° facet of
+    /// an EM far-field pattern is far under a pixel — and the difference is 11 MB of SVG against
+    /// 750 KB for a picture nobody can tell apart (measured 2026-09-12). The two are the same claim
+    /// about the data and a different claim about the page, which is why this is a second question
+    /// and not a redefinition of <see cref="IsActive"/>.</para>
+    /// </summary>
+    public static bool SurfacesAreBudgeted => _budgeted > 0;
+
     /// <summary>Opens the scope; dispose to close it.</summary>
-    public static IDisposable Enter()
+    /// <param name="budgetSurfaces">See <see cref="SurfacesAreBudgeted"/>. Default false — an export
+    /// draws the grid it was given.</param>
+    public static IDisposable Enter(bool budgetSurfaces = false)
     {
         _depth++;
-        return Closer.Instance;
+        if (budgetSurfaces) _budgeted++;
+        return budgetSurfaces ? BudgetedCloser.Instance : Closer.Instance;
     }
 
     private sealed class Closer : IDisposable
     {
         public static readonly Closer Instance = new();
         public void Dispose() => _depth--;
+    }
+
+    private sealed class BudgetedCloser : IDisposable
+    {
+        public static readonly BudgetedCloser Instance = new();
+        public void Dispose() { _depth--; _budgeted--; }
     }
 }

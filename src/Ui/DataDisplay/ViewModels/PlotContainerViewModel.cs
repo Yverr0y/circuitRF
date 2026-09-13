@@ -204,6 +204,7 @@ public partial class PlotContainerViewModel : ViewModelBase
         Inspector.PlotNeedsRedraw += (s, e) =>
         {
             PlotNeedsRedraw?.Invoke(this, e);
+            RefreshStripAutoLabels();
             foreach (var st in LeftLabelStrips)  st.AppearanceRevision++;
             foreach (var st in RightLabelStrips) st.AppearanceRevision++;
         };
@@ -465,6 +466,48 @@ public partial class PlotContainerViewModel : ViewModelBase
     /// existing items are updated in place — no ItemsControl rebuild, no visual flicker.
     /// Pass <c>false</c> (default) when the trace list itself has changed.
     /// </summary>
+    /// <summary>
+    /// <b>The strips' TEXT, without rebuilding the strip set</b> — everything
+    /// <see cref="UpdateLabelStrips"/> does that an ordinary trace edit can invalidate, and nothing
+    /// it does that only adding, removing or re-sourcing a trace can.
+    ///
+    /// <para><b>Why this exists.</b> The <c>AutoLabel</c> on a strip is a SNAPSHOT string, and it was
+    /// only ever recomputed in <see cref="UpdateLabelStrips"/>, which is wired to
+    /// <c>PlotStructureChanged</c>. An ordinary trace edit — a different pinned frequency, a
+    /// different azimuth, the whole-plane switch — raises only <c>PlotNeedsRedraw</c>, so the CURVE
+    /// moved and the label beside it kept naming the old slice, with nothing to say so. Found
+    /// 2026-09-12 while building the antenna pattern figures: two cuts configured identically, and
+    /// the second carried the label of the state it was seeded in — a confidently wrong caption on a
+    /// correct picture, which is worse than either.</para>
+    ///
+    /// <para>The strip SET is deliberately left alone. Which traces get a strip, and on which side,
+    /// is <c>PlotLabelStrips</c>' rule and it turns on trace identity rather than on trace content;
+    /// rebuilding the collections on every redraw would churn the visual tree at frame rate for a
+    /// question whose answer has not changed. The caller bumps <c>AppearanceRevision</c> immediately
+    /// after this, which is what makes the new text reach the canvas.</para>
+    /// </summary>
+    private void RefreshStripAutoLabels()
+    {
+        if (LeftLabelStrips.Count == 0 && RightLabelStrips.Count == 0) return;
+
+        var plot = PlotVM.Plot;
+        if (!plot.PlotType.IsComplex()) return;
+
+        bool showFilePrefix = AppSettingsViewModel.Instance.EffectiveShowFilePrefix(
+            Library?.HasMultipleSources ?? false);
+        var labels = TraceLabeler.ComputeMinimalLabels(plot.Traces, showFilePrefix,
+            aliasFor: t => Library?.AliasFor(t.EffectiveSourcePath));
+
+        var map = new Dictionary<Trace, string>();
+        for (int i = 0; i < plot.Traces.Count && i < labels.Count; i++) map[plot.Traces[i]] = labels[i];
+
+        // A strip showing a CUSTOM label is the user's own text and is never overwritten — the same
+        // rule UpdateLabelStrips follows when it fills AutoLabel in the first place.
+        foreach (var st in LeftLabelStrips.Concat(RightLabelStrips))
+            if (st.CustomLabel is null && map.TryGetValue(st.Trace, out var l))
+                st.AutoLabel = l;
+    }
+
     public void UpdateLabelStrips(bool widthAndThemeOnly = false)
     {
         var    plot      = PlotVM.Plot;

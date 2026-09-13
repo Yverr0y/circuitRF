@@ -44,6 +44,11 @@ public sealed class DocGenRun
     /// <summary>Deck ids the sources actually offered, so an unknown --deck can name the real ones.</summary>
     private readonly List<string> _decksOffered = [];
 
+    /// <summary>Rebuild the figures <see cref="CircuitRF.Ui.Diagnostics.FigureCatalog.Row.Static"/>
+    /// marks as committed. Off for an ordinary run — see that flag for why they are committed.</summary>
+    public bool RebuildStatic { get => _rebuildStatic; set => _rebuildStatic = value; }
+    private bool _rebuildStatic;
+
     public void Run(bool slidesOnly = false, string? slidesOut = null,
                     IReadOnlySet<string>? decks = null,
                     IReadOnlyList<ColorVariant>? variants = null)
@@ -116,6 +121,22 @@ public sealed class DocGenRun
             foreach (var variant in (ColorVariant[])[ColorVariant.Light, ColorVariant.Dark])
             {
                 string path = Path.Combine(outDir, UiArtworkGenerator.FileStem(row.Id, variant) + ".svg");
+
+                // A STATIC figure is committed and left alone — see FigureCatalog.Row.Static. It is
+                // CHECKED rather than skipped: the page inlines it either way, so a missing one is a
+                // blank box on a chapter, which is the failure this whole factory exists to refuse.
+                if (row.Static && !_rebuildStatic)
+                {
+                    if (!File.Exists(path))
+                        throw new InvalidOperationException(
+                            $"'{Path.GetFileName(path)}' is a STATIC figure and it is not committed. It "
+                          + "is not rebuilt by an ordinary regeneration, so there is nothing here to "
+                          + "recover it from: restore it, or rebuild it with --rebuild-static (which "
+                          + "will tell you what that figure needs).");
+                    Account(path);
+                    continue;
+                }
+
                 using var scene = row.Build();
                 UiArtworkGenerator.RenderScene(scene, row.Width, row.Height, variant, path,
                                                row.Chrome, row.MustContainPopup);

@@ -45,6 +45,9 @@ public static class Program
           --lint-diagnostic   write figures even when the dropped-paint lint fires, so the offending
                               file can be opened. Never use for a real regeneration: the lint is
                               blocking precisely because a wrong figure does not announce itself.
+          --rebuild-static    also rebuild the figures the catalog marks Static - the antenna
+                              patterns, which are committed pictures of a simulation the docs
+                              build does not re-run. Each says what it needs if it cannot.
 
         Examples
           --slides docs/slides                          all four decks, light and dark  (8 PDFs)
@@ -55,7 +58,7 @@ public static class Program
     public static int Main(string[] args)
     {
         string? outDir = null, slidesDir = null;
-        bool lintDiag = false;
+        bool lintDiag = false, rebuildStatic = false;
         HashSet<string>? decks = null;
         List<CircuitRF.Render.ColorVariant>? variants = null;
 
@@ -88,6 +91,7 @@ public static class Program
                     }
                     break;
                 case "--lint-diagnostic": lintDiag = true; break;
+                case "--rebuild-static":  rebuildStatic = true; break;
                 case "-h" or "--help": Console.WriteLine(Usage); return 0;
                 default:
                     Console.Error.WriteLine($"Unrecognised argument '{args[i]}'.\n");
@@ -130,7 +134,7 @@ public static class Program
         try
         {
             string docs = outDir ?? DefaultDocsRoot();
-            var run = new DocGenRun(docs);
+            var run = new DocGenRun(docs) { RebuildStatic = rebuildStatic };
             run.Run(slidesOnly: outDir is null, slidesOut: slidesDir, decks: decks, variants: variants);
             Console.WriteLine(run.Report);
             return 0;

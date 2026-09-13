@@ -56,8 +56,8 @@ public static class DocDataDisplayFixtures
     /// </summary>
     internal static (DataDisplayDocumentViewModel Doc, PlotContainerViewModel Plot) PlotFor(
         string logicalId, PlotType type, bool contour = false, int traces = 1,
-        (double W, double H)? size = null)
-        => Plotted(logicalId, type, contour, traces, size);
+        (double W, double H)? size = null, Action<PlotContainerViewModel>? before = null)
+        => Plotted(logicalId, type, contour, traces, size, before);
 
     /// <summary><see cref="Centred"/>, for the same reason.</summary>
     internal static Action<Control> CentredPlot(PlotContainerViewModel plot) => Centred(plot);
@@ -70,9 +70,13 @@ public static class DocDataDisplayFixtures
     internal static Action<Control> CentredRow(params PlotContainerViewModel[] plots)
         => Row(plots);
 
+    /// <param name="before">Applied to the plot AFTER its type and size are set and BEFORE any trace
+    /// is added. A pattern plot needs it: the dB-radial switch decides which cubes the trace card is
+    /// allowed to OFFER (<c>TraceRowViewModel.OnPlotPatternModeChanged</c>), so a plot turned into a
+    /// pattern plot after its traces exist is one whose traces were picked under the other rule.</param>
     private static (DataDisplayDocumentViewModel Doc, PlotContainerViewModel Plot) Plotted(
         string logicalId, PlotType type, bool contour = false, int traces = 1,
-        (double W, double H)? size = null)
+        (double W, double H)? size = null, Action<PlotContainerViewModel>? before = null)
     {
         var vm = Sourced(logicalId);
         var display = vm.Window.DataDisplay
@@ -94,6 +98,8 @@ public static class DocDataDisplayFixtures
             // curve — fine beside body text, thin once a slide scales the whole window down.
             _                                => (700.0, 400.0),
         };
+
+        before?.Invoke(plot);
 
         var command = contour ? plot.Inspector.AddContourTraceCommand : plot.Inspector.AddTraceCommand;
         for (int i = 0; i < traces; i++)

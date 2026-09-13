@@ -1,5 +1,55 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## 2026-09-12 — the antenna pattern figures, and the two defects drawing them exposed
+
+`reference/antennas.html` gained three figures — the two principal-plane cuts, the 3D surface, and
+radiation efficiency across the band — all three of ONE run of the shipped `testdata/antenna/`
+example, through `EmRunService.Run`, the call the Simulate button makes. `DocAntennaFixtures` carries
+the fixtures and the cost note; what follows is what building them turned up.
+
+### A trace card edit left the plot's label strip naming the old slice
+
+**Found by the picture.** Two polar cuts configured identically but for their azimuth: the first came
+out labelled `farfield.U(5.85 GHz, φ=90/270 deg) dB10` and the second
+`farfield.U(θ=0 deg, φ=0 deg) dB10` — the state it had been SEEDED in, not the state it was in. The
+curve beside it was correct. A correct picture with a confidently wrong caption on it is worse than
+either alone, and on a figure nobody would catch it.
+
+The strip's `AutoLabel` is a snapshot string, and it was only ever recomputed in
+`PlotContainerViewModel.UpdateLabelStrips`, which is wired to `PlotStructureChanged`. An ordinary
+trace edit — a different pinned frequency, a different azimuth, the whole-plane switch — raises only
+`PlotNeedsRedraw`. So every one of those moved the curve and left the label. The second trace looked
+different from the first only because something else happened to raise a structure change in
+between: selecting a SIGNAL does, and that was the first thing done to trace 2, after trace 1 was
+already finished.
+
+`RefreshStripAutoLabels` now runs on `PlotNeedsRedraw`, beside the `AppearanceRevision++` that was
+already there for live colour changes. It refreshes the TEXT and deliberately not the strip SET —
+which traces get a strip and on which side is `PlotLabelStrips`' rule, it turns on trace identity
+rather than trace content, and rebuilding those collections every frame would churn the visual tree
+at frame rate to re-derive an unchanged answer. A user-visible bug, not a docs-only one: change the
+frequency pin on any Smith or polar trace and the label beside it kept the old frequency until the
+plot happened to change shape.
+
+### A figure capture is a document, and one renderer had to be told
+
+The 3D pattern figure came out with its axes, its ground disc and its colour bar, and **no pattern in
+the middle of them**. `PlotDocumentScope` already exists for exactly this — Skia's SVG and PDF
+devices ignore `drawVertices` outright, so the surface draws itself as one mesh for a live frame and
+as filled paths for a document — but the scope was entered only by `PlotDocumentWriter`, and a docs
+figure is written by `UiArtworkGenerator`, which had never heard of it.
+
+`UiArtworkGenerator` now enters the scope around both of its `SKSvgCanvas` draws (the capture, and
+the `DrawsAnything` popup probe, which has to ask its question of the frame the capture will actually
+write). The dropped-paint lint did not catch this because the figure was full of other ink; what
+catches it in future is that the scope is now entered wherever an `.svg` is written, rather than
+wherever someone remembered.
+
+The capture asks for `budgetSurfaces: true`, which is what keeps the resulting file from being
+11 MB; the budget itself, and why an ordinary export does NOT take it, are in
+`src/Render/RESOLVED.md`.
+
+
 ## Owner report, 2026-09-11 — combobox text does not sit in the vertical middle
 
 Reported against the EM Setup panel. Measured on the live `EmSetupEditorView`, headless, by walking

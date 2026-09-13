@@ -156,6 +156,15 @@ public static class UiArtworkGenerator
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
             using (var stream = new SKDynamicMemoryWStream())
             {
+            // A FIGURE IS A DOCUMENT, and one renderer needs to be told so. Skia's SVG and PDF
+            // devices ignore drawVertices outright, and the 3D pattern surface draws itself as one
+            // mesh for a live frame because paths are ~9x slower — so a window figure containing a
+            // surface came out with its axes, its ground disc and its colour bar, and no pattern in
+            // the middle of them (found 2026-09-12, building the antenna figures). The scope is what
+            // PlotDocumentWriter enters for an export; a capture writing an .svg is the same claim,
+            // and entering it here is what stops the next vector-only renderer from being lost the
+            // same silent way. See CircuitRF.Render.DataDisplay.PlotDocumentScope.
+            using var _document = CircuitRF.Render.DataDisplay.PlotDocumentScope.Enter(budgetSurfaces: true);
             using (var canvas = SKSvgCanvas.Create(new SKRect(0, 0, totalW, totalH), stream))
             {
                 DrawingContextHelper.RenderAsync(canvas, window);
@@ -371,6 +380,9 @@ public static class UiArtworkGenerator
         var bounds = visual.Bounds;
         float w = (float)Math.Max(1, bounds.Width), h = (float)Math.Max(1, bounds.Height);
         using var stream = new SKDynamicMemoryWStream();
+        // Same scope as the real capture, for the same reason: this asks "does this produce ink",
+        // and it has to ask it of the frame the capture will actually write.
+        using var _document = CircuitRF.Render.DataDisplay.PlotDocumentScope.Enter(budgetSurfaces: true);
         using (var canvas = SKSvgCanvas.Create(new SKRect(0, 0, w, h), stream))
             DrawingContextHelper.RenderAsync(canvas, visual);
         using var data = stream.DetachAsData();

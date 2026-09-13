@@ -31,6 +31,20 @@ public static class FigureCatalog
     /// True when this figure declares a popup. Generation fails if the popup contributed nothing —
     /// "the menu silently did not render" is otherwise indistinguishable from "the menu is closed".
     /// </param>
+    /// <param name="Static">
+    /// <b>Committed, and NOT rebuilt by an ordinary regeneration.</b> For the one kind of figure this
+    /// factory's premise does not cover: a picture whose content is not a function of the interface
+    /// alone, but of a simulation nobody should be made to re-run. The antenna pattern figures are
+    /// that — a radiation pattern is a post-process of solved currents, and the sweep behind them is
+    /// 45.7 s optimised and 5 min 11 s unoptimised for an answer that does not change (owner,
+    /// 2026-09-12: keep the picture, not the dataset).
+    ///
+    /// <para>The <see cref="Build"/> is still here and still correct, so the figure remains
+    /// reproducible rather than orphaned — <c>--rebuild-static</c> runs it, and the fixture says what
+    /// it needs. Everything else about the row is unchanged: the caption is still the catalog's, the
+    /// placeholder still resolves through it, and <c>DocsFactoryTests</c> still requires both
+    /// variants to exist and to carry ink. What changes is only who wrote the file and when.</para>
+    /// </param>
     public readonly record struct Row(
         string Id,
         Func<FigureScene> Build,
@@ -38,7 +52,8 @@ public static class FigureCatalog
         int Height,
         WindowFrame? Chrome,
         string Caption,
-        bool MustContainPopup = false);
+        bool MustContainPopup = false,
+        bool Static = false);
 
     public static readonly IReadOnlyList<Row> Catalog =
     [
@@ -310,6 +325,40 @@ public static class FigureCatalog
             "The one control that turns an ordinary planar run into an antenna run. Off by default, "
           + "because it is only meaningful on a radiator; it changes no s-parameter and no mesh cell, "
           + "and it disables itself with a reason when the pattern could not be computed."),
+
+        // ── The example antenna, SOLVED ──────────────────────────────────────────
+        // The only figures in this catalog that need a full-wave sweep behind them. They are all
+        // three of ONE run of the shipped testdata/antenna/ example — see DocAntennaFixtures.ExampleResult,
+        // which also records what that run costs and why the generator is built Release.
+
+        new("antenna-pattern-cuts", DocAntennaFixtures.PatternCuts, 620, 640,
+            WindowFrame.Titled("circuitRF - Data Display"),
+            "The two principal-plane cuts of the 5.8 GHz example patch at 5.85 GHz, normalised so "
+          + "the outer ring is this pattern's own peak and each ring is 10 dB down. The broader "
+          + "trace is the E-plane (phi = 90/270 deg, the plane containing the current); the narrower "
+          + "one is the H-plane (phi = 0/180 deg). Each is ONE whole-plane trace, which is why the "
+          + "curve crosses broadside instead of stopping at it, and the bearings round the rim are "
+          + "the Angles switch beside the dB-radial one.",
+            Static: true),
+
+        new("antenna-pattern-3d", DocAntennaFixtures.Pattern3D, 740, 500,
+            WindowFrame.Titled("circuitRF - Data Display"),
+            "The same pattern as a 3D surface, at the same frequency: radius and colour are both the "
+          + "radiation intensity, here over a 20 dB range. The hemisphere is the whole of it - with a "
+          + "laterally infinite ground plane the field below the plane is identically zero, so there "
+          + "is no lower half to draw - and the shape is one broad lobe with no sidelobe and no null "
+          + "anywhere but exact grazing. Drag to rotate; the named views put either principal plane "
+          + "in the screen.",
+            Static: true),
+
+        new("antenna-efficiency-sweep", DocAntennaFixtures.EfficiencySweep, 800, 480,
+            WindowFrame.Titled("circuitRF - Data Display"),
+            "Radiation efficiency in decibels across the example's 5.3-6.3 GHz sweep: 22.6 % at the "
+          + "bottom of the band, 69.3 % at its best, and 62.6 % at the 5.85 GHz the worked example "
+          + "quotes. The two points off the 50 MHz grid are the resonances the resonance search "
+          + "added, and the peak is at the upper one of them - the parallel resonance, not the "
+          + "series resonance the feed is matched at.",
+            Static: true),
 
         new("em-setup-loaded", DocLayoutFixtures.EmSetupWithLayout, 520, 1430,
             WindowFrame.Titled("EM Setup - bend"),

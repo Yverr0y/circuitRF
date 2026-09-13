@@ -54,6 +54,21 @@ public static class SurfaceRenderer
     private const int InteractiveFacetBudget = 6000;
 
     /// <summary>
+    /// The facet budget a FIGURE decimates to — see
+    /// <see cref="PlotDocumentScope.SurfacesAreBudgeted"/>, which is set only by a caller drawing at a
+    /// known printed size.
+    ///
+    /// <para><b>Tighter than the interactive one, and for the opposite reason.</b> An interacting
+    /// frame pays for facets in microseconds and can afford a great many of them; a figure pays in
+    /// BYTES — about 170 per facet, as one filled path — and pays them twice, because a user-doc page
+    /// inlines a light and a dark copy of every picture. At the scene size these figures are drawn at
+    /// (~300 px across) 3,000 facets is about 4 px each, which is as fine as the silhouette needs and
+    /// far finer than the colour ramp can show. Measured on the antenna pattern: 11 MB undecimated,
+    /// 750 KB at the interactive budget and 440 KB here, and the page inlines two of it.</para>
+    /// </summary>
+    private const int FigureFacetBudget = 3000;
+
+    /// <summary>
     /// What one frame actually drew. Returned so a test can assert the GEOMETRY §6 asks about — the
     /// peak direction, the nulls, the symmetry, the depth order — without reading pixels, and so the
     /// frame cost can be measured without a timing test in the suite.
@@ -329,14 +344,27 @@ public static class SurfaceRenderer
     /// §6's decimation. <b>Derived from the grid's own size, not from the detail level alone</b> —
     /// a 30° × 45° grid is 8 facets and decimating it would turn a coarse pattern into a triangle,
     /// so the stride only ever rises on a grid that is over the budget.
+    ///
+    /// <para><b>A FIGURE takes the budget too, whatever the detail level says</b> — see
+    /// <see cref="PlotDocumentScope.SurfacesAreBudgeted"/>, which is set only by a caller drawing at
+    /// a known printed size and never by an ordinary export. In a document each facet is a filled
+    /// PATH rather than one <c>drawVertices</c> call, which is ~9x the time and about 170 bytes of
+    /// file: the 91 x 360 grid an EM far-field run publishes wrote an <b>11 MB</b> SVG (measured
+    /// 2026-09-12, building the user-doc antenna figures) against the 340 KB of the largest figure in
+    /// the whole documentation, for a picture indistinguishable from the 750 KB budgeted one. The
+    /// endpoints of both angle axes are kept whatever the stride, so the silhouette, the peak
+    /// direction and the nulls do not move (<c>PatternMesh.Build</c>) — which is what makes this a
+    /// tessellation choice rather than a change to what the picture claims.</para>
     /// </summary>
     internal static int StrideFor(PatternSurfaceGrid grid, PlotDetail detail)
     {
-        if (detail == PlotDetail.Full) return 1;
+        bool figure = PlotDocumentScope.SurfacesAreBudgeted;
+        if (detail == PlotDetail.Full && !figure) return 1;
+        int budget = figure ? FigureFacetBudget : InteractiveFacetBudget;
         long cells = (long)Math.Max(1, grid.ThetaCount - 1) * Math.Max(1, grid.PhiCount);
         long facets = cells * 2;
-        if (facets <= InteractiveFacetBudget) return 1;
-        return (int)Math.Max(1, Math.Ceiling(Math.Sqrt((double)facets / InteractiveFacetBudget)));
+        if (facets <= budget) return 1;
+        return (int)Math.Max(1, Math.Ceiling(Math.Sqrt((double)facets / budget)));
     }
 
     /// <summary>
