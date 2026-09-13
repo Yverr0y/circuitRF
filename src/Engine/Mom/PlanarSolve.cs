@@ -2291,24 +2291,24 @@ public static class PlanarSolve
             {
                 var breaches = clearances.FindAll(cc => g.PortNumbers.Contains(cc.PortNumber));
 
-                // ── PCAL6 — THE SAME QUANTITY, ASKED OF THE ELECTROSTATICS, IS WHAT SAYS WHICH
-                //    OF THE TWO THINGS THIS IS ───────────────────────────────────────────────────
+                // ── PCAL6 — THE SAME QUANTITY, ASKED OF THE ELECTROSTATICS, IS REPORTED BESIDE IT ──
                 //
                 // "These modes are genuinely degenerate" and "this standard could not measure them"
                 // read identically on the measured number alone, and PCAL6/M1 measured that the
-                // second is what the owner's board actually hit: with the shipped 3 h short line the
+                // second is what a low band actually hits: with the shipped 3 h short line the
                 // measured separation is 0.27-0.30x the quasi-static one at 200 MHz. The
-                // quasi-static one does not move when the short standard grows, so a run whose two
-                // numbers disagree has something left to try and a run whose two numbers AGREE does
-                // not. PlanarKernel.Solve is what tries it; this decides only whether there is
-                // anything to try, and says so by TYPE (see PlanarGroupModesRefusedException).
-                double qs   = cal.QuasiStaticModeSeparationDegrees(f);
-                double want = PlanarCalibration.GroupShortLineM(
-                    slab, fLo, PlanarCalibrationSettings.UsableLoDegrees);
-                bool retryable = qs >= calSt.ModeSeparationFloorDegrees
-                              && want > cal.ShortLengthM * 1.05;
+                // quasi-static one is a property of the cross-section and does not move when the
+                // standards do, so the PAIR of numbers is what tells a user which refusal they have.
+                //
+                // It is reported and NOT acted on, and PCAL6's own §M3 records why: regrowing the
+                // short standard until the measurement agrees was built, measured against the
+                // cross-section oracle, and made the published s-parameters WORSE at every
+                // frequency — 1.87 in |ΔS| at the bottom of a decade band, against 0.13 without it.
+                // A separation that reads low does not mean the answer is bad, and lengthening the
+                // standard until it reads high does not make the answer good.
+                double qs = cal.QuasiStaticModeSeparationDegrees(f);
 
-                string message =
+                throw new PlanarFeedClearanceRefusedException(
                     $"Ports {string.Join(", ", g.PortNumbers)} are calibrated together as one group, " +
                     $"and at {SurfaceMesher.Eng(f)}Hz their {b.ModeCount} modes are not separable: the " +
                     $"closest pair differs by {b.ModeSeparationDegrees:F3}° of electrical length over " +
@@ -2320,12 +2320,8 @@ public static class PlanarSolve
                     "eigenvectors are not determined at all — the de-embedded s-parameters would be " +
                     "smooth, plausible and wrong rather than visibly bad. Separate the feeds by at " +
                     "least the driven clearance so each port calibrates on its own, or move the port " +
-                    "plane to a station where the conductors are not coupled.";
-
-                throw retryable
-                    ? new PlanarGroupModesRefusedException(message, breaches, f,
-                                                           b.ModeSeparationDegrees, qs, cal.ShortLengthM)
-                    : new PlanarFeedClearanceRefusedException(message, breaches);
+                    "plane to a station where the conductors are not coupled.",
+                    breaches);
             }
 
             var modes = new string[b.ModeCount];

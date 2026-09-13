@@ -182,72 +182,6 @@ public sealed class PlanarKernel
     }
 
     /// <summary>
-    /// <b>PCAL6/M3 — a group's mode-separation refusal that a LONGER SHORT STANDARD would clear
-    /// applies that remedy instead of naming it.</b> §LF3's sentence, one wall further along: a run
-    /// that already knows the answer should not be asking a person to type it, and here the sentence
-    /// would be about a calibration standard, which is not a thing the user drew.
-    ///
-    /// <para><b>Why the short standard and not a different Δℓ.</b> PCAL6/M1 laddered Δℓ at a fixed
-    /// short line and found the measured separation NOT monotone in it — on the series' own pair at
-    /// 200 MHz it reads 4.92° at Δℓ = 10.5 mm, 0.18° at 130 mm and 1.10° at 171 mm, against a
-    /// quasi-static truth that rises smoothly from 0.29° to 4.77°. The near-zero is two corrupt
-    /// curves CROSSING, not a degeneracy. Choosing among candidates on that number would therefore
-    /// pick by where the crossing happens to fall — and worse, the candidate that "clears the floor"
-    /// is not the accurate one: at Δℓ = 54.6 mm the separation reads a comfortable 2.15° with the
-    /// even mode's β 10 % wrong, while at 171 mm it reads 1.10° with that β exact. The short
-    /// standard's own electrical length is what actually governs the extraction, and
-    /// <see cref="PlanarCalibrationSettings.GroupShortLineDegrees"/> carries the measurement.</para>
-    ///
-    /// <para><b>One retry, keyed on a TYPE, and only where the electrostatics disagrees with the
-    /// measurement.</b> A group whose quasi-static separation is ALSO under the floor is genuinely
-    /// degenerate, nothing is retried, and the refusal stands with the remedy it names today
-    /// (R-pcal6-6). The work repeated is the sweep up to the first refusing point — which is the
-    /// bottom of the band, where the refusal lives — against a run that would otherwise have
-    /// produced nothing at all.</para>
-    ///
-    /// <para><b>The cost is real and is stated in the note.</b> On 0.9 mm FR-4 at 200 MHz the short
-    /// standard goes from 3.83 mm (76 unknowns) to 50.75 mm (762), and the long one grows by the
-    /// same absolute length; the pair a frequency actually solves goes from ~1,620 unknowns to
-    /// ~3,030, i.e. <b>1.9x</b>. It buys a measured separation of 0.92-1.00x the truth in place of
-    /// 0.27-0.30x.</para>
-    /// </summary>
-    private static PlanarSolveResult RunWithGroupShortLineRetry(
-        PlanarProblem meshed, PlanarMesh mesh, IReadOnlyList<PlanarPortResolution> resolved,
-        IReadOnlyList<double> freqsHz, ref PlanarSolveSettings st, RunControl? control,
-        IReadOnlyList<PlanarFeedLead>? leads, SurfaceMesher.PlanarLengthFormat? lengthFormat,
-        ref string? note)
-    {
-        try
-        {
-            return PlanarSolve.Run(meshed, mesh, resolved, freqsHz, st, control, leads, lengthFormat);
-        }
-        catch (PlanarGroupModesRefusedException ex)
-        {
-            var calSt = st.Calibration ?? PlanarCalibrationSettings.Default;
-            st = st with
-            {
-                Calibration = calSt with
-                {
-                    GroupShortLineDegrees = PlanarCalibrationSettings.UsableLoDegrees,
-                },
-            };
-            var result = PlanarSolve.Run(meshed, mesh, resolved, freqsHz, st, control, leads,
-                                         lengthFormat);
-            note =
-                $"A calibration group's modes read {ex.MeasuredDegrees:F3}° apart at " +
-                $"{SurfaceMesher.Eng(ex.FrequencyHz)}Hz against a {calSt.ModeSeparationFloorDegrees:F2}° " +
-                $"floor, while its own electrostatics puts them {ex.QuasiStaticDegrees:F3}° apart — so " +
-                $"the SHORT standard, {(lengthFormat ?? SurfaceMesher.DefaultLengthFormat)(ex.ShortLengthM)} " +
-                "long and therefore carrying " +
-                "almost no phase at the bottom of this band, was the thing that could not measure " +
-                $"them. This run rebuilt it at {PlanarCalibrationSettings.UsableLoDegrees:F0}° " +
-                "electrical and calibrated again. A group's modes are separated by the two standards' " +
-                "cascade, and a standard shorter than a degree or two cannot separate anything.";
-            return result;
-        }
-    }
-
-    /// <summary>
     /// R-via-6's refusal, asked at whatever the top of the sweep actually is. The wavenumber is taken
     /// in the fastest-slowing medium anywhere in the stack — the same rule R-msh-3 uses for the mesh —
     /// because that is the shortest wavelength any part of the via can see.
@@ -457,12 +391,11 @@ public sealed class PlanarKernel
         // work repeated is the setup up to the first oversized standard — sub-second — against a
         // run the user would otherwise have had to start again by hand anyway.
         string? acceleratorNote = null;
-        string? shortLineNote   = null;
         PlanarSolveResult sweep;
         try
         {
-            sweep = RunWithGroupShortLineRetry(meshed, report.Mesh, resolved, freqsHz, ref st,
-                                               control, leads, lengthFormat, ref shortLineNote);
+            sweep = PlanarSolve.Run(meshed, report.Mesh, resolved, freqsHz, st, control, leads,
+                                    lengthFormat);
         }
         catch (PlanarAcceleratorWouldFitException ex)
         {
@@ -476,14 +409,13 @@ public sealed class PlanarKernel
                 $"run turned the ACCELERATED solve on (ceiling {SurfaceMesher.AcceleratedUnknownCeiling:N0}). " +
                 "A standard reproduces the port's own gridlines and grows as the frequency falls, so " +
                 "it is usually larger than the board itself.";
-            sweep = RunWithGroupShortLineRetry(meshed, report.Mesh, resolved, freqsHz, ref st,
-                                               control, leads, lengthFormat, ref shortLineNote);
+            sweep = PlanarSolve.Run(meshed, report.Mesh, resolved, freqsHz, st, control, leads,
+                                    lengthFormat);
         }
 
         var notes = new List<string>(report.Notes);
         if (severedNote is not null) notes.Add(severedNote);
         if (acceleratorNote is not null) notes.Add(acceleratorNote);
-        if (shortLineNote is not null) notes.Add(shortLineNote);
         notes.AddRange(groundNotes);
         notes.AddRange(feedNotes);
         notes.AddRange(sweep.Notes);

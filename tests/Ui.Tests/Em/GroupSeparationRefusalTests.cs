@@ -15,7 +15,7 @@ using Xunit.Abstractions;
 
 namespace CircuitRF.Ui.Tests.Em;
 
-public sealed class GroupSeparationRecoveryTests(ITestOutputHelper output) : IDisposable
+public sealed class GroupSeparationRefusalTests(ITestOutputHelper output) : IDisposable
 {
     private readonly string _results = Path.Combine(
         Path.GetTempPath(), "crf-pcal6-" + Guid.NewGuid().ToString("N")[..12], "results");
@@ -34,16 +34,22 @@ public sealed class GroupSeparationRecoveryTests(ITestOutputHelper output) : IDi
     }
 
     /// <summary>
-    /// <b>The owner's sweep, on the series' own four-port grouped fixture: 0 Hz and a decade of
-    /// band.</b> Every wall this area has hit in the last week is on this one run — the DC point is
-    /// a conduction solve (LF1), the sub-floor points take its answer (LF2), a severed mesh or a
-    /// dense de-embedding ceiling re-meshes or turns the accelerator on (LF3), the setup guard asks
-    /// the group's electrostatics at every requested frequency (PCAL6/R-pcal6-7), and the bottom of
-    /// the band is where the mode-separation measurement fails and the short standard is regrown
-    /// (PCAL6/M3). It is the only gate that sees them interact.
+    /// <b>The owner's sweep shape, on the series' own four-port grouped fixture: 0 Hz and a decade
+    /// of band.</b> Every wall this area has hit in the last week is on this one run — the DC point
+    /// is a conduction solve (LF1), the sub-floor points take its answer (LF2), a severed mesh or a
+    /// dense de-embedding ceiling re-meshes or turns the accelerator on (LF3), and the setup guard
+    /// asks the group's electrostatics at every requested frequency (PCAL6/R-pcal6-7). It is the
+    /// only gate that sees them interact.
+    ///
+    /// <para><b>At this mesh it REFUSES at 200 MHz, and that is the gated outcome.</b> PCAL6/M1
+    /// measured that the refusal is about the instrument rather than the metal — the modes are
+    /// 4.7° apart by the group's own electrostatics and read 0.19° through a short standard
+    /// carrying 1.5° of phase — and PCAL6/M3 then measured that the one available remedy makes the
+    /// published s-parameters worse. So the refusal stands, and what it owes the user is the PAIR of
+    /// numbers that says which kind of refusal it is. That is what is asserted.</para>
     /// </summary>
     [Fact]
-    public void TheOwnersSweepShape_ADecadeWithZeroHzOnAGroupedFourPortBoard_Runs()
+    public void TheOwnersSweepShape_ADecadeWithZeroHzOnAGroupedFourPortBoard_RefusesAndSaysWhy()
     {
         string portcal = Path.Combine(RepoRoot(), "testdata", "portcal");
         string cem     = Path.Combine(portcal, "coupled-pair", "em", "coupled-pair.cem");
@@ -54,7 +60,7 @@ public sealed class GroupSeparationRecoveryTests(ITestOutputHelper output) : IDi
         Assert.NotNull(r.Source);
 
         var s = setup.Clone();
-        // 0, 100, 200 … 1000 MHz — the owner's own §1 row 1, which refused 51.9 s in.
+        // 0, 100, 200 … 1000 MHz — the owner's own sweep shape.
         s.Frequency = new CircuitRF.Core.Design.FrequencySpec(
             "0", "1", 11, CircuitRF.Core.Design.SweepKind.Linear, "GHz", "GHz");
         // The coarsest mesh that still resolves the ports, for ModalErrorBoxTests' own recorded
@@ -63,20 +69,18 @@ public sealed class GroupSeparationRecoveryTests(ITestOutputHelper output) : IDi
 
         var run = EmRunService.Run(s, r.Source!, _results);
         output.WriteLine(run.Error ?? "(no error)");
-        foreach (string n in run.Notes) output.WriteLine("NOTE: " + n);
 
-        Assert.Equal(EmRunStatus.Ok, run.Status);
-        Assert.NotNull(run.SnpPath);
+        Assert.Equal(EmRunStatus.Refused, run.Status);
+        Assert.NotNull(run.Error);
 
-        // The two groups formed, and the run says what it did about the short standard rather than
-        // asking the user to work it out.
-        Assert.Equal(2, run.Notes.Count(n => n.Contains("CALIBRATION GROUP", StringComparison.Ordinal)));
-        string recovery = Assert.Single(
-            run.Notes, n => n.Contains("SHORT standard", StringComparison.Ordinal));
-        Assert.Contains("20° electrical", recovery, StringComparison.Ordinal);
+        // The pair of numbers, which is the whole diagnostic: what was measured, what the
+        // cross-section says the same quantity is, and the standard it was measured on.
+        Assert.Contains("not separable", run.Error!, StringComparison.Ordinal);
+        Assert.Contains("electrostatics puts the same quantity at", run.Error!, StringComparison.Ordinal);
+        Assert.Contains("short standard of", run.Error!, StringComparison.Ordinal);
 
-        // 0 Hz is in the written file, with the conduction answer LF1 put there.
-        string[] lines = File.ReadAllLines(run.SnpPath!);
-        Assert.Contains(lines, l => l.TrimStart().StartsWith('0') && !l.TrimStart().StartsWith("0.", StringComparison.Ordinal));
+        // Nothing was published. A partially-correct modal de-embedding that publishes is the
+        // failure the whole PCAL series exists to remove (R-pcal4-6).
+        Assert.Null(run.SnpPath);
     }
 }

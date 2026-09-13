@@ -1566,9 +1566,17 @@ amplification lands on a quantity a refusal is drawn on: `ModeSeparationDegrees`
 between 0.05× and 17× the modes' actual distance depending on Δℓ, so a group whose modes are
 comfortably separable is refused at a Δℓ where two corrupt curves happen to cross. What governs it
 is the SHORT calibration standard's own electrical length — `ShortLineHeights` = 3 substrate heights
-is 1.5° of line at 200 MHz — and a run that hits the floor now regrows it to 20° and calibrates
-again. **That does not touch (d)'s own measurement**, which is about a single-port peel and still
-stands: what closes (d) is the port model named under "What this leaves" below.
+is 1.5° of line at 200 MHz. **Regrowing that standard was built and then removed**: against the
+cross-section oracle it makes the published answer worse at every frequency and nonsense at the
+bottom of a decade band, so such a group is still refused and the refusal now reports both numbers.
+
+**What was measured while establishing that, and it is the reassuring half**: an ordinary grouped
+run over 100 MHz - 1 GHz on `coupled-pair` comes back at 0.130 / 0.110 / 0.074 / 0.048 / 0.032 in
+max |ΔS| at 100 / 200 / 300 / 500 / 1000 MHz, against a well-separated floor of 0.268 / 0.148 /
+0.106 / 0.074 / 0.054 on the same geometry — **below the floor at every point.** The growth toward
+the bottom of the band is (d)'s amplification acting on any de-embedded port; co-calibration adds
+nothing to it. **That does not close (d)**, which is about the single-port peel: what closes it is
+the port model named under "What this leaves" below.
 
 #### (e) The DC solve converges; a microwave mesh is too coarse for it
 

@@ -90,30 +90,83 @@ so the same geometric shortfall is amplified 25× from 1 GHz to 200 MHz.
   argument against a separability-aware selection and is why `SelectSeparation`'s scoring is
   unchanged.
 
-### M2/M3 — the decision: a recovery on the short standard, not a selection rule
+### M2/M3 — the remedy was built, measured against the oracle, and REMOVED
 
-`PlanarCalibrationSettings.GroupShortLineDegrees`, **0 by default**, is a minimum electrical length
-for a GROUP's short standard at the band's bottom. At 0 nothing anywhere changes, which is how
-R-pcal6-1 is met by construction rather than by measurement. `PlanarKernel.Solve` turns it on for
-**one retry**, keyed on `PlanarGroupModesRefusedException` — a TYPE, for §LF3's own recorded reason
-— and only where the group's quasi-static separation clears the floor while the measured one does
-not. Where BOTH are under it the modes are genuinely degenerate, nothing is retried, and the refusal
-stands with the remedy it names today (R-pcal6-6). The retry's target is
-`UsableLoDegrees` = 20°: TRL's own floor, asked of the short standard rather than only of Δℓ, and
-every row of the ℓ₁ table is on its plateau there.
+**This is the part of PCAL6 that failed, and the failure is worth more recorded than quietly
+rewritten.** The remedy M1 pointed at — grow a group's short standard until it carries real phase,
+as a one-shot recovery on a sweep that would otherwise refuse — was built
+(`PlanarCalibrationSettings.GroupShortLineDegrees`, a typed refusal, a retry in
+`PlanarKernel.Solve`), it did clear the refusals, and then it was measured against the cross-section
+oracle and it **makes the published s-parameters worse at every frequency.** It is gone.
 
-**Measured end to end**, on the four-port `coupled-pair` fixture over 0 Hz + 100 MHz … 1 GHz — the
-owner's own sweep shape — through `EmRunService.Run`: the run reads **0.192° at 200 MHz against a
-4.701° quasi-static**, regrows the short standard, and publishes the whole decade, 200 MHz now
-reading **4.72°**. On the synthetic 200 MHz – 1 GHz sweep the same recovery turns a refusal into
-**Ok in 10.4 s**, and the point it refused on re-reads **2.86° against a quasi-static 2.839°** —
-ratio 1.008, exactly where the ladder said it would land.
+`coupled-pair` through the real `em` verb in Release, max |ΔS| against kernel A on the same file,
+with the floor re-measured by moving the conductors 9 mm apart exactly as §PCAL4 measured it:
 
-**The cost is real and is not another standard.** The short standard is the CHEAP one, so growing it
-is nothing like adding a separation. On 0.9 mm FR-4 at 200 MHz it goes from 3.83 mm (76 unknowns) to
-50.75 mm (762), and the long one grows by the same absolute length (1,546 → ~2,270): the pair a
-frequency actually solves goes from ~1,620 unknowns to ~3,030, **1.9×**. R-pcal6-5's own subject —
-`SuggestDeltas` growing — did not arise: no candidate was added, because no selection rule changed.
+| f | shipped (no regrow) | regrown to 8° | regrown to 20° | floor |
+|---|---|---|---|---|
+| 100 MHz | **0.1298** | 0.2813 | **1.8749** | 0.2682 |
+| 200 MHz | **0.1102** | 0.1581 | 0.1582 | 0.1483 |
+| 300 MHz | **0.0743** | 0.1091 | 0.1092 | 0.1064 |
+| 500 MHz | **0.0481** | 0.0690 | 0.0691 | 0.0743 |
+| 1 GHz | **0.0320** | 0.0414 | 0.0414 | 0.0539 |
+
+At the 20° target and a 100 MHz band bottom the answer is not merely degraded, it is **nonsense** —
+|ΔS| of 1.87 on a matrix whose entries cannot exceed 1, non-passive at σ_max 1.032 — and the run's
+own residuals agree: cascade 5.7e-5 and null-space gap 3.2e-4 at 100 MHz, three to four orders worse
+than without the regrow. The standards go from 9.14× the DUT to **55.21×** to buy that.
+
+**The mistake was an inference, and it is the one PCAL1 §5 and brief 4 both warn about in advance.**
+M1's ladder measured that a longer short standard makes `ModeSeparationDegrees` agree with the
+quasi-static truth, and that is true and reproducible. It does not follow that the ERROR BOX
+improves, and it does not: the separation and the box are different quantities, the separation gets
+better while the box gets worse, and PCAL1 already measured that these residuals do not predict the
+de-embedding error. **A separation that reads low does not mean the answer is bad, and lengthening
+the standard until it reads high does not make the answer good.**
+
+What survives is the DIAGNOSTIC. The per-frequency refusal now reports the quasi-static separation
+and the short standard's length beside the measured separation, because that pair is the only thing
+that distinguishes "these modes are degenerate" (both small) from "this standard could not measure
+them" (measured small, quasi-static large). It is reported and not acted on.
+
+### The accuracy question the removal raises, and it is measured: a group is fine at low frequency
+
+Removing the remedy leaves the refusal in place, so the obvious question is whether grouped
+de-embedding is worth reaching for down there at all. It is. Same harness, same oracle, same floor:
+
+| f | grouped `coupled-pair` | floor (well-separated, ungrouped) |
+|---|---|---|
+| 100 MHz | **0.1298** | 0.2682 |
+| 200 MHz | **0.1102** | 0.1483 |
+| 300 MHz | **0.0743** | 0.1064 |
+| 500 MHz | **0.0481** | 0.0743 |
+| 1 GHz | **0.0320** | 0.0539 |
+
+**Below the floor at every frequency down to 100 MHz.** The error does grow toward the bottom of the
+band, by 4× from 1 GHz to 100 MHz — but the floor grows faster, so that growth is §LF1 §5(a)'s peel
+amplification acting on ANY de-embedded port and not something the grouping adds. On the committed
+fixture at its shipping mesh the mode-separation refusal never fires over that band at all (1.05° at
+100 MHz against the 0.50° floor), and neither does a ceiling: ten points in 27 s.
+
+**The harness is validated rather than asserted.** It reproduces §PCAL4's published numbers to the
+last digit — 1 GHz 0.0303, 2 GHz 0.0296, 3 GHz 0.0331, 4 GHz 0.0374, 5 GHz 0.0408, 6 GHz 0.0434,
+7 GHz 0.0454, floor 0.0521 — before any new frequency was asked for.
+
+### So what is still open, and it is NOT what this brief thought
+
+The user-facing complaint PCAL6 opened on — a group whose modes are separable is refused at the
+bottom of a band — **is diagnosed and not fixed.** What the measurements above add is that the
+refusal is also, on the evidence available, *unnecessary*: at 100 MHz on the shipping fixture the
+measured separation reads 1.05° where the electrostatics says 4.7°, and the answer there is 0.1298
+against a floor of 0.2682. A separation that under-reads by 4× produced an answer comfortably inside
+the floor.
+
+That points at a different remedy from the one this brief tried — **draw the refusal on the
+quasi-static separation, which M1 measured to be the reliable one, and demote the measured
+separation to a reported diagnostic** — and it is deliberately NOT taken here. It moves a safety
+gate on ONE data point, and the gate exists because at equal eigenvalues the modal basis is decided
+by round-off. It needs its own measurement: a family of groups spanning the floor, each de-embedded
+answer scored against the oracle, to establish whether a small MEASURED separation ever corresponds
+to a bad answer. That is a brief, not a change.
 
 ### M4 — one decision point, and a group's choice no longer remembers the sweep
 
@@ -160,38 +213,44 @@ R-pcal6-7 offered three ways out and the measurement takes the third and then th
   `GuardModeSeparation` now asks at every requested frequency and names the one it found; the
   question is arithmetic on an electrostatic solve the run already owes.
 - **What it still cannot do is predict the per-frequency refusal**, and that is the honest statement
-  rather than a hedge: the setup guard's quantity does not move when the short standard grows, which
-  is exactly the property that makes it useful for deciding whether to RETRY and useless for
-  predicting whether the measurement will fail.
+  rather than a hedge. The setup guard's quantity is a property of the cross-section and does not
+  move when the standards do — which is what makes it the trustworthy one, and what makes it unable
+  to say whether a particular pair of standards will manage to measure it.
 
-### What the `.cem` still cannot say, and one thing that was left alone
+### The refusal's own sentence, and what was left alone
 
-- `GroupShortLineDegrees` has no `.cem` field and should not get one before someone asks: it is a
-  recovery knob, its only two values in practice are 0 and `UsableLoDegrees`, and a user setting it
-  by hand would be choosing a calibration standard's length, which is not a thing they drew.
-- **The refusal's own remedy sentence is unchanged** (R-pcal6-6). It still says "separate the feeds"
-  — which is the right advice when the refusal survives the retry, because a refusal that survives
-  the retry IS about the metal.
+**The remedy sentence is unchanged** (R-pcal6-6). It still says "separate the feeds", which is the
+right advice when the refusal is about the metal — and the quasi-static number now printed beside
+the measured one is how a user tells that case from the other. When the two disagree the advice is
+narrower and this write-up is where it lives: raise the sweep's lower edge. On the series' own
+fixture a band starting at 300 MHz clears the floor where one starting at 200 MHz does not, and the
+answer up there is measurably good.
 
 ### Gates
 
-`tests/Engine.Tests/Mom/PlanarGroupSeparationTests.cs` (10 tests, ~27 s) —
+`tests/Engine.Tests/Mom/PlanarGroupSeparationTests.cs` (8 tests, ~19 s) —
 `AGroupedSweepThatCalibratesTodayIsBitIdentical` asserts EXACT equality against eight S entries
 measured on the pre-PCAL6 tree in a worktree at HEAD, which is R-pcal6-1 and the reason §LF1 §5(b)'s
 objection no longer applies; `TheSameFrequencyIsRefusedInOneSweepAndAcceptedInAnother` is §1 rows 1
 and 4 reduced to a fixture (100 MHz – 1 GHz publishes 200 MHz at 1.63°, 200 MHz – 1 GHz refuses the
-same point at 0.405°); `TheRefusedSweepRecoversOnALongerShortStandard_AndSaysSo`,
-`GenuinelyDegenerateModesAreNotRetried`, `TheSeparationAFrequencyUsesDoesNotDependOnTheSweep`,
+same point at 0.405° while its electrostatics says 2.839°); `GenuinelyDegenerateModesStillRefuse`,
+`TheSeparationAFrequencyUsesDoesNotDependOnTheSweep`,
 `TheWorstQuasiStaticSeparationIsNotAlwaysAtTheBandsBottom`, `TheSetupGuardAsksAtEveryFrequency`, and
-the two ladder measurements. `tests/Ui.Tests/Em/GroupSeparationRecoveryTests.cs` is the end-to-end,
-through `EmRunService.Run` on the owner's own sweep shape, 3 s.
+the two ladder measurements that hold M1's finding. `tests/Ui.Tests/Em/GroupSeparationRefusalTests.cs`
+is the end-to-end through `EmRunService.Run` on the owner's own sweep shape: it REFUSES, it carries
+both numbers, and it writes no file.
 
-**Two of those tests are 13.6 s and 7.6 s, which is over this repository's ~5 s `Category=Benchmark`
-threshold, and they are deliberately untagged.** They are the brief's central claim and the only
-routine coverage of it; tagging them would put the defect back out of reach of a plain `dotnet test`,
-which is what §8 asked them not to be. The cost is ~21 s on a project that runs in ~3.5 min, it is
-dominated by the 171 mm calibration standards a decade band needs at 200 MHz, and it is stated here
-rather than hidden.
+**One of those tests is 13.6 s, over this repository's ~5 s `Category=Benchmark` threshold, and it is
+deliberately untagged.** It is the brief's central claim and the only routine coverage of it; tagging
+it would put the defect back out of reach of a plain `dotnet test`, which is what §8 asked it not to
+be. The cost is dominated by the 171 mm calibration standards a decade band needs at 200 MHz, and it
+is stated here rather than hidden.
+
+**The accuracy measurements above are a harness and not a test**, per the standing rule — committed
+fixtures through the real `em` verb in Release, against kernel A on the same files. They are
+reproducible from `testdata/portcal` by setting the `.cem`'s frequency and toggling `AnalysisKind`
+between `Planar` and absent; the floor fixture is `coupled-pair` with its second conductor moved
+9 mm in y.
 
 ## LF3 — two refusals that name a remedy now apply it (2026-09-13)
 
@@ -241,13 +300,13 @@ sub-second — against a run the user would otherwise have restarted by hand.
 **What is still refused on that board, and it is neither of these.** The authored 0–1 GHz sweep now
 reaches PCAL4's mode-separation guard at 200 MHz (0.178° against a 0.50° floor) — the third wall.
 
-> **Closed by §PCAL6, 2026-09-13, and the diagnosis above is wrong.** The selection rule is innocent:
-> `ModeSeparationDegrees` is not the modes' distance at the bottom of a band, because the SHORT
-> standard — 3 substrate heights, which is 1.5° of line at 200 MHz — cannot separate them at any Δℓ.
-> The run now measures the same quantity from the group's own electrostatics, and where the two
-> disagree it regrows the short standard and calibrates again rather than refusing. Nothing in the
-> selection changed, so "it changes de-embedded answers for every grouped port" no longer applies —
-> a run that passes today is bit-identical by construction.
+> **Diagnosed by §PCAL6, 2026-09-13, and the guess above is wrong — but it is still REFUSED.** The
+> selection rule is innocent: `ModeSeparationDegrees` is not the modes' distance at the bottom of a
+> band, because the SHORT standard — 3 substrate heights, which is 1.5° of line at 200 MHz — cannot
+> separate them at any Δℓ. The refusal now reports the quasi-static separation beside the measured
+> one, so a user can see which of the two refusals they have. Regrowing the short standard until the
+> two agree was built and then REMOVED: measured against the cross-section oracle it makes the
+> published s-parameters worse at every frequency, and nonsense at the bottom of a decade band.
 
 Gates: `ConformalConductionTests.AMeshThatSeversAConductorRemeshesItselfOnTheCHEAPESTRemedyThatWorks`
 and `…ARunThatWasNEVERSeveredSaysNothing_AndTheRecoveredOneMatchesItExactly`,
@@ -492,14 +551,13 @@ calibration GROUP's modes separate as f·Δℓ, so the same board refuses at 200
 `PlanarCalibration.SelectSeparation` picks a longer standard there. That last one looks like a defect
 rather than a limit.
 
-> **§PCAL6 (2026-09-13) took it, and the guess in this paragraph was wrong.** The selection rule is
-> not what refuses those points; the MEASUREMENT is. `ModeSeparationDegrees` at 200 MHz on that
-> board reads a fraction of the modes' actual distance, and what governs it is the SHORT standard's
-> own electrical length — 3 substrate heights is 1.5° at 200 MHz — rather than Δℓ. A longer Δℓ helps
-> non-monotonically and the candidate that clears the floor is measurably not the accurate one. The
-> fix is a recovery on the short standard, `SelectSeparation` is unchanged, and this paragraph's own
-> reason for not acting ("it changes de-embedded answers for every grouped port") therefore does not
-> apply: a grouped run that passes today is bit-identical.
+> **§PCAL6 (2026-09-13) took it, and the guess in this paragraph was wrong — but so was PCAL6's own
+> remedy, and those points are still refused.** The selection rule is not what refuses them; the
+> MEASUREMENT is. `ModeSeparationDegrees` at 200 MHz reads a fraction of the modes' actual distance,
+> and what governs it is the SHORT standard's own electrical length — 3 substrate heights is 1.5° at
+> 200 MHz — rather than Δℓ. Growing that standard until the measurement agrees was built and then
+> removed: it makes the de-embedded answer worse, measured against the cross-section oracle.
+> `SelectSeparation` is unchanged and the refusal stands, now reporting both numbers.
 
 ## PCAL5 — a calibration group's feed leads, a cut cell's clearance, and a severed conductor (2026-09-12)
 

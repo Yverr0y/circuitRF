@@ -102,38 +102,6 @@ public sealed class PlanarGroupSeparationTests(ITestOutputHelper output)
         output.WriteLine($"1 GHz S11 = {s[0, 0]}, S21 = {s[1, 0]}");
     }
 
-    /// <summary>
-    /// <b>The recovery is OFF by default, and that is the mechanism of the bit-identity above rather
-    /// than a consequence of it.</b> With <see cref="PlanarCalibrationSettings.GroupShortLineDegrees"/>
-    /// at its shipped 0 a group's standard set is the one a plain port's rule builds, to the bit;
-    /// with the retry's value it is not.
-    /// </summary>
-    [Fact]
-    public void TheShortStandardIsUntouchedUntilTheRecoveryAsksForIt()
-    {
-        var (port, _) = GroupedPort();
-        double shipped = PlanarCalibration.BuildSet(port, Slab, 200e6, 1e9)[0].LengthM;
-        var (target, _) = PlanarCalibration.SuggestLengths(Slab, 200e6, 1e9);
-        Assert.Equal(PlanarCalibration.BuildLine(port, target,
-                         PlanarCalibration.EndRunCellsFor(port, Slab)).LengthM, shipped);
-
-        double grown = PlanarCalibration.BuildSet(port, Slab, 200e6, 1e9,
-            PlanarCalibrationSettings.Default with
-            { GroupShortLineDegrees = PlanarCalibrationSettings.UsableLoDegrees })[0].LengthM;
-
-        output.WriteLine($"short standard {shipped * 1e3:F2} mm shipped, {grown * 1e3:F2} mm recovered");
-        Assert.True(grown > 10 * shipped, "the recovery did not lengthen the short standard");
-
-        // And nothing moves on a port that is not in a group, which is every run that passes today.
-        var (_, mesh, ports) = Board();
-        Assert.Null(ports[0].Group);
-        Assert.Equal(PlanarCalibration.BuildSet(ports[0], Slab, 200e6, 1e9)[0].LengthM,
-                     PlanarCalibration.BuildSet(ports[0], Slab, 200e6, 1e9,
-                         PlanarCalibrationSettings.Default with
-                         { GroupShortLineDegrees = PlanarCalibrationSettings.UsableLoDegrees })[0].LengthM);
-        Assert.NotNull(mesh);
-    }
-
     // ══════════════════════════════════════════════════════════════════════════════════════════
     // §8 gate 2 — THE DEFECT ITSELF, AS A FIXTURE RATHER THAN A BOARD
     // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -156,56 +124,32 @@ public sealed class PlanarGroupSeparationTests(ITestOutputHelper output)
                                     && n.Contains("separation 1.63°", StringComparison.Ordinal));
 
         // 200 MHz - 1 GHz: separations 101.7 and 45.5 mm. The SAME 200 MHz reads 0.405° and stops.
-        var ex = Assert.Throws<PlanarGroupModesRefusedException>(
+        var ex = Assert.Throws<PlanarFeedClearanceRefusedException>(
             () => PlanarSolve.Run(problem, mesh, ports, [200e6, 1e9]));
         output.WriteLine(ex.Message);
 
-        Assert.Equal(200e6, ex.FrequencyHz);
-        Assert.True(ex.MeasuredDegrees < 0.5);
+        Assert.Contains("at 200 MHz", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("0.405°", ex.Message, StringComparison.Ordinal);
 
         // ── And this is the half that says the refusal is not about the metal ──────────────────
         //
-        // The group's own electrostatics puts the same two modes nearly SEVEN TIMES further apart
-        // than the measurement did. A genuinely degenerate pair reads small on both.
-        Assert.True(ex.QuasiStaticDegrees > 2.5,
-                    $"quasi-static separation {ex.QuasiStaticDegrees:F3}° — expected the modes to be " +
-                    "comfortably separable, which is what makes this a measurement failure");
-        Assert.True(ex.QuasiStaticDegrees / ex.MeasuredDegrees > 5);
+        // The refusal reports the same quantity taken from the group's own electrostatics, which
+        // puts the two modes SEVEN TIMES further apart than the measurement did. A genuinely
+        // degenerate pair reads small on both, and the pair of numbers is the only thing that
+        // separates the two cases — so the message carries both.
+        Assert.Contains("electrostatics puts the same quantity at 2.839°", ex.Message,
+                        StringComparison.Ordinal);
+        Assert.Contains("short standard of 3.83 mm", ex.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// <b>M3 — and through <see cref="PlanarKernel.Solve"/>, where the settings live, the refused
-    /// sweep runs.</b> §LF3's sentence one wall further along: a run that already knows the answer
-    /// should not be asking a person to type it, especially when the sentence is about a calibration
-    /// standard, which is not a thing the user drew.
+    /// <b>R-pcal6-6 — the floor does not move and a refusal stays a refusal.</b> Where BOTH
+    /// numbers are under the floor the modes are genuinely degenerate, and the message says so by
+    /// carrying the two of them; nothing recovers, because PCAL6/M3 measured that the one remedy
+    /// available — a longer short standard — makes the published answer worse rather than better.
     /// </summary>
     [Fact]
-    public void TheRefusedSweepRecoversOnALongerShortStandard_AndSaysSo()
-    {
-        var r = new PlanarKernel().Solve(Problem(), PlanarLineFixtures.Coarse, Ports(),
-                                         [200e6, 1e9]);
-
-        string note = Assert.Single(r.Notes, n => n.Contains("SHORT standard", StringComparison.Ordinal));
-        output.WriteLine(note);
-        Assert.Contains("0.405°", note, StringComparison.Ordinal);       // what it measured
-        Assert.Contains("2.839°", note, StringComparison.Ordinal);       // what the electrostatics says
-        Assert.Contains("3.83 mm", note, StringComparison.Ordinal);      // the standard that could not
-        Assert.Contains("20° electrical", note, StringComparison.Ordinal);
-
-        // The point it refused on now reads within 1 % of the quasi-static truth rather than 0.3× it.
-        string modal = Assert.Single(r.Notes, n => n.Contains("MODAL CALIBRATION", StringComparison.Ordinal));
-        Assert.Contains("Worst mode separation 2.86° at 200 MHz", modal, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// <b>R-pcal6-6 — a group whose modes are genuinely degenerate is still refused, and the retry
-    /// never runs.</b> The two cases read identically on the measured number alone; what separates
-    /// them is that the quasi-static separation does not move when the short standard grows. So a
-    /// refusal raised where BOTH numbers are under the floor carries the plain type, which
-    /// <see cref="PlanarKernel.Solve"/> does not catch.
-    /// </summary>
-    [Fact]
-    public void GenuinelyDegenerateModesAreNotRetried()
+    public void GenuinelyDegenerateModesStillRefuse()
     {
         var (problem, mesh, ports) = Board();
         var strict = PlanarCalibrationSettings.Default with { ModeSeparationFloorDegrees = 1e4 };
@@ -213,7 +157,6 @@ public sealed class PlanarGroupSeparationTests(ITestOutputHelper output)
         var ex = Assert.Throws<PlanarFeedClearanceRefusedException>(
             () => PlanarSolve.Run(problem, mesh, ports, [1e9, 3e9, 5e9, 7e9],
                                   new PlanarSolveSettings(Calibration: strict)));
-        Assert.IsNotType<PlanarGroupModesRefusedException>(ex);
         output.WriteLine(ex.Message[..Math.Min(200, ex.Message.Length)]);
     }
 
