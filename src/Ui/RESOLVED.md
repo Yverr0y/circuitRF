@@ -1,5 +1,196 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## Reset Layout and the Library's glyph count, 2026-09-13
+
+Owner: Reset Layout should force the Library to two glyph columns when the Window Layout setting is
+Project Tree & Library.
+
+**A layout carries a FRACTION, and the fraction is only two glyphs at the opening window size.**
+`DockLayoutDefaults.LibraryColumnProportion` is derived for a 1200 px window; Reset Layout on a window
+since widened to 2000 applies the same fraction to a bigger number and lands on **three** columns —
+the shipped arrangement, not showing the shipped palette. Measured: 212 px / 3 columns. So the COUNT
+has to travel separately from the layout, and only the view knows the pixel width to convert it back.
+
+`PaletteTool.RequestDefaultWidth()` is a latch, raised in `WorkspaceViewModel.RebuildLayoutFrom` — the
+one function behind both Reset Layout and Settings ▸ Window Layout, and the one that a *saved* `.cws`
+restore does not come through, which is why the user's own width still survives a restore.
+`PaletteColumnPin` consumes it when the panel first measures itself.
+
+**The latch is taken ONLY in the pin's not-yet-settled branch, and that is the whole bug in this
+piece.** It is raised while the OUTGOING dock tree is still up, and a settled pin gets one more layout
+pass before its panel is replaced — so consuming it wherever it was noticed honoured it on the
+arrangement about to be thrown away, and the incoming one then read three columns off its own fresh
+fraction. Traced, not guessed: `armed → [old panel, settled, cols=2] honoured → adopted new view →
+[new panel, settled=False] read cols=3`. The latch belongs to the arrangement that has not measured
+yet.
+
+**Deliberately not armed on the three clean-slate rebuild sites** (New Workspace, Switch Workspace,
+Close Workspace). Two of them are followed by `ApplyRestoredDockShell` applying the workspace's own
+saved arrangement, which must win — arming there would force two glyphs over a width the user saved.
+Launch at a non-default window size therefore still opens on the fraction; Reset Layout is one click
+away, and disarming correctly across the restore is its own piece of work.
+
+
+## Switch / SwitchD `State`, 2026-09-13 — shown on the schematic, picked in the dialog
+
+**Follow-on the same day: the SPDT was drawing a connection it was not making.** `SwitchThrow` had
+only `T1 = 1` and `T2 = 2`, so `State = 0` — the engine's "no throw is closed" — parsed through
+`Enum.TryParse` to an UNDEFINED enum value, and `BuildSwitchD`'s two-way `thrown == T1 ? … : …` read
+that as its else branch. An SPDT set to open both throws was drawn with the blade on throw 2. Nothing
+failed; the drawing simply disagreed with the S-matrix, which is the exact defect the dynamic glyphs
+exist to prevent. `SwitchThrow.None = 0` and a three-way test fix it, and the blade is drawn PIVOTED
+to horizontal — the same 223.6-long blade at 0° instead of ∓26.57°, parked dead between the two
+contacts and touching neither. Drawing it shorter would read as a blade that had been trimmed rather
+than one that had been moved. Verified by rendering all three variants through `DocSymbolGlyph`.
+
+Both `PrimitivesForSwitch` and `PrimitivesForSwitchD` now NORMALIZE before caching: anything that is
+not a real position becomes Off / None. That is the model's own rule (a `State` naming a throw that
+does not exist closes nothing), it is what lets the three-way test have no else branch that draws a
+connection, and it also stops a sweep over `State` from growing the symbol cache an entry per value.
+The SPST had been getting this right only by accident — its "not On" branch already drew open — and
+nothing said so.
+
+Owner: show `State` on the schematic for both switch tiles, and make the dialog offer it as a
+combobox rather than a text box.
+
+**`State` was hidden on a rule that only half holds.** `TheGlyphSelectorsAreHiddenFromTheSchematic`
+grouped it with Circulator's `Direction` and Filter's `Form` — the glyph is drawn in the position, so
+captioning it says the same thing twice. True of a switch sitting at a literal. Not true of one driven
+by a variable or a sweep, which is the case `State` is a plain number in order to support
+(`SwitchModel`'s own note calls that "the feature") — and there the picture cannot carry the caption.
+Circulator and Filter keep the rule; the two switches are now the stated exception.
+
+**The picker is numerals, not names, and that is a different table.** `NamedParamOptions` is for a
+parameter whose value IS the entry, committed verbatim — which fits `["0","1"]` exactly, the
+`BiasTeeOptions` precedent being raw strings with no enum behind them. `EnumParamOptions` is the other
+one: a value stored as an INDEX into a list of labels, which `State` is not.
+
+**The SPDT's picker has THREE entries, and a two-entry one would have been a functional loss.**
+`SwitchD.State` names which throw is closed — 1 or 2, with 0 opening both — so offering only 0 and 1
+would leave the second throw unreachable from the dialog, which is the position half the reason to
+place an SPDT at all. The SPST has one throw and really is 0 or 1.
+
+**The two halves of this are load-bearing on each other.** A closed picker cannot accept an
+expression, and `ChoiceOptions` only keeps an unlisted value that is ALREADY set (it appends it so the
+ComboBox does not render blank) — it cannot be typed. The schematic label's inline text edit is the
+route for a swept or variable-driven `State`, the same escape hatch the layer-choice picker names, and
+it exists only because `State` now shows there.
+
+**`Throws` is NOT a picker; it is DISABLED** (owner, same day: first "what are its options, should it
+be a combobox?", then "if the parameter is truly read only it should be greyed out").
+It is structural, one legal value per tile (1 SPST / 2 SPDT), and `EditableSchematic`'s pin table is
+hard-coded per tile rather than derived from it — `Switch` is two pins and `SwitchD` three, whatever
+`Throws` says. A picker would therefore either offer a single entry or offer a value that
+desynchronises the model's port count from the drawing. That desync is not silent, which is worth
+knowing: it is refused at RUN, by the engine, as *"Switch 'SW1': expected 8 nets (com+, com−, 1+, 1−,
+2+, 2−, 3+, 3−); got 6"* — a true message about nets the user never typed, for a parameter with one
+legal value.
+
+`ComponentTypeRegistry.IsStructuralParameter` states it, and **four routes had to be closed, not one.**
+The value box is greyed (`ExpressionEnabled`) — but every row also carries a "show on schematic"
+checkbox, and a label on the sheet is inline-editable straight through `EditParameterCommand`, so
+`BeginInlineEdit` and the double-click route both refuse to OPEN, with a message, rather than letting
+the user type into a box whose text is about to be discarded. `CommitExpression` checks as well: the
+box is one control, but LostFocus commits too. And **the UNIT combo writes through the same
+`EditParameterCommand`** — a live picker beside a frozen value is still a way to edit a parameter that
+does not change — so it is greyed and `CommitUnit` guarded.
+
+**Greyed is not the same call as VerilogA's `Pins`, and the difference is permanence.** That one is
+read-only only ONCE a model is settled, and greying a value the user could edit a moment ago says the
+wrong thing about why — which is what `ExpressionReadOnly`'s own note already said. `Throws` is never
+editable, for any component of that type, in any state, so greyed is the honest rendering and an
+ungreyed box that silently swallows typing is not. Hence two flags: `ExpressionReadOnly` (read-only,
+conditional) and `ExpressionEnabled` (greyed, permanent). The registry's answer is also read into its
+own field in `Refresh` rather than through `SetExpressionReadOnly`, because that setter is driven
+imperatively for VerilogA and a refresh would otherwise hand that row its editability back.
+
+**`Throws` stays VISIBLE**, greyed rather than hidden: "how many throws has this switch" is what a
+reader of the dialog wants to know, and hiding it answers a different question.
+
+
+## Library palette column width, 2026-09-13 — a whole number of glyphs, and it stays there
+
+Owner, in two parts. First: the Library palette should OPEN exactly two component-symbol glyphs wide
+(it was close, not exact), and should STAY two glyphs wide while the workspace window is dragged,
+instead of scaling with it — while remaining draggable to any width the user wants. Then: not two
+specifically — whatever number of glyph columns the user has it set to. Set it to three and a window
+resize keeps three.
+
+**A dock column is a fraction, so "two glyphs wide" is not a number you can store.** Dock arranges
+each column of the outer row as a proportion of the window less its splitters, so the palette at
+`0.1125` was 135 px at the 1200 px opening size and 225 px at 2000. The tiles reflow at whole slots,
+so the extra width is not a wider palette — it is a strip of dead space that grows until it suddenly
+becomes a third column. Measured in a headless host: three glyph columns at a 2000 px window, and ONE
+at 900 px. The fraction has to be recomputed from the pixel width every time the pool it divides
+changes, which is what `Views/Palette/PaletteColumnPin.cs` does; `PaletteColumnWidth.cs` beside it
+holds the arithmetic apart from Avalonia so `tests/Ui.Tests` (which has no platform) can gate it.
+
+**The numbers, all measured rather than assumed.** A tile slot is 62 x 72 (`PaletteTile.axaml`'s 60 px
+plus 1 px either side); the dock theme puts 2 px of chrome between the column's outer edge and the
+tile area; so two glyph columns is a 126 px column, against the 134 px that `0.1125` was producing.
+The chrome is read off the LIVE panel at run time and only the shipped opening proportion uses the
+recorded 2 — a theme change moves it, and a number baked in would be wrong with nothing to say so.
+
+**Four things that had to be got right, each of which fails quietly:**
+
+- **The write has to go to the PRESENTER, not the dockable.** Dock's theme binds the presenter's
+  `ProportionalStackPanel.Proportion` two-way to `IDockable.Proportion` *at style priority*, and
+  Dock's own arrange writes a LOCAL value to that presenter on every pass. A local value outranks a
+  style-priority binding, so setting the model's `Proportion` after first layout moves nothing at all.
+  Writing the presenter still reaches the model through the same two-way binding, which is why a
+  pinned width is still what gets captured into the `.cws`.
+- **The neighbour has to absorb the difference.** `ProportionManager.NormalizeProportions` scales the
+  whole row back to sum 1 before arranging it, so raising the palette's share alone is scaled straight
+  back out and nothing happens. Taking it from the adjacent column (the documents, in both
+  arrangements) is what a splitter drag does and leaves every other column where the user put it.
+- **`MinWidth`/`MaxWidth` on the dockable look like the answer and are not.** They do pin the arranged
+  width exactly — `DimensionCalculator.CalculateDimensionWithConstraints` honours them — but the other
+  columns are still sized from proportions of the whole pool, so the row no longer adds up: a jump
+  resize left a ~23 px gap beside the documents for a frame or three while the proportions converged.
+  They would also clamp the user's own splitter drag, which is the one thing this must not break.
+- **Aim half a pixel high.** Dock arranges at `floor(pool x proportion)` with a shared fractional-pixel
+  carry that can only ever ADD one. A proportion that works out to exactly 126 can land on 125 through
+  double-rounding, and one pixel short of two glyph slots is one glyph column. The column therefore
+  settles at 126 or 127 px; that pixel is why.
+
+**The count is read off the palette, and it is FLOORED.** Whatever whole number of glyph columns the
+tile area is showing is the number to hold — re-read on every layout pass in which the window has not
+moved, so dragging the splitter is all it takes to change it. Floor rather than nearest, because the
+count has to be the one on screen: a tile area four-fifths of the way to another column is showing the
+smaller number, and rounding up would add a column the user never asked for the instant the window was
+first resized. Flooring can only take back the leftover strip, which is space no glyph was in. A
+palette too narrow for one whole column has no count to preserve and is left scaling as it always did.
+
+**During a window resize the count must NOT be re-read** — it would be read off the width that has
+just scaled, which is the thing being corrected. It is re-read only in passes where the pool did not
+change.
+
+**The splitter still goes anywhere, because nothing is applied during a drag.** The pin acts when the
+pool changes, never merely because the column width did; re-applying every pass would peg the splitter
+to whole glyph slots and make every width between them unreachable. The deliberate consequence: a
+palette dragged to four columns and a bit tightens to exactly four the first time the window moves.
+
+**The window's `ClientSize` is the trigger, not the layout after it.** Avalonia publishes the new
+client size and then runs the layout pass, so re-proportioning there lands before anything is
+arranged. Correcting afterwards costs a frame at the scaled width — invisible during a slow drag,
+a visible flash on a maximise. The panel's `LayoutUpdated` still re-checks, and is what would catch a
+case where the panel's width does not track the window's one for one.
+
+**Verified in a headless host on the real dock tree** (a scratch probe, not a committed test — this
+project has no Avalonia platform), at window widths 900 / 1200 / 1330 / 1600 / 2000:
+
+| palette dragged to | held at | glyph columns |
+|---|---|---|
+| untouched (the shipped default) | 127 px at all five | 2 |
+| 190 px | 189 px at all five | 3 |
+| 300 px (4 columns + 50 px of slack) | 251 px at all five | 4 |
+| 375 px (already exact) | 375 px at all five — never moved | 6 |
+| 45 px (under one glyph) | not pinned: 34 / 45 / 50 / 61 / 76 px | none to hold |
+
+Unpinned, the shipped default ran 95 / 127 / 141 / 169 / 212 px — one / two / two / two / three
+columns. A simulated splitter drag is not snapped back while the window is still.
+
+
 ## brief-stackup-render-8-docs-and-figures.md, 2026-09-13 — the capture needs a different split
 
 One change in `src/Ui` proper, and it is a capture-time arrangement nothing in the application calls:

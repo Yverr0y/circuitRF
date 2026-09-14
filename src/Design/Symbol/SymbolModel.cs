@@ -63,14 +63,22 @@ public enum CirculatorDirection { CW, CCW }
 public enum SwitchState { Off = 0, On = 1 }
 
 /// <summary>
-/// Which throw an SPDT switch is connected to.
+/// Which throw an SPDT switch is connected to, <see cref="None"/> being neither.
 ///
-/// <para>The members are numbered <b>1 and 2 rather than 0 and 1</b> on purpose: the parameter is
+/// <para>The throws are numbered <b>1 and 2 rather than 0 and 1</b> on purpose: the parameter is
 /// written <c>State = 1</c> or <c>State = 2</c>, matching the throws' own labels on the glyph, and
 /// <c>Enum.TryParse</c> resolves a bare numeral against the UNDERLYING value. Starting at 0 would
 /// silently read "1" as <c>T2</c> — a switch drawn in the wrong position, with nothing to see.</para>
+///
+/// <para><b><see cref="None"/> is 0, the engine's own "no throw is closed"</b> (owner, 2026-09-13).
+/// Without it <c>State = 0</c> parsed to an undefined enum value, which
+/// <c>BuiltInSymbols.BuildSwitchD</c>'s two-way test read as the ELSE branch: an SPDT set to open
+/// both throws was drawn making a connection to throw 2. Nothing failed and nothing was said — the
+/// drawing simply disagreed with the S-matrix. Anything outside 0…2 normalizes to this as well,
+/// which is the model's own rule (a <c>State</c> naming a throw that does not exist closes
+/// nothing).</para>
 /// </summary>
-public enum SwitchThrow { T1 = 1, T2 = 2 }
+public enum SwitchThrow { None = 0, T1 = 1, T2 = 2 }
 
 // ── Primitive base ────────────────────────────────────────────────────────────
 

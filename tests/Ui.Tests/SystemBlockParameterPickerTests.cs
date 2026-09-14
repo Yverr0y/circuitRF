@@ -58,6 +58,8 @@ public class SystemBlockParameterPickerTests
     [InlineData(SymbolKind.Circulator, "Direction")]
     [InlineData(SymbolKind.Switch,     "OffState")]
     [InlineData(SymbolKind.SwitchD,    "OffState")]
+    [InlineData(SymbolKind.Switch,     "State")]
+    [InlineData(SymbolKind.SwitchD,    "State")]
     [InlineData(SymbolKind.Amp,        "IP3Ref")]
     public void AnEnumNamedParameterIsAPickerAndNotATextBox(SymbolKind kind, string name)
     {
@@ -133,6 +135,109 @@ public class SystemBlockParameterPickerTests
         Assert.Contains(first,  options);
         Assert.Contains(second, options);
         Assert.Equal(2, options.Count);
+    }
+
+    // ── Throws: fixed by the tile, editable nowhere ──────────────────────────
+
+    /// <summary>
+    /// <c>Throws</c> is shown and takes no edit (owner, 2026-09-13).
+    ///
+    /// <para>One legal value per tile — 1 SPST, 2 SPDT — and nothing follows an edit of it:
+    /// <c>EditableSchematic</c>'s pin table is per tile, so the symbol keeps its pins whatever the
+    /// parameter says, and the design then fails at RUN with a message about nets the user never
+    /// typed. Shown rather than hidden, because the throw count is worth reading.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(SymbolKind.Switch,  "1")]
+    [InlineData(SymbolKind.SwitchD, "2")]
+    public void ThrowsIsShownButTakesNoEdit(SymbolKind kind, string expected)
+    {
+        var row = Row(kind, "Throws");
+
+        Assert.True(row.ShowExpressionTextBox, "Throws must still be READ — it is the throw count");
+        Assert.True(row.ExpressionReadOnly);
+        Assert.Equal(expected, row.StagedExpression);
+
+        // Greyed, not merely read-only (owner, 2026-09-13): the value is fixed for the life of the
+        // component, and a box that looks editable and silently swallows typing is worse than one
+        // that says it is not.
+        Assert.False(row.ExpressionEnabled);
+
+        // And both write paths refuse. The box is one control, but LostFocus commits too — and the
+        // UNIT combo writes through the same EditParameterCommand, so a live picker beside a frozen
+        // value would still be a way to edit it.
+        row.StagedExpression = "3";
+        row.CommitExpression();
+        row.CommitUnit("Ω");
+
+        Assert.Equal(expected, ComponentTypeRegistry.DefaultParameters(kind, 0)
+                                                    .Single(p => p.Name == "Throws").Expression);
+    }
+
+    /// <summary>
+    /// Every OTHER parameter of the two switch tiles is still editable — a read-only rule that had
+    /// quietly frozen the rest of the dialog would be a much worse bug than the one it fixes.
+    /// </summary>
+    [Theory]
+    [InlineData(SymbolKind.Switch)]
+    [InlineData(SymbolKind.SwitchD)]
+    public void NothingElseOnASwitchBecameReadOnly(SymbolKind kind)
+    {
+        var (vm, comp) = Place(kind);
+        var editor = new ParameterEditorViewModel();
+        editor.SetTargetDirect(vm, comp);
+
+        foreach (var row in editor.Rows)
+        {
+            Assert.Equal(row.Name == "Throws", row.ExpressionReadOnly);
+            Assert.Equal(row.Name != "Throws", row.ExpressionEnabled);
+        }
+    }
+
+    /// <summary>
+    /// The schematic label is the other way in, and it is refused there too. Ticking "show on
+    /// schematic" for <c>Throws</c> puts a label on the sheet whose inline editor writes straight
+    /// through <c>EditParameterCommand</c> — a read-only box in the dialog and an editable label on
+    /// the canvas is no guard at all.
+    /// </summary>
+    [Theory]
+    [InlineData(SymbolKind.Switch)]
+    [InlineData(SymbolKind.SwitchD)]
+    public void TheSchematicLabelRefusesToEditThrows(SymbolKind kind)
+    {
+        var (vm, comp) = Place(kind);
+        var throws = comp.Parameters.Single(p => p.Name == "Throws");
+        string before = throws.Expression;
+
+        vm.BeginInlineEdit(comp, throws, 0, 0);
+
+        Assert.False(vm.IsInlineEditing, "the inline editor must not even OPEN on a fixed parameter");
+        Assert.Equal(before, throws.Expression);
+    }
+
+    /// <summary>
+    /// The switch position is a picker of NUMERALS, and the SPDT's has three entries (owner,
+    /// 2026-09-13).
+    ///
+    /// <para>Its <c>State</c> names which throw is closed — 1 or 2, with 0 opening both — so a
+    /// two-entry picker would leave the second throw unreachable from the dialog, which is the
+    /// position half the reason to place an SPDT at all. The SPST really does have only 0 and 1.</para>
+    /// </summary>
+    [Fact]
+    public void TheSwitchStatePickerOffersEveryPositionTheTileHas()
+    {
+        Assert.Equal(["0", "1"],
+                     ComponentTypeRegistry.NamedParamOptions(SymbolKind.Switch, "State"));
+        Assert.Equal(["0", "1", "2"],
+                     ComponentTypeRegistry.NamedParamOptions(SymbolKind.SwitchD, "State"));
+
+        // Each tile's own default is one of them — a picker opening on a value it does not offer is
+        // the defect the "still listed rather than dropped" rule below exists to paper over.
+        foreach (var kind in new[] { SymbolKind.Switch, SymbolKind.SwitchD })
+        {
+            var state = Assert.Single(ComponentTypeRegistry.DefaultParameters(kind, 0), p => p.Name == "State");
+            Assert.Contains(state.Expression, ComponentTypeRegistry.NamedParamOptions(kind, "State")!);
+        }
     }
 
     /// <summary>

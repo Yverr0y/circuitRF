@@ -1,7 +1,9 @@
 using System;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.VisualTree;
 using CircuitRF.Ui.Controls;
 using CircuitRF.Ui.ViewModels.Dock;
 
@@ -28,6 +30,47 @@ public partial class PaletteToolView : UserControl
     }
 
     private void OnTilePressed(object? sender, PointerPressedEventArgs e) => TileScroll.Focus();
+
+    // ── Column width (PaletteColumnPin) ───────────────────────────────────────
+
+    /// <summary>
+    /// The width the tile grid actually gets — what decides how many glyph columns reflow into the
+    /// panel, and the one measurement <see cref="PaletteColumnPin"/> cannot make from outside.
+    ///
+    /// <para>The viewport, not this control's own width: they are the same today (the scroll bar
+    /// overlays rather than taking a strip), and reading the viewport is what keeps that from being
+    /// an assumption. It falls back when the tile area is hidden, which it is while a search matches
+    /// nothing — a panel with no tiles in it still has a width.</para>
+    /// </summary>
+    public double TileAreaWidth
+    {
+        get
+        {
+            double viewport = TileScroll.Viewport.Width;
+            if (viewport > 0.0) return viewport;
+            return TileScroll.Bounds.Width > 0.0 ? TileScroll.Bounds.Width : Bounds.Width;
+        }
+    }
+
+    /// <summary>
+    /// Takes the panel's pending "open at the default glyph count" request, if any — raised by Reset
+    /// Layout and by choosing a Window Layout, both of which mean "the shipped arrangement, now".
+    /// Forwarded from the tool so <see cref="PaletteColumnPin"/> needs no dock view-model type.
+    /// </summary>
+    internal bool ConsumeDefaultWidthRequest()
+        => DataContext is PaletteTool tool && tool.ConsumeDefaultWidthRequest();
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        PaletteColumnPin.NotifyPaletteAttached(this);
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        PaletteColumnPin.NotifyPaletteDetached(this);
+        base.OnDetachedFromVisualTree(e);
+    }
 
     // ── Activation focus (owner, 2026-08-25) ──────────────────────────────────
     //

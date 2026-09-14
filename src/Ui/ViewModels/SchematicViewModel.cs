@@ -4299,6 +4299,19 @@ public sealed partial class SchematicViewModel : ObservableObject
                 if (comp.Symbol == SymbolKind.SpiceModel
                     && SpiceModelSymbolProvider.IsPanelParameter(param.Name)) return;
 
+                // A parameter fixed by the TILE takes no edit anywhere, and this is the route that
+                // would otherwise make the dialog's read-only box pointless: tick "show on
+                // schematic" and the label is back to writing straight through
+                // EditParameterCommand. Refused at the point the editor would OPEN, so the user
+                // never types into a box whose text is going to be thrown away.
+                if (ComponentTypeRegistry.IsStructuralParameter(comp.Symbol, param.Name))
+                {
+                    _messageSink?.Info(
+                        $"{param.Name} is set by the {ComponentTypeRegistry.DisplayName(comp.Symbol)} "
+                      + "symbol itself and cannot be edited.");
+                    return;
+                }
+
                 _inlineEditParam = param;
 
                 bool nameMode = comp.Symbol is SymbolKind.Var or SymbolKind.Meas or SymbolKind.Sdd;
@@ -4355,6 +4368,16 @@ public sealed partial class SchematicViewModel : ObservableObject
     public void BeginInlineEdit(EditableComponent comp, EditableParameter param,
                                 double screenX, double screenY)
     {
+        // Same refusal as the double-click route above, for the same reason — this is the other way
+        // in, and a guard on only one of them is no guard at all.
+        if (ComponentTypeRegistry.IsStructuralParameter(comp.Symbol, param.Name))
+        {
+            _messageSink?.Info(
+                $"{param.Name} is set by the {ComponentTypeRegistry.DisplayName(comp.Symbol)} "
+              + "symbol itself and cannot be edited.");
+            return;
+        }
+
         _inlineEditParam = param;
         InlineEditIncludesName = false;
         InlineEditSelStart  = 0;

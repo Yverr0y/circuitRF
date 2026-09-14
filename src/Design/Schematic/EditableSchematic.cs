@@ -747,11 +747,21 @@ public sealed class EditableComponent
     private SwitchState SwitchGlyphState() => GetEnumParam("State", SwitchState.On);
 
     /// <summary>
-    /// The throw the SPDT <c>SwitchD</c> glyph's blade points at.
+    /// The throw the SPDT <c>SwitchD</c> glyph's blade points at, or
+    /// <see cref="SwitchThrow.None"/> when it is on neither.
     ///
-    /// <para><see cref="SwitchThrow"/>'s members are numbered 1 and 2 rather than 0 and 1 precisely
+    /// <para><see cref="SwitchThrow"/>'s throws are numbered 1 and 2 rather than 0 and 1 precisely
     /// so this can go through the ordinary enum reader: the parameter is written <c>1</c> or
-    /// <c>2</c>, and <c>Enum.TryParse</c> resolves a bare numeral against the underlying value.</para>
+    /// <c>2</c>, and <c>Enum.TryParse</c> resolves a bare numeral against the underlying value.
+    /// <c>0</c> resolves to <see cref="SwitchThrow.None"/> for the same reason — and a numeral
+    /// outside 0…2 resolves to an UNDEFINED value, which
+    /// <see cref="BuiltInSymbols.PrimitivesForSwitchD"/> normalizes to None rather than letting it
+    /// fall into a branch that draws a connection.</para>
+    ///
+    /// <para>The fallback is <see cref="SwitchThrow.T1"/> and not None, because it is reached only
+    /// when the expression is not a numeral at all — a variable or a sweep parameter, which the glyph
+    /// cannot resolve — and the parameter's own default is 1. A switch showing its default position
+    /// is a better guess there than one showing itself disconnected.</para>
     /// </summary>
     private SwitchThrow SwitchDGlyphThrow() => GetEnumParam("State", SwitchThrow.T1);
 

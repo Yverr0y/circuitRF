@@ -131,6 +131,37 @@ public sealed partial class PaletteTool : Tool, IActivatableTool
 
     public bool ConsumeActivationFocus() => _activationFocus.Consume();
 
+    // ── Opening width (owner, 2026-09-13) ─────────────────────────────────────
+
+    private bool _defaultWidthRequested;
+
+    /// <summary>
+    /// Asks the panel to open at the DEFAULT number of glyph columns rather than at whatever its
+    /// share of the window happens to come to.
+    ///
+    /// <para><b>Why this is not simply the layout's proportion.</b> A dock column's width is a
+    /// FRACTION of the window, and <c>DockLayoutDefaults.LibraryColumnProportion</c> is the fraction
+    /// that gives two glyph columns at the window's own OPENING size. Reset Layout on a window that
+    /// has since been widened applies the same fraction to a bigger number and lands on three
+    /// columns — the shipped default arrangement, not showing the shipped default palette. Only the
+    /// view knows the pixel width, so the request is carried to it and
+    /// <c>PaletteColumnPin</c> converts it back to a fraction against the window as it stands.</para>
+    ///
+    /// <para>Raised BEFORE the view exists, on every one of these paths — the dock tree is built
+    /// first and laid out later — which is why it is a latch to be consumed rather than an event,
+    /// exactly like <see cref="RequestActivationFocus"/> beside it.</para>
+    /// </summary>
+    public void RequestDefaultWidth() => _defaultWidthRequested = true;
+
+    /// <summary>Takes the pending <see cref="RequestDefaultWidth"/>, if any, and clears it. Once
+    /// honoured the panel is the user's again — the next drag or window resize is theirs.</summary>
+    public bool ConsumeDefaultWidthRequest()
+    {
+        bool pending = _defaultWidthRequested;
+        _defaultWidthRequested = false;
+        return pending;
+    }
+
     /// <summary>Dock's own "this tab was chosen" hook.</summary>
     public override void OnSelected()
     {

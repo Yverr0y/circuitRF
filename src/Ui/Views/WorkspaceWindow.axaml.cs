@@ -57,6 +57,11 @@ public partial class WorkspaceWindow : Window
         // reached only the float (owner, 2026-09-02). Same helper, registered on this TopLevel too; no
         // window fallback, because the shell must never close itself over an unidentifiable panel.
         ToolChromeCloseButton.Attach(this, () => DataContext as WorkspaceViewModel);
+        // A docked Library palette is two component glyphs wide and stays two glyphs wide while the
+        // window is resized — a dock column is a FRACTION of the window, so without this the palette
+        // grows a strip of empty space and then jumps to three columns. Armed only while the palette
+        // IS that width, so any other width the user drags it to is left alone. See PaletteColumnPin.
+        PaletteColumnPin.Attach(this);
         FitToScreen();
         // R-dock-14: bring the floating tool panels forward with the workspace. `Window` exposes no
         // OnActivated to override, so this is the event.

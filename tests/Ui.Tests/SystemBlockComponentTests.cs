@@ -255,6 +255,55 @@ public class SystemBlockComponentTests
         Assert.Equal( 100.0, b2.Y2);
     }
 
+    /// <summary>
+    /// <c>State = 0</c> opens BOTH throws, and the glyph has to say so (owner, 2026-09-13).
+    ///
+    /// <para>It used to say the opposite. <c>SwitchThrow</c> had only T1 and T2, so 0 parsed to an
+    /// undefined value and the builder's two-way test took its ELSE branch — an SPDT set to connect
+    /// nothing was drawn connected to throw 2, with nothing failing anywhere.</para>
+    /// </summary>
+    [Fact]
+    public void SwitchD_ParksTheBladeBetweenTheThrows_WhenItIsOnNeither()
+    {
+        var none = BuiltInSymbols.PrimitivesForSwitchD(SwitchThrow.None);
+        var t1   = BuiltInSymbols.PrimitivesForSwitchD(SwitchThrow.T1);
+        var t2   = BuiltInSymbols.PrimitivesForSwitchD(SwitchThrow.T2);
+
+        // Its own picture — and in particular NOT throw 2's, which is what it used to be.
+        Assert.NotEqual(LineKeys(none), LineKeys(t1));
+        Assert.NotEqual(LineKeys(none), LineKeys(t2));
+        Assert.Same(none, BuiltInSymbols.PrimitivesForSwitchD(SwitchThrow.None));
+
+        // The blade pivots to horizontal: it starts at the common contact and reaches neither of the
+        // two at y = ±100. Asserted as "no line touches a throw contact" rather than by coordinate,
+        // because the point is the connection, not the geometry.
+        var blade = Assert.Single(none.Primitives.OfType<LinePrimitive>(),
+                                  l => l.X1 == -100 && l.Y1 == 0);
+        Assert.Equal(0.0, blade.Y2);
+        Assert.DoesNotContain(none.Primitives.OfType<LinePrimitive>(),
+                              l => (l.X2 == 100 && (l.Y2 == -100 || l.Y2 == 100))
+                                || (l.X1 == 100 && (l.Y1 == -100 || l.Y1 == 100) && l.X2 < 100));
+
+        // It is the same blade, moved — not a shorter one. A trimmed blade reads as a different part.
+        double Len(LinePrimitive l) => System.Math.Sqrt((l.X2 - l.X1) * (l.X2 - l.X1) + (l.Y2 - l.Y1) * (l.Y2 - l.Y1));
+        var closed = Assert.Single(t1.Primitives.OfType<LinePrimitive>(), l => l.Y1 != l.Y2);
+        Assert.Equal(Len(closed), Len(blade), 0);
+    }
+
+    /// <summary>
+    /// A <c>State</c> naming a throw that does not exist closes nothing — the model's own rule — so
+    /// the glyph must not draw it closed either. Both tiles, because the SPST got this right only by
+    /// accident (its "not On" branch already drew open) and nothing said so.
+    /// </summary>
+    [Fact]
+    public void ANonexistentThrowIsDrawnConnectedToNothing()
+    {
+        Assert.Same(BuiltInSymbols.PrimitivesForSwitchD(SwitchThrow.None),
+                    BuiltInSymbols.PrimitivesForSwitchD((SwitchThrow)7));
+        Assert.Same(BuiltInSymbols.PrimitivesForSwitch(SwitchState.Off),
+                    BuiltInSymbols.PrimitivesForSwitch((SwitchState)7));
+    }
+
     private static string LineKeys(Symbol s)
         => string.Join("|", s.Primitives.OfType<LinePrimitive>()
                              .Select(l => $"{l.X1},{l.Y1},{l.X2},{l.Y2}"));
@@ -266,6 +315,7 @@ public class SystemBlockComponentTests
     // nothing to see and nothing to fail. SwitchThrow is numbered from one for exactly this reason.
 
     [Theory]
+    [InlineData("0",  SwitchThrow.None)]
     [InlineData("1",  SwitchThrow.T1)]
     [InlineData("2",  SwitchThrow.T2)]
     [InlineData("T1", SwitchThrow.T1)]
@@ -431,14 +481,35 @@ public class SystemBlockComponentTests
     {
         foreach (var (kind, name) in new[]
                  {
-                     (SymbolKind.Circulator, "Direction"), (SymbolKind.Switch, "State"),
-                     (SymbolKind.SwitchD, "State"), (SymbolKind.Filter, "Form"),
+                     (SymbolKind.Circulator, "Direction"), (SymbolKind.Filter, "Form"),
                  })
         {
             var p = Assert.Single(ComponentTypeRegistry.DefaultParameters(kind, 0), q => q.Name == name);
             Assert.False(p.ShowOnSchematic,
                 $"{kind}.{name} is drawn INTO the symbol; captioning it as well says the same thing twice");
         }
+    }
+
+    /// <summary>
+    /// The switches are the exception to the rule above (owner, 2026-09-13): <c>State</c> shows.
+    ///
+    /// <para>The blade does draw the position, but only of a switch sitting at a literal — a State
+    /// driven by a variable or a sweep is a caption the picture cannot carry. The label is also the
+    /// only place such a value can now be TYPED, since the properties dialog offers a closed picker
+    /// (<see cref="ComponentTypeRegistry.NamedParamOptions"/>).</para>
+    /// </summary>
+    [Theory]
+    [InlineData(SymbolKind.Switch)]
+    [InlineData(SymbolKind.SwitchD)]
+    public void TheSwitchesShowTheirState(SymbolKind kind)
+    {
+        var p = Assert.Single(ComponentTypeRegistry.DefaultParameters(kind, 0), q => q.Name == "State");
+        Assert.True(p.ShowOnSchematic);
+
+        // And it is the ONLY one of theirs that shows — the rest are the ideal-switch numbers a
+        // reader does not want captioned on every switch in a diagram.
+        foreach (var q in ComponentTypeRegistry.DefaultParameters(kind, 0))
+            Assert.Equal(q.Name == "State", q.ShowOnSchematic);
     }
 
     [Fact]

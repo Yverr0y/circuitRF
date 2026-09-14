@@ -131,8 +131,10 @@ public static class LibraryCatalog
         (SymbolKind.VProbe,      0),
         (SymbolKind.Vdc,         0),
         (SymbolKind.P1Tone,      0),
-        (SymbolKind.ToneSource,  0),   // "V1Tone" — the single-tone voltage source, displayed as VTone.
-        (SymbolKind.CurrentToneSource, 0), // "I_1Tone" — its current-source dual, displayed as ITone.
+        // Owner, 2026-09-13: ITone first, VTone second. They were added the other way round on the
+        // reading that the voltage source is the more common of the pair.
+        (SymbolKind.CurrentToneSource, 0), // "I_1Tone" — the single-tone current source, displayed as ITone.
+        (SymbolKind.ToneSource,  0),   // "V_1Tone" — its voltage-source dual, displayed as VTone.
         (SymbolKind.Snp,         2),   // S2P
         // Owner, 2026-09-08: WSProbe sits after S2P. It was pinned among the probes (WSP-4) on the
         // reading that a probe belongs with the probes; what it is actually reached for is the same

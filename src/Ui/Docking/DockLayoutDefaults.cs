@@ -25,8 +25,42 @@ public static class DockLayoutDefaults
     /// <summary>Messages' share of the document column.</summary>
     public const double MessagesProportion = 0.20;
 
-    /// <summary>Library column's share of the window width in the two-column preset.</summary>
-    public const double LibraryColumnProportion = 0.1125;
+    /// <summary>
+    /// Library column's share of the window width in the two-column preset — the fraction that
+    /// arranges exactly <see cref="Views.Palette.PaletteColumnWidth.DefaultGlyphColumns"/> component
+    /// glyph columns at the window's own opening width.
+    ///
+    /// <para>Derived rather than dialled in, because a number that is nearly right here is a palette
+    /// with a strip of empty space beside its glyphs and no way to tell from the number itself. It is
+    /// the OPENING width only: a proportion is a fraction of the window, so it stops being two glyphs
+    /// the moment the window is resized, which is what <see cref="Views.Palette.PaletteColumnPin"/>
+    /// exists to hold — including making this exact on the first layout, should the chrome the
+    /// measurement below records ever move.</para>
+    /// </summary>
+    public static readonly double LibraryColumnProportion =
+        Views.Palette.PaletteColumnWidth.ProportionFor(
+            Views.Palette.PaletteColumnWidth.TargetWidth(PaletteColumnChrome),
+            OpeningWindowWidth - OuterSplitterTotal);
+
+    /// <summary>
+    /// <c>WorkspaceWindow.axaml</c>'s declared opening width. Restated here because a proportion can
+    /// only be turned into pixels against some window size, and this is the one a new workspace
+    /// opens at; <c>PaletteColumnWidthTests</c> holds the two together.
+    /// </summary>
+    internal const double OpeningWindowWidth = 1200.0;
+
+    /// <summary>
+    /// The two splitters between the three columns of the two-column preset, at Dock's 4 px default
+    /// thickness. Proportions divide up the row LESS its splitters, so they are not part of the pool.
+    /// </summary>
+    internal const double OuterSplitterTotal = 8.0;
+
+    /// <summary>
+    /// What the dock theme puts between the Library column's outer edge and its tile area — measured
+    /// at 2 px in the running panel, the same at every window width. Only the opening number depends
+    /// on it: <see cref="Views.Palette.PaletteColumnPin"/> reads the real one off the live panel.
+    /// </summary>
+    internal const double PaletteColumnChrome = 2.0;
 
     /// <summary>Project Tree's share of the left column when the Library is not tabbed with it.</summary>
     public const double ProjectTreeAloneProportion = 0.466;
@@ -78,10 +112,9 @@ public static class DockLayoutDefaults
     /// <para>Originally transcribed from the owner's own <c>new_layout.cws</c>, which is why most of
     /// these proportions are the untidy numbers a dragged splitter leaves rather than round ones. Its
     /// Library sat beside the documents as a share of the window WIDTH — the same number
-    /// <c>DockLayoutCapture.EnumerateSideProportions</c> would record for that arrangement — but
-    /// <see cref="LibraryColumnProportion"/> was retuned starting 2026-08-16 (0.125 → 0.09 → 0.1, still
-    /// being tuned) so the Palette's width matches two columns of component symbols at the default
-    /// window width.</para>
+    /// <c>DockLayoutCapture.EnumerateSideProportions</c> would record for that arrangement — and
+    /// <see cref="LibraryColumnProportion"/> was hand-tuned towards two columns of component symbols
+    /// through 2026-08 (0.125 → 0.09 → 0.1 → 0.1125) before being DERIVED from that width instead.</para>
     /// </summary>
     public static CwsDockLayout ProjectTreeAndLibrary() => new()
     {

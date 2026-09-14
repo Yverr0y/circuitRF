@@ -158,16 +158,19 @@ public class CurrentSourceComponentTests
 
     // ── Palette ───────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// The two sit together, ITone first (owner, 2026-09-13 — they went in the other way round).
+    /// </summary>
     [Fact]
-    public void BothAppearInThePalette_AndITone_SitsNextToVTone()
+    public void BothAppearInThePalette_AndVTone_SitsNextToITone()
     {
         var kinds = LibraryCatalog.AllItems.Select(i => i.Kind).ToList();
         Assert.Contains(SymbolKind.CurrentToneSource, kinds);
         Assert.Contains(SymbolKind.Vccs, kinds);
 
         var pinned = LibraryCatalog.AllItemsPinnedOrder().Select(i => i.Kind).ToList();
-        Assert.Equal(pinned.IndexOf(SymbolKind.ToneSource) + 1,
-                     pinned.IndexOf(SymbolKind.CurrentToneSource));
+        Assert.Equal(pinned.IndexOf(SymbolKind.CurrentToneSource) + 1,
+                     pinned.IndexOf(SymbolKind.ToneSource));
     }
 
     [Fact]

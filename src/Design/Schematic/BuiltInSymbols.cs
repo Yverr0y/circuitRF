@@ -1557,8 +1557,16 @@ public static class BuiltInSymbols
     // schematic rather than out of the sweep definition.
 
     /// <summary>Per-instance SPST <c>Switch</c> symbol — the blade closed or lifted.</summary>
+    /// <param name="state">
+    /// Anything that is not <see cref="SwitchState.On"/> is drawn OPEN, including the undefined
+    /// values <c>Enum.TryParse</c> hands back for a <c>State</c> outside 0…1. That is the model's own
+    /// rule — a <c>State</c> naming a throw that does not exist closes nothing — and normalizing here
+    /// rather than at each call site is also what keeps the cache to two entries when a sweep walks
+    /// <c>State</c> over a range.
+    /// </param>
     public static Symbol PrimitivesForSwitch(SwitchState state)
     {
+        if (state != SwitchState.On) state = SwitchState.Off;
         if (!_switchCache.TryGetValue(state, out var sym))
             _switchCache[state] = sym = BuildSwitch(state);
         return sym;
@@ -1574,21 +1582,43 @@ public static class BuiltInSymbols
         Circ( 100, 0, 12, filled: true),        // pivot reads as a pivot rather than as a crossing
     ], SymbolKind.Switch);
 
-    /// <summary>Per-instance SPDT <c>SwitchD</c> symbol — the blade on the throw it is set to.</summary>
+    /// <summary>
+    /// Per-instance SPDT <c>SwitchD</c> symbol — the blade on the throw it is set to, or parked
+    /// between them when it is on neither.
+    /// </summary>
+    /// <param name="thrown">
+    /// Anything that is not a real throw — <see cref="SwitchThrow.None"/> for the engine's
+    /// <c>State = 0</c>, and the undefined values <c>Enum.TryParse</c> hands back for anything above
+    /// 2 — normalizes to <see cref="SwitchThrow.None"/>. That is the model's own rule (a <c>State</c>
+    /// naming a throw that does not exist closes nothing), it is what stops the three-way test below
+    /// from having an else branch that draws a connection, and it keeps the cache to three entries
+    /// when a sweep walks <c>State</c> over a range.
+    /// </param>
     public static Symbol PrimitivesForSwitchD(SwitchThrow thrown)
     {
+        if (thrown is not (SwitchThrow.T1 or SwitchThrow.T2)) thrown = SwitchThrow.None;
         if (!_switchDCache.TryGetValue(thrown, out var sym))
             _switchDCache[thrown] = sym = BuildSwitchD(thrown);
         return sym;
     }
 
+    // The blade PIVOTS about the common contact and keeps its length: closed, it runs from (-100,0)
+    // to a contact at (100,∓100), which is sqrt(200² + 100²) ≈ 223.6 long at ∓26.57°. "Neither" is
+    // the same blade at 0°, dead between the two throws — so its tip lands at x ≈ -100 + 223.6, in
+    // the gap, level with nothing and touching neither contact. Drawing it SHORTER would read as a
+    // blade that had been trimmed rather than one that had been moved.
+    private const double SwitchDOpenBladeTipX = 124;   // -100 + round(sqrt(200*200 + 100*100))
+
     private static Symbol BuildSwitchD(SwitchThrow thrown) => Sym([
         L(-300,    0, -100,    0),              // COM lead
         L( 100, -100,  300, -100),              // T1 lead
         L( 100,  100,  300,  100),              // T2 lead
-        thrown == SwitchThrow.T1
-            ? L(-100, 0, 100, -100)             // blade to throw 1
-            : L(-100, 0, 100,  100),            // blade to throw 2
+        thrown switch
+        {
+            SwitchThrow.T1 => L(-100, 0, 100, -100),                    // blade to throw 1
+            SwitchThrow.T2 => L(-100, 0, 100,  100),                    // blade to throw 2
+            _              => L(-100, 0, SwitchDOpenBladeTipX, 0),      // on neither
+        },
         Circ(-100,    0, 12, filled: true),
         Circ( 100, -100, 12, filled: true),
         Circ( 100,  100, 12, filled: true),

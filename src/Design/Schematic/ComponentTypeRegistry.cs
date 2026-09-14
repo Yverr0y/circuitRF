@@ -999,6 +999,28 @@ public static class ComponentTypeRegistry
         && parameterName.Equals("File", StringComparison.Ordinal);
 
     /// <summary>
+    /// True when a parameter's value is fixed by the TILE the user placed, so it is shown but never
+    /// editable — not in the properties dialog, and not through a schematic label either.
+    ///
+    /// <para><b>The switches' <c>Throws</c> is the case (owner, 2026-09-13).</b> It is what makes
+    /// <c>Switch</c> and <c>SwitchD</c> one engine component, and it has exactly one legal value per
+    /// tile: 1 for the SPST, 2 for the SPDT. Nothing follows an edit of it —
+    /// <c>EditableSchematic</c>'s pin table is written per tile, so the symbol keeps its 2 or 3 pins
+    /// whatever this says — so changing it only desynchronises the model's port count from the
+    /// drawing, and the design then fails at RUN with a message about nets the user never typed
+    /// (<i>"Switch 'SW1': expected 8 nets (com+, com−, 1+, 1−, 2+, 2−, 3+, 3−); got 6"</i>). Placing
+    /// the other tile is how you get the other throw count.</para>
+    ///
+    /// <para>Shown rather than hidden, because "how many throws has this switch" is exactly what a
+    /// reader of the dialog wants to know — the same call
+    /// <c>ParameterRowViewModel.ExpressionReadOnly</c> makes for a VerilogA model's terminal
+    /// count.</para>
+    /// </summary>
+    public static bool IsStructuralParameter(SymbolKind kind, string parameterName)
+        => kind is SymbolKind.Switch or SymbolKind.SwitchD
+        && parameterName.Equals("Throws", StringComparison.Ordinal);
+
+    /// <summary>
     /// A one-line explanation of a BUILT-IN primitive's parameter, shown as the row's tooltip, or ""
     /// when there is nothing worth saying.
     ///
@@ -1199,7 +1221,8 @@ public static class ComponentTypeRegistry
           + "in the symbol points at it.",
         (SymbolKind.Switch or SymbolKind.SwitchD, "Throws") =>
             "How many throws the switch has: 1 for the SPST tile, 2 for the SPDT. It is what makes "
-          + "the two tiles one component, and it sets the pin count, so leave it alone.",
+          + "the two tiles one component, and it is fixed by the tile — place the other one to get "
+          + "the other throw count.",
         (SymbolKind.Switch or SymbolKind.SwitchD, "IL") =>
             "Insertion loss of the path the switch is making, as a positive number of dB.",
         (SymbolKind.Switch or SymbolKind.SwitchD, "Isolation") =>
@@ -1514,8 +1537,14 @@ public static class ComponentTypeRegistry
             // number precisely so a parametric sweep over it gives every switch position in one
             // run, with the glyph following along. See SwitchState/SwitchThrow for why both enums
             // are numbered to match it.
+            //
+            // `State` SHOWS on the schematic (owner, 2026-09-13). It was hidden on the reading that
+            // the blade already draws the position, which is true of a switch sitting at a literal —
+            // but a State driven by a variable or a sweep is a caption the picture cannot carry, and
+            // the label is also the only place such a value can be TYPED now that the properties
+            // dialog offers a closed picker (NamedParamOptions).
             case SymbolKind.Switch:
-                return [new("State",     "1",           "",   false, UnitDimension.None),
+                return [new("State",     "1",           "",   true,  UnitDimension.None),
                         new("Throws",    "1",           "",   false, UnitDimension.None),
                         new("IL",        "0",           "dB", false, UnitDimension.None),
                         new("Isolation", "200",         "dB", false, UnitDimension.None),
@@ -1523,7 +1552,7 @@ public static class ComponentTypeRegistry
                         new("Z0",        "50",          "Ω",  false, UnitDimension.Resistance),
                         new("RL",        "200",         "dB", false, UnitDimension.None)];
             case SymbolKind.SwitchD:
-                return [new("State",     "1",           "",   false, UnitDimension.None),
+                return [new("State",     "1",           "",   true,  UnitDimension.None),
                         new("Throws",    "2",           "",   false, UnitDimension.None),
                         new("IL",        "0",           "dB", false, UnitDimension.None),
                         new("Isolation", "200",         "dB", false, UnitDimension.None),
@@ -2874,6 +2903,19 @@ public static class ComponentTypeRegistry
     private static readonly string[] SwitchOffStateOptions =
         [nameof(SwitchOffState.Reflective), nameof(SwitchOffState.Absorptive)];
 
+    /// <summary>
+    /// <c>State</c>'s legal values, per tile (owner, 2026-09-13): the numeral is the value, so these
+    /// are committed exactly as typed and there is no enum to <c>nameof</c> against — the numbering
+    /// IS <see cref="SwitchState"/>'s and <see cref="SwitchThrow"/>'s, which exist to match it.
+    ///
+    /// <para><b>The SPDT's list has THREE entries, not two.</b> Its <c>State</c> names which throw
+    /// is closed — 1 or 2 — with 0 opening both, so a two-entry picker would leave the second throw
+    /// unreachable from the dialog, which is the position half the reason to place an SPDT at all.
+    /// The SPST has only one throw and so really is 0 or 1.</para>
+    /// </summary>
+    private static readonly string[] SwitchStateOptions  = ["0", "1"];
+    private static readonly string[] SwitchDStateOptions = ["0", "1", "2"];
+
     private static readonly string[] Ip3ReferenceOptions =
         [nameof(Ip3Reference.Input), nameof(Ip3Reference.Output)];
 
@@ -2894,8 +2936,8 @@ public static class ComponentTypeRegistry
     /// <summary>
     /// The closed set of NAMES a parameter accepts, for a parameter whose value is an enum name
     /// rather than a number — <c>Response</c>, <c>Form</c>, <c>Direction</c>, <c>OffState</c>,
-    /// <c>IP3Ref</c>. The Parameter Editor renders these as a picker committing the NAME verbatim,
-    /// which is what the model reads.
+    /// <c>IP3Ref</c> — or, for the switches' <c>State</c>, a closed set of NUMERALS. The Parameter
+    /// Editor renders these as a picker committing the entry verbatim, which is what the model reads.
     ///
     /// <para><b>Not <see cref="EnumParamOptions"/>, and the difference is the stored value.</b> That
     /// one is for a parameter whose value is a raw INDEX (MBend's <c>Miter</c> is 0/1/2 on the
@@ -2916,6 +2958,13 @@ public static class ComponentTypeRegistry
     {
         (SymbolKind.Circulator, "Direction")                      => CirculatorDirectionOptions,
         (SymbolKind.Switch or SymbolKind.SwitchD, "OffState")     => SwitchOffStateOptions,
+        // The switch position (owner, 2026-09-13). A closed set of numerals rather than a free-text
+        // box: a State naming a throw that does not exist closes nothing SILENTLY, by the model's own
+        // rule, so a typo'd "3" is an open switch with nothing said anywhere. An expression — the
+        // variable or sweep this parameter is a plain number in order to support — is still reachable
+        // through the schematic label, which is why State now shows there.
+        (SymbolKind.Switch, "State")                              => SwitchStateOptions,
+        (SymbolKind.SwitchD, "State")                             => SwitchDStateOptions,
         (SymbolKind.Filter, "Response")                           => FilterResponseOptions,
         (SymbolKind.Filter, "Form")                               => NetworkFormOptions,
         (SymbolKind.Duplexer, "TxResponse" or "RxResponse")       => FilterResponseOptions,

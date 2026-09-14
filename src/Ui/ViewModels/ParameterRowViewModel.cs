@@ -101,16 +101,46 @@ public sealed partial class ParameterRowViewModel : ObservableObject
     /// symbol with leads the device does not have. It is shown rather than hidden because "how many
     /// terminals does this model have" is exactly what a reader of the dialog wants to know.</para>
     ///
-    /// <para>Read-only rather than disabled: a disabled box greys its text out, which reads as "this
-    /// does not apply" for a value that very much does.</para>
+    /// <para>Also set, from the registry rather than by a caller, for a parameter whose value is
+    /// fixed by the TILE the user placed — the switches' <c>Throws</c>. See
+    /// <see cref="ComponentTypeRegistry.IsStructuralParameter"/>.</para>
+    ///
+    /// <para><b>Read-only rather than disabled for the VerilogA case</b>: that one is read-only only
+    /// once a model has been settled, and a greyed box reads as "this does not apply" for a value
+    /// that very much does — and that very much was editable a moment ago. A parameter fixed for the
+    /// life of the component is the other case and IS greyed; see
+    /// <see cref="ExpressionEnabled"/>.</para>
     /// </summary>
-    public bool ExpressionReadOnly { get; private set; }
+    public bool ExpressionReadOnly => _structurallyFixed || _readOnlyRequested;
+
+    /// <summary>
+    /// False for a parameter fixed by the TILE, which greys the value box and its unit combo out
+    /// (owner, 2026-09-13: <i>if the parameter is truly read only it should be disabled</i>).
+    ///
+    /// <para><b>The distinction from <see cref="ExpressionReadOnly"/> is permanence.</b> This one is
+    /// never editable, for any component of that type, in any state — so greyed is the honest
+    /// rendering and an ungreyed box that silently swallows typing is not. The VerilogA case is
+    /// conditional (editable until a model is settled) and stays merely read-only, because greying a
+    /// value the user could edit a moment ago says the wrong thing about why.</para>
+    ///
+    /// <para>The unit combo goes with it, and that is not cosmetic: <see cref="CommitUnit"/> writes
+    /// through the same <c>EditParameterCommand</c>, so a live unit picker beside a frozen value is
+    /// still a way to edit a parameter that does not change.</para>
+    /// </summary>
+    public bool ExpressionEnabled => !_structurallyFixed;
+
+    /// <summary>The registry's answer, re-read on every refresh. Kept apart from
+    /// <see cref="SetExpressionReadOnly"/>'s so neither can clear the other — a refresh would
+    /// otherwise hand a VerilogA <c>Pins</c> row back its editability.</summary>
+    private bool _structurallyFixed;
+    private bool _readOnlyRequested;
 
     internal void SetExpressionReadOnly(bool readOnly)
     {
-        if (ExpressionReadOnly == readOnly) return;
-        ExpressionReadOnly = readOnly;
-        OnPropertyChanged(nameof(ExpressionReadOnly));
+        if (_readOnlyRequested == readOnly) return;
+        bool before = ExpressionReadOnly;
+        _readOnlyRequested = readOnly;
+        if (ExpressionReadOnly != before) OnPropertyChanged(nameof(ExpressionReadOnly));
     }
 
     /// <summary>Gates the ordinary Unit combo (column 2) — hidden for a layer-choice parameter (its
@@ -501,6 +531,9 @@ public sealed partial class ParameterRowViewModel : ObservableObject
         // states it. Set BEFORE the cell pass, which owns the answer for a kit part and leaves this
         // alone when there is no cell.
         IsFilePathParam = ComponentTypeRegistry.IsFilePathParameter(ownerSymbol, param.Name);
+        // Fixed by the tile, so the box shows it and takes no edit. Read here rather than pushed in
+        // by the editor because it is a fact about the type, not about what the user has chosen.
+        _structurallyFixed = ComponentTypeRegistry.IsStructuralParameter(ownerSymbol, param.Name);
         Description     = ComponentTypeRegistry.ParameterDescription(ownerSymbol, param.Name);
         CanRemove       = ownerComp is not null
                        && ComponentTypeRegistry.IsRemovableParameter(ownerSymbol, param.Name);
@@ -531,6 +564,8 @@ public sealed partial class ParameterRowViewModel : ObservableObject
         }
         _isRefreshing = false;
 
+        OnPropertyChanged(nameof(ExpressionReadOnly));
+        OnPropertyChanged(nameof(ExpressionEnabled));
         RecomputePreview();
     }
 
@@ -678,6 +713,11 @@ public sealed partial class ParameterRowViewModel : ObservableObject
     /// committable value ("follow the technology" / "(Default)").</summary>
     public void CommitExpression()
     {
+        // The box is read-only, so this should not be reachable — but a commit is also raised on
+        // LostFocus, and "the control cannot be typed into" is a weaker statement than "this value
+        // does not change". Belt and braces on the one path that writes.
+        if (ExpressionReadOnly) return;
+
         string expr = StagedExpression.Trim();
         if (expr == _param.Expression) return;
         if (expr.Length == 0 && !IsLayerChoiceParam) return;
@@ -718,6 +758,10 @@ public sealed partial class ParameterRowViewModel : ObservableObject
     /// <summary>Commit a unit selection to the model (no-op if unchanged).</summary>
     public void CommitUnit(string unit)
     {
+        // The combo is greyed for a fixed parameter; this is the write it guards. See
+        // ExpressionEnabled for why a live unit picker beside a frozen value is still an edit.
+        if (!ExpressionEnabled) return;
+
         if (unit == _param.Unit) return;
         _schematicVm.Execute(new EditParameterCommand(_schematicVm.EditModel, _param, _param.Expression, unit));
     }

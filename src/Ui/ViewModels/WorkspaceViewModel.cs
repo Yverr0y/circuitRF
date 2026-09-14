@@ -3358,6 +3358,14 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     private void RebuildLayoutFrom(Docking.CwsDockLayout state)
     {
         var newLayout = _factory.CreateLayoutPreservingContent(state);
+        // Both callers — Reset Layout and choosing a Window Layout — mean "the shipped arrangement,
+        // now", and the shipped arrangement's Library is two component glyphs wide. The layout only
+        // carries a FRACTION of the window, which is two glyphs at the window's opening size and
+        // three on a window that has since been widened, so the count itself has to be asked for.
+        // Raised before the tree is published, because the view is built from it and the request has
+        // to be waiting when the panel first measures itself. Restoring a SAVED layout does not come
+        // through here, which is why the user's own width survives it.
+        _factory.PaletteTool?.RequestDefaultWidth();
         _factory.InitLayout(newLayout);
         Layout = newLayout;
         // A preserved-content rebuild re-hosts the document area, and a saved split brings back panes

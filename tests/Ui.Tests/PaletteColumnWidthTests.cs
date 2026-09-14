@@ -1,0 +1,273 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using CircuitRF.Ui.Docking;
+using CircuitRF.Ui.ViewModels;
+using CircuitRF.Ui.ViewModels.Dock;
+using CircuitRF.Ui.Views.Palette;
+using Xunit;
+
+namespace CircuitRF.Ui.Tests;
+
+/// <summary>
+/// The Library palette opens two component glyphs wide, and goes on showing whatever number of glyph
+/// columns it is showing when the workspace window is resized (owner, 2026-09-13).
+///
+/// <para><b>What can be asserted here is the arithmetic and the numbers it is fed.</b> There is no
+/// Avalonia platform in this project, so the pin itself — <c>PaletteColumnPin</c>, which reads the
+/// live panel and writes the proportions back — cannot be laid out. It was verified against a real
+/// dock tree in a headless host at five window widths (900 to 2000 px), for palettes dragged to two,
+/// three and four glyph columns: each holds its own count at every width, where unpinned a two-glyph
+/// palette reflowed to three columns at 1600 px and to one at 900. A splitter drag is NOT snapped
+/// back while the window is still. Both are in this file's sibling notes in
+/// <c>src/Ui/RESOLVED.md</c>.</para>
+/// </summary>
+public sealed class PaletteColumnWidthTests
+{
+    private static string RepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "circuitrf.slnx")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        return dir!.FullName;
+    }
+
+    private static string Src(string relative) => File.ReadAllText(Path.Combine(RepoRoot(), relative));
+
+    // ── The two numbers the arithmetic is built on ────────────────────────────
+
+    /// <summary>
+    /// <see cref="PaletteColumnWidth.GlyphSlotWidth"/> IS the tile's own slot in the XAML — a tile
+    /// resized without this constant following it would leave the palette sized for a glyph column
+    /// that is not there, and nothing about the number itself would say so.
+    /// </summary>
+    [Fact]
+    public void GlyphSlotWidth_IsTheTilesDeclaredWidthPlusItsMargins()
+    {
+        string xaml = Src("src/Ui/Controls/PaletteTile.axaml");
+
+        var tile = Regex.Match(xaml, @"<StackPanel\b[^>]*?Width=""(?<w>[\d.]+)""[^>]*?Margin=""(?<m>[^""]+)""", RegexOptions.Singleline);
+        Assert.True(tile.Success, "PaletteTile.axaml no longer declares the tile StackPanel's Width and Margin.");
+
+        double width = double.Parse(tile.Groups["w"].Value);
+        var margin = tile.Groups["m"].Value
+                         .Split([' ', ','], StringSplitOptions.RemoveEmptyEntries)
+                         .Select(double.Parse).ToArray();
+        Assert.Equal(4, margin.Length);
+
+        Assert.Equal(width + margin[0] + margin[2], PaletteColumnWidth.GlyphSlotWidth);
+    }
+
+    /// <summary>
+    /// The opening window width the default proportion is derived against is the one
+    /// <c>WorkspaceWindow.axaml</c> actually opens at.
+    /// </summary>
+    [Fact]
+    public void OpeningWindowWidth_IsTheWindowsDeclaredWidth()
+    {
+        string xaml = Src("src/Ui/Views/WorkspaceWindow.axaml");
+        var declared = Regex.Match(xaml, @"^\s*Width=""(?<w>[\d.]+)""", RegexOptions.Multiline);
+        Assert.True(declared.Success, "WorkspaceWindow.axaml no longer declares an opening Width.");
+        Assert.Equal(DockLayoutDefaults.OpeningWindowWidth, double.Parse(declared.Groups["w"].Value));
+    }
+
+    // ── The shipped default ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// A new workspace opens with the palette at exactly two glyph columns — the point of the whole
+    /// exercise, and the half of it that is visible before anyone touches the window.
+    ///
+    /// <para>Dock arranges a child at <c>floor(pool x proportion)</c> with a shared fractional-pixel
+    /// carry that can add one, so the assertion is "two whole glyph columns and less than one more",
+    /// not an exact pixel count. The carry is why <see cref="PaletteColumnWidth.ProportionFor"/> aims
+    /// half a pixel high: landing one pixel SHORT would cost a whole glyph column.</para>
+    /// </summary>
+    [Fact]
+    public void TheShippedDefault_OpensAtExactlyTwoGlyphColumns()
+    {
+        double pool = DockLayoutDefaults.OpeningWindowWidth - DockLayoutDefaults.OuterSplitterTotal;
+
+        double floored = Math.Floor(pool * DockLayoutDefaults.LibraryColumnProportion);
+        foreach (double arranged in new[] { floored, floored + 1 })
+        {
+            double tiles = arranged - DockLayoutDefaults.PaletteColumnChrome;
+            Assert.Equal(PaletteColumnWidth.DefaultGlyphColumns,
+                         (int)Math.Floor(tiles / PaletteColumnWidth.GlyphSlotWidth));
+        }
+    }
+
+    // ── Reset Layout ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Reset Layout puts the Library back to the DEFAULT glyph count, not back to the default
+    /// FRACTION (owner, 2026-09-13).
+    ///
+    /// <para>They are the same thing only at the window's opening size. The layout carries a share
+    /// of the window; applied to a window that has since been widened it lands on three glyph
+    /// columns, so "reset to the shipped arrangement" would produce a palette the shipped
+    /// arrangement does not have. The count therefore travels separately, as a latch on the panel
+    /// that <c>PaletteColumnPin</c> consumes when the panel first measures itself.</para>
+    ///
+    /// <para>Asserted on the latch rather than on a laid-out dock, which this project has no
+    /// platform for. The conversion from count to fraction is <see cref="TryPin"/>'s, gated above;
+    /// the wiring between them was checked in a headless host at 900-2000 px.</para>
+    /// </summary>
+    [Fact]
+    public void ResetLayout_AsksThePaletteForTheDefaultGlyphCount()
+    {
+        var vm = new WorkspaceViewModel();
+        var palette = ((CircuitRfDockFactory)vm.DockFactory).PaletteTool;
+        Assert.NotNull(palette);
+
+        // Nothing pending on a shell nobody has reset.
+        Assert.False(palette!.ConsumeDefaultWidthRequest());
+
+        vm.ResetLayoutCommand.Execute(null);
+
+        // The factory may hand back a fresh tool for the rebuilt tree — it is whichever one the
+        // rebuilt layout holds that has to carry the request.
+        Assert.True(((CircuitRfDockFactory)vm.DockFactory).PaletteTool!.ConsumeDefaultWidthRequest());
+    }
+
+    /// <summary>
+    /// The latch is one-shot. Once honoured the palette is the user's again: the next drag or window
+    /// resize keeps whatever they set, which is the whole point of the pin reading the count off the
+    /// panel the rest of the time.
+    /// </summary>
+    [Fact]
+    public void TheDefaultWidthRequestIsConsumedOnce()
+    {
+        var tool = new PaletteTool();
+
+        Assert.False(tool.ConsumeDefaultWidthRequest());
+        tool.RequestDefaultWidth();
+        Assert.True(tool.ConsumeDefaultWidthRequest());
+        Assert.False(tool.ConsumeDefaultWidthRequest());
+    }
+
+    // ── What count is being held ──────────────────────────────────────────────
+
+    /// <summary>
+    /// The count is the one on SCREEN — floored, never rounded to nearest. A tile area most of the
+    /// way to another column is still showing the smaller number, and rounding up would add a column
+    /// the user never asked for the moment the window was first resized.
+    /// </summary>
+    [Theory]
+    [InlineData(124.0, 2)]   // exactly two
+    [InlineData(125.0, 2)]   // two, plus the fractional-pixel carry
+    [InlineData(160.0, 2)]   // most of the way to three, still showing two
+    [InlineData(186.0, 3)]
+    [InlineData(298.0, 4)]   // a 300 px column: four glyphs and a strip of nothing
+    [InlineData(61.0,  0)]   // narrower than one glyph: no count to hold
+    [InlineData(0.0,   0)]
+    public void GlyphColumnsIn_CountsWholeColumnsOnly(double tileArea, int expected)
+        => Assert.Equal(expected, PaletteColumnWidth.GlyphColumnsIn(tileArea));
+
+    /// <summary>
+    /// Count and width are each other's inverse: the width that shows N columns shows exactly N, for
+    /// every N the palette could be dragged to. This is what makes the pin settle in one pass rather
+    /// than creeping a column wider each time the window moves.
+    /// </summary>
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(2.0)]
+    [InlineData(2.4)]
+    public void TargetWidth_ShowsExactlyTheColumnsItWasAskedFor(double chrome)
+    {
+        for (int n = 1; n <= 12; n++)
+        {
+            double width = PaletteColumnWidth.TargetWidth(chrome, n);
+            // The arranged column can be a pixel wider than the target (Dock's carry), so both.
+            Assert.Equal(n, PaletteColumnWidth.GlyphColumnsIn(width - chrome));
+            Assert.Equal(n, PaletteColumnWidth.GlyphColumnsIn(width + 1.0 - chrome));
+        }
+    }
+
+    /// <summary>The target is the chrome plus whole glyph slots, and fractional chrome rounds UP —
+    /// rounding down would take the pixel out of the last glyph column.</summary>
+    [Theory]
+    [InlineData(0.0, 124.0)]
+    [InlineData(2.0, 126.0)]
+    [InlineData(2.4, 127.0)]
+    public void TargetWidth_IsWholeGlyphSlotsPlusTheChrome(double chrome, double expected)
+        => Assert.Equal(expected, PaletteColumnWidth.TargetWidth(chrome));
+
+    // ── Re-proportioning ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The pinned column arranges to its target, and the difference comes out of the column beside
+    /// it — every other column keeps the width the user gave it.
+    ///
+    /// <para>The row here is the shipped arrangement: Project Tree, documents, Library, with the
+    /// Library last.</para>
+    /// </summary>
+    [Fact]
+    public void TryPin_PutsTheTargetOnTheColumnAndTakesItFromTheNeighbour()
+    {
+        const double pool = 1192.0;
+        double[] before = [0.20, 0.69, 0.11];
+
+        Assert.True(PaletteColumnWidth.TryPin(before, index: 2, pool, targetWidth: 126.0, out var after));
+
+        Assert.Equal(126.0, Math.Floor(pool * after[2]));
+        Assert.Equal(before[0], after[0]);                                   // Project Tree untouched
+        Assert.Equal(1.0, after.Sum(), 10);                                  // still a whole row
+        Assert.Equal(before[1] - (after[2] - before[2]), after[1], 10);       // documents absorbed it
+    }
+
+    /// <summary>A palette that is already at its target is left entirely alone — no write, so no
+    /// layout pass, so nothing to oscillate.</summary>
+    [Fact]
+    public void TryPin_DoesNothingWhenTheColumnIsAlreadyThere()
+    {
+        const double pool = 1192.0;
+        double want = PaletteColumnWidth.ProportionFor(126.0, pool);
+        double[] before = [0.20, 1.0 - 0.20 - want, want];
+
+        Assert.False(PaletteColumnWidth.TryPin(before, index: 2, pool, targetWidth: 126.0, out _));
+    }
+
+    /// <summary>
+    /// With the palette FIRST in the row — the arrangement where it is docked left of the documents
+    /// — the neighbour is still the column next to it.
+    /// </summary>
+    [Fact]
+    public void TryPin_TakesFromTheNextColumnWhenThePaletteIsFirst()
+    {
+        const double pool = 1192.0;
+        double[] before = [0.11, 0.69, 0.20];
+
+        Assert.True(PaletteColumnWidth.TryPin(before, index: 0, pool, targetWidth: 126.0, out var after));
+
+        Assert.Equal(126.0, Math.Floor(pool * after[0]));
+        Assert.Equal(before[2], after[2]);
+        Assert.Equal(1.0, after.Sum(), 10);
+    }
+
+    /// <summary>
+    /// No room in the neighbour is a refusal, not a column squeezed to nothing: the window is too
+    /// narrow to hold both, and collapsing the documents to show the palette is not the trade.
+    /// </summary>
+    [Fact]
+    public void TryPin_RefusesWhenTheNeighbourCannotGiveTheWidthBack()
+    {
+        double[] before = [0.90, 0.05, 0.05];
+        Assert.False(PaletteColumnWidth.TryPin(before, index: 2, available: 300.0, targetWidth: 126.0, out _));
+    }
+
+    /// <summary>
+    /// A row with nothing to take from, an index off the end, or a proportion Dock has not assigned
+    /// yet (splitters keep NaN until the first arrange) — all left alone rather than guessed at.
+    /// </summary>
+    [Fact]
+    public void TryPin_RefusesEveryRowItCannotReasonAbout()
+    {
+        Assert.False(PaletteColumnWidth.TryPin([1.0], 0, 1192.0, 126.0, out _));
+        Assert.False(PaletteColumnWidth.TryPin([0.2, 0.7, 0.1], 3, 1192.0, 126.0, out _));
+        Assert.False(PaletteColumnWidth.TryPin([0.2, double.NaN, 0.1], 2, 1192.0, 126.0, out _));
+        Assert.False(PaletteColumnWidth.TryPin([0.2, 0.7, 0.1], 2, available: 0.0, targetWidth: 126.0, out _));
+        Assert.False(PaletteColumnWidth.TryPin([0.2, 0.7, 0.1], 2, available: 100.0, targetWidth: 126.0, out _));
+    }
+}

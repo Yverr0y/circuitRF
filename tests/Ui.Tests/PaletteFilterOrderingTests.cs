@@ -22,7 +22,7 @@ public class PaletteFilterOrderingTests
         [
             "R", "GND", "L", "M", "C", "NonlinearC",
             "Term", "TermG", "VAR", "MEAS", "IProbe", "VProbe", "Vdc",
-            "P1Tone", "VTone", "ITone",
+            "P1Tone", "ITone", "VTone",
             "S2P", "WSProbe", "S3P", "SPICE", "TLIN", "MLIN",
             "SourceTuner", "LoadTuner", "Z1P", "wBond",
         ];
