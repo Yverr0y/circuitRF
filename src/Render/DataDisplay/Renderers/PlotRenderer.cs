@@ -30,10 +30,11 @@ namespace CircuitRF.Render.DataDisplay
 
     public struct TransformSet
     {
-        /// <summary>Primary axis world→canvas linear map.</summary>
+        /// <summary>Primary axis world→canvas map. On a log X axis <c>XScale</c> is px per DECADE
+        /// and <c>XOffset</c> is measured against log10(x) — see <see cref="XLog"/>.</summary>
         public (double XScale, double YScale, double XOffset, double YOffset) Primary;
 
-        /// <summary>Secondary axis world→canvas linear map.</summary>
+        /// <summary>Secondary axis world→canvas map, on the same terms.</summary>
         public (double XScale, double YScale, double XOffset, double YOffset) Secondary;
 
         public (double W, double H) CanvasSize;
@@ -44,11 +45,45 @@ namespace CircuitRF.Render.DataDisplay
         /// </summary>
         public PlotRect Viewport;
 
+        /// <summary>
+        /// True when the X axis maps base-10 logarithmically (<see cref="AxisScale.Log"/> on a Rect
+        /// plot). <b>Every consumer of this transform follows automatically</b> — the grid, the
+        /// ticks, the traces, the marker glyphs, the hit-test, the drag, the VSWR locus, the contour
+        /// renderer and the `render` verb's composer all obtain their mapping here — which is why
+        /// this feature is a change in the middle rather than in twenty places.
+        ///
+        /// <para>The Y axis is never logarithmic; only X carries the flag.</para>
+        /// </summary>
+        public bool XLog;
+
         // ---- Mapping helpers --------------------------------------------
+
+        /// <summary>
+        /// World X → canvas X. The linear arm is the expression this type has always evaluated,
+        /// character for character, so a linear plot's pixels cannot move.
+        /// </summary>
+        private double MapX(double wx, double scale, double offset) =>
+            XLog ? Math.Log10(wx) * scale + offset
+                 : wx * scale + offset;
+
+        /// <summary>Canvas X → world X: the exact inverse of <see cref="MapX"/>. Marker placement
+        /// and hit-testing both depend on the round trip, so both arms are written here rather than
+        /// re-derived at the call sites.</summary>
+        private double UnmapX(double cx, double scale, double offset) =>
+            XLog ? Math.Pow(10.0, (cx - offset) / scale)
+                 : (cx - offset) / scale;
+
+        /// <summary>
+        /// False for a world X a log axis has no answer for — zero, negative, or non-finite. A DC
+        /// point is a legal circuitRF frequency and is in the `.sNp` by construction, so this is a
+        /// case the display MEETS rather than one it can rule out; callers skip such a point and
+        /// <see cref="Plot.LogXHiddenPointNote"/> says so on the picture.
+        /// </summary>
+        public bool XIsPlottable(double wx) => !XLog || (wx > 0 && double.IsFinite(wx));
 
         public SKPoint PrimaryToCanvas(float wx, float wy) =>
             new SKPoint(
-                (float)(wx * Primary.XScale   + Primary.XOffset),
+                (float)MapX(wx, Primary.XScale, Primary.XOffset),
                 (float)(wy * Primary.YScale   + Primary.YOffset));
 
         public SKPoint PrimaryToCanvas(double wx, double wy) =>
@@ -56,7 +91,7 @@ namespace CircuitRF.Render.DataDisplay
 
         public SKPoint SecondaryToCanvas(float wx, float wy) =>
             new SKPoint(
-                (float)(wx * Secondary.XScale + Secondary.XOffset),
+                (float)MapX(wx, Secondary.XScale, Secondary.XOffset),
                 (float)(wy * Secondary.YScale + Secondary.YOffset));
 
         public SKPoint SecondaryToCanvas(double wx, double wy) =>
@@ -66,11 +101,11 @@ namespace CircuitRF.Render.DataDisplay
             useSecondary ? SecondaryToCanvas(wx, wy) : PrimaryToCanvas(wx, wy);
 
         public (double Wx, double Wy) PrimaryFromCanvas(float cx, float cy) =>
-            ((cx - Primary.XOffset)   / Primary.XScale,
+            (UnmapX(cx, Primary.XScale, Primary.XOffset),
              (cy - Primary.YOffset)   / Primary.YScale);
 
         public (double Wx, double Wy) SecondaryFromCanvas(float cx, float cy) =>
-            ((cx - Secondary.XOffset) / Secondary.XScale,
+            (UnmapX(cx, Secondary.XScale, Secondary.XOffset),
              (cy - Secondary.YOffset) / Secondary.YScale);
     }
 
@@ -103,17 +138,36 @@ namespace CircuitRF.Render.DataDisplay
 
         // ---- WorldToCanvasParams ----------------------------------------
 
+        /// <param name="xLog">When true the X half is built in log10 space: <c>XScale</c> becomes
+        /// px per decade and <c>XOffset</c> is measured against <c>log10(window.Left)</c>. The Y half
+        /// is unchanged either way — there is no log Y axis.</param>
         public static (double XScale, double YScale, double XOffset, double YOffset)
             WorldToCanvasParams(PlotRect window, PlotRect viewport,
-                                (double W, double H) canvas)
+                                (double W, double H) canvas, bool xLog = false)
         {
             double vpLeft   = viewport.X      * canvas.W;
             double vpTop    = viewport.Y      * canvas.H;
             double vpWidth  = viewport.Width  * canvas.W;
             double vpHeight = viewport.Height * canvas.H;
 
-            double xScale  =  vpWidth  / window.Width;
-            double xOffset =  vpLeft   - window.Left * xScale;
+            double xScale, xOffset;
+            if (xLog)
+            {
+                // Axes.RepairLogWindow guarantees a positive left edge on any window that reached
+                // an Axes in log mode; a window handed here directly still cannot be trusted, and a
+                // degenerate one collapses to a single decade rather than producing an infinity that
+                // would silently blank the plot.
+                double lgL = window.Left  > 0 ? Math.Log10(window.Left)  : 0.0;
+                double lgR = window.Right > 0 ? Math.Log10(window.Right) : lgL + 1.0;
+                if (!(lgR > lgL)) lgR = lgL + 1.0;
+                xScale  = vpWidth / (lgR - lgL);
+                xOffset = vpLeft  - lgL * xScale;
+            }
+            else
+            {
+                xScale  =  vpWidth  / window.Width;
+                xOffset =  vpLeft   - window.Left * xScale;
+            }
             double yScale  = -vpHeight / window.Height;
             double yOffset =  vpTop + vpHeight + window.Top * (vpHeight / window.Height);
 
@@ -124,12 +178,17 @@ namespace CircuitRF.Render.DataDisplay
         public static TransformSet BuildTransforms(Plot plot, (double W, double H) canvasSize)
         {
             var vp = ComputeViewport(plot, canvasSize);
+            // Rect alone. A Smith or Polar X carries Re(Γ), which is signed, and a Table has no
+            // transform at all — so the mode cannot leak into a plot kind it has no meaning for even
+            // if an Axes were handed it directly.
+            bool xLog = plot.PlotType == PlotType.Rect && plot.Axes.XScale == AxisScale.Log;
             return new TransformSet
             {
-                Primary    = WorldToCanvasParams(plot.Axes.Window,          vp, canvasSize),
-                Secondary  = WorldToCanvasParams(plot.Axes.WindowSecondary, vp, canvasSize),
+                Primary    = WorldToCanvasParams(plot.Axes.Window,          vp, canvasSize, xLog),
+                Secondary  = WorldToCanvasParams(plot.Axes.WindowSecondary, vp, canvasSize, xLog),
                 CanvasSize = canvasSize,
-                Viewport   = vp
+                Viewport   = vp,
+                XLog       = xLog
             };
         }
 

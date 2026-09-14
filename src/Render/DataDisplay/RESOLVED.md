@@ -1,5 +1,247 @@
 # src/Render/DataDisplay — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## A pinned X window did not follow the frequency unit, 2026-09-14
+
+Owner-reported against a real extraction, and reported as missing per-point marker glyphs: the dots
+were gone and the only data on the picture sat at the bottom three frequencies of an 11-point
+1 MHz…2 GHz sweep.
+
+**Two separate things, and neither was the marker renderer.**
+
+### 1. The points were off the picture — `Plot.FreqUnits` left a pinned window behind
+
+The display's frequency unit had been changed from MHz to kHz with **Autoscale X off**. The setter
+rebuilds every trace's path in the new unit, so every X moved by 1000×; the WINDOW did not. A plot
+framed 1…10000 MHz became 1…10000 kHz — the same numbers, a thousandth of the span — and seven of
+the eleven points went off the right edge with nothing said anywhere.
+
+Measured on the reporter's own `.cdd`, by counting the `<ellipse>` elements the `render` verb emits:
+**2 on each rect plot** (one point drawn, ×2 for fill and stroke) against **17 on the Smith plot
+beside it**, whose X is Re(Γ) and does not move with the unit. That asymmetry is what identified the
+cause — the two plots share the trace, the data and the mask, and differ only in whether their axis
+tracks the unit.
+
+**A pinned window is a range of FREQUENCIES, not a range of numbers.** `Plot.FreqUnits` now rescales
+it by the unit ratio, primary and secondary (which shares X on a Rect plot), and only when
+`Plot.XAxisTracksFreqUnit` — an autoscaled axis is reframed by the `Autoscale()` the setter already
+runs and must not be moved twice, a cube swept in Vgs or Pin does not move at all, and a Smith or
+Polar X is not a frequency.
+
+Two traps in the fix itself:
+
+- **`Trace.XIsFrequency` is written as `BuildPath`'s own dispatch, in its order.** Anything else and
+  the predicate can say a window should move while the path builder leaves the points where they
+  were. Note it is NOT simply "is the X unit a frequency": the HB harmonic axis is scaled too, by
+  `_f0ByX × freqUnit.Scale()`, and `IsCubeBound` reads `CubeName`/`Expression` rather than the
+  presence of cube X data.
+- **The ratio of two `ScaleMap` entries is not a power of ten.** `1e-3 / 1e-6` is
+  `1000.0000000000001`, and a window rescaled by that puts its own left-hand sample a hair outside
+  itself — the first point vanished again, which the gate caught. `FreqUnitExtensions.ConversionFactor`
+  takes it from decade EXPONENTS instead, so it is one power of ten rather than the quotient of two.
+  `DecadeMap` and `ScaleMap` are one fact written twice and must stay in step.
+
+**A document already saved in this state does not repair itself** — the file says 1…10000 and the
+reader has no way to know it meant MHz. Turning Autoscale X on once, or re-entering the limits,
+re-frames it; from then on the unit change carries the window.
+
+Gate: `tests/Ui.Tests/FreqUnitPinnedWindowTests.cs`.
+
+### 2. The three points with no dot — the plot does not draw the solved/modelled distinction at all
+
+At 1, 2.14 and 4.57 MHz there was no glyph. The run's own `PointSolved` cube reads
+`0,0,0,1,1,1,1,1,1,1,1`, `CalibrationUsable` is `NaN` for exactly those three, and their S entries
+are byte-identical in the `.s2p` (`0.0002251029443`, three times) — one extrapolated value published
+three times by the low-frequency peel. The mask was right about the data.
+
+**It was still the wrong thing to draw, and the owner reversed it twice on 2026-09-14.** Withholding
+the glyph: a modelled point is IN the published result — the Table view lists it, the line runs
+through it, and the `.sNp` beside it would carry it into a circuit simulation, so the plot does not
+get to decide not to draw it. Drawing it OPEN instead (the glyph with the plot background in the
+middle), which was the first attempt at keeping both facts: also wrong — it is a sample of that trace
+and it belongs in that trace's colour.
+
+**Every published point now carries the same glyph.** `Trace.PointIsSolved` still reports the run's
+own mask and the tests still hold it through the file, the re-run and the reload — the PLOT simply
+does not draw the distinction. The renderer gate is now the strongest form of that: the same trace
+rendered with and without a mask must come out **pixel for pixel identical**.
+
+The lesson, and the reason the 2026-09-11 answer looked reasonable at the time: a picture is a poor
+place to qualify a number. The original complaint — an adaptively sampled run publishing a hundred
+points and marking all hundred — is real, and the answer to it is words (a note, a report, the
+Table's own column), not a mark that is either missing or in the wrong colour.
+
+The upstream defect is unchanged and is `brief-deembed-peel-low-frequency.md`'s subject: those three
+points should not have been extrapolated in the first place.
+
+Gate: `tests/Ui.Tests/DataDisplay/SolvedPointMarkerTests.cs`.
+
+## §LOGX — a logarithmic frequency axis, 2026-09-14
+
+`brief-dd-log-frequency-axis.md`. circuitRF's EM kernel writes log-spaced sweeps by default (a
+`.cem` whose `Frequency.Kind` is `Log`) and the Data Display could not draw one: the rect plot's only
+map was affine. On the brief's measured extraction — 11 log-spaced points, 1 MHz to 2 GHz, autoscaled
+to −1e-6 … 2.19990 GHz — **five of the eleven points, the whole bottom two decades, fell inside the
+first seven pixels** of a ~700 px plot area. The line was drawn correctly and was unreadable.
+Reproduced here before anything was changed, and measured again after: closest adjacent pair 0.29 px
+linear, 52.3 px log.
+
+### The survey held: one transform, and the byte gate proved it
+
+`PlotRenderer.BuildTransforms` has 22 call sites across 7 files and everything downstream — grid,
+ticks, traces, marker glyphs, marker hit-test, marker drag, VSWR locus, contour renderer, the
+`render` verb's composer — obtains its mapping from it. Making `TransformSet` log-aware carried all
+of them. **M1's byte-identical gate held on the first run**, over seven plot shapes rendered to SVG
+before and after (rect linear, rect with log-spaced data, secondary axis, a zero-left-edge window,
+Smith, Polar, a marker), which is what said the survey had not missed a consumer.
+
+The linear arm of the map is written as the same expression it always was, so the bit pattern cannot
+move: `MapX` is `XLog ? Math.Log10(wx) * scale + offset : wx * scale + offset`.
+
+### What DID need its own change, and was not in the survey
+
+1. **`Axes.TickLengthX` is a distance ALONG X, and four call sites add it to a window edge**
+   (`AxesRenderer`'s Y-tick nubs). On a log axis `Left + 0.015 · Width` is not 1.5 % of the axis, it
+   is most of it. Replaced by `Axes.XPlusTickLength(x, factor)`, which is a ratio in log mode and, in
+   linear mode, is bit-identical to the four expressions it replaced — multiplying by `1.0` and
+   `0.5` and adding a negated value are all exact in binary floating point, which is why the byte
+   gate still held afterwards.
+2. **`Trace.FindNearestTraceData`'s X-only metric.** It minimises `|Δx|` in WORLD space, which picks
+   the wrong sample over most of a decade axis — not imprecisely, WRONG: a click at 400 MHz between
+   marks at 100 MHz and 1 GHz is 0.60 decades from the first and 0.40 from the second, so the
+   pointer is plainly nearer 1 GHz, while the differences are 300 MHz and 600 MHz and choose
+   100 MHz. It now takes a `logX` flag and compares `|Δlog₁₀x|`. The 2-D complex metric is untouched
+   (Smith and Polar never carry a log axis).
+3. **`Axes.Translate` and `PlotControl.ZoomedWindow` are the two pieces of axis arithmetic the
+   transform does not own.** Both are differences and a log axis moves in the ratio. The pan needed
+   no plumbing at all, which is worth knowing: `TranslateFromPointer` divides a pixel delta by the
+   axis's own `XScale`, and in log mode that scale is px per DECADE, so the quotient arrives in the
+   right units already and only `Translate` itself had to learn the mode.
+4. **`Plot.AutoscaleCore` cannot use `PathBoundingRect`** on a log axis — see the DC decision below.
+5. **There is no box-zoom in `PlotControl`.** The brief lists one among the three routes through
+   `ZoomedWindow`; there are two (wheel and drag-pan), and nothing else calls it.
+
+### The zero/DC decision, and why there are two different answers
+
+**`Axes.Window`'s zero-nudge** — a left edge of exactly 0 rewritten to −1e-6 "so that the zero grid
+line renders correctly" — is a cosmetic nudge on a linear axis and **the log map's undefined point,
+arriving by default**: an autoscaled frequency window literally begins at −1e-6. The setter learns
+the mode. The linear arm is untouched, including the identical second copy on `WindowSecondary`.
+
+`XScale`'s own setter re-runs both windows through their setters, and **three places had to set the
+mode BEFORE the window** or a log document would have had its left edge nudged on the way in: the
+`Axes` deep-copy constructor, `PlotConfigLoader.LoadPlot`, and `Plot.SetXScale`.
+
+**A DC point in the data is a different problem and gets a different answer.** 0 Hz is a legal
+circuitRF frequency and is in the `.sNp` by construction — `PlanarSolve`'s LF1 splices it back on
+*first*, because that is where a Touchstone wants it. So:
+
+- The **autoscale** frames enclosing decades from `Trace.PositiveXExtent()`, not from
+  `PathBoundingRect`, whose left edge on an ordinary extraction is exactly zero.
+- The **point is dropped and the polyline BREAKS** rather than being bridged — `TransformSet.XIsPlottable`
+  guards the five drawing loops and the two marker draws — **and the count is drawn on the picture**:
+  `Plot.LogXHiddenPointNote`, rendered on the same row as the X-axis label. Its own row was measured
+  and does not fit: at the default 792×612 page the bottom margin is 43 pt and the label's baseline
+  already sits 27 pt into it, so a second row lands off the page. The same line is also the right
+  PLACE for it — the note is about the axis the label names.
+
+### The SI-prefix decision: one prefix per axis, unchanged
+
+`AxesRenderer` picks one SI prefix per axis from its window, deliberately ("never per tick: picking
+per value puts 900p and 1n on adjacent gridlines and reads as a jump in the data"). A log axis can
+justify breaking that — its ticks ARE the decades, so a per-decade prefix would change exactly where
+the prefix changes and never mid-run. **It was rejected anyway, for two reasons the per-decade case
+does not answer**: the tick numbers are read against ONE stated unit in the X label (`freq (GHz)`),
+and the Axes Limits flyout's Min and Max are TYPED in that same unit, so a per-tick prefix makes the
+axis carry several units while the label and the entry boxes carry one — and M4 requires
+`XUnitLabel` to still be true. A decade-spanning frequency axis therefore reads
+`0.001 / 0.01 / 0.1 / 1 / 10` under `(GHz)`, which is exact: a decade tick is a power of ten and the
+plain `G{digits}` form prints it with no rounding artefact. **There is no second spelling of this
+anywhere** — the prefix code is unchanged.
+
+One consequence worth knowing: `G5` switches to exponential below 1e-5, so a window reaching five
+decades below 1 GHz prints `1E-05` at its left end. That is the existing formatter's behaviour and is
+identical to what a linear axis of the same window prints; the remedy is the plot's own frequency
+unit, which the user already controls.
+
+The one formatting branch that WAS added: **`EngineeringFormat.SnapNearZero` is skipped on a log
+axis.** It exists to stop accumulated tick arithmetic printing `-3.5E-17` where zero belongs, and it
+is measured against the LINEAR tick step — meaningless here, and actively harmful: on a window
+reaching down to 1e-8 its epsilon swallows real decade ticks and prints them as `0`. A log axis has
+no zero tick and its values are `m·10ⁿ` computed from integers, so there is nothing to snap.
+
+### Ticks: the brief's rule, plus two tiers it does not cover
+
+Majors are the decades and minors the 2…9 within each — right for the span this feature exists for,
+and it produces **no tick at all** on a window of 1…2 GHz, which someone reaches by zooming once.
+An unlabelled axis is a worse defect than the one being fixed, so `Axes.LogLattice` has three tiers:
+two decades or more in view → `10ⁿ` and `{2…9}·10ⁿ`; less → `{1,2,5}·10ⁿ` and the rest; fewer than
+three majors from that → the linear lattice over the same window, by the same `CalcInterval`/`Lattice`
+pair the linear axis uses. **The mapping stays logarithmic in every tier; only the choice of where to
+put the marks changes.** Three rather than two is deliberate: two majors on a narrow window are the
+window's own two edges and leave the interior unlabelled.
+
+### The flyout
+
+The selector is Rect-only (a Smith or Polar X carries Re(Γ), which is signed) and lives on its own
+row in the X Axis block; the Y and Y2 blocks are untouched, and there is no log Y in this change.
+`TryApplyX` gained a positive-minimum guard, and **the reason is not the obvious one**: the fields
+apply on EVERY KEYSTROKE — no OK button, no commit-on-blur — so a user typing `0.001` into Min passes
+through `""`, `"0"`, `"0."`, `"0.0"`, and `"0"` PARSES. **Rejected, never coerced**: pushing a
+rewritten value back into `XMinText` is a coercing control writing over the user's own edit, which is
+the defect the Match Designer's slider already cost this repo once. The gate drives the view model
+through the PREFIXES of the typed value rather than setting the final string, because only that
+sequence reproduces the transient.
+
+**A pinned window whose left edge is zero cannot round-trip**, and that is stated rather than hidden:
+the log axis cannot draw it, so it is repaired to a positive edge on the way out and switching back to
+Linear keeps the repaired window. With Autoscale X on — the normal case — the round trip re-frames
+and reproduces the picture exactly, which is what the byte gate asserts.
+
+### Persistence
+
+`AxesConfig.XScale`, defaulting to `Linear` — the enum's own default and what every `.cdd` written
+before the field existed meant — written as a NAME, never an ordinal. The two halves of this format
+are hand-maintained and in different projects (`DataDisplayViewModel.BuildPlotContainerConfig` writes,
+`PlotConfigLoader.LoadPlot` reads); `AxisSliceConfig`'s own header records what happened the last time
+two such lists drifted. The gate saves and reopens through the application's own view models and
+checks the file text as well as the reloaded mode.
+
+`render <path.cdd>` therefore draws a log axis with no flag of its own, because it reads the document.
+`plot` and `render --window` are unchanged: `--window` names world coordinates, which do not change,
+and `plot` has no axis-mode option (out of scope here).
+
+### Adjacent defect, fixed and reported separately
+
+`Trace.GetMarkerDataLocation` and `Trace.SetMarkerFreq` resolved a marker to its data point with
+`Array.FindIndex(Data.Frequencies, f => f >= m.Freq - 1e-6)` — an **absolute** tolerance of 1e-6 Hz,
+a relative 5e-13 at 2 MHz and roughly two ULPs at 2 GHz. Measured in the brief: a marker asked for
+2138469.2 Hz against a stored 2138469.1999823763 Hz — the same number to ten significant figures, and
+the number the run's own `.s2p` wrote — **missed its point and silently snapped to the next one**,
+4.573 MHz, landing on top of another marker. Nothing reported it. In-app placement was safe because
+`AddMarkerAtFreqIndex` copies `Data.Frequencies[fi]` verbatim, so this bites only a frequency that has
+been round-tripped, typed or unit-converted — exactly what a marker editor and a re-imported
+Touchstone do. Both now call `NearestFrequencyIndex`, **which already existed for this and needs no
+tolerance at all**; the old rule also always rounded UP, so a marker asked for a frequency a hair
+below a sample landed one point past it. Gated by `tests/Ui.Tests/MarkerFrequencyToleranceTests.cs`.
+
+Found and NOT touched, for the next person: four sibling lookups compare frequencies with `==`
+(`Trace.cs` lines ~2579, ~3380, ~3663, ~3768). They are exact-match lookups on in-app values and were
+outside this brief; they carry the same round-trip exposure and are worth a look.
+
+### Gates
+
+`tests/Ui.Tests/Render/LogFrequencyAxisTests.cs` (14) and
+`tests/Ui.Tests/MarkerFrequencyToleranceTests.cs` (3). The byte gate is written as a ROUND TRIP
+rather than against a committed baseline: a stored `.svg` answers "is it what it was when someone
+last regenerated the file", while the round trip answers "is the linear arithmetic still the linear
+arithmetic", and it cannot be repaired by re-blessing an expected file. The one normalisation is
+`StripSkiaIds` — Skia's SVG element ids come from a PROCESS-level counter, so two renders of one
+composition differ in `cl_3` versus `cl_6` and in nothing else; the same exclusion, for the same
+reason, as `RenderDataDisplayCliTests`. No new `Category=Benchmark` test.
+
+---
+
+
 ## Antenna display feedback, 2026-09-11 — six reports, and three of them were the same bug
 
 User feedback on the antenna work, relayed by the owner. Written up together because the causes

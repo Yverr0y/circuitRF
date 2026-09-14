@@ -181,6 +181,22 @@ public sealed class AxesConfig
     public double WindowSecondaryY      { get; set; } = -1;
     public double WindowSecondaryWidth  { get; set; } =  2;
     public double WindowSecondaryHeight { get; set; } =  2;
+
+    /// <summary>
+    /// Linear or Log X axis (brief LOGX, M4). <b>Defaults to Linear and must</b>: that is what every
+    /// <c>.cdd</c> written before this field existed meant, and the enum's own default value, so an
+    /// old file reads back as the picture it was saved as.
+    ///
+    /// <para>Written as a NAME, not an ordinal — a numeric enum in a saved document is a value that
+    /// changes meaning the next time someone inserts a member.</para>
+    ///
+    /// <para><b>The two halves of this format are hand-maintained and a hundred lines apart</b>
+    /// (<see cref="AxisSliceConfig"/>'s own header records what happened the last time they drifted).
+    /// The reader is <c>PlotConfigLoader.LoadPlot</c>; the writer is
+    /// <c>DataDisplayViewModel.BuildPlotContainerConfig</c>. Both were changed with this field.</para>
+    /// </summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public AxisScale XScale { get; set; } = AxisScale.Linear;
 }
 
 // ---- Cube-bound persistence (Phase 7.2c-a) ----------------------------------

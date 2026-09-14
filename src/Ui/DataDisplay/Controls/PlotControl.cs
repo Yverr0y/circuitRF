@@ -1560,8 +1560,8 @@ namespace CircuitRF.Ui.DataDisplay.Controls
             var beforeWindow    = _plot.Axes.Window;
             var beforeSecondary = _plot.Axes.WindowSecondary;
 
-            _plot.Axes.Window               = ZoomedWindow(_plot.Axes.Window,          wxP, wyP, factor);
-            _plot.Axes.WindowSecondary      = ZoomedWindow(_plot.Axes.WindowSecondary, wxS, wyS, factor);
+            _plot.Axes.Window               = ZoomedWindow(_plot.Axes.Window,          wxP, wyP, factor, tf.XLog);
+            _plot.Axes.WindowSecondary      = ZoomedWindow(_plot.Axes.WindowSecondary, wxS, wyS, factor, tf.XLog);
             _plot.Axes.WindowState          = _plot.Axes.Window;
             _plot.Axes.WindowSecondaryState = _plot.Axes.WindowSecondary;
 
@@ -1710,7 +1710,7 @@ namespace CircuitRF.Ui.DataDisplay.Controls
                     : tf.PrimaryFromCanvas((float)canvasPt.X, (float)canvasPt.Y);
 
                 var hit = trace.FindNearestTraceData(
-                    new System.Numerics.Vector2((float)wx, (float)wy));
+                    new System.Numerics.Vector2((float)wx, (float)wy), tf.XLog);
                 if (!hit.HasValue) continue;
 
                 var nearPx = tf.ToCanvas(hit.Value.NearestPoint.X, hit.Value.NearestPoint.Y,
@@ -1752,11 +1752,36 @@ namespace CircuitRF.Ui.DataDisplay.Controls
         //  Private helpers
         // ============================================================
 
-        private static PlotRect ZoomedWindow(PlotRect window, double wx, double wy, double factor)
+        /// <summary>
+        /// The window after a wheel notch, keeping the world point under the cursor under the cursor.
+        ///
+        /// <para><b>A log axis zooms in the RATIO, not the difference.</b> The linear expression
+        /// <c>wx − (wx − left)·factor</c> is the right one for an affine map and walks the left edge
+        /// straight through zero on a logarithmic one; the same arithmetic performed on the
+        /// LOGARITHMS is the log axis's exact equivalent, so the anchor point is preserved to the
+        /// same precision. Y is linear in both.</para>
+        /// </summary>
+        private static PlotRect ZoomedWindow(PlotRect window, double wx, double wy, double factor,
+                                             bool logX)
         {
-            double newW = window.Width  * factor;
             double newH = window.Height * factor;
-            if (newW < 1e-12 || newH < 1e-12) return window;
+            if (newH < 1e-12) return window;
+
+            if (logX)
+            {
+                double l = Math.Log10(window.Left), r = Math.Log10(window.Right), a = Math.Log10(wx);
+                if (!double.IsFinite(l) || !double.IsFinite(r) || !double.IsFinite(a) || !(r > l))
+                    return window;
+                double newLogW = (r - l) * factor;
+                if (newLogW < 1e-9) return window;
+                double newL = a - (a - l) * factor;
+                double left = Math.Pow(10.0, newL), right = Math.Pow(10.0, newL + newLogW);
+                if (!double.IsFinite(left) || !double.IsFinite(right) || !(right > left)) return window;
+                return new PlotRect(left, wy - (wy - window.Top) * factor, right - left, newH);
+            }
+
+            double newW = window.Width * factor;
+            if (newW < 1e-12) return window;
 
             return new PlotRect(
                 wx - (wx - window.Left) * factor,
@@ -1866,7 +1891,7 @@ namespace CircuitRF.Ui.DataDisplay.Controls
                 : tf.PrimaryFromCanvas((float)canvasPt.X, (float)canvasPt.Y);
 
             var hit = trace.FindNearestTraceData(
-                new System.Numerics.Vector2((float)wx, (float)wy));
+                new System.Numerics.Vector2((float)wx, (float)wy), tf.XLog);
             if (!hit.HasValue) return;
 
             AddMarkerAtFreqIndex(trace, hit.Value.FreqIndex, hit.Value.NearestPoint);
@@ -2379,7 +2404,7 @@ namespace CircuitRF.Ui.DataDisplay.Controls
                     : tf.PrimaryFromCanvas((float)canvasPt.X, (float)canvasPt.Y);
 
                 var hit = trace.FindNearestTraceData(
-                    new System.Numerics.Vector2((float)wx, (float)wy));
+                    new System.Numerics.Vector2((float)wx, (float)wy), tf.XLog);
                 if (!hit.HasValue) return;
 
                 var snapped = tf.ToCanvas(hit.Value.NearestPoint.X,

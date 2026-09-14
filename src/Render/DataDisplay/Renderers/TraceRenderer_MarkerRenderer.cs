@@ -42,7 +42,10 @@ namespace CircuitRF.Render.DataDisplay
                     using var headPaint = BuildHeadPaint(props);
                     foreach (var curve in trace.FamilyCurves)
                         foreach (var pt in curve.Points)
+                        {
+                            if (!tf.XIsPlottable(pt.X)) continue;
                             DrawStem(canvas, tf, pt.X, pt.Y, useSecond, lw, strokeW, stemPaint, headPaint);
+                        }
                     return;
                 }
 
@@ -63,6 +66,11 @@ namespace CircuitRF.Render.DataDisplay
                     bool first = true;
                     foreach (var pt in curve.Points)
                     {
+                        // A log X axis has no canvas position for X ≤ 0. The point is SKIPPED and
+                        // the polyline BREAKS rather than being bridged, so the curve never claims a
+                        // segment between a point that is drawn and one that is not; the count is
+                        // reported on the X-axis label (Plot.LogXHiddenPointNote).
+                        if (!tf.XIsPlottable(pt.X)) { first = true; continue; }
                         var px = tf.ToCanvas(pt.X, pt.Y, useSecond);
                         if (first) { p.MoveTo(px); first = false; } else p.LineTo(px);
                     }
@@ -79,7 +87,10 @@ namespace CircuitRF.Render.DataDisplay
                 using var stemPaint = BuildStemPaint(props, lw, strokeW);
                 using var headPaint = BuildHeadPaint(props);
                 foreach (var pt in trace.Points)
+                {
+                    if (!tf.XIsPlottable(pt.X)) continue;
                     DrawStem(canvas, tf, pt.X, pt.Y, useSecond, lw, strokeW, stemPaint, headPaint);
+                }
                 // fall through to draw point markers as well if enabled
             }
             else if (props.LineEnabled)
@@ -125,20 +136,22 @@ namespace CircuitRF.Render.DataDisplay
                     IsAntialias = true
                 };
 
-                // ── A MARKER MEANS "A SAMPLE IS HERE" (owner, 2026-09-11) ────────────────────
+                // ── EVERY PUBLISHED POINT GETS THE SAME GLYPH (owner, 2026-09-14) ───────────
                 //
-                //  An adaptively sampled EM sweep publishes the whole requested grid but solves only
-                //  part of it, so a run STOPPED after six points still returns a hundred. Marking all
-                //  hundred asserted ninety-four solves that never happened — and a marker is exactly
-                //  the furniture a reader counts samples with. The LINE is unchanged and still runs
-                //  through every published point; only the claim that each one was computed is
-                //  withdrawn. Trace.PointIsSolved is true for every point of every source that says
-                //  nothing about it, which is every Touchstone file and every circuit analysis.
+                //  There was an attempt to say something here about WHICH points an adaptively
+                //  sampled run actually solved — first by withholding the glyph on a modelled
+                //  point, then by drawing it open. Both were wrong for the same reason: a
+                //  published point is data. The Table view lists it, the line runs through it, and
+                //  the `.sNp` beside it would carry it into a circuit simulation — so it is a
+                //  sample of this trace and it is drawn in this trace's colour, like every other.
+                //
+                //  Trace.PointIsSolved still reports the run's own mask and is still the truth
+                //  about the result; it is just not something the plot draws. Anything that needs
+                //  to report it does so in words.
                 for (int k = 0; k < trace.Points.Count; k++)
                 {
-                    if (!trace.PointIsSolved(k)) continue;
-
                     var pt   = trace.Points[k];
+                    if (!tf.XIsPlottable(pt.X)) continue;
                     var px   = tf.ToCanvas(pt.X, pt.Y, useSecondary);
                     var rect = new SKRect(px.X - ms, px.Y - ms, px.X + ms, px.Y + ms);
 
@@ -240,6 +253,9 @@ namespace CircuitRF.Render.DataDisplay
                 bool first = true;
                 foreach (var pt in trace.Points)
                 {
+                    // See the family-curve loop above: an unplottable X breaks the polyline rather
+                    // than being bridged across.
+                    if (!tf.XIsPlottable(pt.X)) { first = true; continue; }
                     var px = tf.ToCanvas(pt.X, pt.Y, useSecondary);
                     if (first) { path.MoveTo(px); first = false; }
                     else        path.LineTo(px);
@@ -293,6 +309,9 @@ namespace CircuitRF.Render.DataDisplay
         {
             bool   useSecondary = trace.UseSecondaryAxis;
             var    dl           = trace.GetMarkerDataLocation(marker);
+            // A marker sitting on a point a log X axis cannot place (a DC sample) has no position to
+            // draw at; it is counted in Plot.LogXHiddenPointNote with the data point it names.
+            if (!tf.XIsPlottable(dl.X)) return;
             var    dataPx       = tf.ToCanvas(dl.X, dl.Y, useSecondary);
 
             // brief-dd-loadpull-contour-ux-round8 §1: a contour marker in Mode 1 (interpolated —
@@ -601,6 +620,7 @@ namespace CircuitRF.Render.DataDisplay
             RenderTheme          theme)
         {
             var   dl  = trace.GetMarkerDataLocation(marker);
+            if (!tf.XIsPlottable(dl.X)) return;
             float cx  = tf.PrimaryToCanvas(dl.X, 0f).X;
             float vpT = (float)(tf.Viewport.Y                         * canvasSize.H);
             float vpB = (float)((tf.Viewport.Y + tf.Viewport.Height)  * canvasSize.H);

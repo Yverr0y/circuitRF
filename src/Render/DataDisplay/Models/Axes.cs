@@ -29,6 +29,25 @@ namespace CircuitRF.Render.DataDisplay
     }
 
     // ============================================================
+    //  AxisScale  —  how an axis maps world to canvas
+    // ============================================================
+
+    /// <summary>
+    /// The X axis's mapping. <see cref="Linear"/> is the affine map the display has always had;
+    /// <see cref="Log"/> is base-10 logarithmic, for the decade-spanning sweeps circuitRF's own EM
+    /// kernel writes by default (a <c>.cem</c> whose <c>Frequency.Kind</c> is <c>Log</c>).
+    ///
+    /// <para><b>It is an AXIS property, never a trace one.</b> Two traces on one axis cannot
+    /// disagree about its scale.</para>
+    ///
+    /// <para><b>X only, and Rect only.</b> The Y axis is already logarithmic where it matters
+    /// (<c>YAxis: Db</c>), and a Smith or Polar X carries Re(Γ), which is signed —
+    /// <c>PlotRenderer.BuildTransforms</c> engages the log map on Rect alone, so no other plot kind
+    /// can reach it even if an <see cref="Axes"/> were handed the mode directly.</para>
+    /// </summary>
+    public enum AxisScale { Linear, Log }
+
+    // ============================================================
     //  TickSet  —  pre-calculated tick positions in world coords
     // ============================================================
 
@@ -108,6 +127,27 @@ namespace CircuitRF.Render.DataDisplay
         public PlotRect WindowState          { get; set; } = default;
         public PlotRect WindowSecondaryState { get; set; } = default;
 
+        // ---- X axis scale ------------------------------------------------
+
+        private AxisScale _xScale = AxisScale.Linear;
+
+        /// <summary>
+        /// Linear (the default, and every axis this display has ever drawn) or base-10 Log.
+        /// Assigning it re-runs the window through its own setter, because the two modes disagree
+        /// about what a legal window is — see <see cref="Window"/>.
+        /// </summary>
+        public AxisScale XScale
+        {
+            get => _xScale;
+            set
+            {
+                if (_xScale == value) return;
+                _xScale = value;
+                Window          = _window;            // re-runs the mode-dependent repair below
+                WindowSecondary = _windowSecondary;
+            }
+        }
+
         // ---- Primary window (world coordinates) -------------------------
 
         private PlotRect _window = new PlotRect(-50, -50, 150, 150);
@@ -115,15 +155,22 @@ namespace CircuitRF.Render.DataDisplay
         /// <summary>
         /// Primary axis world-coordinate window (freq × left-Y).
         /// Recalculates tick intervals on every assignment.
-        /// A left edge of exactly 0 is nudged slightly so that the
-        /// zero grid line renders correctly.
+        ///
+        /// <para><b>The two modes repair a left edge differently, and the linear arithmetic is
+        /// untouched.</b> On a LINEAR axis a left edge of exactly 0 is nudged to −1e-6 so that the
+        /// zero grid line renders correctly — a cosmetic nudge, and the behaviour every existing
+        /// document depends on. On a LOG axis that nudge produces the one point the map has no
+        /// answer for, and it arrives by DEFAULT: an autoscaled frequency window literally begins
+        /// at −1e-6. So the log path never reaches it; see <see cref="RepairLogWindow"/>.</para>
         /// </summary>
         public PlotRect Window
         {
             get => _window;
             set
             {
-                if (value.X == 0)
+                if (_xScale == AxisScale.Log)
+                    value = RepairLogWindow(value);
+                else if (value.X == 0)
                     value = new PlotRect(-1e-6, value.Y, value.Width + 1e-6, value.Height);
                 _window = value;
                 SetTicks();
@@ -139,10 +186,54 @@ namespace CircuitRF.Render.DataDisplay
             get => _windowSecondary;
             set
             {
-                if (value.X == 0)
+                if (_xScale == AxisScale.Log)
+                    value = RepairLogWindow(value);
+                else if (value.X == 0)
                     value = new PlotRect(-1e-6, value.Y, value.Width + 1e-6, value.Height);
                 _windowSecondary = value;
             }
+        }
+
+        /// <summary>
+        /// A window whose X extent a base-10 log map can actually draw.
+        ///
+        /// <para>This is a BACKSTOP, not the normal path: a log autoscale frames enclosing decades,
+        /// a log pan and a log zoom are multiplicative and cannot walk a positive edge down to zero,
+        /// and the Axes Limits flyout refuses a non-positive minimum rather than coercing one. What
+        /// reaches it is a window authored while the axis was LINEAR — the moment the user flips the
+        /// mode — plus any caller that assigns a window directly.</para>
+        ///
+        /// <para>The RIGHT edge is kept and the left is placed four decades below it, because the
+        /// right edge is the half a linear frequency window always has right; when the right edge is
+        /// not positive either the window carries no positive extent at all and a single decade
+        /// 1…10 is substituted, which is drawable and visibly wrong rather than silently blank.</para>
+        /// </summary>
+        internal static PlotRect RepairLogWindow(PlotRect w)
+        {
+            if (w.X > 0 && w.Width > 0) return w;
+            double right = w.X + w.Width;
+            if (!(right > 0) || !double.IsFinite(right)) return new PlotRect(1, w.Y, 9, w.Height);
+            double left = right * 1e-4;
+            return new PlotRect(left, w.Y, right - left, w.Height);
+        }
+
+        /// <summary>
+        /// The world X that sits <paramref name="factor"/> tick-lengths from <paramref name="x"/>
+        /// along the axis — the Y-axis tick nubs' inboard ends, which are the one place the grid
+        /// renderer measures a distance ALONG X rather than mapping a point.
+        ///
+        /// <para>On a linear axis this is exactly <c>x + TickLengthX * factor</c>, written that way
+        /// so the existing expressions keep their bit pattern (multiplying by 1.0 and by 0.5, and
+        /// adding a negated value, are all exact). On a log axis a tick nub is a fraction of the
+        /// axis's LENGTH IN DECADES, which is a ratio, not a difference.</para>
+        /// </summary>
+        public double XPlusTickLength(double x, double factor)
+        {
+            if (_xScale != AxisScale.Log) return x + TickLengthX * factor;
+            double right = Window.Right;
+            if (!(x > 0) || !(Window.Left > 0) || !(right > Window.Left)) return x;
+            double decades = Math.Log10(right) - Math.Log10(Window.Left);
+            return x * Math.Pow(10.0, Ticksize * decades * factor);
         }
 
         public bool SecondaryShareGrid { get; set; } = true;
@@ -159,6 +250,10 @@ namespace CircuitRF.Render.DataDisplay
         /// <summary>Deep-copy constructor.</summary>
         public Axes(Axes src)
         {
+            // FIRST, and it has to be: Window's setter repairs its value differently in each mode,
+            // so a copy that took the windows before the mode would run a log window through the
+            // linear zero-nudge.
+            _xScale                = src._xScale;
             Box                    = src.Box;
             FontSizeLabel          = src.FontSizeLabel;
             FontSizeTicks          = src.FontSizeTicks;
@@ -186,21 +281,49 @@ namespace CircuitRF.Render.DataDisplay
 
         // ---- Panning helpers --------------------------------------------
 
+        /// <summary>
+        /// Pans the primary window by a world delta.
+        ///
+        /// <para><b>On a log axis <paramref name="dx"/> is a number of DECADES, not a frequency
+        /// difference</b>, and the window slides multiplicatively. That is not a special case bolted
+        /// on: the only caller that produces a world dx is
+        /// <see cref="TranslateFromPointer"/>, which divides a pixel delta by the axis's own
+        /// <c>XScale</c> — and in log mode that scale is px per decade, so the quotient is already
+        /// in the right units. A difference applied to a log axis walks the left edge through zero
+        /// and out the other side.</para>
+        /// </summary>
         public void Translate(double dx, double dy)
         {
-            if (!LockedPanning)
-                Window = new PlotRect(WindowState.X - dx, WindowState.Y - dy,
-                                  Window.Width, Window.Height);
+            if (LockedPanning) return;
+            if (_xScale == AxisScale.Log)
+            {
+                double f = Math.Pow(10.0, -dx);
+                Window = new PlotRect(WindowState.X * f, WindowState.Y - dy,
+                                      WindowState.Width * f, Window.Height);
+                return;
+            }
+            Window = new PlotRect(WindowState.X - dx, WindowState.Y - dy,
+                              Window.Width, Window.Height);
         }
 
         public void TranslateSecondary(double dx, double dy)
         {
-            if (!LockedPanning)
+            if (LockedPanning) return;
+            if (_xScale == AxisScale.Log)
+            {
+                double f = Math.Pow(10.0, -dx);
                 WindowSecondary = new PlotRect(
-                    WindowSecondaryState.X - dx,
+                    WindowSecondaryState.X * f,
                     WindowSecondaryState.Y - dy,
-                    WindowSecondary.Width,
+                    WindowSecondaryState.Width * f,
                     WindowSecondary.Height);
+                return;
+            }
+            WindowSecondary = new PlotRect(
+                WindowSecondaryState.X - dx,
+                WindowSecondaryState.Y - dy,
+                WindowSecondary.Width,
+                WindowSecondary.Height);
         }
 
         /// <summary>
@@ -312,7 +435,9 @@ namespace CircuitRF.Render.DataDisplay
             if (dmx <= 0) dmx = 0.05;
             if (dmy <= 0) dmy = 0.05;
 
-            var majorXTicks = Lattice(Window.Left, Window.Right,  dmx);
+            var majorXTicks = _xScale == AxisScale.Log
+                ? LogLattice(Window.Left, Window.Right, major: true)
+                : Lattice(Window.Left, Window.Right,  dmx);
             var majorYTicks = Lattice(Window.Top,  Window.Bottom, dmy);
 
             // Secondary Y major ticks
@@ -342,7 +467,9 @@ namespace CircuitRF.Render.DataDisplay
 
             if (minorTicks)
             {
-                minorX = Lattice(Window.Left, Window.Right,  XTick, skipEvery: majX);
+                minorX = _xScale == AxisScale.Log
+                    ? LogLattice(Window.Left, Window.Right, major: false)
+                    : Lattice(Window.Left, Window.Right,  XTick, skipEvery: majX);
                 minorY = Lattice(Window.Top,  Window.Bottom, YTick, skipEvery: majY);
 
                 if (ShowSecondary)
@@ -422,6 +549,72 @@ namespace CircuitRF.Render.DataDisplay
         /// <para>The Y axis never showed it, which is why it went unnoticed: its spacings came out
         /// as 2 and 4, and doubling a power of two IS exact.</para>
         /// </remarks>
+        /// <summary>
+        /// The X ticks of a base-10 log axis: the MAJOR set (which carries the labels) or the MINOR
+        /// set, which is everything in the sub-decade lattice that is not major.
+        ///
+        /// <para><b>Three tiers, because a decade lattice stops existing as you zoom in.</b> The
+        /// brief's rule — majors are the decades, minors the 2…9 within each — is right for the
+        /// span this feature exists for and produces NO tick at all on a window of 1…2 GHz. An
+        /// unlabelled axis is a worse defect than the one being fixed, so:</para>
+        /// <list type="number">
+        /// <item>two decades or more in view: majors are 10ⁿ, minors are {2…9}·10ⁿ;</item>
+        /// <item>less than that: majors are {1,2,5}·10ⁿ, minors the remaining {3,4,6,7,8,9}·10ⁿ —
+        /// the sub-decade marks a reader already looks for;</item>
+        /// <item>narrower than even that lattice can populate (fewer than three majors — two is the
+        /// window's own two edges and leaves the interior unlabelled), the axis is
+        /// effectively linear over the window and is ticked linearly, by the SAME
+        /// <see cref="CalcInterval"/>/<see cref="Lattice"/> pair the linear axis uses. The mapping
+        /// stays logarithmic; only the choice of where to put the marks changes.</item>
+        /// </list>
+        ///
+        /// <para>Values are <c>m · 10ⁿ</c> computed from the integers, never accumulated — the same
+        /// property <see cref="Lattice"/>'s own remarks are about, and the reason a decade line's
+        /// value is identical at every pan offset.</para>
+        /// </summary>
+        private List<double> LogLattice(double lo, double hi, bool major)
+        {
+            var list = new List<double>();
+            if (!(lo > 0) || !(hi > lo) || !double.IsFinite(hi)) return list;
+
+            double lgLo = Math.Log10(lo), lgHi = Math.Log10(hi);
+            if (lgHi - lgLo > MaxLogDecades) return list;
+
+            int[] mant = lgHi - lgLo >= 2.0
+                ? (major ? [1] : [2, 3, 4, 5, 6, 7, 8, 9])
+                : (major ? [1, 2, 5] : [3, 4, 6, 7, 8, 9]);
+
+            int e0 = (int)Math.Floor(lgLo), e1 = (int)Math.Floor(lgHi);
+            double eps = 1e-10;
+            for (int e = e0; e <= e1; e++)
+            {
+                double decade = Math.Pow(10.0, e);
+                foreach (int m in mant)
+                {
+                    double v = m * decade;
+                    if (v >= lo * (1 - eps) && v <= hi * (1 + eps)) list.Add(v);
+                }
+            }
+            list.Sort();
+
+            // Tier 3: the sub-decade lattice did not populate the window either. Fall back to the
+            // linear tick lattice over the same window — at this zoom the log map differs from an
+            // affine one by less than a pixel, and a labelled axis is the point.
+            if (list.Count < 3 && lgHi - lgLo < 2.0)
+            {
+                double step = CalcInterval(hi - lo);
+                int    majX = MajorStep(MajorX);
+                return major ? Lattice(lo, hi, step * majX)
+                             : Lattice(lo, hi, step, skipEvery: majX);
+            }
+            return list;
+        }
+
+        /// <summary>Hard cap on a log axis's span, so a window whose left edge has collapsed toward
+        /// zero cannot ask for an unbounded number of decades. Twenty-four decades is wider than
+        /// any physical frequency axis and still finite.</summary>
+        private const int MaxLogDecades = 24;
+
         private static List<double> Lattice(double from, double to, double step, int skipEvery = 0)
         {
             var list = new List<double>();

@@ -1912,6 +1912,34 @@ namespace CircuitRF.Render.DataDisplay
 
         private static bool IsFreqUnit(string? unit) => unit is "Hz" or "kHz" or "MHz" or "GHz";
 
+        /// <summary>
+        /// True when this trace's X coordinate is a FREQUENCY and therefore moves when the plot's
+        /// <see cref="Plot.FreqUnits"/> changes.
+        ///
+        /// <para>Written as the disjunction of the two tests <see cref="BuildCubePath"/> and
+        /// <see cref="BuildFamilyPath"/> actually apply, and for that reason: a predicate that
+        /// disagreed with the path builder would rescale a window whose points had not moved, or
+        /// leave one behind whose points had.</para>
+        /// </summary>
+        public bool XIsFrequency
+        {
+            get
+            {
+                if (IsContourTrace || IsSummaryColumn) return false;
+
+                // BuildPath's own dispatch, in its own order — anything else and this predicate
+                // could say a window should move while the path builder leaves the points where
+                // they were. The matrix and derived paths are versus frequency by construction and
+                // scale unconditionally; the cube and family paths scale only when the X axis IS a
+                // frequency.
+                if (!IsFamily && !IsCubeBound) return true;
+
+                return IsFreqUnit(_cubeXUnit)
+                    || (string.Equals(_cubeXAxisName, HarmonicAxisName, StringComparison.Ordinal)
+                        && _f0ByX is not null);
+            }
+        }
+
         // Rect scalar Y from one sample (null → skip point).
         internal double? RectY(Complex? cz, double? rv)
         {
@@ -2434,6 +2462,50 @@ namespace CircuitRF.Render.DataDisplay
             return new PlotRect(aX, aY, bX - aX, bY - aY);
         }
 
+        // ---- Positive-X extent, for a logarithmic X axis ------------------
+
+        /// <summary>
+        /// The smallest STRICTLY POSITIVE world X this trace draws at, the largest, and how many of
+        /// its points a base-10 log axis cannot place at all (X ≤ 0 or non-finite).
+        ///
+        /// <para><b><see cref="PathBoundingRect"/> cannot be used for a log autoscale and the reason
+        /// is not an edge case.</b> A DC point is a legal circuitRF frequency and
+        /// <c>PlanarSolve</c>'s LF1 splices 0 Hz back on FIRST, because that is where a Touchstone
+        /// wants it — so the bounding box of a perfectly ordinary extraction starts at exactly zero,
+        /// and framing the axis on it asks for log10(0).</para>
+        ///
+        /// <para>Hidden is a COUNT rather than a flag because the number is reported to the reader
+        /// (<see cref="Plot.LogXHiddenPointNote"/>); a point that vanishes without a sentence is the
+        /// defect the whole log-axis feature exists to stop.</para>
+        /// </summary>
+        public (double MinPositive, double Max, int Hidden) PositiveXExtent()
+        {
+            double lo = double.PositiveInfinity, hi = double.NegativeInfinity;
+            int hidden = 0;
+
+            void Take(double x)
+            {
+                if (x > 0 && double.IsFinite(x)) { if (x < lo) lo = x; if (x > hi) hi = x; }
+                else hidden++;
+            }
+
+            if (IsContourTrace)
+            {
+                var grid = ContourData?.Grid;
+                if (grid != null) foreach (double x in grid.XSpace) Take(x);
+            }
+            else if (IsFamily)
+            {
+                foreach (var c in FamilyCurves) foreach (var pt in c.Points) Take(pt.X);
+            }
+            else
+            {
+                foreach (var pt in Points) Take(pt.X);
+            }
+
+            return (lo, hi, hidden);
+        }
+
         // ---- Data retrieval ---------------------------------------------
 
         // Memoizes the full-sweep derived-metric array so a per-cell Table read (DataPointScalar
@@ -2599,9 +2671,28 @@ namespace CircuitRF.Render.DataDisplay
 
         // ---- Nearest-point search ----------------------------------------
 
+        /// <param name="logX">
+        /// True when the plot's X axis maps logarithmically. It changes the X-ONLY metric below from
+        /// <c>|Δx|</c> to <c>|Δlog₁₀x|</c>, which is what "nearest" means on screen — and it is not a
+        /// refinement: on a decade axis the world-space test picks the wrong sample over most of the
+        /// span. Clicking at 400 MHz between marks at 100 MHz and 1 GHz is 0.60 decades from the
+        /// first and 0.40 from the second, so the pointer is plainly nearer 1 GHz, while the
+        /// differences are 300 and 600 MHz and choose 100 MHz. The 2-D complex-plane metric is
+        /// untouched: Smith and Polar never carry a log axis.
+        /// </param>
         public (int FreqIndex, double Distance, Vector2 NearestPoint)?
-            FindNearestTraceData(Vector2 queryPt)
+            FindNearestTraceData(Vector2 queryPt, bool logX = false)
         {
+            // The X metric, once, so the three loops below cannot disagree about it. A point a log
+            // axis cannot place is not a candidate — it is not on the picture to be clicked near.
+            double qlx = logX ? Math.Log10(Math.Abs(queryPt.X)) : 0;
+            double XDist(float x)
+            {
+                if (!logX) return Math.Abs(queryPt.X - x);
+                if (!(x > 0) || !double.IsFinite(qlx)) return double.PositiveInfinity;
+                return Math.Abs(qlx - Math.Log10(x));
+            }
+
             // Family cube trace: geometry is in FamilyCurves[].Points, not Points.
             // Search across all curves; FreqIndex returns the X-array index of the hit.
             if (IsFamily)
@@ -2615,7 +2706,7 @@ namespace CircuitRF.Render.DataDisplay
                     var cps = FamilyCurves[c].Points;
                     for (int i = 0; i < cps.Count; i++)
                     {
-                        double d = complexPlane ? Dist(queryPt, cps[i]) : Math.Abs(queryPt.X - cps[i].X);
+                        double d = complexPlane ? Dist(queryPt, cps[i]) : XDist(cps[i].X);
                         if (d < bestF) { bestF = d; bestI = i; bestP = cps[i]; }
                     }
                 }
@@ -2666,10 +2757,11 @@ namespace CircuitRF.Render.DataDisplay
                 {
                     for (int i = 0; i < Points.Count; i++)
                     {
-                        double d = Math.Abs(queryPt.X - Points[i].X);
+                        double d = XDist(Points[i].X);
                         if (d < best) { best = d; bestIdx = i; }
                     }
                 }
+                if (bestIdx < 0) return null;     // every point unplottable on this axis
                 return (bestIdx, best, Points[bestIdx]);
             }
         }
@@ -2775,7 +2867,19 @@ namespace CircuitRF.Render.DataDisplay
             if (IsCubeXMarker)     return CubeMarkerPointFor(m);
             if (IsCubeBound)       return Vector2.Zero;
             if (IsStabilityCircle) return m.PositionStatic;
-            int fi = Array.FindIndex(Data.Frequencies, f => f >= m.Freq - 1e-6);
+            // NEAREST, not "the first sample at or above freq − 1e-6".
+            //
+            // That tolerance was ABSOLUTE — a relative 5e-13 at 2 MHz and roughly two ULPs at 2 GHz
+            // — so a frequency that had been round-tripped through a file, typed, or unit-converted
+            // missed its own point and SILENTLY snapped to the next one. Measured: a marker asked
+            // for 2138469.2 Hz against a stored 2138469.1999823763 Hz — the same number to ten
+            // significant figures, and the number the run's own `.s2p` wrote — landed on 4.573 MHz,
+            // on top of another marker, with nothing reported anywhere. In-app placement was safe
+            // only because AddMarkerAtFreqIndex copies Data.Frequencies[fi] verbatim; a marker
+            // editor and a re-imported Touchstone are exactly the two paths that do not.
+            //
+            // NearestFrequencyIndex already existed for this and needs no tolerance at all.
+            int fi = NearestFrequencyIndex(m.Freq);
             if (fi < 0) fi = Data.Frequencies.Length - 1;
             if (fi >= 0 && fi < Points.Count) return Points[fi];
             return Vector2.Zero;
@@ -3802,7 +3906,9 @@ namespace CircuitRF.Render.DataDisplay
         public void SetMarkerFreq(Marker m, double newFreq)
         {
             if (IsCubeBound || IsFamily) return;
-            int fi = Array.FindIndex(Data.Frequencies, f => f >= newFreq - 1e-6);
+            // Nearest, for the reason GetMarkerDataLocation gives — and this is the path a TYPED
+            // frequency takes, which is one of the two the absolute tolerance actually broke.
+            int fi = NearestFrequencyIndex(newFreq);
             if (fi < 0) fi = Data.Frequencies.Length - 1;
             m.Freq = Data.Frequencies[fi];
             SnapMarkerToStabilityCircle(m, fi);

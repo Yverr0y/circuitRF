@@ -282,6 +282,11 @@ public static class PlotConfigLoader
         }
 
         if (pc.Axes is { } savedAxes)
+        {
+            // BEFORE the windows, and it has to be: Axes.Window repairs its value differently in
+            // each mode (the linear zero-nudge is the log map's undefined point), so a log document
+            // whose mode arrived second would have had its left edge nudged to −1e-6 on the way in.
+            if (plot.PlotType.IsRect()) plot.Axes.XScale = savedAxes.XScale;
             plot.RestoreAxesFromConfig(
                 savedAxes.AutoscaleX, savedAxes.AutoscaleY,
                 savedAxes.AutoscaleRightY, savedAxes.AutoscaleMag,
@@ -289,6 +294,7 @@ public static class PlotConfigLoader
                          savedAxes.WindowWidth, savedAxes.WindowHeight),
                 new PlotRect(savedAxes.WindowSecondaryX, savedAxes.WindowSecondaryY,
                          savedAxes.WindowSecondaryWidth, savedAxes.WindowSecondaryHeight));
+        }
         else
             plot.Autoscale();  // no axes config — old file, default to full autoscale
         return plot;

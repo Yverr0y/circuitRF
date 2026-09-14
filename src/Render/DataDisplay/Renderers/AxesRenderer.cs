@@ -53,6 +53,17 @@ namespace CircuitRF.Render.DataDisplay
 
             // One SI prefix per AXIS, chosen from its own window, never per tick: picking per value
             // puts "900p" and "1n" on adjacent gridlines and reads as a jump in the data.
+            //
+            // ── AND THAT RULE HOLDS ON A LOG X AXIS TOO (brief LOGX, M2) ──────────────────────────
+            //  The alternative was a prefix per DECADE, which a log axis can justify — its ticks ARE
+            //  the decades, so the prefix would change exactly where the prefix changes and never
+            //  mid-run. It was rejected for two reasons that the per-decade case does not answer:
+            //  the tick numbers are read against ONE stated unit in the X label ("freq (GHz)"), and
+            //  the Axes Limits flyout's Min and Max are TYPED in that same unit — a per-tick prefix
+            //  makes the axis carry several units while the label and the entry boxes carry one. So
+            //  a decade-spanning frequency axis reads 0.001 / 0.01 / 0.1 / 1 / 10 under "(GHz)",
+            //  which is exact: a decade tick is a power of ten and the plain G-format prints it with
+            //  no rounding artefact at all. There is no second spelling of this anywhere.
             int xGroup  = EngineeringFormat.GroupFor(
                 EngineeringFormat.AxisMagnitude(axes.Window.Left, axes.Window.Right));
             int yGroup  = EngineeringFormat.GroupFor(
@@ -72,7 +83,14 @@ namespace CircuitRF.Render.DataDisplay
 
                 if (labels)
                 {
-                    double v     = EngineeringFormat.SnapNearZero(tx, axes.XTick);
+                    // SnapNearZero exists to stop accumulated tick arithmetic printing "-3.5E-17"
+                    // where zero belongs, and it is measured against the LINEAR tick step. A log
+                    // axis has no zero tick and its values are m·10ⁿ computed from integers, so
+                    // there is nothing to snap — and the linear step it would be measured against is
+                    // meaningless there: on a window reaching down to 1e-8 the epsilon swallows real
+                    // decade ticks and prints them as "0".
+                    double v     = axes.XScale == AxisScale.Log
+                        ? tx : EngineeringFormat.SnapNearZero(tx, axes.XTick);
                     string label = EngineeringFormat.Tick(v, xGroup, axes.NumDigitsXAxis);
                     float  tw    = textFont.MeasureText(label);
                     canvas.DrawText(label,
@@ -96,7 +114,7 @@ namespace CircuitRF.Render.DataDisplay
                 majorGridPathY.MoveTo(left); majorGridPathY.LineTo(right);
 
                 var tl0 = tf.PrimaryToCanvas(axes.Window.Left,                    yPrimary);
-                var tl1 = tf.PrimaryToCanvas(axes.Window.Left + axes.TickLengthX, yPrimary);
+                var tl1 = tf.PrimaryToCanvas(axes.XPlusTickLength(axes.Window.Left, 1.0), yPrimary);
                 majorTickPathY.MoveTo(tl0); majorTickPathY.LineTo(tl1);
 
                 if (labels)
@@ -114,13 +132,13 @@ namespace CircuitRF.Render.DataDisplay
                 {
                     if (axes.SecondaryShareGrid)
                     {
-                        var tr0 = tf.PrimaryToCanvas(axes.Window.Right - axes.TickLengthX, yPrimary);
+                        var tr0 = tf.PrimaryToCanvas(axes.XPlusTickLength(axes.Window.Right, -1.0), yPrimary);
                         var tr1 = tf.PrimaryToCanvas(axes.Window.Right,                    yPrimary);
                         majorTickPathY.MoveTo(tr0); majorTickPathY.LineTo(tr1);
                     }
                     else if (double.IsFinite(ySecondary))
                     {
-                        var sr0 = tf.SecondaryToCanvas(axes.WindowSecondary.Right - axes.TickLengthX, ySecondary);
+                        var sr0 = tf.SecondaryToCanvas(axes.XPlusTickLength(axes.WindowSecondary.Right, -1.0), ySecondary);
                         var sr1 = tf.SecondaryToCanvas(axes.WindowSecondary.Right,                    ySecondary);
                         majorTickPathY2.MoveTo(sr0); majorTickPathY2.LineTo(sr1);
 
@@ -194,7 +212,7 @@ namespace CircuitRF.Render.DataDisplay
                 minorGridPathY.MoveTo(tf.PrimaryToCanvas(axes.Window.Left,  ty));
                 minorGridPathY.LineTo(tf.PrimaryToCanvas(axes.Window.Right, ty));
                 minorTickPathY.MoveTo(tf.PrimaryToCanvas(axes.Window.Left,                    ty));
-                minorTickPathY.LineTo(tf.PrimaryToCanvas(axes.Window.Left + axes.TickLengthX / 2, ty));
+                minorTickPathY.LineTo(tf.PrimaryToCanvas(axes.XPlusTickLength(axes.Window.Left, 0.5), ty));
             }
 
             using var mgPaint = new SKPaint
@@ -1031,6 +1049,19 @@ namespace CircuitRF.Render.DataDisplay
             using (var xFallback = new SKFont(SkiaFonts.DejaVuRegular, xFont.Size))
             {
                 float rowH = xFont.Size * 1.25f;
+
+                // A log X axis cannot place a point at or below zero, and a DC point is legal and
+                // ordinary — so the count of what it dropped is drawn ON THE SAME ROW as the X
+                // label. Its own row was measured and does not fit: at the default 792×612 page the
+                // bottom margin is 43 pt and the label's baseline already sits 27 pt into it, so a
+                // second row lands off the page. The same line is also the right PLACE for it — the
+                // note is about the axis the label names.
+                string? logNote = plot.LogXHiddenPointNote;
+                string WithNote(string lbl) =>
+                    logNote is null ? lbl
+                    : string.IsNullOrEmpty(lbl) ? logNote
+                    : lbl + "   " + logNote;
+
                 if (plot.XLabelsDiffer)
                 {
                     var xTraces = plot.XLabelTraces;
@@ -1039,6 +1070,7 @@ namespace CircuitRF.Render.DataDisplay
                     for (int i = 0; i < xTraces.Count; i++)
                     {
                         string lbl = plot.XLabelFor(xTraces[i]);
+                        if (i == xTraces.Count - 1) lbl = WithNote(lbl);
                         if (string.IsNullOrEmpty(lbl)) continue;
                         float tw = RendererText.MeasureTextWithFallback(lbl, xFont, xFallback);
                         float tx = vpCenterX - tw / 2f;
@@ -1053,7 +1085,7 @@ namespace CircuitRF.Render.DataDisplay
                 }
                 else
                 {
-                    string xLabel = plot.XLabel;
+                    string xLabel = WithNote(plot.XLabel);
                     if (!string.IsNullOrEmpty(xLabel))
                     {
                         float tw = RendererText.MeasureTextWithFallback(xLabel, xFont, xFallback);

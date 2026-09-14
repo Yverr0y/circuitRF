@@ -1533,6 +1533,7 @@ public partial class DataDisplayViewModel : ViewModelBase, IDisposable
                 WindowSecondaryY        = plot.Axes.WindowSecondary.Y,
                 WindowSecondaryWidth    = plot.Axes.WindowSecondary.Width,
                 WindowSecondaryHeight   = plot.Axes.WindowSecondary.Height,
+                XScale                  = plot.Axes.XScale,
             },
         };
         foreach (var t in plot.Traces)

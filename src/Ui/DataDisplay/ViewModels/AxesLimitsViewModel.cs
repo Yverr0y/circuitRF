@@ -52,6 +52,31 @@ public partial class AxesLimitsViewModel : ViewModelBase
     partial void OnXMinTextChanged(string value) => TryApplyX();
     partial void OnXMaxTextChanged(string value) => TryApplyX();
 
+    // ---- X axis scale (Linear | Log) -------------------------------------
+
+    /// <summary>
+    /// True when the X axis is logarithmic. Bound to the Log side of the Linear|Log selector in the
+    /// X Axis block, beside the Autoscale checkbox — and only meaningful on a Rect plot
+    /// (<see cref="ShowXScale"/> hides it elsewhere, because a Smith or Polar X carries Re(Γ)).
+    ///
+    /// <para>Setting it goes through <see cref="Plot.SetXScale"/> rather than
+    /// <c>Axes.XScale</c>, because flipping the mode is not just a flag: the window that was correct
+    /// in one mode is usually not one the other can draw, and the two want different framings.
+    /// The Min/Max boxes are refreshed afterwards because that re-framing MOVED them.</para>
+    /// </summary>
+    [ObservableProperty] private bool _xLogScale;
+
+    /// <summary>Rect only — see <see cref="XLogScale"/>.</summary>
+    public bool ShowXScale => IsRect;
+
+    partial void OnXLogScaleChanged(bool value)
+    {
+        if (_suppressApply) return;
+        _plot.SetXScale(value ? AxisScale.Log : AxisScale.Linear);
+        RefreshXText();
+        RaiseRedraw();
+    }
+
     partial void OnXAutoscaleChanged(bool value)
     {
         if (_suppressApply) return;
@@ -127,6 +152,7 @@ public partial class AxesLimitsViewModel : ViewModelBase
             _xAutoscale  = IsComplex ? _plot.AutoscaleMag    : _plot.AutoscaleX;
             _yAutoscale  = IsComplex ? _plot.AutoscaleMag    : _plot.AutoscaleY;
             _y2Autoscale = _plot.AutoscaleRightY;
+            _xLogScale   = _plot.Axes.XScale == AxisScale.Log;
             _xMinText    = FormatValue(_plot.Axes.Window.Left);
             _xMaxText    = FormatValue(_plot.Axes.Window.Right);
             _yMinText    = FormatValue(_plot.Axes.Window.Top);
@@ -143,11 +169,28 @@ public partial class AxesLimitsViewModel : ViewModelBase
 
     // ---- Private apply logic ---------------------------------------------
 
+    /// <summary>
+    /// Applies the typed X limits to the plot — on EVERY KEYSTROKE, which is what makes the guard
+    /// below necessary rather than merely tidy.
+    ///
+    /// <para><b>The positive-minimum guard, and why the obvious reason is not the reason.</b> There
+    /// is no OK button and no commit-on-blur: <c>OnXMinTextChanged</c> fires per character, so a
+    /// user typing <c>0.001</c> passes through <c>""</c>, <c>"0"</c>, <c>"0."</c>, <c>"0.0"</c> on
+    /// the way — and <c>"0"</c> PARSES. On a linear axis that is a harmless transient; on a log axis
+    /// it is the map's undefined point, arriving several times a second while someone types.</para>
+    ///
+    /// <para><b>Rejected, never coerced.</b> Silently rewriting the typed value and pushing it back
+    /// into <see cref="XMinText"/> is a coercing control writing over the user's own edit — the
+    /// defect this repo has already paid for once, in the Match Designer's slider, where a
+    /// two-way-bound control's write-back turned eight edits into fourteen undos. A transient that
+    /// does not apply simply leaves the plot as it was until the next character makes it valid.</para>
+    /// </summary>
     private void TryApplyX()
     {
         if (_suppressApply || XAutoscale) return;
         if (!TryParse(XMinText, out double xMin) || !TryParse(XMaxText, out double xMax)) return;
         if (Math.Abs(xMax - xMin) < 1e-15) return;
+        if (_plot.Axes.XScale == AxisScale.Log && (xMin <= 0 || xMax <= 0)) return;
 
         if (IsComplex)
         {

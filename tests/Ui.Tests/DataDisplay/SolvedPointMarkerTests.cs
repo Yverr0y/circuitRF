@@ -8,9 +8,16 @@
 //  trace had. Together they claimed ninety-four solves that never happened, in the one form a
 //  reader counts samples by.
 //
-//  The rule this file holds: the LINE runs through every published point, markers only through
-//  the solved ones, and a source that says nothing about the question is unchanged — which is
-//  every Touchstone file and every circuit analysis.
+//  THAT WAS REVERSED ON 2026-09-14, twice, and the second time settled it. Withholding the glyph
+//  was wrong: a modelled point is still IN the published data — the Table view lists it, the line
+//  runs through it, and the `.sNp` beside it would carry it into a circuit simulation. Drawing it
+//  as an OPEN glyph instead was also wrong: it is a sample of that trace and it belongs in that
+//  trace's colour. Reported on a real extraction whose bottom three frequencies were extrapolated
+//  by the low-frequency peel.
+//
+//  The rule this file now holds: EVERY published point is drawn and carries the SAME glyph. The
+//  mask is still read (Trace.PointIsSolved reports the run's own answer, and the tests below hold
+//  it through the file, the re-run and the reload) — the PLOT just does not draw the distinction.
 //
 //  The engine half — the published DataSet carries the mask at all — is in
 //  tests/Engine.Tests/Mom/SolvedPointCubeTests.cs.
@@ -73,11 +80,12 @@ public sealed class SolvedPointMarkerTests
     }
 
     /// <summary>
-    /// The curve is still the whole published grid — the modelled points are the run's own answer
-    /// and dropping them would be a different lie — but only the solved ones are marked.
+    /// The curve is the whole published grid, and the model knows which of its points the run
+    /// actually solved. What the RENDERER does with that is the theory below — it draws a glyph on
+    /// every one of them either way.
     /// </summary>
     [Fact]
-    public void EveryPublishedPointIsDrawn_OnlyTheSolvedOnesAreMarked()
+    public void EveryPublishedPointIsDrawn_AndTheModelKnowsWhichWereSolved()
     {
         var t = Resolve(MakeDs(withMask: true));
 
@@ -240,30 +248,50 @@ public sealed class SolvedPointMarkerTests
         }
     }
 
+    /// <summary>
+    /// <b>Every published point carries a glyph, in the trace's own colour</b> — solved or
+    /// modelled, and with no visual difference between them. This is the 2026-09-14 rule, and it is
+    /// the one an absent or open marker breaks.
+    /// </summary>
     [Theory]
     [InlineData(false)]   // the cube-bound trace
     [InlineData(true)]    // the network-bound trace an s-parameter plot actually is
-    public void TheRendererDrawsAMarkerAtEverySolvedPoint_AndAtNoOther(bool network)
+    public void TheRendererDrawsTheSameGlyphAtEveryPoint_SolvedOrNot(bool network)
     {
-        var t = network ? NetworkTrace(MakeNetworkDs(withMask: true)) : Resolve(MakeDs(withMask: true));
-        t.Properties.LineEnabled   = false;   // markers alone, so the ink under a point is a marker
-        t.Properties.MarkerEnabled = true;
-        t.Properties.MarkerType    = MarkerType.Square;   // the owner's own setting
+        var masked   = network ? NetworkTrace(MakeNetworkDs(withMask: true))
+                               : Resolve(MakeDs(withMask: true));
+        var unmasked = network ? NetworkTrace(MakeNetworkDs(withMask: false))
+                               : Resolve(MakeDs(withMask: false));
 
-        var tf  = Tf(t);
-        var bmp = new SKBitmap(W, H);
-        using (var canvas = new SKCanvas(bmp))
+        SKBitmap Render(Trace t)
         {
+            t.Properties.LineEnabled   = false;   // markers alone, so the ink at a point is a marker
+            t.Properties.MarkerEnabled = true;
+            t.Properties.MarkerType    = MarkerType.Square;   // the owner's own setting
+            var bmp = new SKBitmap(W, H);
+            using var canvas = new SKCanvas(bmp);
             canvas.Clear(SKColors.White);
-            TraceRenderer.Draw(canvas, (W, H), t, tf, RenderTheme.Light);
+            TraceRenderer.Draw(canvas, (W, H), t, Tf(t), RenderTheme.Light);
+            return bmp;
         }
 
-        for (int i = 0; i < t.Points.Count; i++)
+        var withMask = Render(masked);
+        var noMask   = Render(unmasked);
+        var tf       = Tf(masked);
+
+        for (int i = 0; i < masked.Points.Count; i++)
         {
-            var px = tf.PrimaryToCanvas(t.Points[i].X, t.Points[i].Y);
-            bool expected = SolvedAt.Contains(i);
-            Assert.Equal(expected, InkAt(bmp, px));
+            var px = tf.PrimaryToCanvas(masked.Points[i].X, masked.Points[i].Y);
+            Assert.True(InkAt(withMask, px), $"point {i} carries no glyph");
+            Assert.True(withMask.GetPixel((int)MathF.Round(px.X), (int)MathF.Round(px.Y))
+                        != RenderTheme.Light.BackgroundColor,
+                        $"point {i} drew an OPEN glyph — a modelled point is still this trace's point");
         }
+
+        // The strongest form of the claim: the mask changes nothing a reader can see. Compared
+        // pixel for pixel rather than point by point, so a difference anywhere fails it.
+        Assert.True(withMask.Bytes.AsSpan().SequenceEqual(noMask.Bytes),
+                    "the solved mask changed the picture");
     }
 
     // ── A RE-RUN REPLACES THE MASK ON A DISPLAY THAT IS ALREADY OPEN ──────────────────────────

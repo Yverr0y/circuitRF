@@ -35,8 +35,39 @@ namespace CircuitRF.Render.DataDisplay
         };
 
         /// <summary>Multiply a frequency in Hz by Scale to get the display value.</summary>
+        /// <summary>The same seven facts as <see cref="ScaleMap"/>, as DECADE EXPONENTS. Keep the
+        /// two tables in step — they are one fact written twice, and this one exists because a
+        /// RATIO of two entries of the other is not a power of ten: <c>1e-3 / 1e-6</c> is
+        /// 1000.0000000000001, and a window rescaled by that puts its own left-hand sample a
+        /// hair outside itself.</summary>
+        private static readonly Dictionary<FreqUnit, int> DecadeMap = new()
+        {
+            { FreqUnit.Hz,   0 },
+            { FreqUnit.kHz,  3 },
+            { FreqUnit.MHz,  6 },
+            { FreqUnit.GHz,  9 },
+            { FreqUnit.THz, 12 },
+            { FreqUnit.ZHz, 21 },
+            { FreqUnit.YHz, 24 }
+        };
+
         public static double Scale(this FreqUnit u) =>
             ScaleMap.TryGetValue(u, out var s) ? s : 1.0;
+
+        /// <summary>
+        /// The factor that turns a value written in <paramref name="from"/> into the same value
+        /// written in <paramref name="to"/> — exactly, because it is one power of ten rather than
+        /// the quotient of two.
+        /// </summary>
+        public static double ConversionFactor(FreqUnit from, FreqUnit to)
+        {
+            if (from == to) return 1.0;
+            if (!DecadeMap.TryGetValue(from, out int a) || !DecadeMap.TryGetValue(to, out int b))
+                return to.Scale() / from.Scale();
+            // A value written in a SMALLER unit carries a bigger number: 1 MHz is 1000 kHz, and
+            // MHz sits three decades above kHz.
+            return Math.Pow(10.0, a - b);
+        }
 
         public static string Description(this FreqUnit u) => u.ToString();
     }
@@ -108,15 +139,69 @@ namespace CircuitRF.Render.DataDisplay
         // ---- Frequency units --------------------------------------------
 
         private FreqUnit _freqUnits = FreqUnit.GHz;
+
+        /// <summary>
+        /// The unit the X axis of a frequency plot is DISPLAYED in. Assigning it rebuilds every
+        /// trace's path in the new unit — and rescales a PINNED X window to match, which is the half
+        /// that was missing.
+        ///
+        /// <para><b>A pinned window is a range of FREQUENCIES, not a range of numbers</b>
+        /// (owner-reported, 2026-09-14). Every point moves by the unit ratio here; the window did
+        /// not, so a plot
+        /// framed 1…10000 MHz with Autoscale X off became 1…10000 kHz the moment the unit changed —
+        /// the same numbers, a thousandth of the span — and seven of the eleven points of a
+        /// 1 MHz…2 GHz sweep went off the right edge with nothing said. It was reported as missing
+        /// data-point markers, because the points that carried them were no longer on the
+        /// picture.</para>
+        ///
+        /// <para>Only when the X axis actually tracks the unit (see <see cref="XAxisTracksFreqUnit"/>)
+        /// — a cube swept in Vgs or Pin does not move at all — and only when the axis is PINNED:
+        /// an autoscaled axis is reframed by the <c>Autoscale()</c> below and must not be touched
+        /// twice.</para>
+        /// </summary>
         public FreqUnit FreqUnits
         {
             get => _freqUnits;
             set
             {
+                var from = _freqUnits;
                 _freqUnits = value;
+                RescalePinnedFrequencyWindow(from, value);
                 foreach (var t in Traces) t.BuildPath(PlotType, FreqUnits);
                 Autoscale();
             }
+        }
+
+        /// <summary>
+        /// True when this plot's X axis is a frequency that moves with <see cref="FreqUnits"/> —
+        /// every trace that owns an X label, and all of them, since a "plot versus" whose traces
+        /// disagree has no single X quantity to rescale.
+        /// </summary>
+        public bool XAxisTracksFreqUnit
+        {
+            get
+            {
+                if (!PlotType.IsRect()) return false;   // Smith/Polar X is Re(Γ); a Table has no window
+                var xs = XLabelTraces;
+                if (xs.Count == 0) return false;
+                foreach (var t in xs) if (!t.XIsFrequency) return false;
+                return true;
+            }
+        }
+
+        private void RescalePinnedFrequencyWindow(FreqUnit from, FreqUnit to)
+        {
+            if (from == to || _autoscaleX || !XAxisTracksFreqUnit) return;
+
+            double r = FreqUnitExtensions.ConversionFactor(from, to);
+            if (!(r > 0) || !double.IsFinite(r) || r == 1.0) return;
+
+            var w = Axes.Window;
+            Axes.Window = new PlotRect(w.X * r, w.Y, w.Width * r, w.Height);
+            var s = Axes.WindowSecondary;
+            Axes.WindowSecondary = new PlotRect(s.X * r, s.Y, s.Width * r, s.Height);
+            Axes.WindowState          = Axes.Window;
+            Axes.WindowSecondaryState = Axes.WindowSecondary;
         }
 
         // ---- Axes -------------------------------------------------------
@@ -908,6 +993,17 @@ namespace CircuitRF.Render.DataDisplay
                     secondary = new PlotRect(primary.X, secondary.Y, primary.Width, secondary.Height);
                 else if (xIsFrequency && secondary.X < 0)
                     secondary = new PlotRect(0, secondary.Y, secondary.Right, secondary.Height);
+
+                // A log X axis frames ENCLOSING DECADES, not the 1/2/5 lattice above — the padding
+                // and the zero clamp it replaces are both meaningless in the ratio, and a decade
+                // boundary is where a log axis's own major gridlines are. The extent comes from
+                // PositiveXExtent rather than the bounding box because a legal 0 Hz point puts the
+                // box's left edge at exactly zero.
+                if (Axes.XScale == AxisScale.Log && TryEnclosingDecades(out double dLo, out double dHi))
+                {
+                    primary   = new PlotRect(dLo, primary.Y,   dHi - dLo, primary.Height);
+                    secondary = new PlotRect(dLo, secondary.Y, dHi - dLo, secondary.Height);
+                }
             }
             else
             {
@@ -979,6 +1075,74 @@ namespace CircuitRF.Render.DataDisplay
 
             Axes.WindowState          = Axes.Window;
             Axes.WindowSecondaryState = Axes.WindowSecondary;
+        }
+
+        /// <summary>
+        /// The smallest decade boundary at or below every trace's smallest positive X, and the
+        /// largest at or above their largest — the window a log autoscale frames. False when no
+        /// trace has a positive X at all, in which case the caller leaves the window alone and
+        /// <see cref="Axes.RepairLogWindow"/> is the backstop.
+        /// </summary>
+        private bool TryEnclosingDecades(out double lo, out double hi)
+        {
+            lo = double.PositiveInfinity; hi = double.NegativeInfinity;
+            foreach (var t in Traces)
+            {
+                var (a, b, _) = t.PositiveXExtent();
+                if (double.IsFinite(a) && a < lo) lo = a;
+                if (double.IsFinite(b) && b > hi) hi = b;
+            }
+            if (!double.IsFinite(lo) || !double.IsFinite(hi) || !(lo > 0)) return false;
+
+            lo = Math.Pow(10.0, Math.Floor(Math.Log10(lo)));
+            hi = Math.Pow(10.0, Math.Ceiling(Math.Log10(hi)));
+            if (!(hi > lo)) hi = lo * 10.0;
+            return true;
+        }
+
+        /// <summary>
+        /// Switches the X axis between linear and logarithmic and RE-FRAMES it, which is the half a
+        /// bare property assignment cannot do: the window that was correct in one mode is very often
+        /// not a window the other can draw (an autoscaled frequency axis begins at −1e-6, which is
+        /// the log map's undefined point), and the two modes want different framings anyway —
+        /// enclosing decades versus the 1/2/5 lattice.
+        ///
+        /// <para>With Autoscale X on it simply re-autoscales. With Autoscale X off the user has
+        /// pinned a window and it is kept, repaired only as far as the new mode requires — which for
+        /// linear is nothing at all, and for log is <see cref="Axes.RepairLogWindow"/>.</para>
+        ///
+        /// <para>Rect only: a Smith or Polar X carries Re(Γ), which is signed.</para>
+        /// </summary>
+        public void SetXScale(AxisScale scale)
+        {
+            if (!PlotType.IsRect() || Axes.XScale == scale) return;
+            Axes.XScale = scale;                  // repairs both windows through their own setters
+            if (_autoscaleX) RunAutoscale("x");
+            Axes.WindowState          = Axes.Window;
+            Axes.WindowSecondaryState = Axes.WindowSecondary;
+        }
+
+        /// <summary>
+        /// The sentence drawn beside the X-axis label when a logarithmic X axis cannot place some of
+        /// the data: null when there is nothing to say.
+        ///
+        /// <para><b>Never silent.</b> A DC point is in the `.sNp` by construction and a log axis has
+        /// no answer for it, so the choice is between dropping it visibly and dropping it invisibly.
+        /// A point that vanishes without a sentence is the defect this whole axis mode exists to
+        /// stop, in a different costume.</para>
+        /// </summary>
+        public string? LogXHiddenPointNote
+        {
+            get
+            {
+                if (!PlotType.IsRect() || Axes.XScale != AxisScale.Log) return null;
+                int hidden = 0;
+                foreach (var t in Traces) hidden += t.PositiveXExtent().Hidden;
+                if (hidden == 0) return null;
+                return hidden == 1
+                    ? "— 1 point at X ≤ 0 hidden by the log axis"
+                    : $"— {hidden} points at X ≤ 0 hidden by the log axis";
+            }
         }
 
         private static double RoundTo(double value, double interval) =>
@@ -1166,7 +1330,7 @@ namespace CircuitRF.Render.DataDisplay
 
             foreach (var t in Traces)
             {
-                var r = t.FindNearestTraceData(queryPoint);
+                var r = t.FindNearestTraceData(queryPoint, Axes.XScale == AxisScale.Log && PlotType.IsRect());
                 if (r.HasValue && r.Value.Distance < best)
                 {
                     best   = r.Value.Distance;

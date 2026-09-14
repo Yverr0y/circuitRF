@@ -100,6 +100,46 @@ rendering capability **on the Γ-plane (Smith) and Z-plane (Rect)** substrates (
 type. Overlay rules (locked): a contour plot may overlay 1-port Touchstone (`.s1p`) reflection data;
 it does **not** mix with power-sweep line traces (e.g. Gain vs Pin) — those are a different plot.
 
+### 2.4a Axis scale — the X axis is Linear or Log (LOGX, 2026-09-14)
+`Axes.XScale` is `Linear` (the default, and every axis the display drew before this) or base-10
+`Log`, and it is a property of the **axis**, never of a trace: two traces on one axis cannot disagree
+about its scale. It applies to **X only, and to Rect only** — the Y axis is already logarithmic where
+it matters (`YAxis: Db`), and a Smith or Polar X carries Re(Γ), which is signed, so
+`PlotRenderer.BuildTransforms` engages the log map on Rect alone.
+
+It exists because circuitRF's own EM kernel writes log-spaced sweeps by default (a `.cem` whose
+`Frequency.Kind` is `Log`), and a decade-spanning sweep drawn on an affine axis is unreadable: an
+11-point run from 1 MHz to 2 GHz put five of its points inside the first seven pixels.
+
+**One map, so every consumer follows.** `TransformSet` carries an `XLog` flag and maps
+`log10(x)` when it is set — `XScale` is then px per decade — and `PrimaryFromCanvas` inverts it
+exactly, which is what marker placement and hit-testing rest on. The grid, the ticks, the traces, the
+marker glyphs, the drag, the VSWR locus, the contour renderer and the `render` verb's composer all
+obtain their mapping there. The three pieces of axis arithmetic the transform does **not** own —
+`Axes.Window`'s left-edge repair, `Axes.Translate` (pan) and `PlotControl.ZoomedWindow` (wheel) —
+each carry their own log arm, because a log axis pans and zooms in the RATIO, not the difference.
+
+- **Ticks.** Majors are decades and minors the 2…9 within each, down to two decades in view; inside
+  that, majors become `{1,2,5}·10ⁿ`; narrower still, the linear lattice. The mapping stays
+  logarithmic in every tier — only the choice of where to put the marks changes — and the tiers exist
+  because a decade lattice produces no tick at all on a window of 1…2 GHz.
+- **Labels keep ONE SI prefix per axis**, the rule every other axis follows, because the tick numbers
+  are read against one stated unit in the X label and the Axes Limits Min/Max are typed in that same
+  unit. A decade-spanning frequency axis reads `0.001 / 0.01 / 0.1 / 1 / 10` under `(GHz)`.
+- **Autoscale frames the enclosing decades**, from the smallest positive X rather than from a
+  bounding box — a legal 0 Hz point puts that box's left edge at exactly zero.
+- **A point a log axis cannot place (X ≤ 0) is dropped VISIBLY.** The polyline breaks rather than
+  bridging, and `Plot.LogXHiddenPointNote` states the count beside the X-axis label. A DC point is
+  legal and ordinary; a point that vanishes without a sentence is the defect this mode exists to stop.
+- **Entry point:** the Axes Limits flyout's X Axis block (`AxesLimitsView.axaml`), a `Linear | Log`
+  selector beside the Autoscale checkbox. Those fields apply per keystroke, so a non-positive minimum
+  is **rejected, never coerced** — a typed `0.001` passes through `0` on the way.
+- **Persistence:** `AxesConfig.XScale`, written as a name and defaulting to `Linear`, so a `.cdd`
+  written before the field existed reads back as the picture it was saved as. `render <path.cdd>`
+  needs no flag of its own; `render --window` is unaffected, because it names world coordinates.
+
+Detail, the decisions and the traps: `src/Render/DataDisplay/RESOLVED.md` §LOGX.
+
 ### 2.5 Persistence
 The authored display serializes to a circuitRF display-config file with extension **`.cdd`** ("circuitRF
 data display", locked). splotRF's `.splot` is the structural template: tabs → plot containers → traces →

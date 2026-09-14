@@ -35,6 +35,28 @@
                           FontSize="11"
                           VerticalAlignment="Center"/>
             </Grid>
+            <!-- The X axis's own mapping. Its own row rather than squeezed onto the header row
+                 beside Autoscale: at this flyout's 300 px the header already carries "X Axis", the
+                 unit and the Autoscale box. Rect only — a Smith or Polar X carries Re(Γ), which is
+                 signed, and the Y blocks below are deliberately untouched (there is no log Y). -->
+            <StackPanel Orientation="Horizontal" Spacing="10"
+                        IsVisible="{Binding ShowXScale}">
+                <TextBlock Text="Scale"
+                           VerticalAlignment="Center"
+                           FontSize="11"
+                           Width="32"/>
+                <RadioButton GroupName="XAxisScale"
+                             Content="Linear"
+                             FontSize="11"
+                             IsChecked="{Binding !XLogScale}"
+                             VerticalAlignment="Center"/>
+                <RadioButton GroupName="XAxisScale"
+                             Content="Log"
+                             FontSize="11"
+                             IsChecked="{Binding XLogScale, Mode=TwoWay}"
+                             VerticalAlignment="Center"/>
+            </StackPanel>
+
             <Grid ColumnDefinitions="32,*,8,32,*"
                   IsEnabled="{Binding XFieldsEnabled}">
                 <TextBlock Grid.Column="0" Text="Min"
