@@ -191,6 +191,27 @@ public sealed record Termination
         Kind is TerminationKind.Pec or TerminationKind.SurfaceImpedance;
 
     /// <summary>
+    /// <b>CL5 — does this end of the stack DISSIPATE?</b> A PEC and a PMC do not; a CL4 conducting
+    /// plane does unless it is a perfect spelling of one (σ ≤ 0, σ = +∞, t ≤ 0), and an open
+    /// half-space does when the medium it opens into is lossy.
+    ///
+    /// <para><b>This is not <see cref="IsConductor"/> with a different name and the two must not be
+    /// confused.</b> <c>IsConductor</c> asks whether the end is OPAQUE and an equipotential — a PEC
+    /// answers yes. This asks whether it takes power out of the fields, which is the question that
+    /// moves a surface-wave pole off the real k_ρ axis, and a PEC answers no.</para>
+    ///
+    /// <para>The perfect-spelling half is read from <see cref="PlanarSurfaceImpedance.IsPerfect(double, double)"/>
+    /// rather than re-written here, so it agrees with <see cref="SurfaceImpedanceAt"/>'s exact
+    /// <see cref="Complex.Zero"/> by construction rather than by inspection.</para>
+    /// </summary>
+    public bool Dissipates => Kind switch
+    {
+        TerminationKind.SurfaceImpedance => !PlanarSurfaceImpedance.IsPerfect(ConductivitySm, ThicknessM),
+        TerminationKind.HalfSpace        => Material.TanD > 0,
+        _                                => false,
+    };
+
+    /// <summary>
     /// <b>Z_s of the plane at this angular frequency, Ω/square — the ONE-SIDED form</b>
     /// <c>η_c·coth(γ_c t)</c>, because the plane has air below it and conducts on one face.
     /// (<see cref="PlanarSurfaceImpedance.Sheet"/>'s two-sided <c>(η_c/2)·coth(γ_c t/2)</c> is for a
@@ -361,6 +382,20 @@ public sealed class LayerStack
     public double RegionBottomZ(int region) => region == 0 ? double.NegativeInfinity : InterfaceZ[region - 1];
     public double RegionTopZ(int region)    => region == RegionCount - 1 ? double.PositiveInfinity : InterfaceZ[region];
     public bool   IsSemiInfinite(int region) => region == 0 || region == RegionCount - 1;
+
+    /// <summary>
+    /// <b>CL5 — does ANYTHING in this stack take power out of the fields?</b> Any layer with
+    /// tanδ &gt; 0, or either <see cref="Termination.Dissipates">termination</see>.
+    ///
+    /// <para>Written here once because the predicate that reads it has no other way to see a
+    /// <see cref="Termination"/>: the test it replaces was
+    /// <c>Layers.Any(l =&gt; l.Material.TanD &gt; 0)</c>, which is blind to a CL4 conducting floor —
+    /// a 35 µm copper plane under a tanδ = 0 substrate moves the FR-4 starter's TM₀ pole to
+    /// |Im k_ρ|/Re k_ρ = 2.6e-5, three orders further off the real axis than the tanδ = 1e-12 case
+    /// that same test admits freely, and it was still called lossless. §CL5.</para>
+    /// </summary>
+    public bool Dissipates =>
+        Layers.Any(l => l.Material.TanD > 0) || Bottom.Dissipates || Top.Dissipates;
 
     /// <summary>True when the given end is a solid wall (PEC/PMC) rather than a half-space.</summary>
     public bool IsWall(int region) =>

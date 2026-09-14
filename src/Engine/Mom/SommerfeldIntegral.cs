@@ -430,29 +430,62 @@ public static class SommerfeldIntegral
     // ===========================================================================================
 
     /// <summary>
-    /// The same restriction the one-layer oracle carries, for the same reason: a LOSSLESS guided
-    /// stack puts its surface-wave poles exactly on the real-k_ρ contour this integrator uses, so
-    /// the integral exists only as a principal value plus a residue — machinery this path
-    /// deliberately does not carry, because it exists to CHECK another path, not to be one.
+    /// <b>CL5 — the OPEN-TOP reference, which is the half of this file's precondition that is
+    /// structural rather than about the contour.</b> Every closed form extracted below — the direct
+    /// term, the quasi-static image, and at an interior pair the third piece as well — is an inverse
+    /// transform in the TOP half-space's own k_z0. A solid wall up there is not a tolerance; it is a
+    /// different partition, so it is refused by name in the one place both predicates read.
     /// </summary>
-    public static EmSuitability CanIntegrateLayered(LayerStack stack)
-    {
-        if (stack.Top.Kind != TerminationKind.HalfSpace)
-            return EmSuitability.No(
+    private static EmSuitability TopIsOpenHalfSpace(LayerStack stack) =>
+        stack.Top.Kind == TerminationKind.HalfSpace
+            ? EmSuitability.Yes
+            : EmSuitability.No(
                 $"The top termination is {stack.Top}, a solid wall. This oracle is referenced to a " +
                 $"half-space above the stack, where the direct and quasi-static pieces have exact " +
                 $"closed-form inverses; a closed guide needs a different partition.");
 
+    /// <summary>
+    /// The same restriction the one-layer oracle carries, for the same reason: a LOSSLESS guided
+    /// stack puts its surface-wave poles exactly on the real-k_ρ contour this integrator uses, so
+    /// the integral exists only as a principal value plus a residue — machinery this path
+    /// deliberately does not carry, because it exists to CHECK another path, not to be one.
+    ///
+    /// <para><b>CL5 — this refusal is the CONTOUR's and belongs to this integrator alone.</b> It used
+    /// to reach <see cref="Dcim.FitAtHeights"/> too, through <see cref="CanIntegrateInterior"/>,
+    /// which borrowed the whole of it as a precondition. The fit integrates nothing: it samples
+    /// <c>KernelAtHeights</c> along a path in the source region's own k_zm and Prony-fits what is
+    /// left after every pole has been subtracted in closed form, so a pole ON the real k_ρ axis
+    /// costs it nothing. Measured on FR-4 1.6 mm at 10 GHz: at tanδ = 1e-16 the TM₀ pole sits
+    /// 3.8e-18 off the axis — numerically on it — and the fit's residual is 3.86e-5 against the
+    /// tanδ = 0.02 stack's 3.17e-5. <see cref="CanFitAtHeightsStructurally"/> is what that path asks
+    /// now; this one is unchanged for <see cref="EvaluateLayered"/> and
+    /// <see cref="EvaluateInterior"/>. §CL5.</para>
+    ///
+    /// <para><b>And the loss test is the STACK's, not the layer list's</b> — a CL4 conducting floor
+    /// dissipates and moves the poles off the axis, which is exactly the condition this refusal
+    /// exists to guarantee, and <c>Layers.Any(tanδ &gt; 0)</c> could not see it because a
+    /// <see cref="Termination"/> is not a <see cref="MediumLayer"/>. See
+    /// <see cref="LayerStack.Dissipates"/>.</para>
+    /// </summary>
+    public static EmSuitability CanIntegrateLayered(LayerStack stack)
+    {
+        var top = TopIsOpenHalfSpace(stack);
+        if (!top.Ok) return top;
+
         bool guided = stack.Layers.Any(l =>
             l.Material.EpsR * l.Material.MuR > stack.Top.Material.EpsR * stack.Top.Material.MuR + 1e-12);
-        bool lossy = stack.Layers.Any(l => l.Material.TanD > 0);
 
-        if (guided && !lossy)
+        if (guided && !stack.Dissipates)
             return EmSuitability.No(
-                "The direct Sommerfeld integrator needs at least one LOSSY layer (tanδ > 0). A " +
-                "lossless guided stack puts its surface-wave poles exactly on the real-k_ρ contour " +
-                "this integrator uses. Dcim has no such restriction: it extracts the poles in closed " +
-                "form. Both starter substrates are lossy.");
+                "The direct Sommerfeld integrator needs the stack to DISSIPATE somewhere — a layer " +
+                "with tanδ > 0, a conducting termination that is not a perfect one, or an open " +
+                "termination into a lossy half-space. A lossless guided stack puts its surface-wave " +
+                "poles exactly on the real-k_ρ contour this integrator uses, so the integral exists " +
+                "only as a principal value plus a residue, and this path carries neither — it exists " +
+                "to CHECK another path, not to be one. This is the CONTOUR's restriction and nothing " +
+                "else shares it: Dcim.FitAtHeights extracts every pole in closed form and asks " +
+                "CanFitAtHeightsStructurally instead, and Dcim.Fit's high-high path never carried it. " +
+                "Both starter substrates are lossy.");
 
         return EmSuitability.Yes;
     }
@@ -561,15 +594,23 @@ public static class SommerfeldIntegral
     // ===========================================================================================
 
     /// <summary>
-    /// <b>R-mom-17 — what the interior oracle refuses, by name.</b> The lossless-guided refusal is
-    /// the one <see cref="CanIntegrateLayered"/> already carries, for the same reason; the two new
-    /// ones are that a source cannot sit inside a solid wall, and that the closed forms are still
-    /// referenced to an open top.
+    /// <b>CL5 — the STRUCTURAL half of the interior precondition, and the only half
+    /// <see cref="Dcim.FitAtHeights"/> needs.</b> Two questions: the closed forms are still
+    /// referenced to an open top, and a source or observer cannot sit inside a solid wall — there is
+    /// no medium there to be a Green's function of.
+    ///
+    /// <para><b>What is deliberately NOT here is the lossless-guided refusal</b>, which is the
+    /// contour's and stays on <see cref="CanIntegrateLayered"/> for
+    /// <see cref="EvaluateLayered"/>/<see cref="EvaluateInterior"/>'s own use. Before CL5 the fit
+    /// borrowed the whole of <see cref="CanIntegrateInterior"/> and inherited a restriction that
+    /// belongs to a path its run never reaches — so a two-level design on an ideal substrate refused
+    /// with a sentence about an integrator that was never called. R-mom-17's standing rule is to
+    /// NARROW a refusal and re-point it, never to delete it, and that is what this is.</para>
     /// </summary>
-    public static EmSuitability CanIntegrateInterior(LayeredSpectralGreens g, double z, double zp)
+    public static EmSuitability CanFitAtHeightsStructurally(LayeredSpectralGreens g, double z, double zp)
     {
-        var basic = CanIntegrateLayered(g.Stack);
-        if (!basic.Ok) return basic;
+        var top = TopIsOpenHalfSpace(g.Stack);
+        if (!top.Ok) return top;
 
         foreach (var (x, what) in new[] { (zp, "source"), (z, "observer") })
         {
@@ -581,6 +622,23 @@ public static class SommerfeldIntegral
                     $"rather than a medium. Place it inside a layer or in an open half-space.");
         }
         return EmSuitability.Yes;
+    }
+
+    /// <summary>
+    /// <b>R-mom-17 — what the interior ORACLE refuses, by name.</b> The lossless-guided refusal is
+    /// the one <see cref="CanIntegrateLayered"/> already carries, for the same reason, plus
+    /// <see cref="CanFitAtHeightsStructurally"/>'s two.
+    ///
+    /// <para><b>This is <see cref="EvaluateInterior"/>'s precondition and nothing else's</b> (CL5).
+    /// It is the union of the two predicates rather than the source of either, so the direct
+    /// integrator keeps exactly the refusals it had while the fit keeps only the ones it needs.</para>
+    /// </summary>
+    public static EmSuitability CanIntegrateInterior(LayeredSpectralGreens g, double z, double zp)
+    {
+        var basic = CanIntegrateLayered(g.Stack);
+        if (!basic.Ok) return basic;
+
+        return CanFitAtHeightsStructurally(g, z, zp);
     }
 
     /// <summary>

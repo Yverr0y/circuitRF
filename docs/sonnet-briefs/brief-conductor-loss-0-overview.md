@@ -1,6 +1,7 @@
 # Brief — conductor loss in the full-wave kernel: the series
 
-**Status:** CL1 SHIPPED 2026-09-14 (`RESOLVED.md` §CL1); CL2-CL4 briefed, not started ·
+**Status:** CL1-CL5 ALL SHIPPED 2026-09-14 (`RESOLVED.md` §CL1, §CL2, §CL3, §CL4, §CL5);
+**CL6-CL7 briefed 2026-09-14, not started** ·
 **Date:** 2026-09-14 · **Area:** `src/Engine/Mom`,
 `docs/user/src/reference`
 **Requirement tag for the series:** `R-cl-n`, scoped per brief (`R-cl1-3` is brief 1's third)
@@ -53,9 +54,36 @@ is for.
 | **CL2** | `P_conductor` stops being an identical zero: the power budget, the metrics, the radiation efficiency | Low |
 | **CL3** | Flip the default, re-bless the goldens, the docs, the A-vs-B gate, the cost measurement | Low, **wide** |
 | **CL4** | The lossy ground plane — an impedance termination in the layered Green's function | **High.** May return a measured refusal |
+| **CL5** ✅ | The lossless-stack refusal belongs to the integrator, not to the fit | Low. Also closes a live defect. **SHIPPED** — `RESOLVED.md` §CL5 |
+| **CL6** | The one-slab kernel gets the same floor, so no run is re-based onto a looser tier | **High.** One re-derivation, with a named landing |
+| **CL7** | The extractor writes the floor: the QSC ground term, the budget's label, the re-bless | Low, **wide** |
 
 CL1 → CL2 → CL3 in that order. **CL4 is conditional on CL3 having landed** and is worth 11-25% of
 the conductor term (§2). **Thick metal is not a brief in this series** and §3 says why.
+
+### And the three that follow, because CL4 did not reach a user
+
+**CL4 landed as a success and a partial one**: all four of its ordered measurements pass, the
+termination is built and measured — and `PlanarExtractor` still writes a PEC floor, so **no run
+anyone can make has a conducting ground plane** (§CL4 §9). CL5 → CL6 → CL7 is what closes that, in
+that order, and **CL6 is the one that decides whether the series lands**.
+
+CL4 §9 weighed three obstructions to simply turning the floor on. **One of them is gone: CL5 shipped
+and removed it** — the general path's lossless-dielectric refusal was the DIRECT integrator's
+precondition, borrowed by a fit that integrates nothing, and the fit's own spectral residual is flat
+across twelve decades of tanδ down to and including zero (`RESOLVED.md` §CL5 §3). A two-level design
+on a tanδ = 0 substrate solves through `PlanarSolve` now, and a CL4 conducting floor is admitted
+rather than called lossless. The second is real and is why CL6 exists rather than a one-line
+extractor change: the general kernel's validated range is **2.6× looser** (1.6e-2 against 6e-3), and
+buying an 11-25% term by re-basing every ordinary microstrip onto a looser tier is not a trade worth
+making. The third is the re-bless, and it is CL7's.
+
+**A conditional CL8 is named and not briefed:** a two-sided, TRANSMITTING plane — finite-thickness
+metal into a stated medium below — which is what would make `FrontToBackDb` computable and change the
+far field's θ range. CL4 §6 refuses it correctly as things stand: a Leontovich condition replaces
+everything below z = 0 and computes no transmitted field, so the leakage is not small in this model,
+it is ABSENT from it. That is different physics, not a tolerance, and it gets a brief only if
+backside radiation is actually wanted.
 
 ### One thing landed between CL1 and CL2, and it moves where CL3's flip lands
 

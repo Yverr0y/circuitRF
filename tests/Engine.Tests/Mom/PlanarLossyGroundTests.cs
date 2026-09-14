@@ -318,10 +318,13 @@ public sealed class PlanarLossyGroundTests(ITestOutputHelper output)
         output.WriteLine($"  kernel A: a_strip {aStripA:E4}  a_ground {aGroundA:E4}  a_total {aBothA:E4} Np/m" +
                          $"   SHARE {aGroundA/aBothA:P2}   (overview {(fr4 ? "21.1%" : "~11%")})");
         output.WriteLine("");
-        output.WriteLine("  kernel B. The general path REFUSES tanD = 0 (SommerfeldIntegral.CanIntegrateLayered,");
-        output.WriteLine("  through Dcim.FitAtHeights), so the dielectric is carried and cancels in the");
-        output.WriteLine("  differences. A1 is the PEC-metal PEC-ground extraction floor; every term below is");
-        output.WriteLine("  measured FROM IT, so the ground term is B1 - A1 with the strip perfect on both sides.");
+        output.WriteLine("  kernel B. The substrate carries its real tanD and cancels in the differences.");
+        output.WriteLine("  (Until CL5 it HAD to: the fit borrowed the direct integrator's lossless-guided");
+        output.WriteLine("  refusal through Dcim.FitAtHeights. That is now the integrator's alone and a");
+        output.WriteLine("  tanD = 0 stack fits; this measurement keeps the loss anyway, so the numbers here");
+        output.WriteLine("  stay the ones CL4 reported.) A1 is the PEC-metal PEC-ground extraction floor;");
+        output.WriteLine("  every term below is measured FROM IT, so the ground term is B1 - A1 with the");
+        output.WriteLine("  strip perfect on both sides.");
 
         foreach (double gs in new[] { sg, sg / 4.0 })
         {

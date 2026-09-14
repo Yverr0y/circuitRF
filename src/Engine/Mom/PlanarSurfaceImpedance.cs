@@ -160,13 +160,24 @@ public static class PlanarSurfaceImpedance
     private static bool IsPerfect(double sigmaSm) => !(sigmaSm > 0) || double.IsPositiveInfinity(sigmaSm);
 
     /// <summary>
+    /// <b>CL5 — the same three spellings plus the zero-thickness one, as the single test for "this
+    /// metal has Z_s = 0 exactly".</b> <see cref="Sheet"/> and <see cref="Plane"/> both open with
+    /// it, and <c>Termination.Dissipates</c> reads it rather than re-spelling the rule — so
+    /// "a perfect floor does not dissipate" and "a perfect floor returns exactly
+    /// <see cref="Complex.Zero"/>" cannot drift apart. It is frequency-free on purpose: none of the
+    /// four spellings depends on ω, which is what lets a predicate with no ω in hand ask it.
+    /// </summary>
+    public static bool IsPerfect(double sigmaSm, double thicknessM) =>
+        IsPerfect(sigmaSm) || !(thicknessM > 0);
+
+    /// <summary>
     /// <b>(CL1.1) — Z_s of a sheet of thickness <paramref name="thicknessM"/> carrying current on
     /// BOTH faces</b>, Ω per square. <c>σ ≤ 0</c> or <c>t ≤ 0</c> is a PEC and returns exactly
     /// <see cref="Complex.Zero"/>.
     /// </summary>
     public static Complex Sheet(double sigmaSm, double thicknessM, double omegaRadS)
     {
-        if (IsPerfect(sigmaSm) || !(thicknessM > 0)) return Complex.Zero;
+        if (IsPerfect(sigmaSm, thicknessM)) return Complex.Zero;
 
         // ω = 0 is the DC point: the skin depth is infinite, coth's argument is zero, and the limit
         // is 1/(σt) exactly. Written as the limit rather than reached through a coth of zero, which
@@ -203,7 +214,7 @@ public static class PlanarSurfaceImpedance
     /// </summary>
     public static Complex Plane(double sigmaSm, double thicknessM, double omegaRadS)
     {
-        if (IsPerfect(sigmaSm) || !(thicknessM > 0)) return Complex.Zero;
+        if (IsPerfect(sigmaSm, thicknessM)) return Complex.Zero;
         if (!(omegaRadS > 0)) return new Complex(1.0 / (sigmaSm * thicknessM), 0.0);
 
         double delta = SkinDepthM(sigmaSm, omegaRadS);

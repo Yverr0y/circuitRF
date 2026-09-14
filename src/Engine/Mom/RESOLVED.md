@@ -3,6 +3,271 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## CL5 — the lossless-stack refusal belongs to the integrator, not to the fit (2026-09-14)
+
+`docs/sonnet-briefs/brief-conductor-loss-5-lossless-predicate.md`. `SommerfeldIntegral.CanIntegrateLayered`
+refused a guided stack with no loss in it, and that refusal reached the product through
+`Dcim.FitAtHeights`, which borrowed `CanIntegrateInterior` as a precondition. **`FitAtHeights`
+integrates nothing.** Two separable defects, both closed, and the second of them is why this brief is
+in the conductor-loss series rather than in a tidy-up pile.
+
+**It closes a LIVE defect, not a future one.** A two-level design on a tanδ = 0 substrate refused
+today, citing an integrator its run never reaches — and the stackup editor's own readiness message
+(`src/Design/Layout/StackupFieldReadiness.cs:82`) reads *"Use 0 for a lossless dielectric"*, so the
+value the refusal fired on is the one the application invites. `TechModel.TanD` is a bare `double`
+with no initialiser, so it is also the DEFAULT.
+
+### 0. The two predicates, and which question each now asks
+
+| | asks | called by |
+|---|---|---|
+| `SommerfeldIntegral.CanIntegrateLayered(LayerStack)` | open top, **and the CONTOUR's lossless-guided restriction** | `EvaluateLayered`, and `CanIntegrateInterior` |
+| `SommerfeldIntegral.CanFitAtHeightsStructurally(g, z, z′)` | open top, and neither point inside a solid wall | **`Dcim.FitAtHeights`** |
+| `SommerfeldIntegral.CanIntegrateInterior(g, z, z′)` | the UNION of the two | `EvaluateInterior` |
+
+`CanIntegrateInterior` is now the union rather than the source of either, so the direct integrator
+keeps exactly the refusals it had and the fit keeps only the ones it needs. The open-top check is
+written once (`TopIsOpenHalfSpace`) and read from both, message unchanged.
+
+**The one-slab `CanIntegrate(SpectralGreens)` needed no equivalent change and was checked rather than
+assumed:** nothing borrows it. `Dcim.Fit(SpectralGreens, …)` never called it, and its only caller
+outside this file is `tests/Engine.Tests/Mom/Support/SommerfeldRadialTable.cs:45` — the oracle table,
+which is the direct integrator's own consumer.
+
+### 1. The loss test is the STACK's now, and the old one could not see a conducting floor
+
+`LayerStack.Dissipates` — any layer with tanδ > 0, or either `Termination.Dissipates`. The old test
+was `stack.Layers.Any(l => l.Material.TanD > 0)`, and **a `Termination` is not a `MediumLayer`**, so a
+CL4 conducting floor — the one thing in this series built specifically to dissipate — was invisible
+to it.
+
+`Termination.Dissipates` is **not `IsConductor` under another name**, and the pair is worth keeping
+straight: `IsConductor` asks whether the end is opaque and an equipotential (a PEC answers yes, and
+CL4's four narrowed call sites depend on that); `Dissipates` asks whether it takes power out of the
+fields (a PEC answers no). The perfect-spelling half is read from
+`PlanarSurfaceImpedance.IsPerfect(σ, t)` — a new overload of the private three-spelling test, which
+`Sheet` and `Plane` now open with too — so **"does not dissipate" and "returns exactly
+`Complex.Zero`" cannot drift apart.** A `HalfSpace` into a lossy medium counts as well, which is what
+makes `LayerStacks.FilmOnSilicon` dissipate on its bottom termination.
+
+### 2. R-cl5-1 — nothing that runs today moves, measured against HEAD rather than argued
+
+A worktree at `e13f1b70`, the same dump test in both trees, diffed: **234 configurations, 2,070
+doubles at full round-trip (`"R"`) precision, zero differences and zero refusals on either side.**
+Six `LayerStacks` fixtures × 2/10/20 GHz × three kernels × three height pairings, through
+`Dcim.FitAtHeights`, `Dcim.Fit` and `SommerfeldIntegral.EvaluateLayered`.
+
+The zero is structural — a predicate was re-pointed and no arithmetic was touched — but it is the
+kind of claim that is cheap to assert and cheap to be wrong about, and a worktree at HEAD costs one
+build. **`git stash` was not used**; the working tree was never disturbed.
+
+What is asserted permanently instead is the thing a future edit could break:
+`R_cl5_1_TheSplitPredicateAgreesWithTheUnion_WhereverTheStackDissipates` — the narrowed predicate is
+a SUBSET of the union, the two give the same verdict on every stack that dissipates, and the only
+place they part company is a guided stack that does not.
+
+### 3. R-cl5-2 — the ε-ladder, and the column that decided milestone 4
+
+Both starters made lossless, both kernels, 10 GHz, `FitAtHeights(h, h)`, worst over
+ρ/λ ∈ {1e-4, 1e-3, 1e-2, 0.1, 1.0} — the whole of `ValidatedRhoOverLambdaLayered` — scaled on the
+free-space kernel. **The 1.6e-2 ceiling is CL4 §3's own and nothing was widened.** `vs-direct` is the
+fit against `SommerfeldIntegral.EvaluateLayered`, an INDEPENDENT reference; `vs-tanδ=0` is each rung
+against the lossless fit, which is the ladder's own continuity statement.
+
+| stack / kernel | tanδ | pole \|Im\|/Re | direct | fit residual | vs-direct | vs-tanδ=0 |
+|---|---|---|---|---|---|---|
+| FR-4 `G_q` | 1e-3  | 3.846e-5  | yes | 3.831e-5 | 4.197e-5 | 3.503e-4 |
+|            | 1e-6  | 3.846e-8  | yes | 3.892e-5 | 4.209e-5 | 7.078e-7 |
+|            | 1e-9  | 3.846e-11 | yes | 3.945e-5 | 4.227e-5 | 4.210e-7 |
+|            | 1e-12 | 3.846e-14 | yes | 3.814e-5 | 4.186e-5 | 6.893e-7 |
+|            | 1e-16 | 3.846e-18 | yes | 3.861e-5 | **2.320e-1** | 3.903e-7 |
+|            | **0** | 0         | **NO** | 3.871e-5 | — | 0 |
+| FR-4 `G_A` | 1e-3  | 3.846e-5  | yes | 3.200e-6 | 8.828e-7 | 1.028e-4 |
+|            | 1e-6  | 3.846e-8  | yes | 3.157e-6 | 8.458e-7 | 1.086e-7 |
+|            | 1e-9  | 3.846e-11 | yes | 3.164e-6 | 8.853e-7 | 4.209e-8 |
+|            | 1e-12 | 3.846e-14 | yes | 3.106e-6 | 8.530e-7 | 1.364e-8 |
+|            | 1e-16 | 3.846e-18 | yes | 3.105e-6 | 8.463e-7 | 3.124e-9 |
+|            | **0** | 0         | **NO** | 3.103e-6 | — | 0 |
+| GaAs `G_q` | 1e-3  | 3.223e-8  | yes | 6.518e-6 | 1.483e-5 | 1.309e-4 |
+|            | 1e-6  | 3.223e-11 | yes | 6.563e-6 | 1.494e-5 | 9.009e-7 |
+|            | 1e-9  | 3.223e-14 | yes | 6.107e-6 | 1.603e-5 | 3.042e-7 |
+|            | 1e-12 | 3.223e-17 | yes | 6.061e-6 | **6.946e-5** | 1.038e-7 |
+|            | 1e-16 | 3.223e-21 | yes | 6.146e-6 | **1.069e-4** | 3.444e-7 |
+|            | **0** | 0         | **NO** | 6.113e-6 | — | 0 |
+| GaAs `G_A` | 1e-3  | 3.223e-8  | yes | 1.609e-7 | 1.324e-6 | 4.546e-7 |
+|            | 1e-6  | 3.223e-11 | yes | 1.609e-7 | 1.324e-6 | 5.377e-10 |
+|            | 1e-9  | 3.223e-14 | yes | 1.609e-7 | 1.323e-6 | 7.257e-10 |
+|            | 1e-12 | 3.223e-17 | yes | 1.609e-7 | 1.324e-6 | 1.902e-10 |
+|            | 1e-16 | 3.223e-21 | yes | 1.609e-7 | 1.324e-6 | 2.158e-10 |
+|            | **0** | 0         | **NO** | 1.609e-7 | — | 0 |
+
+**Three readings, and they are the whole of the brief's case.**
+
+1. **The FIT does not notice.** Its own spectral residual is flat across twelve decades of tanδ —
+   3.83e-5 → 3.87e-5 on FR-4 `G_q`, and 1.609e-7 UNCHANGED TO FOUR FIGURES on GaAs `G_A`. There is
+   nothing in the DCIM path that degrades as the loss goes to zero.
+2. **The ladder CONVERGES and then floors.** `vs-tanδ=0` falls by 2-5 decades from tanδ = 1e-3 to
+   1e-6 and then sits at a few times 1e-7 (FR-4 `G_q`) or 1e-9 (FR-4 `G_A`) — **that floor is the
+   fit's own reproducibility, not the physics**: below tanδ ≈ 1e-6 the two kernels differ by less
+   than two Prony fits of the same kernel do. The gate asserts monotone convergence only where the
+   column is still signal, and bounds the floor below that; asserting strict monotonicity all the way
+   down fails, and it fails on noise.
+3. **THE DIRECT INTEGRATOR IS THE ONE THAT DEGRADES, AND IT IS STILL ADMITTED WHILE DOING IT.** On
+   FR-4 `G_q` at tanδ = 1e-16 the fit is 2.320e-1 from the direct integrator — **5,500× worse than
+   the same comparison at 1e-3, and 14× PAST the 1.6e-2 ceiling** — with the fit itself unchanged, so
+   it is the integrator that moved. GaAs `G_q` shows the same thing more gently (1.48e-5 → 1.07e-4).
+   The contour is running into the pole, exactly as its refusal says; **the refusal simply fires a
+   binary decade or four too late**, because `tanδ > 0` is a proxy for a continuous condition. That
+   is milestone 4's evidence and it is why the answer there is NO — see §6.
+
+   **Consequence for anyone writing a test:** `SommerfeldIntegral.EvaluateLayered` is not a
+   trustworthy oracle on a nearly-lossless guided stack even though it accepts one. The ladder's
+   assertion against it is therefore made only for tanδ ≥ 1e-9; below that the column is REPORTED and
+   the continuity column is what carries the rung.
+
+### 4. R-cl5-3 — the live defect closes, and this is the only gate driven through `PlanarSolve`
+
+A two-level MMIC shape with a real through path: a 120 µm line on M1 with a 36 × 40 µm overlay pad on
+M2, 3 µm above it — an overlap capacitor, which is the ordinary reason a design has two levels at
+all. Every dielectric at tanδ, N = 118, 10 GHz, de-embedded through `PlanarSolve.Run`.
+
+| tanδ | direct integrator | Z_c | S₁₁ | S₂₁ |
+|---|---|---|---|---|
+| **0** | **REFUSED** | 64.10 − 0.36j | 0.2853 + 0.4321j | 0.7135 − 0.4764j |
+| 1e-16 | admitted | 64.10 − 0.36j | 0.2853 + 0.4321j | 0.7135 − 0.4764j |
+| 2e-3 (the real GaAs figure) | admitted | 64.10 − 0.42j | 0.2859 + 0.4329j | 0.7129 − 0.4772j |
+
+**Before CL5 the first row did not produce a wrong number — it THREW**, out of `Dcim.FitAtHeights`,
+with the direct integrator's sentence. Worst |ΔS| between tanδ = 0 and 1e-16 is **3.57e-6**, against
+**9.93e-4** between tanδ = 0 and the substrate's own loss — the ε agreement is **278× tighter than
+the only scale on this problem that means anything**, which is how the gate states its tolerance
+rather than picking a constant. The first row still reports `CanIntegrateLayered` = NO, asserted, so
+the gate cannot pass for the wrong reason.
+
+### 5. R-cl5-4 — the refusal still refuses, and the MESSAGE is asserted
+
+`EvaluateLayered` and `EvaluateInterior` still throw on a lossless guided stack, and the test asserts
+the REASON and not only the verdict: it must contain `real-k_ρ contour` and `principal value`, and it
+must name `CanFitAtHeightsStructurally` as the thing that asks the narrower question. **This refusal
+has been wrong in its attribution once** — its old sentence said *"Dcim has no such restriction"*,
+which was true and was exactly what carried it into `Dcim.FitAtHeights` unread — and asserting the
+sentence is what stops that recurring.
+
+The message also stopped saying *"needs at least one LOSSY LAYER"*, which was the blind half: it now
+names the three ways a stack can dissipate, including a conducting termination.
+
+The two structural refusals it also carries are asserted to still fire, so this is a narrowing and
+not a deletion: a solid wall on top, and a source inside a wall.
+
+### 6. Milestone 4 — the contour indentation: NO, and the ladder is what makes that a decision
+
+The standard remedy for a pole on the contour is an arbitrarily small indentation around it with the
+residue added in closed form, and it would make the direct integrator exact at tanδ = 0 rather than
+only in the limit. **It is declined, and recorded here because a refusal whose remedy is never
+written down gets re-discovered.** Three reasons, in order of weight:
+
+1. **Nothing needs it.** The direct integrator exists to CHECK the DCIM path, and at tanδ = 1e-3 it
+   is healthy and is already an independent reference for a stack whose kernel is indistinguishable
+   from the lossless one. The ladder's own continuity carries the rest.
+2. **It would fix the measure-zero point and not the band that actually bites.** The pole-on-contour
+   problem is CONTINUOUS and `tanδ > 0` is a binary proxy for it: on FR-4 `G_q` the integrator is
+   formally admitted at tanδ = 1e-16 and is **5,500× worse there than at 1e-3, and 14× past the
+   1.6e-2 ceiling** (§3's `vs-direct` column). An indentation at exactly zero leaves every
+   tiny-but-nonzero tanδ admitted and silently degrading, which is the band a caller is actually
+   likely to be in.
+3. **The change that WOULD address (2) is a different one and is out of this brief's scope** — a
+   pole-proximity refusal on `CanIntegrateLayered` (refuse when |Im k_ρ|/Re k_ρ is below a measured
+   floor, rather than when tanδ is exactly zero). That WIDENS a refusal, would move verdicts
+   R-cl5-1 pins as unchanged, and needs its own measurement of where the floor is. **Named, not
+   built.**
+
+### 7. THE CORRECTION TO §CL4 §9's OBSTRUCTION 1 — read this before sizing CL6 or CL7
+
+§CL4 §9 weighed three obstructions to turning the conducting floor on in `PlanarExtractor`. **The
+first of them is gone, and its example was never a casualty.** The inline correction block in §9 said
+so when this brief was scoped; it is now MEASURED and shipped, and CL6/CL7 should be sized against
+this paragraph rather than against §9 as originally written:
+
+- **`CoplanarDeembedTests` was never refused.** Its fixtures are `EmMaterial(1.0, 0.0)`
+  (`CoplanarDeembedTests.cs:45`, `:337`, `:476`) — at εᵣ = 1 there is no guided mode, so `guided` is
+  false and `CanIntegrateLayered` admitted them before this brief and after it. The case that
+  actually refused is **εᵣ > 1 with tanδ = 0**, which §9 did not name.
+- **The refusal was the DIRECT integrator's** and the fit never shared it. §CL5 §0.
+- **Obstructions 2 and 3 stand, unchanged.** The general path's accuracy tier really is ~2.6× looser,
+  and the default flip really is a CL3-sized re-bless.
+
+**One naming slip in obstruction 2, and it does not weaken it.** §9 writes *"`ValidatedRhoOverLambdaLayered`'s
+≤1.6e-2 against `ValidatedRhoOverLambda`'s ≤6e-3"*. Those two constants are **both 1.0** — they are
+the validated ρ/λ RANGE. 1.6e-2 and 6e-3 are the measured ERROR ceilings inside those ranges
+(`Dcim.cs:246-284` and `:140-169`), and the 2.6× gap between them is real and is the substance of the
+obstruction. CL5's own brief repeats the same conflation. **Nothing needs re-deciding; a reader
+should just not go looking for two constants that differ.**
+
+### 8. What this does NOT reach
+
+**No run a user can make still gets a conducting ground plane** — `PlanarExtractor.BuildMediumStack`
+still writes `Termination.Pec`, exactly as §CL4 §9 says, and this brief did not touch it. What
+changed is that one of the three reasons not to is no longer there.
+
+**The validated ranges were not widened.** `ValidatedRhoOverLambdaLayered`,
+`ValidatedRhoOverLambdaAtHeights` and `ValidatedRhoOverLambdaInteriorHorizontal` are untouched, and
+so is the 1.6e-2 ceiling every measurement above is taken against.
+
+**No loss was added anywhere a run can see.** The ε-ladder is an ORACLE construction, built inside
+the test by rewriting a fixture's tanδ; nothing in `src/` displaces a pole to make a contour work.
+
+### 9. Gates
+
+`tests/Engine.Tests/Mom/LosslessStackPredicateTests.cs`, **7 tests. 5 in the routine tier at 1.2 s
+together**; 2 tagged `Category=Benchmark` — `R_cl5_2_TheEpsilonLadder` at **3 m 39 s** (two starters ×
+two kernels × six rungs, with direct Sommerfeld integration at five ρ/λ each) and
+`R_cl5_3_ATwoLevelDesignOnAnIdealSubstrateSolves` at **7.9 s** (three de-embedded two-level solves).
+Measured, then tagged on the repo's mechanical ~5 s rule.
+
+**Both expensive measurements keep a routine-tier counterpart, on CL4 §10's terms**, because the
+cheap half is the one that catches a refusal someone re-introduced rather than measuring how good the
+answer is: `R_cl5_2b` re-asks the ladder on one stack, one kernel and the near field with no direct
+integration at all (0.83 s), and `R_cl5_3b` builds the CROSS-REGION fit a two-level ideal stack needs
+— the exact `Dcim.FitAtHeights` call the de-embedded solve used to die inside — in 0.31 s.
+
+**R-cl5-4's assertion is on the MESSAGE.** A verdict-only assertion would survive the mistake this
+brief exists to correct.
+
+**R-cl5-6** — `dotnet test tests/Engine.Tests`, run ONCE and triaged from the TRX:
+**2,409 passed, 0 failed, 1 skipped** (the same pre-existing `DataSetExportTests` skip CL4 recorded),
+**1 m 40 s**. Nothing outside this brief's own files moved, which is what says the split predicate is
+narrower and not different. *(CL4 §10 recorded 2,407 on this same HEAD and this brief adds 5 routine
+tests; 2,404 + 5 = 2,409, so one of the two counts is off by three. Not chased — the TRX names every
+outcome and there are no failures in either.)*
+
+### 10. Reported to the owner, by file and line (no `CLAUDE.md` edit, per the standing rule)
+
+- `src/Engine/Mom/CLAUDE.md` **§7's oracle-trap list, line 1194**: *"The Sommerfeld oracle requires a
+  **lossy** slab (tanδ > 0): a lossless one puts TM₀ exactly on the contour. `Dcim` has no such
+  restriction."* **Still true and now narrower than it reads** — it is the DIRECT integrator's only,
+  the loss may come from a termination rather than a layer, and §3's last column says the trap is
+  worse than binary: at tanδ = 1e-16 the oracle is ADMITTED and 14× past the ceiling. A line that
+  said so would have saved this brief.
+- `src/Engine/Mom/CLAUDE.md` **§5, line 1085**, the conductor-loss bullet: *"a conducting floor is
+  expressible only through `MediumStack`, which forces the GENERAL kernel — and that kernel refuses a
+  lossless dielectric outright"*. **The second clause is now false.** The obstruction it names is the
+  one CL5 removed; the bullet's conclusion (not wired to `PlanarExtractor`) is unchanged and rests on
+  §CL4 §9's obstructions 2 and 3.
+- `docs/user/src/reference/mom-engine.md` **lines 174-176**: *"the solver's general layered path,
+  which is a looser accuracy tier and which **refuses a lossless substrate outright** … and would
+  break runs on an air or zero-tanδ substrate that work now."* **Both halves of that are now wrong** —
+  an air substrate was never refused (no guided mode) and a zero-tanδ one no longer is. The
+  paragraph's conclusion still holds on the looser-tier argument alone. **Not edited here**, because
+  the `.md` has an `.html` beside it and `docs/user` is already 78 files out of step with its own
+  generator (§CL4 §11); it is one sentence and it is the owner's call whether it rides with CL6.
+- The repo `CLAUDE.md`'s test-suite section counts **128 `Category=Benchmark` methods repo-wide**;
+  this brief adds 2, so that count is **130**.
+- **`ValidatedRhoOverLambdaLayered` and `ValidatedRhoOverLambda` are both 1.0**, and three places
+  quote them as 1.6e-2 and 6e-3 — which are the measured ERROR CEILINGS inside those ranges, not the
+  constants. §CL4 §9's obstruction 2, `brief-conductor-loss-5-lossless-predicate.md`'s "Must NOT",
+  and CL4 §3's own prose. The 2.6× gap is real and nothing needs re-deciding; the names do not match
+  the numbers.
+
 ## CL4 — the lossy ground plane, as an impedance termination (2026-09-14)
 
 `docs/sonnet-briefs/brief-conductor-loss-4-lossy-ground.md`. CL1 put a surface impedance on the
@@ -315,6 +580,33 @@ the general one. Three consequences, in order of weight:
 1. **The general path refuses a LOSSLESS dielectric outright** (§8's first trap). An air or
    `tanδ = 0` substrate runs today on the one-slab path and would become a REFUSAL. `CoplanarDeembedTests`'
    own fixtures are `EmMaterial(1.0, 0.0)`.
+
+   > **CORRECTION — measured while scoping CL5 and now CLOSED BY IT (2026-09-14, §CL5 §7): this
+   > consequence is overstated, its example is wrong, and the obstruction itself is gone.** Two things were checked rather than argued. **(i) The example is not a
+   > casualty.** `CoplanarDeembedTests`' fixtures are εᵣ = 1, so `guided` is FALSE and
+   > `CanIntegrateLayered` already admits them today — the case that actually refuses is εᵣ > 1 with
+   > tanδ = 0, which nothing above names. **(ii) The refusal is the DIRECT integrator's and the fit
+   > does not share it.** It reaches the product only because `Dcim.FitAtHeights` borrows
+   > `CanIntegrateInterior` as a precondition; `FitAtHeights` integrates nothing, it samples in k_zm
+   > and subtracts every pole through `PoleSum` first. Measured on FR-4 1.6 mm at 10 GHz: at
+   > tanδ = 1e-16 the TM₀ pole sits **3.8e-18** off the real axis — numerically ON it — and
+   > `FitAtHeights` returns residual **3.86e-5** against the lossy stack's 3.17e-5, while the
+   > high-high fit reproduces the one-slab kernel to 7.6e-7 (G_A) / 1.0e-5 (G_q) of free space either
+   > way. **Nothing in the DCIM path degrades as the loss goes to zero.** And the predicate cannot see
+   > a dissipative TERMINATION: a 35 µm copper floor on a tanδ = 0 substrate puts the pole at
+   > |Im k_ρ|/Re k_ρ = **2.607e-5** — three orders further off the axis than the tanδ = 1e-12 case
+   > that is freely admitted — and is still refused by name. **The εᵣ > 1, tanδ = 0 refusal is
+   > therefore a LIVE DEFECT today**, not only a future obstruction: a two-level design on an ideal
+   > substrate refuses, citing an integrator its run never reaches. Consequences 2 and 3 below are
+   > unaffected and stand as written.
+   >
+   > **CL5 SHIPPED and this obstruction is retired.** `Dcim.FitAtHeights` asks
+   > `SommerfeldIntegral.CanFitAtHeightsStructurally` now; the contour's refusal stays on
+   > `CanIntegrateLayered` for the direct integrator's own callers; and a two-level design on a
+   > tanδ = 0 guided stack solves through `PlanarSolve`. **Size CL6 and CL7 against §CL5 §7, not
+   > against this numbered list.** One naming slip in consequence 2 is corrected there too:
+   > `ValidatedRhoOverLambdaLayered` and `ValidatedRhoOverLambda` are BOTH 1.0 — 1.6e-2 and 6e-3 are
+   > the error ceilings inside those ranges, and the 2.6× gap between them is real.
 2. **The validated range is 2.6× worse on the general path** — `ValidatedRhoOverLambdaLayered`'s
    ≤1.6e-2 against `ValidatedRhoOverLambda`'s ≤6e-3 (§5) — so every one-slab run would be re-based
    onto a looser tier to gain a term worth 11–25% of the conductor loss.

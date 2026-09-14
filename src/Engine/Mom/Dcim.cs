@@ -691,7 +691,12 @@ public static class Dcim
                                          double z, double zp, DcimSettings? settings = null)
     {
         var s = settings ?? DcimSettings.Default;
-        var ok = SommerfeldIntegral.CanIntegrateInterior(g, z, zp);
+        // CL5 — the STRUCTURAL precondition, not the direct integrator's. This fit integrates
+        // nothing: it samples along a path in k_zm and subtracts every pole through PoleSum first,
+        // so a surface-wave pole sitting exactly on the real k_ρ axis costs it nothing. Borrowing
+        // CanIntegrateInterior used to import the contour's lossless-guided refusal and refuse a
+        // case this path answers — §CL5.
+        var ok = SommerfeldIntegral.CanFitAtHeightsStructurally(g, z, zp);
         if (!ok.Ok) throw new ArgumentException(ok.Reason);
 
         var a  = g.AsymptoticAtHeights(kernel, z, zp);
