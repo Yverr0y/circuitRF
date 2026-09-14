@@ -1827,8 +1827,12 @@ surface, which is a different height by the thickness of whatever is down there.
 <li><strong>Failing both, the run is refused.</strong> No ground reference and no grounded bottom means no second
 terminal for any port, and there is nothing to solve.</li>
 </ol>
-<p>Three consequences worth having in mind:</p>
+<p>Four consequences worth having in mind:</p>
 <ul>
+<li><strong><code>Bottom = Ground</code> is a fallback, not an override.</strong> Once step 1 finds a designated conductor, the
+boundary condition is never consulted: it adds no second plane underneath, and it does not make the
+chosen plane perfect. A designated ground carries its own σ as a lossy plane whatever <code>Bottom</code> is
+set to, and switching it to <code>Open</code> changes nothing except that step 2 is no longer available.</li>
 <li><strong>The plane is modelled as laterally infinite.</strong> It is the boundary condition the Green's function
 handles analytically, not a meshed pour — so a ground <em>pour</em> drawn as artwork is not it, and a
 finite plane's edges are not modelled. A conductor marked as the ground reference is not meshed and
