@@ -821,6 +821,10 @@ src/Engine/Mom/PlanarModalMedium.cs|A calibration group's standard must carry it
 # cells between their reference planes, so a non-positive differenced capacitance means the
 # electrostatic solve did not converge on one of them rather than that the geometry is unusual.
 src/Engine/Mom/PlanarQuasiStaticLine.cs|The quasi-static port calibration differenced the two standards' static 
+# CL3 — the same INTERNAL INVARIANT PlanarDeembed already carries, one file over: the quasi-static
+# line now differences the two standards' charge itself rather than calling CapacitancePerMetre, so
+# the zero-separation check moved with the arithmetic. Same sentence, same non-remedy.
+src/Engine/Mom/PlanarQuasiStaticLine.cs|The two calibration standards have the same length.
 src/Engine/Mom/PlanarSolve.cs|Calibration group port {g.PortNumbers[k]} is not in the run's port list.
 src/Engine/Mom/PlanarSolve.cs|This calibrator owns no calibration group.
 src/Engine/Mom/PlanarStaticAim.cs|The drive potential has {potential.Count} entries for {_m} cells.

@@ -1249,31 +1249,53 @@ and in one case the defect was in the *oracle* — see `src/Engine/Mom/CLAUDE.md
 **losslessness does not survive into kernel B**: an open planar structure radiates and launches
 surface waves, so |S₁₁|² + |S₂₁|² < 1 legitimately. Reciprocity and passivity carry over.
 
-> **And kernel B's metal is a PERFECT CONDUCTOR, which the stackup editor's own σ field does not say.**
-> `PlanarConductorLayer.SigmaSm` and `ThicknessM` are carried through the whole pipeline and are never
-> read by the fill — only kernel A's Wheeler term (§10.3) uses conductivity. So a full-wave insertion
-> loss carries dielectric loss and radiation but no conductor loss, and reads slightly optimistic by a
-> known amount: **6.5% / 3.0% / 2.1%** of the total conducted loss at 2 / 10 / 20 GHz on 1.6 mm FR-4.
-> It is stated here, and in the user-facing page's own "Cannot" list, because a σ field the user can
-> edit and the solver ignores is exactly the shape of thing that gets trusted silently. Adding it needs
-> a surface-impedance term in the fill — named in `src/Engine/Mom/CLAUDE.md` §5, not built.
+> **Kernel B's metal was a PERFECT CONDUCTOR until CL3, and the paragraph this replaces said so.**
+> `PlanarConductorLayer.SigmaSm` and `ThicknessM` were carried through the whole pipeline and never
+> read by the fill; only kernel A's Wheeler term (§10.3) used conductivity. The omission was recorded
+> here as **6.5% / 3.0% / 2.1%** of the total conducted loss at 2 / 10 / 20 GHz on 1.6 mm FR-4. **That
+> figure was correct and was measured on the one substrate class where conductor loss matters LEAST**
+> — on the shipped MMIC technology the same quantity is **92-99%**, and the generalisation built on it
+> ("dielectric loss dominates on ordinary substrates") was false there by a factor of about thirty.
 >
-> **Built at CL1 (2026-09-14), behind an internal flag that still defaults OFF.**
+> **Built at CL1 (2026-09-14) and turned ON by default at CL3 (2026-09-14).**
 > `PlanarFillSettings.ConductorLoss` carries σ and t into the fill as
 > `Z[m,n] += Z_s(ω, layer)·⟨f_m, f_n⟩` with `Z_s = (η_c/2)·coth(γ_c t/2)`; the term is a true EFIE
 > term, not a post-processing `∫R_s|J|²` over a PEC current, which would be log-divergent in the edge
-> mesh. Measured against kernel A's Wheeler term on a re-bisected 50 Ω line at 10 GHz, ground held PEC
-> in BOTH kernels: kernel A reproduces the numbers this paragraph is built on exactly (**8.194 Ω/m**
-> strip-only on FR-4 at w = 3020.28 µm, **382.571 Ω/m** on GaAs at w = 70.72 µm), and kernel B's
-> loaded sheet returns **0.63 of it on FR-4 and 0.73 on GaAs** — converged in `EdgeCells` to under 1%
-> per refinement rung by `EdgeCells = 8`. **The convergence is the good news and the ratio is the
-> honest limit**: a zero-thickness sheet holds ONE current per location and so cannot carry the
-> sidewall and two-face crowding a 35 µm / 3 µm strip really has. Detail, the full edge table, and
-> the two figures above in `src/Engine/Mom/RESOLVED.md` §CL1.
+> mesh. `PlanarFillSettings.PerfectConductor` is what remains reachable, permanently, as the PEC
+> oracle — on the pattern of `UseSymmetricFactorization = false` and `UseRadialTable = false`, and for
+> the same reason: every accuracy figure below is a comparison AGAINST it.
 >
-> **The sentence two paragraphs up — 6.5 / 3.0 / 2.1% — is correct and is about FR-4, which is the
-> substrate class where conductor loss matters LEAST.** On the shipped MMIC technology it is 92-99%.
-> That correction is independent of the CL series and is `brief-conductor-loss-0-overview.md` §4.
+> **This section's own "A and B agree on a uniform line" gate has changed what it gates, and the
+> change is the point.** It used to compare two models that diverged on loss BY CONSTRUCTION — one
+> with lossy metal, one without — so it could only ever be a gate on ε_eff and β. Both models carry
+> conductor loss now, so α is comparable for the first time. Measured through the WHOLE SHIPPED PATH
+> (the published, de-embedded S₂₁ of a uniform 50 Ω line of known length, not the calibration's own
+> γ), ground held PEC in BOTH kernels, at 2 / 10 / 20 GHz:
+>
+> | | α_c, kernel B ÷ kernel A | TOTAL α, kernel B ÷ kernel A | (the same, with PEC metal) |
+> |---|---|---|---|
+> | FR-4 starter, 1.6 mm, 35 µm Cu | 0.731 / 0.637 / 0.632 | 0.986 at 2 GHz | 0.949 at 2 GHz |
+> | **MMIC starter, 100 µm GaAs, 3 µm Au** | 0.836 / 0.748 / 0.827 | **0.852 / 0.787 / 0.863** | **0.061 / 0.134 / 0.181** |
+>
+> **The α_c column is the honest limit and it is a MODEL limit, not a mesh one.** A zero-thickness
+> sheet holds ONE current per location, so it cannot carry the sidewall current or the two-face
+> crowding a 35 µm / 3 µm strip really has; CL1 measured that deficit as 0.63 (FR-4) and 0.73 (GaAs)
+> by extracting γ from two bare standards, and the table above reproduces 0.637 and 0.748 at the same
+> frequency through the entire de-embedding instead. **The two instruments share no algebra**, which
+> is what makes the 16-40% under-read structural rather than a defect somewhere in the chain. It also
+> converges: refining `EdgeCells` moves it under 1% per rung by `EdgeCells = 8`.
+>
+> **FR-4's total-α column stops at 2 GHz and the reason is pre-existing.** At 10 and 20 GHz a 1.6 mm
+> FR-4 line is h/λ₀ = 0.05 and 0.11, it radiates and couples its ports through a surface wave, and
+> the two-line calibration's own error scales as f² (§5). At 20 GHz the peel over-corrects far enough
+> that |S₂₁| > 1 and α comes out NEGATIVE — identically so on the PEC oracle, at three line lengths
+> and two mesh densities. The DIFFERENCE is still good there, which is §CL1's own sentence ("the
+> absolute α of a PEC FR-4 line out of this route is not a usable number; the difference is").
+>
+> **What is still PEC is the GROUND PLANE**, which is CL4 and has not run. Kernel A's sum over
+> surfaces isolates it exactly: **21.1% (FR-4), ~11% (GaAs MMIC), 25.0% (low-loss laminate)** of the
+> conductor term. Every number in the table above holds the ground PEC in kernel A too, so the two
+> sides are comparing the same quantity. Detail in `src/Engine/Mom/RESOLVED.md` §CL1, §CL2 and §CL3.
 
 **Regression golden data** reviewed and approved by the owner before it becomes a gate — the established
 project pattern.

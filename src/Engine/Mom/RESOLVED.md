@@ -64,22 +64,32 @@ the SAME bodies, so every existing caller is bit-identical. Without it a lossy b
 α = 0 exactly, which is a plausible wrong number and would read as a regression against the measured
 path beside it in the same `.npy`.
 
-**The metal stays a PERFECT CONDUCTOR here**, exactly as the full-wave fill is by default (CL1's
-`PlanarFillSettings.ConductorLoss` is off), so γ carries the dielectric's attenuation and no conductor
-term. A Wheeler term would be a claim kernel B's own matrix does not make, and the two paths would
-then disagree in α across the crossover by whatever the sheet model is worth.
+**The metal stayed a PERFECT CONDUCTOR here while this brief shipped**, exactly as the full-wave fill
+was by default (CL1's `PlanarFillSettings.ConductorLoss` was off), so γ carried the dielectric's
+attenuation and no conductor term. A Wheeler term would have been a claim kernel B's own matrix does
+not make, and the two paths would then have disagreed in α across the crossover by whatever the sheet
+model is worth.
 
-> **THIS PARAGRAPH IS TRUE ONLY WHILE `ConductorLoss` IS OFF, AND CL3 IS THE BRIEF THAT FLIPS IT.**
-> When it does, the standards are still solved full-wave and their `S` gains α_c, while the γ the
-> error box is solved against does not — so the difference lands in `a11`/`a21²` (≈ α_c·Δℓ,
-> ≈ 0.015 dB on the GaAs starter at 10 GHz), Z_c loses its `√(1 + R/(jωL))` correction (0.6% in
-> magnitude there at 10 GHz; ≈ 3.5% and ~10° of PHASE at 100 MHz — and the overlap gate compares
-> |Z_c| only), and the published `planar.Gamma` steps at the crossover in a quantity that is
-> physically smooth. **The GaAs crossover is 26.07 GHz, so on the shipped MMIC technology this is
-> every frequency, not a corner.** `TheQuasiStaticPathAgreesWithTheMeasuredOneWhereBothRun` compares
-> β, |Z_c| and max|ΔS| and **not α**, which was vacuous under PEC metal and will not be afterwards.
-> `brief-conductor-loss-3-default-and-gate.md` §0 and its milestone 0 are where this is decided, and
-> they gate the flip rather than following it.
+> **THAT PARAGRAPH WAS TRUE ONLY WHILE `ConductorLoss` WAS OFF, AND CL3 FLIPPED IT — 2026-09-14.**
+> The metal is a real conductor here now and **R comes off THIS SOLVE'S OWN CHARGE**:
+> `R = Σ_levels Re(Z_s)·[ΔS_level·Δℓ/|ΔT|²]` with `S = Σ|q|²/A` and `T = Σq` differenced across the
+> same two standards C is, and `γ = √((R + jωL)(jωC))`. **Not Wheeler** — the paragraph above stays
+> right about kernel A for the reason it gives, and §CL3's own measurement makes the point a second
+> time with numbers: the static-charge supplier tracks the fill's own α_c to 0.96-1.15× on every mesh
+> tried, while kernel A's Wheeler term over-reads it by 1.32-1.76×. It costs no extra solve, because
+> the second moment comes off the charge vector the C differencing already computes.
+>
+> **The three consequences CL3 §0 named are all closed.** The error box's ≈ e^{−α_c·Δℓ} and the
+> `√(1 + R/(jωL))` correction to `PlanarDeembed.CharacteristicImpedance`'s γ/(jωC′) both come back
+> automatically once γ carries R (measured on the GaAs starter: arg Z_c moves from −0.054° to
+> −0.681° at 2 GHz), and `planar.Gamma` no longer steps at the crossover — α_c agrees across the
+> overlap to **−3.07 % … −1.05 %**.
+> `TheQuasiStaticPathAgreesWithTheMeasuredOneWhereBothRun` compares **Re(γ) and arg Z_c** now beside
+> its β, |Z_c| and max|ΔS|; both comparisons were vacuous under PEC metal and are not now.
+> `PlanarFillSettings.PerfectConductor` reproduces every number in this section bit for bit —
+> `GammaAt` deliberately keeps its `jω√(LC)` spelling rather than the algebraically identical
+> `√(jωL·jωC)` so that the oracle is exact to the LAST BIT and not to the last digit of the physics.
+> `RESOLVED.md` §CL3.
 
 ### 3. M1 — the crossover, measured per stack, then fitted to ONE law
 
@@ -384,10 +394,13 @@ caller asks them about.
 
 ### 9. What was NOT measured, so nothing is read into the silence
 
-- **No conductor term in the quasi-static γ.** α is the dielectric's alone, matching kernel B's own
+- ~~**No conductor term in the quasi-static γ.** α is the dielectric's alone, matching kernel B's own
   default PEC metal. Whether CL1's surface impedance should also enter γ on this path is a question
   for whoever turns `ConductorLoss` on by default, and the two would then have to be made to agree
-  across the crossover.
+  across the crossover.~~ **ANSWERED at CL3 (2026-09-14)**, and it was answered by measurement rather
+  than by preference — three candidate suppliers, two of them measured against the fill's own α_c on
+  four meshes. The supplier is the standard's own static CHARGE and the two paths agree across the
+  crossover to a few per cent. §CL3 §1.
 - **No general-stack (MIM-4) measurement.** The air-filled route for a `LayerStack` is written and
   compiles, and it reuses `InteriorStaticImages.FitScalar` on the emptied stack, but every number in
   this section is on a one-slab problem. A buried-level port below its crossover is untested.
@@ -661,6 +674,337 @@ field is dropped on save; no `Deembed` property survives on either `EmSetup` or 
 `PlanarFeedClearanceTests.TheRefusalNamesThePortTheDistanceAndTheOneWayOut` was re-pointed — it used
 to REQUIRE the raw-solve recommendation to be present.
 
+## CL3 — the metal is a real conductor by default (2026-09-14)
+
+`docs/sonnet-briefs/brief-conductor-loss-3-default-and-gate.md`. CL1 built the surface-impedance term
+and left it behind a null `PlanarFillSettings.ConductorLoss`; CL2 read it back out as `P_conductor`.
+**Neither changed a number anyone runs.** This brief flips the default, absorbs the consequences, and
+puts a gate under the result.
+
+**The brief planned for a wide re-bless — "roughly 90 files under `tests/Engine.Tests` touch
+`Planar*`, and every golden taken on a structure with finite σ moves". TWO TESTS MOVED, both in one
+file.** §6 is the reason and it is worth reading before the next brief in this area plans a re-bless
+from a file count.
+
+### 1. Milestone 0 — where the quasi-static path's γ gets its conductor term, MEASURED
+
+This gated the flip and it is the only part of the brief that could have stopped it. `RESOLVED.md`
+§QSC shipped saying *"the metal is a PERFECT CONDUCTOR here, exactly as the full-wave fill is by
+default"*, and below a per-stack crossover a port is calibrated from a γ supplied by the standard's
+own electrostatics. **On the shipped MMIC technology the crossover is 26.07 GHz, so that is not a
+corner of the band — it is all of it**, and α_c is 92-99 % of a GaAs line's loss. Turning the fill's
+term on and leaving that γ lossless would have published an α four times too small, smooth and
+plausible, at every frequency anyone runs on the substrate class this series exists for.
+
+**The instrument: α_c as kernel B's own two LOSSY standards see it** — the lossy two-line extraction
+minus the PEC one, which is §CL1's own construction. Both candidate suppliers were measured against
+that, on the same standards, at four frequencies and four meshes.
+
+| supplier | FR-4 overlap, 4 meshes | GaAs coarse | GaAs refined |
+|---|---|---|---|
+| **the standard's own static CHARGE** (shipped) | **0.963 – 0.990×** | **0.999 – 1.010×** | 1.059 – 1.147× |
+| kernel A's Wheeler term | 1.32 – 1.76× | 1.52 – 1.72× | 1.20 – 1.37× |
+
+**The static charge tracks the fill's own term AND MOVES WITH THE MESH THE WAY IT DOES.** Turning the
+edge mesh on raises both by ~32 % on FR-4 (α_c 1.073e-2 → 1.421e-2 in the fill, 1.040e-2 → 1.371e-2
+in the supplier); kernel A does not move at all across that change, because it is a different
+discretisation of a different formulation. **That is the whole argument.** This is not a better model
+of the metal — it is the SAME model the fill loaded, read off the same mesh, so the two agree across
+the crossover by construction rather than by calibration.
+
+    R   = Σ_levels Re(Z_s(ω, σ, t)) · [ ΔS_level · Δℓ / |ΔT|² ]
+    S   = Σ_cells |q|²/A   (C²/m²)        T = Σ_cells q   (C)        Δ = long − short
+    γ   = √( (R + jωL)(jωC) )
+
+The derivation is the TEM identity `K = v_p·q_s`: `P′ = ½Re(Z_s)∫|K|²dx` and `P′ = ½R|I|²`, so
+`R = Re(Z_s)·∫|q_s|²dx/(∫q_s dx)²` and v_p cancels. Differencing the two standards turns the surface
+integrals into per-metre ones and cancels both end effects exactly — **one quantity over from D7's
+own C_pul, off the same two solves.**
+
+**It costs no extra solve at all**, which is the practical half of the decision. The charge VECTOR
+was already being computed and summed away; `PlanarDeembed.StaticChargeComplex` is the existing body
+with the summation lifted out of it, and `PlanarStaticAim.ChargeComplex` is the same lift on the
+accelerated route. Both readings above are the sums of those, in the same order, so **every existing
+caller is bit-identical**.
+
+**Kernel A stays the ORACLE and is still not an input** — R-qsc-2's first bullet and `PlanarDeembed`'s
+D7 rule, unchanged, and the brief's "Must NOT" reserved that decision for the owner if the
+measurement had gone the other way. It did not: kernel A is also the LESS accurate of the two here.
+Its 20-76 % over-read is not an error in kernel A — it is §CL1's measured 0.63 (FR-4) / 0.73 (GaAs)
+single-sheet deficit seen from the other side.
+
+**What this does NOT claim.** The static distribution is the UNLOADED one, so its edge crowding is
+not regularised the way the loaded EFIE's is (series overview §1). That is where the refined-mesh
+GaAs over-read of 6-15 % comes from, and it is reported rather than tuned. It is **bounded, not
+divergent**, because the singularity is resolved on the same mesh the fill's own term is integrated
+on — which is exactly why "the same mesh" is load-bearing and not a convenience.
+
+**Third candidate, declined:** leaving γ lossless and saying so. Legitimate on the brief's terms, and
+refused because §0's own arithmetic makes it a 4× error on GaAs rather than a caveat.
+
+### 2. The flip, and the ONE place it lives
+
+`PlanarSolve.Run` builds `ConductorLoss = PlanarConductorLoss.For(problem)` unless
+`PlanarFillSettings.PerfectConductor` is set. **That is the only scope in which the flip can be
+expressed**: σ and t live on the `PlanarProblem`, not on a mesh and not on a fill setting, so
+`PlanarFillSettings.Default` cannot carry a real conductor and there is nothing to flip on it.
+`PlanarKernel.Solve` funnels through `Run`, so the shipped path — the Simulate button, `circuitrf em`
+and `EmRunService` alike — is covered by one line.
+
+**`PerfectConductor` is a SECOND flag rather than "leave `ConductorLoss` null", and it had to be.**
+Null used to mean PEC; it now means "not yet resolved". Those were the same state until this brief
+and are not afterwards, and one nullable field cannot hold both. It stays permanently, on the pattern
+of `UseSymmetricFactorization = false` and `UseRadialTable = false` — **every CL1 and CL2 accuracy
+figure is a comparison AGAINST it**, and a measurement whose reference cannot be reproduced is not a
+measurement. It reaches no `.cem` key and no UI control (series overview §5).
+
+**A caller that supplies its own `ConductorLoss` keeps it**, which is the seam every CL1 gate drives
+the fill through and is how a test compares two metals on one mesh.
+
+### 3. THE ONE TRAP, and it cost a gate before it was found
+
+**A metal DECLARED perfect on the stackup and a metal asked to be perfect with the flag are the same
+physical claim, and they were not producing the same bits.** `PlanarQuasiStaticLine.GammaAt` has two
+spellings — `jω√(LC)` when there is no conductor term and `√(jωL·jωC)` when there is — which are
+identical mathematically and **not to the last bit**. A declared-PEC stackup still built a
+`PlanarQuasiStaticConductor` whose R was identically zero, which put it on the second spelling and
+moved the answer by an ulp. One ulp is exactly enough to stop the flag being an oracle.
+
+`PlanarConductorLoss.IsPerfectOn(mesh)` is the fix and it is frequency-independent, because
+`PlanarSurfaceImpedance`'s own PEC test is (σ ≤ 0, σ = +∞, t ≤ 0). **The general lesson: when a new
+code path is added beside an old one for the same physical case, the question is not whether the two
+agree to the tolerance of the physics — it is whether the OLD one is still taken.**
+
+### 4. The triage, and every move accounted for
+
+`dotnet test tests/Engine.Tests` — **2,392 tests, 1 m 26 s, 2 failed**, both in
+`PlanarGroupSeparationTests`, both on one fixture (PCAL4's coupled pair on 0.9 mm FR-4, 35 µm copper).
+
+| test | class | what moved |
+|---|---|---|
+| `AGroupedSweepThatCalibratesTodayIsBitIdentical` | **expected move** | 8 de-embedded S entries, **4.8e-4 to 2.8e-3 relative**. Re-blessed. |
+| `TheSameFrequencyIsRefusedInOneSweepAndAcceptedInAnother` | **UNEXPECTED — a finding** | a run that REFUSED now publishes. §5. |
+
+Nothing was load-dependent and nothing else in the suite moved. The re-blessed literals are asserted
+as exact equality **beside the pre-CL3 ones**, which are now asserted against `PerfectConductor` — so
+the re-bless is a two-sided gate that says the move came from the metal and not from something else
+in the same commit, and the per-entry move is range-asserted at 1e-4 … 1e-2 rather than merely
+recorded.
+
+`tests/Ui.Tests/Em`: **698 tests green**, including the `.cem` round trip and `EmCliVerbTests`'
+byte-for-byte comparison of the CLI `em` verb against `EmRunService.Run`. R-cl3-2 asked for the
+provenance claim to be asserted rather than assumed and
+`tests/Ui.Tests/Em/ConductorLossProvenanceTests.cs` now does: σ and thickness have been in
+`EmSnpProvenance.GeometryHash` since L9d (`EmSnpProvenance.cs:219`), nothing had ever tested it, and
+it matters now in a way it did not before — those two numbers used to ride along unused, so a cached
+`.snp` taken with the wrong metal was still the right `.snp`.
+
+R-cl3-4, the five heroes: **unchanged, and confirmed structurally rather than assumed** — no test
+under `tests/Engine.Tests/{Linear,Nonlinear,HarmonicBalance,Loadpull}` references `Planar` or `Mom`
+at all, and all of them passed in the run above.
+
+### 5. The unexpected move: CONDUCTOR LOSS MAKES A CALIBRATION GROUP'S MODES MORE SEPARABLE
+
+PCAL4's modal error box is extracted from the eigenvectors of the two standards' cascade, and
+`ModeSeparationFloorDegrees` refuses a run whose modes cannot be told apart. **The measured
+separation is |Δγ|·Δℓ, and γ is complex:** the even and odd modes carry different current
+distributions, so with real metal they differ in α as well as in β and the product grows.
+
+Measured on the fixture at 200 MHz, PEC against 35 µm copper, over a ladder of bands:
+
+| band | PEC | real copper |
+|---|---|---|
+| 100 MHz – 1 GHz | 1.63° | 1.31° |
+| **200 MHz – 1 GHz** | **0.405° — REFUSED** | **0.56° — publishes** |
+| 200 – 800 MHz | 1.16° | 1.29° |
+| 200 – 600 MHz | 0.82° | 0.96° |
+| **200 – 400 MHz** | 0.255° — refused | **0.405° — refused** |
+| 200 – 300 MHz | 0.305° — refused | 0.081° — refused |
+
+**It is not monotone**, which is the part worth keeping: loss adds |Δα|·Δℓ but it also changes Δℓ's
+own selection and the two modes' β, so a band can move either way. The gate's own fixture was
+re-pointed one rung narrower (200 – 400 MHz, which refuses at 0.405° with real metal) rather than
+pinned with `PerfectConductor` — **the brief's own rule, and the right one: a gate that flipped the
+PEC flag would be testing a refusal no user can reach.**
+
+**Reported, not fixed:** `PlanarSolve.BandEdgeRemedy`'s refusal text quotes three measured constants
+("the same 200 MHz point reads 0.26° over a 200 MHz - 800 MHz band and 1.15° over a 200 MHz - 400 MHz
+one"; "turning the edge mesh on moved that same point from 0.19° to 2.94°"). Those were measured at
+PCAL7 on `testdata/portcal/coupled-pair` — a different geometry from this unit fixture — with PEC
+metal, and the table above says such numbers move. **They are a user-facing remedy carrying measured
+sizes, so they are now describing a state the code is not quite in.** Re-measuring them needs a run
+of that board through `EmRunService`, which is a `tests/Ui.Tests` job and outside this brief.
+
+### 6. WHY THE RE-BLESS WAS TWO TESTS AND NOT NINETY
+
+The brief planned this as a wide re-bless and it was not one. Three reasons, and they are worth
+knowing because the next brief in this area will make the same estimate:
+
+- **Most `Planar*` tests never reach `PlanarSolve.Run`.** They build a `PlanarFillSettings` and call
+  `PlanarFill.Fill` or construct a `PlanarSolveContext` directly, which is white-box by design — the
+  flip lives in `Run` because that is the only scope holding a `PlanarProblem`, so those tests stay
+  on PEC metal and SHOULD.
+- **`PlanarSolve.Run`'s two-argument overload builds an all-PEC dummy problem**
+  (`new PlanarConductorLayer("Metal", [], 0, 0)`), so every caller of it is PEC by construction.
+- **The move is 1e-3-scale on FR-4 and the surviving goldens are tolerance-based.** Only
+  `PlanarGroupSeparationTests` asserts exact equality against recorded literals.
+
+**The corollary is uncomfortable and should be said: the suite's coverage of the shipped path with
+real metal was thin, and this brief is why it is not any more.** The gates below run the whole
+de-embedding rather than the fill.
+
+### 7. R-cl3-3 / milestone 5 — the phase gate, one sentence per starter
+
+Read from the **published, de-embedded S₂₁ of a uniform 50 Ω line of known length** — never from the
+calibration's own γ (R-cl3-6), because on the MMIC starter all three frequencies are below the
+crossover and the calibration's γ is a SUPPLIED one, so reading α off it would be reading this
+brief's own arithmetic back to itself. Ground held PEC in BOTH kernels, since CL4 has not run. Two
+runs of one sweep on one mesh differing only in `PerfectConductor`, so α_c is a difference and every
+bias the two share cancels.
+
+**FR-4 starter — 1.6 mm, 35 µm Cu, w = 3020.28 µm, 1.5 λ_g line, N = 954:**
+
+| f | α PEC | α lossy | α_c (B) | α_c (A) | B/A | total B/A | path |
+|---|---|---|---|---|---|---|---|
+| 2 GHz | 6.793e-1 | 7.061e-1 | 2.680e-2 | 3.668e-2 | 0.731 | **0.986** | quasi-static |
+| 10 GHz | 4.071 | 4.124 | 5.217e-2 | 8.194e-2 | 0.637 | 1.185 | measured |
+| 20 GHz | −21.34 | −21.27 | 7.322e-2 | 1.159e-1 | 0.632 | −3.077 | measured |
+
+**MMIC starter — 100 µm GaAs, 3 µm Au, w = 70.72 µm, 1.0 λ_g line, N = 586:**
+
+| f | α PEC | α lossy | α_c (B) | α_c (A) | B/A | **total B/A** | (PEC) | path |
+|---|---|---|---|---|---|---|---|---|
+| 2 GHz | 1.283e-1 | 1.796 | 1.668 | 1.996 | 0.836 | **0.852** | 0.061 | quasi-static |
+| 10 GHz | 5.890e-1 | 3.452 | 2.863 | 3.826 | 0.748 | **0.787** | 0.134 | quasi-static |
+| 20 GHz | 1.160 | 5.531 | 4.371 | 5.287 | 0.827 | **0.863** | 0.181 | quasi-static |
+
+**The band, stated from the measurement: α_c out of kernel B is 0.63 to 0.84 of kernel A's.** It is
+not a tuned number — at 10 GHz it reads **0.637 (FR-4)** and **0.748 (GaAs)** against §CL1's
+independently measured **0.63** and **0.73** for the same quantity. CL1 measured it by extracting γ
+from two bare standards; this measures it through the whole shipped de-embedding. **The two
+instruments share no algebra and they agree**, which is what makes the 16-37 % under-read the
+single-sheet model's own structural limit rather than an error somewhere in this brief.
+
+**And the headline, on the substrate class the series exists for: a MMIC line's TOTAL α goes from
+0.06-0.18 of kernel A's to 0.79-0.86.**
+
+**FR-4's total-α column stops at 2 GHz and the reason is pre-existing.** At 10 and 20 GHz a 1.6 mm
+FR-4 line is h/λ₀ = 0.05 and 0.11; it radiates, its ports couple through a surface wave, and the
+two-line calibration's error scales as f² (`CLAUDE.md` §5). At 20 GHz the peel over-corrects far
+enough that |S₂₁| > 1 and α comes out NEGATIVE — **identically so on the PEC oracle, measured at
+three line lengths (0.5 / 1.5 / 2.5 λ_g) and two mesh densities (cells/λ 20 and 30)**, so no amount
+of refinement moves it and it is not this brief's. The DIFFERENCE is still good there, which is
+§CL1's own sentence ("the absolute α of a PEC FR-4 line out of this route is not a usable number;
+the difference is") measured a second time through a different instrument.
+
+### 8. R-cl3-5 — the overlap gate compares α and arg Z_c now
+
+`QuasiStaticPortCalibrationTests.TheQuasiStaticPathAgreesWithTheMeasuredOneWhereBothRun` is the only
+test in the suite that puts the two calibration paths side by side on one geometry, and after this
+brief it is the only thing that would notice an α that steps at the crossover. It compared β, |Z_c|
+and max|ΔS| and **not α**, because under PEC metal both paths carried the identical dielectric α and
+the comparison was vacuous.
+
+**Its harness had to be given real metal first**, and that is a finding rather than a chore: it
+builds its calibrator by hand so it can name a separation plan, so it passed `null` fill settings and
+would have gone on measuring two lossless paths while every real run moved.
+
+FR-4 6 mm line, 500 MHz – 3 GHz, both quantities as the DIFFERENCE against a PEC run of the same
+path so the shared dielectric term and extraction bias cancel:
+
+| f | Δβ | **Δα_c** | Δ|Z_c| | **Δ arg Z_c** | max\|ΔS\| |
+|---|---|---|---|---|---|
+| 500 MHz | +0.982 % | **−3.069 %** | +0.982 % | **+0.034°** | 5.59e-3 |
+| 750 MHz | +0.151 % | −2.328 % | +0.151 % | +0.020° | 2.40e-3 |
+| 1 GHz | −0.172 % | −2.047 % | −0.172 % | +0.019° | 8.10e-4 |
+| 1.5 GHz | −0.366 % | −2.152 % | −0.366 % | +0.034° | 3.96e-3 |
+| 2 GHz | −0.703 % | −1.797 % | −0.704 % | +0.054° | 9.40e-3 |
+| 3 GHz (≈ crossover) | −1.196 % | −1.051 % | −1.198 % | +0.110° | 2.28e-2 |
+
+**Thresholds taken from that spread with margin (8 % and 0.25°), not chosen first.** The quasi-static
+supplier reads a little LOW throughout, which is the static charge distribution against the solved
+one, and the sign is stable.
+
+**§0's second consequence closed for free.** `PlanarDeembed.CharacteristicImpedance` is D7's
+`γ/(jωC′)`, so a γ carrying R gives Z_c its `√(1 + R/(jωL))` correction with no new code. Measured on
+the GaAs starter's quasi-static line, arg Z_c: **−0.054° → −0.681° at 2 GHz**, −0.054° → −0.269° at
+10 GHz. The magnitude moves 0.01 %, which is why the old |Z_c|-only gate would never have seen it —
+**the larger of the two errors was the one nothing looked at**, exactly as §0 said.
+
+### 9. Milestone 4 — passivity and reciprocity got stricter
+
+Gated on the RAW matrix as well as the de-embedded one, deliberately: the de-embedded answer on this
+stack is already over 1 at the bottom of the band for a reason that predates the series (D6's peel
+divides by a₂₁²), so a de-embedded-only test would be measuring the peel. The raw σ_max is a
+statement about the FILL, which is the only thing CL1's term touches.
+
+| f | σ_max(RawS) PEC | with real copper | \|S₁₂−S₂₁\| PEC | lossy |
+|---|---|---|---|---|
+| 2 GHz | 0.993634026 | 0.993625006 | 2.86e-17 | 3.88e-17 |
+| 6 GHz | 0.976628000 | 0.976486210 | 6.94e-16 | 4.81e-16 |
+| 10 GHz | 0.925436599 | 0.924835293 | 1.89e-15 | 1.46e-15 |
+
+**σ_max only ever falls**, which is the structural statement (real metal absorbs), and reciprocity
+does not degrade at all — Z_s enters the operator symmetrically, against the same Gram, mirrored with
+the rest of the fill.
+
+### 10. Milestone 8 — the cost, and it is unmeasurable as predicted
+
+FR-4 hero at the shipping mesh, N = 552, **Debug** (which is what `dotnet test` builds — CL1's own
+figures are Debug too, so the two are comparable). Best of 5 for the fill and factor, best of 3 for
+the sweep:
+
+| | fill | factor | 5-point de-embedded sweep |
+|---|---|---|---|
+| PEC | 226.7 ms | 304.8 ms | 7.15 s |
+| real copper | 229.7 ms | 305.9 ms | 6.95 s |
+
++1.3 % on the fill, +0.4 % on the factor, and the SWEEP came out **faster** with the term on — i.e.
+all three differences are run-to-run noise, and the sign of the third says so better than any
+tolerance would. The brief's own tell ("if it is measurable, the Gram matrix is being rebuilt per
+frequency") does not fire: `PlanarFillCores.GramBuilt` reads False on the PEC run and True on the
+lossy one, once per mesh, and CL1's `Cost_TheGramIsBuiltOncePerMesh_NotPerFrequency` counter still
+holds.
+
+### 11. Gates
+
+- `tests/Engine.Tests/Mom/ConductorLossDefaultTests.cs` — **6 routine tests (~12 s) and 2 tagged
+  `Category=Benchmark`** (R-cl3-3's two starters, 31 s together; measured, and tagged by the repo's
+  mechanical ~5 s rule rather than by preference).
+  - **R-cl3-0** milestone 0's decision as a gate, three meshes: the static supplier within
+    0.90-1.20× of the fill's own α_c, kernel A over-reading by more than 1.15×, **and the static one
+    the closer of the two at every point** — which is the comparison the decision was actually taken
+    on, rather than two separate tolerances that could both pass on the wrong answer.
+  - **R-cl3-3** the phase gate, tabulated above.
+  - **R-cl3-4** passivity and reciprocity, above.
+  - `ThePerfectConductorFlagIsBitIdenticalToPecMetal` — the flag against a PEC-DECLARED stackup,
+    exact equality through fill, standards, quasi-static γ, error box and renormalisation. Asserted
+    against a second ROUTE rather than against a recorded literal, which is the stronger form of the
+    same statement.
+  - `TheQuasiStaticGammaCarriesTheConductorTerm` — structural: C, C₀ and ε_eff bit-identical between
+    the two, R > 0, α up, |arg Z_c| up.
+- `tests/Engine.Tests/Mom/QuasiStaticPortCalibrationTests.cs` — R-cl3-5, §8.
+- `tests/Engine.Tests/Mom/PlanarGroupSeparationTests.cs` — the two re-blessed gates, §4 and §5.
+- `tests/Ui.Tests/Em/ConductorLossProvenanceTests.cs` — R-cl3-2.
+
+### 12. What was NOT measured, so nothing is read into the silence
+
+- **No general-stack (MIM-4) or coplanar/widened/group standard was run through the new conductor
+  term.** The arithmetic rides on the same `ModePotential`/`ModeWeight`/`FloatingPotential` C does
+  and is split per LAYER for a multi-level standard, but "by construction" is not "measured" — the
+  same sentence §QSC §9 wrote about the same code path. **One deliberate asymmetry inside it:** the
+  mode WEIGHT is applied to Σq and NOT to Σ|q|²/A, because the weight combines two conductors'
+  charges with a SIGN to pick out a mode, while the loss integral is a sum of squares over metal and
+  every conductor the mode drives dissipates. A signed weight under a square would cancel the return
+  conductor's own loss.
+- **The accelerated (AIM) static route is written and compiles but no number here is on it.**
+  `PlanarStaticAim.ChargeComplex` is the same lift as the dense one and every existing reading is a
+  sum of it, so the shipped answers are bit-identical; the CONDUCTOR term over an accelerated
+  standard is untested.
+- **No thick-metal question was re-opened.** The 16-37 % under-read is the series overview §3's
+  deferred decision and this brief measured it a second way rather than acting on it.
+- **CL4 has not run**, so the ground plane is still PEC and the pages say so with the measured size.
+
 ## CL2 — `P_conductor` stops being an identical zero (2026-09-14)
 
 `docs/sonnet-briefs/brief-conductor-loss-2-power-budget.md`. ANT-5 itemised where a driven port's
@@ -751,9 +1095,15 @@ port even though nothing in the conductor term does:
 ### The notes, and one deliberate deviation from the brief
 
 Milestone 3 says `BoundNote`'s clause (2) is *retired* when the term is real. **It could not be
-retired outright**, because `PlanarFillSettings.ConductorLoss` still defaults to OFF until CL3: a
-shipped run today genuinely has PEC metal, and deleting the clause would be the same defect
-inverted — a note describing a state the code is not in, half the time. So:
+retired outright**, because `PlanarFillSettings.ConductorLoss` still defaulted to OFF until CL3: a
+shipped run at the time genuinely had PEC metal, and deleting the clause would have been the same
+defect inverted — a note describing a state the code is not in, half the time. So:
+
+> **CL3 (2026-09-14) flipped that default and the per-run construction is why nothing here had to
+> change.** `BoundNoteForRun` already asks the RUN which state it is in, so the shipped note simply
+> stopped taking the PEC branch; the branch itself stays reachable and correct, because
+> `PlanarFillSettings.PerfectConductor` and an all-PEC stackup both still reach it. Deciding the
+> sentence per run rather than per default is what made a flip of the default a no-op here.
 
 - **`ConductorNote`** (the const the registry carries) states what the term IS, that it is exactly
   zero when the metal is a perfect conductor **by either route**, and what the sheet model cannot

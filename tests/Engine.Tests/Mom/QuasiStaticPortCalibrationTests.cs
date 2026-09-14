@@ -300,16 +300,24 @@ public sealed class QuasiStaticPortCalibrationTests(ITestOutputHelper output)
     private static List<Point> Deembed(
         PlanarProblem problem, PlanarMesh mesh, IReadOnlyList<PlanarPortResolution> ports,
         double fLo, double fHi, IReadOnlyList<double> freqs,
-        PlanarCalibration.PlanarSeparationPlan? plan)
+        PlanarCalibration.PlanarSeparationPlan? plan, bool perfectConductor = false)
     {
         var slab = problem.Slab;
         var eff  = plan ?? PlanarCalibration.SeparationPlan(slab, fLo, fHi, ports[0]);
         var set  = PlanarCalibration.BuildSet(
             ports[0], slab, eff, PlanarCalibration.SuggestLengths(slab, fLo, fHi).Short);
 
-        var cal = new PlanarPortCalibrator(ports[0], slab, fLo, fHi, null, null,
+        // CL3 — the SHIPPED metal, which PlanarSolve.Run now resolves for itself. This harness
+        // builds its calibrator by hand so that it can name a separation plan, so it has to make the
+        // same decision; leaving it null would have kept every measurement here on the PEC oracle
+        // while every real run moved, and R-cl3-5 would have gone on comparing two lossless paths.
+        var fill = perfectConductor
+                 ? PlanarFillSettings.Default with { PerfectConductor = true }
+                 : PlanarFillSettings.Default with { ConductorLoss = PlanarConductorLoss.For(problem) };
+
+        var cal = new PlanarPortCalibrator(ports[0], slab, fLo, fHi, null, fill,
                                            standards: set, separations: eff);
-        var dut = new PlanarSolveContext(mesh, ports, null, null, slab.HeightM);
+        var dut = new PlanarSolveContext(mesh, ports, fill, null, slab.HeightM);
 
         var result = new List<Point>();
         foreach (double f in freqs.OrderBy(x => x))
@@ -349,6 +357,17 @@ public sealed class QuasiStaticPortCalibrationTests(ITestOutputHelper output)
     /// <para><b>The tolerance is the one M1 measured (~1 %) and it is asserted at EVERY point</b>,
     /// because agreeing at the ends of an interval and diverging in the middle is a thing two
     /// different approximations do.</para>
+    ///
+    /// <para><b>CL3/R-cl3-5 — IT COMPARES α AND arg Z_c NOW, AND IT IS THE ONLY THING IN THE SUITE
+    /// THAT WOULD NOTICE AN α THAT STEPS AT THE CROSSOVER.</b> Until CL3 the metal was a perfect
+    /// conductor on both sides, so both paths carried the identical dielectric α and a Z_c with no
+    /// R correction on either — comparing them would have been vacuous, which is why the original
+    /// gate compared β, |Z_c| and max|ΔS| and nothing else. It is not vacuous now: the standards
+    /// are solved FULL-WAVE and their S carries α_c, while γ below the crossover is SUPPLIED, so
+    /// this pair of columns is what says the supplied one carries the same conductor term the fill
+    /// does. Both quantities are measured as the DIFFERENCE against a PEC run of the same path, so
+    /// the dielectric term and the extraction's own radiation bias — which the two paths share —
+    /// cancel instead of diluting the comparison.</para>
     /// </summary>
     [Fact]
     public void TheQuasiStaticPathAgreesWithTheMeasuredOneWhereBothRun()
@@ -367,10 +386,18 @@ public sealed class QuasiStaticPortCalibrationTests(ITestOutputHelper output)
                 PlanarCalibration.SuggestDeltas(slab, fLo, fHi), -1, cross));
         var quasi = Deembed(problem, mesh, ports, fLo, fHi, freqs, null);
 
+        // CL3/R-cl3-5 — the PEC pair, kept beside the lossy one because this is the only place in
+        // the suite where the two calibration paths meet on one geometry, and therefore the only
+        // thing that would ever notice an α that steps at the crossover.
+        var measuredPec = Deembed(problem, mesh, ports, fLo, fHi, freqs,
+            new PlanarCalibration.PlanarSeparationPlan(
+                PlanarCalibration.SuggestDeltas(slab, fLo, fHi), -1, cross), perfectConductor: true);
+        var quasiPec = Deembed(problem, mesh, ports, fLo, fHi, freqs, null, perfectConductor: true);
+
         output.WriteLine($"DUT N = {mesh.Bases.Count}; longest standard " +
                          $"{measured[0].LongestStandardN} measured vs " +
                          $"{quasi[0].LongestStandardN} quasi-static");
-        output.WriteLine($"{"f",9} {"dbeta",9} {"dZc",9} {"max|dS|",10} " +
+        output.WriteLine($"{"f",9} {"dbeta",9} {"dalpha",9} {"dZc",9} {"dargZc",9} {"max|dS|",10} " +
                          $"{"betaDL meas",12} {"betaDL qs",10}");
 
         for (int i = 0; i < freqs.Length; i++)
@@ -380,7 +407,22 @@ public sealed class QuasiStaticPortCalibrationTests(ITestOutputHelper output)
             double dZc = (quasi[i].Zc.Magnitude - measured[i].Zc.Magnitude) / measured[i].Zc.Magnitude;
             double dS = MaxDeltaS(quasi[i].S, measured[i].S);
 
-            output.WriteLine($"{freqs[i] / 1e9,8:0.###}G {dBeta,9:+0.000%;-0.000%} {dZc,9:+0.000%;-0.000%} " +
+            // R-cl3-5 — α, AS THE CONDUCTOR TERM RATHER THAN AS THE TOTAL. The total α on this
+            // stack is dominated by tanδ = 0.02 and by the extraction's own radiation bias, and
+            // both are shared by the two paths, so comparing totals would have hidden a conductor
+            // term that was out by a factor of two inside a ratio that still read 1.00. The
+            // difference against the PEC run is the part this brief actually put there.
+            double acQuasi    = quasi[i].Gamma.Real - quasiPec[i].Gamma.Real;
+            double acMeasured = measured[i].Gamma.Real - measuredPec[i].Gamma.Real;
+            double dAlpha = (acQuasi - acMeasured) / acMeasured;
+
+            // …and arg Z_c, which is the OTHER half §0 named: Z_c = γ/(jωC′) gets its
+            // √(1 + R/(jωL)) correction for free once γ carries R, and the phase is where that
+            // correction is biggest — 3.5 % in magnitude against ~10° in phase at 100 MHz.
+            double dArg = (quasi[i].Zc.Phase - measured[i].Zc.Phase) * 180.0 / Math.PI;
+
+            output.WriteLine($"{freqs[i] / 1e9,8:0.###}G {dBeta,9:+0.000%;-0.000%} " +
+                             $"{dAlpha,9:+0.000%;-0.000%} {dZc,9:+0.000%;-0.000%} {dArg,9:+0.000;-0.000} " +
                              $"{dS,10:E2} {measured[i].ElDeg,12:0.##} {quasi[i].ElDeg,10:0.##}");
 
             Assert.True(Math.Abs(dBeta) < 0.015,
@@ -389,6 +431,25 @@ public sealed class QuasiStaticPortCalibrationTests(ITestOutputHelper output)
                         $"Z_c disagrees by {dZc:P3} at {freqs[i] / 1e9:0.###} GHz");
             Assert.True(dS < 0.03,
                         $"the de-embedded s-parameters disagree by {dS:E2} at {freqs[i] / 1e9:0.###} GHz");
+
+            // THE THRESHOLDS BELOW ARE THE MEASUREMENT'S, NOT A BUDGET CHOSEN FIRST. Measured
+            // across the whole overlap: α_c −3.07 % to −1.05 % (the quasi-static supplier reads a
+            // little LOW, which is the static charge distribution against the solved one), and
+            // arg Z_c +0.019° to +0.110°. Both bands are that spread with margin, and BOTH
+            // COMPARISONS WERE VACUOUS BEFORE THIS BRIEF — with PEC metal the two paths carried
+            // the identical dielectric α and a Z_c with no R correction on either side.
+            Assert.True(Math.Abs(dAlpha) < 0.08,
+                        $"α_c disagrees by {dAlpha:P3} at {freqs[i] / 1e9:0.###} GHz — the two " +
+                        "calibration paths are supposed to carry the SAME conductor term");
+            Assert.True(Math.Abs(dArg) < 0.25,
+                        $"arg Z_c disagrees by {dArg:F3}° at {freqs[i] / 1e9:0.###} GHz");
+
+            // And the thing the whole comparison exists to catch: a conductor term on ONE side of
+            // the crossover. Both paths must actually have one.
+            Assert.True(acQuasi > 0 && acMeasured > 0,
+                        $"one of the two paths carried no conductor term at all at " +
+                        $"{freqs[i] / 1e9:0.###} GHz: quasi-static {acQuasi:E3}, " +
+                        $"measured {acMeasured:E3} Np/m");
         }
 
         // …and the standards really are smaller, which is the point of the exercise.

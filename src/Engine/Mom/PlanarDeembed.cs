@@ -427,6 +427,37 @@ public static class PlanarDeembed
         IReadOnlyList<double>? weight = null,
         IReadOnlyList<double>? floating = null)
     {
+        var q = StaticChargeComplex(mesh, staticScalar, settings, cores, slabHeightM,
+                                    potential, floating);
+
+        Complex total = Complex.Zero;
+        if (weight is null) for (int i = 0; i < q.Length; i++) total += q[i];
+        else                for (int i = 0; i < q.Length; i++) total += weight[i] * q[i];
+        return total;
+    }
+
+    /// <summary>
+    /// <b>CL3 — the solved charge vector itself, which is the body
+    /// <see cref="StaticCapacitanceComplex"/> is the weighted SUM of.</b>
+    ///
+    /// <para>A quasi-static conductor term needs the charge's SECOND moment (<c>Σ|q|²/A</c>) beside
+    /// its first, and the two have to come off one solve: a second electrostatic solve for the
+    /// second moment would be a second answer to the same question, and the whole reason the
+    /// quasi-static path can afford a conductor term at all is that this solve is one the run
+    /// already owes. See <see cref="PlanarQuasiStaticLine"/>.</para>
+    ///
+    /// <para>Both routes are the ones that shipped, unchanged: the dense branch is P2/M2's
+    /// <c>P q = ε₀·1</c>, and the accelerated one is <see cref="PlanarStaticAim.ChargeComplex"/>,
+    /// whose all-1 V drive is <c>ε₀·1.0 == ε₀</c> exactly.</para>
+    /// </summary>
+    public static Complex[] StaticChargeComplex(
+        PlanarMesh mesh, PlanarKernelTerms staticScalar,
+        PlanarFillSettings? settings = null,
+        PlanarFillCores? cores = null,
+        double slabHeightM = 0,
+        IReadOnlyList<double>? potential = null,
+        IReadOnlyList<double>? floating = null)
+    {
         ArgumentNullException.ThrowIfNull(mesh);
         var st = settings ?? PlanarFillSettings.Default;
 
@@ -456,8 +487,7 @@ public static class PlanarDeembed
                    : PlanarFill.BuildGeometryOnlyCores(mesh, st);
 
             var acc = PlanarStaticAim.Build(gc, staticScalar, slabHeightM, aim);
-            return potential is null ? acc.TotalCapacitanceComplex()
-                                     : acc.ModalCapacitanceComplex(potential, weight, floating);
+            return acc.ChargeComplex(potential, floating);
         }
 
         GuardCapacitanceCeiling(mesh, accelerated: false);
@@ -504,10 +534,9 @@ public static class PlanarDeembed
             }
         }
 
-        Complex total = Complex.Zero;
-        if (weight is null) for (int i = 0; i < m; i++) total += q[i];
-        else                for (int i = 0; i < m; i++) total += weight[i] * q[i];
-        return total;
+        var outq = new Complex[m];
+        for (int i = 0; i < m; i++) outq[i] = q[i];
+        return outq;
     }
 
     /// <summary>

@@ -318,6 +318,31 @@ public sealed record PlanarFillSettings(
     public PlanarConductorLoss? ConductorLoss { get; init; }
 
     /// <summary>
+    /// <b>CL3 — the PEC ORACLE, and the only way back to a perfect conductor now that the default is
+    /// a real one.</b> <see cref="PlanarSolve.Run"/> builds <see cref="ConductorLoss"/> from the
+    /// problem's own σ and t unless this is set; with it set the fill carries no surface-impedance
+    /// term at all and every matrix, every calibration and every s-parameter is bit-identical to the
+    /// pre-CL3 answer.
+    ///
+    /// <para><b>It stays permanently</b>, on the pattern of <see cref="UseSymmetricFactorization"/>
+    /// = false and <see cref="UseRadialTable"/> = false and for the same reason: every CL1 and CL2
+    /// accuracy gate is a comparison AGAINST it, and a measurement whose reference cannot be
+    /// reproduced is not a measurement.</para>
+    ///
+    /// <para><b>A separate flag rather than "leave <see cref="ConductorLoss"/> null", because null
+    /// no longer means PEC — it means "not yet resolved".</b> Only <see cref="PlanarSolve.Run"/> has
+    /// the <c>PlanarProblem</c> σ and t live on, so the two states a run can be in ("the caller
+    /// asked for a perfect conductor" and "the caller said nothing and the metal is real") are not
+    /// distinguishable in one nullable field. They were the same state until this brief and are not
+    /// afterwards.</para>
+    ///
+    /// <para>Outside the positional list for the reason <see cref="ConductorLoss"/> is, and it
+    /// reaches <c>EmSetupPersistence</c> no more than that does — whether Maxwell's equations include
+    /// Ohm's law is not a decision a user should be asked to make (series overview §5).</para>
+    /// </summary>
+    public bool PerfectConductor { get; init; }
+
+    /// <summary>
     /// <b>P2/M3 — the meter that says how many times the geometric cores were actually BUILT.</b>
     /// Null everywhere except on a run that wants to count them.
     ///

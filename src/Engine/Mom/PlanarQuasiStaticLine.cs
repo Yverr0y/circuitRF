@@ -61,19 +61,59 @@
 //     γ   = jω√(LC)    so α = ω√(LC′)·tanδ_eff/2 and β = ω√(LC′) fall out together
 //     Z_c = γ/(jωC′)   D7's OWN spelling, unchanged — only γ's source changed
 //
-// **The metal is a PERFECT CONDUCTOR here, exactly as it is in the full-wave fill by default**
-// (CL1: `PlanarFillSettings.ConductorLoss` is off), so γ carries the DIELECTRIC's attenuation and no
-// conductor term. A conductor term taken from Wheeler would be a claim kernel B's own matrix does not
-// make, and the two would disagree across the crossover in α by whatever the sheet model is worth.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// CL3 — THE METAL IS NO LONGER A PERFECT CONDUCTOR HERE, AND R COMES OFF THIS SOLVE'S OWN CHARGE
+// ══════════════════════════════════════════════════════════════════════════════════════════════
 //
-// **THAT SENTENCE IS CONDITIONAL ON A DEFAULT, AND CL3 IS THE BRIEF THAT FLIPS IT.** With
-// `ConductorLoss` on, `PlanarPortCalibrator.At` still solves both standards FULL-WAVE — so their S
-// carries α_c — and hands `SolveErrorBox` a γ that does not, which puts ≈ e^{-α_c·Δℓ} into the error
-// box, leaves `PlanarDeembed.CharacteristicImpedance`'s γ/(jωC′) short of its ½·R/(ωL) correction,
-// and steps `planar.Gamma` at the crossover. The GaAs starter's crossover is 26.07 GHz, so on the
-// shipped MMIC technology that is the whole band. Do not add a conductor term here on the way past:
-// `brief-conductor-loss-3-default-and-gate.md` §0 and its milestone 0 measure the three candidate
-// suppliers and decide between them, and `RESOLVED.md` §QSC carries the same note.
+// This file shipped saying "the metal is a PERFECT CONDUCTOR here, exactly as it is in the full-wave
+// fill by default", which was true while CL1's `PlanarFillSettings.ConductorLoss` was off.
+// `brief-conductor-loss-3-default-and-gate.md` turns it on, and leaving γ lossless below the
+// crossover would have been loud in exactly one place and silent everywhere else: the standards are
+// still solved FULL-WAVE, so their S carries α_c while a lossless γ does not. **On the shipped MMIC
+// technology the crossover is 26.07 GHz, so that is not a corner of the band — it is all of it**, and
+// α_c is 92-99 % of a GaAs line's loss. A published α four times too small, smooth and plausible, is
+// the failure mode this whole directory keeps writing headers about.
+//
+//     R = Σ_levels Re(Z_s(ω, σ, t)) · [ ΔS_level · Δℓ / |ΔT|² ]
+//     S = Σ_cells |q|²/A   (C²/m²)        T = Σ_cells q   (C)        Δ = long − short
+//     γ = √( (R + jωL)(jωC) )
+//
+// **S and T come off the SAME differencing, the SAME two solves and the SAME mesh as C**, which is
+// what makes this the third candidate rather than a fourth loss model. The derivation is the TEM
+// identity K = v_p·q_s: P′ = ½Re(Z_s)∫|K|²dx and P′ = ½R|I|², so R = Re(Z_s)·∫|q_s|²dx/(∫q_s dx)²
+// and v_p cancels. Differencing the two standards is what turns the surface integrals into
+// per-metre ones and cancels both end effects exactly, one quantity over from D7's own C_pul.
+//
+// **R-cl3-0 — THE DECISION WAS MEASURED, AND THE TWO REJECTED CANDIDATES ARE REJECTED BY NUMBER AS
+// WELL AS BY DOCTRINE.** α_c out of kernel B's own two lossy standards (the lossy extraction minus
+// the PEC one, CL1's own instrument) against the two suppliers, at four frequencies and four meshes:
+//
+//     supplier                       FR-4 overlap        GaAs coarse      GaAs refined
+//     this one (static charge)       0.963-0.990×        0.999-1.010×     1.059-1.147×
+//     kernel A's Wheeler term        1.32-1.75×          1.52-1.72×       1.20-1.37×
+//
+// The static charge tracks the fill's own term to a few per cent AND MOVES WITH THE MESH THE WAY IT
+// DOES — turning the edge mesh on raises both by ~32 % on FR-4, where kernel A does not move at all
+// because it is a different discretisation of a different formulation. That is the whole argument:
+// this is not a better model of the metal, it is the SAME model the fill loaded, read off the same
+// mesh, so the two agree across the crossover by construction rather than by calibration.
+//
+// **Kernel A stays the ORACLE and is still not an input** — R-qsc-2's first bullet and D7's rule,
+// unchanged. Its 20-75 % over-read against the fill is not an error in kernel A; it is §CL1's own
+// measured 0.63 (FR-4) / 0.73 (GaAs) single-sheet deficit seen from the other side, and importing it
+// here would have made both `docs/design/mom-engine.md` §10.9's A-vs-B gate and the crossover's own
+// continuity tautologies at once.
+//
+// **What this does NOT claim.** The static distribution is the UNLOADED one, so its edge crowding is
+// not regularised the way the loaded EFIE's is (series overview §1) — which is where the refined-mesh
+// GaAs over-read of 6-15 % comes from, and it is reported rather than tuned. It is bounded, not
+// divergent, because the mesh that resolves the singularity is the same mesh the fill's own term is
+// integrated on.
+//
+// **Null `Conductor` is the PEC reading and is bit-identical to what shipped**, on exactly the terms
+// `PlanarFillSettings.ConductorLoss` null is: `GammaAt` keeps the old `jω√(LC)` expression rather
+// than the equivalent `√(jωL·jωC)`, so a run with `PlanarFillSettings.PerfectConductor` set
+// reproduces every number QSC recorded.
 //
 // **C stays COMPLEX all the way to γ and that is not decoration.** `PlanarKernelTerms.StaticScalar`
 // is built on `GroundedSlab.EpsComplex`, so the charge already carries tanδ; D7 drops it with a
@@ -97,6 +137,13 @@ namespace CircuitRF.Engine.Mom;
 /// route to [L] that does not import a second kernel's answer.</param>
 public sealed record PlanarQuasiStaticLine(Complex CComplexPerMetre, double C0PerMetre)
 {
+    /// <summary>
+    /// <b>CL3 — the conductor's series resistance per metre, or null for a perfect one.</b> Null is
+    /// what shipped before this brief and is bit-identical to it; see the file header for why the
+    /// supplier is this solve's own charge and not kernel A.
+    /// </summary>
+    public PlanarQuasiStaticConductor? Conductor { get; init; }
+
     /// <summary>C′ — F/m, the real part, which is what <see cref="PlanarDeembed.CharacteristicImpedance"/>
     /// takes and what the <c>Cpul</c> diagnostic cube publishes.</summary>
     public double CPerMetre => CComplexPerMetre.Real;
@@ -115,8 +162,23 @@ public sealed record PlanarQuasiStaticLine(Complex CComplexPerMetre, double C0Pe
     public Complex GammaAt(double fHz)
     {
         double omega = 2.0 * Math.PI * fHz;
-        return Complex.ImaginaryOne * omega * Complex.Sqrt(LPerMetre * CComplexPerMetre);
+
+        // The PEC reading keeps its own expression rather than the algebraically identical
+        // √(jωL·jωC), so a run with PlanarFillSettings.PerfectConductor set reproduces every number
+        // QSC recorded BIT FOR BIT. The two agree to the last digit of the physics and not to the
+        // last bit of the arithmetic, and the oracle has to be the second kind.
+        if (Conductor is not { } cond)
+            return Complex.ImaginaryOne * omega * Complex.Sqrt(LPerMetre * CComplexPerMetre);
+
+        Complex z = cond.ResistancePerMetreAt(omega) + Complex.ImaginaryOne * omega * LPerMetre;
+        Complex y = Complex.ImaginaryOne * omega * CComplexPerMetre;
+        return Complex.Sqrt(z * y);
     }
+
+    /// <summary>R per metre at one frequency — 0 on a perfect conductor. Reported rather than
+    /// inferred from γ, because α_c and α_d are not separable once they are inside a square root.</summary>
+    public double ResistancePerMetreAt(double fHz) =>
+        Conductor?.ResistancePerMetreAt(2.0 * Math.PI * fHz) ?? 0.0;
 
     /// <summary>
     /// <b>The same reading as <see cref="PlanarCalibration.Gamma"/> returns</b>, so the two paths
@@ -158,12 +220,18 @@ public sealed record PlanarQuasiStaticLine(Complex CComplexPerMetre, double C0Pe
         PlanarFillSettings? settings = null,
         PlanarFillCores? shortCores = null, PlanarFillCores? longCores = null)
     {
-        Complex c  = PlanarDeembed.CapacitancePerMetreComplex(
-            shortStd, longStd, slab, settings, shortCores, longCores);
+        var terms = PlanarKernelTerms.StaticScalar(slab);
+        var q1 = PlanarDeembed.StaticChargeComplex(shortStd.Mesh, terms, settings, shortCores,
+                                                   slab.HeightM, shortStd.ModePotential,
+                                                   shortStd.FloatingPotential);
+        var q2 = PlanarDeembed.StaticChargeComplex(longStd.Mesh, terms, settings, longCores,
+                                                   slab.HeightM, longStd.ModePotential,
+                                                   longStd.FloatingPotential);
+
         Complex c0 = PlanarDeembed.CapacitancePerMetreComplex(
             shortStd, longStd, slab, settings, shortCores, longCores, airFilled: true);
 
-        return Checked(c, c0);
+        return FromCharge(shortStd, longStd, q1, q2, c0, settings);
     }
 
     /// <summary><b>MIM-4's medium, the same way.</b> Only the electrostatic kernel changes; the
@@ -175,13 +243,101 @@ public sealed record PlanarQuasiStaticLine(Complex CComplexPerMetre, double C0Pe
         PlanarFillCores? shortCores = null, PlanarFillCores? longCores = null,
         InteriorStaticModel? model = null)
     {
-        Complex c  = PlanarDeembed.CapacitancePerMetreComplex(
-            shortStd, longStd, stack, levelZ, referenceHeightM, settings, shortCores, longCores, model);
+        var terms = PlanarKernelTerms.StaticScalarAt(
+            model ?? InteriorStaticImages.FitScalar(stack, levelZ, levelZ));
+        var q1 = PlanarDeembed.StaticChargeComplex(shortStd.Mesh, terms, settings, shortCores,
+                                                   referenceHeightM, shortStd.ModePotential,
+                                                   shortStd.FloatingPotential);
+        var q2 = PlanarDeembed.StaticChargeComplex(longStd.Mesh, terms, settings, longCores,
+                                                   referenceHeightM, longStd.ModePotential,
+                                                   longStd.FloatingPotential);
+
         Complex c0 = PlanarDeembed.CapacitancePerMetreComplex(
             shortStd, longStd, stack, levelZ, referenceHeightM, settings, shortCores, longCores,
             model, airFilled: true);
 
-        return Checked(c, c0);
+        return FromCharge(shortStd, longStd, q1, q2, c0, settings);
+    }
+
+    /// <summary>
+    /// <b>The two standards' charge vectors, differenced into C and — when the fill carried a
+    /// conductor term — into the sheet-geometry ratio R is read through.</b>
+    ///
+    /// <para>One pass over the two solves the run already owed. <c>C</c> comes out of the SAME
+    /// weighted sums <see cref="PlanarDeembed.StaticCapacitanceComplex"/> performs, in the same
+    /// order, so a PEC run's number is bit-identical to what it was.</para>
+    /// </summary>
+    private static PlanarQuasiStaticLine FromCharge(
+        PlanarStandard shortStd, PlanarStandard longStd,
+        Complex[] q1, Complex[] q2, Complex c0, PlanarFillSettings? settings)
+    {
+        double dl = longStd.LengthM - shortStd.LengthM;
+        if (!(dl > 0))
+            throw new InvalidOperationException("The two calibration standards have the same length.");
+
+        Complex t1 = Total(shortStd, q1), t2 = Total(longStd, q2);
+        Complex c  = (t2 - t1) / dl;
+
+        var line = Checked(c, c0);
+        if ((settings ?? PlanarFillSettings.Default).ConductorLoss is not { } loss) return line;
+
+        // A metal DECLARED perfect on the stackup and a metal asked to be perfect with
+        // PlanarFillSettings.PerfectConductor are the same physical claim, so they must produce the
+        // same γ — and γ has two spellings here that agree to the last digit of the physics and not
+        // to the last bit. Attaching a conductor whose R is identically zero would put a PEC run on
+        // the OTHER spelling and move it by an ulp, which is exactly enough to stop the flag being
+        // an oracle.
+        if (loss.IsPerfectOn(longStd.Mesh)) return line;
+
+        // ΔS per LEVEL, because Re(Z_s) is per level and a multi-level standard's cells are not all
+        // made of the same metal. The ratio carries Δℓ/|ΔT|² already, so what is left at each
+        // frequency is one multiply per level.
+        var mesh = longStd.Mesh;
+        int levels = Math.Max(mesh.LayerNames.Count, 1);
+        var ratio  = new double[levels];
+        var s1 = SecondMoment(shortStd, q1, levels);
+        var s2 = SecondMoment(longStd,  q2, levels);
+
+        Complex dT = t2 - t1;
+        double  den = dT.Magnitude * dT.Magnitude;
+        if (!(den > 0)) return line;
+
+        for (int i = 0; i < levels; i++) ratio[i] = (s2[i] - s1[i]) * dl / den;
+
+        return line with { Conductor = new PlanarQuasiStaticConductor(ratio, loss, mesh) };
+    }
+
+    /// <summary>Σ w·q, exactly as the capacitance reading totals it.</summary>
+    private static Complex Total(PlanarStandard std, Complex[] q)
+    {
+        var w = std.ModeWeight;
+        Complex total = Complex.Zero;
+        if (w is null) for (int i = 0; i < q.Length; i++) total += q[i];
+        else           for (int i = 0; i < q.Length; i++) total += w[i] * q[i];
+        return total;
+    }
+
+    /// <summary>
+    /// <c>Σ |q|²/A</c> per conductor LEVEL — the surface integral of the squared charge density,
+    /// which is the squared CURRENT density up to the TEM factor v_p that cancels in the ratio.
+    ///
+    /// <para><b>The mode weight is deliberately NOT applied here.</b> It exists to pick out which
+    /// mode's capacitance is being read, i.e. to combine two conductors' charges with a SIGN; the
+    /// loss integral is a sum of squares over metal and every conductor the mode drives dissipates.
+    /// A signed weight under a square would cancel the return conductor's own loss.</para>
+    /// </summary>
+    private static double[] SecondMoment(PlanarStandard std, Complex[] q, int levels)
+    {
+        var s = new double[levels];
+        var cells = std.Mesh.Cells;
+        for (int i = 0; i < q.Length; i++)
+        {
+            double a = cells[i].Area;
+            if (!(a > 0)) continue;
+            int lvl = Math.Clamp(cells[i].LayerIndex, 0, levels - 1);
+            s[lvl] += q[i].Magnitude * q[i].Magnitude / a;
+        }
+        return s;
     }
 
     /// <summary>
@@ -202,5 +358,36 @@ public sealed record PlanarQuasiStaticLine(Complex CComplexPerMetre, double C0Pe
                 "is unusual.");
 
         return new PlanarQuasiStaticLine(c, c0.Real);
+    }
+}
+
+/// <summary>
+/// <b>CL3 — what a quasi-static line needs to put R into γ: one geometry ratio per conductor level,
+/// and the SAME <see cref="PlanarConductorLoss"/> object the fill loaded Z_s from.</b>
+///
+/// <para>The split is deliberate. <see cref="RatioByLayer"/> is geometry and comes off the
+/// electrostatic solve ONCE; Re(Z_s) is the frequency-dependent half and is asked per point, from
+/// the object the fill used — so the two cannot come to mean different metal. The lookup is
+/// <see cref="PlanarConductorLoss.SheetTable"/>'s, which resolves by layer NAME first: CL1 records
+/// that <c>PlanarCalibration.BuildLine</c> emits every cell with <c>LayerIndex = 0</c> and one layer
+/// name, so an index-only lookup would hand a Metal-2 standard Metal-1's metal, silently.</para>
+/// </summary>
+/// <param name="RatioByLayer">ΔS_level·Δℓ/|ΔT|², in 1/m per Ω/square. Frequency-independent.</param>
+/// <param name="Loss">The fill's own model of the metal.</param>
+/// <param name="Mesh">The standard's mesh, for the name-first level resolution.</param>
+public sealed record PlanarQuasiStaticConductor(
+    IReadOnlyList<double> RatioByLayer,
+    PlanarConductorLoss   Loss,
+    PlanarMesh            Mesh)
+{
+    /// <summary>R per metre at one angular frequency, Ω/m. Exactly 0 on a perfect conductor,
+    /// through <see cref="PlanarSurfaceImpedance.Sheet"/>'s own zero rather than by being absent.</summary>
+    public double ResistancePerMetreAt(double omegaRadS)
+    {
+        var zs = Loss.SheetTable(Mesh, omegaRadS);
+        double r = 0;
+        for (int i = 0; i < RatioByLayer.Count; i++)
+            r += (i < zs.Length ? zs[i].Real : 0.0) * RatioByLayer[i];
+        return r;
     }
 }

@@ -1757,10 +1757,22 @@ public static class PlanarSolve
         var  parallelBudget = st.Deembed && cap != 1
             ? new PlanarParallelBudget(cap ?? Environment.ProcessorCount)
             : null;
-        var fillSt = (st.Fill ?? PlanarFillSettings.Default) with
+        // ── CL3 — THE METAL IS A REAL CONDUCTOR BY DEFAULT, AND THIS IS THE ONE PLACE IT IS DECIDED ──
+        //
+        // σ and t live on the PROBLEM, not on a mesh or on a fill setting, so this is the only
+        // scope in which "model the metal's loss" can resolve to the two numbers it needs. CL1
+        // shipped the term behind a null `ConductorLoss` and CL3 turns it on; what stays reachable
+        // is `PerfectConductor`, the PEC oracle every CL1 and CL2 accuracy gate compares against.
+        //
+        // A caller that supplied its own `ConductorLoss` keeps it — that is the seam CL1's own
+        // gates drive the fill through, and it is how a test compares two metals on one mesh.
+        var fillIn = st.Fill ?? PlanarFillSettings.Default;
+        var fillSt = fillIn with
         {
             MaxDegreeOfParallelism = cap,
             Budget                 = parallelBudget,
+            ConductorLoss          = fillIn.PerfectConductor ? null
+                                   : fillIn.ConductorLoss ?? PlanarConductorLoss.For(problem),
         };
 
         var sw    = Stopwatch.StartNew();

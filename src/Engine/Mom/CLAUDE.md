@@ -543,7 +543,8 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
   evaluated as a quadratic form against the SAME Gram the fill loaded Z_s with, so there is exactly
   one route to it. It is a hard zero only when the metal is a perfect conductor, **and the two ways
   that happens are different facts**: the stackup says so, or the fill carried no term at all
-  (`ConductorLoss` null — still the default). `PlanarPowerBudget.ConductorModelled` separates them,
+  (`PlanarFillSettings.PerfectConductor` — since CL3 the oracle rather than the default).
+  `PlanarPowerBudget.ConductorModelled` separates them,
   because the number cannot; the notes and the caption say which a run is in. `RESOLVED.md` §CL2.
 - **`PowerDielectric` IS A RESIDUAL (accepted − radiated − surface wave − CONDUCTOR), AND THAT IS
   PHYSICS, NOT A SHORTCUT.** Over a laterally infinite lossy substrate a volume integral of ωε₀ε″|E|²
@@ -982,6 +983,7 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
 | **`PlanarCalibrationSettings.MaxCalibrationGroupSize`** | **3** | A COST gate, not an algebraic one: the algebra is written for any N, but N conductors make the standard a 2N-port carrying all of them at every separation and every frequency, and the modes have to stay separable on top of that. Covers the coupled pair and the three-conductor case; a wider group is refused by name. |
 | **`PlanarCalibrationSettings.ModeSeparationFloorDegrees`** | **0.5** | How far apart two of a group's modes must be in electrical length over the separation a frequency reads, before the cascade eigenproblem can tell them apart. Below it the null space of (M − μI) is a plane and the modal basis is decided by round-off, so the run REFUSES rather than publishing something smooth and wrong. Asked at SETUP from the electrostatics, and again on the MEASURED separation per point. |
 | **`PlanarFillSettings.Aim`** | **`null` = OFF, but REACHABLE from the panel since 2026-08-14** | `EmSetup.AcceleratedSolve`, persisted in the `.cem`. **It MOVES the ceiling** (`brief-em-aim-ceiling.md`, 2026-08-14) — see `SurfaceMesher.AcceleratedUnknownCeiling` below — on a single-level mesh. **Since P12 a multi-level/via mesh is no longer refused** (`PlanarBorderedAimOperator`) — but the WIDER CEILING is still not applied to one, and **that question is now asked in exactly one place — `SurfaceMesher.UsesAcceleratedCeiling(aimOn, multiLevel)`**, because the pre-solve mesh verdict and `PlanarSolveContext` had been answering it DIFFERENTLY (the report judged a via mesh at 12,000 and the run then refused it at 5,000, quoting the dense ceiling). P12 measured the ladder that would move it (healthy to N = 15,192, past the 12,000) and left the behaviour alone: **owner's decision**, and it is now `=> aimOn;` in one function. See `RESOLVED.md` §P12 for why it was not taken (the border's TIME is set by N_z, not by N). The refusal names turning it on as the first remedy whenever doing so would let the mesh run. |
+| **`PlanarFillSettings.PerfectConductor`** | **`false` = the metal is a REAL conductor (CL3)** | The PEC oracle, and the only way back to a perfect conductor. `PlanarSolve.Run` builds `ConductorLoss` from the problem's own σ and t unless this is set — **the one place the default lives**, because σ and t are on the `PlanarProblem` and no mesh or fill setting has one. A SECOND flag rather than "leave `ConductorLoss` null", because null now means "not yet resolved" rather than PEC; those were the same state until CL3 and are not afterwards. Kept permanently for the reason `UseSymmetricFactorization = false` is — every CL1/CL2/CL3 accuracy figure is a comparison against it. No `.cem` key, no UI control (series overview §5); a metal DECLARED perfect on the stackup reaches the same matrix bit for bit (`PlanarConductorLoss.IsPerfectOn`). |
 | **`PlanarFillSettings.UseSymmetricFactorization`** | **`true` = P7's in-place complex-symmetric LDLᵀ** | Z is complex-symmetric bit for bit, so the dense solve is an `SymmetricFactorization`, not an LU: half the arithmetic, parallel over the trailing update under the SAME one cap the fill spends, and written INTO the matrix — `PlanarSystem.Matrix` throws after `Factor()`. `false` restores NumFlat's general LU, kept reachable as the oracle exactly as `UseRadialTable = false` is. **Unpivoted, which is standard for MoM matrices and is not a theorem** — the gate is a residual, and `SymmetricFactorization.GrowthFactor` / `SmallestPivotRatio` are computed on every factorisation at no cost. |
 | **`PlanarFillSettings.TrackFactorizationResidual`** | **`false`** | Keeps a copy of Z so every solve reports `‖Zx − b‖/‖b‖` on `PlanarSystem.LastResidual`. That copy is a whole N×N matrix — the memory P7 removed — so it is a diagnostic, never a default. |
 | `PlanarFillDiagnostics` / `ConformalDiagnostics` | `null` | instruments; fill is bit-identical with them attached |
@@ -1040,9 +1042,13 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
   disagreement is real dispersion and the measured path is right. A calibration GROUP declines it by
   name. **NOT a user setting.** `planar.CalQuasiStatic` says which path produced each point.
   `RESOLVED.md` §QSC.
-- **The quasi-static γ carries the DIELECTRIC's attenuation and no conductor term**, which matches
-  the fill only while `ConductorLoss` is off. CL3 is the brief that flips it;
-  `brief-conductor-loss-3-default-and-gate.md` §0 is where the mismatch is decided.
+- **The quasi-static γ carries a CONDUCTOR term since CL3, and its supplier is the standard's own
+  static CHARGE — never kernel A's Wheeler term** (R-qsc-2's rule, one quantity over):
+  `R = Σ_levels Re(Z_s)·[ΔS_level·Δℓ/|ΔT|²]` off the same two solves C is differenced from, so it
+  costs no extra solve and the two calibration paths agree in α across the crossover **by
+  construction rather than by calibration**. Measured: the static supplier tracks the fill's own α_c
+  to 0.96-1.15× on every mesh, where kernel A's over-reads it by 1.32-1.76×. `Z_c = γ/(jωC′)` gets
+  its `√(1 + R/(jωL))` correction for free with it. `RESOLVED.md` §CL3 §1.
 - **`Z_c = γ/(jωC_pul)` holds C at its static value** (`PlanarKernel.QuasiStaticNote` states it
   once): +0.4% at 1 GHz, +2.3% at 5 GHz, +6.3% at 20 GHz vs kernel A; −9.6% vs Kirschning-Jansen at
   20 GHz, where neither is authoritative. A dispersive C needs a field integral this kernel lacks.
@@ -1059,13 +1065,19 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
   frequency tried, so the widening costs nothing. `RESOLVED.md` §LF1.
 - The conductor-width edge reference sits **~0.35% low** on static capacitance; kept because the
   cell-size alternative measures N = 7,562 on an ordinary GaAs line, over R17's ceiling.
-- **Conductor loss is OFF by default; the sheet is PEC unless `PlanarFillSettings.ConductorLoss` is
-  set** (CL1, non-null carries σ/t in as `Z_s·⟨f_m,f_n⟩`; no `.cem` key, no UI control). Turned on it
-  converges in `EdgeCells` to **0.63 (FR-4) / 0.73 (GaAs)** of kernel A's Wheeler term — a single
-  zero-thickness sheet cannot carry sidewall or two-face crowding. **The 6.5 / 3.0 / 2.1% at
-  2 / 10 / 20 GHz is the FR-4 number, and FR-4 is where α_c matters LEAST**: on the shipped MMIC
-  technology the omission is 92-99%. `RESOLVED.md` §CL1. **CL2 reads it back out as `P_conductor`**
-  — see §3.7.
+- **Conductor loss is ON by default since CL3** (CL1's `Z_s·⟨f_m,f_n⟩` term; no `.cem` key, no UI
+  control). **`PlanarFillSettings.PerfectConductor` is the PEC ORACLE and stays permanently**, on
+  the pattern of `UseSymmetricFactorization = false` — every CL1/CL2/CL3 accuracy figure is a
+  comparison against it. **`PlanarSolve.Run` is the one place the default lives**, because σ and t
+  are on the PROBLEM and nothing else has one; a caller that supplies its own `ConductorLoss` keeps
+  it. It converges in `EdgeCells` to **0.63 (FR-4) / 0.73 (GaAs)** of kernel A's Wheeler term — a
+  single zero-thickness sheet cannot carry sidewall or two-face crowding — and CL3 reproduced 0.637
+  and 0.748 through the whole shipped de-embedding, an instrument sharing no algebra with CL1's.
+  **The 6.5 / 3.0 / 2.1% at 2 / 10 / 20 GHz is the FR-4 number, and FR-4 is where α_c matters
+  LEAST**: on the shipped MMIC technology it is 92-99%, and a de-embedded MMIC line's TOTAL α went
+  from 0.06-0.18 of kernel A's to **0.79-0.86**. **The GROUND PLANE is still PEC** (CL4, not run) —
+  21% (FR-4) / ~11% (GaAs) / 25% (low-loss laminate) of the conductor term. `RESOLVED.md` §CL1, §CL3.
+  **CL2 reads it back out as `P_conductor`** — see §3.7.
 - **Staircase error is NOT monotone in cell size.** Local width error on MTaper/MKlopf is 17–24%
   worst, 5.5–11% RMS, against 0.47–0.59% global *area* error. Conformal tiling error vs the drawn
   artwork is 7.7e-16…6.5e-15; staircase is 0.096–0.593%.

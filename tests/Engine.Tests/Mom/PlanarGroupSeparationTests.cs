@@ -71,19 +71,47 @@ public sealed class PlanarGroupSeparationTests(ITestOutputHelper output)
     // ══════════════════════════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// <b>The literals below were measured on the tree BEFORE this brief and are asserted as EXACT
-    /// equality, which is what makes them a gate rather than a tolerance.</b> §LF1 §5(b) declined
-    /// this work on the grounds that it "changes de-embedded answers for every grouped port", and
-    /// confining every change to runs that currently STOP is what removes the objection — so the
-    /// thing that has to be proved is that a grouped sweep which calibrates today is untouched.
+    /// <b>The literals below are asserted as EXACT equality, which is what makes them a gate rather
+    /// than a tolerance.</b> §LF1 §5(b) declined this work on the grounds that it "changes
+    /// de-embedded answers for every grouped port", and confining every change to runs that
+    /// currently STOP is what removes the objection — so the thing that has to be proved is that a
+    /// grouped sweep which calibrates today is untouched.
+    ///
+    /// <para><b>CL3 RE-BLESSED IT, AND THE PRE-CL3 LITERALS ARE STILL HERE AS THE OTHER HALF OF THE
+    /// GATE.</b> <c>PlanarFillSettings.ConductorLoss</c> is on by default now, so this fixture's
+    /// 35 µm copper is real metal and the de-embedded answer legitimately moved — by <b>4.8e-4 to
+    /// 2.8e-3 relative</b> across the eight entries, which is the size of α_c on 1.6 mm-class FR-4
+    /// at 1-7 GHz (the series overview's 8.8 % at 1 GHz, once). Both sets are asserted: the lossy
+    /// one against the shipped default, the PEC one against
+    /// <see cref="PlanarFillSettings.PerfectConductor"/>. <b>Asserting the oracle is the point</b> —
+    /// a re-bless that only moved the numbers would not say whether the move came from the metal or
+    /// from something else in the same commit, and every CL1/CL2 accuracy gate is a comparison
+    /// against exactly this flag.</para>
     /// </summary>
     [Fact]
     public void AGroupedSweepThatCalibratesTodayIsBitIdentical()
     {
         var (problem, mesh, ports) = Board();
-        var r = PlanarSolve.Run(problem, mesh, ports, [1e9, 3e9, 5e9, 7e9]);
+        var r   = PlanarSolve.Run(problem, mesh, ports, [1e9, 3e9, 5e9, 7e9]);
+        var pec = PlanarSolve.Run(problem, mesh, ports, [1e9, 3e9, 5e9, 7e9],
+                                  new PlanarSolveSettings(
+                                      PlanarFillSettings.Default with { PerfectConductor = true }));
 
-        // Recorded at HEAD, before any PCAL6 change, from this same fixture and sweep.
+        // CL3 — the shipped default, real copper. Re-blessed from the PEC column beside it.
+        (int Point, int I, double Re, double Im)[] lossy =
+        [
+            (0, 0,  0.06391205616018335,   0.18747501662593496),
+            (0, 1,  0.9349078429968425,   -0.2207389474994221),
+            (0, 2,  0.059816170917528576,  0.13940222659014842),
+            (0, 3, -0.059250356141446664, -0.1277447743104419),
+            (3, 0,  0.2508735945679807,    0.28492634386881016),
+            (3, 1,  0.7145536009396143,   -0.5172432641453646),
+            (3, 2,  0.16870041214140055,   0.1294002224362011),
+            (3, 3, -0.1482320809491303,   -0.050820039971441286),
+        ];
+
+        // Recorded at HEAD, before any PCAL6 change, from this same fixture and sweep — and still
+        // reproduced EXACTLY by the PEC oracle three briefs later.
         (int Point, int I, double Re, double Im)[] pre =
         [
             (0, 0,  0.06347998547490756,  0.18730399232764747),
@@ -95,15 +123,29 @@ public sealed class PlanarGroupSeparationTests(ITestOutputHelper output)
             (3, 2,  0.16901297308619603,  0.12970768367527550),
             (3, 3, -0.14855289041339780, -0.05113086018271953),
         ];
-        foreach (var (pt, i, re, im) in pre)
+
+        for (int k = 0; k < lossy.Length; k++)
         {
-            Assert.Equal(re, r.Points[pt].S[i, 0].Real);          // EXACT — no tolerance
+            var (pt, i, re, im) = lossy[k];
+            Assert.Equal(re, r.Points[pt].S[i, 0].Real);              // EXACT — no tolerance
             Assert.Equal(im, r.Points[pt].S[i, 0].Imaginary);
+
+            var (ppt, pi, pre_, pim) = pre[k];
+            Assert.Equal(pre_, pec.Points[ppt].S[pi, 0].Real);        // EXACT — the PEC oracle
+            Assert.Equal(pim,  pec.Points[ppt].S[pi, 0].Imaginary);
+
+            double moved = (r.Points[pt].S[i, 0] - pec.Points[pt].S[i, 0]).Magnitude
+                         / pec.Points[pt].S[i, 0].Magnitude;
+            output.WriteLine($"point {pt} S[{i},0]  PEC {pec.Points[pt].S[i, 0]}  " +
+                             $"lossy {r.Points[pt].S[i, 0]}  moved {moved:E2}");
+
+            // Conductor loss moves this fixture and it moves it by a KNOWN amount. A move an order
+            // either side of that is not a re-bless, it is something else in the same commit.
+            Assert.InRange(moved, 1e-4, 1e-2);
         }
-        var s = r.Points[0].S;
 
         Assert.DoesNotContain(r.Notes, n => n.Contains("SHORT standard", StringComparison.Ordinal));
-        output.WriteLine($"1 GHz S11 = {s[0, 0]}, S21 = {s[1, 0]}");
+        output.WriteLine($"1 GHz S11 = {r.Points[0].S[0, 0]}, S21 = {r.Points[0].S[1, 0]}");
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -116,20 +158,34 @@ public sealed class PlanarGroupSeparationTests(ITestOutputHelper output)
     /// a fixture, and it is what says the mechanism is understood: the two sweeps differ in their
     /// BAND, the band is what <see cref="PlanarCalibration.SuggestDeltas"/> sizes the separations
     /// from, and the separation is what the measurement is made over.
+    ///
+    /// <para><b>CL3 MOVED THE SECOND BAND, AND WHY IT HAD TO IS ITSELF A FINDING.</b> With the
+    /// metal a real conductor the two modes are MORE separable, not less: the cascade's eigenvalues
+    /// are e^{±γ_m Δℓ} and the even and odd modes carry different current distributions, so they
+    /// differ in α as well as in β and |Δγ|·Δℓ grows. Measured on this fixture at 200 MHz — PEC
+    /// against real copper — <b>0.405° → 0.56°</b> over a 200 MHz - 1 GHz band, which takes that
+    /// band from under the 0.50° floor to over it. The phenomenon this test exists for is
+    /// unchanged and is demonstrated one rung narrower: a 200 MHz - 400 MHz band reads 0.255° PEC
+    /// and <b>0.405°</b> with real metal, and refuses on both.</para>
+    ///
+    /// <para><b>The band moved rather than the metal.</b> Pinning this with
+    /// <see cref="PlanarFillSettings.PerfectConductor"/> was the other option and is refused on the
+    /// brief's own terms: the PEC flag is an oracle for comparing two answers, and a gate that
+    /// flipped it would be testing a refusal no user can reach.</para>
     /// </summary>
     [Fact]
     public void TheSameFrequencyIsRefusedInOneSweepAndAcceptedInAnother()
     {
         var (problem, mesh, ports) = Board();
 
-        // 100 MHz - 1 GHz: separations 171.0 and 54.1 mm. 200 MHz reads 1.63° and publishes.
+        // 100 MHz - 1 GHz: separations 171.0 and 54.1 mm. 200 MHz reads 1.31° and publishes.
         var ok = PlanarSolve.Run(problem, mesh, ports, [100e6, 200e6, 1e9]);
         Assert.Contains(ok.Notes, n => n.Contains("200 MHz", StringComparison.Ordinal)
-                                    && n.Contains("separation 1.63°", StringComparison.Ordinal));
+                                    && n.Contains("separation 1.31°", StringComparison.Ordinal));
 
-        // 200 MHz - 1 GHz: separations 101.7 and 45.5 mm. The SAME 200 MHz reads 0.405° and stops.
+        // 200 - 400 MHz: a shorter pair of separations again. The SAME 200 MHz reads 0.405° and stops.
         var ex = Assert.Throws<PlanarFeedClearanceRefusedException>(
-            () => PlanarSolve.Run(problem, mesh, ports, [200e6, 1e9]));
+            () => PlanarSolve.Run(problem, mesh, ports, [200e6, 400e6]));
         output.WriteLine(ex.Message);
 
         Assert.Contains("at 200 MHz", ex.Message, StringComparison.Ordinal);
@@ -141,7 +197,7 @@ public sealed class PlanarGroupSeparationTests(ITestOutputHelper output)
         // puts the two modes SEVEN TIMES further apart than the measurement did. A genuinely
         // degenerate pair reads small on both, and the pair of numbers is the only thing that
         // separates the two cases — so the message carries both.
-        Assert.Contains("electrostatics puts the same quantity at 2.839°", ex.Message,
+        Assert.Contains("electrostatics puts the same quantity at 3.008°", ex.Message,
                         StringComparison.Ordinal);
         Assert.Contains("short standard of 3.83 mm", ex.Message, StringComparison.Ordinal);
     }

@@ -440,14 +440,50 @@ public sealed class PlanarStaticAim
     /// </summary>
     public Complex TotalCapacitanceComplex()
     {
-        var b = new Complex[_m];
-        for (int i = 0; i < _m; i++) b[i] = EmConstants.Eps0;
-
-        var q = SolveCharge(b);
+        var q = ChargeComplex(null, null);
 
         Complex total = Complex.Zero;
         for (int i = 0; i < _m; i++) total += q[i];
         return total;
+    }
+
+    /// <summary>
+    /// <b>CL3 — the solved charge vector, after PCAL3's floating combination, and the one body the
+    /// two readings above are sums of.</b> A quasi-static conductor term needs
+    /// <c>Σ|q|²/A</c> as well as <c>Σq</c>, and a second solve for the second moment would be a
+    /// second answer to the same question.
+    ///
+    /// <para><paramref name="potential"/> null is the all-1 V drive
+    /// <see cref="TotalCapacitanceComplex"/> used to build inline; <c>ε₀·1.0</c> is <c>ε₀</c>
+    /// exactly, so that route is bit-identical to what it was.</para>
+    /// </summary>
+    public Complex[] ChargeComplex(IReadOnlyList<double>? potential, IReadOnlyList<double>? floating)
+    {
+        if (potential is not null && potential.Count != _m)
+            throw new ArgumentException(
+                $"The mode potential has {potential.Count} entries for {_m} cells.", nameof(potential));
+
+        var b = new Complex[_m];
+        for (int i = 0; i < _m; i++) b[i] = EmConstants.Eps0 * (potential is null ? 1.0 : potential[i]);
+
+        var q = SolveCharge(b);
+
+        if (floating is not null)
+        {
+            var bf = new Complex[_m];
+            for (int i = 0; i < _m; i++) bf[i] = EmConstants.Eps0 * floating[i];
+            var qf = SolveCharge(bf);
+
+            Complex qa = Complex.Zero, qb = Complex.Zero;
+            for (int i = 0; i < _m; i++) { qa += floating[i] * q[i]; qb += floating[i] * qf[i]; }
+            if (qb != Complex.Zero)
+            {
+                Complex alpha = -qa / qb;
+                for (int i = 0; i < _m; i++) q[i] += alpha * qf[i];
+            }
+        }
+
+        return q;
     }
 
     /// <summary>
@@ -476,29 +512,8 @@ public sealed class PlanarStaticAim
                                            IReadOnlyList<double>? floating = null)
     {
         ArgumentNullException.ThrowIfNull(potential);
-        if (potential.Count != _m)
-            throw new ArgumentException(
-                $"The mode potential has {potential.Count} entries for {_m} cells.", nameof(potential));
 
-        var b = new Complex[_m];
-        for (int i = 0; i < _m; i++) b[i] = EmConstants.Eps0 * potential[i];
-
-        var q = SolveCharge(b);
-
-        if (floating is not null)
-        {
-            var bf = new Complex[_m];
-            for (int i = 0; i < _m; i++) bf[i] = EmConstants.Eps0 * floating[i];
-            var qf = SolveCharge(bf);
-
-            Complex qa = Complex.Zero, qb = Complex.Zero;
-            for (int i = 0; i < _m; i++) { qa += floating[i] * q[i]; qb += floating[i] * qf[i]; }
-            if (qb != Complex.Zero)
-            {
-                Complex alpha = -qa / qb;
-                for (int i = 0; i < _m; i++) q[i] += alpha * qf[i];
-            }
-        }
+        var q = ChargeComplex(potential, floating);
 
         Complex total = Complex.Zero;
         if (weight is null) for (int i = 0; i < _m; i++) total += q[i];

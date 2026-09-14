@@ -62,8 +62,36 @@ not general 3D.
 ### Can
 
 - **Planar conductors on a layered substrate** — any number of dielectric layers, with real
-  ε<sub>r</sub> and tanδ. *(Dielectric loss, in both kernels. **Conductor** loss is the quasi-static
-  kernel only — see below.)*
+  ε<sub>r</sub> and tanδ. **Dielectric AND conductor loss, in both kernels.**
+- **Conductor loss**, from the conductivity and thickness set in the stackup. In the full-wave kernel
+  it is a term in the field equation itself — the solved current is the one a lossy conductor
+  actually carries, not a perfect conductor's current with a correction applied afterwards — so the
+  extra loss at a rim, where the current crowds, comes out of the solve rather than being assumed.
+  **Two things bound it and both are measured.** The model is a *sheet*: one current per location,
+  so it cannot carry the different currents a real strip's upper and lower faces carry, nor the
+  current down its sides. Against the quasi-static kernel's independent thick-strip calculation on a
+  re-bisected 50 Ω line, the full-wave answer comes out at **0.63 of it on 1.6 mm FR-4 and 0.73 on
+  100 µm GaAs** — under-reading, consistently, and **converging**: refining the mesh at the
+  conductor rim changes it by under 1% per step, so this is the model's own limit and not a
+  resolution you can mesh your way out of. And the **ground plane's** share is not included — see
+  [Cannot](#can-cannot).
+  **How much it matters depends entirely on the substrate**, and the FR-4 figure everyone quotes is
+  the one where it matters least:
+
+  | Substrate | conductor loss as a share of the total, at 2 / 10 / 20 GHz |
+  |---|---|
+  | 1.6 mm FR-4, 35 µm Cu, tanδ 0.02 | 6.4% / 3.0% / 2.1% |
+  | **MMIC starter — 100 µm GaAs, 3 µm Au, tanδ 0.0006** | **98.5% / 96.2% / 94.6%** |
+  | Low-loss laminate 0.508 mm, 35 µm Cu, tanδ 0.0015 | 72.2% / 53.7% / 45.1% |
+
+  On FR-4 dielectric loss dominates and always did. **On the MMIC technology the conductor is
+  effectively all of the loss** — which is why "the metal is nearly lossless" is the wrong intuition
+  to carry from one to the other.
+  **On an antenna this lands on radiation efficiency**: the power the metal absorbs is itemised in
+  the power budget as its own term rather than left inside the dielectric residual, and
+  [Antennas](antennas.html#numbers) says which way each correction pushes. A measured example — a
+  half-wave patch — loses **0.28 points** of radiation efficiency to 35 µm copper on FR-4 at
+  2.4 GHz and **4.12 points** to 3 µm gold on GaAs at 60 GHz.
 - **Arbitrary planar shapes**: lines, bends, tapers, stubs, spirals, pads, coupled sections.
 - **Multiple metal levels**, with **vias** carrying z-directed current between them. A via is either
   a placed via primitive or a **drawn region** — a rectangle or polygon on the via entry's drawing
@@ -127,24 +155,22 @@ not general 3D.
   note. Two things that are no longer limits, because they were fixed: the plate sheets used to be
   separated by the capacitor dielectric *plus the lower plate's own metal thickness*, and a port on
   upper metal used to be refused. See [A thin-film (MIM) capacitor](stackup.html#mim).
-- **Conductor loss, in the full-wave kernel.** Its metal is a **perfect conductor**: the conductivity
-  and thickness you set in the stackup are carried but not used in the field solve. Dielectric loss
-  (tanδ) *is* modelled, and it dominates on ordinary substrates — measured on 1.6 mm FR-4, the missing
-  conductor term is **6.5% / 3.0% / 2.1%** of the total conducted loss at 2 / 10 / 20 GHz. So a
-  full-wave insertion loss reads slightly optimistic, by a known and shrinking amount. The
-  quasi-static kernel *does* model conductor loss, through Wheeler's incremental inductance rule over
-  every lossy surface including the ground plane — which is one reason the two kernels' loss numbers
-  do not agree exactly on a uniform line.
-  **On an antenna this lands on radiation efficiency**: with perfect metal the accepted power has one
-  fewer place to go, so a reported efficiency reads **high** by roughly the copper's own share. The
-  itemisation prints the conductor term as an explicit zero rather than leaving it out, and
-  [Antennas](antennas.html#numbers) says which way each correction pushes.
+- **The GROUND PLANE's share of conductor loss, in the full-wave kernel.** The signal metal's loss
+  *is* modelled now (see [Can](#can-cannot) above); the laterally infinite plane the stack terminates
+  on is still a perfect conductor. It is not a large share and it is measured rather than estimated —
+  **21% on 1.6 mm FR-4, about 11% on the MMIC technology, 25% on a low-loss laminate**, of the
+  *conductor* term only. So an insertion loss still reads a little optimistic, and by that much.
+  A ground drawn as **artwork** — coplanar waveguide, a drawn backside path, anything on a meshed
+  level — is an ordinary conductor and its loss is modelled in full; this limit is only about the
+  infinite plane underneath a microstrip.
 
 There is also a **quasi-static kernel** for the special case of a uniform transmission-line
 cross-section, which is described below and which is far faster than the full-wave path where it
 applies. Its own limits are narrower: no discontinuities, no bends, no stubs, no spirals, no radiation,
-no resonance, and no coupling between non-parallel conductors. It **does** model conductor loss, which
-the full-wave kernel does not.
+no resonance, and no coupling between non-parallel conductors. It models conductor loss through
+Wheeler's incremental inductance rule over every lossy surface **including the ground plane**, which
+is a different calculation from the full-wave kernel's sheet — so the two do not agree exactly on a
+uniform line, and the quasi-static one reads the higher of the two by the amounts given above.
 
 ## For advanced users: how circuitRF implements MoM {#implementation}
 

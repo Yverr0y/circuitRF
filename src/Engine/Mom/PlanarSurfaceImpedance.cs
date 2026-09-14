@@ -275,6 +275,26 @@ public sealed class PlanarConductorLoss
         return t;
     }
 
+    /// <summary>
+    /// <b>CL3 — is every conductor level this MESH names a perfect one?</b> Frequency-independent,
+    /// because <see cref="PlanarSurfaceImpedance.Sheet"/>'s own PEC test is: σ ≤ 0, σ = +∞ or
+    /// t ≤ 0. Asked through <see cref="SheetTable"/>'s exact levels so the name-first resolution is
+    /// the same one the fill uses.
+    ///
+    /// <para>It exists so a PERFECT metal produces the identical answer however it was spelled —
+    /// declared on the stackup, or asked for with
+    /// <see cref="PlanarFillSettings.PerfectConductor"/>. Those two are the same physical claim, and
+    /// <see cref="PlanarQuasiStaticLine"/>'s γ has two spellings that agree to the last digit of the
+    /// physics and not to the last bit, so without this the oracle would be off by an ulp and would
+    /// not be an oracle.</para>
+    /// </summary>
+    public bool IsPerfectOn(PlanarMesh mesh)
+    {
+        ArgumentNullException.ThrowIfNull(mesh);
+        foreach (var z in SheetTable(mesh, 1.0)) if (z != Complex.Zero) return false;
+        return true;
+    }
+
     /// <summary>The problem's own index of a level named <paramref name="name"/>, or −1.</summary>
     private int IndexOfName(string name)
     {

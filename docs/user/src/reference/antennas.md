@@ -299,11 +299,12 @@ conductor.
 | **Radiated** | this is the output, not a loss |
 | **Dielectric** | lower tanδ, or a thicker substrate (the same current radiates more of its power) |
 | **Surface wave** | thinner substrate, or lower ε<sub>r</sub>. Booked as a **permanent loss** here, because an infinite substrate never gives it back — on a real board it reaches the edge and radiates, usually badly |
-| **Conductor** | always exactly zero: the full-wave kernel's metal is a perfect conductor |
+| **Conductor** | lower-resistivity metal, or thicker metal — it is the signal metal's own ohmic loss, taken from the stackup's σ and t. **Exactly zero only when the metal really is a perfect conductor**, and the budget says which of the two zeros it is printing. The **ground plane's** share (21% on FR-4, ~11% on the MMIC technology) is not in it |
 
-**The two corrections do not cancel, so read both.** The surface-wave term makes the reported efficiency
-a **lower bound** on what a finite board does; the missing copper loss makes it read **high**. The
-pattern is also missing the edge-diffracted contribution entirely.
+**Read the surface-wave correction and the ground-plane one together, because they push opposite
+ways.** The surface-wave term makes the reported efficiency a **lower bound** on what a finite board
+does; the ground plane's unmodelled loss makes it read **high**, by about a tenth of the conductor
+term. The pattern is also missing the edge-diffracted contribution entirely.
 
 ### Beamwidth, polarization, cross-pol
 
@@ -348,7 +349,12 @@ physical, and it is ideally non-zero.</p>
   out entirely. [Feed from the edge](#feeds) instead.
 - **No vertical current in the pattern.** A probe feed, a monopole, an IFA, a via-fenced patch: the
   s-parameters are computed, the pattern is refused by name. Edge- and inset-fed structures are in.
-- **The metal is a perfect conductor**, so radiation efficiency reads high by the copper's share.
+- **The signal metal's loss is modelled and the GROUND PLANE's is not**, so radiation efficiency reads
+  high by the plane's share of the conductor term — 21% of it on FR-4, about 11% on the MMIC
+  technology. The signal metal's own term is a sheet and under-reads a thick strip's crowding by a
+  further measured amount; [the MoM reference](mom-engine.html#can-cannot) carries both numbers. A
+  measured size: a half-wave patch loses 0.28 points of efficiency to 35 µm copper on FR-4 at
+  2.4 GHz, and 4.12 points to 3 µm gold on GaAs at 60 GHz.
 - **Surface-wave power is a permanent loss**, so efficiency is a lower bound and the pattern is missing
   what a real board's edge re-radiates.
 - **Every dielectric layer is laterally infinite — including one you drew.** circuitRF *does* model
