@@ -8206,3 +8206,42 @@ the run itself reports, so the number under test is the one the interior electro
 For scale: the same |S₁₁| gate reads 3.9e-4 at 2 GHz and 6.0e-3 at 10 GHz on the SLAB TOP over
 1.6 mm FR-4 (§L8d's own T4_6), where the limit is direct radiative and surface-wave coupling between
 the ports rather than the algebra. The buried level is inside that band.
+
+---
+
+# CL1 — the surface-impedance term: what it cost (brief-conductor-loss-1-surface-impedance.md, 2026-09-14)
+
+The full record — the derivation, the edge-convergence tables, the kernel-A comparison and every trap
+— is `RESOLVED.md` §CL1. This is the cost measurement the brief asked to be recorded here.
+
+Per frequency the term is O(N) complex multiply-adds against an O(N²) fill and an O(N³)
+factorisation, over a matrix that is already allocated, so it should be **unmeasurable**. It is.
+
+## Fill and factor, FR-4 hero at the shipping mesh (N = 1,368, 720 cells, Debug)
+
+| | fill (mean of 3, warmed) | factor |
+|---|---|---|
+| PEC — `ConductorLoss = null` | 353.4 ms | 937.3 ms |
+| with the term | 345.5 ms | 935.8 ms |
+
+Both differences are inside the run-to-run noise, and the term measured *faster* on this run, which
+is the honest way of saying the same thing. **These are Debug numbers** — `dotnet test` builds Debug
+— and the comparison is like-for-like, which is what it is for.
+
+## The Gram itself
+
+| | |
+|---|---|
+| build time, N = 1,368 | **1.65 ms**, once per mesh |
+| stored entries | **2,664** = 1.95 × N (upper triangle, diagonal included) |
+| bytes | **47.0 KB** |
+
+Nonzeros per unknown, measured across four meshes: 1.71 (short FR-4 line), 1.90 (conformal disc),
+1.91 (conformal taper), 1.95 (FR-4 hero). A rooftop meets at most one same-direction neighbour per
+cell, so the constant is structurally under 3 and the O(N) claim is a property of the pairing rather
+than of a mesh.
+
+**The counter, not the clock, is what is gated.** `PlanarFillCores.GramBuilt` plus
+`Cost_TheGramIsBuiltOncePerMesh_NotPerFrequency` (a 5-point sweep, one build) is what would catch the
+one failure that would make the term measurable — rebuilding the Gram per frequency. A timing test
+would measure the machine.

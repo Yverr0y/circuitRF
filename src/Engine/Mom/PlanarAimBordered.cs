@@ -381,7 +381,7 @@ public sealed class PlanarBorderedAimOperator : IPlanarOperator
         sw.Restart();
         _hz = new Complex[(long)_nh * _nz];
         _zz = new Complex[(long)_nz * _nz];
-        FillBorder(pr, pulse, levels, diagnostics);
+        FillBorder(pr, pulse, levels, omega, diagnostics);
         double borderMs = sw.Elapsed.TotalMilliseconds;
 
         // ── the preconditioner: the near LU, with the border folded in exactly ────────────────
@@ -420,7 +420,7 @@ public sealed class PlanarBorderedAimOperator : IPlanarOperator
     /// pairing that was never resolved and read a null.</para>
     /// </summary>
     private void FillBorder(PlanarFill.MultiLevelPairings pr, PlanarPulsePotential?[,] pulse,
-                            PlanarLevels levels, PlanarFillDiagnostics? diagnostics)
+                            PlanarLevels levels, double omega, PlanarFillDiagnostics? diagnostics)
     {
         var st = _g.Cores.Settings;
         double rhoFloor = _g.Cores.RhoFloorM;
@@ -482,12 +482,19 @@ public sealed class PlanarBorderedAimOperator : IPlanarOperator
 
                 Complex v = _scalarScale * s
                           + _vectorScale * spanI.Length * spanJ.Length * core;
+
+                // CL1 — the via's own barrel, on the diagonal only: a z-directed basis's series
+                // impedance is ℓ·η_c·coth(γ_c·A/P)/P over ITS barrel, and two different vias share
+                // no barrel. The dense multi-level fill adds exactly this, in exactly this place
+                // (PlanarFill.AddSurfaceImpedance).
+                if (k == l && st.ConductorLoss is { } loss)
+                    v += loss.BarrelAt(_mesh, levels, bi, omega);
+
                 _zz[(long)k * _nz + l] = v;
                 _zz[(long)l * _nz + k] = v;
             }
         });
 
-        _ = levels;
     }
 
     /// <summary>D4's cell-pulse potential at the pairing the two cells' own LEVELS name.</summary>

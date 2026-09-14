@@ -1039,8 +1039,12 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
   frequency tried, so the widening costs nothing. `RESOLVED.md` §LF1.
 - The conductor-width edge reference sits **~0.35% low** on static capacitance; kept because the
   cell-size alternative measures N = 7,562 on an ordinary GaAs line, over R17's ceiling.
-- **Conductor loss is not modelled** — the sheet is PEC; `PlanarConductorLayer.SigmaSm`/`ThicknessM`
-  are carried and unused. α_c is 6.5 / 3.0 / 2.1% of conducted loss at 2 / 10 / 20 GHz.
+- **Conductor loss is OFF by default; the sheet is PEC unless `PlanarFillSettings.ConductorLoss` is
+  set** (CL1, non-null carries σ/t in as `Z_s·⟨f_m,f_n⟩`; no `.cem` key, no UI control). Turned on it
+  converges in `EdgeCells` to **0.63 (FR-4) / 0.73 (GaAs)** of kernel A's Wheeler term — a single
+  zero-thickness sheet cannot carry sidewall or two-face crowding. **The 6.5 / 3.0 / 2.1% at
+  2 / 10 / 20 GHz is the FR-4 number, and FR-4 is where α_c matters LEAST**: on the shipped MMIC
+  technology the omission is 92-99%. `RESOLVED.md` §CL1.
 - **Staircase error is NOT monotone in cell size.** Local width error on MTaper/MKlopf is 17–24%
   worst, 5.5–11% RMS, against 0.47–0.59% global *area* error. Conformal tiling error vs the drawn
   artwork is 7.7e-16…6.5e-15; staircase is 0.096–0.593%.

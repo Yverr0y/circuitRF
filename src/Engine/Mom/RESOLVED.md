@@ -3,6 +3,182 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## CL1 — the surface-impedance term in the full-wave fill (2026-09-14)
+
+`docs/sonnet-briefs/brief-conductor-loss-1-surface-impedance.md`. Kernel B's metal was a PERFECT
+CONDUCTOR: `PlanarConductorLayer.SigmaSm` and `ThicknessM` reached `PlanarProblem`, entered the
+provenance hash, and were never read by the fill. On the MMIC technology this repository ships that
+omits 92-99% of the line's loss. This brief reads them, behind
+`PlanarFillSettings.ConductorLoss`, **default off**.
+
+### What was built
+
+- **`PlanarSurfaceImpedance`** (new file) — `Sheet(σ, t, ω) = (η_c/2)·coth(γ_c t/2)` for a sheet
+  carrying current on both faces, `Barrel(σ, ℓ, A, P, ω) = (ℓ/P)·η_c·coth(γ_c·A/P)` for a via post,
+  and `SkinDepthM`. Derivation and both limits in the file header.
+- **`PlanarGram`** (new file) — `⟨f_m, f_n⟩` over the rooftop basis, symmetric sparse CSR over the
+  upper triangle, built once per mesh off `PlanarFillCores.Gram` (lazy, so a run that never asks for
+  loss pays nothing at all — `GramBuilt` is the counter).
+- **`PolygonIntegrals.AreaSecondMoments`** — `∫∫u²`, `∫∫uv`, `∫∫v²` over a polygon by the same signed
+  fan `Area`/`AreaMoment` already use. The only new closed form in the brief.
+- **Three fill seams, one function.** `PlanarFill.AddSurfaceImpedance` after the direction blocks and
+  before `MirrorLowerToUpper` in both `Fill` and `FillMultiLevel`; `PlanarEntryFill.At` adds
+  `PlanarFill.SurfaceEntry`, which calls the same `SheetTerm`. In the AIM path the term reaches
+  `nearExact` only — never `AimEntry` — because Z_s is not a Green's-function interaction and the
+  grid product must not claim it. `PlanarAimBordered.FillBorder` adds the barrel on the Z_zz
+  diagonal.
+- **`PlanarDcSolve.ViaSigmaFor` is now public** and the DC point's private `ViaSigma` delegates to
+  it. There is one via-conductivity resolution, not two.
+
+### The result that decides the series: R-cl1-9's edge convergence
+
+α_c of a uniform, re-bisected 50 Ω line at 10 GHz, tanδ = 0, γ from the two-line extraction, the PEC
+run's α subtracted as the floor. Ground held PEC in BOTH kernels (kernel A via
+`EmGroundPlane(0, ∞)`), so kernel A's sum over surfaces isolates the strip exactly.
+
+**FR-4, 1.6 mm, 35 µm Cu, w = 3020.28 µm.** Kernel A: R_strip = **8.194 Ω/m**, Z₀ = 50.00 Ω,
+ε_eff = 3.2999, α_c = 8.1943e-2 Np/m = 0.0071 dB/cm.
+
+| EdgeCells | N | α_c Np/m | dB/cm | ÷ kernel A | step |
+|---|---|---|---|---|---|
+| 0 | 148 | 4.1076e-2 | 0.0036 | 0.5013 | — |
+| 2 | 292 | 5.1480e-2 | 0.0045 | 0.6282 | 25.33% |
+| 3 | 365 | 5.1819e-2 | 0.0045 | 0.6324 | 0.66% |
+| 5 | 493 | 5.1038e-2 | 0.0044 | 0.6228 | 1.51% |
+| 8 | 715 | 5.1546e-2 | 0.0045 | 0.6290 | 0.99% |
+
+**GaAs, 100 µm, 3 µm Au, w = 70.72 µm.** Kernel A: R_strip = **382.571 Ω/m**, Z₀ = 50.00 Ω,
+ε_eff = 8.0651, α_c = 3.8256 Np/m = 0.3323 dB/cm.
+
+| EdgeCells | N | α_c Np/m | dB/cm | ÷ kernel A | step |
+|---|---|---|---|---|---|
+| 0 | 24 | 2.2264 | 0.1934 | 0.5820 | — |
+| 2 | 142 | 2.8090 | 0.2440 | 0.7343 | 26.17% |
+| 3 | 161 | 2.7947 | 0.2427 | 0.7305 | 0.51% |
+| 5 | 262 | 2.7855 | 0.2419 | 0.7281 | 0.33% |
+| 8 | 445 | 2.7816 | 0.2416 | 0.7271 | 0.14% |
+
+**Both starters' kernel-A figures reproduce the series overview's own (8.19 and 382.56) to the digit
+it quoted**, which is what says the two sides are measuring the same quantity.
+
+**α_c CONVERGES.** Turning the edge mesh on at all is worth 25-26%; past that each rung moves under
+1.6% (FR-4) and under 0.6% (GaAs), and GaAs is still falling monotonically at 0.14% from rung 5 to 8.
+The log-divergence a PEC-current `∫R_s|J|²` would have is not present — loading the operator does
+what the series overview said it would.
+
+**And the loaded sheet lands at 0.63 (FR-4) / 0.73 (GaAs) of kernel A, converged.** That deficit is
+not a convergence artifact and it is not tuned away. It is the single-sheet model's own structural
+limit, stated in `PlanarSurfaceImpedance`'s header before it was measured: one unknown per location
+cannot hold two independent face currents, and a real strip's loss includes sidewall current and a
+substrate-side face carrying far more than its air-side one. Cross-checked against a uniform-current
+line: on GaAs, Re(Z_s) = 1.4573e-2 Ω/sq over w = 70.72 µm gives R = 206.1 Ω/m, i.e. α = 2.061 Np/m —
+so kernel B's loaded sheet computes an **edge-crowding factor of 1.35** where kernel A's thick strip
+has **1.857** (the overview §3's own back-out). The ratio of those two is 0.727, which is the table's
+own number. **Nothing was adjusted to make that come out.**
+
+**Reading for the series:** the model is well posed and converges, so R-cl1-9's own stated
+alternative — "comes back mesh-dependent, therefore there is a measured structural argument for thick
+metal" — did NOT happen. What did happen is a converged 27-37% under-read against an independent
+oracle, which is a calibration question or a thick-metal question, and is the owner's to decide at
+CL3 rather than this brief's.
+
+### Traps found
+
+- **σ = +∞ is a third spelling of PEC, and it is the one that produces a NaN.** The rest of the
+  kernel means PEC by σ ≤ 0 or t ≤ 0; kernel A spells a perfect ground as `EmGroundPlane(0, ∞)`, so
+  an A-vs-B comparison hands the sheet an infinite conductivity as a matter of course. Then δ → 0 and
+  η_c = (1+j)/(σδ) is ∞·0 = NaN — **not a small loss but a solve that produces nothing**, and R-cl1-4
+  caught it as 302 moved bits on a 59-unknown line. `PlanarSurfaceImpedance.IsPerfect` is the one
+  place all three are asked.
+- **The coth needs a SMALL-argument branch as well as the large one, and the brief only named the
+  large one.** `(e^{2z}+1)/(e^{2z}-1)` at z ~ 1e-6 is cancellation, not arithmetic: at t/δ = 1e-6 it
+  returned an imaginary part 4.1e-11 of the real one where the physics says (t/δ)²/6 = 1.7e-13, i.e.
+  pure noise — and the thin-sheet asymptote is exactly the limit the DC-continuity gate lives in. The
+  Laurent series is used below |z| = 0.1; its first omitted term there is ~2e-14 against a value of 10.
+  The large-argument branch (|Re z| ≥ 30) is the brief's, and it is a precision question rather than
+  an overflow one: 105 µm copper at 40 GHz is t/δ = 318 and the naive form does not overflow until 710.
+- **A HALF-WAVELENGTH two-line separation sits exactly on the extraction's singularity.** The
+  two-line γ is acosh of a quantity whose distance from 1 scales with (γΔℓ)², so βΔℓ = 180° is
+  degenerate. Measured on FR-4 at 10 GHz: the PEC line's extracted α came back at 0.551 Np/m — nearly
+  seven times the conductor term being looked for — and the difference between the PEC and lossy runs
+  was **NEGATIVE**, i.e. adding loss removed it. A quarter wavelength is the target.
+- **…and the crude ε_eff = (εᵣ+1)/2 is not good enough to hit that target on FR-4.** It sized Δℓ at
+  4.97 mm; the extraction came back βΔℓ = 245°, `Usable = false`, on the wrong branch. `Gamma`'s
+  `expectedBetaDeltaL` argument exists for this, and kernel A's own ε_eff is what to feed it — it is
+  the oracle the measurement is against anyway and is never an input to kernel B.
+- **`PlanarCalibration.BuildLine` has a LENGTH FLOOR**, and two targets below it return two standards
+  of the SAME length. `Gamma` refuses a zero Δℓ, so it surfaces — but nothing else would have noticed.
+  Measure the long standard FROM the short one's actual length, not from the same wavelength scale.
+- **The FR-4 PEC floor is larger than the conductor term and its SIGN moves** (−0.55, −0.14, −0.70,
+  −0.21 Np/m across the edge rungs) while the DIFFERENCE is stable to ~1%. That is not a contradiction:
+  the floor is a systematic bias of the extraction on a radiating 1.6 mm substrate, and it cancels
+  almost exactly between two runs that differ only by a ~1e-4 relative perturbation of the operator.
+  **The absolute α of a PEC FR-4 line out of this route is not a usable number; the difference is.**
+- **A calibration standard's mesh hard-codes `LayerIndex = 0` and `layerName = "Metal"`**
+  (`PlanarCalibration.cs:435` and `:387`). An index lookup for Z_s would therefore hand a Metal-2
+  standard Metal-1's metal on a multi-level problem — silently, as a plausible loss figure. The sheet
+  table is resolved by layer NAME first and by index second, which makes the two agree wherever the
+  names do; it does **not** fix the case where `BuildLine` is left on its `"Metal"` default for a
+  level named something else. Reported rather than fixed here: changing what `BuildLine` names its
+  level is a calibration-path change, not a fill change.
+- **Two same-direction rooftops on one CUT cell get strips that are equal element for element**,
+  because `RooftopSupport.Build` takes its breakpoints from the region and the flow direction alone
+  and not from which side the shared face is on. That is what makes pairing them by index exact
+  rather than an alignment assumption — and `PlanarGram.CellIntegral` asserts the counts rather than
+  trusting it.
+- **The second moments are taken about the CELL'S CENTRE, not the origin.** A cell 60 mm down a taper
+  has coordinates ~1e-1 and extents ~1e-5, so `∫u²` about the origin would be a difference of numbers
+  1e8 times the answer.
+
+### Cost — unmeasurable, as predicted
+
+FR-4 hero at the shipping mesh, N = 1,368, 720 cells, **Debug** (which is what `dotnet test` builds):
+
+| | fill | factor |
+|---|---|---|
+| PEC | 353.4 ms | 937.3 ms |
+| with the term | 345.5 ms | 935.8 ms |
+
+Both differences are inside the run-to-run noise. The Gram itself builds in 1.65 ms and holds 2,664
+entries (1.95 × N) at 47.0 KB. `Cost_TheGramIsBuiltOncePerMesh_NotPerFrequency` is the COUNTER that
+keeps it that way, rather than a wall clock.
+
+**Gram nonzero counts measured:** 1.71 × N (short FR-4 line), 1.90 × N (conformal disc, 66 pairs
+touching a cut cell), 1.91 × N (conformal taper, 150 such pairs), 1.95 × N (FR-4 hero). O(N) with a
+constant under 2 everywhere, which is what the pairing predicts: a rooftop meets at most one
+same-direction neighbour per cell.
+
+### Gates
+
+`tests/Engine.Tests/Mom/PlanarSurfaceImpedanceTests.cs`, 29 tests — **25 in the routine tier at ~4 s
+together**, and 4 (two `[Theory]` methods × two starters) tagged `Category=Benchmark` at 1 m 40 s.
+R-cl1-7 and R-cl1-9 are the tagged ones (measured 1.1 + 7.9 s and 10.4 + 72.6 s), which is the
+repo's mechanical ~5 s rule rather than a preference — the brief hoped they would fit the routine
+gate and they do not. `R_cl1_7b` is their routine-tier counterpart: it runs the whole path with the
+term on and asserts the two structural facts (the term can only ADD loss, and α_c ∝ 1/√σ at fixed t
+— measured **1.9957** for a 4× resistivity step against √4 = 2).
+
+- **R-cl1-1** both asymptotes to 1e-12 (exactly 0.00 relative at every rung tried), the PEC zero, the
+  ω = 0 limit.
+- **R-cl1-2** ⟨f_m, f_n⟩ against a bilinear-mapped Gauss quadrature of the rooftop read through
+  `PlanarBasisFunctions.Evaluate` (the definition the fill never calls): **worst 5.0e-15** relative
+  over line, conformal taper and conformal disc. Plus symmetry, a positive diagonal, and the uniform
+  mesh's hand-computed 2/3 and 1/6.
+- **R-cl1-3** every Gram nonzero has a slot in the accelerator's near set — **0 missing** — and
+  `PlanarEntryFill.At` is bit-identical to `PlanarFill.Fill` on every entry carrying the term.
+- **R-cl1-4** PEC reproduction on the FR-4 line and a taper, both spellings (σ = ∞, t = 0):
+  **0 bits moved** out of 2·N² compared.
+- **R-cl1-5** the via barrel walks into `PlanarDcSolve`'s own `ℓ/(σA)`: 1.18e-10 relative at 1 kHz on
+  a 100 µm gold post, and 7.4e-12 on every vertical basis of a real two-level meshed via.
+- **R-cl1-6** the DC limit, tabulated down the band on both starters. At the DCIM fit floor
+  (k₀H < 1e-4, i.e. ~3 MHz on 1.6 mm FR-4 and ~48 MHz on 100 µm GaAs) Re(Z_s)/(1/σt) is **1.0039** and
+  **1.0000** — both inside the brief's 1%, so LF2's conduction-substitution band is not a step in α.
+- **R-cl1-8** with the term off the Gram is not so much as BUILT, and nothing else moved: the whole
+  of `tests/Engine.Tests/Mom` is **1,047 passed** (1 m 17 s), the Firewall suite passes, and the
+  solution builds with no new warning. `PlanarGram`'s one internal-invariant exception is on
+  `tests/Firewall.Tests/user-facing-text-allowlist.txt` — it is a message about two supports of
+  different cells being paired, which no user will ever read.
+
 ## PCAL7 — the mode-separation refusal is drawn on the RIGHT quantity, and so is the other one (2026-09-13)
 
 `docs/sonnet-briefs/brief-portcal-7-separation-gate.md`. PCAL6 ended by pointing at a different

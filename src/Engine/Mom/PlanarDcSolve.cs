@@ -81,6 +81,41 @@ public static class PlanarDcSolve
     public const double PecSheetResistance = 1e-6;
 
     /// <summary>
+    /// <b>Which metal a VERTICAL basis is made of</b>, S/m — the via artwork covering its footprint,
+    /// falling back to any via declared between the same two levels and then to the upper level's own
+    /// conductivity, which is what <c>PlanarGroundPath</c>'s synthesised cells are.
+    ///
+    /// <para><b>Public because CL1's surface-impedance term asks the same question of the same
+    /// basis.</b> A second copy of this resolution in the AC fill would disagree with the DC point on
+    /// exactly the cases this walk exists for — a ground attachment, whose lower index is
+    /// <see cref="PlanarVia.GroundTerminal"/>, and a cell of via the user never drew — and the
+    /// disagreement would be a smooth, plausible loss figure rather than an error. See
+    /// <see cref="PlanarConductorLoss.BarrelAt"/>.</para>
+    /// </summary>
+    public static double ViaSigmaFor(PlanarProblem problem, PlanarBasis b, PlanarCell cell)
+    {
+        ArgumentNullException.ThrowIfNull(problem);
+        ArgumentNullException.ThrowIfNull(b);
+        ArgumentNullException.ThrowIfNull(cell);
+
+        int lower = b.AttachesToGround ? PlanarVia.GroundTerminal : b.LayerIndex;
+        int upper = b.AttachesToGround ? b.LayerIndex : b.LayerIndex + 1;
+        double fallback = 0;
+        foreach (var v in problem.ViaList)
+        {
+            if (v.LowerLayerIndex != lower || v.UpperLayerIndex != upper) continue;
+            if (fallback <= 0) fallback = v.SigmaSm;
+            foreach (var poly in v.Polygons)
+                if (poly.Contains(cell.CentroidX, cell.CentroidY)) return v.SigmaSm;
+        }
+        // No via artwork here — PlanarGroundPath builds one cell of via where the user drew
+        // none, and it is that level's own metal.
+        if (fallback > 0) return fallback;
+        int layer = Math.Clamp(upper, 0, problem.Layers.Count - 1);
+        return problem.Layers[layer].SigmaSm;
+    }
+
+    /// <summary>
     /// <b>The DC point.</b> Exact for the meshed structure, up to the two things it is explicit
     /// about: the reference plane sits at the port's outermost cell rather than on the gridline one
     /// half-cell in, and a grown feed lead (R-fed-1) is peeled as the series resistance it is at DC.
@@ -397,23 +432,7 @@ public static class PlanarDcSolve
         }
 
         private static double ViaSigma(PlanarProblem problem, PlanarBasis b, PlanarCell cell)
-        {
-            int lower = b.AttachesToGround ? PlanarVia.GroundTerminal : b.LayerIndex;
-            int upper = b.AttachesToGround ? b.LayerIndex : b.LayerIndex + 1;
-            double fallback = 0;
-            foreach (var v in problem.ViaList)
-            {
-                if (v.LowerLayerIndex != lower || v.UpperLayerIndex != upper) continue;
-                if (fallback <= 0) fallback = v.SigmaSm;
-                foreach (var poly in v.Polygons)
-                    if (poly.Contains(cell.CentroidX, cell.CentroidY)) return v.SigmaSm;
-            }
-            // No via artwork here — PlanarGroundPath builds one cell of via where the user drew
-            // none, and it is that level's own metal.
-            if (fallback > 0) return fallback;
-            int layer = Math.Clamp(upper, 0, problem.Layers.Count - 1);
-            return problem.Layers[layer].SigmaSm;
-        }
+            => ViaSigmaFor(problem, b, cell);
 
         private static double SheetResistance(PlanarProblem problem, int layerIndex, ref bool anyPec)
         {

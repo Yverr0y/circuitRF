@@ -294,6 +294,30 @@ public sealed record PlanarFillSettings(
     public PlanarAimSettings? Aim { get; init; }
 
     /// <summary>
+    /// <b>CL1 — the surface-impedance term: non-null models the metal's loss, null is a PEC and is
+    /// the default.</b> With it null the filled matrix is bit-identical to the pre-CL1 one, byte for
+    /// byte, and the object is not read at all — exactly the terms <see cref="Aim"/>'s null is the
+    /// dense path on. It stays reachable afterwards as the PEC ORACLE, the way
+    /// <see cref="UseSymmetricFactorization"/> = false and <see cref="UseRadialTable"/> = false are
+    /// kept.
+    ///
+    /// <para><b>A nullable DATA object rather than a bare bool</b>, and deliberately: the switch and
+    /// the two numbers it switches on (σ and t, which live on the PROBLEM and not on a mesh) have to
+    /// arrive together. A bool alone would either need a second property beside it carrying the
+    /// numbers, or would silently do nothing when they were not supplied — which is the failure mode
+    /// this area keeps finding, and which <c>ViaZNodes = 0</c> is <see cref="Validate"/>'s own
+    /// example of.</para>
+    ///
+    /// <para>Outside the positional list for the reason <see cref="Aim"/> is: two fill settings that
+    /// differ only in whether the metal was a perfect conductor are not the same fill, but they are
+    /// also not a QUANTITY a caller dials, and it must not become part of the record's structural
+    /// equality by accident. <b>It never reaches <c>EmSetupPersistence</c> and there is no
+    /// <c>.cem</c> key for it</b> — whether Maxwell's equations include Ohm's law is not a decision
+    /// a user should be asked to make (the series overview §5).</para>
+    /// </summary>
+    public PlanarConductorLoss? ConductorLoss { get; init; }
+
+    /// <summary>
     /// <b>P2/M3 — the meter that says how many times the geometric cores were actually BUILT.</b>
     /// Null everywhere except on a run that wants to count them.
     ///
@@ -704,6 +728,23 @@ public sealed class PlanarFillCores
     /// holds nothing per cell pair.</summary>
     public long ClassifierBytes => Classifier.Bytes + Memoised.Length;
 
+    /// <summary>
+    /// <b>CL1 — ⟨f_m, f_n⟩, the surface-impedance term's second factor.</b> Real, frequency-
+    /// independent, sparse and O(N): built ONCE per mesh beside these cores and scaled by one complex
+    /// scalar per frequency. See <see cref="PlanarGram"/>.
+    ///
+    /// <para>Lazy, and on the same <c>ExecutionAndPublication</c> footing <see cref="PlanarSolveContext"/>
+    /// builds these cores on, because a run that never turns the conductor-loss term on must not pay
+    /// for it — and because every core builder (the production one, the two reference ones, and M5's
+    /// geometry-only one) then carries it without four copies of one line.</para>
+    /// </summary>
+    public PlanarGram Gram => _gram.Value;
+    private readonly Lazy<PlanarGram> _gram;
+
+    /// <summary>Whether <see cref="Gram"/> has actually been built — the counter that says the
+    /// surface-impedance term is not being rebuilt per frequency.</summary>
+    public bool GramBuilt => _gram.IsValueCreated;
+
     /// <summary>P4 — true when either half of the basis carries strips (a cut cell whose ramp is
     /// affine in both coordinates), so every pair it is in takes the four-call path unchanged.</summary>
     public bool IsCutBasis(int basis) => Topology.Cut[basis];
@@ -730,6 +771,7 @@ public sealed class PlanarFillCores
                              long scalarPairs, long vectorPairs, long quadraturePasses, bool hasPairCores)
     {
         Layout = PlanarCoreLayout.Classes;
+        _gram = new Lazy<PlanarGram>(() => PlanarGram.Build(mesh));
         Mesh = mesh; Settings = settings;
         MinCellEdgeM = minCellEdge; ExtentM = extent; RhoFloorM = rhoFloor;
         Classifier = classifier; Memoised = memoised; Kernels = kernels;
@@ -751,6 +793,7 @@ public sealed class PlanarFillCores
                              long scalarPairs, long vectorPairs, long quadraturePasses)
     {
         Layout = PlanarCoreLayout.Triangles;
+        _gram = new Lazy<PlanarGram>(() => PlanarGram.Build(mesh));
         HasPairCores = true;
         Topology = topology; Classifier = classifier;
         Memoised = new bool[mesh.Bases.Count];
@@ -1933,6 +1976,10 @@ public static class PlanarFill
         AddDirectionBlockFromClasses(z, cores, src, cores.Topology.X, PlanarBasisDirection.X, cores.CutX, termsAr, remA, vectorScale);
         AddDirectionBlockFromClasses(z, cores, src, cores.Topology.Y, PlanarBasisDirection.Y, cores.CutY, termsAr, remA, vectorScale);
 
+        // CL1 — after the direction blocks and before the mirror. A one-level mesh carries no
+        // vertical basis, so there is no barrel term to give it.
+        AddSurfaceImpedance(z, cores, levels: null, omega);
+
         MirrorLowerToUpper(st, z);
         return z;
     }
@@ -2587,6 +2634,10 @@ public static class PlanarFill
             }
         });
 
+        // CL1 — after the direction blocks and before the mirror, exactly as the one-level fill does
+        // it, and with the levels this path has so every via gets its barrel's series impedance.
+        AddSurfaceImpedance(z, cores, levels, omega);
+
         MirrorLowerToUpper(st, z);
         return z;
     }
@@ -2825,6 +2876,73 @@ public static class PlanarFill
     /// exactly one row-loop iteration (R-fil-11's shape). The assignment is a copy rather than a
     /// recomputation, so the two triangles cannot differ in their last bit.
     /// </summary>
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // CL1 — the surface-impedance term
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// <b>CL1 — <c>Z[m,n] += Z_s(ω, layer)·⟨f_m, f_n⟩</c>, over the whole matrix.</b> Called from
+    /// <see cref="Fill(PlanarFillCores, PlanarKernelTerms, PlanarKernelTerms, double)"/> and from
+    /// <see cref="FillMultiLevel"/> after their direction blocks and BEFORE
+    /// <see cref="MirrorLowerToUpper"/>, so R-fil-2's "computed once, copied" is untouched and the
+    /// term lands in exactly one triangle.
+    ///
+    /// <para>No-op when <see cref="PlanarFillSettings.ConductorLoss"/> is null — nothing is read, the
+    /// Gram is not even built, and the matrix is bit-identical to the pre-CL1 one. It is also a no-op
+    /// on an all-PEC problem, because <see cref="PlanarSurfaceImpedance.Sheet"/> returns exactly
+    /// <see cref="Complex.Zero"/> for σ ≤ 0 or t ≤ 0 and adding that changes no bits.</para>
+    ///
+    /// <para><paramref name="levels"/> is null on the single-level path, which has no vertical basis
+    /// to give a barrel impedance to. See <see cref="PlanarSurfaceImpedance"/>'s header for why a via
+    /// is a series impedance in ohms rather than a Z_s times a Gram entry.</para>
+    /// </summary>
+    internal static void AddSurfaceImpedance(Mat<Complex> z, PlanarFillCores cores,
+                                             PlanarLevels? levels, double omega)
+    {
+        if (cores.Settings.ConductorLoss is not { } loss) return;
+
+        var mesh = cores.Mesh;
+        var gram = cores.Gram;
+        var zs   = loss.SheetTable(mesh, omega);
+
+        // The stored triangle is (i ≤ j) and the fill writes z[j, i] with j ≥ i, so this is the
+        // triangle the fill filled — no mirroring and no second visit.
+        for (int i = 0; i < gram.UnknownCount; i++)
+            for (int k = gram.RowPtr[i]; k < gram.RowPtr[i + 1]; k++)
+                z[gram.ColIdx[k], i] += SheetTerm(zs, gram, k);
+
+        if (levels is null) return;
+        for (int i = 0; i < mesh.Bases.Count; i++)
+        {
+            var b = mesh.Bases[i];
+            if (b.Direction != PlanarBasisDirection.Z) continue;
+            z[i, i] += loss.BarrelAt(mesh, levels, b, omega);
+        }
+    }
+
+    /// <summary>
+    /// <b>One Gram slot's contribution, written ONCE.</b> The dense fill above and
+    /// <see cref="PlanarEntryFill.At"/> both call this — <c>PlanarPairClasses.cs</c>'s own
+    /// requirement that those two be bit-identical does not relax for a term added later, and two
+    /// spellings of <c>Z_s·g</c> are not guaranteed to be the same two floating-point operations.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static Complex SheetTerm(Complex[] zs, PlanarGram gram, int slot)
+        => zs[gram.Layer[slot]] * gram.Value[slot];
+
+    /// <summary>
+    /// <b>CL1 — the term for ONE basis pair, for a caller that fills entry by entry</b> (M5's
+    /// accelerated near field). Zero for a pair that shares no cell, for a mixed-direction pair and
+    /// for every vertical basis, which are the three shapes the Gram deliberately does not hold.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static Complex SurfaceEntry(PlanarGram gram, Complex[]? zs, int i, int j)
+    {
+        if (zs is null) return Complex.Zero;
+        int slot = gram.Slot(Math.Min(i, j), Math.Max(i, j));
+        return slot < 0 ? Complex.Zero : SheetTerm(zs, gram, slot);
+    }
+
     private static void MirrorLowerToUpper(PlanarFillSettings st, Mat<Complex> z)
     {
         int n = z.RowCount;
@@ -3811,6 +3929,11 @@ public sealed class PlanarEntryFill
     private readonly Func<double, Complex> _remA;
     private readonly Complex _scalarScale, _vectorScale;
 
+    /// <summary>CL1 — every level's Z_s at this frequency, or null for a PEC. Built once here
+    /// because this object IS the per-frequency half (P6); the Gram it multiplies lives on the
+    /// cores and is built once per MESH.</summary>
+    private readonly Complex[]? _zs;
+
     private readonly ConcurrentDictionary<long, PlanarFill.CellPairRemainders> _remA7 = new();
 
     /// <summary><b>P11 — the scalar block's cell-pulse potential, as its own object</b>, because the
@@ -3868,6 +3991,7 @@ public sealed class PlanarEntryFill
 
         _scalarScale = 1.0 / (Complex.ImaginaryOne * omega * EmConstants.Eps0);
         _vectorScale = Complex.ImaginaryOne * omega * EmConstants.Mu0;
+        _zs          = _st.ConductorLoss?.SheetTable(_mesh, omega);
     }
 
     /// <summary>The on-demand class source <see cref="PlanarFill.WholeVectorEntry{T}"/> reads.</summary>
@@ -3910,9 +4034,19 @@ public sealed class PlanarEntryFill
                   + mb.Sign * nb.Sign * P(mb.CellIndex, nb.CellIndex);
         Complex z = _scalarScale * s;
 
+        // ── CL1's surface-impedance term ─────────────────────────────────────────────────────
+        //
+        // Resolved here and ADDED LAST on every return path, so the arithmetic is
+        // ((scalar + vector) + Z_s·g) — which is the association the dense fill produces, its own
+        // term being a third pass over an entry the scalar and vector passes have already written.
+        // PlanarPairClasses.cs:42 requires this method and PlanarFill.Fill to be bit-identical and
+        // that requirement does not relax for a term added later.
+        Complex sz = _zs is null ? Complex.Zero
+                                 : PlanarFill.SurfaceEntry(_g.Cores.Gram, _zs, a, b);
+
         // ── the vector block: same direction only (D5) ───────────────────────────────────────
         var dirA = _mesh.Bases[a].Direction;
-        if (dirA != _mesh.Bases[b].Direction) return z;
+        if (dirA != _mesh.Bases[b].Direction) return z + sz;
 
         var ramps = _g.RampHalves;
         var (ra, rb) = ramps[a];
@@ -3933,13 +4067,13 @@ public sealed class PlanarEntryFill
                        + PlanarFill.PairRemainderOf(_mesh, rb, sa, dirA, _remA, _st)
                        + PlanarFill.PairRemainderOf(_mesh, rb, sb, dirA, _remA, _st);
 
-            return z + _vectorScale * (vc + rc);
+            return z + _vectorScale * (vc + rc) + sz;
         }
 
         // ── P5: the dense build's own assembly, from the class cache ─────────────────────────
         return z + _vectorScale * PlanarFill.WholeVectorEntry(
             new ClassSource(this), _mesh, ramps[a], ramps[b],
-            dirA == PlanarBasisDirection.X, _termsA, _g.Moments[a], _g.Moments[b]);
+            dirA == PlanarBasisDirection.X, _termsA, _g.Moments[a], _g.Moments[b]) + sz;
     }
 
     /// <summary>D4's area-averaged scalar-potential coefficient for one CELL pair — the dense path's

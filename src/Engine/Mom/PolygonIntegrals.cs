@@ -165,6 +165,38 @@ public static class PolygonIntegrals
         return s / 6.0;
     }
 
+    /// <summary>
+    /// <b>CL1 — the three SECOND moments <c>∫∫u² dS′</c>, <c>∫∫uv dS′</c> and <c>∫∫v² dS′</c></b>,
+    /// measured FROM the observation point, and the one new closed form CL1 needed.
+    ///
+    /// <para>It is the same signed fan <see cref="Area"/> and <see cref="AreaMoment"/> already use:
+    /// on the triangle (O, A, B) put P = s·A + t·B over the unit simplex, where the Jacobian is the
+    /// cross product and the only integrals wanted are ∫s² = ∫t² = 1/12 and ∫st = 1/24. So
+    /// <c>∫u² = cross·(a_u² + a_u b_u + b_u²)/12</c> and
+    /// <c>∫uv = cross·(2a_u a_v + a_u b_v + b_u a_v + 2 b_u b_v)/24</c>, with no quadrature and no
+    /// trigonometry — the integrand has no singularity in it, unlike the six that do.</para>
+    ///
+    /// <para><b>Why CL1 wants it.</b> The Gram matrix ⟨f_m, f_n⟩ of two rooftops sharing a CUT cell
+    /// is the integral of a PRODUCT of two affine weights (<see cref="WeightStrip"/>), and a product
+    /// of two affines is a quadratic. On a whole rectangle the ramp×ramp integral is elementary and
+    /// the fill takes that path instead.</para>
+    /// </summary>
+    public static (double UU, double UV, double VV) AreaSecondMoments(
+        IReadOnlyList<EmPoint> ring, double ox, double oy)
+    {
+        double uu = 0, uv = 0, vv = 0;
+        for (int i = 0, n = ring.Count, j = n - 1; i < n; j = i++)
+        {
+            double ax = ring[j].X - ox, ay = ring[j].Y - oy;
+            double bx = ring[i].X - ox, by = ring[i].Y - oy;
+            double cross = ax * by - bx * ay;
+            uu += cross * (ax * ax + ax * bx + bx * bx);
+            vv += cross * (ay * ay + ay * by + by * by);
+            uv += cross * (2.0 * ax * ay + ax * by + bx * ay + 2.0 * bx * by);
+        }
+        return (uu / 12.0, uv / 24.0, vv / 12.0);
+    }
+
     /// <summary>∫∫ dS′/ρ.</summary>
     public static double Inverse(IReadOnlyList<EmPoint> ring, double ox, double oy)
         => Cores(ring, ox, oy, alongX: true, wantRadius: false).Inverse;

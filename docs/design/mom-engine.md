@@ -1199,6 +1199,23 @@ surface waves, so |S₁₁|² + |S₂₁|² < 1 legitimately. Reciprocity and pa
 > It is stated here, and in the user-facing page's own "Cannot" list, because a σ field the user can
 > edit and the solver ignores is exactly the shape of thing that gets trusted silently. Adding it needs
 > a surface-impedance term in the fill — named in `src/Engine/Mom/CLAUDE.md` §5, not built.
+>
+> **Built at CL1 (2026-09-14), behind an internal flag that still defaults OFF.**
+> `PlanarFillSettings.ConductorLoss` carries σ and t into the fill as
+> `Z[m,n] += Z_s(ω, layer)·⟨f_m, f_n⟩` with `Z_s = (η_c/2)·coth(γ_c t/2)`; the term is a true EFIE
+> term, not a post-processing `∫R_s|J|²` over a PEC current, which would be log-divergent in the edge
+> mesh. Measured against kernel A's Wheeler term on a re-bisected 50 Ω line at 10 GHz, ground held PEC
+> in BOTH kernels: kernel A reproduces the numbers this paragraph is built on exactly (**8.194 Ω/m**
+> strip-only on FR-4 at w = 3020.28 µm, **382.571 Ω/m** on GaAs at w = 70.72 µm), and kernel B's
+> loaded sheet returns **0.63 of it on FR-4 and 0.73 on GaAs** — converged in `EdgeCells` to under 1%
+> per refinement rung by `EdgeCells = 8`. **The convergence is the good news and the ratio is the
+> honest limit**: a zero-thickness sheet holds ONE current per location and so cannot carry the
+> sidewall and two-face crowding a 35 µm / 3 µm strip really has. Detail, the full edge table, and
+> the two figures above in `src/Engine/Mom/RESOLVED.md` §CL1.
+>
+> **The sentence two paragraphs up — 6.5 / 3.0 / 2.1% — is correct and is about FR-4, which is the
+> substrate class where conductor loss matters LEAST.** On the shipped MMIC technology it is 92-99%.
+> That correction is independent of the CL series and is `brief-conductor-loss-0-overview.md` §4.
 
 **Regression golden data** reviewed and approved by the owner before it becomes a gate — the established
 project pattern.
