@@ -163,6 +163,18 @@ not general 3D.
   A ground drawn as **artwork** — coplanar waveguide, a drawn backside path, anything on a meshed
   level — is an ordinary conductor and its loss is modelled in full; this limit is only about the
   infinite plane underneath a microstrip.
+  **This limit was attacked directly and it is still here, so here is exactly where it got to.** The
+  physics works: the plane can be given a real conductivity without meshing it — it becomes an
+  impedance the solver's own layered Green's function terminates on rather than a short — and every
+  check that mattered came back clean. The fitted kernel is no worse (it is *better* in four of six
+  cases measured), the substrate's guided modes barely move, backside vias and the antenna metrics
+  keep working, and the resulting ground loss agrees with the independent quasi-static kernel to
+  **6%** on substrates that are electrically thin. What stops it reaching you is not the physics but
+  the plumbing: a stated ground conductivity forces the whole run onto the solver's *general* layered
+  path, which is a looser accuracy tier and which **refuses a lossless substrate outright** — so
+  turning it on today would trade a known 21% under-read for a different, larger change to every
+  microstrip run on the tool, and would break runs on an air or zero-tanδ substrate that work now.
+  It is deliberately not switched on until that path can carry it.
 
 There is also a **quasi-static kernel** for the special case of a uniform transmission-line
 cross-section, which is described below and which is far faster than the full-wave path where it

@@ -138,12 +138,13 @@ public static class InteriorStaticGreens
         for (int i = 0; i <= n; i++) r[i] = InterfaceCoefficient(stack, scalar, i);
 
         var down = new Complex[n + 1];
-        down[0] = stack.Bottom.Kind switch
-        {
-            TerminationKind.Pec => -Complex.One,
-            TerminationKind.Pmc =>  Complex.One,
-            _                   =>  r[0],
-        };
+        // CL4 — a conducting floor is a PEC at ω = 0: a conductor of any finite σ is an
+        // equipotential, and the full-wave Γ of both polarisations tends to −1 as ω → 0. So every
+        // electrostatic route, and every quasi-static calibration resting on one, is bit-identical
+        // at every σ. LayeredStaticGreens.TerminationCoefficient says the same thing once.
+        down[0] = stack.Bottom.IsConductor ? -Complex.One
+                : stack.Bottom.Kind == TerminationKind.Pmc ? Complex.One
+                : r[0];
         for (int i = 1; i <= n; i++)
         {
             Complex x = down[i - 1] * tau[i] * tau[i];
@@ -151,12 +152,9 @@ public static class InteriorStaticGreens
         }
 
         var up = new Complex[n + 1];
-        up[n] = stack.Top.Kind switch
-        {
-            TerminationKind.Pec => -Complex.One,
-            TerminationKind.Pmc =>  Complex.One,
-            _                   => -r[n],                // an interface seen from BELOW is −r
-        };
+        up[n] = stack.Top.IsConductor ? -Complex.One
+              : stack.Top.Kind == TerminationKind.Pmc ? Complex.One
+              : -r[n];                                   // an interface seen from BELOW is −r
         for (int i = n - 1; i >= 0; i--)
         {
             Complex x = up[i + 1] * tau[i + 1] * tau[i + 1];
@@ -390,12 +388,9 @@ public static class InteriorStaticGreens
         // Γ↓ at that interface with every round trip killed: the interface's own coefficient, or the
         // wall's when the interface IS the bottom termination.
         Complex gInf = i - 1 == 0
-            ? stack.Bottom.Kind switch
-              {
-                  TerminationKind.Pec => -Complex.One,
-                  TerminationKind.Pmc =>  Complex.One,
-                  _                   =>  InterfaceCoefficient(stack, scalar, 0),
-              }
+            ? stack.Bottom.IsConductor ? -Complex.One
+              : stack.Bottom.Kind == TerminationKind.Pmc ? Complex.One
+              : InterfaceCoefficient(stack, scalar, 0)
             : InterfaceCoefficient(stack, scalar, i - 1);
         return (Complex.One + gInf) / p;
     }

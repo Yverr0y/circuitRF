@@ -106,6 +106,19 @@ public static class SurfaceWavePoles
         {
             case TerminationKind.Pec: v = Complex.Zero; i = Complex.ImaginaryOne; break;
             case TerminationKind.Pmc: v = Complex.One;  i = Complex.Zero;         break;
+
+            // CL4 — a conducting plane is a LOAD of Z_s on the line: V = −Z_s·I, the same sign
+            // convention the half-space arm below carries (its own v/i is −Z_b, because I is
+            // positive upward and the load is beneath). Z_s = 0 gives back the PEC state exactly,
+            // which is what keeps the σ = ∞ pole set bit-identical. The state leaves the
+            // (V real, I imaginary) subspace for a real σ — the SCAN never sees it, because
+            // Lossless() replaces this termination with a PEC, and only the complex secant
+            // refinement that follows evaluates Ψ on the real stack.
+            case TerminationKind.SurfaceImpedance:
+                v = -stack.Bottom.SurfaceImpedanceAt(omega) * Complex.ImaginaryOne;
+                i = Complex.ImaginaryOne;
+                break;
+
             default:
             {
                 Complex kzb = KzOf(0);
@@ -164,6 +177,12 @@ public static class SurfaceWavePoles
         {
             case TerminationKind.Pec: return v;
             case TerminationKind.Pmc: return -Complex.ImaginaryOne * i;
+
+            // CL4 — V = +Z_s·I at a conducting CEILING (the load is above, so the sign is the
+            // opposite of the floor's). Ψ = V − Z_s·I, which is the PEC's own Ψ = V at Z_s = 0.
+            case TerminationKind.SurfaceImpedance:
+                return v - stack.Top.SurfaceImpedanceAt(omega) * i;
+
             default:
             {
                 Complex kzt = KzOf(top);
@@ -192,10 +211,16 @@ public static class SurfaceWavePoles
         var layers = stack.Layers
             .Select(l => new MediumLayer(l.ThicknessM, new EmMaterial(l.Material.EpsR, 0, l.Material.MuR)))
             .ToArray();
-        static Termination Strip(Termination t) =>
-            t.Kind == TerminationKind.HalfSpace
-                ? Termination.OpenTo(new EmMaterial(t.Material.EpsR, 0, t.Material.MuR))
-                : t;
+        // CL4 — a conducting plane's Z_s is pure loss, so the lossless stack's floor is a PEC. That
+        // is what keeps Ψ real on the real axis inside the guided range, which is the whole reason
+        // the scan bisects rather than hunting: the mode is then a genuine sign change. Loss is put
+        // back by the secant refinement, on the stack as given.
+        static Termination Strip(Termination t) => t.Kind switch
+        {
+            TerminationKind.HalfSpace        => Termination.OpenTo(new EmMaterial(t.Material.EpsR, 0, t.Material.MuR)),
+            TerminationKind.SurfaceImpedance => Termination.Pec,
+            _                                => t,
+        };
         return new LayerStack(Strip(stack.Bottom), layers, Strip(stack.Top));
     }
 

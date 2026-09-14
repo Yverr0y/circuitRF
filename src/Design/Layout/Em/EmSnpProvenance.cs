@@ -196,8 +196,23 @@ public static class EmSnpProvenance
         // structure, and staleness has to notice.
         if (p.MediumStack is { } ms)
         {
+            // CL4 — a CONDUCTING plane's σ and thickness. A half-space's εᵣ used to be the whole of
+            // what a termination contributed, and for a PEC or a PMC that was every bit of
+            // information there is. It is not any more: two runs differing only in the ground
+            // plane's metal produce different s-parameters, and a hash reading Material.EpsR alone
+            // sees EmMaterial.Air on both. Same failure CL3 found on the strip's own σ and t — a
+            // cached .snp taken with the wrong metal was still the right .snp — one surface over.
+            //
+            // APPENDED only for a surface-impedance termination, deliberately: writing the KIND
+            // unconditionally would change the hash of every stack that exists, invalidating every
+            // cached .snp in every workspace to record a capability none of them can reach (§CL4 §9).
+            // A PEC and a PMC hash exactly as they did.
             sb.Append("M:").Append(R(ms.Bottom.Material.EpsR)).Append(':')
               .Append(R(ms.Top.Material.EpsR)).Append(':');
+            foreach (var (t, which) in new[] { (ms.Bottom, 'b'), (ms.Top, 'u') })
+                if (t.Kind == TerminationKind.SurfaceImpedance)
+                    sb.Append(which).Append(R(t.ConductivitySm)).Append(',')
+                      .Append(R(t.ThicknessM)).Append(':');
             foreach (var ml in ms.Layers)
                 sb.Append(R(ml.ThicknessM)).Append(',').Append(R(ml.Material.EpsR)).Append(',')
                   .Append(R(ml.Material.TanD)).Append(',').Append(R(ml.Material.MuR)).Append(';');

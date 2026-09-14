@@ -75,6 +75,20 @@
 // brief in this series and §3 gives the four reasons.
 //
 // ══════════════════════════════════════════════════════════════════════════════════════════════
+// CL4 — THE GROUND PLANE IS NOT A STRIP, AND THE DIFFERENCE IS A FACTOR OF TWO
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+//
+// The laterally infinite plane the Green's function terminates on has AIR BELOW IT and carries its
+// return current on its upper face alone, so neither of (CL1.1)'s two halvings applies:
+//
+//     Z_plane(ω) = η_c · coth(γ_c t) .                                                     (CL4.1)
+//
+// Same two limits, one-sided: η_c = (1+j)/(σδ) when t ≫ δ, and 1/(σt) when t ≪ δ. Reaching for
+// Sheet() here would report half the ground's loss — smoothly, plausibly, and with every gate in
+// this file still green, which is why the brief names it as the first place a factor of two can
+// enter unseen.
+//
+// ══════════════════════════════════════════════════════════════════════════════════════════════
 // THE VIA BARREL IS NOT A SHEET
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 //
@@ -163,6 +177,39 @@ public static class PlanarSurfaceImpedance
         var etaC  = new Complex(1.0, 1.0) / (sigmaSm * delta);
         var gammaC = new Complex(1.0, 1.0) / delta;
         return 0.5 * etaC * Coth(0.5 * gammaC * thicknessM);
+    }
+
+    /// <summary>
+    /// <b>CL4 — Z_s of the laterally infinite GROUND PLANE, Ω/square: the ONE-SIDED
+    /// <c>η_c·coth(γ_c t)</c>.</b>
+    ///
+    /// <para><b>The factor of two is the whole difference from <see cref="Sheet"/> and it is the
+    /// first place one can enter unseen</b> (CL4's own words). A strip is excited on BOTH faces, so
+    /// (CL1.1) halves η_c and halves the coth's argument; a ground plane has air below it and
+    /// carries its return current on its UPPER face alone, so neither halving applies. Using the
+    /// two-sided form here would report half the ground's loss, smoothly and plausibly.</para>
+    ///
+    /// <para>The two limits are the same two that make (CL1.1) load-bearing, one-sided:</para>
+    /// <list type="bullet">
+    /// <item>t ≫ δ → coth → 1, so Z_s → η_c = (1+j)/(σδ) — the classic R_s = 1/(σδ) for ONE face,
+    /// with no factor of two anywhere.</item>
+    /// <item>t ≪ δ → coth(x) → 1/x, so Z_s → η_c/(γ_c t) = 1/(σt), the plane's own DC sheet
+    /// resistance. So a thin ground walks into the same DC point a thin strip does.</item>
+    /// </list>
+    ///
+    /// <para><c>σ ≤ 0</c>, <c>σ = +∞</c> or <c>t ≤ 0</c> is a PEC and returns exactly
+    /// <see cref="Complex.Zero"/> — <see cref="IsPerfect"/>'s three spellings, unchanged, and the
+    /// zero every CL4 PEC-reduction gate rests on.</para>
+    /// </summary>
+    public static Complex Plane(double sigmaSm, double thicknessM, double omegaRadS)
+    {
+        if (IsPerfect(sigmaSm) || !(thicknessM > 0)) return Complex.Zero;
+        if (!(omegaRadS > 0)) return new Complex(1.0 / (sigmaSm * thicknessM), 0.0);
+
+        double delta = SkinDepthM(sigmaSm, omegaRadS);
+        var etaC   = new Complex(1.0, 1.0) / (sigmaSm * delta);
+        var gammaC = new Complex(1.0, 1.0) / delta;
+        return etaC * Coth(gammaC * thicknessM);
     }
 
     /// <summary>

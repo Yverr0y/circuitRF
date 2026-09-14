@@ -3,6 +3,385 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## CL4 — the lossy ground plane, as an impedance termination (2026-09-14)
+
+`docs/sonnet-briefs/brief-conductor-loss-4-lossy-ground.md`. CL1 put a surface impedance on the
+signal metal and CL3 turned it on; the laterally infinite plane the Green's function terminates on
+stayed a PEC, worth **21.1% of the conductor term on FR-4, ~11% on the MMIC starter and 25.0% on a
+low-loss laminate** (series overview §2). This brief makes that plane a real conductor.
+
+**The brief was allowed to fail and it did not: all four of its ordered measurements pass, and the
+physics lands.** What it does NOT do is reach a user, and §9 is the measured reason — that is the
+whole of what is partial here and it is stated rather than implied.
+
+### 0. The change, which really is small
+
+`TerminationKind.SurfaceImpedance`, built by `Termination.LossyGround(σ, t)`, with
+
+    Γ_bottom^{e,h} = (Z_s − Z_line^{e,h}) / (Z_s + Z_line^{e,h}) ,
+    Z_line^e = k_z/(ωε) ,  Z_line^h = ωµ/k_z  of the region next to the wall,
+    Z_s = η_c·coth(γ_c t)                                                   (PlanarSurfaceImpedance.Plane)
+
+at every spectral component `k_ρ`. **The plane is still laterally infinite, still unmeshed, still
+adds no unknown, and R17's ceiling does not move.** `LayeredSpectralGreens.WallReflection` is the one
+place it is written and it serves the floor and the ceiling alike; `SurfaceWavePoles` takes it as a
+LOAD on the same equivalent line (`V = −Z_s·I` at a floor, `+Z_s·I` at a ceiling).
+
+**Z_s is the ONE-SIDED form and that is the factor of two the brief named.** A strip is excited on
+both faces, so CL1.1 halves both η_c and the coth's argument; the plane has air below it and carries
+its return current on its upper face alone, so neither halving applies. Measured, rather than
+asserted: `Re(Z_plane)·σδ → 1.000000` in the thick limit — which is exactly kernel A's own
+`R_s = 1/(σδ)` — and `Z_plane/Z_sheet → 2.000` there and `→ 1.000` in the thin limit, where both walk
+into the same `1/(σt)`.
+
+**Four predicates stopped asking "is it a PEC" and started asking "is it a CONDUCTOR"**
+(`Termination.IsConductor`): the ground-attachment refusal (§5), the far field's θ range (§6),
+`PlanarPortCalibrator.DescribedByTheSlab`, and both static routes. A PMC and an open half-space are
+still refused by every one of them.
+
+### 1. R-cl4-1 — the PEC reduction, and the half of it that is about the calibration
+
+**0 bits moved, out of every comparison made.** Both starters × 2/10/20 GHz × all three spellings of
+a perfect conductor (σ = +∞, σ = 0, t = 0), against the CL3 kernel, on `G_q` and `G_A` at five ρ/λ
+each. The zero is structural rather than lucky: `Termination.SurfaceImpedanceAt` returns exactly
+`Complex.Zero` on `PlanarSurfaceImpedance.IsPerfect`'s own three spellings, and every consumer's
+impedance branch then returns the PEC value EXACTLY instead of computing `(0 − Z)/(0 + Z)` — which is
+−1 to the physics and **not to the last bit**, because complex division leaves an imaginary residue
+of order 1e-17.
+
+**The kind is deliberately NOT collapsed to `Pec` for a perfect spelling.** Collapsing would have
+made this gate vacuous — it would be asserting that the old path is still the old path. The new path
+IS taken and reproduces the old bits, which is the stronger statement and is CL3 §3's own lesson one
+file over.
+
+**And the quasi-static calibration path is bit-identical at every σ, asserted rather than assumed.**
+`LayeredStaticGreens` and `InteriorStaticGreens` both read a conducting floor as a PEC, and that is
+the ω → 0 LIMIT rather than a simplification: `Γ^e = (Z_sωε₁ − k_z1)/(Z_sωε₁ + k_z1) → −1` and
+`Γ^h = (Z_sk_z1 − ωµ)/(Z_sk_z1 + ωµ) → −1` as ω → 0 with `Z_s → 1/(σt)` finite. Measured at a REAL σ
+on both starters: **0/20 bits moved.** `PlanarPortCalibrator.DescribedByTheSlab` had to move with
+them — left asking `Kind == Pec` it would have pushed a lossy-ground run off the one-slab image
+series onto the interior route and changed the reference impedance of a calibration that reads no
+termination at all.
+
+**This is also the statement of what the brief does not reach.** Below `QuasiStaticCrossoverHz`
+(3.048 GHz on FR-4, 26.07 GHz on the MMIC starter) the supplied γ gains no ground term, exactly as
+CL3 §0 found it gains no strip term — and CL3's answer there (the standard's own static CHARGE,
+`R = Σ Re(Z_s)·[ΔS·Δℓ/|ΔT|²]`) is a sum over MESHED levels and the plane is not one. The residue is
+this brief's own headline number, unchanged: 21.1% / ~11% / 25.0% of the conductor term.
+**R-cl4-3 below is read off the two-line extraction directly and never touches that path**, which is
+what CL1's own gates did and is why the crossover does not bite on the measurement.
+
+### 2. R-cl4-2 — the εᵣ = 1 image reduction survives
+
+Free space plus one NEGATIVE image, three height pairs × six ρ/λ × both kernels, at 10 GHz:
+
+| floor | worst relative | worst scaled |
+|---|---|---|
+| σ = +∞ | 1.233e-10 | 7.275e-12 |
+| 35 µm copper | 5.838e-4 | 1.444e-4 |
+
+The first row is §3.1's strongest oracle, intact. **The second row is not a failure — it is the
+measured size of the imperfection**, which is what a conducting floor is for: the image is no longer
+exactly −1 and the closed form no longer exactly applies.
+
+### 3. Measurement 1 — CAN DCIM STILL FIT IT? Yes, and the reason is structural
+
+The brief's own question, and it said to measure rather than argue. Spectral error against direct
+numerical Sommerfeld integration of the SAME kernel, worst value INSIDE
+`Dcim.ValidatedRhoOverLambdaLayered`, scaled on the free-space kernel. **Ceiling 1.6e-2, and nothing
+was widened.**
+
+| stack | f | G_q PEC → LOSSY | G_A PEC → LOSSY |
+|---|---|---|---|
+| FR-4 1.6 mm, 35 µm Cu | 2 GHz | 2.744e-5 → **2.530e-5** | 8.281e-7 → 8.280e-7 |
+| | 10 GHz | 2.055e-5 → **2.035e-5** | 1.916e-6 → 1.194e-6 |
+| | 20 GHz | 1.390e-4 → **5.055e-4** | 9.706e-5 → 9.722e-5 |
+| GaAs 100 µm, 3 µm Au | 2 GHz | 1.025e-2 → **4.262e-3** | 1.135e-8 → 1.126e-8 |
+| | 10 GHz | 1.445e-5 → **1.563e-5** | 8.755e-7 → 8.773e-7 |
+| | 20 GHz | 6.042e-5 → **1.865e-5** | 9.218e-7 → 9.342e-7 |
+
+**The lossy fit is BETTER than the PEC one in four of the six cases** and the worst it ever gets is
+5.06e-4 — thirty times inside the ceiling. `Dcim.CanFit` answers yes throughout (a surface impedance
+is not a half-space, so the denser-bottom refusal is not reached and does not need to be), and the
+far-field sum rule's residual stays at 1e-16 … 1e-21 exactly as before.
+
+**Why it survives, which is worth having written down.** The worry was that Γ_bottom stops being a
+constant and becomes a function of k_ρ. It does — but it stays EVEN in k_z1, the property the whole
+basis rests on: under `k_z1 → −k_z1` an impedance load's `Γ_bot → 1/Γ_bot`, exactly as an ordinary
+Fresnel coefficient does, and the composite is invariant. **A surface impedance adds no branch
+point**, and that is the difference from an open-below stack: the SIBC replaces the region below by a
+CONSTANT rather than by a medium with its own `k_zb`, which is precisely the term §7's refusal is
+about.
+
+**One genuine asymmetry, found in the derivation and documented where it lives.** The k_ρ → ∞ limits
+part company: `Γ^e → −1` (the electrostatic image survives) but `Γ^h → +1`, because `Z_line^h → 0`
+while Z_s stays finite. The crossover is at `k_ρ ≈ √2/δ` — 2.1e6 rad/m for copper at 10 GHz, four
+decades past the DCIM path's own reach — and it is exactly where the Leontovich condition stops being
+valid anyway (an exact conducting half-space gives `Γ^h → 0` there, a matched load). It is invisible
+to the fitted top-referenced route because the bottom wall reaches the top only through `e^{−2k_ρH}`,
+which at that k_ρ on 1.6 mm FR-4 is `e^{−4800}`; `AsymptoticTopReflection` does not read the bottom
+termination at all, for the same reason. The one arm that DOES read it —
+`AsymptoticAtHeights`, for a source in the region directly above the floor — carries both values
+rather than one.
+
+### 4. Measurement 2 — WHERE DID THE SURFACE-WAVE POLES GO? Barely anywhere
+
+`PlanarMetrics` refuses `PowerSurfaceWave` (and `PowerDielectric` with it) past
+`|Im k_ρ|/Re k_ρ = 0.05`. **Nothing comes near it, and the ground's own contribution is three to four
+decades under the ceiling.**
+
+| stack | f | mode | PEC | with a real plane | Δ |
+|---|---|---|---|---|---|
+| FR-4 1.6 mm, 35 µm Cu | 1 GHz | TM₀ | 3.9785e-6 | 4.5521e-6 | 5.7e-7 |
+| | 2 GHz | TM₀ | 1.6277e-5 | 1.7918e-5 | 1.6e-6 |
+| | 5 GHz | TM₀ | 1.1852e-4 | 1.2557e-4 | 7.0e-6 |
+| | 10 GHz | TM₀ | 7.6918e-4 | 7.9576e-4 | 2.7e-5 |
+| | 20 GHz | TM₀ | 8.4007e-3 | 8.5408e-3 | 1.4e-4 |
+| | 40 GHz | TM₀ | 1.2132e-2 | 1.2251e-2 | 1.2e-4 |
+| | 40 GHz | **TE₀** | 1.5630e-2 | **1.5705e-2** | 7.5e-5 |
+| GaAs 100 µm, 3 µm Au | 1 GHz | TM₀ | 6.2839e-10 | 5.0152e-8 | 5.0e-8 |
+| | 10 GHz | TM₀ | 6.4456e-8 | 1.6764e-6 | 1.6e-6 |
+| | 40 GHz | TM₀ | 1.4570e-6 | 1.5654e-5 | 1.4e-5 |
+
+**The worst pole anywhere is 1.5705e-2, against a ceiling of 0.05, and the plane moved it by
+7.5e-5.** On FR-4 the pole's loss is the DIELECTRIC's and the ground adds 0.1–1.7% of it; on GaAs the
+ground raises it by one to two ORDERS of magnitude, because tanδ = 0.002 left almost nothing there —
+and it is still four decades under the ceiling. **No antenna metric starts refusing on an ordinary
+board.** The scan itself is unchanged: `SurfaceWavePoles.Lossless` strips a conducting floor to a
+PEC exactly as it strips tanδ, so Ψ stays real on the real axis and the mode is still a genuine sign
+change; the loss is put back by the secant refinement.
+
+### 5. Measurement 3 — the ground-attachment basis: RE-STATED, not deleted
+
+`PlanarProblem.CanSolve` refused a `PlanarVia.GroundTerminal` unless the bottom termination was a
+PEC **by name**, because the half rooftop's lower terminal is that plane. An impedance floor makes
+the word "perfect" false in that sentence but not the sentence's reason: **what the basis needs is a
+terminal that exists, conducts, and sinks the return charge**, and a Leontovich plane is all three.
+Electrostatically it is an equipotential (§1), which is the limit the attachment's own charge
+conservation lives in, so the basis is unchanged and nothing about it was re-derived. The refusal now
+asks `Termination.IsConductor`, so a PMC and an open half-space are refused exactly as before.
+
+Measured on the MMIC two-level fixture with an interior via AND a backside ground via in one mesh,
+10 GHz, N = 440, 2 attachment bases:
+
+| bottom termination | `CanSolve` |
+|---|---|
+| PEC | yes |
+| conducting plane, gold 3 µm | **yes** |
+| PMC | NO — named |
+| open to air | NO — named |
+
+- **Reciprocity is still STRUCTURAL on the lossy fill**: worst `|Z − Zᵀ|/|Z|` came back **exactly
+  0.00e+00**, not small — the same guarantee L9c's shared vertical-current sign convention gives on a
+  PEC floor, so the floor's Z_s enters the cascade without touching the symmetry argument.
+- **The floor is not a local change and the numbers say so**: the attachment rows move by 1.02e-2
+  relative and the rest of the matrix by up to 2.45, because the termination is in the GREEN'S
+  FUNCTION and every entry is an interaction through it. A change that had moved only the attachment
+  rows would have been the wrong change.
+- **No lumped term was added at the attachment's ground end.** The plane's loss arrives through the
+  termination; putting a spreading resistance on the basis as well would double-count it.
+
+### 6. Measurement 4 — `FrontToBackDb` stays REFUSED, with its reason CORRECTED
+
+The brief asked for an explicit decision because *"a refusal whose reason has become false is worse
+than a missing metric"*. The old sentence ends *"the field below the plane is not small — it is
+identically zero by construction — so the true F/B is infinite"*. **The last clause is now false: a
+real plane leaks, so the true front-to-back of the structure a user drew is finite.**
+
+**The decision is: the metric stays refused and gets a second sentence.** What is still true is that
+this model has no lower half-space AT ALL. A Leontovich surface impedance is a boundary CONDITION —
+it replaces everything below z = 0 with `E_tan = Z_s(n̂ × H_tan)` and computes no transmitted field —
+so the leakage is not small in the model, it is ABSENT from it. Carrying it needs a two-sided plane
+(transmission through a finite-thickness conductor into a stated medium below), which is a different
+termination and a different θ range, not a tolerance.
+`PlanarMetrics.FrontToBackLossyFloorPreamble` is that sentence and
+`FrontToBackRefusalFor` picks between the two on the problem's own termination. ANT-11's narrowing —
+the tail coming from `PlanarFiniteGround.CanCorrect` — is untouched and still follows either.
+
+`PlanarFarField.CanComputeMedium` moved the other way and admits a conducting floor, for the same
+reason read forwards: **the θ range rests on the floor being OPAQUE, not on it being perfect.** The
+pattern over 0…90° is still the whole of what the model radiates. A PMC or an open half-space
+genuinely radiates downward and is still refused, in the same words.
+
+### 7. R-cl4-3 — against kernel A, both surfaces lossy
+
+The gate the brief called *"the one that says the term is right rather than merely present"*.
+Uniform 50 Ω line at 10 GHz on both starters, `EdgeCells = 3`, cells/λ = 20, γ from the **two-line
+extraction directly** — never through `PlanarPortCalibrator`, so the QSC crossover is not in the path
+(CL1's own gates did the same and this is why the crossover does not bite). Kernel A is
+`RlgcModel.RMatrix` with the ground at the same σ and at σ = ∞, so its sum over surfaces splits the
+two terms exactly.
+
+**Four alphas, one mesh, one pair of standards, {PEC, real} strip × {PEC, real} ground.** A1 is the
+all-PEC extraction floor; every term is measured from it. `PlanarFillSettings.PerfectConductor` makes
+the STRIP perfect and nothing else — the plane is in the Green's function, not the fill — which is
+what makes `B1 − A1` the ground term on its own.
+
+| | α_strip | α_ground | α_total | share |
+|---|---|---|---|---|
+| **FR-4**, kernel A | 8.1943e-2 | 2.1895e-2 | 1.0384e-1 | **21.09%** (overview: 21.1%) |
+| **FR-4**, kernel B | 5.2046e-2 | **3.2353e-2** | 8.4383e-2 | 38.34% |
+| ratio B/A | 0.6351 | **1.4776** | 0.8126 | |
+| **GaAs**, kernel A | 3.8256 | 4.5310e-1 | 4.2787 | **10.59%** (overview: ~11%) |
+| **GaAs**, kernel B | 2.7977 | **4.7886e-1** | 3.2725 | 14.63% |
+| ratio B/A | 0.7313 | **1.0569** | 0.7648 | |
+
+Np/m. **Kernel A reproduces the overview's own 21.1% and ~11% to the digit it quoted**, which is what
+says both sides are measuring the same quantity. **Kernel B's strip term reproduces CL1's converged
+0.63 and 0.73** on the general path, which says the harness is the same instrument.
+
+**The ground term is REAL and not an artifact of differencing two kernels.** Two independent checks:
+
+- **It scales as 1/√σ.** A 4× resistivity step multiplied it by **2.0033** on FR-4 and 1.8687 on GaAs,
+  against √4 = 2 — the structural signature of Re(Z_s), and the same test CL1's own routine gate uses.
+- **It is ADDITIVE.** `(α_strip + α_ground)/α_total` = 1.0002 … 1.0021 across every case, so the two
+  surfaces are not double-counting each other through the solved current.
+
+**Where the two formulations actually agree, and where they stop — one substrate, three frequencies,
+w held at the 10 GHz 50 Ω width so the geometry cannot move:**
+
+| | k₀H | kernel A α_ground | kernel B α_ground | B/A |
+|---|---|---|---|---|
+| GaAs 100 µm @ 10 GHz | 0.0209 | 4.5310e-1 | 4.7886e-1 | **1.057** |
+| FR-4 1.6 mm @ 2 GHz | 0.0671 | 9.7858e-3 | 1.0392e-2 | **1.062** |
+| FR-4 1.6 mm @ 10 GHz | 0.3353 | 2.1895e-2 | 3.2353e-2 | 1.478 |
+| FR-4 1.6 mm @ 20 GHz | 0.6707 | 3.0967e-2 | 2.5149e-3 | 0.081 |
+
+**Two independent formulations of ground loss agree to 6% wherever the substrate is electrically
+thin, and the excess tracks k₀H rather than w/h** — the geometry is fixed down that FR-4 column, so
+the two candidate explanations separate cleanly and the geometric one is refuted. That agreement is
+R-cl4-3's answer: the term is right, not merely present.
+
+**The divergence above it is not attributed, and it is not tuned away.** Two things are happening at
+once and this measurement cannot separate them: kernel B's ground term absorbs the surface-wave and
+radiated field, which Wheeler's incremental-inductance rule structurally has no term for; and the
+two-line instrument itself degrades on an electrically thick radiating substrate — CL1 recorded that
+*"the absolute α of a PEC FR-4 line out of this route is not a usable number; the difference is"*, and
+by k₀H = 0.67 the DIFFERENCE stops being usable too (0.081 is not a physical number). **Neither
+kernel is authoritative there**: kernel A's quasi-TEM rule has no radiation term and kernel B's
+instrument has lost resolution, so the row is reported rather than resolved.
+
+**The SHARE does NOT come out at 21.1% and cannot**, and the reason is CL1's rather than CL4's. On
+the FR-4 2 GHz row — where the term itself agrees to 6% — kernel A reads 21.06% and kernel B reads
+**27.48%**, because the numerator is right and the DENOMINATOR carries CL1's measured single-sheet
+strip deficit (0.7478 there, 0.63 at 10 GHz, 0.73 on GaAs). The share is inflated by exactly that
+factor and by nothing else: `1.062·g / (0.7478·s + 1.062·g)` with `g/s = 0.2669` is 27.49%.
+**Quoting kernel B's share as the ground's share of the conductor term would be quoting CL1's
+deficit back with the opposite sign.** The overview's 21.1% / ~11% / 25.0% stay what they are — a
+statement about the PHYSICS, reproduced here by kernel A to the digit — and the gate is the TERM.
+
+### 8. Traps and findings
+
+- **The general kernel REFUSES a lossless dielectric, and that is what stopped CL1's own
+  construction being reused.** CL1 measured α_c with `tanδ = 0` so that what was left was conductor
+  plus radiation. A lossy floor can only be expressed through `MediumStack`, which sets
+  `RequiresGeneralKernel`, and `SommerfeldIntegral.CanIntegrateLayered` (reached through
+  `Dcim.FitAtHeights`) refuses a stack with no lossy layer anywhere — *"a lossless guided stack puts
+  its surface-wave poles exactly on the real-k_ρ contour this integrator uses"*. So every CL4
+  measurement carries the substrate's real tanδ and cancels it in the difference. §9 is the same
+  fact with a much larger consequence.
+- **`PerfectConductor` makes the STRIP perfect and NOTHING ELSE**, because the plane is not in the
+  fill. That is exactly what makes B1 − A1 the ground term on its own — and it is also the mistake
+  that ate the first measurement: subtracting a PEC-metal floor taken on the LOSSY-ground stack
+  removes the very term being looked for, and reports a ground share of **−0.03%** with every gate
+  still green. The floor must come from the PEC-ground kernel.
+- **The provenance hash could not see the ground's metal.** `EmSnpProvenance` hashed
+  `ms.Bottom.Material.EpsR`, which is `EmMaterial.Air` for a PEC and for a conducting plane alike, so
+  two runs differing only in the ground's σ would have shared a cached `.snp`. The termination's
+  KIND, σ and thickness are in the hash now. This is CL3's own finding one surface over — those two
+  numbers used to ride along unused, and they do not any more. Nothing the shipped extractor
+  produces is affected yet (§9); the hash is fixed before it can be.
+- **A conducting floor's dissipation lands in CL2's `P_dielectric`, which is a RESIDUAL.**
+  `P_conductor` is an integral over the fill's own basis functions and the plane has none, so what
+  the plane absorbs arrives as everything-else-minus and is booked against the line labelled
+  dielectric loss. On a low-tanδ substrate it would be most of what that line reads. **Not fixed** —
+  CL4's own "Must NOT" reserves the residual's arithmetic, and splitting it out needs a second
+  quadratic form in the spectral domain rather than a relabelling. Recorded on `DielectricW`'s own
+  parameter documentation.
+
+### 9. WHAT THIS DOES NOT REACH, and the measured reason — read this before quoting any number above
+
+**No run a user can make gets a conducting ground plane.** The engine has the capability, every gate
+above passes, and `PlanarExtractor.BuildMediumStack` still writes `Termination.Pec`. That is a
+decision, not an oversight, and it is CL4's own partial result — stated here loudly because the
+brief's "Must NOT" forbids shipping one silently.
+
+**The obstruction is structural and was measured, not argued.** A conducting floor is expressible
+only on `LayerStack`, and `PlanarProblem.RequiresGeneralKernel` turns on the moment a `MediumStack`
+is given. So turning it on in the extractor moves **every single-level, single-dielectric run** —
+the FR-4 hero, the shipped patch antenna, every ordinary microstrip — off L8's one-slab path and onto
+the general one. Three consequences, in order of weight:
+
+1. **The general path refuses a LOSSLESS dielectric outright** (§8's first trap). An air or
+   `tanδ = 0` substrate runs today on the one-slab path and would become a REFUSAL. `CoplanarDeembedTests`'
+   own fixtures are `EmMaterial(1.0, 0.0)`.
+2. **The validated range is 2.6× worse on the general path** — `ValidatedRhoOverLambdaLayered`'s
+   ≤1.6e-2 against `ValidatedRhoOverLambda`'s ≤6e-3 (§5) — so every one-slab run would be re-based
+   onto a looser tier to gain a term worth 11–25% of the conductor loss.
+3. **It is a CL3-sized re-bless**, and CL4 carries none of CL3's gates: no passivity/reciprocity
+   direction check, no hero check, no golden-move tabulation. A default flip of that reach is its own
+   brief.
+
+**The half-measure was considered and REFUSED**: emitting a conducting floor only on problems already
+on the general path (multi-level, or a multi-dielectric stackup). It is worse than a uniform limit,
+because two physically identical designs would then get different ground physics according to whether
+the stackup happened to carry one dielectric entry or two — a user adding a solder mask would
+silently change the ground model. A stated limit that is the same everywhere beats a correction that
+appears and disappears.
+
+**What would lift it**, in the order it would have to happen: give the ONE-LAYER `SpectralGreens` the
+same impedance floor (the composite reflection is still EVEN in k_z1, so the basis holds — §3 — but
+it needs σ and t on `GroundedSlab`, which is D2's own type and is a key in the fit cache, the
+provenance hash and `DescribedByTheSlab`); then flip the extractor with a CL3-shaped re-bless. That
+is a brief, not a follow-up.
+
+### 10. Gates
+
+`tests/Engine.Tests/Mom/PlanarLossyGroundTests.cs`, 12 tests. **7 in the routine tier at 4 s
+together**; 5 tagged `Category=Benchmark` at **5 m 03 s** (M3's two starters 57 s + 1 m 57 s, M4's
+two N = 440 multi-level fills 1 m 20 s, M5's three-frequency sweep 44 s, M1's full six-case fit sweep
+5.0 s). Measured, then tagged on the repo's mechanical ~5 s rule rather than on a preference.
+
+**The two measurements whose refusal would matter most keep a routine-tier counterpart**, because a
+gate nobody runs is not a gate: `M1b` re-asks measurement 1 on one stack at one frequency against the
+same un-widened `ValidatedRhoOverLambdaLayered`, and `M4a` is measurement 3's refusal TABLE on its
+own — the expensive half only measures how far the matrix moved, while the cheap half is what catches
+a refusal someone deleted instead of narrowing.
+
+**R-cl4-4** — all four measurements tabulated whether they pass or refuse: §3, §4, §5, §6.
+**R-cl4-5** — `dotnet test tests/Engine.Tests`, run ONCE and triaged from the TRX:
+**2,407 passed, 0 failed, 1 skipped** (a pre-existing `DataSetExportTests` skip), 5 m 08 s. Nothing
+outside this brief's own file moved, which is what says the four narrowed predicates (§0) are
+narrower and not different.
+
+### 11. Reported to the owner, by file and line (no `CLAUDE.md` edit, per the standing rule)
+
+- `src/Engine/Mom/CLAUDE.md` **§5**, the conductor-loss bullet, currently ends *"**The GROUND PLANE
+  is still PEC** (CL4, not run) — 21% (FR-4) / ~11% (GaAs) / 25% (low-loss laminate) of the conductor
+  term."* CL4 HAS run. The sentence that replaces it has to say both halves: the termination is built
+  and measured, and **the shipped extractor still writes a PEC floor** (§9), so the 21/11/25% figures
+  stand for every run anyone can make.
+- `src/Engine/Mom/CLAUDE.md` **§5's validated-range table** could take a row for the plane's own
+  `Z_s` — it has no constant of its own, which is the point, but the ≤6% agreement against kernel A
+  at k₀H ≤ 0.07 and the divergence above it is a validated RANGE and belongs in that table.
+- `src/Engine/Mom/CLAUDE.md` **§7**, the antenna-metrics bullet: `FrontToBackDb` *"always, in this
+  kernel — the field below a laterally infinite PEC is identically zero so the true ratio is
+  infinite"*. Still true for a PEC floor and **false for a conducting one** (§6); the code now carries
+  two sentences and §7 carries one.
+- `src/Engine/Mom/CLAUDE.md` **§7**, the same bullet's neighbours: the ground-attachment refusal and
+  the far field's *"A stack that is not PEC below"* both now say CONDUCTOR rather than PEC.
+- The repo `CLAUDE.md`'s test-suite section counts **124 `Category=Benchmark` methods repo-wide**;
+  this brief adds 4 methods (5 cases, 5 m 03 s), so that count is **128**.
+- **`docs/user` is broadly out of date with its own generator, and it is not this brief's doing.**
+  `tools/DocGen/check-docs-current.sh` would fail today: regenerating touches **78 files** that
+  reproduce at HEAD with no source change of any kind — the drift families the owner's own note
+  records, plus pages whose `.md` was edited without a regeneration (CL3's conductor-loss rewrite of
+  `mom-engine.md` is one). **Only `docs/user/reference/mom-engine.html` is carried here**, the one
+  page whose source this brief edited, and it is stable across two consecutive DocGen runs.
+  `assets/js/search-index.js` was deliberately NOT carried: it is an aggregate over every page, so
+  regenerating it would commit other pages' un-regenerated content while leaving their own HTML
+  stale. A full `check-docs-current.sh` clean-up is a decision about 78 files and is the owner's.
+
 ## QSC — a quasi-static port calibration, so the bottom of the band stops costing a metre of line (2026-09-14)
 
 `docs/sonnet-briefs/brief-quasistatic-port-calibration.md`. RAW1 §6 closed with the low-frequency

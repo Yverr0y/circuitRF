@@ -421,7 +421,12 @@ public sealed class PlanarPortCalibrator
     private static bool DescribedByTheSlab(LayerStack stack, GroundedSlab slab, double levelZ)
     {
         if (stack.LayerCount != 1) return false;
-        if (stack.Bottom.Kind != TerminationKind.Pec) return false;
+        // CL4 — a CONDUCTING floor is the slab's floor too. The one-slab image series is
+        // electrostatics, where a plane of any finite σ is an equipotential exactly as a PEC is
+        // (LayeredStaticGreens.TerminationCoefficient), so asking Kind == Pec here would have
+        // quietly moved a lossy-ground run onto the interior route and changed the reference
+        // impedance of a calibration that reads no termination at all. R-cl4-1's second half.
+        if (!stack.Bottom.IsConductor) return false;
         if (stack.Top.Kind != TerminationKind.HalfSpace) return false;
 
         double tol = 1e-12 * Math.Max(1.0, slab.HeightM);

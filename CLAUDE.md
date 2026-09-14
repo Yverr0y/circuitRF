@@ -329,7 +329,8 @@ measured under the threshold, or folded into `Benchmark`).
   `Rbf2DPerfTests`, 4 methods: millisecond-fast, but a ~0.3 ms operation reads ~10 ms per sample under
   full-suite load, so even a best-of-20 gate flaked). **Do not untag those on the grounds that they run
   quickly** — they are tagged for the purpose the mechanism serves, not the letter of the ~5 s rule.
-  Currently **124 test methods** repo-wide, counted rather than estimated (93 in `Engine.Tests` — CL1's
+  Currently **128 test methods** repo-wide, counted rather than estimated (97 in `Engine.Tests` — CL4's
+  `PlanarLossyGroundTests` are the last 4, 5 m 03 s together; CL1's
   two A-vs-B measurements are the last 2, 1 m 40 s together; 24 in `Ui.Tests`, 6 in
   `Harmonica.Tests`, 1 in `RfCore.Tests`); `brief-em-sweep-performance`'s own
   milestones account for much of the growth past the ~81 recorded below, and M5's accelerator adds the

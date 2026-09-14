@@ -774,7 +774,7 @@ public sealed class LayeredSpectralGreens
     private Complex FresnelDown(SurfaceWavePolarization p, int i, Cascade c)
     {
         if (i == 0 && Stack.IsWall(0))
-            return Stack.Bottom.Kind == TerminationKind.Pec ? -Complex.One : Complex.One;
+            return WallReflection(Stack.Bottom, p, adjacentRegion: 1, c);
 
         int below = i, above = i + 1;
         Complex kb = c.Kz[below], ka = c.Kz[above];
@@ -801,8 +801,70 @@ public sealed class LayeredSpectralGreens
     {
         int top = Stack.RegionCount - 1;
         if (i == top - 1 && Stack.IsWall(top))
-            return Stack.Top.Kind == TerminationKind.Pec ? -Complex.One : Complex.One;
+            return WallReflection(Stack.Top, p, adjacentRegion: top - 1, c);
         return -FresnelDown(p, i, c);
+    }
+
+    /// <summary>
+    /// <b>CL4 — what a WALL reflects, and it is no longer a constant.</b> A PEC is a short and a PMC
+    /// an open on both equivalent lines; a conducting plane is a LOAD of
+    /// <see cref="Termination.SurfaceImpedanceAt">Z_s</see> on them, so
+    ///
+    /// <code>    Γ^{e,h} = (Z_s − Z_line^{e,h}) / (Z_s + Z_line^{e,h})</code>
+    ///
+    /// <para>with <c>Z_line^e = k_z/(ωε)</c> and <c>Z_line^h = ωµ/k_z</c> of the region next to the
+    /// wall. <b>Z_s itself is the same scalar for both polarisations</b> — the Leontovich condition
+    /// is <c>E_tan = Z_s(n̂ × H_tan)</c>, which is <c>V = Z_s·I</c> on either line — so the whole
+    /// polarisation dependence is in Z_line, which is why the vector and scalar kernels see
+    /// different floors out of one number.</para>
+    ///
+    /// <para><b>Cross-multiplied, exactly as <see cref="FresnelDown"/> is (R-lyr-3)</b>, so neither a
+    /// vanishing nor a diverging Z_line can produce a NaN: at k_z = 0 the TM form is +1 and the TE
+    /// form −1, both finite.</para>
+    ///
+    /// <para><b>Z_s == 0 returns −1 EXACTLY rather than computing it.</b> <c>(0 − Z)/(0 + Z)</c> is
+    /// −1 to the physics and not to the last bit — complex division leaves an imaginary residue of
+    /// order 1e-17 — and R-cl4-1 asserts BIT identity against CL3 at σ = ∞. This is the guard that
+    /// makes the new path safe to take rather than one that has to be avoided.</para>
+    ///
+    /// <para><b>The k_ρ → ∞ limits differ between the polarisations and that is worth knowing:</b>
+    /// Γ^e → −1 (the electrostatic image survives) but Γ^h → +1, because Z_line^h → 0 while Z_s
+    /// stays finite. The crossover is at k_ρ ≈ √2/δ — 2.1e6 rad/m for copper at 10 GHz, four
+    /// decades above the DCIM path's own reach — and it is where the Leontovich condition stops
+    /// being valid anyway (the exact half-space gives Γ^h → 0 there, a matched load). It is
+    /// invisible to every fit in this file because the bottom wall reaches the top half-space only
+    /// through <c>e^{−2k_ρH}</c>, which at that k_ρ on 1.6 mm FR-4 is e^{−4800};
+    /// <see cref="AsymptoticTopReflection"/> does not read the bottom termination at all for the
+    /// same reason. Where it IS read is <see cref="AsymptoticAtHeights"/>, for a source in the
+    /// region directly above the floor, and that arm carries both values rather than one.</para>
+    /// </summary>
+    private Complex WallReflection(Termination t, SurfaceWavePolarization p, int adjacentRegion,
+                                   Cascade c)
+    {
+        if (t.Kind != TerminationKind.SurfaceImpedance)
+            return t.Kind == TerminationKind.Pec ? -Complex.One : Complex.One;
+
+        Complex zs = t.SurfaceImpedanceAt(Omega);
+        if (zs == Complex.Zero) return -Complex.One;
+
+        Complex kz = c.Kz[adjacentRegion];
+        Complex num, den;
+        if (p == SurfaceWavePolarization.Tm)
+        {
+            Complex a = zs * Omega * EmConstants.Eps0 * _eps[adjacentRegion];
+            num = a - kz;
+            den = a + kz;
+        }
+        else
+        {
+            Complex b = Omega * EmConstants.Mu0 * _mu[adjacentRegion];
+            num = zs * kz - b;
+            den = zs * kz + b;
+        }
+        // Re(Z_s) > 0 and Re(Z_line) ≥ 0 make a zero denominator unreachable on the physical sheet;
+        // the guard is here so that if a caller ever reaches one it gets the PEC value rather than a
+        // NaN propagating into every matrix entry.
+        return den == Complex.Zero ? -Complex.One : num / den;
     }
 
     // -------------------------------------------------------------------------------------------
@@ -1355,7 +1417,20 @@ public sealed class LayeredSpectralGreens
         {
             if (m == 1 && Stack.IsWall(0))
             {
-                re = rh = Stack.Bottom.Kind == TerminationKind.Pec ? -Complex.One : Complex.One;
+                // CL4 — the two polarisations part company at a CONDUCTING floor, and only here.
+                // Γ^e → −1 (the electrostatic image) but Γ^h → +1, because Z_line^h → 0 while Z_s
+                // stays finite; WallReflection's own summary derives both and says why the fitted
+                // top-referenced route never sees it. A PEC keeps −1/−1 and a PMC +1/+1 exactly.
+                if (Stack.Bottom.Kind == TerminationKind.SurfaceImpedance &&
+                    Stack.Bottom.SurfaceImpedanceAt(Omega) != Complex.Zero)
+                {
+                    re = -Complex.One;
+                    rh =  Complex.One;
+                }
+                else
+                {
+                    re = rh = Stack.Bottom.Kind == TerminationKind.Pmc ? Complex.One : -Complex.One;
+                }
             }
             else
             {

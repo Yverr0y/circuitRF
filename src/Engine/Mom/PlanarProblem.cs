@@ -358,15 +358,15 @@ public sealed record PlanarProblem(
             // drew — the failure mode L9's own phase-gate finding is about.
             if (v.ToGround)
             {
-                if (stack.Bottom.Kind != TerminationKind.Pec)
+                if (!stack.Bottom.IsConductor)
                     return EmSuitability.No(
                         $"A via runs to the GROUND PLANE, but this medium's bottom termination is " +
-                        $"{stack.Bottom} rather than a PEC. The ground-attachment basis is a half " +
-                        $"rooftop whose lower terminal is the laterally infinite PERFECT CONDUCTOR " +
-                        $"the Green's function handles analytically — its return charge is that " +
-                        $"plane's own image, and there is no image to be the return without it. " +
-                        $"Terminate the stack in a ground plane, or take the via to a meshed " +
-                        $"conductor level instead.");
+                        $"{stack.Bottom} rather than a conducting plane. The ground-attachment " +
+                        $"basis is a half rooftop whose lower terminal is the laterally infinite " +
+                        $"CONDUCTOR the Green's function handles analytically — its return charge " +
+                        $"is that plane's own image, and there is no image to be the return " +
+                        $"without it. Terminate the stack in a ground plane, or take the via to a " +
+                        $"meshed conductor level instead.");
 
                 if (v.UpperLayerIndex < 0 || v.UpperLayerIndex >= Layers.Count)
                     return EmSuitability.No(

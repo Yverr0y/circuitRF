@@ -451,7 +451,17 @@ public static class PlanarSurfaceWaveLaunch
 /// <param name="SurfaceWaveW">Launched into the substrate's guided modes; 0 when refused.</param>
 /// <param name="DielectricW">The residual: accepted − radiated − surface-wave − <b>conductor</b>.
 /// CL2 moved the conductor term out of it; see the file header for why adding the term beside the
-/// residual instead is the failure that still sums to <paramref name="AcceptedW"/>.</param>
+/// residual instead is the failure that still sums to <paramref name="AcceptedW"/>.
+/// <para><b>CL4 — a CONDUCTING GROUND PLANE's dissipation lands HERE, and it is not dielectric
+/// loss.</b> <paramref name="ConductorW"/> is an integral over the fill's own basis functions, and
+/// the plane is not meshed and has no basis: it enters as a termination of the Green's function, so
+/// what it absorbs arrives as a smaller <paramref name="AcceptedW"/>-minus-everything-else and is
+/// booked against this line. On the FR-4 starter that is 21% of the conductor term and on a
+/// low-loss laminate 25%, so on a low-tanδ substrate it can be most of what this line reads.
+/// <b>Nothing in the shipped extractor builds such a termination</b> (`RESOLVED.md` §CL4), so no run
+/// a user can make is affected today; splitting it out needs a second quadratic form in the
+/// spectral domain rather than a relabelling, and CL4's own "Must NOT" reserved the residual's
+/// arithmetic.</para></param>
 /// <param name="ConductorW">½∫Re(Z_s)|J|²dS + Σ½Re(Z_barrel)|I|² — see
 /// <see cref="PlanarConductorLossInputs"/>. Exactly zero when the metal is a perfect conductor, and
 /// <paramref name="ConductorModelled"/> is what says which kind of zero that is.</param>

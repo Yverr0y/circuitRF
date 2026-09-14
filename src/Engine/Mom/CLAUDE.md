@@ -1017,6 +1017,7 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
 | `Dcim.ValidatedRhoOverLambdaLayered` | 1.0 | general stack; ≤**1.6e-2** (≈2.6× worse than one-layer, stated not rounded away) |
 | `Dcim.ValidatedRhoOverLambdaAtHeights` | **0.1** | **G_A^zz only** — the binding limit on every via-bearing run. Asked of the **via-footprint extent**, not the mesh diagonal. **Do not widen it.** |
 | `Dcim.ValidatedRhoOverLambdaInteriorHorizontal` | 1.0 | a **note, never a refusal** |
+| **CL4's conducting floor** | no constant | **k₀H ≤ 0.07** is where the ground term agrees with kernel A (1.057× on GaAs at 0.021, 1.062× on FR-4 at 0.067); 1.478× at 0.335 and the two-line INSTRUMENT itself fails by 0.671. Deliberately not a refusal — nothing shipped can build the termination (§7). `RESOLVED.md` §CL4 §7 |
 | `GroundedSlab.MinElectricalThickness` | k₀H ≥ 1e-6 | kernel limit |
 | `MinUngroundedElectricalThickness` | 0.05 (k₀H) | bracketed by 0.021 failing / 0.105 passing; **mechanism NOT isolated**, and the refusal says so |
 | `Dcim.CanFitAtFrequency` | **k₀H < 1e-4** | near-DC refusal, asked of the sweep's lowest NON-ZERO point. R-dcm-4's `PathExtent·k₀H < 1` half is **gone** — the path widens itself now (next row); what is left is the floor the widening cannot reach, where the failure is the FIT rather than the path. Names the DC point as the thing that does work there. **LF2 — it is a REFUSAL only under `PlanarSolveSettings.SubstituteConductionBelowFitFloor = false`; by default `PlanarSolve.Run` splits those points out beside 0 Hz and gives them `PlanarDcSolve`'s answer, with a one-line note. `Dcim.IsBelowFitFloor` is the single spelling of the question. `RESOLVED.md` §LF2.** |
@@ -1075,9 +1076,17 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
   and 0.748 through the whole shipped de-embedding, an instrument sharing no algebra with CL1's.
   **The 6.5 / 3.0 / 2.1% at 2 / 10 / 20 GHz is the FR-4 number, and FR-4 is where α_c matters
   LEAST**: on the shipped MMIC technology it is 92-99%, and a de-embedded MMIC line's TOTAL α went
-  from 0.06-0.18 of kernel A's to **0.79-0.86**. **The GROUND PLANE is still PEC** (CL4, not run) —
-  21% (FR-4) / ~11% (GaAs) / 25% (low-loss laminate) of the conductor term. `RESOLVED.md` §CL1, §CL3.
-  **CL2 reads it back out as `P_conductor`** — see §3.7.
+  from 0.06-0.18 of kernel A's to **0.79-0.86**. **The GROUND PLANE is still PEC in every run anyone
+  can make** — 21% (FR-4) / ~11% (GaAs) / 25% (low-loss laminate) of the conductor term.
+  **CL4 RAN and the termination is built** (`Termination.LossyGround`, `TerminationKind.SurfaceImpedance`,
+  the one-sided `PlanarSurfaceImpedance.Plane`): all four of its measurements pass, and the ground term
+  agrees with kernel A to **6%** at k₀H ≤ 0.07. **It is not wired to `PlanarExtractor`**, because a
+  conducting floor is expressible only through `MediumStack`, which forces the GENERAL kernel — and
+  that kernel refuses a lossless dielectric outright. `RESOLVED.md` §CL1, §CL3, §CL4 (§9 is the
+  reachability decision and what would lift it).
+  **CL2 reads it back out as `P_conductor`** — see §3.7. **A conducting floor's own dissipation would
+  land in CL2's `P_dielectric` residual rather than in `P_conductor`**, because the plane has no basis
+  function to integrate over; recorded, not fixed.
 - **Staircase error is NOT monotone in cell size.** Local width error on MTaper/MKlopf is 17–24%
   worst, 5.5–11% RMS, against 0.47–0.59% global *area* error. Conformal tiling error vs the drawn
   artwork is 7.7e-16…6.5e-15; staircase is 0.096–0.593%.
@@ -1228,7 +1237,11 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
 - **The ANTENNA METRICS refuse five things by name, each leaving the sweep and the other metrics
   intact** (ANT-5, §3.7). `FrontToBackDb` **always, in this kernel** — the field below a laterally
   infinite ground plane is identically zero so the true ratio is infinite, and ∞, a large finite
-  number and a missing metric are all worse than the sentence. **ANT-11 narrowed it by the one
+  number and a missing metric are all worse than the sentence. **CL4 gave it a SECOND sentence for a
+  conducting floor, where that reason is false**: a real plane leaks, so the true ratio is finite —
+  what is still true is that a Leontovich impedance is a boundary CONDITION with no lower half-space
+  behind it at all, so what is missing is a region rather than a small number
+  (`PlanarMetrics.FrontToBackLossyFloorPreamble`). **ANT-11 narrowed it by the one
   predicate it was staged for** (`PlanarFiniteGround.CanCorrect`): it is now a function of the problem,
   refusing differently according to whether a ground outline was found, and naming a MEASURED reason
   instead of a future phase. It still refuses in both branches — §3.9 and `RESOLVED.md` §ANT-11. `DirectivityPeakPhiDeg` **at a broadside peak**, where every azimuth names the same
@@ -1253,9 +1266,11 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
   meshes what it can transform). A **VERTICAL basis** — a z-directed current excites the TM line as a
   SERIES voltage source, so it has its own element factor, its own transform and its own oracle;
   **this is the refusal with a real cost, because it rules out a PROBE-FED patch** (an internal port
-  grows a via) while edge- and inset-fed are unaffected. A stack that is **not PEC below** (the θ
-  range rests on it). A top half-space that is **not free space** (the pattern is written in k₀ and
-  η₀).
+  grows a via) while edge- and inset-fed are unaffected. A stack that is **not a CONDUCTOR below** —
+  PEC or CL4's conducting plane; the θ range rests on the floor being OPAQUE rather than perfect, and
+  a PMC or an open half-space genuinely radiates downward. The ground-attachment refusal
+  (`PlanarProblem.CanSolve`) narrowed the same way, to `Termination.IsConductor`. A top half-space
+  that is **not free space** (the pattern is written in k₀ and η₀).
 - **Three per-cell conformal configurations fall back to the staircase for that cell**: >1 polygon of
   the layer touches it; a hole ring touches it; flow-simple in **neither** direction (measured at
   zero everywhere).

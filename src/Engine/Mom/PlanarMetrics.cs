@@ -401,6 +401,33 @@ public static class PlanarMetrics
         "sentence. ";
 
     /// <summary>
+    /// <b>CL4's measurement 4 — the same refusal with its REASON corrected, for a floor that is a
+    /// real conductor.</b>
+    ///
+    /// <para>The metric stays refused and the decision is recorded as that rather than left implied.
+    /// What changed is the last clause of the sentence above: a lossy plane genuinely leaks, so the
+    /// TRUE front-to-back of the structure a user drew is finite, and telling them it is infinite
+    /// would now be false. What is still true — and is the actual reason — is that this model has no
+    /// lower half-space AT ALL. A Leontovich surface impedance is a boundary CONDITION: it replaces
+    /// everything below z = 0 with <c>E_tan = Z_s(n̂ × H_tan)</c> and computes no transmitted field,
+    /// so the leakage is not small in the model, it is absent from it. Carrying it needs a
+    /// two-sided plane — transmission through a finite-thickness conductor into a stated medium
+    /// below — which is a different termination and a different θ range, not a tolerance.</para>
+    ///
+    /// <para><b>A refusal whose stated reason has become false is worse than a missing metric</b>,
+    /// which is why this is a second sentence rather than the same one left standing.</para>
+    /// </summary>
+    internal const string FrontToBackLossyFloorPreamble =
+        "Front-to-back cannot be computed: the θ axis of this pattern stops at 90°, because the " +
+        "ground plane and every dielectric layer are LATERALLY INFINITE in this analysis. This " +
+        "stack's plane is a REAL conductor, so unlike a perfect one it does leak and the true " +
+        "front-to-back of your structure is finite — but this model has no lower half-space at all " +
+        "to read it from. A conducting plane enters as a Leontovich surface impedance, which is a " +
+        "boundary condition replacing everything below it rather than a slab with a medium on the " +
+        "far side, so no transmitted field is computed and the field below is still identically " +
+        "zero. What is missing is a region, not a small number. ";
+
+    /// <summary>
     /// <b>ANT-11 — the NARROWED refusal, and the narrowing is that it is a function of the PROBLEM.</b>
     ///
     /// <para>ANT-5 shipped this as a constant whose tail named "the finite-ground phase" as the thing
@@ -412,7 +439,9 @@ public static class PlanarMetrics
     /// ANT-5 staged is still one predicate.</para>
     /// </summary>
     internal static string FrontToBackRefusalFor(PlanarMetricContext c) =>
-        FrontToBackPreamble +
+        (c.Problem.EffectiveStack.Bottom.Kind == TerminationKind.SurfaceImpedance
+            ? FrontToBackLossyFloorPreamble
+            : FrontToBackPreamble) +
         PlanarFiniteGround.CanCorrect(c.Problem, c.Pattern.FrequencyHz,
                                       c.Problem.MetalBounds()).Reason;
 

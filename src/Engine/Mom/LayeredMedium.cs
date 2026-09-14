@@ -112,6 +112,13 @@ public enum TerminationKind
     Pmc,
     /// <summary>A semi-infinite half-space of stated material — the line is matched into it.</summary>
     HalfSpace,
+    /// <summary>
+    /// <b>CL4 — a REAL conductor, as a Leontovich surface impedance.</b> Still laterally infinite,
+    /// still unmeshed, still adding no unknown: only the terminating reflection changes, from the
+    /// PEC's constant −1 to <c>Γ^{e,h} = (Z_s − Z_line^{e,h})/(Z_s + Z_line^{e,h})</c> at every
+    /// spectral component. See <see cref="Termination.LossyGround"/>.
+    /// </summary>
+    SurfaceImpedance,
 }
 
 /// <summary>
@@ -133,10 +140,21 @@ public sealed record Termination
     /// <summary>Only meaningful for <see cref="TerminationKind.HalfSpace"/>.</summary>
     public EmMaterial      Material { get; }
 
-    private Termination(TerminationKind kind, EmMaterial material)
+    /// <summary>σ of the plane, S/m. Only meaningful for
+    /// <see cref="TerminationKind.SurfaceImpedance"/>; zero otherwise.</summary>
+    public double ConductivitySm { get; }
+
+    /// <summary>The plane's thickness, metres. Only meaningful for
+    /// <see cref="TerminationKind.SurfaceImpedance"/>; zero otherwise.</summary>
+    public double ThicknessM { get; }
+
+    private Termination(TerminationKind kind, EmMaterial material,
+                        double conductivitySm = 0, double thicknessM = 0)
     {
-        Kind     = kind;
-        Material = material;
+        Kind           = kind;
+        Material       = material;
+        ConductivitySm = conductivitySm;
+        ThicknessM     = thicknessM;
     }
 
     public static Termination Pec => new(TerminationKind.Pec, EmMaterial.Air);
@@ -145,13 +163,56 @@ public sealed record Termination
     /// <summary>The ordinary open top: free space above the stack.</summary>
     public static Termination Air => OpenTo(EmMaterial.Air);
 
+    /// <summary>
+    /// <b>CL4 — the laterally infinite plane as a REAL conductor of conductivity
+    /// <paramref name="sigmaSm"/> and thickness <paramref name="thicknessM"/>.</b>
+    ///
+    /// <para>The kind is NOT collapsed to <see cref="Pec"/> for a perfect spelling (σ ≤ 0,
+    /// σ = +∞, t ≤ 0), deliberately. Collapsing would make R-cl4-1's bit-identity gate vacuous —
+    /// it would be testing that the OLD path is still the old path. Instead the new path is taken,
+    /// <see cref="SurfaceImpedanceAt"/> returns exactly <see cref="Complex.Zero"/> there, and every
+    /// consumer's impedance branch returns the PEC value EXACTLY rather than computing
+    /// <c>(0 − Z)/(0 + Z)</c>, whose imaginary part is not bit-zero in complex arithmetic. CL3 §3's
+    /// lesson, one file over: when a new code path is added beside an old one for the same physical
+    /// case, the question is whether the old path is still TAKEN.</para>
+    /// </summary>
+    public static Termination LossyGround(double sigmaSm, double thicknessM) =>
+        new(TerminationKind.SurfaceImpedance, EmMaterial.Air, sigmaSm, thicknessM);
+
     public bool IsOpen => Kind == TerminationKind.HalfSpace;
+
+    /// <summary>
+    /// <b>Is this end a CONDUCTING floor or ceiling</b> — a PEC, or CL4's real conductor? The
+    /// distinction the two share and a PMC or a half-space does not: it is opaque, it carries a
+    /// return current, and electrostatically it is an equipotential. Every site that used to ask
+    /// <c>Kind == TerminationKind.Pec</c> for that reason asks this instead.
+    /// </summary>
+    public bool IsConductor =>
+        Kind is TerminationKind.Pec or TerminationKind.SurfaceImpedance;
+
+    /// <summary>
+    /// <b>Z_s of the plane at this angular frequency, Ω/square — the ONE-SIDED form</b>
+    /// <c>η_c·coth(γ_c t)</c>, because the plane has air below it and conducts on one face.
+    /// (<see cref="PlanarSurfaceImpedance.Sheet"/>'s two-sided <c>(η_c/2)·coth(γ_c t/2)</c> is for a
+    /// STRIP, which is excited on both faces; using it here would halve the ground's loss.)
+    ///
+    /// <para><b>Exactly <see cref="Complex.Zero"/> for any termination that is not
+    /// <see cref="TerminationKind.SurfaceImpedance"/>, and for a perfect spelling of one</b>
+    /// (σ ≤ 0, σ = +∞, t ≤ 0), on <see cref="PlanarSurfaceImpedance"/>'s own three-spelling rule.
+    /// That zero is what every PEC-reduction gate in CL4 rests on.</para>
+    /// </summary>
+    public Complex SurfaceImpedanceAt(double omegaRadS) =>
+        Kind == TerminationKind.SurfaceImpedance
+            ? PlanarSurfaceImpedance.Plane(ConductivitySm, ThicknessM, omegaRadS)
+            : Complex.Zero;
 
     public override string ToString() => Kind switch
     {
-        TerminationKind.Pec       => "PEC",
-        TerminationKind.Pmc       => "PMC",
-        _                         => $"half-space εᵣ={Material.EpsR:G4}",
+        TerminationKind.Pec              => "PEC",
+        TerminationKind.Pmc              => "PMC",
+        TerminationKind.SurfaceImpedance =>
+            $"conducting plane σ={ConductivitySm:G4} S/m, t={ThicknessM * 1e6:G4} µm",
+        _                                => $"half-space εᵣ={Material.EpsR:G4}",
     };
 }
 
@@ -226,6 +287,15 @@ public sealed class LayerStack
         foreach (var (t, which) in new[] { (bottom, "bottom"), (top, "top") })
         {
             if (t is null) return EmSuitability.No($"The {which} termination is null.");
+            if (t.Kind == TerminationKind.SurfaceImpedance)
+            {
+                if (double.IsNaN(t.ConductivitySm) || double.IsNaN(t.ThicknessM))
+                    return EmSuitability.No(
+                        $"The {which} termination is a conducting plane with σ = {t.ConductivitySm} " +
+                        $"S/m and t = {t.ThicknessM} m. Neither may be NaN — a NaN here does not " +
+                        $"refuse, it fills the matrix with NaNs and the solve produces nothing.");
+                continue;
+            }
             if (t.Kind != TerminationKind.HalfSpace) continue;
             if (!(t.Material.EpsR >= 1.0))
                 return EmSuitability.No(
@@ -436,9 +506,17 @@ public static class LayeredStaticGreens
     public static Complex AsymptoticReflection(LayerStack stack, bool scalar) =>
         stack.LayerCount == 0 ? Complex.Zero : InterfaceCoefficient(stack, scalar, stack.InterfaceCount - 1);
 
+    /// <summary>
+    /// <b>CL4 — a CL4 conducting floor is a PEC here, and that is the ω → 0 limit rather than a
+    /// simplification.</b> Electrostatically a conductor of any finite σ is an equipotential, and
+    /// the full-wave coefficient agrees: <c>Γ^e = (Z_sωε₁ − k_z1)/(Z_sωε₁ + k_z1) → −1</c> and
+    /// <c>Γ^h = (Z_sk_z1 − ωµ)/(Z_sk_z1 + ωµ) → −1</c> as ω → 0 with Z_s → 1/(σt) finite. So the
+    /// static route — and every quasi-static calibration that rests on it — is bit-identical at
+    /// every σ, which is half of what R-cl4-1 asserts.
+    /// </summary>
     private static Complex TerminationCoefficient(Termination t, LayerStack stack, bool scalar, bool isBottom)
     {
-        if (t.Kind == TerminationKind.Pec) return -Complex.One;
+        if (t.IsConductor)                 return -Complex.One;
         if (t.Kind == TerminationKind.Pmc) return  Complex.One;
         // Open half-space: an ordinary interface between it and the adjacent layer.
         return InterfaceCoefficient(stack, scalar, isBottom ? 0 : stack.InterfaceCount - 1);

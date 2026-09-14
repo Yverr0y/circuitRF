@@ -718,10 +718,15 @@ public static class PlanarFarField
                 $"beamwidth without being wrong in shape. A structure radiating into a dielectric " +
                 $"half-space is not built.");
 
-        if (stack.Bottom.Kind != TerminationKind.Pec)
+        // CL4 — a CONDUCTING floor keeps the hemisphere. What the θ range rests on is the floor
+        // being OPAQUE, not on it being perfect: a Leontovich surface impedance replaces everything
+        // below z = 0 with a boundary condition and computes no transmitted field at all, so the
+        // model still has no lower half-space and the pattern over 0…90° is still the whole of what
+        // it radiates. A PMC or an open half-space genuinely radiates downward and is still refused.
+        if (!stack.Bottom.IsConductor)
             return EmSuitability.No(
                 $"The stack is terminated below by a {stack.Bottom} rather than by a ground plane. " +
-                $"The θ axis spans 0…90° BECAUSE the plane is a laterally infinite perfect conductor " +
+                $"The θ axis spans 0…90° BECAUSE the plane is a laterally infinite conductor " +
                 $"and there is therefore no field below it; a stack that is open or magnetic below " +
                 $"radiates into the lower half-space and this analysis does not compute that half. " +
                 $"It is refused rather than reported over half a sphere, because a pattern missing " +
