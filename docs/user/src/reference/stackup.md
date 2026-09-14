@@ -84,6 +84,7 @@ In roughly the order you will meet them:
 | **Drag** a via's barrel up or down | Moves the whole span, both ends together. |
 | **Drag** a via sideways | Slides it across the picture, snapping to a column so two vias can be lined up by eye; hold `Alt` to place it freely. This is **cosmetic only** — it is where the via is *drawn*, never where it is. See [Vias](#vias). |
 | **Right-click** anything | A menu built from what is under the pointer, and it selects that entry first so you can see what you are about to act on: **Delete Conductor / Dielectric / Via**, plus the choices that are not typed numbers — **ground reference** and **metal thickness goes to** on a conductor, **Add Via** and **patterned with** on a dielectric, **plated hole** and **fill** on a via, and the drawing-layer binding on either. |
+| **Delete** | Removes the selected layer or via. It is the same deletion as the card's ✕ and the menu's **Delete Conductor / Dielectric / Via**, so one `Ctrl`/`Cmd`+`Z` puts it back — and nothing is asked first, because that undo is the confirmation. On a Mac keyboard the key marked *delete* is the one to press. A field you are typing in keeps the key for its own text.
 | **Esc** | Clears the selection and all its highlighting. With an edit box open, the first `Esc` reverts the edit and the selection stands; a second clears it. |
 | **Right-click ▸ Copy** | Puts the **whole** cross-section on the clipboard as a picture — vector where the receiving application takes it, and never a crop of what happened to be scrolled into view. |
 

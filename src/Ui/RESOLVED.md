@@ -26844,3 +26844,48 @@ argued — that without hover the first click is a guess, because nothing says t
 `StackupSelectionTests` is the ONLY class that flips it, and it is already party to
 `SkiaFontsTypefaceCollection` for the schedule. Every other stackup test that calls `MoveAt` is
 driving a DRAG, and the gate is read after the drag branches — so a flipped switch cannot reach one.
+
+---
+
+## `Delete` removes the selected stackup entry (2026-09-13)
+
+Owner: let `Delete` remove a conductor, via or dielectric selected in the cross-section.
+
+**The deletion already existed and was not written again.** `TechEditorViewModel.RemoveStackupLayer`
+is what the card's ✕ and the context menu's **Delete Conductor / Dielectric / Via** both call; the
+keystroke reaches it through `DeleteSelectedStackupLayer`, which is *only* the by-name lookup a
+keystroke needs and a pointer gesture does not (the selection is held by name — R-stk3-1 — so a row
+VM cannot be carried across the commit that a deletion itself performs). It returns a bool, and the
+handler marks the key handled only when something was removed: a `Delete` with nothing selected falls
+through unmarked rather than being swallowed by a view with nothing to delete.
+
+**Both key spellings.** On a Mac keyboard the key labelled *delete* is `Key.Back`; `Key.Delete` is
+the forward-delete. Taking only `Key.Delete` would have meant the feature did nothing for the key the
+owner was actually asking about. Every other editor here already takes both.
+
+**Bubbling, like the Ctrl+C copy handler, and unlike the two tunnelling ones.** A control with its own
+meaning for the key — a card's text box, the open inline editor, the filter box — must get it first.
+The `TextBox` source check on top of that is *not* a duplicate of the routing rule: Avalonia's text
+box marks these keys handled only when a character was actually deleted, so `Back` with the caret at
+the start, or `Delete` at the end, bubbles out of a field somebody is typing in. No `handledEventsToo`
+is needed, because `WorkspaceWindow` binds no gesture for this key — which is exactly the thing that
+made `Escape` need it.
+
+**The selection is cleared when what it named is deleted**, in `RemoveStackupLayer`, so all three
+gestures do it. A name that no longer names anything outlines nothing and shades no card while the
+editor still claims something is selected, and the next `Delete` then does nothing with no visible
+reason.
+
+**Focus had to follow a click on the drawing, or the keystroke was unreachable.** The canvas is
+non-focusable by design (R-stk2-10), so after clicking a card's text box and then clicking a band,
+focus is still in that text box — and the `Delete` typed next edits text. `TechEditorView` now takes
+focus to itself on a left press over the drawing (bubbling with `handledEventsToo`, so it runs *after*
+the canvas has selected against the scene the user clicked, not before), skipping it while the inline
+editor is open because that box was just given focus to type into.
+
+**A test-only trap worth naming: two xUnit classes constructing Avalonia `MenuItem`s in parallel
+throw `An item with the same key has already been added. Key: Avalonia.Controls.MenuItem`.** That
+type's static registration is not thread-safe and xUnit runs classes in parallel, so the new
+`StackupDeleteKeyTests` passed alone and failed beside `StackupContextMenuTests`. The fix is that ONE
+class builds menus: the keystroke-vs-menu equivalence test lives in `StackupContextMenuTests`, and
+`StackupDeleteKeyTests` compares the keystroke against the card's ✕ only.

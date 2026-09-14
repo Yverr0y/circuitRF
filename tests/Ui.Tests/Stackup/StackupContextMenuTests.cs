@@ -258,6 +258,38 @@ public class StackupContextMenuTests
                           && p.Contains(spanned, StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// <b>The menu's Delete and the <c>Delete</c> KEYSTROKE are one deletion</b> (owner,
+    /// 2026-09-13). The keystroke reaches <c>RemoveStackupLayer</c> through
+    /// <c>DeleteSelectedStackupLayer</c>, which is only the by-name lookup a keystroke needs and a
+    /// pointer gesture does not — so a second removal written for the keyboard would drift from this
+    /// menu silently, and the undo entry would be the first thing to go. Same board, same entry, the
+    /// two gestures: identical documents afterwards, and identical undo descriptions.
+    ///
+    /// <para>Here rather than in <c>StackupDeleteKeyTests</c> because this class is the one that
+    /// builds <c>MenuItem</c>s: doing it from two classes at once races that type's static
+    /// registration, and xUnit runs classes in parallel.</para>
+    /// </summary>
+    [Fact]
+    public void TheDeleteKeystrokeIsTheSameDeletionAsTheMenus()
+    {
+        var byMenu = Editor();
+        string name = byMenu.Working.Stackup.Layers.First(l => l.Kind == StackupKind.Conductor).Name;
+        Click(Item(MenuAt(Canvas(byMenu), byMenu, name), "Delete Conductor"));
+
+        var byKey = Editor();
+        byKey.SelectedStackupLayerName = name;
+        Assert.True(byKey.DeleteSelectedStackupLayer());
+
+        Assert.Equal(TechPersistence.Serialize(byMenu.Working),
+                     TechPersistence.Serialize(byKey.Working));
+        Assert.Equal(byMenu.UndoRedo.UndoDescription, byKey.UndoRedo.UndoDescription);
+
+        // Both leave nothing selected: the name the selection held has just stopped naming anything.
+        Assert.Null(byMenu.SelectedStackupLayerName);
+        Assert.Null(byKey.SelectedStackupLayerName);
+    }
+
     // ── R-stk6-4 — Add Via ──────────────────────────────────────────────────────────────────────
 
     /// <summary>Every dielectric of the shipped four-layer board, against the pair the stack itself

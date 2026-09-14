@@ -43,6 +43,32 @@ public partial class TechEditorView : UserControl
         // the picture. See OnCopyKeyDown.
         AddHandler(KeyDownEvent, OnCopyKeyDown);
 
+        // Delete removes the selected stackup entry (owner, 2026-09-13).
+        //
+        // BUBBLING, for exactly the reason the Ctrl+C handler above bubbles and the two Esc/scroll
+        // handlers tunnel: a control with its own meaning for the key — a card's text box, the open
+        // inline editor, the filter box — must get it first, and a tunnelling handler would take
+        // Delete away from every field in the tab before the field ever saw it. What is left over is
+        // a Delete nothing in the tab claimed, and on the Stackup tab that means the selection.
+        //
+        // No handledEventsToo, and none is needed: WorkspaceWindow binds no gesture for this key
+        // (its KeyBindings were read before this was taken), so unlike Escape it is not already
+        // marked Handled by the time it reaches this view.
+        AddHandler(KeyDownEvent, OnDeleteKeyDown);
+
+        // …and the half that makes it reachable. A keystroke goes to whatever holds focus, and the
+        // drawing cannot hold it (R-stk2-10, non-focusable by design) — so after clicking a card's
+        // text box and then clicking a band, focus is still in that text box and a Delete typed next
+        // would edit the text rather than remove the band the user is looking at. Taking focus to the
+        // VIEW on a press over the drawing is what puts the keystroke back where the selection is; it
+        // is the same target StackupInlineEditor.Closed and FocusForScrollingDeferred already use.
+        //
+        // handledEventsToo, because StackupCanvas marks a left press handled once it has acted on it
+        // — and AFTER it, not tunnelling before it, so the selection is made against the scene the
+        // user clicked on rather than one a commit triggered here has just rebuilt.
+        StackupDrawing.AddHandler(PointerPressedEvent, OnStackupDrawingPressed,
+                                  RoutingStrategies.Bubble, handledEventsToo: true);
+
         // R-stk3-9 — Esc clears the stackup selection, and R-stk4-6 — Esc reverts an open inline
         // editor before it does.
         //
@@ -460,6 +486,91 @@ public partial class TechEditorView : UserControl
         // the other three would break the plain text copy there for no gain.
         if (tabIndex != StackupTabIndex) return false;
 
+        return source is not (TextBox or SelectableTextBlock);
+    }
+
+    /// <summary>Focus follows a click on the cross-section, so that the keys this view handles reach
+    /// it. It changes nothing about the click itself — the canvas has already selected, armed its
+    /// drag and marked the event handled by the time this runs.</summary>
+    private void OnStackupDrawingPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(StackupDrawing).Properties.IsLeftButtonPressed) return;
+
+        // Not while the inline editor is open: the box is the one focusable thing inside the drawing
+        // and it was just given focus for the user to type into. Its own LostFocus commit is what a
+        // click elsewhere means, and the canvas raises that by hiding the box, not by this.
+        if (StackupDrawing.InlineEditIsOpen) return;
+
+        Focus();
+    }
+
+    // ── Delete removes the selected stackup entry (owner, 2026-09-13) ─────────────────────────────
+
+    /// <summary>
+    /// The keystroke half of a deletion that already exists. <c>TechEditorViewModel</c>'s
+    /// <c>RemoveStackupLayer</c> is what the card's ✕ and the drawing's <b>Delete Conductor /
+    /// Dielectric / Via</b> already call, and it is what this reaches — through
+    /// <c>DeleteSelectedStackupLayer</c>, which is only the by-name lookup a keystroke needs and a
+    /// pointer gesture does not. One deletion, one undo entry, three ways in; no second path to
+    /// drift.
+    ///
+    /// <para><b>It acts on the SELECTION, wherever the selection was made</b> — the drawing or a
+    /// card. The two surfaces share one selection held by the view model (R-stk3-1/R-stk3-7), so
+    /// "the selected entry" is a single unambiguous thing, and the Esc handler below covers both
+    /// surfaces for the same reason.</para>
+    ///
+    /// <para>Nothing selected is NOT handled: the key falls through unmarked rather than being
+    /// silently swallowed by a view with nothing to delete.</para>
+    /// </summary>
+    private void OnDeleteKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Handled) return;
+        if (!DeleteKeystrokeTakes(e.Key, e.KeyModifiers, SectionTabs?.SelectedIndex ?? -1, e.Source)) return;
+
+        // An open inline editor owns both keys outright — inside a value being typed they are text
+        // editing. The box is a TextBox and the source test above already turns it away; this is the
+        // belt to that brace, and it is the same thing OnEscapeKeyDown checks first.
+        if (StackupDrawing?.InlineEditIsOpen == true) return;
+
+        // Mid-drag the key means nothing yet: the entry under the pointer has not landed anywhere,
+        // and deleting it out from under a gesture the user is still making is not what they asked
+        // for. Esc is how a drag is abandoned (R-stk5-3); this simply stays out of its way.
+        if (StackupDrawing is { DragKind: not StackupDragKind.None }) return;
+
+        if (DataContext is not TechDocument doc) return;
+        if (!doc.ViewModel.DeleteSelectedStackupLayer()) return;
+
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// The decision above without the event — the same seam <see cref="CopyKeystrokeTakes"/> is, and
+    /// for the same reason: this test project has no application host to route a real keystroke
+    /// through, and the routing is not the part that could be got wrong.
+    /// </summary>
+    internal static bool DeleteKeystrokeTakes(Key key, KeyModifiers modifiers, int tabIndex, object? source)
+    {
+        // BOTH spellings, as every other editor in this application takes them (SchematicViewModel,
+        // SymbolEditorViewModel, LayoutEditorViewModel, HarmonicaCanvas, WBondLayoutOverlay): the key
+        // a Mac keyboard labels "delete" is Back, and Key.Delete is the forward-delete above it. On
+        // that keyboard, taking only Key.Delete would mean the feature did nothing for the key the
+        // owner actually asked about.
+        if (key is not (Key.Delete or Key.Back)) return false;
+
+        // Bare only. Ctrl/Meta/Alt/Shift+Delete are other gestures in other applications — and a
+        // deletion with no confirmation dialog is not one to take on a near miss.
+        if (modifiers != KeyModifiers.None) return false;
+
+        // This editor has four tabs and only one of them has a stackup. The layer table and the DRC
+        // rules have their own rows and their own selection, and claiming the key there would delete
+        // something the user was not looking at.
+        if (tabIndex != StackupTabIndex) return false;
+
+        // A field editing text owns both keys, and — the reason this check is not merely a duplicate
+        // of the routing rule — Avalonia's TextBox does not always mark them handled: Back with the
+        // caret at the start and nothing selected, or Delete at the end, deletes no character and
+        // leaves the key to bubble. Routing alone would therefore delete a stackup entry while
+        // someone was typing in a card.
         return source is not (TextBox or SelectableTextBlock);
     }
 

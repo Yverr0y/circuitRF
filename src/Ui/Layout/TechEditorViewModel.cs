@@ -1092,11 +1092,52 @@ public sealed partial class TechEditorViewModel : ObservableObject
         SelectedStackupLayerName = via.Name;
     }
 
+    /// <summary>
+    /// Removes one stackup entry. <b>The card's ✕, the drawing's context menu and the
+    /// <c>Delete</c> keystroke all land here</b> — one snapshot, one description, one undo entry,
+    /// and no second deletion path to drift from this one.
+    /// </summary>
     internal void RemoveStackupLayer(StackupLayerRowViewModel row)
     {
         var before = SnapshotJson();
+        bool wasSelected = string.Equals(SelectedStackupLayerName, row.Layer.Name,
+                                         System.StringComparison.Ordinal);
         Working.Stackup.Layers.Remove(row.Layer);
         CommitEdit(before, $"Remove stackup layer {row.Layer.Name}");
+
+        // The selection is held BY NAME (R-stk3-1) and that name has just stopped naming anything:
+        // left standing it outlines nothing on the drawing and shades no card, so the editor would
+        // claim to have something selected while showing no sign of it — and a second Delete would
+        // do nothing with no visible reason. Cleared AFTER the commit, so the undo entry above
+        // restores the entry rather than the selection that pointed at it.
+        if (wasSelected) ClearStackupSelection();
+    }
+
+    /// <summary>
+    /// Deletes whatever the stackup selection names, and says whether there was anything to delete —
+    /// which is what tells the keystroke's handler whether to mark the key handled, rather than
+    /// swallowing a <c>Delete</c> that did nothing.
+    ///
+    /// <para>Resolved BY NAME against the rows that exist NOW, for R-stk3-1's reason: every row VM
+    /// is destroyed on every committed edit, so a name is the only handle that survives one. Against
+    /// <see cref="StackupLayers"/> and not the filtered view, because a selection the filter would
+    /// hide has already cleared the filter (<see cref="OnSelectedStackupLayerNameChanged"/>) and
+    /// because what is selected is what gets deleted either way.</para>
+    ///
+    /// <para><b>No confirmation, exactly as the context menu's Delete has none</b>: undo is the
+    /// confirmation and it is already there. A conductor a via's span names is deleted the same way
+    /// too — the via is left alone and <c>TechValidation</c> reports it, per R-stk6-3.</para>
+    /// </summary>
+    internal bool DeleteSelectedStackupLayer()
+    {
+        if (SelectedStackupLayerName is not { Length: > 0 } name) return false;
+
+        var row = StackupLayers.FirstOrDefault(
+            r => string.Equals(r.Layer.Name, name, System.StringComparison.Ordinal));
+        if (row is null) return false;
+
+        RemoveStackupLayer(row);
+        return true;
     }
 
     /// <summary>
