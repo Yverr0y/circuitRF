@@ -107,6 +107,39 @@ public sealed record SurfaceWaveMode(
 /// guard: <c>Γ^e − Γ^h = 2 j T k_ρ²(εᵣ−1)/[(jk_z1T + εᵣk_z0)(jk_z0T + k_z1)]</c>, in which the k_ρ²
 /// cancels algebraically. See <see cref="ReflectionScalar"/>.</para>
 ///
+/// <para><b>CL6 — the short is a LOAD now, and the three coefficients above are its Z_s = 0
+/// case.</b> <see cref="GroundedSlab.Floor"/> closes the slab in CL4's Leontovich surface impedance
+/// rather than in a perfect short, so the stub below the source is a TERMINATED line,</para>
+/// <code>
+///   Z_in^p = Z_1^p (Z_s + j Z_1^p tan k_z1h) / (Z_1^p + j Z_s tan k_z1h) ,   Γ^p = (Z_in^p − Z_0^p)/(Z_in^p + Z_0^p)
+/// </code>
+/// <para>which, cross-multiplied in the same <c>T = tan(k_z1h)/k_z1</c> the file already uses and
+/// written with <c>ζ = Z_s/(ωµ₀)</c> (metres, so every term below is homogeneous), is</para>
+/// <code>
+///   Γ^h = [ k_z0(ζ + jT) − D ] / [ k_z0(ζ + jT) + D ] ,          D = 1 + j ζ k_z1² T
+///   Γ^e = [ (ε*k₀²ζ + j k_z1²T) − ε*k_z0 E ] / [ … + ε*k_z0 E ] , E = 1 + j ε*k₀² ζ T
+/// </code>
+/// <para><b>Three properties of that form, and they are what the CL6 gates check.</b> (i) At
+/// <c>ζ = 0</c> both give <c>D = E = 1</c> and collapse to the shipped pair term for term, which is
+/// what makes the PEC reduction bit-identical rather than merely close. (ii) Neither divides by
+/// k_z0, so the branch point at k_ρ = k₀ is still finite — <c>Γ^h → −1</c>, <c>Γ^e → +1</c> there,
+/// the same two limits as before. (iii) Everything is still EVEN in k_z1 (<c>T</c> and
+/// <c>k_z1²T</c> both are, and ζ does not depend on k_z1 at all), so the k_z1 branch choice still
+/// cannot matter and there is still no cut at k_ρ = k₁ — CL4 §3's finding, said for one layer.</para>
+///
+/// <para><b>And Γ^q's exact cancellation survives, re-derived rather than assumed.</b>
+/// <c>Γ^e − Γ^h = 2(BD − AC)/[(B+C)(A+D)]</c> for the four quantities above, and
+/// <c>BD − AC</c> carries a factor of k_ρ² EXACTLY, through the one identity
+/// <c>k_z1² − ε* k_z0² = (ε*−1) k_ρ²</c> applied term by term:</para>
+/// <code>
+///   (Γ^e − Γ^h)/k_ρ² = 2P/[(B+C)(A+D)]
+///   P = ε*ζ + j(ε*−1)T + j(ε*−1) ε*k₀² ζ² T − ζT²[ (ε*−1)k_z1² − ε*k_z0² ]
+/// </code>
+/// <para>At ζ = 0 that is <c>P = j(ε*−1)T</c> and the whole expression is the shipped identity, so
+/// nothing is divided by a small number as k_ρ → 0 — which is exactly where the DCIM sampling path
+/// starts. The contour-extracted Taylor route <c>LayeredSpectralGreens.ReflectionTaylor</c> takes
+/// was NOT needed here; see <c>RESOLVED.md</c> §CL6 for the measurement that says so.</para>
+///
 /// <para><b>R-lgf-5 — frequency dependence is total, and this is the single biggest change from
 /// kernel A.</b> Kernel A's whole performance story (R-mom-11) is that [C], [C₀] and ∂L/∂n are
 /// frequency-independent, enforced by a counter. <b>None of that survives here.</b> Every quantity
@@ -129,6 +162,27 @@ public sealed class SpectralGreens
     /// <summary>ε* = εᵣ(1 − j tanδ) — R-mom-6, unchanged from kernel A.</summary>
     public Complex EpsR { get; }
 
+    /// <summary>
+    /// <b>CL6 — Z_s of the ground plane at this frequency, Ω/square</b>, which is exactly
+    /// <see cref="Complex.Zero"/> for a PEC floor and for all three of
+    /// <see cref="PlanarSurfaceImpedance.IsPerfect(double, double)"/>'s spellings of a perfect one.
+    /// It is CL4's ONE-SIDED <c>η_c·coth(γ_c t)</c> — <see cref="PlanarSurfaceImpedance.Plane"/> —
+    /// read through <see cref="Termination.SurfaceImpedanceAt"/>, so this file writes no surface
+    /// impedance of its own and cannot drift from the general kernel's.
+    /// </summary>
+    public Complex FloorImpedance { get; }
+
+    /// <summary>
+    /// <c>ζ = Z_s/(ωµ₀)</c>, metres — the floor's impedance in the units every other term of the
+    /// reflection coefficients is written in, so the expressions below are homogeneous and carry no
+    /// loose ω or µ₀. <b>Exactly (0, 0) for a perfect floor</b>, which is what makes every ζ-term a
+    /// complex zero added to the shipped arithmetic rather than a different arithmetic.
+    /// </summary>
+    private readonly Complex _zeta;
+
+    /// <summary>True when the floor is a PEC (or a perfect spelling of a conductor), i.e. ζ = 0.</summary>
+    private bool PerfectFloor => _zeta == Complex.Zero;
+
     public SpectralGreens(GroundedSlab slab, double frequencyHz)
     {
         var ok = CanSolveAt(slab, frequencyHz);
@@ -139,6 +193,11 @@ public sealed class SpectralGreens
         EpsR        = slab.EpsComplex;
         K0          = slab.FreeSpaceWavenumberAt(frequencyHz);
         K1          = K0 * Complex.Sqrt(EpsR);
+
+        double omega   = 2.0 * Math.PI * frequencyHz;
+        FloorImpedance = slab.Floor.SurfaceImpedanceAt(omega);
+        _zeta          = FloorImpedance / (omega * EmConstants.Mu0);
+
         _modes      = new Lazy<IReadOnlyList<SurfaceWaveMode>>(FindSurfaceWaveModes);
     }
 
@@ -156,6 +215,26 @@ public sealed class SpectralGreens
             return EmSuitability.No($"The slab's εᵣ is {slab.Material.EpsR}; a passive dielectric has εᵣ ≥ 1.");
         if (!(frequencyHz > 0))
             return EmSuitability.No($"Frequency {frequencyHz} Hz; the full-wave kernel needs f > 0.");
+
+        // CL6 — the floor. A GroundedSlab's z = 0 boundary is a GROUND PLANE: a PEC, or CL4's real
+        // conductor. A PMC or an open half-space is a different medium, not a different metal, and
+        // D2's geometry does not describe one — so it is refused by name here rather than
+        // terminating the slab in something the coefficients below cannot express.
+        if (!slab.Floor.IsConductor)
+            return EmSuitability.No(
+                $"This is GroundedSlab — the ONE-SLAB medium (D2) — whose z = 0 boundary is a GROUND " +
+                $"PLANE, and this slab's floor is {slab.Floor}. A ground plane is a PEC or CL4's " +
+                $"conducting plane (Termination.LossyGround); a PMC and an open half-space are not " +
+                $"grounds at all and change what is below the slab rather than what it is made of. " +
+                $"An arbitrary termination is the GENERAL layered path: build a LayerStack and use " +
+                $"LayeredSpectralGreens, which takes any Termination at either end.");
+        if (slab.Floor.Kind == TerminationKind.SurfaceImpedance &&
+            (double.IsNaN(slab.Floor.ConductivitySm) || double.IsNaN(slab.Floor.ThicknessM)))
+            return EmSuitability.No(
+                $"The slab's floor is a conducting plane with σ = {slab.Floor.ConductivitySm} S/m and " +
+                $"t = {slab.Floor.ThicknessM} m. Neither may be NaN — a NaN here does not refuse, it " +
+                $"fills the matrix with NaNs and the solve produces nothing. LayerStack.CanRepresent " +
+                $"says the same thing about the same numbers.");
 
         double kh = slab.FreeSpaceWavenumberAt(frequencyHz) * slab.HeightM;
         if (kh < GroundedSlab.MinElectricalThickness)
@@ -253,17 +332,25 @@ public sealed class SpectralGreens
 
     private Complex TeFrom(Complex kz0, Complex kz1)
     {
-        if (IsDoublyDegenerate(kz0, kz1)) return -Complex.One;
-        Complex a = Complex.ImaginaryOne * kz0 * TanOverArgument(kz1);   // j·k_z0·tan(k_z1h)/k_z1
-        return (a - 1.0) / (a + 1.0);
+        if (PerfectFloor && IsDoublyDegenerate(kz0, kz1)) return -Complex.One;
+
+        Complex t  = TanOverArgument(kz1);
+        Complex a  = Complex.ImaginaryOne * kz0 * t;                     // j·k_z0·tan(k_z1h)/k_z1
+        Complex dA = kz0 * _zeta;                                        // A = k_z0(ζ + jT)
+        Complex dD = Complex.ImaginaryOne * _zeta * kz1 * kz1 * t;       // D = 1 + jζk_z1²T
+        return ((a - 1.0) + (dA - dD)) / ((a + 1.0) + (dA + dD));
     }
 
     private Complex TmFrom(Complex kz0, Complex kz1)
     {
-        if (IsDoublyDegenerate(kz0, kz1)) return -Complex.One;
-        Complex a = Complex.ImaginaryOne * kz1 * kz1 * TanOverArgument(kz1);  // j·k_z1·tan(k_z1h)
-        Complex b = EpsR * kz0;
-        return (a - b) / (a + b);
+        if (PerfectFloor && IsDoublyDegenerate(kz0, kz1)) return -Complex.One;
+
+        Complex t  = TanOverArgument(kz1);
+        Complex a  = Complex.ImaginaryOne * kz1 * kz1 * t;               // j·k_z1·tan(k_z1h)
+        Complex b  = EpsR * kz0;
+        Complex dB = EpsR * (K0 * (Complex)K0) * _zeta;                  // B = jk_z1²T + ε*k₀²ζ
+        Complex dC = b * (Complex.ImaginaryOne * EpsR * (K0 * (Complex)K0) * _zeta * t);  // C = ε*k_z0·E
+        return ((a - b) + (dB - dC)) / ((a + b) + (dB + dC));
     }
 
     /// <summary>
@@ -280,18 +367,35 @@ public sealed class SpectralGreens
 
     private Complex ScalarFrom(Complex kz0, Complex kz1)
     {
-        if (IsDoublyDegenerate(kz0, kz1)) return -Complex.One;
+        if (PerfectFloor && IsDoublyDegenerate(kz0, kz1)) return -Complex.One;
 
         Complex j = Complex.ImaginaryOne;
         Complex s = TanOverArgument(kz1);            // tan(k_z1h)/k_z1 — finite as k_z1 → 0
+        Complex k0Sq = K0 * (Complex)K0;
 
-        Complex denTm = j * kz1 * kz1 * s + EpsR * kz0;   // vanishes on a TM surface-wave pole
-        Complex denTe = j * kz0 * s + 1.0;                // vanishes on a TE surface-wave pole
+        // CL6 — every ζ-term is EXACTLY (0, 0) on a perfect floor, so what is added below is a
+        // complex zero and the shipped arithmetic is reproduced bit for bit rather than
+        // approximately. That is the structural zero CL4 §1 used, one kernel over.
+        Complex dB = EpsR * k0Sq * _zeta;                        // B = jk_z1²T + ε*k₀²ζ
+        Complex dC = (EpsR * kz0) * (j * EpsR * k0Sq * _zeta * s);  // C = ε*k_z0(1 + jε*k₀²ζT)
+        Complex dA = kz0 * _zeta;                                // A = k_z0(ζ + jT)
+        Complex dD = j * _zeta * kz1 * kz1 * s;                  // D = 1 + jζk_z1²T
 
-        Complex gammaTm = (j * kz1 * kz1 * s - EpsR * kz0) / denTm;
-        Complex diffOverKRhoSq = 2.0 * j * s * (EpsR - 1.0) / (denTm * denTe);
+        Complex denTm = (j * kz1 * kz1 * s + EpsR * kz0) + (dB + dC);  // B + C; a TM pole's zero
+        Complex denTe = (j * kz0 * s + 1.0) + (dA + dD);               // A + D; a TE pole's zero
 
-        return gammaTm - K0 * (Complex)K0 * diffOverKRhoSq;
+        Complex gammaTm = ((j * kz1 * kz1 * s - EpsR * kz0) + (dB - dC)) / denTm;
+
+        // 2P — the numerator of (Γ^e − Γ^h)/k_ρ², with the k_ρ² cancelled ALGEBRAICALLY through
+        // k_z1² − ε*k_z0² = (ε*−1)k_ρ². The leading term is the shipped identity verbatim.
+        Complex twoP = 2.0 * j * s * (EpsR - 1.0)
+                     + 2.0 * (EpsR * _zeta
+                              + j * (EpsR - 1.0) * EpsR * k0Sq * _zeta * _zeta * s
+                              - _zeta * s * s * ((EpsR - 1.0) * kz1 * kz1 - EpsR * kz0 * kz0));
+
+        Complex diffOverKRhoSq = twoP / (denTm * denTe);
+
+        return gammaTm - k0Sq * diffOverKRhoSq;
     }
 
     public Complex Reflection(GreensKernel kernel, Complex kRho) => kernel switch
@@ -387,9 +491,30 @@ public sealed class SpectralGreens
     {
         Complex kz0 = Kz0(kRho), kz1 = Kz1(kRho), j = Complex.ImaginaryOne;
         Complex u   = kz1 * Slab.HeightM;
+        Complex sin = Complex.Sin(u), cos = Complex.Cos(u);
+        Complex k0Sq = K0 * (Complex)K0;
+
+        // CL6 — the floor's own terms. They are EXACTLY (0, 0) on a perfect floor, so the shipped
+        // shorted-slab residual is reproduced bit for bit; with a real Z_s this is the TERMINATED
+        // slab's denominator, scaled by the same cos(k_z1h) that makes it entire. sin(u)/k_z1 is
+        // written as h·sinc(u) so k_z1 → 0 stays finite, on R-lyr-3's own terms.
+        Complex sincTerm = Slab.HeightM * Sinc(u);        // sin(k_z1h)/k_z1
         return pol == SurfaceWavePolarization.Tm
-            ? j * kz1 * Complex.Sin(u) + EpsR * kz0 * Complex.Cos(u)
-            : j * kz0 * Complex.Sin(u) + kz1 * Complex.Cos(u);
+            ? (j * kz1 * sin + EpsR * kz0 * cos)
+              + _zeta * (EpsR * k0Sq * cos + j * EpsR * EpsR * k0Sq * kz0 * sincTerm)
+            : (j * kz0 * sin + kz1 * cos)
+              + _zeta * (kz0 * kz1 * cos + j * kz1 * kz1 * sin);
+    }
+
+    /// <summary>sin(z)/z — entire, exactly 1 at z = 0, and stable for tiny |z|.</summary>
+    private static Complex Sinc(Complex z)
+    {
+        if (z.Magnitude < 1e-5)
+        {
+            Complex z2 = z * z;
+            return 1.0 - z2 / 6.0 + z2 * z2 / 120.0;
+        }
+        return Complex.Sin(z) / z;
     }
 
     /// <summary>
@@ -416,6 +541,8 @@ public sealed class SpectralGreens
 
     private IReadOnlyList<SurfaceWaveMode> FindSurfaceWaveModes()
     {
+        if (!PerfectFloor) return ModesFromTheStack();
+
         var (nTm, nTe) = ModeCountFromCutoffs();
         var list = new List<SurfaceWaveMode>();
 
@@ -433,6 +560,40 @@ public sealed class SpectralGreens
             Complex refined = RefineComplex(pol, lossless);
             list.Add(new SurfaceWaveMode(pol, n, refined, lossless));
         }
+    }
+
+    /// <summary>
+    /// <b>CL6 — a CONDUCTING floor's poles come from CL4's own search, not from a second one.</b>
+    /// <see cref="LosslessRoot"/> bisects the closed-form transcendental equations of the SHORTED
+    /// slab, which stop being the dispersion relation the moment the short becomes a load; the
+    /// general chain-matrix search in <see cref="SurfaceWavePoles"/> already takes a
+    /// <see cref="TerminationKind.SurfaceImpedance"/> floor (CL4 §4) and is what
+    /// <c>PlanarMetrics</c> reads. Two searches disagreeing about a pole would be a metric refusing
+    /// on one path and not on the other, so there is one search per case and no new code here.
+    ///
+    /// <para><b>A PERFECT floor keeps the shipped route</b>, and that is not timidity: the two
+    /// searches agree to ~1e-15 but not to the LAST BIT, and DCIM subtracts each pole's residue in
+    /// closed form, so re-routing a PEC run would move G_A and G_q in the last digits and make
+    /// R-cl6-1's bit-identity gate unachievable for no physical gain. <c>RESOLVED.md</c> §CL6
+    /// carries the measured agreement between them.</para>
+    ///
+    /// <para><b>TE modes are re-indexed by +1.</b> <see cref="SurfaceWavePoles"/> numbers each
+    /// polarisation from 0 ascending in k_ρ; this kernel numbers TE_n from n = 1, because that is
+    /// the n of its own cutoff condition U &gt; (2n−1)π/2. The names have to agree — they are what
+    /// <c>Dcim</c> labels a pole term with.</para>
+    /// </summary>
+    private IReadOnlyList<SurfaceWaveMode> ModesFromTheStack()
+    {
+        var report = SurfaceWavePoles.Find(LayerStack.FromGroundedSlab(Slab), FrequencyHz);
+        var list = new List<SurfaceWaveMode>(report.Modes.Count);
+        foreach (var pol in new[] { SurfaceWavePolarization.Tm, SurfaceWavePolarization.Te })
+            foreach (var m in report.Modes.Where(m => m.Polarization == pol))
+                list.Add(new SurfaceWaveMode(
+                    pol,
+                    pol == SurfaceWavePolarization.Te ? m.Index + 1 : m.Index,
+                    m.KRho,
+                    m.LosslessKRho));
+        return list;
     }
 
     /// <summary>

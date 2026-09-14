@@ -3,6 +3,293 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## CL6 — the one-slab kernel gets the same floor (2026-09-14)
+
+`docs/sonnet-briefs/brief-conductor-loss-6-one-slab-floor.md`. CL4 built a conducting ground plane
+and §CL4 §9 recorded that **no run a user can make gets one**: a lossy floor was expressible only on
+`LayerStack`, `PlanarProblem.RequiresGeneralKernel` turns on the moment a `MediumStack` is given, and
+every single-level single-dielectric design — the FR-4 hero, the shipped patch, every ordinary
+microstrip — would have been re-based from `Dcim.ValidatedRhoOverLambda`'s ≤ 6e-3 onto
+`ValidatedRhoOverLambdaLayered`'s ≤ 1.6e-2 to gain a term worth 11-25% of the conductor loss. **That
+trade is refused. The one-slab kernel has its own floor now and every run stays on the tier it was
+measured on.**
+
+**All four ordered measurements pass and nothing was widened.** `GroundedSlab.Floor` is the change;
+the three reflection coefficients are re-derived for a terminated slab rather than a shorted one;
+`LayerStack.FromGroundedSlab` passes the floor through, so D5's bridge means the same thing at every
+σ instead of only at σ = ∞. **The extractor still writes a PEC floor and no run's answer moves** —
+that is CL7's, deliberately, so the kernel change and the re-bless can be attributed separately.
+
+### 0. The change, and what stays exactly as it was
+
+`Z_s` is CL4's ONE-SIDED `η_c·coth(γ_c t)` read through `Termination.SurfaceImpedanceAt` →
+`PlanarSurfaceImpedance.Plane`. **This brief writes no surface impedance of its own**, so the two
+kernels cannot drift about what a ground plane's metal costs. The plane is still laterally infinite,
+still unmeshed, still adds no unknown; only the terminating reflection changes. `FrontToBackDb` stays
+refused for §CL4 §6's reason and was not re-opened.
+
+Written with `ζ = Z_s/(ωµ₀)` — metres, so every term is homogeneous and no loose ω or µ₀ survives —
+and in the cross-multiplied `T = tan(k_z1h)/k_z1` the file already used:
+
+    Γ^h = [ k_z0(ζ + jT) − D ] / [ k_z0(ζ + jT) + D ] ,          D = 1 + j ζ k_z1² T
+    Γ^e = [ (ε*k₀²ζ + j k_z1²T) − ε*k_z0 E ] / [ … + ε*k_z0 E ] , E = 1 + j ε*k₀² ζ T
+
+At ζ = 0, `D = E = 1` and both collapse to the shipped `TeFrom`/`TmFrom` **term for term** — which is
+what makes the bit-identity gate reachable rather than hopeful. Neither divides by k_z0, so the
+branch point at k_ρ = k₀ is still finite (`Γ^h → −1`, `Γ^e → +1` there). Everything is still EVEN in
+k_z1, so the k_z1 branch still cannot matter and there is still no cut at k_ρ = k₁ — §CL4 §3's
+finding, said for one layer, and the reason DCIM's basis is untouched.
+
+**A GroundedSlab's floor may only be a GROUND.** `SpectralGreens.CanSolveAt` refuses a PMC or an open
+half-space by name and points at `LayeredSpectralGreens`, and refuses a NaN σ or t in the same words
+`LayerStack.CanRepresent` uses. A ground plane is a PEC or CL4's conductor; anything else changes
+what is BELOW the slab rather than what it is made of, and D2's geometry does not describe one.
+
+### 1. The one real risk the brief named — and it landed on the ALGEBRAIC route
+
+`Γ^q = Γ^e − (k₀²/k_ρ²)(Γ^e − Γ^h)`, and the shipped kernel meets that `k_ρ²` with an algebraically
+cancelled identity so nothing is ever divided by a small number — *"writing it the obvious way is
+fine at k_ρ ~ k₀ and quietly loses every digit as k_ρ → 0, which is precisely where the DCIM
+sampling path starts."* That identity is derived from the shorted-slab algebra and does not survive
+`Z_s ≠ 0`. The brief named `LayeredSpectralGreens.ReflectionTaylor`'s numerical contour extraction as
+an acceptable fallback. **It was not needed.**
+
+`Γ^e − Γ^h = 2(BD − AC)/[(B+C)(A+D)]` for the four quantities above, and `BD − AC` carries an exact
+factor of k_ρ² through **one identity applied term by term**: `k_z1² − ε*k_z0² = (ε*−1)k_ρ²`. Four
+terms, four applications, and the T² term needs the same identity twice
+(`k_z1⁴ − ε*k₁²k_z0² = k_ρ²[(ε*−1)k_z1² − ε*k_z0²]`):
+
+    (Γ^e − Γ^h)/k_ρ² = 2P/[(B+C)(A+D)]
+    P = ε*ζ + j(ε*−1)T + j(ε*−1) ε*k₀² ζ² T − ζT²[ (ε*−1)k_z1² − ε*k_z0² ]
+
+At ζ = 0 this is `P = j(ε*−1)T` and the whole expression is the shipped identity verbatim.
+
+**Measured against the general kernel's own INDEPENDENT route** (numerical Taylor coefficients of the
+same difference, taken by Cauchy integral off a small contour) at 10 GHz with a real floor, down
+through the decade the DCIM path starts in — and with the naive division computed beside it, so the
+gate cannot quietly stop demonstrating why any of this is necessary:
+
+| k_ρ/k₀ | factored Γ^q, rel vs the general kernel | the NAIVE route's error |
+|---|---|---|
+| 1e-1 | 2.288e-15 | 1.935e-14 |
+| 1e-3 | 1.437e-15 | 1.123e-10 |
+| 1e-5 | 1.601e-15 | 1.987e-06 |
+| 1e-7 | 1.470e-15 | 2.253e-02 |
+| 1e-8 | 1.527e-15 | **1.457** |
+
+The factored form is flat at ~1e-15 across eight decades while the naive one loses everything, and
+`Γ^q(0)` and `Γ^q(1e-9 k₀)` come out **bit-identical**. GaAs is the same picture (worst factored
+1.230e-14, worst naive 2.228).
+
+**The ZERO's existence was never the question and the brief said so** — at k_ρ = 0 the two equivalent
+lines ARE the same line whatever the floor is, because `Z_1^e = Z_1^h = √(µ/ε)` and `Z_s` is one
+scalar for both. What had to be re-derived was a form that REALISES it in floating point, and the
+table above is that form working.
+
+### 2. R-cl6-1 — the PEC reduction, and why it is asked TWICE
+
+**0 bits moved, out of every comparison made**, and the two halves answer different questions.
+
+- **Against the pre-CL6 ARITHMETIC — 0/960 bits.** `OneSlabLossyFloorTests.PreCl6Kernel` is the file
+  as it stood before CL6, transcribed verbatim including the association order of every product,
+  because the claim is bit-identity and not closeness. Both starters × 2/10/20 GHz × 16 values of
+  k_ρ/k₀ from 0 to 300, on Γ^h, Γ^e, Γ^q **and both dispersion residuals**. This is what says the
+  ζ = 0 arithmetic IS the shipped arithmetic. It is written out in the test rather than reached for
+  through the shipped class on purpose: a gate that asks the new code whether it agrees with itself
+  is vacuous.
+- **Against a PERFECT floor spelled as a conductor — 0/20 bits, eighteen times.** Both starters ×
+  2/10/20 GHz × all three of `PlanarSurfaceImpedance.IsPerfect`'s spellings (σ = +∞, σ = 0, t = 0),
+  through the **fitted product** at five ρ/λ each — so the poles, the asymptotic extraction and the
+  image fit are all inside the comparison. This is §CL4 §1's own stronger claim: the new path is
+  TAKEN and reproduces the old bits.
+
+**Neither collapses a perfect floor onto the old code path to get there**, which the brief forbids and
+§CL4 §1 refused for the same reason. The zero is structural: `Termination.SurfaceImpedanceAt` returns
+exactly `Complex.Zero` on the perfect spellings, so every ζ-term below is a complex **zero added to
+the shipped expression** rather than a different expression. The one place a guard was kept is
+`IsDoublyDegenerate` (εᵣ = 1 observed exactly at k_ρ = k₀), and it is now conditioned on the floor
+being perfect — with a real `Z_s` the general form reaches that point without a 0/0 and gives the
+physically right pair (`Γ^h = −1`, `Γ^e = +1`) where the old unconditional guard gave −1 for both.
+
+### 3. R-cl6-2 — D5's one-layer reduction, now at every σ
+
+**The strongest oracle in the brief, and it cost nothing to build because CL4 built the other half.**
+`GroundedSlab` with `Termination.LossyGround(σ, t)` against `LayerStack.FromGroundedSlab` of it —
+the same floor on both sides, one solved by a closed form and one by a chain matrix.
+
+| starter | floor | worst rel, k_ρ ≤ 40k₀ | worst anywhere (to 300 k₀) |
+|---|---|---|---|
+| FR-4 1.6 mm | PEC | 6.232e-14 | 8.862e-12 |
+| FR-4 1.6 mm | **35 µm Cu** | **7.741e-14** | 8.740e-12 |
+| GaAs 100 µm | PEC | 7.131e-14 | 1.265e-12 |
+| GaAs 100 µm | **3 µm Au** | **6.871e-14** | 1.138e-12 |
+
+D5's own un-widened tolerances (1e-13 inside 40k₀, 2e-11 past it, where both kernels are computing
+the same exactly-Fresnel limit by two underflowing routes). **A real floor does not degrade the
+reduction at all** — on GaAs it is marginally tighter than the PEC row — which is the direct
+statement that the two derivations agree about the termination and not merely about the slab.
+
+### 4. Measurement 3 — the DCIM fit stays inside the UN-WIDENED one-slab tier
+
+**This is the whole point of the brief: the tier is what is being bought.** Error against direct
+Sommerfeld integration of the SAME kernel, worst value inside `Dcim.ValidatedRhoOverLambda`, scaled
+on the free-space kernel (|ΔG|·4πρ, what a MoM fill experiences). **Ceiling 6e-3, and nothing was
+widened.**
+
+| stack | f | G_q PEC → LOSSY | G_A PEC → LOSSY |
+|---|---|---|---|
+| FR-4 1.6 mm, 35 µm Cu | 2 GHz | 1.749e-5 → 2.647e-5 | 1.058e-6 → 1.059e-6 |
+| | 10 GHz | 4.002e-5 → **3.984e-5** | 1.071e-6 → 1.083e-6 |
+| | 20 GHz | 2.834e-4 → 4.676e-4 | 1.363e-6 → 1.363e-6 |
+| GaAs 100 µm, 3 µm Au | 2 GHz | **5.693e-3 → 5.748e-3** | 2.185e-7 → **2.080e-7** |
+| | 10 GHz | 1.509e-5 → 1.545e-5 | 1.352e-6 → 1.363e-6 |
+| | 20 GHz | 6.340e-5 → **6.105e-5** | 1.777e-6 → **1.764e-6** |
+
+**The tightest case in the table is GaAs at 2 GHz and it is NOT the floor's doing.** G_q is already at
+5.693e-3 against the 6e-3 ceiling with a PEC floor — 5% of headroom, on the shipped kernel, before
+this brief touched anything — and a real plane moves it by **+1.0%** to 5.748e-3. That cell is worth
+knowing about on its own account: the one-slab tier's ≤6e-3 is a statement about the worst cell in
+the span, and this is that cell. The floor did not create it and does not meaningfully move it.
+
+**CL4's "better on four of six" does NOT reproduce here and is not claimed.** Across the twelve
+kernel-cases the lossy fit is better in four and worse in eight, all of them by a few percent and all
+of them far inside the ceiling; the worst it ever gets is 4.676e-4, thirteen times inside. The
+far-field sum-rule residual stays at 1e-16 … 1e-22 exactly as before, and the image counts and fit
+residuals are unchanged to within one image.
+
+### 5. Measurement 4 — where the one-slab poles go, and the seam that answer introduces
+
+`SpectralGreens.FindSurfaceWaveModes` bisects the SHORTED slab's own closed-form transcendental
+equations, which stop being the dispersion relation the moment the short becomes a load. **A
+conducting floor delegates to CL4's `SurfaceWavePoles` over the `LayerStack` the slab now maps to**,
+rather than growing a second search — `PlanarMetrics` reads that search, and two searches disagreeing
+about a pole would be a metric refusing on one path and not the other.
+
+| stack | f | mode | PEC | with a real plane | Δ |
+|---|---|---|---|---|---|
+| FR-4 1.6 mm, 35 µm Cu | 1 GHz | TM₀ | 3.9785e-6 | 4.5521e-6 | 5.7e-7 |
+| | 10 GHz | TM₀ | 7.6918e-4 | 7.9576e-4 | 2.7e-5 |
+| | 20 GHz | TM₀ | 8.4007e-3 | 8.5408e-3 | 1.4e-4 |
+| | 40 GHz | TM₀ | 1.2132e-2 | 1.2251e-2 | 1.2e-4 |
+| | 40 GHz | **TE₁** | 1.5630e-2 | **1.5705e-2** | 7.5e-5 |
+| GaAs 100 µm, 3 µm Au | 1 GHz | TM₀ | 6.2839e-10 | 5.0152e-8 | 5.0e-8 |
+| | 10 GHz | TM₀ | 6.4456e-8 | 1.6764e-6 | 1.6e-6 |
+| | 40 GHz | TM₀ | 1.4570e-6 | 1.5654e-5 | 1.4e-5 |
+
+**The worst pole anywhere is 1.5705e-2 against `PlanarMetrics`' ceiling of 0.05** — the same number
+§CL4 §4 reports, to every digit it quoted, which is the cross-check that the one-slab delegation
+lands on CL4's own answers rather than near them. Mode COUNTS and NAMES agree between the two floors
+at every frequency measured.
+
+**A PERFECT floor deliberately keeps the shipped route, and the seam that leaves is measured rather
+than waved at.** The two searches are not bit-identical, and DCIM subtracts each pole's residue in
+closed form, so re-routing a PEC run would move G_A and G_q in the last digits and make R-cl6-1
+unachievable for no physical gain. How far apart they actually are, on a PEC floor, both starters,
+1/10/40 GHz: **worst 9.19e-18 relative**, and three of the seven poles agree exactly. That is one ulp
+in an imaginary part, not a disagreement about physics.
+
+**TE modes are re-indexed by +1 across the delegation.** `SurfaceWavePoles` numbers each polarisation
+from 0 ascending in k_ρ; this kernel numbers TE_n from n = 1, because that is the n of its own cutoff
+condition `U > (2n−1)π/2`. The names have to agree — they are what `Dcim` labels a pole term with.
+
+### 6. The three things that had to NOT move, asserted rather than assumed
+
+- **R-cl6-3 — the εᵣ = 1 image reduction.** Free space plus one NEGATIVE image, three slab heights ×
+  six ρ/λ × both kernels at 10 GHz: **5.053e-10** worst relative / 7.072e-12 scaled at σ = +∞, and
+  **1.168e-3 / 1.444e-4** with 35 µm copper. The second row is not a failure — it is the measured
+  size of the imperfection, which is what a conducting floor is FOR: the image is no longer exactly
+  −1 and the closed form no longer exactly applies. Its scaled figure reproduces §CL4 §2's
+  **1.444e-4** exactly, on a different kernel and a different geometry sweep.
+- **R-cl6-4 — the static routes are bit-identical at every σ. 0/28 bits moved** on both starters, at a
+  REAL σ, over `StaticGreens.ScalarPotential`/`VectorPotential` and `PlanarKernelTerms.StaticScalar`/
+  `StaticVector`'s own `Inverse` and `Constant`. It is structural: none of them reads a termination at
+  all, and §CL4 §1 established that reading a conducting floor as a PEC there is the **ω → 0 limit
+  rather than a simplification** (`Γ → −1` as ω → 0 with `Z_s → 1/(σt)` finite).
+- **R-cl6-5 — `AsymptoticReflection` does not move.** 0 bits on both kernels, both starters, three
+  frequencies. DCIM's first extraction is that constant and a silent move there would spoil every
+  fit's decay without failing anything obvious. It is also still the LIMIT rather than merely an
+  unchanged constant: on the conducting stack `|Γ(4000k₀) − Γ(∞)|` is 5.3e-8 (G_A, FR-4) and 7.3e-9
+  (G_q), i.e. Γ walks into it from the lossy side too. The floor reaches the top only through
+  `e^{−2k_ρh}`, which is why — and §CL4 §3's k_ρ → ∞ asymmetry between `Γ^e → −1` and `Γ^h → +1` sits
+  four decades past anything reachable here, exactly as it does on the general path.
+- **R-cl6-6 — `CanSolveAt`'s floor is unchanged.** `MinElectricalThickness` is about the static limit
+  and the floor does not move it: the slab solves at k₀h = 1.01e-6 and is refused at 9.90e-7, with a
+  PEC floor and with a conducting one alike. The two refusals ADDED (a non-ground termination, a NaN
+  σ/t) are new names for cases that could not be spelled before, not a narrowing of an old one.
+
+### 7. Traps and findings
+
+- **`EmSnpProvenance` cannot see a ONE-SLAB floor, and this is §CL4 §8's own trap one kernel over.**
+  The hash reads `p.MediumStack`'s terminations; a one-slab problem has `MediumStack == null` and
+  contributes only `p.Slab`'s height, εᵣ, tanδ and µᵣ (`EmSnpProvenance.cs:188-191`). So two runs
+  differing only in the GROUND's σ would share a cached `.snp`, silently and plausibly. **Not fixed
+  here** — this brief's "Must NOT" reserves `src/Design`, and nothing shipped can build the
+  termination until the extractor writes one. **It must be closed in CL7, before the extractor
+  flips**, or the first user-visible conducting floor arrives with a stale-cache defect attached.
+- **The pole search could NOT be delegated unconditionally**, and the reason is the gate rather than
+  the physics: at 9.19e-18 the two searches agree to about one ulp, and DCIM subtracts each pole in
+  closed form, so a PEC run would have moved in its last digits. A brief whose headline gate is
+  bit-identity cannot afford a one-ulp improvement anywhere.
+- **`DispersionResidual` was extended rather than left describing the shorted slab.** It is public and
+  is what `LayeredGreensFunctionTests` checks a pole against; leaving it shorted would have made it
+  quietly wrong for a conducting floor. The floor's terms are appended to the shipped expression, so
+  a PEC slab's residual is bit-identical (it is in R-cl6-1's 0/960), and `sin(k_z1h)/k_z1` is written
+  as `h·sinc(u)` so k_ρ = k₁ stays a non-event on R-lyr-3's own terms.
+- **`GroundedSlab.Floor` is an init-only property, not a third positional parameter.** Every existing
+  two-argument construction is unchanged, a floor is spelled `slab with { Floor = … }`, and record
+  equality carries it — which is what keeps a cache key or a hash from confusing two slabs that
+  differ only in their ground metal. A positional default was not available anyway: `Termination.Pec`
+  is not a compile-time constant.
+- **Measurement 3 is in the ROUTINE tier and that is a measurement, not a preference.** The full
+  12-case sweep — 24 fits and 408 direct Sommerfeld evaluations — is **3.96 s**, under the repo's
+  mechanical ~5 s `Category=Benchmark` threshold. CL4's counterpart was 5.0 s and was tagged; this one
+  is cheaper because the one-slab reflection coefficient is a closed form rather than a cascade. So
+  there is deliberately **no cheap counterpart beside it**: the expensive half IS what runs on every
+  build, which is the outcome §CL4 §10's "a gate nobody runs is not a gate" was settling for.
+
+### 8. What this still does not reach
+
+**No run a user can make gets a conducting ground plane yet, and that is unchanged from §CL4 §9 by
+design.** `PlanarExtractor.BuildMediumStack` still writes `Termination.Pec` and the extractor was not
+touched; the 21.1% (FR-4) / ~11% (MMIC) / 25.0% (low-loss laminate) figures still stand for every run
+anyone can make. **What CL6 removes is the obstruction, not the limit**: obstruction 1 was retired by
+CL5, obstruction 2 — the 2.6× tier — is the one this brief exists to retire and the table in §4 is
+its retirement, and obstruction 3, the CL3-sized re-bless, is real and is CL7's. A flip of that reach
+carries its own passivity/reciprocity direction check, its own hero check and its own golden-move
+tabulation, none of which this brief has.
+
+### 9. Gates
+
+`tests/Engine.Tests/Mom/OneSlabLossyFloorTests.cs`, **12 tests, ~8 s together, none tagged**
+`Category=Benchmark` (the two largest are measurement 3 at 3.87 s and the perfect-spelling reduction
+at 3.64 s; every other one is milliseconds). Measured, then left untagged on the repo's mechanical
+~5 s rule rather than on a preference.
+
+**R-cl6-7** — the four measurements tabulated whether they pass or refuse: §1 (and §2), §3, §4, §5.
+All four pass.
+**R-cl6-8** — `dotnet test tests/Engine.Tests`, run ONCE and triaged from the TRX: **2,421 passed, 0
+failed, 1 skipped** (the same pre-existing `DataSetExportTests` skip §CL4 §10 recorded), 1 m 41 s.
+**Nothing outside this brief's own files moved**, which is what says R-cl6-1 is saying what it claims
+— the extractor still writes a perfect floor, so a move anywhere else would have meant the reduction
+was not exact.
+
+### 10. Reported to the owner, by file and line (no `CLAUDE.md` edit, per the standing rule)
+
+- `src/Engine/Mom/CLAUDE.md` **§5's validated-range table**, the `CL4's conducting floor` row, ends
+  *"Deliberately not a refusal — nothing shipped can build the termination (§7)"*. Still true, but the
+  row now needs the one-slab half beside it: **the conducting floor is available on the one-slab
+  kernel at `ValidatedRhoOverLambda`'s own ≤ 6e-3, measured, un-widened** (§4 above) — which is the
+  whole content of CL6 and is what makes CL7 a decision about the re-bless alone rather than about a
+  2.6× tier.
+- `src/Engine/Mom/CLAUDE.md` **§5's same table** could also carry the tightest cell honestly: G_q on
+  100 µm GaAs at 2 GHz is at **5.693e-3 of the 6e-3 ceiling with a PEC floor** and 5.748e-3 with a
+  real one. That is the cell the ≤6e-3 figure is a statement about, and it pre-dates this brief.
+- `src/Engine/Mom/CLAUDE.md` **§7's refusal list** needs one line: `GroundedSlab` now refuses a floor
+  that is not a GROUND — a PMC or an open half-space — by name, pointing at `LayeredSpectralGreens`.
+  It is a new name for a case that could not be spelled before, not a narrowing.
+- **The repo `CLAUDE.md`'s test-suite section counts 128 `Category=Benchmark` methods repo-wide.
+  CL6 adds NONE** (§7's last bullet), so that count is unchanged at 128.
+
 ## CL5 — the lossless-stack refusal belongs to the integrator, not to the fit (2026-09-14)
 
 `docs/sonnet-briefs/brief-conductor-loss-5-lossless-predicate.md`. `SommerfeldIntegral.CanIntegrateLayered`

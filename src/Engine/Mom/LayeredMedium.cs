@@ -31,6 +31,25 @@ public sealed record GroundedSlab(double HeightM, EmMaterial Material)
     /// <summary>100 µm GaAs — the second starter technology, and the harder case for DCIM.</summary>
     public static GroundedSlab GaAsStarter => new(100e-6, new EmMaterial(12.9, 0.002));
 
+    /// <summary>
+    /// <b>CL6 — the ground plane below the slab, which is a PEC unless something says otherwise.</b>
+    /// The one-slab kernel's terminating reflection is built from this exactly as
+    /// <see cref="LayeredSpectralGreens"/>' is built from <see cref="LayerStack.Bottom"/>, and
+    /// <see cref="LayerStack.FromGroundedSlab"/> passes it straight through — so D5's bridge keeps
+    /// its meaning at every σ rather than only at σ = ∞.
+    ///
+    /// <para><b>It is an init-only property rather than a third positional parameter</b>, so the
+    /// two-argument construction every existing caller uses is unchanged and a floor is spelled
+    /// <c>slab with { Floor = Termination.LossyGround(σ, t) }</c>. Record equality carries it, which
+    /// is what keeps a fit, a provenance hash or a cache key from confusing two slabs that differ
+    /// only in their ground metal.</para>
+    ///
+    /// <para><b>Only a PEC or CL4's conducting plane belongs here</b> — a PMC or an open half-space
+    /// is not a ground plane, and <see cref="SpectralGreens.CanSolveAt"/> refuses it by name rather
+    /// than terminating the slab in something D2's geometry does not describe.</para>
+    /// </summary>
+    public Termination Floor { get; init; } = Termination.Pec;
+
     /// <summary>ε* = εᵣ(1 − j·tanδ), the R-mom-6 convention, unchanged from kernel A.</summary>
     public Complex EpsComplex => Material.EpsComplex;
 
@@ -336,8 +355,12 @@ public sealed class LayerStack
     /// of the slab's own material and height, free space above. This is the object the general
     /// medium must reproduce the SHIPPED kernel from, to machine precision.
     /// </summary>
+    /// <remarks><b>CL6 — the slab's own <see cref="GroundedSlab.Floor"/> is passed straight
+    /// through</b>, so this is a re-expression at every σ and not only at σ = ∞. Before CL6 it wrote
+    /// <c>Termination.Pec</c> unconditionally, which was correct only because a slab could not
+    /// carry a floor.</remarks>
     public static LayerStack FromGroundedSlab(GroundedSlab slab) =>
-        new(Termination.Pec, [new MediumLayer(slab.HeightM, slab.Material)], Termination.Air);
+        new(slab.Floor, [new MediumLayer(slab.HeightM, slab.Material)], Termination.Air);
 
     /// <summary>
     /// Split one layer into <paramref name="fractions"/> sub-layers of the SAME material, summing
