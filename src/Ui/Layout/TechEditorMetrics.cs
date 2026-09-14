@@ -89,12 +89,32 @@ public static class TechEditorMetrics
     /// was with the taller picker, so it fails if the picker grows back.</summary>
     public const double ConductorCardHeightCeiling = 320;
 
+    /// <summary>
+    /// <b>What the card pane OPENS at</b> — the conductor card's four field rows and its chrome, and
+    /// deliberately not its drawing-layer block.
+    ///
+    /// <para>Owner, 2026-09-13: "reduce the band height for the card by approximate half… for a
+    /// conductor, user should only see 4 rows of UI elements (Name → Metal thickness goes to)". The
+    /// drawing is the surface this tab is for, and the pane below it was opening tall enough for a
+    /// whole card including the layer picker — which is <see cref="DrawingLayerBlockHeight"/>, and
+    /// happens to be almost exactly the other half of the card. Dropping it is the halving, expressed
+    /// as the four rows the owner named rather than as a number that divides by two by luck.</para>
+    ///
+    /// <para>Nominal, like <see cref="ConductorCardHeight"/>, and for the same reason: it is an
+    /// opening split a user drags off in a second, and the splitter is still there.</para>
+    /// </summary>
+    public const double ConductorCardFieldRowsHeight =
+        CardChrome
+        + ConductorCardFieldRows * CardFieldRowHeight
+        + ConductorCardFieldRows * CardRowSpacing;
+
     // ── The tab's two panes (R-stk2-6) ────────────────────────────────────────────────────────────
 
-    /// <summary>The card list opens at roughly one conductor card — the owner's "perhaps only as
-    /// tall as what a conductor entry is currently using". A GridLength because that is what a
-    /// <c>RowDefinition.Height</c> takes; the drawing takes the rest of the tab.</summary>
-    public static GridLength StackupCardPaneOpeningHeight { get; } = new(ConductorCardHeight);
+    /// <summary>The card list opens at a conductor card's FIELD ROWS — see
+    /// <see cref="ConductorCardFieldRowsHeight"/> for why that is half of what it was. A GridLength
+    /// because that is what a <c>RowDefinition.Height</c> takes; the drawing takes the rest of the
+    /// tab.</summary>
+    public static GridLength StackupCardPaneOpeningHeight { get; } = new(ConductorCardFieldRowsHeight);
 
     /// <summary>Neither pane can be annihilated by the splitter. Enough to keep the filter box and
     /// the top of one card reachable.</summary>

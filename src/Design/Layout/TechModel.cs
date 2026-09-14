@@ -295,6 +295,26 @@ public sealed class Stackup
     /// </summary>
     public long? BoardThicknessDbu { get; set; }
 
+    /// <summary>
+    /// Whether the Stackup tab's CROSS-SECTION pane is expanded. Null means expanded, which is what
+    /// every <c>.ctech</c> written before this field means and what a new one opens as.
+    ///
+    /// <para><b>A view state, and the only kind of view state this file carries</b> — the same
+    /// judgement <see cref="StackupLayer.DrawLaneFraction"/> already made, for the same reason: the
+    /// two panes are how a particular stackup is best looked at, that answer belongs to the stackup
+    /// rather than to the installation, and a user who dedicated the window to the drawing expects it
+    /// dedicated again next time they open THAT technology. Nothing downstream of the editor may read
+    /// it: no extractor, no solver, no export.</para>
+    ///
+    /// <para>Additive, nullable, no <c>.ctech</c> <c>FormatVersion</c> bump — the
+    /// <see cref="BoardThicknessDbu"/>/<see cref="StackupLayer.DrawLaneFraction"/> pattern.</para>
+    /// </summary>
+    public bool? DrawingPaneExpanded { get; set; }
+
+    /// <summary>Whether the Stackup tab's CARD pane is expanded. Null means expanded — see
+    /// <see cref="DrawingPaneExpanded"/>, which this is the other half of.</summary>
+    public bool? CardPaneExpanded { get; set; }
+
     /// <summary>The sum of <see cref="StackupLayer.ThicknessDbu"/> over the Conductor and Dielectric
     /// entries — the stack's own height. <b>Via entries are excluded</b>: a via has no z band of its
     /// own (it traverses the dielectrics between the conductors it spans), which is why

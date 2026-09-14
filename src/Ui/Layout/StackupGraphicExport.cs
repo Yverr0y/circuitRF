@@ -17,10 +17,10 @@ namespace CircuitRF.Ui.Layout;
 /// was that the pitfalls of copy-to-clipboard are already solved and must not be solved a second
 /// time, and they are: the write is <see cref="PlotExporter.SetClipboardDataAsync"/>, which carries
 /// the Windows bypass (the cross-platform path does not tell Windows the page dimensions) and the
-/// text fallback; the page is <c>PagePlacement.Letter</c>, the one every other copy in this
-/// application composes onto; the PDF, SVG and PNG writers are <c>PlotDocumentWriter</c>'s, shared
-/// with <c>circuitrf render</c>. What this file adds is the three decisions that are the stackup's
-/// own — which scene, at what size, in which colours — and nothing else.
+/// text fallback; the PDF, SVG and PNG writers are <c>PlotDocumentWriter</c>'s, shared with
+/// <c>circuitrf render</c>. What this file adds is the four decisions that are the stackup's own —
+/// which scene, at what size, on what PAGE (see <see cref="PageFor"/>: this drawing is the only copy
+/// in the application that does not compose onto <c>PagePlacement.Letter</c>), in which colours.
 /// <see cref="WBondGraphicExport"/> is the model it follows.</para>
 ///
 /// <para>The picture is drawn by <see cref="StackupRenderer.Draw"/>, the same call the tab paints
@@ -30,14 +30,44 @@ namespace CircuitRF.Ui.Layout;
 internal static class StackupGraphicExport
 {
     /// <summary>
-    /// The page margin, which is <see cref="WBondGraphicExport.MarginFraction"/> itself and not a
-    /// second copy of the number: two graphic copies from one application that framed their pages
-    /// differently would be a difference nobody chose.
+    /// <b>The page is the PICTURE, plus this much on every side.</b>
+    ///
+    /// <para>Owner, 2026-09-13: pasted into a presentation, the cross-section arrived as a small
+    /// drawing inside a much larger empty box. It was composed onto a letter-landscape page and
+    /// centred there, exactly as an exported plot is — and a plot fills that page, while a stackup is
+    /// a tall narrow drawing that never can. The pasted object's bounding box is the PAGE, so every
+    /// blank inch of it was something the user then had to crop by hand.</para>
+    ///
+    /// <para>So the page is sized to the scene instead and the drawing fills it edge to edge. The
+    /// padding is small and absolute rather than a fraction of the page: a fraction of a page that is
+    /// itself the picture is a margin that grows with the stack, which is the same bug one step
+    /// along.</para>
     /// </summary>
-    internal const float MarginFraction = WBondGraphicExport.MarginFraction;
+    internal const float PagePad = 8f;
+
+    /// <summary>The page one scene is drawn on: its own extent, padded. <c>Margin</c> is
+    /// <see cref="PagePad"/> so <see cref="FitScale"/> reads the usable area off the placement rather
+    /// than re-deriving it.</summary>
+    internal static PagePlacement PageFor(StackupScene scene)
+    {
+        ArgumentNullException.ThrowIfNull(scene);
+        return new(Math.Max(scene.Width,  1f) + 2f * PagePad,
+                   Math.Max(scene.Height, 1f) + 2f * PagePad,
+                   PagePad);
+    }
 
     /// <summary>2x the page, matching <c>PlotExporter</c>'s own bitmap scale.</summary>
     internal const float BitmapScale = 2.0f;
+
+    /// <summary>
+    /// The widest page this copy will lay out on, when widening to keep the label column on one line
+    /// (see <see cref="PageScene"/>).
+    ///
+    /// <para>A refusal to grow without bound rather than a layout choice: it is there so a technology
+    /// with an extravagantly long layer name cannot produce a page nothing can open. A stackup that
+    /// needs more than this gets this, and wraps — which is what every copy did before.</para>
+    /// </summary>
+    internal const float MaxPageWidth = 4f * PlotExporter.PageW;
 
     /// <summary>
     /// <b>The whole stackup at the page's width — never the scrolled window (R-stk7-2).</b>
@@ -52,9 +82,21 @@ internal static class StackupGraphicExport
     /// <para>A null technology lays out an EMPTY one rather than returning null, exactly as
     /// <c>StackupSceneCache</c> does — an empty cross-section is a valid picture and a blank page is
     /// the honest thing to put on the clipboard for a technology with no stackup in it.</para>
+    ///
+    /// <para><b>And WIDE ENOUGH that no spec wraps</b> (owner, 2026-09-13). The pane has a width the
+    /// user chose and the drawing makes the best of it — wrapping a dielectric's nine-piece spec onto
+    /// a second line is the right answer there. A copied picture has no such constraint: it is going
+    /// into a document, it is vector, and a page is only as wide as it is asked to be. So the page
+    /// starts at <c>PlotExporter.PageW</c> and grows until the label column holds its widest group on
+    /// one line. The arithmetic is <c>StackupScene.WidthThatFitsLabels</c>'s, not this file's —
+    /// R-stk1-1: how a total width divides into two columns is the scene's business, and a second
+    /// copy of it here would answer about a picture nobody drew.</para>
     /// </summary>
     internal static StackupScene PageScene(Technology? tech)
-        => StackupScene.Build(tech ?? new Technology(), PlotExporter.PageW);
+    {
+        var t = tech ?? new Technology();
+        return StackupScene.Build(t, StackupScene.WidthThatFitsLabels(t, PlotExporter.PageW, MaxPageWidth));
+    }
 
     /// <summary>
     /// R-stk7-1 — <b>both</b> halves of the copy's appearance come from
@@ -76,23 +118,23 @@ internal static class StackupGraphicExport
     }
 
     /// <summary>
-    /// The UNIFORM scale that fits <paramref name="scene"/> into the page's usable area.
+    /// The UNIFORM scale that fits <paramref name="scene"/> into <paramref name="page"/>'s usable
+    /// area — exactly 1 for <see cref="PageFor"/>'s own page, which is the point of it.
     ///
     /// <para>Uniform only: a stackup stretched on one axis misrepresents every thickness in it, which
-    /// is the one thing this picture exists to show. The scene is laid out at the page's full width,
-    /// so the width term alone is <c>1 - 2 * MarginFraction</c>; the height term binds instead when
-    /// the stack is tall enough that its intrinsic height overflows the page, which is the case a
-    /// screenshot of the scrolled pane would have silently cropped.</para>
+    /// is the one thing this picture exists to show. It is still computed rather than assumed,
+    /// because a caller composing this drawing onto a page of its own (a fixed sheet, a figure) has
+    /// to get the same framing this does.</para>
     /// </summary>
-    internal static float FitScale(StackupScene scene, float pageW, float pageH)
+    internal static float FitScale(StackupScene scene, PagePlacement page)
     {
         ArgumentNullException.ThrowIfNull(scene);
 
         float w = Math.Max(scene.Width,  1f);
         float h = Math.Max(scene.Height, 1f);
 
-        return Math.Min(pageW * (1f - 2f * MarginFraction) / w,
-                        pageH * (1f - 2f * MarginFraction) / h);
+        return Math.Min(Math.Max(page.UsableWidth,  1f) / w,
+                        Math.Max(page.UsableHeight, 1f) / h);
     }
 
     /// <summary>
@@ -106,38 +148,46 @@ internal static class StackupGraphicExport
     /// annotation, so there is nothing else to strip.</para>
     /// </summary>
     internal static void Render(
-        SKCanvas canvas, StackupScene scene, StackupRenderTheme theme, float pageW, float pageH,
+        SKCanvas canvas, StackupScene scene, StackupRenderTheme theme, PagePlacement page,
         bool transparentBackground = false)
     {
         ArgumentNullException.ThrowIfNull(canvas);
         ArgumentNullException.ThrowIfNull(scene);
         ArgumentNullException.ThrowIfNull(theme);
 
-        float scale = FitScale(scene, pageW, pageH);
+        float scale = FitScale(scene, page);
 
         int saved = canvas.Save();
-        canvas.Translate((pageW - scene.Width * scale) * 0.5f, (pageH - scene.Height * scale) * 0.5f);
+        canvas.Translate((page.Width  - scene.Width  * scale) * 0.5f,
+                         (page.Height - scene.Height * scale) * 0.5f);
         canvas.Scale(scale);
         StackupRenderer.Draw(canvas, scene, theme, overlay: null, transparentBackground);
         canvas.RestoreToCount(saved);
     }
 
-    /// <summary>The page composition for one technology, as the callback every writer below takes.</summary>
-    internal static Action<SKCanvas> Composer(
+    /// <summary>The page composition for one technology, and the page it is composed on — both, so a
+    /// caller cannot hand one writer the composition and another writer a different page size.</summary>
+    internal static (Action<SKCanvas> Compose, PagePlacement Page) Composition(
         Technology? tech, StackupRenderTheme theme, bool transparentBackground = false)
     {
         var scene = PageScene(tech);
-        return canvas => Render(
-            canvas, scene, theme, PlotExporter.PageW, PlotExporter.PageH, transparentBackground);
+        var page  = PageFor(scene);
+        return (canvas => Render(canvas, scene, theme, page, transparentBackground), page);
     }
 
     internal static byte[] BuildPdfBytes(
         Technology? tech, StackupRenderTheme theme, bool transparentBackground = false)
-        => PlotExporter.BuildPdfBytes(Composer(tech, theme, transparentBackground));
+    {
+        var (compose, page) = Composition(tech, theme, transparentBackground);
+        return PlotDocumentWriter.BuildPdfBytes(compose, page);
+    }
 
     internal static string BuildSvgString(
         Technology? tech, StackupRenderTheme theme, bool transparentBackground = false)
-        => PlotExporter.BuildSvgString(Composer(tech, theme, transparentBackground));
+    {
+        var (compose, page) = Composition(tech, theme, transparentBackground);
+        return PlotDocumentWriter.BuildSvgString(compose, page);
+    }
 
     /// <summary>
     /// Renders the cross-section and places PDF, SVG and a 2x bitmap on the clipboard together.
@@ -147,13 +197,17 @@ internal static class StackupGraphicExport
         ArgumentNullException.ThrowIfNull(anchor);
 
         var (theme, transparent) = ResolvePolicy();
-        var compose = Composer(tech, theme, transparent);
+        var (compose, page) = Composition(tech, theme, transparent);
 
-        byte[] pdf   = PlotExporter.BuildPdfBytes(compose);
-        string svg   = PlotExporter.BuildSvgString(compose);
-        var  bitmap  = BuildBitmap(compose);
+        byte[] pdf   = PlotDocumentWriter.BuildPdfBytes(compose, page);
+        string svg   = PlotDocumentWriter.BuildSvgString(compose, page);
+        var  bitmap  = BuildBitmap(compose, page);
 
-        await PlotExporter.SetClipboardDataAsync(anchor, pdf, svg, json: string.Empty, bitmap);
+        // The page dimensions travel with the bytes: the Windows bypass tells the receiving
+        // application how big the picture is, and handing it PlotExporter's letter landscape would
+        // put this drawing back inside the empty box PageFor exists to remove.
+        await PlotExporter.SetClipboardDataAsync(
+            anchor, pdf, svg, json: string.Empty, bitmap, page.Width, page.Height);
     }
 
     /// <summary>
@@ -168,11 +222,11 @@ internal static class StackupGraphicExport
     /// and encode a PNG" — which also means it enters <c>PlotDocumentScope</c>, so this bitmap is
     /// built to the same standard as the PDF and the SVG beside it.</para>
     /// </summary>
-    private static Avalonia.Media.Imaging.Bitmap? BuildBitmap(Action<SKCanvas> compose)
+    private static Avalonia.Media.Imaging.Bitmap? BuildBitmap(Action<SKCanvas> compose, PagePlacement page)
     {
         try
         {
-            byte[]? png = PlotDocumentWriter.BuildPngBytes(compose, PagePlacement.Letter, BitmapScale);
+            byte[]? png = PlotDocumentWriter.BuildPngBytes(compose, page, BitmapScale);
             if (png is null) return null;
 
             using var ms = new MemoryStream(png);

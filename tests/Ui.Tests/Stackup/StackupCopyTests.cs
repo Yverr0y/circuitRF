@@ -21,13 +21,22 @@ namespace CircuitRF.Ui.Tests.StackupRender;
 /// re-implement. So every test here asserts everything up TO the write, which is where all of this
 /// brief's decisions actually are: which scene, at what size, in which colours, with what overlay.</para>
 /// </summary>
+// SkiaFontsTypefaceCollection: this class ASSERTS OVER RENDERED TEXT BYTES, which is the second
+// half of that collection's stated membership rule and the half it says is easy to miss — a class
+// like this one looks as though it touches no global at all. It does not set either typeface static;
+// what it cannot survive is another class setting one WHILE it renders. Caught in a full-solution
+// run (2026-09-13): two builds of one scene came back with `font-family="Helvetica"` on one side and
+// IBM Plex on the other, and the same test passed alone.
+[Collection(CircuitRF.Ui.Tests.SkiaFontsTypefaceCollection.Name)]
 public class StackupCopyTests
 {
-    private const float PageW = 792f;   // PlotExporter's own Letter landscape, restated so a test
-    private const float PageH = 612f;   // that measures the page does not read it from the subject.
+    /// <summary>The width the scene is LAID OUT at — PlotExporter's own letter landscape, restated
+    /// so a test that measures it does not read it from the subject. It is no longer the width of the
+    /// page the picture is composed onto: see <see cref="StackupGraphicExport.PageFor"/>.</summary>
+    private const float LayoutWidth = 792f;
 
-    private static float UsableW => PageW * (1f - 2f * StackupGraphicExport.MarginFraction);
-    private static float UsableH => PageH * (1f - 2f * StackupGraphicExport.MarginFraction);
+    private static PagePlacement Page(Technology? tech)
+        => StackupGraphicExport.PageFor(StackupGraphicExport.PageScene(tech));
 
     public static TheoryData<string> ShippedIds()
     {
@@ -80,51 +89,121 @@ public class StackupCopyTests
     }
 
     /// <summary>
-    /// A tall technology SCALES to fit the page — uniformly, and centred.
+    /// <b>The picture FILLS its page, edge to edge, with only the padding around it</b> — owner,
+    /// 2026-09-13: pasted into a presentation the cross-section arrived inside a much larger empty
+    /// box, which is what a tall narrow drawing centred on letter landscape is.
     ///
     /// <para>Measured off the composed raster rather than off the arithmetic that produced it: the
     /// question is where the ink actually landed, and a test that re-ran <c>FitScale</c> and compared
-    /// it with itself would pass however the canvas was transformed. Uniform scale is the part that
-    /// matters — a stackup stretched on one axis misrepresents every thickness in it.</para>
+    /// it with itself would pass however the canvas was transformed.</para>
+    ///
+    /// <para>Every shipped technology AND the tall fixture, because the bug is a function of the
+    /// drawing's aspect ratio and the shipped stackups differ in it by a factor of several.</para>
     /// </summary>
+    [Theory]
+    [MemberData(nameof(ShippedIds))]
+    public void ThePictureFillsThePage_OnEveryShippedTechnology(string id) => AssertFillsPage(Shipped(id));
+
     [Fact]
-    public void ATallStackupIsScaledToFitThePage_UniformlyAndCentred()
+    public void ThePictureFillsThePage_OnAStackTallerThanALetterPage()
     {
-        var tech  = Tall(14);
-        var scene = StackupGraphicExport.PageScene(tech);
+        var tech = Tall(14);
+        // Non-vacuity: this is the shape that was worst before — far taller than the page it used to
+        // be scaled down onto.
+        Assert.True(StackupGraphicExport.PageScene(tech).Height > 612f,
+            "fixture is not the tall case this is about");
+        AssertFillsPage(tech);
+    }
 
-        // Non-vacuity: the HEIGHT is what binds here, not the page margin.
-        Assert.True(scene.Height > UsableH, $"fixture fits the page unscaled: {scene.Height} px");
-
+    private static void AssertFillsPage(Technology tech)
+    {
+        var page = Page(tech);
         var (minX, minY, maxX, maxY) = PaintedBounds(tech, StackupRenderTheme.Light);
 
-        // Inside the page's usable area, on all four sides.
-        float margin = StackupGraphicExport.MarginFraction;
-        Assert.True(minX >= PageW * margin - 2, $"left edge at {minX}");
-        Assert.True(minY >= PageH * margin - 2, $"top edge at {minY}");
-        Assert.True(maxX <= PageW * (1 - margin) + 2, $"right edge at {maxX}");
-        Assert.True(maxY <= PageH * (1 - margin) + 2, $"bottom edge at {maxY}");
+        float pad = StackupGraphicExport.PagePad;
 
-        // And the same scale on both axes: the painted box has the scene's own aspect ratio.
-        float scaleX = (maxX - minX) / scene.Width;
-        float scaleY = (maxY - minY) / scene.Height;
-        Assert.Equal(scaleX, scaleY, 2);
+        // The ink reaches the padding on all four sides — nothing is cropped, and nothing beyond the
+        // padding is blank. One pixel of slack, because the bounds are read off a raster and the page
+        // is a fractional number of points.
+        Near(pad, minX, "left");
+        Near(pad, minY, "top");
+        Near(page.Width  - pad, maxX, "right");
+        Near(page.Height - pad, maxY, "bottom");
 
-        // Centred: the margins left and right, top and bottom, are the same.
-        Assert.Equal(minX, PageW - maxX, 0);
-        Assert.Equal(minY, PageH - maxY, 0);
+        static void Near(float expected, float actual, string edge)
+            => Assert.True(Math.Abs(expected - actual) <= 1.5f,
+                           $"{edge} edge at {actual}, expected {expected}");
+
+        // …which is only worth anything if the page is the drawing rather than a sheet: the blank
+        // fraction of the page is the padding and nothing else.
+        float drawn = StackupGraphicExport.PageScene(tech).Width;
+        Assert.True(page.Width < 2 * pad + drawn + 1, $"page is wider than the drawing: {page.Width}");
     }
 
     /// <summary>
     /// The page composition is a pure function of the TECHNOLOGY — never of the pane's width, which
     /// is the one number a screenshot or a reused on-screen scene would have carried into it.
     /// </summary>
-    [Fact]
-    public void ThePictureIsLaidOutAtThePageWidth_NotThePanes()
+    [Theory]
+    [MemberData(nameof(ShippedIds))]
+    public void ThePictureIsLaidOutFromTheTechnologyAlone(string id)
     {
-        var tech = Shipped(ShippedTechnologies.All.First().Id);
+        var tech  = Shipped(id);
+        float w = StackupGraphicExport.PageScene(tech).Width;
 
-        Assert.Equal(PageW, StackupGraphicExport.PageScene(tech).Width);
+        // At least the letter-landscape width it starts from, and the same answer every time — the
+        // pane it happens to be drawn in on screen reaches none of this.
+        Assert.True(w >= LayoutWidth, $"laid out narrower than the page: {w}");
+        Assert.Equal(w, StackupGraphicExport.PageScene(Shipped(id)).Width, 3);
+    }
+
+    /// <summary>
+    /// <b>No spec in a copied picture is wrapped onto a second line</b> (owner, 2026-09-13).
+    ///
+    /// <para>A pane has a width the user chose and the drawing makes the best of it; a copied picture
+    /// has no such constraint — it is vector, it is going into a document, and a page is only as wide
+    /// as it is asked to be. So the page grows until the label column holds its widest group on one
+    /// line.</para>
+    ///
+    /// <para><b>Non-vacuous</b>: the second half shows that some shipped technology genuinely DOES
+    /// wrap at the letter width, so the widening is doing something rather than describing a page that
+    /// already fitted.</para>
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ShippedIds))]
+    public void TheCopiedPictureNeverWrapsASpec(string id)
+        => Assert.False(StackupGraphicExport.PageScene(Shipped(id)).LabelsWrap);
+
+    [Fact]
+    public void AtTheLetterWidthSomeShippedTechnologyWouldHaveWrapped()
+    {
+        Assert.Contains(ShippedTechnologies.All,
+            e => StackupScene.Build(Shipped(e.Id), LayoutWidth).LabelsWrap);
+    }
+
+    /// <summary>A technology that already fits is NOT widened — the copy stays letter-landscape
+    /// wherever it can, which is the page every other picture in this application composes onto.</summary>
+    [Fact]
+    public void ATechnologyThatAlreadyFitsIsNotWidened()
+    {
+        var fits = ShippedTechnologies.All
+            .Select(e => Shipped(e.Id))
+            .First(t => !StackupScene.Build(t, LayoutWidth).LabelsWrap);
+
+        Assert.Equal(LayoutWidth, StackupGraphicExport.PageScene(fits).Width, 3);
+    }
+
+    /// <summary>The widening is bounded. A layer name long enough to demand an unopenable page gets
+    /// the widest page the export will lay out, and wraps — which is what every copy did before.</summary>
+    [Fact]
+    public void TheWideningIsCappedRatherThanUnbounded()
+    {
+        var tech = Shipped("pcb-2layer_RO4350B_20mil_1oz");
+        var band = tech.Stackup.Layers.First(l => l.Kind == StackupKind.Dielectric);
+        band.Name = new string('W', 4000);
+
+        float w = StackupGraphicExport.PageScene(tech).Width;
+        Assert.InRange(w, LayoutWidth, StackupGraphicExport.MaxPageWidth);
     }
 
     // ── R-stk7-3 — an export is artwork, not an editing surface ───────────────────────────────────
@@ -282,8 +361,13 @@ public class StackupCopyTests
         Assert.DoesNotContain("AddHandler(KeyDownEvent, OnCopyKeyDown, RoutingStrategies",
             code, StringComparison.Ordinal);
 
-        // The other two tunnel on purpose, and this scan is only meaningful while that is still true.
-        Assert.Contains("AddHandler(KeyDownEvent, OnEscapeKeyDown, RoutingStrategies.Tunnel);",
+        // The other two tunnel on purpose, and this scan is only meaningful while that is still
+        // true. Escape additionally takes handledEventsToo — WorkspaceWindow's own KeyBinding marks
+        // it handled before routing starts — which Ctrl+C must NOT copy: claiming an already-handled
+        // keystroke is the opposite of "only one nothing else wanted".
+        Assert.Contains("AddHandler(KeyDownEvent, OnEscapeKeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);",
+            code, StringComparison.Ordinal);
+        Assert.DoesNotContain("AddHandler(KeyDownEvent, OnCopyKeyDown, RoutingStrategies.Tunnel",
             code, StringComparison.Ordinal);
     }
 
@@ -332,8 +416,10 @@ public class StackupCopyTests
     private static void RenderWithOverlay(
         SKCanvas canvas, StackupScene scene, StackupRenderTheme theme, StackupOverlay overlay)
     {
-        float scale = StackupGraphicExport.FitScale(scene, PageW, PageH);
-        canvas.Translate((PageW - scene.Width * scale) * 0.5f, (PageH - scene.Height * scale) * 0.5f);
+        var   page  = StackupGraphicExport.PageFor(scene);
+        float scale = StackupGraphicExport.FitScale(scene, page);
+        canvas.Translate((page.Width  - scene.Width  * scale) * 0.5f,
+                         (page.Height - scene.Height * scale) * 0.5f);
         canvas.Scale(scale);
         StackupRenderer.Draw(canvas, scene, theme, overlay);
     }
@@ -365,12 +451,13 @@ public class StackupCopyTests
     internal static SKBitmap Raster(
         Technology? tech, StackupRenderTheme theme, bool transparentBackground = false)
     {
-        var bitmap = new SKBitmap((int)PageW, (int)PageH, SKColorType.Rgba8888, SKAlphaType.Premul);
+        var scene  = StackupGraphicExport.PageScene(tech);
+        var page   = StackupGraphicExport.PageFor(scene);
+        var bitmap = new SKBitmap((int)page.Width, (int)page.Height, SKColorType.Rgba8888, SKAlphaType.Premul);
         using (var canvas = new SKCanvas(bitmap))
         {
             canvas.Clear(SKColors.Transparent);
-            StackupGraphicExport.Render(canvas, StackupGraphicExport.PageScene(tech), theme,
-                                        PageW, PageH, transparentBackground);
+            StackupGraphicExport.Render(canvas, scene, theme, page, transparentBackground);
         }
         return bitmap;
     }

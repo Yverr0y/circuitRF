@@ -5772,3 +5772,22 @@ cases read it rather than hard-coding a number that could drift and quietly make
 
 Corollaries recorded elsewhere: `src/Ui/RESOLVED.md` for the two symptoms that led here (a workspace
 open that read every layout, and a `.cem` that reads its board on the UI thread).
+
+---
+
+## `Stackup` now carries two VIEW-state fields, and that is deliberate (2026-09-13)
+
+`Stackup.DrawingPaneExpanded` and `CardPaneExpanded` say whether the Technology Editor's two Stackup
+panes were left open. They are view state in a document format, which is a thing to be suspicious of
+— and they are here for the reason `StackupLayer.DrawLaneFraction` already is: **how a particular
+stackup is best looked at is a property of that stackup**, not of the installation, and a user who
+gave the window to the drawing expects it given again when they reopen THAT technology.
+
+Both are `bool?`, and **null means expanded**, so every `.ctech` written before them means what it
+always meant. Additive, nullable, no `FormatVersion` bump — the `BoardThicknessDbu` / `SheetAt` /
+`Fill` pattern. `DefaultIgnoreCondition = WhenWritingNull` keeps them out of a file that never set
+them.
+
+**Nothing downstream of the editor may read them**, exactly as for `DrawLaneFraction`, and that is
+gated rather than asserted in a comment:
+`StackupDragTests.ATechnologyDifferingOnlyInThePaneFlags_ExtractsIdentically`.

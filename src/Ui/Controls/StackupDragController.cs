@@ -97,6 +97,8 @@ internal sealed class StackupDragController
     private int     _targetBandIndex = -1;
     private float?  _insertY;
     private SKRect? _ghost;
+    private StackupBarrel? _dragVia;
+    private StackupBarrel? _dragViaSource;
     private string? _spanFrom;
     private string? _spanTo;
     private double? _lane;
@@ -137,6 +139,8 @@ internal sealed class StackupDragController
         return overlay with
         {
             DragGhost = _ghost is { } g ? (g.Left, g.Top, g.Right, g.Bottom) : null,
+            DragVia = _dragVia,
+            DragViaSource = _dragViaSource,
             DragInsertY = _insertY,
         };
     }
@@ -298,6 +302,7 @@ internal sealed class StackupDragController
         _targetBandIndex = -1;
         _insertY = null;
         _ghost = null;
+        _dragVia = _dragViaSource = null;
         _spanFrom = _spanTo = null;
         _lane = null;
     }
@@ -333,6 +338,9 @@ internal sealed class StackupDragController
         _targetBandIndex = target;
         _insertY = insertY;
         _ghost = ghost;
+        // A BAND is what is moving, and a translucent rectangle is what a band looks like. Only a via
+        // has detail worth previewing — see PreviewBarrel.
+        _dragVia = _dragViaSource = null;
         return changed;
     }
 
@@ -403,11 +411,11 @@ internal sealed class StackupDragController
         f = Math.Clamp(f, Math.Min(loF, hiF), Math.Max(loF, hiF));
 
         float cx = col.Left + (float)f * col.Width;
-        var ghost = new SKRect(cx - half, barrel.Rect.Top, cx + half, barrel.Rect.Bottom);
+        var rect = new SKRect(cx - half, barrel.Rect.Top, cx + half, barrel.Rect.Bottom);
 
-        bool changed = !Nullable.Equals(_lane, f) || _ghost != ghost;
+        bool changed = !Nullable.Equals(_lane, f) || _dragVia?.Rect != rect;
         _lane = f;
-        _ghost = ghost;
+        PreviewBarrel(barrel, rect, barrel.SpanFromLayer, barrel.SpanToLayer);
         _insertY = null;
         return changed;
     }
@@ -457,17 +465,53 @@ internal sealed class StackupDragController
         string from = fromIsUpper ? upper : lower;
         string to   = fromIsUpper ? lower : upper;
 
-        var ghost = new SKRect(
+        var rect = new SKRect(
             barrel.Rect.Left, conductors[lo].Rect.Top, barrel.Rect.Right, conductors[hi].Rect.Bottom);
 
         bool changed = !string.Equals(from, _spanFrom, StringComparison.Ordinal) ||
                        !string.Equals(to,   _spanTo,   StringComparison.Ordinal) ||
-                       _ghost != ghost;
+                       _dragVia?.Rect != rect;
         _spanFrom = from;
         _spanTo = to;
-        _ghost = ghost;
+        PreviewBarrel(barrel, rect, from, to);
         _insertY = null;
         return changed;
+    }
+
+    /// <summary>
+    /// <b>The live preview of a via drag: the barrel the release would produce, as a real
+    /// <c>StackupBarrel</c>.</b>
+    ///
+    /// <para>Owner, 2026-09-13: the drag showed "a non-detailed ghost", and most of what a via IS
+    /// lives in the detail — a plated barrel's two walls, the bore cut through the material, the
+    /// outline that binds them into one object, the grippers at each end. So the preview is not a
+    /// rectangle the renderer fills: it is the same record type the scene emits, carrying the same
+    /// <c>Look</c>, <c>WallPx</c> and <c>Fill</c> as the barrel being dragged, and
+    /// <c>StackupRenderer</c> draws it through the SAME method it draws a real one with. A preview
+    /// painted by a second piece of code is one that can come to differ from what it previews.</para>
+    ///
+    /// <para>The grippers are re-derived from the new rect rather than carried over, by the same
+    /// arithmetic <c>StackupScene.Build</c> uses — a preview whose handles stayed at the old ends
+    /// would be showing the user the wrong thing to aim at.</para>
+    ///
+    /// <para><see cref="_dragViaSource"/> is the ORIGINAL, which the renderer then omits: a via is
+    /// being moved, not copied, and a retracting gripper drag would otherwise leave the old barrel's
+    /// tail sticking out past the new end.</para>
+    /// </summary>
+    private void PreviewBarrel(StackupBarrel source, SKRect rect, string? from, string? to)
+    {
+        float g = StackupScene.GripGlyphHalf + StackupScene.GripHitSlop;
+
+        _dragViaSource = source;
+        _dragVia = source with
+        {
+            Rect          = rect,
+            GripTop       = new SKRect(rect.MidX - g, rect.Top    - g, rect.MidX + g, rect.Top    + g),
+            GripBottom    = new SKRect(rect.MidX - g, rect.Bottom - g, rect.MidX + g, rect.Bottom + g),
+            SpanFromLayer = from,
+            SpanToLayer   = to,
+        };
+        _ghost = null;
     }
 
     private static int IndexOfBand(IReadOnlyList<StackupBand> bands, string? name)

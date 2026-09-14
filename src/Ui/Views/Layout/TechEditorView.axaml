@@ -128,6 +128,56 @@
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="Foreground" Value="{DynamicResource SystemBaseMediumColor}"/>
         </Style>
+        <!-- ── The Stackup tab's two pane expanders (owner, 2026-09-13) ────────
+             SMALL AND SUBTLE, which is the whole specification: they sit in the top-left corner of
+             the two panes they collapse, and they are there to be found when wanted rather than to
+             be part of the picture. So: no background, no border, a 14 px glyph, and two-thirds
+             opacity until the pointer is on one.
+
+             ── IT CARRIES ITS OWN TEMPLATE, AND THAT IS THE FIX ─────────────────
+             Owner, 2026-09-13: "the expanders are invisible when I first open a .ctech file". They
+             were, and only in the state they OPEN in. Both start expanded, which is IsChecked=True,
+             and Fluent's ToggleButton theme paints a checked button with an accent background and a
+             LIGHT ON ACCENT foreground. Overriding the background to transparent — which is what a
+             subtle button wants — left the glyph painted in that light-on-accent brush over the
+             pane's own pale ground, so it was there, drawn, and the same colour as what was behind
+             it. Unchecking it made it appear, which is exactly backwards from how a control should
+             behave.
+
+             Overriding the two foregrounds per state would work and would have to be redone for
+             every state the theme grows. A template with no state brushes in it at all cannot have
+             the problem: the glyph takes this style's own Foreground, inherited, in every state.
+             A Style beats a ControlTheme in Avalonia, which is the same lever TextBox.cell.compact
+             above pulls.
+
+             Transparent rather than unset Background — a ToggleButton with no background is not
+             hit-testable, so a button that looked right would not be clickable. -->
+        <Style Selector="ToggleButton.paneexpander">
+            <Setter Property="Padding" Value="3,2"/>
+            <Setter Property="MinWidth" Value="0"/>
+            <Setter Property="MinHeight" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{DynamicResource SystemBaseHighColor}"/>
+            <Setter Property="Opacity" Value="0.65"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border Background="{TemplateBinding Background}" CornerRadius="3">
+                        <ContentPresenter Content="{TemplateBinding Content}"
+                                          Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="ToggleButton.paneexpander:pointerover">
+            <Setter Property="Opacity" Value="1"/>
+            <Setter Property="Background" Value="{DynamicResource SystemListLowColor}"/>
+        </Style>
+
         <Style Selector="ToggleButton.coltoggle">
             <Setter Property="Padding" Value="2"/>
             <Setter Property="MinWidth" Value="0"/>
@@ -562,11 +612,15 @@
 
                      A DockPanel cannot express a splitter between two proportional panes at all,
                      which is why this stopped being one. -->
-                <Grid>
+                <!-- x:Name'd because the two expanders resize these rows from code-behind: an
+                     Avalonia RowDefinition is outside the logical tree and inherits no DataContext,
+                     so its Height cannot be bound. See TechEditorView.ApplyStackupPaneLayout. -->
+                <Grid x:Name="StackupTabGrid">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <!-- The drawing takes what is left over, and neither pane can be dragged out
-                             of existence. -->
+                             of existence. Both of these are REWRITTEN by ApplyStackupPaneLayout when
+                             a pane is collapsed; what is here is the both-expanded state. -->
                         <RowDefinition Height="*"
                                        MinHeight="{x:Static lay:TechEditorMetrics.StackupDrawingMinHeight}"/>
                         <RowDefinition Height="Auto"/>
@@ -623,7 +677,59 @@
                              SelectableTextBlock throughout: every one of these is a number somebody
                              copies — into a fab note, a spreadsheet, or a message asking whether the
                              board is the one they think it is. -->
-                        <WrapPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="6"
+                        <!-- ── The two pane expanders (owner, 2026-09-13) ────────────────────────
+                             HERE, on the Stack height row, and not in the panes they collapse.
+
+                             They began at the top-left corner of each pane, which is where they were
+                             asked for and is where they read best — and the card pane's one then MOVED
+                             when it was used: collapsing a pane gives its space to the other, so
+                             anything sitting at the top of the lower pane is pushed down by exactly the
+                             height that was freed, and a second click has to chase it. In a vertical
+                             stack the only y positions that do not move are the top of the tab and the
+                             bottom of it, so the owner's answer was to put both in this fixed header
+                             (2026-09-13). Side by side, because they are one pair of related controls
+                             and a reader has to be able to tell which is which — hence the pane glyph
+                             beside each chevron.
+
+                             Column 0 with the readouts moved to columns 1-5: the WrapPanel is
+                             right-aligned and wraps, so on a narrow window it would otherwise come
+                             back across a toggle sharing its cell. -->
+                        <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" Spacing="2"
+                                    VerticalAlignment="Center">
+                            <ToggleButton x:Name="StackupDrawingExpander" Classes="paneexpander"
+                                          IsChecked="{Binding ViewModel.StackupDrawingExpanded, Mode=TwoWay}"
+                                          ToolTip.Tip="{x:Static lay:StackupCardText.DrawingPaneExpanderTip}">
+                                <!-- Foreground stated on every glyph as well as on the style, so the
+                                     icon stays legible whatever a future template does with a state
+                                     brush — see the .paneexpander style for the bug that is about. -->
+                                <StackPanel Orientation="Horizontal" Spacing="1">
+                                    <mi:MaterialIcon Kind="ChevronDown" Width="13" Height="13"
+                                                     Foreground="{DynamicResource SystemBaseHighColor}"
+                                                     IsVisible="{Binding ViewModel.StackupDrawingExpanded}"/>
+                                    <mi:MaterialIcon Kind="ChevronRight" Width="13" Height="13"
+                                                     Foreground="{DynamicResource SystemBaseHighColor}"
+                                                     IsVisible="{Binding !ViewModel.StackupDrawingExpanded}"/>
+                                    <mi:MaterialIcon Kind="Layers" Width="13" Height="13"
+                                                     Foreground="{DynamicResource SystemBaseHighColor}"/>
+                                </StackPanel>
+                            </ToggleButton>
+                            <ToggleButton x:Name="StackupCardsExpander" Classes="paneexpander"
+                                          IsChecked="{Binding ViewModel.StackupCardsExpanded, Mode=TwoWay}"
+                                          ToolTip.Tip="{x:Static lay:StackupCardText.CardPaneExpanderTip}">
+                                <StackPanel Orientation="Horizontal" Spacing="1">
+                                    <mi:MaterialIcon Kind="ChevronDown" Width="13" Height="13"
+                                                     Foreground="{DynamicResource SystemBaseHighColor}"
+                                                     IsVisible="{Binding ViewModel.StackupCardsExpanded}"/>
+                                    <mi:MaterialIcon Kind="ChevronRight" Width="13" Height="13"
+                                                     Foreground="{DynamicResource SystemBaseHighColor}"
+                                                     IsVisible="{Binding !ViewModel.StackupCardsExpanded}"/>
+                                    <mi:MaterialIcon Kind="ViewList" Width="13" Height="13"
+                                                     Foreground="{DynamicResource SystemBaseHighColor}"/>
+                                </StackPanel>
+                            </ToggleButton>
+                        </StackPanel>
+
+                        <WrapPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="5"
                                    HorizontalAlignment="Right">
                             <TextBlock Text="Stack height:" Classes="stat" Margin="0,0,6,0"
                                        Foreground="{DynamicResource SystemBaseMediumColor}"/>
@@ -667,6 +773,7 @@
                          The canvas measures to the scene's intrinsic height, which is what there is
                          to scroll: a 20-layer stack does not fit and is not squeezed until it does. -->
                     <ScrollViewer Grid.Row="1" Margin="6,0,6,0"
+                                  IsVisible="{Binding ViewModel.StackupDrawingExpanded}"
                                   VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
                         <!-- R-stk4-2. A Panel, so the ONE inline edit box is a sibling of the
@@ -712,11 +819,12 @@
                     </ScrollViewer>
 
                     <!-- Transparent and 6 px: a grab strip, not a rule. The card Border below already
-                         draws the only line this seam needs. -->
+                         draws the only line this seam needs. Hidden while either pane is collapsed —
+                         a splitter between a fixed row and a collapsed one moves nothing. -->
                     <!-- ResizeBehavior stated rather than inferred: the default resolves it from the
                          splitter's own alignment, which is a property somebody could change for a
                          cosmetic reason and silently re-point what the drag moves. -->
-                    <GridSplitter Grid.Row="2" Height="6" ResizeDirection="Rows"
+                    <GridSplitter x:Name="StackupSplitter" Grid.Row="2" Height="6" ResizeDirection="Rows"
                                   ResizeBehavior="PreviousAndNext"
                                   HorizontalAlignment="Stretch" Background="Transparent"/>
 
@@ -726,12 +834,19 @@
                     <!-- The stackup rows are cards, not a column grid, so the filter row has only
                          the one control to align: the search box sits at the left edge the cards
                          start at. -->
+                    <!-- The filter box and the count go with the CARDS: with the pane collapsed there
+                         is nothing to filter, and a search box above a list that is not there is a
+                         control that appears to do nothing. The pane's EXPANDER is not here — see the
+                         header grid above for why it cannot be. -->
                     <Grid DockPanel.Dock="Top" ColumnDefinitions="220,Auto" ColumnSpacing="6" Margin="6,4,6,4">
                         <TextBox Grid.Column="0" Classes="filter" x:Name="StackupFilterBox"
+                                 IsVisible="{Binding ViewModel.StackupCardsExpanded}"
                                  Text="{Binding ViewModel.StackupFilter, Mode=TwoWay}"
                                  PlaceholderText="Filter by stackup layer name..."
                                  ToolTip.Tip="Shows only stackup entries whose name contains this text (case-insensitive)."/>
-                        <TextBlock Grid.Column="1" Classes="filtercount" Text="{Binding ViewModel.StackupFilterSummary}"/>
+                        <TextBlock Grid.Column="1" Classes="filtercount"
+                                   IsVisible="{Binding ViewModel.StackupCardsExpanded}"
+                                   Text="{Binding ViewModel.StackupFilterSummary}"/>
                     </Grid>
 
                     <!-- R-stk3-7: ONE selection model, two surfaces. SelectedItem is two-way against the
@@ -739,8 +854,25 @@
                          reads — so clicking a card selects its band and clicking a band shades its
                          card. Two independent selections on one list is a fight; this is the list
                          losing it on purpose. -->
+                    <!-- AutoScrollToSelectedItem="False" — THE SCROLL IS OURS, and this is what makes
+                         that true (owner, 2026-09-13, reported three times: "I see a quick flash in
+                         the scrollview").
+
+                         SelectingItemsControl.AutoScrollToSelectedItem defaults to TRUE and its
+                         AutoScrollToSelectedItemIfNecessary POSTS a ScrollIntoView at a priority that
+                         runs BEFORE this view's own Background-priority handler. So every selection
+                         change produced TWO movements: the list's own instant jump, rendered, and then
+                         our eased scroll starting from wherever that left it. The jump is the flash —
+                         it was never the code in TechEditorView, which is why removing the
+                         ScrollIntoView from there changed nothing.
+
+                         Nothing is lost by switching it off: the selection is the view model's, and
+                         ScrollStackupSelectionIntoView runs on every change of it, from the drawing,
+                         from a card, from the context menu and from an undo alike. -->
                     <ListBox Classes="rows" x:Name="StackupList" ItemsSource="{Binding ViewModel.FilteredStackupLayers}"
                              SelectedItem="{Binding ViewModel.SelectedStackupLayerRow, Mode=TwoWay}"
+                             IsVisible="{Binding ViewModel.StackupCardsExpanded}"
+                             AutoScrollToSelectedItem="False"
                              Margin="6,0,6,4" SelectionMode="Single">
                             <ListBox.ItemTemplate>
                                 <DataTemplate x:DataType="lay:StackupLayerRowViewModel">

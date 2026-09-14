@@ -41,6 +41,19 @@ public sealed partial class StackupCanvas
     internal const int ContextMenuLayerLimit =
         TechEditorMetrics.DrawingLayerPickerColumns * TechEditorMetrics.DrawingLayerPickerRows;
 
+    // ── Tooltips: on the SUBMENUS, never on the root menu (owner, 2026-09-13) ──────────────────────
+    //
+    // Every root item used to carry the card's own tooltip for the field it sets, which is where
+    // R-stk6-8 put them. On the real menu they are wider than the menu is and pop up OVER it, so the
+    // item names underneath cannot be read — and a menu you cannot read is worse than one that
+    // explains nothing. They stay on the items INSIDE a submenu, which is where the closed choices
+    // are and where a reader who does not know what "Bottom of its own band" means is actually
+    // looking; a submenu flyout is also not the thing a tooltip over the root menu covers up.
+    //
+    // The one root tooltip left is Add Via's REFUSAL, and only while the item is disabled: it is the
+    // whole of R-stk6-4's "disabled WITH a reason", a disabled item cannot be hovered so it covers
+    // nothing, and dropping it would leave an item that is greyed out and says why nowhere.
+
     /// <summary>Scene coordinates of the pending right-click, or null when nothing is pending — in
     /// which case the <c>Opening</c> handler cancels the menu rather than showing whatever the last
     /// one built.</summary>
@@ -151,7 +164,6 @@ public sealed partial class StackupCanvas
     private MenuItem CopyItem()
     {
         var mi = new MenuItem { Header = "Copy" };
-        ToolTip.SetTip(mi, StackupCardText.CopyPictureTip);
         mi.Click += async (_, _) => await CopyPictureAsync();
         return mi;
     }
@@ -173,7 +185,6 @@ public sealed partial class StackupCanvas
             ToggleType = MenuItemToggleType.CheckBox,
             IsChecked = ground,
         };
-        ToolTip.SetTip(gr, StackupCardText.GroundReferenceTip);
         gr.Click += (_, _) => row.IsGroundReference = !ground;
         items.Add(gr);
 
@@ -181,7 +192,6 @@ public sealed partial class StackupCanvas
         // consequence, through the converter the card's own ComboBox renders each row with. Two
         // spellings of the same choice is how a control comes to ask two different questions.
         var sheet = new MenuItem { Header = StackupCardText.SheetAt };
-        ToolTip.SetTip(sheet, StackupCardText.SheetAtTip);
         var sheetItems = new List<object>();
         foreach (var surface in StackupLayerRowViewModel.SheetAtChoices)
         {
@@ -212,12 +222,12 @@ public sealed partial class StackupCanvas
         // did not ask for.
         string? refusal = vm.AddViaAroundRefusal(row);
         var addVia = new MenuItem { Header = "Add Via", IsEnabled = refusal is null };
-        ToolTip.SetTip(addVia, refusal ?? AddViaTip(vm, row));
+        // The refusal, and nothing when the item is enabled — see the note at the top of this file.
+        if (refusal is not null) ToolTip.SetTip(addVia, refusal);
         addVia.Click += (_, _) => vm.AddViaSpanningAround(row);
         items.Add(addVia);
 
         var pattern = new MenuItem { Header = StackupCardText.PresentWith };
-        ToolTip.SetTip(pattern, StackupCardText.PresentWithTip);
         var choices = new List<object>();
         foreach (var name in row.PresentWithChoices)
         {
@@ -267,14 +277,12 @@ public sealed partial class StackupCanvas
             ToggleType = MenuItemToggleType.CheckBox,
             IsChecked  = plated,
         };
-        ToolTip.SetTip(hole, StackupCardText.PlatedTip);
         hole.Click += (_, _) => row.IsPlated = !plated;
         items.Add(hole);
 
         if (plated)
         {
             var fill = new MenuItem { Header = StackupCardText.Fill };
-            ToolTip.SetTip(fill, StackupCardText.FillTip);
             var fills = new List<object>();
             foreach (var kind in StackupLayerRowViewModel.FillChoices)
             {

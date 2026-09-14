@@ -72,6 +72,22 @@ internal sealed class StackupInlineEditor
     /// root, and is therefore deliberately NOT done here.</summary>
     public event Action? Opened;
 
+    /// <summary>
+    /// Raised after the box is HIDDEN, and <see cref="Opened"/>'s other half: the host has to put
+    /// keyboard focus back somewhere inside itself.
+    ///
+    /// <para><b>Hiding a focused control drops focus out of the tab entirely.</b> Owner, 2026-09-13:
+    /// a second Esc did not clear the band selection. The first one reverted correctly, and then
+    /// nothing in the editor held focus any more — so the second keystroke routed nowhere near
+    /// <c>TechEditorView</c>, whose tunnelling handler is what clears the selection. The same gap
+    /// silenced Page Up/Down after any committed edit, which is R-stk2-10's whole concern.</para>
+    ///
+    /// <para>It fires only when the box was actually open, so the rebuild-driven <see cref="Close"/>
+    /// on every committed edit, undo and redo (R-stk4-8) does not yank focus out of whatever the user
+    /// is typing in on the card below.</para>
+    /// </summary>
+    public event Action? Closed;
+
     public bool IsOpen => _box.IsVisible;
 
     /// <summary>Which field the open box is editing. <see cref="StackupField.None"/> when closed —
@@ -192,6 +208,11 @@ internal sealed class StackupInlineEditor
         _layerName     = null;
         _field         = StackupField.None;
         _vm            = null;
+
+        // LAST, with this editor's own state already reset: the host's handler takes focus, and a
+        // handler that ran while IsOpen still read true would be taking it out of a box this method
+        // is halfway through shutting.
+        Closed?.Invoke();
     }
 
     // ── The field mapping table — the whole of R-stk4-5 ───────────────────────────────────────────

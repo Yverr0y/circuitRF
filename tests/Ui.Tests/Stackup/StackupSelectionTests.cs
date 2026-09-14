@@ -29,6 +29,13 @@ namespace CircuitRF.Ui.Tests.StackupRender;
 /// <c>FilteredStackupLayers</c> when it is asked for. A test that arranged a <c>ListBox</c> to read
 /// back a scroll offset would be measuring the layout engine.</para>
 /// </summary>
+// SkiaFontsTypefaceCollection: this class ASSERTS OVER RENDERED TEXT BYTES, which is the second
+// half of that collection's stated membership rule and the half it says is easy to miss — a class
+// like this one looks as though it touches no global at all. It does not set either typeface static;
+// what it cannot survive is another class setting one WHILE it renders. Caught in a full-solution
+// run (2026-09-13): two builds of one scene came back with `font-family="Helvetica"` on one side and
+// IBM Plex on the other, and the same test passed alone.
+[Collection(CircuitRF.Ui.Tests.SkiaFontsTypefaceCollection.Name)]
 public class StackupSelectionTests
 {
     private const double PaneWidth = 900;
@@ -234,11 +241,51 @@ public class StackupSelectionTests
         Assert.Equal(none, Svg(scene, new StackupOverlay { SelectedLayer = "no such layer" }));
     }
 
-    // ── R-stk3-4 — hover ────────────────────────────────────────────────────────────────────────
+    // ── R-stk3-4 — hover, which is GATED OFF (owner, 2026-09-13) ────────────────────────────────
 
+    /// <summary>
+    /// <b>The switch is off, and with it off a pointer crossing the drawing changes nothing.</b>
+    ///
+    /// <para>Owner, 2026-09-13: remove the mouse-over highlighting, keep the code, gate it, keep it
+    /// off. So the default is the behaviour under test — and it is asserted as the DEFAULT rather
+    /// than by setting it, because "it is off" is the requirement.</para>
+    ///
+    /// <para>The canvas does not even hit-test: with nothing to publish, tracking is pure cost on a
+    /// pointer that raises a move event per pixel.</para>
+    /// </summary>
     [Fact]
-    public void HoverTracksThePointerAndClearsOnExit()
+    public void HoverHighlightingIsOffByDefault_AndThePointerChangesNothing()
     {
+        Assert.False(StackupCanvas.HoverHighlighting);
+
+        var vm = Editor();
+        var canvas = Canvas(vm);
+        var scene = canvas.SceneCache.Current!;
+
+        string before = Svg(scene, canvas.CurrentOverlay);
+
+        canvas.MoveAt(PointInBand(scene, scene.Bands[1]));
+        Assert.Null(canvas.HoverLayer);
+        Assert.Null(canvas.CurrentOverlay.HoverLayer);
+        Assert.Null(vm.SelectedStackupLayerName);
+
+        // …and the picture is the same one, which is the whole of what "removed" means here.
+        Assert.Equal(before, Svg(scene, canvas.CurrentOverlay));
+    }
+
+    /// <summary>
+    /// The gated-off code still WORKS, which is what "keep it" has to mean — a feature switched off
+    /// and left to rot is one nobody can switch back on.
+    ///
+    /// <para>R-stk3-4's own two properties, exercised through the switch: hover tracks the pointer and
+    /// clears on exit, and it selects nothing — hover is the CANVAS's while the selection is the VIEW
+    /// MODEL's, so a pointer crossing the drawing must never rewrite the card list.</para>
+    /// </summary>
+    [Fact]
+    public void WithTheSwitchOn_HoverStillTracksThePointerAndStillSelectsNothing()
+    {
+        using var _ = HoverOn();
+
         var vm = Editor();
         var canvas = Canvas(vm);
         var scene = canvas.SceneCache.Current!;
@@ -246,23 +293,25 @@ public class StackupSelectionTests
         canvas.MoveAt(PointInBand(scene, scene.Bands[1]));
         Assert.Equal(scene.Bands[1].Name, canvas.HoverLayer);
         Assert.Equal(scene.Bands[1].Name, canvas.CurrentOverlay.HoverLayer);
+        Assert.Null(vm.SelectedStackupLayerName);
 
         canvas.MoveAt(new Avalonia.Point(0, 0));
         Assert.Null(canvas.HoverLayer);
     }
 
-    /// <summary>Hover is the CANVAS's and the selection is the VIEW MODEL's: hovering must not
-    /// select, or a pointer crossing the drawing would rewrite the card list under the user.</summary>
-    [Fact]
-    public void HoveringSelectsNothing()
+    /// <summary>Turns the switch on for one test and puts it back. It is a process-wide static, so
+    /// this class is party to <c>SkiaFontsTypefaceCollection</c> for the schedule as well as for the
+    /// typeface — and it is the ONLY class that flips it: every other stackup test that calls
+    /// <c>MoveAt</c> is driving a DRAG, which the gate is read after.</summary>
+    private static IDisposable HoverOn()
     {
-        var vm = Editor();
-        var canvas = Canvas(vm);
-        var scene = canvas.SceneCache.Current!;
+        StackupCanvas.HoverHighlighting = true;
+        return new Restore(() => StackupCanvas.HoverHighlighting = false);
+    }
 
-        canvas.MoveAt(PointInBand(scene, scene.Bands[0]));
-
-        Assert.Null(vm.SelectedStackupLayerName);
+    private sealed class Restore(Action undo) : IDisposable
+    {
+        public void Dispose() => undo();
     }
 
     [Fact]
@@ -323,6 +372,139 @@ public class StackupSelectionTests
 
         Assert.Equal("Copper", vm.StackupFilter);
         Assert.Contains(vm.SelectedStackupLayerRow!, vm.FilteredStackupLayers);
+    }
+
+    // ── R-stk3-5's scroll: to the card's TOP, eased, and painted once (owner, 2026-09-13) ───────
+
+    /// <summary>
+    /// <b>The card scroll never moves the list anywhere it is not going.</b>
+    ///
+    /// <para>It used to call <c>ScrollIntoView</c> to REALISE the card's container, measure off it,
+    /// restore the offset and ease from there — all in one dispatcher frame, so the jump itself was
+    /// never painted. It still flashed going DOWN (owner, 2026-09-13), because the jump de-realises
+    /// everything at the origin and the restored offset is rendered before the virtualizing panel has
+    /// realised it again: what flashed was a blank viewport, not a wrong position.</para>
+    ///
+    /// <para>So the scroll sets out on an ESTIMATE and the animator asks for the truth every frame.
+    /// This asserts the shape that has no jump in it, which is the part a source scan can see; the
+    /// re-aiming itself is <see cref="TheScrollEasesOut_StartingAtOnceAndSettlingAtTheEnd"/>'s
+    /// neighbour below.</para>
+    /// </summary>
+    [Fact]
+    public void TheCardScrollNeverJumpsTheListToMeasureIt()
+    {
+        var code = RepoFile(Path.Combine("src", "Ui", "Views", "Layout", "TechEditorView.axaml.cs"));
+
+        int at   = At(code, "private void ScrollStackupSelectionIntoView()");
+        // COMMENTS STRIPPED FIRST, the convention every source scan in this repo follows: the block
+        // being scanned explains at length why it no longer calls ScrollIntoView, and a scan that read
+        // its own rationale would fail on the words describing the fix.
+        var body = StripComments(
+            code[at..code.IndexOf("private double EstimatedOffsetOf", at, StringComparison.Ordinal)]);
+
+        // The exact position when it is knowable, an estimate when it is not, and a retarget callback
+        // so the ease is re-aimed as the card is realised.
+        At(body, "TopOffsetOf(current, scroll) ?? EstimatedOffsetOf(current, scroll)");
+        At(body, "_stackupScroll.AnimateTo(scroll, target, () => TopOffsetOf(current, scroll))");
+
+        // The list is only ever ScrollIntoView'd on the path that has NO scroller to animate — never
+        // as a way of measuring, which is the jump this replaced.
+        int fallback = At(body, "if (scroll is null)");
+        int animate  = At(body, "_stackupScroll.AnimateTo");
+        int jump     = body.IndexOf("ScrollIntoView", StringComparison.Ordinal);
+        Assert.True(jump > fallback && jump < animate,
+            "ScrollIntoView may only appear in the no-scroller fallback");
+        Assert.Equal(jump, body.LastIndexOf("ScrollIntoView", StringComparison.Ordinal));
+
+        // And nothing writes the offset directly: every movement goes through the ease.
+        Assert.DoesNotContain("scroll.Offset =", body, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <b>The card list does not scroll itself.</b>
+    ///
+    /// <para>Owner, 2026-09-13, three times: "a quick flash in the scrollview". Twice it was looked
+    /// for in this view's own handler, and it was never there.
+    /// <c>SelectingItemsControl.AutoScrollToSelectedItem</c> defaults to TRUE, and its
+    /// <c>AutoScrollToSelectedItemIfNecessary</c> posts a <c>ScrollIntoView</c> that runs BEFORE this
+    /// view's Background-priority handler — so every selection change made TWO movements: the list's
+    /// own instant jump, rendered, then the eased scroll starting from wherever that left it. The jump
+    /// is the flash.</para>
+    ///
+    /// <para>The default is asserted as well as the override, so this test says why the override is
+    /// needed rather than merely that it is present — and fails loudly if a future Avalonia flips
+    /// it.</para>
+    /// </summary>
+    [Fact]
+    public void TheCardListsOwnAutoScrollIsOff_SoTheOnlyScrollIsTheEasedOne()
+    {
+        var tab = RepoFile(Path.Combine("src", "Ui", "Views", "Layout", "TechEditorView.axaml"));
+
+        int list = At(tab, "x:Name=\"StackupList\"");
+        Assert.Contains("AutoScrollToSelectedItem=\"False\"", tab[list..(list + 600)],
+                        StringComparison.Ordinal);
+
+        // Non-vacuity: it is off because it is ON by default, and that is what made the list jump.
+        Assert.True((bool)Avalonia.Controls.Primitives.SelectingItemsControl
+            .AutoScrollToSelectedItemProperty.GetMetadata(typeof(Avalonia.Controls.ListBox))
+            .DefaultValue!);
+    }
+
+    /// <summary>A card already wholly on screen is left where the user has it — with the list's own
+    /// auto-scroll off, this handler is the only thing that decides not to move.</summary>
+    [Fact]
+    public void ACardAlreadyOnScreenIsNotScrolledAtAll()
+    {
+        var code = RepoFile(Path.Combine("src", "Ui", "Views", "Layout", "TechEditorView.axaml.cs"));
+        var body = StripComments(code[At(code, "private void ScrollStackupSelectionIntoView()")..
+                                      At(code, "private readonly ScrollOffsetAnimator")]);
+
+        int guard   = At(body, "IsFullyVisible(current, scroll)");
+        int animate = At(body, "_stackupScroll.AnimateTo");
+        Assert.True(guard < animate, "the do-nothing case is decided before anything moves");
+    }
+
+    /// <summary>The re-aiming itself: a target that could not be known when the scroll started is
+    /// adopted mid-flight, and stops being listened to before the landing so the scroll does not
+    /// visibly settle twice.</summary>
+    [Fact]
+    public void TheScrollAdoptsATargetItCouldNotKnowWhenItStarted()
+    {
+        var code = RepoFile(Path.Combine("src", "Ui", "Controls", "ScrollOffsetAnimator.cs"));
+        var tick = StripComments(code[At(code, "private void OnTick")..]);
+
+        Assert.Contains("_retarget?.Invoke()", tick, StringComparison.Ordinal);
+        Assert.Contains("RetargetUntil", tick, StringComparison.Ordinal);
+
+        // Re-aimed, not restarted: _from and the start time are what keep it one continuous movement.
+        Assert.DoesNotContain("_from =", tick, StringComparison.Ordinal);
+        Assert.DoesNotContain("_startedAt =", tick, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The ease itself, which is the only part of an animated scroll that can be checked without a
+    /// window: it starts where it started, ends where it was sent, is monotone, and is an ease OUT —
+    /// most of the distance is covered in the first half, because the scroll is a response to a click
+    /// that has already happened and a lag at the front of it would be the one unacceptable thing.
+    /// </summary>
+    [Fact]
+    public void TheScrollEasesOut_StartingAtOnceAndSettlingAtTheEnd()
+    {
+        Assert.Equal(0, ScrollOffsetAnimator.Ease(0), 6);
+        Assert.Equal(1, ScrollOffsetAnimator.Ease(1), 6);
+
+        double previous = -1;
+        for (double t = 0; t <= 1.0001; t += 0.05)
+        {
+            double e = ScrollOffsetAnimator.Ease(t);
+            Assert.True(e > previous, $"the ease must be monotone; it went back at t={t}");
+            previous = e;
+        }
+
+        Assert.True(ScrollOffsetAnimator.Ease(0.5) > 0.75, "an ease-OUT covers most of it early");
+
+        // Short enough never to be something to wait for.
+        Assert.InRange(ScrollOffsetAnimator.DurationMs, 80, 300);
     }
 
     // ── R-stk3-6 — the shaded card ──────────────────────────────────────────────────────────────
@@ -529,7 +711,12 @@ public class StackupSelectionTests
     {
         var code = RepoFile(Path.Combine("src", "Ui", "Views", "Layout", "TechEditorView.axaml.cs"));
 
-        Assert.Contains("AddHandler(KeyDownEvent, OnEscapeKeyDown, RoutingStrategies.Tunnel);", code);
+        // handledEventsToo, because WorkspaceWindow's own `<KeyBinding Gesture="Escape" …/>` marks
+        // the key handled before visual-tree routing begins — without the flag this handler is
+        // skipped entirely and Esc does nothing here (owner-reported twice, 2026-09-13).
+        Assert.Contains(
+            "AddHandler(KeyDownEvent, OnEscapeKeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);",
+            code, StringComparison.Ordinal);
 
         int handler = code.IndexOf("private void OnEscapeKeyDown", StringComparison.Ordinal);
         Assert.True(handler >= 0);
@@ -582,6 +769,20 @@ public class StackupSelectionTests
         PlotDocumentWriter.BuildSvgString(
             canvas => StackupRenderer.Draw(canvas, scene, StackupRenderTheme.Light, overlay),
             new PagePlacement(scene.Width, scene.Height, 0f));
+
+    /// <summary>A C# source block with its <c>//</c> comments removed, so a scan asserts what the code
+    /// DOES rather than what its rationale says.</summary>
+    private static string StripComments(string source)
+        => System.Text.RegularExpressions.Regex.Replace(source, @"//[^\r\n]*", "");
+
+    /// <summary>The index of <paramref name="needle"/>, failing the test by NAME when it is absent —
+    /// a source scan that silently matched nothing would be a passing test of nothing.</summary>
+    private static int At(string haystack, string needle)
+    {
+        int i = haystack.IndexOf(needle, StringComparison.Ordinal);
+        Assert.True(i >= 0, $"expected to find: {needle}");
+        return i;
+    }
 
     private static string RepoFile(string rel)
     {

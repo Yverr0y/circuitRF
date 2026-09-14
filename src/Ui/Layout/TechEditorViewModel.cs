@@ -326,6 +326,44 @@ public sealed partial class TechEditorViewModel : ObservableObject
         CommitEdit(before, "Change bottom boundary condition");
     }
 
+    /// <summary>
+    /// Whether the Stackup tab's cross-section pane is expanded, and whether its card pane is —
+    /// the two small expanders at the top left of each (owner, 2026-09-13), so a user can give the
+    /// window to whichever half they are editing.
+    ///
+    /// <para><b>They persist in the <c>.ctech</c></b> (<c>Stackup.DrawingPaneExpanded</c> /
+    /// <c>CardPaneExpanded</c>), so they go through <see cref="CommitEdit"/> like every other edit in
+    /// this editor: the choice dirties the document, undoes and saves. That is
+    /// <see cref="SetViaDrawLane"/>'s precedent, and the same sentence applies — a cosmetic value is
+    /// still a value in the file.</para>
+    ///
+    /// <para><b>Both true is the default and neither can be set from a file to "both collapsed by
+    /// accident"</b>: null reads back as expanded, which is what every technology written before this
+    /// means.</para>
+    /// </summary>
+    [ObservableProperty] private bool _stackupDrawingExpanded = true;
+
+    /// <inheritdoc cref="StackupDrawingExpanded"/>
+    [ObservableProperty] private bool _stackupCardsExpanded = true;
+
+    partial void OnStackupDrawingExpandedChanged(bool value)
+        => CommitPaneState(() => Working.Stackup.DrawingPaneExpanded = value,
+                           value ? "Expand the cross-section" : "Collapse the cross-section");
+
+    partial void OnStackupCardsExpandedChanged(bool value)
+        => CommitPaneState(() => Working.Stackup.CardPaneExpanded = value,
+                           value ? "Expand the stackup cards" : "Collapse the stackup cards");
+
+    private void CommitPaneState(Action write, string description)
+    {
+        if (_suppressPaneCommit) return;
+        var before = SnapshotJson();
+        write();
+        CommitEdit(before, description);
+    }
+
+    private bool _suppressPaneCommit;
+
     partial void OnDefaultDisplayUnitChanged(LayoutUnit value)
     {
         if (_suppressDisplayUnitCommit || value == Working.DefaultDisplayUnit) return;
@@ -808,6 +846,13 @@ public sealed partial class TechEditorViewModel : ObservableObject
         StackupTop    = Working.Stackup.Top;
         StackupBottom = Working.Stackup.Bottom;
         _suppressBoundaryCommit = false;
+
+        // Null is EXPANDED — see Stackup.DrawingPaneExpanded. Suppressed for the same reason the two
+        // above are: this is the model being projected onto the view model, not an edit.
+        _suppressPaneCommit = true;
+        StackupDrawingExpanded = Working.Stackup.DrawingPaneExpanded ?? true;
+        StackupCardsExpanded   = Working.Stackup.CardPaneExpanded   ?? true;
+        _suppressPaneCommit = false;
 
         StackupLayers.Clear();
         foreach (var sl in Working.Stackup.Layers)

@@ -87,6 +87,22 @@ public static class StackupCardText
         "of whether the hole is plated, which is the item above. Plated is a hollow barrel with a " +
         "wall of the stated thickness; Solid is filled edge to edge.";
 
+    // ── The tab's two pane expanders (owner, 2026-09-13) ──────────────────────────────────────────
+
+    /// <summary>
+    /// What the cross-section's expander promises. It says the three things the glyph cannot: WHICH
+    /// pane it acts on — the two toggles sit side by side and their chevrons are identical — that the
+    /// space goes to the other pane rather than nowhere, and that the choice is SAVED, because a
+    /// control that quietly writes to the document is one a user should be told about before they
+    /// press it rather than after the title bar acquires a dot.
+    /// </summary>
+    public const string DrawingPaneExpanderTip =
+        "Toggle cross-section view.";
+
+    /// <inheritdoc cref="DrawingPaneExpanderTip"/>
+    public const string CardPaneExpanderTip =
+        "Toggle card view.";
+
     // ── Copy the drawing (R-stk7-4) ───────────────────────────────────────────────────────────────
 
     /// <summary>

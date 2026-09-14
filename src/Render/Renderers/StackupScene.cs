@@ -229,10 +229,9 @@ public sealed class StackupScene
     /// side, exactly as <c>DocStackupFixtures</c> puts it, so a barrel never runs through the band
     /// names on the left.</summary>
     public const float LaneStartFraction = 0.68f;
-    public const float LaneStepFraction  = 0.18f;
-    /// <summary>How many lanes before the spread WRAPS to a second pass rather than running off the
-    /// edge (R-stk1-8).</summary>
-    public const int   LaneCount = 3;
+    /// <summary>The tightest two barrels are ever packed — what the spread falls back to when the
+    /// column cannot hold every via's name as well as every via.</summary>
+    public const float LaneMinStep = BarrelWidth + 2f;
     /// <summary>Half-width of a gripper's drawn glyph.</summary>
     public const float GripGlyphHalf = 3.5f;
     /// <summary>How much larger than the glyph the gripper's HIT rect is, on every side.</summary>
@@ -267,7 +266,50 @@ public sealed class StackupScene
     /// are therefore separated by <c>2 × LabelPadX + PieceGap</c>, which is what makes R-stk1-9's
     /// "no two label rects intersect" hold for a sentence built out of several of them.</summary>
     public const float LabelPadX = 1.5f;
-    public const float LabelPadY = 3f;
+
+    /// <summary>
+    /// Vertical padding around a label in the COLUMN — and therefore, indirectly, <b>how well the
+    /// spec rows line up with the bands they describe</b>.
+    ///
+    /// <para>It was 3, which is what made it worth changing (owner, 2026-09-13: "we're allowing too
+    /// much vertical padding in the text on the right side"). Every line of every group carried 6 px
+    /// it did not need, so every CLUSTER of groups was that much taller, and <see cref="Separate"/>
+    /// re-centres a cluster about the mean of its members' ideal centres — a taller cluster displaces
+    /// each of its members further from its own band. Measured over the shipped technologies plus a
+    /// 20-hairline stack, at 900 px and 620 px: the mean distance from a thickness label's centre to
+    /// its band's centre went from <b>39.4 px to 14.8 px</b>, and the worst case from 116 to 62.</para>
+    ///
+    /// <para><b>It is not what keeps two labels apart</b>, which is why it can be this small:
+    /// <see cref="LabelGap"/> separates two GROUPS and <see cref="LineGap"/> two wrapped lines of one,
+    /// and both are strictly positive on their own account. What the padding still buys is a pixel of
+    /// slop around the glyphs for brief 4's double-click, which is why it is not zero.</para>
+    /// </summary>
+    public const float LabelPadY = 1f;
+
+    /// <summary>
+    /// The vertical padding an ON-BAND name is measured and drawn with, instead of
+    /// <see cref="LabelPadY"/> — and therefore <b>the whole of the rule that decides whether a band
+    /// keeps its own name</b>: it keeps it when its height admits the text's own face box plus this
+    /// much above and below.
+    ///
+    /// <para>Owner, 2026-09-13: on the shipped 4-layer board the 8 mil prepreg gave its name up to the
+    /// label column, and there is plainly room for it. There was: the band draws 20.95 px tall, the
+    /// text's face box is 16.90, and the test it failed was against the 22.90 px rect that face box
+    /// sits in when it is padded like a label in the COLUMN. That padding is there to keep two
+    /// separately-placed labels from touching (R-stk1-9); a name on its own band has no neighbour to
+    /// be kept from, only two band edges to stay clear of.</para>
+    ///
+    /// <para><b>It is the padding AND the threshold, deliberately.</b> The band is admitted only if
+    /// the padded text fits it, and the text is then emitted with exactly that padding — so an on-band
+    /// name's rect is inside its band BY CONSTRUCTION, which is what keeps R-stk1-9 true of a rect
+    /// that no separator ever sees. Two numbers here would be two chances to make a name that overlaps
+    /// the band above it.</para>
+    ///
+    /// <para>Not smaller: it has to clear the ground reference's heavy edge, which is
+    /// <c>StackupRenderer.GroundEdgeWidth</c> centred on the band's own edge and therefore reaches
+    /// half of that inward.</para>
+    /// </summary>
+    public const float OnBandPadY = 1.5f;
     /// <summary>Strictly positive, so adjacent pieces' padded rects are disjoint rather than merely
     /// touching — a guarantee that survives a future change to the intersection test.</summary>
     public const float PieceGap    = 1f;
@@ -285,6 +327,71 @@ public sealed class StackupScene
     public const float FooterPad = 12f;
     /// <summary>Between a via's barrel and the name drawn beside it.</summary>
     public const float ViaNameGap = 5f;
+
+    /// <summary>
+    /// What the ground reference's spec piece says.
+    ///
+    /// <para>"gnd", not "ground ref" (owner, 2026-09-13). It is printed inside a label column that
+    /// WRAPS, and the two words it used to be took a whole wrapped line on a narrow pane for a piece
+    /// of information the heavy edge on the band has already given. The abbreviation is the one every
+    /// schematic in this application already uses for the same net.</para>
+    /// </summary>
+    public const string GroundReferenceText = "gnd";
+
+    /// <summary>
+    /// How much of a conductor's name a via's SPAN keeps before a SPACE may end it (owner,
+    /// 2026-09-13).
+    ///
+    /// <para>A span is two conductor names and an arrow on one row, and process layers are not called
+    /// short things — "Inner 1 (Ground Plane)" and "Bottom Copper (1 oz)" together are most of a
+    /// narrow pane's label column, and the wrap then spends three lines on a via that has four things
+    /// to say.</para>
+    ///
+    /// <para><b>A BRACKET is not held to it</b>, and deliberately: see
+    /// <see cref="ElideSpanName"/>. Nothing under this length is ever shortened at all.</para>
+    /// </summary>
+    public const int SpanNameMinChars = 10;
+
+    /// <summary>The characters that open a qualifier — everything after one is a parenthetical, and a
+    /// span may cut at it wherever it falls.</summary>
+    private static readonly char[] QualifierOpeners = ['(', '['];
+
+    /// <summary>
+    /// A conductor name as a via's span shows it: whole if it is short, otherwise cut with an
+    /// ellipsis at whichever comes FIRST — an opening bracket, or a space at or after
+    /// <see cref="SpanNameMinChars"/>.
+    ///
+    /// <para><b>At a space and never mid-word.</b> "Bottom Copper (1 oz)" becomes "Bottom Copper…"
+    /// rather than "Bottom Cop…", because the first still names a layer a reader recognises and the
+    /// second is a string that could belong to two of them. A name with no space past the budget and
+    /// no bracket is therefore returned WHOLE: there is nowhere to cut it that leaves it readable, and
+    /// the label column wraps, which is a worse look but not a wrong one.</para>
+    ///
+    /// <para><b>A bracket cuts wherever it falls, even before the budget</b> (owner, 2026-09-13).
+    /// What follows one is a qualifier rather than part of the identity — "(1 oz)", "(Ground Plane)"
+    /// — so "Inner 1 (Ground Plane)" reads better as "Inner 1…" than as "Inner 1 (Ground…", which
+    /// spends six more characters and leaves a bracket hanging open. It cannot empty a name: the
+    /// length guard above means this only ever runs on a name longer than the budget, and a cut at
+    /// index 0 is refused for the name that IS a bracket.</para>
+    ///
+    /// <para>It is display only, and safe to be: brief 4 refuses to type a span
+    /// (<see cref="StackupField.Span"/> is a pair chosen from the card's combo boxes), so no elided
+    /// string is ever parsed back. <see cref="UnresolvedSpanText"/> deliberately does NOT use it — a
+    /// refusal has to quote the exact name that failed to resolve.</para>
+    /// </summary>
+    internal static string ElideSpanName(string? name)
+    {
+        if (name is not { Length: > SpanNameMinChars }) return name ?? "";
+
+        int bracket = name.IndexOfAny(QualifierOpeners);
+        int space   = name.IndexOf(' ', SpanNameMinChars);
+
+        int cut = bracket > 0 && (space < 0 || bracket < space) ? bracket : space;
+        if (cut <= 0) return name;
+
+        string elided = name[..cut].TrimEnd() + "…";
+        return elided.Length < name.Length ? elided : name;
+    }
 
     /// <summary>The fallback conductor colour, for a conductor bound to no drawing layer.</summary>
     public static readonly Rgba MetalFallback = new(190, 150, 90);
@@ -320,6 +427,64 @@ public sealed class StackupScene
     public bool IsTooNarrow { get; private init; }
     /// <summary>The pane was too narrow for a label column, so the specs moved onto the bands.</summary>
     public bool LabelColumnDropped { get; private init; }
+
+    /// <summary>The width the label column actually got.</summary>
+    public float LabelColumnWidth { get; private init; }
+
+    /// <summary>The width the widest label group would need to be drawn on ONE line — its pieces,
+    /// their gaps and their padding, laid out without wrapping.</summary>
+    public float WidestLabelGroup { get; private init; }
+
+    /// <summary>
+    /// Whether any label group had to WRAP at this width.
+    ///
+    /// <para>Derived from the two numbers above rather than recorded as a flag, so it is a statement
+    /// about the layout that a caller can also read the terms of. <see cref="WidthThatFitsLabels"/>
+    /// is what a caller that wants it false does about it.</para>
+    /// </summary>
+    public bool LabelsWrap => WidestLabelGroup > LabelColumnWidth + 0.01f;
+
+    /// <summary>
+    /// <b>The width at which nothing in the label column wraps</b> — at least
+    /// <paramref name="minWidth"/>, never more than <paramref name="maxWidth"/>.
+    ///
+    /// <para>brief 7's clipboard copy is the caller (owner, 2026-09-13: the copied picture must not
+    /// break a spec onto a second line). It belongs HERE and not there for R-stk1-1's reason: the
+    /// relationship between a scene's total width and its label column's is this class's arithmetic —
+    /// the band column takes a fraction, yields to the widest unbreakable token, and has a floor — and
+    /// a caller that solved for it would be keeping a second copy of all three.</para>
+    ///
+    /// <para><b>It iterates rather than solving.</b> Build is a pure function and cheap, and each
+    /// round adds the deficit the last one measured; because the label column takes a fixed FRACTION
+    /// of what is added, each round closes about half of the remaining gap and a handful of rounds
+    /// settles it. Solving in closed form would mean naming <see cref="BandColumnFraction"/> in the
+    /// arithmetic, which is exactly the coupling the iteration avoids.</para>
+    ///
+    /// <para>The cap is a refusal to loop, not a layout choice: a stackup whose labels cannot fit any
+    /// reasonable page gets the widest page tried and wraps, which is what it did before.</para>
+    /// </summary>
+    public static float WidthThatFitsLabels(Technology tech, float minWidth, float maxWidth)
+    {
+        ArgumentNullException.ThrowIfNull(tech);
+
+        float w = Math.Clamp(minWidth, MinRenderableWidth, maxWidth);
+        for (int round = 0; round < MaxWidenRounds; round++)
+        {
+            var scene = Build(tech, w);
+            if (!scene.LabelsWrap) return w;
+
+            float deficit = scene.WidestLabelGroup - scene.LabelColumnWidth;
+            if (deficit <= 0f || w >= maxWidth) break;
+
+            w = Math.Min(maxWidth, w + deficit + ColumnGap);
+        }
+        return w;
+    }
+
+    /// <summary>How many times <see cref="WidthThatFitsLabels"/> will widen before giving up. Each
+    /// round closes about half the remaining gap, so this is far more than convergence needs — it is
+    /// there so a pathological technology cannot spin.</summary>
+    public const int MaxWidenRounds = 24;
 
     /// <summary>
     /// The column the bands and the barrels share — every band's rect spans it exactly, and a via's
@@ -441,14 +606,26 @@ public sealed class StackupScene
                      .Select(v => v.WallThicknessDbu!.Value),
             ViaWallMin, ViaWallMax);
 
-        int slot = 0;
+        // Which vias can be drawn at all, decided BEFORE any of them is placed: the default spread
+        // leaves room between one barrel and the next for the first one's NAME, and it cannot size
+        // that gap without knowing how many barrels share the column and what each is called.
+        var placed = new List<StackupLayer>();
         foreach (var via in viaLayers)
         {
-            var a = FindBand(bands, via.SpanFromLayer);
-            var b = FindBand(bands, via.SpanToLayer);
-            if (a is null || b is null) { unresolved.Add(via); continue; }
+            if (FindBand(bands, via.SpanFromLayer) is null || FindBand(bands, via.SpanToLayer) is null)
+                unresolved.Add(via);
+            else
+                placed.Add(via);
+        }
+        var defaultLanes = DefaultLaneCentres(placed, specFont, bandLeft, bandWidth, dropLabels);
 
-            float cx    = LaneCentre(via, slot++, bandLeft, bandWidth, dropLabels, options);
+        for (int slot = 0; slot < placed.Count; slot++)
+        {
+            var via = placed[slot];
+            var a = FindBand(bands, via.SpanFromLayer)!;
+            var b = FindBand(bands, via.SpanToLayer)!;
+
+            float cx    = LaneCentre(via, defaultLanes[slot], bandLeft, bandWidth, options);
             float y0    = Math.Min(a.Rect.Top,    b.Rect.Top);
             float y1    = Math.Max(a.Rect.Bottom, b.Rect.Bottom);
             var   look  = LookOf(via);
@@ -497,13 +674,13 @@ public sealed class StackupScene
             // the spec — which is the same rule in both modes, because in the narrow mode the "label
             // column" is the band column's own right-hand part.
             float nameW = nameFont.MeasureText(layer.Name) + 2 * LabelPadX;
-            float nameH = FaceHeight(nameFont) + 2 * LabelPadY;
+            float nameH = FaceHeight(nameFont) + 2 * OnBandPadY;
             bool  onBand = !dropLabels && layer.Name.Length > 0
                         && nameH <= band.Rect.Height && nameW <= nameZoneWidth;
 
             if (onBand)
             {
-                var run = new PieceRun(bandLeft + InnerPad);
+                var run = new PieceRun(bandLeft + InnerPad, padY: OnBandPadY);
                 run.Add(layer.Name, StackupField.Name, StackupLabelStyle.BandName, nameFont, 0f);
                 run.Place(band.Rect.MidY - run.Height * 0.5f, layer.Name, labels, hits);
             }
@@ -523,13 +700,18 @@ public sealed class StackupScene
 
             // Rule 4: the via's name goes beside its barrel — unless it would run out of the band
             // column, in which case it joins the spec group, exactly as an over-wide band name does.
+            //
+            // Its ideal y is a BAND's centre rather than the barrel's, so the text lands inside one
+            // band instead of straddling a boundary — see ViaNameAnchorY, which is also where the
+            // dielectric-then-conductor preference is stated.
             float nameW = specFont.MeasureText(via.Name) + 2 * LabelPadX;
+            float nameH = FaceHeight(specFont) + 2 * LabelPadY;
             var   nameGroup = new LabelGroup(barrel.Rect.Right + ViaNameGap,
                                              bandRight - barrel.Rect.Right - ViaNameGap)
             {
                 LayerName = via.Name,
                 Index     = groups.Count,
-                AnchorY   = barrel.Rect.MidY,
+                AnchorY   = ViaNameAnchorY(bands, barrel.Rect, nameH),
             };
             bool besideBarrel = !dropLabels && nameGroup.Left + nameW <= bandRight;
             if (besideBarrel)
@@ -610,6 +792,8 @@ public sealed class StackupScene
             ConductorsCompressed  = conductorScale.Compressed,
             DielectricsCompressed = dielectricScale.Compressed,
             LabelColumnDropped    = dropLabels,
+            LabelColumnWidth      = labelWidth,
+            WidestLabelGroup      = groups.Count == 0 ? 0f : groups.Max(g => g.NaturalWidth),
             BandColumn            = bands.Count == 0
                 ? SKRect.Empty
                 : new SKRect(bandLeft, stackTop, bandRight, stackBottom),
@@ -651,7 +835,7 @@ public sealed class StackupScene
             // says it in the picture; this says it in words, on the same line — a second line would
             // be a second thing to keep from overlapping for no extra information.
             if (layer.IsGroundReference)
-                g.Add("ground ref", StackupField.None, StackupLabelStyle.Accent, font, QuantityGap);
+                g.Add(GroundReferenceText, StackupField.None, StackupLabelStyle.Accent, font, QuantityGap);
             return;
         }
 
@@ -684,22 +868,28 @@ public sealed class StackupScene
         // anywhere in it means the same thing, and brief 5 drags it as one.
         // Both are non-null here by construction — this runs only for a via whose span RESOLVED to
         // two bands — but Add ignores an empty piece anyway, so the guard costs nothing.
-        g.Add(via.SpanFromLayer ?? "", StackupField.Span, StackupLabelStyle.Spec, font, QuantityGap);
-        g.Add("→",               StackupField.Span, StackupLabelStyle.Spec, font, PieceGap);
-        g.Add(via.SpanToLayer   ?? "", StackupField.Span, StackupLabelStyle.Spec, font, PieceGap);
-        g.Add(barrel.Look switch
-        {
-            StackupViaLook.PlatedBarrel => "plated",
-            StackupViaLook.SolidFill    => "solid",
-            _                           => "unplated",
-        }, StackupField.None, StackupLabelStyle.Spec, font, QuantityGap);
+        g.Add(ElideSpanName(via.SpanFromLayer), StackupField.Span, StackupLabelStyle.Spec, font, QuantityGap);
+        g.Add("→",                              StackupField.Span, StackupLabelStyle.Spec, font, PieceGap);
+        g.Add(ElideSpanName(via.SpanToLayer),   StackupField.Span, StackupLabelStyle.Spec, font, PieceGap);
 
         // WallThicknessDbu is the WALL, not the hole radius — the confusion the model field's own
         // doc comment already warns about, and one a drawing that got it backwards would make
         // permanent. It is editable from the drawing on a plated-FILL via only, which is the only
         // state in which it means anything.
-        if (barrel.Look != StackupViaLook.PlatedBarrel) return;
-        g.Add("wall", StackupField.None, StackupLabelStyle.Spec, font, QuantityGap);
+        //
+        // "plated=25" and not "plated wall 25" (owner, 2026-09-13): the word was the only one on this
+        // row that named a field rather than said something about the via, and on a barrel whose look
+        // is already drawn as two walls with a bore between them it was telling the reader what they
+        // are looking at. The "=" carries the same sense the σ, εr and tanδ rows already use, and the
+        // value stays its own piece so brief 4 can still double-click it.
+        if (barrel.Look != StackupViaLook.PlatedBarrel)
+        {
+            g.Add(barrel.Look == StackupViaLook.SolidFill ? "solid" : "unplated",
+                  StackupField.None, StackupLabelStyle.Spec, font, QuantityGap);
+            return;
+        }
+
+        g.Add("plated =", StackupField.None, StackupLabelStyle.Spec, font, QuantityGap);
         g.Add(ThicknessText(via.WallThicknessDbu ?? 0L, tech), StackupField.WallThickness, StackupLabelStyle.Spec, font, PieceGap);
         g.Add(UnitText(tech), StackupField.None, StackupLabelStyle.Spec, font, PieceGap);
     }
@@ -753,36 +943,129 @@ public sealed class StackupScene
     }
 
     /// <summary>
-    /// R-stk1-8. Lanes spread across the right-hand fraction of the band column and WRAP to a second
-    /// pass, shifted left by rather more than a barrel width, rather than running off the edge when
-    /// there are more vias than lanes. An explicit per-via lane from
-    /// <see cref="StackupSceneOptions.ViaLanes"/> wins — which is all brief 5 has to supply.
+    /// R-stk1-8. An explicit per-via lane wins over everything: the caller's
+    /// <see cref="StackupSceneOptions.ViaLanes"/> first — that is a drag IN FLIGHT, which has to win
+    /// over what the technology still says until the release commits it — then the entry's own
+    /// persisted lane (R-stk5-7), so every reader of a technology draws the barrel where the user put
+    /// it with no plumbing of its own: the tab, the clipboard export and the documentation figures.
+    /// Failing both, <paramref name="defaultCentre"/> — <see cref="DefaultLaneCentres"/>' spread.
     /// </summary>
     private static float LaneCentre(
-        StackupLayer via, int slot, float bandLeft, float bandWidth, bool dropLabels,
+        StackupLayer via, float defaultCentre, float bandLeft, float bandWidth,
         StackupSceneOptions options)
     {
         float half = BarrelWidth * 0.5f;
         float lo   = bandLeft + half + 1f;
         float hi   = bandLeft + bandWidth - half - 1f;
 
-        // The caller's override first — that is a drag IN FLIGHT, which has to win over what the
-        // technology still says until the release commits it. Then the entry's own persisted lane
-        // (R-stk5-7), so every reader of a technology draws the barrel where the user put it without
-        // any plumbing of its own: the tab, the clipboard export and the documentation figures.
         if (options.ViaLanes is { } lanes && lanes.TryGetValue(via.Name, out float lane))
             return Math.Clamp(bandLeft + bandWidth * Math.Clamp(lane, 0f, 1f), lo, hi);
 
         if (via.DrawLaneFraction is { } stored && !double.IsNaN(stored))
             return Math.Clamp(bandLeft + bandWidth * (float)Math.Clamp(stored, 0d, 1d), lo, hi);
 
-        // With the specs on the bands there is no left-hand caption strip to stay out of and no room
-        // to spread: the lanes crowd into the gutter reserved for them at the right edge instead.
-        float x = dropLabels
-            ? hi - slot * (BarrelWidth + 2f)
-            : bandLeft + bandWidth * (LaneStartFraction - LaneStepFraction * (slot % LaneCount))
-              - (slot / LaneCount) * BarrelWidth * 1.25f;
-        return Math.Clamp(x, lo, hi);
+        return Math.Clamp(defaultCentre, lo, hi);
+    }
+
+    /// <summary>
+    /// Where the barrels go when nothing has placed them by hand — right to left, <b>with room left
+    /// between each one and the next for its own NAME</b>.
+    ///
+    /// <para>A via's name is drawn immediately to the RIGHT of its barrel, so the gap between barrel
+    /// <i>i</i> and barrel <i>i-1</i> is the space that name has to live in. The spread used to be
+    /// three fixed fractions of the column wrapping to a second pass, which took no account of how
+    /// long anything was called: on a board with several vias the name of one was printed across the
+    /// metal of the next (owner, 2026-09-13). Each step is now measured from the name it has to
+    /// clear.</para>
+    ///
+    /// <para><b>When they do not all fit, the steps are compressed uniformly and the names overlap</b>
+    /// — which is the stated fallback. A barrel pushed outside the band column would be worse: it
+    /// could not be seen, hovered or dragged back, and R-stk1-8 exists to stop exactly that.</para>
+    ///
+    /// <para>With the label column dropped there is no name beside a barrel at all
+    /// (<c>besideBarrel</c> is false), so nothing has to be kept clear and the barrels crowd into the
+    /// right-hand gutter exactly as they did.</para>
+    /// </summary>
+    private static List<float> DefaultLaneCentres(
+        List<StackupLayer> vias, SKFont specFont, float bandLeft, float bandWidth, bool dropLabels)
+    {
+        var centres = new List<float>(vias.Count);
+        if (vias.Count == 0) return centres;
+
+        float half = BarrelWidth * 0.5f;
+        float lo   = bandLeft + half + 1f;
+        float hi   = bandLeft + bandWidth - half - 1f;
+
+        if (dropLabels)
+        {
+            for (int i = 0; i < vias.Count; i++)
+                centres.Add(Math.Clamp(hi - i * LaneMinStep, lo, hi));
+            return centres;
+        }
+
+        // Slot 0 sits where it always has, which is what leaves the right-hand part of the column
+        // free for its own name.
+        float first = Math.Clamp(bandLeft + bandWidth * LaneStartFraction, lo, hi);
+
+        var   steps = new float[vias.Count];
+        float total = 0f;
+        for (int i = 1; i < vias.Count; i++)
+        {
+            float nameW = specFont.MeasureText(vias[i].Name) + 2 * LabelPadX;
+            steps[i] = Math.Max(LaneMinStep, BarrelWidth + ViaNameGap + nameW + NameZoneGap);
+            total   += steps[i];
+        }
+
+        float room  = Math.Max(0f, first - lo);
+        float scale = total > room && total > 0f ? room / total : 1f;
+
+        float x = first;
+        centres.Add(x);
+        for (int i = 1; i < vias.Count; i++)
+        {
+            x -= Math.Max(LaneMinStep, steps[i] * scale);
+            centres.Add(Math.Clamp(x, lo, hi));
+        }
+        return centres;
+    }
+
+    /// <summary>
+    /// Where a via's own name sits vertically: <b>centred in ONE band of the sandwich</b> wherever a
+    /// band the barrel crosses is tall enough to hold it (owner, 2026-09-13). A name straddling a
+    /// boundary is half on metal and half on dielectric and reads as neither.
+    ///
+    /// <para>A DIELECTRIC is preferred over a conductor — it is the taller band on very nearly every
+    /// stack, and it carries no on-band name of its own — and among the candidates of one kind the
+    /// one whose centre is nearest the barrel's own middle wins, so the name stays where the eye
+    /// looks for it. With no band tall enough the barrel's middle stands: mixed is the LAST
+    /// preference, not a refusal.</para>
+    ///
+    /// <para>It is the group's ideal anchor and not its final y. <see cref="Separate"/> still runs,
+    /// and two names whose x intervals overlap — which the spread above avoids unless the column is
+    /// too narrow to hold them all — are still pushed apart, because R-stk1-9 outranks this.</para>
+    /// </summary>
+    private static float ViaNameAnchorY(List<StackupBand> bands, SKRect barrel, float textHeight)
+    {
+        float best     = barrel.MidY;
+        float bestNear = float.PositiveInfinity;
+        int   bestRank = int.MaxValue;
+
+        foreach (var band in bands)
+        {
+            // Only a band the barrel actually crosses. A name floated onto some other band would put
+            // the via somewhere it is not.
+            if (band.Rect.Bottom <= barrel.Top || band.Rect.Top >= barrel.Bottom) continue;
+            if (band.Rect.Height < textHeight) continue;
+
+            int   rank = band.Kind == StackupKind.Dielectric ? 0 : 1;
+            float near = Math.Abs(band.Rect.MidY - barrel.MidY);
+            if (rank > bestRank || (rank == bestRank && near >= bestNear)) continue;
+
+            bestRank = rank;
+            bestNear = near;
+            best     = band.Rect.MidY;
+        }
+        return best;
     }
 
     /// <summary>
@@ -812,8 +1095,11 @@ public sealed class StackupScene
             Token(layer.Epsr.ToString("0.####",   Inv), specFont);
             Token(layer.TanD.ToString("0.######", Inv), specFont);
             Token(layer.Mur .ToString("0.####",   Inv), specFont);
-            Token(layer.SpanFromLayer, specFont);
-            Token(layer.SpanToLayer,   specFont);
+            // The ELIDED spellings, because those are what get drawn — sizing the column against the
+            // full names would yield width to a token the scene never emits, which is the whole of
+            // what the elision was for.
+            Token(ElideSpanName(layer.SpanFromLayer), specFont);
+            Token(ElideSpanName(layer.SpanToLayer),   specFont);
             if (layer.WallThicknessDbu is { } w) Token(ThicknessText(w, tech), specFont);
             if (layer.PresentWithLayer is { Length: > 0 } plate)
                 Token($"patterned: {plate}", specFont);
@@ -922,16 +1208,27 @@ public sealed class StackupScene
         private readonly List<PieceSpec> _pieces = [];
         private readonly List<int>       _lineStart = [];
         private readonly float           _maxWidth;
+        private readonly float           _padY;
         private float _width;
+        private float _natural;
         private float _ascent  = float.PositiveInfinity;
         private float _descent;
 
-        public PieceRun(float left, float maxWidth = float.PositiveInfinity)
-        { Left = left; _maxWidth = maxWidth; }
+        /// <param name="padY">Above and below the text's face box. <see cref="LabelPadY"/> for a run
+        /// in the label column, where the padding is what keeps two separately-placed labels from
+        /// touching; <see cref="OnBandPadY"/> for a name drawn ON its band, which has no neighbour to
+        /// be kept from and two band edges to stay inside.</param>
+        public PieceRun(float left, float maxWidth = float.PositiveInfinity, float padY = LabelPadY)
+        { Left = left; _maxWidth = maxWidth; _padY = padY; }
 
         public float Left  { get; set; }
         public float Width => _width;
-        public float LineHeight => _pieces.Count == 0 ? 0f : (_descent - _ascent) + 2 * LabelPadY;
+
+        /// <summary>What this run would need to be drawn on ONE line — every piece, its gap and its
+        /// padding, with no wrap. <see cref="Width"/> is the width it actually occupies, which is the
+        /// widest of its wrapped lines and therefore never more than the maximum it was given.</summary>
+        public float NaturalWidth => _natural;
+        public float LineHeight => _pieces.Count == 0 ? 0f : (_descent - _ascent) + 2 * _padY;
         public int   PieceCount => _pieces.Count;
         public float Height =>
             _lineStart.Count == 0 ? 0f : _lineStart.Count * LineHeight + (_lineStart.Count - 1) * LineGap;
@@ -954,6 +1251,7 @@ public sealed class StackupScene
         {
             _lineStart.Clear();
             _width = 0f;
+            _natural = 0f;
             float cursor = 0f;
             for (int i = 0; i < _pieces.Count; i++)
             {
@@ -961,6 +1259,9 @@ public sealed class StackupScene
                 bool first = _lineStart.Count == 0 || cursor <= 0f;
                 float advance = first ? 0f : PieceGap + p.GapBefore;
                 float right   = cursor + advance + p.Width + 2 * LabelPadX;
+
+                // The unwrapped width, accumulated alongside: what the run would need on one line.
+                _natural += (i == 0 ? 0f : PieceGap + p.GapBefore) + p.Width + 2 * LabelPadX;
 
                 if (!first && right > _maxWidth)
                 {
@@ -988,7 +1289,7 @@ public sealed class StackupScene
                 int to   = line + 1 < _lineStart.Count ? _lineStart[line + 1] : _pieces.Count;
 
                 float lineTop  = top + line * (lineH + LineGap);
-                float baseline = lineTop + LabelPadY - _ascent;
+                float baseline = lineTop + _padY - _ascent;
                 float cursor   = Left;
 
                 for (int i = from; i < to; i++)

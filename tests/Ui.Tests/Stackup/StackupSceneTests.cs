@@ -16,6 +16,13 @@ namespace CircuitRF.Ui.Tests.StackupRender;
 /// brief-stackup-render-1-scene.md's gate. Every test here builds a scene and reads it — no window,
 /// no app host, no canvas, which is the point of the scene being a pure function.
 /// </summary>
+// SkiaFontsTypefaceCollection: this class ASSERTS OVER RENDERED TEXT BYTES, which is the second
+// half of that collection's stated membership rule and the half it says is easy to miss — a class
+// like this one looks as though it touches no global at all. It does not set either typeface static;
+// what it cannot survive is another class setting one WHILE it renders. Caught in a full-solution
+// run (2026-09-13): two builds of one scene came back with `font-family="Helvetica"` on one side and
+// IBM Plex on the other, and the same test passed alone.
+[Collection(CircuitRF.Ui.Tests.SkiaFontsTypefaceCollection.Name)]
 public class StackupSceneTests
 {
     private const float Wide = 900f;
@@ -298,6 +305,68 @@ public class StackupSceneTests
                                  $"20 hairline bands at {width} px");
     }
 
+    /// <summary>
+    /// <b>A spec row lines up with the band it describes</b>, on a pane wide enough for the label
+    /// column not to wrap much.
+    ///
+    /// <para>Owner, 2026-09-13: "too much vertical padding in the text on the right side… if we reduce
+    /// it, it will be easier to align the text row with its cross-section band." It was
+    /// <c>LabelPadY = 3</c>, so every line of every group carried 6 px it did not need; every CLUSTER
+    /// of groups was that much taller, and <see cref="StackupScene"/>'s separator re-centres a cluster
+    /// about the mean of its members' ideal centres, which displaces each member further from its own
+    /// band. At 1 the mean offset over the shipped technologies fell from 39.4 px to 4.25 and the
+    /// worst from 29.1 to 11.58.</para>
+    ///
+    /// <para>The bounds are the measurement plus headroom for a font change, and they are chosen to
+    /// FAIL at the old padding: 29.1 px is over the 20 px ceiling below.</para>
+    /// </summary>
+    [Fact]
+    public void ASpecRowLinesUpWithItsBand_OnEveryShippedTechnology()
+    {
+        double total = 0, worst = 0;
+        int n = 0;
+        string worstWho = "";
+
+        foreach (var entry in ShippedTechnologies.All)
+        {
+            var scene = StackupScene.Build(Shipped(entry.Id), Wide);
+            foreach (var band in scene.Bands)
+            {
+                var spec = scene.Labels.FirstOrDefault(
+                    l => string.Equals(l.LayerName, band.Name, StringComparison.Ordinal) &&
+                         l.Field == StackupField.Thickness);
+                if (spec is null) continue;
+
+                double d = Math.Abs(spec.Rect.MidY - band.Rect.MidY);
+                total += d;
+                n++;
+                if (d > worst) { worst = d; worstWho = $"{entry.Id}/{band.Name}"; }
+            }
+        }
+
+        Assert.True(n > 20, $"only {n} bands were measured — the gate proved little.");
+        Assert.True(worst <= 20, $"worst offset {worst:F2} px at {worstWho}");
+        Assert.True(total / n <= 8, $"mean offset {total / n:F2} px over {n} bands");
+    }
+
+    /// <summary>
+    /// …and the padding is NOT what keeps two labels apart, which is what lets it be that small:
+    /// <c>LabelGap</c> separates two groups and <c>LineGap</c> two wrapped lines of one, and both are
+    /// strictly positive on their own account. R-stk1-9 rests on those, not on the padding.
+    /// </summary>
+    [Fact]
+    public void TheLabelPaddingIsNotWhatKeepsTwoLabelsApart()
+    {
+        Assert.True(StackupScene.LabelGap > 0);
+        Assert.True(StackupScene.LineGap  > 0);
+        Assert.True(StackupScene.LabelPadY < StackupScene.LabelGap,
+            "the padding must not be carrying the separation the two gaps are for");
+
+        // Not zero either: brief 4 double-clicks these rects, and a rect that is exactly the glyph box
+        // is one a click a pixel high misses.
+        Assert.True(StackupScene.LabelPadY > 0);
+    }
+
     [Fact]
     public void WithNothingToCollideWith_ASpecSitsOnItsBandsOwnCentreLine()
     {
@@ -352,6 +421,55 @@ public class StackupSceneTests
                 $"{band.Name}'s group must LEAD with its name, not bury it.");
         }
         Assert.True(moved > 5, "the worst case should have moved most of the names off their bands.");
+    }
+
+    /// <summary>
+    /// <b>The threshold IS the padding</b>, so an on-band name is inside its band by construction —
+    /// which is what keeps R-stk1-9 true of a rect the separator never sees.
+    ///
+    /// <para>Owner, 2026-09-13: the shipped 4-layer board's 8 mil prepreg gave its name up to the
+    /// label column with plainly room for it. The band draws 20.95 px, the text's face box is 16.90,
+    /// and what it failed was a test against the 22.90 px rect that face box sits in when it is padded
+    /// like a label in the COLUMN — padding that exists to keep two separately-placed labels apart, of
+    /// which an on-band name has none.</para>
+    /// </summary>
+    [Fact]
+    public void AnOnBandNameIsInsideItsBand_OnEveryShippedTechnology()
+    {
+        foreach (var entry in ShippedTechnologies.All)
+        {
+            var scene = StackupScene.Build(Shipped(entry.Id), Wide);
+            foreach (var label in scene.Labels.Where(l => l.Style == StackupLabelStyle.BandName))
+            {
+                var band = scene.Bands.Single(b =>
+                    string.Equals(b.Name, label.LayerName, StringComparison.Ordinal));
+                Assert.True(band.Rect.Contains(label.Rect),
+                    $"{entry.Id}: \"{label.Text}\" at {label.Rect} is not inside {band.Rect}.");
+            }
+        }
+    }
+
+    /// <summary>The 8 mil prepreg itself, named, because it is the case that was reported and a
+    /// property test over every technology would go on passing if it silently moved off again.</summary>
+    [Fact]
+    public void TheFourLayerBoardsEightMilPrepregKeepsItsOwnName()
+    {
+        var scene = StackupScene.Build(Shipped("pcb-4layer_FR-4_62mil_1oz"), Wide);
+
+        foreach (string name in new[] { "Prepreg (top)", "Prepreg (bottom)" })
+        {
+            var band  = scene.Bands.Single(b => b.Name == name);
+            var label = scene.Labels.Single(l => l.LayerName == name && l.Field == StackupField.Name);
+
+            Assert.Equal(StackupLabelStyle.BandName, label.Style);
+            Assert.True(band.Rect.Contains(label.Rect), $"{name} at {label.Rect} left {band.Rect}.");
+        }
+
+        // …and it is NOT that the threshold simply went away: the 1 oz inner planes are thinner still
+        // and keep their names in the column, which is where a band that cannot hold one puts it.
+        foreach (string name in new[] { "Inner 1 (Ground Plane)", "Inner 2" })
+            Assert.Equal(StackupLabelStyle.ColumnName,
+                scene.Labels.Single(l => l.LayerName == name && l.Field == StackupField.Name).Style);
     }
 
     [Fact]
@@ -611,6 +729,245 @@ public class StackupSceneTests
         // in DocStackupFixtures.
         Assert.Equal(StackupRenderTheme.Light.OnBandInk, StackupRenderTheme.Dark.OnBandInk);
         Assert.NotEqual(StackupRenderTheme.Light.LabelInk, StackupRenderTheme.Dark.LabelInk);
+    }
+
+    // ── A via's SPEC row: elided span names, and no "wall" (owner, 2026-09-13) ───────────────────
+
+    /// <summary>
+    /// A span name is kept whole when it is short, and otherwise cut <b>at a bracket or at a space</b>
+    /// — never mid-word, because "Bottom Copper…" still names a layer a reader recognises and
+    /// "Bottom Cop…" is a string that could belong to two of them.
+    ///
+    /// <para>A BRACKET cuts wherever it falls, even before the budget (owner, 2026-09-13): what
+    /// follows one is a qualifier rather than part of the identity, so "Inner 1 (Ground Plane)" reads
+    /// better as "Inner 1…" than as "Inner 1 (Ground…", which spends six more characters and leaves a
+    /// bracket hanging open.</para>
+    /// </summary>
+    [Theory]
+    [InlineData("Metal1",                 "Metal1")]                 // shorter than the budget
+    [InlineData("Inner 2",                "Inner 2")]
+    [InlineData("Ten charsX",             "Ten charsX")]             // exactly the budget
+    [InlineData("M1 (top plate)",         "M1…")]                    // a bracket, well before the budget
+    [InlineData("Top Copper (1 oz)",      "Top Copper…")]
+    [InlineData("Bottom Copper (1 oz)",   "Bottom Copper…")]
+    [InlineData("Inner 1 (Ground Plane)", "Inner 1…")]
+    [InlineData("Inner 1 [Ground Plane]", "Inner 1…")]               // square brackets too
+    [InlineData("Backside Metal",         "Backside Metal")]         // the cut would not shorten it
+    [InlineData("NoSpacesAnywhereAtAll",  "NoSpacesAnywhereAtAll")]  // nowhere readable to cut
+    // A bracket at index 0 is REFUSED as a cut point — it would leave nothing — so the space rule
+    // takes over and the name is still shortened, just not to the empty string.
+    [InlineData("(a very long qualifier)", "(a very long…")]
+    public void ASpanNameIsElidedAtAWordBoundaryOrNotAtAll(string name, string shown)
+        => Assert.Equal(shown, StackupScene.ElideSpanName(name));
+
+    /// <summary>…and the scene actually emits the elided spelling, on the shipped board whose layer
+    /// names are long enough to matter.</summary>
+    [Fact]
+    public void TheDrawingShowsTheElidedSpan_NotTheFullConductorName()
+    {
+        var scene = StackupScene.Build(Shipped("pcb-4layer_FR-4_62mil_1oz"), Wide);
+        var spans = scene.Labels.Where(l => l.Field == StackupField.Span).Select(l => l.Text).ToList();
+
+        Assert.Contains("Top Copper…", spans);
+        Assert.DoesNotContain("Top Copper (1 oz)", spans);
+
+        // The 4-layer board's own bracket case, which is what asked for the bracket rule.
+        Assert.Contains("Inner 1…", spans);
+
+        // The band's OWN name is untouched — only a via's span is elided.
+        Assert.Contains(scene.Labels, l => l.Field == StackupField.Name && l.Text == "Top Copper (1 oz)");
+    }
+
+    /// <summary>
+    /// An unresolvable via's refusal quotes the name VERBATIM. It is the string that failed to
+    /// resolve, and a refusal naming a shortened version of it sends the reader looking for a layer
+    /// that was never spelled that way.
+    /// </summary>
+    [Fact]
+    public void ARefusalQuotesTheSpanNameWhole()
+    {
+        var tech = Shipped("pcb-4layer_FR-4_62mil_1oz");
+        tech.Stackup.Layers.Single(l => l.Kind == StackupKind.Via && l.SpanToLayer == "Inner 1 (Ground Plane)")
+            .SpanToLayer = "Inner 9 (Ground Plane)";
+
+        var scene = StackupScene.Build(tech, Wide);
+        Assert.Contains(scene.Labels, l => l.Text.Contains("\"Inner 9 (Ground Plane)\"", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The plated wall reads "plated = 25 µm" and no longer says "wall".
+    ///
+    /// <para>The word was the only one on that row naming a FIELD rather than saying something about
+    /// the via, and on a barrel already drawn as two walls with a bore between them it told the reader
+    /// what they were looking at. The "=" is the spelling σ, εr and tanδ already use on a band.</para>
+    /// </summary>
+    [Fact]
+    public void APlatedWallIsWrittenAsAnEquality_AndTheWordWallIsGone()
+    {
+        var scene = StackupScene.Build(Shipped("pcb-4layer_FR-4_62mil_1oz"), Wide);
+        var via   = scene.Barrels.First(b => b.Look == StackupViaLook.PlatedBarrel);
+        var row   = scene.Labels.Where(l => l.LayerName == via.Name).ToList();
+
+        Assert.Contains(row, l => l.Text == "plated =");
+        Assert.DoesNotContain(row, l => l.Text.Contains("wall", StringComparison.OrdinalIgnoreCase));
+
+        // The value is still its own piece, so brief 4 can still double-click it.
+        Assert.Contains(row, l => l.Field == StackupField.WallThickness);
+    }
+
+    /// <summary>A via that is not a plated barrel has no wall to state, so it keeps the bare word —
+    /// "plated =" with nothing meaningful after it would be worse than either.</summary>
+    [Theory]
+    [InlineData(StackupViaLook.SolidFill,    "solid")]
+    [InlineData(StackupViaLook.UnplatedHole, "unplated")]
+    public void AViaWithNoWallKeepsTheBareWord(StackupViaLook look, string word)
+    {
+        var tech = Shipped("pcb-2layer_RO4350B_20mil_1oz");
+        var via  = tech.Stackup.Layers.Single(l => l.Kind == StackupKind.Via);
+        if (look == StackupViaLook.SolidFill) via.Fill = ViaFillKind.Solid;
+        else                                  via.Plated = false;
+
+        var scene = StackupScene.Build(tech, Wide);
+        var row   = scene.Labels.Where(l => l.LayerName == via.Name).ToList();
+
+        Assert.Contains(row, l => l.Text == word);
+        Assert.DoesNotContain(row, l => l.Text == "plated =");
+    }
+
+    // ── A via's NAME: inside one band, and clear of the next barrel (owner, 2026-09-13) ──────────
+
+    /// <summary>
+    /// <b>A via's name lands inside ONE band</b>, wherever a band the barrel crosses is tall enough
+    /// to hold it. A name straddling a boundary is half on metal and half on dielectric and reads as
+    /// neither.
+    ///
+    /// <para>Every shipped technology, at the width the tab actually uses, because the failure is a
+    /// function of where the bands happen to fall.</para>
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ShippedIds))]
+    public void AViasNameSitsInsideOneBand_OnEveryShippedTechnology(string id)
+    {
+        var scene = StackupScene.Build(Shipped(id), Wide);
+        int checkedNames = 0;
+
+        foreach (var barrel in scene.Barrels)
+        {
+            var name = scene.Labels.FirstOrDefault(
+                l => l.Style == StackupLabelStyle.ViaName &&
+                     string.Equals(l.LayerName, barrel.Name, StringComparison.Ordinal));
+            if (name is null) continue;   // pushed into the label column instead — rule 4's other half
+
+            // A band could hold it at all: otherwise "inside one band" is not something the drawing
+            // can honour and the barrel's own middle is the stated fallback.
+            var candidates = scene.Bands
+                .Where(b => b.Rect.Bottom > barrel.Rect.Top && b.Rect.Top < barrel.Rect.Bottom)
+                .Where(b => b.Rect.Height >= name.Rect.Height)
+                .ToList();
+            if (candidates.Count == 0) continue;
+
+            checkedNames++;
+            Assert.True(
+                candidates.Any(b => name.Rect.Top >= b.Rect.Top - 0.01f &&
+                                    name.Rect.Bottom <= b.Rect.Bottom + 0.01f),
+                $"{barrel.Name}'s name at {name.Rect} straddles a band boundary.");
+        }
+
+        Assert.True(checkedNames > 0, "no via name was placed beside a barrel — the gate proved nothing.");
+    }
+
+    /// <summary>A DIELECTRIC is preferred: it is the taller band on nearly every stack and it carries
+    /// no on-band name of its own.</summary>
+    [Fact]
+    public void AViasNamePrefersADielectricBandOverAConductor()
+    {
+        var scene = StackupScene.Build(Shipped("pcb-2layer_RO4350B_20mil_1oz"), Wide);
+        var barrel = scene.Barrels.Single();
+        var name = scene.Labels.Single(
+            l => l.Style == StackupLabelStyle.ViaName &&
+                 string.Equals(l.LayerName, barrel.Name, StringComparison.Ordinal));
+
+        var band = scene.Bands.Single(b => name.Rect.Top >= b.Rect.Top - 0.01f &&
+                                           name.Rect.Bottom <= b.Rect.Bottom + 0.01f);
+        Assert.Equal(StackupKind.Dielectric, band.Kind);
+    }
+
+    /// <summary>
+    /// <b>A via's name does not run over the next barrel's metal.</b> The name is drawn immediately
+    /// to the right of its own barrel, so the lane spread has to leave that much room between one
+    /// barrel and the next — which the old three-fixed-fractions spread did not, because it took no
+    /// account of what anything was called.
+    /// </summary>
+    [Fact]
+    public void ViaNamesAreClearOfTheNextBarrel_WhenTheColumnHasRoom()
+    {
+        var tech = Shipped("pcb-2layer_RO4350B_20mil_1oz");
+        var seed = tech.Stackup.Layers.Single(l => l.Kind == StackupKind.Via);
+        foreach (string n in new[] { "GND via", "Thermal", "Stitch" })
+        {
+            var extra = Clone(seed);
+            extra.Name = n;
+            tech.Stackup.Layers.Add(extra);
+        }
+
+        var scene = StackupScene.Build(tech, Wide);
+        Assert.Equal(4, scene.Barrels.Count);
+
+        foreach (var name in scene.Labels.Where(l => l.Style == StackupLabelStyle.ViaName))
+            foreach (var barrel in scene.Barrels)
+            {
+                if (string.Equals(barrel.Name, name.LayerName, StringComparison.Ordinal)) continue;
+                Assert.False(name.Rect.IntersectsWith(barrel.Rect),
+                    $"\"{name.Text}\" at {name.Rect} runs over {barrel.Name}\'s barrel {barrel.Rect}.");
+            }
+    }
+
+    /// <summary>…and when it does NOT have room the barrels still stay inside the column, which is
+    /// R-stk1-8 and outranks the names: overlapping text is the stated fallback, a barrel off the
+    /// page is not.</summary>
+    [Fact]
+    public void WithNoRoomForEveryName_TheBarrelsStillStayInsideTheBandColumn()
+    {
+        var tech = Shipped("pcb-2layer_RO4350B_20mil_1oz");
+        var seed = tech.Stackup.Layers.Single(l => l.Kind == StackupKind.Via);
+        for (int i = 0; i < 9; i++)
+        {
+            var extra = Clone(seed);
+            extra.Name = $"A rather long via name {i}";
+            tech.Stackup.Layers.Add(extra);
+        }
+
+        var scene = StackupScene.Build(tech, Wide);
+        Assert.Equal(10, scene.Barrels.Count);
+
+        float left = scene.BandColumn.Left, right = scene.BandColumn.Right;
+        foreach (var barrel in scene.Barrels)
+        {
+            Assert.True(barrel.Rect.Left  >= left,  $"{barrel.Name} ran off the left edge.");
+            Assert.True(barrel.Rect.Right <= right, $"{barrel.Name} ran off the right edge.");
+        }
+    }
+
+    // ── The ground reference's spec piece ────────────────────────────────────────────────────────
+
+    /// <summary>"gnd", not "ground ref" (owner, 2026-09-13): the label column wraps, and the two
+    /// words took a whole wrapped line for what the band's heavy edge has already said.</summary>
+    [Fact]
+    public void TheGroundReferenceIsLabelledGnd()
+    {
+        var tech  = Shipped("pcb-2layer_RO4350B_20mil_1oz");
+        var ground = tech.Stackup.Layers.First(l => l.IsGroundReference);
+        var scene = StackupScene.Build(tech, Wide);
+
+        var accents = scene.Labels
+            .Where(l => l.Style == StackupLabelStyle.Accent &&
+                        string.Equals(l.LayerName, ground.Name, StringComparison.Ordinal))
+            .Select(l => l.Text)
+            .ToList();
+
+        Assert.Contains(StackupScene.GroundReferenceText, accents);
+        Assert.Equal("gnd", StackupScene.GroundReferenceText);
+        Assert.DoesNotContain(scene.Labels, l => l.Text.Contains("ground ref", StringComparison.Ordinal));
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────────

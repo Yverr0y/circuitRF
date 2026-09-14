@@ -200,6 +200,28 @@ public sealed partial class StackupCanvas : Control
 
     // ── Pointer: click selects, hover marks (R-stk3-2, R-stk3-4) ──────────────────────────────────
 
+    /// <summary>
+    /// <b>The switch that turns hover highlighting off, and it is off.</b>
+    ///
+    /// <para>Owner, 2026-09-13: remove the mouse-over highlighting — keep the code, gate it. So this
+    /// is the one thing that decides, and it is read in exactly two places:
+    /// <see cref="Overlay"/> stops publishing what the pointer is over, and <see cref="MoveAt"/>
+    /// stops tracking it at all so a mouse sweep costs no repaints. Everything downstream —
+    /// <c>StackupOverlay.HoverLayer</c>, <c>StackupRenderer</c>'s lighter outline, the grippers a
+    /// hovered via revealed — is untouched and comes back by setting this true.</para>
+    ///
+    /// <para>What R-stk3-4 argued for is not wrong and is worth keeping written down: without hover
+    /// the first click on this drawing is a guess, because nothing says it is clickable. What
+    /// replaced it is the selection outline, which says what the drawing is ABOUT rather than where a
+    /// pointer happens to be — and a via's grippers therefore appear on SELECTION, which is one click
+    /// and is a rule that holds whether or not a pointer is over the drawing at all.</para>
+    ///
+    /// <para>A settable static rather than a <c>const</c>: a const would make every guarded branch
+    /// unreachable, which this solution treats as an error, and — more to the point — it would make
+    /// the kept code untestable. The gate's own tests flip it.</para>
+    /// </summary>
+    internal static bool HoverHighlighting { get; set; }
+
     /// <summary>The layer under the pointer. Canvas-local and deliberately NOT on the view model:
     /// hover is a property of one pointer over one drawing, it survives nothing and nobody else reads
     /// it, whereas the SELECTION is shared with the card list and is the view model's.</summary>
@@ -209,7 +231,7 @@ public sealed partial class StackupCanvas : Control
     /// the two pieces of state above, so there is no third copy to keep in step.</summary>
     private StackupOverlay Overlay => _drag.Decorate(new StackupOverlay
     {
-        HoverLayer    = _hoverLayer,
+        HoverLayer    = HoverHighlighting ? _hoverLayer : null,
         SelectedLayer = _viewModel?.SelectedStackupLayerName,
     });
 
@@ -308,6 +330,10 @@ public sealed partial class StackupCanvas : Control
         // chasing the pointer across bands the drag is passing over reads as a second selection.
         if (_drag.Update(SceneNow(), (float)p.X, (float)p.Y, freeLane)) { InvalidateVisual(); return; }
         if (_drag.IsDragging) return;
+
+        // With the switch off, a pointer crossing the drawing does nothing at all — not even the
+        // hit-test. The tracking is what costs; the overlay already refuses to publish it.
+        if (!HoverHighlighting) return;
 
         SetHover(HitAt(p)?.LayerName);
     }

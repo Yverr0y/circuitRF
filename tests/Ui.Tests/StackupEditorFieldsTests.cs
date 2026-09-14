@@ -223,4 +223,102 @@ public class StackupEditorFieldsTests
 
         Assert.Null(Row(vm, "Via1").Layer.WallThicknessDbu);
     }
+
+    // ── A refused thickness puts the field back (owner, 2026-09-13) ───────────
+
+    /// <summary>
+    /// <b>A conductor given a negative thickness must not leave the card showing a number the design
+    /// does not have.</b> The refusal used to keep the typed text, so the card read "-3" while the
+    /// cross-section above it went on drawing — and printing — the thickness the layer actually has.
+    /// Two surfaces disagreeing about one value, with only a message to say which was the design.
+    /// </summary>
+    [Theory]
+    [InlineData("-3")]
+    [InlineData("0")]
+    [InlineData("nonsense")]
+    public void ARefusedThicknessRevertsTheField_AndSaysWhy(string typed)
+    {
+        var vm  = Vm();
+        long before = Row(vm, "Metal1").Layer.ThicknessDbu;
+        string shown = Row(vm, "Metal1").StagedThicknessText;
+
+        var row = Row(vm, "Metal1");
+        row.StagedThicknessText = typed;
+        row.CommitThickness();
+
+        // The model is untouched, the box is back to it, and the message is what explains the revert.
+        Assert.Equal(before, Row(vm, "Metal1").Layer.ThicknessDbu);
+        Assert.Equal(shown,  row.StagedThicknessText);
+        Assert.True(row.HasThicknessError);
+        Assert.False(vm.UndoRedo.CanUndo);
+    }
+
+    /// <summary>…and the DRAWING and the card then print the same string, which is the property the
+    /// report was actually about. The scene formats a thickness with the same call the row VM stages
+    /// it with (R-stk1-10), so this fails the moment either side keeps a value the other refused.</summary>
+    [Fact]
+    public void AfterARefusedThickness_TheDrawingAndTheCardAgree()
+    {
+        var vm  = Vm();
+        var row = Row(vm, "Metal1");
+        row.StagedThicknessText = "-3";
+        row.CommitThickness();
+
+        var scene = CircuitRF.Render.StackupScene.Build(vm.Working, 900f);
+        var drawn = scene.Labels.Single(
+            l => l.LayerName == "Metal1" && l.Field == CircuitRF.Design.Layout.StackupField.Thickness);
+
+        Assert.Equal(drawn.Text, Row(vm, "Metal1").StagedThicknessText);
+    }
+
+    // ── The two pane expanders (owner, 2026-09-13) ────────────────────────────
+
+    /// <summary>Both panes open, which is what a technology that says nothing means — and what every
+    /// <c>.ctech</c> written before the field existed means.</summary>
+    [Fact]
+    public void BothPanesOpenExpanded_WhenTheTechnologySaysNothing()
+    {
+        var vm = Vm();
+
+        Assert.Null(vm.Working.Stackup.DrawingPaneExpanded);
+        Assert.Null(vm.Working.Stackup.CardPaneExpanded);
+        Assert.True(vm.StackupDrawingExpanded);
+        Assert.True(vm.StackupCardsExpanded);
+    }
+
+    /// <summary>Collapsing writes to the technology, dirties the editor and undoes — the same
+    /// treatment a via's draw lane already gets, because a cosmetic value is still a value in the
+    /// file.</summary>
+    [Fact]
+    public void CollapsingAPane_PersistsInTheTechnologyAndUndoes()
+    {
+        var vm = Vm();
+
+        vm.StackupCardsExpanded = false;
+        Assert.False(vm.Working.Stackup.CardPaneExpanded);
+        Assert.True(vm.UndoRedo.CanUndo);
+
+        // It survives the .ctech round trip, which is what "persist in the file" means.
+        var reread = TechPersistence.Deserialize(TechPersistence.Serialize(vm.Working));
+        Assert.False(reread.Stackup.CardPaneExpanded);
+
+        vm.UndoRedo.Undo();
+        Assert.True(vm.StackupCardsExpanded);
+        Assert.True(vm.Working.Stackup.CardPaneExpanded ?? true);
+    }
+
+    /// <summary>Reading a technology that says it was collapsed opens it collapsed — the half that
+    /// makes the persistence worth having.</summary>
+    [Fact]
+    public void ATechnologyThatWasSavedCollapsed_OpensCollapsed()
+    {
+        var tech = Tech();
+        tech.Stackup.DrawingPaneExpanded = false;
+
+        var vm = new TechEditorViewModel(TempPath(), tech);
+
+        Assert.False(vm.StackupDrawingExpanded);
+        Assert.True(vm.StackupCardsExpanded);
+        Assert.False(vm.UndoRedo.CanUndo);   // projecting the model is not an edit
+    }
 }

@@ -19,8 +19,36 @@ public sealed record StackupOverlay
     /// <summary>The selected layer, or null (brief 3).</summary>
     public string? SelectedLayer { get; init; }
 
-    /// <summary>Where a drag would land, in scene coordinates, or null (brief 5).</summary>
+    /// <summary>Where a BAND reorder would land, in scene coordinates, or null (brief 5). A via drag
+    /// uses <see cref="DragVia"/> instead — see there.</summary>
     public (float Left, float Top, float Right, float Bottom)? DragGhost { get; init; }
+
+    /// <summary>
+    /// <b>A via drag's live preview: the barrel exactly as it will be if the pointer is released
+    /// now</b>, not a translucent rectangle standing in for it.
+    ///
+    /// <para>Owner, 2026-09-13: dragging a gripper showed "a non-detailed ghost", and what a via
+    /// looks like is most of what the drag is about — a plated barrel's walls, the bore cut through
+    /// the material, the outline binding the two walls into one object. A rectangle answers "roughly
+    /// here"; this answers "like this". It is a full <see cref="StackupBarrel"/> so the renderer can
+    /// draw it with the SAME code it draws a real one with, which is the only way the preview and
+    /// the result cannot come to differ.</para>
+    ///
+    /// <para>Its grippers are drawn unconditionally, because the two ends are what the gesture is
+    /// aiming.</para>
+    /// </summary>
+    public StackupBarrel? DragVia { get; init; }
+
+    /// <summary>
+    /// The barrel <see cref="DragVia"/> is a preview OF — omitted from the drawing for as long as the
+    /// drag is live.
+    ///
+    /// <para>A via is being MOVED, not copied. Left drawn, the original and the preview read as two
+    /// vias, and a retracting gripper drag leaves the old barrel's tail sticking out past the new
+    /// end. Matched by REFERENCE against the scene's own list, because two via entries may share a
+    /// name and the scene is not rebuilt until the release.</para>
+    /// </summary>
+    public StackupBarrel? DragViaSource { get; init; }
 
     /// <summary>
     /// R-stk5-3's insertion line: the scene y of the band boundary a reorder drag would drop
@@ -106,7 +134,7 @@ public static class StackupRenderer
     /// <para>Only the BAND pass is clipped. A barrel's walls lie outside its own bore, and a label
     /// that happens to cross one is ink drawn on top — it is not what the hole is cut through.</para>
     /// </summary>
-    private static int ClipBands(SKCanvas canvas, StackupScene scene)
+    private static int ClipBands(SKCanvas canvas, StackupScene scene, StackupOverlay overlay)
     {
         int saved = canvas.Save();
 
@@ -114,7 +142,7 @@ public static class StackupRenderer
         path.AddRect(new SKRect(0, 0, scene.Width, scene.Height));
 
         bool any = false;
-        foreach (var barrel in scene.Barrels)
+        foreach (var barrel in Barrels(scene, overlay))
         {
             if (BoreOf(barrel) is not { } bore) continue;
             path.AddRect(bore);
@@ -123,6 +151,22 @@ public static class StackupRenderer
 
         if (any) canvas.ClipPath(path, SKClipOperation.Intersect, antialias: true);
         return saved;
+    }
+
+    /// <summary>
+    /// The barrels this frame draws: the scene's, with a via being DRAGGED replaced by the live
+    /// preview of where it is going (<see cref="StackupOverlay.DragVia"/>).
+    ///
+    /// <para>One sequence, read by the bore clip, the barrel pass and the gripper pass alike — so the
+    /// preview cannot be drawn as metal in one of them and as a hole in another.</para>
+    /// </summary>
+    private static IEnumerable<StackupBarrel> Barrels(StackupScene scene, StackupOverlay overlay)
+    {
+        foreach (var barrel in scene.Barrels)
+            if (!ReferenceEquals(barrel, overlay.DragViaSource))
+                yield return barrel;
+
+        if (overlay.DragVia is { } preview) yield return preview;
     }
 
     /// <summary>
@@ -174,7 +218,7 @@ public static class StackupRenderer
         using var stroke = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Stroke };
 
         // ── Bands ────────────────────────────────────────────────────────────────────────────────
-        int bandsClip = transparentBackground ? ClipBands(canvas, scene) : canvas.Save();
+        int bandsClip = transparentBackground ? ClipBands(canvas, scene, overlay) : canvas.Save();
         foreach (var band in scene.Bands)
         {
             fill.Color = band.Fill is { } rgba ? new SKColor(rgba.R, rgba.G, rgba.B, rgba.A) : theme.DielectricFill;
@@ -188,57 +232,8 @@ public static class StackupRenderer
 
         // ── Barrels ──────────────────────────────────────────────────────────────────────────────
         stroke.StrokeWidth = BandEdgeWidth;
-        foreach (var barrel in scene.Barrels)
-        {
-            var metal = barrel.Fill is { } rgba
-                ? new SKColor(rgba.R, rgba.G, rgba.B, rgba.A)
-                : new SKColor(StackupScene.MetalFallback.R, StackupScene.MetalFallback.G,
-                              StackupScene.MetalFallback.B, StackupScene.MetalFallback.A);
-            stroke.Color = theme.BandEdge;
-
-            // THE HOLE IS DRAWN AS A VOID, not left transparent (owner, 2026-09-13: a plated barrel
-            // "renders strangely… 2 vertical lines with a gap"). Letting the bands show through the
-            // bore leaves two metal walls with dielectric between them, which reads as two separate
-            // thin vias rather than as one barrel with a hole in it. A drill removes material, so the
-            // bore is painted in the pane's own ground first and the walls go on top of it — the
-            // convention every cross-section drawing of a plated through-hole uses — and one outline
-            // around the whole barrel then binds the two walls into one object.
-            //
-            // With no ground to paint it in, the same convention is kept by REMOVING the bands from
-            // the bore instead (ClipBands, above) — so the hole is a hole, and what shows through it
-            // is whatever the picture was pasted onto rather than the dielectric behind the via.
-            if (barrel.Look != StackupViaLook.SolidFill && !transparentBackground)
-            {
-                fill.Color = theme.Background;
-                canvas.DrawRect(barrel.Rect, fill);
-            }
-
-            fill.Color = metal;
-            switch (barrel.Look)
-            {
-                case StackupViaLook.SolidFill:
-                    canvas.DrawRect(barrel.Rect, fill);
-                    break;
-
-                // A HOLLOW barrel: two metal walls with the bore between them. WallPx is the WALL,
-                // not the hole radius — the confusion the model field's own doc comment warns about,
-                // and one a drawing that got it backwards would make permanent.
-                case StackupViaLook.PlatedBarrel:
-                    canvas.DrawRect(
-                        new SKRect(barrel.Rect.Left, barrel.Rect.Top,
-                                   barrel.Rect.Left + barrel.WallPx, barrel.Rect.Bottom), fill);
-                    canvas.DrawRect(
-                        new SKRect(barrel.Rect.Right - barrel.WallPx, barrel.Rect.Top,
-                                   barrel.Rect.Right, barrel.Rect.Bottom), fill);
-                    break;
-
-                // An unplated hole is not a conductor. It is the bore and nothing else.
-                case StackupViaLook.UnplatedHole:
-                default:
-                    break;
-            }
-            canvas.DrawRect(barrel.Rect, stroke);
-        }
+        foreach (var barrel in Barrels(scene, overlay))
+            DrawBarrel(canvas, barrel, theme, fill, stroke, transparentBackground);
 
         DrawLabels(canvas, scene, theme);
 
@@ -248,14 +243,15 @@ public static class StackupRenderer
         // the two are the same rect and the last one drawn is the one that is seen.
         if (overlay.HoverLayer is { Length: > 0 } hovered &&
             !string.Equals(hovered, overlay.SelectedLayer, StringComparison.Ordinal) &&
-            scene.RectOf(hovered) is { } hoverRect)
+            OutlinedRectOf(scene, overlay, hovered) is { } hoverRect)
         {
             stroke.Color       = theme.Selection.WithAlpha(HoverAlpha);
             stroke.StrokeWidth = HoverWidth;
             canvas.DrawRect(OutlineRectFor(hoverRect), stroke);
         }
 
-        if (overlay.SelectedLayer is { Length: > 0 } selected && scene.RectOf(selected) is { } rect)
+        if (overlay.SelectedLayer is { Length: > 0 } selected &&
+            OutlinedRectOf(scene, overlay, selected) is { } rect)
         {
             stroke.Color       = theme.Selection;
             stroke.StrokeWidth = SelectionWidth;
@@ -285,14 +281,94 @@ public static class StackupRenderer
         fill.Color   = theme.Gripper;
         stroke.Color = theme.BandEdge;
         stroke.StrokeWidth = BandEdgeWidth;
-        foreach (var barrel in scene.Barrels)
+        foreach (var barrel in Barrels(scene, overlay))
         {
-            if (!string.Equals(barrel.Name, overlay.HoverLayer, StringComparison.Ordinal) &&
+            // A drag's preview always shows its grippers: the two ends are what the gesture is
+            // aiming, and a preview without them is not what the via will look like.
+            bool dragged = ReferenceEquals(barrel, overlay.DragVia);
+            if (!dragged &&
+                !string.Equals(barrel.Name, overlay.HoverLayer, StringComparison.Ordinal) &&
                 !string.Equals(barrel.Name, overlay.SelectedLayer, StringComparison.Ordinal)) continue;
 
             DrawGrip(canvas, barrel.GripTop, fill, stroke);
             DrawGrip(canvas, barrel.GripBottom, fill, stroke);
         }
+    }
+
+    /// <summary>
+    /// The rect an outline goes around: the scene's, except for the via a drag has MOVED, whose
+    /// outline follows the preview.
+    ///
+    /// <para>The press that starts a via drag selects it (R-stk5-3), so without this the selection
+    /// outline stays framing a barrel that is no longer drawn — which reads as the via having been
+    /// left behind.</para>
+    /// </summary>
+    private static SKRect? OutlinedRectOf(StackupScene scene, StackupOverlay overlay, string name)
+        => overlay.DragVia is { } preview && string.Equals(preview.Name, name, StringComparison.Ordinal)
+            ? preview.Rect
+            : scene.RectOf(name);
+
+    /// <summary>
+    /// One barrel, exactly as this drawing draws a barrel.
+    ///
+    /// <para><b>THE HOLE IS DRAWN AS A VOID</b>, not left transparent (owner, 2026-09-13: a plated
+    /// barrel "renders strangely… 2 vertical lines with a gap"). Letting the bands show through the
+    /// bore leaves two metal walls with dielectric between them, which reads as two separate thin vias
+    /// rather than as one barrel with a hole in it. A drill removes material, so the bore is painted
+    /// in the pane's own ground first and the walls go on top of it — the convention every
+    /// cross-section drawing of a plated through-hole uses — and one outline around the whole barrel
+    /// then binds the two walls into one object.</para>
+    ///
+    /// <para>With no ground to paint it in, the same convention is kept by REMOVING the bands from the
+    /// bore instead (<see cref="ClipBands"/>) — so the hole is a hole, and what shows through it is
+    /// whatever the picture was pasted onto rather than the dielectric behind the via.</para>
+    ///
+    /// <para><b>It is a method rather than a loop body because a via DRAG previews itself through
+    /// it</b> (<see cref="StackupOverlay.DragVia"/>). A preview drawn by a second piece of code is a
+    /// preview that can come to differ from the thing it is previewing.</para>
+    /// </summary>
+    private static void DrawBarrel(
+        SKCanvas canvas, StackupBarrel barrel, StackupRenderTheme theme, SKPaint fill, SKPaint stroke,
+        bool transparentBackground)
+    {
+        var metal = barrel.Fill is { } rgba
+            ? new SKColor(rgba.R, rgba.G, rgba.B, rgba.A)
+            : new SKColor(StackupScene.MetalFallback.R, StackupScene.MetalFallback.G,
+                          StackupScene.MetalFallback.B, StackupScene.MetalFallback.A);
+        stroke.Color       = theme.BandEdge;
+        stroke.StrokeWidth = BandEdgeWidth;
+
+        if (barrel.Look != StackupViaLook.SolidFill && !transparentBackground)
+        {
+            fill.Color = theme.Background;
+            canvas.DrawRect(barrel.Rect, fill);
+        }
+
+        fill.Color = metal;
+        switch (barrel.Look)
+        {
+            case StackupViaLook.SolidFill:
+                canvas.DrawRect(barrel.Rect, fill);
+                break;
+
+            // A HOLLOW barrel: two metal walls with the bore between them. WallPx is the WALL, not the
+            // hole radius — the confusion the model field's own doc comment warns about, and one a
+            // drawing that got it backwards would make permanent.
+            case StackupViaLook.PlatedBarrel:
+                canvas.DrawRect(
+                    new SKRect(barrel.Rect.Left, barrel.Rect.Top,
+                               barrel.Rect.Left + barrel.WallPx, barrel.Rect.Bottom), fill);
+                canvas.DrawRect(
+                    new SKRect(barrel.Rect.Right - barrel.WallPx, barrel.Rect.Top,
+                               barrel.Rect.Right, barrel.Rect.Bottom), fill);
+                break;
+
+            // An unplated hole is not a conductor. It is the bore and nothing else.
+            case StackupViaLook.UnplatedHole:
+            default:
+                break;
+        }
+        canvas.DrawRect(barrel.Rect, stroke);
     }
 
     /// <summary>The gripper's HIT rect is larger than its glyph by

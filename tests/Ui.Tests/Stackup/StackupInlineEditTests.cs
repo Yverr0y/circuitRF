@@ -401,6 +401,60 @@ public class StackupInlineEditTests
     }
 
     /// <summary>
+    /// <b>Closing the box raises <c>Closed</c>, which is what puts keyboard focus back in the tab.</b>
+    ///
+    /// <para>Owner, 2026-09-13: a second Esc did not clear the band selection. The first reverted
+    /// correctly and then nothing in the editor held focus — Avalonia drops it when the focused
+    /// control is hidden — so the second keystroke routed nowhere near the view whose handler clears
+    /// the selection. The same gap silenced Page Up/Down after any committed edit.</para>
+    ///
+    /// <para>Focus itself needs an application host, so what is asserted here is the EVENT and its
+    /// conditions; that the host focuses the view on it is the scan below.</para>
+    /// </summary>
+    [Fact]
+    public void ClosingTheBoxRaisesClosed_SoTheHostCanTakeFocusBack()
+    {
+        var s = Open();
+        var p = PointOn(s.Canvas, "TopMetal", StackupField.Thickness);
+        int closed = 0;
+        s.Editor.Closed += () => closed++;
+
+        // A Close with nothing open must NOT fire: the scene rebuild after every committed edit, undo
+        // and redo calls it (R-stk4-8), and focus must not be yanked out of a card the user is typing
+        // in on the strength of that.
+        s.Editor.Close();
+        Assert.Equal(0, closed);
+
+        // Escape.
+        Assert.True(s.Canvas.DoubleClickAt(p));
+        s.Editor.Revert();
+        Assert.Equal(1, closed);
+        Assert.False(s.Canvas.InlineEditIsOpen);
+
+        // Return, which closes before it writes (R-stk4-7) — the same need for focus back.
+        Assert.True(s.Canvas.DoubleClickAt(p));
+        s.Editor.Commit();
+        Assert.Equal(2, closed);
+
+        // …and it is raised with the editor already shut, so a handler cannot take focus out of a box
+        // that is halfway through closing.
+        bool openWhenRaised = true;
+        s.Editor.Closed += () => openWhenRaised = s.Editor.IsOpen;
+        Assert.True(s.Canvas.DoubleClickAt(p));
+        s.Editor.Revert();
+        Assert.False(openWhenRaised);
+    }
+
+    /// <summary>The host's half: the view takes focus back on <c>Closed</c>, to the same target
+    /// <c>FocusForScrollingDeferred</c> already uses.</summary>
+    [Fact]
+    public void TheViewTakesFocusBackWhenTheBoxCloses()
+    {
+        var code = RepoFile(Path.Combine("src", "Ui", "Views", "Layout", "TechEditorView.axaml.cs"));
+        Assert.Contains("StackupInlineEditor.Closed += () => Focus();", code, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Esc's two jobs, and the precedence with brief 3. While the box is open the keystroke belongs to
     /// the box and the selection stands; a second Esc, box closed, clears it.
     ///
@@ -617,20 +671,44 @@ public class StackupInlineEditTests
         Assert.Contains("StackupInlineEditor.Commit()", code[lost..(lost + 200)]);
     }
 
-    /// <summary>R-stk4-6's collision with brief 3: the view's tunnelling Esc handler gets there first,
-    /// so it must stand aside while a box is open.</summary>
+    /// <summary>
+    /// R-stk4-6's collision with brief 3, and <b>the view's tunnelling handler does the revert itself
+    /// — registered <c>handledEventsToo: true</c>, without which it never runs at all</b>.
+    ///
+    /// <para>Owner-reported twice (2026-09-13). A docked document sits inside <c>WorkspaceWindow</c>,
+    /// which carries <c>&lt;KeyBinding Gesture="Escape" …/&gt;</c>, and a Window's KeyBindings are
+    /// evaluated BEFORE visual-tree routing begins — so Escape arrives at this view already marked
+    /// Handled and an ordinary handler is skipped. It is the third instance in this application:
+    /// <c>SchematicView.OnViewKeyDownTunnel</c> and <c>ReadoutStripView.OnStripKeyDownTunnel</c> each
+    /// hit it for their own inline editor and each names the mechanism in a comment.</para>
+    ///
+    /// <para>The flag is asserted ALONGSIDE the window's binding that makes it necessary, so this
+    /// test says why rather than merely that — and fails loudly if that binding ever goes away and
+    /// somebody wonders whether the flag is still earning its place.</para>
+    /// </summary>
     [Fact]
-    public void TheViewsEscapeHandlerStandsAsideWhileTheBoxIsOpen()
+    public void TheViewsEscapeHandlerRevertsTheOpenBoxItself_BeforeClearingTheSelection()
     {
         var code = RepoFile(Path.Combine("src", "Ui", "Views", "Layout", "TechEditorView.axaml.cs"));
+
+        Assert.Contains(
+            "AddHandler(KeyDownEvent, OnEscapeKeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);",
+            code, StringComparison.Ordinal);
+
+        // The reason it is needed: the window marks Escape handled before routing starts.
+        Assert.Contains("<KeyBinding Gesture=\"Escape\"",
+            RepoFile(Path.Combine("src", "Ui", "Views", "WorkspaceWindow.axaml")), StringComparison.Ordinal);
 
         int esc = Require(code, "private void OnEscapeKeyDown");
         var body = code[esc..code.IndexOf("private void OnActivationFocusRequested", esc, StringComparison.Ordinal)];
 
-        int guard = body.IndexOf("InlineEditIsOpen", StringComparison.Ordinal);
-        int clear = body.IndexOf("ClearStackupSelection", StringComparison.Ordinal);
+        int guard  = body.IndexOf("InlineEditIsOpen", StringComparison.Ordinal);
+        int revert = body.IndexOf("StackupInlineEditor.Revert()", StringComparison.Ordinal);
+        int clear  = body.IndexOf("ClearStackupSelection", StringComparison.Ordinal);
+
         Assert.True(guard >= 0, "the handler must check for an open editor");
-        Assert.True(guard < clear, "…and it must check BEFORE it clears the selection");
+        Assert.True(revert > guard, "…and REVERT it rather than leaving the keystroke to the box");
+        Assert.True(revert < clear, "…before it clears the selection");
     }
 
     /// <summary>

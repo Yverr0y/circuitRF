@@ -620,11 +620,24 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
         if (wasSelected) _owner.SelectedStackupLayerName = name;
     }
 
+    /// <summary>
+    /// Commits the band thickness, or REFUSES and puts the field back.
+    ///
+    /// <para><b>A refusal restores the box from the model</b> (owner, 2026-09-13: a conductor given a
+    /// negative thickness drew one number on the cross-section and showed another on its card). The
+    /// refused text used to be left standing, so the card read "-35" while the drawing above it went
+    /// on reading the thickness the design actually has — two surfaces disagreeing about one value,
+    /// with only a message to say which of them was the design. Reverting is what every other Commit
+    /// on this row already does; the message stays, and says why the typing did not take.</para>
+    /// </summary>
     public void CommitThickness()
     {
         if (!LayoutUnits.TryParse(StagedThicknessText, _owner.Working.DefaultDisplayUnit,
                 LayoutUnits.DefaultDbuPerMicron, out var dbu) || dbu <= 0)
         {
+            // AFTER the refresh, which clears it: the box goes back to the design's own value and the
+            // message is what is left to explain the reversion.
+            RefreshFromModel();
             ThicknessError = "Enter a positive length, e.g. 1.6mm, 35u, 100 um.";
             return;
         }

@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
@@ -42,7 +43,8 @@ public partial class TechEditorView : UserControl
         // the picture. See OnCopyKeyDown.
         AddHandler(KeyDownEvent, OnCopyKeyDown);
 
-        // R-stk3-9 — Esc clears the stackup selection.
+        // R-stk3-9 — Esc clears the stackup selection, and R-stk4-6 — Esc reverts an open inline
+        // editor before it does.
         //
         // TUNNELLING FROM THE VIEW, and not a key handler on the drawing, which is what brief 3
         // sketched. The canvas is deliberately NOT focusable (R-stk2-10: a focusable control inside
@@ -50,7 +52,17 @@ public partial class TechEditorView : UserControl
         // below walks up from whatever holds focus) — and the owner's ask is "pressing Esc will
         // unselect", not "pressing Esc while the drawing happens to have focus", so the handler had to
         // cover the card list as well either way. One handler covers both surfaces.
-        AddHandler(KeyDownEvent, OnEscapeKeyDown, RoutingStrategies.Tunnel);
+        //
+        // handledEventsToo: TRUE, and WITHOUT IT THIS HANDLER NEVER RUNS AT ALL. A docked document
+        // sits inside WorkspaceWindow, which carries `<KeyBinding Gesture="Escape" …/>` — and a
+        // Window's KeyBindings are evaluated BEFORE visual-tree routing begins, so Escape arrives at
+        // this view already marked Handled and an ordinary handler is skipped. Owner-reported twice
+        // here (2026-09-13), and the third instance in this application: SchematicView's
+        // OnViewKeyDownTunnel and ReadoutStripView's OnStripKeyDownTunnel each hit it for their own
+        // inline editor and each names the mechanism in a comment. Page Up/Down above needs no such
+        // flag because the window binds no gesture for them, which is exactly why that handler works
+        // and this one did not.
+        AddHandler(KeyDownEvent, OnEscapeKeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
 
         // The scroll handler above is TUNNELLING FROM THIS CONTROL, so it only ever sees a keystroke
         // that is already routing through this view — which means something inside the view has to
@@ -73,6 +85,17 @@ public partial class TechEditorView : UserControl
         // nothing at all.
         StackupInlineEditor.Opened += () =>
             Dispatcher.UIThread.Post(() => StackupInlineEdit.Focus(), DispatcherPriority.Input);
+
+        // …and the other half. Hiding the focused box drops keyboard focus OUT of this view, so the
+        // next keystroke routes nowhere near it — which is why a second Esc did not clear the band
+        // selection (owner, 2026-09-13) and why Page Up/Down went dead after any committed edit.
+        // Focusing the VIEW is the same target FocusForScrollingDeferred already uses and lands on
+        // TargetScrollViewer's documented fallback, the visible tab's own row list.
+        //
+        // Synchronous, unlike Opened's: Avalonia clears focus inside the IsVisible assignment itself,
+        // so by the time this runs the cascade is over and there is nothing to race. Deferring it
+        // would leave a window in which a fast second Esc still found no focused element.
+        StackupInlineEditor.Closed += () => Focus();
 
         // The destination follows the visible tab (TechEditorViewModel.HelpDestinationFor) — this
         // window edits four unrelated things and no one chapter covers all of them.
@@ -131,6 +154,10 @@ public partial class TechEditorView : UserControl
         _subscribedVm = _subscribedDoc.ViewModel;
         _subscribedVm.PropertyChanged += OnViewModelPropertyChanged;
 
+        // The technology carries the two expanders' state, so the panes have to be sized the moment
+        // one is bound — not only when a button is pressed.
+        ApplyStackupPaneLayout();
+
         _subscribedDoc.ActivationFocusRequested += OnActivationFocusRequested;
         // Activated BEFORE the view bound — the first-open case — so the request is sitting pending.
         if (_subscribedDoc.ConsumeActivationFocus()) FocusForScrollingDeferred();
@@ -142,6 +169,59 @@ public partial class TechEditorView : UserControl
     {
         if (e.PropertyName == nameof(TechEditorViewModel.SelectedStackupLayerName))
             ScrollStackupSelectionIntoView();
+        else if (e.PropertyName is nameof(TechEditorViewModel.StackupDrawingExpanded)
+                               or nameof(TechEditorViewModel.StackupCardsExpanded))
+            ApplyStackupPaneLayout();
+    }
+
+    // ── The two pane expanders (owner, 2026-09-13) ────────────────────────────
+
+    /// <summary>The card pane's height while both panes are open — remembered across a collapse, so
+    /// re-expanding puts the splitter back where the user dragged it rather than at the opening
+    /// split. Null until it has been open once.</summary>
+    private GridLength? _cardPaneHeight;
+
+    /// <summary>
+    /// Resizes the two panes for the expanders' current state.
+    ///
+    /// <para><b>In code, and it has to be.</b> An Avalonia <c>RowDefinition</c> is not in the logical
+    /// tree and inherits no DataContext, so <c>Height</c> cannot be bound to the view model; the
+    /// .axaml carries the both-expanded state and this rewrites it.</para>
+    ///
+    /// <para><b>Exactly one row is starred at a time when a pane is collapsed.</b> The collapsed pane
+    /// goes to <c>Auto</c> — which is its expander button and nothing else, since the .axaml hides the
+    /// pane's own content — and the surviving pane takes the star, or the space the collapse freed
+    /// would simply be left empty at the bottom of the tab. With both collapsed neither is starred and
+    /// the tab is two buttons and the header, which is what asking for that means.</para>
+    /// </summary>
+    private void ApplyStackupPaneLayout()
+    {
+        if (StackupTabGrid is null || _subscribedVm is null) return;
+
+        bool drawing = _subscribedVm.StackupDrawingExpanded;
+        bool cards   = _subscribedVm.StackupCardsExpanded;
+
+        var rows = StackupTabGrid.RowDefinitions;
+        if (rows.Count < 4) return;
+
+        // Captured BEFORE anything is rewritten, and only from the state it is meaningful in: while
+        // both panes are open the card row is an absolute height the splitter owns.
+        if (rows[3].Height.IsAbsolute) _cardPaneHeight = rows[3].Height;
+
+        rows[1].Height    = drawing ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
+        rows[1].MinHeight = drawing ? TechEditorMetrics.StackupDrawingMinHeight : 0;
+
+        rows[3].Height = (drawing, cards) switch
+        {
+            (_,     false) => GridLength.Auto,
+            (false, true)  => new GridLength(1, GridUnitType.Star),
+            _              => _cardPaneHeight ?? TechEditorMetrics.StackupCardPaneOpeningHeight,
+        };
+        rows[3].MinHeight = cards ? TechEditorMetrics.StackupCardPaneMinHeight : 0;
+
+        // A splitter between a collapsed pane and a starred one moves nothing, and a grab strip that
+        // does nothing is one users pull at.
+        if (StackupSplitter is not null) StackupSplitter.IsVisible = drawing && cards;
     }
 
     /// <summary>
@@ -165,9 +245,95 @@ public partial class TechEditorView : UserControl
         {
             // Re-read rather than closing over `row`: at Background priority an edit, an undo or a
             // second click may have landed in between, and every one of those replaces the row VMs.
-            if (_subscribedVm?.SelectedStackupLayerRow is { } current)
-                StackupList?.ScrollIntoView(current);
+            if (_subscribedVm?.SelectedStackupLayerRow is not { } current) return;
+            if (StackupList is null) return;
+
+            var scroll = StackupScroller();
+            if (scroll is null) { StackupList.ScrollIntoView(current); return; }
+
+            // A card that is already wholly on screen is left exactly where the user has it. Clicking
+            // a band whose card is right there and having the list yank it to the top is movement for
+            // its own sake — and with the ListBox's own auto-scroll off (see the .axaml), this is the
+            // only thing that decides not to move.
+            if (IsFullyVisible(current, scroll)) return;
+
+            // ── NOTHING JUMPS, and that is the point ────────────────────────────────────────────
+            //
+            // This used to call ScrollIntoView to REALISE the card's container, measure off it, put
+            // the offset straight back and then ease from there — all in one dispatcher frame, so the
+            // jump itself was never painted. It still flashed, going DOWN (owner, 2026-09-13): the
+            // jump de-realises everything at the origin, and the restored offset gets rendered before
+            // the virtualizing panel has realised it again. What flashes is not the wrong position,
+            // it is a blank viewport.
+            //
+            // So the list is never moved anywhere it is not going. The scroll sets out on an ESTIMATE
+            // when the card is not realised yet, and the animator asks TopOffsetOf for the truth on
+            // every frame — which starts answering the moment the scroll gets close enough to realise
+            // it, and re-aims the ease without restarting it.
+            double target = TopOffsetOf(current, scroll) ?? EstimatedOffsetOf(current, scroll);
+            _stackupScroll.AnimateTo(scroll, target, () => TopOffsetOf(current, scroll));
         }, DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// Roughly where a card that has not been realised yet will turn out to be: its share of the
+    /// list's own extent.
+    ///
+    /// <para>It is the same estimate the virtualizing panel is itself using — <c>Extent.Height</c> for
+    /// a list of unrealised, variable-height items IS an estimate — so it is close, and being close is
+    /// all it has to be: the ease is re-aimed from the realised container as soon as there is one.</para>
+    /// </summary>
+    private double EstimatedOffsetOf(StackupLayerRowViewModel row, ScrollViewer scroll)
+    {
+        var rows = _subscribedVm?.FilteredStackupLayers;
+        int i = rows?.IndexOf(row) ?? -1;
+        if (i < 0 || rows!.Count == 0) return scroll.Offset.Y;
+
+        return Math.Clamp(scroll.Extent.Height * i / rows.Count, 0,
+                          Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height));
+    }
+
+    /// <summary>The one eased scroll of the card list. Held by the view so a second selection cancels
+    /// the first one's scroll rather than racing it.</summary>
+    private readonly ScrollOffsetAnimator _stackupScroll = new();
+
+    private ScrollViewer? StackupScroller()
+        => StackupList?.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+
+    /// <summary>Whether <paramref name="row"/>'s card is realised and wholly inside the viewport.
+    /// False for a card taller than the pane, which can never be wholly inside one and therefore
+    /// always wants its top put at the top.</summary>
+    private bool IsFullyVisible(StackupLayerRowViewModel row, ScrollViewer scroll)
+    {
+        if (StackupList?.ContainerFromItem(row) is not Control container) return false;
+        if (container.TranslatePoint(default, scroll) is not { } p) return false;
+
+        return p.Y >= -0.5 && p.Y + container.Bounds.Height <= scroll.Viewport.Height + 0.5;
+    }
+
+    /// <summary>
+    /// The offset that puts <paramref name="row"/>'s card's own TOP edge at the top of the pane, or
+    /// null when its container has not been realised.
+    ///
+    /// <para><b><c>ScrollIntoView</c> alone is not enough, and the case it gets wrong is the common
+    /// one</b> (owner, 2026-09-13: click the bottom entry, then the top one, and only half the card
+    /// is showing). <c>ScrollIntoView</c> brings an item MINIMALLY into view, so for an item taller
+    /// than the viewport — which a conductor card is, against a pane that now opens at four field rows
+    /// (<see cref="TechEditorMetrics.StackupCardPaneOpeningHeight"/>) — it lands the item's BOTTOM at
+    /// the viewport's bottom when scrolling up, and the fields at the top of the card are the ones
+    /// scrolled away. Clicking a band has to land on that band's fields, so the top is the edge that
+    /// matters.</para>
+    /// </summary>
+    private double? TopOffsetOf(StackupLayerRowViewModel row, ScrollViewer scroll)
+    {
+        if (StackupList?.ContainerFromItem(row) is not Control container) return null;
+
+        // The container's offset within the SCROLLER's viewport; adding the scroller's own offset
+        // gives the position in the content, which is what Offset is measured in.
+        if (container.TranslatePoint(default, scroll) is not { } p) return null;
+
+        return Math.Clamp(scroll.Offset.Y + p.Y, 0,
+                          Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height));
     }
 
     /// <summary>
@@ -179,20 +345,24 @@ public partial class TechEditorView : UserControl
     ///
     /// <para><b>Precedence, for brief 4 (R-stk4-6):</b> while an inline editor is open, <c>Esc</c>
     /// reverts the edit and the selection stands; a second <c>Esc</c>, with no editor open, clears the
-    /// selection. This handler tunnels, so it gets there first — brief 4's gate is therefore a check
-    /// HERE for "is an editor open", returning without handling so the editor's own handler takes it.
-    /// Nothing opens an inline editor yet, so there is nothing to check for.</para>
+    /// selection. This handler tunnels, so it gets there first, and it takes BOTH jobs itself.</para>
     /// </summary>
     private void OnEscapeKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key != Key.Escape) return;
 
-        // R-stk4-6's two jobs for one key. This handler TUNNELS, so it gets there before the open
-        // box's own KeyDown — and the first Esc belongs to the box: it reverts the edit and the
-        // selection stands. Returning without handling is what lets the keystroke carry on down to
-        // it. The second Esc, with the box shut, falls through to the line below and clears the
-        // selection.
-        if (StackupDrawing?.InlineEditIsOpen == true) return;
+        // R-stk4-6's first job. THE REVERT IS DONE HERE, not left to the box's own KeyDown handler:
+        // Escape is already marked Handled by WorkspaceWindow's KeyBinding by the time it reaches
+        // this view (see the registration above), and an ordinary bubbling handler on the box never
+        // sees a handled event. The box's own handler stays wired as the documented three-key
+        // contract and is a no-op second path — Revert() returns at once when the box is shut, so one
+        // Esc reverts once.
+        if (StackupDrawing?.InlineEditIsOpen == true)
+        {
+            StackupInlineEditor.Revert();
+            e.Handled = true;
+            return;
+        }
 
         // R-stk5-3's third job for this key, between the two above it. A live drag outranks the
         // clear-selection below — Esc mid-drag means "forget this gesture", and clearing the

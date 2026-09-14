@@ -26581,3 +26581,235 @@ to end:
   re-resolves, which is a fresh read from disk. That is `EmSetupResolver`'s deliberate design (the
   geometry is read at use time so a layout edit is picked up, and never embedded in the `.cem`), so
   it is a caching decision rather than a bug, and it went from ~4.5 s per click to ~130 ms.
+
+---
+
+## Stackup tab: six from one hand-testing round (2026-09-13)
+
+The owner ran the finished `brief-stackup-render-*` series against real `.ctech` files. Six reports,
+five distinct causes, and four of them were in code the series' own gates could not reach.
+
+### Esc did not close the inline editor — the handler itself never ran
+
+**The cause is `handledEventsToo`, and it was written down in this codebase twice before anyone
+looked.** A docked document sits inside `WorkspaceWindow`, which carries
+`<KeyBinding Gesture="Escape" Command="{Binding DisarmPlacementCommand}"/>`, and a Window's
+`KeyBindings` are evaluated **before visual-tree routing begins** — so Escape reaches
+`TechEditorView` already marked `Handled`, and a handler registered without the flag is skipped
+entirely. `SchematicView.OnViewKeyDownTunnel` and `ReadoutStripView.OnStripKeyDownTunnel` each hit it
+for their own inline editor and each names the mechanism in a comment; this is the third instance.
+
+`Page Up`/`Page Down` on the same view work without the flag, and that is the discriminator that
+should have pointed at this on the first report: the window binds no gesture for those keys.
+
+**The first fix below was aimed at the wrong half** and is kept because it is independently right —
+but it changed nothing the owner could see, because the handler it moved the work into was never
+being called. Two reports and two wrong fixes for one missing argument.
+
+### …and the SECOND Esc then did nothing, because closing the box dropped focus
+
+Reported straight after the fix above. The first Esc reverted correctly; the second, which should
+clear the band selection, did nothing — and the difference between them is only where keyboard focus
+is. **Avalonia clears focus when the focused control is hidden**, and `Close()` hides the box, so
+after the first Esc nothing inside `TechEditorView` held focus and the next keystroke routed nowhere
+near its tunnelling handler.
+
+`StackupInlineEditor` now raises **`Closed`**, which is `Opened`'s other half and exists for the same
+reason that one does: focus is the HOST's business, because it needs a visual root. The view focuses
+ITSELF on it — the same target `FocusForScrollingDeferred` already uses, which lands on
+`TargetScrollViewer`'s documented fallback. Synchronous rather than posted, unlike `Opened`'s:
+Avalonia clears focus inside the `IsVisible` assignment itself, so the cascade is over by the time
+the event is raised, and deferring would leave a window in which a fast second Esc still found no
+focused element.
+
+**It fires only when the box was actually open.** `Close()` is called on every scene rebuild
+(R-stk4-8 — every committed edit, undo and redo), and a `Closed` that fired unconditionally would
+yank focus out of whatever the user is typing in on the card below.
+
+The same gap silenced Page Up/Down after any committed edit from the drawing, which is R-stk2-10's
+whole concern — fixed by the same event.
+
+### …and the revert belongs in the view's handler, not the box's
+
+`TechEditorView.OnEscapeKeyDown` tunnels from the view, and while the box was open it **returned
+without handling**, on the theory that the keystroke would carry on down to the box's own bubbling
+`KeyDown="OnStackupInlineEditKeyDown"`. That is one more hop than it can be relied on for: the
+keystroke has to arrive at the box, and then survive whatever `TextBox` and its `ControlTheme` do
+with `Escape` on the way through. The tunnelling handler at the view is reached whenever focus is
+anywhere in the tab, so **it now does the revert itself** — which is the same answer
+`ReadoutStripView.OnStripKeyDownTunnel` already reached for harmonicaRF's inline editors, for the
+same reason. The box's own handler stays wired and is a no-op second path (`Revert()` returns at once
+when the box is shut).
+
+**This was never testable here** and still is not: `tests/Ui.Tests` has no Avalonia host and cannot
+raise a routed key. What the gate holds is the ORDER in the handler's source
+(`StackupInlineEditTests.TheViewsEscapeHandlerRevertsTheOpenBoxItself_BeforeClearingTheSelection`).
+
+### A refused thickness left the card and the drawing disagreeing
+
+Giving a conductor a negative thickness refused the edit — correctly — but **kept the typed text in
+the box**, so the card read `-3` while the cross-section above it went on drawing and printing the
+thickness the layer actually has. `CommitThickness` now calls `RefreshFromModel()` and then re-sets
+`ThicknessError`, which every other `Commit*` on that row already did; the message is what explains
+the reversion. The gate asserts the two surfaces print the same string
+(`StackupEditorFieldsTests.AfterARefusedThickness_TheDrawingAndTheCardAgree`).
+
+### The copied picture was a small drawing in a letter-sized box
+
+`StackupGraphicExport` composed onto `PagePlacement.Letter` and centred, exactly as an exported plot
+does — and **a plot fills that page while a cross-section never can**: it is tall and narrow, and the
+pasted object's bounding box is the PAGE, so every blank inch was something the user had to crop by
+hand in the destination document. `PageFor(scene)` now sizes the page to the drawing plus
+`PagePad = 8`, `FitScale` reads its usable area off the `PagePlacement` rather than a fraction, and
+the page dimensions travel to `PlotExporter.SetClipboardDataAsync` — **the Windows bypass is the one
+path that tells the receiving application how big the picture is**, and leaving it at letter would
+have put the empty box back on that platform only. This is the only copy in the application that does
+not compose onto Letter, which is why the reason is written on `PageFor` itself.
+
+### A copied picture wrapped its specs
+
+Owner, 2026-09-13: the copy must not break a right-hand spec onto a second line. It did, because the
+page was laid out at `PlotExporter.PageW` and a dielectric's spec is nine pieces — measured, the
+label column gets 316.8 px at that width and the MMIC's widest group needs 387.3.
+
+**A pane and a page are not the same constraint.** The pane has a width the user chose and the
+drawing makes the best of it; wrapping is the right answer there. A copied picture is vector, is
+going into a document, and a page is only as wide as it is asked to be — so `PageScene` now starts at
+the letter width and GROWS until nothing wraps. Shipped technologies: three already fit and are left
+at 792 exactly, the 4-layer board goes to 816.7, the MMIC to 955.9.
+
+**The arithmetic is `StackupScene.WidthThatFitsLabels`'s, not the exporter's** (R-stk1-1). How a total
+width divides into two columns is the scene's business — a fraction, a yield to the widest unbreakable
+token, and a floor — and a caller solving for it would be keeping a second copy of all three. It
+ITERATES rather than solving: `Build` is a pure function and cheap, each round adds the deficit the
+last one measured, and because the label column takes a fixed fraction of what is added each round
+closes about half the gap. Solving in closed form would mean naming `BandColumnFraction` outside the
+scene, which is the coupling the iteration exists to avoid.
+
+`MaxPageWidth` (4 × letter) is a refusal to loop, not a layout choice: a technology with an
+extravagant layer name gets the widest page and wraps, which is what every copy did before.
+
+### Context-menu tooltips covered the menu
+
+Every root item carried the card's own tooltip for the field it sets (R-stk6-8). On the real menu
+they are wider than the menu and pop up OVER it, so the item names cannot be read. **Tooltips now
+live on the SUBMENU items only** — where the closed choices are, which is where a reader who does not
+know what "Bottom of its own band" means is actually looking. The one root tooltip kept is Add Via's
+REFUSAL while it is disabled: that is the whole of R-stk6-4's "disabled with a reason", and a
+disabled item cannot be hovered, so it covers nothing.
+
+### Clicking a band showed half its card, and flashed on the way
+
+Two causes, and the second was introduced by the fix for the first.
+
+`ScrollIntoView` brings an item MINIMALLY into view, so for an item **taller than the viewport** —
+which a conductor card is, against a pane that now opens at four field rows — it lands the item's
+BOTTOM at the viewport's bottom when scrolling up, and the fields at the top of the card are exactly
+the ones scrolled away. `TopOffsetOf` measures the realised container and puts its own top edge at
+the top of the pane.
+
+**The flash was the ListBox scrolling itself, and it took three reports to find because it was looked
+for twice in the wrong file.** `SelectingItemsControl.AutoScrollToSelectedItem` defaults to **true**
+(verified by reflection against Avalonia 12.0.3, not assumed), and
+`AutoScrollToSelectedItemIfNecessary` posts a `ScrollIntoView` that runs BEFORE this view's own
+Background-priority handler. So every selection change made TWO movements: the list's own instant
+jump, rendered, and then the eased scroll starting from wherever that had left it. `StackupList` now
+sets `AutoScrollToSelectedItem="False"`; nothing is lost, because the selection is the view model's
+and this handler runs on every change of it.
+
+**The lesson is the debugging one.** Two fixes in a row were aimed at this view's own code — first a
+second `Dispatcher.Post` removed, then `ScrollIntoView` removed from the measurement altogether — and
+neither changed what the owner saw, because neither was what jumped. A movement nobody in the file
+asks for is a movement the CONTROL is making.
+
+The two rewrites were not wasted, and both are kept:
+
+- **The scroll sets out on an estimate** — the card's share of the list's own `Extent.Height`, which
+  for unrealised variable-height items is the same estimate the panel is itself using — and
+  `ScrollOffsetAnimator` **asks a `retarget` callback for the truth on every frame**, which starts
+  answering the moment the scroll gets close enough to realise the container. The ease is re-aimed
+  rather than restarted (`_from` and the start time stand), and the callback stops being listened to
+  at 85% so the landing is stable: a target still moving in the last frames is a scroll that visibly
+  settles twice. Without this, scrolling to an unrealised card needs a jump to measure it, and that
+  jump de-realises everything at the origin — a **blank viewport** for a frame, which is a second,
+  different flash.
+- **A card already wholly on screen is not scrolled at all** (`IsFullyVisible`). With the list's own
+  auto-scroll off, this handler is the only thing that can decide not to move.
+
+It is a `DispatcherTimer` writing `Offset`, not an Avalonia `Animation`: `ScrollViewer.Offset` is a
+direct property the scroller's own layout also writes, and an animation bound to it fights a wheel or
+a drag rather than yielding to it.
+
+`PlotInspectorView`, which the owner remembered as animating, does **not** — it posts a bare
+`Offset =` at `Loaded` priority. The animator is new, and is the reusable half.
+
+### The tab opens with more room for the drawing, and each pane collapses
+
+`StackupCardPaneOpeningHeight` is now `ConductorCardFieldRowsHeight` — the conductor card's four
+field rows and its chrome, WITHOUT the drawing-layer block, which is what the owner's "approximately
+half" turned out to be exactly. Both halves are derived from the card's own template, so the halving
+is a statement about the card rather than a constant somebody divided.
+
+The two expanders are `ToggleButton`s bound to `TechEditorViewModel.StackupDrawingExpanded` /
+`StackupCardsExpanded`, which project `Stackup.DrawingPaneExpanded` / `CardPaneExpanded` — **null
+reads back as expanded**, so every `.ctech` written before the fields existed means what it always
+meant. Writing one goes through `CommitEdit` like every other edit in this editor (the
+`SetViaDrawLane` precedent: a cosmetic value is still a value in the file), so the choice dirties,
+undoes and saves.
+
+**Two things about them were wrong first, and both are worth knowing.**
+
+*They were invisible in the state they open in.* Both start expanded, which is `IsChecked=True`, and
+Fluent's ToggleButton theme paints a checked button with an accent background and a
+**light-on-accent** foreground. Overriding the background to transparent — which is what a subtle
+button wants — left the glyph painted in that light brush over the pane's own pale ground: drawn,
+present, and the same colour as what was behind it. Unchecking made it appear, which is exactly
+backwards. The fix is a **`Template` of its own** with no state brushes in it at all, plus a stated
+`Foreground` on the button and on each glyph; overriding the theme's per-state foregrounds instead
+would have to be redone for every state the theme grows. A `Style` beats a `ControlTheme` in
+Avalonia, which is the same lever `TextBox.cell.compact` in that file already pulls.
+
+*The card pane's one moved when it was used.* They began at the top-left corner of each pane, which
+is where they were asked for — but **collapsing a pane gives its space to the other**, so anything
+sitting at the top of the LOWER pane is pushed down by exactly the height that was freed, and a
+second click has to chase it. In a vertical stack the only y positions that never move are the top of
+the tab and the bottom of it. The owner's answer (2026-09-13) was to put both in the fixed header, on
+the Stack height row, side by side — which is also why each carries a small pane glyph beside its
+chevron: two identical chevrons next to each other say nothing about which pane they act on. The
+readouts moved from `Grid.Column="0" ColumnSpan="6"` to `Column="1" ColumnSpan="5"` rather than
+sharing a cell with the toggles: that `WrapPanel` is right-aligned and wraps, so on a narrow window
+it comes back across the row.
+
+**The row heights are rewritten from code-behind and cannot be bound.** An Avalonia `RowDefinition`
+is not in the logical tree and inherits no `DataContext`. `ApplyStackupPaneLayout` also keeps exactly
+one row starred while a pane is collapsed — without that, the space the collapse freed is simply left
+empty at the bottom of the tab — and hides the `GridSplitter`, which between a collapsed row and a
+starred one moves nothing.
+
+---
+
+## Hover highlighting: kept, gated, and off (2026-09-13)
+
+Owner: remove the mouse-over highlighting — keep the code, gate it, keep it off.
+
+`StackupCanvas.HoverHighlighting` is the one switch, default **false**, and it is read in exactly two
+places: `Overlay` stops publishing what the pointer is over, and `MoveAt` stops tracking it at all —
+so a pointer crossing the drawing does not even hit-test, which on a control that raises a move event
+per pixel is the part that costs. Everything downstream is untouched and comes back by setting it
+true: `StackupOverlay.HoverLayer`, `StackupRenderer`'s lighter outline (`HoverWidth`, `HoverAlpha`),
+and the grippers a hovered via revealed.
+
+**A settable static, not a `const`.** A const would make every guarded branch unreachable — which
+this solution treats as an error — and, more to the point, it would make the kept code untestable.
+`WithTheSwitchOn_HoverStillTracksThePointerAndStillSelectsNothing` flips it and exercises R-stk3-4's
+own two properties, because a feature switched off and left to rot is one nobody can switch back on.
+
+**The consequence worth knowing:** a via's grippers now appear on SELECTION rather than on hover. One
+click, and a rule that holds whether or not a pointer is over the drawing at all. What R-stk3-4
+argued — that without hover the first click is a guess, because nothing says the drawing is clickable
+— is not wrong and is left written down at the switch.
+
+**The parallel-static hazard is the one `SkiaFonts.TestOverrideTypeface` already taught.**
+`StackupSelectionTests` is the ONLY class that flips it, and it is already party to
+`SkiaFontsTypefaceCollection` for the schedule. Every other stackup test that calls `MoveAt` is
+driving a DRAG, and the gate is read after the drag branches — so a flipped switch cannot reach one.

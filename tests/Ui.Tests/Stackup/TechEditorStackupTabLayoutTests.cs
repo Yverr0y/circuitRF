@@ -50,7 +50,9 @@ public class TechEditorStackupTabLayoutTests
     {
         var tab = StackupTab();
 
-        int grid = Require(tab, "<Grid>");
+        // x:Name'd, because the two pane expanders resize these rows from code-behind — an Avalonia
+        // RowDefinition inherits no DataContext, so its Height cannot be bound.
+        int grid = Require(tab, "<Grid x:Name=\"StackupTabGrid\">");
         int rows = Require(tab, "<Grid.RowDefinitions>");
         Assert.True(grid < rows);
 
@@ -72,19 +74,143 @@ public class TechEditorStackupTabLayoutTests
         Assert.True(TechEditorMetrics.StackupCardPaneMinHeight > 0);
     }
 
+    /// <summary>
+    /// The cards pane opens at a conductor card's FOUR FIELD ROWS — name, thickness, σ, "Metal
+    /// thickness goes to" — and not at the whole card.
+    ///
+    /// <para>Owner, 2026-09-13: "give more vertical room to the drawing as default… reduce the band
+    /// height for the card by approximate half". The half that goes is the drawing-layer block, which
+    /// is what makes this an assertion about the card's own template rather than about a number
+    /// somebody halved.</para>
+    /// </summary>
     [Fact]
-    public void TheCardsPaneOpensAtRoughlyOneConductorCard()
+    public void TheCardsPaneOpensAtAConductorCardsFieldRows()
     {
         Assert.Contains(
             "Height=\"{x:Static lay:TechEditorMetrics.StackupCardPaneOpeningHeight}\"", StackupTab());
 
-        // "Roughly one conductor card" is exactly what the opening height IS — it is derived from the
-        // card's own template rather than being a pixel count somebody liked the look of.
-        Assert.Equal(TechEditorMetrics.ConductorCardHeight,
+        Assert.Equal(TechEditorMetrics.ConductorCardFieldRowsHeight,
                      TechEditorMetrics.StackupCardPaneOpeningHeight.Value, 3);
 
+        // "Approximately half" of the whole card, and it is half because the drawing-layer block is
+        // what was dropped — not because a constant was divided by two.
+        Assert.Equal(TechEditorMetrics.ConductorCardHeight - TechEditorMetrics.DrawingLayerBlockHeight,
+                     TechEditorMetrics.ConductorCardFieldRowsHeight, 3);
+        Assert.InRange(TechEditorMetrics.ConductorCardFieldRowsHeight / TechEditorMetrics.ConductorCardHeight,
+                       0.4, 0.6);
+
         // …and it opens larger than its own floor, or the splitter would start pinned.
-        Assert.True(TechEditorMetrics.ConductorCardHeight > TechEditorMetrics.StackupCardPaneMinHeight);
+        Assert.True(TechEditorMetrics.ConductorCardFieldRowsHeight > TechEditorMetrics.StackupCardPaneMinHeight);
+    }
+
+    // ── The two pane expanders (owner, 2026-09-13) ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Each pane has an expander, both panes' content is bound to them, and <b>both expanders live in
+    /// the tab's FIXED header</b> rather than in the panes they collapse.
+    ///
+    /// <para>They started at the top-left corner of each pane, which is where they were asked for —
+    /// and the card pane's one then moved when it was used (owner, 2026-09-13): collapsing a pane
+    /// gives its space to the other, so anything at the top of the lower pane is pushed down by
+    /// exactly the height that was freed and a second click has to chase it. In a vertical stack only
+    /// the top and the bottom of the tab never move; the header is the top.</para>
+    /// </summary>
+    [Fact]
+    public void BothExpandersLiveInTheFixedHeader_AndEachPanesContentFollowsIts()
+    {
+        var tab = StackupTab();
+
+        int drawExp  = Require(tab, "x:Name=\"StackupDrawingExpander\"");
+        int cardsExp = Require(tab, "x:Name=\"StackupCardsExpander\"");
+        int scroller = Require(tab, "<ctrl:StackupCanvas");
+        int filter   = Require(tab, "x:Name=\"StackupFilterBox\"");
+        int cards    = Require(tab, "x:Name=\"StackupList\"");
+
+        // Both are in the header, which comes before either pane — that is what makes them fixed.
+        Assert.True(drawExp < cardsExp, "the two sit side by side, drawing first");
+        Assert.True(cardsExp < scroller, "both expanders are in the header, above the drawing");
+        Assert.True(scroller < filter && filter < cards);
+
+        // On the Stack height row (grid row 1), which is where the owner put them.
+        Assert.Contains("<StackPanel Grid.Row=\"1\" Grid.Column=\"0\" Orientation=\"Horizontal\"",
+                        tab, StringComparison.Ordinal);
+
+        // …and the readouts yielded their columns rather than sharing a cell with a toggle: a
+        // right-aligned WrapPanel wraps back across the row on a narrow window.
+        Assert.Contains("<WrapPanel Grid.Row=\"1\" Grid.Column=\"1\" Grid.ColumnSpan=\"5\"",
+                        tab, StringComparison.Ordinal);
+
+        // Both are two-way against the view model, which is what carries the state into the .ctech.
+        Assert.Contains("IsChecked=\"{Binding ViewModel.StackupDrawingExpanded, Mode=TwoWay}\"", tab);
+        Assert.Contains("IsChecked=\"{Binding ViewModel.StackupCardsExpanded, Mode=TwoWay}\"", tab);
+
+        // The filter box, its count and the card list all disappear with the card pane…
+        foreach (int at in new[] { filter, cards })
+            Assert.Contains("IsVisible=\"{Binding ViewModel.StackupCardsExpanded}\"",
+                            tab[at..(at + 700)], StringComparison.Ordinal);
+
+        // …and the drawing's scroller with the drawing pane.
+        int open = tab.LastIndexOf("<ScrollViewer", scroller, StringComparison.Ordinal);
+        Assert.Contains("IsVisible=\"{Binding ViewModel.StackupDrawingExpanded}\"",
+                        tab[open..scroller], StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <b>The expander carries its own template, and that is load-bearing.</b>
+    ///
+    /// <para>Owner, 2026-09-13: "the expanders are invisible when I first open a .ctech file" — and
+    /// only in the state they open in. Both start expanded, which is <c>IsChecked=True</c>, and
+    /// Fluent's ToggleButton theme paints a checked button with an accent background and a
+    /// light-on-accent foreground. Overriding the background to transparent left the glyph painted in
+    /// that light brush over the pane's pale ground: drawn, and the same colour as what was behind
+    /// it.</para>
+    ///
+    /// <para>What holds the fix is a template with no state brushes in it at all, plus a stated
+    /// Foreground. Overriding the theme's per-state foregrounds instead would have to be redone for
+    /// every state the theme grows.</para>
+    /// </summary>
+    [Fact]
+    public void TheExpandersCarryTheirOwnTemplate_AndAStatedForeground()
+    {
+        // The whole view: the style block is in <UserControl.Styles>, above the tab StackupTab()
+        // slices out.
+        var view = RepoFile(Path.Combine("src", "Ui", "Views", "Layout", "TechEditorView.axaml"));
+        var tab  = StackupTab();
+
+        int style = Require(view, "Selector=\"ToggleButton.paneexpander\"");
+        var block = view[style..(style + 1400)];
+
+        Assert.Contains("<Setter Property=\"Template\">", block, StringComparison.Ordinal);
+        Assert.Contains("<ControlTemplate TargetType=\"ToggleButton\">", block, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"Foreground\"", block, StringComparison.Ordinal);
+
+        // …and the glyphs state theirs too, so the icon survives a future change to that template.
+        int glyphs = Require(tab, "Kind=\"ChevronDown\"");
+        Assert.Contains("Foreground=", tab[glyphs..(glyphs + 260)], StringComparison.Ordinal);
+
+        // The style must NOT be reaching into the theme's checked-state brushes — that is the fix it
+        // replaced, and keeping both would be two answers to one question.
+        Assert.DoesNotContain("ToggleButton.paneexpander:checked", view, StringComparison.Ordinal);
+    }
+
+    /// <summary>The rows the expanders resize are rewritten from code-behind, because an Avalonia
+    /// RowDefinition is outside the logical tree and inherits no DataContext — so its Height cannot
+    /// be bound. This is that arrangement, asserted where it can be seen.</summary>
+    [Fact]
+    public void TheExpandersResizeTheTabsRows_FromCodeBehind()
+    {
+        var code = RepoFile(Path.Combine("src", "Ui", "Views", "Layout", "TechEditorView.axaml.cs"));
+
+        int apply = Require(code, "private void ApplyStackupPaneLayout()");
+        var body  = code[apply..(apply + 1800)];
+
+        Assert.Contains("StackupTabGrid.RowDefinitions", body);
+        Assert.Contains("GridUnitType.Star", body);
+        Assert.Contains("GridLength.Auto", body);
+
+        // …and it is called both when a toggle changes and when a technology is bound, or a stackup
+        // saved collapsed would open expanded.
+        Assert.Contains("ApplyStackupPaneLayout()", code[..apply]);
     }
 
     // ── R-stk2-7 — the drawing scrolls, and only vertically ──────────────────────────────────────

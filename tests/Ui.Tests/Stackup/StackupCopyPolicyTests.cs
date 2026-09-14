@@ -234,10 +234,11 @@ public sealed class StackupCopyPolicyTests : IDisposable
 
         public BarrelProbe(StackupScene scene, StackupViaLook look)
         {
+            var page = StackupGraphicExport.PageFor(scene);
             _barrel = scene.Barrels.First(b => b.Look == look);
-            _scale  = StackupGraphicExport.FitScale(scene, 792f, 612f);
-            _dx     = (792f - scene.Width  * _scale) * 0.5f;
-            _dy     = (612f - scene.Height * _scale) * 0.5f;
+            _scale  = StackupGraphicExport.FitScale(scene, page);
+            _dx     = (page.Width  - scene.Width  * _scale) * 0.5f;
+            _dy     = (page.Height - scene.Height * _scale) * 0.5f;
 
             BoreX = (int)(_dx + _barrel.Rect.MidX * _scale);
             WallX = (int)(_dx + (_barrel.Rect.Left + _barrel.WallPx * 0.5f) * _scale);

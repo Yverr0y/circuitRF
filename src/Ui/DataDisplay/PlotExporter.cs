@@ -321,14 +321,21 @@ namespace CircuitRF.Ui.DataDisplay
         /// text fallback are the part worth sharing, and a second copy of them would be a second set
         /// of platform bugs.
         /// </summary>
+        /// <param name="pageW">The composed page's width, for the Windows bypass — the one path that
+        /// has to tell the receiving application how big the picture is. It defaults to this exporter's
+        /// own letter landscape, which is what every plot composes onto; the stackup cross-section
+        /// composes onto a page sized to the drawing (<c>StackupGraphicExport.PageFor</c>) and passes
+        /// its own, or the picture would be pasted inside a letter-sized empty box.</param>
+        /// <param name="pageH">The composed page's height — see <paramref name="pageW"/>.</param>
         internal static async Task SetClipboardDataAsync(
-            Control anchor, byte[] pdf, string svg, string json, Bitmap? bitmap = null)
+            Control anchor, byte[] pdf, string svg, string json, Bitmap? bitmap = null,
+            float pageW = PageW, float pageH = PageH)
         {
             if (OperatingSystem.IsWindows())
             {
                 var topLevel = TopLevel.GetTopLevel(anchor);
                 IntPtr hwnd  = topLevel?.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
-                WindowsClipboard.SetClipboard(hwnd, pdf, svg, json, bitmap, PageW, PageH);
+                WindowsClipboard.SetClipboard(hwnd, pdf, svg, json, bitmap, pageW, pageH);
                 return;
             }
 

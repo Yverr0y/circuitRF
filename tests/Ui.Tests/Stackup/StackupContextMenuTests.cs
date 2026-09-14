@@ -626,8 +626,42 @@ public class StackupContextMenuTests
         Assert.DoesNotContain($"\"{text}\"", markup, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// <b>No item on the ROOT menu carries a tooltip</b> — owner, 2026-09-13: they pop up over the
+    /// menu and hide the item names underneath it, and a menu you cannot read is worse than one that
+    /// explains nothing.
+    ///
+    /// <para>The one exception is Add Via while it is DISABLED, which is the whole of R-stk6-4's
+    /// "disabled with a reason": a disabled item cannot be hovered, so it covers nothing, and
+    /// dropping that tooltip would leave an item greyed out and saying why nowhere. It is asserted
+    /// as an exception rather than excused, so an enabled item that grows a tooltip still fails.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(StackupKind.Conductor)]
+    [InlineData(StackupKind.Dielectric)]
+    [InlineData(StackupKind.Via)]
+    public void NoRootMenuItemCarriesATooltip(StackupKind kind)
+    {
+        var vm = Editor();
+        var canvas = Canvas(vm);
+        string name = kind == StackupKind.Dielectric
+            ? Dielectric(vm, 0)
+            : vm.Working.Stackup.Layers.First(l => l.Kind == kind).Name;
+
+        foreach (var item in Items(MenuAt(canvas, vm, name)))
+        {
+            if (item.IsEnabled == false) continue;   // the disabled Add Via keeps its refusal
+            Assert.Null(ToolTip.GetTip(item));
+        }
+    }
+
+    /// <summary>
+    /// …and the SUBMENU items keep theirs. That is where the closed choices are, where a reader who
+    /// does not know what "Bottom of its own band" means is actually looking, and a submenu flyout is
+    /// not what a tooltip over the root menu covers up.
+    /// </summary>
     [Fact]
-    public void EveryMenuParameterItemCarriesTheCardsTooltip()
+    public void EverySubmenuItemCarriesTheCardsTooltip()
     {
         var vm = Editor();
         var canvas = Canvas(vm);
@@ -635,15 +669,16 @@ public class StackupContextMenuTests
         string via       = vm.Working.Stackup.Layers.First(l => l.Kind == StackupKind.Via).Name;
 
         var cond = MenuAt(canvas, vm, conductor);
-        Assert.Equal(StackupCardText.GroundReferenceTip, ToolTip.GetTip(Item(cond, StackupCardText.GroundReference)));
-        Assert.Equal(StackupCardText.SheetAtTip,         ToolTip.GetTip(Item(cond, StackupCardText.SheetAt)));
+        foreach (var mi in Items(Sub(Item(cond, StackupCardText.SheetAt))))
+            Assert.Equal(StackupCardText.SheetAtTip, ToolTip.GetTip(mi));
 
         var diel = MenuAt(canvas, vm, Dielectric(vm, 0));
-        Assert.Equal(StackupCardText.PresentWithTip, ToolTip.GetTip(Item(diel, StackupCardText.PresentWith)));
+        foreach (var mi in Items(Sub(Item(diel, StackupCardText.PresentWith))))
+            Assert.Equal(StackupCardText.PresentWithTip, ToolTip.GetTip(mi));
 
         var v = MenuAt(canvas, vm, via);
-        Assert.Equal(StackupCardText.PlatedTip, ToolTip.GetTip(Item(v, StackupCardText.PlatedHoleMenu)));
-        Assert.Equal(StackupCardText.FillTip,   ToolTip.GetTip(Item(v, StackupCardText.Fill)));
+        foreach (var mi in Items(Sub(Item(v, StackupCardText.Fill))))
+            Assert.Equal(StackupCardText.FillTip, ToolTip.GetTip(mi));
     }
 
     // ── Copy — brief 6 shipped it disabled; brief 7 (R-stk7-4) is what enables it ────────────────
@@ -666,7 +701,6 @@ public class StackupContextMenuTests
         var copy = (MenuItem)items[^1];
         Assert.Equal("Copy", (string?)copy.Header);
         Assert.True(copy.IsEnabled);
-        Assert.Equal(StackupCardText.CopyPictureTip, ToolTip.GetTip(copy));
         Assert.IsType<Separator>(items[^2]);
     }
 

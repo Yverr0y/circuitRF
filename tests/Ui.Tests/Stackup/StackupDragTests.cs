@@ -452,6 +452,160 @@ public class StackupDragTests
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════════
+    //  The live preview of a via drag (owner, 2026-09-13)
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// <b>A via drag previews the REAL barrel, not a rectangle.</b> Owner, 2026-09-13: dragging a
+    /// gripper showed "a non-detailed ghost", and most of what a via is lives in the detail — the
+    /// walls, the bore, the outline, the grippers.
+    ///
+    /// <para>So the overlay carries a full <c>StackupBarrel</c> that agrees with the dragged one about
+    /// everything except where it is, and carries the ORIGINAL so the renderer can leave it out: a via
+    /// is being moved, not copied.</para>
+    /// </summary>
+    // The gesture is named by STRING because StackupDragKind is internal and an xUnit [InlineData]
+    // parameter cannot be less accessible than the public test method.
+    [Theory]
+    [InlineData("grip")]
+    [InlineData("span")]
+    [InlineData("lane")]
+    public void AViaDragPreviewsTheBarrelItself_AndHidesTheOneItCameFrom(string gesture)
+    {
+        var kind = gesture switch
+        {
+            "grip" => StackupDragKind.ViaGripTop,
+            "lane" => StackupDragKind.ViaLane,
+            _      => StackupDragKind.ViaSpan,
+        };
+        var vm = Editor();
+        var canvas = Canvas(vm);
+        var scene = SceneOf(canvas);
+        var conductors = scene.Bands.Where(b => b.Kind == StackupKind.Conductor).ToList();
+
+        // Which via has room depends on the gesture, and both cases are real: a whole-barrel step
+        // STOPS at the ends of the stack (R-stk5-4), so it needs the SHORT via; a top gripper can only
+        // move down, so it needs the one that starts at the top copper.
+        int Span(StackupLayer l) => Math.Abs(conductors.FindIndex(c => c.Name == l.SpanFromLayer) -
+                                             conductors.FindIndex(c => c.Name == l.SpanToLayer));
+        var vias = vm.Working.Stackup.Layers.Where(l => l.Kind == StackupKind.Via).ToList();
+
+        var entry  = kind == StackupDragKind.ViaSpan
+            ? vias.OrderBy(Span).First()
+            : vias.OrderByDescending(Span).First();
+        var barrel = Barrel(scene, entry.Name);
+
+        var (from, to) = kind switch
+        {
+            StackupDragKind.ViaGripTop => (new Point(barrel.GripTop.MidX, barrel.GripTop.MidY),
+                                           new Point(barrel.GripTop.MidX, conductors[^2].Rect.MidY)),
+            StackupDragKind.ViaLane    => (new Point(barrel.Rect.MidX, barrel.Rect.MidY),
+                                           new Point(scene.BandColumn.Left + 40f, barrel.Rect.MidY)),
+            _                          => (new Point(barrel.Rect.MidX, barrel.Rect.MidY),
+                                           new Point(barrel.Rect.MidX, barrel.Rect.MidY + 60f)),
+        };
+
+        canvas.PressAt(from);
+        canvas.MoveAt(to);
+        Assert.Equal(kind, canvas.DragKind);
+
+        var overlay = canvas.CurrentOverlay;
+        Assert.NotNull(overlay.DragVia);
+        var preview = overlay.DragVia!;
+
+        // The original is named for omission, by REFERENCE — two via entries may share a name.
+        Assert.Same(barrel, overlay.DragViaSource);
+
+        // No translucent rectangle: a via drag has something better to draw.
+        Assert.Null(overlay.DragGhost);
+
+        // Everything but the position is the barrel being dragged — which is what makes the preview
+        // and the result the same picture.
+        Assert.Equal(barrel.Name,   preview.Name);
+        Assert.Equal(barrel.Look,   preview.Look);
+        Assert.Equal(barrel.WallPx, preview.WallPx);
+        Assert.Equal(barrel.Fill,   preview.Fill);
+        Assert.Equal(barrel.Rect.Width, preview.Rect.Width, 0.01);
+
+        // …and it MOVED, or this proves nothing.
+        Assert.NotEqual(barrel.Rect, preview.Rect);
+
+        // The grippers follow the new ends, by the scene's own arithmetic — handles left at the old
+        // ends would be showing the user the wrong thing to aim at.
+        float g = StackupScene.GripGlyphHalf + StackupScene.GripHitSlop;
+        Assert.Equal(preview.Rect.MidX, preview.GripTop.MidX, 0.01);
+        Assert.Equal(preview.Rect.Top,  preview.GripTop.MidY, 0.01);
+        Assert.Equal(preview.Rect.Bottom, preview.GripBottom.MidY, 0.01);
+        Assert.Equal(2 * g, preview.GripTop.Height, 0.01);
+
+        // Nothing is left over once the gesture is abandoned.
+        canvas.CancelDrag();
+        Assert.Null(canvas.CurrentOverlay.DragVia);
+        Assert.Null(canvas.CurrentOverlay.DragViaSource);
+    }
+
+    /// <summary>
+    /// <b>And the preview is DRAWN as a via</b> — metal walls, a bore that is a void rather than the
+    /// dielectric behind it, and the old barrel gone from where it was.
+    ///
+    /// <para>Measured off a raster rather than off the overlay record: the overlay carrying the right
+    /// numbers and the renderer drawing a rectangle anyway is exactly the defect this is about.</para>
+    /// </summary>
+    [Fact]
+    public void ThePreviewIsPaintedAsARealBarrel_AndTheOriginalIsNotPaintedAtAll()
+    {
+        var vm = Editor();
+        var canvas = Canvas(vm);
+        var scene = SceneOf(canvas);
+
+        var entry  = vm.Working.Stackup.Layers.First(
+            l => l.Kind == StackupKind.Via && l.Plated != false && l.Fill != ViaFillKind.Solid);
+        var barrel = Barrel(scene, entry.Name);
+        Assert.Equal(StackupViaLook.PlatedBarrel, barrel.Look);
+
+        // Slide it sideways, far enough that the preview and the original do not overlap at all.
+        var start = new Point(barrel.Rect.MidX, barrel.Rect.MidY);
+        canvas.PressAt(start);
+        canvas.MoveAt(new Point(scene.BandColumn.Left + StackupScene.BarrelWidth, barrel.Rect.MidY));
+        Assert.Equal(StackupDragKind.ViaLane, canvas.DragKind);
+
+        var overlay = canvas.CurrentOverlay;
+        Assert.NotNull(overlay.DragVia);
+        var preview = overlay.DragVia!;
+        Assert.False(preview.Rect.IntersectsWith(barrel.Rect), "the two must not overlap for this test");
+
+        var theme = StackupRenderTheme.Light;
+        using var painted = Raster(scene, theme, overlay);
+
+        int y = (int)preview.Rect.MidY;
+
+        // The WALL is metal…
+        var wall = painted.GetPixel((int)(preview.Rect.Left + preview.WallPx * 0.5f), y);
+        Assert.NotEqual(theme.Background, wall);
+        Assert.NotEqual(theme.DielectricFill, wall);
+
+        // …the BORE is the drawn void, not the dielectric the via passes through…
+        Assert.Equal(theme.Background, painted.GetPixel((int)preview.Rect.MidX, y));
+
+        // …and where the barrel USED to be there is now band, not metal and not a void.
+        var vacated = painted.GetPixel((int)barrel.Rect.MidX, y);
+        Assert.NotEqual(theme.Background, vacated);
+        Assert.Equal(painted.GetPixel((int)(scene.BandColumn.Right - 4), y), vacated);
+    }
+
+    /// <summary>The scene at 1x with an overlay, so a test can ask where the ink is.</summary>
+    private static SKBitmap Raster(StackupScene scene, StackupRenderTheme theme, StackupOverlay overlay)
+    {
+        var bitmap = new SKBitmap((int)scene.Width, (int)scene.Height, SKColorType.Rgba8888, SKAlphaType.Premul);
+        using (var canvas = new SKCanvas(bitmap))
+        {
+            canvas.Clear(SKColors.Transparent);
+            StackupRenderer.Draw(canvas, scene, theme, overlay);
+        }
+        return bitmap;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
     //  R-stk5-6 — one undo entry, and the same bytes the combo boxes would have written
     // ══════════════════════════════════════════════════════════════════════════════════════════════
 
@@ -680,6 +834,38 @@ public class StackupDragTests
             }
             Assert.Equal(pa.Slab.HeightM, pb.Slab.HeightM);
             Assert.Equal(pa.EffectiveStack.Layers.Count, pb.EffectiveStack.Layers.Count);
+        }
+    }
+
+    /// <summary>
+    /// The same claim for the Stackup tab's two PANE flags (owner, 2026-09-13), which are the second
+    /// and third purely-cosmetic values the <c>.ctech</c> carries: whether the cross-section pane and
+    /// the card pane were left expanded.
+    ///
+    /// <para>Cheaper than the lane gate above and deliberately so — these two cannot be mistaken for
+    /// geometry the way a lane fraction can. What this holds is the weaker and still worth-holding
+    /// property that the extractor does not read them at all.</para>
+    /// </summary>
+    [Fact]
+    public void ATechnologyDifferingOnlyInThePaneFlags_ExtractsIdentically()
+    {
+        foreach (var entry in ShippedTechnologies.All)
+        {
+            var plain     = ShippedTechnologies.Load(entry.Id);
+            var collapsed = ShippedTechnologies.Load(entry.Id);
+            collapsed.Stackup.DrawingPaneExpanded = false;
+            collapsed.Stackup.CardPaneExpanded    = false;
+
+            var shapes = ProbeShapes(plain);
+            var a = PlanarExtractor.Extract(shapes, plain,     LayoutUnits.DefaultDbuPerMicron, 10e9);
+            var b = PlanarExtractor.Extract(shapes, collapsed, LayoutUnits.DefaultDbuPerMicron, 10e9);
+
+            Assert.Equal(a.Ok, b.Ok);
+            Assert.Equal(a.Refusal, b.Refusal);
+            Assert.Equal(a.Notes, b.Notes);
+            if (!a.Ok) continue;
+
+            Assert.Equal(EmSnpProvenance.GeometryHash(a.Problem!), EmSnpProvenance.GeometryHash(b.Problem!));
         }
     }
 

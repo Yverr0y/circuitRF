@@ -2292,3 +2292,183 @@ A vector export is a **different renderer**, and the parts of Skia it does not i
 silently and selectively. Anything that reaches for a layer, a blend mode or a non-intersect clip in
 `src/Render` should be assumed absent from an export until a test says otherwise — the two in
 `VectorExportClipAndLayerTests` are the pattern.
+
+---
+
+## Stackup cross-section: the via lane spread never measured a via's NAME (2026-09-13)
+
+Owner, testing the Stackup tab by hand: *the name of a via is sometimes drawn partly on a conductor
+and partly on the dielectric below it, and it sometimes lands on the next barrel's metal.* Two
+defects with one cause each, both in `StackupScene`, both invisible on the two-layer starter
+technology because it carries exactly one via.
+
+### The lane spread was three fixed fractions of the column
+
+`LaneCentre` placed slot 0 at `0.68 × bandWidth`, slot 1 at `0.50`, slot 2 at `0.32`, then wrapped to
+a second pass shifted left by `1.25 × BarrelWidth`. A via's NAME is drawn immediately to the right of
+its own barrel (`ViaNameGap`), so the gap between barrel *i* and barrel *i-1* is the space that name
+has to live in — and a fraction of the column knows nothing about how long anything is called. Four
+vias on a 900 px pane put ~100 px between lanes, which holds "Via1" and does not hold "Thermal via".
+
+`DefaultLaneCentres` now packs right to left with a **measured** step —
+`BarrelWidth + ViaNameGap + nameWidth + NameZoneGap` — and, when the column cannot hold every step,
+**compresses them uniformly** rather than running off the edge. The names then overlap, which is the
+owner's own stated fallback; a barrel outside the band column would be worse, because it could not be
+seen, hovered or dragged back, and R-stk1-8 exists to stop exactly that. `LaneStepFraction` and
+`LaneCount` are gone; `LaneMinStep` is the floor the compression cannot go below.
+
+This is also why the barrels are now placed in two passes: **which vias are drawable has to be known
+before any of them is placed**, because the step for barrel *i* depends on the whole list.
+
+### The name's ideal y was the barrel's middle, which is a boundary as often as not
+
+A barrel spans from one conductor's top to another's bottom, so its own midpoint is very often inside
+the dielectric — but on a stack with several layers it lands on a conductor/dielectric boundary just
+as easily, and the text then sits half on metal and half on substrate and reads as neither.
+
+`ViaNameAnchorY` picks a band the barrel CROSSES that is tall enough to hold the text, preferring a
+dielectric (taller on nearly every stack, and it carries no on-band name of its own), then a
+conductor, then falling back to the barrel's middle. `Separate` still runs afterwards and can still
+push a name off that centre — R-stk1-9's no-overlap guarantee outranks this, and does so only when
+two names' x intervals overlap, which the new spread avoids unless the column is too narrow.
+
+### "ground ref" became "gnd"
+
+`GroundReferenceText`. The label column WRAPS, and two words took a whole wrapped line on a narrow
+pane for something the band's own heavy edge has already said.
+
+Gates: `StackupSceneTests.AViasNameSitsInsideOneBand_OnEveryShippedTechnology`,
+`AViasNamePrefersADielectricBandOverAConductor`, `ViaNamesAreClearOfTheNextBarrel_WhenTheColumnHasRoom`,
+`WithNoRoomForEveryName_TheBarrelsStillStayInsideTheBandColumn`, `TheGroundReferenceIsLabelledGnd`.
+
+## A via drag now previews the barrel itself (2026-09-13)
+
+Owner: *during drag of the via using the grippers, I only see a non-detailed ghost.* It was a
+translucent rectangle — `StackupOverlay.DragGhost`, filled in `StackupRenderTheme.DragGhost` — and
+for a BAND reorder that is the right picture, because a band IS a rectangle. A via is not: most of
+what it is lives in the detail the ghost threw away — two metal walls, the bore cut through the
+material, the outline binding them into one object, a gripper at each end.
+
+**`StackupOverlay.DragVia` carries a whole `StackupBarrel`**, built from the one being dragged with
+only its rect and its grippers changed, and `StackupRenderer` draws it through **`DrawBarrel`, the
+same method it draws a real barrel with**. That extraction is the point: a preview painted by a
+second piece of code is a preview that can come to differ from what it previews.
+
+**`DragViaSource` names the original, which is then omitted** — matched by REFERENCE, because two via
+entries may share a name and the scene is not rebuilt until the release. Without it a via reads as
+two vias during a span or lane drag, and a RETRACTING gripper drag leaves the old barrel's tail
+sticking out past the new end. `Barrels(scene, overlay)` is the one sequence the bore clip, the
+barrel pass and the gripper pass all read, so the preview cannot be metal in one of them and a hole
+in another.
+
+Two smaller consequences: the preview's grippers are drawn unconditionally (the ends are what the
+gesture is aiming), and `OutlinedRectOf` makes the SELECTION outline follow the preview — the press
+that starts a via drag selects it, so an outline left framing the hidden original would read as the
+via having been left behind.
+
+Gates: `StackupDragTests.AViaDragPreviewsTheBarrelItself_AndHidesTheOneItCameFrom` (three gestures)
+and `ThePreviewIsPaintedAsARealBarrel_AndTheOriginalIsNotPaintedAtAll`, which measures a raster
+rather than the overlay record — the overlay carrying the right numbers while the renderer draws a
+rectangle anyway is exactly the defect this is about.
+
+## An on-band name was measured against the wrong box (2026-09-13)
+
+Owner: *on the shipped PCB 4-layer FR-4, the 8 mil Prepreg (top) moves its name over to the right-hand
+list, and there is enough space for it.* There was.
+
+The rule was `FaceHeight(nameFont) + 2 * LabelPadY <= band.Rect.Height`, and the three numbers are
+22.90 against a band that draws 20.95 — short by 1.95 px, for text whose own face box is **16.90**.
+`LabelPadY` is the label COLUMN's padding, and it is there for one reason: R-stk1-9's guarantee that
+no two separately-placed label rects touch. **A name on its own band has no neighbour to be kept from**
+— only two band edges to stay inside — so it was being held to a clearance that answers a question it
+does not ask.
+
+`OnBandPadY = 1.5` replaces it, and **it is the threshold AND the padding the run is then emitted
+with**. That is the part worth keeping: an on-band name's rect is inside its band *by construction*,
+which is what keeps R-stk1-9 true of a rect that `Separate` never sees. Two numbers — a loose
+threshold and a padding chosen separately — would be two chances to emit a name overlapping the band
+above it. `PieceRun` takes the padding as a parameter for this; `LabelPadX` is unchanged, because
+horizontal crowding is a real adjacency.
+
+Not smaller than 1.5: the ground reference's edge is `StackupRenderer.GroundEdgeWidth` centred on the
+band's own edge and reaches half of that inward.
+
+**What still moves off, and should:** the 1 oz inner planes at 18.00 px, and anything whose name is
+wider than the zone left of the leftmost via barrel — the MMIC's "MIM Dielectric" is exactly that
+case, at 20.00 px tall and 90.56 px wide. Gates:
+`StackupSceneTests.AnOnBandNameIsInsideItsBand_OnEveryShippedTechnology` (the property) and
+`TheFourLayerBoardsEightMilPrepregKeepsItsOwnName` (the reported case, named, with the inner planes
+asserted still in the column so the threshold cannot simply have been removed).
+
+## The via spec row lost two things it did not need (2026-09-13)
+
+Owner, on row width: drop the word *wall*, and shorten the span's conductor names.
+
+**`plated = 25 µm`, not `plated wall 25 µm`.** "wall" was the only word on that row naming a FIELD
+rather than saying something about the via — and on a barrel already drawn as two walls with a bore
+between them, it was telling the reader what they were looking at. The `=` is the spelling `σ`, `εr`
+and `tanδ` already use on a band, and the value stays its own piece so brief 4 can still double-click
+it. A via that is NOT a plated barrel has no wall to state and keeps the bare word (`solid`,
+`unplated`): `plated =` with nothing meaningful after it would be worse than either.
+
+**`ElideSpanName`** cuts a span's conductor name with an ellipsis at whichever comes first — an
+opening bracket, or a space at or after `SpanNameMinChars = 10`. So "Bottom Copper (1 oz)" draws as
+"Bottom Copper…" and "Inner 1 (Ground Plane)" as "Inner 1…". Three rules matter more than the number:
+
+- **At a space, never mid-word.** "Bottom Copper…" still names a layer a reader recognises; "Bottom
+  Cop…" is a string that could belong to two of them. A name with no space past the budget and no
+  bracket is therefore returned WHOLE — there is nowhere to cut it that leaves it readable, and the
+  label column wraps, which is a worse look but not a wrong one.
+- **A bracket cuts wherever it falls, even before the budget.** What follows one is a qualifier
+  rather than part of the identity — "(1 oz)", "(Ground Plane)" — so the budget does not apply to it.
+  The first cut tried was space-only, and it gave "Inner 1 (Ground…": six more characters than
+  "Inner 1…" and a bracket left hanging open. A bracket at index 0 is refused (it would empty the
+  name) and the space rule takes over; the length guard means none of this runs on a short name at
+  all.
+- **`WidestToken` measures the ELIDED spelling.** It is what sizes the band column against the label
+  column, and measuring the full names there would yield width to a token the scene never emits —
+  which is the whole of what the elision was for.
+
+It is display-only and safe to be: `StackupField.Span` is a pair chosen from the card's combo boxes
+and brief 4 refuses to type it, so no elided string is ever parsed back. `UnresolvedSpanText`
+deliberately does NOT use it — a refusal has to quote the exact name that failed to resolve, or it
+sends the reader looking for a layer that was never spelled that way.
+
+Gates: `StackupSceneTests.ASpanNameIsElidedAtAWordBoundaryOrNotAtAll`,
+`TheDrawingShowsTheElidedSpan_NotTheFullConductorName`, `ARefusalQuotesTheSpanNameWhole`,
+`APlatedWallIsWrittenAsAnEquality_AndTheWordWallIsGone`, `AViaWithNoWallKeepsTheBareWord`.
+
+## The label column's vertical padding was three times what it needed (2026-09-13)
+
+Owner: *too much vertical padding in the text on the right side — reducing it will make it easier to
+align the text row with its cross-section band.* Both halves were right, and the second is the
+mechanism.
+
+`LabelPadY` was 3, so every line of every group carried 6 px it did not need. That is not just
+wasted ink: every CLUSTER of groups was that much taller, and `Separate` re-centres a cluster about
+the MEAN of its members' ideal centres — so a taller cluster displaces each of its members further
+from its own band. The padding was buying misalignment.
+
+**It is not what keeps two labels apart**, which is what lets it be small: `LabelGap` (2) separates
+two GROUPS and `LineGap` (1) two wrapped lines of one, and both are strictly positive on their own
+account — R-stk1-9 rests on those. What the padding still buys is a pixel of slop around the glyphs
+for brief 4's double-click, which is why it is 1 and not 0.
+
+Measured over the five shipped technologies plus a 20-band hairline stack, at 900 px and 620 px —
+distance from a thickness label's centre to its band's centre:
+
+| `LabelPadY` | mean | worst |
+|---|---|---|
+| 3 (before) | 39.4 | 116.0 |
+| 2 | 26.6 | 77.3 |
+| 1.5 | 20.6 | 68.5 |
+| **1 (now)** | **14.8** | **62.0** |
+
+Shipped technologies alone at 900 px, which is the case the gate pins: mean **4.25**, worst **11.58**
+(was 29.1). `ASpecRowLinesUpWithItsBand_OnEveryShippedTechnology` holds worst ≤ 20 and mean ≤ 8 —
+bounds chosen to fail at the old padding rather than merely to pass at the new one — and
+`TheLabelPaddingIsNotWhatKeepsTwoLabelsApart` holds the reason it is allowed to be this small.
+
+The residual at narrow widths is inherent and not a padding problem: below ~620 px the column wraps
+a dielectric's spec onto three lines, groups get tall, and clusters displace. That is what
+`LabelColumnDropWidth` exists for.
