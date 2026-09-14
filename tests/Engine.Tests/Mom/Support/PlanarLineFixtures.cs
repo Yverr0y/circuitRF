@@ -22,12 +22,19 @@ public static class PlanarLineFixtures
     // and both calibration standards. The same fact makes it cacheable across tests. The cache is a
     // pure memo of a deterministic function of an immutable key, so it is safe under xUnit's
     // cross-class parallelism in the way a mutable static would not be.
-    private static readonly ConcurrentDictionary<(double H, double Eps, double Tan, double F),
+    //
+    // CL7 — THE KEY IS THE SLAB ITSELF, and it used to be four of its numbers. A key spelled
+    // (height, εᵣ, tanδ, f) rebuilt a FLOORLESS slab to fit, so once CL6 gave GroundedSlab a ground
+    // plane, two slabs differing only in the ground's metal were served one PEC kernel and every
+    // ground measurement came out EXACTLY zero — a plausible, silent, perfectly stable zero. That is
+    // the same defect `EmSnpProvenance` had on the production side (§CL6 §7), in a cache instead of
+    // a hash. `GroundedSlab` is a record and its `Floor` is part of its value equality, so the type
+    // itself is the right key and cannot go stale again when the next field is added.
+    private static readonly ConcurrentDictionary<(GroundedSlab Slab, double F),
                                                  PlanarKernelPair> Kernels = new();
 
     public static PlanarKernelPair Kernel(GroundedSlab slab, double fHz) =>
-        Kernels.GetOrAdd((slab.HeightM, slab.Material.EpsR, slab.Material.TanD, fHz),
-                         k => PlanarKernelPair.Fit(new GroundedSlab(k.H, new EmMaterial(k.Eps, k.Tan)), k.F));
+        Kernels.GetOrAdd((slab, fHz), k => PlanarKernelPair.Fit(k.Slab, k.F));
 
     /// <summary>Cheap enough that a de-embedded solve (DUT + two standards) is milliseconds.</summary>
     public static readonly PlanarMeshSettings Coarse =

@@ -441,7 +441,7 @@ public static class PlanarSurfaceWaveLaunch
 
 /// <summary>
 /// <b>Where one driven port's accepted power went, at one frequency.</b> See this file's header for
-/// what each term is and for why <see cref="DielectricW"/> is a residual rather than a third
+/// what each term is and for why <see cref="DielectricAndGroundW"/> is a residual rather than a third
 /// integral.
 /// </summary>
 /// <param name="AcceptedW">½·Re(Y_jj) for the 1 V delta gap — <b>the RAW self-admittance</b> of the
@@ -449,19 +449,25 @@ public static class PlanarSurfaceWaveLaunch
 /// different structure with the feed leads removed.</param>
 /// <param name="RadiatedW">∫U dΩ over the upper hemisphere.</param>
 /// <param name="SurfaceWaveW">Launched into the substrate's guided modes; 0 when refused.</param>
-/// <param name="DielectricW">The residual: accepted − radiated − surface-wave − <b>conductor</b>.
-/// CL2 moved the conductor term out of it; see the file header for why adding the term beside the
-/// residual instead is the failure that still sums to <paramref name="AcceptedW"/>.
-/// <para><b>CL4 — a CONDUCTING GROUND PLANE's dissipation lands HERE, and it is not dielectric
-/// loss.</b> <paramref name="ConductorW"/> is an integral over the fill's own basis functions, and
-/// the plane is not meshed and has no basis: it enters as a termination of the Green's function, so
-/// what it absorbs arrives as a smaller <paramref name="AcceptedW"/>-minus-everything-else and is
-/// booked against this line. On the FR-4 starter that is 21% of the conductor term and on a
-/// low-loss laminate 25%, so on a low-tanδ substrate it can be most of what this line reads.
-/// <b>Nothing in the shipped extractor builds such a termination</b> (`RESOLVED.md` §CL4), so no run
-/// a user can make is affected today; splitting it out needs a second quadratic form in the
-/// spectral domain rather than a relabelling, and CL4's own "Must NOT" reserved the residual's
-/// arithmetic.</para></param>
+/// <param name="DielectricAndGroundW">The residual: accepted − radiated − surface-wave −
+/// <b>conductor</b>. CL2 moved the conductor term out of it; see the file header for why adding the
+/// term beside the residual instead is the failure that still sums to <paramref name="AcceptedW"/>.
+/// <para><b>CL7 — IT IS NAMED FOR TWO MECHANISMS BECAUSE IT CARRIES TWO, and until CL7 it carried
+/// one.</b> <paramref name="ConductorW"/> is an integral over the fill's own basis functions; the
+/// laterally infinite GROUND PLANE is not meshed and has no basis, so it enters as a termination of
+/// the Green's function and what it absorbs arrives as everything-else-minus and is booked here.
+/// CL4 §8 found that and left it alone because no run could build such a termination; CL7 makes
+/// every run with a σ on its ground layer build one, and a budget line whose label named only the
+/// dielectric would then be false. <b>Measured</b> (<c>GroundReachesAUserTests</c> R-cl7-4): with
+/// tanδ = 0 and a perfect strip, where the plane is the only absorber in the model, it is the WHOLE
+/// of this line.
+/// <para><b>It is renamed rather than SPLIT, and that is a recorded decision.</b> Splitting needs a
+/// second quadratic form in the spectral domain — a 2D spectral integral per basis PAIR for
+/// ½∫Re(Z_s)|H_tan|² over the plane — which is a brief rather than a relabelling, and CL4's own
+/// "Must NOT" reserved the residual's arithmetic. `RESOLVED.md` §CL7.</para>
+/// <para>A run whose ground layer has no σ has a perfect plane, which absorbs nothing, and this
+/// line is then dielectric loss alone — exactly as it was. The two states are distinguishable from
+/// the extraction's own return-plane note, not from this number.</para></param>
 /// <param name="ConductorW">½∫Re(Z_s)|J|²dS + Σ½Re(Z_barrel)|I|² — see
 /// <see cref="PlanarConductorLossInputs"/>. Exactly zero when the metal is a perfect conductor, and
 /// <paramref name="ConductorModelled"/> is what says which kind of zero that is.</param>
@@ -478,7 +484,7 @@ public sealed record PlanarPowerBudget(
     double                   AcceptedW,
     double                   RadiatedW,
     double                   SurfaceWaveW,
-    double                   DielectricW,
+    double                   DielectricAndGroundW,
     double                   ConductorW,
     EmSuitability            SurfaceWaveVerdict,
     PlanarSurfaceWavePower?  SurfaceWave,
@@ -585,15 +591,19 @@ public sealed record PlanarPowerBudget(
                 $"Power budget at {SurfaceMesher.Eng(FrequencyHz)}Hz, port {DrivenPort} driven at " +
                 $"1 V: {SurfaceMesher.Eng(AcceptedW)}W accepted, " +
                 $"{SurfaceMesher.Eng(RadiatedW)}W radiated{pc(RadiatedW)}, {sw}, " +
-                $"{SurfaceMesher.Eng(DielectricW)}W dielectric{pc(DielectricW)}, {cond}. " +
+                $"{SurfaceMesher.Eng(DielectricAndGroundW)}W dielectric + ground plane" +
+                $"{pc(DielectricAndGroundW)}, {cond}. " +
                 $"Radiation efficiency {RadiationEfficiency:P2}. " +
-                $"The dielectric term is a RESIDUAL (accepted − radiated − surface wave − " +
-                $"conductor), not a third independent integral: over a laterally infinite lossy " +
-                $"substrate a volume loss integral already contains the whole surface-wave term, so " +
-                $"adding the two would double-count. What is reported is therefore the dielectric " +
-                $"loss NOT carried away by a guided mode. The conductor term, by contrast, IS an " +
-                $"independent integral and is taken OUT of that residual rather than reported " +
-                $"beside it.";
+                $"The dielectric + ground-plane term is a RESIDUAL (accepted − radiated − " +
+                $"surface wave − conductor), not a third independent integral: over a laterally " +
+                $"infinite lossy substrate a volume loss integral already contains the whole " +
+                $"surface-wave term, so adding the two would double-count. What is reported is " +
+                $"therefore the dielectric loss NOT carried away by a guided mode, PLUS whatever " +
+                $"the ground plane absorbed — the plane is not meshed and has no basis function, so " +
+                $"it cannot be integrated the way the drawn metal is, and on a low-tanδ substrate " +
+                $"it can be most of what this line reads. The conductor term, by contrast, IS an " +
+                $"independent integral over the drawn metal and is taken OUT of that residual " +
+                $"rather than reported beside it.";
         }
     }
 

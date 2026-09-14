@@ -447,7 +447,7 @@ public class PlanarMetricsTests(Xunit.Abstractions.ITestOutputHelper output)
         _out.WriteLine(budget.Caption);
         _out.WriteLine(budget.SurfaceWave!.Caption);
 
-        double residual = budget.DielectricW / budget.AcceptedW;
+        double residual = budget.DielectricAndGroundW / budget.AcceptedW;
         double swShare  = budget.SurfaceWaveW / budget.AcceptedW;
         _out.WriteLine($"dielectric residual = {residual:E3} of accepted; surface wave = {swShare:P2}");
 
@@ -457,7 +457,7 @@ public class PlanarMetricsTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.InRange(swShare, 0.05, 0.95);
         Assert.True(Math.Abs(residual) < 1e-3,
             $"a LOSSLESS substrate absorbs nothing, so the dielectric residual must vanish; it is " +
-            $"{residual:E3} of the accepted power ({SurfaceMesher.Eng(budget.DielectricW)}W of " +
+            $"{residual:E3} of the accepted power ({SurfaceMesher.Eng(budget.DielectricAndGroundW)}W of " +
             $"{SurfaceMesher.Eng(budget.AcceptedW)}W)");
         Assert.Equal(0.0, budget.ConductorW);
     }
@@ -487,8 +487,8 @@ public class PlanarMetricsTests(Xunit.Abstractions.ITestOutputHelper output)
         _out.WriteLine("tanδ = 0:    " + lossless.Caption);
         _out.WriteLine("tanδ = 0.02: " + lossy.Caption);
 
-        Assert.True(Math.Abs(lossless.DielectricW / lossless.AcceptedW) < 1e-3);
-        Assert.True(lossy.DielectricW / lossy.AcceptedW > 0.1,
+        Assert.True(Math.Abs(lossless.DielectricAndGroundW / lossless.AcceptedW) < 1e-3);
+        Assert.True(lossy.DielectricAndGroundW / lossy.AcceptedW > 0.1,
             "a 20 mm FR-4 line at 5 GHz absorbs a real fraction of what it accepts");
         Assert.True(lossy.RadiationEfficiency < lossless.RadiationEfficiency,
             "adding dielectric loss cannot raise the radiation efficiency");
@@ -615,8 +615,8 @@ public class PlanarMetricsTests(Xunit.Abstractions.ITestOutputHelper output)
             problem, mesh, sol.Currents[0], pattern, sol.Y[0, 0], ports[0].Z0));
 
         Assert.False(report[PlanarMetric.PowerSurfaceWave].Ok);
-        Assert.False(report[PlanarMetric.PowerDielectric].Ok);
-        Assert.Contains("double count", report[PlanarMetric.PowerDielectric].Verdict.Reason!);
+        Assert.False(report[PlanarMetric.PowerDielectricAndGround].Ok);
+        Assert.Contains("double count", report[PlanarMetric.PowerDielectricAndGround].Verdict.Reason!);
 
         // Everything that does not depend on the itemisation still ships.
         Assert.True(report[PlanarMetric.PowerAccepted].Ok);

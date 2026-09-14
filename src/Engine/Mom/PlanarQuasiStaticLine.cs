@@ -115,6 +115,44 @@
 // than the equivalent `√(jωL·jωC)`, so a run with `PlanarFillSettings.PerfectConductor` set
 // reproduces every number QSC recorded.
 //
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// CL7 — AND THE GROUND PLANE IS A REAL CONDUCTOR NOW, SO γ NEEDS ITS TERM TOO
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+//
+// The block above is CL3's, and its sum is over MESHED LEVELS. `brief-conductor-loss-7` makes the
+// extractor write a conducting floor, and the plane is not a meshed level: it is laterally infinite,
+// unmeshed, and has no ΔS of its own. Left alone, a GaAs line's published S would carry a ground
+// term at every frequency and the γ its error box is solved against would carry one at none of them
+// — and on the shipped MMIC technology the quasi-static path is the WHOLE band.
+//
+//     R_ground = Re(Z_plane(ω, σ, t)) · [ ΔS_g · Δℓ / |ΔT|² ] ,   S_g = Σ_ij q_i q̄_j K(d_ij)
+//     K(d)     = h / (π (4h² + d²)^{3/2})                          (PlanarGroundReturn)
+//
+// **Off the SAME two solves and the SAME mesh**, from the same charge vector, so CL3 §1's whole
+// argument transfers. Three things about it are worth having here rather than one file over:
+//
+//   • **It is a SEPARATE object from `Conductor` and that is load-bearing.**
+//     `PlanarFillSettings.PerfectConductor` makes the STRIP perfect and nothing else, because the
+//     plane is a termination of the Green's function and not a member of the fill (§CL4 §8). Folding
+//     the ground in would have made that flag turn the plane perfect here and not in the full-wave
+//     kernel — the exact asymmetry that ate CL4's own first measurement.
+//   • **Re(Z_s) is the ONE-SIDED `PlanarSurfaceImpedance.Plane`**, read through the floor itself, so
+//     this path and CL6's kernel cannot come to mean different metal. A level's two-sided `Sheet`
+//     would halve it.
+//   • **It is the RETURN CURRENT's distribution, not the induced CHARGE's.** Those are two different
+//     things in an inhomogeneous line and the charge one over-reads by 1.56× on FR-4 and 1.87× on
+//     GaAs — the measurement and the reason are in `PlanarGroundReturn`'s own header.
+//
+// Measured against the fill's own ground term (the lossy-floor two-line extraction minus the PEC one,
+// strip perfect on both sides) at four frequencies and four meshes on both starters: **0.887-0.983×**,
+// drifting down the band exactly as §CL4 §7's k₀H finding predicts. `RESOLVED.md` §CL7.
+//
+// **A PERFECT floor produces no `Ground` at all rather than one whose R is zero**, on the same rule
+// the paragraph above states for `Conductor`: a `+ 0.0` would put a PEC-ground run on the other
+// spelling of γ and move it by an ulp, which is exactly enough to stop `PerfectGround` being an
+// oracle. And **MIM-4's interior route supplies NO ground term** — `GroundTermSupplied` says so, and
+// `PlanarSolve`'s own calibration note reports the residue rather than leaving it to be assumed.
+//
 // **C stays COMPLEX all the way to γ and that is not decoration.** `PlanarKernelTerms.StaticScalar`
 // is built on `GroundedSlab.EpsComplex`, so the charge already carries tanδ; D7 drops it with a
 // `.Real` because Z_c takes a double. Dropping it here would publish α = 0 on a lossy board — a
@@ -144,6 +182,22 @@ public sealed record PlanarQuasiStaticLine(Complex CComplexPerMetre, double C0Pe
     /// </summary>
     public PlanarQuasiStaticConductor? Conductor { get; init; }
 
+    /// <summary>
+    /// <b>CL7 — the ground plane's own series resistance per metre, or null when the floor is a
+    /// perfect conductor or when this route cannot supply one.</b> Orthogonal to
+    /// <see cref="Conductor"/>: the strip and the plane are two different surfaces and
+    /// <c>PlanarFillSettings.PerfectConductor</c> speaks for only one of them.
+    /// </summary>
+    public PlanarQuasiStaticGround? Ground { get; init; }
+
+    /// <summary>
+    /// <b>Whether the medium this line was extracted in has a conducting floor AND this route can
+    /// read it.</b> False on MIM-4's interior route even when the floor conducts — a general stack's
+    /// return current has no closed form (see <c>PlanarGroundReturn</c>'s header) — so a
+    /// caller can report the residue rather than assume it away.
+    /// </summary>
+    public bool GroundTermSupplied => Ground is not null;
+
     /// <summary>C′ — F/m, the real part, which is what <see cref="PlanarDeembed.CharacteristicImpedance"/>
     /// takes and what the <c>Cpul</c> diagnostic cube publishes.</summary>
     public double CPerMetre => CComplexPerMetre.Real;
@@ -167,10 +221,12 @@ public sealed record PlanarQuasiStaticLine(Complex CComplexPerMetre, double C0Pe
         // √(jωL·jωC), so a run with PlanarFillSettings.PerfectConductor set reproduces every number
         // QSC recorded BIT FOR BIT. The two agree to the last digit of the physics and not to the
         // last bit of the arithmetic, and the oracle has to be the second kind.
-        if (Conductor is not { } cond)
+        if (Conductor is null && Ground is null)
             return Complex.ImaginaryOne * omega * Complex.Sqrt(LPerMetre * CComplexPerMetre);
 
-        Complex z = cond.ResistancePerMetreAt(omega) + Complex.ImaginaryOne * omega * LPerMetre;
+        double r = (Conductor?.ResistancePerMetreAt(omega) ?? 0.0)
+                 + (Ground?.ResistancePerMetreAt(omega)    ?? 0.0);
+        Complex z = r + Complex.ImaginaryOne * omega * LPerMetre;
         Complex y = Complex.ImaginaryOne * omega * CComplexPerMetre;
         return Complex.Sqrt(z * y);
     }
@@ -178,6 +234,17 @@ public sealed record PlanarQuasiStaticLine(Complex CComplexPerMetre, double C0Pe
     /// <summary>R per metre at one frequency — 0 on a perfect conductor. Reported rather than
     /// inferred from γ, because α_c and α_d are not separable once they are inside a square root.</summary>
     public double ResistancePerMetreAt(double fHz) =>
+        (Conductor?.ResistancePerMetreAt(2.0 * Math.PI * fHz) ?? 0.0) +
+        (Ground?.ResistancePerMetreAt(2.0 * Math.PI * fHz)    ?? 0.0);
+
+    /// <summary><b>The GROUND PLANE's half of R on its own</b>, Ω/m — 0 on a perfect floor, and on
+    /// the interior route where it is not supplied. Reported because it is not recoverable from the
+    /// total, and because the two zeros are different facts.</summary>
+    public double GroundResistancePerMetreAt(double fHz) =>
+        Ground?.ResistancePerMetreAt(2.0 * Math.PI * fHz) ?? 0.0;
+
+    /// <summary><b>The STRIP's half of R on its own</b>, Ω/m — CL3's own reading, unchanged.</summary>
+    public double ConductorResistancePerMetreAt(double fHz) =>
         Conductor?.ResistancePerMetreAt(2.0 * Math.PI * fHz) ?? 0.0;
 
     /// <summary>
@@ -231,7 +298,11 @@ public sealed record PlanarQuasiStaticLine(Complex CComplexPerMetre, double C0Pe
         Complex c0 = PlanarDeembed.CapacitancePerMetreComplex(
             shortStd, longStd, slab, settings, shortCores, longCores, airFilled: true);
 
-        return FromCharge(shortStd, longStd, q1, q2, c0, settings);
+        // CL7 — the PLANE's own RETURN CURRENT, off this same solve and this same mesh. The slab
+        // puts the metal one image-height above one plane, which is the geometry PlanarGroundReturn's
+        // closed form describes — which is why the ground term is supplied on THIS overload and not
+        // on the interior one below.
+        return FromCharge(shortStd, longStd, q1, q2, c0, settings, slab.Floor, slab.HeightM);
     }
 
     /// <summary><b>MIM-4's medium, the same way.</b> Only the electrostatic kernel changes; the
@@ -256,7 +327,12 @@ public sealed record PlanarQuasiStaticLine(Complex CComplexPerMetre, double C0Pe
             shortStd, longStd, stack, levelZ, referenceHeightM, settings, shortCores, longCores,
             model, airFilled: true);
 
-        return FromCharge(shortStd, longStd, q1, q2, c0, settings);
+        // CL7 — NO GROUND TERM ON THIS ROUTE, and that is stated rather than defaulted. A standard
+        // on a buried level of a stratified stack is not one horizontal current one image-height
+        // above one plane, so PlanarGroundReturn's closed form does not describe it.
+        // `GroundTermSupplied` is false here and a caller can report the residue; see the header of
+        // PlanarGroundReturn.cs and `RESOLVED.md` §CL7 for its measured size.
+        return FromCharge(shortStd, longStd, q1, q2, c0, settings, null, 0.0);
     }
 
     /// <summary>
@@ -269,7 +345,8 @@ public sealed record PlanarQuasiStaticLine(Complex CComplexPerMetre, double C0Pe
     /// </summary>
     private static PlanarQuasiStaticLine FromCharge(
         PlanarStandard shortStd, PlanarStandard longStd,
-        Complex[] q1, Complex[] q2, Complex c0, PlanarFillSettings? settings)
+        Complex[] q1, Complex[] q2, Complex c0, PlanarFillSettings? settings,
+        Termination? floor, double heightM)
     {
         double dl = longStd.LengthM - shortStd.LengthM;
         if (!(dl > 0))
@@ -279,6 +356,30 @@ public sealed record PlanarQuasiStaticLine(Complex CComplexPerMetre, double C0Pe
         Complex c  = (t2 - t1) / dl;
 
         var line = Checked(c, c0);
+
+        Complex dT  = t2 - t1;
+        double  den = dT.Magnitude * dT.Magnitude;
+
+        // ── CL7 — the GROUND's own ΔS, before and independently of the strip's ────────────────
+        //
+        // Independently, because PlanarFillSettings.PerfectConductor makes the STRIP perfect and
+        // nothing else: the plane is a termination of the Green's function, not a member of the
+        // fill. Reading the ground term out of the same `if` as the levels' would have made that
+        // flag silently turn the plane perfect here and not in the full-wave kernel — the exact
+        // asymmetry CL4 §8 records eating its own first measurement.
+        //
+        // A PEC floor, any floor that is not a conducting plane, and any PERFECT spelling of one
+        // contribute NOTHING and are not asked for, so a perfect-ground run's γ keeps CL3's
+        // arithmetic to the bit rather than gaining a `+ 0.0`.
+        if (den > 0 && heightM > 0 &&
+            floor is { Kind: TerminationKind.SurfaceImpedance } f &&
+            !PlanarSurfaceImpedance.IsPerfect(f.ConductivitySm, f.ThicknessM))
+        {
+            double g1 = PlanarGroundReturn.SecondMoment(shortStd.Mesh, q1, heightM);
+            double g2 = PlanarGroundReturn.SecondMoment(longStd.Mesh,  q2, heightM);
+            line = line with { Ground = new PlanarQuasiStaticGround((g2 - g1) * dl / den, f) };
+        }
+
         if ((settings ?? PlanarFillSettings.Default).ConductorLoss is not { } loss) return line;
 
         // A metal DECLARED perfect on the stackup and a metal asked to be perfect with
@@ -298,8 +399,6 @@ public sealed record PlanarQuasiStaticLine(Complex CComplexPerMetre, double C0Pe
         var s1 = SecondMoment(shortStd, q1, levels);
         var s2 = SecondMoment(longStd,  q2, levels);
 
-        Complex dT = t2 - t1;
-        double  den = dT.Magnitude * dT.Magnitude;
         if (!(den > 0)) return line;
 
         for (int i = 0; i < levels; i++) ratio[i] = (s2[i] - s1[i]) * dl / den;
@@ -390,4 +489,30 @@ public sealed record PlanarQuasiStaticConductor(
             r += (i < zs.Length ? zs[i].Real : 0.0) * RatioByLayer[i];
         return r;
     }
+}
+
+/// <summary>
+/// <b>CL7 — what a quasi-static line needs to put the GROUND PLANE's R into γ.</b> The plane's
+/// counterpart of <see cref="PlanarQuasiStaticConductor"/>, and deliberately a SEPARATE object.
+///
+/// <para><b>It is separate because <see cref="PlanarFillSettings.PerfectConductor"/> makes the STRIP
+/// perfect and nothing else</b> (CL4 §8) — the plane is a termination of the Green's function, not a
+/// member of the fill. Folding the ground into the conductor record would have made that flag turn
+/// the plane perfect too on this path and not on the full-wave one, which is the exact asymmetry
+/// CL4's own first measurement died of, and it would have made the four-alpha instrument
+/// unmeasurable.</para>
+///
+/// <para><b>Re(Z_s) here is the ONE-SIDED <see cref="PlanarSurfaceImpedance.Plane"/></b>, read
+/// through the floor itself so this path and CL6's kernel cannot come to mean different metal — the
+/// plane has air below it and carries its return current on one face, where a strip is excited on
+/// both. A meshed level's two-sided <see cref="PlanarSurfaceImpedance.Sheet"/> would halve it.</para>
+/// </summary>
+/// <param name="Ratio">ΔS_g·Δℓ/|ΔT|², in 1/m per Ω/square, from
+/// <see cref="PlanarGroundReturn.SecondMoment"/>. Frequency-independent.</param>
+/// <param name="Floor">The medium's own floor — <see cref="GroundedSlab.Floor"/>.</param>
+public sealed record PlanarQuasiStaticGround(double Ratio, Termination Floor)
+{
+    /// <summary>R_ground per metre at one angular frequency, Ω/m.</summary>
+    public double ResistancePerMetreAt(double omegaRadS) =>
+        Floor.SurfaceImpedanceAt(omegaRadS).Real * Ratio;
 }

@@ -485,11 +485,14 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
   That is the single place the FILL makes the same choice; a far field that re-derived it could
   disagree with the currents it is transforming, silently, and only on a stratified stack.
 - **The θ axis spans 0…90° and the run says why** — the ground plane and every dielectric layer are
-  laterally infinite, so the field below is *identically zero by construction*, and an axis padded
-  with those zeros reads as a measured front-to-back ratio. `PlanarFarFieldGrid.MaxThetaDeg` is the
-  one constant a finite-ground phase moves; the θ values are DATA. Group `"farfield"`, cubes
-  `Etheta`/`Ephi`/`U`, axes `[freq, theta, phi, port]` — **the port axis is there from the first
-  commit** even on a one-port, because retro-fitting an axis onto a shipped cube is not free.
+  laterally infinite, and the model has **no lower half-space at all**: a PEC floor makes the field
+  below *identically zero by construction*, and CL4's conducting floor is a boundary CONDITION that
+  computes no transmitted field, so what is missing below is a REGION rather than a small number.
+  Either way an axis padded with those zeros reads as a measured front-to-back ratio.
+  `PlanarFarFieldGrid.MaxThetaDeg` is the one constant a finite-ground phase moves; the θ values are
+  DATA. Group `"farfield"`, cubes `Etheta`/`Ephi`/`U`, axes `[freq, theta, phi, port]` —
+  **the port axis is there from the first commit** even on a one-port, because retro-fitting an axis
+  onto a shipped cube is not free.
   **ANT-11 was that phase and it left the constant at 90, on purpose** — see §3.9.
 - **BOTH ELEMENT FACTORS ARE EXACTLY ZERO AT θ = 90°, AND THAT IS NOW AN EXPLICIT LIMIT** in
   `FarFieldElementFactors.At` (ANT-11, R-fg-4). At grazing the top half-space's TM characteristic
@@ -546,12 +549,21 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
   (`PlanarFillSettings.PerfectConductor` — since CL3 the oracle rather than the default).
   `PlanarPowerBudget.ConductorModelled` separates them,
   because the number cannot; the notes and the caption say which a run is in. `RESOLVED.md` §CL2.
-- **`PowerDielectric` IS A RESIDUAL (accepted − radiated − surface wave − CONDUCTOR), AND THAT IS
-  PHYSICS, NOT A SHORTCUT.** Over a laterally infinite lossy substrate a volume integral of ωε₀ε″|E|²
-  already contains the whole surface-wave term — the guided mode decays as e^{−2αρ}/ρ and never escapes — so
-  the two are not disjoint channels and adding them double-counts. What is published is the
-  dielectric loss NOT carried away by a guided mode; on a finite board that is the distinction that
-  matters, because the guided part instead reaches the edge.
+- **`PowerDielectricAndGround` IS A RESIDUAL (accepted − radiated − surface wave − CONDUCTOR), AND
+  THAT IS PHYSICS, NOT A SHORTCUT.** Over a laterally infinite lossy substrate a volume integral of
+  ωε₀ε″|E|² already contains the whole surface-wave term — the guided mode decays as e^{−2αρ}/ρ and
+  never escapes — so the two are not disjoint channels and adding them double-counts. What is
+  published is the dielectric loss NOT carried away by a guided mode; on a finite board that is the
+  distinction that matters, because the guided part instead reaches the edge.
+  **CL7 renamed it, because it carries TWO mechanisms and named one.** `ConductorW` is an integral
+  over the FILL's own basis functions; the laterally infinite ground plane has none — it is a
+  termination of the Green's function — so what it absorbs can only arrive here. Measured with
+  tanδ = 0 and a perfect strip, where the plane is the only absorber in the model, it is the WHOLE of
+  this line; on a realistic MMIC run it is 13.7% of it and on FR-4 0.42%. **Splitting it out needs a
+  second quadratic form in the spectral domain** (a 2D spectral integral per basis PAIR for
+  ½∫Re(Z_s)|H_tan|² over the plane) and is a brief, not a relabelling — `RESOLVED.md` §CL7 §2 is that
+  decision. A run whose ground layer has no σ has a perfect plane and this line is dielectric loss
+  alone; the extraction's return-plane note is what says which state a run is in.
 - **R-ant-3. THE BALANCE CANNOT GATE ITSELF; THE LOSSLESS CASE GATES IT.** With tanδ = 0 the residual
   must be zero, so ½Re(Y_jj) (MoM factorisation), ∫U dΩ (far field) and the pole residues (spectral
   kernel) are three independent routes on one number. **With tanδ = 0 and REAL metal it also gates
@@ -1017,7 +1029,7 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
 | `Dcim.ValidatedRhoOverLambdaLayered` | 1.0 | general stack; ≤**1.6e-2** (≈2.6× worse than one-layer, stated not rounded away) |
 | `Dcim.ValidatedRhoOverLambdaAtHeights` | **0.1** | **G_A^zz only** — the binding limit on every via-bearing run. Asked of the **via-footprint extent**, not the mesh diagonal. **Do not widen it.** |
 | `Dcim.ValidatedRhoOverLambdaInteriorHorizontal` | 1.0 | a **note, never a refusal** |
-| **CL4's conducting floor** | no constant | **k₀H ≤ 0.07** is where the ground term agrees with kernel A (1.057× on GaAs at 0.021, 1.062× on FR-4 at 0.067); 1.478× at 0.335 and the two-line INSTRUMENT itself fails by 0.671. Deliberately not a refusal — nothing shipped can build the termination (§7). `RESOLVED.md` §CL4 §7 |
+| **The conducting ground plane** | no constant | **k₀H ≤ 0.07** is where the ground term agrees with kernel A (1.057× on GaAs at 0.021, 1.062× on FR-4 at 0.067); 1.478× at 0.335 and the two-line INSTRUMENT itself fails by 0.671. **Deliberately not a refusal**: above it neither formulation is authoritative — kernel A's quasi-TEM rule has no radiation term and the two-line instrument has lost resolution — so the row is REPORTED and not resolved. CL7 reproduces both figures on the ONE-SLAB path, which is what a shipped microstrip takes. `RESOLVED.md` §CL4 §7, §CL7 §3 |
 | `GroundedSlab.MinElectricalThickness` | k₀H ≥ 1e-6 | kernel limit |
 | `MinUngroundedElectricalThickness` | 0.05 (k₀H) | bracketed by 0.021 failing / 0.105 passing; **mechanism NOT isolated**, and the refusal says so |
 | `Dcim.CanFitAtFrequency` | **k₀H < 1e-4** | near-DC refusal, asked of the sweep's lowest NON-ZERO point. R-dcm-4's `PathExtent·k₀H < 1` half is **gone** — the path widens itself now (next row); what is left is the floor the widening cannot reach, where the failure is the FIT rather than the path. Names the DC point as the thing that does work there. **LF2 — it is a REFUSAL only under `PlanarSolveSettings.SubstituteConductionBelowFitFloor = false`; by default `PlanarSolve.Run` splits those points out beside 0 Hz and gives them `PlanarDcSolve`'s answer, with a one-line note. `Dcim.IsBelowFitFloor` is the single spelling of the question. `RESOLVED.md` §LF2.** |
@@ -1050,6 +1062,21 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
   construction rather than by calibration**. Measured: the static supplier tracks the fill's own α_c
   to 0.96-1.15× on every mesh, where kernel A's over-reads it by 1.32-1.76×. `Z_c = γ/(jωC′)` gets
   its `√(1 + R/(jωL))` correction for free with it. `RESOLVED.md` §CL3 §1.
+  **CL7 gave it the GROUND's term too, and that sum is over MESHED levels while the plane is not
+  one.** `R_ground = Re(Z_plane)·[ΔS_g·Δℓ/|ΔT|²]` with `S_g = Σ_ij q_i q̄_j·h/(π(4h²+d²)^{3/2})` —
+  off the same charge vector, so the crossover stays continuous for the same reason. **It is the
+  plane's RETURN CURRENT, not its induced CHARGE**: in an inhomogeneous line those are two different
+  distributions and the charge one over-reads by `A₀ = 2εᵣ/(1+εᵣ)` — 1.63 on FR-4, 1.86 on GaAs. The
+  magnetostatic problem does not see the dielectric (one negative image, every εᵣ), which is
+  `StaticGreens.VectorPotential`'s own sentence. Measured: 0.887-0.983× of the fill's own ground term
+  over both starters, four frequencies and four meshes, drifting with k₀H exactly as §CL4 §7
+  predicts. **`PlanarQuasiStaticGround` is a SEPARATE object from `PlanarQuasiStaticConductor`**,
+  because `PerfectConductor` speaks for the strip alone; a perfect floor produces no `Ground` at all
+  rather than one whose R is zero, or `GammaAt`'s two spellings would move a PEC run by an ulp.
+  **MIM-4's interior route supplies NO ground term** — a standard on a buried level of a stratified
+  stack is not one current one image-height above one plane — and `GroundTermSupplied` /
+  `PlanarPortCalibrator.QuasiStaticGroundTermMissing` say so, with `PlanarSolve`'s own calibration
+  note reporting the residue. `RESOLVED.md` §CL7 §1.
 - **`Z_c = γ/(jωC_pul)` holds C at its static value** (`PlanarKernel.QuasiStaticNote` states it
   once): +0.4% at 1 GHz, +2.3% at 5 GHz, +6.3% at 20 GHz vs kernel A; −9.6% vs Kirschning-Jansen at
   20 GHz, where neither is authoritative. A dispersive C needs a field integral this kernel lacks.
@@ -1076,17 +1103,29 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
   and 0.748 through the whole shipped de-embedding, an instrument sharing no algebra with CL1's.
   **The 6.5 / 3.0 / 2.1% at 2 / 10 / 20 GHz is the FR-4 number, and FR-4 is where α_c matters
   LEAST**: on the shipped MMIC technology it is 92-99%, and a de-embedded MMIC line's TOTAL α went
-  from 0.06-0.18 of kernel A's to **0.79-0.86**. **The GROUND PLANE is still PEC in every run anyone
-  can make** — 21% (FR-4) / ~11% (GaAs) / 25% (low-loss laminate) of the conductor term.
-  **CL4 RAN and the termination is built** (`Termination.LossyGround`, `TerminationKind.SurfaceImpedance`,
-  the one-sided `PlanarSurfaceImpedance.Plane`): all four of its measurements pass, and the ground term
-  agrees with kernel A to **6%** at k₀H ≤ 0.07. **It is not wired to `PlanarExtractor`**, because a
-  conducting floor is expressible only through `MediumStack`, which forces the GENERAL kernel — and
-  that kernel refuses a lossless dielectric outright. `RESOLVED.md` §CL1, §CL3, §CL4 (§9 is the
-  reachability decision and what would lift it).
-  **CL2 reads it back out as `P_conductor`** — see §3.7. **A conducting floor's own dissipation would
-  land in CL2's `P_dielectric` residual rather than in `P_conductor`**, because the plane has no basis
-  function to integrate over; recorded, not fixed.
+  from 0.06-0.18 of kernel A's to **0.79-0.86**.
+  **CL2 reads it back out as `P_conductor`** — see §3.7.
+- **THE GROUND PLANE IS A REAL CONDUCTOR IN EVERY RUN SINCE CL7**, in BOTH kernels, and it takes the
+  σ and thickness of whichever stackup conductor the run returns through. It is worth **21% (FR-4) /
+  ~11% (GaAs) / 25% (low-loss laminate) of the conductor term** — and on the MMIC technology, where
+  the conductor term is 92-99% of the loss, that is about a tenth of every GaAs line's total α.
+  It is still **laterally infinite, unmeshed and adds no unknown**: `Termination.LossyGround(σ, t)`
+  with the ONE-SIDED `PlanarSurfaceImpedance.Plane` (a strip is excited on both faces; the plane
+  carries its return on one, so CL1.1's halving does NOT apply here).
+  **`PlanarExtractor.FloorFor` is the one place it is decided**, from the band CHOSEN as the return
+  plane and from nothing else — a designated plane that was skipped over, or any conductor that is
+  neither a level nor the return plane, is absorbed into a neighbouring dielectric and must not
+  acquire a floor by accident. **Both spellings of the medium get the same floor**, `GroundedSlab.Floor`
+  and the `LayerStack`'s bottom alike: writing it only where the general kernel was already selected
+  would give two physically identical designs different ground physics according to whether the
+  stackup carried one dielectric entry or two.
+  **`PlanarProblem.PerfectGround` is the PEC ORACLE and stays permanently**, on `PerfectConductor`'s
+  own pattern — every CL4/CL6/CL7 ground figure is a comparison against it. **`PerfectConductor` is
+  NOT it and cannot be made to be**: that flag makes the STRIP perfect, because the plane is a
+  termination of the Green's function and not a member of the fill. A ground layer with no σ gets
+  `Termination.Pec` — not a perfect SPELLING of a conducting plane — so its provenance hash and every
+  cached `.snp` are unchanged; the extraction's return-plane note says which state a run is in.
+  No `.cem` key and no UI control. `RESOLVED.md` §CL1, §CL3, §CL4, §CL6, §CL7.
 - **Staircase error is NOT monotone in cell size.** Local width error on MTaper/MKlopf is 17–24%
   worst, 5.5–11% RMS, against 0.47–0.59% global *area* error. Conformal tiling error vs the drawn
   artwork is 7.7e-16…6.5e-15; staircase is 0.096–0.593%.
@@ -1235,20 +1274,24 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
   section. A standard also carries **no cut cell** (`BuildLine` never runs the conformal pass).
 - `CanSolve` refuses: a level not on any interface, levels not bottom-to-top, a via skipping a level.
 - **The ANTENNA METRICS refuse five things by name, each leaving the sweep and the other metrics
-  intact** (ANT-5, §3.7). `FrontToBackDb` **always, in this kernel** — the field below a laterally
-  infinite ground plane is identically zero so the true ratio is infinite, and ∞, a large finite
-  number and a missing metric are all worse than the sentence. **CL4 gave it a SECOND sentence for a
-  conducting floor, where that reason is false**: a real plane leaks, so the true ratio is finite —
-  what is still true is that a Leontovich impedance is a boundary CONDITION with no lower half-space
-  behind it at all, so what is missing is a region rather than a small number
-  (`PlanarMetrics.FrontToBackLossyFloorPreamble`). **ANT-11 narrowed it by the one
+  intact** (ANT-5, §3.7). `FrontToBackDb` **always, in this kernel**, and it carries TWO sentences
+  because there are two floors and the reason differs. On a PEC floor the field below is identically
+  zero so the true ratio is infinite, and ∞, a large finite number and a missing metric are all worse
+  than the sentence. **On CL4's conducting floor — which since CL7 is what every run with a σ on its
+  ground layer gets, so this is now the COMMON branch — that reason is false**: a real plane leaks,
+  so the true front-to-back of the structure a user drew is finite. What is still true is that a
+  Leontovich impedance is a boundary CONDITION with no lower half-space behind it at all, so what is
+  missing from the model is a REGION rather than a small number, and carrying it needs a two-sided
+  plane and a different θ range rather than a tolerance
+  (`PlanarMetrics.FrontToBackLossyFloorPreamble`; `FrontToBackRefusalFor` picks between the two on
+  the problem's own termination). **ANT-11 narrowed it by the one
   predicate it was staged for** (`PlanarFiniteGround.CanCorrect`): it is now a function of the problem,
   refusing differently according to whether a ground outline was found, and naming a MEASURED reason
   instead of a future phase. It still refuses in both branches — §3.9 and `RESOLVED.md` §ANT-11. `DirectivityPeakPhiDeg` **at a broadside peak**, where every azimuth names the same
   direction. `PowerSurfaceWave` on a substrate whose pole is too far off the real axis for a
   simple-pole residue (|Im k_ρ|/Re k_ρ past 0.05), or whose mode is too close to cutoff to be
-  separable from the continuum — and `PowerDielectric` goes with it, because the residual's meaning
-  depends on the term taken out of it. `BeamwidthDeg` when there is no cut: no dominant linear current
+  separable from the continuum — and `PowerDielectricAndGround` goes with it, because the residual's
+  meaning depends on the term taken out of it. `BeamwidthDeg` when there is no cut: no dominant linear current
   axis (a circularly polarized structure reads 1.0 exactly), no current moment at all, a grid that
   samples only part of the azimuth circle, or a cut with no 3 dB crossing inside the sampled θ range.
   **It is never defaulted to φ = 0.**

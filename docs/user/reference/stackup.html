@@ -1724,7 +1724,7 @@ which removes the entry.</p>
 </tr>
 <tr>
 <td><strong>σ (S/m)</strong></td>
-<td>Conductivity at 20 °C. Sets conductor loss and skin depth in the cross-section kernel. The <strong>combo beside it</strong> is a shortcut that fills the box with a metal's bulk value (copper 5.8e7, silver 6.3e7, gold 4.1e7, aluminium 3.77e7, nickel 1.43e7); the box stays typeable and is what gets saved, and a value matching none of them reads as <em>Custom</em>.</td>
+<td>Conductivity at 20 °C. Sets conductor loss and skin depth in <strong>both</strong> EM kernels — on drawn metal, and on the <strong>ground reference</strong> layer, whose own σ becomes the loss of the infinite plane a microstrip returns through (about a fifth to a quarter of the conductor term; see <a href="mom-engine.html#ground-loss">the MoM engine</a>). A ground layer left at zero is a perfect plane, and the run's notes say so. The <strong>combo beside it</strong> is a shortcut that fills the box with a metal's bulk value (copper 5.8e7, silver 6.3e7, gold 4.1e7, aluminium 3.77e7, nickel 1.43e7); the box stays typeable and is what gets saved, and a value matching none of them reads as <em>Custom</em>.</td>
 </tr>
 <tr>
 <td><strong>Ground reference</strong></td>
@@ -2372,15 +2372,13 @@ and no such bound.</p>
 <h2 id="ignored">What the EM engine does not read</h2>
 <p>Stated plainly, because a field that is carried but unused is worse than one that is absent:</p>
 <ul>
-<li><strong>Conductor σ is not used by the full-wave planar kernel.</strong> It models metal as a perfect conductor;
-conductor loss is not in the answer. The <strong>cross-section (uniform-line) kernel</strong> does use it, for
-its Wheeler-incremental-inductance surface resistance.</li>
-<li><strong>Conductor thickness is not modelled by the full-wave kernel either</strong> — it solves a zero-thickness
-sheet. The thickness itself is used by the cross-section kernel and by interchange, and the
-full-wave kernel gives it to one of the two dielectrics beside the conductor. Which one is
-normally invisible (3 µm of metal under a 100 µm substrate moves nothing), and matters exactly
-once: between the two plates of a <a href="#mim">thin-film capacitor</a>. It is a per-conductor setting —
-see <a href="#sheet-surface">Where a conductor's thickness goes</a>.</li>
+<li><strong>Conductor thickness reaches the full-wave kernel's loss model but not its GEOMETRY</strong> — it still
+solves a zero-thickness sheet, so t sets the sheet's surface impedance (and therefore its loss) and
+nothing about where the metal is. The thickness is also used by the cross-section kernel and by
+interchange, and the full-wave kernel gives it to one of the two dielectrics beside the conductor.
+Which one is normally invisible (3 µm of metal under a 100 µm substrate moves nothing), and matters
+exactly once: between the two plates of a <a href="#mim">thin-film capacitor</a>. It is a per-conductor
+setting — see <a href="#sheet-surface">Where a conductor's thickness goes</a>.</li>
 <li><strong>A via's fill and wall thickness are carried for thermal work</strong>, not read by the RF solve: a plated
 wall a few µm thick is many skin depths at RF, so plated and solid behave the same.</li>
 </ul>

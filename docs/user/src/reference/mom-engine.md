@@ -73,8 +73,8 @@ not general 3D.
   re-bisected 50 Ω line, the full-wave answer comes out at **0.63 of it on 1.6 mm FR-4 and 0.73 on
   100 µm GaAs** — under-reading, consistently, and **converging**: refining the mesh at the
   conductor rim changes it by under 1% per step, so this is the model's own limit and not a
-  resolution you can mesh your way out of. And the **ground plane's** share is not included — see
-  [Cannot](#can-cannot).
+  resolution you can mesh your way out of. **The ground plane's share IS included** — see
+  [The ground plane's own loss](#ground-loss) below.
   **How much it matters depends entirely on the substrate**, and the FR-4 figure everyone quotes is
   the one where it matters least:
 
@@ -92,6 +92,26 @@ not general 3D.
   [Antennas](antennas.html#numbers) says which way each correction pushes. A measured example — a
   half-wave patch — loses **0.28 points** of radiation efficiency to 35 µm copper on FR-4 at
   2.4 GHz and **4.12 points** to 3 µm gold on GaAs at 60 GHz.
+- <a id="ground-loss"></a>**The ground plane's own loss**, in both kernels. The laterally infinite plane the
+  stack terminates on is a real conductor: it takes the conductivity and thickness of whichever
+  stackup conductor this run returns through, and the run's notes name that layer and its σ. It is
+  **not meshed** and costs no unknowns — it enters as a surface impedance on the boundary the solver's
+  own Green's function terminates on, which is why it is free.
+  **It is worth about a fifth to a quarter of the conductor term** — measured on a re-bisected 50 Ω
+  line as **21% on 1.6 mm FR-4, about 11% on the MMIC technology and 25% on a low-loss laminate** —
+  so on the MMIC technology, where the conductor term is nearly all of the loss, the plane alone is
+  about a tenth of a line's total attenuation.
+  Two independent formulations agree on it: the full-wave kernel's surface impedance and the
+  quasi-static kernel's incremental-inductance rule come out within **6%** of each other wherever the
+  substrate is electrically thin (k₀·h ≤ 0.07). It scales as 1/√σ, as a skin-effect term must, and it
+  is **additive** with the signal metal's — the two surfaces do not double-count each other.
+  **A ground layer with no conductivity set is a perfect plane, as it always was**, and the run says
+  so rather than leaving you to infer it. Set σ on that layer in the technology editor's
+  [Stackup](stackup.html) tab to carry the term.
+  **In the power budget it is not separable from the dielectric loss** and the line is named for both
+  — see [Antennas](antennas.html#numbers). The plane has no basis function to integrate over, so what
+  it absorbs can only be reported as part of the residual; on a low-tanδ substrate that is most of
+  what the line reads.
 - **Arbitrary planar shapes**: lines, bends, tapers, stubs, spirals, pads, coupled sections.
 - **Multiple metal levels**, with **vias** carrying z-directed current between them. A via is either
   a placed via primitive or a **drawn region** — a rectangle or polygon on the via entry's drawing
@@ -155,26 +175,6 @@ not general 3D.
   note. Two things that are no longer limits, because they were fixed: the plate sheets used to be
   separated by the capacitor dielectric *plus the lower plate's own metal thickness*, and a port on
   upper metal used to be refused. See [A thin-film (MIM) capacitor](stackup.html#mim).
-- **The GROUND PLANE's share of conductor loss, in the full-wave kernel.** The signal metal's loss
-  *is* modelled now (see [Can](#can-cannot) above); the laterally infinite plane the stack terminates
-  on is still a perfect conductor. It is not a large share and it is measured rather than estimated —
-  **21% on 1.6 mm FR-4, about 11% on the MMIC technology, 25% on a low-loss laminate**, of the
-  *conductor* term only. So an insertion loss still reads a little optimistic, and by that much.
-  A ground drawn as **artwork** — coplanar waveguide, a drawn backside path, anything on a meshed
-  level — is an ordinary conductor and its loss is modelled in full; this limit is only about the
-  infinite plane underneath a microstrip.
-  **This limit was attacked directly and it is still here, so here is exactly where it got to.** The
-  physics works: the plane can be given a real conductivity without meshing it — it becomes an
-  impedance the solver's own layered Green's function terminates on rather than a short — and every
-  check that mattered came back clean. The fitted kernel is no worse (it is *better* in four of six
-  cases measured), the substrate's guided modes barely move, backside vias and the antenna metrics
-  keep working, and the resulting ground loss agrees with the independent quasi-static kernel to
-  **6%** on substrates that are electrically thin. What stops it reaching you is not the physics but
-  the plumbing: a stated ground conductivity forces the whole run onto the solver's *general* layered
-  path, which is a looser accuracy tier and which **refuses a lossless substrate outright** — so
-  turning it on today would trade a known 21% under-read for a different, larger change to every
-  microstrip run on the tool, and would break runs on an air or zero-tanδ substrate that work now.
-  It is deliberately not switched on until that path can carry it.
 
 There is also a **quasi-static kernel** for the special case of a uniform transmission-line
 cross-section, which is described below and which is far faster than the full-wave path where it
@@ -182,7 +182,9 @@ applies. Its own limits are narrower: no discontinuities, no bends, no stubs, no
 no resonance, and no coupling between non-parallel conductors. It models conductor loss through
 Wheeler's incremental inductance rule over every lossy surface **including the ground plane**, which
 is a different calculation from the full-wave kernel's sheet — so the two do not agree exactly on a
-uniform line, and the quasi-static one reads the higher of the two by the amounts given above.
+uniform line, and the quasi-static one reads the higher of the two, by the 0.63/0.73 sheet factor
+given above. **The ground plane's own term is in both of them now**, and where the substrate is
+electrically thin the two formulations agree on it to within **6%** — see below.
 
 ## For advanced users: how circuitRF implements MoM {#implementation}
 

@@ -53,7 +53,7 @@ The results land in the `farfield` group of the same result the s-parameters do.
 | `RadiationEfficiencyDb` | freq, port | dB — the same number, 10·log10(η) |
 | `TrpDbm`, `PeakEirpDbm` | freq, port | dBm — see [TRP and EIRP](#trp) |
 | `ReferenceInputPowerDbm` | freq, port | dBm — what those two are referenced to |
-| `PowerAccepted`, `PowerRadiated`, `PowerSurfaceWave`, `PowerDielectric`, `PowerConductor` | freq, port | W |
+| `PowerAccepted`, `PowerRadiated`, `PowerSurfaceWave`, `PowerDielectricAndGround`, `PowerConductor` | freq, port | W |
 | `BeamwidthDeg` | freq, **cut**, port | deg — the `cut` axis carries each plane's φ |
 | `AxialRatioDb`, `PolarizationSense` | freq, θ, φ, port | dB, and signed Stokes *V* |
 | `CoPolLudwig3Db`, `CrossPolLudwig3Db` | freq, θ, φ, port | dB |
@@ -291,20 +291,19 @@ its edges and this one books as loss permanently — pushes the same way.
 
 ### The loss itemisation, and what to change for each term
 
-The run prints a power budget at every pattern point: accepted = radiated + surface wave + dielectric +
-conductor.
+The run prints a power budget at every pattern point: accepted = radiated + surface wave +
+dielectric and ground plane + conductor.
 
 | Term | What to change |
 |---|---|
 | **Radiated** | this is the output, not a loss |
-| **Dielectric** | lower tanδ, or a thicker substrate (the same current radiates more of its power) |
+| **Dielectric + ground plane** | lower tanδ, or a thicker substrate (the same current radiates more of its power); and a lower-resistivity ground plane. **The two are reported together because they cannot be separated here**: the plane is laterally infinite and is not meshed, so it has no basis function to integrate its loss over the way the drawn metal does, and what it absorbs can only arrive in this residual. On a low-tanδ substrate it is most of what this line reads — measured at **14% of it** on the MMIC starter at 30 GHz and 0.4% on FR-4 at 6 GHz, where the dielectric swamps it. A ground layer with no σ is a perfect plane and this term is dielectric loss alone |
 | **Surface wave** | thinner substrate, or lower ε<sub>r</sub>. Booked as a **permanent loss** here, because an infinite substrate never gives it back — on a real board it reaches the edge and radiates, usually badly |
-| **Conductor** | lower-resistivity metal, or thicker metal — it is the signal metal's own ohmic loss, taken from the stackup's σ and t. **Exactly zero only when the metal really is a perfect conductor**, and the budget says which of the two zeros it is printing. The **ground plane's** share (21% on FR-4, ~11% on the MMIC technology) is not in it |
+| **Conductor** | lower-resistivity metal, or thicker metal — it is the **drawn** metal's own ohmic loss, taken from the stackup's σ and t. **Exactly zero only when the metal really is a perfect conductor**, and the budget says which of the two zeros it is printing. The ground plane's share is real and is modelled, but it is in the line above rather than this one |
 
-**Read the surface-wave correction and the ground-plane one together, because they push opposite
-ways.** The surface-wave term makes the reported efficiency a **lower bound** on what a finite board
-does; the ground plane's unmodelled loss makes it read **high**, by about a tenth of the conductor
-term. The pattern is also missing the edge-diffracted contribution entirely.
+**The surface-wave term makes the reported efficiency a lower bound** on what a finite board does —
+an infinite substrate never gives that power back, where a real board's edge radiates some of it. The
+pattern is also missing the edge-diffracted contribution entirely.
 
 ### Beamwidth, polarization, cross-pol
 
@@ -414,8 +413,8 @@ At 5.85 GHz, the requested grid point nearest resonance:
 | Ground plane | 0.71 λ₀ across at 5.3 GHz rising to 0.84 λ₀ at 6.3, with 0.15–0.18 λ₀ beyond the metal |
 
 The power budget at that point, in the run's own words: **27.50 µW accepted = 17.22 µW radiated
-(62.6 %) + 1.93 µW surface wave (7.0 %) + 8.35 µW dielectric (30.4 %) + 0 conductor.** Dielectric loss
-is the term to attack, and the explicit zero is the perfect metal.
+(62.6 %) + 1.93 µW surface wave (7.0 %) + 8.35 µW dielectric + ground plane (30.4 %) + 0 conductor.**
+Dielectric loss is the term to attack, and the explicit zero is the perfect metal.
 
 ### The mesh is not what limits this example — the frequency grid is
 

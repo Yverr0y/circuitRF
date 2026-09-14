@@ -650,9 +650,14 @@ public static class PlanarExtractor
                     $"'{named.Layer.Name}' is NOT marked as a ground reference in technology " +
                     $"'{tech.Name}', but this EM setup names it as the return plane, so this run " +
                     "overrides the technology and terminates on it anyway. It is modelled as a " +
-                    "laterally infinite PEC and its own artwork, if any, is not meshed. That " +
-                    "override applies to this run only; the technology is unchanged.");
+                    "laterally infinite plane and its own artwork, if any, is not meshed — its own " +
+                    "metal is carried, and the note below says with what. That override applies to " +
+                    "this run only; the technology is unchanged.");
         }
+
+        // CL7 — the medium's floor, decided HERE because this is where the return plane is settled
+        // and because the note below has to say what it is. Both medium-building sites read it.
+        var floor = FloorFor(groundBand);
 
         double groundTopM;
         if (groundBand is not null)
@@ -731,6 +736,31 @@ public static class PlanarExtractor
                   "through a different conductor, designate that one as the ground reference in " +
                   "the technology editor, or name it as this EM setup's own return plane to " +
                   "override the choice for this run alone.");
+
+            // ── CL7 — SAY WHAT THE PLANE IS MADE OF, BECAUSE IT IS NOW IN THE ANSWER ─────────
+            //
+            // Until CL7 the plane was a perfect conductor and there was nothing to report: its metal
+            // was not in the physics, and `src/Engine/Mom/CLAUDE.md` carried the omission as a stated
+            // limit with its measured size. It IS in the physics now — worth 21.1% of the conductor
+            // term on FR-4, ~11% on the MMIC starter and 25.0% on a low-loss laminate — and the two
+            // states are not distinguishable from any published number, so this note is the only
+            // place a run says which it is in. A layer with no σ is a legitimate thing to have (it is
+            // what every technology written before conductivity mattered has) and gets the PERFECT
+            // plane, bit for bit; what it must not do is get it silently.
+            notes.Add(floor.Kind == TerminationKind.SurfaceImpedance
+                ? $"The return plane's own metal is in this solve: '{groundBand.Layer.Name}' is a " +
+                  $"laterally infinite conductor of σ = {groundBand.Layer.SigmaSm:G4} S/m and " +
+                  $"{(groundBand.TopM - groundBand.BottomM) * 1e6:G4} µm thickness, entered as a " +
+                  "surface impedance on the boundary the Green's function terminates on. It is still " +
+                  "not meshed and adds no unknowns. On an ordinary microstrip the plane is of order a " +
+                  "fifth to a quarter of the total conductor loss, so a run with it and a run without " +
+                  "it differ by a real amount in α and in the published |S₂₁|."
+                : $"'{groundBand.Layer.Name}' has no conductivity set in technology '{tech.Name}', so " +
+                  "the return plane is a PERFECT conductor in this solve and contributes no loss of " +
+                  "its own. The signal metal's loss is unaffected. On an ordinary microstrip the " +
+                  "plane is worth of order a fifth to a quarter of the total conductor loss, so this " +
+                  "run's α is that much low; set that layer's σ in the technology editor's Stackup " +
+                  "tab to carry it.");
 
             // ── A GROUND PLANE SKIPPED OVER IS NOT A GROUND PLANE — IT IS SUBSTRATE ───────────
             //
@@ -917,7 +947,10 @@ public static class PlanarExtractor
                 "mesh and the phase seed, never as the published reference impedance.");
         }
 
-        var slab = new GroundedSlab(slabHeight, slabMaterial);
+        // CL7 — the floor, on BOTH spellings of the medium. CL6 put it on GroundedSlab so that a
+        // single-level single-dielectric design keeps Dcim.ValidatedRhoOverLambda's own ≤6e-3 tier
+        // instead of being re-based onto the general path's ≤1.6e-2 to gain the term.
+        var slab = new GroundedSlab(slabHeight, slabMaterial) { Floor = floor };
 
         // The metal must be ON the slab's top surface — L8a's own refusal, asked here rather than
         // re-derived, so the two cannot drift.
@@ -1094,9 +1127,9 @@ public static class PlanarExtractor
                 ? $"{groundOutlineShapes} of them are on '{groundBand?.Layer.Name}', THIS run's return " +
                   $"plane, and their outline is read and carried so the run can report how large the " +
                   $"real plane is in wavelengths — see the ground-plane note beside the results. " +
-                  $"It is still NOT MESHED: the plane in the analysis is the laterally infinite PEC " +
-                  $"the Green's function terminates on, and reading the outline changed no matrix " +
-                  $"entry and no published number."
+                  $"It is still NOT MESHED: the plane in the analysis is the laterally infinite " +
+                  $"boundary the Green's function terminates on, carrying that conductor's own metal, " +
+                  $"and reading the outline changed no matrix entry and no published number."
                 : "None of them is on this run's own return plane, so there is no outline to measure — " +
                   "a plane's size can only be reported for the conductor the fields actually return " +
                   "through.";
@@ -1146,7 +1179,7 @@ public static class PlanarExtractor
         }
 
         // ── L9d/D5 — the general MEDIUM, and each level's own z on one of its interfaces ───────
-        var (mediumStack, levelZ, stackNote) = BuildMediumStack(stack, levels, groundTopM);
+        var (mediumStack, levelZ, stackNote) = BuildMediumStack(stack, levels, groundTopM, floor);
         if (stackNote is not null) notes.Add(stackNote);
 
         // ── ANT-12 §1a — A COVER LAYER OVER THE TOP METAL IS NOT IN THE SOLVE, AND IT WAS SILENT ──
@@ -1376,8 +1409,42 @@ public static class PlanarExtractor
     /// change. A conductor band contributes no thickness: a level is a sheet at one z, exactly as
     /// R-em-4a already established for the cross-section extractor.</para>
     /// </summary>
+    /// <summary>
+    /// <b>CL7 — the ground plane's own metal, as the medium's floor.</b> CL4 built the termination
+    /// and CL6 gave the one-slab kernel one; this is the line that makes a run get one, and it is
+    /// the whole of the flip. Worth 21.1% of the conductor term on FR-4, ~11% on the MMIC starter
+    /// and 25.0% on a low-loss laminate (series overview §2), and on the MMIC starter the conductor
+    /// term is itself 92-99% of the line's loss.
+    ///
+    /// <para><b>Both σ and t come off the band that was CHOSEN as the return plane and off nothing
+    /// else.</b> A ground-designated conductor that was skipped over, or a conductor band that is
+    /// neither a level nor the return plane, is absorbed into a neighbouring dielectric
+    /// (<c>BuildMediumStack</c>, and the warning above says so) — those must not acquire a floor by
+    /// accident, which is why this reads one band rather than searching for metal.</para>
+    ///
+    /// <para><b>A PERFECT floor is still what a stackup with no metal under it gets</b>, and it is
+    /// returned as <see cref="Termination.Pec"/> rather than as a perfect SPELLING of a conducting
+    /// plane. The two are bit-identical in the kernel (CL4 §1, CL6 §2) and are NOT identical to
+    /// <see cref="EmSnpProvenance"/> or to record equality, so spelling "no metal" as
+    /// <c>LossyGround(0, t)</c> would invalidate every cached <c>.snp</c> in every workspace to
+    /// record a σ nobody supplied.</para>
+    ///
+    /// <para><b>There is no <c>.cem</c> key and no UI control for this</b>, per the series
+    /// overview §5: whether Maxwell's equations include Ohm's law is not a decision to put in front
+    /// of a user. The σ is the technology's, exactly as the signal metal's is.</para>
+    /// </summary>
+    private static Termination FloorFor(Band? groundBand)
+    {
+        if (groundBand is null) return Termination.Pec;
+        double sigma = groundBand.Layer.SigmaSm;
+        double t     = groundBand.TopM - groundBand.BottomM;
+        return sigma > 0 && !double.IsPositiveInfinity(sigma) && t > 0
+            ? Termination.LossyGround(sigma, t)
+            : Termination.Pec;
+    }
+
     private static (LayerStack Stack, double[] LevelZ, string? Note) BuildMediumStack(
-        List<Band> bands, List<Band> levels, double groundTopM)
+        List<Band> bands, List<Band> levels, double groundTopM, Termination floor)
     {
         var levelZ = new double[levels.Count];
         for (int i = 0; i < levels.Count; i++) levelZ[i] = levels[i].SheetM - groundTopM;
@@ -1467,7 +1534,7 @@ public static class PlanarExtractor
             layers.Add(new MediumLayer(hi - lo, m));
         }
 
-        return (new LayerStack(Termination.Pec, layers, Termination.Air), levelZ, note);
+        return (new LayerStack(floor, layers, Termination.Air), levelZ, note);
     }
 
     /// <summary>Is (x, y) on any of these polygons? Box-filtered, then the polygon's own even-odd

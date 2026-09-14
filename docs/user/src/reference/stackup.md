@@ -186,7 +186,7 @@ which removes the entry.
 | Field | What it is |
 |---|---|
 | **Thickness** | The metal's thickness, in the display unit. Used by the cross-section kernel and by interchange; the full-wave planar kernel solves a zero-thickness sheet and uses this only to place it — see [What the EM engine does not read](#ignored). |
-| **σ (S/m)** | Conductivity at 20 °C. Sets conductor loss and skin depth in **both** EM kernels. The **combo beside it** is a shortcut that fills the box with a metal's bulk value (copper 5.8e7, silver 6.3e7, gold 4.1e7, aluminium 3.77e7, nickel 1.43e7); the box stays typeable and is what gets saved, and a value matching none of them reads as *Custom*. |
+| **σ (S/m)** | Conductivity at 20 °C. Sets conductor loss and skin depth in **both** EM kernels — on drawn metal, and on the **ground reference** layer, whose own σ becomes the loss of the infinite plane a microstrip returns through (about a fifth to a quarter of the conductor term; see [the MoM engine](mom-engine.html#ground-loss)). A ground layer left at zero is a perfect plane, and the run's notes say so. The **combo beside it** is a shortcut that fills the box with a metal's bulk value (copper 5.8e7, silver 6.3e7, gold 4.1e7, aluminium 3.77e7, nickel 1.43e7); the box stays typeable and is what gets saved, and a value matching none of them reads as *Custom*. |
 | **Ground reference** | Marks this conductor as the ground plane — **the negative terminal of every port in an EM run**. In the figure it is ticked on `Inner 1` and on `Bottom Copper`; the rule for which one a given run uses is in [the next section](#ground). |
 | **Metal thickness goes to** | The full-wave solver has no thickness for metal, so this conductor's thickness is given to the dielectric above it or the one below it. `the layer above` is the default and is what every technology authored before the field existed means. The stack height is the same either way. Full explanation, and the one case that needs the other setting: [Where a conductor's thickness goes](#sheet-surface). |
 | **Drawing layer** | Which drawing layers map onto this conductor — a **checkbox list**, because a conductor may carry several, with a filter box above it for a process that has hundreds. A shape on a layer bound to nothing is simply not part of the EM problem. |
@@ -592,13 +592,6 @@ and no such bound.
 
 Stated plainly, because a field that is carried but unused is worse than one that is absent:
 
-- **The GROUND PLANE's σ is not read by the full-wave planar kernel.** The plane it terminates on is
-  a perfect conductor. Every drawn conductor's σ *is* read, by both kernels — see
-  [the MoM reference](mom-engine.html#can-cannot) for what the full-wave kernel's sheet model of it
-  can and cannot carry, and for how much the plane's omission is worth (21% of the conductor term on
-  FR-4, about 11% on the MMIC technology). The **cross-section (uniform-line) kernel** reads the
-  plane's σ as well as the strip's, for its Wheeler-incremental-inductance surface resistance, which
-  is why the two kernels do not report the same loss on a uniform line.
 - **Conductor thickness reaches the full-wave kernel's loss model but not its GEOMETRY** — it still
   solves a zero-thickness sheet, so t sets the sheet's surface impedance (and therefore its loss) and
   nothing about where the metal is. The thickness is also used by the cross-section kernel and by

@@ -188,7 +188,19 @@ public static class EmSnpProvenance
         sb.Append("S:").Append(R(p.Slab.HeightM)).Append(':')
           .Append(R(p.Slab.Material.EpsR)).Append(':')
           .Append(R(p.Slab.Material.TanD)).Append(':')
-          .Append(R(p.Slab.Material.MuR)).Append('|');
+          .Append(R(p.Slab.Material.MuR));
+
+        // CL7 — the ONE-SLAB floor's own metal. CL4 closed this on the MediumStack spelling below;
+        // a one-slab problem has MediumStack == null and contributed only the four numbers above, so
+        // two runs differing only in the GROUND's σ would have shared a cached .snp — silently, and
+        // with a plausible answer. §CL6 §7 found it and reserved it for this brief, which is the one
+        // that makes the termination reachable. Appended only for a surface impedance, deliberately:
+        // writing a kind unconditionally would change the hash of every stack that exists and
+        // invalidate every cached .snp in every workspace to record nothing.
+        if (p.Slab.Floor.Kind == TerminationKind.SurfaceImpedance)
+            sb.Append(":g").Append(R(p.Slab.Floor.ConductivitySm)).Append(',')
+              .Append(R(p.Slab.Floor.ThicknessM));
+        sb.Append('|');
 
         // L9d — the general MEDIUM and each level's own z, or the answer changes with nothing the
         // hash can see. Before L9d there was one level on one slab and the slab line above said all

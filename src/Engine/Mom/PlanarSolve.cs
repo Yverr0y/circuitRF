@@ -426,7 +426,15 @@ public sealed class PlanarPortCalibrator
         // (LayeredStaticGreens.TerminationCoefficient), so asking Kind == Pec here would have
         // quietly moved a lossy-ground run onto the interior route and changed the reference
         // impedance of a calibration that reads no termination at all. R-cl4-1's second half.
+        //
+        // CL7 — and it has to be the SAME floor, not merely a conducting one. CL6 gave GroundedSlab
+        // a floor of its own, so "is this stack the slab" stopped being answerable without comparing
+        // it: a stack with a copper floor and a slab with a PEC one are two different electrostatic
+        // problems, and answering yes would put one's reference impedance on the other's image
+        // series. Nothing shipped can build that pair — the extractor writes ONE floor into both —
+        // which is exactly why it has to be asserted here rather than relied on.
         if (!stack.Bottom.IsConductor) return false;
+        if (!SameFloor(stack.Bottom, slab.Floor)) return false;
         if (stack.Top.Kind != TerminationKind.HalfSpace) return false;
 
         double tol = 1e-12 * Math.Max(1.0, slab.HeightM);
@@ -439,6 +447,22 @@ public sealed class PlanarPortCalibrator
             && Math.Abs(m.TanD - slab.Material.TanD) <= 1e-12
             && Math.Abs(m.MuR  - slab.Material.MuR)  <= 1e-12
             && Math.Abs(stack.Top.Material.EpsR - 1.0) <= 1e-12;
+    }
+
+    /// <summary>
+    /// <b>Two terminations that are the same GROUND.</b> Not record equality: every PERFECT spelling
+    /// of a conducting plane is the same physical floor as a PEC and is bit-identical to it in both
+    /// kernels (CL4 §1, CL6 §2), so treating them as different would split the one-slab route on a
+    /// distinction that does not exist in the arithmetic.
+    /// </summary>
+    private static bool SameFloor(Termination a, Termination b)
+    {
+        bool pa = a.Kind != TerminationKind.SurfaceImpedance ||
+                  PlanarSurfaceImpedance.IsPerfect(a.ConductivitySm, a.ThicknessM);
+        bool pb = b.Kind != TerminationKind.SurfaceImpedance ||
+                  PlanarSurfaceImpedance.IsPerfect(b.ConductivitySm, b.ThicknessM);
+        if (pa || pb) return pa && pb;
+        return a.ConductivitySm.Equals(b.ConductivitySm) && a.ThicknessM.Equals(b.ThicknessM);
     }
 
     /// <param name="separations">
@@ -929,6 +953,30 @@ public sealed class PlanarPortCalibrator
     /// <summary><b>QSC — the crossover this calibrator's plan was drawn at</b>, so a caller can
     /// report which path each point took without recomputing it.</summary>
     public double QuasiStaticCrossoverHz => _plan.CrossoverHz;
+
+    /// <summary>
+    /// <b>CL7 — whether the supplied γ carries the GROUND PLANE's term.</b> True on the one-slab
+    /// electrostatic route with a conducting floor, which is what an ordinary microstrip gets;
+    /// <see cref="QuasiStaticGroundTermMissing"/> is the case where the floor conducts and this route
+    /// cannot read it. Asked WITHOUT extracting the line, so a run that never reaches the
+    /// quasi-static path pays nothing to report on it.
+    /// </summary>
+    public bool QuasiStaticGroundTermSupplied =>
+        _interiorStack is null && Conducting(_slab.Floor);
+
+    /// <summary>
+    /// <b>CL7 — the floor conducts and this route cannot supply its term, so the residue is
+    /// REPORTED rather than assumed away.</b> MIM-4's interior route puts the standard on a level
+    /// inside a stratified stack, which is not one horizontal current one image-height above one
+    /// plane — see <see cref="PlanarGroundReturn"/>'s header. Below the crossover such a run's γ
+    /// carries the strip's conductor term and not the plane's.
+    /// </summary>
+    public bool QuasiStaticGroundTermMissing =>
+        _interiorStack is { } st && Conducting(st.Bottom);
+
+    private static bool Conducting(Termination t) =>
+        t.Kind == TerminationKind.SurfaceImpedance &&
+        !PlanarSurfaceImpedance.IsPerfect(t.ConductivitySm, t.ThicknessM);
 
     /// <summary>Whether this frequency's γ comes from the quasi-static line rather than from D5's
     /// two-line extraction. <b>The one question, asked in one place</b> — see
@@ -4119,6 +4167,7 @@ public static class PlanarSolve
     {
         double cross = double.PositiveInfinity;
         int    quasi = 0, measured = 0;
+        bool   withGround = false, withoutGround = false;
 
         foreach (var cal in calibrators)
         {
@@ -4126,8 +4175,28 @@ public static class PlanarSolve
             cross = Math.Min(cross, cal.QuasiStaticCrossoverHz);
             foreach (double f in freqs)
                 if (f > 0) { if (cal.IsQuasiStaticAt(f)) quasi++; else measured++; }
+            withGround    |= cal.QuasiStaticGroundTermSupplied;
+            withoutGround |= cal.QuasiStaticGroundTermMissing;
         }
         if (quasi == 0) return null;
+
+        // CL7 — the supplied γ's own conductor terms, and the one case where half of it is absent.
+        // Reported rather than left to be assumed: below the crossover this γ is what the error box
+        // is solved against, so a missing ground term is a published α that is low by the size of it
+        // and looks entirely ordinary.
+        string groundClause =
+            withoutGround
+                ? "On a STRATIFIED stack, or a standard on a buried level, that supplied γ carries " +
+                  "the drawn metal's conductor term but NOT the ground plane's — the plane's return " +
+                  "current has a closed form only for one plane one height below one level, which is " +
+                  "what a single-slab design is. Below the crossover such a point's α is low by the " +
+                  "plane's share, which on an ordinary microstrip is of order a fifth to a quarter " +
+                  "of the conductor loss. The measured points above the crossover carry it. "
+            : withGround
+                ? "That supplied γ carries BOTH conductor terms — the drawn metal's, from the same " +
+                  "charge vector, and the ground plane's, from the return current that charge " +
+                  "induces on it — so α does not step at the crossover. "
+                : "";
 
         return
             $"γ for {quasi} of {quasi + measured} calibrated point(s) is QUASI-STATIC, not measured: " +
@@ -4140,7 +4209,7 @@ public static class PlanarSolve
             (measured > 0
                 ? $"The other {measured} point(s) use the measured two-line γ, which is what captures " +
                   "dispersion and is the right instrument above the crossover. "
-                : "") +
+                : "") + groundClause +
             "Per-point, the `planar.CalQuasiStatic` diagnostic reads 1 where γ was supplied and 0 " +
             "where it was measured. Both paths agree to about 1 % at the crossover; below it the " +
             "MEASURED value is the less accurate of the two (it converges toward this one as the " +

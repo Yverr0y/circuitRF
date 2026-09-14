@@ -238,6 +238,34 @@ public sealed record PlanarProblem(
     public IReadOnlyList<PlanarAnalyticAlternative> Alternatives => AnalyticAlternatives ?? [];
     public IReadOnlyList<PlanarVia> ViaList => Vias ?? [];
 
+    /// <summary>
+    /// <b>CL7 — the same problem with a PERFECT ground plane, and it is a PERMANENT oracle rather
+    /// than a migration aid.</b> Every CL4, CL6 and CL7 ground figure is a comparison against this,
+    /// and a measurement whose reference cannot be reproduced is not a measurement — the pattern is
+    /// <see cref="PlanarFillSettings.PerfectConductor"/>'s, kept for the same reason.
+    ///
+    /// <para><b><see cref="PlanarFillSettings.PerfectConductor"/> is NOT this and cannot be made to
+    /// be.</b> That flag makes the STRIP perfect, because the plane is not in the fill at all — it is
+    /// a termination of the Green's function (CL4 §8). Using it as a ground oracle is the mistake
+    /// that ate CL4's first measurement: subtracting a PEC-metal floor taken on the lossy-ground
+    /// stack removes the very term being looked for and reports a ground share of −0.03% with every
+    /// gate still green.</para>
+    ///
+    /// <para>BOTH spellings of the medium move together, deliberately. Leaving one behind would give
+    /// a one-slab problem and a general one different oracles, and the whole point of CL6 is that
+    /// those two answer the same question.</para>
+    ///
+    /// <para>It reaches no <c>.cem</c> key, no <c>EmSetupPersistence</c> field and no UI
+    /// control — series overview §5.</para>
+    /// </summary>
+    public PlanarProblem PerfectGround => this with
+    {
+        Slab        = Slab with { Floor = Termination.Pec },
+        MediumStack = MediumStack is null
+                    ? null
+                    : new LayerStack(Termination.Pec, MediumStack.Layers, MediumStack.Top),
+    };
+
     /// <summary>The medium this problem actually sits in: <see cref="MediumStack"/> if given, else
     /// the one-slab stack <paramref name="Slab"/> describes. Built fresh each call; it is a value.</summary>
     public LayerStack EffectiveStack => MediumStack ?? LayerStack.FromGroundedSlab(Slab);

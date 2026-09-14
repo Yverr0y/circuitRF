@@ -3,6 +3,317 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## CL7 — the ground plane reaches a user (2026-09-14)
+
+`docs/sonnet-briefs/brief-conductor-loss-7-ground-reaches-a-user.md`. CL4 built a conducting ground
+plane on the general kernel and CL6 built it on the one-slab kernel; both passed every gate and
+neither reached a run, because `PlanarExtractor` wrote `Termination.Pec` into both media.
+**It writes the real floor now.** Every shipped technology carries σ on its ground-designated
+conductor, so every run on one gets a plane worth **21.1% of the conductor term on FR-4, ~11% on the
+MMIC starter and 25.0% on a low-loss laminate** — and on the MMIC starter the conductor term is
+92-99% of the line's loss, so this is about a tenth of the total loss of every GaAs line the tool
+draws.
+
+**The brief's two milestones both landed, and milestone 0 found something the brief did not
+anticipate.** §1 is where the work is.
+
+### 0. The change, which really is small
+
+`PlanarExtractor.FloorFor(groundBand)` is the whole of it: `Termination.LossyGround(σ, t)` from the
+band that was CHOSEN as the return plane, written into `GroundedSlab.Floor` and into
+`BuildMediumStack`'s `LayerStack` alike — **both spellings, because the half-measure would have given
+two physically identical designs different ground physics according to whether the stackup carried
+one dielectric entry or two** (CL4 §9's refusal, and the reason CL6 exists).
+
+**A PERFECT floor is returned as `Termination.Pec`, not as a perfect SPELLING of a conducting plane.**
+The two are bit-identical in both kernels (CL4 §1, CL6 §2) and are NOT identical to
+`EmSnpProvenance` or to record equality, so spelling "no metal" as `LossyGround(0, t)` would have
+invalidated every cached `.snp` in every workspace to record a σ nobody supplied.
+
+**`PlanarProblem.PerfectGround` is the oracle and it is permanent**, on `PlanarFillSettings.
+PerfectConductor`'s own pattern — every CL4, CL6 and CL7 ground figure is a comparison against it.
+It moves BOTH spellings together; that flag is not it and cannot be made to be, because it makes the
+STRIP perfect and the plane is not in the fill (CL4 §8).
+
+No `.cem` key, no `EmSetupPersistence` field, no UI control — series overview §5.
+
+### 1. Milestone 0 — THE PLANE'S RETURN CURRENT, NOT ITS INDUCED CHARGE
+
+**Candidate (a) shipped, and the brief's own statement of it is subtly wrong in a way that is worth
+43% of the answer.** The brief proposes *"the plane's own INDUCED CHARGE, through the same TEM
+identity"*. The loss integral is `½Re(Z_s)∫|K_g|²dA` and what it needs is the plane's CURRENT
+density. **In an INHOMOGENEOUS line those are two different distributions**, and they part company by
+a factor that is a property of the substrate:
+
+    σ̂_g(k) = −ε*/(sinh kh + ε* cosh kh)      the ELECTROSTATIC induced charge
+    K̂_g(k) = −e^{−kh}                          the MAGNETOSTATIC return current
+
+The second does not see the dielectric at all — µᵣ is 1 everywhere, so a horizontal current at height
+h over a PEC plane has exactly ONE negative image, which is `StaticGreens.VectorPotential`'s own
+sentence one quantity over. The first is an image LADDER at ratio `Γ = (1−ε*)/(1+ε*)`, the same ratio
+`StaticGreens.ScalarPotential` sums, and it is **more concentrated by exactly `A₀ = 2ε*/(1+ε*)` for a
+filament: 1.630 on FR-4 and 1.856 on GaAs.**
+
+Parseval turns the right one into a CLOSED FORM over the same cells — no ladder, no quadrature:
+
+    S_g = ∫|K_g|² dA = Σ_ij q_i q̄_j K(d_ij) ,   K(d) = h / (π(4h² + d²)^{3/2})
+    R_ground = Re(Z_plane(ω,σ,t)) · [ ΔS_g · Δℓ / |ΔT|² ]
+
+**Measured on CL3 §0's own instrument** — α as kernel B's two standards see it with a conducting
+floor minus the same two standards on a PEC floor, `PlanarFillSettings.PerfectConductor` held ON
+throughout so the strip is perfect on both sides and what is left is the ground term alone, and the
+separation plan's quasi-static index forced to −1 so every point takes the MEASURED two-line path
+(comparing the supplier against a γ the supplier produced would be a tautology):
+
+| stack, mesh | f | α_gnd fill | α_gnd supplier | supplier/fill | the CHARGE kernel | charge/fill |
+|---|---|---|---|---|---|---|
+| FR-4, cells/λ 10, no edge | 0.5 GHz | 4.974e-3 | 4.794e-3 | **0.964** | 7.489e-3 | 1.506 |
+| | 1 GHz | 7.069e-3 | 6.780e-3 | 0.959 | 1.059e-2 | 1.498 |
+| | 2 GHz | 1.034e-2 | 9.589e-3 | 0.927 | 1.498e-2 | 1.449 |
+| | 3 GHz | 1.316e-2 | 1.174e-2 | 0.892 | 1.834e-2 | 1.394 |
+| FR-4, cells/λ 20, edge 3 | 0.5 GHz | 5.033e-3 | 4.826e-3 | 0.959 | 7.511e-3 | 1.492 |
+| | 2 GHz | 1.047e-2 | 9.652e-3 | 0.922 | 1.502e-2 | 1.435 |
+| | 3 GHz | 1.333e-2 | 1.182e-2 | **0.887** | 1.840e-2 | 1.380 |
+| GaAs, cells/λ 10, no edge | 5 GHz | 3.333e-1 | 3.212e-1 | 0.964 | 5.998e-1 | 1.799 |
+| | 10 GHz | 4.734e-1 | 4.554e-1 | 0.962 | 8.503e-1 | 1.796 |
+| | 20 GHz | 6.930e-1 | 6.432e-1 | 0.928 | 1.201 | 1.733 |
+| | 25 GHz | 7.895e-1 | 7.192e-1 | 0.911 | 1.343 | 1.701 |
+| GaAs, cells/λ 20, edge 3 | 5 GHz | 3.338e-1 | 3.282e-1 | **0.983** | 6.082e-1 | 1.822 |
+| | 10 GHz | 4.799e-1 | 4.653e-1 | 0.970 | 8.623e-1 | 1.797 |
+| | 20 GHz | 7.025e-1 | 6.573e-1 | 0.936 | 1.218 | 1.734 |
+| | 25 GHz | 8.023e-1 | 7.349e-1 | 0.916 | 1.362 | 1.697 |
+
+**0.887 – 0.983 across both starters, four frequencies and four meshes; the rejected kernel is
+1.38-1.82× and is the closer of the two at NO point.** The supplier also lands on kernel A: FR-4 at
+2 GHz reads 9.652e-3 against kernel A's 9.7858e-3, **0.986×** — where the charge kernel reads 1.53×.
+Kernel A was not an input anywhere (R-qsc-2's first bullet, D7's rule); it is quoted here as the
+oracle it is.
+
+**The drift down each column is not noise and it is not a defect.** It tracks k₀H exactly as
+§CL4 §7's own finding does: the full-wave ground term absorbs the surface-wave and radiated field,
+which a quasi-TEM supplier structurally has no term for. FR-4 goes 0.964 → 0.887 over k₀H 0.017 →
+0.10; GaAs goes 0.983 → 0.916 over 0.010 → 0.052.
+
+**THE MESH ARGUMENT IS DIFFERENT HERE FROM CL3'S, AND THE DIFFERENCE IS THE FINDING.** CL3's whole
+case for the static-charge supplier was that it *moves with the mesh the way the fill's term does* —
+turning the edge mesh on raised both by ~32% on FR-4, where kernel A did not move at all. **The
+GROUND term does not move with the mesh, in either instrument**: fill ×1.0127 and supplier ×1.0066
+across the same edge-mesh change. That is a statement about the PLANE rather than a weak test — the
+strip's current crowds at its edges and the mesh is what resolves that, while the plane's return
+current has no edge to crowd at and is spread over a width set by h, which the strip's mesh does not
+change. What is gated instead is that the RATIO holds: 0.927 coarse against 0.922 refined.
+
+**MIM-4's interior route supplies NO ground term, and that is stated rather than defaulted.** A
+standard on a buried level of a stratified stack is not one horizontal current one image-height above
+one plane, so the closed form does not describe it and there is no image expansion to fall back on.
+`PlanarQuasiStaticLine.GroundTermSupplied` is false there, `PlanarPortCalibrator.
+QuasiStaticGroundTermMissing` says so without extracting the line, and `PlanarSolve`'s own
+quasi-static calibration note carries the residue in the user's own words. **Below the crossover such
+a point's α is low by the plane's share**; every point above it carries the term in full.
+
+**The kernel's own oracles are asserted before anything is measured with it** (`GroundReachesAUser
+Tests`): `∫K d²ρ = 1` to 1e-9 (the plane returns the whole current), a uniform filament integrating
+to `R = Re(Z_s)/(2πh)` to 0.002% — which is also a strict UPPER bound on any distributed strip — and
+the rejected ladder checked against a direct numerical Hankel transform of `|σ̂_g|²` to 1e-8 … 1e-7 on
+both starters, so the decision is a comparison of two CORRECT kernels rather than of one correct one
+and one bug.
+
+### 2. Milestone 0b — the budget line is RENAMED, and here is what it was carrying
+
+**Decision: rename and re-document, not split.** Splitting needs a second quadratic form in the
+spectral domain — a 2D spectral integral per basis PAIR for `½∫Re(Z_s)|H_tan|²` over the plane —
+which is a brief rather than a relabelling, and CL4's own "Must NOT" reserved the residual's
+arithmetic. What this brief may not do is leave a line whose label names one mechanism while it
+reports two.
+
+`PlanarPowerBudget.DielectricW` → **`DielectricAndGroundW`**; the published cube
+`PowerDielectric` → **`PowerDielectricAndGround`**; the caption and the metric note say what it
+contains, and the antenna reference's budget table says why the two cannot be separated.
+
+**The size, measured two ways.** The sharp form is R-cl2-3a's construction one surface over — tanδ = 0
+with a PERFECT strip, where the plane is the only absorber in the model, so the whole residual is the
+plane's:
+
+| fixture | tanδ = 0, perfect strip: residual as a share of accepted | | realistic run: the PLANE's share of the renamed line |
+|---|---|---|---|
+| | PEC floor | real plane | |
+| FR-4 line, 6 GHz, N = 115 | −6.4e-5 | **2.18%** | 720 nW of 169.5 µW = **0.42%** (tanδ = 0.02) |
+| GaAs line, 30 GHz, N = 59 | 5.4e-4 | **58.5%** | 1.65 µW of 12.09 µW = **13.7%** (tanδ = 0.002) |
+
+**On the MMIC starter the plane is a seventh of the line a user reads**, and on a tanδ = 0 substrate
+it is all of it. On FR-4 the dielectric swamps it, which is the same ordering every figure in this
+series has. The budget still closes as an identity to 1e-12.
+
+### 3. R-cl7-2 — against kernel A, both surfaces lossy, ON THE ONE-SLAB PATH
+
+CL4 §7 measured this on the GENERAL kernel with an explicit `LayerStack`, because that was the only
+place a conducting floor could be spelled. **This runs on the one-slab kernel**, which is what an
+ordinary microstrip now gets. γ from the two-line extraction directly, never through
+`PlanarPortCalibrator`, so the QSC crossover is not in the path. The rows are the two where
+k₀H ≤ 0.07, which is where CL4 established the two formulations agree to ≈6%.
+
+| | k₀H | α_strip | α_ground | α_total | additivity | ground B/A |
+|---|---|---|---|---|---|---|
+| **FR-4 1.6 mm @ 2 GHz**, kernel A | 0.0671 | 3.6675e-2 | 9.7858e-3 | 4.6461e-2 | | (share 21.06%) |
+| kernel B, σ = 5.8e7 | | 2.7425e-2 | **1.0392e-2** | 3.7813e-2 | 1.0001 | **1.0620** |
+| kernel B, σ = 1.45e7 | | 2.7425e-2 | 2.0778e-2 | 4.8194e-2 | 1.0002 | 1.0615 |
+| **GaAs 100 µm @ 10 GHz**, kernel A | 0.0210 | 3.8256 | 4.5310e-1 | 4.2787 | | (share 10.59%) |
+| kernel B, σ = 4.1e7 | | 2.7977 | **4.7888e-1** | 3.2725 | 1.0012 | **1.0569** |
+| kernel B, σ = 1.025e7 | | 2.7977 | 8.9486e-1 | 3.6847 | 1.0021 | 0.9834 |
+
+Np/m. **It reproduces CL4 §7 to every digit that brief quoted** — 1.062 and 1.0569 — on a different
+kernel, which is the cross-check that the one-slab floor lands on CL4's own answer rather than near
+it. The 1/√σ signature across the 4× resistivity step is **1.9994** (FR-4) and **1.8687** (GaAs)
+against √4 = 2, the second reproducing CL4's own figure exactly.
+
+**The SHARE is not gated anywhere and must not be quoted.** Kernel B reads 27-28% where kernel A
+reads 21.06% on the same row, and the inflation is exactly CL1's measured single-sheet strip deficit
+in the DENOMINATOR. A first draft of `ThePublishedAnswerMoves_…` DID gate it and failed at 40.19% on
+a 6 GHz FR-4 row — the brief's own "Must NOT", caught by the measurement rather than by reading.
+What that gate asserts instead is the 1/√σ signature, which has no denominator to be wrong:
+**×2.0023 at 2 GHz and ×1.9617 at 6 GHz** on the extractor's own problem with the technology's ground
+σ quartered.
+
+### 4. R-cl7-5 — the three checks CL4 carried none of
+
+- **Passivity with a DIRECTION check.** σ_max(RawS) may only FALL when the plane becomes a conductor,
+  gated on the RAW matrix for CL3 §9's reason (the de-embedded answer is already over 1 at the bottom
+  of the band because D6's peel divides by a₂₁², so a de-embedded-only test would measure the peel).
+  It falls at every point on both starters — FR-4 0.998021812 → 0.998021780 at 1 GHz, 0.988548637 →
+  0.988545020 at 6 GHz; GaAs 0.999811841 → 0.999811704 at 10 GHz. **Reciprocity does not degrade at
+  all** (|S₁₂−S₂₁| stays at 1e-18 … 6e-17): the floor enters through the Green's function, which is
+  symmetric in source and observer.
+- **The hero check.** Confirmed structurally rather than assumed, exactly as CL3 §4 did it: **0 of
+  114 files** under `tests/Engine.Tests/{Linear,Nonlinear,HarmonicBalance,Loadpull}` reference
+  `Planar` or `Mom` at all, and every one of them passed in the single run below.
+- **The golden-move tabulation.** §5.
+
+### 5. THE RE-BLESS WAS ZERO TESTS, AND THAT NEEDED PROVING RATHER THAN ACCEPTING
+
+CL3 planned for ~90 files and moved two. **This one planned for a CL3-sized re-bless and moved
+none**: `dotnet test tests/Engine.Tests` — **2,434 passed, 0 failed, 1 skipped** (the same
+pre-existing `DataSetExportTests` skip §CL4 §10 recorded), 2 m 4 s; `dotnet test tests/Ui.Tests` —
+**14,495 passed, 0 failed**, 9 m 30 s. Both run ONCE and triaged from the TRX.
+
+**A zero re-bless is indistinguishable from a flip that did not happen, so the reason is measured:**
+
+- **`tests/Engine.Tests` cannot reach the change at all.** The extractor is in `src/Design`; nothing
+  under `tests/Engine.Tests` calls it, and every CL7 measurement there builds its floor by hand. That
+  project's 2,434 green is the statement that the ENGINE did not move, which is what CL6's own
+  bit-identity claim rests on.
+- **47 files under `tests/Ui.Tests` do reach `PlanarExtractor`, and their numeric assertions are
+  tolerance-based ranges** — `Assert.InRange(eeff, 3.0, 3.6)`, unknown counts, notes, refusals. The
+  ground term moves |S₂₁| by 4e-4 dB on the shipped starter and crosses none of them.
+- **`EmCliVerbTests`' byte-for-byte comparison is between the CLI and `EmRunService.Run`**, so both
+  sides moved together and the identity held — which is the right outcome and not a gap.
+
+**So the two-sided gate the brief asked for is built on the extractor's own problem rather than on a
+recorded literal**, which §CL3 §11 already prefers ("asserted against a second ROUTE rather than
+against a recorded literal"): `R_cl7_1` asserts the pre-CL7 answer is reproduced **bit for bit**
+through the whole shipped path — 0/96 bits on both starters, over every perfect SPELLING of the floor
+(σ = +∞, t = 0, σ = 0) and over `PerfectGround` — and `ThePublishedAnswerMoves_ByTheShareTheGround
+PlaneIsWorth` asserts the move, its DIRECTION, its ADDITIVITY (1.000 ± 0.03) and its 1/√σ scaling on
+the same mesh at the same frequency.
+
+### 6. Traps and findings
+
+- **The test harness's kernel cache was the defect CL6 §7 predicted, in a cache instead of a hash.**
+  `PlanarLineFixtures.Kernel` keyed on `(height, εᵣ, tanδ, f)` and REBUILT a floorless slab to fit
+  with, so two slabs differing only in the ground's metal were served one PEC kernel. **Every ground
+  measurement came out EXACTLY 0.000 — a plausible, silent, perfectly stable zero**, and the first
+  milestone-0 run reported it as four clean tables. The key is the `GroundedSlab` itself now; it is a
+  record and `Floor` is part of its value equality, so it cannot go stale again when the next field is
+  added. The production-side counterpart was closed at the same time (§7 below).
+- **`PlanarFillSettings.PerfectConductor` had to be kept OUT of the ground term's own `if`.** CL3's
+  supplier is built inside `if (settings.ConductorLoss is { } loss)`; reading the ground term there
+  too would have made that flag turn the PLANE perfect on the quasi-static path and not in the
+  full-wave kernel — the exact asymmetry CL4 §8 records eating its own first measurement, and it would
+  have made the four-alpha instrument unmeasurable. `PlanarQuasiStaticGround` is a separate object for
+  that reason and for no other.
+- **A perfect floor produces NO `Ground` object rather than one whose R is zero.** A `+ 0.0` would put
+  a PEC-ground run on `GammaAt`'s other spelling and move it by an ulp, which is exactly enough to
+  stop `PerfectGround` being an oracle — CL3 §3's lesson, which had to be applied a second time to a
+  second term in the same expression.
+- **The extractor's own notes claimed a PEC in three places and two of them were user-facing.** The
+  return-plane override note and the ground-outline note both said "laterally infinite PEC"; both are
+  corrected, and a new note names the plane's σ and thickness — or says the plane is PERFECT and what
+  that costs, because the two states are not distinguishable from any published number.
+- **`PlanarProblem.PerfectGround` moves BOTH spellings of the medium** and a version that moved only
+  the slab would have left a general-kernel run comparing against itself.
+
+### 7. What was checked and did NOT need changing
+
+- **The DCIM fit cache cannot confuse two floors.** `PlanarKernelSet.FitCache` is an instance field
+  of a set built from one `LayeredSpectralGreens`, which holds the stack; `PlanarKernelPair.Fit`
+  takes the slab directly. There is no static cache anywhere under `src/Engine/Mom` keyed on a
+  medium. The brief named this as plumbing that "fails silently if missed"; it was already right, and
+  the one that was not right was in the test harness (§6).
+- **`PlanarSolve.DescribedByTheSlab` DID need it, and the fix is an equality rather than a
+  predicate.** CL4 made it ask `IsConductor`; once CL6 gave `GroundedSlab` a floor of its own, "is
+  this stack the slab" stopped being answerable without comparing the two floors — a stack with a
+  copper floor and a slab with a PEC one are different electrostatic problems, and answering yes would
+  put one's reference impedance on the other's image series. `SameFloor` treats every PERFECT spelling
+  as one floor, because they are one physically and are bit-identical in both kernels.
+- **`EmSnpProvenance` now hashes the ONE-SLAB floor.** §CL6 §7 found that a one-slab problem
+  contributed only the slab's height, εᵣ, tanδ and µᵣ, so two runs differing only in the ground's σ
+  would have shared a cached `.snp`. Appended only for a surface impedance, so **a PEC floor hashes
+  exactly as it did** and no cached `.snp` in any existing workspace is invalidated —
+  `ConductorLossProvenanceTests` asserts that against the pre-CL7 stamp rather than by inspection.
+- **A plane that is SKIPPED or absorbed does not become the floor.** `FloorFor` reads the CHOSEN band
+  and does not search for metal; on the 4-layer starter with levels straddling Inner 1, the floor is
+  the bottom plane's 35 µm and not the skipped plane's 17.5 µm, and the existing warning is unchanged.
+
+### 8. Gates
+
+- `tests/Engine.Tests/Mom/GroundReachesAUserTests.cs` — **11 routine tests (~15 s) and 1 tagged
+  `Category=Benchmark` in two shapes**: `R_cl7_2_…` (2 cases, 1 m 26 s together) and
+  `R_cl7_3_…_RefinedMesh` (2 cases, 20 s). Measured, then split by cost tier — a `[Theory]`'s
+  `InlineData` cases cannot be tagged individually, and the coarse half of milestone 0 is the one that
+  would catch a supplier someone deleted rather than narrowed, so it stays in the default gate.
+- `tests/Ui.Tests/Em/GroundPlaneMetalReachesARunTests.cs` — 8 tests, ~2 s. The extractor's own half:
+  the floor arrives on five (technology, conductor) pairs, both spellings carry the same metal, the
+  note says which state the run is in, a skipped plane does not become the floor, and the published
+  answer moves by an accounted amount.
+- `tests/Ui.Tests/Em/ConductorLossProvenanceTests.cs` — R-cl7-7's ground-σ half.
+- **R-cl7-6** — the suite run ONCE per project and triaged from the TRX: §5.
+
+### 9. The `CLAUDE.md` lines this brief made stale
+
+Reported to the owner by file and line first, per the standing rule; **the owner then asked for them
+to be fixed, and `src/Engine/Mom/CLAUDE.md` carries the corrections.** What was false, and what
+replaced it:
+
+- **§5's conductor-loss bullet** ended *"The GROUND PLANE is still PEC in every run anyone can
+  make"*, and went on to say the termination *"is not wired to `PlanarExtractor`, because a
+  conducting floor is expressible only through `MediumStack`, which forces the GENERAL kernel — and
+  that kernel refuses a lossless dielectric outright."* **Every clause of that is now false** — CL5
+  retired the refusal, CL6 gave the one-slab kernel its own floor, CL7 wired it. The ground plane is
+  its own bullet now: what it is worth, where `FloorFor` decides it, why BOTH spellings of the medium
+  get the same floor, and why `PerfectGround` rather than `PerfectConductor` is its oracle.
+- **The same bullet's last clause** — *"A conducting floor's own dissipation **would** land in CL2's
+  `P_dielectric` residual … recorded, not fixed"* — was conditional and is now actual. It moved to
+  §3.7 with the measured size and the rename.
+- **§5's validated-range table**, the `CL4's conducting floor` row, ended *"Deliberately not a
+  refusal — nothing shipped can build the termination (§7)"*. The row is still not a refusal and the
+  reason is now the real one: above k₀H ≈ 0.07 neither formulation is authoritative, so it is
+  reported rather than resolved.
+- **§5's quasi-static-γ bullet** described CL3's `Σ_levels` supplier alone. It carries CL7's ground
+  half now, including the RETURN-CURRENT-not-CHARGE finding and the interior route's residue.
+- **§3.7** — `PowerDielectric` is renamed, and the sentence *"What is published is the dielectric
+  loss NOT carried away by a guided mode"* named one mechanism while the line reports two.
+- **§7's θ-axis bullet** said the field below is *"identically zero by construction"*. True for a PEC
+  floor; for a conducting one the model computes no transmitted field at all, so what is missing
+  below is a REGION rather than a small number — CL4 §6's correction, which this brief makes reachable.
+- **§7's `FrontToBackDb` refusal** carried the PEC reason first and the conducting-floor sentence as
+  an aside. Since CL7 the conducting floor is what every run with a σ on its ground layer gets, so
+  the two branches are re-ordered and the common one says so.
+- **§7's refusal list** named `PowerDielectric`.
+
+**Still outstanding and NOT edited here** (it is not this file): the repo-root `CLAUDE.md`'s
+test-suite section counts **128 `Category=Benchmark` methods repo-wide**; this brief adds **2**
+(`R_cl7_2_…` 2 cases at 1 m 26 s, `R_cl7_3_…_RefinedMesh` 2 cases at 20 s), so that count is **130**
+and the tier grows by ~1 m 46 s.
+
 ## CL6 — the one-slab kernel gets the same floor (2026-09-14)
 
 `docs/sonnet-briefs/brief-conductor-loss-6-one-slab-floor.md`. CL4 built a conducting ground plane

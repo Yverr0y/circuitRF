@@ -68,7 +68,7 @@ public class PlanarConductorPowerTests(ITestOutputHelper output)
             problem, mesh, sol.Currents[0], pattern, sol.Y[0, 0],
             new PlanarConductorLossInputs(loss, PlanarGram.Build(mesh), null));
 
-        double residual = budget.DielectricW / budget.AcceptedW;
+        double residual = budget.DielectricAndGroundW / budget.AcceptedW;
         double swShare  = budget.SurfaceWaveW / budget.AcceptedW;
         output.WriteLine($"h = {h * 1e3:F2} mm, εᵣ = {epsR}, N = {mesh.Bases.Count}");
         output.WriteLine(budget.Caption);
@@ -314,7 +314,7 @@ public class PlanarConductorPowerTests(ITestOutputHelper output)
     public void R_cl2_3a_WithALosslessDielectric_TheConductorTermIsTheWholeResidual(string which)
     {
         var (budget, n) = MmicBudget(which, tanD: 0.0);
-        double residual = budget.DielectricW / budget.AcceptedW;
+        double residual = budget.DielectricAndGroundW / budget.AcceptedW;
 
         output.WriteLine($"{which}, tanδ = 0, N = {n}");
         output.WriteLine(budget.Caption);
@@ -352,15 +352,15 @@ public class PlanarConductorPowerTests(ITestOutputHelper output)
         // tanδ = 6e-4 is the series overview's own MMIC starter figure; GroundedSlab.GaAsStarter
         // carries 2e-3, and the difference moves this ratio by 3.3×, so it is spelled out here.
         var (budget, n) = MmicBudget("gaas-line-30", tanD: 6e-4);
-        double ratio = budget.ConductorW / budget.DielectricW;
+        double ratio = budget.ConductorW / budget.DielectricAndGroundW;
 
         output.WriteLine($"MMIC starter line, tanδ = 6e-4, N = {n}");
         output.WriteLine(budget.Caption);
         output.WriteLine($"  conductor / dielectric = {ratio:F2}× " +
                          $"(the overview's 30× is an α ratio on a MATCHED line, not this)");
 
-        Assert.True(budget.DielectricW > 0,
-            $"the dielectric residual came out NEGATIVE ({SurfaceMesher.Eng(budget.DielectricW)}W " +
+        Assert.True(budget.DielectricAndGroundW > 0,
+            $"the dielectric residual came out NEGATIVE ({SurfaceMesher.Eng(budget.DielectricAndGroundW)}W " +
             $"against a conductor term of {SurfaceMesher.Eng(budget.ConductorW)}W) — the " +
             $"milestone-2 failure named in R_cl2_3a");
         Assert.True(ratio > 1.0,
@@ -368,7 +368,7 @@ public class PlanarConductorPowerTests(ITestOutputHelper output)
 
         // The budget closes as an identity whichever way round it is, so this asserts the
         // bookkeeping, not the physics — it is what says no term was dropped on the way through.
-        double sum = budget.RadiatedW + budget.SurfaceWaveW + budget.DielectricW + budget.ConductorW;
+        double sum = budget.RadiatedW + budget.SurfaceWaveW + budget.DielectricAndGroundW + budget.ConductorW;
         Assert.Equal(budget.AcceptedW, sum, 1e-12 * budget.AcceptedW);
     }
 

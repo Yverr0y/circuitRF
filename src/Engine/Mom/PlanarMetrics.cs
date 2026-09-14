@@ -76,7 +76,7 @@ public enum PlanarMetric
     PowerAccepted,
     PowerRadiated,
     PowerSurfaceWave,
-    PowerDielectric,
+    PowerDielectricAndGround,
     PowerConductor,
     RadiationEfficiency,
     RadiationEfficiencyDb,
@@ -486,9 +486,16 @@ public static class PlanarMetrics
             c => c.Budget.SurfaceWaveVerdict,
             c => [c.Budget.SurfaceWaveW]),
 
-        new(PlanarMetric.PowerDielectric, "PowerDielectric", "W", PlanarMetricAxis.PerPoint,
-            "The dielectric loss NOT carried away by a guided mode: accepted − radiated − surface " +
-            "wave − conductor. It is a RESIDUAL rather than a third independent integral, and that " +
+        new(PlanarMetric.PowerDielectricAndGround, "PowerDielectricAndGround", "W",
+            PlanarMetricAxis.PerPoint,
+            "The dielectric loss NOT carried away by a guided mode, PLUS whatever the laterally " +
+            "infinite GROUND PLANE absorbed: accepted − radiated − surface wave − conductor. The " +
+            "plane is not meshed and has no basis function, so it cannot be integrated the way the " +
+            "drawn metal is — it enters as a termination of the Green's function, and what it " +
+            "absorbs can only arrive here. On a low-tanδ substrate that is most of what this line " +
+            "reads; on a stackup whose ground layer has no σ the plane is perfect, absorbs nothing, " +
+            "and this is dielectric loss alone. " +
+            "It is a RESIDUAL rather than a third independent integral, and that " +
             "is a physical " +
             "statement, not a shortcut — over a laterally infinite lossy substrate a volume integral " +
             "of ωε₀ε″|E|² already contains the whole surface-wave term (the mode decays as " +
@@ -505,7 +512,7 @@ public static class PlanarMetrics
                        "which is a different quantity from this one, and reporting the sum under this " +
                        "name would be the double count the note warns about. PowerAccepted minus " +
                        "PowerRadiated is that combined remainder, and both of those are published."),
-            c => [c.Budget.DielectricW]),
+            c => [c.Budget.DielectricAndGroundW]),
 
         new(PlanarMetric.PowerConductor, "PowerConductor", "W", PlanarMetricAxis.PerPoint,
             PlanarPowerBudget.ConductorNote,

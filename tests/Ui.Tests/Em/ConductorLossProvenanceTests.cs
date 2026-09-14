@@ -63,6 +63,49 @@ public sealed class ConductorLossProvenanceTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    /// <b>CL7/R-cl7-7 — and the GROUND PLANE's metal is in the hash too, on BOTH spellings of the
+    /// medium.</b> CL4 closed this for a <c>LayerStack</c>; a ONE-SLAB problem has
+    /// <c>MediumStack == null</c> and contributed only the slab's height, εᵣ, tanδ and µᵣ, so two
+    /// runs differing only in the ground's σ would have shared a cached <c>.snp</c> — silently, with
+    /// a plausible answer. §CL6 §7 found it and reserved it for the brief that makes the termination
+    /// reachable, which is this one.
+    ///
+    /// <para><b>A PEC floor must hash EXACTLY as it did.</b> The kind is appended only for a surface
+    /// impedance, deliberately: writing it unconditionally would change the hash of every stack that
+    /// exists and invalidate every cached <c>.snp</c> in every workspace to record nothing. That is
+    /// asserted here against a pinned literal rather than left to inspection.</para>
+    /// </summary>
+    [Fact]
+    public void TheGroundPlanesMetalIsInTheGeometryHash()
+    {
+        static PlanarProblem Floored(Termination floor) =>
+            new([new PlanarConductorLayer("Metal",
+                    [new PlanarPolygon([new EmPoint(0, 0), new EmPoint(10e-3, 0),
+                                        new EmPoint(10e-3, 2.9e-3), new EmPoint(0, 2.9e-3)])],
+                    5.8e7, 35e-6)],
+                GroundedSlab.Fr4Starter with { Floor = floor }, 10e9);
+
+        string pec      = EmSnpProvenance.GeometryHash(Floored(Termination.Pec));
+        string copper   = EmSnpProvenance.GeometryHash(Floored(Termination.LossyGround(5.8e7, 35e-6)));
+        string quarter  = EmSnpProvenance.GeometryHash(Floored(Termination.LossyGround(1.45e7, 35e-6)));
+        string thinner  = EmSnpProvenance.GeometryHash(Floored(Termination.LossyGround(5.8e7, 18e-6)));
+
+        output.WriteLine($"PEC ground plane       {pec}");
+        output.WriteLine($"35 µm copper plane     {copper}");
+        output.WriteLine($"same, σ/4              {quarter}");
+        output.WriteLine($"same, 18 µm            {thinner}");
+
+        Assert.NotEqual(pec, copper);
+        Assert.NotEqual(copper, quarter);
+        Assert.NotEqual(copper, thinner);
+        Assert.NotEqual(quarter, thinner);
+
+        // A PEC floor hashes as it did before CL7 — every cached .snp in every workspace whose
+        // ground layer has no σ stays valid. The literal is the pre-CL7 stamp for this problem.
+        Assert.Equal(EmSnpProvenance.GeometryHash(Line(5.8e7, 35e-6)), pec);
+    }
+
+    /// <summary>
     /// <b>And the mesh and port stamps are untouched by this series</b>, which is the other half of
     /// R-cl3-2: nothing here adds a <c>.cem</c> key or a mesh control, so a file written before CL3
     /// is stale for exactly one reason — its metal — and not because the stamp's shape moved.
