@@ -1,6 +1,6 @@
 # Brief — an inline, interactive stackup rendering in the Technology Editor: the series
 
-**Status:** WRITTEN, not started · **Date:** 2026-09-13 · **Area:** `src/Render`, `src/Ui/Layout`,
+**Status:** SHIPPED, briefs 1-8 · **Date:** 2026-09-13 · **Area:** `src/Render`, `src/Ui/Layout`,
 `src/Ui/Controls`, `src/Ui/Views/Layout`, `src/Design/Layout`
 **Requirement tag for the series:** `R-stk-n`, scoped per brief (`R-stk1-3` is brief 1's third)
 

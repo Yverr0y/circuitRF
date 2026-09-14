@@ -171,36 +171,64 @@ public static class FigureCatalog
 
         // The Technology Editor's Stackup tab, on the shipped four-layer board technology.
         //
-        // TALL ON PURPOSE. A .ctech's stackup is a scrolling list of cards, and a capture at the
-        // height of a real docked window shows four of the nine entries with a scrollbar past them —
-        // which is the one thing a figure cannot convey, because a reader cannot scroll a picture.
-        // The height here is the height at which all nine cards and the summary row fit with nothing
-        // clipped, so what the page shows is the whole stackup.
-        new("tech-editor-stackup", DocTechEditorFixtures.StackupTab, 980, 2080,
+        // TALL ON PURPOSE, and the height is MEASURED, not chosen. A .ctech's stackup is a scrolling
+        // list of cards under a drawing, and a capture at the height of a real docked window shows a
+        // few of the nine entries with a scrollbar past them - which is the one thing a figure cannot
+        // convey, because a reader cannot scroll a picture. So the height is the height at which the
+        // whole tab fits with nothing clipped.
+        //
+        // 2224 = the title bar (34) + the boundary/Add/summary header (57) + the cross-section, which
+        // is StackupScene's own intrinsic height at this pane's width (338) + the splitter (6) + the
+        // filter row + all nine cards, ending at 2214 measured off the capture itself. It is NOT the
+        // old 2080 nudged: the drawing is new above the cards and each conductor card lost the
+        // ~52 px R-stk2-9 took out of its drawing-layer picker, and the two changes do not cancel.
+        //
+        // DocTechEditorFixtures sets the SPLIT through FigureScene.AfterLayout for the same reason -
+        // at this height the interactive default would give the drawing ~1,800 px and leave eight
+        // cards below the fold. See TechEditorView.ApplyStackupSplitForCapture.
+        new("tech-editor-stackup", DocTechEditorFixtures.StackupTab, 980, 2224,
             WindowFrame.Titled("circuitRF - PCB 4-Layer FR-4 (62mil, 1/0.5oz)"),
-            "The Technology Editor's Stackup tab on the shipped four-layer FR-4 technology: four "
-          + "copper entries, three dielectrics between them, and two via entries that span different "
-          + "pairs of conductors. The boundary conditions and the three Add buttons are on the top "
-          + "row; the summary beneath them is the stack height and what the stack is made of."),
+            "The Technology Editor's Stackup tab on the shipped four-layer FR-4 technology. The "
+          + "cross-section at the top is the primary surface: click a band to select it and land on "
+          + "its fields below, double-click a value to edit it in place, drag to reorder a layer or "
+          + "to move a via's span, right-click for the choices that are not typed numbers. The card "
+          + "list under the splitter edits the same nine entries - four coppers, three dielectrics "
+          + "and two vias that span different pairs of conductors - and the two always agree, "
+          + "because they are two views of one stackup rather than two copies of it. The boundary "
+          + "conditions and the three Add buttons are on the top row; the summary beneath them is "
+          + "the stack height and what the stack is made of."),
 
         // The stackup in cross-section, drawn from the shipped MMIC technology rather than from a
         // hand-written list of bands — so the picture cannot outlive the thing it is a picture of.
-        new("stackup-mmic", DocStackupFixtures.MmicCrossSection, 862, 354, null,
+        //
+        // SIZE, R-stk8-7. Both numbers are the SCENE's, not a frame chosen here. 960 is the width at
+        // which no label group wraps (DocStackupFixtures.Width - the MMIC process needs 949.7 and is
+        // the widest of the three); 396 is StackupScene.Height at that width, 388.7, rounded up.
+        // Neither may be nudged: the fixture reports its own intrinsic height and a frame smaller
+        // than it clips the bottom band silently.
+        new("stackup-mmic", DocStackupFixtures.MmicCrossSection, 960, 396, null,
             "An MMIC stackup in cross-section: two signal metals over a GaAs substrate, a backside "
           + "ground plane, the thin-film capacitor module between the metals, and the three vias "
           + "that connect them. The heavy edge marks the ground-designated conductor - the negative "
           + "terminal of every port in an EM run; the capacitor dielectric is marked with the plate "
           + "it is patterned with, which is what keeps it out of runs that have no capacitor in "
-          + "them. Thicknesses are printed rather than drawn to scale."),
+          + "them. Every thickness is printed. Heights are relative WITHIN a kind and never across "
+          + "kinds - a conductor against a conductor, a dielectric against a dielectric - and this "
+          + "process's dielectrics span 0.2 um to 100 um, which is too wide to draw even on its "
+          + "own, so they are compressed while staying in order."),
 
         // MIM-7 — the capacitor module on its own, for the chapter's MIM section. A WINDOW on the
         // figure above, from the same real Technology object, because seven bands at reading size
         // make the 0.2 um film and its tie the two least legible things in the picture.
-        new("stackup-mim", DocStackupFixtures.MimModuleCrossSection, 862, 252, null,
+        // 280 is the scene's own height at 960 (248) plus the footer line under it - see
+        // stackup-mmic above for why neither number is a frame chosen here.
+        new("stackup-mim", DocStackupFixtures.MimModuleCrossSection, 960, 280, null,
             "The thin-film capacitor module in cross-section: the plate metal, the capacitor "
           + "dielectric under it - marked with the plate it is patterned with, which is what keeps "
-          + "it out of runs that analyse no plate - and the plate via up to the routing metal. "
-          + "Thicknesses are printed rather than drawn to scale."),
+          + "it out of runs that analyse no plate - and the plate via up to the routing metal. It "
+          + "is a WINDOW on the figure above, so it states no boundary conditions: a slice of a "
+          + "sandwich has none of its own. Every thickness is printed; heights are relative within "
+          + "a kind and never across kinds."),
 
         // The two port types, drawn by the real renderer on real MKLOPF artwork. Landscape and the
         // same size as each other on purpose: they are read as a PAIR — the whole point is that the
@@ -304,11 +332,15 @@ public static class FigureCatalog
           + "overlapping in the corner square that makes them one conductor. The square is left "
           + "unmitred deliberately - the bend is what the exercise measures."),
 
-        new("mom-bend-stackup", DocStackupFixtures.PcbCrossSection, 862, 262, null,
-            "Step 2: the stackup the PCB starter technology hands you, drawn in cross-section. "
-          + "1.6 mm of FR-4 between 35 um of top copper and the bottom copper that is the ground "
-          + "reference - the heavy blue edge - with the plated through-hole spanning them. Heights "
-          + "are not to scale; every thickness is printed."),
+        // 264 is the scene's own height at 960 (259.8) - see stackup-mmic for why.
+        new("mom-bend-stackup", DocStackupFixtures.PcbCrossSection, 960, 264, null,
+            "Step 2: the stackup the PCB starter technology hands you, drawn in cross-section - the "
+          + "same drawing the Technology Editor's Stackup tab puts above its cards. The FR-4 core "
+          + "between the two coppers, the bottom one designated the ground reference (the heavy "
+          + "blue edge), and the plated through-hole spanning them - drawn with its bore, because "
+          + "it is a barrel and not a rod. Thicknesses are in the technology's OWN display unit, "
+          + "which on this board is mil: 62.99 mil is the 1.6 mm the walkthrough quotes and 1.378 "
+          + "mil is 1 oz copper. Heights are relative within a kind and never across kinds."),
 
         new("mom-bend-ports", DocMomBendFixtures.Ports, 560, 620, null,
             "Step 3: an edge port at the centre of each end face, with the bar marking where "

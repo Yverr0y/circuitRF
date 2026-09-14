@@ -1,5 +1,28 @@
 # src/Render — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## brief-stackup-render-8, 2026-09-13 — a scene may be built with NO boundary conditions
+
+`StackupSceneOptions.ShowBoundaryConditions` (default true) is the one thing brief 8 needed from the
+scene, and it exists for exactly one caller: the `stackup-mim` documentation figure, which is a
+**window** on five of the MMIC process's seven bands. "Top: Open — free space above" is true of the
+stack and false of a slice of it; a picture that printed it would be claiming to show the whole
+sandwich.
+
+**It is a scene option and not a renderer flag**, because it changes the LAYOUT rather than the paint:
+the two notes occupy vertical space above and below the bands and everything else in the scene is
+measured from them. With it off, `TopPad` is where the first band starts and the footer row (an
+unresolvable via's refusal) is measured from the bottom of the label column instead of from the
+bottom note.
+
+Nothing else in `src/Render` changed for brief 8. The documentation figures now call
+`StackupScene.Build` and `StackupRenderer.Draw` directly, which is the point — see
+`src/Ui/Diagnostics/RESOLVED.md` for what that comparison found, including the one dark-variant
+contrast issue it surfaced in the TAB (a dielectric's on-band name is `StackupOnBandInk`, fixed dark,
+over a themed `DielectricFill`) and why brief 8 left it alone.
+
+---
+
+
 ## brief-stackup-render-5-drag.md, 2026-09-13 — what the drags needed FROM the scene (two things)
 
 The gesture code is in `src/Ui`; the detail is in `src/Ui/RESOLVED.md`. What landed here:

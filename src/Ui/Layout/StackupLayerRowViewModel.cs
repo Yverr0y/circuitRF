@@ -6,8 +6,19 @@ using CommunityToolkit.Mvvm.Input;
 namespace CircuitRF.Ui.Layout;
 
 /// <summary>
-/// VM for one row in the .ctech editor's stackup list — an ordered top-to-bottom plain list
-/// (no diagram; see docs/design/layout-view.md §10.4, which is L6). The detail pane shows only
+/// VM for one row in the .ctech editor's stackup CARD LIST — the lower of the Stackup tab's two
+/// panes, below the cross-section drawing (docs/design/mom-engine.md §10.4a; §10 moved out of
+/// layout-view.md with its numbering preserved).
+///
+/// <para><b>The card list is one of TWO views of the same stackup, and this VM is the write path
+/// for both.</b> The drawing above it does not mutate <c>Working.Stackup</c> and pushes no undo
+/// entry of its own: a band dragged, a value typed on the canvas or a menu item picked there all
+/// arrive at <see cref="CommitName"/> / <see cref="CommitThickness"/> / the owner's
+/// <c>MoveStackupLayer</c> / <c>RemoveStackupLayer</c> / <c>CommitEdit</c>, which is why undo/redo,
+/// <c>TechValidation</c>, the dirty mark and the live-technology push need no second copy to stay in
+/// step. A comment-stripped source scan holds it.</para>
+///
+/// <para>The detail pane shows only
 /// the fields <see cref="Kind"/> actually uses (§2.4's rule): a dielectric never shows σ, a
 /// conductor/via never shows εr/tanδ/µr. Thickness is a physical dimension, parsed/formatted via
 /// <see cref="LayoutUnits"/> in the technology's <see cref="Technology.DefaultDisplayUnit"/> —

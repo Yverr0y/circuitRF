@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Rendering.SceneGraph;
+using Avalonia.Skia;
+using Avalonia.Styling;
+using CircuitRF.Render;
 using CircuitRF.Ui.Layout;
 using CircuitRF.Ui.Theming;
 
@@ -22,21 +25,44 @@ namespace CircuitRF.Ui.Diagnostics.Fixtures;
 /// ground reference, which two layers a via spans — is read off the <c>Technology</c> the
 /// application ships, so if that moves, the figure moves.</para>
 ///
-/// <para><b>Heights are NOT to scale, and the caption says so.</b> A 3 µm metal beside a 100 µm
-/// substrate is a 33:1 ratio: drawn honestly, every conductor in the picture would be a hairline,
-/// including the one the whole chapter is about. Conductors get a fixed readable band and
-/// dielectrics a compressed one; the real thickness is printed on every band, which is the number a
-/// reader actually needs.</para>
+/// <h3>R-stk8-7 — it is the APPLICATION'S renderer, not a second drawing of the same subject</h3>
+/// <para>Every rectangle, band, barrel and label here comes out of <see cref="StackupScene"/> and
+/// <see cref="StackupRenderer"/> in <c>src/Render</c>: the same layout pass and the same paint calls
+/// the Technology Editor's Stackup tab makes every frame, and that <c>circuitrf render</c> and the
+/// clipboard copy make. Until this brief there were two drawings of one thing — ~250 lines of
+/// <c>Border</c>s and <c>TextBlock</c>s on a <c>Canvas</c> here, and the Skia renderer there — which
+/// had to be kept looking alike by hand. That is the duplication <c>src/Render</c> exists to
+/// prevent.</para>
+///
+/// <para><b>The hand-built figures were not broken, and the repoint was judged on the pictures, not
+/// on the principle</b> — the three side-by-side comparisons, what each one gained and the one thing
+/// each lost, are in <c>src/Ui/Diagnostics/RESOLVED.md</c>. The short version: the drawing now states
+/// each via's SPAN, its fill and its wall, draws a plated barrel with its bore, and scales conductors
+/// against each other, so the 0.25 µm capacitor plate no longer draws the same thickness as a 3 µm
+/// interconnect metal. What it gives up is the room for a sentence: the ground reference reads "gnd"
+/// and a tie reads "patterned: &lt;plate&gt;", where this file used to write both out in full. That is
+/// <c>R-stk1-4</c> holding — the drawing carries no commentary — and both sentences moved into the
+/// figure CAPTIONS in <see cref="FigureCatalog"/>, which is where a qualification belongs.</para>
+///
+/// <para>What is left here is the three things that are the FIGURE's and not the drawing's: which
+/// technology, what window on it, and the footer sentence that sits outside the picture.</para>
 /// </summary>
 public static class DocStackupFixtures
 {
-    private const double Width       = 860;
-    private const double BandLeft    = 24;
-    private const double BandWidth   = 460;
-    private const double ConductorH  = 26;
-    private const double LabelLeft   = BandLeft + BandWidth + 18;
-
-    private static double MicronsOf(long dbu) => dbu / (double)LayoutUnits.DefaultDbuPerMicron;
+    /// <summary>
+    /// The width every cross-section figure lays out at.
+    ///
+    /// <para><b>Wide enough that no label group wraps</b>, which is what the clipboard copy widens a
+    /// page to get and what <see cref="StackupScene.WidthThatFitsLabels"/> answers:
+    /// <see cref="StarterTechnologies.MmicGaAs"/>, the widest of the three, needs 949.7 at the
+    /// shipped font sizes, and the other two fit at 860. One width for all three so the chapter's
+    /// figures line up, with the slack in the same place for each.</para>
+    ///
+    /// <para>It was 860 while this file drew its own bands, which measured nothing and simply trusted
+    /// the numbers to fit. A test asserts nothing wraps at this width, so the next long layer name is
+    /// a failure rather than a figure that has quietly started wrapping.</para>
+    /// </summary>
+    internal const float Width = 960;
 
     /// <summary>An MMIC stackup: two signal metals, the thin-film capacitor module between them, a
     /// substrate, a backside ground plane, and the three vias that connect them.</summary>
@@ -55,8 +81,7 @@ public static class DocStackupFixtures
     /// <para>Shorter than the MMIC figure because the stack is: two conductors and one dielectric,
     /// against seven bands.</para>
     /// </summary>
-    public static FigureScene PcbCrossSection() => CrossSection(
-        StarterTechnologies.Pcb2Layer(), height: 260);
+    public static FigureScene PcbCrossSection() => CrossSection(StarterTechnologies.Pcb2Layer());
 
     /// <summary>
     /// <b>The capacitor module on its own, MIM-7</b> — the same real technology, windowed to the
@@ -72,178 +97,130 @@ public static class DocStackupFixtures
     public static FigureScene MimModuleCrossSection() => CrossSection(
         StarterTechnologies.MmicGaAs(),
         include: l => l.Name is "Metal2" or "Air" or "MIM Metal" or "MIM Dielectric" or "Metal1",
-        height: 250,
         footer: "…then 100 µm of GaAs and the backside ground plane, unchanged by the module.");
 
+    /// <param name="include">
+    /// A WINDOW on the stack: only the band entries this admits are drawn, and the two boundary
+    /// conditions are then not stated at all (<see cref="StackupSceneOptions.ShowBoundaryConditions"/>)
+    /// — a slice of a sandwich has no terminations of its own. A via whose span leaves the window is
+    /// dropped with it, by the scene's own unresolved-span rule.
+    /// </param>
+    /// <param name="footer">
+    /// One sentence UNDER the picture, outside it. Deliberately not a scene label: it is
+    /// documentation prose about what the window leaves out, and <c>R-stk1-4</c>'s rule that the
+    /// drawing carries no commentary applies to the figures too — a qualification belongs beside a
+    /// picture, not inside one.
+    /// </param>
     private static FigureScene CrossSection(
-        Technology tech, Func<StackupLayer, bool>? include = null, double height = 352,
-        string? footer = null)
+        Technology tech, Func<StackupLayer, bool>? include = null, string? footer = null)
     {
-        var canvas = new Canvas { Width = Width, Height = height };
+        var drawn = include is null ? tech : Windowed(tech, include);
+        var scene = StackupScene.Build(
+            drawn, Width, new StackupSceneOptions { ShowBoundaryConditions = include is null });
 
-        var bands = tech.Stackup.Layers
-            .Where(l => l.Kind != StackupKind.Via && (include is null || include(l))).ToList();
-        var vias  = tech.Stackup.Layers.Where(l => l.Kind == StackupKind.Via).ToList();
+        var view = new StackupSceneView(scene);
+        if (footer is null) return new FigureScene(view);
 
-        // ── Where each band lands, top to bottom (the order the stackup itself is written in) ────
-        double y = 46;
-        var top = new Dictionary<string, double>(StringComparer.Ordinal);
-        var bot = new Dictionary<string, double>(StringComparer.Ordinal);
-
-        foreach (var band in bands)
+        var stack = new StackPanel { Orientation = Orientation.Vertical, Spacing = 6, Width = Width };
+        stack.Children.Add(view);
+        stack.Children.Add(new TextBlock
         {
-            double h = band.Kind == StackupKind.Conductor ? ConductorH : DielectricHeight(band);
-            top[band.Name] = y;
-            bot[band.Name] = y + h;
+            Text = footer,
+            FontSize = StackupScene.SpecSize,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(StackupScene.Gutter, 0, StackupScene.Gutter, 0),
+        });
+        return new FigureScene(stack);
+    }
 
-            canvas.Children.Add(Band(band, tech, y, h));
-            foreach (var text in BandLabels(band, y, h)) canvas.Children.Add(text);
-            y += h;
-        }
+    /// <summary>
+    /// The same technology with only the admitted band entries in its stackup — the via entries come
+    /// through untouched, so one whose span has left the window is reported by the scene's own
+    /// unresolved-span rule rather than silently vanishing.
+    ///
+    /// <para>The drawing layers are SHARED, not copied: the scene reads them only to resolve a
+    /// conductor's colour, and a second copy of a layer table is a second thing to keep in step.</para>
+    /// </summary>
+    private static Technology Windowed(Technology tech, Func<StackupLayer, bool> include)
+    {
+        var kept = new HashSet<string>(
+            tech.Stackup.Layers.Where(l => l.Kind != StackupKind.Via && include(l)).Select(l => l.Name),
+            StringComparer.Ordinal);
 
-        // ── The two boundary conditions, which are properties of the STACK rather than of a band ─
-        //
-        // A WINDOWED figure states neither: it is not showing the whole sandwich, so printing the
-        // stack's terminations beside a slice of it would say something the picture does not show.
-        if (include is null)
+        return new Technology
         {
-            canvas.Children.Add(Note($"Top: {tech.Stackup.Top}"
-                                   + (tech.Stackup.Top == BoundaryCondition.Open ? " — free space above" : ""),
-                                     BandLeft, 22, bold: true));
-            canvas.Children.Add(Note($"Bottom: {tech.Stackup.Bottom}", BandLeft, y + 8, bold: true));
-        }
-        if (footer is not null) canvas.Children.Add(Note(footer, BandLeft, y + 8, small: true));
-
-        // ── The vias, drawn ACROSS the bands they span ──────────────────────────────────────────
-        //
-        // A via is a stackup entry like any other, but it is not a layer of the sandwich: it is a
-        // connection between two of them, and drawing it as a band in the list is what makes people
-        // read it as one. Each is drawn at its own x, spanning exactly the two conductors it names.
-        // Spread across the RIGHT-HAND part of the band, never over the left where every band prints
-        // its own name: three vias at the old 0.30 spacing put the third one straight through the
-        // "Metal2"/"Air"/"MIM Metal" captions. The MMIC stackup grew a third via at MIM-2.
-        int viaSlot = 0;
-        foreach (var via in vias)
-        {
-            if (via.SpanFromLayer is not { } a || via.SpanToLayer is not { } b) continue;
-            if (!top.ContainsKey(a) || !top.ContainsKey(b)) continue;
-
-            double viaX = BandLeft + BandWidth * (0.68 - 0.18 * viaSlot);
-            viaSlot++;
-
-            double y0 = Math.Min(top[a], top[b]), y1 = Math.Max(bot[a], bot[b]);
-            canvas.Children.Add(new Border
+            Name               = tech.Name,
+            DefaultDisplayUnit = tech.DefaultDisplayUnit,
+            Layers             = tech.Layers,
+            Stackup = new Stackup
             {
-                Width = 16, Height = y1 - y0,
-                Background = new SolidColorBrush(Color.FromArgb(210, 120, 120, 128)),
-                BorderBrush = new SolidColorBrush(Color.FromArgb(255, 60, 60, 68)),
-                BorderThickness = new Thickness(1),
-                [Canvas.LeftProperty] = viaX,
-                [Canvas.TopProperty]  = y0,
-            });
-            canvas.Children.Add(Note(via.Name, viaX + 22, 0.5 * (y0 + y1) - 8, small: true));
+                Top    = tech.Stackup.Top,
+                Bottom = tech.Stackup.Bottom,
+                Layers = tech.Stackup.Layers
+                    // A via is kept only when BOTH its ends are in the window. One end outside it is
+                    // an UNRESOLVED span as far as the scene is concerned, and the scene is right to
+                    // print that in red — R-stk1-6 exists so a broken stackup cannot look fine. It is
+                    // not broken here: the conductor is in the technology, just not in this picture.
+                    // Filtering it out is what makes the window a window rather than a claim.
+                    .Where(l => l.Kind == StackupKind.Via
+                        ? kept.Contains(l.SpanFromLayer ?? "") && kept.Contains(l.SpanToLayer ?? "")
+                        : kept.Contains(l.Name))
+                    .ToList(),
+            },
+        };
+    }
+
+    /// <summary>
+    /// <b>A laid-out <see cref="StackupScene"/>, painted by <see cref="StackupRenderer"/>.</b> It
+    /// holds no view model, handles no input and computes nothing — <c>StackupCanvas</c> is the
+    /// interactive control and this is the figure's half of it.
+    ///
+    /// <para>It paints with <c>transparentBackground</c>, so the docs page's own surface shows
+    /// through: a figure with no window chrome is composited onto that surface, and painting the
+    /// pane's background over it would put a slab of editor colour on the page. The side effect is
+    /// the wanted one — a plated barrel's bore becomes a real hole in the picture rather than a disc
+    /// of some other colour.</para>
+    /// </summary>
+    private sealed class StackupSceneView : Control
+    {
+        private readonly StackupScene _scene;
+        private StackupRenderTheme _theme = StackupRenderTheme.Fallback;
+
+        internal StackupSceneView(StackupScene scene) => _scene = scene;
+
+        protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+        {
+            base.OnAttachedToVisualTree(e);
+            // The capture window carries the variant, exactly as it does for every other themed
+            // fixture — read it here rather than from ThemeService.CurrentVariant so a figure and the
+            // window it is composited into cannot disagree.
+            var variant = ActualThemeVariant == ThemeVariant.Dark ? ColorVariant.Dark : ColorVariant.Light;
+            _theme = StackupRenderTheme.FromTheme(ThemeService.Active, variant);
         }
 
-        return new FigureScene(canvas);
-    }
+        // The scene's own intrinsic height, which is what replaced this file's former `height:`
+        // parameter: a figure whose height was typed beside the fixture is a figure that silently
+        // clips the day a layer is added, and the scene already knows the answer.
+        protected override Size MeasureOverride(Size availableSize) => new(_scene.Width, _scene.Height);
 
-    /// <summary>
-    /// One band of the sandwich. A conductor takes its colour from the DRAWING layer it is bound to,
-    /// so the picture and the layout editor agree about which metal is which; a dielectric is drawn
-    /// as neutral fill, because it is not something anyone draws on.
-    /// </summary>
-    private static Control Band(StackupLayer band, Technology tech, double y, double h)
-    {
-        bool ground = band is { Kind: StackupKind.Conductor, IsGroundReference: true };
+        public override void Render(DrawingContext context)
+            => context.Custom(new Operation(new Rect(Bounds.Size), _scene, _theme));
 
-        var fill = band.Kind == StackupKind.Conductor
-            ? Metal(band, tech)
-            : new SolidColorBrush(Color.FromArgb(60, 120, 130, 145));
-
-        return new Border
+        private sealed class Operation(Rect bounds, StackupScene scene, StackupRenderTheme theme)
+            : ICustomDrawOperation
         {
-            Width = BandWidth, Height = h,
-            Background = fill,
-            // The ground reference is the one band a reader has to be able to find, so it is the one
-            // band with a heavy edge. Every other distinction in this picture is a label.
-            BorderBrush = new SolidColorBrush(ground
-                ? Color.FromArgb(255, 30, 130, 200)
-                : Color.FromArgb(90, 110, 110, 120)),
-            BorderThickness = new Thickness(ground ? 2.5 : 1),
-            [Canvas.LeftProperty] = BandLeft,
-            [Canvas.TopProperty]  = y,
-        };
-    }
+            public Rect Bounds => bounds;
+            public bool HitTest(Point p) => false;
+            public bool Equals(ICustomDrawOperation? other) => false;
+            public void Dispose() { }
 
-    private static IBrush Metal(StackupLayer band, Technology tech)
-    {
-        foreach (var key in band.DrawingLayers)
-            foreach (var def in tech.Layers)
-                if (def.Key.Equals(key))
-                    return new SolidColorBrush(Color.FromArgb(def.Color.A, def.Color.R, def.Color.G, def.Color.B));
-
-        return new SolidColorBrush(Color.FromArgb(255, 190, 150, 90));
-    }
-
-    /// <summary>The band's own caption on the left, and what it is made of on the right.</summary>
-    private static IEnumerable<Control> BandLabels(StackupLayer band, double y, double h)
-    {
-        double mid = y + 0.5 * h - 9;
-        yield return Note(band.Name, BandLeft + 10, mid, bold: true, onBand: true);
-
-        string spec = band.Kind == StackupKind.Conductor
-            ? $"{Eng(MicronsOf(band.ThicknessDbu))} µm thick, σ = {band.SigmaSm:0.0e+0} S/m"
-            : $"{Eng(MicronsOf(band.ThicknessDbu))} µm thick, εr = {band.Epsr:0.###}, tanδ = {band.TanD:0.####}";
-        yield return Note(spec, LabelLeft, mid, small: true);
-
-        if (band is { Kind: StackupKind.Conductor, IsGroundReference: true })
-            yield return Note("◄ ground reference: every port's − terminal",
-                              LabelLeft, mid + 15, small: true, accent: true);
-
-        // MIM-7 — the tie, marked, because it is the one thing about this band a reader cannot infer
-        // from the picture: it is drawn as a layer of the sandwich like any other, and it is the only
-        // one that is not always there.
-        if (band is { Kind: StackupKind.Dielectric, PresentWithLayer: { Length: > 0 } plate })
-            // Kept short deliberately: the right-hand label column is BandWidth-limited, and a
-            // sentence long enough to explain the tie would run off the canvas. The chapter's own
-            // text explains it; this only has to be findable.
-            yield return Note($"◄ patterned with '{plate}' — only in runs that analyse it",
-                              LabelLeft, mid + 15, small: true, accent: true);
-    }
-
-    /// <summary>
-    /// A dielectric's drawn height: compressed, bounded, and monotone in the real thickness — so a
-    /// thicker layer still looks thicker, without a 33:1 ratio driving every metal to a hairline.
-    /// </summary>
-    private static double DielectricHeight(StackupLayer band)
-    {
-        double um = Math.Max(MicronsOf(band.ThicknessDbu), 0.1);
-        return Math.Clamp(30 + 26 * Math.Log10(1 + um), 34, 96);
-    }
-
-    private static string Eng(double um) =>
-        um >= 100 ? um.ToString("0", CultureInfo.InvariantCulture)
-      : um >= 1   ? um.ToString("0.##", CultureInfo.InvariantCulture)
-      :             um.ToString("0.###", CultureInfo.InvariantCulture);
-
-    private static TextBlock Note(string text, double x, double y, bool bold = false, bool small = false,
-                                  bool accent = false, bool onBand = false)
-    {
-        var t = new TextBlock
-        {
-            Text = text,
-            FontSize = small ? 11.5 : 13,
-            FontWeight = bold ? FontWeight.SemiBold : FontWeight.Normal,
-            VerticalAlignment = VerticalAlignment.Center,
-            [Canvas.LeftProperty] = x,
-            [Canvas.TopProperty]  = y,
-        };
-
-        // A band's own name sits ON the metal, whose colour is the technology's and is the same in
-        // both variants — so it takes a fixed dark ink rather than the theme's, which would vanish
-        // into copper in the dark variant. Everything outside a band uses the theme's own foreground.
-        if (onBand) t.Foreground = new SolidColorBrush(Color.FromArgb(255, 25, 25, 30));
-        if (accent) t.Foreground = new SolidColorBrush(Color.FromArgb(255, 30, 130, 200));
-        return t;
+            public void Render(ImmediateDrawingContext context)
+            {
+                if (context.TryGetFeature<ISkiaSharpApiLeaseFeature>() is not { } skia) return;
+                using var lease = skia.Lease();
+                StackupRenderer.Draw(lease.SkCanvas, scene, theme, overlay: null,
+                                     transparentBackground: true);
+            }
+        }
     }
 }

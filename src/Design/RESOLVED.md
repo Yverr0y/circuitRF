@@ -1,5 +1,24 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## `DrawLaneFraction`'s cosmetic-only status is now written down OUTSIDE this file (2026-09-13)
+
+Brief 8's closeout. The STK5 note below is the finding; what it lacked was a statement anyone reading
+the design in the ordinary way would meet. Two now exist:
+
+- **`docs/design/mom-engine.md` §10.4b** — "`StackupLayer.DrawLaneFraction` is COSMETIC, and must stay
+  cosmetic", beside the model fields it sits among, including the additive-nullable persistence rule
+  and the fact that a test rather than a paragraph is what holds it.
+- **`docs/user/src/reference/stackup.md`, the Vias section** — "Where a via sits on the cross-section
+  means nothing", for the user who has just dragged one sideways and wants to know whether they have
+  changed their board. They have not: a via entry is a KIND of connection between two named
+  conductors, and where the holes are is in the layout.
+
+The rule is unchanged and so is the gate (R-stk5-9: a technology differing only in this field extracts
+to an identical `EmProblem`). Nothing in `src/Design` changed for brief 8.
+
+---
+
+
 ## STK5 — `StackupLayer.DrawLaneFraction`: a drawing position that must never become geometry (2026-09-13)
 
 brief-stackup-render-5-drag.md R-stk5-7. One additive nullable `double?` on `StackupLayer`, in the

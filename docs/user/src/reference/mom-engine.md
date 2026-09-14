@@ -1321,6 +1321,12 @@ reference** row reads the ground plane and not something else.
 
 {{ui: mom-bend-stackup}}
 
+The cross-section prints every thickness in the technology's own display unit, which on this board is
+**mil** — so the core reads 62.99 mil, which is the 1.6 mm above, and each copper reads 1.378 mil,
+which is 1 oz. If anything there is not what you expected, that same drawing is live at the top of the
+Technology Editor's **Stackup** tab: click a band to land on its fields and change them in place — see
+[The stackup](stackup.html#cross-section).
+
 That is the whole stack this run sees. The soldermask, the silkscreen and the outline are drawing
 layers with no stackup band, so they are not in the solve at all — see [The stackup](stackup.html) for
 which drawing layers become physics and which do not.

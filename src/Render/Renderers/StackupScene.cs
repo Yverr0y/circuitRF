@@ -153,6 +153,22 @@ public sealed record StackupSceneOptions
     /// downstream of the drawing may read it (series overview §3e).</para>
     /// </summary>
     public IReadOnlyDictionary<string, float>? ViaLanes { get; init; }
+
+    /// <summary>
+    /// Whether the two boundary-condition notes — "Top: Open — free space above" above the stack and
+    /// "Bottom: Ground" below it — are laid out at all.
+    ///
+    /// <para>True everywhere the drawing shows a WHOLE stackup, which is the tab, the clipboard copy
+    /// and two of the three documentation figures. It is false for the one caller that draws a
+    /// <b>window</b> on a stack rather than the stack: the MIM module figure shows five of the MMIC
+    /// process's seven bands, and a slice of a sandwich has no terminations of its own — printing the
+    /// stack's would say something the picture does not show.</para>
+    ///
+    /// <para>It is here rather than in the renderer because it changes the LAYOUT: the notes occupy
+    /// vertical space above and below the bands, and everything the scene places is measured from
+    /// them.</para>
+    /// </summary>
+    public bool ShowBoundaryConditions { get; init; } = true;
 }
 
 /// <summary>
@@ -572,13 +588,18 @@ public sealed class StackupScene
         // ── The stack itself ─────────────────────────────────────────────────────────────────────
         float y = TopPad;
 
-        // Two pieces, so a narrow pane WRAPS the note rather than running it off the edge.
+        // Two pieces, so a narrow pane WRAPS the note rather than running it off the edge. A caller
+        // drawing a WINDOW on a stack asks for neither note — see ShowBoundaryConditions — and then
+        // the space they occupy is not reserved either.
+        bool showBoundaries = options.ShowBoundaryConditions;
         var topNote = new PieceRun(bandLeft, width - Gutter - bandLeft);
-        topNote.Add($"Top: {tech.Stackup.Top}", StackupField.None, StackupLabelStyle.Note, noteFont, 0f);
-        if (tech.Stackup.Top == BoundaryCondition.Open)
-            topNote.Add("— free space above", StackupField.None, StackupLabelStyle.Note, noteFont, PieceGap);
-        float noteHeight = topNote.Height;
-        y += noteHeight + NoteGap;
+        if (showBoundaries)
+        {
+            topNote.Add($"Top: {tech.Stackup.Top}", StackupField.None, StackupLabelStyle.Note, noteFont, 0f);
+            if (tech.Stackup.Top == BoundaryCondition.Open)
+                topNote.Add("— free space above", StackupField.None, StackupLabelStyle.Note, noteFont, PieceGap);
+            y += topNote.Height + NoteGap;
+        }
 
         float stackTop = y;
         var   bands    = new List<StackupBand>(bandLayers.Count);
@@ -737,16 +758,24 @@ public sealed class StackupScene
         foreach (var group in groups) group.Emit(labels, hits);
 
         // ── The two boundary conditions, which belong to the STACK rather than to any band ───────
-        string bottomText   = $"Bottom: {tech.Stackup.Bottom}";
-        float  bottomWidth  = noteFont.MeasureText(bottomText) + 2 * LabelPadX;
-        float  bottomTop    = Math.Max(stackBottom, BottomOfColumn(labels, bandLeft, bandLeft + bottomWidth)) + NoteGap;
+        float footerY;
+        if (showBoundaries)
+        {
+            string bottomText   = $"Bottom: {tech.Stackup.Bottom}";
+            float  bottomWidth  = noteFont.MeasureText(bottomText) + 2 * LabelPadX;
+            float  bottomTop    = Math.Max(stackBottom, BottomOfColumn(labels, bandLeft, bandLeft + bottomWidth)) + NoteGap;
 
-        topNote.Place(TopPad, "", labels, hits);
+            topNote.Place(TopPad, "", labels, hits);
 
-        var bottomNote = new PieceRun(bandLeft, width - Gutter - bandLeft);
-        bottomNote.Add(bottomText, StackupField.None, StackupLabelStyle.Note, noteFont, 0f);
-        bottomNote.Place(bottomTop, "", labels, hits);
-        float footerY = bottomTop + bottomNote.Height + LabelGap;
+            var bottomNote = new PieceRun(bandLeft, width - Gutter - bandLeft);
+            bottomNote.Add(bottomText, StackupField.None, StackupLabelStyle.Note, noteFont, 0f);
+            bottomNote.Place(bottomTop, "", labels, hits);
+            footerY = bottomTop + bottomNote.Height + LabelGap;
+        }
+        else
+        {
+            footerY = Math.Max(stackBottom, BottomOfColumn(labels, bandLeft, width - Gutter)) + NoteGap;
+        }
 
         // R-stk1-6: an unresolvable via is drawn as a marker, never omitted. A via that simply does
         // not appear is a stackup the user cannot tell is broken from the picture, and the card list

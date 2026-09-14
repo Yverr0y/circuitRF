@@ -258,10 +258,56 @@ An ordered stack from top to bottom, living in the `.ctech` file:
   polygon on the bound layer, which is the MIM plate-connection case and reaches the mesher at the
   outline it was drawn. *(> Built at MIM-1, 2026-08-30.)*
 
-UI: a vertical stack diagram, click a band to edit, with **presets** — "FR-4 2-layer 1.6 mm",
-"Rogers 4350B 0.508 mm", "GaAs MMIC 100 µm" — because preset-then-tweak is what makes the 30-second
-target reachable. Linear isotropic only, as specified; the model should nonetheless leave room for
-anisotropic εr later (Rogers laminates are anisotropic in reality).
+Presets ship as starter technologies rather than as a combo box on this tab — two- and four-layer
+laminate boards, a low-loss microwave board and a MMIC process, each a whole `.ctech` a New Workspace
+can be created against — because preset-then-tweak is what makes the 30-second target reachable. Linear isotropic
+only, as specified; the model should nonetheless leave room for anisotropic εr later (real laminates
+are anisotropic).
+
+#### 10.4a The tab is a DRAWING over a list — **shipped 2026-09-13**
+
+**This section used to say the editor was an ordered top-to-bottom plain list with no diagram. It is
+not, and has not been since the `R-stk-n` series landed.** The Stackup tab is a cross-section drawing
+above a card list, split by a `GridSplitter`, and the drawing is the primary surface: click a band to
+select it and land on its fields, double-click a value to edit it in place, drag a band to reorder it,
+drag a via's ends to change its span or its side to slide it, right-click for delete / add via /
+plated / fill, `Esc` to clear, right-click ▸ Copy to put the whole picture on the clipboard. The card
+list below is still there and still edits everything; the two are two VIEWS of one stackup and never
+two models of it — every mutation the canvas performs calls the function the card already calls, so
+undo/redo, live validation, the dirty mark and the live-technology push all follow without a second
+path to keep in step.
+
+The drawing itself is `StackupScene` + `StackupRenderer` in `src/Render`, below the UI firewall and
+with no Avalonia in it, for the reason that project exists: the tab, the clipboard export and the
+documentation figures are one picture rather than three that have to be kept looking alike by hand.
+The scene is laid out ONCE per `(Technology, width)` and read twice — the renderer draws its rects and
+the control hit-tests the same ones — so the picture and the pointer cannot disagree.
+
+**Band heights are relative WITHIN a kind and never across kinds.** A half-thickness conductor draws
+half as tall as another conductor; it is never compared with a dielectric, because the shipped MMIC
+process spans 0.2 µm to 100 µm of dielectric alone and drawn honestly against metal every conductor in
+the picture would be a hairline. Where a kind's own dynamic range will not fit its height budget the
+mapping compresses, monotonically, so the ordering stays truthful; the real thickness is printed on
+every band, which is the number a reader needs. **The drawing says nothing about any of this** — no
+note, no asterisk, no "not to scale" caption. Which branch was taken is scene metadata
+(`ConductorsCompressed` / `DielectricsCompressed`) that tests and figure captions read and nothing
+draws. The rule is written down once for users, in
+[the Stackup chapter](../user/src/reference/stackup.md).
+
+#### 10.4b `StackupLayer.DrawLaneFraction` is COSMETIC, and must stay cosmetic
+
+A via entry carries one field that exists only for the drawing: `DrawLaneFraction`, the fraction of
+the drawn band column (0 = left edge, 1 = right edge) at which its barrel's centre sits, null meaning
+"wherever the automatic lane assignment puts it". It is additive and nullable on the
+`SheetAt`/`PresentWithLayer`/`Fill` precedent — no `FormatVersion` bump, ignored on a non-via entry,
+not written when null — and a value outside [0, 1] in a hand-edited file is clamped on read rather
+than refused, because a drawing position is never worth failing a load over.
+
+**Nothing downstream of the drawing may read it.** A stackup is a cross-section of a laterally
+infinite sandwich and a via entry is a KIND of connection between two named conductors, not one hole
+at one place; a lateral x in this model is one careless read away from being mistaken for geometry.
+That is held by a test rather than by this paragraph: a technology differing only in this field
+extracts to an identical `EmProblem`.
 
 ### 10.5 Meshing, including the edge mesh
 
@@ -506,8 +552,8 @@ but wrong numbers.
 > LINE of the port's cross-section, and its `a₁₁` is only the DUT's `a₁₁` if the DUT's own metal looks
 > like that line for the distance the standard replaces. Drop a shipped `MKLOPF` PCell into a layout,
 > port its two ends, and it does not: a taper's flanks are oblique from the first cell. That is not a
-> mild inaccuracy, because D6's peel forms `(S_meas,ii − a₁₁)/a₂₁²` and `a₂₁ ∝ ω` — on 0.508 mm
-> RO4350B at 1 GHz `a₂₁² = 9.8e-5`, so a **0.1% error in the error box is a 10× error in the answer**.
+> mild inaccuracy, because D6's peel forms `(S_meas,ii − a₁₁)/a₂₁²` and `a₂₁ ∝ ω` — on the shipped
+> 20 mil low-loss laminate at 1 GHz `a₂₁² = 9.8e-5`, so a **0.1% error in the error box is a 10× error in the answer**.
 > The owner's 2000 mil, 50 → 12 Ω Klopfenstein taper came back as `|S₁₁| = 1.0000`, `|S₂₁| = 0.0008`
 > and `Σ|S|² = 1.06` — a **non-passive open circuit**, shipped to a `.s2p` with nothing but a note.
 >
@@ -1104,7 +1150,7 @@ closed-form anchors.
 
 **Closed-form anchors:** Hammerstad-Jensen microstrip Z₀ and εeff (±2% is a reasonable gate); coupled
 microstrip even/odd-mode impedances; a quarter-wave open stub's resonant frequency; a known
-Rogers-substrate line.
+low-loss-laminate line.
 
 **Learned at L7 (2026-08-04): validate the charge solver against *exact* closed forms before comparing
 anything to Hammerstad-Jensen.** H-J is an empirical fit, so a ±2% agreement against it can hide a real

@@ -50,7 +50,7 @@ there is no honest default for "how far above the ground plane is this trace".
 ## Anatomy of a stackup {#anatomy}
 
 A stackup is an ordered list, **top to bottom**, of three kinds of entry, plus two boundary
-conditions for what is above and below the whole sandwich.
+conditions for what is above and below the whole sandwich. Seen in cross-section, it is a sandwich:
 
 {{ui: stackup-mmic}}
 
@@ -59,6 +59,53 @@ conditions for what is above and below the whole sandwich.
 | **Conductor** | A metal layer | Thickness, conductivity σ, the **drawing layers** that map onto it, and whether it is the **ground reference** |
 | **Dielectric** | The material between two conductors | Thickness, ε<sub>r</sub>, tanδ, µ<sub>r</sub> |
 | **Via** | A connection *between* two conductors — not a layer of the sandwich | The drawing layer via shapes are drawn on, the two conductors it **spans by name**, and its fill (plated or solid) with a wall thickness |
+
+### That picture is in the application, and you edit it there {#cross-section}
+
+The cross-section above is not a diagram drawn for this page. It is the upper half of the
+**Stackup** tab, drawn from whichever `.ctech` you have open, and it is the main way to work on a
+stackup: the thing a list cannot tell you — which metal is on top, how thick the substrate is
+against the copper on it, which two conductors a via actually joins — is the thing a cross-section
+says at a glance.
+
+The card list underneath it edits the same entries and always agrees with it. They are two **views**
+of one stackup, not two copies: whichever surface you change it on, the other follows immediately,
+the **Undo** and **Redo** buttons at the top of the window cover it, and the layouts you have open
+repaint against the changed technology without waiting for a save.
+
+In roughly the order you will meet them:
+
+| Do this on the drawing | What it does |
+|---|---|
+| **Click** a layer or a via | Selects it — an outline round it on the drawing, and the card list below scrolls to that entry and shades it, so a click on the picture lands you on the fields. If the filter box was hiding that card, the filter clears, because a click that appears to do nothing is the worse outcome. |
+| **Double-click** a value | Opens a small edit box **on the number itself** — the same box the schematic editor uses. `Return` commits, `Esc` reverts, clicking away commits. Names, thicknesses, σ, ε<sub>r</sub>, tanδ, µ<sub>r</sub> and a via's wall are all typeable here; a via's **span** is not, because it is a pair of conductor names rather than a number — right-click, or use the card. |
+| **Drag** a layer up or down | Reorders the stack. The order top to bottom **is z**, so this is the same edit as the ↑ ↓ buttons on the card. |
+| **Drag** a via's end gripper | Moves that end of the span to another conductor. The small handle at each end of a barrel is what you grab; the drawing refuses a span it cannot resolve rather than silently snapping to something else. |
+| **Drag** a via's barrel up or down | Moves the whole span, both ends together. |
+| **Drag** a via sideways | Slides it across the picture, snapping to a column so two vias can be lined up by eye; hold `Alt` to place it freely. This is **cosmetic only** — it is where the via is *drawn*, never where it is. See [Vias](#vias). |
+| **Right-click** anything | A menu built from what is under the pointer, and it selects that entry first so you can see what you are about to act on: **Delete Conductor / Dielectric / Via**, plus the choices that are not typed numbers — **ground reference** and **metal thickness goes to** on a conductor, **Add Via** and **patterned with** on a dielectric, **plated hole** and **fill** on a via, and the drawing-layer binding on either. |
+| **Esc** | Clears the selection and all its highlighting. With an edit box open, the first `Esc` reverts the edit and the selection stands; a second clears it. |
+| **Right-click ▸ Copy** | Puts the **whole** cross-section on the clipboard as a picture — vector where the receiving application takes it, and never a crop of what happened to be scrolled into view. |
+
+The drawing scrolls when a stack is taller than its pane, and the divider between it and the cards
+drags. Neither pane can be dragged out of existence — to give one of them the whole tab, use the two
+small chevron toggles at the left of the summary row, which collapse the drawing and the card list
+respectively.
+
+### How tall each layer is drawn {#heights}
+
+**Heights are relative within a kind and never across kinds.** A conductor twice the thickness of
+another conductor draws twice as tall, and so does a dielectric against another dielectric — but a
+metal is never drawn to scale against a substrate, because on a real process it would be a hairline —
+the MMIC stackup above puts 3 µm of metal beside 100 µm of substrate, and the metals are what most of
+this chapter is about. **Where a kind's own range is too wide to draw even on its
+own, the heights are compressed while staying in order**, so a thicker layer still looks thicker; the
+same MMIC process spans 0.2 µm to 100 µm of *dielectric* alone, which is 500:1 and would make either
+the capacitor film a hairline or the substrate four screens tall.
+
+The drawing carries no note about this, deliberately — a caveat printed on every stackup anyone ever
+looks at is worse than a paragraph here. What it does carry is **the real thickness, printed on
+every layer**, which is what you actually need to read off it.
 
 <div class="callout note">
 <span class="label">A field an EM run cannot use is marked as you look at it</span>
@@ -341,6 +388,16 @@ Three rules the extractor applies, each reported when it bites:
   the conducting cross-section. The run reports that it did. **A drawn region is not squared** — the
   substitution exists so a circle nobody drew does not staircase, and an outline you drew already is
   the footprint, so it is meshed as it stands.
+
+<div class="callout note">
+<span class="label">Where a via sits on the cross-section means nothing</span>
+<p>You can slide a via sideways on the drawing, and it is saved with the technology — but it is a
+<strong>drawing position and nothing else</strong>, there so a stack with several via entries can be
+laid out tidily rather than overlapping. A via entry is a <em>kind</em> of connection between two
+named conductors, not one hole at one place: every via you draw on its drawing layer is an instance
+of it, and where they are is in the layout. Nothing in the extraction, the solver or any export reads
+the drawn position.</p>
+</div>
 
 <div class="callout note">
 <span class="label">An internal port does not need you to draw one</span>

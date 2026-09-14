@@ -37,6 +37,12 @@ public static class DocTechEditorFixtures
             SelectedTabIndex = tabIndex,
         };
         var view = new TechEditorView { DataContext = new TechDocument(tech.Name, vm, vm.FilePath) };
-        return new FigureScene(view);
+
+        // R-stk8-5. The Stackup tab's two panes are split for the CAPTURE rather than left at the
+        // interactive opening split, which in a window this tall would give the drawing ~1,800 px of
+        // mostly empty pane and leave eight of the nine cards below the fold. AfterLayout, because the
+        // drawing's height is the scene's and there is no measured size to read before the first
+        // arrange - which is exactly what that hook exists for.
+        return new FigureScene(view) { AfterLayout = c => (c as TechEditorView)?.ApplyStackupSplitForCapture() };
     }
 }

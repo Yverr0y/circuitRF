@@ -1,5 +1,36 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## brief-stackup-render-8-docs-and-figures.md, 2026-09-13 — the capture needs a different split
+
+One change in `src/Ui` proper, and it is a capture-time arrangement nothing in the application calls:
+`TechEditorView.ApplyStackupSplitForCapture`.
+
+The Stackup tab opens with the drawing starred and the card pane at
+`TechEditorMetrics.StackupCardPaneOpeningHeight`, which is the right opening split in a window of
+ordinary size. **A documentation figure is captured in a window ~2,000 px tall**, because a reader
+cannot scroll a picture and all nine entries have to be in the frame — and at that height the starred
+row hands the drawing about 1,800 px of mostly empty pane while the cards keep their 140 and eight of
+the nine stay below the fold. The published figure would have shown a split the interactive default
+would never produce.
+
+So for the capture the roles swap: the drawing takes `StackupDrawing.DesiredSize.Height`, which is
+`StackupScene`'s own intrinsic height and therefore the whole cross-section with nothing left to
+scroll, and the card row takes the star. **Neither number is typed** — one is the scene's and the
+other is whatever is left — and the catalog row's height is then chosen to fill it (see
+`src/Ui/Diagnostics/RESOLVED.md`).
+
+It has to run from `FigureScene.AfterLayout` rather than at construction: before the first measure and
+arrange there is no desired size to read, which is the same reason Zoom-to-Fit lives there.
+
+**`StackupLayerRowViewModel`'s header was rewritten in the same pass.** It opened by describing the
+stackup editor as "an ordered top-to-bottom plain list (no diagram)" and pointing at a design-note
+section that said the same. Both were false the moment brief 2 landed. A comment stating a constraint
+the code no longer has is worse than no comment, and this is the first thing anyone reads before
+touching a stackup row.
+
+---
+
+
 ## brief-stackup-render-7-copy.md, 2026-09-13 — copy the cross-section to the clipboard
 
 Right-click the stackup drawing ▸ **Copy**, or press Ctrl/⌘+C on the Stackup tab, and the whole

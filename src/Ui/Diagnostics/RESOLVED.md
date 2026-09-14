@@ -3,6 +3,130 @@
 Same pattern as the other `RESOLVED.md` files in this repo: a completed investigation's detail lands
 here, and `CLAUDE.md` stays for durable, still-true conventions only.
 
+## R-stk8-7 — the stackup doc figures adopt `StackupRenderer`. Taken, and here is what it cost (2026-09-13)
+
+`brief-stackup-render-8-docs-and-figures.md` left one decision open: `DocStackupFixtures` drew
+`stackup-mmic`, `stackup-mim` and `mom-bend-stackup` in Avalonia `Border`s and `TextBlock`s on a
+`Canvas`, ~250 lines, while brief 1's `StackupRenderer` drew the same subject in Skia from the same
+`Technology` objects. Two drawings of one thing, kept looking alike by hand. **Repointed.**
+
+### It was judged on the pictures, not on the principle
+
+The brief's instruction was to attempt it and **stop and report if it did not come out at least as
+good**, so all six figures were rendered and read at 2× before anything was decided. Doing that needs
+a rasteriser, and the obvious one lies:
+
+> **`qlmanage -t` is not a reliable way to look at one of these figures.** It rendered an 862-px SVG
+> at some other scale and clipped it, which read exactly like a figure whose right-hand label ran off
+> the canvas — and an early draft of this note and of `DocStackupFixtures`' own header said the
+> hand-built figures shipped with the MIM tie annotation cut off mid-word. **They did not.** The
+> SVG's own clip rect for that label is `x=503 width=320` and the glyph advances end at 315: it fits.
+> `qlmanage` is fine for "did anything draw at all" (which is what `src/Ui/Diagnostics/RESOLVED.md`
+> already recommends it for) and not fine for judging a layout. A five-line console referencing
+> `Svg.Skia` that loads the picture and writes `CullRect × 2` to a PNG is exact, takes two minutes to
+> write, and is what the comparison was actually done with.
+
+### What the repointed figures gain
+
+- **A via says what it connects.** `MIM Metal → Metal2  solid`, `Metal1 → Backside Metal  plated =
+  3 µm`. The hand-built figure drew three identical grey rods and named them; the *span* — which is
+  the whole of what a via entry is, and what the chapter's Via section is about — appeared nowhere.
+- **Plated, solid and unplated are visibly different**, and a plated barrel is drawn with its bore.
+- **Conductors scale against each other.** The old fixture gave every conductor a flat 26 px, so the
+  0.25 µm MIM plate drew the same thickness as a 3 µm interconnect metal — in the figure whose
+  subject is that plate. The scene draws it at 16 px against their 36.
+- **The label column is measured and cannot overlap or overflow** (R-stk1-9), where the old one
+  placed text at computed offsets and trusted it.
+- One renderer, so brief 1's determinism gate now covers the documentation, and a reader comparing
+  the page with the application sees the same picture.
+
+### What they lose, and where it went
+
+- **The two sentences.** The old figure wrote `◄ ground reference: every port's − terminal` and
+  `◄ patterned with 'MIM Metal' — only in runs that analyse it` into the picture. The renderer writes
+  `gnd` and `patterned: MIM Metal`, which is right for a pane someone is editing in and thin for a
+  page someone is reading. That is R-stk1-4 holding rather than a defect, and **both sentences moved
+  into the figure captions**, which is where a qualification belongs — held by
+  `StackupDocFigureTests.TheCaptions_CarryWhatTheDrawingAbbreviates`.
+- **A very thin band gives up its own name.** `MIM Metal` at 16 px cannot hold a padded 19 px name,
+  so the scene moves it into the label column in bold, leading its group. Designed behaviour, and the
+  column is in stack order, but it is a real difference on the one figure that is about that band.
+- **`mom-bend-stackup` now reads in mil**, because that is the technology's own display unit and the
+  scene prints what the tab prints: `62.9921 mil`, not the `1600 µm` the hand-built fixture hardcoded.
+  The chapter quoted 1.6 mm, so the figure and the prose beside it disagreed. **Fixed in the prose and
+  the caption, not in the drawing** — the drawing agrees with the application, which is the point of
+  the repoint. Both now say 62.99 mil *is* the 1.6 mm.
+
+### Three things the repoint needed, none of them a "documentation mode"
+
+1. **`StackupSceneOptions.ShowBoundaryConditions`.** The MIM figure is a WINDOW on five of seven
+   bands, and a slice of a sandwich has no terminations of its own — printing the stack's would say
+   something the picture does not show. It is a scene option rather than a renderer flag because it
+   changes the LAYOUT: the notes occupy space above and below the bands and everything else is
+   measured from them.
+2. **The window is a filtered `Technology`, built by the fixture**, not a feature of the scene. The
+   layer table is shared rather than copied — the scene reads it only to resolve a conductor's colour.
+3. **The `footer:` line is an Avalonia `TextBlock` UNDER the control**, not a scene label. It is
+   documentation prose about what the window leaves out, and R-stk1-4's rule that the drawing carries
+   no commentary applies to the figures too.
+
+**`height:` did not survive**, and the brief's "keep the signatures unchanged" is the one place this
+deviates from it. The scene computes its own intrinsic height, so a figure height typed beside the
+fixture could only be ignored or, worse, silently clip the bottom band the day a layer is added. The
+catalog rows are derived from `StackupScene.Height` instead, and `StackupDocFigureTests` asserts the
+frame is neither smaller than the drawing nor more than 24 px larger.
+
+### One thing the repoint SURFACED and did not cause
+
+In the dark variant, a dielectric's on-band name is dark ink on a dark fill and reads faintly.
+`ColorRole.StackupOnBandInk` is fixed dark in both variants deliberately — a theme-coloured name would
+vanish into copper — and `StackupRenderTheme.DielectricFill` is themed, so the two meet on a
+dielectric. **This is the tab's behaviour, not the figure's**, and it arrived with brief 1; the old
+doc figure hid it by hardcoding a light grey dielectric fill in both variants. Left alone here — brief
+8 is documentation, and the fix is a renderer decision that changes the application.
+
+---
+
+## R-stk8-5 — `tech-editor-stackup` is 2224 px, and the number is measured (2026-09-13)
+
+Two separate problems, and the first is the one that would have gone unnoticed.
+
+**The split.** The Stackup tab opens with the drawing starred and the card pane at a stated height,
+which is right in a window of ordinary size. The figure is captured in a window ~2,000 px tall,
+because a reader cannot scroll a picture — and at that height the starred row handed the drawing
+**about 1,800 px, nearly all of it empty**, while the cards kept their 140 and eight of the nine
+stayed below the fold. The capture showed a split the interactive default would never produce and a
+card list that was mostly missing. `TechEditorView.ApplyStackupSplitForCapture`, called from
+`FigureScene.AfterLayout`, swaps the roles: the drawing takes the height it actually measured (the
+scene's own, so the whole cross-section with nothing to scroll) and the CARDS take the star.
+
+**The height.** 2224 = title bar 34 + header 57 + cross-section 338 + splitter 6 + the filter row and
+all nine cards, ending at 2214 measured off a deliberately over-tall capture. It is **not** the old
+2080 nudged, and the two changes do not cancel: the drawing is new above the cards (+344) and each
+conductor card lost the ~52 px R-stk2-9 took out of its drawing-layer picker (−208).
+
+---
+
+## The churn, classified (R-stk8-6, 2026-09-13)
+
+Regenerated in a `git worktree` at `HEAD` and again in place, then diffed the two regenerations — the
+procedure this file already prescribes, and the only one that separates a change from the ~59-file
+stale drift. **21 files differed, of which 3 were `.DS_Store`.**
+
+- **13 are this brief's**: the four cross-section figures in both variants (`stackup-mmic`,
+  `stackup-mim`, `mom-bend-stackup`, `tech-editor-stackup`), `reference/stackup.html`,
+  `reference/mom-engine.html`, their two `.md` sources, and `search-index.js`. The brief predicted
+  two; taking R-stk8-7 is what makes it eight.
+- **5 are a nondeterministic family**, and now it has a name: `analysis-editor-hb-dark`,
+  `em-setup-loaded`, `em-setup-loaded-dark` and the two pages that inline them differ in **one
+  chevron's rotation matrix** — `matrix(-0.9212 0.389 …)` against `matrix(-0.9203 0.3912 …)` on a
+  7×7 `M0 0L7 7L14 0` glyph, which is an expander arrow caught mid-transition. `SettleAnimations`
+  does not pin it. Nothing else in those files differs.
+
+The other ~52 changed files were the stale drift and were `git checkout`-ed. **The hex id counter
+never came into it** — a run-against-run diff cancels id churn as well as drift, which is why it is
+worth the four minutes rather than filtering a diff against the committed files.
+
 ## The crash report says how the process EXECUTES code, not only what it runs on (2026-09-03)
 
 Four header lines were added for one specific dead end. A field report that has survived six rounds

@@ -225,6 +225,40 @@ public partial class TechEditorView : UserControl
     }
 
     /// <summary>
+    /// <b>R-stk8-5 — the split a DOCUMENTATION CAPTURE needs, which is not the interactive one.</b>
+    ///
+    /// <para>The tab opens with the drawing starred and the card pane at a stated height, so in a
+    /// window of ordinary size the drawing gets a sensible share and the splitter is there for anyone
+    /// who wants it the other way. A figure is captured in a window <em>2,000 px tall</em>, because a
+    /// reader cannot scroll a picture and every entry has to be in the frame — and at that height the
+    /// starred row hands the drawing about 1,800 px, nearly all of it empty, while the cards keep
+    /// their 140 and the other eight stay below the fold. The capture would show a split the
+    /// interactive default would never produce.</para>
+    ///
+    /// <para>So the roles are swapped for the capture: the drawing takes the height it actually
+    /// measured — <see cref="StackupScene"/>'s own intrinsic height, which is exactly the whole
+    /// cross-section with nothing to scroll — and the CARDS take the star, which is what the catalog
+    /// row's height is then chosen to fill. Neither number is typed: one is the scene's and the other
+    /// is whatever is left.</para>
+    ///
+    /// <para>Called from <c>DocTechEditorFixtures</c> through <c>FigureScene.AfterLayout</c>, which
+    /// runs after the window has been measured and arranged — before that there is no desired size to
+    /// read. It is a capture-time arrangement and nothing in the application calls it.</para>
+    /// </summary>
+    internal void ApplyStackupSplitForCapture()
+    {
+        if (StackupTabGrid is null || StackupDrawing is null) return;
+
+        var rows = StackupTabGrid.RowDefinitions;
+        if (rows.Count < 4) return;
+
+        rows[1].Height    = new GridLength(StackupDrawing.DesiredSize.Height);
+        rows[1].MinHeight = 0;
+        rows[3].Height    = new GridLength(1, GridUnitType.Star);
+        rows[3].MinHeight = TechEditorMetrics.StackupCardPaneMinHeight;
+    }
+
+    /// <summary>
     /// Brings the selected entry's card into view, so a click on a band lands on its fields.
     ///
     /// <para><b>Posted at Background priority, and not run inline.</b> The view model may have just
