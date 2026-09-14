@@ -16107,22 +16107,10 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     private void QuitApplication()
         => (App.Current as App)?.Quit();
 
-    // ---- Test messages command (Help → Post Test Messages) ------------------
+    // ---- Documentation -------------------------------------------------------
 
     /// <summary>Open the bundled User Documentation in the default browser (Help menu).</summary>
     [RelayCommand]
     private void OpenDocumentation() => DocLauncher.Open();
 
-    [RelayCommand]
-    private void PostTestMessages()
-    {
-        Messages.Info("Info: simulation started for TestBench PA_TestBench.");
-        Messages.Success("Success: simulation converged in 12 Newton iterations.");
-        Messages.Warning("Warning: node n_drain approaches supply rail — check bias.");
-        // Demonstrate clickable file link (path to a real file in the project).
-        var netlistPath = Path.Combine(
-            AppContext.BaseDirectory, "..", "..", "..", "..", "testdata", "Hero2", "hero2.cnl");
-        netlistPath = Path.GetFullPath(netlistPath);
-        Messages.Error($"Error: netlist parse failed.", File.Exists(netlistPath) ? netlistPath : null);
-    }
 }

@@ -859,11 +859,6 @@
                           Click="OnAboutMenuItemClick">
                     <MenuItem.Icon><mi:MaterialIcon Kind="InformationOutline" Width="16" Height="16"/></MenuItem.Icon>
                 </MenuItem>
-                <MenuItem Header="Post Test _Messages"
-                          Command="{Binding PostTestMessagesCommand}"
-                          IsVisible="{OnPlatform True, Windows=False}">
-                    <MenuItem.Icon><mi:MaterialIcon Kind="MessageTextOutline" Width="16" Height="16"/></MenuItem.Icon>
-                </MenuItem>
             </MenuItem>
 
         </Menu>
