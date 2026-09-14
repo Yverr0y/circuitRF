@@ -5838,3 +5838,49 @@ them.
 **Nothing downstream of the editor may read them**, exactly as for `DrawLaneFraction`, and that is
 gated rather than asserted in a comment:
 `StackupDragTests.ATechnologyDifferingOnlyInThePaneFlags_ExtractsIdentically`.
+
+---
+
+## A port's TYPE is addressed by its NUMBER, not by its place in a list (2026-09-14)
+
+Owner question, in three scenarios: with geometry snapping on, can dragging P1 around a trace turn it
+into an internal port? And if P1 is typed internal and then DELETED, does P2 become internal — drawn
+as one, or actually one?
+
+**The drag half was already safe.** A port the `.cem` has not typed as internal is pulled onto the
+conductor's nearest boundary by the edge rule in `LayoutEditorViewModel.RecomputeMoveDelta`, so the
+"deep in the metal" inference (`LayoutPortDirection.IsInterior`) never fires. Swept over ~1,700 drop
+points on a straight trace and on a two-rect L bend, with and without a setup claiming the layout —
+nowhere to drop it. The documented way to get one by dragging is still the only way: turn geometry
+snapping off first.
+
+**The delete half was not safe, and it was not merely a drawing problem.** `EmSetup.PortKinds` and
+`PortZ0s` are per-port lists, and `ResolvePortKind` / `ResolvePortZ0` were read by the port's
+**position in the number-sorted list**. So:
+
+- type P1 internal, delete P1 → P2 slides into slot 0 and **is** an internal port. Not drawn as one:
+  `EmPortExtraction` returns `Kind = Internal`, `PlanarGroundPath` grows a via to the plane underneath
+  it, and the run returns a complete, plausible s-matrix for a structure nobody drew;
+- type P2 internal, delete P1 → the type **walks onto P3**;
+- delete P1 and draw a new port → it auto-numbers to the lowest free number (1), inserts at slot 0,
+  and slides everything again.
+
+It persisted, too: the shifted state is what gets written back to the `.cem`.
+
+**The fix is that the slot is `portNumber - 1`, never a position.** A port number is the one stable
+identity a port has — it is what the user typed, it indexes the s-parameter matrix, and it survives
+its neighbours being deleted. A position survives nothing. `EmPortExtraction.Extract` now invokes
+`kindFor`/`z0For` with `number - 1`, and the three places in the panel that addressed by row position
+(`CommitPortKind`, `CommitPortRow`, and the `InternalPortMarkAnchors` the layout draws from) address
+by the row's `PortNumber`.
+
+**No format change, and every existing `.cem` means exactly what it meant.** For the contiguous 1..N
+numbering every layout this tool creates has, the position IS the number minus one. A gap in the
+numbering now costs a slot of padding in the file and nothing else — ports 1 and 5 store five
+entries, four of them the default.
+
+Gate: `tests/Ui.Tests/Em/PortTypeIdentityTests.cs` — the three delete scenarios at the extraction
+level (the same two callbacks `EmRunService` itself passes), the panel writing to the right slot on a
+layout numbered 2 and 3, the render marks addressed the same way, a round-trip proving contiguous
+setups are unchanged, and the two drag sweeps with their snapping-off non-vacuity guard. Six of the
+thirteen fail against the positional behaviour; the drag sweeps pass either way, which is the point.

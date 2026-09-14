@@ -133,13 +133,18 @@ public sealed class EmSetup
     public List<Complex> PortZ0s { get; set; } = [];
 
     /// <summary>
-    /// The reference impedance of port <paramref name="index"/> (0-based, D3 order): the explicit
-    /// override when one is stored, else the near/far default for that end.
+    /// The reference impedance of the port in slot <paramref name="slot"/> — <c>portNumber - 1</c>,
+    /// which is D3 order for the contiguous numbering every layout this tool creates has: the
+    /// explicit override when one is stored, else the near/far default for that end.
+    ///
+    /// <para><b>The slot is the port NUMBER, not the port's position among the ports that happen to
+    /// exist.</b> See <see cref="ResolvePortKind"/> — the two lists have the same shape and the same
+    /// rule, and had the same defect.</para>
     /// </summary>
-    public Complex ResolvePortZ0(int index)
-        => index >= 0 && index < PortZ0s.Count
-            ? PortZ0s[index]
-            : (index % 2 == 0 ? Port1Z0 : Port2Z0);
+    public Complex ResolvePortZ0(int slot)
+        => slot >= 0 && slot < PortZ0s.Count
+            ? PortZ0s[slot]
+            : (slot % 2 == 0 ? Port1Z0 : Port2Z0);
 
     /// <summary>
     /// <b>Per-port TYPE, for the full-wave planar kernel: an edge port, an internal delta gap, or
@@ -159,11 +164,24 @@ public sealed class EmSetup
     public List<PlanarPortKind> PortKinds { get; set; } = [];
 
     /// <summary>
-    /// The type of port <paramref name="index"/> (0-based, in extractor order): the stored value
-    /// when there is one, else <see cref="PlanarPortKind.Edge"/>.
+    /// The type of the port in slot <paramref name="slot"/>: the stored value when there is one,
+    /// else <see cref="PlanarPortKind.Edge"/>.
+    ///
+    /// <para><b>The slot is <c>portNumber - 1</c>, NOT the port's position in the extracted list.</b>
+    /// For the contiguous 1..N numbering every layout this tool creates has, the two are the same
+    /// number and every <c>.cem</c> ever written means exactly what it meant before. They come apart
+    /// the moment a port is DELETED, and that is the bug this rule exists to make impossible: with
+    /// the list read positionally, typing P1 as an internal port and then deleting P1 slid P2 into
+    /// slot 0 and made P2 an internal port — not merely drawn as one, but extracted, meshed and
+    /// solved as one, with a ground path grown under it and a complete, plausible s-matrix returned
+    /// for a structure nobody drew. Typing P2 and deleting P1 walked the type onto P3 the same way.
+    /// A port NUMBER is the one stable identity a port has; a position survives nothing.</para>
+    ///
+    /// <para>A gap in the numbering costs a slot of padding in the file and nothing else — a design
+    /// with ports 1 and 5 stores five entries, four of them the default.</para>
     /// </summary>
-    public PlanarPortKind ResolvePortKind(int index)
-        => index >= 0 && index < PortKinds.Count ? PortKinds[index] : PlanarPortKind.Edge;
+    public PlanarPortKind ResolvePortKind(int slot)
+        => slot >= 0 && slot < PortKinds.Count ? PortKinds[slot] : PlanarPortKind.Edge;
 
     /// <summary>
     /// Does this setup declare any port the uniform-line kernel cannot represent — an internal delta

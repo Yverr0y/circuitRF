@@ -102,16 +102,26 @@ public static class EmPortExtraction
     /// the side inference measures against, in the SAME metre coordinates
     /// <c>PlanarExtractor</c> produced (no translation, no centring: see that file's header).</param>
     /// <param name="dbuPerMicron">The LAYOUT's own resolution, for the label coordinates.</param>
-    /// <param name="z0For">Reference impedance for the port at a given 0-based index in the final
-    /// ordered list. <b>The impedance lives in the <c>.cem</c> (<c>EmSetup.PortZ0s</c>), never on the
-    /// shape</b> — R-cpl-6's list is already per-port and already additive.</param>
+    /// <param name="z0For">Reference impedance for the port with a given 0-based SLOT — that is,
+    /// <c>portNumber - 1</c>, <b>not</b> the port's position in the final ordered list. <b>The
+    /// impedance lives in the <c>.cem</c> (<c>EmSetup.PortZ0s</c>), never on the shape</b> —
+    /// R-cpl-6's list is already per-port and already additive. See <paramref name="kindFor"/> for
+    /// why the slot is the port NUMBER and not the position.</param>
     /// <param name="displayUnit">The LAYOUT's own display unit, used for every coordinate this file
     /// prints. Defaults to microns so a headless caller that has no layout to ask keeps the previous
     /// wording exactly.</param>
-    /// <param name="kindFor">The port TYPE at a given 0-based index in the final ordered list —
-    /// edge, or an internal delta gap. <b>Lives in the <c>.cem</c> (<c>EmSetup.PortKinds</c>) beside
-    /// the impedance, for the same reason: a layout is geometry.</b> Null means every port is an edge
-    /// port, which is what every caller predating internal ports gets.</param>
+    /// <param name="kindFor">The port TYPE for a given 0-based SLOT — edge, an internal delta gap,
+    /// or an internal port to the ground plane. <b>Lives in the <c>.cem</c>
+    /// (<c>EmSetup.PortKinds</c>) beside the impedance, for the same reason: a layout is
+    /// geometry.</b> Null means every port is an edge port, which is what every caller predating
+    /// internal ports gets.
+    ///
+    /// <para><b>The slot is <c>portNumber - 1</c>, never the port's POSITION in the ordered list.</b>
+    /// The two are the same number for the contiguous 1..N numbering every layout this tool creates
+    /// has, and they come apart the moment a port is deleted — which is how a type assigned to P1
+    /// came to be applied to P2. A port number is the one stable identity a port has: it is what the
+    /// user typed, what indexes the s-parameter matrix, and what survives its neighbours being
+    /// deleted. A position survives nothing. See <c>EmSetup.ResolvePortKind</c>.</para></param>
     /// <param name="groundPathWidthM">The size of the path an <see cref="PlanarPortKind.Internal"/>
     /// port may grow down to the ground plane where the artwork has no via — the TECHNOLOGY's own
     /// default via size, in metres, which is why it comes from the caller rather than from here.
@@ -207,7 +217,11 @@ public static class EmPortExtraction
             var (number, label) = numbered[i];
             double x = label.X * perDbu, y = label.Y * perDbu;
 
-            var kind = kindFor?.Invoke(i) ?? PlanarPortKind.Edge;
+            // `number - 1`, not `i`: the type is addressed by the port's own NUMBER, so deleting a
+            // port cannot slide every other port's type down one slot. See the `kindFor` doc above.
+            int slot = number - 1;
+
+            var kind = kindFor?.Invoke(slot) ?? PlanarPortKind.Edge;
 
             // ── A SHUNT PORT STANDS ON A VIA, AND THE VIA IS WHAT IT DRIVES ───────────────────
             //
@@ -499,7 +513,7 @@ public static class EmPortExtraction
                 negLayerName = problem.Layers[nLevel].Name;
             }
 
-            var z0 = z0For?.Invoke(i) ?? new Complex(50, 0);
+            var z0 = z0For?.Invoke(slot) ?? new Complex(50, 0);
             ports.Add(new PlanarPort(number, new EmPoint(x, y), side, z0,
                                      problem.Layers.Count > 1 ? viaLevel ?? level : null,
                                      Reference: reference,

@@ -907,6 +907,10 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     /// <see cref="EmSetup.PortZ0s"/>, padding it from the near/far defaults so a list that is
     /// shorter than the port count stays meaningful — an override on port 4 must not silently
     /// change ports 1–3.
+    ///
+    /// <para><paramref name="index"/> is the ROW's position, which is what the panel's item
+    /// container knows. The SLOT written is the row's port number, not its position — see
+    /// <see cref="EmSetup.ResolvePortKind"/>.</para>
     /// </summary>
     public void CommitPortRow(int index)
     {
@@ -921,11 +925,14 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         }
         row.Error = null;
 
+        int slot = row.PortNumber - 1;
+        if (slot < 0) return;
+
         var before = SnapshotJson();
         var list = Working.PortZ0s;
-        while (list.Count <= index) list.Add(Working.ResolvePortZ0(list.Count));
-        if (list[index] == z) return;                       // no-change guard: no undo entry
-        list[index] = z;
+        while (list.Count <= slot) list.Add(Working.ResolvePortZ0(list.Count));
+        if (list[slot] == z) return;                        // no-change guard: no undo entry
+        list[slot] = z;
 
         CommitEdit(before, $"Change port {row.PortNumber} reference impedance");
         Refresh();
@@ -946,13 +953,20 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         if (_suppressCommit) return;
         if (index < 0 || index >= PortRows.Count) return;
 
-        var kind = PortRows[index].Kind;
+        var row  = PortRows[index];
+        var kind = row.Kind;
+
+        // The SLOT is the port's own number, never the row's position. A type stored against a
+        // position is a type that moves to whichever port later occupies that position.
+        int slot = row.PortNumber - 1;
+        if (slot < 0) return;
+
         var list = Working.PortKinds;
-        while (list.Count <= index) list.Add(Working.ResolvePortKind(list.Count));
-        if (list[index] == kind) return;                    // no-change guard: no undo entry
+        while (list.Count <= slot) list.Add(Working.ResolvePortKind(list.Count));
+        if (list[slot] == kind) return;                     // no-change guard: no undo entry
 
         var before = SnapshotJson();
-        list[index] = kind;
+        list[slot] = kind;
         CommitEdit(before, $"Change port {PortRows[index].PortNumber} type");
         InvalidateMesh();
         OnPropertyChanged(nameof(InternalPortOnTheWrongKernel));
@@ -976,7 +990,7 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
                     PortNumber = p.Number,
                     // D3 in the user's own terms, so the numbering is legible without the brief.
                     Label      = $"Port {p.Number} — '{p.Conductor}', {(i % 2 == 0 ? "near" : "far")} end",
-                    Text       = FormatComplexOhms(Working.ResolvePortZ0(i)),
+                    Text       = FormatComplexOhms(Working.ResolvePortZ0(p.Number - 1)),
                 });
             }
         }
@@ -1660,9 +1674,13 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         // (LayoutPortDirection.PortHint.Interior). An entry per port makes this setup's answer
         // authoritative for the ports it knows, and leaves the layout free to infer for the rest — a
         // port just drawn, which this setup has not re-extracted yet.
+        //
+        // Addressed by the row's port NUMBER, exactly as the extractor addresses it, so the mark the
+        // layout draws and the port the run drives cannot disagree about which type belongs to whom.
         var anchors = new List<(long X, long Y, PlanarPortKind Kind)>();
         for (int i = 0; i < ports.Rows.Count; i++)
-            anchors.Add((ports.Rows[i].Label.X, ports.Rows[i].Label.Y, Working.ResolvePortKind(i)));
+            anchors.Add((ports.Rows[i].Label.X, ports.Rows[i].Label.Y,
+                         Working.ResolvePortKind(ports.Rows[i].Number - 1)));
         InternalPortMarkAnchors = anchors;
 
         var notes = new List<string>(_geometryNotes);
@@ -1699,7 +1717,8 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         PortRows.Clear();
         for (int i = 0; i < ports.Count; i++)
         {
-            var kind = Working.ResolvePortKind(i);
+            int slot = ports[i].Number - 1;
+            var kind = Working.ResolvePortKind(slot);
             var port = ports[i].Port;
             var row = new EmPortZ0Row
             {
@@ -1724,7 +1743,7 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
                             $"Port {ports[i].Number} — internal, to ground",
                         _ => $"Port {ports[i].Number} — {SideLabel(port.Side)} end",
                     },
-                Text       = FormatComplexOhms(Working.ResolvePortZ0(i)),
+                Text       = FormatComplexOhms(Working.ResolvePortZ0(slot)),
                 ShowKind   = true,
                 Kind       = kind,
                 Problem    = ports[i].Problem,
