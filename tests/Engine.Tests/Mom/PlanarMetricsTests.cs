@@ -242,9 +242,17 @@ public class PlanarMetricsTests(Xunit.Abstractions.ITestOutputHelper output)
     }
 
     /// <summary>
-    /// <b>§6 — PowerConductor is present and zero, WITH its note.</b> This is the term most likely to
-    /// be silently dropped as "not applicable"; a missing term reads as "not a factor", a zero term
-    /// with this note reads as "this kernel does not model it".
+    /// <b>§6 — PowerConductor is present, WITH its note; and with no conductor-loss model supplied
+    /// it is zero.</b> This is the term most likely to be silently dropped as "not applicable"; a
+    /// missing term reads as "not a factor", a zero term with this note reads as "this kernel did
+    /// not model it".
+    ///
+    /// <para><b>CL2 changed what the note says and this test with it.</b> The term is no longer
+    /// identically zero — it is a real integral whenever the fill carried a surface impedance — so
+    /// the note now covers BOTH states, says which is which, and states what the sheet model cannot
+    /// carry. Leaving the old assertion in place would have pinned a note describing a state the
+    /// code is no longer in. The efficiency's own per-run correction moved to
+    /// <see cref="PlanarPowerBudget.ConductorBoundClause"/> and is asserted there.</para>
     /// </summary>
     [Fact]
     public void PowerConductorIsPresentAndZero_WithItsNote()
@@ -255,11 +263,16 @@ public class PlanarMetricsTests(Xunit.Abstractions.ITestOutputHelper output)
         var outcome = report[PlanarMetric.PowerConductor];
         Assert.True(outcome.Ok);
         Assert.Equal(0.0, outcome.Value);
+        Assert.False(report.Budget.ConductorModelled,
+            "no conductor-loss model was supplied, so the zero must read as NOT MODELLED");
+        Assert.Contains("NOT MODELLED", report.Budget.Caption);
 
         string note = PlanarMetrics.Of(PlanarMetric.PowerConductor).Note;
-        Assert.Contains("IDENTICALLY ZERO", note);
-        Assert.Contains("perfect conductor", note);
-        Assert.Contains("6.5 %", note);
+        Assert.Contains("½∫Re(Z_s)|J|²", note);                    // what it is
+        Assert.Contains("EXACTLY ZERO WHEN THE METAL IS A PERFECT CONDUCTOR", note);
+        Assert.Contains("ZERO-THICKNESS", note);                   // what it cannot carry
+        Assert.Contains("0.63", note);                             // CL1's measured under-read
+        Assert.Contains("6.5 %", PlanarPowerBudget.ConductorNote + report.Budget.ConductorBoundClause);
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════

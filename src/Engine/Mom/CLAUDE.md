@@ -539,20 +539,25 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
   taking that point's pattern, and `PlanarMetricContext.PortReflection` is what it hands over; a
   context built with none leaves `RealizedGainDbi` present-and-refused, with the exact substitute
   (`GainDbi + 10·log₁₀(1 − |S₁₁|²)`) in the refusal.
-- **`PowerConductor` IS PUBLISHED AND IS ZERO, with its note.** Kernel B's metal is a perfect
-  conductor; a missing term reads as "not a factor", a zero term with the note reads as "this kernel
-  does not model it". The note carries §10.9's 6.5 / 3.0 / 2.1 % yardstick.
-- **`PowerDielectric` IS A RESIDUAL (accepted − radiated − surface wave), AND THAT IS PHYSICS, NOT A
-  SHORTCUT.** Over a laterally infinite lossy substrate a volume integral of ωε₀ε″|E|² already
-  contains the whole surface-wave term — the guided mode decays as e^{−2αρ}/ρ and never escapes — so
+- **`PowerConductor` IS A REAL INTEGRAL SINCE CL2** — `½∫Re(Z_s)|J|²dS` plus `½Re(Z_barrel)|I|²`,
+  evaluated as a quadratic form against the SAME Gram the fill loaded Z_s with, so there is exactly
+  one route to it. It is a hard zero only when the metal is a perfect conductor, **and the two ways
+  that happens are different facts**: the stackup says so, or the fill carried no term at all
+  (`ConductorLoss` null — still the default). `PlanarPowerBudget.ConductorModelled` separates them,
+  because the number cannot; the notes and the caption say which a run is in. `RESOLVED.md` §CL2.
+- **`PowerDielectric` IS A RESIDUAL (accepted − radiated − surface wave − CONDUCTOR), AND THAT IS
+  PHYSICS, NOT A SHORTCUT.** Over a laterally infinite lossy substrate a volume integral of ωε₀ε″|E|²
+  already contains the whole surface-wave term — the guided mode decays as e^{−2αρ}/ρ and never escapes — so
   the two are not disjoint channels and adding them double-counts. What is published is the
   dielectric loss NOT carried away by a guided mode; on a finite board that is the distinction that
   matters, because the guided part instead reaches the edge.
 - **R-ant-3. THE BALANCE CANNOT GATE ITSELF; THE LOSSLESS CASE GATES IT.** With tanδ = 0 the residual
   must be zero, so ½Re(Y_jj) (MoM factorisation), ∫U dΩ (far field) and the pole residues (spectral
-  kernel) are three independent routes on one number. **Measured: 5.6e-5 on the 1.6 mm FR-4 starter
-  cross-section and 1.6e-4 on a 5× thicker low-εᵣ slab**, with the surface wave carrying 20 % and
-  32 % of the budget respectively.
+  kernel) are three independent routes on one number. **With tanδ = 0 and REAL metal it also gates
+  the conductor term's MAGNITUDE** (CL2): that term is then the only absorber and carries 87-99.7 %
+  of accepted on the MMIC starter, so an error in it lands in the residual at that scale.
+  **Measured: 5.6e-5 on the 1.6 mm FR-4 starter cross-section and 1.6e-4 on a 5× thicker low-εᵣ
+  slab**, with the surface wave carrying 20 % and 32 % of the budget respectively.
 - **`PowerSurfaceWave` is the residue of the spectral line voltages at the surface-wave poles** —
   `P = Σ_modes β·Σ_j Im[Q_p(β, φ_j)] / (4N_φ)`, the φ rule being the periodic rectangle (**converged
   at 90 samples to eleven digits**; the default 360 costs nothing). It is a **permanent loss** here,
@@ -1059,7 +1064,8 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
   converges in `EdgeCells` to **0.63 (FR-4) / 0.73 (GaAs)** of kernel A's Wheeler term — a single
   zero-thickness sheet cannot carry sidewall or two-face crowding. **The 6.5 / 3.0 / 2.1% at
   2 / 10 / 20 GHz is the FR-4 number, and FR-4 is where α_c matters LEAST**: on the shipped MMIC
-  technology the omission is 92-99%. `RESOLVED.md` §CL1.
+  technology the omission is 92-99%. `RESOLVED.md` §CL1. **CL2 reads it back out as `P_conductor`**
+  — see §3.7.
 - **Staircase error is NOT monotone in cell size.** Local width error on MTaper/MKlopf is 17–24%
   worst, 5.5–11% RMS, against 0.47–0.59% global *area* error. Conformal tiling error vs the drawn
   artwork is 7.7e-16…6.5e-15; staircase is 0.096–0.593%.

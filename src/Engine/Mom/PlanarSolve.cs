@@ -1768,6 +1768,22 @@ public static class PlanarSolve
         double setupMs = sw.Elapsed.TotalMilliseconds;
         int    cores   = 1;
 
+        // ── CL2 — what the power budget needs to book a conductor term, and it is the FILL's ─────
+        //
+        // Null while the fill modelled no conductor loss, which is CL1's PEC oracle and is still the
+        // default; then the budget is bit-identical to ANT-5's. Where it is non-null every piece
+        // comes from the objects the fill itself read — `dut.Cores.Gram` rather than a rebuild — so a
+        // loss term in the matrix and a loss term in the budget cannot mean different things. It is
+        // built once and memoised because the budget is per (frequency, port) and the Gram is not.
+        //
+        // `dut.Cores` is LAZY, so this is a local function rather than a plain local: touching it
+        // eagerly on a PEC run would force a core build that run might never need.
+        PlanarConductorLossInputs? conductorInputs = null;
+        PlanarConductorLossInputs? ConductorLoss() =>
+            fillSt.ConductorLoss is { } cl
+                ? conductorInputs ??= new PlanarConductorLossInputs(cl, dut.Cores.Gram, dut.Levels)
+                : null;
+
         // ── R-prt-2/3 + PCAL2: what the ports resolved to, and whether their feeds are clear ─────
         //
         // PCAL2/R-pcal2-1 — A BREACH IS A REFUSAL NOW, NOT A NOTE.
@@ -2910,7 +2926,7 @@ public static class PlanarSolve
                 if (farWanted.Contains(points.Count))
                 {
                     var (pats, mets, pols) = FarFieldAt(problem, mesh, currents, y, s, ports, f,
-                                                        farSettings!, cap, control);
+                                                        farSettings!, cap, control, ConductorLoss());
                     farPatterns[points.Count] = pats;
                     farMetrics[points.Count]  = mets;
                     farPol[points.Count]      = pols;
@@ -3194,7 +3210,8 @@ public static class PlanarSolve
                     // loop above for why the RAW admittance is not.
                     var (pats, mets, pols) = FarFieldAt(problem, mesh, currentsByIndex[i],
                                                         yByIndex[i], byIndex[i].S, ports, freqs[i],
-                                                        farSettings!, cap, control, ownStage: false);
+                                                        farSettings!, cap, control, ConductorLoss(),
+                                                        ownStage: false);
                     farPatterns[i] = pats;
                     farMetrics[i]  = mets;
                     farPol[i]      = pols;
@@ -3363,7 +3380,7 @@ public static class PlanarSolve
                             // self-admittance instead runs it 15 dB low at a de-embedded edge port.
                             var (pats, mets, pols) = FarFieldAt(problem, mesh, cur, yy, byFreq![at].S,
                                                                 ports, at, farSettings, cap, control,
-                                                                ownStage: false);
+                                                                ConductorLoss(), ownStage: false);
                             farResPatterns[at] = pats;
                             farResMetrics[at]  = mets;
                             farResPol[at]      = pols;
@@ -3772,7 +3789,7 @@ public static class PlanarSolve
             var firstMetrics = metricSet.At(0, 0);
             notes.Add(firstMetrics.Budget.Caption);
             if (firstMetrics.Budget.SurfaceWave is { } guided) notes.Add(guided.Caption);
-            notes.Add(PlanarPowerBudget.BoundNote);
+            notes.Add(firstMetrics.Budget.BoundNoteForRun);
             foreach (string refusal in metricSet.Refusals) notes.Add(refusal);
 
             // ── ANT-6 — polarization. The reference angle is REPORTED whether it was named or
@@ -3866,7 +3883,7 @@ public static class PlanarSolve
         PlanarProblem problem, PlanarMesh mesh, IReadOnlyList<Vec<Complex>> currents,
         Mat<Complex> rawY, Mat<Complex>? deembeddedS, IReadOnlyList<PlanarPortResolution> ports,
         double fHz, PlanarFarFieldSettings settings, int? cap, RunControl? control,
-        bool ownStage = true)
+        PlanarConductorLossInputs? conductorLoss, bool ownStage = true)
     {
         // ownStage false when the CALLER is running a block of these and counting them itself — the
         // adaptive path's far-field block. Beginning a stage per pattern there resets a bar that is
@@ -3885,7 +3902,8 @@ public static class PlanarSolve
             var context = new PlanarMetricContext(
                 problem, mesh, currents[j], made[j], rawY[j, j], ports[j].Z0,
                 settings.EffectiveMetrics, cap,
-                deembeddedS is { } sm ? sm[j, j] : null);
+                deembeddedS is { } sm ? sm[j, j] : null,
+                conductorLoss);
             metrics[j] = PlanarMetrics.Evaluate(context);
             pol[j]     = PlanarPolarization.For(context);
             if (ownStage) control?.TickStage();

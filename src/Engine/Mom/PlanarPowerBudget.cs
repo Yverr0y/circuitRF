@@ -26,24 +26,33 @@
 //                  and "surface-wave power" are not two disjoint channels here, and adding them
 //                  would double-count. What IS disjoint, and what this reports, is
 //
-//                      P_dielectric = P_accepted − P_radiated − P_surfaceWave
+//                      P_dielectric = P_accepted − P_radiated − P_surfaceWave − P_conductor
 //
 //                  — the dielectric loss NOT carried away by a guided mode, i.e. what is absorbed
 //                  under and beside the antenna. On a real finite board the surface-wave term is the
 //                  part that instead reaches the edge and radiates (badly); that is exactly why the
 //                  two are booked separately rather than summed.
 //
-//   P_conductor    **Identically zero, and reported as zero with a note rather than omitted.**
-//                  Kernel B's metal is a perfect conductor: PlanarConductorLayer.SigmaSm and
-//                  ThicknessM are carried through the whole pipeline and never read by the fill. A
-//                  missing term reads as "not a factor"; a zero term with a note reads as "this
-//                  kernel does not model it".
+//   P_conductor    **CL2 — a genuine, independent integral now: ½∫Re(Z_s)|J|²dS over the solved
+//                  current, plus ½Re(Z_barrel)|I|² over each via barrel.** It ships as a hard zero
+//                  only when the metal really is a perfect conductor — see PlanarConductorPower for
+//                  the two distinct ways that happens and for why there is exactly ONE route to the
+//                  number. A missing term reads as "not a factor"; a zero term with a note reads as
+//                  "this kernel does not model it", and ConductorModelled is what separates them.
+//
+// CL2 — AND THE RESIDUAL HAD TO MOVE WITH IT, WHICH IS THE ONE THING IN THIS FILE THAT CANNOT BE GOT
+// WRONG SAFELY. Adding P_conductor BESIDE the old residual instead of subtracting it from the
+// residual leaves a budget that still sums to P_accepted by construction and therefore still LOOKS
+// right, while P_dielectric silently carries a negative copy of the conductor term. The tell is a
+// dielectric term that goes NEGATIVE on a low-tanδ MMIC substrate, where the conductor term is the
+// larger of the two by a factor of thirty — which is what R-cl2-3 measures.
 //
 // R-ant-3. THE BALANCE IS AN IDENTITY BY CONSTRUCTION AND THEREFORE CANNOT GATE ITSELF. What makes
 // the residual a measurement rather than a definition is the LOSSLESS case: with tanδ = 0 and PEC
-// metal and a PEC floor there is no absorption anywhere, so P_dielectric must come out ZERO, and the
-// three quantities — ½Re(Y_jj) from the MoM factorisation, ∫U dΩ from the far field, and the pole
-// residues from the spectral kernel — are three independent routes forced to close on one number.
+// metal and a PEC floor there is no absorption anywhere, so P_dielectric AND P_conductor must BOTH
+// come out ZERO, and the three quantities — ½Re(Y_jj) from the MoM factorisation, ∫U dΩ from the far
+// field, and the pole residues from the spectral kernel — are three independent routes forced to
+// close on one number.
 // That is the gate, and it is run on two substrates of very different thickness because a balance
 // that closes in one regime may be closing on a cancellation.
 //
@@ -440,8 +449,21 @@ public static class PlanarSurfaceWaveLaunch
 /// different structure with the feed leads removed.</param>
 /// <param name="RadiatedW">∫U dΩ over the upper hemisphere.</param>
 /// <param name="SurfaceWaveW">Launched into the substrate's guided modes; 0 when refused.</param>
-/// <param name="DielectricW">The residual: accepted − radiated − surface-wave.</param>
-/// <param name="ConductorW">Identically zero — see the note.</param>
+/// <param name="DielectricW">The residual: accepted − radiated − surface-wave − <b>conductor</b>.
+/// CL2 moved the conductor term out of it; see the file header for why adding the term beside the
+/// residual instead is the failure that still sums to <paramref name="AcceptedW"/>.</param>
+/// <param name="ConductorW">½∫Re(Z_s)|J|²dS + Σ½Re(Z_barrel)|I|² — see
+/// <see cref="PlanarConductorLossInputs"/>. Exactly zero when the metal is a perfect conductor, and
+/// <paramref name="ConductorModelled"/> is what says which kind of zero that is.</param>
+/// <param name="ConductorModelled">
+/// <b>Whether the FILL carried a surface-impedance term at all.</b> False means kernel B's metal was
+/// a perfect conductor for this run — CL1's PEC oracle, and still the default — so the zero in
+/// <paramref name="ConductorW"/> is "not modelled" rather than "modelled and negligible", and the
+/// notes say the two different things. It is not derivable from the number: an all-PEC stackup
+/// reports zero with the term switched fully on.</param>
+/// <param name="Conductor">The conductor term split into its sheet and barrel halves, or null when
+/// nothing was modelled. Carried because a run whose metal loss is mostly BARRELS rests on the via
+/// model rather than on the strip model, and nothing else would say so.</param>
 public sealed record PlanarPowerBudget(
     double                   AcceptedW,
     double                   RadiatedW,
@@ -451,27 +473,48 @@ public sealed record PlanarPowerBudget(
     EmSuitability            SurfaceWaveVerdict,
     PlanarSurfaceWavePower?  SurfaceWave,
     int                      DrivenPort,
-    double                   FrequencyHz)
+    double                   FrequencyHz,
+    bool                     ConductorModelled = false,
+    PlanarConductorPower?    Conductor         = null)
 {
     /// <summary>P_radiated / P_accepted — a FRACTION, not dB, and deliberately not clamped.</summary>
     public double RadiationEfficiency => AcceptedW > 0 ? RadiatedW / AcceptedW : double.NaN;
 
     /// <summary>
-    /// <b>The conductor term's note, and it ships with the zero.</b> A σ field the user can edit and
-    /// the solver ignores is exactly the shape of thing that gets trusted silently.
+    /// <b>CL2 — the conductor term's note. It covers BOTH states a run can be in</b>, because the
+    /// term is computed when the fill carried a surface impedance and is a hard zero when it did
+    /// not, and the fill's PEC oracle is still the default. <see cref="Caption"/> is where a
+    /// particular run says which; a note that named only one state would be describing a state the
+    /// code is not in half the time.
+    ///
+    /// <para>It carries the model's OWN limits deliberately, not as a hedge: a σ field the user can
+    /// edit and a solver that reads it into a term that under-reads by a known factor are different
+    /// kinds of trap, and the second one is only avoided by saying the factor.</para>
     /// </summary>
     public const string ConductorNote =
-        "Conductor loss is IDENTICALLY ZERO in this kernel, and it is reported rather than omitted " +
-        "because a missing term reads as \"not a factor\" while a zero term with this note reads as " +
-        "\"this kernel does not model it\". Kernel B's metal is a perfect conductor: a conductor " +
-        "level's σ and thickness are carried through the whole pipeline and never read by the matrix " +
-        "fill. The closest available yardstick for how optimistic an efficiency therefore reads is " +
-        "the full-wave insertion loss on a comparable structure, which is optimistic by 6.5 % / " +
-        "3.0 % / 2.1 % of the total conducted loss at 2 / 10 / 20 GHz on 1.6 mm FR-4.";
+        "Conductor loss is the ohmic dissipation in the metal itself: ½∫Re(Z_s)|J|² dS over the " +
+        "solved surface current, plus ½Re(Z_barrel)|I|² over each via barrel. It is a genuine " +
+        "integral against the SAME surface impedance the matrix fill was loaded with, evaluated as " +
+        "a quadratic form in the solved current, so there is exactly one route to the number. IT IS " +
+        "EXACTLY ZERO WHEN THE METAL IS A PERFECT CONDUCTOR — either because the stackup says so " +
+        "(σ ≤ 0 or thickness ≤ 0) or because this run's fill modelled no conductor loss at all, " +
+        "which is this kernel's PEC reference and is still its default; the power-budget line says " +
+        "which of the two a given run is. WHAT THE TERM CANNOT CARRY, where it is live: the metal " +
+        "is modelled as a ZERO-THICKNESS sheet with one unknown per location, which holds neither " +
+        "the strip's two independently loaded faces nor its sidewall current, and Re(Z_s) is flat " +
+        "over the thickness range real stackups use while the true loss is not. Measured against an " +
+        "independent quasi-static kernel on a re-bisected 50 Ω line at 10 GHz, the sheet converges " +
+        "in edge refinement to 0.63 of that kernel's conductor loss on 1.6 mm FR-4 with 35 µm " +
+        "copper and 0.73 on 100 µm GaAs with 3 µm gold — so where this term is live it is a real " +
+        "measurement that still reads roughly a third LOW, and surface roughness is absent from the " +
+        "model entirely.";
 
     /// <summary>
-    /// <b>The two honest consequences, both stated because a user will otherwise draw the wrong
-    /// conclusion from a low efficiency — and they push in OPPOSITE directions.</b>
+    /// <b>The bound on the efficiency that is true of EVERY run</b>, and the half of it that is not
+    /// — the conductor correction — is <see cref="ConductorBoundClause"/>, because it depends on
+    /// whether this run modelled conductor loss. <see cref="BoundNoteForRun"/> is the two together
+    /// and is what a run prints; this constant alone is what the metric REGISTRY carries, where
+    /// there is no run to ask.
     /// </summary>
     public const string BoundNote =
         "Two corrections to read this efficiency by, and they do not cancel — say both. (1) " +
@@ -479,8 +522,34 @@ public sealed record PlanarPowerBudget(
         "power launched into a guided mode never comes back. On a real board it reaches the edge and " +
         "radiates, usually badly, so the efficiency reported here is a LOWER BOUND on what a finite " +
         "board does and the pattern is missing the edge-diffracted contribution entirely. (2) The " +
-        "missing conductor term pushes the other way: with perfect metal the accepted power has one " +
-        "fewer place to go, so the efficiency reads HIGH by roughly the copper's own share.";
+        "conductor term pushes the other way, and by how much depends on whether this run modelled " +
+        "conductor loss at all — the power budget's own line says which, and PowerConductor's note " +
+        "says what the model does and does not carry.";
+
+    /// <summary>
+    /// <b>CL2 — clause (2) of <see cref="BoundNote"/>, per run.</b> Where the conductor term is a
+    /// hard zero it is ANT-5's own sentence, unchanged. Where it is real that sentence is RETIRED
+    /// rather than left standing over a state the code is no longer in — and what replaces it is
+    /// CL1's measured residual under-read, which is smaller and in the same direction, not nothing.
+    /// </summary>
+    public string ConductorBoundClause =>
+        ConductorModelled
+            ? "On clause (2): this run DID model conductor loss, so the old correction — that the " +
+              "missing metal loss makes the efficiency read high by the metal's whole share — does " +
+              "not apply. What is left of it is smaller and in the same direction: a " +
+              "zero-thickness surface impedance converges to 0.63 (1.6 mm FR-4, 35 µm copper) and " +
+              "0.73 (100 µm GaAs, 3 µm gold) of an independent quasi-static kernel's conductor " +
+              "loss on a uniform 50 Ω line, so the efficiency still reads high, by roughly a third " +
+              "of the metal's share rather than by all of it."
+            : "On clause (2): this run's metal is a PERFECT CONDUCTOR, so the conductor term is a " +
+              "hard zero and the accepted power has one fewer place to go — the efficiency reads " +
+              "HIGH by roughly the metal's own share. On 1.6 mm FR-4 that share is 6.5 % / 3.0 % / " +
+              "2.1 % of the total conducted loss at 2 / 10 / 20 GHz, but FR-4 is the substrate " +
+              "class where it matters LEAST: on a 100 µm GaAs MMIC stackup the metal carries " +
+              "92-99 % of the conducted loss.";
+
+    /// <summary>The bound and this run's own conductor clause, as one note.</summary>
+    public string BoundNoteForRun => BoundNote + " " + ConductorBoundClause;
 
     /// <summary>R-res-8 — the whole budget as lines a run or a panel prints verbatim.</summary>
     public string Caption
@@ -491,18 +560,30 @@ public sealed record PlanarPowerBudget(
             string sw = SurfaceWaveVerdict.Ok
                 ? $"{SurfaceMesher.Eng(SurfaceWaveW)}W surface wave{pc(SurfaceWaveW)}"
                 : "surface wave REFUSED";
+            // CL2 — the conductor line says WHICH ZERO a zero is. Nothing else in the budget can:
+            // an all-PEC stackup reports 0 W with the term switched fully on.
+            string cond = ConductorModelled
+                ? $"{SurfaceMesher.Eng(ConductorW)}W conductor{pc(ConductorW)}" +
+                  (Conductor is { BarrelW: > 0 } c
+                      ? $" ({SurfaceMesher.Eng(c.SheetW)}W sheet + " +
+                        $"{SurfaceMesher.Eng(c.BarrelW)}W via barrels)"
+                      : "")
+                : $"{SurfaceMesher.Eng(ConductorW)}W conductor{pc(ConductorW)} — NOT MODELLED, the " +
+                  $"metal is a perfect conductor in this run";
+
             return
                 $"Power budget at {SurfaceMesher.Eng(FrequencyHz)}Hz, port {DrivenPort} driven at " +
                 $"1 V: {SurfaceMesher.Eng(AcceptedW)}W accepted, " +
                 $"{SurfaceMesher.Eng(RadiatedW)}W radiated{pc(RadiatedW)}, {sw}, " +
-                $"{SurfaceMesher.Eng(DielectricW)}W dielectric{pc(DielectricW)}, " +
-                $"{SurfaceMesher.Eng(ConductorW)}W conductor{pc(ConductorW)}. " +
+                $"{SurfaceMesher.Eng(DielectricW)}W dielectric{pc(DielectricW)}, {cond}. " +
                 $"Radiation efficiency {RadiationEfficiency:P2}. " +
-                $"The dielectric term is a RESIDUAL (accepted − radiated − surface wave), not a " +
-                $"third independent integral: over a laterally infinite lossy substrate a volume " +
-                $"loss integral already contains the whole surface-wave term, so adding the two " +
-                $"would double-count. What is reported is therefore the dielectric loss NOT carried " +
-                $"away by a guided mode.";
+                $"The dielectric term is a RESIDUAL (accepted − radiated − surface wave − " +
+                $"conductor), not a third independent integral: over a laterally infinite lossy " +
+                $"substrate a volume loss integral already contains the whole surface-wave term, so " +
+                $"adding the two would double-count. What is reported is therefore the dielectric " +
+                $"loss NOT carried away by a guided mode. The conductor term, by contrast, IS an " +
+                $"independent integral and is taken OUT of that residual rather than reported " +
+                $"beside it.";
         }
     }
 
@@ -511,9 +592,19 @@ public sealed record PlanarPowerBudget(
     /// <c>Y[j, j]</c> of the RAW (not de-embedded) port admittance — the matrix the
     /// <paramref name="pattern"/>'s own currents came out of.
     /// </summary>
+    /// <param name="conductor">
+    /// <b>CL2 — the fill's own conductor-loss model, or null when the fill modelled none.</b> Null
+    /// is the pre-CL2 behaviour exactly: <c>ConductorW</c> is a hard zero and the residual is
+    /// <c>accepted − radiated − surface wave</c>. It is not defaulted to
+    /// <c>PlanarConductorLoss.For(problem)</c> and must not be — the solved current belongs to a PEC
+    /// structure when the fill had no such term, and the power it did not dissipate is not in
+    /// <paramref name="rawSelfAdmittance"/> either, so a term computed from it would be paid for by
+    /// a NEGATIVE dielectric residual.
+    /// </param>
     public static PlanarPowerBudget For(
         PlanarProblem problem, PlanarMesh mesh, Vec<Complex> basisCurrents,
         PlanarFarFieldPattern pattern, Complex rawSelfAdmittance,
+        PlanarConductorLossInputs? conductor = null,
         int azimuthSamples = PlanarSurfaceWaveLaunch.DefaultAzimuthSamples,
         int? maxDegreeOfParallelism = null, CancellationToken ct = default)
     {
@@ -529,8 +620,16 @@ public sealed record PlanarPowerBudget(
                                                  azimuthSamples, maxDegreeOfParallelism, ct);
 
         double swW = sw?.TotalW ?? 0.0;
+
+        // CL2 milestone 2 — the conductor term is an INDEPENDENT integral, so it comes OUT of the
+        // residual. Adding it beside the residual instead leaves a budget that still sums to
+        // `accepted` and is silently wrong; the file header names the tell.
+        var cond = conductor?.PowerOf(mesh, basisCurrents, pattern.FrequencyHz);
+        double condW = cond?.TotalW ?? 0.0;
+
         return new PlanarPowerBudget(
-            accepted, radiated, swW, accepted - radiated - swW, 0.0,
-            verdict, sw, pattern.DrivenPort, pattern.FrequencyHz);
+            accepted, radiated, swW, accepted - radiated - swW - condW, condW,
+            verdict, sw, pattern.DrivenPort, pattern.FrequencyHz,
+            ConductorModelled: conductor is not null, Conductor: cond);
     }
 }

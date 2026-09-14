@@ -280,11 +280,19 @@ public sealed class PlanarMetricContext
     public PlanarBeamCuts    Cuts   => _cuts.Value;
     public PlanarPatternPeak Peak   => _peak.Value;
 
+    /// <summary>
+    /// <b>CL2 — the fill's own conductor-loss model, or null when the fill modelled none.</b> Null
+    /// is the pre-CL2 behaviour exactly; see <see cref="PlanarPowerBudget.For"/> for why it is not
+    /// derived from <paramref name="problem"/>.
+    /// </summary>
+    public PlanarConductorLossInputs? ConductorLoss { get; }
+
     public PlanarMetricContext(PlanarProblem problem, PlanarMesh mesh, Vec<Complex> basisCurrents,
                                PlanarFarFieldPattern pattern, Complex rawSelfAdmittance,
                                Complex portZ0, PlanarMetricSettings? settings = null,
                                int? maxDegreeOfParallelism = null,
-                               Complex? portReflection = null)
+                               Complex? portReflection = null,
+                               PlanarConductorLossInputs? conductorLoss = null)
     {
         ArgumentNullException.ThrowIfNull(problem);
         ArgumentNullException.ThrowIfNull(mesh);
@@ -297,11 +305,12 @@ public sealed class PlanarMetricContext
         RawSelfAdmittance = rawSelfAdmittance;
         PortZ0            = portZ0;
         PortReflection    = portReflection;
+        ConductorLoss     = conductorLoss;
         Settings          = settings ?? PlanarMetricSettings.Default;
 
         _budget = new Lazy<PlanarPowerBudget>(() => PlanarPowerBudget.For(
-            problem, mesh, basisCurrents, pattern, rawSelfAdmittance, Settings.AzimuthSamples,
-            maxDegreeOfParallelism));
+            problem, mesh, basisCurrents, pattern, rawSelfAdmittance, conductorLoss,
+            Settings.AzimuthSamples, maxDegreeOfParallelism));
         _peak = new Lazy<PlanarPatternPeak>(() => PlanarPatternPeak.Of(pattern));
         _cuts = new Lazy<PlanarBeamCuts>(() => PlanarBeamwidth.Cuts(this));
     }
@@ -450,7 +459,8 @@ public static class PlanarMetrics
 
         new(PlanarMetric.PowerDielectric, "PowerDielectric", "W", PlanarMetricAxis.PerPoint,
             "The dielectric loss NOT carried away by a guided mode: accepted − radiated − surface " +
-            "wave. It is a RESIDUAL rather than a third independent integral, and that is a physical " +
+            "wave − conductor. It is a RESIDUAL rather than a third independent integral, and that " +
+            "is a physical " +
             "statement, not a shortcut — over a laterally infinite lossy substrate a volume integral " +
             "of ωε₀ε″|E|² already contains the whole surface-wave term (the mode decays as " +
             "e^{−2αρ}/ρ and never escapes), so the two are not disjoint channels and adding them " +

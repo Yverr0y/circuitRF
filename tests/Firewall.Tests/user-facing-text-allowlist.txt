@@ -385,6 +385,8 @@ src/Engine/Mom/PlanarFill.cs|These cores were built geometry-only (M5's accelera
 src/Engine/Mom/PlanarFill.cs|This fill needs the cached cell-pair and basis-pair cores, and these were built 
 src/Engine/Mom/PlanarFill.cs|This mesh has {n:N0} unknowns, which is past the {SurfaceMesher.UnknownCeiling:N0}-unknown 
 src/Engine/Mom/PlanarFill.cs|{caller} needs cores in the {layout} layout and these are {cores.Layout}. 
+src/Engine/Mom/PlanarConductorPower.cs|The Gram matrix is of a {Gram.UnknownCount}-unknown mesh and this one has 
+src/Engine/Mom/PlanarConductorPower.cs|The solution has {basisCurrents.Count} unknowns and the mesh has 
 src/Engine/Mom/PlanarGram.cs|Two same-direction rooftops on one cut cell produced {sm.Strips.Count} and 
 src/Engine/Mom/PlanarKernel.cs|A planar solve needs at least one port. Place port labels on the conductor ends in 
 src/Engine/Mom/PlanarKernel.cs|This layout has no port {drivenPortNumber} to drive; it has 

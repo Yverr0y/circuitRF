@@ -661,6 +661,155 @@ field is dropped on save; no `Deembed` property survives on either `EmSetup` or 
 `PlanarFeedClearanceTests.TheRefusalNamesThePortTheDistanceAndTheOneWayOut` was re-pointed — it used
 to REQUIRE the raw-solve recommendation to be present.
 
+## CL2 — `P_conductor` stops being an identical zero (2026-09-14)
+
+`docs/sonnet-briefs/brief-conductor-loss-2-power-budget.md`. ANT-5 itemised where a driven port's
+accepted power goes and had to book one of its four terms as a hard zero. CL1 made it computable;
+this brief computes it, takes it OUT of the dielectric residual, and repairs the two notes that
+described the state the code is no longer in.
+
+### What was built
+
+- **`PlanarConductorPower`** (new file) — `PlanarConductorLossInputs(Loss, Gram, Levels)`, the three
+  things the integral needs carried as ONE object, plus `PlanarConductorPower(TotalW, SheetW,
+  BarrelW)`. The sheet term is the quadratic form `½ Re(Z_s)·xᴴGx` against the SAME Gram the fill
+  multiplied Z_s by — `PlanarFillCores.Gram`, not a rebuild — and the barrel term is the elementary
+  `½Re(Z_barrel)|I|²` over each vertical basis, which has no Gram row at all. **One route, on
+  purpose:** a second statement of the same number is how a factor of two gets in.
+- **The residual moved with it.** `PlanarPowerBudget.For` now reports
+  `P_dielectric = accepted − radiated − surface wave − conductor`.
+- **`ConductorModelled`** on the budget, because the two zeros are different facts and the number
+  cannot tell them apart: an all-PEC stackup reports 0 W with the term switched fully on.
+- **Plumbing**: one optional `PlanarConductorLossInputs?` through `PlanarPowerBudget.For`,
+  `PlanarMetricContext` and `PlanarSolve.FarFieldAt`, built once per run by a local function in
+  `PlanarSolve.Run` (a local FUNCTION rather than a local, because `dut.Cores` is lazy and a PEC run
+  must not be made to build cores it never needs). **Null is bit-identical to ANT-5.**
+
+### The gate the brief did not ask for, and it is the strongest one here
+
+R-cl2-3's stated premise — *the MMIC starter patch, where the conductor term dominates the
+dielectric term by ~30×* — **is not what a power budget measures, and the ratio was nowhere near
+30× on any fixture tried.** The overview's 30× is a ratio of per-unit-length ATTENUATIONS on a
+MATCHED line, which weighs `∫R_s|J|²` against `∫G|V|²` with `|V|` and `|I|` locked together by Z₀.
+This budget drives one port at 1 V into a structure whose other port is a transparent zero-volt gap,
+so voltage and current are a standing wave and the same two mechanisms are weighted quite
+differently. Measured, 3 µm gold on 100 µm GaAs, conductor ÷ dielectric:
+
+| fixture | tanδ | conductor | dielectric | ratio |
+|---|---|---|---|---|
+| 70.72 µm line, 30 GHz | 6e-4 | 64.85 % | 25.66 % | **2.53×** |
+| 70.72 µm line, 30 GHz | 2e-3 | 40.57 % | 53.49 % | 0.76× |
+| 70.72 µm line, 10 GHz | 6e-4 | 32.56 % | 67.35 % | 0.48× |
+| half-λ patch, 60 GHz | 6e-4 | 6.57 % | 3.65 % | 1.80× |
+
+**So the sign check was re-drawn on tanδ = 0 with REAL metal**, where the conductor term is the only
+absorber in the model and the dielectric residual must therefore vanish:
+
+| fixture | N | accepted | conductor share | dielectric residual |
+|---|---|---|---|---|
+| GaAs line, 10 GHz | 24 | 449.8 nW | **99.73 %** | −1.71e-4 |
+| GaAs line, 30 GHz | 59 | 9.074 µW | **87.23 %** | +6.85e-5 |
+| GaAs patch, 60 GHz | 237 | 12.93 mW | 6.82 % | +2.40e-4 |
+
+That is a gate on the conductor term's own **MAGNITUDE**, not merely on the sign of the arithmetic
+around it — it is the residual of three independent routes (½Re(Y_jj) from the factorisation, ∫U dΩ
+plus the pole residues from the spectral kernel, and this brief's quadratic form) and the conductor
+term carries 87-99.7 % of it. The milestone-2 failure the brief warns about — the term added BESIDE
+the residual rather than taken out of it — reads as a residual of −87 % to −99.7 % of accepted here,
+not as a fraction of a per cent. **The residual's SIGN at tanδ = 0 is noise** (the first row is
+negative), which is why the gate is two-sided at the fill's own documented accuracy (1e-2 on 100 µm
+GaAs) rather than at `> 0`.
+
+### R-cl2-2 — the two routes, and the gap is the reference route's quadrature EXACTLY
+
+The shipped quadratic form against a direct `∫Re(Z_s)|J|²dS` over `PlanarCurrentDensity.Compute`'s
+map (test-only; it does not ship). The map is the current at each cell's CENTRE, so the direct sum
+is a **midpoint rule**, and on one cell carrying rooftops I_m and I_n the exact integral exceeds it
+by exactly `Δ·|I_m − I_n|²/(12·L)`. Summing that closed form over the mesh reproduces the observed
+gap to **3.5e-15 / 6.7e-14 / 1.3e-15** relative (GaAs line, FR-4 patch, FR-4 line) — so the two
+routes differ by the reference route's quadrature and by **nothing else**. A dropped off-diagonal, a
+missing ½ or a wrong Z_s is not expressible in that form.
+
+The gap itself is 8.91 % / 3.24 % / 0.85 % on those three, and **it falls like √(cells), not like
+cells²** — measured on the GaAs line at cells/λ 10 / 20 / 40 / 80 (16 / 20 / 36 / 72 cells): 8.91 /
+7.07 / 4.45 / 3.16 %. The deficit is dominated by `|I_m − I_n|²` at the strip's own RIM, where the
+transverse current's 1/√d edge behaviour is never resolved by a uniform mesh, so the jump between
+neighbouring coefficients does not shrink the way it does mid-strip. **That is a property of the
+test-only reference route**, and it is why R-cl2-2's band is per cent rather than per mille.
+
+### R-cl2-4 — the efficiency moved the predicted way
+
+Half-guided-wavelength patch, edge-fed at x = 0, N = 237, with and without the fill's term. The
+quasi-static port-calibration crossover is stated beside each because `P_accepted` comes through the
+port even though nothing in the conductor term does:
+
+| starter | f | crossover | η_rad PEC | η_rad with Z_s | Δ | conductor |
+|---|---|---|---|---|---|---|
+| FR-4 1.6 mm, 35 µm Cu | 2.4 GHz | 3.048 GHz (**below**) | 41.210 % | 40.931 % | **−0.279 pp** | 0.67 % of accepted |
+| GaAs 100 µm, 3 µm Au | 60 GHz | 26.07 GHz (**above**) | 67.854 % | 63.734 % | **−4.121 pp** | 6.06 % of accepted |
+
+### The notes, and one deliberate deviation from the brief
+
+Milestone 3 says `BoundNote`'s clause (2) is *retired* when the term is real. **It could not be
+retired outright**, because `PlanarFillSettings.ConductorLoss` still defaults to OFF until CL3: a
+shipped run today genuinely has PEC metal, and deleting the clause would be the same defect
+inverted — a note describing a state the code is not in, half the time. So:
+
+- **`ConductorNote`** (the const the registry carries) states what the term IS, that it is exactly
+  zero when the metal is a perfect conductor **by either route**, and what the sheet model cannot
+  carry — overview §3's thickness-blindness and CL1's 0.63 (FR-4) / 0.73 (GaAs) under-read against
+  kernel A, in a sentence.
+- **`BoundNote`** keeps clause (1) and defers clause (2) to the run.
+  **`PlanarPowerBudget.ConductorBoundClause`** is that clause, per run: ANT-5's own sentence
+  (unchanged, plus the MMIC 92-99 % figure beside the FR-4 6.5/3.0/2.1 %) where the metal is
+  perfect, and where the term is live the old correction is **retired by name** and replaced by
+  CL1's measured residual under-read, which is smaller and in the same direction rather than absent.
+  `BoundNoteForRun` is the two together, and is what `PlanarSolve` prints.
+- **`Caption`** says which zero a zero is (`— NOT MODELLED, the metal is a perfect conductor in this
+  run`) and breaks the conductor term into sheet + barrels whenever there are barrels.
+
+### Traps found
+
+- **A midpoint-rule reference route is not a second opinion until you can predict its error.** The
+  first version of R-cl2-2 gated at 10 % and a refinement ladder was written to argue the gap was
+  second order. It is not — it falls like √(cells) — and the ladder would have shipped a claim the
+  measurement refutes. The closed form is what turns the same measurement into evidence.
+- **The lossless power balance is a magnitude gate on any term that dominates it**, and is far
+  sharper than the sign check the brief asked for. Worth reaching for whenever a new loss term lands
+  in this budget.
+- **Two zeros that are not the same fact.** `ConductorW == 0` means "perfect metal" and "the fill
+  had no term" alike, and only the second one makes the efficiency read high. The bool is carried
+  rather than inferred for the same reason `PlanarConductorLoss` is a nullable data object rather
+  than a bare bool in CL1.
+- **`dut.Cores` is LAZY and the budget's inputs must not force it.** Reading `dut.Cores.Gram` into a
+  plain local at the top of `PlanarSolve.Run` would build the geometric cores on every run,
+  including one that refuses before it ever fills.
+
+### Gates
+
+`tests/Engine.Tests/Mom/PlanarConductorPowerTests.cs`, **14 tests, ~5 s, all in the routine tier** —
+nothing here crosses the ~5 s `Category=Benchmark` threshold, because every fixture is a single
+frequency on a coarse mesh and no gate needs a calibration.
+
+- **R-cl2-1** the lossless balance with the term switched ON and the metal declared PEC (σ = +∞,
+  the spelling CL1 found produces a NaN if the three spellings are not asked in one place), on
+  1.6 mm FR-4 and an 8 mm εᵣ = 2.2 slab: conductor **exactly** 0.0 (sheet and barrel), residual
+  5.6e-5 / 1.6e-4, surface wave carrying 19.9 % / 32.0 %.
+- **R-cl2-2** the two routes, three fixtures; **R-cl2-2b** the barrel arm on a two-level via mesh
+  (N = 101, 3 vertical bases: 1.224 µW sheet + 5.889 nW barrels, and the two arms are exact);
+  **R-cl2-2c** the stored upper triangle counted twice off the diagonal and once on it, against a
+  HAND-BUILT current vector so it fails on the arithmetic alone, plus the phase-rotation invariance
+  that says only Re(Z_s) is read; **R-cl2-2d** the closed-form midpoint deficit above.
+- **R-cl2-3a/3b** as tabulated above, including the budget closing as an identity to 1e-12.
+- **R-cl2-4** as tabulated above, plus the two notes describing the state each run is in.
+- `PlanarMetricsTests.PowerConductorIsPresentAndZero_WithItsNote` was re-pointed — it pinned
+  "IDENTICALLY ZERO", which is the sentence CL2 exists to remove. It now asserts the metric is
+  still present, that a run with no conductor model reports the zero AS not-modelled, and that the
+  note carries both the definition and the model's own limits.
+- The whole of `tests/Engine.Tests/Mom` is **1,086 passed** (1 m 15 s) and `Firewall.Tests` passes;
+  `PlanarConductorPower`'s two internal-invariant exceptions are on
+  `tests/Firewall.Tests/user-facing-text-allowlist.txt`.
+
 ## CL1 — the surface-impedance term in the full-wave fill (2026-09-14)
 
 `docs/sonnet-briefs/brief-conductor-loss-1-surface-impedance.md`. Kernel B's metal was a PERFECT
