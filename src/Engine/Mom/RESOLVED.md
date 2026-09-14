@@ -3,6 +3,652 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## QSC — a quasi-static port calibration, so the bottom of the band stops costing a metre of line (2026-09-14)
+
+`docs/sonnet-briefs/brief-quasistatic-port-calibration.md`. RAW1 §6 closed with the low-frequency
+wall still standing and named its cause: **the wall is the price of MEASURING γ from two full-wave
+line standards (D5), and nothing else.** The two lines' length difference has to sit inside TRL's
+usable interval βΔℓ ∈ [20°, 160°], so it scales as 1/f_lo — on the reported board a 3.8 mm microstrip
+swept from 100 MHz wanted a **161.5 mm** standard at **79,055 unknowns** against a 12,000 ceiling, and
+the run refused. The DUT itself is N = 1,144 and solves fine down there.
+
+**The reported file runs now**, 100 MHz – 6 GHz, 11 points, no refusal and no accelerator.
+
+### 1. The hole in RAW1 §6(a), which is why this is not a two-line change
+
+**Supplying γ does NOT by itself remove the long standards.** γ is ALREADY an input to
+`PlanarDeembed.SolveErrorBox` — look at its signature. One standard gives two complex equations
+(`m11`, `m21`) for three complex unknowns (`a11`, `a21²`, `a22`), and no reciprocity or symmetry
+argument closes that gap, so the error box still needs TWO lines however γ arrives.
+
+**What a known γ buys is that Δℓ need not be ELECTRICALLY long.** The [20°, 160°] interval exists to
+protect the γ EXTRACTION, where `Acosh`'s branch structure makes βΔℓ = nπ a genuine singularity and
+where α is two orders below β so its extracted sign is noise. The error box's own conditioning is a
+different and far gentler thing. So Δℓ is sized from the SUBSTRATE and the MESH instead of from λ,
+both standards become small and frequency-independent, and the sub-band ladder collapses to one
+separation because there is no βΔℓ window left to cover.
+
+### 2. R-qsc-2 — the supplier is the STANDARD's own electrostatics, and the decision is structural
+
+The two candidates were kernel A's per-unit-length cross-section solve (`RlgcExtractor.Extract`) and
+the standard's own electrostatics. **The standard's, and four of the reasons are structural rather
+than numerical — this was not settled by whose number was closer.**
+
+- **`PlanarDeembed`'s own D7 rule already says so**, one quantity over: *"Kernel A is the ORACLE for
+  Z_c, never an input. Reading Z_c or C_pul off QuasiStaticKernel and feeding it into B would make the
+  phase table's own 'A and B agree on a uniform line' gate a tautology and would import A's
+  discretisation error into B's answer."* A γ taken from A is that sentence about γ.
+- **De-embedding is ALREADY part quasi-static.** `PlanarDeembed.CapacitancePerMetre` runs an
+  electrostatic solve on the two standards and supplies C_pul for Z_c = γ/(jωC_pul). What this adds is
+  ONE further solve of the same kind — the same geometry with the dielectric removed — read as
+  L = μ₀ε₀/C₀. An existing route is extended by its other half; nothing new is introduced.
+- **Kernel A cannot represent what a standard can.** A coplanar standard's C_pul is a MODAL
+  capacitance (RP-2c), a widened one carries a FLOATING conductor (PCAL3), and a group's is a MATRIX
+  (PCAL4/D7'). All three ride on `PlanarStandard`'s own `ModePotential`/`ModeWeight`/
+  `FloatingPotential` and are honoured here for free, because it is the same solve. Kernel A would
+  need a cross-section it does not have and a WIDTH that is not defined for a feed that is not a plain
+  rectangle.
+- **It is self-consistent in the discretisation.** C and C₀ come off the SAME mesh, so ε_eff = C/C₀ and
+  Z_c = √(L/C) share their error and it cancels to first order in the ratio — which is exactly the
+  argument D7 already makes for DIFFERENCING two standards rather than solving one.
+
+`PlanarQuasiStaticLine` is the whole of it: `C` and `C₀` per metre by D7's own differencing,
+`L = μ₀ε₀/C₀`, `γ = jω√(LC)`, and `Z_c` left on D7's existing `γ/(jωC_pul)` spelling so **only γ's
+source changed**.
+
+**C stays COMPLEX all the way to γ, and that needed a change.** `PlanarKernelTerms.StaticScalar` is
+built on `GroundedSlab.EpsComplex`, so the charge already carries tanδ; D7 was dropping it with a
+`.Real` because Z_c takes a double. `PlanarDeembed.StaticCapacitance` /`CapacitancePerMetre` and
+`PlanarStaticAim.TotalCapacitance`/`ModalCapacitance` are now `.Real` wrappers over complex bodies —
+the SAME bodies, so every existing caller is bit-identical. Without it a lossy board would publish
+α = 0 exactly, which is a plausible wrong number and would read as a regression against the measured
+path beside it in the same `.npy`.
+
+**The metal stays a PERFECT CONDUCTOR here**, exactly as the full-wave fill is by default (CL1's
+`PlanarFillSettings.ConductorLoss` is off), so γ carries the dielectric's attenuation and no conductor
+term. A Wheeler term would be a claim kernel B's own matrix does not make, and the two paths would
+then disagree in α across the crossover by whatever the sheet model is worth.
+
+### 3. M1 — the crossover, measured per stack, then fitted to ONE law
+
+M1 measured quasi-static γ and Z_c against the MEASURED two-line values from `PlanarPortCalibrator.At`,
+per frequency, on three stacks at two mesh densities. The calibrator was built at `(f, f)` so each
+point's own separation sits near 60° and conditioning is never the variable.
+
+**The reported board — 0.6 mm low-loss laminate, εᵣ ≈ 4, w = 254 µm — refined mesh** (quasi-static minus measured):
+
+| f | Δβ | ΔZ_c | ε_eff measured (quasi-static 2.786) |
+|---|---|---|---|
+| 100 MHz | +6.97% | +7.15% | 2.452 |
+| 300 MHz | +0.98% | +0.73% | 2.734 |
+| **1 GHz** | **+0.20%** | **−0.10%** | 2.775 |
+| 3 GHz | −0.14% | −0.43% | 2.794 |
+| 6 GHz | −0.35% | −0.63% | 2.806 |
+| 10 GHz | −0.77% | −1.05% | 2.830 |
+| 20 GHz | −2.12% | −2.35% | 2.909 |
+
+FR-4 1.6 mm, same shape, dispersing earlier as `h√εᵣ` predicts: +4.78% at 100 MHz, +0.09% at 1 GHz,
+−2.61% at 6 GHz, −5.83% at 20 GHz.
+
+**TWO DIFFERENT ERROR SOURCES, AND THEY MUST NOT BE CONFLATED — the disagreement is smallest in the
+MIDDLE of the band and grows in both directions.**
+
+- **Above ~5-10 GHz it is real dispersion**, ε_eff rising, quasi-static under-predicting β. That is
+  what the measured calibration is for, and it is why this is a second path and not a replacement.
+- **Below ~300 MHz it is the MEASURED value that is wrong, not the quasi-static one.** Proven by
+  refinement rather than asserted: on the default mesh the 100 MHz disagreement is **+17.8%** and on
+  the refined mesh **+7.0%** — the measured value moves TOWARD the quasi-static one as the mesh
+  tightens, and ε_eff_meas goes 2.02 → 2.45 against a static 2.786 it must approach as f → 0. **So the
+  two-line calibration at the bottom of the band is not merely expensive, it is inaccurate**, which is
+  a stronger argument for this work than the one it was briefed on.
+
+**GaAs 0.1 mm is the outlier and is NOT papered over.** It agrees to 0.5-1.3% at 6-20 GHz but its
+MEASURED values at 100-300 MHz are nonsense — ε_eff_meas ≈ 12.3-12.5 against a substrate εᵣ of 12.9
+and a quasi-static ε_eff of 8.21 — and 1 GHz reads +8.2%. That is not dispersion and not a
+conditioning slope. It is the same mechanism as the paragraph above, at its extreme: a stack whose
+standards are tiny in absolute terms, where the measured route is worst and the quasi-static one is
+the answer. It is recorded rather than tuned around, and it is the reason the crossover for GaAs comes
+out at 26 GHz — the whole shipped band is on the quasi-static side of it.
+
+**The law.** Dispersion in a microstrip groups on `h·√(εᵣ−1)/λ₀`, which is what lets one constant
+cover a 1.6 mm board and a 0.1 mm MMIC. M1's two readable crossovers are ratios of **0.0295** (FR-4,
+≈ 3 GHz) and **0.0347** (the reported board, ≈ 10 GHz);
+`PlanarCalibrationSettings.DispersionCrossoverRatio` is **0.03**, the conservative end of that pair.
+
+| stack | h | εᵣ | by dispersion | by thickness | crossover |
+|---|---|---|---|---|---|
+| FR-4 starter | 1.6 mm | 4.4 | 3.048 GHz | 3.75 GHz | **3.048 GHz** |
+| the reported board (low-loss laminate) | 0.6 mm | 4.0 | 8.654 GHz | 9.99 GHz | **8.654 GHz** |
+| GaAs starter | 0.1 mm | 12.9 | 26.07 GHz | 60.0 GHz | **26.07 GHz** |
+| an AIR slab | 5 mm | 1.0 | **+∞** | 1.20 GHz | **1.20 GHz** |
+
+**THE SECOND COLUMN IS NOT BELT AND BRACES, AND THE AIR ROW IS WHY.** The fit above measures
+DIELECTRIC dispersion — ε_eff climbing from (εᵣ+1)/2 toward εᵣ — and at εᵣ = 1 there is none, so that
+term alone answers "+∞". **That is true of the MODE and false of the STRUCTURE**: in a homogeneous
+medium every bound mode is exactly TEM, but a coplanar pair 5 mm above its plane in air at 10 GHz is a
+sixth of a free-space wavelength thick, radiates, and its measured β sits **3.6 %** off k₀ — which the
+two-line calibration captures and a quasi-TEM γ cannot. That is not a hypothetical: nine
+`CoplanarDeembedTests` cases failed the moment the dispersion term was allowed to answer alone, the
+first of them on the identity that says the calibration is exact at its own standard's length
+(|S₁₁| = 7.3e-2 where the requirement is machine zero). Its fixtures are `EmMaterial(1.0, 0.0)`.
+
+So the crossover is the LOWER of two limits, the second being an absolute electrical thickness
+`h/λ₀ ≤ PlanarCalibrationSettings.ElectricalThicknessCrossoverRatio` = **0.02**, chosen to be INERT on
+every stack M1 measured (the dispersion term binds first on all three, by 1.2× to 2.3×) so it moved no
+number recorded here. **Being a MINIMUM it can only LOWER a crossover** — i.e. only ever move a point
+from the quasi-static path back onto the measured one, which is the conservative direction.
+
+**The general lesson, which is this brief's own trap repeated:** a crossover fitted to one family of
+stacks answers confidently about a family it was never shown. FR-4, a low-loss laminate and GaAs are
+all εᵣ ≥ 3.7; εᵣ = 1 is not an exotic corner here, it is what every coplanar fixture in this directory
+uses.
+
+**Conservative is the right direction here and the reason is asymmetric.** Below the crossover the
+quasi-static path is not merely cheaper but MORE accurate; above it the measured one is right. A
+crossover placed low costs a little accuracy and a lot of standard, in a region where both are
+affordable — a crossover placed high publishes dispersion that is not there. **It is deliberately NOT
+a user setting**: a knob invites someone to put it in the wrong place and there is no way for them to
+know, because both failure modes publish a smooth, plausible, wrong phase.
+
+### 4. M3 — how short Δℓ may be, and THE SURPRISE IS THE OTHER DIRECTION
+
+`PlanarCalibration.SeparationPlan` is the one place that decides what a band builds: the measured
+ladder over the part ABOVE the crossover (`SuggestDeltas` asked with the CROSSOVER as its lower edge,
+not the user's), plus ONE short separation for the part below. Three shapes, and the first is what
+makes every run that ships today bit-identical — a band entirely at or above the crossover gets
+`SuggestDeltas`' own array, entry for entry, and no quasi-static entry at all.
+
+**A band that STRADDLES the crossover changes at its top as well as at its bottom, and that is worth
+stating rather than discovering.** The measured ladder is drawn from the CROSSOVER, so a 1–20 GHz
+sweep on FR-4 calibrates its 5/10/15/20 GHz points against `SuggestDeltas(3.05 GHz, 20 GHz)` rather
+than `SuggestDeltas(1 GHz, 20 GHz)` — a different separation set, a different error box, and not
+bit-identical. That is deliberate: a separation exists to cover a sub-band, and below the crossover no
+measured separation is used at all, so building the ladder from the user's f_lo would mesh and solve
+standards that no frequency will ever read. It is what a 100 MHz–6 GHz sweep was paying 79,055
+unknowns for.
+
+Measured on the FR-4 fixture (6 mm line, coarse mesh, bulk cell 1.5 mm), sweeping the separation from
+24 substrate heights down to below one bulk cell. `margin` is
+`RejectedResidual / ConsistencyResidual` — the a₂₂ SIGN margin, which is the one failure mode that
+does not degrade smoothly:
+
+| Δℓ | βΔℓ @ 2 GHz | standard N | max\|ΔS\| vs measured @ 1 GHz | worst margin |
+|---|---|---|---|---|
+| 24 h = 38.4 mm | **170.1°** | 234 | 1.21e-3 | **2.5e+01** |
+| 12 h = 19.2 mm | 85.0° | 143 | 5.40e-4 | 3.6e+02 |
+| **6 h = 9.6 mm (shipped)** | 45.8° | 101 | 6.00e-4 | 2.9e+02 |
+| 3 h = 4.8 mm | 26.1° | 80 | 8.46e-4 | 3.1e+02 |
+| 1.5 h = 2.4 mm | 13.1° | 66 | 1.28e-3 | 3.5e+02 |
+| 0.75 h = 1.2 mm | 6.5° | 59 | 1.69e-3 | 3.3e+02 |
+| 0.375 h = 0.6 mm | 6.5° | 59 | 1.69e-3 | 3.3e+02 |
+
+**Three findings, and the first is the one the brief expected to go the other way.**
+
+- **SHORTER is nearly free and LONGER is what breaks it.** The error grows as ~1/Δℓ going down, from
+  6.0e-4 at 6 h to 1.7e-3 at one bulk cell — a factor of three over a 16× shorter standard, against a
+  de-embedding residual floor two to three decades below. Going UP, the 24 h separation reaches
+  βΔℓ = 170° at 2 GHz, which is D6's own denominator zero at βΔℓ = nπ, and the a₂₂ sign margin
+  collapses by an order and a half. **A supplied γ frees Δℓ from the usable interval's LOWER end; it
+  leaves the upper end exactly where it was.** So `QuasiStaticSeparationM` caps the substrate term at
+  the same electrical length `SuggestDeltas` aims a measured separation at, evaluated at the
+  CROSSOVER — the highest frequency that separation ever serves. **h cancels in that cap**: βΔℓ there
+  is a pure function of εᵣ, ≈ 58° on FR-4 and ≈ 50° on GaAs, so the cap is inert on any ordinary board
+  and binds only on a substrate close enough to air that the crossover runs away.
+- **THE MESH IS ALREADY A FLOOR AND IT IS EXACT.** The last two rows are identical because
+  `LongitudinalPartition` realises a separation as a whole number of bulk cells, so a target under one
+  cell simply becomes one cell. `QuasiStaticSeparationMinBulkCells` = 4 makes that explicit and puts
+  it where D7's capacitance DIFFERENCING needs it — C_pul is (C₂ − C₁)/Δℓ, and two standards differing
+  by one cell differ by one cell's worth of discretisation error as well as by a length.
+- **The a₂₂ sign is never decided by noise on the shipped separation.** Worst margin across the whole
+  sweep at or below 6 h is **2.93e+02**; on the reported file's own run it is **1.8e+02** (port 2 at
+  100 MHz) to **9.3e+03**. `DeembedRejected` and `DeembedResidual` are both published per point, so
+  this is checkable on any file rather than only in a test.
+
+**A number that CHANGES and that a reader will notice: `DeembedResidual` is larger on this path.**
+~1e-5 to 1e-3 on the fixture, against ~1e-15 on the measured path. **That is not a regression and the
+old number was the misleading one.** On the measured path γ is EXTRACTED from the very two standards
+the M₁₁ consistency equation then checks, so the check is nearly a tautology. With γ supplied the
+residual becomes an honest measure of the quasi-TEM assumption on that cross-section — a better
+diagnostic and a worse-looking number. The margin RATIO is what to read.
+
+### 5. M2 — the overlap, at every frequency and not just its ends
+
+FR-4 6 mm line, coarse mesh, DUT N = 24, band 500 MHz – 6 GHz so the measured ladder is still
+affordable at its own bottom. Longest standard **206 unknowns measured against 101 quasi-static**.
+Both paths de-embed the same DUT solve; the difference is γ's source and the standards' size.
+
+| f | Δβ | ΔZ_c | max\|ΔS\| | βΔℓ measured | βΔℓ quasi-static |
+|---|---|---|---|---|---|
+| 500 MHz | +1.040% | +1.039% | 5.8e-3 | 35.6° | 11.4° |
+| 750 MHz | +0.197% | +0.197% | 2.6e-3 | 53.8° | 17.2° |
+| 1 GHz | −0.133% | −0.133% | 6.0e-4 | 72.0° | 22.9° |
+| 1.5 GHz | −0.334% | −0.334% | 3.7e-3 | 34.4° | 34.3° |
+| 2 GHz | −0.675% | −0.676% | 9.1e-3 | 46.1° | 45.8° |
+| 3 GHz (≈ crossover) | −1.174% | −1.176% | 2.2e-2 | 69.4° | 68.6° |
+
+**The two paths agree to ~1 % across the whole overlap and the disagreement is smallest in the middle
+of it — the same shape M1 measured, on a different fixture and through the whole de-embedding rather
+than on γ alone.** At the crossover it reaches the 1 % budget the crossover was drawn at, which is
+what says the constant is in the right place. Δβ and ΔZ_c track each other to the fourth digit because
+Z_c = γ/(jωC_pul) with the SAME C_pul on both paths, so Z_c's disagreement IS γ's by construction —
+worth knowing before reading the two columns as independent evidence.
+
+**The absolute error of either path is far larger than the difference between them, and that is the
+pre-existing low-frequency floor rather than anything here.** On the same uniform line a de-embedded
+S₁₁ must be exactly 0, and it reads 0.844 at 100 MHz, 0.393 at 300 MHz, 0.189 at 690 MHz, 0.110 at
+1.28 GHz and 0.073 at 2.46 GHz on that deliberately coarse 24-unknown mesh. That is the series
+delta-gap's own `a₂₁ ∝ ω` amplification (`CLAUDE.md` §5, "~22× at 2 GHz, growing as f⁻²"), it is
+identical on both paths, and **this brief neither improves nor worsens it**.
+
+### 6. M5 — the reported file, end to end
+
+`extract1` from the RAW1 report: a 3.8 mm microstrip trace on 20 mil laminate, a 254 µm port on P1 and
+a 558.8 µm pad on P2, 100 MHz – 6 GHz, 11 points, via the `em` CLI verb on the `.cem` itself.
+
+**It runs.** 4 min 12 s wall, 10 cores, **Debug** — the owner's build, and the one quoted here rather
+than a Release figure nobody measured. (`CLAUDE.md` §8 already records this code running ~4× slower in
+Debug at N = 4,836; that is context for the number, not a second measurement.)
+
+| | port 2's standards |
+|---|---|
+| RAW1, as reported | **1,526 / 79,055 / 21,349 / 6,600** — refused |
+| now | **1,526 / 3,289** |
+
+The short standard is **bit-identical**, which is the construction working as intended: only the
+separations changed. The whole run's four standard meshes are 871 / 1,039 / 1,526 / 3,289 = **6,725
+unknowns against the 108,530 port 2 alone used to ask for**, and 5.88× the DUT's own N = 1,144.
+
+**S₂₁ against the ideal-MLIN reference**, both at 50 Ω:
+
+| f | S₂₁ sim | S₂₁ ideal | Δ | S₁₁ sim | S₁₁ ideal |
+|---|---|---|---|---|---|
+| 100 MHz | −0.324 dB | −0.006 dB | **−0.318 dB** | −12.2 dB | −40.2 dB |
+| 690 MHz | −0.027 dB | −0.039 dB | +0.012 dB | −26.2 dB | −23.5 dB |
+| 1.28 GHz | −0.091 dB | −0.097 dB | +0.006 dB | −17.9 dB | −18.2 dB |
+| 2.46 GHz | −0.312 dB | −0.282 dB | −0.030 dB | −12.1 dB | −12.9 dB |
+| 4.23 GHz | −0.782 dB | −0.686 dB | −0.096 dB | −8.1 dB | −8.9 dB |
+| 6 GHz | −1.296 dB | −1.140 dB | −0.156 dB | −6.1 dB | −6.7 dB |
+
+**The stated tolerance: 0.16 dB in S₂₁ from 690 MHz to 6 GHz, and 0.32 dB at 100 MHz.** Two separate
+things are in that column and neither is the calibration:
+
+- The slow rise to 0.16 dB at the top is the STRUCTURE, not the reference. The artwork is not an ideal
+  MLIN — 40 corners, a bend, and a 558.8 µm pad on P2 — and both curves already say so: S₁₁ is −6 dB
+  at 6 GHz on the ideal line too. |ΔS| grows monotonically with frequency, which is radiation and the
+  discontinuities, not a calibration error.
+- **The 100 MHz point is the pre-existing `a₂₁ ∝ ω` floor and the diagnostics say so directly.** Its
+  `DeembedResidual` is the SMALLEST of the sweep (1.05e-7 on port 2, against 2.9e-6 at 4 GHz), its
+  margin is 1.8e+02, and its ε_eff and Z_c are the ones that are RIGHT: quasi-static gives
+  ε_eff = 2.787 and Z_c = 105.7 Ω on the 254 µm trace against closed-form microstrip values of 2.777
+  and 106 Ω — **0.4 % and 0.3 %** — where RAW1 §6 records the two-line route giving 2.45 and 99 Ω on
+  the same trace, i.e. **12 % and 6.6 % out.** The calibration at 100 MHz is the best one in the
+  sweep; what is large there is the peel's amplification of it. §5's uniform-line control is the
+  cleanest statement of that floor: on a plain line, where a de-embedded S₁₁ must be exactly 0, both
+  paths read 0.84 / 0.39 / 0.19 / 0.11 at 100 / 300 / 690 MHz / 1.28 GHz on a deliberately coarse
+  24-unknown mesh, and they read it IDENTICALLY.
+
+**THE ACCELERATOR DID NOT ENGAGE, and it was checked rather than assumed.** The run's notes carry no
+AIM line and no GMRES; every standard is under the 5,000 dense ceiling. That closes RAW1's "separately
+still open" GMRES failure as a side effect, and it was never a separate defect: the `.cem` never asked
+for the accelerator, `PlanarKernel` turned it on itself in the
+`catch (PlanarAcceleratorWouldFitException)` around `PlanarSolve.Run` because a CALIBRATION STANDARD
+had crossed the dense ceiling, and the DUT at N = 1,144 had always been comfortably dense. **It will
+still engage on its own merits for a DUT genuinely over 5,000 unknowns**, which is the case this does
+not touch.
+
+The `.npy` reads `CalQuasiStatic = 1` and `CalibrationUsable = 1` at all 22 (freq, port) slots, ε_eff
+and Z_c constant across the sweep (they are frequency-independent by construction on this path, which
+is itself a readable signature of which path ran), and α rising linearly from 0.257 to 15.4 dB/m —
+constant tanδ, which is what the complex C is there to produce.
+
+### 7. M4 — the ceiling refusal learns about the crossover
+
+RAW1 §4's own defect, one phase on: that refusal used to blame the mesh and offer "coarsen it", RAW1
+re-pointed it at the lower band edge, and with this path in place **a band edge below the crossover
+binds nothing at all.** Printing "raise the lower band edge" there would be the same defect a third
+time.
+
+`PlanarCalibration.MeasuredBandBottomHz` is what every band-edge quantity is now asked of — the user's
+edge or the crossover, whichever is higher, clamped to the band — and `PlanarSolve.BandEdgeRemedy`
+branches on WHICH KIND of standard is over the ceiling:
+
+- a MEASURED standard still names a band edge, but the ladder is quoted from the crossover
+  (*"Below 3.048 GHz this port is calibrated quasi-statically on short, frequency-independent
+  standards, so the measured ladder is drawn from 3.048 GHz rather than from 100 MHz"*), and when no
+  edge inside the sweep helps it says outright that raising it below the crossover changes nothing;
+- the SHORT quasi-static standard says **"The band edge is NOT the remedy here"** and names the port's
+  TRANSVERSE mesh, which is what actually sets its size — because a standard reproduces the DUT's
+  transverse gridlines verbatim (D4) and its length no longer moves with frequency at all.
+
+`LongestStandardLengthM`, `StartFrequencyThatFits` and `SuggestDeltas` are **unchanged** and still
+describe the measured ladder, which is still what they describe;
+`RawSolveAndCalibrationRemedyTests` passes unaltered for that reason. What changed is which band the
+caller asks them about.
+
+### 8. Traps found, and the two that cost the most
+
+- **`Termination`'s constructor is private and PEC/PMC already carry `EmMaterial.Air`.** Building the
+  air-filled `LayerStack` for L = μ₀ε₀/C₀ by `t with { Material = EmMaterial.Air }` does not compile,
+  and the reason is the right one: only a HALF-SPACE termination has a material to empty. A PEC floor
+  is still a PEC floor with the dielectric gone, which is exactly what the identity asks for.
+- **A model fitted to the real stack is the wrong Green's function for an air-filled one.**
+  `CapacitancePerMetreComplex`'s `InteriorStaticModel` parameter is IGNORED when `airFilled` is set,
+  and the fit is redone. Reusing it would have produced a complete, plausible, wrong [L] on every
+  general-stack board — and nothing would have failed.
+- **A GROUP must not take this path, and the decline is in `SeparationPlan` rather than at each call
+  site.** PCAL4's modal error box separates N modes by the DIFFERENCE of their electrical lengths over
+  Δℓ (`ModeSeparationFloorDegrees`, 0.5°, asked at setup and again per point). A separation sized from
+  the substrate rather than from λ drives every one of those differences toward zero at the bottom of
+  a band, so the quasi-static path would turn PCAL4's refusal from a rare event into the normal case.
+  Supplying the modal γ's quasi-statically would remove that objection — `PlanarModalMedium` already
+  computes them — but it is a different error box and a different measurement.
+- **`SelectSeparation` must be offered the MEASURED separations only, above the crossover.** The
+  quasi-static entry is the last one in the plan and is a fraction of a degree up there, so leaving it
+  in the candidate list lets a frequency just above the crossover score it as "closest to the
+  interval's centre" on a log measure and calibrate against a standard with no phase in it.
+- **One plan, drawn once.** `PlanarSolve` computes `SeparationPlan` and hands the SAME value to both
+  `BuildSet` and the calibrator. Two evaluations of the same function with the same arguments agree
+  today, and PCAL6/R-pcal6-3 is what happens when they stop: a run solves one standard and calibrates
+  against another, silently.
+- **`PlanarPortCalibrator`'s `separations` parameter is the A-vs-B seam at the CALIBRATOR level and is
+  what lets the overlap gate and the Δℓ sweep name a separation directly.** Not on
+  `PlanarCalibrationSettings`, not in the `.cem`, not reachable from the panel — the same status
+  `UseRadialTable = false` and `UseSymmetricFactorization = false` have.
+- **A new `throw` below the UI firewall trips `UserFacingTextGateTests`, and that is the gate doing
+  its job.** `PlanarQuasiStaticLine`'s non-positive-capacitance check is an INTERNAL INVARIANT with no
+  user remedy — the two standards differ only in the bulk cells between their planes, so a
+  non-positive difference means the electrostatic solve did not converge rather than that the geometry
+  is unusual — so it is allowlisted in `tests/Firewall.Tests/user-facing-text-allowlist.txt` with that
+  reason written beside it. Anything a user could ACT on belongs in a `CircuitRF.Diagnostics.Diagnostic`
+  instead.
+- **`PlanarCalibrationSettings.QuasiStaticBelowCrossover` is the SETTINGS-level one, and it had to
+  exist.** Off reproduces the pre-QSC answer bit for bit, which is `IncludePassiveNeighbours`' and
+  `IncludeDrivenGroups`' own sentence and exists for the same two reasons: every measurement here was
+  taken against it, and **the engine's own ceiling refusals need a run that still REACHES a ceiling**.
+  Three `EmDeembedCeilingTests` cases and `PlanarP2MemoryWinsTests`' pinned digest are gated on it
+  now — see §10. **It is NOT a crossover knob**: on or off, its off-state restores a refusal rather
+  than a wrong number, and it has no `.cem` field. The crossover itself stays measured, fixed per
+  stack and unsettable, for the reason §3 gives.
+
+### 9. What was NOT measured, so nothing is read into the silence
+
+- **No conductor term in the quasi-static γ.** α is the dielectric's alone, matching kernel B's own
+  default PEC metal. Whether CL1's surface impedance should also enter γ on this path is a question
+  for whoever turns `ConductorLoss` on by default, and the two would then have to be made to agree
+  across the crossover.
+- **No general-stack (MIM-4) measurement.** The air-filled route for a `LayerStack` is written and
+  compiles, and it reuses `InteriorStaticImages.FitScalar` on the emptied stack, but every number in
+  this section is on a one-slab problem. A buried-level port below its crossover is untested.
+- **No coplanar (RP-2c), widened (PCAL3) or multi-level standard was run through this path.** They are
+  handled by construction — the mode potential, weight and floating vectors ride along into both
+  solves — but "by construction" is not "measured".
+- **The crossover was fitted to two readable points, not to a swept family.** M1 measured three stacks;
+  GaAs's measured values at the bottom of its band are too poor to read a crossover off at all (§3), so
+  the constant rests on FR-4 and the reported board. A third stack of a different εᵣ family would
+  either confirm the `h√(εᵣ−1)` grouping or move the constant.
+- **No timing comparison against the path this replaces**, because on the file that motivated it that
+  path does not run. The size comparison (§6) is the honest one.
+
+### 10. Gates
+
+`tests/Engine.Tests/Mom/QuasiStaticPortCalibrationTests.cs` — eleven tests, ~2 s, routine tier (no
+`Category=Benchmark`; nothing here is a timing measurement and the overlap comparison runs on the
+coarse fixture deliberately, because the ALGEBRA is what is being compared and a coarse mesh tests it
+just as hard).
+
+- the crossover per stack, its order across three stacks, and the reported band sitting under its
+  own board's;
+- a band entirely above the crossover producing `SuggestDeltas`' array **entry for entry**, on three
+  bands — which is what makes every run that ships today bit-identical by construction rather than by
+  tolerance;
+- a real coupled pair forming a calibration GROUP and being declined by name, keeping the measured
+  ladder entry for entry;
+- the longest standard being the SAME length at five different lower band edges, against the old
+  scaling's 161.5 mm at 100 MHz;
+- the overlap, at every frequency and not only its ends, on β, Z_c and the de-embedded s-parameters;
+- the a₂₂ sign margin, with its own recorded number (2.93e+02 worst at or below the shipped
+  separation) **and** the assertion that a 24 h separation is at least 5× worse, which is what the
+  upper cap exists for;
+- `CalQuasiStatic` reading 1 below the crossover, 0 above it and NaN with nothing calibrated, in one
+  sweep — and the note that says what the flag means;
+- both branches of the re-pointed ceiling refusal, asserted on the sentences that would otherwise
+  name a remedy that cannot bind.
+
+plus one that the switch of §8 gives the measured ladder back, entry for entry.
+
+`RawSolveAndCalibrationRemedyTests` passes **unaltered** (§7), and so does
+`PlanarGroupSeparationTests.AGroupedSweepThatCalibratesTodayIsBitIdentical`, whose pinned literals are
+a grouped sweep — the case §8's decline keeps on the measured ladder.
+
+**Four existing tests HAD to change, and none of them is a regression.** All four gate a refusal or a
+pinned literal on a run that this phase deliberately stops producing:
+
+- `EmDeembedCeilingTests`' three cases (`P11_ADenseDeembeddedRun_IsRefusedAtSetup`,
+  `LF3_ADenseCeilingTheAcceleratorWouldClear`, `P11_TheSameRunAccelerated_IsNotRefusedAtSetup`). Their
+  fixture is a 13.1 mm → 299 µm taper on 0.508 mm laminate swept from 400 MHz / 1 GHz — entirely below
+  that stack's 10.9 GHz crossover, so its standards now come out at **N = 1,498 / 2,386** against a
+  5,000 dense ceiling and nothing refuses. That IS the phase. They run with
+  `QuasiStaticBelowCrossover = false`, which is what the switch is for; the refusals themselves are
+  unchanged and still fire on a band above the crossover or a port wide enough to cross on its
+  transverse mesh alone.
+- `PlanarP2MemoryWinsTests.P2_6_TheSweepsPublishedSMovesOnlyByM2sRescaling`. Its 1 GHz point is below
+  FR-4's crossover, so the pinned digest — an anchor for P2/P5/P7's own bit-identity claims — would
+  move. Same switch, same reason, and the same shape as the `WidenForStack = false` line LF1 already
+  put beside it. **Its LF1 point-by-point comparison needed the switch on BOTH sides**, because QSC
+  draws the measured ladder from the crossover: without that, the 5-20 GHz points differ for a reason
+  that has nothing to do with `WidenForStack` and the identity it asserts would be about two changes
+  at once.
+- Nine `CoplanarDeembedTests` cases failed first and were **not** re-pointed — they found a real
+  defect in the crossover law, and §3's second limit is the fix. They pass unaltered.
+
+## RAW1 — "-80 dB through a short transmission line": de-embedding is no longer optional (2026-09-14)
+
+Owner bug report on a real board — a 3.8 mm microstrip trace on 20 mil RO4350, 100 MHz – 6 GHz, EM
+run reported about **-80 dB S21**. The kernel was working correctly. The `.cem` carried
+`"Deembed": false`, and with de-embedding off kernel B published the RAW delta-gap solve.
+
+### 1. The raw solve at an EDGE port is an OPEN CIRCUIT, not a degraded answer
+
+This is the whole finding, and the previous wording of it everywhere in the engine — "includes the
+port discontinuity", "for diagnostics only" — reads as *degraded*, which is why nobody caught it.
+
+An edge port's cut sits ONE CELL INSIDE the drawn metal (`PlanarPortResolution`: "an edge port has a
+feed outside its cut"). The delta gap is therefore a SERIES source whose outer terminal is a single
+isolated sliver of copper, and the port sees that sliver's fringing capacitance in series with
+everything else. Measured, on the reported file and on synthetic controls:
+
+| case | kernel / path | result |
+|---|---|---|
+| the reported file | planar, raw | S11 = 0.99999 − j0.00087, S21 = **−107 dB** |
+| one plain 3.83 × 0.254 mm rectangle | planar, raw | S21 = **−115 dB** |
+| the same rectangle at **7.66 mm** | planar, raw | S11 moves in the **4th decimal** |
+| the same rectangle | planar, de-embedded | S21 = **−0.11 dB** at 100 MHz |
+| the same rectangle | quasi-static (kernel A) | S21 = **−0.005 dB** at 100 MHz |
+
+Converting the raw S11 gives Y11 = jωC with **C = 13.9 fF** at the 254 µm port and **31.8 fF** at the
+558.8 µm one — a ratio of 2.29 against the port-width ratio of 2.20. It is the sliver and nothing
+else. **Doubling the line's length changes the raw answer in the fourth decimal**: the raw path
+carries no information about the structure at all.
+
+`PlanarExcitation.RawScattering`'s own doc comment has said "**R-prt-4: this is never the answer**"
+since `d726f5df`. The `.cem` published it as the answer anyway.
+
+### 2. Why the switch existed, and why removing it loses nothing
+
+PCAL2/R-pcal2-3 added `EmSetup.Deembed` for exactly one reason, stated in its own doc comment: the
+mesh-ceiling refusal recommended "turn de-embedding off and read the raw solve" in prose, and *a
+refusal that names an unreachable remedy is not a remedy*. **The remedy was the defect.** Once it is
+deleted (§3) the switch has no purpose left.
+
+And it never had a second case: de-embedding applies only to `PlanarPortKind.Edge`
+(`IsDeembeddable`), so on a design of internal delta gaps or via ports turning it off already changed
+nothing. **The switch's two settings were "no effect" and "an open circuit."**
+
+What was done:
+
+- `EmSetup.Deembed` and the panel checkbox are **gone**. `CemFile.Deembed` is still DESERIALISED, so
+  a legacy document opens rather than being refused, and sets `EmSetup.LegacyRawSolveRequested`;
+  `EmRunService` warns and runs de-embedded. It is never written back, so the field leaves the file
+  on the next save. That is a deliberate single exception to this format's byte-identical round-trip
+  rule — the field no longer has a meaning to preserve.
+- `PlanarSolveSettings.Deembed` in the ENGINE is untouched and stays the way the far-field and
+  resonance paths ask for a current distribution without paying for calibration (191 references
+  across the test suite). What is removed is a `.cem`'s ability to publish that path's s-parameters.
+
+### 3. Five refusals recommended the raw solve; a source scan found the fifth
+
+Four were in `PlanarSolve` (the RP-2c third-conductor refusal, both branches of the standard-ceiling
+refusal, and the interior-fit-residual refusal). The fifth — `PlanarPort.RefusalFor`, PCAL2's own
+clearance refusal, which called it one of "the two ways past" — was found only because
+`RawSolveAndCalibrationRemedyTests.NoRefusalInTheMomEngineRecommendsReadingTheRawSolve` scans the
+source rather than asserting on one message. **Write the gate as a scan when the defect is a phrase.**
+
+### 4. The ceiling refusal named the wrong cause and three inert remedies
+
+It blamed the port's WIDTH and offered "coarsen the mesh". Measured on the reported file, against
+the 79,055-unknown standard that refused:
+
+| change | standard N |
+|---|---|
+| as reported | 79,055 |
+| `EdgeMesh` off | **79,055 — unchanged** |
+| Auto off, 6 cells/λ, 2 cells across width, edge mesh off (DUT N 1,144 → 290, a **4×** cut) | 13,723 — **still refuses** |
+| P2's 558.8 µm pad narrowed to the 254 µm trace width | 31,644 — **still refuses** |
+| **lower band edge 100 MHz → 1 GHz** | **fits** |
+
+The binding input is the BOTTOM OF THE SWEEP, which the message never mentioned. `SuggestDeltas`
+sizes each separation at `TargetElectricalDegrees` (60°) of electrical length at its own sub-band's
+geometric mean, so length ∝ 1/f_lo, and the separation COUNT steps with the band ratio
+(`DesignBandRatioPerSeparation` = 4). At 100 MHz – 6 GHz that is **3 separations and a 161.5 mm
+longest standard — 42× the 3.8 mm DUT.**
+
+`PlanarCalibration.LongestStandardLengthM` and `StartFrequencyThatFits` now compute this, and
+`PlanarSolve.BandEdgeRemedy` prints it: the band, the separation count, the longest standard's
+length, and the band edge that would fit, rounded UP onto the 1-2-5 ladder. The mesh remedy is still
+mentioned, but as the weak one it is, with the reason.
+
+`StartFrequencyThatFits` scans UPWARD rather than bisecting — the separation count is a step function
+of the band ratio, so the predicted size falls in jumps and a bisection can settle above the first
+frequency that would have worked. It scales from the standard that was ACTUALLY built (N per metre)
+rather than predicting from scratch, and takes only RATIOS of `LongestStandardLengthM`, which is what
+cancels `BuildLine`'s end-run length floor instead of leaving it in an absolute estimate.
+
+### 5. `CalibrationUsable` read 1 for a run that calibrated nothing
+
+In the published `.npy`, `Gamma`, `Zc`, `Eeff`, `Cpul`, `AttenDbPerM` and `CalElectricalDeg` were NaN
+at all 11 frequencies — and `CalibrationUsable` was **1.0 at all 11**. That is the one flag a reader
+checks before trusting the file, and it is how this survived inspection.
+
+It asked only whether the FREQUENCY was above zero. LF1 left it that way deliberately, in a comment
+saying re-pointing it was "a separate decision about a cube people already read". This is that
+decision. It now also asks whether anything was calibrated, which is what the cube's name implies.
+`RawSolveAndCalibrationRemedyTests` asserts BOTH directions in one run pair — a fix returning NaN
+unconditionally would pass the half that matters most and silently break every de-embedded run.
+
+### 6. STILL OPEN — low frequency is blocked by HOW THIS KERNEL DE-EMBEDS, not by its field solve
+
+Worth being precise, because LF1-LF3 (2026-09-13) had just made the low-frequency *field solve* work
+and this looks like a regression of it. It is not. The DUT solves fine at 100 MHz: the same fixture
+de-embedded gives S21 = −0.11 dB, ε_eff = 2.45, Z_c = 99 Ω. ~~and Z_c and ε_eff agree with the
+closed-form microstrip values (106 Ω, 2.777) to 0.1%.~~ **That last clause is wrong on its own
+numbers and was corrected at §QSC**: 99 against 106 is 6.6 % and 2.45 against 2.777 is 12 %, not
+0.1 %. The 0.1 % figure appears to have been carried over from a higher-frequency point. §QSC §3
+measures where the discrepancy comes from — it is the MEASURED value that is wrong at the bottom of
+the band, and it moves toward the quasi-static one as the mesh is refined — and the same trace
+calibrated quasi-statically reads ε_eff = 2.787 and Z_c = 105.7 Ω, i.e. 0.4 % and 0.3 %. **What does not fit is the calibration
+standard.**
+
+**And that is an architectural choice, not a law of MoM.** Owner's observation, and it is correct:
+low-frequency planar structures are not normally hard. The usual approach to an edge port on a
+uniform feed is a QUASI-STATIC port calibration — solve the feed's transverse cross-section for its
+per-unit-length L, C, R, G, get γ and Z_c analytically, and subtract a known electrical length. That
+cost is set by the cross-section only. It does not scale with wavelength, so it has no
+low-frequency wall at all.
+
+circuitRF instead MEASURES γ from two full-wave line standards (D5/D6). That is a real advantage at
+the top of the band — it captures dispersion, the port's own discontinuity and higher-order effects
+without assuming quasi-TEM — but it buys that with a cost that scales as 1/f_lo, because the two
+lines' length difference has to be a measurable fraction of a wavelength. **The low-frequency wall is
+the price of the measured calibration, and nothing else.** At 100 MHz the wall is a 161.5 mm standard
+against a 3.8 mm DUT.
+
+The good news is that the machinery for the standard approach is already in this repository:
+`RlgcExtractor.Extract` is kernel A's per-unit-length cross-section solve, and
+`PlanarDeembed.CapacitancePerMetre` already runs an electrostatic solve on a standard for
+Z_c = γ/(jωC_pul). What is missing is using a quasi-static γ at the bottom of the band instead of a
+measured one.
+
+**Two candidate fixes, in the order I would take them:**
+
+**(a) A quasi-static port calibration below a crossover frequency. BUILT — see §QSC below, which
+supersedes every sentence that used to be in this paragraph.** It removes the wall rather than moving
+it: the reported file now runs from 100 MHz, and its port 2's longest standard went from **79,055
+unknowns to 3,289** while its short standard stayed bit-identical at 1,526.
+
+Three things that were written here as a sketch and that §QSC settled by measurement, kept because
+they are the things a reader of this paragraph would otherwise re-derive wrongly:
+
+- **Supplying γ does NOT by itself remove the long standards.** γ is already an input to
+  `PlanarDeembed.SolveErrorBox`, and the error box still needs two lines — one line gives two complex
+  equations for three complex unknowns. What a known γ buys is that **Δℓ need not be ELECTRICALLY
+  long**, because the 20°-160° usable interval protects the γ EXTRACTION and nothing else.
+- **The supplier is the STANDARD's own electrostatics, not `RlgcExtractor`** — R-qsc-2, decided on
+  four structural grounds in §QSC §2 rather than on the numbers, which is where the sketch above
+  guessed wrong by naming kernel A first.
+- **The a₂₂ sign margin does not collapse as Δℓ shrinks; it collapses as Δℓ GROWS.** The worry
+  recorded above is real but points the wrong way — measured at a few hundred all the way down to one
+  bulk cell, and at **25** when the separation is long enough to reach βΔℓ = nπ. §QSC §4.
+
+**(b) Mesh each standard for ITS OWN sub-band. NOT taken, and (a) removed the need for it** — the
+24× it estimated below is the same order (a) actually delivered, for a change that would have had to
+re-open D4's verbatim rule. Kept as a measured decomposition, not as a plan.
+Cheaper to implement, and it does not remove the
+wall, only lowers it by roughly an order. A measured decomposition (Fr4Line fixture, DUT N = 144,
+bulk cell 939.4 µm):
+
+| f_lo | longest standard | N | cells | its electrical length AT f_lo |
+|---|---|---|---|---|
+| 100 MHz | 161.5 mm | 3,085 | 1,638 | **31.3°** |
+| 500 MHz | 40.3 mm | 892 | 477 | 39° |
+| 1 GHz | 27.2 mm | 654 | 351 | 52.6° |
+| 2 GHz | 16.8 mm | 467 | 252 | 65.1° |
+
+- **NOT "the standard is over-meshed".** Its longitudinal fill is the DUT's bulk cell repeated, which
+  works out at ≈ 33 cells/λ at 6 GHz against a setting of 20 — only ≈ 1.6× loose. Coarsening it buys
+  1.6×, not the 7× needed. (I assumed this was the answer before measuring; it is not. Measure the
+  decomposition before choosing between "too many cells" and "too long a line".)
+- **The real inefficiency: every standard is meshed for the GLOBAL top frequency, but each one only
+  ever SERVES its own sub-band.** `SelectSeparation` picks, per frequency, the separation whose βΔℓ
+  is nearest √(20·160) ≈ 56.6°, so the 161.5 mm standard exists solely to calibrate the bottom
+  ≈ 100–400 MHz — where λ_g ≈ 0.93 m and it is a third of a wavelength. It is meshed with ~172
+  longitudinal cells; at 20 cells/λ for ITS OWN sub-band it needs about **7**. `BuildSet` →
+  `BuildLine` takes no frequency at all, which is why.
+
+Estimated ≈ 24× on that standard (79,055 → ≈ 3,300 on the reported file), which clears the ceiling
+with room. Two honest caveats before anyone implements it: D4's verbatim rule must still hold for the
+TRANSVERSE gridlines and for the end runs (that is where the port's evanescent field lives) — only the
+middle fill is free; and the jump from fine end-run cells to a coarse middle needs grading, since the
+de-embedding peel divides by a₂₁ ∝ ω and the standard's own discretisation error propagates. It needs
+a measured convergence check, not just the code change.
+
+~~Separately still open: at a 1 GHz lower edge the reported file clears the ceiling and then fails
+GMRES — 400 iterations to a relative residual of 1.36e-7 against a 1e-8 tolerance. Different problem,
+not triaged here.~~ **CLOSED at §QSC, and it was never a different problem.** The `.cem` never asked
+for the accelerator; `PlanarKernel` turned it on by itself in the
+`catch (PlanarAcceleratorWouldFitException)` around `PlanarSolve.Run`, because a CALIBRATION STANDARD
+had crossed the 5,000 dense ceiling. The DUT is N = 1,144 and was always comfortably dense. With the
+standards sized quasi-statically the largest is 3,289, nothing crosses the dense ceiling, AIM never
+engages and there is no GMRES to fail — checked on the run rather than assumed (§QSC §6).
+
+### Gates
+
+`tests/Engine.Tests/Mom/RawSolveAndCalibrationRemedyTests.cs` (the source scan, the band-edge
+arithmetic, the `CalibrationUsable` pair, and the raw-is-an-open contrast) and
+`tests/Ui.Tests/Em/PortClearanceRefusalTests.cs` (the legacy `.cem` warns and runs de-embedded; the
+field is dropped on save; no `Deembed` property survives on either `EmSetup` or the view model).
+`PlanarFeedClearanceTests.TheRefusalNamesThePortTheDistanceAndTheOneWayOut` was re-pointed — it used
+to REQUIRE the raw-solve recommendation to be present.
+
 ## CL1 — the surface-impedance term in the full-wave fill (2026-09-14)
 
 `docs/sonnet-briefs/brief-conductor-loss-1-surface-impedance.md`. Kernel B's metal was a PERFECT

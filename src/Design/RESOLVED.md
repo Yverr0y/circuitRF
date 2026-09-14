@@ -1,5 +1,33 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## `EmSetup.Deembed` is GONE, and a legacy `.cem` that carries it warns (2026-09-14)
+
+Owner bug report: an EM run of a 3.8 mm microstrip reported about -80 dB S21. The `.cem` carried
+`"Deembed": false`, and the raw delta-gap solve reads an EDGE port as an OPEN CIRCUIT rather than as
+a degraded answer — the full measurement is `src/Engine/Mom/RESOLVED.md` §RAW1.
+
+What matters on this side of the firewall:
+
+- **`EmSetup.Deembed` and the panel checkbox are removed.** The switch was added (PCAL2/R-pcal2-3)
+  only so the mesh-ceiling refusal's own recommended remedy could be followed from the GUI; that
+  recommendation is deleted, so the switch has no purpose. It never had a second case either —
+  de-embedding applies to edge ports only, so on internal delta gaps it already did nothing.
+- **`CemFile.Deembed` is still DESERIALISED, and only that.** A legacy document opens rather than
+  being refused — refusing would leave a user with a file they cannot open in order to fix it — and
+  sets `EmSetup.LegacyRawSolveRequested`, which `EmRunService` turns into a warning before running
+  de-embedded. `ToFile` never sets it, so the field leaves the document on the next save.
+- **This is a deliberate single exception to the `.cem` byte-identical round-trip rule.** Every other
+  nullable flag in `EmSetupPersistence` exists to preserve that property. This one does not, because
+  the field no longer has a meaning to preserve, and keeping it would make the warning permanent.
+- `LegacyRawSolveRequested` rides in `Clone()` for the reason every other field does: the editor's
+  undo snapshots go through it, and an unrelated edit must not be what silences the warning.
+
+Gate: `tests/Ui.Tests/Em/PortClearanceRefusalTests.cs` — the legacy file warns and runs de-embedded,
+the field is dropped on save, `"Deembed": true` carries no warning, and reflection asserts that no
+`Deembed` property survives on `EmSetup` or on `EmSetupEditorViewModel` (a property that came back
+would compile and silently restore the switch).
+
+
 ## `DrawLaneFraction`'s cosmetic-only status is now written down OUTSIDE this file (2026-09-13)
 
 Brief 8's closeout. The STK5 note below is the finding; what it lacked was a statement anyone reading

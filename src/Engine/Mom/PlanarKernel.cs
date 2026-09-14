@@ -550,6 +550,7 @@ public sealed class PlanarKernel
         var elDeg  = new double[nf * np];
         var resid  = new double[nf * np];
         var rejct  = new double[nf * np];
+        var quasi  = new double[nf * np];
         var usable = new double[nf];
 
         // PCAL4 — a port calibrated as part of a MODAL group has no per-port γ, Z_c or C_pul: those
@@ -562,6 +563,7 @@ public sealed class PlanarKernel
         Array.Fill(elDeg, double.NaN);
         Array.Fill(resid, double.NaN);
         Array.Fill(rejct, double.NaN);
+        Array.Fill(quasi, double.NaN);
         for (int i = 0; i < gamma.Length; i++) { gamma[i] = Complex.NaN; zc[i] = Complex.NaN; }
 
         // …and the slot a calibration lands in is its own PORT NUMBER's, not its position in the
@@ -588,6 +590,7 @@ public sealed class PlanarKernel
                 elDeg[o] = c.Gamma.ElectricalDegrees;
                 resid[o] = c.Box.ConsistencyResidual;
                 rejct[o] = c.Box.RejectedResidual;
+                quasi[o] = c.Source == PlanarCalibrationSource.QuasiStatic ? 1 : 0;
                 if (!c.Gamma.Usable) flagged++;
             }
             // LF1 — the 0 Hz point is NaN, not 1. The comment twenty lines up says a zero in a
@@ -595,10 +598,17 @@ public sealed class PlanarKernel
             // solved as a conduction network with no calibration in it at all (PlanarDcSolve), so
             // "nothing was flagged" and "nothing was measured" must not arrive here as one value.
             //
-            // Asked of the FREQUENCY rather than of the calibration count, deliberately narrow: a
-            // run with de-embedding off also carries no calibrations and has published 1 here since
-            // L8e, and re-pointing that is a separate decision about a cube people already read.
-            usable[i] = pt.FrequencyHz <= 0 ? double.NaN : flagged == 0 ? 1 : 0;
+            // …AND A POINT THAT RAN NO CALIBRATION IS THE SAME CASE, which this used to get wrong.
+            // It asked only about the FREQUENCY, so a run with de-embedding off — which carries no
+            // calibrations at all — published 1 at every point while Gamma, Zc, Eeff, Cpul,
+            // AttenDbPerM and CalElectricalDeg beside it were NaN. That is the one flag a reader
+            // checks before trusting the file, and it said "usable" for a run in which nothing was
+            // calibrated and every edge port read as an open circuit. The narrow question was left
+            // in place deliberately at L8e as "a separate decision about a cube people already
+            // read"; this is that decision, and it goes the other way.
+            usable[i] = pt.FrequencyHz <= 0 || pt.Calibrations.Count == 0
+                ? double.NaN
+                : flagged == 0 ? 1 : 0;
         }
 
         ds.AddToGroup(DiagnosticsGroup, "Gamma",              new DataCube(Ax2(), gamma));
@@ -610,6 +620,19 @@ public sealed class PlanarKernel
         ds.AddToGroup(DiagnosticsGroup, "DeembedResidual",    new DataCube(Ax2(), resid));
         ds.AddToGroup(DiagnosticsGroup, "DeembedRejected",    new DataCube(Ax2(), rejct));
         ds.AddToGroup(DiagnosticsGroup, "CalibrationUsable",  new DataCube(Ax1(), usable));
+
+        // ── QSC — WHICH CALIBRATION PRODUCED THIS POINT'S γ ───────────────────────────────────
+        //
+        // 1 = quasi-static (PlanarQuasiStaticLine: γ = jω√(LC) from the standards' own
+        // electrostatics), 0 = D5's two-line extraction, NaN = this port was not calibrated at this
+        // frequency. A sweep that crosses PlanarCalibration.QuasiStaticCrossoverHz takes BOTH paths,
+        // so it is per (freq, port) and not a property of the run.
+        //
+        // Emitted unconditionally, exactly as PointAddedBySearch is and for the same reason: a
+        // reader of the file can always ask the question and gets an answer rather than a missing
+        // cube to interpret. RAW1 §5 is what a flag that cannot distinguish "measured" from "not
+        // measured" costs.
+        ds.AddToGroup(DiagnosticsGroup, "CalQuasiStatic",      new DataCube(Ax2(), quasi));
 
         // ── ANT-9: which published points the user did not ask for ────────────────────────────
         //

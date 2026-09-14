@@ -724,7 +724,6 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     [ObservableProperty] private bool   _resonanceSearch;
     [ObservableProperty] private bool   _directVerticalKernel;
     [ObservableProperty] private bool   _acceleratedSolve;
-    [ObservableProperty] private bool   _deembed = true;
     [ObservableProperty] private bool   _deembedOutsideCalibrationValidity;
     [ObservableProperty] private bool   _radiationPattern;
 
@@ -1277,19 +1276,6 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         // kernel and the core cap rather than in the Surface-mesh group.
     }
 
-    partial void OnDeembedChanged(bool value)
-    {
-        if (_suppressCommit) return;
-        if (value == Working.Deembed) return;
-        var before = SnapshotJson();
-        Working.Deembed = value;
-        CommitEdit(before, "Change port de-embedding");
-        OnPropertyChanged(nameof(DeembedOutsideValidityEnabled));
-        // No InvalidateMesh(): de-embedding chooses what is done WITH the solved matrix and with
-        // which extra standards, not how the DUT is meshed. The DUT's own mesh is the same either
-        // way — the same rule the accelerator above follows.
-    }
-
     partial void OnDeembedOutsideCalibrationValidityChanged(bool value)
     {
         if (_suppressCommit) return;
@@ -1300,9 +1286,13 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     }
 
     /// <summary>
-    /// PCAL2/R-pcal2-3 — why port de-embedding cannot be turned off, or null when it can. Only the
-    /// planar kernel has a calibration step at all; kernel A's ports are the ends of a uniform line
-    /// by construction and there is nothing to remove.
+    /// PCAL2/R-pcal2-3 — why this panel has no port-calibration controls, or null when it does.
+    /// Only the planar kernel has a calibration step at all; kernel A's ports are the ends of a
+    /// uniform line by construction and there is nothing to remove.
+    ///
+    /// <para>The checkbox that used to be gated on this is gone — de-embedding is no longer
+    /// optional, because its "off" setting published an open circuit at every edge port. This still
+    /// gates the OUTSIDE-VALIDITY override below, which is a real choice.</para>
     /// </summary>
     public string? DeembedDisabledReason =>
         Working.AnalysisKind == EmAnalysisKind.CrossSection
@@ -1311,24 +1301,16 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
             : null;
 
     /// <summary>
-    /// PCAL2/R-pcal2-2 — the override only means anything while there is a de-embedding to apply
-    /// outside its validity. With de-embedding off it is inert, so it is disabled rather than
-    /// ticked and doing nothing — the rule the resonance search already follows against adaptive
-    /// sampling.
+    /// PCAL2/R-pcal2-2 — the override only means anything where there is a de-embedding to apply
+    /// outside its validity, which is now exactly "the planar kernel is running". It used to also
+    /// require the de-embedding checkbox; that checkbox is gone and de-embedding is always on.
     /// </summary>
-    public bool DeembedOutsideValidityEnabled => Deembed && DeembedDisabledReason is null;
+    public bool DeembedOutsideValidityEnabled => DeembedDisabledReason is null;
 
     /// <summary>
     /// R13a, for PCAL2's override. Null when it applies.
     /// </summary>
-    public string? DeembedOutsideValidityDisabledReason =>
-        DeembedDisabledReason is { } r
-            ? r
-            : !Deembed
-                ? "Nothing is being de-embedded, so there is no calibration to apply outside its " +
-                  "validity. The raw solve has no validity condition of this kind — it includes the " +
-                  "port discontinuity by construction."
-                : null;
+    public string? DeembedOutsideValidityDisabledReason => DeembedDisabledReason;
 
     /// <summary>
     /// R13a — why adaptive sampling is unavailable, or null when it is. It only ever applies to the
@@ -1447,7 +1429,6 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         ResonanceSearch      = Working.ResonanceSearch;
         DirectVerticalKernel = Working.DirectVerticalKernel;
         AcceleratedSolve     = Working.AcceleratedSolve;
-        Deembed              = Working.Deembed;
         DeembedOutsideCalibrationValidity = Working.DeembedOutsideCalibrationValidity;
         RadiationPattern     = Working.RadiationPattern;
         ReferenceInputPowerDbm = Working.ReferenceInputPowerDbm;

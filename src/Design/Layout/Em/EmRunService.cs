@@ -7,7 +7,8 @@
 //
 //   kernel A (cross-section) → "tline"   Zc, Gamma, Eeff, AttenDbPerM, Rpul, Lpul, Gpul, Cpul
 //   kernel B (planar)        → "planar"  Gamma, Zc, Eeff, AttenDbPerM, Cpul, CalElectricalDeg,
-//                                        DeembedResidual, DeembedRejected, CalibrationUsable
+//                                        DeembedResidual, DeembedRejected, CalibrationUsable,
+//                                        CalQuasiStatic
 //
 // The two groups are deliberately NOT the same name (L8e D4): a per-unit-length quantity from a 2-D
 // quasi-static solve and one back-solved from a de-embedded full-wave S-matrix are different claims,
@@ -143,7 +144,8 @@ public static class EmRunService
     /// the diagnostics group that makes a wrong answer diagnosable — <c>tline</c>'s Zc / Gamma /
     /// Eeff / AttenDbPerM / Rpul / Lpul / Gpul / Cpul for the cross-section kernel, and
     /// <c>planar</c>'s Cpul / CalElectricalDeg / DeembedResidual / DeembedRejected /
-    /// CalibrationUsable for the full-wave one. Not writing it would lose every one of those.</para>
+    /// CalibrationUsable and CalQuasiStatic for the full-wave one. Not writing it would lose every
+    /// one of those.</para>
     ///
     /// <para>The <c>.sNp</c> keeps its own unsuffixed name deliberately: it is the artifact a
     /// schematic REFERENCES by path, and renaming it would orphan every existing reference.</para>
@@ -512,12 +514,16 @@ public static class EmRunService
                 Fill = setup.DirectVerticalKernel || setup.AcceleratedSolve
                     ? fill
                     : PlanarSolveSettings.Default.Fill,
-                // PCAL2 — the two port-calibration switches. `Deembed` has been in the engine since
-                // L8d with no .cem field to reach it, which made the mesh-ceiling refusal's own
-                // recommended remedy ("turn de-embedding off and read the raw solve") impossible to
-                // follow from either the GUI or the CLI. The second one is the explicit,
-                // self-declaring way past the clearance refusal below.
-                Deembed = setup.Deembed,
+                // PCAL2 — `Deembed` is DELIBERATELY NOT SET from the setup any more, and the .cem
+                // field that used to set it is gone. It stays at the engine default (on). For an
+                // edge port the raw solve is an open circuit rather than a degraded answer, and for
+                // every other port kind de-embedding is already inert, so there was no third case
+                // the switch preserved — EmSetup.LegacyRawSolveRequested carries the whole finding
+                // and the measurement behind it. The engine flag itself is untouched and is still
+                // how the far-field and resonance paths ask for the raw current distribution.
+                //
+                // The one that remains is the explicit, self-declaring way past the clearance
+                // refusal below — it publishes a de-embedded answer, not an uncalibrated one.
                 DeembedOutsideCalibrationValidity = setup.DeembedOutsideCalibrationValidity,
             };
             // ANT-9 — the one combination the panel can express and the engine cannot honour. The
@@ -525,6 +531,20 @@ public static class EmRunService
             // adaptive refinement builds; with adaptive sampling off there is no interpolant and
             // nothing to seed from. Left off, and SAID, rather than quietly doing nothing — which
             // is the failure mode this repository has been bitten by more than once.
+            // A legacy `.cem` asked for something this no longer does. Said, rather than honoured
+            // and rather than ignored: the file's stored answer was an open circuit at every edge
+            // port, so running it as written is not an option — but changing what a document asks
+            // for without saying so is the failure mode this repository keeps paying for.
+            if (setup.LegacyRawSolveRequested)
+                warnings.Add("This EM setup carries \"Deembed\": false, a setting that has been " +
+                             "REMOVED, and the run below is de-embedded. That switch published the " +
+                             "raw delta-gap solve, which is not the structure's response with a " +
+                             "launch included — at an edge port the cut sits one cell inside the " +
+                             "drawn metal, so the port drives an isolated sliver and reads as an " +
+                             "OPEN. Measured on a plain 3.8 mm microstrip it gave S11 = +1 and " +
+                             "S21 = -107 dB, and doubling the line's length moved S11 in the fourth " +
+                             "decimal. Saving this setup drops the field.");
+
             if (setup.ResonanceSearch && !setup.AdaptiveSampling)
                 warnings.Add("The resonance search is on but adaptive frequency sampling is off, so " +
                              "the search has been left off too: it seeds itself from the interpolant " +

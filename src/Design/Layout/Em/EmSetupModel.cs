@@ -325,26 +325,34 @@ public sealed class EmSetup
     public double ReferenceInputPowerDbm { get; set; }
 
     /// <summary>
-    /// <b>PCAL2/R-pcal2-3 — de-embed the ports, or publish the raw solve. ON by default, and this
-    /// is the first user-reachable switch it has ever had.</b> Planar kernel only.
+    /// <b>Set by the loader when a legacy <c>.cem</c> asked for de-embedding to be turned off.
+    /// Never serialised, never editable — the switch it came from has been REMOVED.</b>
     ///
-    /// <para><c>PlanarSolveSettings.Deembed</c> has existed in the engine since L8d and no
-    /// <c>.cem</c> field exposed it, so the remedy the mesh-ceiling refusal has been recommending
-    /// in prose — "turn de-embedding off and read the raw solve instead" — could not be followed
-    /// from the GUI or from <c>circuitrf em</c> at all. It is also one of the two ways past PCAL2's
-    /// own clearance refusal, and a refusal that names an unreachable remedy is not a remedy.</para>
+    /// <para>PCAL2/R-pcal2-3 added that switch for one reason: the mesh-ceiling refusal recommended
+    /// "turn de-embedding off and read the raw solve" in prose, and a refusal naming an unreachable
+    /// remedy is not a remedy. The remedy itself was the defect. For an EDGE port the raw solve is
+    /// not a degraded answer, it is an OPEN CIRCUIT: the port's cut sits one cell inside the drawn
+    /// metal, so the source's outer terminal is an isolated sliver and the port drives nothing but
+    /// that sliver's fringing capacitance. Measured on a plain 3.8 mm × 254 µm microstrip — S₁₁ and
+    /// S₂₂ = +1, S₂₁ = −107 dB, and DOUBLING the line's length moved S₁₁ in the fourth decimal,
+    /// because the raw answer carries no information about the structure at all.</para>
     ///
-    /// <para><b>Turned off, the s-parameters include the port discontinuity</b> — the delta-gap
-    /// excitation's own external reflection, which is what the two-line calibration exists to
-    /// remove — so they are referenced to the port cell rather than to your drawn metal edge and are
-    /// for diagnostics rather than for a circuit. The run says so in its notes. Nothing about kernel
-    /// A is affected: a cross-section solve has no calibration step to turn off.</para>
+    /// <para>And for every OTHER port kind the switch was already inert: de-embedding only ever
+    /// applies to <c>PlanarPortKind.Edge</c> (<c>PlanarPortResolution.IsDeembeddable</c>), so on a
+    /// design of internal delta gaps turning it off changed nothing. A switch whose two settings are
+    /// "no effect" and "an open circuit" has no third case to preserve.</para>
     ///
-    /// <para>Nullable + omitted at its default (on) in the <c>.cem</c>, the same polarity
-    /// <see cref="AdaptiveSampling"/> uses, so a file written before this existed loads and
-    /// re-serialises byte-identically.</para>
+    /// <para>The engine's own <c>PlanarSolveSettings.Deembed</c> is untouched and stays available to
+    /// callers who want the raw current distribution rather than port s-parameters — the far-field
+    /// and resonance-search paths use it exactly that way. What is removed is the ability for a
+    /// <c>.cem</c> to publish that path's s-parameters as an answer.</para>
+    ///
+    /// <para>A file carrying <c>"Deembed": false</c> still LOADS — refusing it would leave the user
+    /// with a document they cannot open to fix — and runs de-embedded, saying so in a warning. It
+    /// re-serialises WITHOUT the field, which is the one deliberate exception to the byte-identical
+    /// round-trip rule the rest of this file follows: the field no longer has a meaning to preserve.</para>
     /// </summary>
-    public bool Deembed { get; set; } = true;
+    public bool LegacyRawSolveRequested { get; set; }
 
     /// <summary>
     /// <b>PCAL2/R-pcal2-2 — publish a de-embedded answer even where the two-line calibration is not
@@ -393,7 +401,7 @@ public sealed class EmSetup
         ResonanceSearch        = ResonanceSearch,
         DirectVerticalKernel   = DirectVerticalKernel,
         AcceleratedSolve       = AcceleratedSolve,
-        Deembed                = Deembed,
+        LegacyRawSolveRequested = LegacyRawSolveRequested,
         DeembedOutsideCalibrationValidity = DeembedOutsideCalibrationValidity,
         RadiationPattern       = RadiationPattern,
         ReferenceInputPowerDbm = ReferenceInputPowerDbm,

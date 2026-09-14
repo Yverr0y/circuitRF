@@ -291,10 +291,19 @@ public sealed class PlanarP2MemoryWinsTests
         // exists for: it reproduces the arithmetic these literals were pinned on, so P4/P5/P7's own
         // claims are still assertions about this tree. The widened sweep is measured against it
         // BELOW, point by point, which is the part that says LF1 moved one point and no other.
+        // ── QSC — AND THROUGH THE PRE-QSC CALIBRATION PATH, FOR THE SAME REASON ────────────────
+        //
+        // QSC supplies γ quasi-statically below a per-stack crossover, which on 1.6 mm FR-4 is
+        // 3.05 GHz — i.e. exactly one point of this sweep, the 1 GHz one. The digest below would
+        // move, and a bare re-pin would accept ANY change rather than that one.
+        // `QuasiStaticBelowCrossover = false` is what that switch exists for: it reproduces the
+        // arithmetic these literals were pinned on, so P2/P5/P7's own claims stay assertions about
+        // this tree. Same shape as the `WidenForStack` line beside it, one phase later.
         var preLf1 = PlanarSolveSettings.Default with
         {
-            Deembed = true,
-            Dcim    = DcimSettings.Default with { WidenForStack = false },
+            Deembed     = true,
+            Dcim        = DcimSettings.Default with { WidenForStack = false },
+            Calibration = PlanarCalibrationSettings.Default with { QuasiStaticBelowCrossover = false },
         };
 
         var run = PlanarSolve.Run(mesh, ports, slab, [1e9, 5e9, 10e9, 15e9, 20e9], preLf1);
@@ -344,8 +353,20 @@ public sealed class PlanarP2MemoryWinsTests
         // which is a statement about a code path rather than about a tolerance. 1 GHz is at product
         // 10 and does move; how far is reported rather than asserted at a threshold, because the
         // point of the measurement is the size of it.
+        //
+        // QSC — the calibration path is held at PRE-QSC on BOTH sides here, so `WidenForStack` is
+        // the only thing that differs and the identity below is still a statement about it alone.
+        // It has to be: QSC draws the measured ladder from the CROSSOVER rather than from the user's
+        // lower edge, so on a sweep that straddles 3.05 GHz the 5-20 GHz points calibrate against a
+        // different separation set and are legitimately not bit-identical. What QSC itself moves is
+        // measured in QuasiStaticPortCalibrationTests, which is where that belongs.
         var shipped = PlanarSolve.Run(mesh, ports, slab, [1e9, 5e9, 10e9, 15e9, 20e9],
-                                      PlanarSolveSettings.Default with { Deembed = true });
+                                      PlanarSolveSettings.Default with
+                                      {
+                                          Deembed     = true,
+                                          Calibration = PlanarCalibrationSettings.Default with
+                                                        { QuasiStaticBelowCrossover = false },
+                                      });
 
         for (int i = 0; i < run.Points.Count; i++)
         {

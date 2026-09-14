@@ -952,22 +952,16 @@
                            Text="{Binding ViewModel.AcceleratedSolveDisabledReason}"
                            IsVisible="{Binding ViewModel.AcceleratedSolveDisabledReason, Converter={x:Static ObjectConverters.IsNotNull}}"/>
 
-                <!-- ── PCAL2 — the two port-calibration switches, both first reachable here ──
-                     R-pcal2-3: PlanarSolveSettings.Deembed has existed since L8d with no .cem field
-                     to reach it, so the mesh-ceiling refusal's own recommended remedy ("turn
-                     de-embedding off and read the raw solve") could not be followed from anywhere.
-                     R-pcal2-2: the override is named for what it DOES, not for the check it
+                <!-- ── PCAL2 — the calibration override. The de-embedding checkbox that stood
+                     here is GONE: R-pcal2-3 added it only so the mesh-ceiling refusal's recommended
+                     remedy ("turn de-embedding off and read the raw solve") could be followed, and
+                     that remedy was itself the defect - the raw solve reads every edge port as an
+                     open circuit, and on every other port kind de-embedding is already inert. The
+                     refusal no longer recommends it; see EmSetup.LegacyRawSolveRequested.
+                     R-pcal2-2: the override below is named for what it DOES, not for the check it
                      suppresses, because the arithmetic still runs outside its validity and the file
                      it writes says so in its own provenance block. -->
                 <TextBlock Classes="colhdr" Margin="0,8,0,0" Text="Port de-embedding"/>
-                <CheckBox Name="DeembedCheck" FontSize="11"
-                          Content="De-embed the ports (remove the feed and the port discontinuity)"
-                          IsChecked="{Binding ViewModel.Deembed}"
-                          IsEnabled="{Binding ViewModel.DeembedDisabledReason, Converter={x:Static ObjectConverters.IsNull}}"
-                          ToolTip.Tip="Measures each port's feed against a two-line calibration standard and removes it, so the answer is referenced to your drawn metal edge. Turn it off to read the raw solve instead: those s-parameters include the delta-gap port's own discontinuity, are referenced to the port cell rather than to your metal, and are for diagnostics rather than for a circuit. Turning it off also skips every calibration standard, which is most of a de-embedded run's solve time."/>
-                <TextBlock Classes="colhdr" TextWrapping="Wrap"
-                           Text="{Binding ViewModel.DeembedDisabledReason}"
-                           IsVisible="{Binding ViewModel.DeembedDisabledReason, Converter={x:Static ObjectConverters.IsNotNull}}"/>
                 <CheckBox Name="DeembedOutsideValidityCheck" FontSize="11"
                           Content="De-embed outside the calibration's validity"
                           IsChecked="{Binding ViewModel.DeembedOutsideCalibrationValidity}"

@@ -97,13 +97,30 @@ public sealed record PlanarErrorBox(
 /// <para>Taken over both standards this frequency actually read (the short line and the selected long
 /// one), because the error box is solved from the pair and either one resonating contaminates it.</para>
 /// </param>
+/// <summary>
+/// <b>QSC — where this point's γ came from, and it rides on every calibration rather than on the
+/// run.</b> A sweep that crosses <see cref="PlanarCalibration.QuasiStaticCrossoverHz"/> takes both
+/// paths, so "which calibration produced this point" is a per-point question; RAW1 §5 is what
+/// happens when a diagnostic flag cannot distinguish "measured" from "not measured".
+/// </summary>
+public enum PlanarCalibrationSource
+{
+    /// <summary>D5's two-line extraction — γ from ½·tr(M) on two full-wave standards.</summary>
+    Measured,
+
+    /// <summary><see cref="PlanarQuasiStaticLine"/> — γ = jω√(LC) from the standards' own
+    /// electrostatics. The error box is still solved from two standards; only γ's SOURCE differs.</summary>
+    QuasiStatic,
+}
+
 public sealed record PlanarPortCalibration(
     int                            PortNumber,
     PlanarCalibration.GammaResult  Gamma,
     PlanarErrorBox                 Box,
     Complex                        Zc,
     double                         CPerMetre,
-    double                         NeighbourResonanceDegrees = double.NaN);
+    double                         NeighbourResonanceDegrees = double.NaN,
+    PlanarCalibrationSource        Source = PlanarCalibrationSource.Measured);
 
 public static class PlanarDeembed
 {
@@ -386,6 +403,29 @@ public static class PlanarDeembed
                                            IReadOnlyList<double>? potential = null,
                                            IReadOnlyList<double>? weight = null,
                                            IReadOnlyList<double>? floating = null)
+        => StaticCapacitanceComplex(mesh, staticScalar, settings, cores, slabHeightM,
+                                    potential, weight, floating).Real;
+
+    /// <summary>
+    /// <b>QSC — <see cref="StaticCapacitance"/> with the imaginary part KEPT</b>, which is the whole
+    /// body and the one the double-valued reading above is <c>.Real</c> of.
+    ///
+    /// <para><c>Y = jωC</c> is exactly <c>G + jωC</c> when the loss rides in the imaginary part
+    /// (R-mom-6), and <see cref="PlanarKernelTerms.StaticScalar"/> is built on
+    /// <see cref="GroundedSlab.EpsComplex"/> — so the charge this solve returns already carries the
+    /// dielectric's tanδ and <c>.Real</c> is where it was being dropped. A quasi-static
+    /// <c>γ = jω√(LC)</c> needs it: without it the reported α would be exactly zero on a lossy
+    /// board, which is a plausible, wrong number of the kind this file's headers keep warning
+    /// about. D7's Z_c still takes a double and is untouched.</para>
+    /// </summary>
+    public static Complex StaticCapacitanceComplex(
+        PlanarMesh mesh, PlanarKernelTerms staticScalar,
+        PlanarFillSettings? settings = null,
+        PlanarFillCores? cores = null,
+        double slabHeightM = 0,
+        IReadOnlyList<double>? potential = null,
+        IReadOnlyList<double>? weight = null,
+        IReadOnlyList<double>? floating = null)
     {
         ArgumentNullException.ThrowIfNull(mesh);
         var st = settings ?? PlanarFillSettings.Default;
@@ -416,8 +456,8 @@ public static class PlanarDeembed
                    : PlanarFill.BuildGeometryOnlyCores(mesh, st);
 
             var acc = PlanarStaticAim.Build(gc, staticScalar, slabHeightM, aim);
-            return potential is null ? acc.TotalCapacitance()
-                                     : acc.ModalCapacitance(potential, weight, floating);
+            return potential is null ? acc.TotalCapacitanceComplex()
+                                     : acc.ModalCapacitanceComplex(potential, weight, floating);
         }
 
         GuardCapacitanceCeiling(mesh, accelerated: false);
@@ -467,7 +507,7 @@ public static class PlanarDeembed
         Complex total = Complex.Zero;
         if (weight is null) for (int i = 0; i < m; i++) total += q[i];
         else                for (int i = 0; i < m; i++) total += weight[i] * q[i];
-        return total.Real;
+        return total;
     }
 
     /// <summary>
@@ -670,14 +710,31 @@ public static class PlanarDeembed
                                              GroundedSlab slab, PlanarFillSettings? settings = null,
                                              PlanarFillCores? shortCores = null,
                                              PlanarFillCores? longCores = null)
+        => CapacitancePerMetreComplex(shortStd, longStd, slab, settings, shortCores, longCores).Real;
+
+    /// <summary>
+    /// <b>QSC — the same differencing with the imaginary part KEPT</b>; see
+    /// <see cref="StaticCapacitanceComplex"/>. The scalar reading above is this, <c>.Real</c>.
+    /// </summary>
+    /// <param name="airFilled">
+    /// <b>Solve the same geometry with the dielectric removed</b>, which is the only route to [L]
+    /// that does not import a second kernel's answer: <c>L = μ₀ε₀/C₀</c>.
+    /// <see cref="CapacitanceMatrixPerMetre"/>'s own parameter, one conductor down.
+    /// </param>
+    public static Complex CapacitancePerMetreComplex(
+        PlanarStandard shortStd, PlanarStandard longStd, GroundedSlab slab,
+        PlanarFillSettings? settings = null,
+        PlanarFillCores? shortCores = null, PlanarFillCores? longCores = null,
+        bool airFilled = false)
     {
-        var terms = PlanarKernelTerms.StaticScalar(slab);
-        double c1 = StaticCapacitance(shortStd.Mesh, terms, settings, shortCores, slab.HeightM,
-                                      shortStd.ModePotential, shortStd.ModeWeight,
-                                      shortStd.FloatingPotential);
-        double c2 = StaticCapacitance(longStd.Mesh,  terms, settings, longCores, slab.HeightM,
-                                      longStd.ModePotential, longStd.ModeWeight,
-                                      longStd.FloatingPotential);
+        var medium = airFilled ? slab with { Material = new EmMaterial(1.0, 0.0) } : slab;
+        var terms  = PlanarKernelTerms.StaticScalar(medium);
+        Complex c1 = StaticCapacitanceComplex(shortStd.Mesh, terms, settings, shortCores, slab.HeightM,
+                                              shortStd.ModePotential, shortStd.ModeWeight,
+                                              shortStd.FloatingPotential);
+        Complex c2 = StaticCapacitanceComplex(longStd.Mesh,  terms, settings, longCores, slab.HeightM,
+                                              longStd.ModePotential, longStd.ModeWeight,
+                                              longStd.FloatingPotential);
         double dl = longStd.LengthM - shortStd.LengthM;
 
         if (!(dl > 0))
@@ -713,22 +770,57 @@ public static class PlanarDeembed
                                              PlanarFillCores? shortCores = null,
                                              PlanarFillCores? longCores = null,
                                              InteriorStaticModel? model = null)
+        => CapacitancePerMetreComplex(shortStd, longStd, stack, levelZ, referenceHeightM,
+                                      settings, shortCores, longCores, model).Real;
+
+    /// <inheritdoc cref="CapacitancePerMetreComplex(PlanarStandard, PlanarStandard, GroundedSlab, PlanarFillSettings, PlanarFillCores, PlanarFillCores, bool)"/>
+    /// <param name="airFilled">
+    /// <b>QSC — every layer's material replaced by air, the TERMINATIONS kept.</b> A PEC floor is
+    /// still a PEC floor with the dielectric gone: what <c>L = μ₀ε₀/C₀</c> asks for is the same
+    /// conductor geometry over the same ground in a vacuum, not an unbounded one. The fit is redone
+    /// for that medium, so <paramref name="model"/> is ignored when this is set — a model fitted to
+    /// the real stack is the wrong Green's function for an air-filled one, and reusing it would be a
+    /// plausible, wrong [L].
+    /// </param>
+    public static Complex CapacitancePerMetreComplex(
+        PlanarStandard shortStd, PlanarStandard longStd,
+        LayerStack stack, double levelZ, double referenceHeightM,
+        PlanarFillSettings? settings = null,
+        PlanarFillCores? shortCores = null, PlanarFillCores? longCores = null,
+        InteriorStaticModel? model = null, bool airFilled = false)
     {
         ArgumentNullException.ThrowIfNull(stack);
-        var terms = PlanarKernelTerms.StaticScalarAt(
-            model ?? InteriorStaticImages.FitScalar(stack, levelZ, levelZ));
+        var medium = airFilled ? AirFilled(stack) : stack;
+        var terms  = PlanarKernelTerms.StaticScalarAt(
+            airFilled ? InteriorStaticImages.FitScalar(medium, levelZ, levelZ)
+                      : model ?? InteriorStaticImages.FitScalar(medium, levelZ, levelZ));
 
-        double c1 = StaticCapacitance(shortStd.Mesh, terms, settings, shortCores, referenceHeightM,
-                                      shortStd.ModePotential, shortStd.ModeWeight,
-                                      shortStd.FloatingPotential);
-        double c2 = StaticCapacitance(longStd.Mesh,  terms, settings, longCores, referenceHeightM,
-                                      longStd.ModePotential, longStd.ModeWeight,
-                                      longStd.FloatingPotential);
+        Complex c1 = StaticCapacitanceComplex(shortStd.Mesh, terms, settings, shortCores, referenceHeightM,
+                                              shortStd.ModePotential, shortStd.ModeWeight,
+                                              shortStd.FloatingPotential);
+        Complex c2 = StaticCapacitanceComplex(longStd.Mesh,  terms, settings, longCores, referenceHeightM,
+                                              longStd.ModePotential, longStd.ModeWeight,
+                                              longStd.FloatingPotential);
         double dl = longStd.LengthM - shortStd.LengthM;
 
         if (!(dl > 0))
             throw new InvalidOperationException("The two calibration standards have the same length.");
         return (c2 - c1) / dl;
+    }
+
+    /// <summary>The same stack with every dielectric replaced by vacuum and every termination KIND
+    /// left alone — see <see cref="CapacitancePerMetreComplex(PlanarStandard, PlanarStandard, LayerStack, double, double, PlanarFillSettings, PlanarFillCores, PlanarFillCores, InteriorStaticModel, bool)"/>.</summary>
+    private static LayerStack AirFilled(LayerStack stack)
+    {
+        var layers = new MediumLayer[stack.LayerCount];
+        for (int i = 0; i < layers.Length; i++)
+            layers[i] = stack.Layers[i] with { Material = EmMaterial.Air };
+
+        // A PEC or PMC termination already carries EmMaterial.Air and its KIND is what matters — a
+        // PEC floor is still a PEC floor with the dielectric gone. Only a half-space needs emptying.
+        static Termination Vacuum(Termination t) => t.IsOpen ? Termination.Air : t;
+
+        return new LayerStack(Vacuum(stack.Bottom), layers, Vacuum(stack.Top));
     }
 
     /// <summary>Z_c = γ/(jωC_pul) — the standard γ-and-C route. See the file header for what it

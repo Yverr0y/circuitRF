@@ -151,6 +151,44 @@ namespace CircuitRF.Engine.Mom;
 /// nearly-degenerate group is DECLINED by name rather than de-embedded against a modal basis decided
 /// by round-off. The measured distance is reported on every point whether or not it trips.
 /// </param>
+/// <param name="QuasiStaticBelowCrossover">
+/// <b>QSC — whether a frequency below <see cref="PlanarCalibration.QuasiStaticCrossoverHz"/> takes
+/// the QUASI-STATIC γ and its two short standards, rather than D5's two-line extraction and the
+/// λ-scaled ladder.</b> On, because the wall is what a user gets otherwise and — below the crossover
+/// — the measured value is the less accurate of the two as well as the more expensive.
+///
+/// <para><b>Off is how the pre-QSC answer is reproduced for comparison</b>, which is
+/// <see cref="IncludePassiveNeighbours"/>'s and <see cref="IncludeDrivenGroups"/>'s own sentence and
+/// exists for the same two reasons: every measurement in §QSC's findings was taken against it, and
+/// the engine's own ceiling refusals are gated on a run that still reaches the ceiling. <b>It is NOT
+/// a crossover knob</b> — the crossover itself is measured, fixed per stack and deliberately not
+/// settable, because a knob THERE invites someone to put it in the wrong place and both failure
+/// modes publish a smooth, plausible, wrong phase. This one is on or off, its off-state restores a
+/// refusal rather than a wrong number, and it has no <c>.cem</c> field and no panel control.</para>
+///
+/// <para>It changes nothing on a band that sits entirely above the crossover, which is where the
+/// measured calibration is right and where the whole L8/L9 acceptance set lives.</para>
+/// </param>
+/// <param name="QuasiStaticSeparationHeights">
+/// <b>QSC — the line separation used BELOW the crossover, in substrate heights, and it is
+/// frequency-independent on purpose.</b> That is the whole saving: with γ supplied quasi-statically
+/// (<see cref="PlanarQuasiStaticLine"/>) Δℓ no longer has to be ELECTRICALLY long, so it is sized
+/// from the substrate and the mesh instead of from λ, and the sub-band ladder collapses to ONE
+/// separation because there is no βΔℓ window left to cover.
+///
+/// <para><b>6, and it is measured rather than chosen for roundness</b> — see
+/// <c>src/Engine/Mom/RESOLVED.md</c> §QSC. What degrades as Δℓ shrinks is the error box's own
+/// conditioning, smoothly, as 1/Δℓ; what does NOT degrade smoothly is the a₂₂ SIGN selection, whose
+/// margin (<see cref="PlanarErrorBox.RejectedResidual"/>) is the quantity M3 swept and the reason
+/// the floor is not lower still.</para>
+/// </param>
+/// <param name="QuasiStaticSeparationMinBulkCells">
+/// <b>…and never fewer than this many of the port's OWN bulk cells.</b> A separation is realised by
+/// <see cref="PlanarCalibration.BuildLine"/> as a whole number of bulk cells, so on a coarse mesh a
+/// substrate-sized target can round to one or two of them — and two standards differing by one cell
+/// differ by one cell's worth of discretisation error as well as by a length. This floor is what
+/// stops the mesh deciding the separation by accident.
+/// </param>
 public sealed record PlanarCalibrationSettings(
     double EndRunHeights                     = 3.0,
     double ShortLineHeights                  = 3.0,
@@ -161,7 +199,10 @@ public sealed record PlanarCalibrationSettings(
     int    NeighbourExtensionCells           = 0,
     bool   IncludeDrivenGroups               = true,
     int    MaxCalibrationGroupSize           = 3,
-    double ModeSeparationFloorDegrees        = 0.5)
+    double ModeSeparationFloorDegrees        = 0.5,
+    bool   QuasiStaticBelowCrossover         = true,
+    double QuasiStaticSeparationHeights      = 6.0,
+    int    QuasiStaticSeparationMinBulkCells = 4)
 {
     public static readonly PlanarCalibrationSettings Default = new();
 
@@ -190,6 +231,50 @@ public sealed record PlanarCalibrationSettings(
     /// edge. Designing to 4:1 costs one extra standard mesh and puts the same band at 105°.
     /// </summary>
     public const double DesignBandRatioPerSeparation = 4.0;
+
+    /// <summary>
+    /// <b>QSC — where the MEASURED calibration stops being worth its cost, as a normalised
+    /// frequency: h·√(εᵣ−1)/λ₀.</b> That grouping is the classical one for microstrip dispersion —
+    /// it is what makes one number cover a 1.6 mm FR-4 board and a 0.1 mm MMIC — and
+    /// <see cref="PlanarCalibration.QuasiStaticCrossoverHz"/> is the only place it is read.
+    ///
+    /// <para><b>0.03, fitted to M1's own measured tables and not to a rule of thumb.</b> Quasi-static
+    /// γ was compared against the two-line γ per frequency on three stacks at two mesh densities, and
+    /// the ~1 % crossover came out at ≈ 3 GHz on 1.6 mm FR-4 (ratio 0.0295) and ≈ 10 GHz on the
+    /// 0.6 mm board the series was reported on (0.0347). 0.03 sits at the conservative end of that
+    /// pair, which is the right end: below the crossover the quasi-static path is not merely cheaper
+    /// but MORE accurate (the two-line value at 100 MHz is 7 % out on a refined mesh and 17.8 % out
+    /// on the default one, moving toward the quasi-static answer as the mesh tightens), while above
+    /// it real dispersion is what the measured calibration exists to capture. Tables in
+    /// <c>src/Engine/Mom/RESOLVED.md</c> §QSC.</para>
+    ///
+    /// <para><b>It is deliberately NOT a user setting.</b> A knob here invites someone to put it in
+    /// the wrong place and there is no way for them to know they have: both failure modes publish a
+    /// smooth, plausible, wrong phase.</para>
+    /// </summary>
+    public const double DispersionCrossoverRatio = 0.03;
+
+    /// <summary>
+    /// <b>QSC — the SECOND crossover limit, and it exists because the first one is infinite on a
+    /// homogeneous substrate.</b> <c>h/λ₀</c>, an absolute electrical thickness, and the crossover is
+    /// the LOWER of the two.
+    ///
+    /// <para><see cref="DispersionCrossoverRatio"/> measures DIELECTRIC dispersion — ε_eff climbing
+    /// from (εᵣ+1)/2 toward εᵣ — and at εᵣ = 1 there is none, so that term alone says "quasi-static is
+    /// exact at every frequency". <b>For the MODE that is true and for the STRUCTURE it is not:</b> a
+    /// coplanar pair 5 mm above its plane in air at 10 GHz is a sixth of a free-space wavelength
+    /// thick, radiates, and its measured β sits 3.6 % off k₀ — which the two-line calibration
+    /// captures and a quasi-TEM γ cannot. That is not a hypothetical; it is what
+    /// <c>CoplanarDeembedTests</c> measured the moment the first term was allowed to answer alone.</para>
+    ///
+    /// <para><b>0.02, and it is chosen to be INERT on every stack M1 measured</b> — the dispersion
+    /// term binds first on FR-4 (3.05 against 3.75 GHz), on the reported board (8.65 against 9.99 GHz)
+    /// and on GaAs (26.1 against 60 GHz) — so it moves no number this brief recorded. It binds only as
+    /// εᵣ → 1, where the other term runs away. Being a MINIMUM it can only LOWER a crossover, i.e.
+    /// only ever move a point from the quasi-static path back onto the measured one, which is the
+    /// conservative direction.</para>
+    /// </summary>
+    public const double ElectricalThicknessCrossoverRatio = 0.02;
 }
 
 /// <summary>One synthesised uniform line: its mesh, its two ports, and the length between the two
@@ -724,6 +809,261 @@ public static class PlanarCalibration
         return deltas;
     }
 
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // QSC — the crossover, and the one short separation below it
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// <b>Below this frequency a port is calibrated with a QUASI-STATIC γ and two SHORT standards;
+    /// above it, with D5's measured γ and the λ-scaled ladder.</b>
+    /// <b>The LOWER of two limits</b> —
+    /// <c>DispersionCrossoverRatio·c / (h√(εᵣ−1))</c> and
+    /// <c>ElectricalThicknessCrossoverRatio·c / h</c> — each of which has its own note; the first
+    /// carries the fit and the measured tables, the second says why one term is not enough.
+    ///
+    /// <para><b>The two paths are not interchangeable and neither is a fallback for the other.</b>
+    /// Above the crossover the disagreement is REAL DISPERSION and the measured calibration is the
+    /// one that is right; below it the disagreement is the MEASURED value being wrong, which M1
+    /// proved by refinement rather than asserting — on the reported board the two-line ε_eff at
+    /// 100 MHz reads 2.02 on the default mesh and 2.45 on a refined one against a static 2.786 it
+    /// must approach as f → 0.</para>
+    ///
+    /// <para><b>An AIR substrate does not get "+∞", and that is the whole reason there are two
+    /// terms.</b> The dispersion term alone says so — correctly about the MODE, since every bound mode
+    /// of a homogeneous medium is exactly TEM — and wrongly about the STRUCTURE, which can still be a
+    /// sixth of a wavelength thick and radiating. See
+    /// <see cref="PlanarCalibrationSettings.ElectricalThicknessCrossoverRatio"/>.</para>
+    /// </summary>
+    public static double QuasiStaticCrossoverHz(GroundedSlab slab)
+    {
+        ArgumentNullException.ThrowIfNull(slab);
+        if (!(slab.HeightM > 0)) return double.PositiveInfinity;
+
+        // THE LOWER OF TWO LIMITS, and the second is not a belt-and-braces addition — without it a
+        // homogeneous substrate (εᵣ = 1) answers "+∞" and hands the quasi-static path a structure
+        // that is a sixth of a wavelength thick. See ElectricalThicknessCrossoverRatio.
+        double disp = slab.HeightM * Math.Sqrt(Math.Max(slab.Material.EpsR - 1.0, 0.0));
+        double byDispersion = disp > 0
+            ? PlanarCalibrationSettings.DispersionCrossoverRatio * EmConstants.C0 / disp
+            : double.PositiveInfinity;
+        double byThickness =
+            PlanarCalibrationSettings.ElectricalThicknessCrossoverRatio * EmConstants.C0 / slab.HeightM;
+
+        return Math.Min(byDispersion, byThickness);
+    }
+
+    /// <summary>
+    /// <b>The ONE separation the quasi-static path uses, whatever the band</b> — sized from the
+    /// substrate height and floored at a whole number of the port's own bulk cells. Frequency does
+    /// not appear, which is the entire saving: <see cref="SuggestDeltas"/>'s λ-scaled ladder is what
+    /// makes a 100 MHz lower edge cost a 161.5 mm standard, and there is no βΔℓ window left to cover
+    /// once γ is supplied.
+    /// </summary>
+    /// <param name="port">The port whose bulk cell floors the answer, or null to take the substrate
+    /// term alone — which is what <see cref="PlanarSolve"/>'s ceiling refusal wants, since it is
+    /// sizing a message rather than a mesh.</param>
+    public static double QuasiStaticSeparationM(GroundedSlab slab, PlanarPortResolution? port,
+                                                PlanarCalibrationSettings? settings = null)
+    {
+        ArgumentNullException.ThrowIfNull(slab);
+        var s = settings ?? PlanarCalibrationSettings.Default;
+
+        // ── AND IT IS CAPPED FROM ABOVE, WHICH IS THE OPPOSITE OF THE OBVIOUS WORRY ──────────
+        //
+        // M3 swept Δℓ from 24 substrate heights down to one bulk cell and the error box degrades
+        // GENTLY going DOWN (max|ΔS| against the measured reference at 1 GHz: 1.2e-3 at 24 h,
+        // 6.0e-4 at 6 h, 1.7e-3 at one bulk cell) and BREAKS going UP: at 24 h the separation
+        // reaches βΔℓ = 170° at 2 GHz, which is D6's own denominator zero at βΔℓ = nπ, and the a₂₂
+        // sign margin collapses from ~1e3 to 25. A supplied γ frees Δℓ from the interval's LOWER
+        // end — that is the whole point — and leaves its upper end exactly where it was.
+        //
+        // So the substrate term is capped at the same electrical length `SuggestDeltas` aims a
+        // measured separation at, evaluated at the CROSSOVER, which is the highest frequency this
+        // separation ever serves. The h cancels: βΔℓ there is a pure function of εᵣ, ≈ 58° on FR-4
+        // and ≈ 50° on GaAs, so the cap is inert on any ordinary board and binds only on a
+        // substrate close enough to air that the crossover runs away.
+        double want = Math.Min(s.QuasiStaticSeparationHeights * slab.HeightM,
+                               DeltaAt(slab, QuasiStaticCrossoverHz(slab), s));
+
+        // The mesh has the last word, and it would have it anyway: BuildLine realises a separation
+        // as a whole number of bulk cells, so a target under one cell simply becomes one cell. This
+        // makes that floor explicit and puts it where D7's capacitance DIFFERENCING needs it —
+        // C_pul is (C₂ − C₁)/Δℓ, and two standards differing by one cell difference by one cell's
+        // worth of discretisation error as well.
+        if (port is not null)
+            want = Math.Max(want, s.QuasiStaticSeparationMinBulkCells * port.BulkCellM);
+        return want;
+    }
+
+    /// <summary>
+    /// <b>QSC — the separations a band actually builds, and which of them is the quasi-static one.</b>
+    /// </summary>
+    /// <param name="DeltaLM">The separations, measured ladder first and the quasi-static one (if any)
+    /// LAST — so a band entirely above the crossover is <see cref="SuggestDeltas"/>'s own array,
+    /// index for index, and every such run is bit-identical to the one that shipped.</param>
+    /// <param name="QuasiStaticIndex">Which entry is the short, frequency-independent one, or −1 when
+    /// the whole band sits above the crossover and there is none.</param>
+    /// <param name="CrossoverHz">The crossover this plan was drawn at, carried so a caller reporting
+    /// which path a point took does not recompute it.</param>
+    public readonly record struct PlanarSeparationPlan(
+        double[] DeltaLM, int QuasiStaticIndex, double CrossoverHz)
+    {
+        /// <summary>Whether <paramref name="fHz"/> is calibrated quasi-statically under this plan.
+        /// <b>The one place the question is asked</b> — <see cref="PlanarPortCalibrator"/>'s own
+        /// separation choice, its γ source and the run's diagnostics all read it, and a second
+        /// spelling would let a run solve one standard and calibrate against another.</summary>
+        public bool IsQuasiStaticAt(double fHz) => QuasiStaticIndex >= 0 && fHz < CrossoverHz;
+    }
+
+    /// <summary>
+    /// <b>The plan for a band: the measured ladder over the part of it ABOVE the crossover, plus one
+    /// short separation for the part below.</b>
+    ///
+    /// <para><b><see cref="SuggestDeltas"/> is called with the EFFECTIVE lower edge, not the user's
+    /// one, and that is the whole of the change.</b> A separation exists to cover a sub-band, and
+    /// below the crossover no measured separation is used at all — so building the ladder from the
+    /// user's f_lo would mesh (and, at the bottom, solve) standards that no frequency will ever
+    /// read. That is what a 100 MHz–6 GHz sweep was paying 79,055 unknowns for.</para>
+    ///
+    /// <para>Three shapes, and the first is the one that guarantees nothing that ships today moves:
+    /// a band entirely at or above the crossover gets <see cref="SuggestDeltas"/>'s array unchanged
+    /// and no quasi-static entry; a band entirely below it gets ONE separation and no measured
+    /// ladder at all; a band spanning it gets both.</para>
+    /// </summary>
+    public static PlanarSeparationPlan SeparationPlan(
+        GroundedSlab slab, double fLoHz, double fHiHz, PlanarPortResolution? port = null,
+        PlanarCalibrationSettings? settings = null)
+    {
+        ArgumentNullException.ThrowIfNull(slab);
+        var st = settings ?? PlanarCalibrationSettings.Default;
+        double lo = Math.Max(Math.Min(fLoHz, fHiHz), 1.0);
+        double hi = Math.Max(Math.Max(fLoHz, fHiHz), 1.0);
+        double cross = st.QuasiStaticBelowCrossover ? QuasiStaticCrossoverHz(slab) : 0.0;
+
+        // The pre-QSC answer, bit for bit — see QuasiStaticBelowCrossover. A zero crossover makes
+        // `IsQuasiStaticAt` false everywhere as well, so the switch is one comparison and not a
+        // second branch each caller has to remember.
+        if (!st.QuasiStaticBelowCrossover)
+            return new PlanarSeparationPlan(SuggestDeltas(slab, lo, hi, settings), -1, cross);
+
+        // ── A CALIBRATION GROUP STAYS ON THE MEASURED LADDER, AND THAT IS A DECLINE BY NAME ──
+        //
+        // PCAL4's modal error box extracts N propagation constants from a 2N-port cascade
+        // eigenproblem, and what separates the modes there is the DIFFERENCE of their electrical
+        // lengths over Δℓ — `ModeSeparationFloorDegrees`, 0.5°, asked at setup and again per point.
+        // A separation sized from the substrate rather than from λ drives every one of those
+        // differences toward zero at the bottom of a band, so the quasi-static path would turn
+        // PCAL4's refusal from a rare event into the normal case. Supplying the modal γ's
+        // quasi-statically as well would remove that objection — `PlanarModalMedium` already
+        // computes them — but it is a different error box and a different measurement, and it is
+        // not this brief's.
+        if (port?.Group is not null)
+            return new PlanarSeparationPlan(SuggestDeltas(slab, lo, hi, settings), -1, cross);
+
+        if (lo >= cross)
+            return new PlanarSeparationPlan(SuggestDeltas(slab, lo, hi, settings), -1, cross);
+
+        double qs = QuasiStaticSeparationM(slab, port, settings);
+
+        if (hi <= cross) return new PlanarSeparationPlan([qs], 0, cross);
+
+        var measured = SuggestDeltas(slab, cross, hi, settings);
+        var all = new double[measured.Length + 1];
+        Array.Copy(measured, all, measured.Length);
+        all[^1] = qs;
+        return new PlanarSeparationPlan(all, measured.Length, cross);
+    }
+
+    /// <summary>
+    /// <b>The lower edge the MEASURED ladder is actually drawn from</b> — the user's, or the
+    /// crossover, whichever is higher, clamped to the band. Every band-edge quantity
+    /// (<see cref="LongestStandardLengthM"/>, <see cref="StartFrequencyThatFits"/>, and the refusal
+    /// that prints them) has to be asked of THIS rather than of <c>fLoHz</c>, or it describes a
+    /// regime the run no longer has and offers a remedy that cannot bind.
+    /// </summary>
+    public static double MeasuredBandBottomHz(GroundedSlab slab, double fLoHz, double fHiHz)
+    {
+        double lo = Math.Max(Math.Min(fLoHz, fHiHz), 1.0);
+        double hi = Math.Max(Math.Max(fLoHz, fHiHz), 1.0);
+        return Math.Min(Math.Max(lo, QuasiStaticCrossoverHz(slab)), hi);
+    }
+
+    /// <summary>
+    /// <b>The longest standard this band asks for, as a LENGTH, without meshing anything.</b>
+    ///
+    /// <para>This is the quantity the mesh-ceiling refusal has to be able to name. A standard's
+    /// unknown count is set by its length times the DUT's own transverse gridlines, and the length
+    /// comes from <see cref="SuggestDeltas"/> — λ at each sub-band's geometric mean. So the binding
+    /// input is the BOTTOM of the sweep, not the mesh and not the port's width, and a refusal that
+    /// offers mesh remedies is offering the knob that moves this least. Measured on a 3.8 mm
+    /// microstrip over 100 MHz–6 GHz: three separations, the longest standard 160 mm of line — 42×
+    /// the DUT — and coarsening the DUT 4× cut the standard only 5.8×, still over the ceiling.</para>
+    ///
+    /// <para>Target lengths, not realised ones: <see cref="BuildLine"/>'s end-run floor inflates a
+    /// short target. <see cref="StartFrequencyThatFits"/> only ever takes RATIOS of this, which is
+    /// what cancels that bias rather than leaving it in an absolute estimate.</para>
+    /// </summary>
+    public static double LongestStandardLengthM(GroundedSlab slab, double fLoHz, double fHiHz,
+                                                PlanarCalibrationSettings? settings = null)
+    {
+        ArgumentNullException.ThrowIfNull(slab);
+        var (shortTarget, _) = SuggestLengths(slab, fLoHz, fHiHz, settings);
+        double max = 0;
+        foreach (double d in SuggestDeltas(slab, fLoHz, fHiHz, settings)) max = Math.Max(max, d);
+        return shortTarget + max;
+    }
+
+    /// <summary>
+    /// <b>The lowest band edge at which this port's standards would fit — the remedy the ceiling
+    /// refusal has to name instead of "turn de-embedding off".</b>
+    ///
+    /// <para>Scaled from the standard that was ACTUALLY built rather than predicted from scratch:
+    /// <paramref name="measuredN"/> unknowns at <paramref name="measuredLengthM"/> fixes the
+    /// unknowns-per-metre for this port's own transverse mesh, and the candidate's count is that
+    /// times <see cref="LongestStandardLengthM"/>'s ratio. Taking the ratio is what makes the
+    /// target-vs-realised difference cancel; taking the absolute length would not.</para>
+    ///
+    /// <para>The scan runs UPWARD from the current lower edge and returns the first candidate that
+    /// fits, because the separation COUNT is a step function of the band ratio — the length falls
+    /// in jumps, not smoothly, and a bisection over a step function can settle above the first
+    /// frequency that would have worked. Null when even a band starting at <paramref name="fHiHz"/>
+    /// would not fit, which is the case where no band edge is the answer.</para>
+    /// </summary>
+    public static double? StartFrequencyThatFits(
+        GroundedSlab slab, double fLoHz, double fHiHz, PlanarCalibrationSettings? settings,
+        int ceiling, int measuredN, double measuredLengthM)
+    {
+        ArgumentNullException.ThrowIfNull(slab);
+        if (measuredN <= 0 || measuredLengthM <= 0 || ceiling <= 0) return null;
+
+        double lNow = LongestStandardLengthM(slab, fLoHz, fHiHz, settings);
+        if (lNow <= 0) return null;
+
+        const int Steps = 240;                       // ~1% resolution over a 60:1 band
+        double lo = Math.Max(fLoHz, 1.0), hi = Math.Max(fHiHz, lo * 1.000001);
+        for (int k = 1; k <= Steps; k++)
+        {
+            double f = lo * Math.Pow(hi / lo, (double)k / Steps);
+            double predicted = measuredN * (LongestStandardLengthM(slab, f, fHiHz, settings) / lNow);
+            if (predicted <= ceiling) return f;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// A frequency rounded UP onto the 1-2-5 ladder, so a refusal names a band edge someone would
+    /// actually type. Up rather than to-nearest: this number is offered as one that FITS, and
+    /// rounding it down past the estimate would hand back the same refusal.
+    /// </summary>
+    public static double RoundUpToTidyFrequency(double fHz)
+    {
+        if (!(fHz > 0) || double.IsInfinity(fHz)) return fHz;
+        double decade = Math.Pow(10, Math.Floor(Math.Log10(fHz)));
+        double m = fHz / decade;
+        double tidy = m <= 1.0 ? 1.0 : m <= 2.0 ? 2.0 : m <= 5.0 ? 5.0 : 10.0;
+        return tidy * decade;
+    }
+
     private static double DeltaAt(GroundedSlab slab, double fHz, PlanarCalibrationSettings s)
     {
         // ε_eff is not known before a solve; (εᵣ+1)/2 is the standard crude microstrip estimate, and
@@ -744,12 +1084,28 @@ public static class PlanarCalibration
         PlanarPortResolution port, GroundedSlab slab, double fLoHz, double fHiHz,
         PlanarCalibrationSettings? settings = null)
     {
+        // QSC — the measured ladder over the band's ABOVE-crossover part, plus one short
+        // frequency-independent separation for the part below it. Above the crossover throughout,
+        // this IS SuggestDeltas' own array and the set built is the one that shipped.
+        return BuildSet(port, slab, SeparationPlan(slab, fLoHz, fHiHz, port, settings),
+                        SuggestLengths(slab, fLoHz, fHiHz, settings).Short, settings);
+    }
+
+    /// <summary>
+    /// <b>The same set, from a plan the caller already has.</b> <see cref="PlanarPortCalibrator"/>
+    /// draws the plan once and hands it here, so the standards that are BUILT and the separations
+    /// that are SELECTED cannot come from two evaluations of the same function — which is the defect
+    /// PCAL6/R-pcal6-3 fixed one level up, and it is the same defect here.
+    /// </summary>
+    public static PlanarStandard[] BuildSet(
+        PlanarPortResolution port, GroundedSlab slab, PlanarSeparationPlan plan,
+        double shortTargetM, PlanarCalibrationSettings? settings = null)
+    {
         int k = EndRunCellsFor(port, slab, settings);
-        var (shortTarget, _) = SuggestLengths(slab, fLoHz, fHiHz, settings);
-        var deltas = SuggestDeltas(slab, fLoHz, fHiHz, settings);
+        var deltas = plan.DeltaLM;
 
         var set = new PlanarStandard[deltas.Length + 1];
-        set[0] = BuildLine(port, shortTarget, k, settings: settings);
+        set[0] = BuildLine(port, shortTargetM, k, settings: settings);
         for (int i = 0; i < deltas.Length; i++)
             set[i + 1] = BuildLine(port, set[0].LengthM + deltas[i], k, settings: settings);
 

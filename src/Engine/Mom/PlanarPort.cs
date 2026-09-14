@@ -610,8 +610,14 @@ public sealed record PlanarFeedClearance(
 
     /// <summary>
     /// R-pcal2-1 — <b>the refusal.</b> The diagnosis is the sentence this check has always carried;
-    /// what PCAL2 adds is the consequence, and the two ways past it — both of which have to be
-    /// reachable, or this is a refusal that names a remedy nobody can follow.
+    /// what PCAL2 adds is the consequence and the way past it, which has to be reachable or this is
+    /// a refusal that names a remedy nobody can follow.
+    ///
+    /// <para><b>There used to be TWO ways past, and the second one was wrong.</b> "Turn port
+    /// de-embedding off and read the raw solve" is not a degraded answer at an edge port, it is an
+    /// open circuit — measured at S11 = +1 and S21 = -107 dB on a plain microstrip whose de-embedded
+    /// loss is a tenth of a dB. The switch it named has been removed;
+    /// <c>EmSetup.LegacyRawSolveRequested</c> carries the whole finding.</para>
     /// </summary>
     public static string RefusalFor(IReadOnlyList<PlanarFeedClearance> breaches,
                                     SurfaceMesher.PlanarLengthFormat? fmt = null)
@@ -630,10 +636,11 @@ public sealed record PlanarFeedClearance(
                "answer that is not passive at 48 of 51 points, which used to be published with a " +
                "note and nothing on the file to carry it. Move the feed away from its neighbour, or " +
                "put the port where the line is already isolated. To get an answer out of this " +
-               "geometry as drawn, either turn port de-embedding OFF and read the raw solve (it " +
-               "includes the port discontinuity and is for diagnostics), or turn ON \"de-embed " +
-               "outside the calibration's validity\", which publishes the de-embedded answer and " +
-               "records on the Touchstone that the calibration was applied outside it.";
+               "geometry as drawn, turn ON \"de-embed outside the calibration's validity\", which " +
+               "publishes the de-embedded answer and records on the Touchstone that the calibration " +
+               "was applied outside it. (Reading the RAW solve used to be offered here as the other " +
+               "way out. It is not one: at an edge port the raw answer is an open circuit, not a " +
+               "degraded answer — see EmSetup.LegacyRawSolveRequested.)";
     }
 
     /// <summary>The pre-PCAL2 sentence, for the one-threshold

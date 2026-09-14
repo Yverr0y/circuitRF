@@ -541,6 +541,64 @@ but wrong numbers.
 > The assumption that C is frequency-independent is the route's real cost, and it is 0.4% / 2.3% / 6.3%
 > at 1 / 5 / 20 GHz against kernel A's static value. Details in `src/Engine/Mom/CLAUDE.md` §L8d.
 
+> ### **QSC (2026-09-14) — DE-EMBEDDING NOW HAS TWO PATHS, SEPARATED BY A MEASURED CROSSOVER.**
+>
+> The paragraph above describes the MEASURED calibration: γ extracted from two full-wave line
+> standards (D5), which captures dispersion and the port's own discontinuity with no quasi-TEM
+> assumption. **That instrument is right at the top of the band and it is what the whole L8/L9
+> acceptance set rests on. It is also the entire reason low frequency was unreachable.**
+>
+> The two standards' length difference Δℓ has to sit inside TRL's usable interval βΔℓ ∈ [20°, 160°],
+> so it scales as **1/f_lo**. On a real board — a 3.8 mm microstrip on 20 mil laminate swept from
+> 100 MHz — that meant a **161.5 mm** calibration standard at **79,055 unknowns** against a
+> 12,000-unknown ceiling. The DUT is N = 1,144 and solves fine down there; **the artefact was 42× the
+> size of the part**, and the run refused.
+>
+> **So below a crossover frequency, γ and Z_c are supplied QUASI-STATICALLY instead** (`PlanarQuasiStaticLine`):
+> C and C₀ per metre by D7's own differencing of the two standards' electrostatics, `L = μ₀ε₀/C₀`,
+> `γ = jω√(LC)`, and Z_c on D7's existing `γ/(jωC_pul)` spelling. **Only γ's SOURCE changes.**
+>
+> Four things about it are load-bearing and are easy to get wrong from the outside:
+>
+> - **A supplied γ does not by itself remove the long standards.** γ was already an input to the error
+>   box, and the error box still needs TWO lines — one gives two complex equations for three complex
+>   unknowns. What a known γ buys is that **Δℓ need not be electrically long**, because the usable
+>   interval protects the γ EXTRACTION and nothing else. Δℓ is then sized from the substrate height and
+>   the port's own bulk cell, is frequency-independent, and the sub-band ladder collapses to ONE
+>   separation. On the reported file the longest standard falls from 79,055 unknowns to 3,289 while the
+>   short one stays bit-identical.
+> - **Kernel A is still the ORACLE and still not an input.** The supplier is the STANDARD's own
+>   electrostatic solve, not `RlgcExtractor` — which keeps D7's own rule intact, reuses the solve
+>   de-embedding already owes, and inherits the coplanar, floating-conductor and modal cases for free.
+> - **The crossover is a property of the STACK and is not a user setting.** It is the LOWER of two
+>   limits — `h·√(εᵣ−1)/λ₀ = 0.03`, fitted to measurement (≈ 3.0 GHz on 1.6 mm FR-4, ≈ 8.7 GHz on the
+>   reported 0.6 mm board, ≈ 26 GHz on 0.1 mm GaAs), and an absolute electrical thickness
+>   `h/λ₀ = 0.02`. **The second is not belt and braces**: the first measures DIELECTRIC dispersion, so
+>   on a homogeneous substrate it is infinite — true of the MODE and false of the STRUCTURE, which can
+>   still be a sixth of a wavelength thick and radiating. A knob for the crossover itself invites
+>   someone to put it in the wrong place and there is no way for them to know, because both failure
+>   modes publish a smooth, plausible, wrong phase; what IS settable is
+>   `PlanarCalibrationSettings.QuasiStaticBelowCrossover`, on/off, which exists to reproduce the
+>   pre-QSC answer for comparison exactly as `IncludePassiveNeighbours` and `IncludeDrivenGroups` do.
+> - **BELOW THE CROSSOVER THE QUASI-STATIC VALUE IS THE MORE ACCURATE OF THE TWO, not merely the
+>   cheaper**, and that was measured rather than argued. On the reported board at 100 MHz the two-line
+>   ε_eff reads 2.02 on the default mesh and 2.45 on a refined one, against a static 2.786 it must
+>   approach as f → 0 — the MEASURED value moves toward the quasi-static one as the mesh tightens. Its
+>   Z_c lands 0.3 % from the closed-form microstrip value where the two-line route was 6.6 % out.
+>
+> **A run that crosses the crossover says which path each point took**, in its notes and in the `.npy`
+> as `planar.CalQuasiStatic` (1 supplied, 0 measured, NaN uncalibrated). A run entirely above the
+> crossover builds exactly the standards it always did, entry for entry; a run that STRADDLES it
+> changes at its top as well, because the measured ladder is drawn from the crossover rather than from
+> the user's lower edge — deliberately, since a separation exists to cover a sub-band and no measured
+> separation is used below the crossover at all. Measurements, the crossover
+> table, the Δℓ sweep and the a₂₂ sign margin are in `src/Engine/Mom/RESOLVED.md` §QSC.
+>
+> **What this does NOT fix:** the series delta gap's own `a₂₁ ∝ ω` amplification, which is the same on
+> both paths and is what still limits the very bottom of a sweep — on the reported file, 0.32 dB of
+> S₂₁ error at 100 MHz against 0.16 dB at 6 GHz, with the calibration's own residual at its SMALLEST
+> there. That floor is a property of the port type, not of the calibration.
+
 > ### **Requirement, added 2026-08-12 (owner report): THE SOLVER BUILDS ITS OWN CALIBRATION FEED.**
 >
 > **A user places a port on the part they drew and presses Simulate. Nothing above that is their job.**

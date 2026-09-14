@@ -221,27 +221,49 @@ public sealed class PortClearanceRefusalTests(ITestOutputHelper output) : IDispo
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
-    // GATE 4 — de-embedding off is REACHABLE, and the answer says what it is
+    // GATE 4 — de-embedding is NOT optional any more, and a legacy file that asked for it says so
+    //
+    // This gate used to assert the opposite: that `Deembed: false` was reachable and published,
+    // "and the answer says what it is". It did not say what it is. For an EDGE port the raw solve
+    // is not the structure's response with a launch included, it is an OPEN CIRCUIT — the cut sits
+    // one cell inside the drawn metal, so the source's outer terminal is an isolated sliver and the
+    // port drives nothing but that sliver's fringing capacitance. Measured on a plain 3.8 mm x
+    // 254 um microstrip: S11 = S22 = +1, S21 = -107 dB, and DOUBLING the line's length moved S11 in
+    // the fourth decimal, because the raw answer carries no information about the structure at all.
+    // On every other port kind de-embedding was already inert (IsDeembeddable is Edge-only), so the
+    // switch's two settings were "no effect" and "an open circuit".
     // ══════════════════════════════════════════════════════════════════════════════════════════
 
+    /// <summary>
+    /// A <c>.cem</c> written when the switch existed still OPENS and still runs — refusing it would
+    /// leave the user with a document they cannot open to fix — but it runs DE-EMBEDDED, and the run
+    /// says so rather than quietly changing what the file asked for.
+    /// </summary>
     [Fact]
-    public void Gate4_WithDeembeddingOffTheRunPublishes_AndSaysItIncludesThePortDiscontinuity()
+    public void Gate4_ALegacyDeembedFalseFile_RunsDeembedded_AndSaysSo()
     {
         var (setup, source) = Fixture("coupled-pair");
-        var s = OnePoint(setup);
-        s.Deembed = false;
 
-        var r = EmRunService.Run(s, source, _results);
+        // The field as it appears on disk in a file written before the switch was removed.
+        string json = EmSetupPersistence.Serialize(OnePoint(setup));
+        json = json.TrimEnd().TrimEnd('}').TrimEnd().TrimEnd(',') + ",\n  \"Deembed\": false\n}";
+        var legacy = EmSetupPersistence.Deserialize(json);
+        Assert.True(legacy.LegacyRawSolveRequested);
+
+        var r = EmRunService.Run(legacy, source, _results);
         Assert.Equal(EmRunStatus.Ok, r.Status);
         Assert.NotNull(r.SnpPath);
 
-        string note = Assert.Single(r.Notes, n => n.Contains("De-embedding is OFF", StringComparison.Ordinal));
-        output.WriteLine(note);
-        Assert.Contains("port discontinuity", note, StringComparison.OrdinalIgnoreCase);
+        string warn = Assert.Single(r.Warnings, w => w.Contains("Deembed", StringComparison.Ordinal));
+        output.WriteLine(warn);
+        Assert.Contains("REMOVED", warn, StringComparison.Ordinal);
+        Assert.Contains("OPEN", warn, StringComparison.Ordinal);
 
-        // Nothing was de-embedded, so there is no calibration applied outside its validity and
-        // nothing for the file to declare.
-        Assert.Empty(EmSnpProvenance.ReadCaveats(r.SnpPath!));
+        // It ran de-embedded, so there is no "De-embedding is OFF" note anywhere in the run…
+        Assert.DoesNotContain(r.Notes, n => n.Contains("De-embedding is OFF", StringComparison.Ordinal));
+
+        // …and saving the setup drops the field, which is what stops it coming back.
+        Assert.DoesNotContain("\"Deembed\"", EmSetupPersistence.Serialize(legacy), StringComparison.Ordinal);
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -258,31 +280,54 @@ public sealed class PortClearanceRefusalTests(ITestOutputHelper output) : IDispo
         Assert.DoesNotContain("DeembedOutsideCalibrationValidity", before, StringComparison.Ordinal);
 
         var reloaded = EmSetupPersistence.Deserialize(before);
-        Assert.True(reloaded.Deembed);                                 // null means ON
+        Assert.False(reloaded.LegacyRawSolveRequested);                // no field means nothing to warn about
         Assert.False(reloaded.DeembedOutsideCalibrationValidity);      // null means off
         Assert.Equal(before, EmSetupPersistence.Serialize(reloaded));
     }
 
     [Fact]
-    public void BothSettingsRoundTrip_AndSurviveClone()
+    public void TheOverrideRoundTrips_AndSurvivesClone()
     {
         var setup = new EmSetup
         {
             Name = "planar", LayoutRef = "Amp/layout/Amp.clay",
             AnalysisKind = EmAnalysisKind.Planar,
-            Deembed = false, DeembedOutsideCalibrationValidity = true,
+            DeembedOutsideCalibrationValidity = true,
         };
 
         string json = EmSetupPersistence.Serialize(setup);
         var back = EmSetupPersistence.Deserialize(json);
-        Assert.False(back.Deembed);
         Assert.True(back.DeembedOutsideCalibrationValidity);
         Assert.Equal(json, EmSetupPersistence.Serialize(back));
 
         // Clone drives the editor's undo snapshots; a field missing from it is silently lost on the
-        // next unrelated edit.
-        Assert.False(setup.Clone().Deembed);
+        // next unrelated edit. The legacy flag rides along for the same reason — an unrelated edit
+        // must not be what silences the warning.
         Assert.True(setup.Clone().DeembedOutsideCalibrationValidity);
+        Assert.True((new EmSetup { LegacyRawSolveRequested = true }).Clone().LegacyRawSolveRequested);
+    }
+
+    /// <summary>
+    /// <b>The removed field is a deliberate, single exception to the byte-identical round trip.</b>
+    /// A legacy document loads, and re-serialises WITHOUT the field — the whole point, since the
+    /// field no longer has a meaning to preserve and leaving it would make the warning permanent.
+    /// </summary>
+    [Fact]
+    public void ALegacyDeembedField_LoadsAndIsDroppedOnSave()
+    {
+        var setup = new EmSetup { Name = "planar", LayoutRef = "a.clay",
+                                  AnalysisKind = EmAnalysisKind.Planar };
+        string json = EmSetupPersistence.Serialize(setup).TrimEnd().TrimEnd('}').TrimEnd().TrimEnd(',')
+                    + ",\n  \"Deembed\": false\n}";
+
+        var back = EmSetupPersistence.Deserialize(json);
+        Assert.True(back.LegacyRawSolveRequested);
+        Assert.DoesNotContain("\"Deembed\"", EmSetupPersistence.Serialize(back), StringComparison.Ordinal);
+
+        // …and `"Deembed": true` was never anything but the default, so it carries no warning.
+        string on = EmSetupPersistence.Serialize(setup).TrimEnd().TrimEnd('}').TrimEnd().TrimEnd(',')
+                  + ",\n  \"Deembed\": true\n}";
+        Assert.False(EmSetupPersistence.Deserialize(on).LegacyRawSolveRequested);
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -303,12 +348,12 @@ public sealed class PortClearanceRefusalTests(ITestOutputHelper output) : IDispo
         var s1 = OnePoint(setup); s1.DeembedOutsideCalibrationValidity = true;
         Assert.Equal(EmRunStatus.Ok, EmRunService.Run(s1, source, _results).Status);
 
-        var s2 = OnePoint(setup); s2.Deembed = false;
-        Assert.Equal(EmRunStatus.Ok, EmRunService.Run(s2, source, _results).Status);
+        // …and there is no second way past it any more: the de-embedding switch that used to be
+        // the other escape hatch is gone, because what it escaped to was an open circuit.
     }
 
     [Fact]
-    public void ThePanelOffersBothSwitches_AndTheOverrideIsInertWithoutDeembedding()
+    public void ThePanelOffersTheOverrideOnly_AndNoDeembedSwitchRemains()
     {
         string dir = Path.Combine(Path.GetTempPath(), "crf-pcal2vm-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(dir);
@@ -322,17 +367,17 @@ public sealed class PortClearanceRefusalTests(ITestOutputHelper output) : IDispo
             var vm = new EmSetupEditorViewModel(path, setup);
             vm.Refresh();
 
-            Assert.True(vm.Deembed);
             Assert.Null(vm.DeembedDisabledReason);
             Assert.True(vm.DeembedOutsideValidityEnabled);
+            Assert.Null(vm.DeembedOutsideValidityDisabledReason);
 
-            vm.Deembed = false;
-            Assert.False(vm.Working.Deembed);
-            Assert.False(vm.DeembedOutsideValidityEnabled);
-            Assert.NotNull(vm.DeembedOutsideValidityDisabledReason);
-            output.WriteLine(vm.DeembedOutsideValidityDisabledReason!);
+            // The de-embedding checkbox is GONE, so the view model no longer carries the property
+            // it bound to. Asserted structurally rather than by compiling against it, because a
+            // property that comes back would compile here and silently restore the switch.
+            Assert.Null(typeof(EmSetupEditorViewModel).GetProperty("Deembed"));
+            Assert.Null(typeof(EmSetup).GetProperty("Deembed"));
 
-            // …and the cross-section kernel has no calibration step to turn off at all.
+            // …and the cross-section kernel has no calibration step at all.
             vm.AnalysisKind = EmAnalysisKind.CrossSection;
             vm.Refresh();
             Assert.NotNull(vm.DeembedDisabledReason);

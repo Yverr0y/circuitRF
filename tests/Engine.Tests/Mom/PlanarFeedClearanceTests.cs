@@ -97,7 +97,7 @@ public sealed class PlanarFeedClearanceTests
     /// exists to fix, so the remedies are asserted rather than left to prose.
     /// </summary>
     [Fact]
-    public void TheRefusalNamesThePortTheDistanceAndBothWaysOut()
+    public void TheRefusalNamesThePortTheDistanceAndTheOneWayOut()
     {
         var (problem, mesh, ports) = Pair(0.27, driven: true);   // the series' own 246 µm
         // PCAL4 — the grouping is turned OFF here on purpose. This gate is PCAL2's: a DRIVEN
@@ -113,8 +113,15 @@ public sealed class PlanarFeedClearanceTests
         Assert.Equal(4, ex.Breaches.Count);
         Assert.Contains("port 1", ex.Message, StringComparison.Ordinal);
         Assert.Contains("243 µm", ex.Message, StringComparison.Ordinal);      // 0.27 h on this slab
-        Assert.Contains("de-embedding OFF", ex.Message, StringComparison.Ordinal);
         Assert.Contains("outside the calibration's validity", ex.Message, StringComparison.Ordinal);
+
+        // …and it no longer offers the raw solve as the other way out. That was never a way out:
+        // at an edge port the raw answer is an OPEN CIRCUIT rather than a degraded one (S11 = +1,
+        // S21 = -107 dB on a plain microstrip), and following it is how a user came to file a
+        // "-80 dB through a short transmission line" bug against a working kernel. The switch it
+        // named is gone; see EmSetup.LegacyRawSolveRequested.
+        Assert.DoesNotContain("de-embedding OFF and read the raw solve", ex.Message,
+                              StringComparison.OrdinalIgnoreCase);
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════

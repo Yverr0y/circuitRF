@@ -430,7 +430,15 @@ public sealed class PlanarStaticAim
     /// the reason P2/M2 recorded on the dense path: the scaling the RHS carries for free is one
     /// rounding per entry that this form does not do at all.</para>
     /// </summary>
-    public double TotalCapacitance()
+    public double TotalCapacitance() => TotalCapacitanceComplex().Real;
+
+    /// <summary>
+    /// <b>QSC — the same solve, with the imaginary part KEPT.</b> <c>Y = jωC</c> is exactly
+    /// <c>G + jωC</c> when the loss rides in the imaginary part (R-mom-6), so a quasi-static
+    /// γ = jω√(LC) carries the dielectric's own attenuation only if C stays complex. D7's Z_c takes
+    /// a double and is untouched; <see cref="TotalCapacitance"/> is this, <c>.Real</c>.
+    /// </summary>
+    public Complex TotalCapacitanceComplex()
     {
         var b = new Complex[_m];
         for (int i = 0; i < _m; i++) b[i] = EmConstants.Eps0;
@@ -439,7 +447,7 @@ public sealed class PlanarStaticAim
 
         Complex total = Complex.Zero;
         for (int i = 0; i < _m; i++) total += q[i];
-        return total.Real;
+        return total;
     }
 
     /// <summary>
@@ -460,6 +468,12 @@ public sealed class PlanarStaticAim
     /// </param>
     public double ModalCapacitance(IReadOnlyList<double> potential, IReadOnlyList<double>? weight,
                                    IReadOnlyList<double>? floating = null)
+        => ModalCapacitanceComplex(potential, weight, floating).Real;
+
+    /// <inheritdoc cref="TotalCapacitanceComplex"/>
+    public Complex ModalCapacitanceComplex(IReadOnlyList<double> potential,
+                                           IReadOnlyList<double>? weight,
+                                           IReadOnlyList<double>? floating = null)
     {
         ArgumentNullException.ThrowIfNull(potential);
         if (potential.Count != _m)
@@ -489,7 +503,7 @@ public sealed class PlanarStaticAim
         Complex total = Complex.Zero;
         if (weight is null) for (int i = 0; i < _m; i++) total += q[i];
         else                for (int i = 0; i < _m; i++) total += weight[i] * q[i];
-        return total.Real;
+        return total;
     }
 
     /// <summary>

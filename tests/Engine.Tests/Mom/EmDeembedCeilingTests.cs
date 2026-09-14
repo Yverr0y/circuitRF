@@ -221,6 +221,24 @@ public class EmDeembedCeilingTests(ITestOutputHelper output)
     /// </summary>
     private static readonly GroundedSlab Ro4350 = new(0.508e-3, new EmMaterial(3.66, 0.0037));
 
+    /// <summary>
+    /// <b>QSC — these three tests gate the CEILING refusals, and the quasi-static path is what stops
+    /// this fixture reaching a ceiling at all.</b> On the shipped default its 400 MHz – 5 GHz and
+    /// 1 – 5 GHz bands are entirely below this stack's 10.9 GHz crossover, so the ladder collapses to
+    /// one substrate-sized separation and the standards come out at N = 1,498 / 2,386 — comfortably
+    /// under the 5,000 dense ceiling. That is the WHOLE POINT of that phase and is measured in
+    /// <c>src/Engine/Mom/RESOLVED.md</c> §QSC.
+    ///
+    /// <para>The refusals themselves are unchanged and still live — a band above the crossover still
+    /// builds a λ-scaled ladder, and a wide enough port still crosses the ceiling on its transverse
+    /// mesh alone. So these tests reproduce the pre-QSC standard set with
+    /// <see cref="PlanarCalibrationSettings.QuasiStaticBelowCrossover"/> off, which is exactly what
+    /// that switch exists for and what <c>IncludePassiveNeighbours</c> and <c>IncludeDrivenGroups</c>
+    /// already do for PCAL2's own refusals.</para>
+    /// </summary>
+    private static readonly PlanarCalibrationSettings PreQsc =
+        PlanarCalibrationSettings.Default with { QuasiStaticBelowCrossover = false };
+
     private static readonly PlanarMeshSettings TaperMesh =
         new(Auto: false, CellsPerWavelength: 5, EdgeMesh: true, EdgeCells: 3, MeshFrequencyHz: 500e6);
 
@@ -256,7 +274,8 @@ public class EmDeembedCeilingTests(ITestOutputHelper output)
         // the case the accelerator WOULD fit is the next test, and it is no longer this exception.
         var ex = Assert.Throws<InvalidOperationException>(() => PlanarSolve.Run(
             problem, mesh, ports, [400e6, 5e9],
-            new PlanarSolveSettings(Fill: PlanarFillSettings.Default, Deembed: true)));
+            new PlanarSolveSettings(Fill: PlanarFillSettings.Default, Deembed: true,
+                                    Calibration: PreQsc)));
 
         _out.WriteLine(ex.Message);
         Assert.IsNotType<PlanarAcceleratorWouldFitException>(ex);
@@ -284,7 +303,8 @@ public class EmDeembedCeilingTests(ITestOutputHelper output)
 
         var ex = Assert.Throws<PlanarAcceleratorWouldFitException>(() => PlanarSolve.Run(
             problem, mesh, ports, [1e9, 5e9],
-            new PlanarSolveSettings(Fill: PlanarFillSettings.Default, Deembed: true)));
+            new PlanarSolveSettings(Fill: PlanarFillSettings.Default, Deembed: true,
+                                    Calibration: PreQsc)));
 
         _out.WriteLine($"port {ex.PortNumber}, standard N = {ex.StandardUnknowns:N0}");
         Assert.Equal(ports[0].Number, ex.PortNumber);
@@ -297,7 +317,7 @@ public class EmDeembedCeilingTests(ITestOutputHelper output)
             Fill: PlanarFillSettings.Default with { Aim = PlanarAimSettings.Default }, Deembed: true);
         var slab = Ro4350;
         int endRun = PlanarCalibration.EndRunCellsFor(ports[0], slab);
-        Assert.All(PlanarCalibration.BuildSet(ports[0], slab, 1e9, 5e9),
+        Assert.All(PlanarCalibration.BuildSet(ports[0], slab, 1e9, 5e9, PreQsc),
                    z => Assert.True(z.Mesh.Bases.Count <= SurfaceMesher.AcceleratedUnknownCeiling));
         _out.WriteLine($"end run {endRun} cells; accelerated ceiling clears every standard");
         Assert.NotNull(accelerated.Fill!.Aim);
@@ -316,7 +336,7 @@ public class EmDeembedCeilingTests(ITestOutputHelper output)
         var slab = Ro4350;
 
         int endRun = PlanarCalibration.EndRunCellsFor(ports[0], slab);
-        var set = PlanarCalibration.BuildSet(ports[0], slab, 1e9, 5e9);
+        var set = PlanarCalibration.BuildSet(ports[0], slab, 1e9, 5e9, PreQsc);
         var sizes = set.Select(s => s.Mesh.Bases.Count).ToArray();
         _out.WriteLine($"end run {endRun}; standards N = {string.Join(" / ", sizes.Select(n => n.ToString("N0")))}");
 

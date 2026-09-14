@@ -357,6 +357,12 @@ public sealed class PlanarPortCalibrator
     private double   _prevBeta  = double.NaN;
     private Complex? _prevA21;
 
+    // ── QSC — which separations are measured, which one is the short quasi-static one, and the
+    //    crossover they were drawn at. Built once in the constructor from the port and the band;
+    //    `_plan.IsQuasiStaticAt(f)` is the ONE place a frequency's path is decided. ─────────────
+    private readonly PlanarCalibration.PlanarSeparationPlan _plan;
+    private PlanarQuasiStaticLine? _qsLine;
+
     public IReadOnlyList<PlanarStandard> Standards { get; }
 
     /// <summary>How many meshes this calibrator owns — R-prt-11's counter counts these.</summary>
@@ -430,13 +436,25 @@ public sealed class PlanarPortCalibrator
             && Math.Abs(stack.Top.Material.EpsR - 1.0) <= 1e-12;
     }
 
+    /// <param name="separations">
+    /// <b>QSC — the A-vs-B seam, and the ONLY way to make a sub-crossover point take the measured
+    /// two-line path.</b> Null draws the plan from the band, which is what
+    /// <see cref="PlanarSolve"/> always does and therefore what every run does. It exists because
+    /// the overlap gate has to compare the two paths at the SAME frequency on the SAME meshes, and
+    /// there is no other way to ask for that; it is deliberately not on
+    /// <see cref="PlanarCalibrationSettings"/>, not in the <c>.cem</c> and not reachable from the
+    /// panel — the crossover is measured and fixed per stack, exactly as <c>UseRadialTable</c> and
+    /// <c>UseSymmetricFactorization</c> are reachable as oracles and are not user controls.
+    /// <b>A plan passed here must have built <paramref name="standards"/>.</b>
+    /// </param>
     public PlanarPortCalibrator(PlanarPortResolution port, GroundedSlab slab,
                                 double fLoHz, double fHiHz,
                                 PlanarCalibrationSettings? calibration = null,
                                 PlanarFillSettings? fill = null,
                                 double standardLevelZ = double.NaN,
                                 IReadOnlyList<PlanarStandard>? standards = null,
-                                LayerStack? mediumStack = null)
+                                LayerStack? mediumStack = null,
+                                PlanarCalibration.PlanarSeparationPlan? separations = null)
     {
         _slab = slab;
         _standardLevels = double.IsNaN(standardLevelZ) ? null : new PlanarLevels([standardLevelZ]);
@@ -452,8 +470,16 @@ public sealed class PlanarPortCalibrator
             InteriorFitResidual = _interiorModel.Residual;
         }
 
+        // QSC — drawn from the port and the band before anything is meshed, because it decides
+        // WHICH standards exist. A caller that supplied its own set (PlanarSolve does, so the
+        // ceiling refusal can size the meshes before paying for them) built it from BuildSet, which
+        // asks this same function with these same arguments.
+        _plan = separations ?? PlanarCalibration.SeparationPlan(slab, fLoHz, fHiHz, port, calibration);
+
         var set = standards is null
-                ? PlanarCalibration.BuildSet(port, slab, fLoHz, fHiHz, calibration)
+                ? PlanarCalibration.BuildSet(port, slab, _plan,
+                                             PlanarCalibration.SuggestLengths(slab, fLoHz, fHiHz, calibration).Short,
+                                             calibration)
                 : [.. standards];
         Standards = set;
 
@@ -691,10 +717,25 @@ public sealed class PlanarPortCalibrator
         var sShort = slots[0]!.Value;              // Mat<T> is a struct, so these are Nullable<Mat<T>>
         var sLong  = slots[pick + 1]!.Value;
 
+        // ── QSC — γ'S SOURCE IS THE ONLY THING THAT CHANGES BELOW THE CROSSOVER ─────────────
+        //
+        // The error box is still solved from TWO standards, because it has to be: one line gives
+        // two complex equations for three complex unknowns and no symmetry argument closes that.
+        // What a supplied γ buys is that Δℓ need not be electrically long, which is what makes the
+        // two standards down here small and frequency-independent (SeparationPlan).
+        bool quasi = _plan.IsQuasiStaticAt(fHz);
+
         // Selected here rather than inside GammaBest, because PrepareAt has already solved exactly
         // these two meshes and no others — asking GammaBest to re-select would mean handing it an
         // array that is null everywhere except at `pick`. Same rule, same arithmetic, asked once.
-        var g = PlanarCalibration.Gamma(sShort, sLong, _deltas[pick], expect * _deltas[pick]);
+        var g = quasi
+            ? QuasiStaticLine().ResultAt(fHz, _deltas[pick])
+            : PlanarCalibration.Gamma(sShort, sLong, _deltas[pick], expect * _deltas[pick]);
+
+        // The branch continuation is stepped on BOTH paths. It is what the first measured point
+        // above the crossover predicts from, and the quasi-static β is a better prediction than
+        // EstimateBeta's own 15-20 %-low estimate would be — so a sweep that crosses the crossover
+        // hands the measured path a seed it could not otherwise have.
         _prevBeta = g.Beta;
         _prevF    = fHz;
 
@@ -711,6 +752,12 @@ public sealed class PlanarPortCalibrator
         // standard's if no frequency in the band ever selected it. That is correct rather than a
         // leak — the static differencing needs the two EXTREME lengths, not the one this frequency
         // solved — but it does mean the longest standard is cored on every de-embedded run.
+        // QSC — on the quasi-static path the dielectric-filled differencing has ALREADY been done,
+        // by QuasiStaticLine() above, and its real part IS this number bit for bit
+        // (CapacitancePerMetre is CapacitancePerMetreComplex(...).Real). Reading it back rather than
+        // re-solving is what keeps the quasi-static route's extra cost to the AIR-FILLED half.
+        if (double.IsNaN(_cPerMetre) && quasi) _cPerMetre = QuasiStaticLine().CPerMetre;
+
         if (double.IsNaN(_cPerMetre))
             _cPerMetre = _interiorStack is { } medium
                 ? PlanarDeembed.CapacitancePerMetre(Standards[0], Standards[^1], medium,
@@ -728,7 +775,8 @@ public sealed class PlanarPortCalibrator
         return new PlanarPortCalibration(
             portNumber, g, box,
             PlanarDeembed.CharacteristicImpedance(g.Gamma, _cPerMetre, fHz), _cPerMetre,
-            NeighbourResonanceDegrees(g.Beta, pick));
+            NeighbourResonanceDegrees(g.Beta, pick),
+            quasi ? PlanarCalibrationSource.QuasiStatic : PlanarCalibrationSource.Measured);
     }
 
     private double _prevF;
@@ -829,14 +877,58 @@ public sealed class PlanarPortCalibrator
     /// </summary>
     public int SelectedIndexAt(double fHz)
     {
+        // ── QSC — BELOW THE CROSSOVER THERE IS NOTHING TO SELECT ────────────────────────────
+        //
+        // The selection exists to put βΔℓ near the middle of TRL's usable interval, which is a
+        // constraint on the γ EXTRACTION and nothing else. With γ supplied quasi-statically there
+        // is one separation down here by construction (PlanarCalibration.SeparationPlan), sized
+        // from the substrate rather than from λ, and asking SelectSeparation would hand it the
+        // measured ladder's entries as candidates — the long standards this path exists to avoid
+        // building, let alone solving.
+        if (_plan.IsQuasiStaticAt(fHz)) return _plan.QuasiStaticIndex;
+
+        // …and above it, the candidates are the MEASURED separations only. The quasi-static one is
+        // the last entry and is a fraction of a degree up there, so leaving it in the list would
+        // let a frequency just above the crossover score it as "closest to the interval's centre"
+        // on a log measure and calibrate against a standard with no phase in it.
+        int n = _plan.QuasiStaticIndex >= 0 ? _plan.QuasiStaticIndex : _deltas.Length;
+        var measured = n == _deltas.Length ? _deltas : _deltas[..n];
+
         if (_groupPorts is null)
-            return PlanarCalibration.SelectSeparation(_deltas, ExpectedBeta(fHz));
+            return PlanarCalibration.SelectSeparation(measured, ExpectedBeta(fHz));
 
         var medium = Medium();
         double mean = 0;
         for (int m = 0; m < medium.ModeCount; m++) mean += medium.Beta(fHz, m);
-        return PlanarCalibration.SelectSeparation(_deltas, mean / medium.ModeCount);
+        return PlanarCalibration.SelectSeparation(measured, mean / medium.ModeCount);
     }
+
+    /// <summary>
+    /// <b>QSC — the two standards' quasi-TEM description, built once and reused</b>, exactly as D7's
+    /// scalar C_pul is and for the same reason: [C] and [C₀] are frequency-independent (R-mom-11).
+    /// It costs the air-filled electrostatic solve of both extreme standards; the dielectric-filled
+    /// half is the solve <see cref="At(Func{PlanarFrequencyKernel}, double, int)"/> already owes for
+    /// C_pul, and is not paid twice.
+    /// </summary>
+    public PlanarQuasiStaticLine QuasiStaticLine() =>
+        _qsLine ??= _interiorStack is { } medium
+            ? PlanarQuasiStaticLine.Extract(Standards[0], Standards[^1], medium, _standardLevelZ,
+                                            _standardLevelZ - medium.InterfaceZ[0],
+                                            _standards[0].Settings,
+                                            _standards[0].Cores, _standards[^1].Cores,
+                                            _interiorModel)
+            : PlanarQuasiStaticLine.Extract(Standards[0], Standards[^1], _slab,
+                                            _standards[0].Settings,
+                                            _standards[0].Cores, _standards[^1].Cores);
+
+    /// <summary><b>QSC — the crossover this calibrator's plan was drawn at</b>, so a caller can
+    /// report which path each point took without recomputing it.</summary>
+    public double QuasiStaticCrossoverHz => _plan.CrossoverHz;
+
+    /// <summary>Whether this frequency's γ comes from the quasi-static line rather than from D5's
+    /// two-line extraction. <b>The one question, asked in one place</b> — see
+    /// <see cref="SelectedIndexAt"/>.</summary>
+    public bool IsQuasiStaticAt(double fHz) => _plan.IsQuasiStaticAt(fHz);
 
     /// <summary>
     /// How many standard meshes <see cref="PrepareAt"/> would fill at this frequency — 0 when it is
@@ -2031,10 +2123,9 @@ public static class PlanarSolve
                             "ground strips) or floating at zero net charge (a neighbouring line) — " +
                             "so it is not chosen here. Join the ground strips before the reference " +
                             "plane so the pair is genuinely two conductors, move the port to a " +
-                            "station where only the pair crosses it, cut this port as an internal " +
+                            "station where only the pair crosses it, or cut this port as an internal " +
                             "delta gap instead (an interior cut has no feed, no error box and needs " +
-                            "no standard), or turn de-embedding off and read the raw solve — those " +
-                            "s-parameters include the port discontinuity and are for diagnostics only.");
+                            "no standard).");
 
                     // ── R-dcl-1..4 (brief-em-deembed-ceiling-closeout.md), RE-POINTED AT P11 —
                     // refuse a de-embedded run AT SETUP, honestly, rather than let it succeed here
@@ -2069,11 +2160,29 @@ public static class PlanarSolve
                     bool accStd = SurfaceMesher.UsesAcceleratedCeiling(fillSt.Aim is not null, general);
                     int  stdCeiling = accStd ? SurfaceMesher.AcceleratedUnknownCeiling
                                              : SurfaceMesher.UnknownCeiling;
-                    var stdSet = PlanarCalibration.BuildSet(ports[i], slab, fLo, fHi, st.Calibration);
-                    foreach (var std in stdSet)
+                    // QSC — the plan is drawn ONCE and both the standards that are BUILT and the
+                    // separations that are SELECTED come from it. Evaluating SeparationPlan twice
+                    // with the same arguments would agree today and is exactly the shape PCAL6's
+                    // own R-pcal6-3 found a run solving one standard and calibrating against
+                    // another. The set is the short line followed by one standard per separation,
+                    // so the quasi-static separation's standard is at QuasiStaticIndex + 1.
+                    var stdPlan = PlanarCalibration.SeparationPlan(slab, fLo, fHi, ports[i], st.Calibration);
+                    var stdSet  = PlanarCalibration.BuildSet(
+                        ports[i], slab, stdPlan,
+                        PlanarCalibration.SuggestLengths(slab, fLo, fHi, st.Calibration).Short,
+                        st.Calibration);
+
+                    for (int si = 0; si < stdSet.Length; si++)
                     {
+                        var std  = stdSet[si];
                         int nStd = std.Mesh.Bases.Count;
                         if (nStd <= stdCeiling) continue;
+
+                        // The short line (index 0) is shared by both paths, so it is "quasi-static"
+                        // exactly when there is no measured ladder for it to serve as well.
+                        bool quasiStd = stdPlan.QuasiStaticIndex >= 0 &&
+                                        (si == stdPlan.QuasiStaticIndex + 1 ||
+                                         (si == 0 && stdPlan.DeltaLM.Length == 1));
 
                         var stdSizes = stdSet.Select(z => z.Mesh.Bases.Count.ToString("N0"));
 
@@ -2104,18 +2213,14 @@ public static class PlanarSolve
                                 ? "Both the standards' frequency-domain solves and their static " +
                                   "capacitance solve (Z_c = γ/(jωC_pul)) are accelerated, so this is " +
                                   "the same ceiling the DUT is judged against and there is no further " +
-                                  "switch to turn on. Coarsen the mesh, or turn de-embedding off and " +
-                                  "read the raw solve — those s-parameters include the port " +
-                                  "discontinuity rather than being the structure's own response, and " +
-                                  "are for diagnostics only."
+                                  "switch to turn on. "
                                 : "Turn ON the accelerated solve (the EM setup's Accelerated solve, " +
                                   "PlanarFillSettings.Aim): since P11 it covers the standards' static " +
                                   "capacitance solve (Z_c = γ/(jωC_pul)) as well as every " +
                                   "frequency-domain system, and its ceiling is " +
-                                  $"{SurfaceMesher.AcceleratedUnknownCeiling:N0} unknowns. Failing " +
-                                  "that, turn de-embedding off and read the raw solve instead: those " +
-                                  "s-parameters include the port discontinuity rather than being the " +
-                                  "structure's own response, and are for diagnostics only.") +
+                                  $"{SurfaceMesher.AcceleratedUnknownCeiling:N0} unknowns. ") +
+                            BandEdgeRemedy(std, nStd, stdCeiling, slab, fLo, fHi, st.Calibration,
+                                           quasiStd) +
                             $" The DUT's own mesh is N = {mesh.Bases.Count:N0}; this port's " +
                             $"standard(s) are N = {string.Join(" / ", stdSizes)}.");
                     }
@@ -2124,7 +2229,8 @@ public static class PlanarSolve
                         ports[i], slab, fLo, fHi, st.Calibration, fillSt,
                         standardLevelZ: general ? problem.LevelZ(ports[i].LayerIndex) : double.NaN,
                         standards: stdSet,
-                        mediumStack: general ? problem.EffectiveStack : null);
+                        mediumStack: general ? problem.EffectiveStack : null,
+                        separations: stdPlan);
 
                     // MIM-4 — the interior electrostatics is fitted, so its quality is asked about
                     // rather than assumed. R-mom-17: a fit this poor is refused BY NAME at setup,
@@ -2139,10 +2245,8 @@ public static class PlanarSolve
                             "the line's own Z_c = γ/(jωC_pul), so a bad electrostatic fit renormalises " +
                             "every published s-parameter rather than degrading one number. Simplify " +
                             "the medium under this level (merging two dielectrics of nearly equal εᵣ " +
-                            "is exact, not an approximation), bring the feed out on a level with a " +
-                            "simpler stack beneath it, or turn de-embedding off and read the raw " +
-                            "solve — those s-parameters include the port discontinuity and are for " +
-                            "diagnostics only.");
+                            "is exact, not an approximation), or bring the feed out on a level with " +
+                            "a simpler stack beneath it.");
                     // ── R-pcal4-6 — THE SAME QUESTION, ASKED AT SETUP, FROM THE ELECTROSTATICS ──
                     //
                     // The measured separation is not known until a frequency has been solved, and
@@ -2223,6 +2327,15 @@ public static class PlanarSolve
             if (calibrators.Count < deembedded)
                 notes.Add($"{deembedded} port(s) share {calibrators.Count} calibration(s), because their " +
                           "cross-sections and port cells are identical — the standards are solved once each.");
+
+            // ── QSC — WHICH CALIBRATION EACH POINT TOOK, SAID IN THE RUN'S OWN NOTES ──────────
+            //
+            // The two paths are not interchangeable and the run must not present one as the other.
+            // Which one a point took is also in the `.npy` as `CalQuasiStatic`, per (freq, port);
+            // this is the sentence that says what the flag MEANS, and it is emitted only when the
+            // quasi-static path actually engaged, so a run entirely above the crossover reads
+            // exactly as it did before this existed.
+            if (QuasiStaticCalibrationNote(calibrators, freqs) is { } qsNote) notes.Add(qsNote);
 
             // M2 — the user set a core count in the panel and it is a machine setting, not part of the
             // design, so the run says what it actually did with it rather than leaving the user to
@@ -3861,6 +3974,144 @@ public static class PlanarSolve
     /// ρ/λ ≈ 2.4 at 20 GHz, for an error the fill does not experience. So the extent is reported and
     /// the user is told what it means.</para>
     /// </summary>
+    /// <summary>
+    /// <b>The remedy that actually binds when a calibration standard is over the ceiling: the
+    /// BOTTOM of the sweep.</b>
+    ///
+    /// <para>This replaced "coarsen the mesh, or turn de-embedding off and read the raw solve", and
+    /// both halves of that were wrong. The raw solve is not a degraded answer — for an edge port the
+    /// cut sits one cell inside the metal, so the outer terminal is an isolated sliver and the port
+    /// reads as an OPEN; on a 3.8 mm microstrip it published S₂₁ = −107 dB and S₁₁ = +1, and
+    /// doubling the line changed S₁₁ in the fourth decimal. And the mesh moves this far less than a
+    /// reader would assume: a standard reproduces the DUT's transverse gridlines verbatim (D4), so
+    /// coarsening the DUT 4× cut the standard only 5.8× on the geometry that prompted this.</para>
+    ///
+    /// <para>What sets the count is LENGTH, and length comes from λ at each sub-band's geometric
+    /// mean — see <see cref="PlanarCalibration.LongestStandardLengthM"/>. So the number this names
+    /// is a lower band edge, estimated by scaling the standard that was actually built.</para>
+    ///
+    /// <para><b>QSC RE-POINTED IT, AND THE RE-POINTING IS THE WHOLE OF M4.</b> Below
+    /// <see cref="PlanarCalibration.QuasiStaticCrossoverHz"/> γ is supplied rather than extracted, so
+    /// Δℓ is sized from the substrate and the mesh and is frequency-independent — the λ ladder is
+    /// drawn from the CROSSOVER upward, not from the user's lower edge. Two consequences, and both
+    /// are sentences that used to be printed and were about to become false: the length and the
+    /// separation count must be asked of <see cref="PlanarCalibration.MeasuredBandBottomHz"/>, and a
+    /// band edge already below the crossover is <b>not a remedy at all</b> — lowering or raising it
+    /// down there changes no standard. Telling a user to raise it would be the same defect RAW1 §4
+    /// found in this very message, one phase on.</para>
+    /// </summary>
+    /// <param name="quasiStandard">Whether the standard that is over the ceiling is the SHORT,
+    /// frequency-independent one. Its size is set by the port's transverse mesh alone, so no band
+    /// edge touches it and <see cref="PlanarCalibration.StartFrequencyThatFits"/>'s length-ratio
+    /// scaling does not describe it.</param>
+    internal static string BandEdgeRemedy(PlanarStandard std, int nStd, int ceiling,
+                                         GroundedSlab slab, double fLo, double fHi,
+                                         PlanarCalibrationSettings? calSettings,
+                                         bool quasiStandard = false)
+    {
+        double cross = PlanarCalibration.QuasiStaticCrossoverHz(slab);
+        double fEff  = PlanarCalibration.MeasuredBandBottomHz(slab, fLo, fHi);
+
+        if (quasiStandard)
+            return
+                $"The band edge is NOT the remedy here, and saying so is the point: below " +
+                $"{HzOf(cross)} this port is calibrated with a QUASI-STATIC γ, so its two standards " +
+                $"are sized from the substrate height and the port's own bulk cell — " +
+                $"{SurfaceMesher.Eng(std.LengthM)}m of line — and are the same size at 1 kHz as at " +
+                $"{HzOf(cross)}. What sets this count is the port's TRANSVERSE mesh, which a " +
+                "standard reproduces verbatim (D4): narrow the port, or coarsen the mesh ACROSS it " +
+                "(Min cells across conductor, Edge cells), or cut this port as an internal delta " +
+                "gap, which has no feed outside it and needs no standard at all.";
+
+        int nSep = PlanarCalibration.SuggestDeltas(slab, fEff, fHi, calSettings).Length;
+        double lMax = PlanarCalibration.LongestStandardLengthM(slab, fEff, fHi, calSettings);
+
+        var fit = PlanarCalibration.StartFrequencyThatFits(
+            slab, fEff, fHi, calSettings, ceiling, nStd, std.LengthM);
+
+        // Asked of the EFFECTIVE bottom, because that is the one the ladder was drawn from. Below
+        // the crossover there is one short separation and no λ scaling at all, so quoting the
+        // user's own f_lo here would describe a regime this run does not have.
+        string band =
+            $"What sets that count is the standard's LENGTH, and the length is set by the BOTTOM of " +
+            $"the sweep, not by the mesh and not by the port's width: each line separation is aimed " +
+            $"at {(calSettings ?? PlanarCalibrationSettings.Default).TargetElectricalDegrees:0.#}° of " +
+            $"electrical length at its own sub-band's geometric mean, so halving the lower band edge " +
+            $"roughly doubles the longest standard. " +
+            (fEff > fLo * 1.000001
+                ? $"Below {HzOf(cross)} this port is calibrated quasi-statically on short, " +
+                  $"frequency-independent standards, so the measured ladder is drawn from " +
+                  $"{HzOf(fEff)} rather than from {HzOf(fLo)}: "
+                : "") +
+            $"{HzOf(fEff)}–{HzOf(fHi)} needs {nSep} " +
+            $"separation(s), the longest standard being {SurfaceMesher.Eng(lMax)}m of line. ";
+
+        string remedy = fit is { } f
+            ? $"Raising the lower band edge to about " +
+              $"{HzOf(PlanarCalibration.RoundUpToTidyFrequency(f))} brings it under the ceiling."
+            : "No lower band edge inside this sweep brings it under the ceiling — narrow the sweep " +
+              "from BOTH ends, or cut these ports as internal delta gaps, which have no feed outside " +
+              "them and need no standard at all." +
+              (fEff > fLo * 1.000001
+                  ? $" Note that raising it anywhere below {HzOf(cross)} changes nothing: the " +
+                    "standards down there do not scale with frequency."
+                  : "");
+
+        // Said explicitly, because it is the remedy a reader reaches for first and it is the weak
+        // one — and because the previous message recommended it.
+        string mesh =
+            " Coarsening the mesh moves this much less than it looks: a standard reproduces the " +
+            "DUT's transverse gridlines verbatim, so only the transverse half of the count responds " +
+            "to it.";
+
+        return band + remedy + mesh;
+
+        static string HzOf(double f) =>
+            f >= 1e9 ? $"{f / 1e9:0.###} GHz" :
+            f >= 1e6 ? $"{f / 1e6:0.###} MHz" :
+            f >= 1e3 ? $"{f / 1e3:0.###} kHz" :
+                       $"{f:0.###} Hz";
+    }
+
+    /// <summary>
+    /// <b>QSC — the run says which calibration produced which points, and why.</b> Null when no
+    /// frequency took the quasi-static path, which is every run whose band sits entirely above
+    /// <see cref="PlanarCalibration.QuasiStaticCrossoverHz"/> and therefore every run that passed
+    /// before this existed.
+    /// </summary>
+    private static string? QuasiStaticCalibrationNote(
+        IReadOnlyList<PlanarPortCalibrator> calibrators, IReadOnlyList<double> freqs)
+    {
+        double cross = double.PositiveInfinity;
+        int    quasi = 0, measured = 0;
+
+        foreach (var cal in calibrators)
+        {
+            if (double.IsInfinity(cal.QuasiStaticCrossoverHz)) continue;
+            cross = Math.Min(cross, cal.QuasiStaticCrossoverHz);
+            foreach (double f in freqs)
+                if (f > 0) { if (cal.IsQuasiStaticAt(f)) quasi++; else measured++; }
+        }
+        if (quasi == 0) return null;
+
+        return
+            $"γ for {quasi} of {quasi + measured} calibrated point(s) is QUASI-STATIC, not measured: " +
+            $"below {SurfaceMesher.Eng(cross)}Hz it comes from the two standards' own electrostatics " +
+            $"(γ = jω√(LC), with L = μ₀ε₀/C₀ from the same geometry with the dielectric removed) " +
+            $"rather than from the two-line extraction. The error box is still solved from TWO " +
+            $"standards either way — one line cannot give three unknowns — but a supplied γ frees Δℓ " +
+            $"from having to be electrically long, so the standards down there are sized from the " +
+            $"substrate and the mesh and do not grow as the band edge falls. " +
+            (measured > 0
+                ? $"The other {measured} point(s) use the measured two-line γ, which is what captures " +
+                  "dispersion and is the right instrument above the crossover. "
+                : "") +
+            "Per-point, the `planar.CalQuasiStatic` diagnostic reads 1 where γ was supplied and 0 " +
+            "where it was measured. Both paths agree to about 1 % at the crossover; below it the " +
+            "MEASURED value is the less accurate of the two (it converges toward this one as the " +
+            "mesh is refined), and above it the measured one is right and this one under-predicts β.";
+    }
+
     private static string ValidatedRangeNote(PlanarMesh mesh, GroundedSlab slab, double fHiHz)
     {
         var (x0, y0, x1, y1) = Extent(mesh);
