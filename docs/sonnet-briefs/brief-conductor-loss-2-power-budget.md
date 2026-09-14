@@ -9,6 +9,16 @@ the series overview §1.
 
 ---
 
+## Not affected by the quasi-static port calibration, and it is worth saying once
+
+`brief-quasistatic-port-calibration.md` landed after CL1 and changed how a port is de-embedded below
+a per-stack crossover (overview's own note, and CL3 §0). **Nothing in this brief reads it.**
+`P_conductor` is a quadratic form in the SOLVED coefficient vector against CL1's Gram matrix, on the
+DUT's own mesh; no calibration, error box or reference impedance enters it. The one place to keep an
+eye on is R-cl2-4's radiation efficiency, whose `P_accepted` comes through the port — state the
+fixture's crossover alongside the before/after numbers so a later reader can tell the two effects
+apart.
+
 ## The problem
 
 ANT-5 designed the itemisation around a term it could not compute. `PlanarPowerBudget.ConductorW` is

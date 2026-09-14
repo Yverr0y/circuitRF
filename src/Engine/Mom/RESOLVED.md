@@ -69,6 +69,18 @@ path beside it in the same `.npy`.
 term. A Wheeler term would be a claim kernel B's own matrix does not make, and the two paths would
 then disagree in α across the crossover by whatever the sheet model is worth.
 
+> **THIS PARAGRAPH IS TRUE ONLY WHILE `ConductorLoss` IS OFF, AND CL3 IS THE BRIEF THAT FLIPS IT.**
+> When it does, the standards are still solved full-wave and their `S` gains α_c, while the γ the
+> error box is solved against does not — so the difference lands in `a11`/`a21²` (≈ α_c·Δℓ,
+> ≈ 0.015 dB on the GaAs starter at 10 GHz), Z_c loses its `√(1 + R/(jωL))` correction (0.6% in
+> magnitude there at 10 GHz; ≈ 3.5% and ~10° of PHASE at 100 MHz — and the overlap gate compares
+> |Z_c| only), and the published `planar.Gamma` steps at the crossover in a quantity that is
+> physically smooth. **The GaAs crossover is 26.07 GHz, so on the shipped MMIC technology this is
+> every frequency, not a corner.** `TheQuasiStaticPathAgreesWithTheMeasuredOneWhereBothRun` compares
+> β, |Z_c| and max|ΔS| and **not α**, which was vacuous under PEC metal and will not be afterwards.
+> `brief-conductor-loss-3-default-and-gate.md` §0 and its milestone 0 are where this is decided, and
+> they gate the flip rather than following it.
+
 ### 3. M1 — the crossover, measured per stack, then fitted to ONE law
 
 M1 measured quasi-static γ and Z_c against the MEASURED two-line values from `PlanarPortCalibrator.At`,

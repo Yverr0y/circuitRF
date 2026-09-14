@@ -66,6 +66,15 @@
 // conductor term. A conductor term taken from Wheeler would be a claim kernel B's own matrix does not
 // make, and the two would disagree across the crossover in α by whatever the sheet model is worth.
 //
+// **THAT SENTENCE IS CONDITIONAL ON A DEFAULT, AND CL3 IS THE BRIEF THAT FLIPS IT.** With
+// `ConductorLoss` on, `PlanarPortCalibrator.At` still solves both standards FULL-WAVE — so their S
+// carries α_c — and hands `SolveErrorBox` a γ that does not, which puts ≈ e^{-α_c·Δℓ} into the error
+// box, leaves `PlanarDeembed.CharacteristicImpedance`'s γ/(jωC′) short of its ½·R/(ωL) correction,
+// and steps `planar.Gamma` at the crossover. The GaAs starter's crossover is 26.07 GHz, so on the
+// shipped MMIC technology that is the whole band. Do not add a conductor term here on the way past:
+// `brief-conductor-loss-3-default-and-gate.md` §0 and its milestone 0 measure the three candidate
+// suppliers and decide between them, and `RESOLVED.md` §QSC carries the same note.
+//
 // **C stays COMPLEX all the way to γ and that is not decoration.** `PlanarKernelTerms.StaticScalar`
 // is built on `GroundedSlab.EpsComplex`, so the charge already carries tanδ; D7 drops it with a
 // `.Real` because Z_c takes a double. Dropping it here would publish α = 0 on a lossy board — a

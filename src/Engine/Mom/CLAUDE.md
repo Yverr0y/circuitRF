@@ -1020,13 +1020,28 @@ E      = (σ/2πε₀)·(∂Φ/∂x·û + ∂Φ/∂y·n̂)      — returned in 
 - **De-embedding accuracy is limited by RADIATION and surface-wave coupling between ports, not the
   algebra**: exact (8.5e-16) at the two calibrated lengths, ~3.9e-4 at 2 GHz and ~6.0e-3 at 10 GHz
   elsewhere on 1.6 mm FR-4, scaling ≈ f². A longer feed does not fix it (feed-length sensitivity is
-  ~1e-2, the same order as the residual).
+  ~1e-2, the same order as the residual). **Both figures are on the MEASURED two-line path and
+  pre-date QSC; 2 GHz on 1.6 mm FR-4 is now below the crossover (QSC bullet below) and calibrates
+  quasi-statically.**
 - **Low-frequency floor**: the port is necessarily a **series** delta-gap, so `a₂₁ ∝ ω` and the peel
   divides by `a₂₁²` — ~22× error amplification at 2 GHz, growing as f⁻². A true edge port would
   remove it and is not built (the basis is forbidden).
+- **QSC — below a per-stack crossover a port is calibrated QUASI-STATICALLY**, γ and Z_c from the
+  standard's own electrostatics rather than from two full-wave lines, on ONE separation of 6
+  substrate heights (≥ 4 bulk cells) instead of the λ-scaled ladder. `QuasiStaticCrossoverHz` is the
+  lower of `0.03·c/(h√(εᵣ−1))` and `0.02·c/h`: **3.048 GHz** on 1.6 mm FR-4, **26.07 GHz** on
+  100 µm GaAs — so the shipped MMIC band is entirely on that side. Below it the quasi-static value
+  is the MORE accurate one (the measured ε_eff moves toward it under refinement); above it the
+  disagreement is real dispersion and the measured path is right. A calibration GROUP declines it by
+  name. **NOT a user setting.** `planar.CalQuasiStatic` says which path produced each point.
+  `RESOLVED.md` §QSC.
+- **The quasi-static γ carries the DIELECTRIC's attenuation and no conductor term**, which matches
+  the fill only while `ConductorLoss` is off. CL3 is the brief that flips it;
+  `brief-conductor-loss-3-default-and-gate.md` §0 is where the mismatch is decided.
 - **`Z_c = γ/(jωC_pul)` holds C at its static value** (`PlanarKernel.QuasiStaticNote` states it
   once): +0.4% at 1 GHz, +2.3% at 5 GHz, +6.3% at 20 GHz vs kernel A; −9.6% vs Kirschning-Jansen at
   20 GHz, where neither is authoritative. A dispersive C needs a field integral this kernel lacks.
+  **The spelling is unchanged below the crossover — only γ's source is** (QSC bullet above).
 - **Fit accuracy is not uniform in Σ = z + z′.** `|e^{−jk_z0Σ}| = e^{−k_ρΣ}` kills the evanescent
   spectrum: G_A on a grounded stack improves with height, G_q on a thick low-εᵣ substrate degrades
   ~20× at Σ/λ = 0.30.

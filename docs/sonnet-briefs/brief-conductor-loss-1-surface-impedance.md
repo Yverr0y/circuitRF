@@ -144,6 +144,12 @@ costs in practice.**
 - Touch `PlanarDeembed`'s algebra. The calibration lines get the term through the same `Fill` they
   already call, so γ gains its α_c and the two-line peel is unchanged. **If a de-embedded result
   moves more than the overview predicts, that is a finding to report, not a thing to correct here.**
+  > **SHIPPED 2026-09-14, and this bullet's second sentence has since become conditional.** QSC
+  > landed the same day and supplies γ from the standard's ELECTROSTATICS below a per-stack
+  > crossover, where there is no `Fill` to get the term through — so "γ gains its α_c" holds only
+  > above it, which on the MMIC starter is above 26.07 GHz. It changed nothing for CL1, whose flag
+  > is off and whose own gates read γ from the two-line extraction directly. It is CL3's to answer:
+  > `brief-conductor-loss-3-default-and-gate.md` §0.
 - Touch the ground termination. That is CL4 and it is a Green's-function change.
 - Add a `.cem` key, a UI control, or a `PlanarSolveSettings` member.
 - Write a second σ lookup, a second sheet-resistance formula, or a second `coth`.

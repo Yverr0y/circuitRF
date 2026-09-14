@@ -1,6 +1,7 @@
 # Brief — conductor loss in the full-wave kernel: the series
 
-**Status:** BRIEFED, not started · **Date:** 2026-09-14 · **Area:** `src/Engine/Mom`,
+**Status:** CL1 SHIPPED 2026-09-14 (`RESOLVED.md` §CL1); CL2-CL4 briefed, not started ·
+**Date:** 2026-09-14 · **Area:** `src/Engine/Mom`,
 `docs/user/src/reference`
 **Requirement tag for the series:** `R-cl-n`, scoped per brief (`R-cl1-3` is brief 1's third)
 
@@ -55,6 +56,21 @@ is for.
 
 CL1 → CL2 → CL3 in that order. **CL4 is conditional on CL3 having landed** and is worth 11-25% of
 the conductor term (§2). **Thick metal is not a brief in this series** and §3 says why.
+
+### One thing landed between CL1 and CL2, and it moves where CL3's flip lands
+
+**`brief-quasistatic-port-calibration.md` shipped on 2026-09-14, after CL1** (`RESOLVED.md` §QSC).
+Below a per-stack crossover a port is no longer calibrated from two full-wave line standards: γ and
+Z_c are supplied from the standard's own electrostatics, **where the metal is a perfect conductor by
+construction**. The standards are still solved full-wave, so after CL3's flip their `S` carries α_c
+while the γ the error box is solved against does not.
+
+The crossover is **3.048 GHz** on the FR-4 starter and **26.07 GHz** on the MMIC starter — so on the
+substrate class this series exists for, **every frequency anyone runs is on the quasi-static side of
+it**. CL1 is unaffected (its own gates read γ from the two-line extraction directly); CL2 is
+unaffected (the power budget is a quadratic form in the solved current and no calibration touches
+it). **CL3 §0 is where it is answered, and it gates the flip rather than following it.** CL4
+inherits the same gap for the ground term.
 
 ---
 

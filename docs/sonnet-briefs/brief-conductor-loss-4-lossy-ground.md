@@ -7,7 +7,9 @@
 validated ranges — every one of them is at stake here); `LayeredMedium.cs` in full; `SpectralGreens.cs`'s
 pole finder and its L9c block comment; `Dcim.cs`'s header; `PlanarProblem.cs:340-370`;
 `brief-L9a-general-layered-medium.md` and `brief-L9b-dcim-general-medium.md`, because this brief
-walks into the same spectrum they did.
+walks into the same spectrum they did; **CL3 §0 and `RESOLVED.md` §QSC, because the calibration path
+that supplies γ below a per-stack crossover has a PEC ground of its own and this brief does not
+reach it.**
 
 ---
 
@@ -56,6 +58,23 @@ Three things it still cannot do, unchanged by this brief:
   them.
 - **One σ and one thickness** for the whole infinite plane, because it is one scalar.
 
+### And one more, which is CL3 §0's, inherited
+
+**The quasi-static calibration path's ground is a PEC too, and this brief does not change that.**
+`PlanarQuasiStaticLine` runs the standard's electrostatics over a `GroundedSlab`, whose floor is
+perfect by construction; nothing in the termination this brief re-points is read by that solve. So
+below `PlanarCalibration.QuasiStaticCrossoverHz` — 3.048 GHz on the FR-4 starter, **26.07 GHz on the
+MMIC starter** — the supplied γ gains no ground term, exactly as CL3 §0 found it gains no strip
+term. **Whatever CL3's milestone 0 decided for the strip has to be extended here or the residue
+stated with its size**, and the size is this brief's own headline number: 21.1% (FR-4) / ~11%
+(GaAs) / 25.0% (low-loss laminate) of the conductor term.
+
+**R-cl4-3's ratio is the place this bites.** That gate asks whether the measured ground share
+appears — a ratio of α_c-with-ground to α_c-strip-only — and if the frequency it is asked at is
+below the crossover, its denominator was set by a calibration carrying neither term. **Read α from a
+de-embedded S₂₁ over a known length and name the path per point** (CL3's R-cl3-6), or ask the gate
+above the crossover on both starters, which on GaAs means above 26 GHz.
+
 ## The change, which is small; and the consequences, which are not
 
 The termination reflection becomes, per polarization,
@@ -102,7 +121,9 @@ half and it is perhaps thirty lines.**
 ## Gates
 
 - **R-cl4-1 — the PEC reduction.** At σ = ∞ the termination returns exactly `−Complex.One` and the
-  whole kernel is **bit-identical** to CL3's. Not 1e-12.
+  whole kernel is **bit-identical** to CL3's. Not 1e-12. **The quasi-static calibration path is
+  bit-identical at every σ**, since it never reads the termination at all — assert that rather than
+  assuming it, because it is also the statement of what this brief fails to reach.
 - **R-cl4-2 — the εᵣ = 1 image reduction still holds.** §3.1's strongest oracle (free space plus one
   image) must survive, at σ = ∞.
 - **R-cl4-3 — against kernel A, both surfaces lossy.** A uniform 50 Ω microstrip on both starters:
@@ -118,6 +139,9 @@ half and it is perhaps thirty lines.**
 - Widen `ValidatedRhoOverLambdaLayered`, `ValidatedRhoOverLambdaAtHeights`, `PoleLossCeiling`, or
   `CalibratedPathProduct` to make a gate pass. Each was set by a measurement and §5 says so.
 - Use the two-sided `coth` for the plane. It is one-sided.
+- Change what the quasi-static calibration path supplies without re-running CL3's milestone-0
+  measurement. Its γ is the standard's electrostatics, not this brief's termination, and a ground
+  term bolted onto it here would be a second loss model with no gate on it.
 - Mesh the ground plane. That is a different kernel and R17's ceiling forbids it on any real board.
 - Touch CL1's sheet term, CL2's residual, or the port algebra.
 - Ship a partial result silently. If two of the four measurements pass and two refuse, the brief
