@@ -128,4 +128,90 @@ public sealed class ConductorLossProvenanceTests(ITestOutputHelper output)
         Assert.NotEqual(EmSnpProvenance.GeometryHash(Line(5.8e7, 35e-6)),
                         EmSnpProvenance.GeometryHash(Line(5.8e7, 18e-6)));
     }
+    /// <summary>
+    /// <b>The stamp answers "did the SOLVER change" as well as "did the document change", and until
+    /// this it could only answer the second.</b>
+    ///
+    /// <para>σ and thickness have been in <see cref="EmSnpProvenance.GeometryHash"/> since L9d — they
+    /// were simply never READ by the fill. So an <c>.snp</c> written when kernel B's metal was a
+    /// perfect conductor hashes to exactly what the same design hashes to today, and went on reading
+    /// as CURRENT while carrying numbers with 92-99% of the MMIC starter's loss missing. A hash of
+    /// the document cannot see that, by construction; a model token can.</para>
+    ///
+    /// <para>The three cases below are the three that matter: a file from the current model is
+    /// current, a file from a NAMED earlier model is stale, and a file with NO model line — which is
+    /// every planar <c>.snp</c> written before this — is stale and the message says that its metal
+    /// was a perfect conductor.</para>
+    /// </summary>
+    [Fact]
+    public void AFileWrittenByAnEarlierPHYSICSReadsAsStale()
+    {
+        var problem = Line(5.8e7, 35e-6);
+        var mesh    = new PlanarMeshSettings(Auto: false, CellsPerWavelength: 10, EdgeMesh: false);
+        var ports   = new[] { new PlanarPort(1, new EmPoint(0, 1.45e-3), PlanarPortSide.MinX, 50.0) };
+
+        string dir = Path.Combine(Path.GetTempPath(), "crf-model-stamp-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var header = EmSnpProvenance.BuildHeader(
+                problem, mesh, ports, "setup", "layout.clay", DateTimeOffset.UnixEpoch);
+
+            // The model line is IN the header the planar path writes, in plain text.
+            Assert.Contains(header, l => l == EmProvenanceStamp.ModelPrefix + PlanarKernel.ModelRevision);
+
+            string Write(IEnumerable<string> lines, string name)
+            {
+                string path = Path.Combine(dir, name);
+                File.WriteAllLines(path, lines.Select(l => "! " + l).Append("# HZ S RI R 50"));
+                return path;
+            }
+
+            // (a) written by THIS model, nothing else moved — current.
+            Assert.Null(EmSnpProvenance.DescribeStaleness(Write(header, "now.s1p"), problem, mesh, ports));
+
+            // (b) written by a NAMED earlier model, same document — stale, and it says which.
+            var older = header.Select(l => l.StartsWith(EmProvenanceStamp.ModelPrefix, StringComparison.Ordinal)
+                                            ? EmProvenanceStamp.ModelPrefix + "something-earlier"
+                                            : l);
+            string named = EmSnpProvenance.DescribeStaleness(Write(older, "older.s1p"), problem, mesh, ports)!;
+            output.WriteLine(named);
+            Assert.Contains("EM physics has", named, StringComparison.Ordinal);
+            Assert.Contains("something-earlier", named, StringComparison.Ordinal);
+            Assert.Contains(PlanarKernel.ModelRevision, named, StringComparison.Ordinal);
+
+            // (c) NO model line at all — every planar .snp written before this token existed. Stale,
+            //     and the sentence names the reason rather than leaving "a different setup" to be
+            //     read as an edit nobody made.
+            var pre = header.Where(l => !l.StartsWith(EmProvenanceStamp.ModelPrefix, StringComparison.Ordinal));
+            string legacy = EmSnpProvenance.DescribeStaleness(Write(pre, "pre.s1p"), problem, mesh, ports)!;
+            output.WriteLine(legacy);
+            Assert.Contains("PERFECT", legacy, StringComparison.Ordinal);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    /// <summary>
+    /// <b>Kernel A gets no model token, and that is the point of having one per kernel.</b> Nothing
+    /// in the conductor-loss series touched the cross-section kernel, so stamping it would mark every
+    /// cross-section <c>.snp</c> in every workspace stale to record a change that did not happen.
+    /// </summary>
+    [Fact]
+    public void TheCrossSectionKernelIsNotStamped()
+    {
+        var p = new EmProblem(
+            [new EmConductor("sig",
+                [new EmPoint(0, 0), new EmPoint(1e-3, 0),
+                 new EmPoint(1e-3, 35e-6), new EmPoint(0, 35e-6)], 5.8e7)],
+            [new EmDielectricRegion(0, 1.6e-3, new EmMaterial(4.4, 0.02))],
+            new EmGroundPlane(0, double.PositiveInfinity),
+            [new EmPort(1, "sig", null, 50.0), new EmPort(2, "sig", null, 50.0)],
+            10e-3);
+
+        var header = EmSnpProvenance.BuildHeader(p, new EmMeshSettings(), "setup", "x.clay",
+                                                 DateTimeOffset.UnixEpoch);
+        Assert.DoesNotContain(header, l => l.StartsWith(EmProvenanceStamp.ModelPrefix,
+                                                        StringComparison.Ordinal));
+    }
+
 }

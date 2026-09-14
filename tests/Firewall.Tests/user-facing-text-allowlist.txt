@@ -388,6 +388,10 @@ src/Engine/Mom/PlanarFill.cs|{caller} needs cores in the {layout} layout and the
 src/Engine/Mom/PlanarConductorPower.cs|The Gram matrix is of a {Gram.UnknownCount}-unknown mesh and this one has 
 src/Engine/Mom/PlanarConductorPower.cs|The solution has {basisCurrents.Count} unknowns and the mesh has 
 src/Engine/Mom/PlanarGram.cs|Two same-direction rooftops on one cut cell produced {sm.Strips.Count} and 
+# CL-review — an INTERNAL INVARIANT with no user remedy: a mesh and the PlanarProblem it was
+# built from have to agree about how many conductor levels there are. It used to clamp instead,
+# which read the nearest level's metal — a plausible loss figure for the wrong conductor.
+src/Engine/Mom/PlanarSurfaceImpedance.cs|This mesh names conductor level {i} 
 src/Engine/Mom/PlanarKernel.cs|A planar solve needs at least one port. Place port labels on the conductor ends in 
 src/Engine/Mom/PlanarKernel.cs|This layout has no port {drivenPortNumber} to drive; it has 
 src/Engine/Mom/PlanarPowerBudget.cs|The solution has {basisCurrents.Count} unknowns and the mesh has 

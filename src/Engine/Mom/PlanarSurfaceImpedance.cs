@@ -303,10 +303,28 @@ public sealed class PlanarConductorLoss
     /// <summary>How many conductor levels the problem declares.</summary>
     public int LayerCount => _problem.Layers.Count;
 
-    /// <summary>Z_s of one conductor LEVEL at one angular frequency, Ω/square.</summary>
+    /// <summary>
+    /// Z_s of one conductor LEVEL at one angular frequency, Ω/square.
+    ///
+    /// <para><b>An out-of-range level is a REFUSAL, not a clamp.</b> It used to clamp into range,
+    /// which meant a mesh naming more levels than the problem declares read the LAST level's metal
+    /// — a plausible loss figure for a pairing that is simply wrong, and the same class of silent
+    /// substitution the name-first resolution in <see cref="SheetTable"/> exists to prevent. There
+    /// is no case where the clamp is the right answer: the two callers are that method, which
+    /// resolves a level it has, and a caller asking about a level this problem does not have.</para>
+    /// </summary>
     public Complex SheetAt(int layerIndex, double omegaRadS)
     {
-        var layer = _problem.Layers[Math.Clamp(layerIndex, 0, _problem.Layers.Count - 1)];
+        if ((uint)layerIndex >= (uint)_problem.Layers.Count)
+            throw new ArgumentOutOfRangeException(
+                nameof(layerIndex),
+                $"Conductor level {layerIndex} was asked for and this problem declares " +
+                $"{_problem.Layers.Count} ({string.Join(", ", _problem.Layers.Select(l => l.Name))}). " +
+                "A mesh and the problem it was built from must agree about how many levels there are " +
+                "— a level index that does not resolve is a mesh/problem mismatch, and answering it " +
+                "with the nearest level would report a plausible loss figure for the wrong metal.");
+
+        var layer = _problem.Layers[layerIndex];
         return PlanarSurfaceImpedance.Sheet(layer.SigmaSm, layer.ThicknessM, omegaRadS);
     }
 
@@ -320,6 +338,14 @@ public sealed class PlanarConductorLoss
     /// layer name, so on a multi-level problem an index lookup would hand a Metal-2 standard Metal-1's
     /// metal — silently, as a plausible loss figure. Matching the name first makes the two agree
     /// wherever the names do.</para>
+    ///
+    /// <para><b>…and the name has to be SUPPLIED, which it was not until the review that found
+    /// this.</b> <c>BuildLine</c>'s layer name defaults to <c>PlanarCalibration.DefaultLayerName</c>
+    /// and nothing passed the port's own, so on a real technology the match failed and the INDEX
+    /// fallback answered — level 0's metal, for every port on every level. That is the right answer
+    /// on a single-level problem by either route, which is why it was invisible.
+    /// <c>PlanarSolve</c> now hands <c>BuildSet</c> the name of the level the port sits on, and
+    /// <c>PlanarSurfaceImpedanceTests.R_cl1_2d</c> is the gate.</para>
     /// </summary>
     public Complex[] SheetTable(PlanarMesh mesh, double omegaRadS)
     {
@@ -328,7 +354,18 @@ public sealed class PlanarConductorLoss
         for (int i = 0; i < t.Length; i++)
         {
             int resolved = i < mesh.LayerNames.Count ? IndexOfName(mesh.LayerNames[i]) : -1;
-            t[i] = SheetAt(resolved >= 0 ? resolved : i, omegaRadS);
+            if (resolved < 0) resolved = i;
+            if (resolved >= _problem.Layers.Count)
+                throw new InvalidOperationException(
+                    $"This mesh names conductor level {i} " +
+                    (i < mesh.LayerNames.Count ? $"('{mesh.LayerNames[i]}') " : "") +
+                    $"and the problem declares {_problem.Layers.Count} " +
+                    $"({string.Join(", ", _problem.Layers.Select(l => l.Name))}), none of them by " +
+                    "that name. A mesh and the problem it was built from have to agree about the " +
+                    "metal: a level that resolves by neither name nor index has no σ or thickness " +
+                    "to read, and the nearest level's would be a plausible loss figure for the " +
+                    "wrong conductor.");
+            t[i] = SheetAt(resolved, omegaRadS);
         }
         return t;
     }

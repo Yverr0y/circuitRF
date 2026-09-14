@@ -559,7 +559,7 @@ public sealed record PlanarPowerBudget(
               "of the metal's share rather than by all of it."
             : "On clause (2): this run's metal is a PERFECT CONDUCTOR, so the conductor term is a " +
               "hard zero and the accepted power has one fewer place to go — the efficiency reads " +
-              "HIGH by roughly the metal's own share. On 1.6 mm FR-4 that share is 6.5 % / 3.0 % / " +
+              "HIGH by roughly the metal's own share. On 1.6 mm FR-4 that share is 6.4 % / 3.0 % / " +
               "2.1 % of the total conducted loss at 2 / 10 / 20 GHz, but FR-4 is the substrate " +
               "class where it matters LEAST: on a 100 µm GaAs MMIC stackup the metal carries " +
               "92-99 % of the conducted loss.";

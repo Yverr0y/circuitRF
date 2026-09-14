@@ -53,6 +53,29 @@ public sealed class PlanarKernel
     /// <b>No "kernel B" (owner request, 2026-08-09)</b> — see <see cref="QuasiStaticKernel.KernelName"/>.</summary>
     public const string KernelName = "Full-wave planar";
 
+    /// <summary>
+    /// <b>The PHYSICS this kernel solves, as a token stamped into every <c>.snp</c> it writes.</b>
+    /// It exists because a provenance hash answers "did the DOCUMENT change" and cannot answer "did
+    /// the SOLVER change" — and the conductor-loss series changed the solver by more than any edit a
+    /// user could make to the document.
+    ///
+    /// <para>Before it, an <c>.snp</c> written when kernel B's metal was a perfect conductor hashed
+    /// to exactly what the same design hashes to today (σ and thickness have been in
+    /// <c>EmSnpProvenance.GeometryHash</c> since L9d — they simply were not read by the fill), so it
+    /// went on reading as CURRENT while carrying numbers taken with 92-99% of the MMIC starter's
+    /// loss missing. The ground plane's own metal is the same story one surface over.</para>
+    ///
+    /// <para><b>Bump it whenever a change moves a published s-parameter for an unchanged document</b>
+    /// — a new loss mechanism, a default that flips, a formulation replaced — and NOT for a
+    /// performance change, a refactor or a refusal's wording, which are exactly the changes that
+    /// must not invalidate anyone's cache. The date is the ship date of the change that last moved
+    /// it, so a stamped file says in plain text which physics wrote it.</para>
+    ///
+    /// <para>Kernel A has no such token: nothing in this series touched it, and giving it one would
+    /// mark every cross-section <c>.snp</c> stale to record nothing.</para>
+    /// </summary>
+    public const string ModelRevision = "conductor-and-ground-loss-2026-09-14";
+
     /// <summary>The diagnostics group D4 adds. <b>Not "tline"</b> — kernel A's eight scalars are
     /// per-unit-length properties of a uniform line, and a planar structure has none; overloading the
     /// name would make a Data Display trace mean two different things depending on which kernel

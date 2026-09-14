@@ -58,9 +58,19 @@ The results land in the `farfield` group of the same result the s-parameters do.
 | `AxialRatioDb`, `PolarizationSense` | freq, θ, φ, port | dB, and signed Stokes *V* |
 | `CoPolLudwig3Db`, `CrossPolLudwig3Db` | freq, θ, φ, port | dB |
 
-One is **present and refused**, with its own sentence in the run's notes: `FrontToBackDb` — there is
-no field behind an infinite plane, so the true ratio is infinite rather than large, and a number for
-it would be a fiction.
+One is **present and refused**, with its own sentence in the run's notes: `FrontToBackDb`. This model
+has **no lower half-space at all** — the ground plane is laterally infinite and enters as a boundary
+condition, so no field below it is ever computed. On a stackup whose ground layer has no conductivity
+that plane is perfect and the true ratio really is infinite; on one that carries conductivity the
+plane is a real conductor and does leak, so your structure's front-to-back is finite — but what is
+missing from the model is a *region*, not a small number, and either way a printed value would be a
+fiction. The run's note says which of the two it is in.
+
+> **`PowerDielectricAndGround` was called `PowerDielectric`** before the ground plane became a real
+> conductor. It is the same residual with one more mechanism in it, and it is renamed rather than
+> split because the laterally infinite plane has no basis function to integrate over — what it
+> absorbs can only arrive as a remainder. **A Data Display or script that names the old cube will
+> find nothing**; point it at the new name.
 
 ## Which feeds work {#feeds}
 
@@ -335,10 +345,11 @@ physical, and it is ideally non-zero.</p>
 <p>A user who discovers a limit by getting a wrong answer has been failed by the documentation.</p>
 </div>
 
-- **No back radiation, and no front-to-back ratio.** The ground plane is laterally infinite, so the
-  field behind it is identically zero. `FrontToBackDb` is present and refused rather than printed as a
-  large number. **Directivity therefore reads optimistic** against a real board, whose finite plane puts
-  substantial power behind it and tilts and ripples the pattern.
+- **No back radiation, and no front-to-back ratio.** The ground plane is laterally infinite and enters
+  as a boundary condition on the underside of the stack, so the model computes no field below it at
+  all — not even the leakage a real conductor has. `FrontToBackDb` is present and refused rather than
+  printed as a large number. **Directivity therefore reads optimistic** against a real board, whose
+  finite plane puts substantial power behind it and tilts and ripples the pattern.
 - **Drawing the pour does not make the plane finite**, but it does make its size *reportable*: a run
   that finds artwork on the return plane prints the plane's bounding box, equal-area diameter and — the
   electrically meaningful one — how far the plane reaches **beyond** the radiating metal, all in

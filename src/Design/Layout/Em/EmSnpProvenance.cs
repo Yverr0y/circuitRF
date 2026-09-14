@@ -17,12 +17,26 @@ using CircuitRF.Engine.Mom;
 namespace CircuitRF.Design.Layout.Em;
 
 /// <summary>The fields of a provenance stamp, parsed back out of an existing <c>.snp</c> header.</summary>
-public sealed record EmProvenanceStamp(string GeometryHash, string MeshHash, string PortHash)
+public sealed record EmProvenanceStamp(string GeometryHash, string MeshHash, string PortHash,
+                                       string? ModelRevision = null)
 {
     public const string Marker         = "circuitRF-EM";
     public const string GeometryPrefix = "circuitRF-EM geometry: ";
     public const string MeshPrefix     = "circuitRF-EM mesh: ";
     public const string PortPrefix     = "circuitRF-EM ports: ";
+
+    /// <summary>
+    /// <b>Which PHYSICS wrote this file</b> — <see cref="CircuitRF.Engine.Mom.PlanarKernel.ModelRevision"/>,
+    /// in plain text rather than hashed, so a reader can see it. The three hashes above answer "did
+    /// the DOCUMENT change"; this is the one that answers "did the SOLVER change", which no hash of
+    /// an <c>EmProblem</c> can.
+    ///
+    /// <para><b>Absent on a file written before it existed, and that is exactly the case it is for</b>
+    /// — such a file was produced by a kernel whose metal was a perfect conductor, so it reads as
+    /// stale once and correctly. It is emitted by the PLANAR overload only; kernel A did not change
+    /// and must not have every one of its files marked.</para>
+    /// </summary>
+    public const string ModelPrefix    = "circuitRF-EM model: ";
 
     /// <summary>
     /// <b>PCAL2/R-pcal2-2 — a line saying this file's numbers were produced outside the condition
@@ -55,12 +69,12 @@ public static class EmSnpProvenance
         IReadOnlyList<string>? caveats = null)
         => BuildHeader(PlanarKernel.KernelName,
                        GeometryHash(problem), MeshHash(mesh), PortHash(ports),
-                       setupName, layoutRef, when, caveats);
+                       setupName, layoutRef, when, caveats, PlanarKernel.ModelRevision);
 
     private static IReadOnlyList<string> BuildHeader(
         string kernelName, string geometry, string mesh, string ports,
         string setupName, string layoutRef, DateTimeOffset when,
-        IReadOnlyList<string>? caveats = null)
+        IReadOnlyList<string>? caveats = null, string? modelRevision = null)
     {
         var lines = new List<string>
         {
@@ -72,6 +86,11 @@ public static class EmSnpProvenance
             EmProvenanceStamp.MeshPrefix     + mesh,
             EmProvenanceStamp.PortPrefix     + ports,
         };
+
+        // Emitted only where there is one — the planar overload. A kernel-A file gains no byte, so
+        // no cross-section .snp in any workspace is marked stale to record a token kernel A has not
+        // got. See PlanarKernel.ModelRevision.
+        if (modelRevision is not null) lines.Add(EmProvenanceStamp.ModelPrefix + modelRevision);
 
         // Empty on every run that has nothing to declare, so an ordinary .sNp gains no byte and
         // stays byte-identical to one written before PCAL2 — the same omit-at-default rule the
@@ -348,7 +367,7 @@ public static class EmSnpProvenance
     public static EmProvenanceStamp? TryRead(string snpPath)
     {
         if (!File.Exists(snpPath)) return null;
-        string? geo = null, mesh = null, ports = null;
+        string? geo = null, mesh = null, ports = null, model = null;
         try
         {
             foreach (var raw in File.ReadLines(snpPath))
@@ -363,13 +382,15 @@ public static class EmSnpProvenance
                     mesh = line[EmProvenanceStamp.MeshPrefix.Length..].Trim();
                 else if (line.StartsWith(EmProvenanceStamp.PortPrefix, StringComparison.Ordinal))
                     ports = line[EmProvenanceStamp.PortPrefix.Length..].Trim();
+                else if (line.StartsWith(EmProvenanceStamp.ModelPrefix, StringComparison.Ordinal))
+                    model = line[EmProvenanceStamp.ModelPrefix.Length..].Trim();
             }
         }
         catch (IOException) { return null; }
 
         return geo is null || mesh is null || ports is null
             ? null
-            : new EmProvenanceStamp(geo, mesh, ports);
+            : new EmProvenanceStamp(geo, mesh, ports, model);
     }
 
     /// <summary>
@@ -385,11 +406,17 @@ public static class EmSnpProvenance
     public static string? DescribeStaleness(
         string snpPath, PlanarProblem problem, PlanarMeshSettings mesh, IReadOnlyList<PlanarPort> ports)
         => Compare(snpPath, GeometryHash(problem), MeshHash(mesh), PortHash(ports),
-                   "the layout geometry", "the ports");
+                   "the layout geometry", "the ports", PlanarKernel.ModelRevision);
 
+    /// <param name="modelRevision">
+    /// <b>The physics the run about to be written solves</b>, or null for a kernel that has no such
+    /// token (kernel A). Compared as plain text against the stamp's own, so a file written by a
+    /// DIFFERENT model of the same document is stale — which is a thing no hash of an
+    /// <c>EmProblem</c> can say. See <see cref="CircuitRF.Engine.Mom.PlanarKernel.ModelRevision"/>.
+    /// </param>
     private static string? Compare(
         string snpPath, string geometry, string mesh, string ports,
-        string geometryLabel, string portLabel)
+        string geometryLabel, string portLabel, string? modelRevision = null)
     {
         var stamp = TryRead(snpPath);
         if (stamp is null) return null;
@@ -398,10 +425,30 @@ public static class EmSnpProvenance
         if (stamp.GeometryHash != geometry) changed.Add(geometryLabel);
         if (stamp.MeshHash     != mesh)     changed.Add("the mesh settings");
         if (stamp.PortHash     != ports)    changed.Add(portLabel);
-        if (changed.Count == 0) return null;
+
+        // The document is only half the question. A file whose three hashes all match can still hold
+        // numbers this build would not produce, because the SOLVER moved — and the conductor-loss
+        // series moved it by more than any edit to the document could. An absent token is the
+        // pre-token kernel, whose metal was a perfect conductor, so it is a mismatch rather than a
+        // free pass.
+        bool modelMoved = modelRevision is not null && stamp.ModelRevision != modelRevision;
+        if (changed.Count == 0 && !modelMoved) return null;
+
+        string what = changed.Count > 0
+            ? $"{string.Join(" and ", changed)} changed since"
+            : "the document has not changed, but circuitRF's own EM physics has";
+
+        string model = modelMoved
+            ? " The solver that wrote it was " +
+              (stamp.ModelRevision is { Length: > 0 } was
+                  ? $"'{was}'"
+                  : "an earlier one with no model stamp — which is a build whose metal was a PERFECT " +
+                    "CONDUCTOR, so its conductor and ground-plane loss are missing entirely") +
+              $" and this run is '{modelRevision}'."
+            : "";
 
         return $"'{Path.GetFileName(snpPath)}' was written from a different setup — " +
-               $"{string.Join(" and ", changed)} changed since. Any schematic referencing it was " +
+               $"{what}.{model} Any schematic referencing it was " +
                "using stale s-parameters; this run has just rewritten it.";
     }
 

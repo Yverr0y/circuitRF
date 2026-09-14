@@ -203,6 +203,72 @@ public sealed class PlanarGroupSeparationTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    /// <b>The mode-separation refusal quotes four measured sizes, and this is what holds them.</b>
+    ///
+    /// <para>It is a user-facing remedy carrying numbers, so something has to. The ones it used to
+    /// print were taken at PCAL7 on a different board with PEC metal; CL3 both moved them and showed
+    /// that a real conductor does not move a mode separation monotonically, so the sentence had come
+    /// to read as "narrow the band and the separation rises" — which is not what the lever does.</para>
+    ///
+    /// <para>The CHEAP half of that re-measurement lives here (one coarse mesh, N = 48, two bands);
+    /// the edge-mesh half costs a group calibration on N = 424 and is
+    /// <see cref="TheEdgeMeshMovesTheSameSeparationTheOtherWay"/>, tagged.</para>
+    /// </summary>
+    [Fact]
+    public void TheBandIsALever_AndTheRefusalQuotesTheMeasuredSizes()
+    {
+        var problem = Problem();
+        var mesh    = SurfaceMesher.Mesh(problem, PlanarLineFixtures.Coarse).Mesh;
+        var ports   = PlanarPorts.ResolveAll(mesh, Ports());
+        output.WriteLine($"edge mesh OFF: N = {mesh.Bases.Count}");
+
+        // 200 - 800 MHz publishes at 1.29°; 200 - 400 MHz refuses at 0.405°. Same metal, same ports.
+        var wide = PlanarSolve.Run(problem, mesh, ports, [200e6, 800e6]);
+        Assert.Contains(wide.Notes, n => n.Contains("Worst mode separation 1.29°", StringComparison.Ordinal));
+
+        var ex = Assert.Throws<PlanarFeedClearanceRefusedException>(
+            () => PlanarSolve.Run(problem, mesh, ports, [200e6, 400e6]));
+        Assert.Contains("at 200 MHz", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("0.405°", ex.Message, StringComparison.Ordinal);
+        output.WriteLine(ex.Message);
+
+        // …and the message quotes exactly the four figures the two halves measured, so it cannot
+        // drift from the fixture the way PCAL7's did.
+        foreach (string n in new[] { "0.405°", "1.29°", "0.96°", "0.155°" })
+            Assert.Contains(n, ex.Message, StringComparison.Ordinal);
+        Assert.Contains("NOT A RULE", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <b>…and the edge mesh moves the same 200 MHz point the OTHER way, which is the half that
+    /// makes the direction not a rule.</b> With it on, the 200 - 400 MHz band that refused at 0.405°
+    /// publishes at 0.96°, and the 200 - 800 MHz band that published at 1.29° refuses at 0.155°.
+    ///
+    /// <para>Tagged because the edge-meshed fixture is N = 424 and each band is a full grouped
+    /// de-embedded calibration — ~2.5 min together, well past the routine tier's ~5 s. The cheap half
+    /// and the message's own four figures stay in the default gate
+    /// (<see cref="TheBandIsALever_AndTheRefusalQuotesTheMeasuredSizes"/>).</para>
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Benchmark")]   // N = 424 grouped calibration on two bands, ~2.5 min
+    public void TheEdgeMeshMovesTheSameSeparationTheOtherWay()
+    {
+        var problem = Problem();
+        var mesh    = SurfaceMesher.Mesh(problem, PlanarLineFixtures.Coarse with { EdgeMesh = true }).Mesh;
+        var ports   = PlanarPorts.ResolveAll(mesh, Ports());
+        output.WriteLine($"edge mesh ON: N = {mesh.Bases.Count}");
+
+        var narrow = PlanarSolve.Run(problem, mesh, ports, [200e6, 400e6]);
+        Assert.Contains(narrow.Notes, n => n.Contains("Worst mode separation 0.96°", StringComparison.Ordinal));
+
+        var ex = Assert.Throws<PlanarFeedClearanceRefusedException>(
+            () => PlanarSolve.Run(problem, mesh, ports, [200e6, 800e6]));
+        Assert.Contains("at 200 MHz", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("0.155°", ex.Message, StringComparison.Ordinal);
+        output.WriteLine(ex.Message);
+    }
+
+    /// <summary>
     /// <b>R-pcal6-6 — the floor does not move and a refusal stays a refusal.</b> Where BOTH
     /// numbers are under the floor the modes are genuinely degenerate, and the message says so by
     /// carrying the two of them; nothing recovers, because PCAL6/M3 measured that the one remedy
@@ -452,10 +518,14 @@ public sealed class PlanarGroupSeparationTests(ITestOutputHelper output)
         Assert.DoesNotContain("would be calibrated together", ex.Message, StringComparison.Ordinal);
 
         // R-pcal7-7 — and because the electrostatic figure is OVER the floor, the remedy it names is
-        // the one that binds on this case: the band and the mesh, not the feeds. PCAL7 measured both
-        // levers moving the same point by 4.4x and 15x respectively while the published
-        // s-parameters moved by 1%.
-        Assert.Contains("narrowing the sweep", ex.Message, StringComparison.Ordinal);
+        // the one that binds on this case: the band and the mesh, not the feeds.
+        //
+        // **It names the two levers and no longer names a DIRECTION.** It used to say "narrowing the
+        // sweep", which was measured on a PEC board at PCAL7 and is not what the lever does — with
+        // the edge mesh on, narrowing goes the other way on this very fixture
+        // (TheBandAndTheEdgeMeshAreTheTwoLevers). The assertion follows the message.
+        Assert.Contains("moving either band edge", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("NOT A RULE", ex.Message, StringComparison.Ordinal);
         Assert.Contains("standards' own MESH", ex.Message, StringComparison.Ordinal);
         Assert.Contains("Your metal is not the problem", ex.Message, StringComparison.Ordinal);
     }

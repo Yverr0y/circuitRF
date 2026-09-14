@@ -800,6 +800,62 @@ public class PlanarSurfaceImpedanceTests(ITestOutputHelper output)
         return new PlanarMesh(cells, bases, ["Metal"], gx, gy);
     }
 
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // R-cl1-2d — a CALIBRATION STANDARD is made of the port's own level's metal
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// <b>A standard's mesh numbers its one conductor level 0 whatever level the port sits on, so
+    /// the fill has to resolve its metal by NAME — and the name has to be the port's level's.</b>
+    ///
+    /// <para><see cref="PlanarConductorLoss.SheetTable"/> matches the mesh's layer name against the
+    /// problem's levels and falls back to the index, which is 0. That fallback is the right answer on
+    /// a single-level problem by either route and the WRONG one on a multi-level problem: with the
+    /// name left at <see cref="PlanarCalibration.DefaultLayerName"/>, a port on M2 was calibrated
+    /// against standards filled with M1's σ and thickness — silently, as a plausible α, and on the
+    /// MMIC technology conductor loss is 92-99% of the line's. So <c>BuildSet</c> takes the name and
+    /// <c>PlanarSolve</c> hands it the port's own level's.</para>
+    ///
+    /// <para>The fixture is the two-level MMIC one: same gold, 1 µm on Metal1 against 3 µm on
+    /// Metal2, which at 30 GHz is a real difference in Re(Z_s) and not a rounding one.</para>
+    /// </summary>
+    [Fact]
+    public void R_cl1_2d_AStandardIsFilledWithItsOwnLevelsMetal()
+    {
+        var (problem, mesh, _) = ViaFixture();
+        double f = 30e9, omega = 2.0 * Math.PI * f;
+        var loss = PlanarConductorLoss.For(problem);
+
+        var upperPorts = PlanarPorts.ResolveAll(mesh,
+            [new PlanarPort(1, new EmPoint(700e-6, 0), PlanarPortSide.MaxX, 50.0, 1)]);
+        Assert.Equal(1, upperPorts[0].LayerIndex);
+
+        var named = PlanarCalibration.BuildSet(upperPorts[0], problem.Slab, f, f, null,
+                                               problem.Layers[1].Name);
+        var placeholder = PlanarCalibration.BuildSet(upperPorts[0], problem.Slab, f, f);
+
+        var wantUpper = PlanarSurfaceImpedance.Sheet(problem.Layers[1].SigmaSm,
+                                                     problem.Layers[1].ThicknessM, omega);
+        var wantLower = PlanarSurfaceImpedance.Sheet(problem.Layers[0].SigmaSm,
+                                                     problem.Layers[0].ThicknessM, omega);
+
+        output.WriteLine($"Metal1 ({problem.Layers[0].ThicknessM * 1e6:0.#} µm) Z_s = {wantLower}");
+        output.WriteLine($"Metal2 ({problem.Layers[1].ThicknessM * 1e6:0.#} µm) Z_s = {wantUpper}");
+
+        // The two levels really are different metal, or this test would pass for the wrong reason.
+        Assert.True((wantUpper - wantLower).Magnitude > 0.05 * wantLower.Magnitude);
+
+        foreach (var std in named)
+        {
+            Assert.Equal(problem.Layers[1].Name, Assert.Single(std.Mesh.LayerNames));
+            Assert.Equal(wantUpper, Assert.Single(loss.SheetTable(std.Mesh, omega)));
+        }
+
+        // …and the placeholder is exactly the defect: level 0's metal on a level-1 port.
+        foreach (var std in placeholder)
+            Assert.Equal(wantLower, Assert.Single(loss.SheetTable(std.Mesh, omega)));
+    }
+
     /// <summary>A two-level MMIC fixture with a real via between the levels.</summary>
     private static (PlanarProblem, PlanarMesh, PlanarLevels) ViaFixture()
     {

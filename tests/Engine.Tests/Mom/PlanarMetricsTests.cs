@@ -272,7 +272,10 @@ public class PlanarMetricsTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Contains("EXACTLY ZERO WHEN THE METAL IS A PERFECT CONDUCTOR", note);
         Assert.Contains("ZERO-THICKNESS", note);                   // what it cannot carry
         Assert.Contains("0.63", note);                             // CL1's measured under-read
-        Assert.Contains("6.5 %", PlanarPowerBudget.ConductorNote + report.Budget.ConductorBoundClause);
+        // The FR-4 share at 2 GHz. **6.4 %, not 6.5 %** — the series' own re-measurement moved it
+        // (overview §0's table and docs/user/src/reference/mom-engine.md both say 6.4), and this
+        // clause was the last place carrying the old digit.
+        Assert.Contains("6.4 %", PlanarPowerBudget.ConductorNote + report.Budget.ConductorBoundClause);
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════

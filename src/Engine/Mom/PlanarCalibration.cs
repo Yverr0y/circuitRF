@@ -412,7 +412,7 @@ public static class PlanarCalibration
     /// not in the DUT, and the check that says so already exists.</para>
     /// </summary>
     public static PlanarStandard BuildCoplanarLine(PlanarPortResolution port, double targetLengthM,
-                                                   int endRunCells, string layerName = "Metal")
+                                                   int endRunCells, string layerName = DefaultLayerName)
     {
         ArgumentNullException.ThrowIfNull(port);
         var xs = port.CrossSection
@@ -465,12 +465,21 @@ public static class PlanarCalibration
     }
 
     /// <summary>
+    /// <b>The placeholder level name a standard carries when no caller supplies the port's own.</b>
+    /// A standard's mesh has exactly one conductor level and numbers it 0 whatever level the port
+    /// sits on, so <see cref="PlanarConductorLoss.SheetTable"/> resolves its metal by NAME with an
+    /// index-0 fallback — which is the right answer for a single-level problem by either route, and
+    /// is why the placeholder is harmless there and why the real name has to be passed otherwise.
+    /// </summary>
+    public const string DefaultLayerName = "Metal";
+
+    /// <summary>
     /// A uniform line of the port's own cross-section, at least <paramref name="targetLengthM"/>
     /// between reference planes. The actual length is rounded UP to a whole number of bulk cells and
     /// is reported on the result — the requested length is never assumed.
     /// </summary>
     public static PlanarStandard BuildLine(PlanarPortResolution port, double targetLengthM,
-                                           int endRunCells, string layerName = "Metal",
+                                           int endRunCells, string layerName = DefaultLayerName,
                                            PlanarCalibrationSettings? settings = null)
     {
         ArgumentNullException.ThrowIfNull(port);
@@ -570,7 +579,7 @@ public static class PlanarCalibration
     /// between the two treatments rather than the length between them.</para>
     /// </summary>
     public static PlanarStandard BuildNeighbourLine(PlanarPortResolution port, double targetLengthM,
-                                                    int endRunCells, string layerName = "Metal",
+                                                    int endRunCells, string layerName = DefaultLayerName,
                                                     PlanarCalibrationSettings? settings = null)
     {
         ArgumentNullException.ThrowIfNull(port);
@@ -659,7 +668,7 @@ public static class PlanarCalibration
     /// all.</para>
     /// </summary>
     public static PlanarStandard BuildGroupLine(PlanarPortResolution port, double targetLengthM,
-                                                int endRunCells, string layerName = "Metal")
+                                                int endRunCells, string layerName = DefaultLayerName)
     {
         ArgumentNullException.ThrowIfNull(port);
         var g = port.Group
@@ -1080,15 +1089,24 @@ public static class PlanarCalibration
     /// <para>Δℓ is taken from the SHORT line's ACTUAL length, never from its target — see
     /// <see cref="SuggestLengths"/> for the measurement that made that necessary.</para>
     /// </summary>
+    /// <param name="layerName">
+    /// <b>CL1 — the name of the PROBLEM's conductor level this port sits on</b>, which is how the
+    /// fill resolves the standard's metal. A standard's mesh carries one level, numbered 0 whatever
+    /// level the port is actually on, so <see cref="PlanarConductorLoss.SheetTable"/> matches it by
+    /// NAME and falls back to index 0 — and before this parameter existed the name was always the
+    /// placeholder, so on a multi-level problem every standard was filled with level 0's σ and
+    /// thickness however high the port sat. The default keeps every single-level call site
+    /// bit-identical: one level resolves to index 0 by either route.
+    /// </param>
     public static PlanarStandard[] BuildSet(
         PlanarPortResolution port, GroundedSlab slab, double fLoHz, double fHiHz,
-        PlanarCalibrationSettings? settings = null)
+        PlanarCalibrationSettings? settings = null, string layerName = DefaultLayerName)
     {
         // QSC — the measured ladder over the band's ABOVE-crossover part, plus one short
         // frequency-independent separation for the part below it. Above the crossover throughout,
         // this IS SuggestDeltas' own array and the set built is the one that shipped.
         return BuildSet(port, slab, SeparationPlan(slab, fLoHz, fHiHz, port, settings),
-                        SuggestLengths(slab, fLoHz, fHiHz, settings).Short, settings);
+                        SuggestLengths(slab, fLoHz, fHiHz, settings).Short, settings, layerName);
     }
 
     /// <summary>
@@ -1097,17 +1115,21 @@ public static class PlanarCalibration
     /// that are SELECTED cannot come from two evaluations of the same function — which is the defect
     /// PCAL6/R-pcal6-3 fixed one level up, and it is the same defect here.
     /// </summary>
+    /// <param name="layerName">The PROBLEM's name for the conductor level this port sits on — see the
+    /// band overload above for why a standard's metal is resolved by name and what the placeholder
+    /// costs on a multi-level problem.</param>
     public static PlanarStandard[] BuildSet(
         PlanarPortResolution port, GroundedSlab slab, PlanarSeparationPlan plan,
-        double shortTargetM, PlanarCalibrationSettings? settings = null)
+        double shortTargetM, PlanarCalibrationSettings? settings = null,
+        string layerName = DefaultLayerName)
     {
         int k = EndRunCellsFor(port, slab, settings);
         var deltas = plan.DeltaLM;
 
         var set = new PlanarStandard[deltas.Length + 1];
-        set[0] = BuildLine(port, shortTargetM, k, settings: settings);
+        set[0] = BuildLine(port, shortTargetM, k, layerName, settings);
         for (int i = 0; i < deltas.Length; i++)
-            set[i + 1] = BuildLine(port, set[0].LengthM + deltas[i], k, settings: settings);
+            set[i + 1] = BuildLine(port, set[0].LengthM + deltas[i], k, layerName, settings);
 
         return set;
     }

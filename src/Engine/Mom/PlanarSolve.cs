@@ -465,6 +465,13 @@ public sealed class PlanarPortCalibrator
         return a.ConductivitySm.Equals(b.ConductivitySm) && a.ThicknessM.Equals(b.ThicknessM);
     }
 
+    /// <param name="standardLayerName">
+    /// <b>CL1 — the PROBLEM's name for the conductor level this port sits on.</b> A standard's mesh
+    /// numbers its one level 0 whatever level the port is on, so the fill resolves its metal by NAME
+    /// (<see cref="PlanarConductorLoss.SheetTable"/>) and falls back to index 0; left at the
+    /// placeholder on a multi-level problem, every standard is filled with level 0's σ and thickness.
+    /// The default is bit-identical on a single-level problem, where both routes give index 0.
+    /// </param>
     /// <param name="separations">
     /// <b>QSC — the A-vs-B seam, and the ONLY way to make a sub-crossover point take the measured
     /// two-line path.</b> Null draws the plan from the band, which is what
@@ -483,7 +490,8 @@ public sealed class PlanarPortCalibrator
                                 double standardLevelZ = double.NaN,
                                 IReadOnlyList<PlanarStandard>? standards = null,
                                 LayerStack? mediumStack = null,
-                                PlanarCalibration.PlanarSeparationPlan? separations = null)
+                                PlanarCalibration.PlanarSeparationPlan? separations = null,
+                                string standardLayerName = PlanarCalibration.DefaultLayerName)
     {
         _slab = slab;
         _standardLevels = double.IsNaN(standardLevelZ) ? null : new PlanarLevels([standardLevelZ]);
@@ -508,7 +516,7 @@ public sealed class PlanarPortCalibrator
         var set = standards is null
                 ? PlanarCalibration.BuildSet(port, slab, _plan,
                                              PlanarCalibration.SuggestLengths(slab, fLoHz, fHiHz, calibration).Short,
-                                             calibration)
+                                             calibration, standardLayerName)
                 : [.. standards];
         Standards = set;
 
@@ -2248,10 +2256,21 @@ public static class PlanarSolve
                     // another. The set is the short line followed by one standard per separation,
                     // so the quasi-static separation's standard is at QuasiStaticIndex + 1.
                     var stdPlan = PlanarCalibration.SeparationPlan(slab, fLo, fHi, ports[i], st.Calibration);
+
+                    // CL1 — the standard is a piece of THIS PORT'S LEVEL, so it is named after it.
+                    // A standard's mesh numbers its one conductor level 0 whatever level the port
+                    // is on, and the fill resolves a level's Z_s by NAME with an index-0 fallback
+                    // (PlanarConductorLoss.SheetTable). Left at the placeholder, every standard on
+                    // a multi-level problem was filled with level 0's σ and thickness however high
+                    // the port sat — silently, as a plausible α. One level resolves to index 0 by
+                    // either route, so nothing about a single-level run moves.
+                    string stdLayerName = problem.Layers[
+                        Math.Clamp(ports[i].LayerIndex, 0, problem.Layers.Count - 1)].Name;
+
                     var stdSet  = PlanarCalibration.BuildSet(
                         ports[i], slab, stdPlan,
                         PlanarCalibration.SuggestLengths(slab, fLo, fHi, st.Calibration).Short,
-                        st.Calibration);
+                        st.Calibration, stdLayerName);
 
                     for (int si = 0; si < stdSet.Length; si++)
                     {
@@ -2311,7 +2330,8 @@ public static class PlanarSolve
                         standardLevelZ: general ? problem.LevelZ(ports[i].LayerIndex) : double.NaN,
                         standards: stdSet,
                         mediumStack: general ? problem.EffectiveStack : null,
-                        separations: stdPlan);
+                        separations: stdPlan,
+                        standardLayerName: stdLayerName);
 
                     // MIM-4 — the interior electrostatics is fitted, so its quality is asked about
                     // rather than assumed. R-mom-17: a fit this poor is refused BY NAME at setup,
@@ -2521,10 +2541,31 @@ public static class PlanarSolve
                 // standards that could not resolve them. "Separate the feeds" is the right advice
                 // for the other case and does not bind here, and PCAL7 measured what does: the
                 // calibration separation Δℓ is chosen from the SWEEP's band, so the band is the
-                // lever. On the series' own pair at 200 MHz, a 200-400 MHz band reads 1.15° and a
-                // 200-800 MHz band reads 0.26° on the same metal — and the two de-embedded answers
-                // differ by 1% (0.1099 against 0.1091 in max |ΔS|, floor 0.148). So narrowing the
-                // band is free of accuracy, which is why it is named first.
+                // lever, and the standards' own MESH is the second one.
+                //
+                // ── THE THREE MEASURED SIZES THIS MESSAGE QUOTES WERE RE-MEASURED, AND THE OLD
+                //    ONES HAD ACQUIRED A DIRECTION THEY DO NOT HAVE ──────────────────────────────
+                //
+                // They were taken at PCAL7 on a different board with PEC metal, and §CL3 §5 showed
+                // that a real conductor moves a mode separation and does NOT move it monotonically
+                // (loss adds |Δα|·Δℓ, but it also changes which Δℓ is selected and both modes' β).
+                // The sentence had come to read as "narrow the band and the separation rises", which
+                // is not what the lever does. Re-measured on this series' own coupled pair, at the
+                // same 200 MHz, with the shipped real metal — `PlanarGroupSeparationTests`'
+                // `Board()`, and gated by `TheBandAndTheEdgeMeshAreTheTwoLevERS`:
+                //
+                //     edge mesh OFF (N = 48):   200-400 MHz  0.405° REFUSED
+                //                               200-800 MHz  1.29°  publishes
+                //                               100 MHz-1 GHz 1.31° publishes
+                //     edge mesh ON  (N = 424):  200-400 MHz  0.96°  publishes
+                //                               200-800 MHz  0.155° REFUSED
+                //
+                // So WIDENING helps with the edge mesh off and hurts with it on, on one fixture and
+                // one frequency. The lever is real; its sign is not a rule, and the message must say
+                // "try the other edge and read the reported figure back" rather than name a
+                // direction. The accuracy figure behind "narrowing is free" (0.1099 against 0.1091
+                // in max |ΔS|) was measured on the same PEC board and is dropped rather than
+                // re-quoted — it supported a recommendation that is no longer being made.
                 //
                 // The other spelling survives for the case that can still reach here — an adaptive
                 // sweep solves points the setup guard never saw, and the quasi-static separation is
@@ -2546,15 +2587,16 @@ public static class PlanarSolve
                         ? "Your metal is not the problem — the electrostatic figure above is over the " +
                           "floor, so these modes are far enough apart in principle and it is this pair " +
                           "of standards that could not tell them apart. Two things move that " +
-                          "measurement and neither of them changes your design. The calibration " +
-                          "separation is chosen from the SWEEP's band, so narrowing the sweep (raising " +
-                          "its lower edge or lowering its upper one) picks a different one: measured " +
-                          "on this series' own coupled pair, the same 200 MHz point reads 0.26° over a " +
-                          "200 MHz - 800 MHz band and 1.15° over a 200 MHz - 400 MHz one, while the " +
-                          "published s-parameters move by 1%. And the measurement is made on the " +
-                          "standards' own MESH: turning the edge mesh on moved that same point from " +
-                          "0.19° to 2.94°. Separating the feeds by at least the driven clearance also " +
-                          "works, by removing the group altogether."
+                          "measurement and neither of them changes your design. (1) The calibration " +
+                          "separation is chosen from the SWEEP's band, so moving either band edge " +
+                          "picks a different one. (2) The measurement is made on the standards' own " +
+                          "MESH, so the edge mesh moves it too. WHICH WAY EITHER ONE GOES IS NOT A " +
+                          "RULE — try it and read this figure back from the run. Measured on this " +
+                          "series' own coupled pair, all at the same 200 MHz: with the edge mesh OFF " +
+                          "a 200 MHz - 400 MHz band reads 0.405° and refuses while 200 MHz - 800 MHz " +
+                          "reads 1.29° and publishes; with the edge mesh ON the same two bands read " +
+                          "0.96° (publishes) and 0.155° (refuses). Separating the feeds by at least " +
+                          "the driven clearance also works, by removing the group altogether."
                         : "Separate the feeds by at " +
                           "least the driven clearance so each port calibrates on its own, or move the " +
                           "port plane to a station where the conductors are not coupled."),

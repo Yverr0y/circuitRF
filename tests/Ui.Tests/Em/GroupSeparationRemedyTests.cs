@@ -63,14 +63,25 @@ public sealed class GroupSeparationRemedyTests(ITestOutputHelper output) : IDisp
     /// the refusal is not over-caution: at this mesh the de-embedded answer is max |ΔS| <b>0.994</b>
     /// — against an A-vs-B agreement floor, measured on the same geometry with the conductors 9 mm
     /// apart, of <b>0.995</b>. Nothing at this discretisation is measurable, which is why the
-    /// measured separation collapses to 0.19° while the group's own electrostatics still reads
-    /// 4.70°: it is the STANDARDS that could not resolve the modes.</para>
+    /// measured separation collapses while the group's own electrostatics still reads <b>4.701°</b>:
+    /// it is the STANDARDS that could not resolve the modes.</para>
     ///
-    /// <para><b>And the mesh is the lever.</b> The same sweep with the edge mesh on reads 2.94° at
-    /// that point and publishes, at |ΔS| 0.110 against a floor of 0.148 — so the remedy the message
-    /// names is one that works, which is R-pcal7-7. The old spelling ("separate the feeds") does not
-    /// apply here and is now reserved for the case it is about: a cross-section whose modes are
-    /// genuinely degenerate, which the SETUP guard refuses before a standard is solved.</para>
+    /// <para><b>And the mesh is the lever.</b> The same sweep with the edge mesh on publishes — so
+    /// the remedy the message names is one that works, which is R-pcal7-7. The old spelling
+    /// ("separate the feeds") does not apply here and is now reserved for the case it is about: a
+    /// cross-section whose modes are genuinely degenerate, which the SETUP guard refuses before a
+    /// standard is solved.</para>
+    ///
+    /// <para><b>CL3 MOVED THE MEASURED FIGURES AND THIS COMMENT NOW SAYS WHICH ARE WHICH.</b> The
+    /// conductor-loss series made the metal real, and a mode separation is |Δγ|·Δℓ with γ complex,
+    /// so it moves — and not monotonically (`RESOLVED.md` §CL3 §5). Re-measured here: this run's
+    /// separation is <b>0.096°</b>, where PCAL7 recorded 0.19° on PEC metal. <b>The remaining PCAL7
+    /// numbers above — the two |ΔS| figures, and the 2.94° the edge-meshed run used to read — are
+    /// PEC-metal measurements that have NOT been re-taken</b>, because doing so means running the
+    /// owner's board and that is <see cref="TheSameSweepWithTheEdgeMeshOn_Publishes"/>, which is
+    /// tagged. They are kept as the PCAL7 record rather than quietly restated as current. Nothing
+    /// user-facing quotes them: the refusal's own sizes come off the unit fixture and are gated by
+    /// <c>PlanarGroupSeparationTests.TheBandIsALever_AndTheRefusalQuotesTheMeasuredSizes</c>.</para>
     /// </summary>
     [Fact]
     public void TheOwnersSweepShape_AtAMeshTooCoarseToResolveTheModes_RefusesAndNamesTheMeshAndTheBand()
@@ -90,8 +101,16 @@ public sealed class GroupSeparationRemedyTests(ITestOutputHelper output) : IDisp
 
         // R-pcal7-7 — the remedy that binds. Both levers are named and the feeds are not the first
         // of them, because the electrostatic figure here is nine times the floor.
+        //
+        // **It names the two levers and no longer names a DIRECTION.** It used to say "narrowing the
+        // sweep", measured on a PEC board at PCAL7; re-measured on real metal the sign is not fixed —
+        // with the edge mesh on, narrowing goes the other way (PlanarGroupSeparationTests'
+        // TheEdgeMeshMovesTheSameSeparationTheOtherWay). This file's own next test is the same point
+        // from the other side, and it is why the assertion follows the message rather than the
+        // recommendation.
         Assert.Contains("Your metal is not the problem", run.Error!, StringComparison.Ordinal);
-        Assert.Contains("narrowing the sweep", run.Error!, StringComparison.Ordinal);
+        Assert.Contains("moving either band edge", run.Error!, StringComparison.Ordinal);
+        Assert.Contains("NOT A RULE", run.Error!, StringComparison.Ordinal);
         Assert.Contains("standards' own MESH", run.Error!, StringComparison.Ordinal);
 
         // Nothing was published. A partially-correct modal de-embedding that publishes is the

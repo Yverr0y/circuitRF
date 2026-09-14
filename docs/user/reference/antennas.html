@@ -171,9 +171,20 @@ same results.</p>
 </tr>
 </tbody>
 </table>
-<p>One is <strong>present and refused</strong>, with its own sentence in the run's notes: <code>FrontToBackDb</code> — there is
-no field behind an infinite plane, so the true ratio is infinite rather than large, and a number for
-it would be a fiction.</p>
+<p>One is <strong>present and refused</strong>, with its own sentence in the run's notes: <code>FrontToBackDb</code>. This model
+has <strong>no lower half-space at all</strong> — the ground plane is laterally infinite and enters as a boundary
+condition, so no field below it is ever computed. On a stackup whose ground layer has no conductivity
+that plane is perfect and the true ratio really is infinite; on one that carries conductivity the
+plane is a real conductor and does leak, so your structure's front-to-back is finite — but what is
+missing from the model is a <em>region</em>, not a small number, and either way a printed value would be a
+fiction. The run's note says which of the two it is in.</p>
+<blockquote>
+<p><strong><code>PowerDielectricAndGround</code> was called <code>PowerDielectric</code></strong> before the ground plane became a real
+conductor. It is the same residual with one more mechanism in it, and it is renamed rather than
+split because the laterally infinite plane has no basis function to integrate over — what it
+absorbs can only arrive as a remainder. <strong>A Data Display or script that names the old cube will
+find nothing</strong>; point it at the new name.</p>
+</blockquote>
 <h2 id="feeds">Which feeds work</h2>
 <table>
 <thead>
@@ -1249,10 +1260,11 @@ physical, and it is ideally non-zero.</p>
 <p>A user who discovers a limit by getting a wrong answer has been failed by the documentation.</p>
 </div>
 <ul>
-<li><strong>No back radiation, and no front-to-back ratio.</strong> The ground plane is laterally infinite, so the
-field behind it is identically zero. <code>FrontToBackDb</code> is present and refused rather than printed as a
-large number. <strong>Directivity therefore reads optimistic</strong> against a real board, whose finite plane puts
-substantial power behind it and tilts and ripples the pattern.</li>
+<li><strong>No back radiation, and no front-to-back ratio.</strong> The ground plane is laterally infinite and enters
+as a boundary condition on the underside of the stack, so the model computes no field below it at
+all — not even the leakage a real conductor has. <code>FrontToBackDb</code> is present and refused rather than
+printed as a large number. <strong>Directivity therefore reads optimistic</strong> against a real board, whose
+finite plane puts substantial power behind it and tilts and ripples the pattern.</li>
 <li><strong>Drawing the pour does not make the plane finite</strong>, but it does make its size <em>reportable</em>: a run
 that finds artwork on the return plane prints the plane's bounding box, equal-area diameter and — the
 electrically meaningful one — how far the plane reaches <strong>beyond</strong> the radiating metal, all in

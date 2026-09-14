@@ -3,6 +3,148 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## CL-review — the five smaller findings, fixed (2026-09-14)
+
+Found reviewing the conductor-loss series. The calibration-standard defect is its own section below;
+these are the rest, in the order they matter.
+
+### 1. The `.snp` provenance stamp could not see a change to the SOLVER
+
+`EmSnpProvenance` hashes the extracted `EmProblem` — *"everything the answer depends on and nothing
+else"* — which answers **"did the DOCUMENT change"** and cannot answer **"did the PHYSICS change"**.
+σ and thickness have been in `GeometryHash` since L9d and were simply never READ by the fill, so an
+`.snp` written when kernel B's metal was a perfect conductor hashes to **exactly** what the same
+design hashes to today. It went on reading as CURRENT while carrying numbers with 92-99% of the MMIC
+starter's loss missing.
+
+**CL7's floor covers part of this by accident** — a stackup with σ on its ground layer now hashes
+differently, so those files do go stale. A stackup with a perfect plane does not, and CL1/CL3's strip
+term moved its answer just the same.
+
+`PlanarKernel.ModelRevision` is the fix: a plain-text token, stamped as a fourth header line
+(`circuitRF-EM model: …`) by the PLANAR overload only, and compared as text in `Compare`. **Kernel A
+gets none** — nothing in this series touched it, and stamping it would mark every cross-section
+`.snp` in every workspace stale to record a change that did not happen.
+
+- **An ABSENT token is a mismatch, not a free pass** — that is every planar `.snp` written before
+  this, i.e. exactly the files whose metal was perfect, and the message says so in those words
+  rather than leaving "a different setup" to be read as an edit nobody made.
+- **Bump it when a change moves a published s-parameter for an unchanged document**; never for a
+  performance change, a refactor or a refusal's wording, which are the changes that must not
+  invalidate anyone's cache. The constant's own doc carries that rule.
+- Gate: `ConductorLossProvenanceTests.AFileWrittenByAnEarlierPHYSICSReadsAsStale` (current / named
+  earlier / no token at all) and `…TheCrossSectionKernelIsNotStamped`.
+
+**The precedent is ANT-2's**, which broke `MeshHash`'s own omit-at-default rule on purpose for the
+same reason and recorded *"every pre-ANT-2 planar `.snp` reads as stale once, correctly."*
+
+### 2. `PowerDielectric` → `PowerDielectricAndGround` had no user-facing note
+
+CL7 renamed a PUBLISHED cube. The rename is right and is recorded in §CL7, but nothing a user reads
+said so, and a Data Display or script naming the old cube resolves to nothing rather than erroring.
+`docs/user/src/reference/antennas.md` now carries the rename and what to do about it.
+
+### 3. The same page still gave the PEC reason for refusing `FrontToBackDb`
+
+*"There is no field behind an infinite plane, so the true ratio is infinite"* — which CL7 made false
+for the COMMON case: a conducting plane leaks, so the true front-to-back of the structure the user
+drew is finite. `PlanarMetrics.FrontToBackLossyFloorPreamble` corrects it in the engine and the user
+page contradicted it. **A refusal whose stated reason has become false is worse than a missing
+metric** (CL4 §6's own rule) — the page now says what is actually missing, which is a REGION.
+
+### 4. `PlanarSolve.BandEdgeRemedy` quoted three stale constants, and they had acquired a DIRECTION
+
+§CL3 §5 flagged them as *"Reported, not fixed"*. They were measured at PCAL7 on a different board
+with PEC metal, and the sentence had come to read as *"narrow the band and the separation rises"*.
+**Re-measured on this series' own coupled pair, at the same 200 MHz, with the shipped real metal:**
+
+| | 200-400 MHz | 200-800 MHz | 100 MHz-1 GHz |
+|---|---|---|---|
+| edge mesh OFF (N = 48) | **0.405° refused** | 1.29° publishes | 1.31° publishes |
+| edge mesh ON (N = 424) | **0.96° publishes** | **0.155° refused** | (standard over the ceiling) |
+
+**So widening helps with the edge mesh off and hurts with it on.** The lever is real; its SIGN is
+not a rule, which is §CL3 §5's own non-monotonicity finding arriving in the one place a user reads
+it. The message now names both levers, says outright that neither has a fixed direction, and tells
+the reader to try it and read the reported figure back. The accuracy figure behind *"narrowing is
+free"* (0.1099 against 0.1091 max |ΔS|) was measured on the same PEC board and is DROPPED rather
+than re-quoted — it supported a recommendation no longer being made.
+
+Gates: `PlanarGroupSeparationTests.TheBandIsALever_AndTheRefusalQuotesTheMeasuredSizes` (the cheap
+half plus the four figures the message quotes, so it cannot drift from the fixture again) and
+`…TheEdgeMeshMovesTheSameSeparationTheOtherWay` (`Category=Benchmark` — the edge-meshed fixture is a
+grouped de-embedded calibration on N = 424, ~2.5 min).
+
+### 5. Three smaller ones
+
+- **`PlanarConductorLoss.SheetAt` clamped an out-of-range level index**, so a mesh naming more levels
+  than the problem declares read the LAST level's metal — a plausible loss figure for a pairing that
+  is simply wrong, and the same class of silent substitution the name-first resolution exists to
+  prevent. It refuses now, and `SheetTable` refuses a level that resolves by neither name nor index.
+- **`PlanarPowerBudget.ConductorBoundClause` said the FR-4 2 GHz share is 6.5 %**; the series'
+  own re-measurement and the user page both say 6.4 %.
+- **The cross-section port list labelled near/far by the row's POSITION** while its default Z₀ came
+  from `portNumber - 1`. D3 says near/far is a property of the port NUMBER, and the two agreed only
+  for contiguous 1..N numbering — which the port-identity fix in this same series made possible to
+  not have. The label follows the number now.
+
+### Reported and NOT fixed: the repo-root `CLAUDE.md`'s `Category=Benchmark` count
+
+It says **128 test methods repo-wide, 97 in `Engine.Tests`**. Counted mechanically (every
+`[Trait("Category", "Benchmark")]`, with a class-level one expanded to the `[Fact]`/`[Theory]`
+methods it covers) the figure is **397 — Engine 197, Ui 153, Harmonica 22, WBond 20, RfCore 4,
+Core 1**. It has been stale for far longer than this series, which only moved it 122 → 128, and the
+opt-in tier's stated runtime is optimistic in proportion. **Not edited here, and not edited there
+either** — the standing instruction is that nothing writes to a `CLAUDE.md` from this kind of work.
+
+## CL-review — a calibration standard was made of the wrong level's metal (2026-09-14)
+
+Found reviewing the conductor-loss series, not by a failing test. **A defect introduced by CL1 and
+made live by CL3**, invisible on every fixture the series used and on every single-level design.
+
+### What was wrong
+
+`PlanarConductorLoss.SheetTable` resolves a mesh's level to a problem level **by NAME first, by index
+second**, and its own doc says why: a calibration standard's mesh carries exactly one conductor level
+and numbers it 0 whatever level the port sits on, so an index lookup would hand a Metal-2 standard
+Metal-1's metal. That is the right design.
+
+**Nothing ever supplied the name.** `PlanarCalibration.BuildLine`'s `layerName` parameter defaults to
+the placeholder `"Metal"` and both `BuildSet` overloads called it without one, so on a real technology
+— whose levels are called `M1`, `M2`, `TopMetal` — the name match ALWAYS failed and the INDEX fallback
+answered. Every calibration standard on every port was filled with **level 0's σ and thickness**.
+
+- **Single-level problems are unaffected**, which is why it was invisible: index 0 and the one level
+  are the same level by either route, and `PlanarLineFixtures.Problem` happens to name its layer
+  `"Metal"` besides.
+- **Multi-level problems with a port on level ≥ 1 got the wrong metal** — on the two-level MMIC
+  fixture, 2 µm M1 in place of 3 µm M2, which at 30 GHz (δ = 0.45 µm) is a real difference in
+  Re(Z_s) rather than a rounding one. It lands in the standard's own α, hence in the two-line γ, in
+  the error box, and — through `PlanarQuasiStaticConductor`, which reads the same table off the same
+  mesh — in the quasi-static γ below the crossover as well.
+- **It was a hard zero before CL3**, because the fill read neither σ nor t. CL1 made the numbers
+  load-bearing and CL3 turned them on; the placeholder has been there since long before either.
+
+### The fix
+
+`BuildSet` takes a `layerName` (defaulted to `PlanarCalibration.DefaultLayerName`, so every existing
+caller is unchanged) and `PlanarSolve` passes `problem.Layers[port.LayerIndex].Name`;
+`PlanarPortCalibrator` takes the same argument for the set it builds itself.
+**Bit-identical wherever the old path was right** — one level resolves to index 0 by either route, and
+a multi-level port on level 0 resolves to 0 by either route.
+
+Gate: `PlanarSurfaceImpedanceTests.R_cl1_2d_AStandardIsFilledWithItsOwnLevelsMetal`, which asserts the
+named set gets M2's Z_s **and** that the placeholder set gets M1's — the defect written down, so the
+name cannot quietly stop being passed.
+
+### What it says about the rule
+
+The name-first resolution was written, documented and reasoned about correctly, and then the
+production path never exercised it. **A fallback that is correct for the common case hides a lookup
+that never succeeds** — nothing failed, nothing warned, and the index answer is always a plausible
+metal. The general form: when a lookup has a fallback, assert somewhere that the LOOKUP succeeds, not
+just that the answer is sane.
+
 ## CL7 — the ground plane reaches a user (2026-09-14)
 
 `docs/sonnet-briefs/brief-conductor-loss-7-ground-reaches-a-user.md`. CL4 built a conducting ground

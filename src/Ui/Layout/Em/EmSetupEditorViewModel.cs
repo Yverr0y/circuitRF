@@ -982,14 +982,19 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         {
             var ordered = new List<EmPort>(problem.Ports);
             ordered.Sort((a, b) => a.Number.CompareTo(b.Number));
-            for (int i = 0; i < ordered.Count; i++)
+            foreach (var p in ordered)
             {
-                var p = ordered[i];
                 PortRows.Add(new EmPortZ0Row
                 {
                     PortNumber = p.Number,
                     // D3 in the user's own terms, so the numbering is legible without the brief.
-                    Label      = $"Port {p.Number} — '{p.Conductor}', {(i % 2 == 0 ? "near" : "far")} end",
+                    // Read off the port NUMBER, not its position in the list: D3 says port 2k−1 is
+                    // conductor k's near end and 2k its far end, and that is what ResolvePortZ0's
+                    // own near/far default reads too. The two agree for contiguous 1..N numbering
+                    // and came apart the moment a gap was possible — this row would then have said
+                    // "near" over a far-end default impedance.
+                    Label      = $"Port {p.Number} — '{p.Conductor}', " +
+                                 $"{((p.Number - 1) % 2 == 0 ? "near" : "far")} end",
                     Text       = FormatComplexOhms(Working.ResolvePortZ0(p.Number - 1)),
                 });
             }
