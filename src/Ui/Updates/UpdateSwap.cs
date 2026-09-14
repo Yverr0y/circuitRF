@@ -79,6 +79,23 @@ public static class UpdateSwap
     public const int MaxFailedStartups = 2;
 
     /// <summary>
+    /// True once THIS process has exchanged the macOS <c>.app</c> it was launched from — set at the
+    /// exchange itself, so it is true even when what follows throws.
+    ///
+    /// <para><b>It exists so a failure after that line cannot become a crash.</b> Everything below the
+    /// exchange runs in a process that may no longer load an assembly it has not already loaded, and
+    /// <c>UpdateStartup.RunBeforeUi</c> wraps all of it in a catch-all whose rule — an updater that
+    /// can prevent a launch is worse than no updater — is exactly wrong here: carrying on hands
+    /// <c>Main</c> a session that is denied every protected folder AND cannot prepare its next method.
+    /// That is the shape of every one of the four reports (beta.17, .18, .19, .20), and it is the
+    /// difference between "one more launch" and "circuitRF quit unexpectedly".</para>
+    ///
+    /// <para>A field rather than an outcome code because the outcome is what is not available: the
+    /// throw happens on the way to producing one.</para>
+    /// </summary>
+    internal static bool BundleExchangedThisSession { get; private set; }
+
+    /// <summary>
     /// The whole launch-time sequence: reclaim debris, resolve the outstanding startup attempt (raise
     /// it, or revert if it has failed too often), then apply anything staged.
     ///
@@ -299,6 +316,7 @@ public static class UpdateSwap
             persist(s => s.SwapInProgress = staged);
 
             AtomicFile.SwapDirectories(site.Root, staged, out bool atomic);
+            BundleExchangedThisSession = true;
 
             // After the exchange, `staged` holds what used to be installed.
             Directory.Move(staged, previous);
@@ -483,6 +501,7 @@ public static class UpdateSwap
             // Exchange the retained bundle back into the launch path, then hand the caller the
             // executable to exec — this process is the failing version and must not carry on as it.
             AtomicFile.SwapDirectories(site.Root, previousBundle, out bool atomic);
+            BundleExchangedThisSession = true;
 
             // After the exchange `previous/` holds the bundle that would not start. It is not
             // insurance any more — the thing it was insuring against has happened — so it goes now

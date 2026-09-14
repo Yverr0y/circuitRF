@@ -176,6 +176,60 @@ public sealed class HandOverAfterBundleExchangeTests
         Assert.DoesNotContain("persist(", revert[..exchange]);
     }
 
+    // ── and if something on that path throws anyway ─────────────────────────────────────────────
+
+    /// <summary>
+    /// <b>The catch-all must not return.</b> Every report in this series has the same second half: an
+    /// exception on the post-exchange path is swallowed by <c>RunBeforeUi</c>'s catch — whose rule, an
+    /// updater that can prevent a launch is worse than no updater, is exactly wrong once the bundle is
+    /// gone — and then <c>Main</c>'s very next call dies at the prestub, as a crash the user sees and
+    /// with nothing written down anywhere. Leaving instead costs one more launch, and the exchange is
+    /// already durable, so the version on disk is the new one either way.
+    ///
+    /// <para>Held as a source scan because the alternative is a test that calls <c>_exit</c> and takes
+    /// the test host with it.</para>
+    /// </summary>
+    [Fact]
+    public void AFailureAfterTheExchangeLeavesRatherThanReturningIntoMain()
+    {
+        string run   = Body(Source("UpdateStartup.cs"), "public static void RunBeforeUi(");
+        int    catchAt = run.LastIndexOf("catch (Exception)", StringComparison.Ordinal);
+
+        Assert.True(catchAt >= 0, "RunBeforeUi no longer has the catch-all this pins.");
+
+        string tail = run[catchAt..];
+        Assert.Contains("UpdateSwap.BundleExchangedThisSession", tail, StringComparison.Ordinal);
+        Assert.Contains("LeaveTheUpdateForTheNextLaunch", tail, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// And the flag it reads is set AT the exchange, not after whatever follows it — the whole point
+    /// is that it is true even when the next statement throws. Both exchanges are pinned: the update
+    /// and the rollback.
+    /// </summary>
+    [Fact]
+    public void TheExchangeFlagIsRaisedByTheExchangeItself()
+    {
+        string swap = Source("UpdateSwap.cs");
+
+        Assert.Equal(2, Occurrences(swap, "AtomicFile.SwapDirectories"));
+
+        foreach (int at in Positions(swap, "AtomicFile.SwapDirectories"))
+        {
+            string next = swap[at..].Split('\n').Skip(1).First();
+            Assert.Contains("BundleExchangedThisSession = true", next, StringComparison.Ordinal);
+        }
+    }
+
+    private static int Occurrences(string text, string needle) => Positions(text, needle).Count();
+
+    private static IEnumerable<int> Positions(string text, string needle)
+    {
+        for (int i = text.IndexOf(needle, StringComparison.Ordinal); i >= 0;
+             i = text.IndexOf(needle, i + 1, StringComparison.Ordinal))
+            yield return i;
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>Where a standard utility actually is, or null on a platform that has no such thing —

@@ -1,5 +1,79 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## The macOS update hand-over, fourth report: a sleep that never ran, 2026-09-13
+
+Owner: auto-updated beta.19 to beta.20, pressed Relaunch, macOS reported that circuitRF had quit
+unexpectedly. Third time the same button has produced the same crash.
+
+**beta.19 DID contain the beta.18 fix** (`git merge-base --is-ancestor c61392a2 1.0.0-beta.19` — it
+does), so the note in `NativeLaunch` about checking which side of a release a fix is on was honoured
+and was not the answer this time. The hand-over still never spawned `open`.
+
+### What the evidence said before any code was read
+
+- The crash report's header is `1.0.0-beta.19`, parent `launchd`, **70 ms** from launch to `SIGABRT`.
+  So this is the session `open -n -a` started for the Relaunch button, and it is the session that
+  applies the exchange — not the GUI that pressed the button.
+- `ReportCrash` resolved that process's own image to
+  `…/circuitRF/updates/previous/` ("Unable to find store record for … kLSNotAnApplicationErr"), which
+  is where the exchange puts the outgoing bundle. **The exchange had happened before the crash.**
+- The unified log for that window contains exactly ONE `open` process — pid 98695, the one the
+  *Relaunch button* ran. **The swap-applying session spawned none.**
+- One DYLD unnest event for pid 98696: an ordinary launch, not an exec.
+- No `session-*.running` was left behind and the next launch promoted no crash report, so
+  `CrashReporter.MarkCleanExit` ran — which on this path only `HandOverTo`'s `HandOffToExec` does.
+
+That pair is the whole diagnosis: the hand-over was ENTERED and `open` was never spawned, and it
+happened too fast for the retry loop's 250 ms sleeps to have run. Something between those two lines
+threw, `RunBeforeUi`'s catch-all swallowed it, and `Main`'s next call died at the prestub — the
+`Main` + `PreStubWorker` + `abort()` stack, with one managed frame, exactly as in beta.18.
+
+### The cause: `System.Threading.Thread` is its own assembly, and the JIT loads it to PREPARE a method
+
+`AppRelaunch.TryRelaunchBundle` gained a retry loop on 2026-09-10 (three attempts, `Thread.Sleep(250)`
+between them) — after the single-file measurements that produced `NativeLaunch`, so nothing re-checked
+it. `System.Threading.Thread` is **not** among the assemblies a launch has loaded by the time it
+exchanges its bundle, and **the runtime resolves a method's call targets when it prepares the method,
+not when the call is reached**. So the sleep the successful first attempt never reaches still had to be
+resolved before the method's first instruction: `FileNotFoundException` at the prestub, no `open`, no
+trace of any of it.
+
+**Measured on a real single-file `osx-arm64` publish, not reasoned about.** A temporary audit ran the
+startup sequence to the exchange and printed `AppDomain.CurrentDomain.GetAssemblies()` — **31
+assemblies**, and `System.Threading.Thread` is not one of them — then exercised every post-exchange
+operation and printed what each one added. The complete answer was one line:
+`RuntimeHelpers.PrepareMethod(TryRelaunchBundle)` **on its own** loads `System.Threading.Thread`, and
+running that method with the Launcher seam accepting on the first attempt loads it too. Nothing else on
+the whole path loads anything. After the fix, the same audit adds nothing at all.
+
+### Three changes, in order of what they buy
+
+1. **`NativeLaunch.Sleep` — the wait is `libc`'s `usleep`**, the same one `TryWaitForExit` already
+   polls with, and `AppRelaunch` no longer names `Thread` at all. This is the defect.
+
+2. **`UpdateSwap.BundleExchangedThisSession`, and `RunBeforeUi`'s catch-all no longer returns when it
+   is true.** This is the more valuable half: it is the *second* half of all four reports. The
+   catch-all's rule — an updater that can prevent a launch is worse than no updater — is exactly wrong
+   once the bundle is gone, because carrying on hands `Main` a session that is denied every protected
+   folder AND cannot prepare its next method. The flag is set at the exchange itself, on both exchanges
+   (the update and the rollback), so it is true even when the next statement throws. A failure on that
+   path is now one more launch with a notice, which is an outcome the design already endorses.
+
+3. **`tests/Ui.Tests/Updates/PostExchangeAssemblyClosureTests` — the rule is enforced, not
+   remembered.** Every previous fix named the one call that had gone wrong and the next innocuous line
+   brought it back. What the failure depends on is the assembly GRAPH of everything the post-exchange
+   window can reach, so that is what the test reads: it decodes the IL of `HandOverTo` and the other
+   post-exchange roots, recurses through our own code, and collects every assembly any token names.
+   The allowed set is the measured 31.
+
+**The trap in writing that gate, and it is worth knowing.** The first version asked the resolved
+runtime member which assembly it belonged to — and that answers `System.Private.CoreLib` for everything
+the facades forward, so it saw nothing when `Thread.Sleep` was put back. **The JIT loads the assembly
+REFERENCE recorded in metadata** (`System.Threading.Thread`, `System.Collections`, …), so the gate reads
+the `MemberReference` → `TypeReference` → `AssemblyReference` chain with `MetadataReader` instead.
+Verified by reintroducing the exact regression: both tests go red and the general one names the
+assembly and the method it came from.
+
 ## Reset Layout and the Library's glyph count, 2026-09-13
 
 Owner: Reset Layout should force the Library to two glyph columns when the Window Layout setting is

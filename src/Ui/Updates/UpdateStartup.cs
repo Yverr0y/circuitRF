@@ -182,7 +182,15 @@ public static class UpdateStartup
         }
         catch (Exception)
         {
-            // An updater that can prevent a launch is worse than no updater.
+            // An updater that can prevent a launch is worse than no updater — EXCEPT on the one launch
+            // that has already replaced the bundle it was started from, where carrying on is the
+            // crash. That session is denied every protected folder (AppRelaunch says why) and, being a
+            // single-file bundle whose file has just been exchanged, cannot PREPARE another method:
+            // Main's very next call dies at the prestub with nothing written down anywhere. Four owner
+            // reports have had exactly that shape. The exchange is durable, so leaving costs one more
+            // launch and the version on disk is the new one either way.
+            if (UpdateSwap.BundleExchangedThisSession)
+                LeaveTheUpdateForTheNextLaunch("the hand-over could not be completed");   // never returns
         }
     }
 

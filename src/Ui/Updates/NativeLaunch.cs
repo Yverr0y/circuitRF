@@ -158,6 +158,34 @@ internal static class NativeLaunch
     }
 
     /// <summary>
+    /// Waits <paramref name="milliseconds"/> without touching <c>Thread</c>.
+    ///
+    /// <para><b>Not <c>Thread.Sleep</c>, and this is the defect that reached the owner a fourth time
+    /// (beta.19 to beta.20, 2026-09-13).</b> <c>System.Threading.Thread</c> is its own assembly and it
+    /// is NOT among the ones a launch has loaded by the time it exchanges its bundle — measured, 31
+    /// assemblies in, and that one is not there. The Launch Services request is made from
+    /// <see cref="AppRelaunch.TryRelaunchBundle"/>, whose retry loop slept between attempts; the
+    /// runtime resolves a call target when it PREPARES a method, not when the call is reached, so the
+    /// sleep that never ran on the successful path still had to be resolved before the method's first
+    /// instruction. It threw at the prestub, <c>open</c> was never spawned, and the launch died a few
+    /// statements later. Measured directly: preparing that one method loads that one assembly and
+    /// nothing else on the whole path does.</para>
+    ///
+    /// <para>So the wait is <c>libc</c>'s, like everything else here — the same <c>usleep</c>
+    /// <see cref="TryWaitForExit"/> already polls with.</para>
+    /// </summary>
+    internal static void Sleep(int milliseconds)
+    {
+        if (milliseconds <= 0) return;
+
+        try   { USleep((uint)milliseconds * 1000u); }
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException)
+        {
+            // No libc to wait with. A retry that does not pause is still a retry.
+        }
+    }
+
+    /// <summary>
     /// Ends this process now, running no managed shutdown at all.
     ///
     /// <para><b>Not <c>Environment.Exit</c>, on this path.</b> That one raises <c>ProcessExit</c>,

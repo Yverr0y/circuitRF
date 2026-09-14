@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Threading;
 
 namespace CircuitRF.Ui.Updates;
 
@@ -171,7 +170,11 @@ public static class AppRelaunch
             if (AskOnce(bundle, args, out refusal)) return true;
             if (attempt >= LaunchAttempts) return false;
 
-            Thread.Sleep(RetryDelayMs);
+            // NativeLaunch.Sleep, not Thread.Sleep: System.Threading.Thread is an assembly this
+            // session can no longer load, and the runtime resolves it when this METHOD is prepared —
+            // so a sleep the successful path never reaches still killed the hand-over. See
+            // NativeLaunch.Sleep for the measurement.
+            NativeLaunch.Sleep(RetryDelayMs);
         }
     }
 
