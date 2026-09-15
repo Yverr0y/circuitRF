@@ -2354,6 +2354,9 @@ means what it meant here. `LayoutRenderer.ExclusionOf` builds it, and the rectan
 the canvas clip and the hole's own bounds, because a hole reaching outside the rectangle would read
 as one more crossing and be filled IN rather than cut out. `AxesRenderer.EvenOddExclusionPath` was
 already doing this for the Smith masks; nothing else in `src/Render` used a difference clip.
+*(That helper is gone as of 2026-09-14 — the Smith masks are an angular trim now; see the
+crossings entry at the end of this file. `LayoutRenderer.ExclusionOf` is the surviving
+example.)*
 
 **The bug's reach was every port in every export**, not just the one figure that surfaced it: the
 same regeneration redrew `ports-edge`, `ports-internal`, `ports-internal-gap`,
@@ -2558,3 +2561,55 @@ bounds chosen to fail at the old padding rather than merely to pass at the new o
 The residual at narrow widths is inherent and not a padding problem: below ~620 px the column wraps
 a dielectric's spec onto three lines, groups get tall, and clusters displace. That is what
 `LabelColumnDropWidth` exists for.
+
+## The Smith grid punched a hole out of every crossing (2026-09-14)
+
+Reported as *"the Smith Chart axes grid has gaps where the grid lines overlap — looks almost like
+an XOR."* It was exactly an XOR, and it was the cost of the fix recorded directly above.
+
+`AxesRenderer.DrawSmithGrid` accumulates the constant-R and constant-X family into ONE path and
+draws it ONCE — it has to, because N draws composite N times and the grid then goes dark wherever
+it is busiest, and it may not use a `SaveLayer` because Skia's SVG device drops one. That path held
+each arc's **stroked outline** (`SKPaint.GetFillPath`) and was FILLED with a winding rule. The arcs
+that carry a mask were trimmed with `SKPath.Op(…, Intersect)`.
+
+**A pathops result does not carry the contour orientation `AddCircle` plus the stroker produce, and
+it is not even the same orientation from one call to the next.** Under a winding fill two pieces of
+opposite sign CANCEL where they overlap, so every crossing between such a pair was erased: a white
+rhombus the size of the two stroke widths. At the 0.5 default `GridThicknessFactor` that is a 31-px
+scatter of single-pixel pinholes across the whole chart — small enough that the change's own
+histogram check (three grey populations, 411 / 1011 / 1265 px) missed it by 68 px of one tone. At a
+heavier grid it is unmistakable.
+
+**The family is now the arcs' CENTRELINES, stroked in one draw.** A stroke has no such failure
+mode: Skia strokes the whole path in one pass and orients its own output consistently, and one
+`DrawPath` is one coverage mask however much the path overlaps itself. The masks are applied as an
+**angular trim** — `AccumulateArc` removes the spans of a circle that fall inside the masking
+circles, which is exact for circles and needs no pathops at all. The masking circles here are
+pairwise TANGENT (an x-arc and its conjugate meet only at Γ = 1, as do two r-circles), so removing
+the union of their spans says exactly what the even-odd exclusion region used to say; that is why
+the trim points did not move.
+
+Three things worth keeping:
+
+- **It is also three times faster.** A full 520 px Smith plot draws in **0.56 ms** against
+  **1.68 ms** — no `GetFillPath` and no path ops at all. The obvious alternative fix, accumulating
+  by `SKPathOp.Union` so orientation stops mattering, is correct and costs **12.7 ms**: it was
+  measured and rejected. `SKPath.Simplify` is not a fix at all — it normalises a path while
+  PRESERVING what its fill rule draws, so it preserves the holes.
+- **The export improves too.** The grid leaves as one `<path fill="none" stroke=… stroke-opacity=…>`
+  with a subpath per arc, rather than a filled outline path; overlaps inside one SVG element
+  composite once there as well. `VectorExportClipAndLayerTests` was looking for the filled form and
+  now looks for the stroked one.
+- **Butt caps, not `StrokePaint`'s square ones.** A trimmed arc's end is a cut, and a square cap
+  pushes it half a stroke past the circle it was cut at.
+
+The gate is `tests/Ui.Tests/Render/SmithGridCrossingTests.cs`: one test pins the Skia premise
+(a pathops piece cancelling an ordinary ribbon it overlaps, where a stroked centreline cannot), one
+walks eight crossings computed from Γ = (z−1)/(z+1) and asserts none is blank, and one asserts a
+crossing reads the same tone as a plain arc — which is the property the one-path construction
+exists for, and the one a naive "just draw each arc" fix would break. The disc's centre and radius
+are MEASURED off the render rather than re-derived from the viewport arithmetic, so the test says
+nothing about plot-area layout.
+
+**Any regenerated figure carrying a Smith chart will change** — the crossings fill in.

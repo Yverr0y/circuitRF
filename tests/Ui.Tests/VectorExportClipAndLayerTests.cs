@@ -153,19 +153,21 @@ public sealed class VectorExportClipAndLayerTests
                                                 RenderTheme.Light, watermarkOpacity: 0f));
 
         // The outline is one <ellipse> and was never missing. The ARCS are the whole constant-R and
-        // constant-X family, accumulated into ONE filled path — so the gate is that the export
-        // carries a filled path with a subpath per arc, which is what a SaveLayer took away.
-        var family = System.Text.RegularExpressions.Regex.Matches(svg, "<path[^>]*\\bfill=\"#[^\"]+\"[^>]*\\bd=\"([^\"]*)\"")
+        // constant-X family, accumulated into ONE path and STROKED once — so the gate is that the
+        // export carries a stroked path with a subpath per arc, which is what a SaveLayer took
+        // away. (It was a FILLED path of stroked outlines until 2026-09-14; that form cancelled
+        // itself where two arcs crossed — see SmithGridCrossingTests.)
+        var family = System.Text.RegularExpressions.Regex.Matches(svg, "<path[^>]*\\bstroke=\"#[^\"]+\"[^>]*\\bd=\"([^\"]*)\"")
             .Select(m => m.Groups[1].Value)
             .OrderByDescending(d => d.Count(ch => ch == 'M'))
             .FirstOrDefault();
 
         Assert.NotNull(family);
         Assert.True(family!.Count(ch => ch == 'M') >= 20,
-            "The exported Smith chart's largest filled path has only "
-          + family.Count(ch => ch == 'M') + " subpaths in it. The grid is ~27 arcs, each a closed "
-          + "stroked outline, so far fewer than that means the family did not reach the file — "
-          + "which is what a SaveLayer did to it.");
+            "The exported Smith chart's largest stroked path has only "
+          + family.Count(ch => ch == 'M') + " subpaths in it. The grid is ~27 arcs, several of them "
+          + "cut into more than one span, so far fewer than that means the family did not reach the "
+          + "file — which is what a SaveLayer did to it.");
     }
 
     // ── The port glyph, fixed ────────────────────────────────────────────────
