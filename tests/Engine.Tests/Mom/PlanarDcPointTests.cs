@@ -361,4 +361,245 @@ public sealed class PlanarDcPointTests
         Assert.True(dc.S[1, 0].Magnitude > 1 - 1e-7, $"|S21| = {dc.S[1, 0].Magnitude:R}");
         Assert.Contains(dc.Notes, n => n.Contains("perfect conductor"));
     }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // A PORT WHOSE REFERENCE IS NOT THE PLANE — THE INTERNAL DELTA GAP
+    //
+    // Owner report, 2026-09-14: a 50 Ω line simulated twice, once as a 2-port with edge ports and
+    // once as a 3-port with a gap port in the middle, disagreed completely below the DCIM fit floor
+    // (where LF2 substitutes this solve) and agreed to six digits above it. The gap file published
+    // S13 = 1 and S22 = -1 — port 2 shorted to ground and isolated from everything.
+    //
+    // These gate the SHAPE of the answer, not a tolerance: a cut in a floating trace makes three
+    // ports meet at one series node, and that has a closed form with no mesh in it.
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>The 3-port that a cut in an otherwise continuous line has to be. With the metal
+    /// floating over the plane the only thing joining the three ports is the trace itself, so ONE
+    /// current flows and Y is rank 1: I₁ = I₃, I₂ = −I₃. That makes S the 1/3-2/3 split of three
+    /// matched sources meeting at a series node — the same numbers the full-wave solve publishes at
+    /// the bottom of its own band, which is what makes the two halves of a sweep meet.</summary>
+    [Fact]
+    public void AGapPortIsASERIESPortAtDC_NotTwoTerminalsPinnedToGround()
+    {
+        const double w = 2.9e-3, len = 20e-3;
+        var problem = PlanarLineFixtures.Line(GroundedSlab.Fr4Starter, w, len, 6e9);
+        var mesh    = SurfaceMesher.Mesh(problem, PlanarLineFixtures.Coarse).Mesh;
+        var (x0, y0, x1, y1) = problem.Bounds();
+        double yc = 0.5 * (y0 + y1);
+
+        var ports = PlanarPorts.ResolveAll(mesh,
+        [
+            new PlanarPort(1, new EmPoint(x0, yc), PlanarPortSide.MinX, 50.0),
+            new PlanarPort(2, new EmPoint(x1, yc), PlanarPortSide.MaxX, 50.0),
+            new PlanarPort(3, new EmPoint(0.5 * (x0 + x1), yc), PlanarPortSide.MinX, 50.0,
+                           Kind: PlanarPortKind.InternalDeltaGap),
+        ]);
+        var dc = PlanarDcSolve.Solve(problem, mesh, ports);
+
+        for (int i = 0; i < 3; i++)
+            _out.WriteLine($"  S{i + 1}* = {dc.S[i, 0].Real:F6}  {dc.S[i, 1].Real:F6}  {dc.S[i, 2].Real:F6}");
+        foreach (var n in dc.Notes) _out.WriteLine("  " + n);
+
+        // Every diagonal 1/3, every off-diagonal 2/3 in magnitude. The signs are the port-3 polarity
+        // and are asserted by their PRODUCT, which is what the polarity cannot change.
+        for (int i = 0; i < 3; i++)
+            Assert.Equal(1.0 / 3.0, dc.S[i, i].Real, 4);
+        foreach (var (i, j) in ((int, int)[])[(0, 1), (0, 2), (1, 2)])
+        {
+            Assert.Equal(2.0 / 3.0, dc.S[i, j].Magnitude, 4);
+            // Reciprocal — but the two entries come from two separate sparse solves, so this is the
+            // solver's own tolerance rather than bit-identity, exactly as the trace test above says.
+            Assert.Equal(0.0, (dc.S[i, j] - dc.S[j, i]).Magnitude, 9);
+        }
+        // Around the loop the three off-diagonals multiply to a NEGATIVE number whichever lip is +,
+        // which is the statement that port 3 sits in series with the other two rather than shunting
+        // them. It is what came out wrong: the old answer had S12 = S23 = 0.
+        Assert.True((dc.S[0, 1] * dc.S[0, 2] * dc.S[1, 2]).Real < 0,
+                    $"S12·S13·S23 = {dc.S[0, 1] * dc.S[0, 2] * dc.S[1, 2]}");
+
+        // Y is rank 1: one current, so every 2×2 minor vanishes.
+        for (int i = 0; i < 3; i++)
+            for (int j = i + 1; j < 3; j++)
+                Assert.Equal(0.0,
+                    (dc.Y[i, i] * dc.Y[j, j] - dc.Y[i, j] * dc.Y[j, i]).Magnitude /
+                    (dc.Y[i, i] * dc.Y[j, j]).Magnitude, 6);
+    }
+
+    /// <summary>The owner's actual question: short the gap port out and you must get the line back.
+    /// This is the acceptance test — it is how anyone uses a gap port for a series component, and it
+    /// is the comparison that failed.</summary>
+    [Fact]
+    public void ShortingTheGapPortGivesBackThePlainTwoPortLine()
+    {
+        const double w = 2.9e-3, len = 20e-3;
+        var problem = PlanarLineFixtures.Line(GroundedSlab.Fr4Starter, w, len, 6e9);
+        var mesh    = SurfaceMesher.Mesh(problem, PlanarLineFixtures.Coarse).Mesh;
+        var (x0, y0, x1, y1) = problem.Bounds();
+        double yc = 0.5 * (y0 + y1);
+
+        PlanarPort P1() => new(1, new EmPoint(x0, yc), PlanarPortSide.MinX, 50.0);
+        PlanarPort P2() => new(2, new EmPoint(x1, yc), PlanarPortSide.MaxX, 50.0);
+
+        var two   = PlanarDcSolve.Solve(problem, mesh, PlanarPorts.ResolveAll(mesh, [P1(), P2()]));
+        var three = PlanarDcSolve.Solve(problem, mesh, PlanarPorts.ResolveAll(mesh,
+        [
+            P1(), P2(),
+            new PlanarPort(3, new EmPoint(0.5 * (x0 + x1), yc), PlanarPortSide.MinX, 50.0,
+                           Kind: PlanarPortKind.InternalDeltaGap),
+        ]));
+
+        // Terminate port 3 in a short (Γ = −1) and reduce to two ports.
+        var S = three.S;
+        for (int i = 0; i < 2; i++)
+            for (int j = 0; j < 2; j++)
+            {
+                var reduced = S[i, j] - S[i, 2] * S[2, j] / (Complex.One + S[2, 2]);
+                _out.WriteLine($"  short-P3 S{i + 1}{j + 1} = {reduced.Real:F8}   " +
+                               $"2-port = {two.S[i, j].Real:F8}");
+                // Not bit-identical and cannot be: the cut removes the gap's own rooftop from the
+                // conduction path, so the shorted line is one rooftop SHORTER than the uncut one.
+                // On this mesh that is ~13 % of a milliohm on a 3 mΩ trace — far below anything S
+                // can show at 50 Ω, which is why the gate is written on S rather than on R.
+                Assert.Equal(two.S[i, j].Real, reduced.Real, 5);
+            }
+    }
+
+    /// <summary>The regression in one line: what the old Dirichlet excitation published. A gap port
+    /// held at an absolute potential welds the far lip to ground, which severs the line — S₂₂ = −1,
+    /// port 2 alone, and a perfect through between the other two. None of it may come back.</summary>
+    [Fact]
+    public void AGapDoesNotWELDTheFarLipToGround()
+    {
+        const double w = 2.9e-3, len = 20e-3;
+        var problem = PlanarLineFixtures.Line(GroundedSlab.Fr4Starter, w, len, 6e9);
+        var mesh    = SurfaceMesher.Mesh(problem, PlanarLineFixtures.Coarse).Mesh;
+        var (x0, y0, x1, y1) = problem.Bounds();
+        double yc = 0.5 * (y0 + y1);
+
+        var dc = PlanarDcSolve.Solve(problem, mesh, PlanarPorts.ResolveAll(mesh,
+        [
+            new PlanarPort(1, new EmPoint(x0, yc), PlanarPortSide.MinX, 50.0),
+            new PlanarPort(2, new EmPoint(x1, yc), PlanarPortSide.MaxX, 50.0),
+            new PlanarPort(3, new EmPoint(0.5 * (x0 + x1), yc), PlanarPortSide.MinX, 50.0,
+                           Kind: PlanarPortKind.InternalDeltaGap),
+        ]));
+
+        Assert.True(dc.S[1, 1].Real > 0, $"S22 = {dc.S[1, 1]} — port 2 is shorted to the plane");
+        Assert.NotEqual(0.0, dc.S[0, 1].Magnitude);     // port 2 reaches port 1 …
+        Assert.NotEqual(0.0, dc.S[1, 2].Magnitude);     // … and port 3
+        Assert.True(dc.S[0, 2].Magnitude < 0.9,
+                    $"|S13| = {dc.S[0, 2].Magnitude} — ports 1 and 3 are not the same terminal pair");
+
+        // And the metal is still FLOATING: nothing reaches the plane, so lifting the WHOLE structure
+        // by a volt relative to it must draw no current anywhere. That is +1 V at each edge port and
+        // 0 at the gap, whose two lips rise together — so Y·(1,1,0) = 0. It is the property the weld
+        // destroyed, and the one that says port 2 is not tied to ground.
+        for (int i = 0; i < 3; i++)
+        {
+            var lift = dc.Y[i, 0] + dc.Y[i, 1];
+            Assert.Equal(0.0, lift.Magnitude / dc.Y[i, i].Magnitude, 6);
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // THE OTHER TWO KINDS — one that was wrong the same way, one that never was
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// <b>An edge port with a RETURN CONDUCTOR is floating too</b>, and it was wrong in the same
+    /// place — quietly, which is why it outlived the gap port's version of the bug. Its − terminal is
+    /// the return strip, so holding both terminals at an absolute potential put the return at ground
+    /// and left it carrying no current: the published resistance was the SIGNAL conductor's alone,
+    /// with the return's contribution simply missing. On a symmetric coplanar pair that is a clean
+    /// factor of two and looks like nothing at all in S, since both answers are 0 dB on copper.
+    ///
+    /// <para>The gate is the series law, which needs no closed form and no mesh: a loop is
+    /// R_signal + R_return, so narrowing the return to a third of the signal must TRIPLE its share
+    /// and widening it to three times must cut it to a third. Under the old code all three widths
+    /// published the same number.</para>
+    /// </summary>
+    [Fact]
+    public void AConductorReferencedPortCarriesTheReturnConductorsResistanceToo()
+    {
+        double same = CoplanarLoopOhms(0.6e-3, 0.6e-3);
+        double thin = CoplanarLoopOhms(0.6e-3, 0.2e-3);
+        double wide = CoplanarLoopOhms(0.6e-3, 1.8e-3);
+
+        _out.WriteLine($"  return = signal   {same * 1e3:F4} mΩ");
+        _out.WriteLine($"  return = signal/3 {thin * 1e3:F4} mΩ   ×{thin / same:F4}");
+        _out.WriteLine($"  return = signal·3 {wide * 1e3:F4} mΩ   ×{wide / same:F4}");
+
+        // R + 3R over R + R, and R + R/3 over R + R.
+        Assert.Equal(2.0,       thin / same, 3);
+        Assert.Equal(2.0 / 3.0, wide / same, 3);
+    }
+
+    /// <summary>The coplanar loop resistance, read straight off Y's off-diagonal.</summary>
+    private static double CoplanarLoopOhms(double wSignal, double wReturn)
+    {
+        const double slot = 0.2e-3, len = 10e-3;
+        var problem = PlanarLineFixtures.Problem(
+            new GroundedSlab(1e-3, new EmMaterial(1.0, 0.0)), 6e9,
+            PlanarLineFixtures.Rect(0,  0.5 * slot,             len,  0.5 * slot + wSignal),
+            PlanarLineFixtures.Rect(0, -(0.5 * slot + wReturn), len, -0.5 * slot));
+        var mesh = SurfaceMesher.Mesh(problem,
+            new PlanarMeshSettings(Auto: false, CellsPerWavelength: 40, EdgeMesh: false,
+                                   MinCellsAcrossConductor: 3)).Mesh;
+
+        double yp = 0.5 * slot + 0.5 * wSignal, yn = -(0.5 * slot + 0.5 * wReturn);
+        var ports = PlanarPorts.ResolveAll(mesh,
+        [
+            new PlanarPort(1, new EmPoint(0, yp), PlanarPortSide.MinX, 50.0,
+                           Reference: PlanarPortReference.CoplanarGround,
+                           NegativeLocation: new EmPoint(0, yn)),
+            new PlanarPort(2, new EmPoint(len, yp), PlanarPortSide.MaxX, 50.0,
+                           Reference: PlanarPortReference.CoplanarGround,
+                           NegativeLocation: new EmPoint(len, yn)),
+        ]);
+        return 1.0 / -PlanarDcSolve.Solve(problem, mesh, ports).Y[0, 1].Real;
+    }
+
+    /// <summary>
+    /// <b>A via-to-plane port's − terminal IS the ground node, so it was never affected</b> — and
+    /// this pins that, because the source formulation reduces to the old Dirichlet condition for it
+    /// and a change that broke the reduction would be invisible otherwise.
+    ///
+    /// <para>It is also the instructive contrast with the gap port: this one SHUNTS the line to the
+    /// plane, so the three ports meet at a common node and S is the −1/3, +2/3 of a shunt junction.
+    /// The gap port puts the third port in SERIES, and the same three lines give +1/3, ∓2/3.</para>
+    /// </summary>
+    [Fact]
+    public void AViaToPlanePortIsAShuntJunction_AndIsUnchangedByTheSourceFormulation()
+    {
+        const double via = 1.2e-3;
+        var line = PlanarLineFixtures.Fr4Line(8e-3, 2e9);
+        var (x0, y0, x1, y1) = line.Bounds();
+        double xc = 0.5 * (x0 + x1), yc = 0.5 * (y0 + y1);
+        var problem = line with
+        {
+            Vias = [new PlanarVia(PlanarVia.GroundTerminal, 0,
+                                  [PlanarLineFixtures.Rect(xc - 0.5 * via, yc - 0.5 * via,
+                                                           xc + 0.5 * via, yc + 0.5 * via)], 5.8e7)],
+        };
+        var mesh = SurfaceMesher.Mesh(problem, PlanarLineFixtures.Coarse).Mesh;
+        var dc   = PlanarDcSolve.Solve(problem, mesh, PlanarPorts.ResolveAll(mesh,
+        [
+            new PlanarPort(1, new EmPoint(x0, yc), PlanarPortSide.MinX, 50.0),
+            new PlanarPort(2, new EmPoint(x1, yc), PlanarPortSide.MaxX, 50.0),
+            new PlanarPort(3, new EmPoint(xc, yc), PlanarPortSide.MinX, 50.0,
+                           Kind: PlanarPortKind.Internal),
+        ]));
+
+        for (int i = 0; i < 3; i++)
+            _out.WriteLine($"  S{i + 1}* = {dc.S[i, 0].Real,10:F6} {dc.S[i, 1].Real,10:F6} " +
+                           $"{dc.S[i, 2].Real,10:F6}");
+
+        for (int i = 0; i < 3; i++)
+        {
+            Assert.Equal(-1.0 / 3.0, dc.S[i, i].Real, 4);
+            for (int j = 0; j < 3; j++)
+                if (i != j) Assert.Equal(2.0 / 3.0, dc.S[i, j].Real, 4);
+        }
+    }
 }

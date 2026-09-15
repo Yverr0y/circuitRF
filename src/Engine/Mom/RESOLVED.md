@@ -3,6 +3,140 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## DCFLOAT — the DC point could not drive a port that is not referenced to the plane (2026-09-14)
+
+Owner report. A 50 Ω trace on the 0.6 mm laminate starter stack, simulated twice — once as a 2-port
+with edge ports, once as a 3-port with an internal delta gap in the middle — and compared by shorting
+the gap port out in a schematic. The two agreed to six digits from 204 MHz up and disagreed
+completely below, which is backwards from every intuition about a short piece of copper. Shorting the
+gap gave |S₂₁| = 0 where the 2-port gave 1.
+
+**The three rows that disagreed are not full-wave results.** They are below `Dcim.LowestFittableFrequency`
+(7.952 MHz on this stack) where LF2 substitutes `PlanarDcSolve`, and they were bit-identical to each
+other, which is what a substitution looks like. The defect is in the conduction solve.
+
+### 1. WHAT IT PUBLISHED, AND WHY EVERY NUMBER OF IT FOLLOWS FROM ONE LINE
+
+```
+S₁₃ = 0.99997   S₂₂ = -0.99974   everything else 0
+```
+
+Port 2 shorted to the plane and isolated; ports 1 and 3 a perfect through. Reproduced in **30 ms** on
+a plain 20 mm line with a gap at its midpoint, so none of the reported geometry is load-bearing.
+
+`Network.Admittance` built Y by **Dirichlet excitation**: hold every port terminal at a fixed
+potential, drive one to 1 V, solve the free nodes, read back the current leaving that terminal. The
+short-circuit definition Yᵢⱼ = Iᵢ/Vⱼ with Vₖ = 0 requires each other port's **two terminals to be at
+the same potential as each other**. Pinning them all to absolute zero is that condition **only when
+every port's − terminal is one shared node.**
+
+It is, for every kind but one. `Build` writes `_minus[p] = _groundNode` for an edge port and for a
+via-to-plane `Internal` port. An `InternalDeltaGap`'s − terminal is **the far lip of the cut** —
+signal metal. Pinning it to zero does not set V₃ = 0; it welds the trace to ground on the far side of
+the gap, and the two lips stop being one port: current entering the near lip is under no obligation
+to leave the far one. There was no constraint tying them.
+
+With R_left = 1.132 mΩ and R_right = 1.510 mΩ on the reproducer, every published number follows:
+
+| | published | correct |
+|---|---|---|
+| Y₁₁ | 1/R_left = 883 S | 1/(R_left+R_right) = 378.5 S |
+| Y₂₁ | 0 | −378.5 S |
+| rank of Y | 2 | **1** |
+
+**The rank is the tell.** The true network has one independent current (I₁ = I₃, I₂ = −I₃), so
+Y = g·uuᵀ with u = (1,−1,±1) and S is the 1/3–2/3 split of three matched sources meeting at a series
+cut — which is exactly what the full-wave solve publishes at 204 MHz, and what makes the two halves
+of a sweep meet. The extra rank was the current path that should not exist.
+
+A second, independent contribution: reachability was asked on the **branch** graph
+(`CompOf(_plus[i]) == driven`). A cut's two lips are in different conduction components *by
+construction* — that is what a cut is — so every port on the far side was declared unreachable and
+hard-zeroed. That is where S₁₂ = S₂₃ = 0 came from, rather than from the solve.
+
+### 2. THE FIX: A SOURCE ACROSS EACH TERMINAL PAIR, AS ONE MNA SYSTEM
+
+Each port contributes an ideal voltage source across its own pair: one extra unknown (the source
+current) and one constraint row `v(+) − v(−) = Vₖ`. That enforces I₊ = −I₋ by construction and lets
+the pair's common-mode potential float, saying nothing about where either terminal sits. A port whose
+− terminal is the ground node reduces to the old Dirichlet condition exactly, so those kinds are
+untouched — verified by running the same probe against the pre-change file.
+
+Four things the formulation needs, each of which is a real case and not a hypothetical:
+
+- **A port is a CONNECTION when asking what can reach what.** Islands are unioned over branches *and*
+  active port pairs. Without it the far side of every cut stays hard-zeroed.
+- **A datum per island.** The ground node is its own island's. An island that never reaches it — a
+  trace over a plane it does not touch, driven only through gap ports — is floating, and the constant
+  vector is a null vector of the whole system. One node of it is pinned; it appears in no current.
+- **Exact zeros are still structural.** A conduction component holding only ONE port terminal sits at
+  that terminal's potential and conducts nothing whatever the excitation, so such a port gets no
+  source and an exactly-zero row and column. That is LF1's series-MIM-cap answer and it is preserved
+  bit for bit (Y = 0, S = I). Counted over *terminals* now rather than over held nodes, because a
+  delta gap contributes two and neither is ground.
+- **A source loop is refused, not factorised.** Two ports sharing one terminal pair would assert two
+  voltages across one piece of metal. No port kind this kernel builds can close one, so it is a guard
+  with a note rather than a path.
+
+The conductances run to ~1e6 S (`PecSheetResistance` is 1 µΩ/sq) against a source row of ±1, so the
+source unknown is scaled by the mean branch conductance — a change of variable, so the answer is
+unchanged, but it keeps the pivot search on one scale.
+
+### 3. A SECOND KIND WAS WRONG THE SAME WAY, QUIETLY — AND THAT IS WORSE
+
+`IsConductorReferenced` — an edge port with a named **return conductor**, i.e. every coplanar pair —
+is floating too: `_minus` is the return strip's end cells. Its old answer was not catastrophic, which
+is why it outlived the gap port's version: it published **the signal conductor's resistance alone,
+with the return's contribution simply absent.** On a symmetric coplanar pair that is a clean factor
+of two, and in S at 50 Ω on copper both answers read 0 dB. Nothing would have flagged it.
+
+The series law is now exact, measured on a 10 mm pair at three return widths:
+
+| return width | loop R | ratio to symmetric |
+|---|---|---|
+| = signal | 14.5959 mΩ | 1 |
+| signal / 3 | 29.1918 mΩ | **2.000** |
+| signal × 3 | 9.7306 mΩ | **0.667** |
+
+R + 3R over R + R, and R + R/3 over R + R. Under the old code all three published 14.5959 mΩ, because
+the return conductor never entered the answer at all.
+
+`InternalDeltaGap` with a `Negative` (two cuts in one loop) is the third floating kind and is fixed by
+the same change.
+
+### 4. WHAT WAS **NOT** AFFECTED, VERIFIED RATHER THAN ASSERTED
+
+`PlanarPortKind.Internal`, the via-to-plane port, references the ground node and was correct
+throughout. Running the same probe against the pre-change source gives S identical to the new one:
+−1/3 on the diagonal, +2/3 off it — the shunt junction of three lines meeting at a via. It is the
+instructive contrast with the gap port, which puts the third port in **series** and gives +1/3, ∓2/3
+on the same three lines. `PlanarDcPointTests` pins both, because a change that broke the reduction to
+the Dirichlet case would otherwise be invisible.
+
+### 5. TWO SMALLER THINGS IN THE BLAST RADIUS
+
+- `_plus`/`_minus` held a `Find()` result from `Build` time, but a **later** port's `Tie` can union
+  that root under a new one, leaving a stored id that is no longer a root and that the branch list
+  never mentions. `held[rep[_groundNode]]` already went through `rep`; the port terminals did not.
+  They do now. Reachable only when two ports share cells, which is why it had not bitten.
+- The dead-short note named `port {j + 1}` — the row index, not the port number. They differ the
+  moment a design numbers its ports anything but 1..n, and the message sent a reader to the wrong
+  port. `Network` carries the numbers now.
+
+### 6. WHAT THIS DOES NOT FIX
+
+The reported sweep also has an **8–200 MHz hole** with nothing published in it, in both files: those
+points are dropped by PEEL's own `DeembedErrorFloor` guard (§PEEL above), which is working as
+designed and hits both setups equally. So on that stack a sweep from 1 MHz has three regimes —
+substituted below 7.952 MHz, dropped to 204 MHz, solved above. The consequence for a schematic is
+worth stating because it is how the second half of the report arrived: the `.sNp` reader splines
+across that hole, and with the LF2 rows on the far side of it being *wrong*, the ring reached **+0.77
+dB at 299 MHz and +0.36 dB at 1.37 GHz** in a shorted-gap schematic run — a passive structure
+reported as a gain. It was not an EM result; every anomalous frequency was one the spline invented,
+and the entries it interpolates cancel (two ~0.66 terms making ~0.99) so the reduction amplifies
+whatever error the spline has. A gap-port 3-port wants a denser frequency grid than the 2-port it
+replaces, independently of any of this.
+
 ## PEEL — the de-embedding peel's own conditioning, published and gated (2026-09-14)
 
 `docs/sonnet-briefs/brief-deembed-peel-low-frequency.md`. Owner report: a 3.8 mm microstrip on the

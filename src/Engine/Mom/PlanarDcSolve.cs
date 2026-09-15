@@ -32,6 +32,16 @@
 // node, and the answer comes out as the trace's own resistance. The kinds that genuinely ARE a cut in
 // metal — the internal delta gap, and the via-to-plane port whose gap is at the foot of the via — cut
 // the network, because that is what they are.
+//
+// **And a pair is a PAIR: neither terminal of a cut port is the ground node.** An edge port's − IS
+// the plane, so the two statements coincide there and it is easy to write a solve that only works
+// for them — which is what this file did until 2026-09-14, by holding every terminal at an absolute
+// potential. That is the short-circuit condition ONLY under a common reference; on a delta gap it
+// welds the far lip to ground and the port stops conserving current across itself. So each port is
+// driven by a source across its own terminal pair (`Admittance`), which says nothing about where
+// either terminal sits, and a port is treated as a CONNECTION when asking what can reach what —
+// a cut's two lips are in different conduction components by construction, so branch connectivity
+// alone declares everything past a gap unreachable.
 
 using System.Numerics;
 using CSparse;
@@ -263,6 +273,7 @@ public static class PlanarDcSolve
         private readonly List<(int A, int B, double G)> _branches = [];
         private int[]      _plus  = [];                // per port: super-node of its + terminal
         private int[]      _minus = [];
+        private int[]      _numbers = [];               // per port: the number the design gave it
         public  double[]   SeriesOhms = [];
 
         private int Find(int i) { while (_parent[i] != i) i = _parent[i] = _parent[_parent[i]]; return i; }
@@ -325,10 +336,12 @@ public static class PlanarDcSolve
             // ── Port terminals ─────────────────────────────────────────────────────────────────
             net._plus       = new int[ports.Count];
             net._minus      = new int[ports.Count];
+            net._numbers    = new int[ports.Count];
             net.SeriesOhms  = new double[ports.Count];
             for (int p = 0; p < ports.Count; p++)
             {
                 var port = ports[p];
+                net._numbers[p] = port.Number;
                 bool low = port.IncidenceSign > 0;
 
                 switch (port.Kind)
@@ -475,11 +488,29 @@ public static class PlanarDcSolve
         // ══════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>Y by Dirichlet excitation, not by inverting anything.</b> Every port terminal is held
-        /// at a potential, the free nodes are solved for, and the current leaving one terminal is
-        /// read back — which is the only formulation that survives a FLOATING conductor. Driving
-        /// currents instead would need a Z that does not exist for one: a trace over a plane it never
-        /// touches has a perfectly good two-port Y and no Z at all.
+        /// <b>Y by driving each port with an ideal voltage source, solved as one MNA system.</b>
+        /// Nothing is inverted and no current is driven: a source across each port's terminal PAIR
+        /// gives the short-circuit condition every other port needs (V = 0 across it) without
+        /// asserting anything about where those terminals sit relative to the plane, which is what
+        /// makes the formulation survive a FLOATING conductor. Driving currents instead would need a
+        /// Z that does not exist for one — a trace over a plane it never touches has a perfectly
+        /// good two-port Y and no Z at all.
+        ///
+        /// <para><b>It used to hold every terminal at an absolute potential, and that is only the
+        /// short-circuit condition when every port's − terminal IS the common node.</b> True for an
+        /// edge port and for a via-to-plane port, both of which reference the ground node. False for
+        /// an internal delta gap, whose − terminal is the far lip of the cut — signal metal. Pinning
+        /// that lip to zero does not set V = 0 across the port; it welds the trace to ground on the
+        /// far side of the gap, and the two lips stop being one port at all: current entering the
+        /// near lip is under no obligation to leave the far one. Owner report, 2026-09-14 — a 50 Ω
+        /// line cut by a gap port published S₁₃ = 1 and S₂₂ = −1 at the low end of a sweep, where
+        /// the right answer is the 1/3-2/3 split of three ports meeting at one series cut, and the
+        /// gap sim was unusable below the fit floor. The rank is the tell: the true network has ONE
+        /// independent current (I₁ = I₃, I₂ = −I₃) so Y is rank 1, and the Dirichlet answer was
+        /// rank 2 — the extra rank is exactly the current path that should not exist.</para>
+        ///
+        /// <para>Ports whose − terminal is the ground node are unaffected by the change: their
+        /// source rows reduce to the same Dirichlet condition the old code wrote by hand.</para>
         /// </summary>
         public Mat<Complex> Admittance(List<string> notes)
         {
@@ -498,28 +529,14 @@ public static class PlanarDcSolve
                 if (ra != rb) br.Add((ra, rb, g));
             }
 
-            // Which super-nodes are held.
-            var held = new bool[_nodeCount];
-            held[rep[_groundNode]] = true;
-            for (int i = 0; i < p; i++) { held[_plus[i]] = true; held[_minus[i]] = true; }
-
-            // Free nodes, dense-numbered. Anything untouched by a branch cannot carry current, so it
-            // is left out rather than regularised into the matrix.
-            var touched = new bool[_nodeCount];
-            foreach (var (a, b, _) in br) { touched[a] = true; touched[b] = true; }
-            var freeIndex = new int[_nodeCount];
-            Array.Fill(freeIndex, -1);
-            int nFree = 0;
-            for (int i = 0; i < _nodeCount; i++)
-                if (rep[i] == i && touched[i] && !held[i]) freeIndex[i] = nFree++;
-
-            // Per-super-node incident branch lists, for reading the terminal current back.
-            var incident = new Dictionary<int, List<int>>();
-            for (int k = 0; k < br.Count; k++)
-            {
-                Add(incident, br[k].A, k);
-                Add(incident, br[k].B, k);
-            }
+            // The terminals, THROUGH rep — for the same reason the branches are. Build wrote a
+            // Find() result into _plus/_minus, and a LATER port's Tie can union that root under a
+            // new one, which leaves the stored id a non-root that the branch list never mentions.
+            // The ground node was already read this way here; the port terminals were not.
+            int gnd   = rep[_groundNode];
+            var plus  = new int[p];
+            var minus = new int[p];
+            for (int i = 0; i < p; i++) { plus[i] = rep[_plus[i]]; minus[i] = rep[_minus[i]]; }
 
             // ── WHICH TERMINALS CAN REACH EACH OTHER AT ALL — AND IT IS ASKED STRUCTURALLY ───────
             //
@@ -540,95 +557,164 @@ public static class PlanarDcSolve
                 if (ra != rb) comp[rb] = ra;
             }
 
-            // A component carries current under excitation j only if it holds plus[j] AND at least
-            // one other held node — everything else held is at zero, so a component with a single
-            // held node in it sits at one potential and conducts nothing.
-            var heldPerComponent = new Dictionary<int, int>();
-            for (int i = 0; i < _nodeCount; i++)
-                if (rep[i] == i && held[i])
-                {
-                    int c = CompOf(i);
-                    heldPerComponent[c] = heldPerComponent.GetValueOrDefault(c) + 1;
-                }
-
-            SparseLU? lu = null;
-            if (nFree > 0)
+            // A conduction component carries current only if TWO port terminals sit in it: one alone
+            // makes the whole component sit at that terminal's potential and conduct nothing, whatever
+            // the excitation. Counted over terminals rather than over held nodes, because a delta gap
+            // contributes two of them and neither is the ground node.
+            var terminals = new Dictionary<int, int>();
+            for (int i = 0; i < p; i++)
             {
-                var tri = new CoordinateStorage<double>(nFree, nFree, br.Count * 4 + nFree);
-                foreach (var (a, b, g) in br)
-                {
-                    int ia = freeIndex[a], ib = freeIndex[b];
-                    if (ia >= 0) tri.At(ia, ia, g);
-                    if (ib >= 0) tri.At(ib, ib, g);
-                    if (ia >= 0 && ib >= 0) { tri.At(ia, ib, -g); tri.At(ib, ia, -g); }
-                }
-                var csc  = SparseMatrix.OfIndexed(tri);
-                var perm = AMD.Generate(csc, ColumnOrdering.MinimumDegreeAtA);
-                lu = SparseLU.Create(csc, perm, 1.0);
+                int cp = CompOf(plus[i]),  cm = CompOf(minus[i]);
+                terminals[cp] = terminals.GetValueOrDefault(cp) + 1;
+                terminals[cm] = terminals.GetValueOrDefault(cm) + 1;
             }
 
-            var v   = new double[_nodeCount];
-            var rhs = new double[Math.Max(nFree, 1)];
-            var sol = new double[Math.Max(nFree, 1)];
+            // ── WHICH PORTS GET A SOURCE ─────────────────────────────────────────────────────────
+            //
+            // A source LOOP has no solution (two ports sharing one terminal pair assert two different
+            // voltages across the same metal), so the one that closes the loop is refused rather than
+            // handed to a factorisation that would return whatever the pivoting happened to produce.
+            // No port kind this kernel builds can close one — each cut is its own — so this is a
+            // guard, not a path.
+            var active    = new bool[p];
+            var srcParent = new int[_nodeCount];
+            for (int i = 0; i < _nodeCount; i++) srcParent[i] = i;
+            int SrcOf(int i) { while (srcParent[i] != i) i = srcParent[i] = srcParent[srcParent[i]]; return i; }
+
+            for (int i = 0; i < p; i++)
+            {
+                if (plus[i] == minus[i])
+                {
+                    notes.Add($"DC: port {Number(i)}'s two terminals are the same piece of metal, so " +
+                              "it is a dead short at DC and has no admittance to publish. Its row and " +
+                              "column are left at zero.");
+                    continue;
+                }
+                if (terminals.GetValueOrDefault(CompOf(plus[i]))  < 2 ||
+                    terminals.GetValueOrDefault(CompOf(minus[i])) < 2)
+                    continue;                                  // no path — exact zero row and column
+
+                int sa = SrcOf(plus[i]), sb = SrcOf(minus[i]);
+                if (sa == sb)
+                {
+                    notes.Add($"DC: port {Number(i)} shares both of its terminals with another port, " +
+                              "so the two would have to impose different voltages on the same metal. " +
+                              "Its row and column are left at zero.");
+                    continue;
+                }
+                srcParent[sb] = sa;
+                active[i] = true;
+            }
+
+            // ── ISLANDS: BRANCHES **AND** SOURCES, BECAUSE A PORT IS A CONNECTION ────────────────
+            //
+            // The old reachability was over branches alone, which is exactly backwards for a cut
+            // port: a gap's two lips are in different conduction components BY CONSTRUCTION — that is
+            // what a cut is — so every port on the far side was declared unreachable and hard-zeroed.
+            // A non-driven port is a short, so it joins what it touches.
+            var isle = new int[_nodeCount];
+            for (int i = 0; i < _nodeCount; i++) isle[i] = i;
+            int IsleOf(int i) { while (isle[i] != i) i = isle[i] = isle[isle[i]]; return i; }
+            void JoinIsle(int a, int b) { a = IsleOf(a); b = IsleOf(b); if (a != b) isle[b] = a; }
+            foreach (var (a, b, _) in br) JoinIsle(a, b);
+            for (int i = 0; i < p; i++) if (active[i]) JoinIsle(plus[i], minus[i]);
+
+            var live = new HashSet<int>();
+            for (int i = 0; i < p; i++) if (active[i]) live.Add(IsleOf(plus[i]));
+
+            // ── A DATUM PER ISLAND ──────────────────────────────────────────────────────────────
+            //
+            // The ground node is the datum of its own island. An island that never reaches it — a
+            // trace over a plane it does not touch, driven only through gap ports — is floating, and
+            // its common-mode potential is genuinely arbitrary: it appears in no current. One node of
+            // it is pinned so the system has a solution at all; without that the constant vector is a
+            // null vector and the factorisation is singular.
+            var touched = new bool[_nodeCount];
+            foreach (var (a, b, _) in br) { touched[a] = true; touched[b] = true; }
+            for (int i = 0; i < p; i++)
+                if (active[i]) { touched[plus[i]] = true; touched[minus[i]] = true; }
+
+            var datum = new Dictionary<int, int> { [IsleOf(gnd)] = gnd };
+            for (int i = 0; i < _nodeCount; i++)
+            {
+                if (rep[i] != i || !touched[i]) continue;
+                int isl = IsleOf(i);
+                if (live.Contains(isl)) datum.TryAdd(isl, i);
+            }
+
+            // ── UNKNOWNS: one per live non-datum node, plus one current per active port ──────────
+            var nodeIndex = new int[_nodeCount];
+            Array.Fill(nodeIndex, -1);
+            int nNode = 0;
+            for (int i = 0; i < _nodeCount; i++)
+            {
+                if (rep[i] != i || !touched[i]) continue;
+                int isl = IsleOf(i);
+                if (!live.Contains(isl) || datum[isl] == i) continue;
+                nodeIndex[i] = nNode++;
+            }
+
+            var portIndex = new int[p];
+            Array.Fill(portIndex, -1);
+            int nSrc = 0;
+            for (int i = 0; i < p; i++) if (active[i]) portIndex[i] = nNode + nSrc++;
+
+            if (nSrc == 0) return y;
+
+            // The conductances here run to ~1e6 S (PecSheetResistance is 1 µΩ/sq) while a source row
+            // is ±1, and a pivot search comparing those across one matrix costs digits for nothing.
+            // Scaling the unknown current by a typical conductance puts both blocks on one scale; it
+            // is a change of variable, so the answer is unchanged.
+            double scale = 0;
+            foreach (var (_, _, g) in br) scale += g;
+            scale = br.Count > 0 && scale > 0 ? scale / br.Count : 1.0;
+
+            int n = nNode + nSrc;
+            var tri = new CoordinateStorage<double>(n, n, br.Count * 4 + nSrc * 4 + n);
+            foreach (var (a, b, g) in br)
+            {
+                int ia = nodeIndex[a], ib = nodeIndex[b];
+                if (ia >= 0) tri.At(ia, ia, g);
+                if (ib >= 0) tri.At(ib, ib, g);
+                if (ia >= 0 && ib >= 0) { tri.At(ia, ib, -g); tri.At(ib, ia, -g); }
+            }
+            for (int k = 0; k < p; k++)
+            {
+                if (!active[k]) continue;
+                int c = portIndex[k], ip = nodeIndex[plus[k]], im = nodeIndex[minus[k]];
+                // KCL: the source delivers its current into + and takes it out of −.
+                if (ip >= 0) { tri.At(ip, c, -scale); tri.At(c, ip,  scale); }
+                if (im >= 0) { tri.At(im, c,  scale); tri.At(c, im, -scale); }
+            }
+
+            var csc  = SparseMatrix.OfIndexed(tri);
+            var perm = AMD.Generate(csc, ColumnOrdering.MinimumDegreeAtPlusA);
+            var lu   = SparseLU.Create(csc, perm, 1.0);
+
+            var rhs = new double[n];
+            var sol = new double[n];
 
             for (int j = 0; j < p; j++)
             {
-                if (_plus[j] == _minus[j])
-                {
-                    notes.Add($"DC: port {j + 1}'s two terminals are the same piece of metal, so it is " +
-                              "a dead short at DC and has no admittance to publish. Its row and column " +
-                              "are left at zero.");
-                    continue;
-                }
+                if (!active[j]) continue;
 
-                int driven = CompOf(_plus[j]);
-                if (heldPerComponent.GetValueOrDefault(driven) < 2) continue;   // exactly zero column
-
-                Array.Clear(v);
                 Array.Clear(rhs);
-                v[_plus[j]] = 1.0;
+                rhs[portIndex[j]] = scale;                     // V_j = 1, every other port shorted
+                lu.Solve(rhs, sol);
 
-                if (lu is not null)
-                {
-                    foreach (var (a, b, g) in br)
-                    {
-                        int ia = freeIndex[a], ib = freeIndex[b];
-                        if (ia >= 0 && ib < 0) rhs[ia] += g * v[b];
-                        else if (ib >= 0 && ia < 0) rhs[ib] += g * v[a];
-                    }
-                    lu.Solve(rhs, sol);
-                    for (int i = 0; i < _nodeCount; i++)
-                        if (freeIndex[i] >= 0) v[i] = sol[freeIndex[i]];
-                }
-
+                int driven = IsleOf(plus[j]);
                 for (int i = 0; i < p; i++)
-                    if (CompOf(_plus[i]) == driven)
-                        y[i, j] = new Complex(TerminalCurrent(br, incident, v, _plus[i]), 0);
+                    if (active[i] && IsleOf(plus[i]) == driven)
+                        y[i, j] = new Complex(scale * sol[portIndex[i]], 0);
             }
 
             return y;
         }
 
-        private static void Add(Dictionary<int, List<int>> map, int key, int value)
-        {
-            if (!map.TryGetValue(key, out var list)) map[key] = list = [];
-            list.Add(value);
-        }
+        /// <summary>The port NUMBER behind a row index, for the notes. The two differ the moment a
+        /// design numbers its ports anything but 1..n, and a message naming the wrong one sends a
+        /// reader to the wrong port.</summary>
+        private int Number(int i) => (uint)i < (uint)_numbers.Length ? _numbers[i] : i + 1;
 
-        /// <summary>Net current leaving <paramref name="node"/> into the network — which is what the
-        /// source attached to that terminal is supplying.</summary>
-        private static double TerminalCurrent(List<(int A, int B, double G)> br,
-                                              Dictionary<int, List<int>> incident,
-                                              double[] v, int node)
-        {
-            if (!incident.TryGetValue(node, out var list)) return 0;
-            double i = 0;
-            foreach (int k in list)
-            {
-                var (a, b, g) = br[k];
-                i += a == node ? g * (v[a] - v[b]) : g * (v[b] - v[a]);
-            }
-            return i;
-        }
     }
 }
