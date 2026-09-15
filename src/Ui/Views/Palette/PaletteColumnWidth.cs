@@ -94,10 +94,7 @@ public static class PaletteColumnWidth
     {
         pinned = [];
 
-        if (proportions is null || proportions.Count < 2) return false;
-        if (index < 0 || index >= proportions.Count) return false;
-        if (!(available > 0.0) || !(targetWidth > 0.0) || targetWidth >= available) return false;
-        if (proportions.Any(p => !double.IsFinite(p))) return false;
+        if (!HasRoomFor(proportions, index, available, targetWidth)) return false;
 
         double want = ProportionFor(targetWidth, available);
         double have = proportions[index];
@@ -106,17 +103,45 @@ public static class PaletteColumnWidth
         // difference is nothing at one window size and a visible step at another.
         if (Math.Abs(have - want) * available < 0.5) return false;
 
-        // The next column along, or the previous one when the palette is the last — which it is in
-        // the shipped right-hand arrangement. Either way this is the document column.
-        int neighbour = index + 1 < proportions.Count ? index + 1 : index - 1;
-
-        double absorbed = proportions[neighbour] - (want - have);
-        if (!(absorbed > 0.0)) return false;
+        int neighbour = NeighbourOf(proportions, index);
 
         var result = proportions.ToArray();
         result[index]     = want;
-        result[neighbour] = absorbed;
+        result[neighbour] = proportions[neighbour] - (want - have);
         pinned = result;
         return true;
     }
+
+    /// <summary>
+    /// Whether this row CAN give the palette <paramref name="targetWidth"/> — the whole of
+    /// <see cref="TryPin"/>'s refusal test, minus the one refusal that is not a refusal (a column
+    /// already at its target has room by definition, and returns true here).
+    ///
+    /// <para><b>The difference matters to the caller, which is why it is asked separately.</b> A pin
+    /// that is REFUSED for want of room leaves the palette scaled to whatever share of a too-narrow
+    /// window it had — a width that is not the count the user set, and so a width the count must not
+    /// be re-read from. Re-reading it there is a one-way ratchet: the smaller count becomes the one
+    /// the pin then holds, and the user's two or three columns do not come back when the window is
+    /// widened again. <c>PaletteColumnPin</c> asks this so it can keep the count instead.</para>
+    /// </summary>
+    public static bool HasRoomFor(
+        IReadOnlyList<double> proportions, int index, double available, double targetWidth)
+    {
+        if (proportions is null || proportions.Count < 2) return false;
+        if (index < 0 || index >= proportions.Count) return false;
+        if (!(available > 0.0) || !(targetWidth > 0.0) || targetWidth >= available) return false;
+        if (proportions.Any(p => !double.IsFinite(p))) return false;
+
+        double want = ProportionFor(targetWidth, available);
+        double absorbed = proportions[NeighbourOf(proportions, index)] - (want - proportions[index]);
+        return absorbed > 0.0;
+    }
+
+    /// <summary>
+    /// The column that absorbs the difference: the next one along, or the previous one when the
+    /// palette is last — which it is in the shipped right-hand arrangement. Either way this is the
+    /// document column.
+    /// </summary>
+    private static int NeighbourOf(IReadOnlyList<double> proportions, int index)
+        => index + 1 < proportions.Count ? index + 1 : index - 1;
 }

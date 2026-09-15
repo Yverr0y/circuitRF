@@ -1,5 +1,49 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## The Library palette still lost a glyph column on a resize, 2026-09-14
+
+Owner: a docked Library palette sometimes drops from two glyph columns to one when the workspace
+window is resized, and it is noticeably more common in a Debug build than in the packaged Release one
+— a timing tell, since Debug makes layout the slower half of every race in the window. The
+2026-09-13 pin below is the right mechanism; it had two ways of reading the wrong number into its own
+latch, and **the latch is what makes either one stick.** `PaletteColumnPin` holds the count the user
+set and re-proportions the column to match on every window resize, so the moment the latch reads
+`1`, the pin *enforces* one column: widening the window back does not bring the second one back, and
+the only way out is to drag the splitter. That is why both fixes are refusals to read rather than
+corrections after the fact.
+
+**1. The prediction was written into the measurement, so most resize passes looked still.** The pin
+has two triggers: the window's `ClientSize` (act before the pass, so the palette never flashes at the
+scaled width) and the panel's `LayoutUpdated` (check what the pass actually produced). The second
+decides "has the window moved?" by comparing the measured pool against `_pool` — and the first was
+storing its *predicted* pool there. When the prediction was right, which is the ordinary case, the
+following pass compared the pool against itself, concluded the window was still, and took the branch
+that **re-reads the count off the tile area** — from a width the pin had only just asked for and
+which that pass had not necessarily delivered. `TargetWidth` aims at exactly N glyph slots plus the
+measured chrome, with half a pixel of guard against Dock's `floor`; a tile area a hair under two
+slots is one column, and the read latches it. The class already stated the invariant ("during a
+window resize the count must NOT be re-read"); the prediction quietly defeated it.
+
+The prediction now lives in its own field and `_pool` is only ever a measurement, so every pass after
+a resize takes the pool-changed branch, re-applies against the real width, and reads nothing. The
+prediction still accumulates across several `ClientSize` changes that arrive between two layout
+passes — a fast drag, and again a Debug build — rather than each delta being added to a measurement
+that is by then several steps stale.
+
+**2. A pin the row had no room for was read back as if the user had chosen it.** `TryPin` returns
+false for two opposite situations: the column is already exactly where it should be, and the row is
+too narrow to put it there. On the second the palette stays at its scaled share of a too-narrow
+window — not a width anybody chose — and the still-pass read turned that into the new latched count.
+The room test is now `PaletteColumnWidth.HasRoomFor`, asked separately (`TryPin` calls it, so the two
+refuse the same set), and a pass where the pin had no room reads nothing. `HasRoomFor` returns true
+for a column already at its target, which is the whole point of splitting it out.
+
+**Gated in `PaletteColumnWidthTests`** — the arithmetic half properly (`HasRoomFor` against `TryPin`
+on both refusals), and the two guards as a source scan, because `PaletteColumnPin` needs a laid-out
+dock and this project has no Avalonia platform. A scan is weak, but both guards were removable
+without a single test going red, and the alternative was nothing at all.
+
+
 ## A click must land the port the ghost drew — the port type, 2026-09-14
 
 Owner bug report, filed as a snapping bug: place a port mid-trace with geometry snapping OFF, the ghost

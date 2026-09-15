@@ -29,6 +29,23 @@ namespace CircuitRF.Ui.Views.Palette;
 /// too narrow to show one whole column has no count to preserve, and that one is left to scale as it
 /// always did.</para>
 ///
+/// <para><b>Two things must never be mistaken for the user choosing a narrower palette, because the
+/// count is a LATCH and a wrong read of it does not wash out</b> (owner, 2026-09-14: the docked
+/// Library sometimes dropped from two columns to one on a window resize, noticeably more often in a
+/// Debug build, where layout is the slower half of the race). Once the latch reads one, the pin
+/// holds one, and widening the window back does not bring the second column back — so both of these
+/// are refusals to read rather than corrections after the fact:</para>
+///
+/// <list type="bullet">
+/// <item><description>A pass that belongs to a window resize. The pool is compared against the last
+/// MEASUREMENT, never against the prediction <see cref="OnWindowPropertyChanged"/> acts on — see the
+/// note there for why storing the prediction quietly turned most resize passes into still
+/// ones.</description></item>
+/// <item><description>A pass in which the pin asked for a width the row could not give
+/// (<see cref="PaletteColumnWidth.HasRoomFor"/>). The palette is then scaled to its share of a
+/// too-narrow window, which is not a width anybody chose.</description></item>
+/// </list>
+///
 /// <para><b>The splitter still goes anywhere, because nothing is applied DURING a drag.</b> The pin
 /// acts when the pool the columns divide up changes — that is, when the window is resized — and never
 /// merely because the column width did. Re-applying on every layout pass would peg the splitter to
@@ -41,8 +58,10 @@ namespace CircuitRF.Ui.Views.Palette;
 /// publishes the new client size and then runs the layout pass, so re-proportioning there lands
 /// before anything is arranged and the palette never flashes at the scaled width — which it would if
 /// the correction were made after the fact, most visibly on a maximise, where one frame's worth of
-/// scaling is the whole jump. <see cref="OnPanelLayoutUpdated"/> re-checks afterwards and is what
-/// catches any case where the panel's width does not track the window's one-for-one.</para>
+/// scaling is the whole jump. <see cref="OnPanelLayoutUpdated"/> then re-applies against the width
+/// the pass actually produced — always, since the prediction is never written into the measurement —
+/// which is what catches any case where the panel's width does not track the window's
+/// one-for-one.</para>
 /// </summary>
 public sealed class PaletteColumnPin
 {
@@ -59,7 +78,9 @@ public sealed class PaletteColumnPin
     private bool   _settled;                  // a usable measurement has been seen for this arrangement
     private int    _columns;                  // glyph columns the palette is showing; 0 = nothing to hold
     private double _chrome;                   // column width less tile-area width, as last measured
-    private double _pool;                     // the panel width proportions divide up, at the last pass
+    private double _pool;                     // the panel width proportions divide up — MEASURED, only ever
+    private double _predicted;                // that width as predicted since the last pass; 0 = none pending
+    private bool   _hasRoom = true;           // the last Apply could get the width it asked for
     private double _clientWidth;
 
     private PaletteColumnPin(Window window)
@@ -118,20 +139,24 @@ public sealed class PaletteColumnPin
             }
         }
 
-        _settled = false;
-        _columns = 0;
-        _pool    = 0.0;
+        _settled   = false;
+        _columns   = 0;
+        _pool      = 0.0;
+        _predicted = 0.0;
+        _hasRoom   = true;
     }
 
     private void Release(PaletteToolView? view)
     {
         if (view is not null && !ReferenceEquals(view, _view)) return;
         if (_panel is not null) _panel.LayoutUpdated -= OnPanelLayoutUpdated;
-        _panel   = null;
-        _column  = null;
-        _view    = null;
-        _settled = false;
-        _columns = 0;
+        _panel     = null;
+        _column    = null;
+        _view      = null;
+        _settled   = false;
+        _columns   = 0;
+        _predicted = 0.0;
+        _hasRoom   = true;
     }
 
     // ── The two triggers ──────────────────────────────────────────────────────
@@ -150,10 +175,25 @@ public sealed class PaletteColumnPin
         // what does that. Every column in the row is inside the window and none of the chrome around
         // them is elastic, so the pool moves with the window pixel for pixel; OnPanelLayoutUpdated
         // checks the answer once the pass has run.
-        double pool = _pool + delta;
+        //
+        // **The prediction is kept apart from _pool, and that is the whole of it.** _pool is what
+        // OnPanelLayoutUpdated compares against to decide whether the window has moved, and writing
+        // the prediction into it made a resize pass look STILL whenever the prediction was right —
+        // which is most of the time. The count was then re-read from a width the pin had only just
+        // asked for and the pass had not necessarily delivered, and a width one pixel short of two
+        // glyph slots reads as one column. That read latches: the pin holds the smaller number from
+        // then on, and widening the window back does not bring the column back. Leaving _pool a
+        // MEASUREMENT means every pass that follows a resize takes the poolChanged branch, which
+        // re-applies against the real width and never re-reads the count — which is what the note
+        // below, and this class's whole contract, already said happens.
+        //
+        // Several ClientSize changes can arrive between two layout passes (a fast drag, and a Debug
+        // build where layout is the slower half), so the deltas accumulate here rather than each
+        // being added to a measurement that is by then several steps stale.
+        double pool = (_predicted > 0.0 ? _predicted : _pool) + delta;
         if (pool <= 0.0) return;
 
-        _pool = pool;
+        _predicted = pool;
         Apply(pool);
     }
 
@@ -169,7 +209,8 @@ public sealed class PaletteColumnPin
         _chrome = columnWidth - tileArea;
 
         bool poolChanged = Math.Abs(pool - _pool) > 0.5;
-        _pool = pool;
+        _pool      = pool;
+        _predicted = 0.0;
 
         if (!_settled)
         {
@@ -206,6 +247,13 @@ public sealed class PaletteColumnPin
             return;
         }
 
+        // The pin asked for a width this row could not give — the window is too narrow to hold the
+        // count the user set beside a document column that still has something in it. The palette is
+        // scaled to its share of that window, which is NOT the count they set, so there is nothing
+        // here to read. Reading it anyway is a one-way ratchet: the smaller number becomes the one
+        // the pin holds, and their columns do not come back when the window is widened again.
+        if (!_hasRoom) return;
+
         // Same window, different column: the user moved the splitter, and the count they have landed
         // on is the one to keep. Nothing is applied — see the class note on why a pin that snapped
         // back mid-drag would be a bug.
@@ -224,6 +272,11 @@ public sealed class PaletteColumnPin
 
         double target  = PaletteColumnWidth.TargetWidth(_chrome, _columns);
         var    current = columns.Select(ProportionalStackPanel.GetProportion).ToArray();
+
+        // Recorded rather than inferred from the refusal below, which also refuses a column that is
+        // already exactly where it should be — the opposite case entirely.
+        _hasRoom = PaletteColumnWidth.HasRoomFor(current, index, pool, target);
+
         if (!PaletteColumnWidth.TryPin(current, index, pool, target, out var pinned)) return;
 
         // Set on the PRESENTER, at local value, which is where Dock itself writes a resize: the

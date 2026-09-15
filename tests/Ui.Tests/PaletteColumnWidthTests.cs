@@ -270,4 +270,72 @@ public sealed class PaletteColumnWidthTests
         Assert.False(PaletteColumnWidth.TryPin([0.2, 0.7, 0.1], 2, available: 0.0, targetWidth: 126.0, out _));
         Assert.False(PaletteColumnWidth.TryPin([0.2, 0.7, 0.1], 2, available: 100.0, targetWidth: 126.0, out _));
     }
+
+    // ── No room is not the same refusal as nothing to do ──────────────────────
+
+    /// <summary>
+    /// <see cref="PaletteColumnWidth.TryPin"/> returns false for two opposite situations — the column
+    /// is already exactly where it should be, and the row is too narrow to put it there — and the pin
+    /// has to tell them apart. It keeps the user's glyph count through the second and re-reads it
+    /// through the first, and getting that backwards is what made a resize able to take a column away
+    /// for good (owner, 2026-09-14).
+    /// </summary>
+    [Fact]
+    public void HasRoomFor_SeparatesNoRoomFromAlreadyThere()
+    {
+        const double pool = 1192.0;
+
+        // Already there: nothing to do, but the room is plainly there.
+        double want = PaletteColumnWidth.ProportionFor(126.0, pool);
+        double[] settled = [0.20, 1.0 - 0.20 - want, want];
+        Assert.False(PaletteColumnWidth.TryPin(settled, index: 2, pool, 126.0, out _));
+        Assert.True(PaletteColumnWidth.HasRoomFor(settled, index: 2, pool, 126.0));
+
+        // No room: the neighbour cannot give 126 px back out of a 300 px row.
+        double[] cramped = [0.90, 0.05, 0.05];
+        Assert.False(PaletteColumnWidth.TryPin(cramped, index: 2, available: 300.0, targetWidth: 126.0, out _));
+        Assert.False(PaletteColumnWidth.HasRoomFor(cramped, index: 2, available: 300.0, targetWidth: 126.0));
+    }
+
+    /// <summary>
+    /// Every row <see cref="PaletteColumnWidth.TryPin"/> cannot reason about has no room either —
+    /// the two refuse the same set, so a caller reading one never has to re-check the other.
+    /// </summary>
+    [Fact]
+    public void HasRoomFor_RefusesEveryRowTryPinCannotReasonAbout()
+    {
+        Assert.False(PaletteColumnWidth.HasRoomFor([1.0], 0, 1192.0, 126.0));
+        Assert.False(PaletteColumnWidth.HasRoomFor([0.2, 0.7, 0.1], 3, 1192.0, 126.0));
+        Assert.False(PaletteColumnWidth.HasRoomFor([0.2, double.NaN, 0.1], 2, 1192.0, 126.0));
+        Assert.False(PaletteColumnWidth.HasRoomFor([0.2, 0.7, 0.1], 2, available: 0.0, targetWidth: 126.0));
+        Assert.False(PaletteColumnWidth.HasRoomFor([0.2, 0.7, 0.1], 2, available: 100.0, targetWidth: 126.0));
+
+        // And the ordinary case has room, so the assertions above are not vacuous.
+        Assert.True(PaletteColumnWidth.HasRoomFor([0.20, 0.69, 0.11], 2, 1192.0, 126.0));
+    }
+
+    // ── What the pin must not do with the count ───────────────────────────────
+
+    /// <summary>
+    /// The count is a LATCH, and the two reads that must not happen are what this whole exercise
+    /// turned on. <c>PaletteColumnPin</c> itself needs a laid-out dock, which this project has no
+    /// platform for, so the guards are held here as a source scan — the alternative is nothing at
+    /// all, and both were removable without a single test going red.
+    /// </summary>
+    [Fact]
+    public void ThePin_NeverReadsTheCountFromAResizeOrFromAPinItCouldNotApply()
+    {
+        string pin = Src("src/Ui/Views/Palette/PaletteColumnPin.cs");
+
+        // The ClientSize handler predicts a pool to act on before the pass runs. Writing that
+        // prediction into the MEASUREMENT the layout pass compares against made a resize pass look
+        // still whenever the prediction was right, and the count was then re-read off a width the
+        // pin had only just asked for — one pixel short of two glyph slots reads as one column.
+        Assert.DoesNotContain("_pool = pool;\n        Apply(pool);", pin.Replace("\r\n", "\n"));
+        Assert.Contains("_predicted = pool;", pin);
+
+        // A pin the row had no room for leaves the palette at a width nobody chose.
+        Assert.Contains("PaletteColumnWidth.HasRoomFor(", pin);
+        Assert.Contains("if (!_hasRoom) return;", pin);
+    }
 }
