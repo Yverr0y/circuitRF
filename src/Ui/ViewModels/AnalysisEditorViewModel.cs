@@ -122,9 +122,9 @@ public sealed partial class AnalysisEditorViewModel : ObservableObject
         _type          = initialType;
         _name          = NextFreeName(initialType, _existingNames);
         SpBody         = new SpBodyViewModel(model);
-        HbBody         = new HbBodyViewModel(model);
-        LpBody         = new LpBodyViewModel(model, workspaceRoot);
-        LppBody        = new LppBodyViewModel(model, workspaceRoot);
+        HbBody         = SeededHb(model);
+        LpBody         = SeededLp(model, workspaceRoot);
+        LppBody        = SeededLpp(model, workspaceRoot);
         ValidateName();
     }
 
@@ -154,33 +154,33 @@ public sealed partial class AnalysisEditorViewModel : ObservableObject
             case SParameterAnalysis sp:
                 _type  = AnalysisKind.SP;
                 SpBody = SpBodyViewModel.FromAnalysis(sp, model);
-                HbBody = new HbBodyViewModel(model);
-                LpBody = new LpBodyViewModel(model, workspaceRoot);
-                LppBody = new LppBodyViewModel(model, workspaceRoot);
+                HbBody = SeededHb(model);
+                LpBody = SeededLp(model, workspaceRoot);
+                LppBody = SeededLpp(model, workspaceRoot);
                 break;
 
             case LoadpullPursuitAnalysis lpp:
                 _type   = AnalysisKind.LPP;
                 SpBody  = new SpBodyViewModel(model);
-                HbBody  = new HbBodyViewModel(model);
-                LpBody  = new LpBodyViewModel(model, workspaceRoot);
+                HbBody  = SeededHb(model);
+                LpBody  = SeededLp(model, workspaceRoot);
                 LppBody = LppBodyViewModel.FromAnalysis(lpp, model, workspaceRoot);
                 break;
 
             case LoadpullAnalysis lp:
                 _type  = AnalysisKind.LP;
                 SpBody = new SpBodyViewModel(model);
-                HbBody = new HbBodyViewModel(model);
+                HbBody = SeededHb(model);
                 LpBody = LpBodyViewModel.FromAnalysis(lp, model, workspaceRoot);
-                LppBody = new LppBodyViewModel(model, workspaceRoot);
+                LppBody = SeededLpp(model, workspaceRoot);
                 break;
 
             case HarmonicBalanceAnalysis hb:
                 _type  = AnalysisKind.HB;
                 SpBody = new SpBodyViewModel(model);
                 HbBody = HbBodyViewModel.FromAnalysis(hb, model);
-                LpBody = new LpBodyViewModel(model, workspaceRoot);
-                LppBody = new LppBodyViewModel(model, workspaceRoot);
+                LpBody = SeededLp(model, workspaceRoot);
+                LppBody = SeededLpp(model, workspaceRoot);
 
                 // Migrate legacy HB sweep fields into a sweep axis row.
 #pragma warning disable CS0618
@@ -200,9 +200,9 @@ public sealed partial class AnalysisEditorViewModel : ObservableObject
             default: // DcAnalysis or unknown
                 _type  = AnalysisKind.DC;
                 SpBody = new SpBodyViewModel(model);
-                HbBody = new HbBodyViewModel(model);
-                LpBody = new LpBodyViewModel(model, workspaceRoot);
-                LppBody = new LppBodyViewModel(model, workspaceRoot);
+                HbBody = SeededHb(model);
+                LpBody = SeededLp(model, workspaceRoot);
+                LppBody = SeededLpp(model, workspaceRoot);
                 break;
         }
 
@@ -215,6 +215,35 @@ public sealed partial class AnalysisEditorViewModel : ObservableObject
 
         ApplySweepVariableHint();   // hint reflects the (now-resolved) analysis type
         ValidateName();
+    }
+
+    // ── Seeded bodies ─────────────────────────────────────────────────────────
+
+    // Every body the dialog does NOT fill from an existing analysis opens prefilled from the
+    // schematic instead (AnalysisSeeding) — on Add that is all of them, and on Edit it is the ones
+    // the edited analysis did not fill, so switching the type mid-edit carries the tuners and tone
+    // across rather than dropping them. The bodies are built once, in these constructors, which is
+    // why seeding happens here and not when the type radio changes.
+
+    private static HbBodyViewModel SeededHb(SchematicEditModel model)
+    {
+        var body = new HbBodyViewModel(model);
+        body.ApplySeed(AnalysisSeeding.For(model, AnalysisSeeding.Target.Hb));
+        return body;
+    }
+
+    private static LpBodyViewModel SeededLp(SchematicEditModel model, string? workspaceRoot)
+    {
+        var body = new LpBodyViewModel(model, workspaceRoot);
+        body.ApplySeed(AnalysisSeeding.For(model, AnalysisSeeding.Target.Lp));
+        return body;
+    }
+
+    private static LppBodyViewModel SeededLpp(SchematicEditModel model, string? workspaceRoot)
+    {
+        var body = new LppBodyViewModel(model, workspaceRoot);
+        body.ApplySeed(AnalysisSeeding.For(model, AnalysisSeeding.Target.Lpp));
+        return body;
     }
 
     // ── Validation ────────────────────────────────────────────────────────────

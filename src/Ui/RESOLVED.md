@@ -1,5 +1,48 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## Add Analysis opens prefilled from the schematic, 2026-09-14
+
+Owner: a Loadpull added to a schematic that already has one tuner of each side, or an existing
+Loadpull-Pursuit, should not make the user retype what the design already says.
+
+`AnalysisSeeding` (`src/Ui/ViewModels/AnalysisSeeding.cs`) reads the schematic once and returns an
+`AnalysisSeed` of nullable fields; each body VM's `ApplySeed` writes only the non-null ones, so a
+seed can never blank a field or override one an edit already filled. `AnalysisEditorViewModel` builds
+every body it does NOT fill from an existing analysis through `SeededHb`/`SeededLp`/`SeededLpp` — on
+Add that is all of them, and on Edit the others, so switching an LPP to an LP mid-edit carries the
+tuners and tone across instead of dropping them. The bodies are constructed once, in those two
+constructors, which is why seeding happens there and not on the type radio.
+
+**The rule is that a field is prefilled only when the schematic answers it unambiguously**, and the
+ambiguous case leaves the field alone rather than picking. One load-tuner symbol answers `LoadTuner=`;
+two do not. A generic `SymbolKind.Tuner` is never assigned to a side at all — its glyph does not say
+which end it is on, and only an analysis that names it does. Precedence for every field is *an
+analysis the design already carries*, then *the schematic's components*: a tone typed into an LPP is a
+statement about this design, while a tone source's `Freq` is a plausible default. Among analyses the
+same kind wins over the other loadpull kind over HB, enabled over disabled, ties by schematic order.
+
+Three traps are the reason the tone is not a one-liner:
+
+- **A coefficient travels with its unit or not at all.** `AnalysisSeed` carries both and the bodies
+  apply both or neither — carrying a mark without its scale is the defect that once produced a run at
+  2 Hz that looked entirely normal (`ParametricSweepEngine`, 2026-08-18).
+- **Assigning a tone unit RESCALES the coefficient already in the field** — that is what the dropdown
+  is for. So `ApplySeed` sets the previous-unit latch, then the unit, then the coefficient; the
+  reverse order turns a seeded `1.85 MHz` into `1850`. `HbBodyViewModel` goes through `SetTones`
+  instead, which CONSTRUCTS the row with its unit rather than assigning one to it.
+- **A frequency parameter with no unit seeds nothing.** A unitless `2` read into a GHz field is off by
+  1e9 with nothing downstream to flag it. Only the four units the tone dropdown offers are accepted;
+  `THz` and `None` are frequency units the dialog cannot show, and they seed nothing rather than being
+  rewritten into a unit that means something else. A stored *analysis* tone is the one exception — a
+  plain number stored in Hz is split for display exactly as the bodies' own `FromAnalysis` does, so a
+  seeded tone reads identically to an edited one — and `"0"`, the unset default every analysis type
+  carries, is read as absent rather than as a frequency.
+
+A new Loadpull's Grid falls back to the `.gam` a Pursuit on the same schematic is set to WRITE, which
+is the shape of that pair. Gate: `tests/Ui.Tests/AnalysisSeedingTests.cs`. The two `Build_Blank…`
+gates in `LpAuthoringTests`/`LppAuthoringTests` now clear the tuner deliberately, because the dialog
+no longer opens with it blank.
+
 ## The Library palette still lost a glyph column on a resize, 2026-09-14
 
 Owner: a docked Library palette sometimes drops from two glyph columns to one when the workspace

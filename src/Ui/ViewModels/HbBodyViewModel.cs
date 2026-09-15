@@ -228,6 +228,23 @@ public sealed partial class HbBodyViewModel : ObservableObject
     // Field initializers set the remaining defaults. Previews are empty for bare-number
     // defaults — no need to call property setters in the constructor.
 
+    // ── Seeding (a NEW analysis, not an edit) ─────────────────────────────────
+
+    /// <summary>
+    /// Applies what the schematic already says to a body that has not been filled from an existing
+    /// analysis (<see cref="AnalysisSeeding"/>). HB borrows the TONE and nothing else — it has no
+    /// tuner, no drive ladder and no grid, and its harmonic and convergence knobs are its own.
+    ///
+    /// <para>The tone replaces row 1 through <see cref="SetTones"/> rather than through the named
+    /// accessors, so the row is constructed with its unit instead of having one assigned to it — an
+    /// assignment the row answers by RESCALING the coefficient it already holds.</para>
+    /// </summary>
+    internal void ApplySeed(AnalysisSeed seed)
+    {
+        if (seed.ToneCoeff is not { Length: > 0 } coeff) return;
+        SetTones([(coeff, seed.ToneUnit is { Length: > 0 } unit ? unit : "GHz")]);
+    }
+
     // ── Tone-list plumbing ────────────────────────────────────────────────────
 
     private void OnTonesChanged(object? sender, NotifyCollectionChangedEventArgs e)

@@ -111,6 +111,35 @@ public sealed partial class LpBodyViewModel : ObservableObject
             .ToList();
     }
 
+    // ── Seeding (a NEW analysis, not an edit) ─────────────────────────────────
+
+    /// <summary>
+    /// Applies what the schematic already says to a body that has not been filled from an existing
+    /// analysis (<see cref="AnalysisSeeding"/>). Only the seed's non-null fields are written, so a
+    /// field the schematic cannot answer keeps its own default and none is ever blanked.
+    ///
+    /// <para>The tone's unit is installed BEFORE its coefficient, and the previous-unit latch with
+    /// it: assigning the unit alone rescales whatever coefficient is sitting there (that is what the
+    /// dropdown is for), and doing it in the other order would rescale the seeded value.</para>
+    /// </summary>
+    internal void ApplySeed(AnalysisSeed seed)
+    {
+        if (seed.LoadTunerName   is { Length: > 0 } lt) LoadTunerName   = lt;
+        if (seed.SourceTunerName is { Length: > 0 } st) SourceTunerName = st;
+        if (seed.GridPath        is { Length: > 0 } gp) GridPath        = gp;
+        if (seed.PinStartExpr    is { Length: > 0 } p0) PinStartExpr    = p0;
+        if (seed.PinMaxExpr      is { Length: > 0 } p1) PinMaxExpr      = p1;
+        if (seed.PinStepExpr     is { Length: > 0 } p2) PinStepExpr     = p2;
+        if (seed.CompressionExpr is { Length: > 0 } cp) CompressionExpr = cp;
+
+        if (seed.ToneCoeff is { Length: > 0 } tc && seed.ToneUnit is { Length: > 0 } tu)
+        {
+            _prevToneUnit = tu;
+            ToneUnit      = tu;
+            ToneCoeff     = tc;
+        }
+    }
+
     // ── Preview side-effects ──────────────────────────────────────────────────
 
     partial void OnToneCoeffChanged(string value)

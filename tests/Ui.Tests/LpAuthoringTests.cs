@@ -128,7 +128,9 @@ public sealed class LpAuthoringTests
         var vm = NewLpEditor(ModelWithTuners());
         vm.LpBody.SourceTunerName = "SourceTuner1";
         vm.LpBody.GridPath        = "g.gam";
-        // LoadTunerName left blank → invalid.
+        // LoadTunerName CLEARED → invalid. The dialog opens with it prefilled from the one load
+        // tuner on the schematic (AnalysisSeeding), so this gate has to blank it deliberately.
+        vm.LpBody.LoadTunerName   = "";
         Assert.False(vm.LpBody.IsValid);
         Assert.Null(vm.BuildAnalyses());
     }

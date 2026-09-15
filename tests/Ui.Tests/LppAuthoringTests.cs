@@ -199,7 +199,9 @@ public sealed class LppAuthoringTests
     {
         var vm = NewLppEditor(ModelWithTuners());
         vm.LppBody.SourceTunerName = "SourceTuner1";
-        // LoadTunerName left blank → invalid.
+        // LoadTunerName CLEARED → invalid. The dialog opens with it prefilled from the one load
+        // tuner on the schematic (AnalysisSeeding), so this gate has to blank it deliberately.
+        vm.LppBody.LoadTunerName   = "";
         Assert.False(vm.LppBody.IsValid);
         Assert.Null(vm.BuildAnalyses());
     }

@@ -136,6 +136,30 @@ public sealed partial class LppBodyViewModel : ObservableObject
             .ToList();
     }
 
+    // ── Seeding (a NEW analysis, not an edit) ─────────────────────────────────
+
+    /// <summary>
+    /// Applies what the schematic already says to a body that has not been filled from an existing
+    /// analysis — see <see cref="LpBodyViewModel.ApplySeed"/> for the rule and for why the tone's
+    /// unit is installed before its coefficient. The pursuit takes no Grid: it builds its own.
+    /// </summary>
+    internal void ApplySeed(AnalysisSeed seed)
+    {
+        if (seed.LoadTunerName   is { Length: > 0 } lt) LoadTunerName   = lt;
+        if (seed.SourceTunerName is { Length: > 0 } st) SourceTunerName = st;
+        if (seed.PinStartExpr    is { Length: > 0 } p0) PinStartExpr    = p0;
+        if (seed.PinMaxExpr      is { Length: > 0 } p1) PinMaxExpr      = p1;
+        if (seed.PinStepExpr     is { Length: > 0 } p2) PinStepExpr     = p2;
+        if (seed.CompressionExpr is { Length: > 0 } cp) CompressionExpr = cp;
+
+        if (seed.ToneCoeff is { Length: > 0 } tc && seed.ToneUnit is { Length: > 0 } tu)
+        {
+            _prevToneUnit = tu;
+            ToneUnit      = tu;
+            ToneCoeff     = tc;
+        }
+    }
+
     // ── Preview side-effects ──────────────────────────────────────────────────
 
     partial void OnToneCoeffChanged(string value)
