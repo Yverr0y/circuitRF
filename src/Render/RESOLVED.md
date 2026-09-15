@@ -2613,3 +2613,40 @@ are MEASURED off the render rather than re-derived from the viewport arithmetic,
 nothing about plot-area layout.
 
 **Any regenerated figure carrying a Smith chart will change** — the crossings fill in.
+
+## The drag/placement ghost's outline was dashed; it is the committed outline now (2026-09-15)
+
+Owner report: dragging out a rect, circle or polygon in the layout editor showed a ragged, broken
+edge that changed the instant the gesture ended. `LayoutRenderer.DrawGhostShape` stroked the
+in-progress primitive with a DASHED, alpha-220, `StrokeWidth = 0` hairline, where `DrawLayer` gives
+the committed shape a SOLID outline `GeometryStrokeDevicePixels` (2 device pixels) wide at full alpha.
+Two differences at once — dash, and half the width — so the ghost's edge could not have matched.
+
+The fix is to use the committed paint, and it **retires R-dgf-3's last "provisional" marker on
+purpose**. That brief had already raised the ghost's FILL from a fixed alpha=60 to the layer's own
+`FillOpacity` for exactly this reason, and kept the dash as the surviving signal that a shape was not
+yet placed. The edge is the part a user judges a placement by, so carrying the signal there is the
+most expensive place to carry it: a placement preview exists to show what will land. Provisional-ness
+is already carried by the gesture — the shape is under a held pointer and follows it. Nothing else
+changed: committed geometry still strokes in `DrawLayer`, and the overlays that genuinely are chrome
+rather than content (marquee, selection outline, a stale instance) keep their own dashes.
+
+**The old gate asserted the bug.** `LayoutWindingNormalizationTests.DrawingGhost_EdgeShowsDashVariation_NotAUniformSolidStroke`
+required >40 of on/off contrast variation along the edge, so it had to be replaced rather than kept —
+it is now `DrawingGhost_EdgeIsSolid_AndIsTheCommittedShapesOutline`, which renders the same shape
+committed and as a ghost and asserts the edge band matches pixel for pixel (worst difference measured
+0 of an allowed 8; reintroducing the dash measures 197.3, verified by actually putting it back rather
+than assumed).
+
+**Its solidity half needed a per-COLUMN oracle, and a per-pixel one would have been vacuous.** The
+sampled band straddles the edge, so it necessarily contains pure-background rows above the stroke and
+fill rows below it: a plain min-over-the-band reads 0.0 whether the stroke is dashed or solid, which
+is how the first attempt at this assertion failed against a correct renderer. Taking each column's
+MAXIMUM first isolates the stroke, and that figure is constant to within antialiasing along a solid
+line and collapses to the fill's contrast at a dashed one's gaps. The retired test had the same blind
+spot; its threshold happened to be met by the background rows.
+
+**Not changed, and still dashed: the SYMBOL editor's in-progress primitive**
+(`SymbolEditorRenderer`, the `overlay.InProgressPrimitive` branch). The report was about the layout
+editor, and that one differs by more than a dash — it draws in `theme.GhostBody` rather than the
+primitive's own colour, so matching it to its committed appearance is a separate change.

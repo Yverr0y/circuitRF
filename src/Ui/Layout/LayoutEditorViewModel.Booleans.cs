@@ -272,6 +272,55 @@ public sealed partial class LayoutEditorViewModel
         ValidSelectedIndices.Where(i => LayoutBooleans.IsClipOperand(Model.Shapes[i])).ToList();
 
     /// <summary>
+    /// The operand set for <b>Clip All</b> / <b>Cut Out All</b> (owner, 2026-09-15): every shape the
+    /// user COULD have selected, minus the stencil — the selection step removed, since on an imported
+    /// board "select the 1,284 shapes I want cropped" is the whole cost of the operation and the answer
+    /// is almost always "all of them".
+    ///
+    /// <para><b>The filter is <see cref="SelectableShapeIndices"/>, not <c>Model.Shapes</c>, and that is
+    /// the whole design.</b> It makes Clip All exactly equivalent to Select All then Clip, so there is
+    /// one rule to learn rather than two, and it inherits the gate that a hidden or non-selectable
+    /// layer is off limits — the same rule the 2026-09-09 Select All fix installed for the same reason
+    /// (a layer the user has switched Select off for is precisely what they have said they cannot
+    /// touch, and silently cropping artwork on it is the bug that fix closed). Shapes it skips are
+    /// COUNTED and reported rather than dropped in silence.</para>
+    /// </summary>
+    private IReadOnlyList<int> ClipAllOperandIndices(int stencilIndex) =>
+        SelectableShapeIndices()
+            .Where(i => i != stencilIndex && LayoutBooleans.IsClipOperand(Model.Shapes[i]))
+            .ToList();
+
+    /// <summary>
+    /// Deliberately independent of the selection — including <see cref="ShapeOnlyBlockReason"/>, which
+    /// the selection-scoped <see cref="ClipAvailability"/> applies and this one must not. An instance
+    /// mixed into the SELECTION is ambiguous (did the user mean to clip it?), so that command refuses;
+    /// an instance merely present in the DOCUMENT is not ambiguous at all, and refusing on it would
+    /// disable Clip All on essentially every real board. It is left untouched and reported instead
+    /// (<see cref="ReportClipAllSkipped"/>).
+    /// </summary>
+    public LayoutCommandAvailability ClipAllAvailability(double wx, double wy, long tolDbu)
+    {
+        if (FindClipStencil(wx, wy, tolDbu) is not { } stencil)
+            return LayoutCommandAvailability.Disabled("Right-click the shape to clip to");
+        if (ClipAllOperandIndices(stencil).Count == 0)
+            return LayoutCommandAvailability.Disabled(
+                "Nothing to clip — no other shape is on a visible, selectable layer");
+        return LayoutCommandAvailability.Enabled;
+    }
+
+    /// <summary>The enabled tooltip for the All variants — the COUNT is the safety signal, and it is
+    /// the reason these two carry one at all: "Clips all 1,284 shapes to Rect · Top Copper" is a number
+    /// a user can recognise as wrong before clicking, which a bare verb is not.</summary>
+    public string ClipAllTooltip(int stencilIndex, bool cutOut)
+    {
+        int n = ClipAllOperandIndices(stencilIndex).Count;
+        string what = cutOut ? "Cuts" : "Clips";
+        string prep = cutOut ? "out of" : "to";
+        return $"{what} all {Plural(n, "shape", "shapes")} {prep} {ClipStencilLabel(stencilIndex)} " +
+               "— the selection is ignored";
+    }
+
+    /// <summary>
     /// §7's table, in its stated order. Deliberately NOT <see cref="BooleanOpAvailability"/>: that
     /// requires a same-layer pair, which §4 drops for these two.
     ///
@@ -311,8 +360,14 @@ public sealed partial class LayoutEditorViewModel
         return $"{what} the {Plural(n, "selected shape", "selected shapes")} {prep} {ClipStencilLabel(stencilIndex)}";
     }
 
-    public void ApplyClip(int stencilIndex)   => ApplyClipCore(stencilIndex, cutOut: false);
-    public void ApplyCutOut(int stencilIndex) => ApplyClipCore(stencilIndex, cutOut: true);
+    public void ApplyClip(int stencilIndex)   => ApplyClipCore(stencilIndex, cutOut: false, allShapes: false);
+    public void ApplyCutOut(int stencilIndex) => ApplyClipCore(stencilIndex, cutOut: true,  allShapes: false);
+
+    /// <summary>Clip All / Cut Out All — identical to the two above in every respect except which
+    /// shapes are the operands (<see cref="ClipAllOperandIndices"/>). Same single undo entry, same
+    /// untouched stencil, same per-operand independence.</summary>
+    public void ApplyClipAll(int stencilIndex)   => ApplyClipCore(stencilIndex, cutOut: false, allShapes: true);
+    public void ApplyCutOutAll(int stencilIndex) => ApplyClipCore(stencilIndex, cutOut: true,  allShapes: true);
 
     /// <summary>
     /// R-clip-7: ONE undo entry — a single <c>ReplaceShapesCommand</c> over the whole operand set,
@@ -325,15 +380,17 @@ public sealed partial class LayoutEditorViewModel
     ///
     /// <para><b>R-clip-0 — the operands are the SELECTION and nothing else.</b> Unselected geometry is
     /// never touched, on any layer, including geometry on the stencil's own layer that the stencil
-    /// overlaps.</para>
+    /// overlaps. <paramref name="allShapes"/> is the one documented departure, and it is a SEPARATE
+    /// menu entry rather than a mode: Clip All names its own scope, so neither command's meaning
+    /// depends on state the user cannot see at the moment they click.</para>
     /// </summary>
-    private void ApplyClipCore(int stencilIndex, bool cutOut)
+    private void ApplyClipCore(int stencilIndex, bool cutOut, bool allShapes)
     {
         if (stencilIndex < 0 || stencilIndex >= Model.Shapes.Count) return;
         var stencil = Model.Shapes[stencilIndex];
         if (!LayoutBooleans.IsClipperOperand(stencil)) return;
 
-        var indices = ClipOperandIndices(stencilIndex);
+        var indices = allShapes ? ClipAllOperandIndices(stencilIndex) : ClipOperandIndices(stencilIndex);
         if (indices.Count == 0) return;
 
         var operands = indices.Select(i => Model.Shapes[i]).ToList();
@@ -348,27 +405,67 @@ public sealed partial class LayoutEditorViewModel
             : LayoutBooleans.Clip(operands, stencil, Technology);
 
         CommitReplace(indices, result.Shapes, opName);
-        ReportClipOutcome(result, opName, cutOut, operands.Count, stencilLabel);
+        ReportClipOutcome(result, opName, cutOut, operands.Count, stencilLabel, allShapes);
+        if (allShapes) ReportClipAllSkipped(opName, stencilIndex);
+    }
+
+    /// <summary>
+    /// What Clip All did NOT touch, and why. A crop that silently left 189 vias standing outside the
+    /// stencil is the defect R-clip-10 already had to fix once; a crop that silently leaves a whole
+    /// hidden layer, or every instance on the board, is the same defect with a different cause. Neither
+    /// is an error — both are correct — so this is Info, but it is never silent.
+    ///
+    /// <para>Counted, not guessed: the hidden/locked count is the shapes <see cref="SelectableShapeIndices"/>
+    /// rejects, so it cannot drift from the filter it describes.</para>
+    /// </summary>
+    private void ReportClipAllSkipped(string opName, int stencilIndex)
+    {
+        if (_messageSink is null) return;
+
+        var selectable = SelectableShapeIndices().ToHashSet();
+        int hidden = 0, notGeometry = 0;
+        for (int i = 0; i < Model.Shapes.Count; i++)
+        {
+            if (i == stencilIndex) continue;
+            if (!selectable.Contains(i)) hidden++;
+            else if (!LayoutBooleans.IsClipOperand(Model.Shapes[i])) notGeometry++;
+        }
+
+        var left = new List<string>();
+        if (notGeometry > 0) left.Add(Plural(notGeometry, "bitmap", "bitmaps"));
+        if (Model.Instances.Count > 0) left.Add(Plural(Model.Instances.Count, "instance", "instances"));
+        if (left.Count > 0)
+            _messageSink.Info($"{opName} All: {string.Join(" and ", left)} left untouched — {opName} applies to shape geometry.");
+
+        if (hidden > 0)
+            _messageSink.Info(
+                $"{opName} All: {Plural(hidden, "shape", "shapes")} on hidden or non-selectable layers left untouched.");
     }
 
     /// <summary>R-clip-3's three sentences. The all-removed case gets its OWN sentence naming the
     /// cause, for the same reason R-clip-4 rewrites Intersect's: an empty result here is a legitimate
     /// outcome and must not read as a failure.</summary>
-    private void ReportClipOutcome(LayoutClipResult result, string opName, bool cutOut, int operandCount, string stencil)
+    private void ReportClipOutcome(LayoutClipResult result, string opName, bool cutOut, int operandCount,
+                                   string stencil, bool allShapes)
     {
+        // "all 1,284 shapes" vs "1,284 shapes" — the one word that says whether the selection was the
+        // operand set, in the record the user reads AFTER the fact rather than the tooltip they read
+        // before it.
+        string scope = allShapes ? "all " : "";
         if (result.AnyCurvedOperand) WarnCurvedOperandOnce(opName);
 
         if (result.Shapes.Count == 0)
         {
+            string which = allShapes ? "shape" : "selected shape";
             _messageSink?.Warning(cutOut
-                ? $"{opName}: every selected shape lay entirely inside {stencil} — all {operandCount} were removed."
-                : $"{opName}: no selected shape overlapped {stencil} — all {operandCount} were removed.");
+                ? $"{opName}: every {which} lay entirely inside {stencil} — all {operandCount} were removed."
+                : $"{opName}: no {which} overlapped {stencil} — all {operandCount} were removed.");
             return;
         }
 
         string verb = cutOut ? "cut out of" : "clipped to";
         _messageSink?.Success(
-            $"{opName}: {Plural(operandCount, "shape", "shapes")} {verb} {stencil} — " +
+            $"{opName}: {scope}{Plural(operandCount, "shape", "shapes")} {verb} {stencil} — " +
             $"{result.OperandsRemoved} removed, {result.OperandsChanged} changed, {result.OperandsUntouched} unchanged.");
     }
 

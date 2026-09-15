@@ -1103,7 +1103,8 @@ public static partial class LayoutRenderer
     }
 
     /// <summary>Draws a not-yet-committed shape above every layer, in its own resolved layer
-    /// color, with a dashed outline so it reads as provisional. Reuses
+    /// color and with the SAME fill and outline the committed shape will get, so the picture under the
+    /// cursor is the picture that lands (owner, 2026-09-15 - see the stroke paint below). Reuses
     /// <see cref="BuildShapePath"/> — no second geometry path for the ghost. Never touches
     /// <c>unknownLayers</c>: an uncommitted shape's layer choice isn't a gap to warn about — if it
     /// is placed, the very next frame's normal per-shape resolution will do that. Shared by the L1b
@@ -1113,9 +1114,9 @@ public static partial class LayoutRenderer
     /// <see cref="LayerDef.FillOpacity"/> (the same alpha <c>DrawLayer</c> computes for the committed
     /// shape), not a fixed low alpha — a prior fixed alpha=60 measured at a consistent ~0.67-0.69× the
     /// committed shape's contrast against the canvas background regardless of layer color (muted or
-    /// saturated) or theme (light or dark), i.e. the cause was opacity, not color as first suspected;
-    /// the dashed outline (unchanged) is what marks a ghost as provisional, so the fill does not need
-    /// to be faint to carry that meaning.</summary>
+    /// saturated) or theme (light or dark), i.e. the cause was opacity, not color as first suspected.
+    /// That brief kept the dashed outline as the surviving provisional marker; 2026-09-15 retired it
+    /// for the reason it had raised the fill - the outline is the committed one too now.</summary>
     private static void DrawGhostShape(SKCanvas canvas, LayoutShape ghost, Dictionary<LayerKey, LayerDef>? layerMap,
         Technology? ghostTech,
         LayoutPortDirection.ConductorLookup? conductorAt, PathSpace ps, double scaleUm, SKColor background)
@@ -1167,10 +1168,26 @@ public static partial class LayoutRenderer
         if (shapePath is null || shapePath.IsEmpty) return;
 
         using var fillPaint = LayerFillPaint.Create(def, ghostTech?.FindFillPattern(def.FillPattern), color, scaleUm);
+
+        // Owner, 2026-09-15: the ghost's outline IS the outline the committed shape gets - same width
+        // (GeometryStrokeDevicePixels, converted to path space off this frame's scale), same solid
+        // colour at full alpha, no dash. It used to be a dashed alpha-220 HAIRLINE, which read as a
+        // ragged, broken edge while a rect or circle was being dragged out and then snapped to
+        // something visibly different the instant the gesture ended.
+        //
+        // That dash was R-dgf-3's one surviving "provisional" marker, and this deliberately retires
+        // it. A placement preview's job is to show what will land, which is the same reason R-dgf-3
+        // had already moved the FILL to the layer's own opacity; leaving the outline behind meant the
+        // ghost still lied about the one thing a user judges a placement by, its edge. Provisional-ness
+        // is carried by the gesture - the shape is under a held pointer and follows it - not by drawing
+        // the wrong picture. Nothing else is affected: committed geometry strokes in DrawLayer, and the
+        // overlays that genuinely ARE something other than content (marquee, selection, a stale
+        // instance) keep their own dashes.
         using var strokePaint = new SKPaint
         {
-            IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 0, Color = color.WithAlpha(220),
-            PathEffect = SKPathEffect.CreateDash([6f, 4f], 0),
+            IsAntialias = true, Style = SKPaintStyle.Stroke,
+            StrokeWidth = DevicePixelsToPathSpace(scaleUm, GeometryStrokeDevicePixels),
+            Color = color,
         };
 
         canvas.DrawPath(shapePath, fillPaint);

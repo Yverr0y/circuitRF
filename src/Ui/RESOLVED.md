@@ -27796,3 +27796,49 @@ Gates: `PdkPCellExampleTests.UpdateLayoutFromSchematic_PlacesEveryPartWhereTheOt
 (asserts a relation to the cells — neighbours clear, the row within a few of its own widths — rather
 than a number, since a number is what just went stale) and
 `tests/Ui.Tests/Layout/EmptyLayoutIsFramedOnWhatIsWrittenTests.cs`.
+
+## Clip All / Cut Out All, and why the other four booleans did not get the same treatment (2026-09-15)
+
+Clip and Cut Out took the SELECTION as their operand set (R-clip-0). On an imported board, building
+that selection is the whole cost of the operation and the answer is nearly always "all of them", so
+`ApplyClipAll`/`ApplyCutOutAll` drop the selecting step. Three decisions are worth keeping:
+
+- **The operand set is `SelectableShapeIndices()`, not `Model.Shapes`.** That makes Clip All exactly
+  equivalent to Select All then Clip — one rule to learn, not two — and it inherits the gate the
+  2026-09-09 Select All fix installed: a layer the user has hidden, or switched Select off for, is
+  precisely the artwork they have said they cannot touch, and silently cropping it is the bug that fix
+  closed. What the filter rejects is COUNTED off the same filter and posted, so the count cannot drift
+  from the rule it describes.
+- **Separate menu entries, not a fallback on an empty selection.** Clip All crops every visible layer;
+  an operation that destructive has to be the item the user pointed at, not the same item behaving
+  differently because of state (a stale selection) that is off-screen at the moment of the click. The
+  scope is in the header and the SHAPE COUNT is in the tooltip, which is the number a user can
+  recognise as wrong before committing.
+- **An instance in the DOCUMENT does not disable Clip All, unlike an instance in the SELECTION.**
+  `ShapeOnlyBlockReason` refuses the selection-scoped command because "the user selected an instance
+  and asked to clip" is genuinely ambiguous. Merely containing instances is not ambiguous, and refusing
+  on it would disable Clip All on essentially every real board — they are left untouched and reported.
+
+**The other four booleans were deliberately not extended, and the reason is structural rather than
+conservative.** Clip/Cut Out have a distinguished operand (the stencil under the cursor) and act on
+each operand INDEPENDENTLY, which is exactly what makes "…and everything else" well defined: there is
+no pairing and no ordering to invent. Union/Intersect/Difference/XOR fold ONE result across the whole
+operand list, and:
+
+- `Difference` is documented as "first operand minus every other operand, **in selection order**" — with
+  no selection there is no order, so an all-shapes form has no meaning to give it.
+- An all-shapes `Intersect` on a real layer is the region common to every shape on it, i.e. empty. A
+  menu item whose honest outcome is "all 1,284 shapes were removed" is a trap, not a feature.
+- An all-shapes `Xor` is a parity of coverage, which is not a layout operation anyone asks for.
+
+More to the point, **the two that would be useful already exist under the names they have**:
+`LayoutBooleans.Clip` IS per-operand Intersection against a stencil and `CutOut` IS per-operand
+Difference, with the operand order the gesture implies (right-click the tool shape → the tool shape is
+what gets subtracted). So extending Clip/Cut Out to all shapes delivers the all-shapes forms of
+Intersect-against-a-region and Difference-against-a-region for free, correctly ordered. The only genuine
+gap left is "merge everything on this layer" — an all-shapes Union — and that is a LAYER command, not a
+stencil one: it has no shape under the cursor to name and does not belong on this gesture.
+
+Gates: the eight `ClipAll_*` cases in `tests/Ui.Tests/LayoutBooleanOperationsViewModelTests.cs`,
+including one that pins Clip and Clip All as separate commands on the same stencil (the selection-scoped
+one must still leave unselected geometry byte-identical).

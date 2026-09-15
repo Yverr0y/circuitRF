@@ -405,37 +405,63 @@ public sealed class LayoutWindingNormalizationTests : IDisposable
             $"the paste-fragment ghost's fill contrast ({pasteContrast:F1}) must be within 90% of the committed shape's fill contrast ({committedContrast:F1}); ratio was {ratio:F3}");
     }
 
-    /// <summary>Gate 5: raising the ghost's fill toward the committed opacity must not quietly turn
-    /// "make it visible" into "make it identical" — the dashed outline (unchanged by R-dgf-3) is the
-    /// one thing that still marks a ghost as provisional. Scans a band of pixels straddling the top
-    /// edge and asserts real on/off contrast variation along it: a dashed stroke alternates between a
-    /// high-alpha (220) segment and a gap showing only the (much lower-alpha) fill beneath it, while a
-    /// solid line would read as near-uniform contrast along its whole length.</summary>
+    /// <summary>
+    /// Owner, 2026-09-15: while a rect/circle/polygon was being dragged out, its outline read as
+    /// ragged and broken and then changed the instant the gesture ended. It was a DASHED alpha-220
+    /// hairline; the committed shape gets a SOLID outline
+    /// <c>GeometryStrokeDevicePixels</c> wide at full alpha. This replaces the R-dgf-3-era gate that
+    /// asserted the opposite (dash on/off variation along the edge), which is exactly the behaviour
+    /// being removed - the dash was that brief's last "provisional" marker and it is retired here.
+    ///
+    /// <para>Two assertions, and the first is the one that states the requirement: the ghost's edge is
+    /// the COMMITTED shape's edge. Sampled on the fixture whose <c>FillOpacity</c> is the production
+    /// 0.35 rather than the 1.0 one, so ghost and committed are not structurally identical by
+    /// construction. The second pins solidity directly, so a future change that made both edges
+    /// dashed together could not pass the first one alone.</para>
+    /// </summary>
     [Fact]
-    public void DrawingGhost_EdgeShowsDashVariation_NotAUniformSolidStroke()
+    public void DrawingGhost_EdgeIsSolid_AndIsTheCommittedShapesOutline()
     {
         var tech = MakeRealisticTech();
         var vp = new LayoutViewport(-50, -50, 1.0, 400, 400);
 
+        var committedView = MakeView();
+        committedView.Shapes.Add(SquareClockwise());
+        using var committedPixels = RenderPixels(committedView, tech, vp, null);
+
         var ghostView = MakeView();
-        var overlay = new LayoutOverlay { InProgressPrimitive = SquareClockwise() };
-        using var ghostPixels = RenderPixels(ghostView, tech, vp, null, overlay: overlay);
+        using var ghostPixels = RenderPixels(ghostView, tech, vp, null,
+            overlay: new LayoutOverlay { InProgressPrimitive = SquareClockwise() });
 
         int yCenter = (int)System.Math.Round(vp.WorldToScreenY(200)); // the top edge, y=200 in world
         int xStart = (int)System.Math.Round(vp.WorldToScreenX(15));
         int xEnd = (int)System.Math.Round(vp.WorldToScreenX(185));
 
-        double maxDist = 0, minDist = double.MaxValue;
+        double worstPairDelta = 0;
+        double strongestColumn = 0, weakestColumn = double.MaxValue;
         for (int x = xStart; x <= xEnd; x++)
+        {
+            // The STRONGEST pixel in this column's slice of the band, which is the stroke itself: the
+            // band deliberately straddles the edge, so it also holds pure-background rows above it and
+            // fill rows below, and a per-pixel min would only ever measure those. Along a solid stroke
+            // this per-column figure is constant to within antialiasing; along a dashed one a gap
+            // column falls back to the fill's own (much fainter) contrast, which is the >40 swing the
+            // retired gate used to require.
+            double columnMax = 0;
             for (int y = yCenter - 2; y <= yCenter + 2; y++)
             {
-                var c = ghostPixels.GetPixel(x, y);
-                double d = ColorDistance(LayoutRenderTheme.Light.Background, c);
-                maxDist = System.Math.Max(maxDist, d);
-                minDist = System.Math.Min(minDist, d);
+                var g = ghostPixels.GetPixel(x, y);
+                worstPairDelta = System.Math.Max(worstPairDelta, ColorDistance(committedPixels.GetPixel(x, y), g));
+                columnMax = System.Math.Max(columnMax, ColorDistance(LayoutRenderTheme.Light.Background, g));
             }
+            strongestColumn = System.Math.Max(strongestColumn, columnMax);
+            weakestColumn = System.Math.Min(weakestColumn, columnMax);
+        }
 
-        Assert.True(maxDist - minDist > 40,
-            $"the ghost's edge must show real dash on/off variation (max={maxDist:F1}, min={minDist:F1}), not read as a solid outline");
+        Assert.True(worstPairDelta <= 8,
+            $"the drag ghost's edge must be the committed shape's edge; worst per-pixel difference across the edge band was {worstPairDelta:F1}");
+
+        Assert.True(strongestColumn - weakestColumn <= 20,
+            $"the drag ghost's edge must read as solid, not dashed (strongest column={strongestColumn:F1}, weakest={weakestColumn:F1})");
     }
 }

@@ -118,7 +118,8 @@ automatically on GDSII export.
 **Edit operations:** boolean **Union** (grouped per layer — one result per distinct layer in the
 selection), **Intersect / Difference / XOR** (which need a same-layer pair to enable), **Size**
 (grow or shrink by a signed offset), **Scale** (a numeric factor or a target size, plus bounding-box
-handles: corner for uniform, side for one axis), **Clip** and **Cut Out**, **Align and distribute**, **Move to layer**,
+handles: corner for uniform, side for one axis), **Clip** and **Cut Out** (and their **All** forms),
+**Align and distribute**, **Move to layer**,
 **Set net**, **Flatten to Polygon…**, **Flatten Hierarchy** and **Group into cell**.
 
 <div class="callout note">
@@ -135,6 +136,14 @@ Every selected shape is clipped on its own and keeps its own identity, layer and
 sit on any mix of layers. The right-clicked shape is the stencil, not an operand: it is never clipped
 against itself and it survives the operation, so the same rectangle can clip a second layer straight
 afterwards. Nothing you did not select is touched, on any layer.</p>
+<p><strong>Clip All</strong> and <strong>Cut Out All</strong> sit directly below them and skip the
+selecting: they use every shape in the cell, whatever is selected. That is usually what you want when
+you have imported a board and the answer to "which shapes?" is "all of them" — draw the region,
+right-click it, done. Their tooltip gives the shape count, so you can see the size of what you are about
+to do before you do it. They obey the layer list exactly as <kbd>Ctrl</kbd>+<kbd>A</kbd> does: a layer
+you have hidden, or switched selection off for, is left alone — and the Messages panel says how many
+shapes that was, along with any bitmaps and placed instances, which are not geometry and are never
+clipped. All four are a single undo.</p>
 </div>
 
 <div class="callout note">

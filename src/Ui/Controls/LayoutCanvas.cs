@@ -1504,16 +1504,28 @@ public sealed class LayoutCanvas : Control
         // bare verbs instead (2026-09-09). The stencil is still named everywhere it has to be — the
         // enabled TOOLTIP carries it by kind and layer, and so does every Messages sentence — so a
         // mis-aimed right-click is still visible before the click, on hover rather than at a glance.
-        void AddClipItem(string header, bool cutOut, Action<int> apply)
+        void AddClipItem(string header, LayoutCommandAvailability avail, Func<int, bool, string> tip,
+                         bool cutOut, Action<int> apply)
         {
-            var mi = AddAvailItem(header, clipAvail);
-            if (clipAvail.CanExecute && stencil is { } s)
-                ToolTip.SetTip(mi, _viewModel.ClipTooltip(s, cutOut));
+            var mi = AddAvailItem(header, avail);
+            if (avail.CanExecute && stencil is { } s)
+                ToolTip.SetTip(mi, tip(s, cutOut));
             mi.Click += (_, _) => { if (stencil is { } s2) { apply(s2); InvalidateVisual(); } };
         }
 
-        AddClipItem("Clip", cutOut: false, i => _viewModel.ApplyClip(i));
-        AddClipItem("Cut Out", cutOut: true, i => _viewModel.ApplyCutOut(i));
+        AddClipItem("Clip", clipAvail, _viewModel.ClipTooltip, cutOut: false, i => _viewModel.ApplyClip(i));
+        AddClipItem("Cut Out", clipAvail, _viewModel.ClipTooltip, cutOut: true, i => _viewModel.ApplyCutOut(i));
+
+        // Owner, 2026-09-15: on an imported board, "select the shapes to clip" IS the cost of the
+        // operation and the answer is nearly always "all of them" — so the selection step is the thing
+        // to remove. These are SEPARATE entries rather than a fallback on an empty selection: Clip All
+        // crops every visible layer, and an operation that destructive must be the item the user
+        // pointed at, not the same item behaving differently because of state (a stale selection) that
+        // is off-screen at the moment of the click. Their scope is in the header AND in the tooltip's
+        // count, which is the number a user can recognise as wrong before committing.
+        var clipAllAvail = _viewModel.ClipAllAvailability(wx, wy, clipTol);
+        AddClipItem("Clip All", clipAllAvail, _viewModel.ClipAllTooltip, cutOut: false, i => _viewModel.ApplyClipAll(i));
+        AddClipItem("Cut Out All", clipAllAvail, _viewModel.ClipAllTooltip, cutOut: true, i => _viewModel.ApplyCutOutAll(i));
 
         Sep();
         AddAvailItem("Offset…", _viewModel.OffsetAvailability).Click += async (_, _) => await ShowOffsetDialogAsync();

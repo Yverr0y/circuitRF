@@ -688,7 +688,12 @@ same-layer pair to enable but still combine across the whole selection, unchange
 corner = uniform, side = one axis) · **Clip / Cut Out** (per-operand booleans against a STENCIL — the
 shape under the right-click; every selected shape is clipped independently and keeps its own identity,
 layer and net, and the stencil itself is not consumed. Not `Intersect`, which is the one region shared
-by ALL operands; see brief-layout-clip-and-cut-out.md) · Align/distribute · Move-to-layer · Set net ·
+by ALL operands; see brief-layout-clip-and-cut-out.md) · **Clip All / Cut Out All** (the same two over
+every shape the user could have selected — `SelectableShapeIndices`, so they are exactly Select-All-then-Clip
+and inherit its hidden/non-selectable gate; separate menu entries rather than a fallback on an empty
+selection, since a crop of every visible layer must be the item that was pointed at. What they skip —
+hidden layers, bitmaps, instances — is counted and posted, never silent) · Align/distribute ·
+Move-to-layer · Set net ·
 **Flatten to Polygon…** (§3.2, curve → polygon; always prompts for the tolerance) ·
 **Flatten Hierarchy** (§7, instance → geometry) · Group-into-cell. The two flattens are different
 operations on different things; label them distinctly in the UI, because "Flatten" alone will be

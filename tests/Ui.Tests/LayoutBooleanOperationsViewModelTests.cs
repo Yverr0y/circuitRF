@@ -782,6 +782,183 @@ public class LayoutBooleanOperationsViewModelTests
         Assert.Single(model.Shapes);         // only the stencil is left; the outside via is gone
     }
 
+    // ── Clip All / Cut Out All (owner, 2026-09-15) ───────────────────────────────
+    //
+    // The selection step removed: on an imported board it IS the cost of the operation and the answer
+    // is nearly always "all of them". Separate menu entries, not a fallback on an empty selection —
+    // so neither command's meaning depends on off-screen state at the moment of the click.
+
+    private static readonly LayerKey Layer2 = new(2, 0);
+
+    /// <summary>The gate that separates Clip All from Clip: it ignores the selection ENTIRELY — both
+    /// what is selected and what is not — and the stencil is still a tool, not an operand.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ClipAll_IgnoresTheSelection_AndStillNeverConsumesTheStencil(bool cutOut)
+    {
+        var model = FreshModel();
+        var inside  = new RectShape { Layer = Layer1, X1 = 10_000, Y1 = 10_000, X2 = 20_000, Y2 = 20_000 };
+        var outside = new RectShape { Layer = Layer2, X1 = 500_000, Y1 = 500_000, X2 = 510_000, Y2 = 510_000 };
+        var stencil = new RectShape { Layer = Layer1, X1 = 0, Y1 = 0, X2 = 100_000, Y2 = 100_000 };
+        model.Shapes.Add(inside); model.Shapes.Add(outside); model.Shapes.Add(stencil);
+
+        var vm = new LayoutEditorViewModel(model) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+        Assert.Empty(vm.SelectedIndices);                                    // nothing selected at all
+        Assert.True(vm.ClipAllAvailability(80_000, 80_000, ClipTol).CanExecute);
+        Assert.Equal(2, vm.FindClipStencil(80_000, 80_000, ClipTol));
+
+        if (cutOut) vm.ApplyCutOutAll(2); else vm.ApplyClipAll(2);
+
+        Assert.Contains(stencil, model.Shapes);                              // R-clip-2 still holds
+        if (cutOut)
+        {
+            Assert.DoesNotContain(inside, model.Shapes);                     // wholly inside → cut away
+            Assert.Contains(outside, model.Shapes);                          // disjoint → untouched
+        }
+        else
+        {
+            Assert.Contains(inside, model.Shapes);                           // wholly inside → kept
+            Assert.DoesNotContain(outside, model.Shapes);                    // disjoint → cropped away
+        }
+    }
+
+    /// <summary>The selection-scoped Clip is unchanged by the arrival of the All variants: a selection
+    /// of one still clips exactly one, with the other shape byte-identical afterwards. Both commands
+    /// coexist on the same stencil; neither is the other's fallback.</summary>
+    [Fact]
+    public void Clip_AndClipAll_AreSeparateCommands_OnTheSameStencil()
+    {
+        var model = FreshModel();
+        var a = new RectShape { Layer = Layer1, X1 = -50_000, Y1 = 10_000, X2 = 10_000, Y2 = 20_000 };
+        var b = new RectShape { Layer = Layer1, X1 = -50_000, Y1 = 30_000, X2 = 10_000, Y2 = 40_000 };
+        var stencil = new RectShape { Layer = Layer1, X1 = 0, Y1 = 0, X2 = 100_000, Y2 = 100_000 };
+        model.Shapes.Add(a); model.Shapes.Add(b); model.Shapes.Add(stencil);
+        string bJson = SerializeOne(b);
+
+        var vm = new LayoutEditorViewModel(model) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+        Click(vm, -20_000, 15_000);                                          // select `a` only
+        Assert.Equal([0], vm.SelectedIndices);
+
+        vm.ApplyClip(stencilIndex: 2);
+        Assert.Equal(bJson, SerializeOne(b));                                // R-clip-0: `b` untouched
+
+        // …and Clip All, on the same stencil, does reach it.
+        int stencil2 = vm.FindClipStencil(80_000, 80_000, ClipTol)!.Value;
+        vm.ApplyClipAll(stencil2);
+        Assert.DoesNotContain(b, model.Shapes);
+    }
+
+    /// <summary>The whole reason the operand set is <c>SelectableShapeIndices</c> and not
+    /// <c>Model.Shapes</c>: Clip All must be exactly Select All then Clip, so artwork on a hidden or
+    /// non-selectable layer is off limits to it — the rule the 2026-09-09 Select All fix installed.
+    /// And it is not silent about it.</summary>
+    [Theory]
+    [InlineData(true, false)]   // visible, not selectable
+    [InlineData(false, true)]   // hidden, selectable
+    public void ClipAll_LeavesHiddenAndNonSelectableLayersAlone_AndSaysSo(bool visible, bool selectable)
+    {
+        var model = FreshModel();
+        var offLimits = new RectShape { Layer = Layer2, X1 = 500_000, Y1 = 500_000, X2 = 510_000, Y2 = 510_000 };
+        var stencil = new RectShape { Layer = Layer1, X1 = 0, Y1 = 0, X2 = 100_000, Y2 = 100_000 };
+        var ordinary = new RectShape { Layer = Layer1, X1 = 600_000, Y1 = 0, X2 = 610_000, Y2 = 10_000 };
+        model.Shapes.Add(offLimits); model.Shapes.Add(stencil); model.Shapes.Add(ordinary);
+        string offLimitsJson = SerializeOne(offLimits);
+
+        var sink = new FakeMessageSink();
+        var vm = new LayoutEditorViewModel(model, messageSink: sink) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+        vm.Technology = new Technology
+        {
+            Layers =
+            {
+                new LayerDef { Key = Layer1, Name = "M1" },
+                new LayerDef { Key = Layer2, Name = "M2", Visible = visible, Selectable = selectable },
+            },
+        };
+
+        vm.ApplyClipAll(vm.FindClipStencil(80_000, 80_000, ClipTol)!.Value);
+
+        Assert.Contains(offLimits, model.Shapes);
+        Assert.Equal(offLimitsJson, SerializeOne(offLimits));       // byte-identical, not merely present
+        Assert.DoesNotContain(ordinary, model.Shapes);              // an ordinary layer WAS cropped
+        Assert.Contains(sink.Posted, p => p.Text.Contains("1 shape on hidden or non-selectable layers"));
+    }
+
+    /// <summary>An instance in the DOCUMENT must not disable Clip All — that would disable it on every
+    /// real board. It is left untouched and REPORTED, which is the opposite trade from the
+    /// selection-scoped command, where an instance in the SELECTION is genuinely ambiguous and refuses
+    /// (brief-L3a-followups.md R-fix-2).</summary>
+    [Fact]
+    public void ClipAll_WithInstancesInTheDocument_RunsAnyway_AndReportsThemAsUntouched()
+    {
+        var model = FreshModel();
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 500_000, Y1 = 500_000, X2 = 510_000, Y2 = 510_000 });
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 0, Y1 = 0, X2 = 100_000, Y2 = 100_000 });
+        model.Instances.Add(new LayoutInstance { CellRef = "../../Leaf", X = 4_000, Y = 6_000, Mag = 1.0 });
+
+        var sink = new FakeMessageSink();
+        var vm = new LayoutEditorViewModel(model, messageSink: sink) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+        vm.SelectAllCommand.Execute(null);                                   // instance IS selected now
+
+        // The selection-scoped command refuses on it…
+        var selAvail = vm.ClipAvailability(80_000, 80_000, ClipTol);
+        Assert.False(selAvail.CanExecute);
+        Assert.Contains("1 instance selected", selAvail.DisabledReason);
+
+        // …and Clip All does not.
+        Assert.True(vm.ClipAllAvailability(80_000, 80_000, ClipTol).CanExecute);
+        vm.ApplyClipAll(1);
+
+        Assert.Single(model.Instances);
+        Assert.Contains(sink.Posted, p => p.Text.Contains("1 instance left untouched"));
+    }
+
+    /// <summary>R-clip-3's rule applied to the new entries: the count IS the safety signal, so the
+    /// enabled tooltip carries it and the Messages sentence says "all" rather than reading as though a
+    /// selection had been used. A disabled entry still names its own remedy.</summary>
+    [Fact]
+    public void ClipAllTooltipAndMessage_NameTheScopeAndTheCount()
+    {
+        var model = FreshModel();
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 10_000, Y1 = 10_000, X2 = 20_000, Y2 = 20_000 });
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 30_000, Y1 = 30_000, X2 = 40_000, Y2 = 40_000 });
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 0, Y1 = 0, X2 = 100_000, Y2 = 100_000 });
+
+        var sink = new FakeMessageSink();
+        var vm = new LayoutEditorViewModel(model, messageSink: sink) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+
+        Assert.Equal("Clips all 2 shapes to Rect · L1/0 — the selection is ignored", vm.ClipAllTooltip(2, cutOut: false));
+        Assert.Equal("Cuts all 2 shapes out of Rect · L1/0 — the selection is ignored", vm.ClipAllTooltip(2, cutOut: true));
+
+        vm.ApplyClipAll(2);
+        Assert.Contains(sink.Posted, p => p.Text.Contains("Clip: all 2 shapes clipped to Rect · L1/0"));
+
+        // Right-click on empty space names the same remedy the selection-scoped command does.
+        var avail = vm.ClipAllAvailability(900_000, 900_000, ClipTol);
+        Assert.False(avail.CanExecute);
+        Assert.Equal("Right-click the shape to clip to", avail.DisabledReason);
+    }
+
+    /// <summary>One undo entry over the whole document, exactly as the selection-scoped command gives
+    /// one over the selection — Clip All is not N operations.</summary>
+    [Fact]
+    public void ClipAll_IsOneUndoEntry_RestoringEveryShapeByteIdentically()
+    {
+        var model = FreshModel();
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 500_000, Y1 = 0, X2 = 510_000, Y2 = 10_000 });
+        model.Shapes.Add(new RectShape { Layer = Layer2, X1 = 600_000, Y1 = 0, X2 = 610_000, Y2 = 10_000 });
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = -20_000, Y1 = -20_000, X2 = 20_000, Y2 = 20_000 });
+        model.Shapes.Add(new RectShape { Layer = Layer1, X1 = 0, Y1 = 0, X2 = 100_000, Y2 = 100_000 });
+        string jsonBefore = LayoutPersistence.Serialize(model);
+
+        var vm = new LayoutEditorViewModel(model) { ActiveTool = LayoutEditorViewModel.Tool.Select };
+        vm.ApplyClipAll(3);
+        Assert.NotEqual(jsonBefore, LayoutPersistence.Serialize(model));
+
+        vm.UndoCommand.Execute(null);
+        Assert.Equal(jsonBefore, LayoutPersistence.Serialize(model));
+    }
+
     [Fact]
     public void ClipStencil_IsNeverALabelAViaOrABitmap()
     {
