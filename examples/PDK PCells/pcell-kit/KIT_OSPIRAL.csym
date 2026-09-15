@@ -1,0 +1,178 @@
+{
+  "FormatVersion": 6,
+  "GridSize": 100,
+  "PortCount": 2,
+  "Primitives": [
+    {
+      "$type": "Polyline",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "Points": [
+        [
+          -120.0,
+          0.0
+        ],
+        [
+          -120.0,
+          37.8
+        ],
+        [
+          -47.1,
+          110.8
+        ],
+        [
+          52.4,
+          110.9
+        ],
+        [
+          120.0,
+          43.3
+        ],
+        [
+          120.0,
+          -48.6
+        ],
+        [
+          57.7,
+          -110.9
+        ],
+        [
+          -26.6,
+          -110.9
+        ],
+        [
+          -83.5,
+          -54.0
+        ],
+        [
+          -83.5,
+          22.8
+        ],
+        [
+          -31.9,
+          74.4
+        ],
+        [
+          37.2,
+          74.2
+        ],
+        [
+          83.5,
+          28.1
+        ],
+        [
+          83.5,
+          -33.5
+        ],
+        [
+          42.6,
+          -74.4
+        ],
+        [
+          -11.4,
+          -74.4
+        ],
+        [
+          -46.9,
+          -38.8
+        ],
+        [
+          -46.9,
+          7.6
+        ],
+        [
+          -16.8,
+          37.8
+        ],
+        [
+          22.1,
+          37.8
+        ],
+        [
+          46.9,
+          12.9
+        ],
+        [
+          46.9,
+          -18.3
+        ],
+        [
+          27.4,
+          -37.8
+        ],
+        [
+          3.7,
+          -37.8
+        ]
+      ]
+    },
+    {
+      "$type": "Line",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "X1": -120.0,
+      "Y1": 0.0,
+      "X2": -300.0,
+      "Y2": 0.0
+    },
+    {
+      "$type": "Line",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "X1": 3.7,
+      "Y1": -37.8,
+      "X2": 200.0,
+      "Y2": -37.8
+    },
+    {
+      "$type": "Line",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "X1": 200.0,
+      "Y1": -37.8,
+      "X2": 200.0,
+      "Y2": 0.0
+    },
+    {
+      "$type": "Line",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "X1": 200.0,
+      "Y1": 0.0,
+      "X2": 300.0,
+      "Y2": 0.0
+    },
+    {
+      "$type": "Circle",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "Filled": true,
+      "Cx": 3.7,
+      "Cy": -37.8,
+      "R": 9.0
+    },
+    {
+      "$type": "Circle",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "Filled": true,
+      "Cx": 200.0,
+      "Cy": -37.8,
+      "R": 9.0
+    }
+  ],
+  "Pins": [
+    {
+      "LocalX": -300.0,
+      "LocalY": 0.0,
+      "PortIndex": 0,
+      "Name": "1"
+    },
+    {
+      "LocalX": 300.0,
+      "LocalY": 0.0,
+      "PortIndex": 1,
+      "Name": "2"
+    }
+  ]
+}

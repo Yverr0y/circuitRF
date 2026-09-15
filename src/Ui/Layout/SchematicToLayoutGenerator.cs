@@ -47,7 +47,8 @@ public static class SchematicToLayoutGenerator
         int UnchangedCount,
         int RemovedCount,
         int OverwrittenParameterCount,
-        IReadOnlyList<string> NoLayoutWarnings)
+        IReadOnlyList<string> NoLayoutWarnings,
+        Bbox AddedRegion = default)
     {
         public bool NothingChanged => Command is null && NoLayoutWarnings.Count == 0;
     }
@@ -71,10 +72,31 @@ public static class SchematicToLayoutGenerator
         };
 
     private const int GridCols = 8;
-    // 10 mm at the app-wide fixed 1 DBU = 1 nm resolution (LayoutUnits.DefaultDbuPerMicron) — crude
-    // and non-overlapping for realistic microstrip parts, deliberately not tuned further (§9 step 3:
-    // "no auto-routing or auto-placement quality... say so rather than pretending otherwise").
+
+    /// <summary>
+    /// The placement pitch used only when NOTHING being placed can be measured — 10 mm at the
+    /// app-wide 1 DBU = 1 nm resolution.
+    ///
+    /// <para><b>OWNER REPORT (2026-09-15): three kit cells written into a layout and only one of them
+    /// visible.</b> All three were there and all three resolved; they were at x = 0, 10 mm and 20 mm,
+    /// because this was the pitch for every placement regardless of what was being placed. These
+    /// parts measure 84 and 250 µm, so the command scattered the design across 20 mm of empty wafer —
+    /// forty cell-widths between neighbours — and a view framed on the first one contains none of the
+    /// others. The original note here called the constant "crude and non-overlapping for realistic
+    /// microstrip parts", and on a BOARD it is; the assumption that a part is millimetres across is
+    /// what does not survive contact with a MMIC.</para>
+    ///
+    /// <para>A fixed pitch cannot be right, because this command places whatever the schematic names
+    /// and circuitRF spans four orders of magnitude of part size. <see cref="PlaceNewInstances"/>
+    /// measures the cells instead. This remains for the case where there is nothing to measure — a
+    /// reference that resolves to no geometry — where a crude answer is still better than stacking
+    /// everything on the origin.</para>
+    /// </summary>
     private const long GridPitchDbu = 10_000_000;
+
+    /// <summary>Clear space between neighbours, as a fraction of the largest cell placed. Half a cell
+    /// reads as "laid out, not touching" at any scale, which is the whole point of measuring.</summary>
+    private const long GridGapNumerator = 1, GridGapDenominator = 2;
 
     /// <summary>
     /// brief-L5-followups-3.md §2 (R-L5h-3): FORMERLY the reserved (Layer, Datatype) key a §9 step 4
@@ -123,6 +145,7 @@ public static class SchematicToLayoutGenerator
                 existingBySchematicId[sid] = (i, target.Instances[i]);
 
         var seenSchematicIds = new HashSet<string>(StringComparer.Ordinal);
+        var newInstances = new List<(int Slot, LayoutInstance Instance)>();
         var lines = new List<ReportLine>();
         var noLayoutWarnings = new List<string>();
         IUiCommand? chain = null;
@@ -158,9 +181,12 @@ public static class SchematicToLayoutGenerator
 
             if (!hasExisting)
             {
-                long x = (slot % GridCols) * GridPitchDbu;
-                long y = (slot / GridCols) * GridPitchDbu;
-                var inst = new LayoutInstance { CellRef = resolvedCellRef, X = x, Y = y, Mag = 1.0, SchematicId = schematicId };
+                // Placed at the origin and moved once the whole set is known — the pitch is a function
+                // of what is being placed, and that is not known until the last one is resolved. The
+                // command holds this instance by reference and has not run yet, so moving it now is
+                // moving it before it exists. See PlaceNewInstances.
+                var inst = new LayoutInstance { CellRef = resolvedCellRef, X = 0, Y = 0, Mag = 1.0, SchematicId = schematicId };
+                newInstances.Add((slot, inst));
                 chain = Chain(chain, new AddInstanceCommand(target, inst));
                 added++;
                 lines.Add(new ReportLine(schematicId, $"{schematicId} — added", ReportSeverity.Info));
@@ -258,7 +284,63 @@ public static class SchematicToLayoutGenerator
                 ReportSeverity.Warning));
         }
 
-        return new GenerationResult(chain, lines, added, updated, unchanged, removed, overwritten, noLayoutWarnings);
+        var addedRegion = PlaceNewInstances(newInstances, targetLayoutBaseDir);
+
+        return new GenerationResult(chain, lines, added, updated, unchanged, removed, overwritten,
+                                    noLayoutWarnings, addedRegion);
+    }
+
+    /// <summary>
+    /// Lays the newly-created instances out on a grid whose pitch is <b>measured from the cells
+    /// themselves</b>, and returns the region they ended up in.
+    ///
+    /// <para>Measuring is the whole point (see <see cref="GridPitchDbu"/> for what a fixed pitch did).
+    /// The cells exist by the time this runs — a PCell's artwork was generated while its component was
+    /// resolved — so the largest of them is an ordinary question to ask, and one-and-a-half times it
+    /// puts half a cell of clear space between neighbours at any scale.</para>
+    ///
+    /// <para>The SLOT is still the component's own index in the schematic, not a running count of
+    /// placements: a slot has to name the same square every run, or a second run adding one more part
+    /// would drop it on top of something placed by the first.</para>
+    ///
+    /// <para>The returned region is what the caller brings on screen. Instances are the only thing a
+    /// user cannot find by looking — they land wherever this puts them rather than where the user
+    /// clicked — so saying where they went is part of writing them.</para>
+    /// </summary>
+    private static Bbox PlaceNewInstances(
+        List<(int Slot, LayoutInstance Instance)> placed, string targetLayoutBaseDir)
+    {
+        if (placed.Count == 0) return Bbox.Empty;
+
+        // Measured at the origin, which is where they still are: an instance's box includes its own
+        // placement, so this is the cell's own extent and the offset below is exact (no rotation, no
+        // magnification — a freshly placed instance is neither).
+        var extents = new List<Bbox>(placed.Count);
+        long largest = 0;
+        foreach (var (_, inst) in placed)
+        {
+            var bb = CellHierarchy.InstanceBbox(inst, targetLayoutBaseDir);
+            extents.Add(bb);
+            if (!bb.IsEmpty)
+                largest = Math.Max(largest, Math.Max(bb.MaxX - bb.MinX, bb.MaxY - bb.MinY));
+        }
+
+        long pitch = largest > 0
+            ? largest + largest * GridGapNumerator / GridGapDenominator
+            : GridPitchDbu;
+
+        var region = Bbox.Empty;
+        for (int i = 0; i < placed.Count; i++)
+        {
+            var (slot, inst) = placed[i];
+            inst.X = (slot % GridCols) * pitch;
+            inst.Y = (slot / GridCols) * pitch;
+
+            if (extents[i].IsEmpty) continue;
+            region = region.Union(new Bbox(extents[i].MinX + inst.X, extents[i].MinY + inst.Y,
+                                           extents[i].MaxX + inst.X, extents[i].MaxY + inst.Y));
+        }
+        return region;
     }
 
     // ── Shared PCell-eligibility helpers (also used by the palette→layout drag path, §3) ──────────

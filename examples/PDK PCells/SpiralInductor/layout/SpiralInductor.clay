@@ -5,7 +5,7 @@
   "SnapDbu": 5,
   "AngleMode": "AnyAngle",
   "PCellSnapshots": {
-    "KIT_SPIRAL_91eca3a9f429": {
+    "KIT_SPIRAL_4f26c9ac51f5": {
       "GeneratorId": "KIT_SPIRAL",
       "Parameters": {
         "Width": 1E-05,
@@ -19,7 +19,7 @@
   "Shapes": [],
   "Instances": [
     {
-      "CellRef": "../../.generated-cells/KIT_SPIRAL_91eca3a9f429",
+      "CellRef": "../../.generated-cells/KIT_SPIRAL_4f26c9ac51f5",
       "X": 0,
       "Y": 0,
       "Rot": "R0",

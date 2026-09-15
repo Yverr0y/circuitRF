@@ -78,6 +78,14 @@ public sealed partial class LayoutEditorViewModel
     /// </summary>
     public event Action<Bbox>? ZoomToRegionRequested;
 
+    /// <summary>Brings <paramref name="region"/> on screen — the same seam a DRC violation uses, for
+    /// the other case that needs it: Update Layout from Schematic has just written instances the user
+    /// cannot see, because they are somewhere the current view is not.</summary>
+    public void RequestZoomToRegion(Bbox region)
+    {
+        if (!region.IsEmpty) ZoomToRegionRequested?.Invoke(region);
+    }
+
     public string DrcSummaryText => DrcResult is not { } r
         ? "Not checked."
         : r.IsClean

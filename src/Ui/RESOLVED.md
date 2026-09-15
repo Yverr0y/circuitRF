@@ -27662,3 +27662,45 @@ run failure, so in the window it is simply a trace that never appears.
 `RFfreq = "2 GHz"` as an EXPRESSION with an empty unit field produced no variable at all — the unit
 belongs in the row's own unit column. Nothing reports it at the point it was typed. (Already known
 from the sweep-scale work; it was still sitting in a demo bench.)
+
+## Update Layout from Schematic scattered a MMIC design across 20 mm (2026-09-15)
+
+**Owner report: three kit cells placed on one schematic, only one visible in the layout after the
+command.** All three were written and all three resolved — they were at x = 0, **10 mm** and
+**20 mm**, because `SchematicToLayoutGenerator.GridPitchDbu` was a fixed 10 mm for every placement.
+Its own comment called that "crude and non-overlapping for realistic microstrip parts", and on a
+board it is; the assumption that a part is millimetres across is what does not survive contact with
+a MMIC, where these cells measure 84 and 250 µm. Forty cell-widths between neighbours, and a view
+framed on the first one contains none of the others.
+
+**A fixed pitch cannot be right for a tool that spans four orders of magnitude of part size**, so
+`PlaceNewInstances` measures the cells instead: largest extent plus half of it, which reads as "laid
+out, not touching" at any scale. The constant survives only for the case where nothing can be
+measured. The instances are created at the origin and moved once the whole set is known — the
+command holds each by reference and has not run yet, so moving it then is moving it before it
+exists, and the chain order is untouched. The SLOT is still the component's own index in the
+schematic, never a running count of placements: a slot has to name the same square every run, or a
+second run adding one part drops it on top of one the first placed.
+
+**An instance is the one thing a user cannot find by looking** — it lands where the command puts it,
+not where they clicked. So the run now brings what it wrote on screen: the region the new instances
+occupy, through the same `ZoomToRegionRequested` seam DRC uses. On a large board that walks the
+camera to the new part rather than re-framing work in progress. Where nothing was added and the
+layout was empty it falls back to a plain fit — the wBond case, whose only content is an overlay of
+wires. Both run after the wBond sidecar is seeded, which Zoom to Fit counts and Zoom to Region does
+not.
+
+**The framing was the first diagnosis and it was wrong.** Worth recording because the measurement
+behind it is still true and still surprising: `LayoutViewport.Default` frames an EMPTY layout on 200
+of its own snap steps, which on this MMIC technology's 5 DBU snap is **one micrometre** across the
+whole canvas — and a spiral re-centres on its winding, so the origin of a coil is the middle of its
+own opening with no metal within 60 µm. Nothing would have been drawn there either. It was the
+second half of the problem, not the first.
+
+**The command never moves an instance it has already placed**, so a design laid out by the old pitch
+keeps its positions; the stray instances have to be deleted and the command re-run.
+
+Gates: `PdkPCellExampleTests.UpdateLayoutFromSchematic_PlacesEveryPartWhereTheOthersCanBeSeen`
+(asserts a relation to the cells — neighbours clear, the row within a few of its own widths — rather
+than a number, since a number is what just went stale) and
+`tests/Ui.Tests/Layout/EmptyLayoutIsFramedOnWhatIsWrittenTests.cs`.

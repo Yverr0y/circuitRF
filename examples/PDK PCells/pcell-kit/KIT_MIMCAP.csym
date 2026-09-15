@@ -1,0 +1,59 @@
+{
+  "FormatVersion": 6,
+  "GridSize": 100,
+  "PortCount": 2,
+  "Primitives": [
+    {
+      "$type": "Line",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "X1": -300.0,
+      "Y1": 0.0,
+      "X2": -28.0,
+      "Y2": 0.0
+    },
+    {
+      "$type": "Line",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "X1": 28.0,
+      "Y1": 0.0,
+      "X2": 300.0,
+      "Y2": 0.0
+    },
+    {
+      "$type": "Rect",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "Filled": true,
+      "Cx": -28.0,
+      "Cy": 0.0,
+      "W": 14.0,
+      "H": 180.0
+    },
+    {
+      "$type": "Rect",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "Filled": true,
+      "Cx": 28.0,
+      "Cy": 0.0,
+      "W": 14.0,
+      "H": 128.0
+    }
+  ],
+  "Pins": [
+    {
+      "LocalX": -300.0,
+      "LocalY": 0.0,
+      "PortIndex": 0,
+      "Name": "1"
+    },
+    {
+      "LocalX": 300.0,
+      "LocalY": 0.0,
+      "PortIndex": 1,
+      "Name": "2"
+    }
+  ]
+}

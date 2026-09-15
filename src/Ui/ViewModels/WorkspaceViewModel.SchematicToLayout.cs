@@ -158,6 +158,23 @@ public partial class WorkspaceViewModel
         OpenOrActivateLayout(targetPath);
         var layoutVm = GetOrCreateLayoutSession(targetPath);
 
+        // OWNER REPORT (2026-09-15): three kit cells written into a layout and only one of them
+        // visible. All three were there and all three resolved — they were at x = 0, 10 mm and 20 mm,
+        // forty cell-widths apart, because the generator's placement pitch was a fixed 10 mm. That is
+        // fixed at its source (SchematicToLayoutGenerator.GridPitchDbu), and this is the other half:
+        // **an instance is the one thing a user cannot find by looking.** It lands where the command
+        // puts it, not where they clicked, so saying where it went is part of writing it.
+        //
+        // Two cases, and they are different sentences. Instances added: bring THOSE on screen — on a
+        // large board that walks the camera to the new part instead of re-framing work in progress.
+        // Nothing added but the layout was empty: fit it, which is the wBond case, where the only
+        // content is an overlay of wires and there is no instance region to speak of. An empty layout
+        // is framed by LayoutViewport.Default on 200 of its own SNAP STEPS — on this MMIC starter
+        // technology's 5 DBU snap, one micrometre across the whole canvas — so leaving the camera
+        // there shows nothing whatever was written.
+        bool layoutWasEmpty = layoutVm.Model.Shapes.Count == 0 && layoutVm.Model.Instances.Count == 0;
+        var addedRegion = Bbox.Empty;
+
         // The INSTANCE half is skipped entirely for a wBond-only update: nothing else in the schematic
         // is re-resolved, so nothing else can move, be re-parameterised, or be reported.
         if (onlyWBond is null)
@@ -182,9 +199,21 @@ public partial class WorkspaceViewModel
             ReportGenerationResult(result.Command, result.Lines, result.NoLayoutWarnings,
                 result.AddedCount, result.UpdatedCount, result.UnchangedCount, result.RemovedCount,
                 result.OverwrittenParameterCount, "Update Layout from Schematic");
+
+            addedRegion = result.AddedRegion;
         }
 
         SeedWBondSidecar(doc.ViewModel.EditModel, cellDir, schematicName, layoutVm, onlyWBond);
+
+        // …and now say where it went. Harmless if the canvas has not been laid out yet — neither zoom
+        // does anything without valid bounds, and the canvas's own initial fit then runs against a
+        // model that is by this point populated.
+        if (!addedRegion.IsEmpty)
+            layoutVm.RequestZoomToRegion(addedRegion);
+        else if (layoutWasEmpty
+                 && (layoutVm.Model.Shapes.Count > 0 || layoutVm.Model.Instances.Count > 0)
+                 && _openDocsByPath.GetValueOrDefault(targetPath) is Layout.LayoutDocument filled)
+            filled.RequestZoomToFit();
 
         // R-L5-17: primacy — new file with no prior real primary becomes primary automatically
         // (CellFolder's own SoleFile branch handles the common case for free); only the ambiguous

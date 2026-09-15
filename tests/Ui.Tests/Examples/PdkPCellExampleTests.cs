@@ -57,8 +57,10 @@ public sealed class PdkPCellExampleTests(ITestOutputHelper output) : IDisposable
         foreach (var d in _scratch) try { Directory.Delete(d, true); } catch { /* best effort */ }
     }
 
-    private const string Mlin   = "KIT_MLIN";
-    private const string Spiral = "KIT_SPIRAL";
+    private const string Mlin    = "KIT_MLIN";
+    private const string Spiral  = "KIT_SPIRAL";
+    private const string OSpiral = "KIT_OSPIRAL";
+    private const string MimCap  = "KIT_MIMCAP";
 
     /// <summary>The example technology's resolution, and every length below is in its DBU.</summary>
     private const int Dbu = 1000;
@@ -138,18 +140,25 @@ public sealed class PdkPCellExampleTests(ITestOutputHelper output) : IDisposable
     /// <summary>
     /// The layer choice is a DROPDOWN, not a free-text box — the generator declares the two values
     /// it accepts, which is the only thing that can make the Properties Inspector offer them.
+    ///
+    /// <para>Every cell that HAS a choice of metal declares it this way; the MIM capacitor has none
+    /// and declares no such parameter, because its stack is Metal1, the MIM dielectric and the MIM
+    /// top plate in that order and there is no second arrangement of it. A parameter offering a
+    /// choice that does not exist is worse than no parameter, so the absence is asserted too.</para>
     /// </summary>
     [PythonFact]
     public void TheMetalParameterOffersItsTwoLayersAsChoices()
     {
         using var kit = StartKit(ExampleRoot());
 
-        foreach (string id in kit.GeneratorIds)
+        foreach (string id in new[] { Mlin, Spiral, OSpiral })
         {
             var metal = Assert.Single(kit.DeclaredParameters(id)!.Where(p => p.Name == "Metal"));
             Assert.Equal(["Metal1", "Metal2"], metal.Choices!.Select(c => c.AsText()));
             Assert.Equal("Metal1", metal.Default!.Value.AsText());
         }
+
+        Assert.DoesNotContain(kit.DeclaredParameters(MimCap)!, p => p.Name == "Metal");
     }
 
     // ══ 2. Nothing is drawn on the air bridge by default ════════════════════
@@ -398,6 +407,8 @@ public sealed class PdkPCellExampleTests(ITestOutputHelper output) : IDisposable
     [PythonTheory]
     [InlineData(Mlin)]
     [InlineData(Spiral)]
+    [InlineData(OSpiral)]
+    [InlineData(MimCap)]
     public void DraggingAGripPastZero_StopsAtTheProcessMinimum(string generatorId)
     {
         using var kit = StartKit(ExampleRoot());
@@ -437,8 +448,10 @@ public sealed class PdkPCellExampleTests(ITestOutputHelper output) : IDisposable
     /// generator, so the floor has to be stated in both places or it holds in only one of them.
     /// </summary>
     [PythonTheory]
-    [InlineData(Mlin,   "W", "L")]
-    [InlineData(Spiral, "Width", "Space", "Inner")]
+    [InlineData(Mlin,    "W", "L")]
+    [InlineData(Spiral,  "Width", "Space", "Inner")]
+    [InlineData(OSpiral, "Width", "Space", "Inner")]
+    [InlineData(MimCap,  "W", "L")]
     public void AValueTypedBelowTheProcessMinimum_IsRefusedRatherThanDrawn(
         string generatorId, params string[] lengths)
     {
@@ -589,6 +602,8 @@ public sealed class PdkPCellExampleTests(ITestOutputHelper output) : IDisposable
     [Theory]
     [InlineData(Mlin)]
     [InlineData(Spiral)]
+    [InlineData(OSpiral)]
+    [InlineData(MimCap)]
     public void TheKitShipsASchematicSymbolForEveryGenerator(string generatorId)
     {
         string kitDir = Path.Combine(ExampleRoot(), "pcell-kit");
@@ -694,7 +709,7 @@ public sealed class PdkPCellExampleTests(ITestOutputHelper output) : IDisposable
             parts.Add(built);
             tiles.Add(PCellKitSchematicParts.PaletteItemFor(kitName, built));
         }
-        Assert.Equal(2, parts.Count);
+        Assert.Equal(4, parts.Count);
 
         string kit = kitNames[Spiral];
         PdkKitRegistry.SetPCellParts(copy, kit, parts);
@@ -736,6 +751,538 @@ public sealed class PdkPCellExampleTests(ITestOutputHelper output) : IDisposable
         Assert.Equal("3", placed.Parameters.Single(p => p.Name == "Turns").Expression);
         Assert.Equal("Metal1", placed.Parameters.Single(p => p.Name == "Metal").Expression);
         Assert.All(placed.Parameters, p => Assert.True(p.ShowOnSchematic, $"'{p.Name}' is hidden"));
+    }
+
+    // ══ 6. The octagonal coil and the MIM capacitor ══════════════════════════
+
+    /// <summary>
+    /// <b>The octagonal coil is the square one with its corners cut — one cell body, two walks.</b>
+    ///
+    /// <para>Every side of it runs at a multiple of forty-five degrees, and four of the eight are
+    /// diagonal; the square coil has none. Asserted on the MERGED outline rather than on the pieces
+    /// that drew it, because a diagonal run is emitted as a four-cornered polygon and the whole
+    /// question is whether those polygons union into one conductor with clean edges instead of a
+    /// notched one — a mitre that does not quite close leaves a sliver that renders invisibly and
+    /// exports.</para>
+    /// </summary>
+    [PythonFact]
+    public void TheOctagonalCoilRunsAtFortyFiveDegrees_AndTheSquareOneNever()
+    {
+        using var kit = StartKit(ExampleRoot());
+        var tech = Tech();
+
+        PolygonShape Coil(string id)
+        {
+            Assert.True(kit.TryGetGenerator(id, out var generate));
+            return generate(kit.DeclaredDefaults(id)!, tech, PCellLayerSelection.Default)
+                   .Shapes.OfType<PolygonShape>().Where(g => g.Layer == Metal1)
+                   .MaxBy(g => Math.Abs(SignedArea(g)))!;
+        }
+
+        static List<double> Bearings(PolygonShape coil)
+        {
+            var bearings = new List<double>();
+            int n = coil.Xy.Length / 2;
+            for (int i = 0; i < n; i++)
+            {
+                int j = (i + 1) % n;
+                double deg = Math.Atan2(coil.Xy[j * 2 + 1] - coil.Xy[i * 2 + 1],
+                                        coil.Xy[j * 2]     - coil.Xy[i * 2]) * 180 / Math.PI;
+                bearings.Add((deg + 360) % 180);      // an edge and its reverse are one direction
+            }
+            return bearings;
+        }
+
+        static double ShortestEdge(PolygonShape coil)
+        {
+            double shortest = double.MaxValue;
+            int n = coil.Xy.Length / 2;
+            for (int i = 0; i < n; i++)
+            {
+                int j = (i + 1) % n;
+                shortest = Math.Min(shortest, Math.Sqrt(
+                    Math.Pow(coil.Xy[j * 2]     - coil.Xy[i * 2],     2) +
+                    Math.Pow(coil.Xy[j * 2 + 1] - coil.Xy[i * 2 + 1], 2)));
+            }
+            return shortest;
+        }
+
+        var square = Bearings(Coil(Spiral));
+        Assert.All(square, b => Assert.True(Math.Abs(b % 90) < 0.01,
+            $"the square coil has an edge at {b:0.###}°, which is neither horizontal nor vertical."));
+
+        var octagonCoil = Coil(OSpiral);
+        var octagon = Bearings(octagonCoil);
+        Assert.All(octagon, b => Assert.True(Math.Abs(b % 45) < 0.05,
+            $"the octagonal coil has an edge at {b:0.###}°, which is not a multiple of 45°."));
+        Assert.True(octagon.Count(b => Math.Abs(b % 90) > 0.05) >= octagon.Count / 3,
+            "the octagonal coil came back with hardly any diagonal edges — it is a square spiral.");
+
+        // …and the joints closed: no sliver left behind by a mitre that did not quite meet. A notch
+        // a database unit across renders invisibly, survives the union and exports.
+        double shortest = ShortestEdge(octagonCoil);
+        Assert.True(shortest > 1000,
+            $"the octagonal outline has a {shortest:0.##} DBU edge — that is a mitre artefact, not a side.");
+
+        output.WriteLine($"square {square.Count} edges; octagon {octagon.Count} edges, " +
+                         $"shortest {shortest:N0} DBU");
+    }
+
+    /// <summary>
+    /// <b>The octagon holds its turn-to-turn gap at exactly <c>Space</c>, and so does the square.</b>
+    ///
+    /// <para>Its sides are placed by their own perpendicular distance from the centre, so side
+    /// <i>k</i> and side <i>k+8</i> are parallel and one pitch apart by construction. Walking corner
+    /// to corner along rays from the centre is the obvious alternative and looks identical on
+    /// screen: the two ends of a side then sit at slightly different radii, adjacent turns are not
+    /// quite parallel, and the gap drifts across the side — which a min-spacing check finds and a
+    /// person does not.</para>
+    ///
+    /// <para>Measured by scanning a horizontal line through the middle of the merged winding and
+    /// reading off the bands of metal it crosses. Both coils have vertical sides due east and west
+    /// of centre, so that line meets them square and the gaps between bands are the turn spacing
+    /// itself — no reconstruction of the centre line, and nothing shared with the generator.</para>
+    /// </summary>
+    [PythonTheory]
+    [InlineData(Spiral)]
+    [InlineData(OSpiral)]
+    public void EveryTurnIsSpacedExactlyItsSpaceFromTheNext(string generatorId)
+    {
+        using var kit = StartKit(ExampleRoot());
+        var defaults = kit.DeclaredDefaults(generatorId)!;
+        long space = PCellUnits.MetresToDbu(defaults["Space"].AsReal(), Dbu);
+        long width = PCellUnits.MetresToDbu(defaults["Width"].AsReal(), Dbu);
+
+        Assert.True(kit.TryGetGenerator(generatorId, out var generate));
+        var coil = generate(defaults, Tech(), PCellLayerSelection.Default)
+                   .Shapes.OfType<PolygonShape>().Where(g => g.Layer == Metal1)
+                   .MaxBy(g => Math.Abs(SignedArea(g)))!;
+
+        int n = coil.Xy.Length / 2;
+        var ys = Enumerable.Range(0, n).Select(i => coil.Xy[i * 2 + 1]).ToList();
+        // Off the exact centre by one unit, so the scan cannot land on a horizontal edge.
+        long scanY = (ys.Min() + ys.Max()) / 2 + 1;
+
+        var crossings = new List<double>();
+        for (int i = 0; i < n; i++)
+        {
+            int j = (i + 1) % n;
+            long y1 = coil.Xy[i * 2 + 1], y2 = coil.Xy[j * 2 + 1];
+            if ((y1 > scanY) == (y2 > scanY)) continue;           // no crossing, horizontals included
+            long x1 = coil.Xy[i * 2], x2 = coil.Xy[j * 2];
+            crossings.Add(x1 + (x2 - x1) * (double)(scanY - y1) / (y2 - y1));
+        }
+        crossings.Sort();
+        Assert.True(crossings.Count >= 6 && crossings.Count % 2 == 0,
+            $"the scan line met {crossings.Count} edges, which is not a set of metal bands.");
+
+        // Alternating band, gap, band, gap … across the coil. Every band is one turn wide.
+        for (int i = 0; i + 1 < crossings.Count; i += 2)
+            Assert.Equal(width, crossings[i + 1] - crossings[i], 0);
+
+        // Every gap between two of them is the declared spacing — except the one in the MIDDLE,
+        // which is the coil's own opening and is a different thing entirely. It comes out wider than
+        // `Inner` on both shapes, because `Inner` is measured across the innermost side and the turn
+        // has to step outward somewhere: once per lap, on whichever axis it steps.
+        var gaps = new List<double>();
+        for (int i = 1; i + 1 < crossings.Count; i += 2)
+            gaps.Add(crossings[i + 1] - crossings[i]);
+        Assert.True(gaps.Count % 2 == 1, $"{gaps.Count} gaps is an even number — there is no middle.");
+
+        int opening = gaps.Count / 2;
+        for (int i = 0; i < gaps.Count; i++)
+            if (i != opening)
+                Assert.Equal(space, gaps[i], 0);
+
+        long inner = PCellUnits.MetresToDbu(defaults["Inner"].AsReal(), Dbu);
+        Assert.True(gaps[opening] >= inner,
+            $"the opening measures {gaps[opening]:N0} DBU against a declared Inner of {inner:N0}.");
+
+        output.WriteLine($"{generatorId}: {crossings.Count / 2} bands of {width} DBU on {space} DBU " +
+                         $"gaps, around a {gaps[opening]:N0} DBU opening");
+    }
+
+    /// <summary>
+    /// <b>The MIM capacitor is a three-storey cell, and one of its four storeys is drawn by not
+    /// drawing it.</b>
+    ///
+    /// <para>Metal1 is the bottom plate; <c>MIM Metal</c> is the top plate 0.2 µm above it; the
+    /// <c>MIM Dielectric</c> between them carries NO drawing layer at all and is declared
+    /// <c>PresentWithLayer: MIM Metal</c> in the stackup, so drawing the top plate is what puts it
+    /// there. A generator that helpfully drew one as well would stack a second insulator under the
+    /// first, and the artwork would look exactly the same.</para>
+    ///
+    /// <para>The escape is the spiral's crossover one storey higher, and it is not a stylistic
+    /// choice: <c>MIM Via</c> spans MIM Metal to Metal2 and nothing in this stackup spans MIM Metal
+    /// to Metal1, so the top plate can only leave upwards. It comes back down through an ordinary
+    /// Metal1–Metal2 post, which is what puts both terminals on one layer.</para>
+    /// </summary>
+    [PythonFact]
+    public void TheSeriesMimCapIsMetal1AndMimMetal_WithNothingDrawnForTheDielectric()
+    {
+        var mimMetal = new LayerKey(9, 0);
+        var mimVia   = new LayerKey(10, 0);
+
+        using var kit = StartKit(ExampleRoot());
+        Assert.True(kit.TryGetGenerator(MimCap, out var generate));
+        var result = generate(kit.DeclaredDefaults(MimCap)!, Tech(), PCellLayerSelection.Default);
+
+        var layers = result.Shapes.Select(sh => sh.Layer).ToHashSet();
+        Assert.Equal([Metal1, Metal2, Via, mimMetal, mimVia], layers.OrderBy(k => k.Layer).ToArray());
+
+        // The bottom plate ENCLOSES the top plate — the enclosure is a process rule, not a
+        // parameter, which is why W x L is declared as the top plate and the bottom one is grown.
+        var bottom = result.Shapes.OfType<RectShape>().Where(r => r.Layer == Metal1)
+                                  .MaxBy(r => Math.Abs((r.X2 - r.X1) * (r.Y2 - r.Y1)))!;
+        var top    = Assert.Single(result.Shapes.OfType<RectShape>().Where(r => r.Layer == mimMetal));
+        Assert.True(Math.Min(bottom.X1, bottom.X2) < Math.Min(top.X1, top.X2));
+        Assert.True(Math.Max(bottom.X2, bottom.X1) > Math.Max(top.X2, top.X1));
+        Assert.True(Math.Min(bottom.Y1, bottom.Y2) < Math.Min(top.Y1, top.Y2));
+        Assert.True(Math.Max(bottom.Y2, bottom.Y1) > Math.Max(top.Y2, top.Y1));
+
+        // Both terminals land on Metal1, so the cell abuts the same things at either end.
+        Assert.Equal(2, result.Pins.Count);
+        Assert.All(result.Pins, p => Assert.Equal(Metal1, p.Layer));
+    }
+
+    /// <summary>
+    /// <b>The capacitance is a READOUT, and it tracks the plate.</b>
+    ///
+    /// <para><c>C</c> is declared as an output — circuitRF renders it as text rather than an edit
+    /// box, because typing into it cannot do anything — and the generator reports what it derived
+    /// it to on every run. Without that report the parameter list can only show the number the
+    /// instance was stored with, while the geometry that determines it moves underneath.</para>
+    ///
+    /// <para>Checked against the parallel-plate value written out here from the technology's own
+    /// stackup rather than asked of the generator: an oracle that shares the code under test proves
+    /// nothing. Doubling the plate area doubles it, which is the property that says the report is
+    /// being recomputed rather than echoed.</para>
+    /// </summary>
+    [PythonFact]
+    public void TheMimCapReportsACapacitanceThatFollowsItsPlate()
+    {
+        const double Eps0 = 8.8541878128e-12;
+        var tech = Tech();
+        var mim = tech.Stackup.Layers.Single(l => l.Name == "MIM Dielectric");
+
+        using var kit = StartKit(ExampleRoot());
+        Assert.True(kit.TryGetGenerator(MimCap, out var generate));
+        var defaults = kit.DeclaredDefaults(MimCap)!;
+
+        Assert.True(kit.DeclaredParameters(MimCap)!.Single(d => d.Name == "C").Computed,
+            "'C' is not declared as an output, so the Properties Inspector offers an edit box that " +
+            "cannot do anything.");
+
+        double Reported(double wMetres, double lMetres)
+        {
+            var p = new Dictionary<string, PCellValue>(defaults)
+            {
+                ["W"] = PCellValue.Real(wMetres),
+                ["L"] = PCellValue.Real(lMetres),
+            };
+            var r = generate(p, tech, PCellLayerSelection.Default);
+            return r.ComputedValues!["C"].AsReal();
+        }
+
+        // 60 um square of MIM dielectric, er 6.8 over 0.2 um: about 1.08 pF on this process.
+        double areaM2 = 60e-6 * 60e-6;
+        double expectedPf = Eps0 * mim.Epsr * areaM2 / (mim.ThicknessDbu / (double)Dbu * 1e-6) * 1e12;
+        Assert.Equal(expectedPf, Reported(60e-6, 60e-6), 3);
+
+        // Twice the plate, twice the capacitance — it is recomputed, not echoed.
+        Assert.Equal(2 * expectedPf, Reported(60e-6, 120e-6), 3);
+    }
+
+    /// <summary>
+    /// <b>A shunt capacitor grounds a plate itself, and it is the BOTTOM plate.</b>
+    ///
+    /// <para>Nothing above Metal1 can reach the metal on the back of the wafer — <c>Backside Via</c>
+    /// spans Metal1 to Backside Metal and the MIM top plate is two storeys above that — so the
+    /// grounded terminal has to be the plate lying on the substrate. That is also the plate you
+    /// want grounded: it is the one facing 100 µm of εr 12.9, and grounding it shorts out a
+    /// plate-to-backside capacitance that would otherwise hang off the signal node. A cell that
+    /// grounded the top plate instead still works, still draws, and carries a parasitic nobody
+    /// declared.</para>
+    ///
+    /// <para>So the signal terminal is the top plate's, and pin 1 is at the cell origin — which is
+    /// the other end of the cell from where the series part's pin 1 is. The shunt cell is therefore
+    /// the series cell reflected, and both assertions below are really the same one: the ground via
+    /// is on Metal1, at the far end, and the signal is at the origin.</para>
+    /// </summary>
+    [PythonFact]
+    public void TheShuntCapacitorGroundsItsBottomPlateThroughTheWafer()
+    {
+        var backsideVia = new LayerKey(8, 0);
+
+        using var kit = StartKit(ExampleRoot());
+        Assert.True(kit.TryGetGenerator(MimCap, out var generate));
+        var tech = Tech();
+
+        PCellResult Generate(string connection)
+        {
+            var p = new Dictionary<string, PCellValue>(kit.DeclaredDefaults(MimCap)!)
+            {
+                ["Connection"] = PCellValue.Text(connection),
+            };
+            return generate(p, tech, PCellLayerSelection.Default);
+        }
+
+        // The series part reaches no ground at all — it is two signal terminals and nothing else.
+        var series = Generate("Series");
+        Assert.DoesNotContain(series.Shapes, sh => sh.Layer == backsideVia);
+
+        var shunt = Generate("Shunt");
+        var hole = Assert.Single(shunt.Shapes.OfType<RectShape>().Where(r => r.Layer == backsideVia));
+
+        // The via spans Metal1 to the backside, so it has to sit on Metal1 — and inside it, because
+        // a drilled hole with no pad round it is an open circuit that draws.
+        var onMetal1 = shunt.Shapes.Where(sh => sh.Layer == Metal1).ToList();
+        Assert.Contains(onMetal1, sh => Covers(sh, hole));
+
+        // Both terminals still land on Metal1, and pin 1 — the signal — is still at the origin.
+        Assert.Equal(2, shunt.Pins.Count);
+        Assert.All(shunt.Pins, p => Assert.Equal(Metal1, p.Layer));
+        Assert.Equal(0, shunt.Pins[0].X);
+        Assert.Equal(0, shunt.Pins[0].Y);
+
+        // …and pin 2, the ground, is the far end of the cell, on the via's own pad.
+        Assert.True(shunt.Pins[1].X > Math.Max(hole.X1, hole.X2));
+
+        // The plates did not move, only what they face: the same capacitance either way.
+        Assert.Equal(series.ComputedValues!["C"].AsReal(), shunt.ComputedValues!["C"].AsReal(), 9);
+
+        output.WriteLine($"shunt: {shunt.Shapes.Count} shapes, ground via " +
+                         $"{Math.Abs(hole.X2 - hole.X1)} x {Math.Abs(hole.Y2 - hole.Y1)} DBU");
+    }
+
+    /// <summary>Whether <paramref name="outer"/> contains every corner of <paramref name="inner"/>.
+    /// A merged region is a polygon, so this takes either.</summary>
+    private static bool Covers(LayoutShape outer, RectShape inner)
+    {
+        var ring = outer switch
+        {
+            RectShape r    => new[] { (r.X1, r.Y1), (r.X2, r.Y1), (r.X2, r.Y2), (r.X1, r.Y2) },
+            PolygonShape p => Enumerable.Range(0, p.Xy.Length / 2)
+                                        .Select(i => (p.Xy[i * 2], p.Xy[i * 2 + 1])).ToArray(),
+            _ => [],
+        };
+        if (ring.Length < 3) return false;
+
+        foreach (var (x, y) in new[] { (inner.X1, inner.Y1), (inner.X2, inner.Y1),
+                                       (inner.X2, inner.Y2), (inner.X1, inner.Y2) })
+        {
+            bool inside = false;
+            for (int i = 0, j = ring.Length - 1; i < ring.Length; j = i++)
+                if (ring[i].Item2 > y != ring[j].Item2 > y &&
+                    x < (double)(ring[j].Item1 - ring[i].Item1) * (y - ring[i].Item2)
+                        / (ring[j].Item2 - ring[i].Item2) + ring[i].Item1)
+                    inside = !inside;
+            if (!inside) return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// <b>The shunt cell is the series cell reflected — the same plates, read back the other way.</b>
+    ///
+    /// <para>One layout routine draws both, so the two must agree everywhere the reflection does not
+    /// change anything: the same layers, the same plate size, the same enclosure, the same
+    /// capacitance. What differs is the ground via and which end each terminal is on.</para>
+    ///
+    /// <para>And the grips have to survive it. They are stated in the frame the cell ENDED UP in
+    /// rather than the one it was drawn in, which is the part that is easy to get wrong: a handle
+    /// mirrored along with the artwork names an anchor that moves when the parameter changes, and
+    /// the drag solver then measures a sensitivity that is not the one the user is dragging.</para>
+    /// </summary>
+    [PythonTheory]
+    [InlineData("Series")]
+    [InlineData("Shunt")]
+    public void EitherConnectionDrawsTheSamePlates_AndBothGripsStillWork(string connection)
+    {
+        var mimMetal = new LayerKey(9, 0);
+
+        using var kit = StartKit(ExampleRoot());
+        Assert.True(kit.TryGetGenerator(MimCap, out var generate));
+        var tech = Tech();
+        var parameters = new Dictionary<string, PCellValue>(kit.DeclaredDefaults(MimCap)!)
+        {
+            ["Connection"] = PCellValue.Text(connection),
+        };
+
+        PCellResult Generate(IReadOnlyDictionary<string, PCellValue> p)
+            => generate(p, tech, PCellLayerSelection.Default);
+
+        var result = Generate(parameters);
+        var top = Assert.Single(result.Shapes.OfType<RectShape>().Where(r => r.Layer == mimMetal));
+        long w = PCellUnits.MetresToDbu(parameters["W"].AsReal(), Dbu);
+        long l = PCellUnits.MetresToDbu(parameters["L"].AsReal(), Dbu);
+        Assert.Equal(l, Math.Abs(top.X2 - top.X1));
+        Assert.Equal(w, Math.Abs(top.Y2 - top.Y1));
+
+        // Both grips move the parameter they name, in the direction they claim, in this frame.
+        var handles = result.Handles!;
+        Assert.Equal(2, handles.Count);
+        for (int i = 0; i < handles.Count; i++)
+        {
+            Assert.True(PCellHandleSolver.MeasureSensitivity(
+                    Generate, parameters, handles[i], i, out double valuePerProjection, out _),
+                $"'{handles[i].Parameter}' is undraggable in {connection}: the grip does not move " +
+                "along the axis it declares when the parameter changes.");
+
+            var solved = PCellHandleSolver.Solve(
+                Generate, parameters, handles[i], i, targetProjection: -10_000_000, valuePerProjection);
+            Assert.True(solved.Ok);
+            Assert.True(solved.Value.AsReal() >= handles[i].Min!.Value - 1e-15);
+        }
+    }
+
+    /// <summary>
+    /// <b>A coil's own ORIGIN is the middle of its opening — there is no metal there at all.</b>
+    ///
+    /// <para>The cell re-centres on its winding, so a freshly placed instance sits with its centre
+    /// on the layout origin and its nearest metal tens of micrometres away. That is the right place
+    /// for it, and it is also why Update Layout from Schematic reported "1 added" while the owner saw
+    /// an empty canvas (2026-09-15): an empty MMIC layout is framed on about one micrometre, and one
+    /// micrometre at the middle of a coil is the hole. Measured here rather than reasoned about,
+    /// because it is the fact that turns "I did not see it" into a framing bug rather than a
+    /// generation one — see <c>EmptyLayoutIsFramedOnWhatIsWrittenTests</c> for the fix.</para>
+    /// </summary>
+    [PythonTheory]
+    [InlineData(Spiral)]
+    [InlineData(OSpiral)]
+    public void TheCoilsOriginIsInsideItsOwnOpening(string generatorId)
+    {
+        using var kit = StartKit(ExampleRoot());
+        Assert.True(kit.TryGetGenerator(generatorId, out var generate));
+        var result = generate(kit.DeclaredDefaults(generatorId)!, Tech(), PCellLayerSelection.Default);
+
+        var origin = new RectShape { Layer = Metal1, X1 = 0, Y1 = 0, X2 = 0, Y2 = 0 };
+        Assert.DoesNotContain(result.Shapes, sh => Covers(sh, origin));
+
+        // …and the cell itself is two orders of magnitude bigger than the window that framed nothing.
+        long width = result.Shapes.Max(RightmostX) - result.Shapes.Min(LeftmostX);
+        Assert.True(width > 200 * Dbu, $"{generatorId} measures {width} DBU across — too small to be this cell.");
+        output.WriteLine($"{generatorId}: {width / (double)Dbu:N0} µm across, nothing at its origin");
+    }
+
+    private static long LeftmostX(LayoutShape shape) => shape switch
+    {
+        RectShape r    => Math.Min(r.X1, r.X2),
+        PolygonShape p => Enumerable.Range(0, p.Xy.Length / 2).Min(i => p.Xy[i * 2]),
+        _              => long.MaxValue,
+    };
+
+    /// <summary>
+    /// <b>OWNER REPORT (2026-09-15): three of this kit's cells placed on one schematic, and after
+    /// Update Layout from Schematic only one of them was visible in the layout.</b>
+    ///
+    /// <para>All three were written and all three resolved. They were at x = 0, <b>10 mm</b> and
+    /// <b>20 mm</b> — the generator's placement pitch was a fixed 10 mm, chosen when the parts this
+    /// command placed were board-scale microstrip. These cells measure 84 and 250 µm, so it scattered
+    /// the design across twenty millimetres of empty wafer, forty cell-widths between neighbours, and
+    /// a view framed on the first one contains none of the others.</para>
+    ///
+    /// <para>A fixed pitch cannot be right for a tool that spans four orders of magnitude of part
+    /// size, so the pitch is MEASURED from the cells being placed. Asserted here as a relation to the
+    /// cells themselves — neighbours clear of each other, and the whole row inside a millimetre —
+    /// rather than against a number, because a number is the thing that just went stale.</para>
+    /// </summary>
+    [PythonFact]
+    public void UpdateLayoutFromSchematic_PlacesEveryPartWhereTheOthersCanBeSeen()
+    {
+        string copy = Path.Combine(Path.GetTempPath(), "crf-s2l-" + Guid.NewGuid().ToString("N")[..8]);
+        _scratch.Add(copy);
+        CopyDirectory(ExampleRoot(), copy);
+        try { Directory.Delete(Path.Combine(copy, GeneratedCellStore.ReservedFolderName), true); }
+        catch (DirectoryNotFoundException) { /* a fresh clone's own state */ }
+
+        PdkKitRegistry.ResetAllForTests();
+        KitLayoutGenerators.ResetAllForTests();
+        PCellRegistry.ClearResolvers();
+        using var resolver = new PCellWorkerResolver(
+            copy,
+            findInterpreter: (_, _) => new PythonInterpreter(PythonRunner.Interpreter!, [], "test", "supplied by the test"),
+            report: output.WriteLine);
+        PCellRegistry.AddResolver(resolver);
+        GeneratedCellsLifecycle.RegenerateAll(copy, _ => null, output.WriteLine);
+
+        var kitNames = resolver.KitNameByGeneratorId;
+        var kitDirs  = resolver.KitDirectoryByGeneratorId;
+        var parts = new List<PdkKitPart>();
+        var tiles = new List<PaletteItem>();
+        foreach (var (gid, kitName) in kitNames)
+        {
+            var built = PCellKitSchematicParts.TryBuild(
+                kitName, gid, kitDirs.GetValueOrDefault(gid), resolver.DeclaredParameters(gid), out _);
+            if (built is null) continue;
+            parts.Add(built);
+            tiles.Add(PCellKitSchematicParts.PaletteItemFor(kitName, built));
+        }
+        string kit = kitNames[Spiral];
+        PdkKitRegistry.SetPCellParts(copy, kit, parts);
+        KitLayoutGenerators.Publish(copy, KitPaletteMerge.Compose(
+            tiles, kitNames.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase)));
+
+        // The reported sheet: one of each coil and the capacitor, seeded exactly as placing them does.
+        string schDir = Path.Combine(copy, "SpiralInductor", "schematic");
+        string layDir = Path.Combine(copy, "SpiralInductor", "layout");
+        Directory.CreateDirectory(schDir);
+        Directory.CreateDirectory(layDir);
+        var schematic = new SchematicEditModel { SchematicDirectory = schDir };
+        int n = 0;
+        foreach (string gid in new[] { Spiral, OSpiral, MimCap })
+        {
+            string kitRef = PdkKitRegistry.RefFor(kit, gid);
+            var comp = new EditableComponent
+            {
+                InstanceName = "X" + ++n, Symbol = SymbolKind.Generic, CellRef = kitRef,
+            };
+            foreach (var cp in CellSymbolResolver.ResolveCcell(kitRef, schDir)!.Parameters)
+                comp.Parameters.Add(new EditableParameter
+                {
+                    Name = cp.Name, Expression = cp.DefaultExpression, Unit = cp.Unit,
+                    Dimension = cp.Dimension, ShowOnSchematic = cp.ShowOnSchematic,
+                });
+            schematic.Components.Add(comp);
+        }
+
+        var tech = Tech();
+        var layout = new LayoutView { DbuPerMicron = Dbu, DisplayUnit = LayoutUnit.Um, SnapDbu = tech.DefaultSnapDbu };
+        var result = SchematicToLayoutGenerator.Run(schematic, layout, schDir, copy, layDir, tech, null, null);
+
+        foreach (var w in result.NoLayoutWarnings) output.WriteLine($"NO-LAYOUT: {w}");
+        Assert.Empty(result.NoLayoutWarnings);
+        Assert.Equal(3, result.AddedCount);
+        result.Command!.Execute();
+        Assert.Equal(3, layout.Instances.Count);
+
+        var boxes = layout.Instances
+            .Select(i => (i.SchematicId, Box: CellHierarchy.InstanceBbox(i, layDir)))
+            .OrderBy(b => b.Box.MinX).ToList();
+        foreach (var (id, box) in boxes)
+            output.WriteLine($"{id}: x {box.MinX / (double)Dbu:N1}…{box.MaxX / (double)Dbu:N1} µm");
+
+        long widest = boxes.Max(b => Math.Max(b.Box.MaxX - b.Box.MinX, b.Box.MaxY - b.Box.MinY));
+
+        // Neighbours are clear of each other — the pitch is not so tight that the parts overlap…
+        for (int i = 1; i < boxes.Count; i++)
+            Assert.True(boxes[i].Box.MinX > boxes[i - 1].Box.MaxX,
+                $"'{boxes[i].SchematicId}' overlaps '{boxes[i - 1].SchematicId}'.");
+
+        // …and not so loose that finding one tells you nothing about where the others are. Three
+        // parts of which the largest is a quarter of a millimetre belong within a few of its own
+        // widths, not within forty.
+        long span = boxes.Max(b => b.Box.MaxX) - boxes.Min(b => b.Box.MinX);
+        Assert.True(span < 6 * widest,
+            $"the three parts span {span / (double)Dbu:N0} µm — {span / (double)widest:N0} times the " +
+            "widest of them. That is the fixed-pitch defect, back again.");
+
+        // And the command is told WHERE they went, so it can bring them on screen. An instance is the
+        // one thing a user cannot find by looking: it lands where this puts it, not where they clicked.
+        Assert.False(result.AddedRegion.IsEmpty);
+        Assert.True(result.AddedRegion.MinX <= boxes[0].Box.MinX);
+        Assert.True(result.AddedRegion.MaxX >= boxes[^1].Box.MaxX);
+        output.WriteLine($"added region {(result.AddedRegion.MaxX - result.AddedRegion.MinX) / (double)Dbu:N0} µm wide");
     }
 
     /// <summary>
