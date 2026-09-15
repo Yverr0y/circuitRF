@@ -35,6 +35,7 @@ using CircuitRF.Core;
 using CircuitRF.Design.Cells;
 using CircuitRF.Design.Layout;
 using CircuitRF.Design.Layout.PCells;
+using CircuitRF.Engine.Mom;
 using CircuitRF.Design.Schematic;
 using CircuitRF.Ui.Layout;
 using CircuitRF.Ui.Schematic;
@@ -225,12 +226,21 @@ public sealed class PdkPCellExampleTests(ITestOutputHelper output) : IDisposable
         Assert.Equal(2, result.Pins.Count);
         Assert.All(result.Pins, p => Assert.Equal(coil, p.Layer));
 
-        // The crossover spans every turn it has to clear: it starts at pin 2 and reaches past the
-        // innermost rail. A bridge that stops short is a broken terminal that still renders.
+        // The crossover spans every turn it has to clear: it lands on the terminal pad and reaches
+        // past the innermost rail. A bridge that stops short is a broken terminal that still renders.
         var span = result.Shapes.OfType<RectShape>().Single(r => r.Layer == bridge);
         long innermost = result.Shapes.Where(sh => sh.Layer == coil).Max(RightmostX);
-        Assert.True(Math.Min(span.X1, span.X2) <= result.Pins[1].X);
+        long bridgeOuter = Math.Min(span.X1, span.X2);
         Assert.True(Math.Max(span.X1, span.X2) < innermost);
+
+        // ...and it STOPS SHORT OF THE PIN, which is the whole point of the pad running past it
+        // (kit.py RULE 10). A port label standing where metal on two conductor levels overlaps is
+        // refused by name at extraction — "driving the wrong one drives a different conductor with
+        // the same footprint" — so pin 2 has to sit on metal the bridge does not reach. The two used
+        // to be the same coordinate, and that terminal could not be driven at all.
+        Assert.True(bridgeOuter > result.Pins[1].X,
+            $"the {bridge} crossover reaches out to {bridgeOuter}, at or past pin 2 at " +
+            $"{result.Pins[1].X}: there is no single-level metal left to place a port on.");
     }
 
     private static long RightmostX(LayoutShape shape) => shape switch
@@ -473,6 +483,110 @@ public sealed class PdkPCellExampleTests(ITestOutputHelper output) : IDisposable
         // …and a negative one, which is the value that actually inverts the artwork.
         var inverted = new Dictionary<string, PCellValue>(defaults) { [lengths[0]] = PCellValue.Real(-50e-6) };
         Assert.Throws<PCellWireException>(() => generate(inverted, Tech(), PCellLayerSelection.Default));
+    }
+
+    // ══ 2b. A PORT CAN ACTUALLY BE PLACED ON EITHER TERMINAL ════════════════
+
+    /// <summary>
+    /// <b>A port label standing on each declared pin extracts as an ordinary EDGE port on the coil's
+    /// own level — for both spirals, on both metals.</b>
+    ///
+    /// <para>Owner report, 2026-09-15. Two defects, one test, because the artwork fix for each is
+    /// what makes the other's assertion reachable:</para>
+    ///
+    /// <list type="number">
+    /// <item><b>Pin 2 stood on metal on two conductor levels at once.</b> The Metal1 landing pad was
+    /// exactly the via's footprint with the crossover ending on top of it, so every point of the
+    /// terminal carried Metal1 AND Metal2 — and <c>EmPortExtraction</c> refuses that by name
+    /// ("driving the wrong one drives a different conductor with the same footprint"). The terminal
+    /// could not be driven at all. The pad runs a lead past the via now (kit.py RULE 10).</item>
+    /// <item><b>Pin 1 sat half a turn width INSIDE the metal</b>, because it was the end of the
+    /// centre LINE and <c>_segment_runs</c> cuts a free end square half a width beyond that. A label
+    /// there is in the conductor's interior, so it came out as an <c>Internal</c> to-ground port
+    /// rather than an edge port — a different structure, answered plausibly. The pin is on the metal's
+    /// own end face now (RULE 11), which is where KIT_MLIN has always put its two.</item>
+    /// </list>
+    /// </summary>
+    [PythonTheory]
+    [InlineData(Spiral,  "Metal1")]
+    [InlineData(Spiral,  "Metal2")]
+    [InlineData(OSpiral, "Metal1")]
+    [InlineData(OSpiral, "Metal2")]
+    public void APortOnEitherTerminalDrivesTheCoilsOwnLevel(string generatorId, string metal)
+    {
+        using var kit = StartKit(ExampleRoot());
+        Assert.True(kit.TryGetGenerator(generatorId, out var generate));
+
+        var parameters = new Dictionary<string, PCellValue>(kit.DeclaredDefaults(generatorId)!)
+        {
+            ["Metal"] = PCellValue.Text(metal),
+        };
+        var tech   = Tech();
+        var result = generate(parameters, tech, PCellLayerSelection.Default);
+
+        var shapes = new List<LayoutShape>(result.Shapes);
+        foreach (var pin in result.Pins)
+            shapes.Add(new LabelShape
+            {
+                Layer = pin.Layer, X = pin.X, Y = pin.Y, Text = pin.Name,
+                Height = 5 * Dbu, IsPort = true, PortLayer = pin.Layer,
+            });
+
+        var planar = PlanarExtractor.Extract(shapes, tech, Dbu, 20e9);
+        Assert.True(planar.Ok, planar.Refusal);
+
+        var ports = EmPortExtraction.Extract(shapes, planar.Problem!, Dbu);
+        Assert.True(ports.Ok, ports.Refusal);
+        Assert.Equal(2, ports.Rows.Count);
+        Assert.All(ports.Rows, r =>
+        {
+            Assert.Null(r.Problem);
+            Assert.Equal(PlanarPortKind.Edge, r.Port!.Kind);
+        });
+
+        // Both on ONE level, and it is the coil's — the property "both terminals are on the coil's
+        // own metal" is what lets the cell abut anything, and a port is where it becomes checkable.
+        int level = Assert.Single(ports.Rows.Select(r => r.Port!.LayerIndex).Distinct())!.Value;
+        Assert.Equal(metal, planar.Problem!.Layers[level].Name);
+    }
+
+    /// <summary>
+    /// <b>A port placed on the PLACED INSTANCE reports the pin's own 10 µm, not the coil's 250 µm
+    /// envelope.</b>
+    ///
+    /// <para>The other half of the same report, and the half a user actually sees: a port on an
+    /// instance takes its width from the cell's pin only when the label lands on that pin EXACTLY
+    /// (<c>LayoutConductorLookup.PinAt</c>, zero tolerance), and falls back to the instance's
+    /// array-expanded BOUNDING BOX otherwise. So a pin a few micrometres off the metal's visible end
+    /// is not a cosmetic error: the user aims at the end of the metal, geometry snap offers the edge
+    /// midpoint there rather than the pin, and the port reports the whole part as its excitation
+    /// width. One terminal came out right and one 25× wide, from one pin half a line width out.</para>
+    /// </summary>
+    [Fact]
+    public void APortOnThePlacedCoilTakesItsWidthFromThePin_NotTheInstanceBox()
+    {
+        string clay = Path.Combine(ExampleRoot(), "SpiralInductor", "layout", "SpiralInductor.clay");
+        var view = LayoutPersistence.LoadFromFile(clay);
+        var tech = Tech();
+        var lookup = LayoutConductorLookup.LookupFor(view, tech, Path.GetDirectoryName(clay)!);
+
+        var instance = Assert.Single(view.Instances);
+        string cellDir = RefPath.Resolve(Path.GetDirectoryName(clay)!, instance.CellRef);
+        var cell = LayoutPersistence.LoadFromFile(
+            Path.Combine(cellDir, "layout", Path.GetFileName(cellDir) + ".clay"));
+        Assert.Equal(2, cell.Pins.Count);
+
+        foreach (var pin in cell.Pins)
+        {
+            var label = new LabelShape
+            {
+                Layer = pin.Layer, X = pin.X, Y = pin.Y, Text = pin.Name,
+                Height = 5 * Dbu, IsPort = true,
+            };
+            var hint = LayoutPortDirection.Resolve(lookup, label);
+            Assert.NotNull(hint);
+            Assert.Equal(pin.WidthDbu, hint!.Value.WidthDbu);
+        }
     }
 
     // ══ 3. The committed instance rebuilds somewhere else ═══════════════════

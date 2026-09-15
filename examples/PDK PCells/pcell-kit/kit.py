@@ -14,8 +14,8 @@ and everything it returns is in the `Result`: shapes, pins, optional parameter h
 optional diagnostics. There is no registration step and no second file: the `@generator` decorator
 above each function is the declaration.
 
-Read `Reference > PDK Authoring` in the in-app documentation for the full contract. The nine rules
-worth knowing before changing anything here are marked RULE below.
+Read `Reference > PDK Authoring` in the in-app documentation for the full contract. The eleven
+rules worth knowing before changing anything here are marked RULE below.
 """
 
 import math
@@ -363,6 +363,13 @@ def _outward_deg(previous, last):
     return math.degrees(math.atan2(qy - py, qx - px)) % 360.0
 
 
+def _advanced(point, deg, distance):
+    """`point` moved `distance` in the direction `deg` - how a centre line's last point becomes the
+    METAL's own end face, which is where a pin belongs (RULE 11)."""
+    x, y = point
+    return dbu(x + math.cos(math.radians(deg)) * distance), dbu(y + math.sin(math.radians(deg)) * distance)
+
+
 def _segment_runs(layer, points, half):
     """One filled piece per straight run of `points`, each offset by `half` to either side.
 
@@ -478,10 +485,19 @@ def _spiral_cell(params, tech, centreline):
     # The INNER ESCAPE: a via post onto the inner end, a span on the other metal running back the way
     # the first side came so that it clears every turn, a second via post, and a landing pad on the
     # coil's own metal so BOTH terminals of this cell are on one layer and abut the same things.
+    #
+    # RULE 10: THE LANDING PAD RUNS PAST THE VIA, AND THE OVERHANG IS THE WHOLE REASON IT IS THERE.
+    # The pad used to be exactly the via's own footprint, with the bridge ending on top of it - so
+    # every point of it carried metal on BOTH conductor levels at once. An EM setup refuses a port
+    # standing there by name ("a port's LEVEL is part of its identity: driving the wrong one drives a
+    # different conductor with the same footprint"), which made pin 2 a terminal nothing could be
+    # driven from. `lead` of clean single-level metal past the via is what a port needs, and it costs
+    # two turn widths of artwork.
     inner_x, inner_y = points[0]
     coil_min_x = min(x for x, _ in points) - half
-    out_x      = coil_min_x - lead
-    coil.append(Rect(layer, out_x, inner_y - half, out_x + w, inner_y + half))   # landing pad
+    out_x      = coil_min_x - lead          # where the bridge and its via post stop
+    pad_x      = out_x - lead               # ...and where the pad, and therefore pin 2, reaches
+    coil.append(Rect(layer, pad_x, inner_y - half, out_x + w, inner_y + half))   # landing pad
 
     # Drawn as overlapping pieces and emitted as the regions they actually form - one continuous
     # winding, plus the landing pad, which the escape reaches by via and so is deliberately a
@@ -503,7 +519,18 @@ def _spiral_cell(params, tech, centreline):
             f"this technology has no layer named '{coil_name}'; the coil was drawn on this kit's "
             "own fallback layer for that name instead")
 
-    outer_x, outer_y = points[-1]
+    # RULE 11: A PIN SITS ON THE METAL'S OWN EDGE, NOT ON THE END OF THE CENTRE LINE.
+    # `points` is a centre line and `_segment_runs` cuts a free end square `half` PAST its last
+    # point, so pin 1 used to sit half a turn width inside the metal while pin 2 - on the landing
+    # pad's drawn edge - sat exactly on it. That asymmetry is not cosmetic: an EM port takes its
+    # width from the cell's pin only when it lands on the pin EXACTLY, and a user aiming at the
+    # visible end of the metal lands on the edge, five micrometres short. The port then falls back to
+    # the INSTANCE's bounding box and reports the whole coil's 250 um as its excitation width, while
+    # the other port - the one whose pin is on its edge - reports the 10 um it should. One port right
+    # and one port 25x wrong, from a pin half a line width out of place. KIT_MLIN has always put its
+    # pins on the rectangle's own faces; this is the same rule, stated for a walk.
+    outward_deg = _outward_deg(points[-2], points[-1])
+    outer_x, outer_y = _advanced(points[-1], outward_deg, half)
 
     return Result(
         shapes=shapes,
@@ -511,8 +538,8 @@ def _spiral_cell(params, tech, centreline):
             # Pin 1 is the tip of the outer lead, facing away from the coil along the side it
             # continues - so it moves with `Turns`, one side of the walk at a time. Pin 2 is the far
             # end of the inner escape, on the coil metal like pin 1.
-            Pin("1", outer_x, outer_y, layer, w, _outward_deg(points[-2], points[-1])),
-            Pin("2", out_x,   inner_y, layer, w, 180.0),
+            Pin("1", outer_x, outer_y, layer, w, outward_deg),
+            Pin("2", pad_x,   inner_y, layer, w, 180.0),
         ],
         handles=[
             # Both measure from the cell's own centre, which is where re-centring put it. `min` is in
@@ -679,9 +706,14 @@ def mimcap(params, tech):
     # entitled to call it, and a cell that ships its own violation is a cell nobody trusts.
     pad_x1 = bottom_x2 + 2 * floor
     pad_x2 = pad_x1 + 2 * floor
+    # RULE 10 again, and for the same reason the spirals' landing pad carries it: the Metal1 pad
+    # reaches PAST the via and past the end of the strap above it, so its outer end is metal on one
+    # conductor level only and a port may stand there. Drawn on top of each other, every point of the
+    # terminal carries Metal1 and Metal2 at once and an EM setup refuses a port on it by name.
+    pad_x3 = pad_x2 + bridge
     shapes.append(Rect(strap, post_x2 - post, -(bridge // 2), pad_x2, bridge - bridge // 2))
     shapes.append(Rect(via,   pad_x1,         -(bridge // 2), pad_x2, bridge - bridge // 2))
-    shapes.append(Rect(plate, pad_x1,         -(bridge // 2), pad_x2, bridge - bridge // 2))
+    shapes.append(Rect(plate, pad_x1,         -(bridge // 2), pad_x3, bridge - bridge // 2))
 
     diagnostics = []
 
@@ -703,10 +735,10 @@ def mimcap(params, tech):
                           arm_x1 + drill, arm_y1 + drill,
                           arm_x1 + drill + ground_via, arm_y1 + drill + ground_via))
 
-        pins = [Pin("1", pad_x2, 0, plate, bridge,     0.0),     # the top plate: the signal
+        pins = [Pin("1", pad_x3, 0, plate, bridge,     0.0),     # the top plate: the signal
                 Pin("2", arm_x1, 0, plate, ground_pad, 180.0)]   # the bottom plate: ground
-        shapes, pins = _reflected(metal + shapes, pins, pad_x2)
-        bottom_x1, bottom_x2 = pad_x2 - bottom_x2, pad_x2        # the same plate, read back the other way
+        shapes, pins = _reflected(metal + shapes, pins, pad_x3)
+        bottom_x1, bottom_x2 = pad_x3 - bottom_x2, pad_x3        # the same plate, read back the other way
 
         if tech.layers and tech.layer_named(GROUND_VIA_LAYER) is None:
             diagnostics.append(
@@ -716,7 +748,7 @@ def mimcap(params, tech):
     else:
         shapes = [bottom] + shapes
         pins = [Pin("1", 0,      0, plate, 2 * (half + enc), 180.0),   # the bottom plate's own edge
-                Pin("2", pad_x2, 0, plate, bridge,             0.0)]   # the top plate, brought down
+                Pin("2", pad_x3, 0, plate, bridge,             0.0)]   # the top plate, brought down
         bottom_x1 = 0
 
     if tech.layers and tech.layer_named(MIM_METAL) is None:

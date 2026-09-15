@@ -1,5 +1,78 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## A port on a PLACED INSTANCE gets the pin's width only on EXACT coincidence (2026-09-15)
+
+Owner, on the PDK PCells example: placing a port on each end of a `KIT_SPIRAL` gave one port the
+right width and the other the wrong one, and the component's own pin looked like it was in the
+middle of the metal rather than on its edge. The two are one defect, and the pin is the cause.
+
+### What the lookup can and cannot say about an instance
+
+`LayoutConductorLookup.LookupFor`'s instance branch returns `ConductorInfo(bbox, PinAt(...))` with a
+**null Shape** — a placed instance owns no top-level shape, so there is nothing to measure. So there
+are exactly two answers available:
+
+* the pin's own `WidthDbu`/`OutwardDeg`, when `PinAt` finds a pin, and `PinAt`'s default tolerance is
+  **zero — exact coincidence**, deliberately (a port merely NEAR a pin has not named it); or
+* `WidthAcross(bbox, direction)` — the instance's **array-expanded bounding box**.
+
+There is no third. On a straight run of metal the box is a fair approximation and the gap never
+shows; on a coil it is the whole 250 µm envelope against a 10 µm turn.
+
+### The pin was half a turn width inside the metal
+
+`_spiral_cell` built pin 1 from `points[-1]`, the last point of the **centre line**, while
+`_segment_runs` cuts a free end square `half` a width PAST that point. Pin 2, on the landing pad's
+drawn edge, sat exactly on the metal. Measured on the shipped cell: pin 1 at (−110, −120) µm with
+the metal's face at y = −125.
+
+That 5 µm is the whole bug, because of where a user aims. Geometry snap ranks `Pin` above every
+other feature but only among candidates **within the pixel tolerance**, and the user aims at the
+metal's visible end, not at a pin 5 µm behind it. Measured with `LayoutSnapQuery.FindCandidates` at
+(−110, −125):
+
+| tolerance | first candidate |
+|---|---|
+| 0.5 µm | `Midpoint@(−110,−125)` — the end face's own midpoint |
+| 2 µm   | `Midpoint@(−110,−125)` |
+| 6 µm   | `Pin@(−110,−120)` |
+
+At the other terminal the pin IS the edge midpoint, so every tolerance answers `Pin`. Landing on the
+midpoint, `PinAt` finds nothing and `LayoutPortDirection.Resolve` reports **250 µm** — 25× the
+metal. One terminal right, one terminal wrong, from one pin half a line width out of place.
+
+### And the interior label changed the port's TYPE, not only its width
+
+Driven all the way through `PlanarExtractor` + `EmPortExtraction`, a port at the old pin 1 came out
+`Kind = Internal` with `Side = MinX` — a shunt-to-ground port on the wrong axis, not an edge port.
+`LayoutPortDirection.IsInterior` is right to say so: the label was in the conductor's interior. **A
+pin that is not on the metal's edge is not a terminal**, and the misclassification is silent — an
+internal port produces a complete, plausible answer for a different structure.
+
+### The other half: a terminal covered by two conductor levels cannot be driven at all
+
+The same cell's landing pad was exactly the via's footprint with the Metal2 crossover ending on top
+of it, so pin 2 carried metal on BOTH levels. `EmPortExtraction` refuses that by name — *"a port's
+LEVEL is part of its identity: driving the wrong one drives a different conductor with the same
+footprint"* — and the refusal is correct. What was wrong was the artwork: **a cell that hands out a
+pin has to hand out single-level metal to stand on.** `KIT_MIMCAP` had the identical arrangement at
+its own strap terminal and was fixed with it.
+
+Both fixes are in `examples/PDK PCells/pcell-kit/kit.py` as RULE 10 (the pad runs a lead past the
+via) and RULE 11 (a pin sits on the metal's own edge, not on the end of a centre line). `KIT_MLIN`
+had always followed RULE 11; the spirals are a walk rather than a rectangle and it was not restated.
+Gated by `PdkPCellExampleTests.APortOnEitherTerminalDrivesTheCoilsOwnLevel` (both spirals, both
+metals, through the real extractor) and `.APortOnThePlacedCoilTakesItsWidthFromThePin_NotTheInstanceBox`.
+
+### What was NOT changed, and is worth knowing
+
+`PinAt`'s zero tolerance is right and the bbox fallback is honest. **Widening either would hide this
+class of defect rather than fix it** — a kit whose pins are off the metal would then report a
+plausible width measured from somewhere the pin is not. The lookup could instead resolve the
+instance's own sub-cell SHAPE at the point and measure it, which would make the fallback as good as
+a top-level polygon's; it was not done here because the artwork was genuinely wrong and fixing the
+artwork is what makes the pin authoritative again.
+
 ## A relative file reference means the WORKSPACE ROOT, and a run verb thought otherwise (2026-09-15)
 
 Owner, on the shipped S-Parameters example after copying it out of Tools ▸ Examples:
