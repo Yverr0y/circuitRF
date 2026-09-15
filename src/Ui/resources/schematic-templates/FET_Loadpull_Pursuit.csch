@@ -6,60 +6,6 @@
   "AuthorGridDivisor": 20,
   "Components": [
     {
-      "InstanceName": "VAR1",
-      "Symbol": "Var",
-      "X": -1400,
-      "Y": -800,
-      "Rotation": "R0",
-      "MirrorX": false,
-      "Disable": "None",
-      "Parameters": [
-        {
-          "Name": "VGS",
-          "Expression": "-3.05",
-          "Unit": "",
-          "ShowOnSchematic": true,
-          "Dimension": "None"
-        },
-        {
-          "Name": "VDS",
-          "Expression": "48",
-          "Unit": "",
-          "ShowOnSchematic": true,
-          "Dimension": "None"
-        },
-        {
-          "Name": "RFfreq",
-          "Expression": "2 GHz",
-          "Unit": "",
-          "ShowOnSchematic": true,
-          "Dimension": "None"
-        }
-      ],
-      "LabelOffsets": [
-        [
-          70,
-          -75
-        ],
-        [
-          70,
-          -75
-        ],
-        [
-          70,
-          -75
-        ],
-        [
-          70,
-          -75
-        ],
-        [
-          70,
-          -75
-        ]
-      ]
-    },
-    {
       "InstanceName": "SourceTuner1",
       "Symbol": "SourceTuner",
       "X": -1200,
@@ -318,6 +264,38 @@
       "Parameters": [],
       "ShowTypeLabel": false,
       "ShowInstanceName": false
+    },
+    {
+      "InstanceName": "VAR1",
+      "Symbol": "Var",
+      "X": -1500,
+      "Y": -800,
+      "Rotation": "R0",
+      "MirrorX": false,
+      "Disable": "None",
+      "Parameters": [
+        {
+          "Name": "VGS",
+          "Expression": "-3.05",
+          "Unit": "",
+          "ShowOnSchematic": true,
+          "Dimension": "None"
+        },
+        {
+          "Name": "VDS",
+          "Expression": "48",
+          "Unit": "",
+          "ShowOnSchematic": true,
+          "Dimension": "None"
+        },
+        {
+          "Name": "RFfreq",
+          "Expression": "2 GHz",
+          "Unit": "",
+          "ShowOnSchematic": true,
+          "Dimension": "None"
+        }
+      ]
     }
   ],
   "Wires": [
