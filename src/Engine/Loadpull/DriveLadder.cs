@@ -71,6 +71,36 @@ public static class DriveLadder
     public static double PoutDbm(double poutW) => poutW > 0 ? 10 * Math.Log10(poutW) + 30 : double.NaN;
 
     /// <summary>
+    /// The smallest Pout rise, in dB, that lets a gain drop be read as COMPRESSION rather than as an
+    /// output that is not responding to drive. It separates "did not move at all" from "moved" — not
+    /// "moved enough" — which is why it is this small and why it is a constant rather than a setting.
+    /// </summary>
+    public const double MinPoutRiseForCompressionDb = 0.01;
+
+    /// <summary>
+    /// Whether a gain drop measured against the ladder's own gain PEAK is credible as compression.
+    ///
+    /// <para>Falling gain is also the exact signature of an output that is not responding to drive at
+    /// all: a Pout floor that never moves makes <c>Gt = Pout − Pin</c> fall by 1 dB for every 1 dB of
+    /// Pin, so a 3 dB target trips three rungs after the ladder starts — at a drive tens of dB below
+    /// anything the device could respond to, and at EVERY termination alike. A whole loadpull grid
+    /// then reports "reached compression" over a surface that is one constant value, which draws no
+    /// contours at all because a constant field has no level crossings to draw.</para>
+    ///
+    /// <para><b>The criterion is physical, like <see cref="IsDiscontinuous"/>'s.</b> Real compression
+    /// always raises Pout: accumulating <c>x</c> dB of it takes more than <c>x</c> dB of extra drive,
+    /// so Pout rises by the difference. A device saturating so hard that Pout is flat to within
+    /// <see cref="MinPoutRiseForCompressionDb"/> simply runs on to PinMax — the engine's existing,
+    /// honest answer for a point that did not compress.</para>
+    ///
+    /// <para>A non-finite <paramref name="poutAtGainPeakDbm"/> (no gain peak recorded yet) is not
+    /// evidence against the stop, so it passes.</para>
+    /// </summary>
+    public static bool IsCompressionCredible(double poutAtGainPeakDbm, double poutNowDbm)
+        => !double.IsFinite(poutAtGainPeakDbm)
+           || poutNowDbm - poutAtGainPeakDbm >= MinPoutRiseForCompressionDb;
+
+    /// <summary>
     /// Re-walks ONE ladder step as a bisection continuation. Subdivides
     /// <c>[fromPinDbm, toPinDbm]</c> into 2ᵈ equal sub-steps for d = 1 … <paramref name="maxDepth"/>,
     /// each warm-started from its own predecessor; the FIRST depth whose whole chain is continuous

@@ -653,6 +653,17 @@ public class Hero3BPursuitTests(ITestOutputHelper output)
                 $"Unexpected StopCode {code} at grid point {i}");
         }
 
+        // The follow-on surface must actually VARY across the grid. A run that reported all 44 of its
+        // terminations as "compressed" over one constant Pout passed every assertion above and drew no
+        // contours at all, because a constant field has no level crossings (RESOLVED.md, 2026-09-14).
+        var lpPout = ds["Pout_dBm"].RealValues.Where(double.IsFinite).ToArray();
+        Assert.NotEmpty(lpPout);
+        double poutSpan = lpPout.Max() - lpPout.Min();
+        output.WriteLine($"Follow-on Pout_dBm span across the surface: {poutSpan:F2} dB");
+        Assert.True(poutSpan > 1.0,
+            $"Follow-on loadpull surface is degenerate (Pout_dBm spans {poutSpan:E3} dB across " +
+            "44 terminations x every Pin step) — nothing to contour.");
+
         int lpCompressed = lpStopCodes.Count(c => (int)Math.Round(c) == 1);
         output.WriteLine(
             $"Follow-on loadpull DataSet: {lpGridCount} grid points  " +

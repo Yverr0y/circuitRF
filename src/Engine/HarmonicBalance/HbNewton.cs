@@ -172,7 +172,61 @@ public static class HbNewton
         /// </summary>
         Complex[,,]? G = null,
         Complex[,,]? C = null,
-        IReadOnlyList<HigherWeightBucket>? Buckets = null);
+        IReadOnlyList<HigherWeightBucket>? Buckets = null,
+        /// <summary>
+        /// Set when the solve was refused before it started because <c>tol</c> is not smaller than
+        /// the RF excitation itself — see <see cref="RfExcitationScale"/>. Carries that scale so a
+        /// caller can say which two numbers are in the wrong order.
+        /// </summary>
+        double VacuousToleranceScale = double.NaN);
+
+    /// <summary>
+    /// The size of the RF excitation this solve is driven by: ‖iSrc[k]‖₂ over the signal harmonics
+    /// <c>k = 1 … K</c>, in amperes. DC (<c>k = 0</c>) is excluded on purpose — the bias sources are
+    /// not what the tone drives the circuit with, and including them would hide a dead RF drive
+    /// behind a large bias current.
+    /// </summary>
+    public static double RfExcitationScale(Complex[][] iSrc, int K)
+    {
+        double sum = 0.0;
+        for (int k = 1; k <= K && k < iSrc.Length; k++)
+        {
+            var col = iSrc[k];
+            if (col is null) continue;
+            for (int n = 0; n < col.Length; n++)
+            {
+                double re = col[n].Real, im = col[n].Imaginary;
+                sum += re * re + im * im;
+            }
+        }
+        return Math.Sqrt(sum);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="tol"/> can constrain the RF solution at all.
+    ///
+    /// <para>The convergence test is <c>‖F‖ &lt; tol</c> with ‖F‖ in AMPERES and tol absolute. When
+    /// tol is not smaller than the whole RF excitation, the zero-RF iterate already satisfies it:
+    /// <c>F</c> at the DC operating point is the excitation itself, so EVERY spectrum from the true
+    /// one down to no response at all is "converged" and which one is reported depends only on the
+    /// warm start. That is not a loose answer, it is no answer — and it is silent, because the solve
+    /// returns <c>Converged = true</c> at iteration 1 having taken no step, so a drive-up ladder
+    /// reports the previous rung's spectrum at every rung and the gain falls exactly 1 dB per dB.</para>
+    ///
+    /// <para>Refusing is the only honest outcome: a cold restart lands on the same vacuous set, and
+    /// tightening tol may put it below what the circuit's conditioning can reach.</para>
+    ///
+    /// <para><b>This is not the same as "tol is loose".</b> ‖F‖ is the residual over ALL harmonics,
+    /// DC included, so a solve that has real work to do at k=0 iterates whatever the RF excitation
+    /// is, and lands on the right answer. The fault appears only when the solve is about to return
+    /// its ENTRY state — which is why <see cref="Solve"/> consults this at <c>iter == 0</c> and
+    /// nowhere else.</para>
+    /// </summary>
+    public static bool IsToleranceVacuous(Complex[][] iSrc, int K, double tol, out double scale)
+    {
+        scale = RfExcitationScale(iSrc, K);
+        return scale > 0.0 && tol >= scale;
+    }
 
     /// <summary>
     /// Run Newton loop. V is modified in-place ([N, K+1] complex).
@@ -230,6 +284,17 @@ public static class HbNewton
             // ── 1. Convergence test on ‖F‖ (absolute, in amperes — design §12.2) ──
             if (fN < tol)
             {
+                // Passing at the ENTRY state means no step has been taken toward THIS excitation:
+                // what is about to be returned is the seed, spectrum and all. That is a real answer
+                // whenever tol can constrain the RF part — the seed then IS a solution to within
+                // tolerance — and no answer at all when it cannot (see IsToleranceVacuous), because
+                // every spectrum from the true one down to no response passes the same test and
+                // which one comes back depends only on where the solve started.
+                if (iter == 0 && IsToleranceVacuous(iSrc, K, tol, out double rfScale))
+                    return new SolveResult(false, 0, trace,
+                        TotalInjection(iNl, qNl, higherBuckets, N, K, omega0), portITime,
+                        G, C, higherBuckets, rfScale);
+
                 trace.Add(new HbConvergenceTrace.IterRecord(iter, fN));
                 return new SolveResult(true, iter + 1, trace,
                     TotalInjection(iNl, qNl, higherBuckets, N, K, omega0), portITime,

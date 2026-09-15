@@ -586,7 +586,10 @@ public sealed class HbEngine
         // not converge; Always = ramp without trying cold. The line search catches most of what used
         // to land here (HB-P3 M1), so IfNecessary is normally free.
         if (p.DriveStepping != DcBiasSteppingMode.Never &&
-            (solveResult is null || !solveResult.Converged))
+            (solveResult is null || !solveResult.Converged) &&
+            // A vacuous tolerance is not a hard solve — every ramp rung LOWERS the drive, so each one
+            // is vacuous too. Ramping would spend the whole ladder to arrive at the same refusal.
+            !(solveResult is not null && double.IsFinite(solveResult.VacuousToleranceScale)))
         {
             var sources = HbDriveRamp.Collect(_netlist);
             if (sources.Count > 0)
@@ -627,7 +630,13 @@ public sealed class HbEngine
                 0.0, solveResult.Iterations, solveResult.Converged, solveResult.IterTrace));
         }
 
-        if (!solveResult.Converged)
+        if (!solveResult.Converged && double.IsFinite(solveResult.VacuousToleranceScale))
+        {
+            string msg = VacuousToleranceMessage(p.Tol, solveResult.VacuousToleranceScale);
+            _netlist.AddWarning(msg);
+            Console.Error.WriteLine($"[HB] {msg}");
+        }
+        else if (!solveResult.Converged)
         {
             double res = solveResult.IterTrace.LastOrDefault()?.ResidualNorm ?? 0.0;
             _netlist.AddWarning(
@@ -1666,6 +1675,17 @@ public sealed class HbEngine
     /// InductanceRegularization is taken from the injected <paramref name="settingsOverride"/>
     /// (the loadpull engine passes Always).
     /// </summary>
+    /// <summary>
+    /// The sentence a refused-as-vacuous solve reports (see <see cref="HbNewton.IsToleranceVacuous"/>).
+    /// It names both numbers, because the fault is their ORDER and neither one alone looks wrong.
+    /// </summary>
+    internal static string VacuousToleranceMessage(double tol, double rfScale) =>
+        $"HB tolerance {tol:E3} A is not smaller than the RF excitation itself ({rfScale:E3} A), so " +
+        "\u2016F\u2016 < tol is satisfied with no RF response at all and the solve has nothing to determine. " +
+        "The drive reaching the circuit is far below the tolerance \u2014 typically a source impedance " +
+        "whose real part starves a high-impedance input, or a Tol left at a value meant for a " +
+        "milliamp-scale circuit.";
+
     public SinglePointResult RunSinglePoint(
         HbAnalysisParams  p,
         Complex[,]?       warmStart        = null,
@@ -1738,7 +1758,9 @@ public sealed class HbEngine
 
         string? failReason = null;
         if (!sr.Converged)
-            failReason = $"Newton non-convergence: ‖F‖={sr.IterTrace.LastOrDefault()?.ResidualNorm:E3} after {sr.Iterations} iters";
+            failReason = double.IsFinite(sr.VacuousToleranceScale)
+                ? VacuousToleranceMessage(p.Tol, sr.VacuousToleranceScale)
+                : $"Newton non-convergence: ‖F‖={sr.IterTrace.LastOrDefault()?.ResidualNorm:E3} after {sr.Iterations} iters";
 
         // Lazy linear back-solver: snapshot the per-harmonic source RHS while component state is still
         // current (it must be captured now — BuildSourceRhs reflects only the latest stamp), then hand

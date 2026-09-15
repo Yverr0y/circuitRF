@@ -241,3 +241,105 @@ one, or cost solves and change nothing. That is why the guard being over-eager o
   `Z[k]` on both tuners plus the swept `Z` — the flag both energy screens read.
 - `testdata/Hero3/hero3_classF.cnl` and `hero3_classF_active.cnl` (new). Neither is a golden; they
   exist to be wrong without the guard, and the second to be right *with* PAE > 100%.
+
+---
+
+## A follow-on loadpull that reported 44 compressed terminations and drew no contours (2026-09-14)
+
+Reported from a `loadpull_pursuit` on a compiled (Verilog-A) HEMT: the run said the device compressed
+at all 44 points, the follow-on loadpull was present in the DataSet, and the Data Display drew nothing.
+Starting the ladder lower (`PinStart=-50`) made no difference.
+
+**The surface was ONE constant value.** `Pout_dBm` was 8.254e-22 W — −180.83 dBm — at every one of the
+44 terminations and every Pin step, to the last digit. `ContourExtractor` finds a level crossing with
+`(v0 < level) != (v1 < level)`; on a constant field that is never true at any level, so it emits zero
+polylines. Nothing in the Data Display was wrong.
+
+### The chain, measured
+
+1. The pursuit itself was healthy — 25 queries, MXP `20.03+j0.98 Ω` at 47.68 dBm, MXE `75.06+j6.27 Ω`
+   at 74.7% DE — and it extracted `Zsource = 1.52 + j1188.49 Ω`. `LoadpullResultZsource=MXE` (the
+   default) makes the follow-on present that instead of the SourceTuner's declared `Z[1]`.
+2. **Drive into a high-impedance input is set by `Re(Zs)`, not by `Pavl` alone.** The gate is very
+   nearly an open at 2 GHz, so the swing it sees is the open-circuit source voltage
+   `sqrt(8·Pavl·Re(Zs))`. Measured at Pavl = −50 dBm: `|Vg| = 2.000e-3 V` at the declared 50 Ω and
+   `3.491e-4 V` at the pursuit Zsource — 15.2 dB less, and in both cases exactly the open-circuit
+   value, so nothing resonates at the drive the ladder starts from.
+3. **The whole circuit then ran below the HB tolerance.** The RF excitation was 2.937e-7 A against the
+   directive's `Tol=1e-6` A, which `HbNewton` applies as an ABSOLUTE test on ‖F‖ in amperes *before*
+   its first update. Every warm-started rung therefore returned the PREVIOUS rung's spectrum, flagged
+   `Converged=true` at iteration 1, having ignored the drive change entirely — `|Vg|` stayed pinned at
+   3.491009e-4 V from −50 through −46 dBm.
+4. With Pout frozen, `Gt = Pout − Pin` fell exactly 1 dB per 1 dB, so the 3 dB compression target
+   tripped on the 4th rung — at −46 dBm, 81 dB below `PinMax` — at every termination alike. That is the
+   "44 reached compression" the run reported, printed next to `DE 0.00%`.
+
+### The traps
+
+- **An absolute residual tolerance is not merely loose when it exceeds the excitation — it is vacuous.**
+  `‖F‖ < tol` is then satisfied by every spectrum from the true one down to no response at all, and
+  which one comes back depends only on where the solve started. Tightening `Tol` does not rescue it:
+  at 1e-11 this circuit stops converging at all, because the Q ≈ 780 source makes the problem badly
+  conditioned. Refusal is the only honest outcome.
+- **The fault is NOT "tol is loose".** ‖F‖ spans all harmonics, DC included, so a solve with real work
+  to do at k=0 iterates whatever the RF excitation is and lands on the right answer. A first cut that
+  refused on `tol >= rfScale` alone broke five legitimate small-drive HB tests
+  (`HbLinearNodeTests`, `Hero2ParametricSweepTests.SingleLevel_DcDrainCurrent_ShiftsWithVgg`,
+  `OperatingPointReadBackTests.Hb_OpVarsAreWaveformsOnTheHarmonicAxis`). The condition only bites when
+  the solve is about to return its ENTRY state, which is why `HbNewton` consults it at `iter == 0` and
+  nowhere else.
+- **Falling gain alone is not compression.** It is equally the signature of an output not responding to
+  drive. Real compression always RAISES Pout: accumulating x dB of it takes more than x dB of extra
+  drive. The ladder had no such check.
+- **The acceptance gate could not have caught this.** `Hero3BPursuit_FollowOnLoadpullResult_WhenCreateOn_DataPresent`
+  asserted cube presence and stop codes in 0–3, both of which the degenerate run satisfied. Hero 3B
+  also never exercises the path: its SDD gate is `I[1,0]=_v1/50`, so its own extracted Zsource is
+  `50.00+0.00j Ω` and the follow-on is never re-matched at all.
+
+### Zsource itself is not miscomputed — it is not meaningful for this DUT
+
+`ComputeZsource` faithfully reports `conj(Zin)` at the OBO drive; the arithmetic checks out against the
+ladder. What it is reporting is the problem. Zin measured across the drive-up at the declared 50 Ω:
+
+| Pavl dBm | 16 | 18 | 19 | 21 | 22 | 23 | 24 | 25 | 26 |
+|---|---|---|---|---|---|---|---|---|---|
+| Re(Zin) Ω | −1.427 | −0.258 | +0.786 | +1.580 | +1.375 | +0.712 | +0.083 | −0.540 | −1.047 |
+| C_equiv fF | 52.3 | 59.5 | 62.7 | 68.3 | 70.9 | 73.5 | 75.9 | 78.1 | 80.1 |
+
+- The reactance dominates by three orders (−j1164 at the OBO rung) and the **real part sign-flips
+  across the ladder**, wandering in a ±1.5 Ω band around zero — 0.1% of |Zin|. Which value the
+  extraction lands on is decided by `ZsourceOBO`: 5 dB gives +1.52 Ω here, and **1 dB would give a
+  NEGATIVE real part**, which as a source impedance is an active termination — and `TunerModel.
+  SetSourceDrive` answers `Re(Z1) <= 0` with `|Vs| = 0`, silently. Not fixed here; recorded.
+- The equivalent input capacitance runs from **0.004 fF pinched off to 80 fF driven** — a 20,000:1
+  swing — so a single conj-match is valid only in a narrow band of drive near compression, and the
+  ladder has to climb 70 dB through where it is a gross mismatch. Forcing a rung directly at +20 dBm
+  with that source gives HB non-convergence in 100 iterations.
+
+### What changed
+
+- `HbNewton.RfExcitationScale` / `IsToleranceVacuous` (new) — ‖iSrc[k]‖₂ over the SIGNAL harmonics
+  k = 1…K. DC is excluded on purpose: a large bias current must not hide a dead RF drive.
+- `HbNewton.Solve` — the convergence test, when it passes at `iter == 0`, is refused as a
+  non-convergence if the tolerance is vacuous; `SolveResult.VacuousToleranceScale` carries the scale
+  so the caller can name both numbers.
+- `HbEngine.VacuousToleranceMessage` — the sentence, naming the tolerance AND the excitation, because
+  the fault is their ORDER and neither looks wrong alone. `RunSinglePoint` reports it as the
+  `FailReason`; `Run` warns with it and SKIPS the drive ramp, since every ramp rung lowers the drive
+  and is vacuous too.
+- `DriveLadder.IsCompressionCredible` / `MinPoutRiseForCompressionDb` (new) — a gain drop measured
+  against the ladder's own gain peak counts as compression only if Pout rose since that peak. The
+  threshold (0.01 dB) separates "did not move" from "moved", not "moved enough"; a device saturating
+  flatter than that runs on to PinMax, which is the engine's existing honest answer for a point that
+  did not compress. `LoadpullEngine.RunOneTermination` consults it at the compression stop.
+- `LoadpullEngine.RunOneTermination` reports the failing solve's own reason on the stop line and adds
+  it once per run (`AddNoteOnce("loadpull.solve-failed", …)`) rather than once per grid point.
+- `Hero3BPursuitTests` — the follow-on acceptance now asserts the surface VARIES (Pout_dBm span > 1 dB
+  across the grid). Hero 3B measures 81.11 dB.
+- `VacuousToleranceAndCompressionCredibilityTests` (new) — both guards, unit and end-to-end on Hero 3B
+  with a starved source, plus the converse: the same starved source at a tolerance the excitation can
+  reach still runs and still tracks drive.
+
+**The pursuit phase is untouched by all of this** — verified by diffing the whole 2,077-line query log
+of the reported design before and after: byte-identical, MXP, MXE and Zsource included. The pursuit
+queries run at the declared 50 Ω source with mA-scale currents, four orders above the tolerance.

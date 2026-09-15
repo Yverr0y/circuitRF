@@ -507,8 +507,14 @@ public sealed class LoadpullEngine
         var pinSteps  = new List<PinStepResult>();
         string stopReason = "PinMax";
         double gMax   = double.NegativeInfinity;
+        // Pout at the rung gMax was measured on — what a compression claim is measured AGAINST.
+        double poutAtGMaxDbm = double.NaN;
         Complex[,]? innerSeed = warmStart;
         int continuations = 0, retries = 0;
+        // The reason the LAST failed solve gave. A ladder that stops reports WHY it stopped: the
+        // solver's own sentence says far more than the word "non-convergence" (a vacuous tolerance,
+        // for one, is a setup fault and not a hard solve — see HbNewton.IsToleranceVacuous).
+        string? lastFailReason = null;
 
         // One solve at an EXPLICIT warm start, packaged as the step this ladder records. Returns null
         // for non-convergence, which is what DriveLadder's continuation reads as "abandon this depth".
@@ -537,6 +543,8 @@ public sealed class LoadpullEngine
                 foms.PavlW, foms.PinDeliveredW, foms.PoutW, foms.GtDb, foms.GpDb,
                 vLoad, iLoad, vSrc, iSrc2,
                 sr.Converged, sr.Iterations, sr.FailReason);
+
+            if (!sr.Converged && sr.FailReason is not null) lastFailReason = sr.FailReason;
 
             return sr.Converged ? step : null;
         }
@@ -585,7 +593,12 @@ public sealed class LoadpullEngine
                 pinSteps.Add(NonConvergedStep(p, ctx, pavlDbm, isTickle, innerSeed));
                 stopReason = "NonConvergence";
                 Console.Error.WriteLine(
-                    $"[LP]   Pin={pavlDbm:F1}: non-convergence. Stopping.");
+                    $"[LP]   Pin={pavlDbm:F1}: non-convergence. Stopping." +
+                    (lastFailReason is null ? "" : $"  {lastFailReason}"));
+                // Once per run, not once per grid point: a setup fault repeats at every termination,
+                // and 44 copies of the same paragraph buries it rather than reporting it.
+                if (lastFailReason is not null)
+                    _netlist.AddNoteOnce("loadpull.solve-failed", lastFailReason);
                 break;
             }
 
@@ -598,7 +611,7 @@ public sealed class LoadpullEngine
 
             if (!isTickle)
             {
-                if (gain > gMax) gMax = gain;
+                if (gain > gMax) { gMax = gain; poutAtGMaxDbm = WattsToDbm(step.PoutW); }
                 double compression = gMax - gain;
                 Console.Error.WriteLine(
                     $"[LP]   Pin={pavlDbm:F1} dBm  Pout={WattsToDbm(step.PoutW):F2} dBm  " +
@@ -607,7 +620,8 @@ public sealed class LoadpullEngine
                 // Stop when we have driven at least 0.1 dB past the compression target.
                 // Every step stays on the regular Pin grid (PinStart + n·PinStep).
                 // The step just below this one and this step bracket P-xdB for ExtractCriterion.
-                if (compression >= p.Compression + 0.1)
+                if (compression >= p.Compression + 0.1 &&
+                    DriveLadder.IsCompressionCredible(poutAtGMaxDbm, WattsToDbm(step.PoutW)))
                 {
                     stopReason = "Compression";
                     break;
