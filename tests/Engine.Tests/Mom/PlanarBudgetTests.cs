@@ -312,7 +312,7 @@ public sealed class PlanarBudgetTests
         Assert.Equal(6.0, sub.Points[0].FrequencyHz);
         Assert.Equal(0.0, sub.Points[0].KernelFitMs);
         Assert.Equal(0.0, sub.Points[0].S[1, 0].Imaginary);
-        Assert.Contains(sub.Notes, n => n.Contains("the 0 Hz conduction solve"));
+        Assert.Contains(sub.Notes, n => n.Contains("the field solver has no valid range"));
 
         // …and the legitimate neighbour runs, unchanged by either. 2 GHz on 1.6 mm FR-4 is
         // k₀H = 0.067, so PathExtent·k₀H = 20 — comfortably past the point where the fit stops

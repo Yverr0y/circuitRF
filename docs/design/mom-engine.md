@@ -443,6 +443,85 @@ but wrong numbers.
 >   what each port returns through, per port — the standing "the plane is the negative terminal of every
 >   port in this run" sentence is what a mixed run makes false.
 
+> **PEEL (2026-09-14) — THE PEEL HAS A CONDITIONING LIMIT OF ITS OWN, AND `DeembedResidual` IS NOT A
+> QUALITY MEASURE BELOW IT.**
+>
+> The two-line calibration is exact algebra, and at the bottom of a band it still publishes a number
+> that is 59 dB wrong. The reason is in `PlanarDeembed.Apply`, not in the calibration: the peel forms
+>
+> ```
+> Y = (S_meas − a₁₁) / a₂₁²
+> ```
+>
+> and an edge port at low frequency is a **series gap capacitance** — the cut sits one cell inside the
+> drawn metal, so the source drives the structure through a fringing capacitance and nothing else.
+> That makes `a₂₁ ∝ ω` and `a₁₁ → 1`: the numerator is the difference of two numbers that both
+> approach 1, and the denominator is an ω². **The ω² is the amplifier**, and it is why a de-embedded
+> point at the bottom of a band is wrong by a factor that grows as 1/f while nothing published moves.
+>
+> **The amplification is NOT the two standards' separation, and that was measured rather than
+> reasoned about.** A 30× longer second standard — βΔℓ from 0.40° to 11.8° at 10 MHz — moves the
+> de-embedded |S₁₁| of a uniform line by under 6 %, and at 100 MHz a 30× separation is *ten times
+> worse*, because the two standards' `M₁₁` inconsistency grows with the length difference while the
+> amplifier it is multiplied by does not move at all. Lengthening the standards is the obvious move
+> at the bottom of a band, it is exactly the 1/f_lo standard the quasi-static path exists to remove,
+> and it does not work.
+>
+> **What is published.** `DeembedErrorFloor`, per (frequency, port), in the diagnostics group beside
+> the two residuals:
+>
+> ```
+> DeembedErrorFloor = DeembedResidual · |a₁₁| / |a₂₁|²
+> ```
+>
+> It is in |ΔS| — the units of the answer — so it reads against a tolerance directly. Measured
+> against the uniform-line control, where a de-embedded S₁₁ must be exactly 0, it tracks the realised
+> error to a ratio of **0.73–1.06** over three stacks, three mesh densities and three decades of
+> frequency. It is a **floor on the instrument's own error, not a bound on the answer**: it is what
+> the peel does to a structure it was calibrated for, so it says nothing about the DUT's own meshing
+> or about radiation.
+>
+> **`DeembedResidual` is not the number to read, and down there it points the wrong way.** It measures
+> the two standards' agreement with each other, and two standards whose `x = e^{−γℓ}` are both
+> approaching 1 agree better and better while determining the error box less and less. On the board
+> this was reported on it reads **1.95e-10 at 10 MHz and 9.38e-9 at 500 MHz** — 48× *smaller* exactly
+> where the published answer is worst. A reader checking de-embedding quality by that cube is told the
+> bottom of the band is the best-calibrated part of the sweep. That is not a defect in the number; it
+> is honest about what it measures, and what it measures is not accuracy. The residual is ∝ ω and
+> `|a₂₁|²` is ∝ ω², so their quotient — the error — is ∝ 1/ω, which is the law measured.
+>
+> **The guard, and it is PER POINT.** `PlanarSolve` reads the floor off the points the sweep already
+> produced (nothing is re-solved, and a run nowhere near the thresholds takes exactly the arithmetic
+> it took before). Points above `PeelErrorBudgetDS` = 0.05 are **named in the run's notes and still
+> published**; a point at or above `PeelErrorRefusalDS` = 0.25 is **left out of the sweep** and named
+> by frequency, so the gap in the `.sNp` is never a mystery. Both thresholds are anchored on what a
+> perfect match would be published as (−26 dB and −12.0 dB respectively), and −12 dB is the shape of
+> the report itself.
+>
+> **The rest of the sweep is published exactly as it was solved — the run is not thrown away for the
+> points it cannot answer.** That is this file's own rule for a far field that cannot be produced
+> ("present and refused"), and it applies here for a stronger reason: the unanswerable points are at
+> the *bottom* of a band, so refusing over them costs the user every higher frequency they waited
+> for. The one case that is still a refusal is the sweep in which *every* de-embedded point went,
+> where there is no result to hand back and nothing is lost by saying so.
+>
+> Neither threshold is a `.cem` field or a panel control; the way to get the dropped points into the
+> file anyway is `PlanarSolveSettings.DeembedOutsideCalibrationValidity`, which already exists and
+> already says so in the notes and in the `.sNp`'s provenance.
+>
+> **What the run actually says is three sentences and none of the above is in it** — which points are
+> missing, the frequency above which de-embedding on that port is reliable, and that the
+> `DeembedErrorFloor` cube carries the per-point number. The mechanism is here and in the source,
+> because that is where someone asking "why" looks; a run's notes are for someone asking "what do I
+> do", and a note too long to read is worth nothing however true it is. The gate holds it under 400
+> characters and rejects words in block capitals.
+>
+> **This is the FOURTH wall at the bottom of a band and it is the highest of them.** The other three
+> are §10.13's: the calibration standard's own N, the DCIM fit's floor, and the raw uncalibrated
+> answer being the port rather than the structure. The fit's substitution note used to be the only
+> sentence down there, and it reads as "trouble ends here" when it is a ceiling on one wall; it now
+> says which wall it is.
+
 > **RP-2c (2026-09-10) — de-embedding a coplanar edge port. The STANDARD changed; the ALGEBRA did not.**
 >
 > D4's rule is unchanged and is the whole point of this phase: the calibration standard must rebuild the
@@ -1183,7 +1262,7 @@ The consequences are all good ones:
 > Whichever kernel runs, the `DataSet` has the same shape: `S`, per-port `Z0`, and **one** diagnostics
 > group. Kernel A's is `"tline"` (Zc, Gamma, Eeff, AttenDbPerM, Rpul, Lpul, Gpul, Cpul); kernel B's is
 > `"planar"` (Gamma, Zc, Eeff, AttenDbPerM, Cpul, CalElectricalDeg, DeembedResidual, DeembedRejected,
-> CalibrationUsable). **They deliberately do not share a name.** A per-unit-length quantity from a 2-D
+> DeembedErrorFloor, CalibrationUsable). **They deliberately do not share a name.** A per-unit-length quantity from a 2-D
 > quasi-static solve and one back-solved from a de-embedded full-wave S-matrix are different claims;
 > they agree on a uniform line — that agreement is L8's phase gate — and they diverge with frequency,
 > which is dispersion and is a *result*. One shared group would let a Data Display trace silently mix

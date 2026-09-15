@@ -3,6 +3,390 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## PEEL — the de-embedding peel's own conditioning, published and gated (2026-09-14)
+
+`docs/sonnet-briefs/brief-deembed-peel-low-frequency.md`. Owner report: a 3.8 mm microstrip on the
+0.6 mm laminate starter stack, 254 µm wide, swept from 1 MHz, publishes |S₁₁| = −1.37 dB at 9.98 MHz
+where the equivalent closed-form line gives −60.2 dB. **It is not a refusal, not a warning and not a
+note**, and the one sentence the run does emit down there — LF2's *"Below 7.952 MHz the full-wave fit
+has no valid range"* — invites exactly the wrong reading, that 7.952 MHz is where trouble ends.
+
+**The defect that reached a user is not the 59 dB. It is that the 59 dB arrived with no sentence
+attached**, and that the one diagnostic anyone would have checked is anti-correlated with the truth.
+That is what this section closes. The accuracy is not closed and the measurements below say why.
+
+**The guard is PER POINT: a frequency the peel cannot answer is left out of the published sweep and
+named, and every other frequency is published exactly as it was solved.** The first version refused
+the whole run and that was wrong — §6 has the reasoning and the house rule it violated.
+
+### 1. M1 — WHERE THE FLOOR IS, AND IT IS NOT WHERE THE BRIEF PUT IT
+
+The brief attributed the amplification to the factor `(x₂² − x₁²) ≈ 2γΔℓ` that both halves of
+`SolveErrorBox`'s `a₂₂²` quotient carry, i.e. **to the two standards' SEPARATION**, and said so in
+italics: *"the ω is not in `a₂₁`, it is in `x₂² − x₁²`."* It fitted a law — error × 2βΔℓ flat to
+within a factor of two over a 42× move in the error — and the fit is real. **The attribution is
+wrong, and the experiment that settles it is one line of the brief's own "Must NOT".**
+
+**Δℓ IS INERT.** On the reported cross-section with a 20 mm uniform line, second standards from 3× to
+61× the short one (`PeelConditioningTests.ALongerSecondStandardDoesNotMoveIt_AndUpTheBandItIsWorse`):
+
+| Δℓ | βΔℓ @ 10 MHz | standard N | \|S₁₁\| @ 10 MHz | βΔℓ @ 100 MHz | \|S₁₁\| @ 100 MHz |
+|---|---|---|---|---|---|
+| 20 mm (shipped) | 0.401° | 52 | 1.200e-2 | 4.011° | 1.682e-3 |
+| 50 mm | 1.003° | 94 | 1.256e-2 | 10.03° | 2.521e-3 |
+| 110 mm | 2.206° | 178 | 1.257e-2 | 22.06° | 4.096e-3 |
+| 290 mm | 5.817° | 430 | 1.234e-2 | 58.15° | 8.822e-3 |
+| 590 mm | 11.83° | 850 | 1.19e-2 | 118.3° | 1.69e-2 |
+
+**A 30× longer second standard moves the 10 MHz answer by 5 %, and makes the 100 MHz answer TEN TIMES
+WORSE.** The brief's "Must NOT" says the obvious move "is the obvious move, it works, and it is
+exactly the 1/f_lo standard QSC existed to remove." Two of those three are right. **It does not
+work** — and that matters more than being a correction, because a reader who believed it would have
+spent the day proving it for themselves, which is precisely what that rule existed to prevent. The
+rule stands; its stated reason is now the measured one.
+
+**Why it gets worse going up: the two standards' `M₁₁` inconsistency grows with the length
+difference** while the amplifier it is multiplied by does not move at all. Lengthening buys more
+inconsistency and no conditioning.
+
+**THE AMPLIFIER IS `1/|a₂₁|²`, AND RAW1 §6 / LF1 §5(a) ALREADY NAMED IT.** `PlanarDeembed.Apply`
+forms `Y = (S_meas − a₁₁)/a₂₁²`. An edge port at the bottom of a band is a series gap capacitance —
+RAW1 measured its 13.9 fF directly — so `a₂₁ ∝ ω` and `a₁₁ → 1`: the numerator is the difference of
+two numbers that both approach 1 and the denominator is an ω². QSC's shorthand *"the `a₂₁ ∝ ω`
+floor"* was correct as written and the brief's re-attribution away from it is the error.
+
+**THE LAW.** With `ConsistencyResidual` the two standards' relative disagreement on `a₁₁`:
+
+```
+|ΔS| on a uniform line  =  ConsistencyResidual · |a₁₁| / |a₂₁|²
+```
+
+Measured against the uniform-line control — the only oracle here with no second model in it, because
+a de-embedded S₁₁ on a plain line must be exactly 0 and is read at the line's own Z_c:
+
+| stack / mesh | f | residual | \|a₂₁\|² | predicted | realised | ratio |
+|---|---|---|---|---|---|---|
+| board 0.6 mm, coarse | 10 MHz | 7.08e-08 | 5.90e-06 | 1.20e-02 | 1.20e-02 | **1.000** |
+| | 100 MHz | 9.63e-07 | 5.70e-04 | 1.69e-03 | 1.68e-03 | 0.996 |
+| board 0.6 mm, 4× mesh | 10 MHz | 2.97e-07 | 8.53e-07 | 3.48e-01 | 3.39e-01 | 0.973 |
+| | 100 MHz | 2.76e-06 | 8.24e-05 | 3.36e-02 | 3.54e-02 | 1.055 |
+| | 300 MHz | 9.04e-06 | 7.85e-04 | 1.15e-02 | 1.12e-02 | 0.972 |
+| FR-4 1.6 mm, coarse | 10 MHz | 2.13e-06 | 2.64e-05 | 8.06e-02 | 6.84e-02 | 0.849 |
+| | 100 MHz | 2.66e-05 | 2.74e-03 | 9.68e-03 | 8.21e-03 | 0.848 |
+| FR-4 1.6 mm, 2× mesh | 10 MHz | 6.82e-06 | 7.53e-06 | 9.05e-01 | 6.82e-01 | 0.754 |
+| | 100 MHz | 7.11e-05 | 7.94e-04 | 8.95e-02 | 9.16e-02 | 1.023 |
+| | 1 GHz | 5.55e-04 | 7.54e-02 | 7.03e-03 | 6.15e-03 | 0.874 |
+| GaAs 0.1 mm, coarse | 10 MHz | 1.82e-08 | 4.32e-07 | 4.22e-02 | 4.28e-02 | 1.015 |
+| | 300 MHz | 6.45e-08 | 4.54e-04 | 1.42e-04 | 1.42e-04 | 0.999 |
+
+**Three stacks, four mesh densities, five separations, three decades: ratio 0.73–1.06.** The residual
+is ∝ ω and `|a₂₁|²` is ∝ ω², so the quotient is ∝ 1/ω — which is the brief's own measured −0.984
+log-log slope, arrived at from the other end.
+
+**And the 1/f is why refining the mesh makes it WORSE, which a discretisation error does not do.**
+Both factors move the wrong way at once: on the board at 10 MHz, coarse → 2× → 4× takes `|a₂₁|²` from
+5.90e-6 to 2.69e-6 to 8.53e-7 (LF2's "the gap is one cell wide, so refining the mesh makes it worse",
+again) while the residual goes 7.08e-8 → 1.23e-7 → 2.97e-7. The floor goes 1.20e-2 → 3.72e-2 →
+3.48e-1.
+
+### 2. M1.1 — γ IS INNOCENT, AND SO IS EVERYTHING ELSE THE BRIEF CLEARED
+
+Perturbing the two standards' raw S by a relative η and γ by the same η, and reading the change in the
+de-embedded |S₁₁| (FR-4, 10 MHz): **amplification of an error in `m` = 1.62e+03; amplification of an
+error in γ = 3.75e-06.** Eight orders apart. The floor lives entirely in `m`, i.e. in the standards'
+own solved S, and nothing about γ's real or imaginary part reaches it down there. The brief's own
+measurements clearing the calibration (ε_eff to 0.4 %, Z_c to 0.3 %, α to 1 %) are consistent with
+this and were not re-measured.
+
+### 3. M1.2 — THE TWO STANDARDS ALREADY SHARE THEIR MESH, SO M2(a) IS A NO-OP
+
+`LongitudinalPartition` emits `endRun cells, N bulk cells, mirrored endRun` and accumulates the
+gridlines from zero, so the long standard **is** the short one with bulk cells inserted in the middle:
+head gridlines bit-identical, tail gridlines identical up to the shift, on both stacks checked. D7's
+"the end effects cancel exactly" argument already holds on the mesh, and there is nothing for M2(a)
+to build. **That was the brief's cheapest route and its most likely one** ("if it is the second, M2(a)
+is the whole fix and the rest of this brief is a guard") — and it was already done, in 2026-08, by
+L8d's own D4.
+
+### 4. M1 — WHAT THE RESIDUAL ACTUALLY IS: `a₁₁` DEPENDS ON THE STANDARD'S OWN LENGTH
+
+`a₂₂²` is `(m₂/x₂ − m₁/x₁)/(m₂x₂ − m₁x₁)` and that quotient is **exactly** the condition that the two
+standards agree on `a₂₁²` — so they agree on it to 5e-15, by construction, and a "do the two
+standards agree" check built on `a₂₁²` measures nothing. **All of the inconsistency lands in `M₁₁`**,
+which is what `ConsistencyResidual` reports.
+
+Solving `a₁₁` from each of five lines with `(a₂₁, a₂₂)` held at the two-line values, board 4× mesh at
+10 MHz, as a deviation from the shortest line's answer:
+
+| line length | a₁₁ − a₁₁(shortest) | \|S₁₁\| de-embedding the DUT with it |
+|---|---|---|
+| 3.64 mm | 0 | 5.68e-01 |
+| 10.91 mm | 2.97e-07 | **1.81e-02** |
+| 21.82 mm | 3.45e-07 | 9.42e-02 |
+| 43.64 mm | 3.44e-07 | 9.15e-02 |
+| 109.09 mm | 3.28e-07 | 5.47e-02 |
+| *shipped: the average of the first two* | 1.48e-07 | 3.39e-01 |
+
+**`a₁₁` is a function of the standard's own length, it saturates by about three times the short one,
+and the SHORT standard is the outlier.** The peel needs `a₁₁` at the DUT's own length, to about
+2e-8 absolute, and no line standard has that value. Two corollaries worth keeping:
+
+- **The model is nearly right and the peel's demand is what is extreme.** The correction term
+  `a₂₁²a₂₂x²/(1 − a₂₂²x²)` is 4.2e-4 on that fixture and the model reproduces it to ~3 parts in 10⁴.
+  One more decade of model accuracy would close it; the peel wants five.
+- **A single error box that fits both standards does not exist at these frequencies.** An `a₁₁` fitted
+  to the short line de-embeds it to 1.2e-10 (machine zero — the algebra is exactly self-consistent,
+  so nothing here is floating-point) and de-embeds the long one to 9.7e-1. **The averaging in
+  `SolveErrorBox` is not the bug; it is the only defensible thing to do with two incompatible
+  answers.**
+
+### 5. M2 — THREE ROUTES, AND NONE OF THEM MOVED THE NUMBER
+
+Reported including the ones that failed, because the next person will otherwise try them.
+
+**(a) Make the difference cancel what it is supposed to cancel — ALREADY TRUE (§3).** Not built,
+nothing to build.
+
+**(b) Continue the error box in frequency instead of re-solving it — BUILT, MEASURED, MUCH WORSE.**
+Fitting each of `(1−a₁₁)/ω`, `a₂₁/ω`, `(1−a₂₂)/ω` as `A + Bω²` from 1 GHz and 2 GHz and evaluating
+below gives |S₁₁| ≈ **1.0 at every frequency** on all three fixtures, against 0.012–0.68 solved. The
+reason is arithmetic and it rules out the whole family, not just this fit: the useful signal `1 − a₁₁`
+is ∝ ω and the required *absolute* accuracy is ∝ ω², so **the required RELATIVE accuracy tightens as
+1/f.** Extrapolating two decades down would need the leading coefficient right to ~1e-4, which no fit
+over a solved band delivers. The brief's supporting evidence — that ε_eff and Z_c are constant to five
+figures on the quasi-static path — is true and is about γ, which §2 shows is not the quantity in
+trouble.
+
+**(c) Add a REFLECT standard below the crossover — NOT BUILT, and §4 bounds what it could buy.**
+The brief's premise for (c) was "`a₁₁` and `a₂₂` from an O(1) measurement, with no differencing of two
+nearly-identical lines". The differencing is not the problem (§1), and the ceiling was measured
+directly: **substituting the `a₁₁` the DUT itself needs — the best any standard of any kind could
+supply — takes the error from 3.39e-1 to 6.9e-2 on the board and from 6.8e-1 to 2.0e-1 on FR-4, a
+factor of ~5, not the decade the brief hoped for.** The rest is `a₂₁`/`a₂₂`. And a reflect supplies
+`a₁₁` at its own length, which by §4 is not the DUT's. **It was not started, on the brief's own
+instruction not to start it before M1 had spoken.** It remains the only untried route and it is worth
+less than it looked.
+
+**The thing that would close it is not in M2's list and is already written down.** LF2's closing
+paragraph and LF1 §5(a) both name it: the enabling change is **the PORT**. `PlanarDcSolve` works at
+0 Hz because it uses conduction terminals — the conductor's end cells against the ground node —
+rather than a cut in the metal. A port of that shape at AC has an `a₂₁` that does not vanish with ω,
+and `1/|a₂₁|²` is the whole amplifier. That is one change that removes this wall *and* lets a
+sub-floor point be published without a calibration at all. It is still not built.
+
+### 6. M3 — THE GUARD, WHICH IS WHAT SHIPPED
+
+`PlanarErrorBox` gains two computed properties — no constructor churn, and every existing
+construction site is untouched:
+
+- **`PeelAmplification` = |a₁₁| / |a₂₁|²** — a property of the PORT, not of how well it was
+  calibrated.
+- **`DeembedErrorFloor` = `ConsistencyResidual` × `PeelAmplification`** — in |ΔS|, the units of the
+  answer, so it reads against a tolerance directly.
+
+`DeembedErrorFloor` is published per (frequency, port) in the `planar` diagnostics group beside the
+two residuals, **unconditionally** — `CalQuasiStatic`'s own rule, so a reader of the file can always
+ask the question and gets an answer rather than a missing cube to interpret. `ResultUnits` carries it
+as dimensionless.
+
+**`DeembedResidual`'s XML doc now says why it is not a quality measure**, with the reported numbers in
+it (1.95e-10 at 10 MHz against 9.38e-9 at 500 MHz — 48× smaller exactly where the answer is worst) and
+a pointer to the cube that is. `PlanarErrorBox`'s header already carried *"an honest measure of what
+was discarded, not a proven predictor of accuracy"*; this is the concrete case it was hedging about.
+
+**The two thresholds are anchored on what a perfect match gets published as**, which is the shape of
+the report itself:
+
+| | |ΔS| | as a return loss | what happens |
+|---|---|---|---|
+| `PlanarSolve.PeelErrorBudgetDS` | 0.05 | −26 dB | the point is NAMED in the run's notes and still published |
+| `PlanarSolve.PeelErrorRefusalDS` | 0.25 | −12.0 dB | the POINT is left out of the sweep, and named by frequency |
+
+−12 dB is what the reported file published for a −60.2 dB line. Because the control's realised |ΔS|
+equals the floor to within 0.73–1.06, **a threshold on the floor IS a threshold on |ΔS|** — which is
+what makes these measured rather than chosen.
+
+**THE GUARD IS PER POINT, AND THE FIRST VERSION OF IT WAS NOT. That was wrong and the owner caught
+it.** It refused the RUN, which costs a user every other frequency they waited for — on the reported
+sweep, eight solved points discarded to suppress three, and the discarded ones are the *good* ones
+because the wall is at the BOTTOM of the band. **This file already had the right rule written down**,
+a few hundred lines further on where a far field that cannot be produced is reported as *"present and
+refused — the sweep is not thrown away for a diagnostic it cannot produce"*. The same applies here
+with more force, and it is now what the code does: the unanswerable points are removed from the
+published sweep and named by frequency, and everything else is published exactly as it was solved
+with nothing interpolated across the gap.
+
+**The one case that is still a refusal is the sweep in which EVERY de-embedded point went.** There is
+then no result to hand back, so nothing is lost by saying so — which is the whole distinction.
+
+**Neither threshold is a `.cem` field or a panel control** (QSC's reasoning about its crossover,
+unchanged), and **the way to get the dropped points into the file anyway is the flag that already
+exists**: `DeembedOutsideCalibrationValidity` is named for what it does and already says so in the
+run's notes and in the `.sNp`'s provenance. The claim is the same one — this calibration is not valid
+at this frequency — and it did not deserve a second flag. The points it puts back are **bit-identical**
+to the ones the filtered run kept, which is what says the drop is a filter and not a different solve.
+
+**The note's denominator is the DE-EMBEDDED points, not the frequency list.** By the time the guard
+runs, `freqs` has already had the 0 Hz row and LF2's substituted ones taken off its front, so quoting
+it reported *"3 of 8"* to a user who asked for eleven.
+
+**The remedy sentence names a band edge the user can type, derived from the run's own measurement.**
+The floor goes as 1/f, so `floor · f` is the constant and the budget is met above `floor · f /
+budget`, taken over every point and kept at its largest (a sweep that crosses a separation switch has
+more than one constant in it). On the reported cross-section that reads **"this port meets 0.05 above
+about 461.3 MHz"** — against the brief's own observation that the error "only falls under 1 dB
+somewhere near 250 MHz". The sentence also says outright that **lengthening the standards does not
+help**, because that is the move a user who reads it will otherwise make, and §1 is the measurement
+behind the claim.
+
+**The guard reads the sweep; it does not change it.** It is asked of the points the sweep already
+produced, after the fact, so nothing in the hot path moved — `TheGuardChangesNoPublishedNumber`
+asserts bit-identical s-parameters against a run with the escape hatch open, and the whole Engine and
+Ui suites pass with no re-blessed number anywhere.
+
+**LF2's note is re-pointed in two words and stays ONE sentence.** *"Below X the full-wave FIT — one of
+this band's walls, not the band's own floor — has no valid range…"*. LF1's own ask was that an RF
+designer will not read it if the text is too long, and `PlanarDcPointTests` asserts that as a rule
+(`Assert.DoesNotContain(". ", note)`); appending a clause about the peel would have broken it for the
+right reason and the wrong result. The peel's wall gets a sentence of its own instead.
+
+### 6b. The wording of what a run says — owner instruction, 2026-09-14
+
+Three notes were rewritten after the first version of this work shipped them, and the rule behind all
+three is worth having in one place because every note in this engine is written by someone who has
+just finished reading the code.
+
+**Plain terms.** `fit` is this engine's word for the DCIM Green's-function fit and means nothing to
+the person reading the run; `peel`, `error box`, `a₂₁` and `|ΔS|` are the same. The substitution note
+now says *"the field solver has no valid range"*. It also used to end with *"one of this band's
+walls, not the band's own floor"*, which was accurate and unreadable — the point it was making (that
+this is not the only low-frequency limit) is made by the de-embedding note appearing beside it, which
+is what the brief actually asked for.
+
+**Short.** The first de-embedding note was eight sentences carrying the mechanism: `a₂₁ ∝ ω`, the
+division by `a₂₁²`, why `DeembedResidual` is anti-correlated. **A designer would not have read any of
+it, and a note that is not read is worth nothing however true it is.** It is three sentences now —
+which points are missing, the band edge that gets them back, where the per-point number is — and the
+mechanism lives in this file and in the source, which is where someone asking "why" looks. The gate
+asserts a 400-character ceiling so it cannot grow back.
+
+**No block capitals.** They read as shouting and they were everywhere in the first version.
+
+**Nothing about a fixture.** The Z_c note said *"measured against the quasi-static answer on a 50 Ω
+FR-4 line"* — a user cares about their own circuit, not the one the number was taken on. The
+percentages stayed, because "reads slightly high" is not something anyone can design against; the
+fixture moved into the doc comment.
+
+The three, before and after:
+
+| | was | is |
+|---|---|---|
+| LF2's substitution | *"Below 7.952 MHz the full-wave FIT — one of this band's walls, not the band's own floor — has no valid range, so 2 points … carry the 0 Hz conduction solve…"* | *"Below 7.952 MHz the field solver has no valid range, so 2 points … carry a DC solve — resistance only, no reactance…"* |
+| the peel | 8 sentences, ~1,100 characters | *"3 point(s) (9.779 MHz to 44.72 MHz) were dropped: port de-embedding is not reliable that low, and the rest of the sweep is unaffected. De-embedding on this port is reliable above about 461.3 MHz — raise the sweep's lower edge to get them back. Longer calibration lines do not help. The DeembedErrorFloor result estimates the de-embedding error at every point."* |
+| `PlanarKernel.QuasiStaticNote` | the formula, the √ε_eff(f) scaling, the fixture, and why a dispersive C is unavailable | *"The reported Z_c is a quasi-static estimate, so it reads slightly high as frequency rises — by roughly 0.4% at 1 GHz, 2% at 5 GHz and 6% at 20 GHz. Your s-parameters are not affected."* |
+
+**One assertion was re-pointed and the reason is recorded at the assertion**: `PlanarDcPointTests`
+finds the substitution note by a phrase, and the phrase changed. Everything else about that test is
+untouched, including the single-sentence rule it enforces.
+
+**This was scoped to the notes this work touched.** Plenty of other refusals in `PlanarSolve` still
+shout; rewriting them is not this brief's job and each one carries tests that assert its wording.
+
+### 7. M4 — THE REPORTED SWEEP, END TO END
+
+1 MHz – 2 GHz, 11 log points, the reported cross-section — **the sweep as it was actually written.**
+**It runs, and eight of its eleven rows are published.** Every point leaves by one of exactly four
+doors and `TheReportedSweepEndToEnd_…` asserts that the four cover it:
+
+| f | door | floor | \|S₁₁\| | \|S₂₁\| |
+|---|---|---|---|---|
+| 1 MHz | conduction (LF2) | — | 0.0001 | 0.9999 |
+| 2.138 MHz | conduction | — | 0.0001 | 0.9999 |
+| 4.573 MHz | conduction | — | 0.0001 | 0.9999 |
+| 9.779 MHz | **LEFT OUT** | 2.36 | — | — |
+| 20.91 MHz | **LEFT OUT** | 1.10 | — | — |
+| 44.72 MHz | **LEFT OUT** | 0.516 | — | — |
+| 95.64 MHz | flagged, published | 0.241 | 0.4922 | 0.8820 |
+| 204.5 MHz | flagged, published | 0.113 | 0.2736 | 0.9670 |
+| 437.3 MHz | flagged, published | 0.0525 | 0.1612 | 0.9888 |
+| 935.2 MHz | published | 0.0241 | 0.1263 | 0.9922 |
+| 2 GHz | published | 0.0105 | 0.1530 | 0.9870 |
+
+With `DeembedOutsideCalibrationValidity` the three dropped rows come back and read |S₁₁| = 0.9906 /
+0.9353 / 0.7651 on a uniform line. **That column IS the reported defect, reproduced** — 0.99 at
+9.8 MHz where the right answer is 0 — and it is what is now left out of the file instead of being
+published.
+
+**There is no fifth door, and the fifth door — published, silent and wrong — is what this work
+removes.** The floor column is the answer to "state the frequency below which this file is no longer
+answered": **on this cross-section, about 440 MHz at a 0.05 budget and about 95 MHz at 0.25.** The
+brief asked that this be said plainly if M2 achieved nothing, and M2 achieved nothing.
+
+### 8. Traps found
+
+- **THE UNIFORM-LINE CONTROL MUST BE READ AT THE LINE'S OWN Z_c, NOT RENORMALISED TO 50 Ω.** The
+  first version of this measurement renormalised, and on the reported cross-section — 106 Ω — that
+  adds a real, physical S₁₁ of up to 0.25 at 1 GHz which is not the instrument's error at all. It is
+  invisible on the FR-4 hero, which is 50 Ω by construction, and that is why §QSC §5's own control
+  curve (0.84 / 0.39 / 0.19 / 0.11) was unaffected by it. **A control that "must read exactly 0" only
+  reads exactly 0 in the reference the algebra hands back.**
+- **§QSC §5's FR-4 control fixture is DEGENERATE and its numbers should not be quoted as an
+  instrument measurement.** The 6 mm line has `EndRunHeights` = 3 × 1.6 mm = 4.8 mm of end run at each
+  end against a 6 mm total, so the two error boxes overlap inside the DUT. It reads 0.998 at 10 MHz
+  where the same stack AT THE SAME COARSE MESH with a 40 mm line reads **0.068** — a factor of 15, all
+  of it fixture. The measurements here use lines long enough that the two boxes do not meet.
+- **"Do the two standards agree on `a₂₁²`?" is not a question — it is an identity.** `a₂₂²` is solved
+  to make them agree, so the answer is always 5e-15 and a check built on it measures the floating-point
+  arithmetic. The only honest agreement measure between the two standards is the `M₁₁` one, which is
+  `ConsistencyResidual` and was already there.
+- **The peel is NOT losing precision.** An `a₁₁` fitted to one standard de-embeds that standard to
+  1e-10 through the full `Apply` + `Renormalise` path. Every decimal of the error is model, not
+  roundoff — which is what rules out reordering the arithmetic as a fix.
+- **A `record`'s computed property is the way to add a diagnostic to `PlanarErrorBox`.** Adding a
+  constructor parameter would have touched three test files that build boxes by hand, for a quantity
+  that is a pure function of the three already there.
+
+### 9. Reported to the owner, by file and line (no `CLAUDE.md` edit, per the standing rule)
+
+- **repo-root `CLAUDE.md`, the `Cli em` paragraph (around line 60).** It says nothing about a band
+  having a usable BOTTOM. `em` now has a third outcome at low frequency — a refusal whose remedy is
+  the sweep's lower edge — and the paragraph's list of refusals (`Refused`/`NoLayout`/`EngineError`)
+  does not hint that one of them is about frequency rather than geometry. The brief flagged this line
+  as stale before the work started and it still is.
+- **`src/Design/Layout/Em/EmRunService.cs:559`** forwards this refusal under the diagnostic key
+  `"port-clearance"`, because it reuses `PlanarFeedClearanceRefusedException` — which is the right
+  exception (the claim is "this calibration is not valid here") but the wrong label. Cosmetic: the
+  message the user reads is unambiguous and the key is not shown. Left alone rather than churned
+  through the Ui tests for a string.
+
+### 10. Gates
+
+`tests/Engine.Tests/Mom/PeelConditioningTests.cs`, nine tests, all under a second each — no
+`Category=Benchmark` was needed, and the brief's own note that a 5-point version of the reported file
+is well under the routine tier is what made that possible.
+
+- `TheErrorFloorPredictsWhatTheUniformLineControlActuallyReads` — four fixtures, the law asserted at
+  every point whose floor is above a tenth of the budget (i.e. over the whole range the guard ever
+  acts in), plus the DIRECTION assertion: the residual must grow up the band while the error it is
+  read as a proxy for shrinks.
+- `ALongerSecondStandardDoesNotMoveIt_AndUpTheBandItIsWorse` — the §1 table, both halves. The 100 MHz
+  half is what stops someone reading the 10 MHz row as "harmless".
+- `TheErrorFloorIsPublishedPerFrequencyAndPort` — the cube, its axes, and its recorded values on the
+  reported cross-section.
+- `APointThePeelCannotAnswerIsDropped_AndTheRestOfTheSweepSurvives` — the sweep survives, the
+  missing frequencies are named, every survivor is on the right side of the wall, and the points the
+  escape hatch puts back are bit-identical to the ones the filtered run kept.
+- `ASweepWithNothingLeftIsRefused` — the one case that is still a refusal.
+- `TheGuardChangesNoPublishedNumber` — bit-identical S with the hatch open, and no note on a band
+  where the measured calibration belongs.
+- `TheReportedSweepEndToEnd_…` — §7's table, the four doors, and both walls named separately.
+
+Unchanged and passing: `RawSolveAndCalibrationRemedyTests`, `QuasiStaticPortCalibrationTests`,
+`PlanarDcPointTests`, `PlanarDeembedTests`, `CoplanarDeembedTests`, `EmDeembedCeilingTests`, the whole
+of `Engine.Tests` (2,443) and of `Ui.Tests`' EM set (3,443). **No assertion was re-pointed and none
+was deleted** — LF2's note changed by two words inside its existing single sentence, which its own
+test already allowed for.
+
 ## CL-review — the five smaller findings, fixed (2026-09-14)
 
 Found reviewing the conductor-loss series. The calibration-standard defect is its own section below;
@@ -1719,6 +2103,19 @@ things are in that column and neither is the calibration:
   cleanest statement of that floor: on a plain line, where a de-embedded S₁₁ must be exactly 0, both
   paths read 0.84 / 0.39 / 0.19 / 0.11 at 100 / 300 / 690 MHz / 1.28 GHz on a deliberately coarse
   24-unknown mesh, and they read it IDENTICALLY.
+
+  > **SIZED AND GATED BY §PEEL, 2026-09-14 — this paragraph named the floor and declined to size it,
+  > and it must not be left standing as though the sizing were unknown.** It is
+  > `ConsistencyResidual · |a₁₁| / |a₂₁|²`, which is published now as `DeembedErrorFloor` and tracks
+  > the control's realised |ΔS| to a ratio of 0.73-1.06 over three stacks, three mesh densities and
+  > three decades. A POINT whose floor reaches 0.25 is left out of the published sweep and named
+  > rather than published; the rest of the sweep is unaffected. **Two corrections to what is implied
+  > above:** the amplification is `1/|a₂₁|²` and NOT the standards' separation — a 30× longer second
+  > standard moves it by under 6 % and is ten times worse at 100 MHz — and **this
+  > section's own FR-4 control fixture is degenerate**, its 6 mm line being shorter than the two end
+  > runs the standards reproduce, so its 0.84 / 0.39 / 0.19 / 0.11 overstate the instrument's error.
+  > On a 40 mm line of the same stack at the same coarse mesh the 100 MHz reading is **8.2e-3**, two
+  > orders below the 0.84 quoted above.
 
 **THE ACCELERATOR DID NOT ENGAGE, and it was checked rather than assumed.** The run's notes carry no
 AIM line and no GMRES; every standard is under the 5,000 dense ceiling. That closes RAW1's "separately

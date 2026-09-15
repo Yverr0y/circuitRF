@@ -155,6 +155,9 @@ namespace RfCore.Export
             // Residuals are ratios of the quantity they measure against itself.
             ["Residual"]              = Dimensionless,
             ["DeembedResidual"]       = Dimensionless,
+            // PEEL — this one is in |ΔS|, which is dimensionless for the same reason S is: it is
+            // the RESIDUAL times the peel's amplification, so it reads against an S tolerance.
+            ["DeembedErrorFloor"]     = Dimensionless,
             ["ModeCouplingResidual"]  = Dimensionless,
 
             // The DC operating-point bag: one cube holding a device's own op variables, each with

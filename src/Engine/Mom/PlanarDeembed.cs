@@ -68,9 +68,24 @@ namespace CircuitRF.Engine.Mom;
 /// <param name="A11">External reflection.</param>
 /// <param name="A22">Internal reflection — the one facing the DUT.</param>
 /// <param name="A21">Transmission. Determined only up to sign; see the file header.</param>
-/// <param name="ConsistencyResidual">How well the two standards agreed on <paramref name="A11"/>
-/// with the chosen sign of <paramref name="A22"/>, relative to |a₁₁|. Small is good; it is a
-/// diagnostic, not a proven predictor.</param>
+/// <param name="ConsistencyResidual">
+/// How well the two standards agreed on <paramref name="A11"/> with the chosen sign of
+/// <paramref name="A22"/>, relative to |a₁₁|. Small is good.
+///
+/// <para><b>PEEL — IT IS NOT A QUALITY MEASURE, AND AT THE BOTTOM OF A BAND IT POINTS THE WRONG
+/// WAY.</b> The header's standing caveat — "an honest measure of what was discarded, not a proven
+/// predictor of accuracy" — has a concrete case, and this is it. On the series' own board this
+/// residual reads <b>1.95e-10 at 10 MHz and 9.38e-9 at 500 MHz</b>, i.e. it is 48× SMALLER exactly
+/// where the published answer is 59 dB wrong. That is not a defect in the number: it measures the
+/// two standards' agreement with each other, and two standards whose <c>x = e^{-γℓ}</c> are both
+/// approaching 1 agree better and better while determining the error box less and less.
+///
+/// <para><b>What predicts the error is this residual multiplied by
+/// <see cref="PeelAmplification"/></b>, which is <see cref="DeembedErrorFloor"/>. Read that, not
+/// this. Measured against the uniform-line control — where a de-embedded S₁₁ must be exactly 0 —
+/// the product tracks the realised |ΔS| to a ratio of 0.73-1.06 over three stacks, three mesh
+/// densities and three decades of frequency (<c>src/Engine/Mom/RESOLVED.md</c> §PEEL).</para></para>
+/// </param>
 /// <param name="RejectedResidual">The same quantity for the sign that was NOT chosen. A ratio near 1
 /// means the sign was decided by noise.</param>
 public sealed record PlanarErrorBox(
@@ -78,7 +93,38 @@ public sealed record PlanarErrorBox(
     Complex A22,
     Complex A21,
     double  ConsistencyResidual,
-    double  RejectedResidual);
+    double  RejectedResidual)
+{
+    /// <summary>
+    /// <b>PEEL — the factor by which an ABSOLUTE error anywhere in this box reaches the published
+    /// s-parameter: |a₁₁| / |a₂₁|².</b> A property of the PORT, not of how well it was calibrated.
+    ///
+    /// <para><see cref="Apply"/> forms <c>Y = (S_meas − a₁₁)/a₂₁²</c>. At the bottom of a band an
+    /// edge port is a series gap capacitance, so <c>a₂₁ ∝ ω</c> and <c>a₁₁ → 1</c>: the numerator is
+    /// the difference of two numbers that both approach 1 and the denominator is an ω². <b>That ω²
+    /// is the amplifier</b>, and it is why the published error at the bottom of a band goes as 1/f
+    /// while nothing that is published goes anywhere.</para>
+    ///
+    /// <para><b>It is NOT the two standards' separation.</b> That was measured directly and it is
+    /// inert: a 30× longer second standard — βΔℓ from 0.40° to 11.8° at 10 MHz — moves the
+    /// de-embedded |S₁₁| of a uniform line by under 6 %, and at 100 MHz a 30× separation is TEN
+    /// TIMES worse. Lengthening Δℓ is the move this number exists to stop someone making.</para>
+    /// </summary>
+    public double PeelAmplification => A11.Magnitude / Math.Max((A21 * A21).Magnitude, double.Epsilon);
+
+    /// <summary>
+    /// <b>PEEL — what this port's de-embedding is expected to be wrong by, in |ΔS|:
+    /// <see cref="ConsistencyResidual"/> × <see cref="PeelAmplification"/>.</b> This is the number to
+    /// read; see <see cref="ConsistencyResidual"/> for why that one is not.
+    ///
+    /// <para><b>It is a FLOOR on the instrument's own error and not a bound on the answer.</b> It is
+    /// what the peel does to a structure it was calibrated for — measured on a uniform line, where
+    /// the right answer is exactly 0 — so it says nothing about the DUT's own meshing or about
+    /// radiation. A run whose floor is 0.9 is publishing noise; a run whose floor is 1e-4 may still
+    /// be wrong for reasons this cannot see.</para>
+    /// </summary>
+    public double DeembedErrorFloor => ConsistencyResidual * PeelAmplification;
+}
 
 /// <summary>The whole per-port calibration at one frequency: γ, the error box, and Z_c.</summary>
 /// <param name="NeighbourResonanceDegrees">

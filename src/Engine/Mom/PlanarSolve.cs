@@ -1482,9 +1482,171 @@ public static class PlanarSolve
         string onMesh = meshHz > 0
             ? $", read on the {SurfaceMesher.Eng(meshHz)}Hz mesh (a coarse mesh reads resistance low)"
             : "; a coarse mesh reads resistance low";
+        // PEEL — this used to say "the full-wave fit has no valid range", which reads as "trouble
+        // ends here" when it is one of four low-frequency walls and not the highest of them. That is
+        // exactly how the reported 59 dB arrived with a sentence beside it that seemed to say
+        // otherwise. "The field solver" names the same wall in words a designer already has; the
+        // de-embedding wall gets its own note (PeelConditioningNote) when it binds.
+        //
+        // Owner instruction, 2026-09-14: plain terms, short, and no shouting. "Fit" is this file's
+        // word for the DCIM Green's-function fit and means nothing to the person reading the run.
+        // It stays ONE sentence — LF1's own ask was that an RF designer will not read it if the text
+        // is too long, and PlanarDcPointTests asserts that as a rule.
         return $"Below {SurfaceMesher.Eng(Dcim.LowestFittableFrequency(stackHeightM))}Hz the "
-             + $"full-wave fit has no valid range, so {which} the 0 Hz conduction solve — "
-             + $"resistance only, no reactance{onMesh}.";
+             + $"field solver has no valid range, so {which} a DC solve — resistance only, no "
+             + $"reactance{onMesh}.";
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // PEEL — WHAT THE DE-EMBEDDING IS EXPECTED TO BE WRONG BY, AND THE TWO THRESHOLDS
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // Measured, in |ΔS|, against the uniform-line control — the only oracle here that smuggles in no
+    // second model, because a de-embedded S₁₁ on a plain line must be exactly 0. Across three
+    // stacks, four mesh densities, five separations and three decades of frequency the realised
+    // error came out at 0.73-1.06 times PlanarErrorBox.DeembedErrorFloor, so a threshold ON the
+    // floor IS a threshold on |ΔS| (src/Engine/Mom/RESOLVED.md §PEEL).
+    //
+    // BOTH NUMBERS ARE ANCHORED ON WHAT A PERFECT MATCH GETS PUBLISHED AS, which is the defect that
+    // reached a user: on the reported board a −60.2 dB line was published as −1.37 dB.
+    //
+    //   • 0.05 is −26 dB. A design's own return loss is usually worse than that, so up to here the
+    //     instrument is not what a reader is looking at. Above it, the points are NAMED and still
+    //     published.
+    //   • 0.25 is −12.0 dB, which is the shape of the report itself. At that level the published
+    //     number is not a degraded version of the answer, it is a different answer, so the POINT is
+    //     left out of the sweep — the rest of which is published exactly as it was solved. A run
+    //     that printed such a point with a note would be inviting the note to be skipped, and a run
+    //     that REFUSED over it would throw away every other frequency the user waited for.
+    //
+    // They are deliberately NOT settings and there is no .cem field and no panel control: QSC's own
+    // reasoning about its crossover, unchanged. The one way to get the dropped points back in the
+    // file is PlanarSolveSettings.DeembedOutsideCalibrationValidity, which already exists and
+    // already says in the run's notes and in the .sNp's provenance that it was used — this is the
+    // same claim (the calibration is not valid here) and it does not deserve a second flag.
+    public const double PeelErrorBudgetDS   = 0.05;
+    public const double PeelErrorRefusalDS  = 0.25;
+
+    /// <summary>
+    /// <b>PEEL — the per-point floor a sweep came back with, and what is to be done about it.</b>
+    /// </summary>
+    /// <param name="Flagged">Points at or above <see cref="PeelErrorBudgetDS"/> that are still
+    /// published, ascending.</param>
+    /// <param name="Unanswerable">Points at or above <see cref="PeelErrorRefusalDS"/>. <b>These are
+    /// DROPPED from the published sweep, not refused</b> — see
+    /// <see cref="PeelConditioningNote"/>.</param>
+    /// <param name="WorstFloor">The largest floor seen, over every (point, port).</param>
+    /// <param name="WorstHz">Where it was seen.</param>
+    /// <param name="BudgetMetAboveHz">
+    /// The frequency above which the floor is expected to fall under <see cref="PeelErrorBudgetDS"/>.
+    /// <b>Extrapolated from the run's own measurement rather than modelled</b>: the floor is
+    /// (residual ∝ ω) / (|a₂₁|² ∝ ω²), so it goes as 1/f, and the worst point's own floor scaled by
+    /// its own frequency is the constant. That is the remedy sentence's whole content — a band edge
+    /// the user can actually type — and it is the analogue of
+    /// <see cref="Dcim.LowestFittableFrequency"/> for the wall one level up.</param>
+    internal readonly record struct PeelConditioning(
+        IReadOnlyList<double> Flagged, IReadOnlyList<double> Unanswerable,
+        double WorstFloor, double WorstHz, double BudgetMetAboveHz);
+
+    /// <summary>
+    /// <b>PEEL — the worst <see cref="PlanarErrorBox.DeembedErrorFloor"/> over a point's ports</b>,
+    /// and 0 on a point that carries no calibration at all (the 0 Hz row and LF2's substituted ones,
+    /// which are not de-embedded and must never be dropped for a de-embedding diagnostic).
+    /// </summary>
+    private static double PointFloor(PlanarFrequencyPoint pt)
+    {
+        if (!(pt.FrequencyHz > 0)) return 0;
+        double worst = 0;
+        foreach (var c in pt.Calibrations)
+        {
+            double v = c.Box.DeembedErrorFloor;
+            if (!double.IsNaN(v) && !double.IsInfinity(v) && v > worst) worst = v;
+        }
+        return worst;
+    }
+
+    /// <summary>
+    /// <b>PEEL — read the peel's own conditioning off the points the sweep already produced.</b>
+    /// Nothing is solved and nothing is re-derived: every ingredient is on
+    /// <see cref="PlanarPortCalibration.Box"/>, which is why this is asked after the sweep rather
+    /// than in its hot path.
+    /// </summary>
+    internal static PeelConditioning? MeasurePeelConditioning(IReadOnlyList<PlanarFrequencyPoint> points)
+    {
+        var flagged = new List<double>();
+        var dropped = new List<double>();
+        double worst = 0, worstHz = 0, above = 0;
+        bool any = false;
+
+        foreach (var pt in points)
+        {
+            double here = PointFloor(pt);
+            if (!(pt.FrequencyHz > 0) || pt.Calibrations.Count == 0) continue;
+            any = true;
+            if (here <= 0) continue;
+
+            if (here >= PeelErrorRefusalDS) dropped.Add(pt.FrequencyHz);
+            else if (here >= PeelErrorBudgetDS) flagged.Add(pt.FrequencyHz);
+            if (here > worst) { worst = here; worstHz = pt.FrequencyHz; }
+
+            // The 1/f law, read off THIS point: floor·f is the constant, so the budget is met above
+            // floor·f/budget. Taken over every point and kept at its largest, because a sweep that
+            // crosses a separation switch has more than one constant in it.
+            double implied = here * pt.FrequencyHz / PeelErrorBudgetDS;
+            if (implied > above) above = implied;
+        }
+        if (!any) return null;
+        flagged.Sort();
+        dropped.Sort();
+        return new PeelConditioning(flagged, dropped, worst, worstHz, above);
+    }
+
+    /// <summary>
+    /// <b>PEEL — what the run tells the person reading it.</b> Three things and no more: which points
+    /// are missing, the band edge that gets them back, and where to find the per-point number.
+    ///
+    /// <para><b>Owner instruction, 2026-09-14: plain terms, short, and no shouting.</b> The first
+    /// version of this note was eight sentences of mechanism — a₂₁ ∝ ω, the peel's division, why
+    /// <c>DeembedResidual</c> is anti-correlated — and a designer would not have read any of it.
+    /// None of that is lost; it lives in this file's own comments, in
+    /// <see cref="PlanarErrorBox.DeembedErrorFloor"/> and in <c>RESOLVED.md</c> §PEEL, which are
+    /// where someone asking "why" will look. The run's notes are for someone asking "what do I
+    /// do".</para>
+    ///
+    /// <para>The one clause that is neither a symptom nor a remedy — that longer calibration lines
+    /// do not help — earns its place because it is the move a user who reads this will otherwise
+    /// make, and it costs a day.</para>
+    /// </summary>
+    /// <param name="everythingWent">
+    /// The one case that is a refusal rather than a dropped point: every de-embedded point of the
+    /// sweep was unanswerable, so there is no result to hand back and nothing is lost by saying so.
+    /// </param>
+    private static string PeelConditioningNote(PeelConditioning p, bool everythingWent)
+    {
+        string edge = $"De-embedding on this port is reliable above about " +
+                      $"{SurfaceMesher.Eng(p.BudgetMetAboveHz)}Hz";
+        const string tail = " Longer calibration lines do not help. " +
+                            "The DeembedErrorFloor result estimates the de-embedding error at " +
+                            "every point.";
+
+        if (everythingWent)
+            return "Every de-embedded point of this sweep is below the port de-embedding limit, so " +
+                   $"there is nothing to publish. {edge} — raise the sweep's lower edge." + tail;
+
+        if (p.Unanswerable.Count > 0)
+        {
+            string names = p.Unanswerable.Count == 1
+                ? SurfaceMesher.Eng(p.Unanswerable[0]) + "Hz"
+                : $"{SurfaceMesher.Eng(p.Unanswerable[0])}Hz to " +
+                  $"{SurfaceMesher.Eng(p.Unanswerable[^1])}Hz";
+            return $"{p.Unanswerable.Count} point(s) ({names}) were dropped: port de-embedding is " +
+                   $"not reliable that low, and the rest of the sweep is unaffected. {edge} — raise " +
+                   "the sweep's lower edge to get them back." + tail;
+        }
+
+        return $"{p.Flagged.Count} point(s) from {SurfaceMesher.Eng(p.Flagged[0])}Hz carry a " +
+               $"de-embedding error of up to {p.WorstFloor:0.##} in |S|, which is enough to hide a " +
+               $"good match. {edge} — raise the sweep's lower edge to avoid them." + tail;
     }
 
     /// <summary>
@@ -3760,6 +3922,38 @@ public static class PlanarSolve
                       : "but it is modelled from FEWER nodes than the tolerance asked for, so read " +
                         "the adaptive note beside this one for the disagreement that was actually " +
                         "reached rather than assuming the requested tolerance was met."));
+
+        // ── PEEL — THE PEEL'S OWN CONDITIONING, WHICH NOTHING PUBLISHED COULD SEE BEFORE ───────
+        //
+        // The defect this closes is not that a de-embedded point at the bottom of a band is wrong.
+        // It is that it arrived with NO SENTENCE ATTACHED, and that the one diagnostic a reader
+        // would have checked — DeembedResidual — is anti-correlated with the truth down there.
+        //
+        // A POINT THE PEEL CANNOT ANSWER IS DROPPED; THE SWEEP IS NOT THROWN AWAY FOR IT. That is
+        // this file's own house shape, stated a few hundred lines down where a far field is refused:
+        // "present and refused — the sweep is not thrown away for a diagnostic it cannot produce".
+        // The first version of this guard refused the RUN, which costs a user every other frequency
+        // they waited for — on the reported sweep, nine solved points discarded to suppress two.
+        // The only case that is still a refusal is the one where every de-embedded point went, since
+        // there is then no result to hand back and nothing is lost by saying so.
+        //
+        // Asked of the points the sweep already produced, so nothing in the hot path moved and a
+        // run that is nowhere near either threshold takes exactly the arithmetic it took before.
+        // It runs BEFORE the passivity note on purpose: a point that is about to be left out must
+        // not also be reported as a passivity violation, which would be one defect described twice.
+        if (st.Deembed && MeasurePeelConditioning(points) is { } peelCond &&
+            (peelCond.Flagged.Count > 0 || peelCond.Unanswerable.Count > 0))
+        {
+            bool drop = peelCond.Unanswerable.Count > 0 && !st.DeembedOutsideCalibrationValidity;
+            int deembedded = points.Count(pt => pt.FrequencyHz > 0 && pt.Calibrations.Count > 0);
+            bool everythingWent = drop && peelCond.Unanswerable.Count >= deembedded;
+
+            string sentence = PeelConditioningNote(peelCond, everythingWent);
+            if (everythingWent) throw new PlanarFeedClearanceRefusedException(sentence, []);
+
+            if (drop) points.RemoveAll(pt => PointFloor(pt) >= PeelErrorRefusalDS);
+            notes.Add(sentence);
+        }
 
         if (st.Deembed && PassivityNote(points, z0) is { } passivity) notes.Add(passivity);
 

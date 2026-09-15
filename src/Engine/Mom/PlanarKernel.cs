@@ -514,19 +514,23 @@ public sealed class PlanarKernel
     }
 
     /// <summary>
-    /// §0's third finding, surfaced to the user as a NOTE rather than published as if it were
+    /// §0's third finding, surfaced to the user as a note rather than published as if it were
     /// dispersion. Z_c here is <c>γ/(jωC_pul)</c> with C_pul differenced between the two calibration
     /// standards, so C is held at its quasi-static value; Z_c therefore rises with frequency as
     /// √ε_eff(f). Measured against kernel A's own static value on §10.7's hero: +0.40% at 1 GHz,
     /// +2.33% at 5 GHz, +6.34% at 20 GHz (L8d Tier 5). That is the γ-and-C route's honest cost, and a
     /// dispersive C needs a field integral this kernel does not have.
+    ///
+    /// <para><b>§PEEL (2026-09-14) — rewritten for the person reading the run, on the owner's
+    /// instruction.</b> It used to give the formula, the √ε_eff(f) scaling, the fixture the
+    /// percentages were taken on and the reason a dispersive C is unavailable. A designer wants to
+    /// know whether the Z_c in front of them is trustworthy and whether their s-parameters are — the
+    /// rest is this doc comment's job. No block capitals, and the percentages stay because "a little
+    /// high" is not something anyone can design against.</para>
     /// </summary>
     internal const string QuasiStaticNote =
-        "The reported Z_c is γ/(jωC_pul) with C_pul held at its QUASI-STATIC value, so it rises with " +
-        "frequency as √ε_eff(f) rather than dispersing properly. Measured against the quasi-static " +
-        "answer on a 50 Ω FR-4 line: +0.4% at 1 GHz, +2.3% at 5 GHz, +6.3% at 20 GHz. The " +
-        "s-parameters themselves are not affected — this is a limitation of the γ-and-C route used to " +
-        "REPORT Z_c, and a dispersive C needs a field integral this analysis does not have.";
+        "The reported Z_c is a quasi-static estimate, so it reads slightly high as frequency rises — " +
+        "by roughly 0.4% at 1 GHz, 2% at 5 GHz and 6% at 20 GHz. Your s-parameters are not affected.";
 
     // ── D4: the DataSet, in the house convention plus one diagnostics group ────────────────────
 
@@ -573,6 +577,7 @@ public sealed class PlanarKernel
         var elDeg  = new double[nf * np];
         var resid  = new double[nf * np];
         var rejct  = new double[nf * np];
+        var floor  = new double[nf * np];
         var quasi  = new double[nf * np];
         var usable = new double[nf];
 
@@ -586,6 +591,7 @@ public sealed class PlanarKernel
         Array.Fill(elDeg, double.NaN);
         Array.Fill(resid, double.NaN);
         Array.Fill(rejct, double.NaN);
+        Array.Fill(floor, double.NaN);
         Array.Fill(quasi, double.NaN);
         for (int i = 0; i < gamma.Length; i++) { gamma[i] = Complex.NaN; zc[i] = Complex.NaN; }
 
@@ -613,6 +619,7 @@ public sealed class PlanarKernel
                 elDeg[o] = c.Gamma.ElectricalDegrees;
                 resid[o] = c.Box.ConsistencyResidual;
                 rejct[o] = c.Box.RejectedResidual;
+                floor[o] = c.Box.DeembedErrorFloor;
                 quasi[o] = c.Source == PlanarCalibrationSource.QuasiStatic ? 1 : 0;
                 if (!c.Gamma.Usable) flagged++;
             }
@@ -642,6 +649,24 @@ public sealed class PlanarKernel
         ds.AddToGroup(DiagnosticsGroup, "CalElectricalDeg",   new DataCube(Ax2(), elDeg));
         ds.AddToGroup(DiagnosticsGroup, "DeembedResidual",    new DataCube(Ax2(), resid));
         ds.AddToGroup(DiagnosticsGroup, "DeembedRejected",    new DataCube(Ax2(), rejct));
+
+        // ── PEEL — WHAT THE DE-EMBEDDING IS EXPECTED TO BE WRONG BY, AND WHY IT IS A SEPARATE CUBE
+        //    FROM THE RESIDUAL BESIDE IT ──────────────────────────────────────────────────────────
+        //
+        // DeembedResidual is the two standards' agreement with each other, and at the bottom of a
+        // band two standards that are becoming identical agree better and better while determining
+        // the error box less and less — on the series' own board it reads 1.95e-10 at 10 MHz and
+        // 9.38e-9 at 500 MHz, i.e. SMALLEST exactly where the answer is worst. A reader checking
+        // de-embedding quality by that number is told the bottom of the band is the best-calibrated
+        // part of the sweep.
+        //
+        // This is that residual multiplied by the peel's own amplification |a11|/|a21|^2, and it is
+        // in |ΔS| — the same units as the answer, so it can be read against a tolerance directly.
+        // Measured against the uniform-line control it tracks the realised error to a ratio of
+        // 0.73-1.06 over three stacks, three mesh densities and three decades (RESOLVED.md §PEEL).
+        // Emitted unconditionally, like CalQuasiStatic and PointAddedBySearch: a reader can always
+        // ask the question and gets an answer rather than a missing cube to interpret.
+        ds.AddToGroup(DiagnosticsGroup, "DeembedErrorFloor",   new DataCube(Ax2(), floor));
         ds.AddToGroup(DiagnosticsGroup, "CalibrationUsable",  new DataCube(Ax1(), usable));
 
         // ── QSC — WHICH CALIBRATION PRODUCED THIS POINT'S γ ───────────────────────────────────

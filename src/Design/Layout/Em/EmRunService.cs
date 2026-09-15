@@ -7,8 +7,8 @@
 //
 //   kernel A (cross-section) → "tline"   Zc, Gamma, Eeff, AttenDbPerM, Rpul, Lpul, Gpul, Cpul
 //   kernel B (planar)        → "planar"  Gamma, Zc, Eeff, AttenDbPerM, Cpul, CalElectricalDeg,
-//                                        DeembedResidual, DeembedRejected, CalibrationUsable,
-//                                        CalQuasiStatic
+//                                        DeembedResidual, DeembedRejected, DeembedErrorFloor,
+//                                        CalibrationUsable, CalQuasiStatic
 //
 // The two groups are deliberately NOT the same name (L8e D4): a per-unit-length quantity from a 2-D
 // quasi-static solve and one back-solved from a de-embedded full-wave S-matrix are different claims,
@@ -144,7 +144,7 @@ public static class EmRunService
     /// the diagnostics group that makes a wrong answer diagnosable — <c>tline</c>'s Zc / Gamma /
     /// Eeff / AttenDbPerM / Rpul / Lpul / Gpul / Cpul for the cross-section kernel, and
     /// <c>planar</c>'s Cpul / CalElectricalDeg / DeembedResidual / DeembedRejected /
-    /// CalibrationUsable and CalQuasiStatic for the full-wave one. Not writing it would lose every
+    /// DeembedErrorFloor / CalibrationUsable and CalQuasiStatic for the full-wave one. Not writing it would lose every
     /// one of those.</para>
     ///
     /// <para>The <c>.sNp</c> keeps its own unsuffixed name deliberately: it is the artifact a

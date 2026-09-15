@@ -277,10 +277,16 @@ public sealed class PlanarDcPointTests
         }
 
         foreach (var n in with.Notes) _out.WriteLine("  " + n);
-        var note = Assert.Single(with.Notes, n => n.Contains("the 0 Hz conduction solve"));
+        var note = Assert.Single(with.Notes, n => n.Contains("the field solver has no valid range"));
 
         // The note has to carry three things and no more: the boundary, which points moved, and
         // that the reactance is not in them. It is ONE sentence on purpose.
+        //
+        // §PEEL (2026-09-14) re-pointed the phrase this is found by, on the owner's instruction that
+        // these notes use plain terms: it said "the full-wave fit has no valid range", and "fit" is
+        // this engine's word for the DCIM Green's-function fit, not a word the person reading the
+        // run has. Nothing else about the sentence moved — the assertions below are unchanged,
+        // including the one that keeps it to a single sentence.
         Assert.Contains("2.982 MHz", note);          // Dcim.LowestFittableFrequency on 1.6 mm
         Assert.Contains("no reactance", note);
         Assert.Contains("mesh", note);               // a coarse mesh reads the resistance low
@@ -304,7 +310,7 @@ public sealed class PlanarDcPointTests
         // standard count for standards it never built — the same claim LF1's DC-only sweep makes.
         Assert.Equal(0, run.StandardCount);
         Assert.Equal(0, run.CoreFillCount);
-        Assert.Contains(run.Notes, n => n.Contains("the 0 Hz conduction solve"));
+        Assert.Contains(run.Notes, n => n.Contains("the field solver has no valid range"));
     }
 
     [Fact]
@@ -330,7 +336,7 @@ public sealed class PlanarDcPointTests
         var (mesh, ports) = PlanarLineFixtures.MeshAndPorts(problem, PlanarLineFixtures.Coarse);
         var run = PlanarSolve.Run(problem, mesh, ports, [fFloor, 2e9],
                                   new PlanarSolveSettings(Deembed: false));
-        Assert.DoesNotContain(run.Notes, n => n.Contains("the 0 Hz conduction solve"));
+        Assert.DoesNotContain(run.Notes, n => n.Contains("the field solver has no valid range"));
         Assert.NotEqual(0.0, run.Points[0].S[1, 0].Imaginary);
     }
 
