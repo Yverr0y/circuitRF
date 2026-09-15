@@ -90,7 +90,7 @@ public class LayoutPortGlyphReadsOverMetalTests
     public void BothEndsOfThePlaneBar_AreVisible_IncludingTheOneInsideTheMetal()
     {
         var hint = LayoutPortDirection.Resolve(
-            LayoutPortDirection.LookupFor(NotchView(), Tech(), ""), WallPort())!.Value;
+            LayoutConductorLookup.LookupFor(NotchView(), Tech(), ""), WallPort())!.Value;
 
         // The wall, and only the wall — the port's width is the edge it stands on.
         Assert.Equal(6_000, hint.WidthDbu);

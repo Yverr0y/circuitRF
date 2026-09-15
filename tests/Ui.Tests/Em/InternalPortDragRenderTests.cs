@@ -6,6 +6,12 @@
 // One root cause family: the renderer decided a port's TYPE, and measured its selection outline,
 // from the shape it was about to DRAW — which during a live move drag is a translated clone, not the
 // shape the .cem's marks were computed from (R-L1c-3: the model is untouched until commit).
+//
+// The TYPE moved onto the label itself on 2026-09-14 (LabelShape.PortKind), which removes the class
+// of bug entirely: a clone carries the field, so there is no anchor to match and nothing to keep in
+// step. These tests are kept, rewritten against the field, because what they assert is about the
+// PICTURE — a dragged internal port draws as an internal port, and its outline is where it is — and
+// that has to stay true however the type is stored.
 
 using CircuitRF.Engine.Mom;
 using Avalonia.Input;
@@ -22,10 +28,11 @@ public class InternalPortDragRenderTests
 
     private static long Mm(double mm) => (long)Math.Round(mm * 1000 * Dbu);
 
-    private static LabelShape Port(double xMm, double yMm) => new()
+    private static LabelShape Port(double xMm, double yMm,
+                                  PlanarPortKind kind = PlanarPortKind.InternalDeltaGap) => new()
     {
         Layer = TopCopper, X = Mm(xMm), Y = Mm(yMm), Text = "P1", Height = Mm(0.5),
-        IsPort = true, PortDirection = LayoutRotation.R0,
+        IsPort = true, PortDirection = LayoutRotation.R0, PortKind = kind,
     };
 
     /// <summary>Renders a one-trace layout whose single port is declared an internal delta gap at
@@ -48,8 +55,6 @@ public class InternalPortDragRenderTests
             new LayoutRenderOptions
             {
                 Theme = LayoutRenderTheme.Light,
-                // The .cem says this port — at its STORED anchor — is a gap.
-                InternalPortMarks = [(Mm(anchorMm), Mm(1.45), PlanarPortKind.InternalDeltaGap)],
                 Overlay = new LayoutOverlay
                 {
                     DragOverrides   = overrides,
@@ -92,13 +97,10 @@ public class InternalPortDragRenderTests
 
         byte[] Draw(PlanarPortKind kind)
         {
+            ((LabelShape)view.Shapes[1]).PortKind = kind;
             using var surface = SKSurface.Create(new SKImageInfo((int)vp.Width, (int)vp.Height));
             LayoutRenderer.Draw(surface.Canvas, view, StarterTechnologies.Pcb2Layer(), vp,
-                new LayoutRenderOptions
-                {
-                    Theme = LayoutRenderTheme.Light,
-                    InternalPortMarks = [(Mm(12), Mm(1.45), kind)],
-                });
+                new LayoutRenderOptions { Theme = LayoutRenderTheme.Light });
             using var img = surface.Snapshot();
             using var bmp = SKBitmap.FromImage(img);
             return bmp.Bytes;
@@ -118,96 +120,86 @@ public class InternalPortDragRenderTests
     // ── Mouse-up ──────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// <b>The mark survives the COMMIT, not just the drag.</b> Owner report, 2026-08-25: "after drag
+    /// <b>The type survives the COMMIT, not just the drag.</b> Owner report, 2026-08-25: "after drag
     /// of the port, the port rendering glitches momentarily on the mouse up."
     ///
-    /// <para>Two things used to happen at mouse-up and each on its own is enough to cause the flash.
-    /// <c>Model.Changed</c> cleared <c>InternalPortMarks</c> outright — correct for the mesh overlay
-    /// beside it, which is derived from the geometry, and wrong for a port TYPE, which lives in the
-    /// <c>.cem</c> and cannot be changed by moving a label. And the marks are keyed by the label's
-    /// ANCHOR, which the move has just changed, so even an uncleared list would have stopped matching.
-    /// The gap was then open until the owning <c>.cem</c> re-extracted and republished — a
-    /// Background-priority refresh, i.e. one or more visible frames later.</para>
+    /// <para>Two things used to happen at mouse-up and each on its own caused the flash.
+    /// <c>Model.Changed</c> cleared the <c>.cem</c>'s published marks outright — correct for the mesh
+    /// overlay beside it, which is derived from the geometry, and wrong for a port TYPE, which moving
+    /// a label cannot change. And the marks were keyed by the label's ANCHOR, which the move had just
+    /// changed, so even an uncleared list stopped matching. The gap stayed open until the owning
+    /// <c>.cem</c> re-extracted and republished, one or more visible frames later.</para>
     ///
-    /// <para>This drives the real view model through a real move commit and asserts the mark is still
-    /// there and has followed the port, with no republish in between.</para>
+    /// <para>The type is a field on the label now, so it moves with the port by construction. This
+    /// drives the real view model through a real move commit and asserts it.</para>
     /// </summary>
     [Fact]
-    public void CommittingAMoveOfAnInternalPort_KeepsItsMark_AndCarriesItToTheNewAnchor()
+    public void CommittingAMoveOfAnInternalPort_KeepsItsType()
     {
         var view = new LayoutView { DbuPerMicron = Dbu, DisplayUnit = LayoutUnit.Um, SnapDbu = 1000 };
         view.Shapes.Add(new RectShape { Layer = TopCopper, X1 = 0, Y1 = 0, X2 = Mm(20), Y2 = Mm(2.9) });
         view.Shapes.Add(Port(10, 1.45));
 
         var vm = new LayoutEditorViewModel(view);
-        vm.InternalPortMarks = [(Mm(10), Mm(1.45), PlanarPortKind.InternalDeltaGap)];
-        vm.InternalPortMarksOwner = "gap_setup";
 
         // The real pointer path: press on the port, drag 2 mm, release.
         vm.OnPointerPressed(Mm(10), Mm(1.45), KeyModifiers.None, 1, Mm(0.1));
         vm.OnPointerMoved(Mm(12), Mm(1.45), true, KeyModifiers.None, Mm(0.1));
         vm.OnPointerReleased(Mm(12), Mm(1.45), KeyModifiers.None);
 
-        Assert.Equal(Mm(12), ((LabelShape)view.Shapes[1]).X);
-
-        var mark = Assert.Single(vm.InternalPortMarks);
-        Assert.Equal(PlanarPortKind.InternalDeltaGap, mark.Kind);
-        Assert.Equal(Mm(12), mark.X);
-        Assert.Equal(Mm(1.45), mark.Y);
-        Assert.Equal("gap_setup", vm.InternalPortMarksOwner);
+        var port = (LabelShape)view.Shapes[1];
+        Assert.Equal(Mm(12), port.X);
+        Assert.Equal(PlanarPortKind.InternalDeltaGap, port.PortKind);
+        Assert.Equal(PlanarPortKind.InternalDeltaGap, vm.PortKindAt(1));
     }
 
     /// <summary>
-    /// <b>Undoing that move drops the mark rather than leaving it on empty space.</b> An undo raises
-    /// the same <c>Updated</c> change with no shift beside it, so the ports go back and the marks
-    /// would stay where they were — a mark sitting where no port is, which could in principle land on
-    /// some other port and give it a type it was never assigned. The owning .cem republishes a
-    /// correct set moments later; the prune only has to make the interval honest.
+    /// <b>Undoing that move takes the type back with it.</b> The old marks were keyed by anchor and
+    /// an undo left them stranded on empty space, which a prune then had to clean up; a field on the
+    /// label has none of that shape — undo restores the shape, and the shape is where the type is.
     /// </summary>
     [Fact]
-    public void UndoingThatMove_DropsTheStrandedMark()
+    public void UndoingThatMove_TakesTheTypeBackWithThePort()
     {
         var view = new LayoutView { DbuPerMicron = Dbu, DisplayUnit = LayoutUnit.Um, SnapDbu = 1000 };
         view.Shapes.Add(new RectShape { Layer = TopCopper, X1 = 0, Y1 = 0, X2 = Mm(20), Y2 = Mm(2.9) });
         view.Shapes.Add(Port(10, 1.45));
 
         var vm = new LayoutEditorViewModel(view);
-        vm.InternalPortMarks = [(Mm(10), Mm(1.45), PlanarPortKind.InternalDeltaGap)];
 
         vm.OnPointerPressed(Mm(10), Mm(1.45), KeyModifiers.None, 1, Mm(0.1));
         vm.OnPointerMoved(Mm(12), Mm(1.45), true, KeyModifiers.None, Mm(0.1));
         vm.OnPointerReleased(Mm(12), Mm(1.45), KeyModifiers.None);
-        Assert.Equal(Mm(12), Assert.Single(vm.InternalPortMarks).X);
+        Assert.Equal(Mm(12), ((LabelShape)view.Shapes[1]).X);
 
         vm.UndoCommand.Execute(null);
 
-        Assert.Equal(Mm(10), ((LabelShape)view.Shapes[1]).X);
-        // The mark did not follow the undo, so it no longer names a port — and is dropped rather
-        // than left pointing at nothing.
-        Assert.Empty(vm.InternalPortMarks);
+        var port = (LabelShape)view.Shapes[1];
+        Assert.Equal(Mm(10), port.X);
+        Assert.Equal(PlanarPortKind.InternalDeltaGap, port.PortKind);
     }
 
     /// <summary>
-    /// But an ADD still clears them, because it can renumber the ports — which .cem row means which
-    /// label is no longer knowable from the layout side, and a mark left pointing at the wrong label
-    /// is worse than no mark. This is the half of R-em-17 that still applies.
+    /// <b>And drawing something else does not disturb it.</b> An ADD used to clear every mark,
+    /// because it can renumber the ports and the <c>.cem</c>'s rows were addressed by number — so
+    /// which row meant which label became unknowable from the layout side. A type carried by the
+    /// label is immune to renumbering by construction, which is the half of R-em-17 that this
+    /// change retires.
     /// </summary>
     [Fact]
-    public void AddingAShapeStillClearsTheMarks_BecauseItCanRenumberThePorts()
+    public void AddingAShape_NoLongerDisturbsAnotherPortsType()
     {
         var view = new LayoutView { DbuPerMicron = Dbu, DisplayUnit = LayoutUnit.Um, SnapDbu = 1000 };
         view.Shapes.Add(new RectShape { Layer = TopCopper, X1 = 0, Y1 = 0, X2 = Mm(20), Y2 = Mm(2.9) });
         view.Shapes.Add(Port(10, 1.45));
 
         var vm = new LayoutEditorViewModel(view);
-        vm.InternalPortMarks = [(Mm(10), Mm(1.45), PlanarPortKind.InternalDeltaGap)];
-        vm.InternalPortMarksOwner = "gap_setup";
 
-        view.Shapes.Add(Port(5, 1.45));
+        view.Shapes.Add(Port(5, 1.45, PlanarPortKind.Edge));
         view.NotifyChanged(LayoutChangeInfo.Appended(2, 1));
 
-        Assert.Empty(vm.InternalPortMarks);
-        Assert.Equal("", vm.InternalPortMarksOwner);
+        Assert.Equal(PlanarPortKind.InternalDeltaGap, ((LabelShape)view.Shapes[1]).PortKind);
+        Assert.Equal(PlanarPortKind.Edge,             ((LabelShape)view.Shapes[2]).PortKind);
     }
 
     // ── The box itself ────────────────────────────────────────────────────────────────────────
@@ -319,7 +311,7 @@ public class InternalPortDragRenderTests
         var label = Port(xMm, 1.45);
         view.Shapes.Add(label);
 
-        var lookup = LayoutPortDirection.LookupFor(view, StarterTechnologies.Pcb2Layer(), baseDir: "");
+        var lookup = LayoutConductorLookup.LookupFor(view, StarterTechnologies.Pcb2Layer(), baseDir: "");
         return (label, LayoutPortDirection.Resolve(lookup, label));
     }
 }

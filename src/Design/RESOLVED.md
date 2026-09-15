@@ -1,5 +1,120 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## A port's TYPE moved from the `.cem` to the `.clay`, and silence stopped meaning "edge port" (2026-09-14)
+
+Owner bug report: place a port in the middle of a 50 Ω trace with geometry snapping OFF. The ghost
+draws an internal port under the cursor; the click lands; **the marker jumps to the far end of the
+conductor and reads as an edge port.** Reported as a snapping bug: the port was said to snap to some
+other geometry on the click.
+
+**Nothing was snapping.** Driven headlessly against the reporting file, with geometry snap off and the
+cursor on the saved anchor, the ghost and the committed label agree to the DBU:
+
+```
+ghost  = (254000, 812800)  PortHint Interior = True
+placed = (254000, 812800)  PortHint Interior = True
+```
+
+What moved was the PICTURE, one frame later, and the `.cem` moved it:
+
+1. The ghost passed `statedKind: null`, so the renderer inferred from the artwork — `Interior = True`
+   → `Internal` → the ring at the cursor. That is the good picture.
+2. The click committed. `LayoutChangeKind.Added` cleared `InternalPortMarks`, so for a frame it still
+   drew Internal.
+3. The open `.cem` re-extracted (posted at Background priority) and published one mark **per port**,
+   the kind from `EmSetup.ResolvePortKind(slot)`. The file carried no `PortKinds` array at all, and
+   that method's documented default for an unstated slot was `PlanarPortKind.Edge`.
+4. `MarkKindOf` returned Edge, so `DrawPortMarker` drew the bar at `hint.PlaneX` — the conductor's
+   **end face**, measured at x = −1,648,887 DBU, **1.9 mm from where the user clicked**.
+
+**This was the same defect `LayoutRenderer.MarkKindOf` already records from 2026-09-09** — *"'says
+nothing' used to mean 'edge port', and that was the bug"* — one layer up. That fix taught the LAYOUT
+that silence means "infer"; the `.cem` went on manufacturing an `Edge` assertion for a slot nobody had
+ever set. **The run agreed with the wrong half**: the Port tool stamps a `PortDirection`, so
+`EmPortExtraction` took the `stated` branch and would have driven a mid-trace port from the trace's
+MinX end — no refusal, a complete and plausible wrong answer.
+
+### The type is `LabelShape.PortKind` now
+
+Owner decision, after the diagnosis. The arguments, for the record:
+
+- **It was already three-quarters there.** `IsPort`, `PortDirection`, `PortLayer`, `PortReference`
+  and `PortReturn` all live on the label. The type was the odd one out.
+- **The split was incoherent.** `PortReference` is on the shape, but `EmPortExtraction` refuses it
+  unless the *`.cem`* calls that port `InternalDeltaGap` — one file's field whose legality was decided
+  by another file's.
+- **RP-2b's own argument applies more strongly to the type than to the return**: a port cut across
+  the middle of a trace is not the same port as one driven from its end; it is a different port.
+- The reference IMPEDANCE stays in the `.cem` (`PortZ0s`) and that is not an inconsistency: 50 Ω
+  versus 75 Ω really is one port measured twice.
+
+**What was given up, deliberately:** two `.cem` files analysing one `.clay` can no longer disagree
+about a port. `InternalPortMarksOwner`, `WorkspaceViewModel.AdoptPortTypes` and its takeover message
+existed only for that and are gone.
+
+### The engine's enum, not a layout one
+
+Unlike `LayoutPortReference`, whose note explains that the engine's `PlanarPortReference` carries a
+fourth member naming a refusal rather than anything anyone can draw. `PlanarPortKind`'s three members
+are exactly the three things a user can draw, so a parallel layout enum would have been a mapping
+table and two places to add the fourth kind.
+
+### One resolution, `LayoutPortDirection.KindOf`
+
+`label.PortKind ?? InferredKind(Resolve(conductorAt, label))`. The renderer, the hit test, the Port
+tool's ghost, the Properties Inspector, the port context menu, the `.cem` panel's port list and
+`EmPortExtraction` all call it. **`EmPortExtraction.Extract`'s `kindFor` parameter is gone and must
+not come back** — a caller supplying a type is a second source by definition, and
+`InternalDeltaGapPortUiTests.NoExtractorCallerHandsItAPortTypeOfItsOwn` scans all three call sites
+(`EmRunService`, `EmSetupEditorViewModel`, `Cli/Explain`) for one.
+
+### `EmSetup.DeclaresInternalPort()` had to become `EmPortExtraction.AnyNonEdgePort(shapes)`
+
+It read a list of STATED types. A port that is an internal port because of **where it is drawn**, with
+nothing stated, was invisible to it — so `Auto` would have routed exactly the port that guard exists
+for to the kernel that cannot carry it. It asks the artwork now, needs no problem and no mesh, and is
+asked in `Refresh()` rather than in the planar half: the whole point is that it fires when the
+CROSS-SECTION kernel was chosen, and the planar refresh does not run then. That is a real trap — the
+first version set the flag inside the planar extraction and `AGapPortOnTheCrossSectionKernel_
+BlocksTheRunByName` caught it immediately.
+
+### The migration is ONE door, not two readers
+
+`EmPortKindMigration`. Reading the label and falling back to the `.cem` would leave the value with two
+homes indefinitely and keep the drawing disagreeing with the run for exactly the files this change
+fixes — the renderer knows nothing about a `.cem`, so a legacy stated type would be driven and not
+drawn.
+
+- `EmRunService` and `circuitrf explain` call `ApplyInMemory` and **write nothing**, so a build machine
+  analysing an un-migrated pair gets the application's answer without modifying the tree it was handed.
+- `WorkspaceViewModel.MigrateLegacyPortKinds` does it as a real, undoable layout edit, reports it, and
+  clears `EmSetup.PortKinds`. Both documents end up dirty and the user saves when they choose;
+  silently rewriting two of somebody's files on open is not a thing to do.
+- **A label that states its own type is never overwritten**, so migrating twice is a no-op and a type
+  changed in the layout after the setup was written is not reverted by it.
+
+`EmSetup.PortKinds` survives as a read-only legacy field, documented as a migration SOURCE and nothing
+else. `ResolvePortKind` is deleted rather than kept — keeping it is how the Edge default would come
+back.
+
+### What an interior port infers as
+
+`Internal` (to ground), not `InternalDeltaGap`. That is what the DRAWING has said since 2026-09-09, so
+making the run agree changes nothing on screen; a user who means a delta gap says so, now in three
+places. **Existing tests encoded the old default and had to change**: a port at the middle of a
+20 mm line used to read `Edge` because the `.cem` said so, and now reads `Internal` because the metal
+does. Five assertions in `PortTypeIdentityTests` and `InternalDeltaGapPortUiTests` were updated, not
+suppressed.
+
+### `PortTypeIdentityTests`' whole defect class is now unrepresentable
+
+That file exists because `PortKinds` was read by POSITION, so deleting P1 slid P2 into slot 0 and P2
+was extracted, meshed and solved as an internal port. The slot became `portNumber - 1` in September;
+a field on the label has no slot to slide along at all. The tests stay, asserting the property rather
+than the mechanism. `PortZ0s` still uses the slot rule and is still tested for it.
+
+---
+
 ## `EmSetup.Deembed` is GONE, and a legacy `.cem` that carries it warns (2026-09-14)
 
 Owner bug report: an EM run of a 3.8 mm microstrip reported about -80 dB S21. The `.cem` carried

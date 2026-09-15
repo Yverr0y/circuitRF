@@ -263,6 +263,20 @@
                                       HorizontalAlignment="Stretch"
                                       FontSize="11" Padding="4,2"/>
                         </Grid>
+                        <!-- The port's own TYPE. It lives on the label (LabelShape.PortKind), so this
+                             combo, the port's right-click menu on the canvas and the EM setup panel's
+                             port list are three editors of one field — and a change here redraws the
+                             port immediately, because the drawing is where the value lives. -->
+                        <Grid ColumnDefinitions="56,*" IsVisible="{Binding ShowPortDirection}">
+                            <TextBlock Grid.Column="0" Text="Port type" VerticalAlignment="Center" FontSize="11"
+                                       ToolTip.Tip="An EDGE port is driven at the end face of a conductor and has a feed outside its cut, so it is de-embedded. An INTERNAL DELTA GAP cuts the metal in the middle, with metal on both sides and no feed to remove. An INTERNAL (to ground) port drives current down through a via into the ground plane instead of cutting the trace at all."
+                                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"/>
+                            <ComboBox Grid.Column="1"
+                                      ItemsSource="{x:Static vm:LayoutShapePropertiesViewModel.PortKindOptions}"
+                                      SelectedItem="{Binding PortKindValue, Mode=TwoWay}"
+                                      HorizontalAlignment="Stretch"
+                                      FontSize="11" Padding="4,2"/>
+                        </Grid>
                         <!-- RP-2b — what the port RETURNS THROUGH. "Ground plane" is a real row and
                              the first one: it is what every port drawn before this field carries and
                              what the Port tool still places, so naming a drawn conductor instead is a

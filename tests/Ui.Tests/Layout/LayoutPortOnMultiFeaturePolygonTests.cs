@@ -58,7 +58,7 @@ public class LayoutPortOnMultiFeaturePolygonTests
     public void APortOnTheRightRectangle_MeasuresTheRightRectangle_NotTheLeftBlob()
     {
         var view = ThreeFeaturePolygon();
-        var lookup = LayoutPortDirection.LookupFor(view, Tech(), "");
+        var lookup = LayoutConductorLookup.LookupFor(view, Tech(), "");
 
         // Just inside the right rectangle's own bottom edge, 8,000 DBU away from the left blob.
         var hint = LayoutPortDirection.Resolve(lookup, PortAt(8_000, 100))!.Value;
@@ -74,7 +74,7 @@ public class LayoutPortOnMultiFeaturePolygonTests
     {
         var view = ThreeFeaturePolygon();
         var hint = LayoutPortDirection.Resolve(
-            LayoutPortDirection.LookupFor(view, Tech(), ""), PortAt(10_000, 1_000))!.Value;
+            LayoutConductorLookup.LookupFor(view, Tech(), ""), PortAt(10_000, 1_000))!.Value;
 
         Assert.Equal(LayoutRotation.R180, hint.Direction);
         Assert.Equal(10_000, hint.PlaneX);
@@ -86,7 +86,7 @@ public class LayoutPortOnMultiFeaturePolygonTests
     {
         var view = ThreeFeaturePolygon();
         var hint = LayoutPortDirection.Resolve(
-            LayoutPortDirection.LookupFor(view, Tech(), ""), PortAt(3_000, 620))!.Value;
+            LayoutConductorLookup.LookupFor(view, Tech(), ""), PortAt(3_000, 620))!.Value;
 
         Assert.Equal(LayoutRotation.R90, hint.Direction);
 
@@ -115,7 +115,7 @@ public class LayoutPortOnMultiFeaturePolygonTests
         // polygon's whole 2,000-tall box... and, facing R180 from the right end, 10,000 rather than
         // the box's own width used blindly.
         var view = ThreeFeaturePolygon();
-        var lookup = LayoutPortDirection.LookupFor(view, Tech(), "");
+        var lookup = LayoutConductorLookup.LookupFor(view, Tech(), "");
 
         Assert.Equal(2_000, LayoutPortDirection.Resolve(lookup, PortAt(8_000, 100))!.Value.LengthDbu);
         Assert.Equal(10_000, LayoutPortDirection.Resolve(lookup, PortAt(10_000, 1_000))!.Value.LengthDbu);
@@ -130,7 +130,7 @@ public class LayoutPortOnMultiFeaturePolygonTests
         var port = PortAt(8_000, 1_000);
         port.PortDirection = LayoutRotation.R270;   // faces the top edge
 
-        var hint = LayoutPortDirection.Resolve(LayoutPortDirection.LookupFor(view, Tech(), ""), port)!.Value;
+        var hint = LayoutPortDirection.Resolve(LayoutConductorLookup.LookupFor(view, Tech(), ""), port)!.Value;
         Assert.Equal(LayoutRotation.R270, hint.Direction);
         Assert.Equal(2_000, hint.PlaneY);     // the rectangle's own top edge
         Assert.Equal(4_000, hint.WidthDbu);
@@ -163,7 +163,7 @@ public class LayoutPortOnMultiFeaturePolygonTests
         // y 0..600. Measuring the metal reported 1,000 — 67% too long, and centred 200 DBU above the
         // port, overlapping artwork the port does not touch.
         var hint = LayoutPortDirection.Resolve(
-            LayoutPortDirection.LookupFor(NotchedPolygon(), Tech(), ""), PortAt(1_000, 300))!.Value;
+            LayoutConductorLookup.LookupFor(NotchedPolygon(), Tech(), ""), PortAt(1_000, 300))!.Value;
 
         Assert.Equal(LayoutRotation.R180, hint.Direction);
         Assert.Equal(1_000, hint.PlaneX);
@@ -188,7 +188,7 @@ public class LayoutPortOnMultiFeaturePolygonTests
         });
 
         var hint = LayoutPortDirection.Resolve(
-            LayoutPortDirection.LookupFor(view, Tech(), ""), PortAt(1_000, 100))!.Value;
+            LayoutConductorLookup.LookupFor(view, Tech(), ""), PortAt(1_000, 100))!.Value;
         Assert.Equal(200, hint.WidthDbu);   // the LOWER finger's face, not both plus the gap
         Assert.Equal(100, hint.PlaneY);
     }
@@ -200,7 +200,7 @@ public class LayoutPortOnMultiFeaturePolygonTests
         var view = new LayoutView();
         view.Shapes.Add(new RectShape { Layer = new LayerKey(1, 0), X1 = 0, Y1 = 0, X2 = 10_000, Y2 = 2_000 });
         var hint = LayoutPortDirection.Resolve(
-            LayoutPortDirection.LookupFor(view, Tech(), ""), PortAt(0, 1_000))!.Value;
+            LayoutConductorLookup.LookupFor(view, Tech(), ""), PortAt(0, 1_000))!.Value;
 
         Assert.Equal(LayoutRotation.R0, hint.Direction);
         Assert.Equal(0, hint.PlaneX);

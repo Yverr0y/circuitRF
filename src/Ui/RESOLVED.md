@@ -1,5 +1,85 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## A click must land the port the ghost drew — the port type, 2026-09-14
+
+Owner bug report, filed as a snapping bug: place a port mid-trace with geometry snapping OFF, the ghost
+draws an internal port, the click lands, and the marker is suddenly an edge port at the far end of the
+conductor. **The snapping was innocent** — ghost and committed label agreed to the DBU. The full
+diagnosis, the decision to move a port's TYPE onto its label, and the migration are in
+`src/Design/RESOLVED.md`; what follows is the UI half.
+
+### The Port tool STAMPS the type, on exactly `PortDirection`'s terms
+
+`TryBuildPortPlacement` now ends with `placed.PortKind = LayoutPortDirection.KindOf(conductorAt,
+placed)` — the same call the ghost draws through, made once. Stamped rather than left null so the
+value is the USER's from the moment it lands: visible in the Properties Inspector, changeable from the
+port's own context menu, and not an inference that can quietly change under them later.
+
+### …but a DRAG still retypes, and that took work
+
+The drawing rule this replaces had a deliberate property the owner named in 2026-09-09: dragging a
+port across the toggle changed what it drew as, which a stored mode could not have done. Dragging a
+port out of the middle of a trace onto its end face really does make it an edge port, and that fell
+out for free while the type was re-inferred every frame. With it STORED it has to be re-seated
+deliberately.
+
+`LayoutPortDirection.Reseat` gained `Kind`/`KindChanged` on **exactly the trigger it already applies to
+the direction**: not "the port moved" but "the ARTWORK's own answer under the port CHANGED" — the
+inference at the old anchor versus the new one. So nudging an internal port a few DBU leaves an
+explicit `InternalDeltaGap` alone, and crossing from the interior to an end face adopts the new answer.
+Both halves are held by `PortTypeLivesOnTheLabelTests`. `Measured` is asked about a label AT the
+destination (`WithAnchor`), because it reads `X`/`Y` — asking it about the source label while claiming
+to describe the destination is the obvious wrong answer here.
+
+### Three editors, one field, no push channel
+
+The owner's follow-up requirement was that a type changed in the `.cem` panel must update the layout.
+That is what one home buys: there is nothing to push.
+
+| Editor | Path |
+|---|---|
+| Layout context menu | `LayoutCanvas.BuildContextMenuItems` → `FindPortForContextMenu` → `SetPortKind` |
+| Properties Inspector | `PortKindValue` combo → `ApplyToEach` |
+| `.cem` port list | `CommitPortKind` → `SetPortKind` callback → `WorkspaceViewModel.SetLayoutPortKind` → the layout's `SetPortKind` |
+
+Three things that are easy to get wrong and are decided once:
+
+- **`FindPortForContextMenu` uses the port's own PICK REGION** (`PortMarkerRegion`), not a label box.
+  An edge port's bar-and-arrow is drawn at the conductor END, an arbitrary distance from its anchor —
+  a menu keyed on the anchor would appear for presses that do not select the port and refuse presses
+  that do. Smallest-region-wins, like the conductor lookup, so overlapping generous regions resolve
+  to the port being pointed at.
+- **A port OWNS its menu outright** — owner instruction: a port's context menu shows the port type
+  rows and nothing else. `BuildContextMenuItems` returns the three type rows and returns — **before the overlay is
+  asked** and before every click-target section below it, rather than contributing three more rows to
+  a list. A port is the one thing under the pointer that is entirely about itself: it is not an edge
+  to convert, not a vertex to delete, and a wBond overlay's wire commands are about something else
+  that happens to be nearby. `PortContextMenuTests` holds both halves — three rows and no separator on
+  a port, the ordinary menu untouched away from one — through the real control over a real view model,
+  which `LayoutCanvas` supports (it constructs with no Avalonia app, the seam
+  `StackupContextMenuTests` already uses).
+- **The `.cem` panel's edit belongs to the LAYOUT's undo stack.** `CommitPortKind` takes no snapshot
+  of its own document and pushes no `.cem` undo entry — the user changed the drawing, and that is
+  where they will look for the undo.
+- **A `.cem` panel can be open while its `.clay` is not.** `SetLayoutPortKind` OPENS the layout rather
+  than editing a resolved-but-unowned `LayoutView`, because an edit into a document nobody is saving
+  is an edit the user loses without being told. A panel with no workspace behind it (a test, a doc
+  fixture) leaves `SetPortKind` null and the type is refused with a sentence rather than written
+  nowhere.
+
+### What was deleted
+
+`LayoutEditorViewModel.InternalPortMarks`/`InternalPortMarksOwner`, `PruneInternalPortMarksToLivePorts`,
+`PortAnchorsOf`, `ShiftInternalPortMarks`, `EmSetupEditorViewModel.InternalPortMarkAnchors`,
+`WorkspaceViewModel.AdoptPortTypes` and its two-setups-disagree takeover message. All of it existed to
+carry an anchor-keyed type list across a window boundary and keep it in step with moving artwork.
+
+One live comment elsewhere was made false by the deletion and was fixed rather than left:
+`SetShapeFieldCommand`'s `change` parameter documented `Updated`-vs-`Full` in terms of clearing those
+marks. The ordinary rule (neither content nor order changes) is what remains.
+
+---
+
 ## The macOS update hand-over, fourth report: a sleep that never ran, 2026-09-13
 
 Owner: auto-updated beta.19 to beta.20, pressed Relaunch, macOS reported that circuitRF had quit

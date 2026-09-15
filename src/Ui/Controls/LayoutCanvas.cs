@@ -18,7 +18,8 @@ using CircuitRF.Ui.Renderers;
 using CircuitRF.Ui.Schematic;
 using CircuitRF.Ui.Theming;
 using CircuitRF.Ui.Views.Dialogs;
-using SkiaSharp;
+using SkiaSharp;using CircuitRF.Engine.Mom;   // PlanarPortKind — a port's own type, on the port.
+
 
 namespace CircuitRF.Ui.Controls;
 
@@ -485,7 +486,6 @@ public sealed class LayoutCanvas : Control
             ShowPlanarMesh = _viewModel?.ShowPlanarMesh ?? false, PlanarMesh = _viewModel?.PlanarMeshReport,
             PlanarCurrentDensity = _viewModel?.PlanarCurrentDensity,
             PlanarPorts = _viewModel?.PlanarReferencePlanes ?? [],
-            InternalPortMarks = _viewModel?.InternalPortMarks ?? [],
             // SL3 R-sl3-9 — chrome for an instance whose cell's interface changed. Read from the VM's
             // last scan, never computed here: a hash reads the cell's .ccell from disk.
             InterfaceChangedCellRefs = _viewModel?.InterfaceChangedCellRefs,
@@ -1132,12 +1132,67 @@ public sealed class LayoutCanvas : Control
         return t;
     }
 
+    /// <summary>
+    /// The port context menu: its three TYPES, and nothing else — see
+    /// <see cref="BuildContextMenuItems"/> for why a port's menu carries nothing but this.
+    ///
+    /// <para>The type lives on the label (<c>LabelShape.PortKind</c>), so choosing here is one
+    /// undoable layout edit and the port redraws immediately — this menu, the Properties Inspector
+    /// and the EM setup panel's port list are three spellings of one edit.</para>
+    /// </summary>
+    private List<object> PortTypeMenuItems(int portIndex)
+    {
+        var items = new List<object>(3);
+        if (_viewModel is null) return items;
+
+        var current = _viewModel.PortKindAt(portIndex);
+        foreach (var kind in new[] { PlanarPortKind.Edge, PlanarPortKind.InternalDeltaGap,
+                                     PlanarPortKind.Internal })
+        {
+            var mi = new MenuItem
+            {
+                Header = kind switch
+                {
+                    PlanarPortKind.Internal         => "Port Type: Internal (to ground)",
+                    PlanarPortKind.InternalDeltaGap => "Port Type: Internal delta gap",
+                    _                               => "Port Type: Edge",
+                },
+                // A radio-style tick rather than a disabled row: the user is choosing among three
+                // states, and which one is current is the thing the menu has to say.
+                ToggleType = MenuItemToggleType.Radio,
+                IsChecked  = kind == current,
+            };
+            var chosen = kind;
+            mi.Click += (_, _) => { _viewModel.SetPortKind(portIndex, chosen); InvalidateVisual(); };
+            items.Add(mi);
+        }
+        return items;
+    }
+
     /// <summary>Builds a FRESH list of menu items for a right-click at <paramref name="wx"/>/<paramref
     /// name="wy"/> — called anew on every <c>ContextMenu.Opening</c>, never reused across openings
     /// (reusing item instances and re-subscribing <c>Click</c> would fire an action N times on the
     /// Nth opening — the exact mistake this fix must not reintroduce).</summary>
     internal List<object> BuildContextMenuItems(double wx, double wy)
     {
+        // ── A PORT OWNS ITS MENU OUTRIGHT (owner instruction, 2026-09-14) ───────────────────────
+        //
+        // A port's context menu shows the port type rows and nothing else — so this returns BEFORE
+        // the overlay is asked and before any of the click-target sections below, rather than
+        // contributing three more rows to a list.
+        //
+        // A port is the one thing under the pointer that is entirely about itself: it is not an edge
+        // to convert, not a vertex to delete, and the wire commands a wBond overlay offers are about
+        // something else that happens to be nearby. Offering them beside a port's type is the noise
+        // this rule removes.
+        //
+        // Scoped by the port's own PICK REGION (FindPortForContextMenu), which is the mark it draws
+        // plus padding — NOT the label's anchor. An edge port's bar-and-arrow sits at the conductor
+        // END, an arbitrary distance away, so an anchor-keyed test would claim presses that do not
+        // select the port and miss the ones that do.
+        if (_viewModel?.FindPortForContextMenu(wx, wy, HitTolDbu()) is { } portIndex)
+            return PortTypeMenuItems(portIndex);
+
         // WB39a: the overlay contributes FIRST, and it may be the only contributor — a wBond editor
         // (or a Layout Editor pushed into a wirebond cell) has wire commands to offer whether or not
         // this canvas has a view model bound yet. The canvas's own items follow after a separator.

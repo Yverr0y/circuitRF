@@ -1,5 +1,68 @@
 # src/Render — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## `LayoutPortDirection` moved DOWN to `src/Design`, and one overload could not come with it (2026-09-14)
+
+Part of moving a port's TYPE onto its label — `src/Design/RESOLVED.md` has the bug and the decision.
+What is worth recording here is the boundary, because it is the second time a framework-free type in
+this project turned out to be needed below it.
+
+**Why it had to move.** `EmPortExtraction` — and through it `EmRunService`, which is what `circuitrf
+em` and Simulate both call — has to ask *"is this port standing in the interior of its conductor, or
+at an end of it?"* and get the SAME answer the drawing gives. `src/Design` cannot reference
+`src/Render`, so the alternative was a second interior test in the extractor, which is the second copy
+every other note in that file exists to prevent. The file's own header already claimed *"the renderer,
+the editor and the EM extractor all read this"*; the move is what makes that sentence true.
+
+**Cost: almost nothing.** Both `src/Render` and `src/Ui` already say `global using
+CircuitRF.Design.Layout`, and nothing qualified the type, so all 34 referencing files were untouched.
+`CellPins` and `LayoutFlattenToPolygon` came along (both framework-free, both needed by it);
+`CellPins` needed one `using CircuitRF.Design.Layout.PCells` for the `PCellGenerator` delegate.
+
+**`LayoutHitTest` did NOT come along, and that is the whole reason for the split.** It measures a
+label with real Skia glyph metrics off `LayoutRenderer.MeasureLabelWorldBbox`, which is render-layer
+code by any reading. It is used by exactly one thing in `LayoutPortDirection`: the
+`LookupFor(LayoutView, Technology?, string, long)` overload, which enumerates candidate shapes through
+the hit stack. So that one overload — plus its `PinAt`/`ScaleWidth`/`TransformDirection` helpers —
+stayed here as **`LayoutConductorLookup.LookupFor`**, and the ~37 call sites were renamed. Nothing
+below the wall wants it: a lookup over a plain shape list (`LayoutPortDirection.LookupFor(shapes)`) is
+all the extractor ever needs, and the view form exists for the EDITOR, which has a technology, layer
+visibility and placed instances to resolve through.
+
+**Three approaches were tried and rejected before that**, each for a stated reason:
+
+- *Move `LayoutHitTest` too.* It compiles nowhere below the wall until `MeasureLabelWorldBbox` moves,
+  and that lives on an 11,000-line renderer.
+- *Inject the hit stack through a static delegate*, like `LayoutTextOutline.TypefaceSource` and
+  `CellPins.GeneratorSource` already do. Rejected because what is lost when it is unset here is not a
+  degradation, it is the whole answer — the lookup would return nothing — and because a module
+  initializer in `src/Render` is not guaranteed to have run before a test touches `src/Design`. Those
+  two existing hooks each have a precise, documented, harmless fallback; this one would not.
+- *Let `EmPortExtraction` do its own interior test* from the polygons it already has. That is a second
+  answer to the question, free to disagree with the drawing in marginal cases, which is the bug.
+
+## The `.cem` no longer tells the renderer what a port is
+
+`LayoutRenderOptions.InternalPortMarks` and `MarkKindOf` are **gone**. `DrawPortMarker` reads
+`label.PortKind ?? InferredKind(hint)` — spelled out rather than calling
+`LayoutPortDirection.KindOf`, only because the hint is already resolved there and `KindOf` would
+resolve it twice.
+
+Two pieces of machinery disappeared with it, and both are worth knowing were there:
+
+- **The `original`-not-`shape` dance in the layer pass.** Marks were keyed on the label's exact DBU
+  anchor, and a live move drag renders a translated CLONE while the model stays untouched until commit
+  (R-L1c-3) — so from the first pixel of a drag no anchor matched and every internal port fell through
+  to Edge for the whole gesture (owner report, 2026-08-25). Asking the STORED shape was the fix. A
+  field on the label needs no fix: `LayoutGeometry.Clone` and the renderer's own two field-by-field
+  `LabelShape` copies carry `PortKind`, so the preview is right by construction. **Those three copies
+  are the trap to remember** — a new `LabelShape` field that is not added to all of them is dropped
+  silently, and only during a drag.
+- **`DrawSelectionOutlines`' `internalPortMarks` parameter**, for the same reason, feeding
+  `BuildOutlinePathForSelection` → `LayoutHitTest.PortPickBbox`. The outline and the pick region read
+  the shape's own field now.
+
+---
+
 ## brief-stackup-render-8, 2026-09-13 — a scene may be built with NO boundary conditions
 
 `StackupSceneOptions.ShowBoundaryConditions` (default true) is the one thing brief 8 needed from the

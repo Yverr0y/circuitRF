@@ -101,9 +101,15 @@ public class PortReturnConductorTests(ITestOutputHelper output) : IDisposable
         PortKinds = [.. Enumerable.Repeat(PlanarPortKind.InternalDeltaGap, ports)],
     };
 
+    /// <summary>Extracts, with the setup's LEGACY port-kind list carried onto the labels first —
+    /// which is exactly what <c>EmRunService</c> does for a <c>.cem</c> written before the type moved
+    /// onto the drawing (2026-09-14). The fixtures above still state their types the old way, so this
+    /// exercises that door as well as the extraction.</summary>
     private static EmPortExtractionResult Ports(EmSetup setup, params LayoutShape[] shapes)
-        => EmPortExtraction.Extract(shapes, Problem(shapes), Dbu, setup.ResolvePortZ0,
-                                    LayoutUnit.Um, setup.ResolvePortKind);
+    {
+        EmPortKindMigration.ApplyInMemory(shapes, setup.PortKinds);
+        return EmPortExtraction.Extract(shapes, Problem(shapes), Dbu, setup.ResolvePortZ0, LayoutUnit.Um);
+    }
 
     private static PlanarMeshSettings MeshSettings() =>
         new(Auto: false, CellsPerWavelength: 12, EdgeMesh: false, MinCellsAcrossConductor: 4);
@@ -522,9 +528,10 @@ public class PortReturnConductorTests(ITestOutputHelper output) : IDisposable
             setup.ToExtractionSettings(setup.LayoutRef), geometry.GeneratorIds);
         Assert.True(planar.Ok, planar.Refusal);
 
+        EmPortKindMigration.ApplyInMemory(resolution.Source.View.Shapes, setup.PortKinds);
         var ports = EmPortExtraction.Extract(
             resolution.Source.View.Shapes, planar.Problem!, resolution.Source.DbuPerMicron,
-            setup.ResolvePortZ0, resolution.Source.View.DisplayUnit, setup.ResolvePortKind);
+            setup.ResolvePortZ0, resolution.Source.View.DisplayUnit);
         Assert.True(ports.Ok, ports.Refusal);
 
         var conductorReferenced = Assert.Single(ports.Ports, p => p.IsConductorReferenced);

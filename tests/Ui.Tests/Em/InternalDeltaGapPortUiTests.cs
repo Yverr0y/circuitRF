@@ -52,8 +52,7 @@ public class InternalDeltaGapPortUiTests
         string before = EmSetupPersistence.Serialize(setup);
 
         Assert.DoesNotContain("PortKinds", before, StringComparison.Ordinal);
-        Assert.Equal(PlanarPortKind.Edge, setup.ResolvePortKind(0));
-        Assert.Equal(PlanarPortKind.Edge, setup.ResolvePortKind(7));
+        Assert.Empty(setup.PortKinds);
 
         var reloaded = EmSetupPersistence.Deserialize(before);
         Assert.Equal(before, EmSetupPersistence.Serialize(reloaded));
@@ -88,12 +87,11 @@ public class InternalDeltaGapPortUiTests
         Assert.Contains("InternalDeltaGap", json, StringComparison.Ordinal);
 
         var back = EmSetupPersistence.Deserialize(json);
-        Assert.Equal(PlanarPortKind.Edge,             back.ResolvePortKind(0));
-        Assert.Equal(PlanarPortKind.InternalDeltaGap, back.ResolvePortKind(1));
+        Assert.Equal([PlanarPortKind.Edge, PlanarPortKind.InternalDeltaGap], back.PortKinds);
 
         // Clone drives the editor's undo snapshots; a field missing from it is silently lost on the
         // next unrelated edit.
-        Assert.Equal(PlanarPortKind.InternalDeltaGap, setup.Clone().ResolvePortKind(1));
+        Assert.Equal(PlanarPortKind.InternalDeltaGap, setup.Clone().PortKinds[1]);
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -142,8 +140,9 @@ public class InternalDeltaGapPortUiTests
             PortKinds = [PlanarPortKind.Edge, PlanarPortKind.Edge, PlanarPortKind.InternalDeltaGap],
         };
 
+        EmPortKindMigration.ApplyInMemory(shapes, setup.PortKinds);
         var r = EmPortExtraction.Extract(shapes, Problem(shapes), Dbu, setup.ResolvePortZ0,
-                                         LayoutUnit.Um, setup.ResolvePortKind);
+                                         LayoutUnit.Um);
 
         Assert.True(r.Ok, r.Refusal);
         Assert.Equal(PlanarPortKind.Edge,             r.Ports[0].Kind);
@@ -163,10 +162,9 @@ public class InternalDeltaGapPortUiTests
         // reverse the sign of everything through this port; the edge port's own corner-ambiguity
         // refusal would fire here too, but for the wrong reason and with the wrong remedy.
         LayoutShape[] shapes = [Line(), Port("1", 10, 1.45)];   // no PortDirection
+        foreach (var l in shapes.OfType<LabelShape>()) l.PortKind = PlanarPortKind.InternalDeltaGap;
 
-        var r = EmPortExtraction.Extract(
-            shapes, Problem(shapes), Dbu, null, LayoutUnit.Um,
-            _ => PlanarPortKind.InternalDeltaGap);
+        var r = EmPortExtraction.Extract(shapes, Problem(shapes), Dbu, null, LayoutUnit.Um);
 
         Assert.False(r.Ok);
         Assert.Contains("internal delta-gap port with no direction", r.Refusal!);
@@ -206,7 +204,11 @@ public class InternalDeltaGapPortUiTests
         return view;
     }
 
-    private static EmSetupEditorViewModel Editor(string dir)
+    /// <summary>The panel plus the LIVE layout it edits. A port's type lives on its label
+    /// (2026-09-14), so the panel is an editor of the drawing rather than the owner of the value —
+    /// <c>SetPortKind</c> is exactly what <c>WorkspaceViewModel</c> supplies, minus the document
+    /// plumbing.</summary>
+    private static (EmSetupEditorViewModel Vm, LayoutView View) EditorAndLayout(string dir)
     {
         string path  = Path.Combine(dir, "panel.cem");
         var    setup = new EmSetup
@@ -214,13 +216,28 @@ public class InternalDeltaGapPortUiTests
             Name = "panel", LayoutRef = "a.clay", AnalysisKind = EmAnalysisKind.Planar,
         };
         EmSetupPersistence.SaveToFile(path, setup);
+        var view = PortedLine();
         var vm = new EmSetupEditorViewModel(path, setup)
         {
             ResolveLayout = _ => new EmLayoutSource(
-                Path.Combine(dir, "a.clay"), PortedLine(), StarterTechnologies.Pcb2Layer(), Dbu),
+                Path.Combine(dir, "a.clay"), view, StarterTechnologies.Pcb2Layer(), Dbu),
+            SetPortKind = (label, kind) => { label.PortKind = kind; view.NotifyChanged(); },
         };
         vm.Refresh();
-        return vm;
+        return (vm, view);
+    }
+
+    private static EmSetupEditorViewModel Editor(string dir) => EditorAndLayout(dir).Vm;
+
+    /// <summary>The type port <paramref name="number"/> currently resolves to, asked the way
+    /// everything else asks it.</summary>
+    private static PlanarPortKind KindOfPort(EmSetupEditorViewModel vm, int number)
+    {
+        var source = vm.ResolveLayout!.Invoke(vm.Working.LayoutRef)!;
+        var conductorAt = LayoutPortDirection.LookupFor(source.View.Shapes);
+        foreach (var (n, label) in EmPortExtraction.NumberPorts(source.View.Shapes))
+            if (n == number) return LayoutPortDirection.KindOf(conductorAt, label);
+        throw new InvalidOperationException($"no port {number}");
     }
 
     [Fact]
@@ -260,29 +277,30 @@ public class InternalDeltaGapPortUiTests
     }
 
     [Fact]
-    public void ChangingATypeCommitsOneUndoEntry_AndINVALIDATESTheMesh()
+    public void ChangingATypeInThePanel_WRITESTHELAYOUT_AndINVALIDATESTheMesh()
     {
-        var vm = Editor(TempDir());
-
-        while (vm.UndoRedo.CanUndo) vm.UndoRedo.Undo();
-        while (vm.UndoRedo.CanRedo) vm.UndoRedo.Redo();
+        // The type lives on the port LABEL (2026-09-14), so this panel EDITS the drawing rather than
+        // storing an answer of its own. The undo entry therefore belongs to the .clay's stack, not
+        // to this document's — which is where a user looks for the undo of a change to the drawing.
+        var (vm, view) = EditorAndLayout(TempDir());
 
         vm.BuildPlanarMesh();
         Assert.NotNull(vm.PlanarMeshReport);
 
         vm.PortRows[1].Kind = PlanarPortKind.InternalDeltaGap;
 
-        Assert.Equal(PlanarPortKind.InternalDeltaGap, vm.Working.ResolvePortKind(1));
-        Assert.Equal(PlanarPortKind.Edge,             vm.Working.ResolvePortKind(0));
+        Assert.Equal(PlanarPortKind.InternalDeltaGap, KindOfPort(vm, 2));
+        Assert.Equal(PlanarPortKind.Edge,             KindOfPort(vm, 1));
+
+        // …and it is on the LABEL, not in the .cem, which keeps no second copy to disagree with.
+        var p2 = view.Shapes.OfType<LabelShape>().Single(l => l.Text == "2");
+        Assert.Equal(PlanarPortKind.InternalDeltaGap, p2.PortKind);
+        Assert.Empty(vm.Working.PortKinds);
 
         // Unlike the reference impedance beside it: Z0 is a renormalisation applied to the answer,
         // while the type decides WHERE the excitation is cut and therefore which rooftops are
         // driven. A report computed under the other type is about a different excitation.
         Assert.Null(vm.PlanarMeshReport);
-
-        Assert.True(vm.UndoRedo.CanUndo);
-        vm.UndoRedo.Undo();
-        Assert.Equal(PlanarPortKind.Edge, vm.Working.ResolvePortKind(1));
     }
 
     [Fact]
@@ -337,13 +355,18 @@ public class InternalDeltaGapPortUiTests
         var setup = new EmSetup
         {
             Name = "xs", LayoutRef = "a.clay", AnalysisKind = EmAnalysisKind.CrossSection,
-            PortKinds = [PlanarPortKind.Edge, PlanarPortKind.InternalDeltaGap],
         };
         EmSetupPersistence.SaveToFile(path, setup);
+
+        // Stated on the LABEL, which is where a port's type lives (2026-09-14).
+        var view = PortedLine();
+        view.Shapes.OfType<LabelShape>().Single(l => l.Text == "2").PortKind =
+            PlanarPortKind.InternalDeltaGap;
+
         var vm = new EmSetupEditorViewModel(path, setup)
         {
             ResolveLayout = _ => new EmLayoutSource(
-                Path.Combine(dir, "a.clay"), PortedLine(), StarterTechnologies.Pcb2Layer(), Dbu),
+                Path.Combine(dir, "a.clay"), view, StarterTechnologies.Pcb2Layer(), Dbu),
         };
         vm.Refresh();
 
@@ -395,56 +418,63 @@ public class InternalDeltaGapPortUiTests
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
-    // Two setups, one layout: the layout names whose interpretation it is drawing
+    // Two setups, one layout — no longer a conflict, because the drawing owns the answer
     // ══════════════════════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public void TheLayoutRecordsWhichSetupsPortTypesItIsShowing_AndAnEditClearsIt()
+    public void TheLayoutDrawsItsOwnPortTypes_WithNoSetupToldItAnything()
     {
-        // A layout can be analysed by more than one .cem, and two of them may legitimately disagree
-        // about a port — which is the whole reason the type is an analysis setting rather than a
-        // property of the drawing. There is only ONE layout on screen, so it can draw only one of
-        // the two answers, and it has to be able to say which.
-        var vm = new LayoutEditorViewModel(PortedLine());
+        // This replaces a test that asserted the opposite arrangement: the layout used to RECORD
+        // which .cem's interpretation it was showing, because two setups could disagree about a port
+        // and only one answer could be drawn. The type is on the label now (2026-09-14) — so there is
+        // no channel, no owner to record, and nothing for two setups to disagree about. What a user
+        // sees is what the file says, with no EM setup open at all.
+        var view = PortedLine();
+        var gap  = view.Shapes.OfType<LabelShape>().Single(l => l.Text == "2");
+        gap.PortKind = PlanarPortKind.InternalDeltaGap;
 
-        Assert.Equal("", vm.InternalPortMarksOwner);
+        var vm = new LayoutEditorViewModel(view);
 
-        vm.InternalPortMarks      = [(Mm(10), Mm(1.45), PlanarPortKind.InternalDeltaGap)];
-        vm.InternalPortMarksOwner = "lna_gap";
-        Assert.Single(vm.InternalPortMarks);
+        int index = vm.Model.Shapes.IndexOf(gap);
+        Assert.Equal(PlanarPortKind.InternalDeltaGap, vm.PortKindAt(index));
 
-        // R-em-17's rule, applied to this overlay too: an edited layout drops what an EM setup told
-        // it about itself rather than going on drawing marks against moved artwork.
+        // …and an unrelated edit does not disturb it. The old marks were dropped on any edit that
+        // could renumber the ports, which is what made an internal port flash back to an edge port
+        // the instant anything was drawn.
         vm.Model.Shapes.Add(new RectShape { Layer = TopCopper, X1 = 0, Y1 = 0, X2 = Mm(1), Y2 = Mm(1) });
         vm.Model.NotifyChanged();
 
-        Assert.Empty(vm.InternalPortMarks);
-        Assert.Equal("", vm.InternalPortMarksOwner);
+        Assert.Equal(PlanarPortKind.InternalDeltaGap, vm.PortKindAt(vm.Model.Shapes.IndexOf(gap)));
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
-    // The wiring — an optional parameter carrying a capability is a capability with no caller
+    // The wiring — no caller may resurrect a second source for a port's type
     // ══════════════════════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public void BothCallersOfTheExtractor_PassThePortKinds()
+    public void NoExtractorCallerHandsItAPortTypeOfItsOwn()
     {
+        // The inverse of the test this replaces, which required both callers to PASS the .cem's
+        // port-kind list. Passing it is exactly what made a port drawn in the middle of a trace run
+        // as an edge port: an unstated slot answered Edge, which is an assertion rather than the
+        // silence it actually was (owner report, 2026-09-14). The type is read from the LABEL inside
+        // the extractor now, so a caller supplying one is a second source by definition.
         foreach (string file in new[]
                  {
-                     // The two callers now live on opposite sides of the UI firewall — the run
-                     // service moved to CircuitRF.Design with the rest of the EM pipeline
-                     // (brief-cli-em-verb.md), the editor stayed. That is exactly why BOTH still have
-                     // to be checked: a capability the GUI passes and the headless run does not would
-                     // make `circuitrf em` quietly answer a different question.
+                     // The callers live on opposite sides of the UI firewall — the run service moved
+                     // to CircuitRF.Design with the rest of the EM pipeline (brief-cli-em-verb.md),
+                     // the editor stayed, and `explain` is a third. All three have to be checked: a
+                     // second source in any one of them makes that path answer a different question.
                      Path.Combine("..", "..", "..", "..", "..", "src", "Design", "Layout", "Em", "EmRunService.cs"),
                      Path.Combine("..", "..", "..", "..", "..", "src", "Ui", "Layout", "Em", "EmSetupEditorViewModel.cs"),
+                     Path.Combine("..", "..", "..", "..", "..", "src", "Cli", "Explain.cs"),
                  })
         {
             string src = File.ReadAllText(file);
             int at = src.IndexOf("EmPortExtraction.Extract(", StringComparison.Ordinal);
             Assert.True(at >= 0, $"{file} no longer calls EmPortExtraction.Extract");
-            Assert.Contains("ResolvePortKind", src.Substring(at, Math.Min(400, src.Length - at)),
-                            StringComparison.Ordinal);
+            Assert.DoesNotContain("PortKind", src.Substring(at, Math.Min(400, src.Length - at)),
+                                  StringComparison.Ordinal);
         }
     }
 }

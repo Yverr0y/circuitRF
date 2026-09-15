@@ -20,7 +20,7 @@ namespace CircuitRF.Ui.Tests.Layout;
 /// <para>Resolving the conductor against VISIBLE artwork every time breaks (1); resolving it against
 /// ALL artwork breaks (2). Both were shipped in that order and each broke the other. The rule that
 /// holds both is that they are questions about different MOMENTS —
-/// <see cref="LayoutPortDirection.LookupFor(LayoutView, Technology?, string, long)"/> states it
+/// <see cref="LayoutConductorLookup.LookupFor(LayoutView, Technology?, string, long)"/> states it
 /// once — and <see cref="LabelShape.PortLayer"/> is what carries the commitment between them.</para>
 ///
 /// <para>A third report is here too: a port's orientation did not update while it was being dragged,
@@ -68,8 +68,8 @@ public class LayoutPortStableUnderLayerVisibilityTests
         var view = TraceOverPour();
         var port = PortAtTraceEnd();
 
-        var before = LayoutPortDirection.Resolve(LayoutPortDirection.LookupFor(view, Tech(false), ""), port);
-        var after  = LayoutPortDirection.Resolve(LayoutPortDirection.LookupFor(view, Tech(true),  ""), port);
+        var before = LayoutPortDirection.Resolve(LayoutConductorLookup.LookupFor(view, Tech(false), ""), port);
+        var after  = LayoutPortDirection.Resolve(LayoutConductorLookup.LookupFor(view, Tech(true),  ""), port);
 
         Assert.NotNull(before);
         Assert.Equal(before, after);
@@ -92,8 +92,8 @@ public class LayoutPortStableUnderLayerVisibilityTests
         var shown  = new Technology { Layers = [Layer(1, 0), Layer(2, 100)] };
         var hidden = new Technology { Layers = [Layer(1, 0, visible: false), Layer(2, 100)] };
 
-        Assert.Equal(LayoutPortDirection.Resolve(LayoutPortDirection.LookupFor(view, shown,  ""), port),
-                     LayoutPortDirection.Resolve(LayoutPortDirection.LookupFor(view, hidden, ""), port));
+        Assert.Equal(LayoutPortDirection.Resolve(LayoutConductorLookup.LookupFor(view, shown,  ""), port),
+                     LayoutPortDirection.Resolve(LayoutConductorLookup.LookupFor(view, hidden, ""), port));
     }
 
     // ── (2) A gesture is never attracted to metal it cannot see ───────────────────────────────
@@ -103,10 +103,10 @@ public class LayoutPortStableUnderLayerVisibilityTests
     {
         var view = TraceOverPour();
         // (120_000, 120_000) is inside the pour and well clear of the trace.
-        var gated = LayoutPortDirection.LookupFor(view, Tech(false), "");
+        var gated = LayoutConductorLookup.LookupFor(view, Tech(false), "");
 
         Assert.Null(gated(120_000, 120_000, onLayer: null));                       // pour hidden
-        Assert.Equal(2, LayoutPortDirection.LookupFor(view, Tech(true), "")
+        Assert.Equal(2, LayoutConductorLookup.LookupFor(view, Tech(true), "")
                                            (120_000, 120_000, onLayer: null)!.Value.Shape!.Layer.Layer);
     }
 
@@ -115,7 +115,7 @@ public class LayoutPortStableUnderLayerVisibilityTests
     {
         // ZOrder-descending — a CLICK's ordering — would return the pour (ZOrder 100) over the trace
         // (ZOrder 0) even with both visible, which is how a port on a trace came to measure a plane.
-        var info = LayoutPortDirection.LookupFor(TraceOverPour(), Tech(true), "")(2_000, 50_000, onLayer: null);
+        var info = LayoutConductorLookup.LookupFor(TraceOverPour(), Tech(true), "")(2_000, 50_000, onLayer: null);
         Assert.Equal(1, info!.Value.Shape!.Layer.Layer);
     }
 
@@ -129,7 +129,7 @@ public class LayoutPortStableUnderLayerVisibilityTests
         var port = PortAtTraceEnd();
 
         Assert.Equal(LayoutPortDirection.Resolve(view.Shapes, port),
-                     LayoutPortDirection.Resolve(LayoutPortDirection.LookupFor(view, Tech(true), ""), port));
+                     LayoutPortDirection.Resolve(LayoutConductorLookup.LookupFor(view, Tech(true), ""), port));
     }
 
     // ── (3) The arrow turns DURING the drag, not on release ───────────────────────────────────

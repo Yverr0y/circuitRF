@@ -146,31 +146,6 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
     /// there is nothing here to compute and nothing for a user to move.</summary>
     [ObservableProperty] private IReadOnlyList<Engine.Mom.PlanarPortResolution> _planarReferencePlanes = [];
 
-    /// <summary>
-    /// Which port labels the active <c>.cem</c> drives as INTERNAL DELTA GAPS, by the label's own DBU
-    /// anchor — pushed here by that editor, exactly as the mesh and the reference planes are.
-    ///
-    /// <para><b>The port type is not on the shape and must not be</b> (a layout is geometry; the same
-    /// artwork can be gapped in one setup and edge-driven in another), so this is how the renderer
-    /// gets to draw the right mark. Empty — a layout with no EM setup open — means every port draws
-    /// as an edge port, which is what it always did.</para>
-    /// </summary>
-    [ObservableProperty] private IReadOnlyList<(long X, long Y, PlanarPortKind Kind)> _internalPortMarks = [];
-
-    /// <summary>
-    /// <b>Which EM setup's interpretation <see cref="InternalPortMarks"/> currently is.</b>
-    ///
-    /// <para>A layout can be analysed by more than one <c>.cem</c>, and two of them may legitimately
-    /// disagree about a port — a gap in the middle of a trace in one, driven from the ends in
-    /// another. That is the whole reason the type is an analysis setting rather than a property of
-    /// the drawing. But there is only ONE layout on screen, so it can only draw one of the two
-    /// answers, and without this it drew whichever setup last refreshed with nothing saying which.</para>
-    ///
-    /// <para>Empty when no setup has claimed it. See <c>WorkspaceViewModel.PushEmMeshToLayout</c>
-    /// for the takeover notice.</para>
-    /// </summary>
-    [ObservableProperty] private string _internalPortMarksOwner = "";
-
     // ── Technology (L0c) ───────────────────────────────────────────────────────
 
     /// <summary>The resolved technology, or null when unresolved (missing/corrupt/no default) —
@@ -492,29 +467,16 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
             PlanarCurrentDensity  = null;
             PlanarReferencePlanes = [];
 
-            // ── THE PORT MARKS ARE NOT MESH, AND A MOVE DOES NOT INVALIDATE THEM ─────────────
+            // ── THE PORT TYPES ARE NOT MESH, AND THERE IS NOTHING LEFT TO INVALIDATE ─────────
             //
             // Owner report, 2026-08-25: "after drag of the port, the port rendering glitches
             // momentarily on the mouse up." Everything above is derived from the GEOMETRY, so an
-            // edit genuinely invalidates it — that is R-em-17. A port's TYPE is not: it lives in
-            // the .cem, and moving a label cannot retype it. Clearing the marks here meant every
-            // internal port in the drawing snapped to an edge port's bar-and-arrow the instant a
-            // drag committed, and stayed that way until the .cem's own refresh caught up — which is
-            // posted at Background priority, i.e. one or more visible frames later. That is the
-            // flash.
-            //
-            // Kind is what separates the two cases. An Updated change moves shapes that already
-            // existed and leaves the shape list's ORDER alone, so the .cem's per-port rows still
-            // address the same labels; the marks only need their anchors carried along, which
-            // CommitMoveDrag does. Anything else — an add, a delete, a full rebuild, an undo — can
-            // renumber the ports, so which .cem row means which label is no longer knowable here
-            // and the marks really are stale.
-            if (info.Kind != LayoutChangeKind.Updated)
-            {
-                InternalPortMarks      = [];
-                InternalPortMarksOwner  = "";
-            }
-            else PruneInternalPortMarksToLivePorts();
+            // edit genuinely invalidates it — that is R-em-17. A port's TYPE never was: it used to
+            // live in the .cem and be pushed here as an anchor-keyed mark list, so clearing it on an
+            // edit snapped every internal port to an edge port's bar-and-arrow until the .cem's own
+            // Background-priority refresh caught up. That whole channel is gone (2026-09-14) — the
+            // type is on the label (LabelShape.PortKind), so an edit carries it by construction and
+            // there is no window in which the drawing is wrong.
 
             // Any model mutation (draw, move, delete, undo, redo — every one of them calls
             // NotifyChanged) invalidates the overlap-cycling cache (R-L1c-2). Selected indices may
@@ -955,7 +917,7 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         // onLayer: null — a PLACEMENT is a gesture, so it asks what VISIBLE metal is here. That is
         // what keeps a port from landing on a layer the user has switched off, and it is the moment
         // the port's own PortLayer commitment is made (LayoutPortDirection.LookupFor states the rule).
-        var conductorAt = LayoutPortDirection.LookupFor(Model, Technology, InstanceBaseDir);
+        var conductorAt = LayoutConductorLookup.LookupFor(Model, Technology, InstanceBaseDir);
 
         // ── THE TOGGLE DECIDES, AND IT DECIDES BY MOVING THE LABEL — NOT BY REMEMBERING A MODE ────
         //
@@ -1001,7 +963,7 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
             ? LayoutRenderer.EffectiveVisibleLabelHeightDbu(_labelHeightDbu, zoomPxPerDbu)
             : _labelHeightDbu;
 
-        return new LabelShape
+        var placed = new LabelShape
         {
             Layer         = CurrentLayerKey,
             X             = sx,
@@ -1032,6 +994,27 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
             // made in the Properties inspector by picking the metal. Seeding a nearest-conductor guess
             // here would silently reference the answer to whichever loop happened to be closest.
         };
+
+        // ── AND THE TYPE THE GHOST IS ABOUT TO DRAW IS THE TYPE THAT LANDS ──────────────────────
+        //
+        // Owner report, 2026-09-14: placing a port mid-trace drew an internal port under the cursor,
+        // and the click produced something that looked like an edge port somewhere else. A click has
+        // to land what the ghost showed.
+        //
+        // Nothing was snapping — the label landed exactly where the ghost drew it, to the DBU. What
+        // moved was the PICTURE, one frame later: the port's type lived in the .cem, whose port-kind
+        // list answered "edge port" for every slot it had never been told about, so the open setup
+        // republished the brand-new port as an edge port and the marker jumped to the far end of the
+        // conductor. The type is on the label now, and this is where it is decided — ONCE, by the
+        // same call the ghost draws through, so the two cannot disagree.
+        //
+        // Stamped rather than left null, on exactly PortDirection's terms: the value is then the
+        // user's, visible in the Properties Inspector and changeable from the port's own context
+        // menu, instead of an inference that could quietly change under them later. A DRAG still
+        // re-stamps it where the artwork's own answer has changed (LayoutPortDirection.Reseat), which
+        // is what keeps "drag a port onto the end of the metal and it becomes an edge port" true.
+        placed.PortKind = LayoutPortDirection.KindOf(conductorAt, placed);
+        return placed;
     }
 
     // ── RP-2b — picking a port's RETURN conductor ───────────────────────────────────────────────
@@ -1100,7 +1083,7 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         // only has to be on the metal; the mesher decides which gridline it lands on.
         var (sx, sy) = LayoutSnapping.SnapPoint(wx, wy, Model.SnapDbu, suspend: false);
 
-        var conductorAt = LayoutPortDirection.LookupFor(Model, Technology, InstanceBaseDir);
+        var conductorAt = LayoutConductorLookup.LookupFor(Model, Technology, InstanceBaseDir);
         var picked = conductorAt(sx, sy, null);
         if (picked is null)
         {
@@ -2160,30 +2143,98 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
     ///
     /// <para><b>Why the view model owns this rather than the hit test.</b> The region needs two
     /// things the hit test cannot reach on its own: the conductor beneath the label (which needs the
-    /// resolved technology and, for an instance, the base directory) and the port's TYPE, which lives
-    /// in the <c>.cem</c> and arrives here as <see cref="InternalPortMarks"/>. This is the one place
-    /// both are in hand, and it is the same pair the RENDERER is handed for the selection outline —
-    /// so what is highlighted and what responds to a click are the same rectangle by construction.</para>
+    /// resolved technology and, for an instance, the base directory) and the port's TYPE. This is the
+    /// one place both are in hand, and it is the same pair the RENDERER is handed for the selection
+    /// outline — so what is highlighted and what responds to a click are the same rectangle by
+    /// construction.</para>
     /// </summary>
     private Bbox PortMarkerRegion(LabelShape label)
     {
-        var conductorAt = LayoutPortDirection.LookupFor(Model, Technology, InstanceBaseDir);
+        var conductorAt = LayoutConductorLookup.LookupFor(Model, Technology, InstanceBaseDir);
         var hint = LayoutPortDirection.Resolve(conductorAt, label);
 
-        // The setup's own answer when it has one — Edge included, so a port changed back to an edge
-        // port in the .cem is picked by the bar at the conductor end again. Where nothing has spoken,
-        // the SAME inference the renderer makes, so the rectangle that highlights a port and the
-        // rectangle that responds to a click stay one rectangle (PortHint.Interior).
-        PlanarPortKind? stated = null;
-        foreach (var (mx, my, kind) in InternalPortMarks)
-            if (mx == label.X && my == label.Y) { stated = kind; break; }
-
+        // The label's own type when it states one, the SAME inference the renderer makes when it
+        // does not — so the rectangle that highlights a port and the rectangle that responds to a
+        // click stay one rectangle (PortHint.Interior).
         bool atAnchor = hint is { } h
                         && LayoutPortDirection.MarkAtAnchor(
-                               stated ?? LayoutPortDirection.InferredKind(h), h);
+                               label.PortKind ?? LayoutPortDirection.InferredKind(h), h);
 
         return LayoutHitTest.PortPickBbox(label, hint, atAnchor: atAnchor);
     }
+
+    // ── THE PORT'S OWN TYPE, EDITED FROM THE DRAWING (owner request, 2026-09-14) ────────────────
+
+    /// <summary>The index of the port label a right-click at <paramref name="wx"/>/<paramref
+    /// name="wy"/> landed on, or null. <b>Uses the port's own pick region</b>
+    /// (<see cref="PortMarkerRegion"/>) rather than a plain label box, so the menu appears for
+    /// exactly the presses that select the port — including an edge port's bar-and-arrow out at the
+    /// conductor end, which is nowhere near the label's anchor.</summary>
+    public int? FindPortForContextMenu(double wx, double wy, long tolDbu)
+    {
+        long x = (long)Math.Round(wx), y = (long)Math.Round(wy);
+        long tol = Math.Max(tolDbu, 0);
+
+        int? best = null;
+        double bestArea = double.MaxValue;
+        for (int i = 0; i < Model.Shapes.Count; i++)
+        {
+            if (Model.Shapes[i] is not LabelShape { IsPort: true } port) continue;
+            var bb = PortMarkerRegion(port);
+            if (bb.IsEmpty) continue;
+            if (x < bb.MinX - tol || x > bb.MaxX + tol || y < bb.MinY - tol || y > bb.MaxY + tol) continue;
+
+            // Smallest wins, exactly as the conductor lookup does: two ports whose generous pick
+            // regions overlap should resolve to the one the user was actually pointing at.
+            double area = (double)(bb.MaxX - bb.MinX + 1) * (bb.MaxY - bb.MinY + 1);
+            if (area >= bestArea) continue;
+            bestArea = area;
+            best = i;
+        }
+        return best;
+    }
+
+    /// <summary>What the port at <paramref name="shapeIndex"/> currently IS — stated on the label, or
+    /// inferred from the artwork under it. The one call the renderer makes, so the menu's tick is on
+    /// the row the drawing is showing.</summary>
+    public PlanarPortKind PortKindAt(int shapeIndex)
+    {
+        if (shapeIndex < 0 || shapeIndex >= Model.Shapes.Count) return PlanarPortKind.Edge;
+        if (Model.Shapes[shapeIndex] is not LabelShape { IsPort: true } port) return PlanarPortKind.Edge;
+        return LayoutPortDirection.KindOf(
+            LayoutConductorLookup.LookupFor(Model, Technology, InstanceBaseDir), port);
+    }
+
+    /// <summary>
+    /// <b>Sets a port's TYPE — the one edit, called from three places.</b> The layout's port context
+    /// menu, the Properties Inspector, and the EM setup panel's own port list all land here, because
+    /// the type lives on the label (<see cref="LabelShape.PortKind"/>) and an editor of it is just an
+    /// editor of a field. One undo entry, on the LAYOUT's stack, which is where a user looks for the
+    /// undo of a change they made to the drawing.
+    ///
+    /// <para><c>Updated</c>, not <c>Full</c>: it changes neither the shape list's content nor its
+    /// order, so nothing downstream has to rebuild.</para>
+    /// </summary>
+    public void SetPortKind(int shapeIndex, PlanarPortKind kind)
+    {
+        if (shapeIndex < 0 || shapeIndex >= Model.Shapes.Count) return;
+        if (Model.Shapes[shapeIndex] is not LabelShape { IsPort: true } port) return;
+        if (port.PortKind == kind) return;                 // no-change guard: no undo entry
+
+        Execute(new Commands.Layout.SetShapeFieldCommand<PlanarPortKind?>(
+            Model, $"Set {DescribePortKind(kind)} port type", port.PortKind, kind,
+            v => port.PortKind = v, LayoutChangeInfo.Updated([shapeIndex])));
+        RebuildOverlay();
+    }
+
+    /// <summary>The user's words for a port type — said once, so the menu, the inspector and the undo
+    /// entry cannot drift apart.</summary>
+    public static string DescribePortKind(PlanarPortKind kind) => kind switch
+    {
+        PlanarPortKind.Internal         => "internal (to ground)",
+        PlanarPortKind.InternalDeltaGap => "internal delta gap",
+        _                               => "edge",
+    };
 
     private void BeginMoveDrag(long px, long py)
     {
@@ -2203,16 +2254,12 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
                 _pointSnapDragActive = true;
                 px = port.X; py = port.Y;
 
-                // …but a port the .cem has TYPED as internal is never pulled to the metal's boundary
-                // by the edge rule below. Its whole reason for existing is to sit in the middle of a
-                // conductor — a delta gap dragged onto the edge is not a delta gap any more — and the
-                // setup's answer outranks an inference either way (owner, 2026-09-09). The edge rule
-                // is for the ports nothing has spoken for, which is every port in a layout with no
-                // setup open.
-                _portDragIsTypedInternal = false;
-                foreach (var (mx, my, kind) in InternalPortMarks)
-                    if (mx == port.X && my == port.Y)
-                    { _portDragIsTypedInternal = kind != PlanarPortKind.Edge; break; }
+                // …but a port TYPED as internal is never pulled to the metal's boundary by the edge
+                // rule below. Its whole reason for existing is to sit in the middle of a conductor —
+                // a delta gap dragged onto the edge is not a delta gap any more — and a STATED type
+                // outranks an inference either way (owner, 2026-09-09). The edge rule is for the
+                // ports nothing has stated, which is every port in a layout nobody has typed.
+                _portDragIsTypedInternal = port.PortKind is { } k && k != PlanarPortKind.Edge;
             }
         }
 
@@ -2704,7 +2751,7 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         // target: the port reaches the edge along the free axis and does not budge on the locked one.
         if (_pointSnapDragActive && !_portDragIsTypedInternal && GeometrySnapEnabled)
         {
-            var portConductorAt = LayoutPortDirection.LookupFor(Model, Technology, InstanceBaseDir);
+            var portConductorAt = LayoutConductorLookup.LookupFor(Model, Technology, InstanceBaseDir);
             long lx = _moveAnchorX + dx, ly = _moveAnchorY + dy;
             if (portConductorAt(lx, ly, null) is { } onMetal
                 && LayoutPortDirection.NearestBoundaryPoint(onMetal, lx, ly) is { } edge)
@@ -2921,7 +2968,7 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         }
         if (!anyPort) return null;
 
-        var conductorAt = LayoutPortDirection.LookupFor(Model, Technology, InstanceBaseDir);
+        var conductorAt = LayoutConductorLookup.LookupFor(Model, Technology, InstanceBaseDir);
 
         IUiCommand? combined = null;
         foreach (int i in shapeIndices)
@@ -2935,8 +2982,7 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
 
             // "Move" rather than a name of its own: CompositeCommand takes its description from the
             // LAST command, and this rides along with a move rather than being one of its own.
-            // Updated, not Full: neither field changes the shape list's content or its order, and a
-            // Full here CLEARS the .cem's internal-port marks — see SetShapeFieldCommand's own note.
+            // Updated, not Full: none of these fields changes the shape list's content or its order.
             var asUpdate = LayoutChangeInfo.Updated([i]);
             if (seat.DirectionChanged)
             {
@@ -2950,6 +2996,19 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
                 var wasLayer = port.PortLayer;
                 IUiCommand cmd = new Commands.Layout.SetShapeFieldCommand<LayerKey?>(
                     Model, "Move", wasLayer, seat.Layer, v => port.PortLayer = v, asUpdate);
+                combined = combined is null ? cmd : new CompositeCommand(combined, cmd);
+            }
+            if (seat.KindChanged)
+            {
+                // A property the owner named in 2026-09-09: dragging a port across the toggle
+                // changed what it drew as. Dragging a port out of the middle of a trace onto its end
+                // face really does make it an edge port, and that has to keep working now that the
+                // type is STORED rather than re-inferred every frame. Reseat only reports a change
+                // where the ARTWORK's own answer changed, so an ordinary nudge leaves a type the user
+                // picked alone.
+                var wasKind = port.PortKind;
+                IUiCommand cmd = new Commands.Layout.SetShapeFieldCommand<PlanarPortKind?>(
+                    Model, "Move", wasKind, seat.Kind, v => port.PortKind = v, asUpdate);
                 combined = combined is null ? cmd : new CompositeCommand(combined, cmd);
             }
         }
@@ -2988,17 +3047,11 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
                 combined = new CompositeCommand(combined, reseat);
             if (combined is not null)
             {
-                // Captured BEFORE the move, because a mark is keyed by the label's anchor and Execute
-                // is what changes it. See the Model.Changed note above for why the marks travel with
-                // the shapes rather than being dropped and rebuilt.
-                // Shifted BEFORE Execute, not after, and the ORDER is what makes undo self-heal.
-                // Execute raises Model.Changed synchronously, and that handler prunes any mark whose
-                // anchor no longer has a port label on it. Shifting first means the marks already
-                // point at where the ports are about to land, so the prune keeps them; an UNDO of
-                // this move — which raises the same Updated change with no shift beside it — leaves
-                // the marks behind the ports, and the prune drops them rather than leaving a mark
-                // sitting on empty space.
-                ShiftInternalPortMarks(PortAnchorsOf(shapeIndices), _moveLiveDx, _moveLiveDy);
+                // A port's TYPE used to be an anchor-keyed mark published by the .cem, so a move had
+                // to shift the marks in step with the labels — before Execute, so that an undo left
+                // them stale and a prune could drop them. All of that is gone (2026-09-14): the type
+                // is a field on the label, so it moves when the label moves and comes back when an
+                // undo brings the label back, with nothing to keep in step.
                 Execute(combined);
             }
         }
@@ -3006,68 +3059,6 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
         _snapDragActive = false;
         _pointSnapDragActive = false;
         SetDuplicateDragArmed(false);
-    }
-
-    /// <summary>The DBU anchors of every port label among <paramref name="indices"/>, as they are
-    /// RIGHT NOW. Call before the move; <see cref="ShiftInternalPortMarks"/> consumes it after.</summary>
-    private HashSet<(long X, long Y)> PortAnchorsOf(IReadOnlyList<int> indices)
-    {
-        var anchors = new HashSet<(long, long)>();
-        if (InternalPortMarks.Count == 0) return anchors;
-
-        foreach (int i in indices)
-            if (i >= 0 && i < Model.Shapes.Count && Model.Shapes[i] is LabelShape { IsPort: true } port)
-                anchors.Add((port.X, port.Y));
-        return anchors;
-    }
-
-    /// <summary>
-    /// Moves the .cem's port-type marks along with the port labels they name.
-    ///
-    /// <para>The mark list is keyed by anchor (see <c>LayoutRenderOptions.InternalPortMarks</c> for
-    /// why not a port number), so a moved port whose mark stayed behind reads as an edge port until
-    /// the owning <c>.cem</c> re-extracts and republishes. That republish is real and correct — it is
-    /// just a frame or two later, which is exactly long enough to see.</para>
-    ///
-    /// <para>A no-op when nothing moved, when no marks are published, or when none of the moved
-    /// shapes was a port — which is the overwhelmingly common case and costs one count check.</para>
-    /// </summary>
-    private void ShiftInternalPortMarks(HashSet<(long X, long Y)> movedAnchors, long dx, long dy)
-    {
-        if (movedAnchors.Count == 0 || (dx == 0 && dy == 0)) return;
-
-        var shifted = new List<(long X, long Y, PlanarPortKind Kind)>(InternalPortMarks.Count);
-        foreach (var (x, y, kind) in InternalPortMarks)
-            shifted.Add(movedAnchors.Contains((x, y)) ? (x + dx, y + dy, kind) : (x, y, kind));
-        InternalPortMarks = shifted;
-    }
-
-    /// <summary>
-    /// Drops any port-type mark whose anchor no longer has a port label on it.
-    ///
-    /// <para><b>This is what keeps "an Updated change does not clear the marks" honest.</b> A move
-    /// carries its marks along (<see cref="ShiftInternalPortMarks"/>), but an UNDO of that move is
-    /// the same <see cref="LayoutChangeKind.Updated"/> change with nothing beside it — the ports go
-    /// back and the marks would stay where they were, sitting on empty space, and could in principle
-    /// land on some other port and give it a type it was never assigned. Pruning is the cheap,
-    /// direction-agnostic answer: a mark with no port under it means nothing, so it goes.</para>
-    ///
-    /// <para>The owning <c>.cem</c> republishes a correct set moments later either way; this only has
-    /// to make the interval honest.</para>
-    /// </summary>
-    private void PruneInternalPortMarksToLivePorts()
-    {
-        if (InternalPortMarks.Count == 0) return;
-
-        var live = new HashSet<(long, long)>();
-        foreach (var shape in Model.Shapes)
-            if (shape is LabelShape { IsPort: true } port) live.Add((port.X, port.Y));
-
-        var kept = new List<(long X, long Y, PlanarPortKind Kind)>(InternalPortMarks.Count);
-        foreach (var m in InternalPortMarks)
-            if (live.Contains((m.X, m.Y))) kept.Add(m);
-
-        if (kept.Count != InternalPortMarks.Count) InternalPortMarks = kept;
     }
 
     /// <summary>R-L1i-1, extended by R-fix-3: commit is just "settle on whatever the shared compute
@@ -4226,10 +4217,11 @@ public sealed partial class LayoutEditorViewModel : ObservableObject
                 if (reseatPorts && clone is LabelShape { IsPort: true } portClone
                     && Model.Shapes[idx] is LabelShape original)
                 {
-                    portConductorAt ??= LayoutPortDirection.LookupFor(Model, Technology, InstanceBaseDir);
+                    portConductorAt ??= LayoutConductorLookup.LookupFor(Model, Technology, InstanceBaseDir);
                     var seat = LayoutPortDirection.Reseat(portConductorAt, original, _moveLiveDx, _moveLiveDy);
                     portClone.PortDirection = seat.Direction;
                     portClone.PortLayer     = seat.Layer;
+                    portClone.PortKind      = seat.Kind;
                 }
 
                 dict[idx] = clone;

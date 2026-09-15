@@ -499,7 +499,7 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     /// The same applies to an internal port, whose via the cross-section kernel does not model either.</para>
     /// </summary>
     public string? InternalPortOnTheWrongKernel =>
-        SelectedKernel == EmAnalysisKind.CrossSection && Working.DeclaresInternalPort()
+        SelectedKernel == EmAnalysisKind.CrossSection && _layoutHasNonEdgePort
             ? EmRunService.InternalPortNeedsFullWave(SelectedKernelName is { Length: > 0 } n
                                                         ? n : "uniform-line (quasi-static) kernel")
             : null;
@@ -939,35 +939,63 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Commits one row's port TYPE. Same shape as <see cref="CommitPortRow"/> above — pad the list
-    /// from the default so a change on port 4 cannot silently retype ports 1-3, no-change guard
-    /// before the undo entry, one undo entry per change.
+    /// <b>Fulfils a port-type change made in this panel — by editing the LAYOUT.</b>
+    ///
+    /// <para>Set by the workspace, which is the only thing that can reach the <c>.clay</c>'s own
+    /// editor and undo stack. Null (a panel with no workspace behind it — a test, a doc fixture)
+    /// makes the type read-only here rather than writing somewhere nobody is saving.</para>
+    /// </summary>
+    public Action<LabelShape, PlanarPortKind>? SetPortKind { get; set; }
+
+    /// <summary>
+    /// Commits one row's port TYPE — <b>onto the port LABEL, in the layout</b>.
+    ///
+    /// <para><b>This panel no longer OWNS the type; it edits it</b> (2026-09-14). It lived in the
+    /// <c>.cem</c> until then, and an unstated slot answered "edge port", so placing a port in the
+    /// middle of a trace drew an internal port under the cursor and an edge port one frame after the
+    /// click (owner report). The type is on the label now — see <see cref="LabelShape.PortKind"/> —
+    /// and this method, the layout's port context menu and the Properties Inspector are three
+    /// spellings of one edit. So there is no list to pad here, no snapshot of this document to take,
+    /// and no undo entry on the <c>.cem</c>: the edit belongs to the <c>.clay</c>'s own undo stack,
+    /// which is where a user will look for it.</para>
     ///
     /// <para><b>It calls <see cref="InvalidateMesh"/> and every other per-port setting does not.</b>
     /// The impedance beside it is a renormalisation applied to the answer; the type decides WHERE
     /// the excitation is cut and therefore which rooftops are driven, so a mesh report computed
     /// under the other type is about a different excitation and must not go on being shown.</para>
     /// </summary>
+    /// <summary>
+    /// Empties the legacy <c>EmSetup.PortKinds</c> list once its values have reached the layout's port
+    /// labels — see <c>WorkspaceViewModel.MigrateLegacyPortKinds</c>. Marks this document dirty,
+    /// because the file on disk still carries the list.
+    /// </summary>
+    public void ClearLegacyPortKinds()
+    {
+        if (Working.PortKinds.Count == 0) return;
+        var before = SnapshotJson();
+        Working.PortKinds.Clear();
+        CommitEdit(before, "Move port types onto the layout");
+        Refresh();
+    }
+
     public void CommitPortKind(int index)
     {
         if (_suppressCommit) return;
         if (index < 0 || index >= PortRows.Count) return;
 
-        var row  = PortRows[index];
-        var kind = row.Kind;
+        var row = PortRows[index];
+        if (row.PortLabel is not { } label) return;   // an unresolved row has no label to write to
+        if (label.PortKind == row.Kind) return;       // no-change guard
 
-        // The SLOT is the port's own number, never the row's position. A type stored against a
-        // position is a type that moves to whichever port later occupies that position.
-        int slot = row.PortNumber - 1;
-        if (slot < 0) return;
+        if (SetPortKind is null)
+        {
+            SaveError?.Invoke(
+                $"Port {row.PortNumber}'s type could not be changed: a port's type lives on its label " +
+                "in the layout, and this EM setup has no workspace behind it to make that edit in.");
+            return;
+        }
 
-        var list = Working.PortKinds;
-        while (list.Count <= slot) list.Add(Working.ResolvePortKind(list.Count));
-        if (list[slot] == kind) return;                     // no-change guard: no undo entry
-
-        var before = SnapshotJson();
-        list[slot] = kind;
-        CommitEdit(before, $"Change port {PortRows[index].PortNumber} type");
+        SetPortKind(label, row.Kind);
         InvalidateMesh();
         OnPropertyChanged(nameof(InternalPortOnTheWrongKernel));
         Refresh();
@@ -1510,7 +1538,6 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         PlanarExtractionRefusal = null;
         PortRefusal        = null;
         PlanarPorts        = [];
-        InternalPortMarkAnchors = [];
         Notes              = [];
         StackupRows        = [];
         TechnologyName     = "";
@@ -1534,6 +1561,12 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         }
 
         LayoutStatus = Working.LayoutRef;
+
+        // Asked of the ARTWORK, and asked HERE rather than in the planar half — the whole point of
+        // InternalPortOnTheWrongKernel is to fire when the CROSS-SECTION kernel has been chosen, and
+        // the planar refresh does not run then. It needs no problem and no mesh: whether a port is an
+        // internal one is a question about the label and the metal under it.
+        _layoutHasNonEdgePort = EmPortExtraction.AnyNonEdgePort(source.View.Shapes);
 
         if (source.Technology is null)
         {
@@ -1623,7 +1656,6 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     {
         Notes         = [.. planar.Notes];
         PlanarPorts   = [];
-        InternalPortMarkAnchors = [];
         DispersionDisabledReason =
             "The Kirschning–Jansen correction belongs to the cross-section analysis, where it is " +
             "applied on top of a quasi-static answer. A full-wave planar solve has dispersion in " +
@@ -1652,41 +1684,27 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
 
         var ports = EmPortExtraction.Extract(
             source.View.Shapes, planar.Problem!, source.DbuPerMicron, Working.ResolvePortZ0,
-            source.View.DisplayUnit, Working.ResolvePortKind,
+            source.View.DisplayUnit,
             EmPortExtraction.DefaultGroundPathWidthM(source.Technology));
 
         PortRefusal = ports.Ok ? null : ports.Refusal;
         PlanarPorts = ports.Ports;
 
-        // ── THE MARKS AND THE ROWS COME FROM `Rows`, WHICH SURVIVES A REFUSAL ────────────────
+        // ── THE ROWS COME FROM `Rows`, WHICH SURVIVES A REFUSAL ─────────────────────────────
         //
         // Owner reports, 2026-08-25: "if any ports aren't touching metal, the .cem editor will not
         // list the ports", and "P3 renders as edge port (even though it is a gap port) when P2 is
-        // not on a conductor." One cause: both of these read `ports.Ports`, which is empty on any
-        // refusal — so ONE bad label emptied the panel's port list AND silently retyped every
-        // internal port in the layout back to an edge port, neither of which is true of the ports
-        // the user actually drew. `Rows` reports every numbered label whether it resolved or not.
+        // not on a conductor." Both read `ports.Ports`, which is empty on any refusal — so ONE bad
+        // label emptied the panel's port list. `Rows` reports every numbered label whether it
+        // resolved or not, and carries the type each one RESOLVED to.
         //
-        // The KIND comes from the .cem (`ResolvePortKind`) rather than from the resolved port,
-        // because that is where it lives and because an unresolved row has no port to ask. For a
-        // resolved row the two are the same value by construction — `kindFor` above IS this
-        // function — so this is not a second opinion, it is the only one.
-        // EVERY port, Edge ones included (owner, 2026-09-09: "if user changes the port type from the
-        // .cem window, then the ports in layout are drawn properly"). The list used to hold only the
-        // internal ones, so "absent" meant both "this setup calls it an edge port" and "no setup has
-        // ever spoken", and the layout could not tell them apart — it assumed the former for both and
-        // drew every port in an unclaimed layout at a conductor end, wherever the label actually was
-        // (LayoutPortDirection.PortHint.Interior). An entry per port makes this setup's answer
-        // authoritative for the ports it knows, and leaves the layout free to infer for the rest — a
-        // port just drawn, which this setup has not re-extracted yet.
-        //
-        // Addressed by the row's port NUMBER, exactly as the extractor addresses it, so the mark the
-        // layout draws and the port the run drives cannot disagree about which type belongs to whom.
-        var anchors = new List<(long X, long Y, PlanarPortKind Kind)>();
-        for (int i = 0; i < ports.Rows.Count; i++)
-            anchors.Add((ports.Rows[i].Label.X, ports.Rows[i].Label.Y,
-                         Working.ResolvePortKind(ports.Rows[i].Number - 1)));
-        InternalPortMarkAnchors = anchors;
+        // <b>There is no longer a mark channel to the layout, and that is the point.</b> The panel
+        // used to publish an anchor-and-kind list the drawing was told to obey, built from the
+        // `.cem`'s own port-kind list — which answered Edge for every port it had never been told
+        // about, so a port placed in the middle of a trace was redrawn as an edge port one frame
+        // after the click (owner report, 2026-09-14). The type is on the label now: this panel READS
+        // it here and WRITES it in CommitPortKind, exactly as the layout's own context menu and
+        // Properties Inspector do, and the drawing updates because that is where the value lives.
 
         var notes = new List<string>(_geometryNotes);
         notes.AddRange(planar.Notes);
@@ -1723,11 +1741,15 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         for (int i = 0; i < ports.Count; i++)
         {
             int slot = ports[i].Number - 1;
-            var kind = Working.ResolvePortKind(slot);
+            // The EXTRACTOR's own answer for this port, not a second lookup — stated on the label or
+            // inferred from the artwork under it. Asking the question a second way here is how the
+            // panel and the drawing came to disagree about a port nobody had typed.
+            var kind = ports[i].Kind;
             var port = ports[i].Port;
             var row = new EmPortZ0Row
             {
                 PortNumber = ports[i].Number,
+                PortLabel  = ports[i].Label,
                 // An internal gap has no "end" — it is a cut in the middle of the metal, and the
                 // side only says which way its current is positive. An internal port has neither: its
                 // terminals are the metal and the ground plane, so naming a direction at all would
@@ -2133,17 +2155,14 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     /// (<c>PlanarPortResolution.ReferencePlaneM</c>), never one this layer derives.</summary>
     [ObservableProperty] private IReadOnlyList<PlanarPortResolution> _referencePlanes = [];
 
-    /// <summary>
-    /// The DBU anchors of the port labels this setup drives as INTERNAL DELTA GAPS — what the layout
-    /// editor needs in order to draw the right mark, since the type lives here and not on the shape.
-    ///
-    /// <para><b>Populated on every refresh, not only after a run</b>, unlike
-    /// <see cref="ReferencePlanes"/>: a reference plane is a location the ENGINE reports and does not
-    /// exist until something is solved, while a port's type is a decision the user has just made and
-    /// has to see immediately. Anchors rather than port numbers — see
-    /// <c>LayoutRenderOptions.InternalPortMarks</c> for why.</para>
-    /// </summary>
-    [ObservableProperty] private IReadOnlyList<(long X, long Y, PlanarPortKind Kind)> _internalPortMarkAnchors = [];
+    /// <summary>Whether the referenced layout carries any port the uniform-line kernel cannot
+    /// represent — refreshed with everything else, and read by
+    /// <see cref="InternalPortOnTheWrongKernel"/>. It asks the ARTWORK
+    /// (<c>EmPortExtraction.AnyNonEdgePort</c>) rather than a list of stated types, because a port is
+    /// an internal port by virtue of where it is DRAWN when nothing says otherwise — and routing
+    /// exactly that port to the kernel that cannot carry it is what this warning exists to
+    /// prevent.</summary>
+    private bool _layoutHasNonEdgePort;
 
     partial void OnCurrentDensityChanged(PlanarCurrentDensityMap? value)
         => OnPropertyChanged(nameof(CurrentDensityScale));
@@ -2456,6 +2475,12 @@ public sealed partial class EmPortZ0Row : CommunityToolkit.Mvvm.ComponentModel.O
 {
     public int    PortNumber { get; init; }
     public string Label      { get; init; } = "";
+
+    /// <summary>The port LABEL in the layout this row is about, or null for a row whose label could
+    /// not be resolved to a conductor. It is what <c>CommitPortKind</c> writes the type onto — the
+    /// type lives on the drawing (<see cref="LabelShape.PortKind"/>), and this panel is one of its
+    /// three editors rather than its owner.</summary>
+    public LabelShape? PortLabel { get; init; }
 
     /// <summary>
     /// Whether this row offers a port TYPE at all. <b>Planar rows only</b> — the cross-section

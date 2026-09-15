@@ -473,7 +473,9 @@ public static class DocLayoutFixtures
         // rather than a thing anyone does.
         var (view, xc, yc) = SeriesGapLine();
         var vm = EditorVm(view);
-        vm.InternalPortMarks = [(xc, yc, PlanarPortKind.InternalDeltaGap)];
+        // The type is on the LABEL now — the figure states it the way a user does.
+        foreach (var l in view.Shapes.OfType<LabelShape>())
+            if (l.IsPort) l.PortKind = PlanarPortKind.InternalDeltaGap;
 
         return Framed(new LayoutDocument("Series gap", vm), 880, 300);
     }
@@ -505,7 +507,9 @@ public static class DocLayoutFixtures
                                              PadSize = Um(700), DrillSize = Um(360) });
 
         var vm = EditorVm(view);
-        vm.InternalPortMarks = [(xc, yc, PlanarPortKind.Internal)];
+        // The type is on the LABEL now — the figure states it the way a user does.
+        foreach (var l in view.Shapes.OfType<LabelShape>())
+            if (l.IsPort) l.PortKind = PlanarPortKind.Internal;
 
         return Framed(new LayoutDocument("Internal via", vm), 880, 300);
     }
@@ -723,7 +727,9 @@ public static class DocLayoutFixtures
     {
         var (view, xc, yc) = SeriesGapLine();
         var vm = EditorVm(view);
-        vm.InternalPortMarks = [(xc, yc, PlanarPortKind.InternalDeltaGap)];
+        // The type is on the LABEL now — the figure states it the way a user does.
+        foreach (var l in view.Shapes.OfType<LabelShape>())
+            if (l.IsPort) l.PortKind = PlanarPortKind.InternalDeltaGap;
 
         var tech    = StarterTechnologies.Pcb2Layer();
         var planar  = PlanarExtractor.Extract(view.Shapes, tech, Dbu, 20e9);

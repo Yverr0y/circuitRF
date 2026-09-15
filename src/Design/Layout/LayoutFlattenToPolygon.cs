@@ -4,7 +4,7 @@
 // re-derive winding for; the flattener's own outer-ring-then-holes order already matches
 // PolygonShape's contract exactly).
 
-namespace CircuitRF.Render;
+namespace CircuitRF.Design.Layout;
 
 public static class LayoutFlattenToPolygon
 {

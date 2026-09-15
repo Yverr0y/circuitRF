@@ -4,8 +4,9 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using CircuitRF.Design.Layout.PCells;   // PCellGenerator — the delegate GeneratorSource hands back.
 
-namespace CircuitRF.Render;
+namespace CircuitRF.Design.Layout;
 
 /// <summary>
 /// A resolved cell's own pins — the ONE place "what pins does this cell have?" is answered.

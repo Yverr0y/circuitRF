@@ -7092,6 +7092,12 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             var vm = new EmSetupEditorViewModel(absolutePath, setup)
             {
                 ResolveLayout = r => ResolveEmLayout(absolutePath, r),
+                // A port's TYPE is on its label in the .clay (2026-09-14), so the panel's own port
+                // list EDITS THE LAYOUT — through the layout's editor and its undo stack, which is
+                // where a user will look for the undo of a change to the drawing. Opening the .clay
+                // when it is closed is deliberate: the alternative is an in-memory edit of a document
+                // nobody is saving, which is a change the user would lose without being told.
+                SetPortKind = (label, kind) => SetLayoutPortKind(absolutePath, label, kind),
                 MakeLayoutRef = abs => MakeEmLayoutRef(absolutePath, abs),
                 RunRequested  = RunEmSetupAsync,
                 MeshRequested = MeshEmSetupAsync,
@@ -7103,6 +7109,11 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             // there the moment the setup's own state says it is no longer current.
             vm.AnalysisRefreshed += () => PushEmMeshToLayout(vm);
             vm.Refresh();
+
+            // Before anything reads a port's type: a .cem from before the type moved to the drawing
+            // still carries one, and this is the one door between the two. After Refresh so the
+            // panel's own port rows exist, and once — ClearLegacyPortKinds empties the list.
+            MigrateLegacyPortKinds(vm, absolutePath);
 
             var doc = new EmSetupDocument(Path.GetFileName(absolutePath), vm, absolutePath);
 
@@ -7152,6 +7163,103 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     /// </summary>
     private string? ResolveEmLayoutPath(string cemPath, string layoutRef)
         => EmSetupResolver.ResolveLayoutPath(cemPath, layoutRef, CurrentWorkspacePath);
+
+    /// <summary>
+    /// <b>Carries a legacy <c>.cem</c>'s port types onto the layout's own port labels, once.</b>
+    ///
+    /// <para>A <c>.cem</c> written before 2026-09-14 stored the type in <c>EmSetup.PortKinds</c>.
+    /// Reading both files forever would leave the value with two homes and the drawing disagreeing
+    /// with the run — the renderer knows nothing about a <c>.cem</c> — so there is one door and this
+    /// is it. <c>EmRunService</c> and <c>circuitrf explain</c> apply the SAME migration in memory,
+    /// writing nothing, so an un-migrated pair still runs identically on a build machine.</para>
+    ///
+    /// <para><b>A real, undoable layout edit, and it is reported.</b> Both documents end up dirty and
+    /// the user saves them when they choose; silently rewriting two files on open is not something to
+    /// do to somebody's design. A label that already states its own type is never overwritten, so
+    /// running this twice does nothing.</para>
+    /// </summary>
+    private void MigrateLegacyPortKinds(EmSetupEditorViewModel vm, string cemPath)
+    {
+        if (vm.Working.PortKinds.Count == 0) return;
+        if (ResolveEmLayoutPath(cemPath, vm.Working.LayoutRef) is not { } clayPath) return;
+
+        // SYNCHRONOUS on purpose — the same exception SetLayoutPortKind takes, for the same reason:
+        // the migration edits the opened document's port labels immediately below.
+        if (LiveLayoutView(clayPath) is null) OpenOrActivateLayout(clayPath);
+
+        foreach (var open in _openDocsByPath.Values.OfType<LayoutDocument>())
+        {
+            if (open.FilePath is not { } fp
+                || !string.Equals(Path.GetFullPath(fp), clayPath, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var shapes  = open.ViewModel.Model.Shapes;
+            var pending = EmPortKindMigration.Pending(shapes, vm.Working.PortKinds);
+            if (pending.Count == 0) { vm.ClearLegacyPortKinds(); return; }
+
+            foreach (var label in pending)
+                open.ViewModel.SetPortKind(shapes.IndexOf(label),
+                                           EmPortKindMigration.KindFor(shapes, vm.Working.PortKinds, label));
+
+            vm.ClearLegacyPortKinds();
+            Messages.Info(
+                $"{pending.Count} port type(s) moved from {Path.GetFileName(cemPath)} onto " +
+                $"{Path.GetFileName(clayPath)}'s own port labels, which is where a port's type lives. " +
+                "Save both to make the move permanent; it is on the layout's undo stack until then.",
+                clayPath);
+            return;
+        }
+    }
+
+    /// <summary>
+    /// <b>Fulfils a port-type change made in an EM setup panel, as an edit of the LAYOUT.</b>
+    ///
+    /// <para>The type lives on the port label (<see cref="LabelShape.PortKind"/>), so there is no
+    /// push channel any more and nothing for two setups to disagree about — this is the same
+    /// <c>SetPortKind</c> the layout's own context menu and Properties Inspector call, reached from
+    /// the other window. The layout is OPENED if it is closed, because an edit made into a document
+    /// nobody is saving is an edit the user loses without being told.</para>
+    /// </summary>
+    private void SetLayoutPortKind(string cemPath, LabelShape label, PlanarPortKind kind)
+    {
+        var setup = _openDocsByPath.TryGetValue(cemPath, out var d) && d is EmSetupDocument cem
+            ? cem.ViewModel.Working : null;
+        if (setup is null) return;
+
+        if (ResolveEmLayoutPath(cemPath, setup.LayoutRef) is not { } clayPath)
+        {
+            Messages.Error("This EM setup does not resolve to a layout, so there is no port label to " +
+                           "set a type on.", cemPath);
+            return;
+        }
+
+        // SYNCHRONOUS on purpose, and one of the four exceptions AsyncDocumentOpenRoutingTests names:
+        // the very next statement edits the opened document, so it has to exist by then.
+        if (LiveLayoutView(clayPath) is null) OpenOrActivateLayout(clayPath);
+
+        foreach (var open in _openDocsByPath.Values.OfType<LayoutDocument>())
+        {
+            if (open.FilePath is not { } fp
+                || !string.Equals(Path.GetFullPath(fp), clayPath, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            int index = open.ViewModel.Model.Shapes.IndexOf(label);
+            if (index < 0)
+            {
+                // The panel's row carries the label object itself, so this means the layout the panel
+                // resolved is not the one now open — a Change Layout, or a reload. Say so rather than
+                // writing the type onto whichever label happens to share the index.
+                Messages.Error($"Port '{label.Text}' is no longer in {Path.GetFileName(clayPath)}, so " +
+                               "its type was not changed. Refresh the EM setup and try again.", clayPath);
+                return;
+            }
+            open.ViewModel.SetPortKind(index, kind);
+            return;
+        }
+
+        Messages.Error($"{Path.GetFileName(clayPath)} could not be opened, so port '{label.Text}' " +
+                       "kept its type. A port's type is stored on its label in the layout.", clayPath);
+    }
 
     private EmLayoutSource? ResolveEmLayout(string cemPath, string layoutRef)
     {
@@ -7930,66 +8038,11 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
                 // outside that case, which the renderer takes as "draw plain cell boundaries".
                 open.ViewModel.PlanarCurrentDensity  = vm.CurrentDensity;
                 open.ViewModel.PlanarReferencePlanes = vm.ReferencePlanes;
-                // The port TYPE lives in the .cem, so the layout cannot know it — this is the one
-                // channel that carries it, and without it an internal delta gap would draw as an
-                // edge port with its cut at the far end of the trace.
-                AdoptPortTypes(open, vm, source.AbsolutePath);
+                // The port TYPE used to be pushed here too, from the .cem's own list. It is on the
+                // port LABEL now (2026-09-14) — so the layout already knows it, there is nothing to
+                // adopt, and two setups can no longer hand one drawing two different answers. See
+                // LabelShape.PortKind.
             }
-    }
-
-    /// <summary>
-    /// Hands a layout the port TYPES of the setup that just refreshed — and <b>says so when that
-    /// takes them off a DIFFERENT setup that disagreed</b>.
-    ///
-    /// <para><b>The conflict is real and is not a bug to be designed away.</b> More than one
-    /// <c>.cem</c> may analyse one <c>.clay</c>, and two of them may legitimately disagree about a
-    /// port: a gap in the middle of a trace in one, driven from its ends in another. That is exactly
-    /// why the type is an analysis setting rather than a property of the drawing. But there is only
-    /// ONE layout on screen and it can draw only one of the two answers.</para>
-    ///
-    /// <para>So the layout NAMES its current owner, and a takeover that actually changes the marks
-    /// is reported. Silence was the defect: the marks flipped when a user touched an unrelated field
-    /// in the other setup, and nothing on screen connected the two. A takeover that changes nothing —
-    /// the overwhelmingly common case, two setups that agree, or the same setup refreshing — says
-    /// nothing, because a message nobody can act on is one they learn to skip.</para>
-    /// </summary>
-    private void AdoptPortTypes(LayoutDocument open, EmSetupEditorViewModel vm, string layoutPath)
-    {
-        var next  = vm.InternalPortMarkAnchors;
-        var owner = vm.Working.Name is { Length: > 0 } n ? n : Path.GetFileName(vm.FilePath);
-
-        var prev      = open.ViewModel.InternalPortMarks;
-        string before = open.ViewModel.InternalPortMarksOwner;
-        bool  differs = prev.Count != next.Count || !prev.All(next.Contains);
-
-        open.ViewModel.InternalPortMarks     = next;
-        open.ViewModel.InternalPortMarksOwner = owner;
-
-        if (!differs || before.Length == 0 || string.Equals(before, owner, StringComparison.Ordinal))
-            return;
-
-        Messages.Info(
-            $"Port marks on {Path.GetFileName(layoutPath)} now follow the EM setup '{owner}' " +
-            $"({Describe(next)}); they were following '{before}' ({Describe(prev)}). Two EM setups " +
-            "analyse this layout and disagree about a port's type — which is allowed, since a port " +
-            "type belongs to the analysis rather than to the drawing. The layout can only draw one " +
-            "of them.", layoutPath);
-
-        // Counted BY KIND, because "2 internal ports" said of one delta gap and one internal port
-        // describes neither of the two marks that just changed on screen.
-        static string Describe(IReadOnlyList<(long X, long Y, PlanarPortKind Kind)> marks)
-        {
-            if (marks.Count == 0) return "no internal ports";
-
-            int gaps = 0, vias = 0;
-            foreach (var m in marks)
-                if (m.Kind == PlanarPortKind.Internal) vias++; else gaps++;
-
-            var parts = new List<string>(2);
-            if (gaps   > 0) parts.Add(gaps   == 1 ? "1 internal delta-gap port" : $"{gaps} internal delta-gap ports");
-            if (vias   > 0) parts.Add(vias   == 1 ? "1 internal port"     : $"{vias} internal ports");
-            return string.Join(" and ", parts);
-        }
     }
 
     /// <summary>Reflects a .cem editor's dirty state onto its own tree node's dirty dot — the exact

@@ -517,9 +517,14 @@ internal static class Explain
     private static void ExplainPortReturns(
         EmSetup setup, EmLayoutSource source, PlanarProblem problem, List<ResolutionStepJson> walks)
     {
+        // A .cem written before the port TYPE moved onto the label still carries one; apply it in
+        // memory, exactly as EmRunService does, so `explain` reports what a run would do. Writes
+        // nothing — this verb is read-only by contract.
+        EmPortKindMigration.ApplyInMemory(source.View.Shapes, setup.PortKinds);
+
         var ports = EmPortExtraction.Extract(
             source.View.Shapes, problem, source.DbuPerMicron, setup.ResolvePortZ0,
-            source.View.DisplayUnit, setup.ResolvePortKind,
+            source.View.DisplayUnit,
             EmPortExtraction.DefaultGroundPathWidthM(source.Technology));
 
         if (!ports.Rows.Any(r => r.Port?.IsConductorReferenced == true)) return;

@@ -82,11 +82,11 @@ public class InternalPortUiTests
         Assert.Contains("Internal", json, StringComparison.Ordinal);
 
         var back = EmSetupPersistence.Deserialize(json);
-        Assert.Equal(PlanarPortKind.Internal, back.ResolvePortKind(2));
-        Assert.Equal(PlanarPortKind.Edge,          back.ResolvePortKind(0));
+        Assert.Equal(PlanarPortKind.Internal, back.PortKinds[2]);
+        Assert.Equal(PlanarPortKind.Edge,     back.PortKinds[0]);
         Assert.Equal(json, EmSetupPersistence.Serialize(back));
 
-        Assert.Equal(PlanarPortKind.Internal, setup.Clone().ResolvePortKind(2));
+        Assert.Equal(PlanarPortKind.Internal, setup.Clone().PortKinds[2]);
     }
 
     [Fact]
@@ -116,14 +116,28 @@ public class InternalPortUiTests
             PortKinds = [PlanarPortKind.Edge, PlanarPortKind.Internal],
         };
 
-        Assert.True(setup.DeclaresInternalPort());
+        // The question is asked of the ARTWORK now, not of a list of stated types — so a port that
+        // is an internal port because of where it is DRAWN is caught too, which is the port this
+        // guard exists for. The setup's legacy list still reaches the labels through the one door.
+        LayoutShape[] guarded = [Line(), Port("1", 0, 1.45), Port("2", 10, 1.45)];
+        EmPortKindMigration.ApplyInMemory(guarded, setup.PortKinds);
+        Assert.True(EmPortExtraction.AnyNonEdgePort(guarded));
         string why = EmRunService.InternalPortNeedsFullWave("uniform-line (quasi-static) kernel");
         Assert.Contains("internal port is the foot of a via", why);
         Assert.Contains("full-wave planar kernel", why);
     }
 
+    /// <summary>States a port's type the way the drawing does — the type is a field on the LABEL
+    /// (2026-09-14), so a test that wants a particular type says so on the port rather than handing
+    /// the extractor a slot lookup of its own.</summary>
+    private static void TypePort(IEnumerable<LayoutShape> shapes, string text, PlanarPortKind kind)
+    {
+        foreach (var l in shapes.OfType<LabelShape>())
+            if (l.IsPort && l.Text == text) l.PortKind = kind;
+    }
+
     // ══════════════════════════════════════════════════════════════════════════════════════════
-    // Extraction — the type comes from the .cem, and an internal port needs a via under it
+    // Extraction — the type comes from the LABEL, and an internal port needs a via under it
     // ══════════════════════════════════════════════════════════════════════════════════════════
 
     [Fact]
@@ -134,8 +148,8 @@ public class InternalPortUiTests
         // plane rather than by anything in the drawing.
         LayoutShape[] shapes = [Line(), Via(10), Port("1", 0, 1.45), Port("2", 20, 1.45), Port("3", 10, 1.45)];
 
-        var r = EmPortExtraction.Extract(shapes, Problem(shapes), Dbu, null, LayoutUnit.Um,
-                                         i => i == 2 ? PlanarPortKind.Internal : PlanarPortKind.Edge);
+        TypePort(shapes, "3", PlanarPortKind.Internal);
+        var r = EmPortExtraction.Extract(shapes, Problem(shapes), Dbu, null, LayoutUnit.Um);
 
         Assert.True(r.Ok, r.Refusal);
         Assert.Equal(PlanarPortKind.Internal, r.Ports[2].Kind);
@@ -154,9 +168,9 @@ public class InternalPortUiTests
         LayoutShape[] shapes = [Line(), Port("1", 0, 1.45), Port("2", 20, 1.45), Port("3", 10, 1.45)];
         var problem = Problem(shapes);
 
+        TypePort(shapes, "3", PlanarPortKind.Internal);
         var r = EmPortExtraction.Extract(
             shapes, problem, Dbu, null, LayoutUnit.Um,
-            i => i == 2 ? PlanarPortKind.Internal : PlanarPortKind.Edge,
             EmPortExtraction.DefaultGroundPathWidthM(StarterTechnologies.Pcb2Layer()));
 
         Assert.True(r.Ok, r.Refusal);
@@ -183,9 +197,9 @@ public class InternalPortUiTests
         LayoutShape[] shapes = [Line(), Via(10), Port("1", 0, 1.45), Port("2", 20, 1.45), Port("3", 10, 1.45)];
         var problem = Problem(shapes);
 
+        TypePort(shapes, "3", PlanarPortKind.Internal);
         var r = EmPortExtraction.Extract(
             shapes, problem, Dbu, null, LayoutUnit.Um,
-            i => i == 2 ? PlanarPortKind.Internal : PlanarPortKind.Edge,
             EmPortExtraction.DefaultGroundPathWidthM(StarterTechnologies.Pcb2Layer()));
 
         Assert.True(r.Ok, r.Refusal);
@@ -205,8 +219,8 @@ public class InternalPortUiTests
         // one: the number is the user's to fix by drawing a via.
         LayoutShape[] shapes = [Line(), Port("1", 10, 1.45)];
 
-        var r = EmPortExtraction.Extract(shapes, Problem(shapes), Dbu, null, LayoutUnit.Um,
-                                         _ => PlanarPortKind.Internal);
+        TypePort(shapes, "1", PlanarPortKind.Internal);
+        var r = EmPortExtraction.Extract(shapes, Problem(shapes), Dbu, null, LayoutUnit.Um);
 
         Assert.True(r.Ok, r.Refusal);
         Assert.NotNull(r.Ports[0].GroundPathWidthM);
@@ -240,23 +254,32 @@ public class InternalPortUiTests
         return view;
     }
 
-    private static EmSetupEditorViewModel Editor(string dir)
+    /// <summary>The panel plus the LIVE layout it edits. The port type is stated on the LABEL
+    /// (2026-09-14), and <c>SetPortKind</c> is what <c>WorkspaceViewModel</c> supplies, minus the
+    /// document plumbing.</summary>
+    private static (EmSetupEditorViewModel Vm, LayoutView View) EditorAndLayout(string dir)
     {
         string path  = Path.Combine(dir, "panel.cem");
         var    setup = new EmSetup
         {
             Name = "panel", LayoutRef = "a.clay", AnalysisKind = EmAnalysisKind.Planar,
-            PortKinds = [PlanarPortKind.Edge, PlanarPortKind.Edge, PlanarPortKind.Internal],
         };
         EmSetupPersistence.SaveToFile(path, setup);
+
+        var view = PortedLineWithVia();
+        TypePort(view.Shapes, "3", PlanarPortKind.Internal);
+
         var vm = new EmSetupEditorViewModel(path, setup)
         {
             ResolveLayout = _ => new EmLayoutSource(
-                Path.Combine(dir, "a.clay"), PortedLineWithVia(), StarterTechnologies.Pcb2Layer(), Dbu),
+                Path.Combine(dir, "a.clay"), view, StarterTechnologies.Pcb2Layer(), Dbu),
+            SetPortKind = (label, kind) => { label.PortKind = kind; view.NotifyChanged(); },
         };
         vm.Refresh();
-        return vm;
+        return (vm, view);
     }
+
+    private static EmSetupEditorViewModel Editor(string dir) => EditorAndLayout(dir).Vm;
 
     [Fact]
     public void ThePanelNamesTheInternalRowForWhatItIs_NotForAnEndOrADirection()
@@ -278,27 +301,26 @@ public class InternalPortUiTests
     }
 
     [Fact]
-    public void ThePanelPublishesTheInternalAnchorWithItsKind_SoTheLayoutCanDrawTheRightMark()
+    public void ThePanelReadsThePortTypeOffTheLABEL_AndPublishesNothingToTheLayout()
     {
-        // The layout cannot know a port's type — it lives in the .cem — so this channel is the only
-        // way the mark can differ, and it has to carry WHICH mark rather than merely "internal".
-        var vm = Editor(TempDir());
+        // This replaces a test for the channel that no longer exists. The panel used to publish an
+        // anchor-and-kind list the drawing was told to obey — built from the .cem's own port-kind
+        // list, which answered "edge port" for every port it had never been told about. That is what
+        // redrew a port placed in the middle of a trace as an edge port one frame after the click
+        // (owner report, 2026-09-14). The type is on the label now: the panel READS it and WRITES it,
+        // and the drawing needs telling nothing.
+        var (vm, view) = EditorAndLayout(TempDir());
 
-        var mark = Assert.Single(vm.InternalPortMarkAnchors, m => m.Kind == PlanarPortKind.Internal);
-        Assert.Equal(Mm(10), mark.X);
+        Assert.Equal(PlanarPortKind.Internal, vm.PortRows[2].Kind);
 
-        // ── AND EVERY OTHER PORT, AS AN EDGE PORT (2026-09-09) ────────────────────────────────
-        //
-        // It used to publish ONLY the non-edge ports, so "absent from this list" meant both "this
-        // setup calls it an edge port" and "no setup has ever spoken" — and the layout, unable to
-        // tell the two apart, assumed the former for both. That is what drew a port standing in the
-        // middle of a rectangle as an edge port with its bar at the metal's end, wherever the label
-        // actually was. An entry per port is what lets the layout infer for the ports this setup has
-        // NOT claimed while still obeying it for the ports it has, in either direction: the owner's
-        // "if user changes the port type from the .cem window, then the ports in layout are drawn
-        // properly" includes changing one BACK to Edge.
-        Assert.Equal(3, vm.InternalPortMarkAnchors.Count);
-        Assert.Equal(2, vm.InternalPortMarkAnchors.Count(m => m.Kind == PlanarPortKind.Edge));
+        var p3 = view.Shapes.OfType<LabelShape>().Single(l => l.Text == "3");
+        Assert.Equal(PlanarPortKind.Internal, p3.PortKind);
+
+        // …and the row the panel shows IS the label's own answer, for every port, in both
+        // directions — the owner's requirement that a type changed in the .cem window draws properly
+        // in the layout includes changing one BACK to Edge.
+        vm.PortRows[2].Kind = PlanarPortKind.Edge;
+        Assert.Equal(PlanarPortKind.Edge, p3.PortKind);
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -316,11 +338,10 @@ public class InternalPortUiTests
         var vp = LayoutViewport.ZoomToFit(bb, 400, 400, 0.2);
 
         var surface = SKSurface.Create(new SKImageInfo((int)vp.Width, (int)vp.Height));
-        var opts = new LayoutRenderOptions
-        {
-            Theme = LayoutRenderTheme.Light,
-            InternalPortMarks = kind is { } k ? [(Mm(10), Mm(1.45), k)] : null,
-        };
+        // The type is on the LABEL, so a render of a given type is a render of a label that states
+        // it. `null` is a port that states nothing, which infers from the artwork.
+        ((LabelShape)view.Shapes[^1]).PortKind = kind;
+        var opts = new LayoutRenderOptions { Theme = LayoutRenderTheme.Light };
         LayoutRenderer.Draw(surface.Canvas, view, StarterTechnologies.Pcb2Layer(), vp, opts);
         return surface;
     }

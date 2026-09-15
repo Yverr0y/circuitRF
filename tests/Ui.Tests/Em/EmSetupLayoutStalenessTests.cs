@@ -119,14 +119,17 @@ public class EmSetupLayoutStalenessTests
 
     // ── One bad port must not erase the others ────────────────────────────────────────────────
 
-    /// <summary>A tee with three ports, the third an internal delta gap in the .cem.</summary>
+    /// <summary>A tee with three ports, the third an internal delta gap — stated on the LABEL, which
+    /// is where a port's type lives (2026-09-14).</summary>
     private static (LayoutView View, EmSetupEditorViewModel Vm) ThreePortPanel(string clay)
     {
         var view = TeeWithTwoPorts();
         view.Shapes.Add(Port("P3", 7.5, -12, LayoutRotation.R90));
 
+        view.Shapes.OfType<LabelShape>().First(l => l.Text == "P3").PortKind =
+            PlanarPortKind.InternalDeltaGap;
+
         var setup = new EmSetup { LayoutRef = clay, AnalysisKind = EmAnalysisKind.Auto };
-        setup.PortKinds.AddRange([PlanarPortKind.Edge, PlanarPortKind.Edge, PlanarPortKind.InternalDeltaGap]);
 
         var vm = new EmSetupEditorViewModel(clay + ".cem", setup)
         {
@@ -202,18 +205,17 @@ public class EmSetupLayoutStalenessTests
         const string clay = "/tmp/bad-port-marks.clay";
         var (view, vm) = ThreePortPanel(clay);
 
-        // Single among the GAP marks: since 2026-09-09 the panel publishes an entry for every port,
-        // edge ones included, so that "absent" can mean "no setup has claimed this port" and the
-        // layout can draw an unclaimed one where it actually stands. What this test is about — the
-        // gap mark surviving another port's failure — is unchanged.
-        var before = Assert.Single(vm.InternalPortMarkAnchors, m => m.Kind == PlanarPortKind.InternalDeltaGap);
+        // What this test is about — the gap port surviving another port's failure — is unchanged;
+        // what it reads has moved. The panel used to PUBLISH an anchor-and-kind list to the layout,
+        // and that channel is gone (2026-09-14): the type is on the label, so the question is whether
+        // the panel's ROW still reports it while a sibling port is unresolvable.
+        var before = Assert.Single(vm.PortRows, r => r.Kind == PlanarPortKind.InternalDeltaGap);
 
         view.Shapes.OfType<LabelShape>().First(l => l.Text == "P2").X = Mm(60);
         vm.Refresh();
 
-        var after = Assert.Single(vm.InternalPortMarkAnchors, m => m.Kind == PlanarPortKind.InternalDeltaGap);
-        Assert.Equal(before.X, after.X);
-        Assert.Equal(before.Y, after.Y);
+        var after = Assert.Single(vm.PortRows, r => r.Kind == PlanarPortKind.InternalDeltaGap);
+        Assert.Equal(before.PortNumber, after.PortNumber);
 
         // And the row still offers the type it is, so the user can retype it while the other port is
         // still broken.

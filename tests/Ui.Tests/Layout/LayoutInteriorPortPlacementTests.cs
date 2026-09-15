@@ -209,8 +209,10 @@ public class LayoutInteriorPortPlacementTests
         foreach (var s in view.Shapes) bb = bb.Union(LayoutGeometry.BboxOf(s));
         var vp = LayoutViewport.ZoomToFit(bb, 900, 300, 0.2);
 
-        var plain = Render(bare, vp, marks: null);
-        var withMark = Render(view, vp, marks: [(Um(10_000), Um(1_450), PlanarPortKind.Internal)]);
+        var plain = Render(bare, vp);
+        foreach (var l in view.Shapes.OfType<LabelShape>())
+            if (l.IsPort) l.PortKind = PlanarPortKind.Internal;
+        var withMark = Render(view, vp);
 
         // The metal's own rows on screen, from the same viewport transform the renderer used.
         double yTop = vp.WorldToScreenY(Um(2_900)), yBot = vp.WorldToScreenY(0);
@@ -230,13 +232,14 @@ public class LayoutInteriorPortPlacementTests
         withMark.Dispose();
     }
 
-    private static SKBitmap Render(LayoutView view, LayoutViewport vp,
-                                   IReadOnlyList<(long X, long Y, PlanarPortKind Kind)>? marks)
+    /// <summary>The port TYPE is on the LABEL (2026-09-14), so a render of a given type is a render
+    /// of a layout whose port states it — there is no mark list to hand the renderer any more.</summary>
+    private static SKBitmap Render(LayoutView view, LayoutViewport vp)
     {
         using var surface = SKSurface.Create(new SKImageInfo((int)vp.Width, (int)vp.Height));
         surface.Canvas.Clear(LayoutRenderTheme.Light.Background);
         LayoutRenderer.Draw(surface.Canvas, view, StarterTechnologies.Pcb2Layer(), vp,
-            new LayoutRenderOptions { Theme = LayoutRenderTheme.Light, InternalPortMarks = marks });
+            new LayoutRenderOptions { Theme = LayoutRenderTheme.Light });
         using var img = surface.Snapshot();
         return SKBitmap.FromImage(img);
     }

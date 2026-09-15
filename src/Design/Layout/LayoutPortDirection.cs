@@ -1,10 +1,17 @@
 // Framework-free. No Avalonia, no SkiaSharp — the renderer, the editor and the EM extractor all
 // read this, and only the renderer is allowed to know about Skia.
+//
+// It lives in src/Design rather than src/Render because that sentence has to be TRUE of the EM
+// extractor as well: `EmRunService` and `EmPortExtraction` are below the firewall in src/Design,
+// which does not reference src/Render, so a port's type could not be inferred from the artwork in
+// the one place the RUN reads it. The alternative was a second interior test in src/Design, which is
+// exactly the second copy every other note in this file exists to prevent. Both src/Render and
+// src/Ui already say `global using CircuitRF.Design.Layout`, so no call site changed.
 
 using System.Collections.Generic;
 using CircuitRF.Engine.Mom;   // PlanarPortKind — the port TYPE an EM setup drives a label as.
 
-namespace CircuitRF.Render;
+namespace CircuitRF.Design.Layout;
 
 /// <summary>
 /// An EM port's DIRECTION — the way current flows INTO the structure — and the conductor width it
@@ -69,11 +76,33 @@ public static class LayoutPortDirection
         bool Interior = false);
 
     /// <summary>
-    /// <b>What to draw a port as when nothing has said what it is</b> — read only where the active EM
-    /// setup has no answer for this label. See <see cref="PortHint.Interior"/> for the report.
+    /// <b>What to draw a port as when nothing has said what it is</b> — read only where
+    /// <see cref="LabelShape.PortKind"/> is null. See <see cref="PortHint.Interior"/> for the report.
     /// </summary>
     public static PlanarPortKind InferredKind(PortHint hint) =>
         hint.Interior ? PlanarPortKind.Internal : PlanarPortKind.Edge;
+
+    /// <summary>
+    /// <b>THE port type: what this label is, stated or inferred.</b> The single answer the renderer,
+    /// the hit test, the Port tool's ghost, the <c>.cem</c>'s port list and the EM extractor all
+    /// take — so none of them can disagree about whether a port is an edge port, and the picture the
+    /// tool draws under the cursor is the one the run drives.
+    ///
+    /// <para><b>There used to be two answers, and that was the bug</b> (owner report, 2026-09-14).
+    /// The drawing inferred from the artwork; the <c>.cem</c> answered <c>Edge</c> for any port slot
+    /// it had never been told about, which is every port in a setup whose <c>PortKinds</c> was empty
+    /// — the normal case. A port placed in the middle of a trace was therefore drawn as an internal
+    /// port by the ghost, committed, and redrawn one frame later as an edge port with its
+    /// reference-plane bar at the far end of the conductor. The type lives on the label now
+    /// (<see cref="LabelShape.PortKind"/>) and this is the one place silence is resolved.</para>
+    ///
+    /// <para>Edge is the answer for a port whose conductor cannot be resolved at all. Such a port is
+    /// refused BY NAME at extraction time; it still has to draw as something in the meantime, and
+    /// an edge port's bar-and-arrow on the label's own anchor is what it has always drawn as.</para>
+    /// </summary>
+    public static PlanarPortKind KindOf(ConductorLookup? conductorAt, LabelShape label)
+        => label.PortKind
+           ?? (Resolve(conductorAt, label) is { } hint ? InferredKind(hint) : PlanarPortKind.Edge);
 
     /// <summary>
     /// <b>Whether a port's mark is drawn at the LABEL's own anchor rather than at the conductor
@@ -969,34 +998,67 @@ public static class LayoutPortDirection
     /// case where the stated direction has stopped describing where the port is.</para>
     /// </summary>
     public readonly record struct PortReseat(LayoutRotation? Direction, LayerKey? Layer,
-                                             bool DirectionChanged, bool LayerChanged)
+                                             PlanarPortKind? Kind,
+                                             bool DirectionChanged, bool LayerChanged, bool KindChanged)
     {
-        public bool Changed => DirectionChanged || LayerChanged;
+        public bool Changed => DirectionChanged || LayerChanged || KindChanged;
     }
 
     /// <inheritdoc cref="PortReseat"/>
     public static PortReseat Reseat(ConductorLookup visibleAt, LabelShape port, long dx, long dy)
     {
-        var unchanged = new PortReseat(port.PortDirection, port.PortLayer, false, false);
+        var unchanged = new PortReseat(port.PortDirection, port.PortLayer, port.PortKind,
+                                       false, false, false);
         if (!port.IsPort) return unchanged;
 
         // Landed off the metal: nothing under the new anchor has anything to say, so the port keeps
         // what it had rather than being reset to a guess.
         if (visibleAt(port.X + dx, port.Y + dy, null) is not { } after) return unchanged;
 
-        var before = visibleAt(port.X, port.Y, null) is { } b
-            ? DirectionAt(b, port.X, port.Y)
-            : (LayoutRotation?)null;
+        var beforeInfo = visibleAt(port.X, port.Y, null);
+        var before = beforeInfo is { } b ? DirectionAt(b, port.X, port.Y) : (LayoutRotation?)null;
         var adopted = DirectionAt(after, port.X + dx, port.Y + dy);
 
         bool dirChanged = adopted != before && port.PortDirection != adopted;
         var layer = after.Shape?.Layer;
         bool layerChanged = layer != port.PortLayer;
 
+        // ── AND THE TYPE, ON EXACTLY THE RULE ABOVE ─────────────────────────────────────────────
+        //
+        // A property the owner named in 2026-09-09: dragging a port across the toggle changed what
+        // it drew as, which a stored mode could not have done. Dragging a port out of the middle of a
+        // trace onto its end face really does make it an edge port, and that has to keep working now
+        // that the type is STORED rather than re-inferred every frame.
+        //
+        // The trigger is the one Direction already uses: not "the port moved" but "the ARTWORK's own
+        // answer under the port CHANGED". Nudging an internal port a few DBU infers Internal at both
+        // anchors and leaves an explicit choice — an InternalDeltaGap the user picked, say — alone.
+        // Crossing from the interior to an end face is the case where the stored type has stopped
+        // describing where the port is.
+        var kindBefore = beforeInfo is { } bi ? InferredKind(Measured(bi, before ?? adopted,
+                                                                      port, Inferred: true))
+                                              : (PlanarPortKind?)null;
+        var kindAfter  = InferredKind(Measured(after, adopted,
+                                               WithAnchor(port, port.X + dx, port.Y + dy),
+                                               Inferred: true));
+        bool kindChanged = kindAfter != kindBefore && port.PortKind != kindAfter;
+
         return new PortReseat(dirChanged ? adopted : port.PortDirection,
                               layerChanged ? layer : port.PortLayer,
-                              dirChanged, layerChanged);
+                              kindChanged ? kindAfter : port.PortKind,
+                              dirChanged, layerChanged, kindChanged);
     }
+
+    /// <summary>The same label at a different anchor — <see cref="Measured"/> reads
+    /// <see cref="LabelShape.X"/>/<see cref="LabelShape.Y"/>, so asking it about the DESTINATION of a
+    /// drag means asking about a label that is already there. Only the fields that method reads are
+    /// carried; it is a question, not a shape anyone keeps.</summary>
+    private static LabelShape WithAnchor(LabelShape port, long x, long y) => new()
+    {
+        Layer = port.Layer, X = x, Y = y, Text = port.Text, Height = port.Height,
+        Rotation = port.Rotation, IsPort = port.IsPort, PortDirection = port.PortDirection,
+        PortLayer = port.PortLayer, PortKind = port.PortKind, Style = port.Style,
+    };
 
     /// <summary>Top-level shapes only — the cheap form, and all a hand-drawn layout ever needs.
     /// It knows no technology, so it has no visibility to consult; a port's committed layer still
@@ -1007,197 +1069,4 @@ public static class LayoutPortDirection
             ? new ConductorInfo(LayoutGeometry.BboxOf(s), null, s)
             : null;
 
-    /// <summary>
-    /// The full form: top-level shapes FIRST (exact hit-testing, so a click on an edge counts), then
-    /// placed instances.
-    ///
-    /// <para><b>Two owner requirements pull in opposite directions, and this is where they are
-    /// reconciled.</b> (1) a placed port must never move on its own — so its geometry may not depend
-    /// on which layers are switched on. (2) a drag must not be attracted to metal on a layer that is
-    /// switched off — so it may not see metal that is not on screen. Resolve the
-    /// conductor against the VISIBLE artwork every time and (1) breaks; resolve it against ALL
-    /// artwork and (2) breaks. Both were shipped, in that order, and each broke the other.</para>
-    ///
-    /// <para><b>The reconciliation is that the two questions belong to different MOMENTS.</b> A port
-    /// COMMITS to a conductor layer at a user gesture — placement, or a move — and
-    /// <see cref="LabelShape.PortLayer"/> records which. That gesture asks about VISIBLE metal, so
-    /// nothing invisible can ever attract it. At rest the port asks only about the layer it already
-    /// committed to, and pays no attention to whether that layer is currently shown, so no visibility
-    /// toggle can move it. The two rules never meet, because a port is never resting and being
-    /// dragged at the same time.</para>
-    ///
-    /// <list type="bullet">
-    /// <item><paramref name="onLayer"/> given (a committed port): shapes on THAT layer only,
-    /// visibility ignored.</item>
-    /// <item><paramref name="onLayer"/> null (a gesture, or a port written before
-    /// <see cref="LabelShape.PortLayer"/> existed): shapes on VISIBLE layers only.</item>
-    /// </list>
-    ///
-    /// <para><b>Visibility here means <see cref="LayerDef.Visible"/> alone, deliberately, not
-    /// <c>Visible &amp;&amp; Selectable</c>.</b> `LayoutHitTest.HitStack` requires both because it
-    /// answers "what did the user CLICK", and a locked layer may not be clicked. This asks "what
-    /// metal is on screen", and a locked layer's metal is on screen — it is the same gate
-    /// `LayoutSnapQuery` applies to every snap feature, so a port's marker and the snap that placed
-    /// it can no longer disagree about what is there.</para>
-    ///
-    /// <para><b>The SMALLEST conductor at the point wins, not the topmost.</b> `HitStack` orders
-    /// ZOrder-descending because that is what a click means, and borrowing it put a POUR ahead of the
-    /// trace lying on it whenever the pour's layer draws on top — measured on the reporting board, a
-    /// trace on ZOrder 0 crossing a pour on ZOrder 10. Smallest area is what a user pointed at, and
-    /// it is what <see cref="ConductorUnderShape"/> — the shapes-only form used by the clipboard and
-    /// <c>DocumentExtents</c> — has always returned, so the two forms no longer disagree about where
-    /// a port is.</para>
-    ///
-    /// <para>Genuinely ambiguous artwork — a port over metal on more than one conductor level — is
-    /// still a REFUSAL, and it is <c>EmPortExtraction</c>'s to make ("a port's LEVEL is part of its
-    /// identity"). This picks a stable conductor to draw a marker against; it does not decide what
-    /// runs.</para>
-    ///
-    /// <para><b>Why instances have to be in here (owner report, 2026-08-09: "placing a port does not
-    /// set a direction, when I placed it by clicking on the metal").</b> A layout built by "Update
-    /// Layout from Schematic" is ALL instances and no top-level shapes, so a shapes-only lookup finds
-    /// nothing on artwork the user can plainly see, and the port silently gets no direction at all.
-    /// </para>
-    ///
-    /// <para><b>An instance answers with its PIN when the point names one, and only falls back to
-    /// its bbox otherwise</b> (owner report, 2026-08-09). The array-expanded bbox is a fair seed for
-    /// a straight run of metal and a badly wrong one for anything else — an MTee's box spans both
-    /// arms, and a TAPER's spans a width it has nowhere along its length. Since a cell's pins carry
-    /// an exact width and outward direction, preferring them makes the common case (a port placed on
-    /// a PCell's own pin, which is what the snap lands on) exact instead of approximate. The bbox
-    /// survives for a port placed on the metal but NOT at a pin, where there is genuinely nothing
-    /// better to say. <c>EmPortExtraction</c> still re-derives the side from exact flattened geometry
-    /// and refuses rather than guessing — it does not read this at all.</para>
-    ///
-    /// <para><paramref name="tolDbu"/> is how close the point must be to a pin to be naming it. Zero
-    /// — every caller's default — means exact coincidence, which is precisely what a port snapped
-    /// onto a pin has, and correctly declines to claim a pin the user placed the port merely NEAR.</para>
-    /// </summary>
-    public static ConductorLookup LookupFor(LayoutView view, Technology? tech, string baseDir, long tolDbu = 0)
-    {
-        // Built once per lookup — which is once per frame, not once per port — for the same reason
-        // LayoutSnapQuery builds its own: a real process stack is hundreds of layers, and a linear
-        // scan per candidate shape is what this replaces.
-        var visible = new Dictionary<LayerKey, bool>(tech?.Layers.Count ?? 0);
-        if (tech is { } t)
-            foreach (var l in t.Layers)
-                visible.TryAdd(l.Key, l.Visible);   // FIRST wins, matching every other layer lookup
-
-        bool IsVisible(LayerKey key) =>
-            visible.TryGetValue(key, out bool v) ? v : FallbackPalette.For(key).Visible;
-
-        return (x, y, onLayer) =>
-        {
-            LayoutShape? best = null;
-            Bbox bestBox = default;
-            double bestArea = double.MaxValue;
-
-            // ignoreLayerVisibility: this decides for itself, by the rule in the summary — a
-            // committed port narrows by LAYER instead, and must not be filtered by what is shown.
-            foreach (int i in LayoutHitTest.HitStack(view, tech, x, y, tolDbu, ignoreLayerVisibility: true))
-            {
-                var shape = view.Shapes[i];
-                if (shape is LabelShape or BitmapShape) continue;
-                if (onLayer is { } want ? shape.Layer != want : !IsVisible(shape.Layer)) continue;
-
-                var bb = LayoutGeometry.BboxOf(shape);
-                if (bb.IsEmpty) continue;
-
-                double area = (double)(bb.MaxX - bb.MinX) * (bb.MaxY - bb.MinY);
-                if (area >= bestArea) continue;   // ties keep the earlier (topmost) candidate
-                bestArea = area;
-                bestBox = bb;
-                best = shape;
-            }
-
-            // The SHAPE, not only its box: a top-level conductor can be measured at the end face,
-            // and for anything that changes width along its length the box is the wrong number.
-            if (best is not null) return new ConductorInfo(bestBox, null, best);
-
-            foreach (int i in LayoutHitTest.HitInstanceStack(view, tech, baseDir, x, y, tolDbu))
-            {
-                var inst = view.Instances[i];
-                var bb = CellHierarchy.InstanceBbox(inst, baseDir);
-                if (bb.IsEmpty) continue;
-                return new ConductorInfo(bb, PinAt(inst, baseDir, tech, x, y, tolDbu));
-            }
-
-            return null;
-        };
-    }
-
-    /// <summary>
-    /// The pin of <paramref name="inst"/>'s sub-cell that <paramref name="x"/>,<paramref name="y"/>
-    /// names, in the PARENT's frame — nearest within <paramref name="tolDbu"/>, or null.
-    ///
-    /// <para>Walks every array placement, exactly as <c>LayoutSnapQuery</c>'s own instance recursion
-    /// does and at the same cost: a placement is a handful of integer operations per pin, and the
-    /// caller has already narrowed to instances whose bbox contains the point.</para>
-    /// </summary>
-    private static PinFacts? PinAt(LayoutInstance inst, string baseDir, Technology? tech,
-                                   long x, long y, long tolDbu)
-    {
-        var res = CellLayoutResolver.Resolve(inst.CellRef, baseDir);
-        if (res.State != CellLayoutState.Resolved) return null;
-
-        var pins = CellPins.Resolve(res.View!, tech);
-        if (pins.Count == 0) return null;
-
-        int rows = System.Math.Max(1, inst.Rows), cols = System.Math.Max(1, inst.Cols);
-        double bestSq = (double)tolDbu * tolDbu;
-        PinFacts? best = null;
-
-        for (int r = 0; r < rows; r++)
-        for (int c = 0; c < cols; c++)
-        foreach (var pin in pins)
-        {
-            var (wx, wy) = LayoutInstanceTransform.TransformPoint(pin.X, pin.Y, inst, r, c);
-            double dx = wx - x, dy = wy - y;
-            double d2 = dx * dx + dy * dy;
-            if (d2 > bestSq) continue;
-
-            bestSq = d2;
-            best = new PinFacts(wx, wy,
-                                ScaleWidth(pin.WidthDbu, inst.Mag),
-                                // The pin's own outward angle, UNSNAPPED — TransformDirection composes
-                                // in real angles and rounds once at the end (R-L3d-12). Inward is
-                                // outward + 180, the same relation FromPinOutward states.
-                                TransformDirection(pin.OutwardDeg + 180.0, inst));
-        }
-
-        // A pin that states no width is a connection point with nothing to say about the metal's
-        // extent; falling through to the box is more honest than reporting a zero-width port.
-        return best is { WidthDbu: > 0 } ? best : null;
-    }
-
-    private static long ScaleWidth(long widthDbu, double mag)
-    {
-        double w = widthDbu * System.Math.Abs(mag);
-        return w > 0 ? (long)System.Math.Round(w) : 0;
-    }
-
-    /// <summary>
-    /// Carries a cell-local direction, as a REAL angle, into the parent's frame. Mirror-then-rotate,
-    /// the SAME ordering as <see cref="LayoutInstanceTransform.TransformPoint"/> — a direction that
-    /// composed differently from the position it belongs to would put the arrow and the plane bar on
-    /// different sides of the same pin. Mirroring negates local X, which reflects a direction about
-    /// the Y axis: <c>deg -> 180 - deg</c>.
-    ///
-    /// <para><b>R-L3d-12: this is the boundary that snaps, and it snaps ONCE.</b> A
-    /// <see cref="PinFacts.Direction"/> is a <see cref="LayoutRotation"/> because port extraction
-    /// downstream is side-based, and L3d deliberately did not widen that — whether an EM port on a
-    /// non-Manhattan conductor is meaningful is an L8/L9 question about extraction, not a placement
-    /// question. What changed here is that the composition now happens in real angles and rounds at
-    /// the end, where before <see cref="FromPinOutward"/> collapsed the pin's own (already
-    /// double-valued) <see cref="LayoutPin.OutwardDeg"/> to four-way BEFORE the instance rotation was
-    /// applied — so a pin at 10 deg inside an instance at 80 deg used to land on R0 and now lands on
-    /// R90, which is the correct answer. The residual is not reported: this is a pure geometric query
-    /// with no Messages sink to report into, and inventing one would thread a diagnostics channel
-    /// through hit-test. The limitation is stated here and in the L3d completion note.</para>
-    /// </summary>
-    private static LayoutRotation TransformDirection(double localInwardDeg, LayoutInstance inst)
-    {
-        double deg = inst.MirrorX ? 180.0 - localInwardDeg : localInwardDeg;
-        return LayoutAngle.NearestCardinal(deg + inst.RotationDegrees);
-    }
 }

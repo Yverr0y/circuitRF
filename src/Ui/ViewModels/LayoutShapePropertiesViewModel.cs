@@ -10,7 +10,8 @@ using CircuitRF.Ui.Commands.Layout;
 using CircuitRF.Ui.Layout;
 using CircuitRF.Ui.Layout.PCells;
 using CircuitRF.Ui.Renderers;
-using CircuitRF.Ui.Schematic;
+using CircuitRF.Ui.Schematic;using CircuitRF.Engine.Mom;   // PlanarPortKind — a port's own type, on the port.
+
 
 namespace CircuitRF.Ui.ViewModels;
 
@@ -82,6 +83,36 @@ public sealed partial class LayoutShapePropertiesViewModel : ObservableObject
     /// </summary>
     public static string[] PortReferenceOptions { get; } =
         ["Ground plane", "Coplanar ground", "Second conductor"];
+
+    /// <summary>
+    /// <b>What KIND of port this is</b> — the three things a port can be, in the user's words.
+    ///
+    /// <para>The type lives on the LABEL (<see cref="LabelShape.PortKind"/>, 2026-09-14), so this
+    /// combo, the port's own right-click menu on the canvas and the EM setup panel's port list are
+    /// three editors of one field. It was in the <c>.cem</c> before that and reachable only from the
+    /// setup panel, which is why placing a port in the middle of a trace drew one thing and stored
+    /// another (owner report).</para>
+    ///
+    /// <para>Rows rather than the enum's own names, on <see cref="PortReferenceOptions"/>' terms: the
+    /// engine spells the ground-referenced one <c>Internal</c>, which says nothing about what makes
+    /// it different from the delta gap beside it.</para>
+    /// </summary>
+    public static string[] PortKindOptions { get; } =
+        ["Edge", "Internal delta gap", "Internal (to ground)"];
+
+    private static PlanarPortKind KindOfOption(string? option) => option switch
+    {
+        "Internal delta gap"   => PlanarPortKind.InternalDeltaGap,
+        "Internal (to ground)" => PlanarPortKind.Internal,
+        _                      => PlanarPortKind.Edge,
+    };
+
+    private static string OptionOfKind(PlanarPortKind kind) => kind switch
+    {
+        PlanarPortKind.InternalDeltaGap => "Internal delta gap",
+        PlanarPortKind.Internal         => "Internal (to ground)",
+        _                               => "Edge",
+    };
 
     /// <summary>docs/design/layout-view.md §9B.3 — the two ruler size modes, for the tri-state combo.
     /// <see cref="RulerStyleOptions"/> is deliberately the SAME <see cref="LabelFontStyle"/> list a
@@ -741,6 +772,10 @@ public sealed partial class LayoutShapePropertiesViewModel : ObservableObject
     /// </summary>
     [ObservableProperty] private string? _portReferenceValue;
 
+    /// <summary>The selected port TYPE row, or null for a mixed selection. See
+    /// <see cref="PortKindOptions"/>.</summary>
+    [ObservableProperty] private string? _portKindValue;
+
     /// <summary>True when the selected port(s) name a return conductor, i.e. when there is a return
     /// POINT to show and pick. False for a ground-referenced port, which has no second terminal to
     /// place.</summary>
@@ -763,6 +798,20 @@ public sealed partial class LayoutShapePropertiesViewModel : ObservableObject
         LayoutPortReference.SecondConductor => "Second conductor",
         _                                   => "Ground plane",
     };
+
+    partial void OnPortKindValueChanged(string? oldValue, string? newValue)
+    {
+        if (_isRefreshing || newValue is null || oldValue == newValue) return;
+        if (DragBlocksEdits()) return;
+
+        // Nullable on the model so that "nothing stated, infer from the artwork" stays expressible —
+        // but an explicit choice here is a STATEMENT, so it writes the value rather than clearing it.
+        ApplyToEach<PlanarPortKind?>("Port type", s => ((LabelShape)s).PortKind,
+            (s, v) => ((LabelShape)s).PortKind = v, KindOfOption(newValue),
+            s => s is LabelShape { IsPort: true });
+
+        RefreshFromVm();
+    }
 
     partial void OnPortReferenceValueChanged(string? oldValue, string? newValue)
     {
@@ -813,7 +862,7 @@ public sealed partial class LayoutShapePropertiesViewModel : ObservableObject
     {
         if (labels.Count != 1 || _vm is null) { PortWidthText = labels.Count > 1 ? "(multiple)" : ""; return; }
 
-        var lookup = LayoutPortDirection.LookupFor(_vm.Model, _vm.Technology, _vm.InstanceBaseDir);
+        var lookup = LayoutConductorLookup.LookupFor(_vm.Model, _vm.Technology, _vm.InstanceBaseDir);
         PortWidthText = LayoutPortDirection.Resolve(lookup, labels[0]) is { } hint
             ? LayoutUnits.Format(hint.WidthDbu, _vm.Model.DisplayUnit, _vm.Model.DbuPerMicron) + " " + LayoutUnits.Suffix(_vm.Model.DisplayUnit)
             : "(not on a conductor)";
@@ -821,6 +870,19 @@ public sealed partial class LayoutShapePropertiesViewModel : ObservableObject
 
     /// <summary>RP-2b — the reference combo and the return-point readout, for the current
     /// selection. Blank across a selection that disagrees, like every other field here.</summary>
+    /// <summary>The selection's port TYPE — the RESOLVED one, so a port that states nothing shows the
+    /// type it is actually being drawn and driven as rather than an empty combo. Choosing the row
+    /// that is already showing is a no-op; choosing another states it.</summary>
+    private void RefreshPortKind(System.Collections.Generic.List<LabelShape> labels)
+    {
+        var lookup = _vm is null
+            ? null
+            : LayoutConductorLookup.LookupFor(_vm.Model, _vm.Technology, _vm.InstanceBaseDir);
+
+        var kinds = labels.Select(l => LayoutPortDirection.KindOf(lookup, l)).Distinct().ToList();
+        PortKindValue = kinds.Count == 1 ? OptionOfKind(kinds[0]) : null;
+    }
+
     private void RefreshPortReturn(System.Collections.Generic.List<LabelShape> labels)
     {
         var refs = labels.Select(l => l.PortReference).Distinct().ToList();
@@ -2089,6 +2151,7 @@ public sealed partial class LayoutShapePropertiesViewModel : ObservableObject
             {
                 var dirs = labels.Select(l => l.PortDirection).Distinct().ToList();
                 PortDirectionValue = dirs.Count == 1 ? dirs[0] : null;
+                RefreshPortKind(labels);
                 RefreshPortWidth(labels);
                 RefreshPortReturn(labels);
             }

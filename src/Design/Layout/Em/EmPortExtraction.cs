@@ -39,7 +39,12 @@ namespace CircuitRF.Design.Layout.Em;
 /// structure nobody drew. So the SOLVER's view is unchanged and a second, diagnostic view is added
 /// beside it.</para>
 /// </summary>
-public sealed record EmPortRow(int Number, LabelShape Label, PlanarPort? Port, string? Problem)
+/// <param name="Kind">The type this port RESOLVED to — stated on the label, or inferred from the
+/// artwork under it. Carried so the <c>.cem</c>'s port list shows the extractor's own answer rather
+/// than asking the same question a second way, which is how the panel and the drawing came to
+/// disagree about a port nobody had typed (owner report, 2026-09-14).</param>
+public sealed record EmPortRow(int Number, LabelShape Label, PlanarPort? Port, string? Problem,
+                               PlanarPortKind Kind = PlanarPortKind.Edge)
 {
     public bool Ok => Port is not null;
 }
@@ -76,6 +81,84 @@ public sealed record EmPortExtractionResult(
 public static class EmPortExtraction
 {
     /// <summary>
+    /// <b>Does this layout carry any port the uniform-line kernel cannot represent — an internal
+    /// delta gap, or an internal port to the plane?</b>
+    ///
+    /// <para><b>The one question that has to be asked BEFORE the kernel is chosen.</b> A uniform line
+    /// with an internal port on it is, geometrically, still a uniform cross-section — so the
+    /// cross-section extractor accepts it and <c>Auto</c> prefers that kernel, which has no interior
+    /// cut, no via, no mesh to put either on, and no way to say so. The port would simply not be
+    /// there, and the run would return a complete, plausible answer for a structure without it.</para>
+    ///
+    /// <para><b>It asks the ARTWORK, which is why it is here and not on <c>EmSetup</c>.</b> It was
+    /// <c>EmSetup.DeclaresInternalPort()</c>, reading a list of stated types — so a port that is an
+    /// internal port because of where it is DRAWN, with nothing stated, was invisible to it and
+    /// <c>Auto</c> would have routed exactly the port this guard exists for to the kernel that
+    /// cannot carry it.</para>
+    ///
+    /// <para>Cheap: no problem, no mesh, no numbering — the question is per-label and the answer does
+    /// not depend on which port number a label ends up with.</para>
+    /// </summary>
+    /// <summary>
+    /// <b>Which label is which port NUMBER</b> — D3's rule, on its own, for callers that need the
+    /// mapping without extracting: a label whose text names a number keeps it, everything else takes
+    /// the lowest free one, in document order.
+    ///
+    /// <para>Exposed because a port number is an IDENTITY (it indexes the s-parameter matrix, and the
+    /// <c>.cem</c>'s per-port impedance list is addressed by it), so a second derivation of it
+    /// anywhere would be free to drift. A duplicate explicit number is not reported here — it is a
+    /// refusal, and <see cref="Extract"/> is where it is raised with the coordinates that let a user
+    /// find both labels; this form keeps the first and is used only where the answer is advisory.</para>
+    /// </summary>
+    public static IReadOnlyList<(int Number, LabelShape Label)> NumberPorts(IReadOnlyList<LayoutShape> shapes)
+    {
+        ArgumentNullException.ThrowIfNull(shapes);
+
+        var explicitNumbers = new Dictionary<int, LabelShape>();
+        var pending         = new List<LabelShape>();
+        int count = 0;
+        foreach (var shape in shapes)
+        {
+            if (shape is not LabelShape { IsPort: true } l) continue;
+            count++;
+            if (TryParseNumber(l.Text, out int n)) explicitNumbers.TryAdd(n, l);
+            else pending.Add(l);
+        }
+        return AssignNumbers(explicitNumbers, pending, count);
+    }
+
+    /// <summary>The second half of <see cref="NumberPorts"/>, shared with <see cref="Extract"/> —
+    /// which does its own first half because a duplicate explicit number is a refusal there.</summary>
+    private static List<(int Number, LabelShape Label)> AssignNumbers(
+        Dictionary<int, LabelShape> explicitNumbers, List<LabelShape> unnumbered, int capacity)
+    {
+        int next = 1;
+        var numbered = new List<(int Number, LabelShape Label)>(capacity);
+        foreach (var kv in explicitNumbers) numbered.Add((kv.Key, kv.Value));
+        foreach (var l in unnumbered)
+        {
+            while (explicitNumbers.ContainsKey(next)) next++;
+            explicitNumbers[next] = l;
+            numbered.Add((next, l));
+            next++;
+        }
+        numbered.Sort((a, b) => a.Number.CompareTo(b.Number));
+        return numbered;
+    }
+
+    public static bool AnyNonEdgePort(IReadOnlyList<LayoutShape> shapes)
+    {
+        ArgumentNullException.ThrowIfNull(shapes);
+
+        var conductorAt = LayoutPortDirection.LookupFor(shapes);
+        foreach (var shape in shapes)
+            if (shape is LabelShape { IsPort: true } label
+                && LayoutPortDirection.KindOf(conductorAt, label) != PlanarPortKind.Edge)
+                return true;
+        return false;
+    }
+
+    /// <summary>
     /// How close a second conductor boundary has to be, as a fraction of <b>the width of the end the
     /// port sits on</b>, before "which end is this?" stops having one answer.
     ///
@@ -110,18 +193,12 @@ public static class EmPortExtraction
     /// <param name="displayUnit">The LAYOUT's own display unit, used for every coordinate this file
     /// prints. Defaults to microns so a headless caller that has no layout to ask keeps the previous
     /// wording exactly.</param>
-    /// <param name="kindFor">The port TYPE for a given 0-based SLOT — edge, an internal delta gap,
-    /// or an internal port to the ground plane. <b>Lives in the <c>.cem</c>
-    /// (<c>EmSetup.PortKinds</c>) beside the impedance, for the same reason: a layout is
-    /// geometry.</b> Null means every port is an edge port, which is what every caller predating
-    /// internal ports gets.
-    ///
-    /// <para><b>The slot is <c>portNumber - 1</c>, never the port's POSITION in the ordered list.</b>
-    /// The two are the same number for the contiguous 1..N numbering every layout this tool creates
-    /// has, and they come apart the moment a port is deleted — which is how a type assigned to P1
-    /// came to be applied to P2. A port number is the one stable identity a port has: it is what the
-    /// user typed, what indexes the s-parameter matrix, and what survives its neighbours being
-    /// deleted. A position survives nothing. See <c>EmSetup.ResolvePortKind</c>.</para></param>
+    /// <b>The port TYPE is not a parameter and must not become one again.</b> It is read from
+    /// <c>LabelShape.PortKind</c> through <c>LayoutPortDirection.KindOf</c> — the same call the
+    /// renderer, the hit test and the Port tool's ghost make — so the type this drives a port as is
+    /// the type the user is looking at. It used to arrive as a <c>kindFor</c> slot lookup into
+    /// <c>EmSetup.PortKinds</c>, and an unstated slot answered Edge, which silently drove a port
+    /// drawn in the middle of a trace from the trace's end (owner report, 2026-09-14).
     /// <param name="groundPathWidthM">The size of the path an <see cref="PlanarPortKind.Internal"/>
     /// port may grow down to the ground plane where the artwork has no via — the TECHNOLOGY's own
     /// default via size, in metres, which is why it comes from the caller rather than from here.
@@ -132,7 +209,6 @@ public static class EmPortExtraction
         int                        dbuPerMicron,
         Func<int, Complex>?        z0For = null,
         LayoutUnit                 displayUnit = LayoutUnit.Um,
-        Func<int, PlanarPortKind>? kindFor = null,
         double?                    groundPathWidthM = null)
     {
         ArgumentNullException.ThrowIfNull(shapes);
@@ -155,6 +231,11 @@ public static class EmPortExtraction
 
         double perDbu = 1.0 / (dbuPerMicron * 1e6);
 
+        // The artwork the port TYPE is inferred against when a label states none — the shapes-only
+        // form, because this is the document, not a canvas: no technology, no layer visibility, no
+        // placed-instance resolution. A port's committed PortLayer still narrows it.
+        var conductorAt = LayoutPortDirection.LookupFor(shapes);
+
         // Numbering (D3): a label whose text names a number keeps it; everything else takes the
         // lowest free one, in document order. Auto-numbering from the EXISTING labels is what makes
         // "click an edge, get P1" true without the tool having to know what is already there.
@@ -175,17 +256,7 @@ public static class EmPortExtraction
             else pending.Add(l);
         }
 
-        int next = 1;
-        var numbered = new List<(int Number, LabelShape Label)>(labels.Count);
-        foreach (var kv in explicitNumbers) numbered.Add((kv.Key, kv.Value));
-        foreach (var l in pending)
-        {
-            while (explicitNumbers.ContainsKey(next)) next++;
-            explicitNumbers[next] = l;
-            numbered.Add((next, l));
-            next++;
-        }
-        numbered.Sort((a, b) => a.Number.CompareTo(b.Number));
+        var numbered = AssignNumbers(explicitNumbers, pending, labels.Count);
 
         // ── Side inference, per label ─────────────────────────────────────────────────────────
         var notes  = new List<string>();
@@ -217,11 +288,13 @@ public static class EmPortExtraction
             var (number, label) = numbered[i];
             double x = label.X * perDbu, y = label.Y * perDbu;
 
-            // `number - 1`, not `i`: the type is addressed by the port's own NUMBER, so deleting a
-            // port cannot slide every other port's type down one slot. See the `kindFor` doc above.
+            // `number - 1`, not `i`: the reference IMPEDANCE is addressed by the port's own NUMBER,
+            // so deleting a port cannot slide every other port's impedance down one slot. (The port
+            // TYPE no longer needs this rule at all — it is on the label, and a label cannot slide.)
             int slot = number - 1;
 
-            var kind = kindFor?.Invoke(slot) ?? PlanarPortKind.Edge;
+            // The ONE answer, shared with everything that draws this port. See LayoutPortDirection.KindOf.
+            var kind = LayoutPortDirection.KindOf(conductorAt, label);
 
             // ── A SHUNT PORT STANDS ON A VIA, AND THE VIA IS WHAT IT DRIVES ───────────────────
             //
@@ -285,7 +358,7 @@ public static class EmPortExtraction
                             "to reach the plane somehow — draw a via there, or make this an edge or " +
                             "internal delta-gap port, which drive current along the metal instead.";
                         firstProblem ??= portProblem;
-                        rows.Add(new EmPortRow(number, label, null, portProblem));
+                        rows.Add(new EmPortRow(number, label, null, portProblem, kind));
                         continue;
                     }
                 }
@@ -303,7 +376,7 @@ public static class EmPortExtraction
                     "answer for a structure that was not drawn. Move the label to a point where only " +
                     "the level you mean carries metal, or narrow this setup's analysis levels.";
                 firstProblem ??= portProblem;
-                rows.Add(new EmPortRow(number, label, null, portProblem));
+                rows.Add(new EmPortRow(number, label, null, portProblem, kind));
                 continue;
             }
 
@@ -315,7 +388,7 @@ public static class EmPortExtraction
                     "check that the artwork it names is on a layer bound to a signal conductor in the " +
                     "technology's stackup.";
                 firstProblem ??= portProblem;
-                rows.Add(new EmPortRow(number, label, null, portProblem));
+                rows.Add(new EmPortRow(number, label, null, portProblem, kind));
                 continue;
             }
 
@@ -358,7 +431,7 @@ public static class EmPortExtraction
                     "everything through this port. Rotate the port to point the way current should " +
                     "flow across the cut.";
                 firstProblem ??= portProblem;
-                rows.Add(new EmPortRow(number, label, null, portProblem));
+                rows.Add(new EmPortRow(number, label, null, portProblem, kind));
                 continue;
             }
             else if (stated)
@@ -374,7 +447,7 @@ public static class EmPortExtraction
                     "way current should flow into the structure, or move the label to the middle of " +
                     "the conductor end you mean, clear of the corner.";
                 firstProblem ??= portProblem;
-                rows.Add(new EmPortRow(number, label, null, portProblem));
+                rows.Add(new EmPortRow(number, label, null, portProblem, kind));
                 continue;
             }
 
@@ -426,7 +499,7 @@ public static class EmPortExtraction
                               "gap' in the EM setup's port list if you meant a port between two pieces " +
                               "of drawn metal, or clear its return conductor.");
                     firstProblem ??= portProblem;
-                    rows.Add(new EmPortRow(number, label, null, portProblem));
+                    rows.Add(new EmPortRow(number, label, null, portProblem, kind));
                     continue;
                 }
 
@@ -448,7 +521,7 @@ public static class EmPortExtraction
                         "Properties inspector, or clear its reference so it returns through the " +
                         "ground plane.";
                     firstProblem ??= portProblem;
-                    rows.Add(new EmPortRow(number, label, null, portProblem));
+                    rows.Add(new EmPortRow(number, label, null, portProblem, kind));
                     continue;
                 }
 
@@ -466,7 +539,7 @@ public static class EmPortExtraction
                         "the metal you mean, or check that its layer is bound to a signal conductor in " +
                         "the technology's stackup and is one of this setup's analysis levels.";
                     firstProblem ??= portProblem;
-                    rows.Add(new EmPortRow(number, label, null, portProblem));
+                    rows.Add(new EmPortRow(number, label, null, portProblem, kind));
                     continue;
                 }
 
@@ -481,7 +554,7 @@ public static class EmPortExtraction
                         "one silently. Move the return point to somewhere only the level you mean " +
                         "carries metal, or narrow this setup's analysis levels.";
                     firstProblem ??= portProblem;
-                    rows.Add(new EmPortRow(number, label, null, portProblem));
+                    rows.Add(new EmPortRow(number, label, null, portProblem, kind));
                     continue;
                 }
 
@@ -501,7 +574,7 @@ public static class EmPortExtraction
                         "return conductor named at all. Pick a genuinely separate conductor as the " +
                         "return, or clear this port's reference.";
                     firstProblem ??= portProblem;
-                    rows.Add(new EmPortRow(number, label, null, portProblem));
+                    rows.Add(new EmPortRow(number, label, null, portProblem, kind));
                     continue;
                 }
 
@@ -527,7 +600,7 @@ public static class EmPortExtraction
                                      // there is one candidate, so the answer is the same either way.
                                      NegativeLayerIndex: problem.Layers.Count > 1 ? negLevel : null));
             owners.Add(label);
-            rows.Add(new EmPortRow(number, label, ports[^1], null));
+            rows.Add(new EmPortRow(number, label, ports[^1], null, kind));
 
             notes.Add(kind == PlanarPortKind.Internal
                 ? $"Port {number} ('{Describe(label)}') at {Coord(label.X, label.Y, dbuPerMicron, displayUnit)} is " +

@@ -84,7 +84,7 @@ public class LayoutPortOnInstancePinTests : IDisposable
     public void APortOnATaperedInstancesPin_ReportsThePinsWidth_NotTheWholeEnvelopes()
     {
         var (top, baseDir) = TopWithTaper();
-        var lookup = LayoutPortDirection.LookupFor(top, tech: null, baseDir);
+        var lookup = LayoutConductorLookup.LookupFor(top, tech: null, baseDir);
 
         var label = new LabelShape { X = 0, Y = 0, Text = "P1", IsPort = true, Height = 100_000 };
         var hint = LayoutPortDirection.Resolve(lookup, label);
@@ -103,7 +103,7 @@ public class LayoutPortOnInstancePinTests : IDisposable
         // The taper is deliberately placed OFF the origin and OFF-CENTRE in y, which is what turns a
         // mid-height plane into a visibly wrong one — the reported symptom.
         var (top, baseDir) = TopWithTaper(instX: 19_558_000, instY: -177_800);
-        var lookup = LayoutPortDirection.LookupFor(top, tech: null, baseDir);
+        var lookup = LayoutConductorLookup.LookupFor(top, tech: null, baseDir);
 
         var label = new LabelShape { X = 19_558_000, Y = -177_800, Text = "P1", IsPort = true, Height = 100_000 };
         var h = Assert.NotNull(LayoutPortDirection.Resolve(lookup, label));
@@ -116,7 +116,7 @@ public class LayoutPortOnInstancePinTests : IDisposable
     public void TheDirection_IsThePinsOwnInward_NotTheNearestBoxSide()
     {
         var (top, baseDir) = TopWithTaper();
-        var lookup = LayoutPortDirection.LookupFor(top, tech: null, baseDir);
+        var lookup = LayoutConductorLookup.LookupFor(top, tech: null, baseDir);
 
         // Pin 1 faces out along −x̂, so current flows IN along +x̂.
         var p1 = Assert.NotNull(LayoutPortDirection.Resolve(lookup,
@@ -134,7 +134,7 @@ public class LayoutPortOnInstancePinTests : IDisposable
     public void TheArrowHasOnlyTheMetalAHEADOfThePin_NotTheWholeLength()
     {
         var (top, baseDir) = TopWithTaper();
-        var lookup = LayoutPortDirection.LookupFor(top, tech: null, baseDir);
+        var lookup = LayoutConductorLookup.LookupFor(top, tech: null, baseDir);
 
         // Pin 2 sits at the far end: there is no metal ahead of it in its own +x̂ sense, so the
         // length must be measured back along −x̂ (its actual direction), not reported as the full run.
@@ -155,7 +155,7 @@ public class LayoutPortOnInstancePinTests : IDisposable
         // Mid-taper: a real point on real metal that names no pin. There is genuinely nothing better
         // to say than the envelope, and saying nothing at all would lose the marker entirely.
         var (top, baseDir) = TopWithTaper();
-        var lookup = LayoutPortDirection.LookupFor(top, tech: null, baseDir);
+        var lookup = LayoutConductorLookup.LookupFor(top, tech: null, baseDir);
 
         var info = Assert.NotNull(lookup(Length / 2, 0, null));
         Assert.Null(info.Pin);   // no pin claimed — this point names none
@@ -175,7 +175,7 @@ public class LayoutPortOnInstancePinTests : IDisposable
     {
         var view = new LayoutView { DbuPerMicron = 1000 };
         view.Shapes.Add(new RectShape { Layer = new LayerKey(1, 0), X1 = 0, Y1 = -50_000, X2 = 400_000, Y2 = 50_000 });
-        var lookup = LayoutPortDirection.LookupFor(view, tech: null, _root);
+        var lookup = LayoutConductorLookup.LookupFor(view, tech: null, _root);
 
         var h = Assert.NotNull(LayoutPortDirection.Resolve(lookup,
             new LabelShape { X = 0, Y = 0, Text = "P1", IsPort = true }));
@@ -198,7 +198,7 @@ public class LayoutPortOnInstancePinTests : IDisposable
         LayoutRotation rot, bool mirrorX, LayoutRotation expected)
     {
         var (top, baseDir) = TopWithTaper(rot: rot, mirrorX: mirrorX);
-        var lookup = LayoutPortDirection.LookupFor(top, tech: null, baseDir);
+        var lookup = LayoutConductorLookup.LookupFor(top, tech: null, baseDir);
 
         // Pin 1 sits at the cell origin, so it stays at (0,0) under every rotation/mirror here —
         // which isolates the DIRECTION as the only thing under test.
@@ -212,7 +212,7 @@ public class LayoutPortOnInstancePinTests : IDisposable
     public void MagnificationScalesThePinsWidth()
     {
         var (top, baseDir) = TopWithTaper(mag: 2.0);
-        var lookup = LayoutPortDirection.LookupFor(top, tech: null, baseDir);
+        var lookup = LayoutConductorLookup.LookupFor(top, tech: null, baseDir);
 
         var h = Assert.NotNull(LayoutPortDirection.Resolve(lookup,
             new LabelShape { X = 0, Y = 0, Text = "P1", IsPort = true }));
@@ -225,7 +225,7 @@ public class LayoutPortOnInstancePinTests : IDisposable
     public void AStatedDirectionMatchingThePin_KeepsThePinsExactWidthAndPlane()
     {
         var (top, baseDir) = TopWithTaper();
-        var lookup = LayoutPortDirection.LookupFor(top, tech: null, baseDir);
+        var lookup = LayoutConductorLookup.LookupFor(top, tech: null, baseDir);
 
         var h = Assert.NotNull(LayoutPortDirection.Resolve(lookup, new LabelShape
         {
@@ -245,7 +245,7 @@ public class LayoutPortOnInstancePinTests : IDisposable
         // so it no longer answers the question being asked — measuring the box across the chosen
         // axis is coarser but honest.
         var (top, baseDir) = TopWithTaper();
-        var lookup = LayoutPortDirection.LookupFor(top, tech: null, baseDir);
+        var lookup = LayoutConductorLookup.LookupFor(top, tech: null, baseDir);
 
         var h = Assert.NotNull(LayoutPortDirection.Resolve(lookup, new LabelShape
         {
@@ -262,7 +262,7 @@ public class LayoutPortOnInstancePinTests : IDisposable
     public void DirectionAt_AgreesWithWhatResolveInfers_SoAPlacedPortNeverDisagreesWithItsMarker()
     {
         var (top, baseDir) = TopWithTaper();
-        var lookup = LayoutPortDirection.LookupFor(top, tech: null, baseDir);
+        var lookup = LayoutConductorLookup.LookupFor(top, tech: null, baseDir);
 
         foreach (var (x, y) in new (long, long)[] { (0, 0), (Length, 0), (Length / 2, 0) })
         {
@@ -293,7 +293,7 @@ public class LayoutPortOnInstancePinTests : IDisposable
         top.Instances.Add(new LayoutInstance { CellRef = Path.GetRelativePath(_root, cellDir), Mag = 1.0 });
 
         var h = Assert.NotNull(LayoutPortDirection.Resolve(
-            LayoutPortDirection.LookupFor(top, tech: null, _root),
+            LayoutConductorLookup.LookupFor(top, tech: null, _root),
             new LabelShape { X = 0, Y = 0, Text = "P1", IsPort = true }));
 
         Assert.Equal(100_000, h.WidthDbu);

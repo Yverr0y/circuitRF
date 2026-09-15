@@ -72,10 +72,14 @@ public sealed class AsyncDocumentOpenRoutingTests
     /// is handed to. What must not happen is a USER-INITIATED open reaching it, because that one pays
     /// the read on the UI thread.
     ///
-    /// <para>Two call sites are deliberate exceptions and are named here rather than left to be
-    /// rediscovered: both need the opened document to exist by the time the next line runs (the EM
-    /// mesh push writes into it; Generate Layout reads its view model back). Both are reached only
-    /// when the layout is not already open, and both are documented at the call site.</para>
+    /// <para>FOUR call sites are deliberate exceptions and are named here rather than left to be
+    /// rediscovered: each needs the opened document to exist by the time the next line runs. The EM
+    /// mesh push writes into it; Generate Layout reads its view model back; and the two added when a
+    /// port's TYPE moved onto its label (2026-09-14) make an undoable edit to the port label the very
+    /// next statement — <c>SetLayoutPortKind</c>, which fulfils a type change made in a <c>.cem</c>
+    /// panel, and <c>MigrateLegacyPortKinds</c>, which carries a pre-2026-09-14 setup's stored types
+    /// onto the drawing. All four are reached only when the layout is not already open, and all four
+    /// are documented at the call site.</para>
     /// </summary>
     [Fact]
     public void NoUserInitiatedLayoutOpen_StillUsesTheSynchronousOverload()
@@ -86,13 +90,13 @@ public sealed class AsyncDocumentOpenRoutingTests
             .Matches(vm, @"[^A-Za-z]OpenOrActivateLayout\(")
             .Count;
 
-        // The declaration, the two documented exceptions, the preloaded-model hand-off from
+        // The declaration, the FOUR documented exceptions, the preloaded-model hand-off from
         // OpenPrimaryLayoutIfResolvableAsync, the already-in-memory shortcut and the tail of
         // OpenOrActivateLayoutAsync itself, plus the restore loop's own preloaded open.
-        Assert.True(callSites <= 7,
+        Assert.True(callSites <= 9,
             $"{callSites} synchronous OpenOrActivateLayout call sites — a new one has appeared. "
             + "A user-initiated open must call OpenOrActivateLayoutAsync; see this test's summary "
-            + "for the two exceptions that may not.");
+            + "for the four exceptions that may not.");
 
         // The project tree's two routes and push-in are async, specifically.
         Assert.Contains("_ = OpenOrActivateLayoutAsync(node.AbsolutePath); return; }", vm);

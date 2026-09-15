@@ -16,6 +16,7 @@
 // implicit — do not add a Curve tool or an ad hoc Polygon->Curve conversion without reading this.
 
 using System.Text.Json.Serialization;
+using CircuitRF.Engine.Mom;   // PlanarPortKind — see LabelShape.PortKind for why the engine enum.
 
 namespace CircuitRF.Design.Layout;
 
@@ -587,6 +588,45 @@ public sealed class LabelShape : LayoutShape
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public LayoutPortReference? PortReference { get; set; }
+
+    /// <summary>
+    /// <b>What KIND of EM port this is: an edge port, an interior cut of the metal, or a port to the
+    /// ground plane.</b> Meaningful only when <see cref="IsPort"/>; ignored otherwise.
+    ///
+    /// <para><b>It lives on the LABEL, and until 2026-09-14 it lived in the <c>.cem</c>
+    /// (<c>EmSetup.PortKinds</c>).</b> Moving it is a decision worth stating, because the note that
+    /// used to be there argued the other way. The argument for the setup was the reference
+    /// impedance's: the same artwork can be analysed two ways. The argument that won is
+    /// <see cref="PortReturn"/>'s, and it is stronger for the TYPE than for the return — a port cut
+    /// across the middle of a trace is not the same port as one driven from its end, it is a
+    /// different port, and the drawing is where a user points at it. The split was also already
+    /// incoherent: <see cref="PortReference"/> is on the shape, but <c>EmPortExtraction</c> refuses
+    /// it unless the type says <c>InternalDeltaGap</c> — one file's field whose legality was decided
+    /// by another file's.
+    ///
+    /// <para>The reference IMPEDANCE still goes the other way (<c>EmSetup.PortZ0s</c>) and that is
+    /// not an inconsistency: 50 Ω versus 75 Ω really is one port measured twice.</para></para>
+    ///
+    /// <para><b>null means "infer it from the artwork", exactly as <see cref="PortDirection"/>'s null
+    /// does</b> — an interior point of a conductor is an internal port, a point at a conductor's end
+    /// face is an edge port (<c>LayoutPortDirection.KindOf</c>). That is what every <c>.clay</c>
+    /// written before this field carries, and the Port tool stamps it at placement so that what the
+    /// ghost drew is what the file records. <b>That is the bug this field fixes</b> (owner report,
+    /// 2026-09-14): the tool drew an internal port under the cursor, and one frame after the click
+    /// the open <c>.cem</c> republished the port as an edge port — because an empty <c>PortKinds</c>
+    /// answered Edge for a port nobody had ever typed — so the marker jumped to the far end of the
+    /// trace.</para>
+    ///
+    /// <para><b>The engine's enum, not a layout one</b> — unlike <see cref="LayoutPortReference"/>,
+    /// whose note explains that the engine's <c>PlanarPortReference</c> carries a fourth member
+    /// naming a refusal rather than anything anyone can draw. This enum's three members are exactly
+    /// the three things a user can draw, so a parallel layout enum would be a mapping table and two
+    /// places to add the fourth kind.</para>
+    ///
+    /// <para>Additive: no <c>.clay</c> <c>FormatVersion</c> bump, omitted from the file when null.</para>
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PlanarPortKind? PortKind { get; set; }
 
     /// <summary>
     /// <b>RP-2b — the point on the RETURN conductor this port's negative terminal is cut at.</b>

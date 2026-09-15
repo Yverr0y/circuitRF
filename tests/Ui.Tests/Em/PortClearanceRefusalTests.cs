@@ -145,9 +145,10 @@ public sealed class PortClearanceRefusalTests(ITestOutputHelper output) : IDispo
         Assert.True(x.Ok, x.Refusal);
 
         var mesh  = SurfaceMesher.Mesh(x.Problem!, setup.PlanarMesh).Mesh;
+        EmPortKindMigration.ApplyInMemory(source.View.Shapes, setup.PortKinds);
         var ports = EmPortExtraction.Extract(
             source.View.Shapes, x.Problem!, source.DbuPerMicron, setup.ResolvePortZ0,
-            source.View.DisplayUnit, setup.ResolvePortKind,
+            source.View.DisplayUnit,
             EmPortExtraction.DefaultGroundPathWidthM(source.Technology));
         Assert.True(ports.Ok, ports.Refusal);
 

@@ -12,9 +12,11 @@
 // s-matrix returned for a structure nobody drew. Typing P2 and deleting P1 walked the type onto P3
 // the same way. `PortZ0s` had the identical defect beside it.
 //
-// The slot is now `portNumber - 1`. For the contiguous 1..N numbering every layout this tool creates
-// has, that is the same number it always was, so every existing `.cem` means exactly what it meant —
-// which is what the round-trip test at the bottom is for.
+// The slot became `portNumber - 1`, which fixed it for both lists. On 2026-09-14 the TYPE went
+// further and left the `.cem` altogether: it is `LabelShape.PortKind` now, on the port itself, so
+// there is no slot for it to slide along and the whole class of defect is unrepresentable. These
+// tests keep asserting the behaviour — deleting a port must not retype its neighbours — because that
+// is the property, not the mechanism. `PortZ0s` still uses the slot rule and is still tested for it.
 
 using System.Numerics;
 using Avalonia.Input;
@@ -49,21 +51,24 @@ public class PortTypeIdentityTests
         return r.Problem!;
     }
 
-    /// <summary>Extraction exactly as <c>EmRunService</c> and the panel both perform it — the same
-    /// two callbacks off the same setup.</summary>
+    /// <summary>Extraction exactly as <c>EmRunService</c> and the panel both perform it.</summary>
     private static EmPortExtractionResult Extract(EmSetup setup, params LayoutShape[] shapes) =>
         EmPortExtraction.Extract(
-            shapes, Problem(shapes), Dbu, setup.ResolvePortZ0, LayoutUnit.Um, setup.ResolvePortKind,
+            shapes, Problem(shapes), Dbu, setup.ResolvePortZ0, LayoutUnit.Um,
             EmPortExtraction.DefaultGroundPathWidthM(StarterTechnologies.Pcb2Layer()));
 
-    /// <summary>A setup with one port typed, written the way the panel writes it.</summary>
-    private static EmSetup Typed(int portNumber, PlanarPortKind kind)
+    private static EmSetup Setup() =>
+        new() { Name = "x", LayoutRef = "a.clay", AnalysisKind = EmAnalysisKind.Planar };
+
+    /// <summary>Types the port NUMBERED <paramref name="portNumber"/> — on the label, which is where
+    /// a port's type lives. The whole scenario this file is about is a port with that number being
+    /// deleted, so the fixture states the type the way a user does and then simply leaves the label
+    /// out of the shape list.</summary>
+    private static LayoutShape[] Typed(int portNumber, PlanarPortKind kind, params LayoutShape[] shapes)
     {
-        var setup = new EmSetup { Name = "x", LayoutRef = "a.clay", AnalysisKind = EmAnalysisKind.Planar };
-        var list = setup.PortKinds;
-        while (list.Count <= portNumber - 1) list.Add(setup.ResolvePortKind(list.Count));
-        list[portNumber - 1] = kind;
-        return setup;
+        foreach (var l in shapes.OfType<LabelShape>())
+            if (l.IsPort && l.Text == portNumber.ToString()) l.PortKind = kind;
+        return shapes;
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -74,8 +79,8 @@ public class PortTypeIdentityTests
     [Fact]
     public void BeforeAnythingIsDeleted_TheTypeIsOnThePortItWasAssignedTo()
     {
-        var r = Extract(Typed(1, PlanarPortKind.Internal),
-                        Line(), Port("1", 0, 1.45), Port("2", 20, 1.45));
+        var r = Extract(Setup(), Typed(1, PlanarPortKind.Internal,
+                        Line(), Port("1", 0, 1.45), Port("2", 20, 1.45)));
 
         Assert.True(r.Ok, r.Refusal);
         Assert.Equal(PlanarPortKind.Internal, r.Ports[0].Kind);
@@ -86,39 +91,46 @@ public class PortTypeIdentityTests
     [Fact]
     public void DeletingTheTypedPort_LeavesTheSurvivorAnEdgePort()
     {
-        var r = Extract(Typed(1, PlanarPortKind.Internal), Line(), Port("2", 20, 1.45));
+        // P1 was typed internal and has since been DELETED — so it is simply not here.
+        var r = Extract(Setup(), Line(), Port("2", 20, 1.45));
 
         Assert.True(r.Ok, r.Refusal);
         Assert.Equal(2, r.Rows[0].Number);
         Assert.Equal(PlanarPortKind.Edge, r.Ports[0].Kind);
     }
 
-    /// <summary>Scenario 1b: P1 typed internal, P3 added, then P1 deleted. Neither survivor moves.
-    /// </summary>
+    /// <summary>Scenario 1b: P1 typed internal, P3 added, then P1 deleted. Neither survivor takes
+    /// P1's type — each keeps its OWN, which for a port that states nothing is what the artwork under
+    /// it says: P2 stands on the conductor's end face and is an edge port, P3 stands in the middle of
+    /// the metal and is an internal port. Under the arrangement this replaces both read "edge",
+    /// because an unstated slot in the `.cem` answered Edge whatever the drawing showed.</summary>
     [Fact]
-    public void DeletingTheTypedPortWithAThirdPresent_LeavesBothSurvivorsEdgePorts()
+    public void DeletingTheTypedPortWithAThirdPresent_LeavesEachSurvivorItsOwnType()
     {
-        var r = Extract(Typed(1, PlanarPortKind.Internal),
-                        Line(), Port("2", 20, 1.45), Port("3", 10, 1.45, LayoutRotation.R0));
+        var r = Extract(Setup(), Line(), Port("2", 20, 1.45), Port("3", 10, 1.45, LayoutRotation.R0));
 
         Assert.True(r.Ok, r.Refusal);
         Assert.Equal([2, 3], r.Rows.Select(x => x.Number));
-        Assert.Equal(PlanarPortKind.Edge, r.Ports[0].Kind);
-        Assert.Equal(PlanarPortKind.Edge, r.Ports[1].Kind);
+        Assert.Equal(PlanarPortKind.Edge,     r.Ports[0].Kind);   // P2, on the end face
+        Assert.Equal(PlanarPortKind.Internal, r.Ports[1].Kind);   // P3, mid-metal
     }
 
     /// <summary>Scenario 1c, the mirror: the type must not WALK either. P2 is the typed one and
-    /// stays the typed one when P1 goes; P3 is untouched. Before the fix this read
-    /// "P2=Edge P3=Internal".</summary>
+    /// stays the typed one when P1 goes. Before the fix this read "P2=Edge P3=Internal" — the type
+    /// had slid one slot along. P3 states nothing and stands mid-metal, so it is an internal port on
+    /// its own account, which is a different sentence with the same words.</summary>
     [Fact]
     public void DeletingAnUNtypedPort_DoesNotWalkTheTypeOntoItsNeighbour()
     {
-        var r = Extract(Typed(2, PlanarPortKind.Internal),
-                        Line(), Port("2", 20, 1.45), Port("3", 10, 1.45, LayoutRotation.R0));
+        var r = Extract(Setup(), Typed(2, PlanarPortKind.Internal,
+                        Line(), Port("2", 20, 1.45), Port("3", 10, 1.45, LayoutRotation.R0)));
 
         Assert.True(r.Ok, r.Refusal);
-        Assert.Equal($"P2={PlanarPortKind.Internal} P3={PlanarPortKind.Edge}",
+        Assert.Equal($"P2={PlanarPortKind.Internal} P3={PlanarPortKind.Internal}",
                      $"P2={r.Ports[0].Kind} P3={r.Ports[1].Kind}");
+
+        // …and P3's is its ARTWORK's answer, not a copy of P2's: it states nothing at all.
+        Assert.Null(r.Rows[1].Label.PortKind);
     }
 
     /// <summary>The same rule for the reference impedance, which shared the defect: an override on
@@ -157,30 +169,41 @@ public class PortTypeIdentityTests
         {
             ResolveLayout = _ => new EmLayoutSource(
                 Path.Combine(dir, "a.clay"), view, StarterTechnologies.Pcb2Layer(), Dbu),
+            // What WorkspaceViewModel supplies: the panel EDITS the drawing, because that is where a
+            // port's type lives.
+            SetPortKind = (label, kind) => { label.PortKind = kind; view.NotifyChanged(); },
         };
         vm.Refresh();
         return vm;
     }
 
+    private static LabelShape PortNamed(EmSetupEditorViewModel vm, string text)
+    {
+        var source = vm.ResolveLayout!.Invoke(vm.Working.LayoutRef)!;
+        return source.View.Shapes.OfType<LabelShape>().Single(l => l.IsPort && l.Text == text);
+    }
+
     /// <summary>A layout whose ports are numbered 2 and 3 — which is what a layout LOOKS like after
-    /// P1 is deleted. Retyping the first ROW must write port 2's slot, not slot 0.</summary>
+    /// P1 is deleted. Retyping the first ROW must land on port 2's own LABEL; there is no slot for it
+    /// to miss any more, and this is what says so.</summary>
     [Fact]
-    public void ThePanelWritesTheTypeToThePortsOwnSlot()
+    public void ThePanelWritesTheTypeToThePortsOwnLabel()
     {
         var vm = Editor(Port("2", 20, 1.45), Port("3", 10, 1.45, LayoutRotation.R0));
         Assert.Equal([2, 3], vm.PortRows.Select(r => r.PortNumber));
 
         vm.PortRows[0].Kind = PlanarPortKind.InternalDeltaGap;
 
-        Assert.Equal(PlanarPortKind.InternalDeltaGap, vm.Working.ResolvePortKind(1));   // port 2
-        Assert.Equal(PlanarPortKind.Edge,             vm.Working.ResolvePortKind(0));   // slot 0 untouched
-        Assert.Equal(PlanarPortKind.Edge,             vm.Working.ResolvePortKind(2));   // port 3 untouched
+        Assert.Equal(PlanarPortKind.InternalDeltaGap, PortNamed(vm, "2").PortKind);
+        Assert.Null(PortNamed(vm, "3").PortKind);            // port 3 untouched, and still unstated
+        Assert.Empty(vm.Working.PortKinds);                  // and the .cem keeps no second copy
 
         // …and it survives the round trip to the row it came from, so the panel reads back what it
         // wrote rather than the slot it happens to sit at.
         vm.Refresh();
         Assert.Equal(PlanarPortKind.InternalDeltaGap, vm.PortRows[0].Kind);
-        Assert.Equal(PlanarPortKind.Edge,             vm.PortRows[1].Kind);
+        // Port 3 stands in the middle of the metal and states nothing, so its own artwork answers.
+        Assert.Equal(PlanarPortKind.Internal,         vm.PortRows[1].Kind);
     }
 
     /// <summary>The same for the impedance, and it is the same list mechanism.</summary>
@@ -197,30 +220,36 @@ public class PortTypeIdentityTests
         Assert.Equal("75", vm.PortRows[1].Text);
     }
 
-    /// <summary>What the LAYOUT is told to draw is addressed the same way, so the mark on screen and
-    /// the port the run drives cannot disagree.</summary>
+    /// <summary>The layout is told NOTHING — it reads the same field the run does, so the mark on
+    /// screen and the port the run drives cannot disagree. This replaces a test that checked the
+    /// anchor-keyed mark list was addressed by port number; that channel is gone.</summary>
     [Fact]
-    public void TheLayoutsRenderMarksAreAddressedByPortNumberToo()
+    public void TheDrawingAndTheRunReadTheSameField()
     {
         var vm = Editor(Port("2", 20, 1.45), Port("3", 10, 1.45, LayoutRotation.R0));
         vm.PortRows[0].Kind = PlanarPortKind.InternalDeltaGap;
         vm.Refresh();
 
-        var marks = vm.InternalPortMarkAnchors;
-        Assert.Equal(2, marks.Count);
-        Assert.Equal((Mm(20), Mm(1.45), PlanarPortKind.InternalDeltaGap), marks[0]);   // port 2
-        Assert.Equal((Mm(10), Mm(1.45), PlanarPortKind.Edge),             marks[1]);   // port 3
+        var source = vm.ResolveLayout!.Invoke(vm.Working.LayoutRef)!;
+        var conductorAt = LayoutPortDirection.LookupFor(source.View.Shapes);
+
+        Assert.Equal(PlanarPortKind.InternalDeltaGap,
+                     LayoutPortDirection.KindOf(conductorAt, PortNamed(vm, "2")));
+        Assert.Equal(PlanarPortKind.Internal,   // mid-metal, and states nothing
+                     LayoutPortDirection.KindOf(conductorAt, PortNamed(vm, "3")));
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
     // Every existing .cem still means what it meant
     // ══════════════════════════════════════════════════════════════════════════════════════════
 
-    /// <summary>The compatibility guard. A `.cem` written before this change stores its types
-    /// positionally — and for the contiguous 1..N numbering every layout this tool creates has, the
-    /// position IS the port number minus one, so nothing moves.</summary>
+    /// <summary>The compatibility guard, now for the MIGRATION: a `.cem` written before the type
+    /// moved onto the drawing still carries `PortKinds`, and the one door
+    /// (<c>EmPortKindMigration</c>) carries it onto the labels by port NUMBER — which for the
+    /// contiguous 1..N numbering every layout this tool creates has is the position it always was,
+    /// so nothing moves.</summary>
     [Fact]
-    public void AContiguouslyNumberedSetupResolvesExactlyAsItAlwaysDid()
+    public void ALegacySetupsPortKindsStillMeanWhatTheyMeant()
     {
         var setup = new EmSetup
         {
@@ -231,8 +260,11 @@ public class PortTypeIdentityTests
         var back = EmSetupPersistence.Deserialize(json);
         Assert.Equal(json, EmSetupPersistence.Serialize(back));
 
-        var r = Extract(back, Line(),
-                        Port("1", 0, 1.45), Port("2", 10, 1.45, LayoutRotation.R0), Port("3", 20, 1.45));
+        LayoutShape[] shapes = [Line(),
+            Port("1", 0, 1.45), Port("2", 10, 1.45, LayoutRotation.R0), Port("3", 20, 1.45)];
+        Assert.Equal(1, EmPortKindMigration.ApplyInMemory(shapes, back.PortKinds));
+
+        var r = Extract(back, shapes);
 
         Assert.True(r.Ok, r.Refusal);
         Assert.Equal(PlanarPortKind.Edge,             r.Ports[0].Kind);
@@ -258,22 +290,17 @@ public class PortTypeIdentityTests
             ActiveTool = LayoutEditorViewModel.Tool.Select,
             GeometrySnapEnabled = snap,
         };
-        if (cemClaims) vm.InternalPortMarks = [(p1.X, p1.Y, PlanarPortKind.Edge)];
+        // "Claimed" now means the LABEL states its type, which is what the Port tool stamps at
+        // placement. Unstated is the other half: a port from a .clay written before the field existed.
+        if (cemClaims) p1.PortKind = PlanarPortKind.Edge;
         return (vm, p1);
     }
 
-    /// <summary>What the renderer draws this port as, given the marks the editor currently holds —
-    /// the setup's answer where it has one, the drawing's own inference where it does not.</summary>
-    private static PlanarPortKind Drawn(LayoutEditorViewModel vm, LabelShape port)
-    {
-        foreach (var (mx, my, kind) in vm.InternalPortMarks)
-            if (mx == port.X && my == port.Y) return kind;
-
-        var lookup = LayoutPortDirection.LookupFor(vm.Model, vm.Technology, vm.InstanceBaseDir);
-        return LayoutPortDirection.Resolve(lookup, port) is { } hint
-                   ? LayoutPortDirection.InferredKind(hint)
-                   : PlanarPortKind.Edge;
-    }
+    /// <summary>What the renderer draws this port as — the label's own type where it states one, the
+    /// drawing's inference where it does not. The ONE call everything makes.</summary>
+    private static PlanarPortKind Drawn(LayoutEditorViewModel vm, LabelShape port) =>
+        LayoutPortDirection.KindOf(
+            LayoutConductorLookup.LookupFor(vm.Model, vm.Technology, vm.InstanceBaseDir), port);
 
     private static void Drag(LayoutEditorViewModel vm, long fx, long fy, long tx, long ty)
     {

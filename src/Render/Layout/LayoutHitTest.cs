@@ -65,7 +65,7 @@ public static class LayoutHitTest
     /// <b>Answer as if every layer were visible and selectable.</b> For a CLICK that would be wrong —
     /// a user cannot pick what they cannot see — so it is off by default and every interactive caller
     /// leaves it off. It exists for the one caller whose question is not "what did the user click"
-    /// but "what artwork is at this point": <see cref="LayoutPortDirection.LookupFor(LayoutView,
+    /// but "what artwork is at this point": <see cref="LayoutConductorLookup.LookupFor(LayoutView,
     /// Technology?, string, long)"/>, which resolves the conductor a port's marker is drawn against.
     ///
     /// <para><b>Owner report, 2026-09-09: a placed port moved when another layer's visibility was

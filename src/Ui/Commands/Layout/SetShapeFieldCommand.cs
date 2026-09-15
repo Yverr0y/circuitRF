@@ -33,14 +33,12 @@ internal sealed class SetShapeFieldCommand<T> : IUiCommand
     /// means <c>Full</c>, which is the safe answer for a field nobody has thought about.
     ///
     /// <para><b>Pass <see cref="LayoutChangeInfo.Updated"/> for a field that changes neither the
-    /// shape list's CONTENT nor its ORDER</b>, and only for such a field. It is not an optimization:
-    /// <c>LayoutEditorViewModel</c>'s own change handler CLEARS the <c>.cem</c>'s published
-    /// internal-port marks on any kind but <c>Updated</c>, because anything else can renumber the
-    /// ports and make "which .cem row means which label" unknowable. Re-seating a dragged port's
+    /// shape list's CONTENT nor its ORDER</b>, and only for such a field. The <c>.cem</c> mark
+    /// channel this note used to be about is gone (2026-09-14 — a port's type is a field on its
+    /// label), so what remains is the ordinary rule: re-seating a dragged port's
     /// direction or its <see cref="LabelShape.PortLayer"/> renumbers nothing — but it rode a
-    /// <c>Full</c> here, so committing such a drag wiped the marks and every internal port in the
-    /// drawing snapped to an edge port's bar-and-arrow until the <c>.cem</c> caught up. That is the
-    /// same flash the handler's own note describes; this is the other way in.</para>
+    /// <c>Full</c> here once, which wiped those marks and made every internal port in the drawing
+    /// snap to an edge port's bar-and-arrow until the <c>.cem</c> caught up.</para>
     /// </param>
     public SetShapeFieldCommand(LayoutView view, string description, T oldValue, T newValue, Action<T> apply,
                                 LayoutChangeInfo? change = null)

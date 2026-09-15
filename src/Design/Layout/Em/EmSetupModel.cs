@@ -138,8 +138,8 @@ public sealed class EmSetup
     /// explicit override when one is stored, else the near/far default for that end.
     ///
     /// <para><b>The slot is the port NUMBER, not the port's position among the ports that happen to
-    /// exist.</b> See <see cref="ResolvePortKind"/> — the two lists have the same shape and the same
-    /// rule, and had the same defect.</para>
+    /// exist.</b> The per-port TYPE was the other such list until 2026-09-14, when it moved to the
+    /// drawing — see <see cref="PortKinds"/>.</para>
     /// </summary>
     public Complex ResolvePortZ0(int slot)
         => slot >= 0 && slot < PortZ0s.Count
@@ -147,57 +147,23 @@ public sealed class EmSetup
             : (slot % 2 == 0 ? Port1Z0 : Port2Z0);
 
     /// <summary>
-    /// <b>Per-port TYPE, for the full-wave planar kernel: an edge port, an internal delta gap, or
-    /// an internal port to the ground plane.</b>
-    /// One entry per port in the extractor's own port order, and <b>empty is the normal case</b> —
-    /// every port is an edge port unless something here says otherwise, so a <c>.cem</c> written
-    /// before this existed loads and re-serialises byte-identically, exactly as
-    /// <see cref="PortZ0s"/> and <see cref="AnalysisLevelNames"/> do.
+    /// <b>LEGACY — where a port's TYPE used to live, kept only so an old <c>.cem</c> can still be
+    /// read.</b> The type is <c>LabelShape.PortKind</c> now, on the drawing (2026-09-14); that field's
+    /// own doc gives the argument, and <see cref="EmPortKindMigration"/> is the one door between the
+    /// two. Nothing reads this to decide anything — it is a migration SOURCE and nothing else, and it
+    /// is cleared the moment its values reach the labels.
     ///
-    /// <para>It is here rather than on the port LABEL for the same reason the reference impedance is:
-    /// a layout is geometry. The same artwork can be analysed with a gap in the middle of a trace in
-    /// one setup and driven from its ends in another, and neither should edit the drawing.</para>
+    /// <para><b>Do not re-introduce a resolver over it.</b> The method that used to read it answered
+    /// <see cref="PlanarPortKind.Edge"/> for any slot it had never been told about, which is every
+    /// port in a setup whose list is empty — the normal case. That turned silence into an assertion,
+    /// and it is the bug this whole move exists to end: a port drawn in the middle of a trace was
+    /// redrawn as an edge port one frame after it was placed, and would have been DRIVEN from the
+    /// conductor's end (owner report, 2026-09-14).</para>
     ///
-    /// <para>The cross-section (quasi-static) kernel has no use for it — its ports are the ends of a
-    /// uniform line by construction — so the panel offers it only for a planar analysis.</para>
+    /// <para>Still serialised while a value remains, so a file that has not been opened since the
+    /// move does not lose its types. Empty is the normal case and writes nothing.</para>
     /// </summary>
     public List<PlanarPortKind> PortKinds { get; set; } = [];
-
-    /// <summary>
-    /// The type of the port in slot <paramref name="slot"/>: the stored value when there is one,
-    /// else <see cref="PlanarPortKind.Edge"/>.
-    ///
-    /// <para><b>The slot is <c>portNumber - 1</c>, NOT the port's position in the extracted list.</b>
-    /// For the contiguous 1..N numbering every layout this tool creates has, the two are the same
-    /// number and every <c>.cem</c> ever written means exactly what it meant before. They come apart
-    /// the moment a port is DELETED, and that is the bug this rule exists to make impossible: with
-    /// the list read positionally, typing P1 as an internal port and then deleting P1 slid P2 into
-    /// slot 0 and made P2 an internal port — not merely drawn as one, but extracted, meshed and
-    /// solved as one, with a ground path grown under it and a complete, plausible s-matrix returned
-    /// for a structure nobody drew. Typing P2 and deleting P1 walked the type onto P3 the same way.
-    /// A port NUMBER is the one stable identity a port has; a position survives nothing.</para>
-    ///
-    /// <para>A gap in the numbering costs a slot of padding in the file and nothing else — a design
-    /// with ports 1 and 5 stores five entries, four of them the default.</para>
-    /// </summary>
-    public PlanarPortKind ResolvePortKind(int slot)
-        => slot >= 0 && slot < PortKinds.Count ? PortKinds[slot] : PlanarPortKind.Edge;
-
-    /// <summary>
-    /// Does this setup declare any port the uniform-line kernel cannot represent — an internal delta
-    /// gap or an internal port?
-    ///
-    /// <para><b>The one question that has to be asked BEFORE the kernel is chosen.</b> A uniform line
-    /// with an internal port on it is, geometrically, still a uniform cross-section — so the
-    /// cross-section extractor accepts it and <c>Auto</c> prefers that kernel, which has no interior
-    /// cut, no via, no mesh to put either on, and no way to say so. The port would simply not be
-    /// there, and the run would return a complete, plausible answer for a structure without it.</para>
-    /// </summary>
-    public bool DeclaresInternalPort()
-    {
-        foreach (var k in PortKinds) if (k != PlanarPortKind.Edge) return true;
-        return false;
-    }
 
     /// <summary>All six <see cref="EmMeshSettings"/> fields, each defaulting to
     /// <see cref="EmMeshSettings.Default"/>. R18's 30-second target is reachable because the

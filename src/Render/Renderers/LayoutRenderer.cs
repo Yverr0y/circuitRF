@@ -239,28 +239,6 @@ public readonly struct LayoutRenderOptions
     public IReadOnlyList<PlanarPortResolution>? PlanarPorts { get; init; }
 
     /// <summary>
-    /// <b>Which port labels the active EM setup drives as INTERNAL DELTA GAPS</b>, by the label's own
-    /// DBU anchor. Null or empty means every port is an edge port, which is what every caller that
-    /// predates the second port type passes and what a layout with no EM setup open means.
-    ///
-    /// <para><b>The port TYPE is not on the shape, and must not be.</b> It lives in the <c>.cem</c>
-    /// (<c>EmSetup.PortKinds</c>) because a layout is geometry — the same artwork can be analysed with
-    /// a gap in the middle of a trace in one setup and driven from its ends in another. So the
-    /// renderer is TOLD, by the same channel that already hands it the mesh, the current-density map
-    /// and the reference planes, rather than reading it off the label.</para>
-    ///
-    /// <para>Each entry carries the port's KIND as well as its anchor: an internal delta gap and an
-    /// internal port draw different marks, and a port absent from this list draws the edge
-    /// port's own reference-plane bar and arrow.</para>
-    ///
-    /// <para><b>Matched on the anchor, which is an exact pair of longs</b>, rather than on a port
-    /// number: a label whose text names no number is auto-numbered in document order by
-    /// <c>EmPortExtraction</c>, and reproducing that ordering here would be a second copy of it —
-    /// free to drift, and silently wrong when it did.</para>
-    /// </summary>
-    public IReadOnlyList<(long X, long Y, PlanarPortKind Kind)>? InternalPortMarks { get; init; }
-
-    /// <summary>
     /// L5b export (owner request: "copy/paste the DRC markers, just like the mesh"). Copies
     /// <see cref="ShowPlanarMesh"/>'s own contract: false by default, so every export/one-shot render
     /// draws no markers unless a caller explicitly opts in. The interactive canvas never sets this —
@@ -691,7 +669,7 @@ public static partial class LayoutRenderer
             // Built once per frame, not per port: an EM port's marker needs the conductor it sits
                 // on, and that conductor may be a placed INSTANCE's artwork rather than a top-level
                 // shape (a schematic-generated layout has no top-level shapes at all).
-                var conductorAt = LayoutPortDirection.LookupFor(view, tech, opts.BaseDir ?? "");
+                var conductorAt = LayoutConductorLookup.LookupFor(view, tech, opts.BaseDir ?? "");
 
                 // L3a — instances (docs/sonnet-briefs/brief-L3a-instances-and-arrays.md). Culled the
                 // same way shapes are: the combined spatial-index query already excludes off-screen
@@ -915,7 +893,7 @@ public static partial class LayoutRenderer
                 if (opts.Overlay?.SelectedIndices is { Count: > 0 } selected)
                 {
                     DrawSelectionOutlines(canvas, view, selected, dragOverrides, theme, ps, scaleUm,
-                                          conductorAt, opts.InternalPortMarks);
+                                          conductorAt);
 
                     // L1h R-L1h-5: bbox scale handles replace L1d's single-shape handles when showing
                     // (always for a 2+ selection; for a single shape, only while Scale mode is on).
@@ -1155,7 +1133,7 @@ public static partial class LayoutRenderer
                 Layer = label.Layer, X = label.X, Y = label.Y, Text = label.Text,
                 Height = effectiveHeight, RotationDegrees = label.RotationDegrees, IsPort = label.IsPort,
                 PortDirection = label.PortDirection, PortLayer = label.PortLayer,
-                PortReference = label.PortReference, PortReturn = label.PortReturn, Style = label.Style,
+                PortReference = label.PortReference, PortReturn = label.PortReturn, PortKind = label.PortKind, Style = label.Style,
                 HAlign = label.HAlign, VAlign = label.VAlign,
             };
             // A port ghost carries its own marker, so what the user is placing looks like what
@@ -1169,11 +1147,11 @@ public static partial class LayoutRenderer
             // arrow arrives at the plane the name is centred on, and the glyph reads as one object.
             if (label.IsPort)
             {
-                // Null, not Edge: a ghost is not placed yet, so no EM setup can have claimed it, and
-                // the ghost has to show what a click will actually LAND — which for a point in the
-                // middle of metal is an internal port's ring, not an edge port's bar at the far end.
+                // Nothing special for a ghost any more, and that is the point: it draws through the
+                // same call a committed port does, off the same field, so the picture under the
+                // cursor is the picture that lands.
                 DrawPortMarker(canvas, effective, conductorAt, ps, scaleUm, color, background,
-                               new LayoutFrameCounters(), statedKind: null);
+                               new LayoutFrameCounters());
                 DrawLabelText(canvas, effective, ps,
                               TintForContrast(color, background, PortMarkerContrastTintAmount),
                               centred: true);
@@ -1443,26 +1421,20 @@ public static partial class LayoutRenderer
                     Layer = label.Layer, X = label.X, Y = label.Y, Text = label.Text,
                     Height = effectiveHeight, RotationDegrees = label.RotationDegrees, IsPort = label.IsPort,
                     PortDirection = label.PortDirection, PortLayer = label.PortLayer,
-                    PortReference = label.PortReference, PortReturn = label.PortReturn, Style = label.Style,
+                    PortReference = label.PortReference, PortReturn = label.PortReturn, PortKind = label.PortKind, Style = label.Style,
                     HAlign = label.HAlign, VAlign = label.VAlign,
                 };
-                // ── THE KIND IS ASKED OF `original`, NEVER OF THE DRAG OVERRIDE ──────────
+                // ── THE TYPE RIDES ON THE SHAPE, SO A DRAG CANNOT LOSE IT ────────────────────
                 //
                 // Owner report, 2026-08-25: "the internal port rendering is messed up during a drag
-                // — it reverts to edge port rendering." MarkKindOf matches on the label's exact DBU
-                // anchor, and a live move drag renders `shape` as a translated CLONE while the model
-                // stays untouched until commit (R-L1c-3). So from the first pixel of the drag the
-                // anchor no longer matched any mark, every internal port fell through to Edge, and
-                // the gap glyph was replaced by an edge port's bar-and-arrow for the whole gesture.
+                // — it reverts to edge port rendering." The kind used to be looked up by the label's
+                // exact DBU anchor in a list published by the .cem, and a live move drag renders a
+                // translated CLONE while the model stays untouched until commit (R-L1c-3) — so from
+                // the first pixel of the drag no anchor matched and every internal port fell through
+                // to Edge for the whole gesture. Reading `original` was the fix; the type living on
+                // the label is why there is nothing left to fix. `effective` is cloned field by
+                // field from the label, PortKind included.
                 //
-                // `original` is the shape the .cem's marks were computed FROM, and moving a port does
-                // not retype it — the type lives in the .cem and no drag can touch it. Asking the
-                // stored shape is therefore not a workaround for the coordinate key; it is the
-                // correct question, and it stays correct if the key ever changes.
-                PlanarPortKind? portKind = label.IsPort && original is LabelShape stored
-                    ? MarkKindOf(opts.InternalPortMarks, stored)
-                    : null;
-
                 // ── A PORT IS NOT DRAWN HERE — IT IS HANDED UP TO THE FRAME'S OWN TOP PASS ──────
                 //
                 // This loop draws a label the moment it is reached, but the layer's GEOMETRY does not
@@ -1482,7 +1454,7 @@ public static partial class LayoutRenderer
                 // marker.
                 if (label.IsPort)
                 {
-                    deferredPorts.Add(new DeferredPort(index, effective, color, portKind));
+                    deferredPorts.Add(new DeferredPort(index, effective, color));
                     continue;
                 }
 
@@ -1757,8 +1729,7 @@ public static partial class LayoutRenderer
     /// stroked path. Never touches fill — the layer color stays the information the user reads.</summary>
     private static void DrawSelectionOutlines(SKCanvas canvas, LayoutView view, IReadOnlyList<int> selected,
         IReadOnlyDictionary<int, LayoutShape> dragOverrides, LayoutRenderTheme theme, PathSpace ps, double scaleUm,
-        LayoutPortDirection.ConductorLookup? conductorAt = null,
-        IReadOnlyList<(long X, long Y, PlanarPortKind Kind)>? internalPortMarks = null)
+        LayoutPortDirection.ConductorLookup? conductorAt = null)
     {
         using var batch = new SKPath();
         foreach (var idx in selected)
@@ -1767,14 +1738,9 @@ public static partial class LayoutRenderer
             var original = view.Shapes[idx];
             var shape = dragOverrides.TryGetValue(idx, out var ov) ? ov : original;
 
-            // A port's outline follows its MARK, and the mark's position follows its TYPE — asked of
-            // `original` for the same reason DrawLayer does: a drag override is the same port
-            // previewed elsewhere, and moving a port cannot retype it.
-            var statedKind = shape is LabelShape { IsPort: true } && original is LabelShape stored
-                             ? MarkKindOf(internalPortMarks, stored)
-                             : null;
-
-            using var outline = BuildOutlinePathForSelection(shape, ps, conductorAt, statedKind);
+            // A port's outline follows its MARK, and the mark's position follows its TYPE — which
+            // the shape itself carries, drag override included (LayoutGeometry's clone copies it).
+            using var outline = BuildOutlinePathForSelection(shape, ps, conductorAt);
             if (outline is null || outline.IsEmpty) continue;
             batch.AddPath(outline);
         }
@@ -1859,7 +1825,7 @@ public static partial class LayoutRenderer
     /// <see cref="BuildShapePath"/> entry: <c>Label</c> (real font metrics — see
     /// <see cref="MeasureLabelWorldBbox"/>) and <c>Via</c> (a circle at its pad radius).</summary>
     private static SKPath? BuildOutlinePathForSelection(LayoutShape shape, PathSpace ps,
-        LayoutPortDirection.ConductorLookup? conductorAt = null, PlanarPortKind? statedKind = null)
+        LayoutPortDirection.ConductorLookup? conductorAt = null)
     {
         switch (shape)
         {
@@ -1872,7 +1838,7 @@ public static partial class LayoutRenderer
                 var pb = LayoutHitTest.PortPickBbox(port, hint,
                     atAnchor: hint is { } h
                               && LayoutPortDirection.MarkAtAnchor(
-                                     statedKind ?? LayoutPortDirection.InferredKind(h), h));
+                                     port.PortKind ?? LayoutPortDirection.InferredKind(h), h));
                 if (pb.IsEmpty) return null;
                 var portPath = new SKPath();
                 portPath.AddRect(NormalizedRect(ps.X(pb.MinX), ps.Y(pb.MinY), ps.X(pb.MaxX), ps.Y(pb.MaxY)));
@@ -3131,25 +3097,6 @@ public static partial class LayoutRenderer
         }
     }
 
-    /// <summary>What the active EM setup drives this label as, or <b>null when no setup has an answer
-    /// for it</b>. Exact longs — see <see cref="LayoutRenderOptions.InternalPortMarks"/> for why not a
-    /// port number.
-    ///
-    /// <para><b>"Says nothing" used to mean "edge port", and that was the bug</b> (owner,
-    /// 2026-09-09). A layout with no <c>.cem</c> open has no answer for ANY port, so every port drew
-    /// its bar and arrow at the conductor end however far from the label that was — see
-    /// <see cref="LayoutPortDirection.PortHint.Interior"/> for the measurement. Null now says exactly
-    /// that, and the caller infers from the geometry instead. A setup that HAS claimed the layout is
-    /// still the only authority, Edge included, which is why it publishes an entry for every port
-    /// rather than only for the internal ones.</para></summary>
-    private static PlanarPortKind? MarkKindOf(IReadOnlyList<(long X, long Y, PlanarPortKind Kind)>? marks,
-                                              LabelShape label)
-    {
-        if (marks is null) return null;
-        foreach (var (x, y, kind) in marks) if (x == label.X && y == label.Y) return kind;
-        return null;
-    }
-
     /// <summary>One port met by the layer loop, held back for <see cref="DrawPortGlyphs"/>. The
     /// colour is its LAYER's, unmodified — the contrast tint is applied once, inside the marker, and
     /// the name now takes the same one so the whole glyph is a single colour.</summary>
@@ -3163,7 +3110,7 @@ public static partial class LayoutRenderer
     /// collects every port. Drawing one twice is not invisible: a glyph drawn over itself
     /// antialiases darker. The index is what lets the gather drop the duplicates exactly.</para>
     /// </summary>
-    internal readonly record struct DeferredPort(int Index, LabelShape Label, SKColor LayerColor, PlanarPortKind? Kind);
+    internal readonly record struct DeferredPort(int Index, LabelShape Label, SKColor LayerColor);
 
     /// <summary>
     /// Every port glyph in the frame, drawn above all of its geometry.
@@ -3192,7 +3139,7 @@ public static partial class LayoutRenderer
         LayoutRenderOptions opts, LayoutFrameCounters counters, int dbuPerMicron)
     {
         using var knockout = new SKPath();
-        foreach (var (_, label, _, _) in ports)
+        foreach (var (_, label, _) in ports)
         {
             if (PortNameKnockout(label, ps, scaleUm) is not { } k) continue;
             knockout.AddPath(k);
@@ -3205,12 +3152,12 @@ public static partial class LayoutRenderer
             using var exclusion = ExclusionOf(knockout, canvas);
             canvas.ClipPath(exclusion, SKClipOperation.Intersect, antialias: true);
         }
-        foreach (var (_, label, layerColor, kind) in ports)
+        foreach (var (_, label, layerColor) in ports)
             DrawPortMarker(canvas, label, conductorAt, ps, scaleUm, layerColor,
-                           opts.Theme.Background, counters, kind, opts.PlanarMesh, dbuPerMicron);
+                           opts.Theme.Background, counters, opts.PlanarMesh, dbuPerMicron);
         canvas.Restore();
 
-        foreach (var (_, label, layerColor, _) in ports)
+        foreach (var (_, label, layerColor) in ports)
             DrawLabelText(canvas, label, ps,
                           TintForContrast(layerColor, opts.Theme.Background, PortMarkerContrastTintAmount),
                           centred: true);
@@ -3313,15 +3260,20 @@ public static partial class LayoutRenderer
     private static void DrawPortMarker(SKCanvas canvas, LabelShape label,
         LayoutPortDirection.ConductorLookup? conductorAt,
         PathSpace ps, double scaleUm, SKColor layerColor, SKColor background,
-        LayoutFrameCounters counters, PlanarPortKind? statedKind,
+        LayoutFrameCounters counters,
         PlanarMeshReport? mesh = null, int dbuPerMicron = LayoutUnits.DefaultDbuPerMicron)
     {
         if (LayoutPortDirection.Resolve(conductorAt, label) is not { } hint) return;
 
-        // The EM setup's own answer when it has one — including Edge, so changing a port back to an
-        // edge port in the .cem draws it as one. Only where nothing has spoken does the drawing infer
-        // from where the label is standing.
-        var kind = statedKind ?? LayoutPortDirection.InferredKind(hint);
+        // ── THE LABEL'S OWN TYPE, STATED OR INFERRED ────────────────────────────────────────────
+        //
+        // Exactly LayoutPortDirection.KindOf, spelled out only because the hint is already resolved
+        // here and KindOf would resolve it a second time. The drawing is no longer TOLD what a port
+        // is by a channel from the .cem (`InternalPortMarks`, gone 2026-09-14): an empty port-kind
+        // list there answered Edge for every port nobody had typed, so a port drawn in the middle of
+        // a trace by the Port tool's own ghost was redrawn as an edge port one frame after the click,
+        // with its reference-plane bar at the far end of the conductor (owner report, 2026-09-14).
+        var kind = label.PortKind ?? LayoutPortDirection.InferredKind(hint);
 
         if (kind == PlanarPortKind.Internal)
         {

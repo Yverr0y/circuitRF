@@ -231,6 +231,17 @@ public static class EmRunService
                 d.Render(), warnings, Diagnostic: d);
         }
 
+        // ── A .cem WRITTEN BEFORE THE TYPE MOVED TO THE DRAWING ─────────────────────────────────
+        //
+        // In memory, writing nothing: a build machine handed an un-migrated pair must produce the
+        // answer the application produces, and it must not modify the tree it was given to analyse.
+        // The editor applies the SAME migration as a real, undoable layout edit — see
+        // EmPortKindMigration for why one door rather than two readers.
+        if (EmPortKindMigration.ApplyInMemory(source.View.Shapes, setup.PortKinds) is > 0 and var moved)
+            notes.Add($"{moved} port type(s) in this EM setup were carried onto the layout's own port " +
+                      "labels, which is where a port's type lives. Open the layout to see them; saving " +
+                      "it makes the move permanent.");
+
         double[] freqs;
         try
         {
@@ -288,7 +299,8 @@ public static class EmRunService
         //
         // Refused by name rather than silently re-routed to the planar kernel. Re-routing would be a
         // guess at intent that costs minutes of solve time, and the remedy is one dropdown.
-        if (choice.Ok && choice.Kind == EmAnalysisKind.CrossSection && setup.DeclaresInternalPort())
+        if (choice.Ok && choice.Kind == EmAnalysisKind.CrossSection
+            && EmPortExtraction.AnyNonEdgePort(source.View.Shapes))
         {
             var d = EmDiagnostics.InternalPortNeedsFullWave(choice.KernelName);
             return new EmRunResult(EmRunStatus.Refused, null, crossSection.Readback, null, null, null,
@@ -428,7 +440,7 @@ public static class EmRunService
         // by name rather than guessed (R-res-5).
         var ports = EmPortExtraction.Extract(
             source.View.Shapes, problem, source.DbuPerMicron, setup.ResolvePortZ0,
-            source.View.DisplayUnit, setup.ResolvePortKind,
+            source.View.DisplayUnit,
             EmPortExtraction.DefaultGroundPathWidthM(source.Technology));
 
         notes.AddRange(ports.Notes);
