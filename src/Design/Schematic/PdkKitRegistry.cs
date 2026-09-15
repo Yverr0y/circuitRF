@@ -72,6 +72,19 @@ public static class PdkKitRegistry
         public readonly Dictionary<string, PdkKitPart> Parts = new(StringComparer.OrdinalIgnoreCase);
         public readonly List<string> Kits = [];
         public readonly Dictionary<string, IReadOnlyList<OsdiModel>> Osdi = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Which of <see cref="Parts"/> circuitRF SYNTHESISED from a parametric cell's own
+        /// declaration rather than read out of the kit's schematic side
+        /// (<see cref="SetPCellParts"/>).
+        ///
+        /// <para>Recorded because the two are replaced on different occasions and must not replace
+        /// each other: a kit re-import rebuilds the imported half while its interpreters keep
+        /// running, and a kit's scripts are re-read while its imported parts sit untouched. One
+        /// dictionary with a note on which entries came from where keeps every reader — every
+        /// <c>Find</c>, every <c>PartsOf</c> — asking one question and getting the whole kit.</para>
+        /// </summary>
+        public readonly HashSet<string> Generated = new(StringComparer.OrdinalIgnoreCase);
     }
 
     private static readonly Dictionary<string, KitScope> _scopes = new(StringComparer.OrdinalIgnoreCase);
@@ -137,10 +150,70 @@ public static class PdkKitRegistry
         lock (_gate)
         {
             var scope = ScopeLocked(scopeKey, create: true)!;
-            RemoveKitLocked(scope, kitName);
-            foreach (var p in fresh) scope.Parts[RefFor(kitName, p.PartId)] = p;
+            RemoveKitLocked(scope, kitName, includeGenerated: false);
+            foreach (var p in fresh)
+            {
+                string reference = RefFor(kitName, p.PartId);
+                // A kit that ships a schematic part for a cell it also generates has STATED that
+                // part; the one synthesised from the cell's declaration was only ever the answer
+                // for a cell the kit said nothing about. So the import supersedes it, here, rather
+                // than the two racing to be written last.
+                scope.Parts[reference] = p;
+                scope.Generated.Remove(reference);
+            }
             scope.Kits.Add(kitName);
             if (osdiModels is { Count: > 0 }) scope.Osdi[kitName] = osdiModels;
+        }
+    }
+
+    /// <summary>
+    /// Replaces the parts SYNTHESISED from one kit's parametric cells, for one workspace — the
+    /// schematic side of a kit that ships artwork generators and a symbol for them, and nothing
+    /// else (<c>PCellKitSchematicParts</c>).
+    ///
+    /// <para><b>It never overwrites a part the kit itself supplied.</b> A kit that ships both a
+    /// schematic part and a generator for one cell has said what that part is; the synthesised one
+    /// exists only for the cell a kit says nothing about. Mounting is therefore additive in one
+    /// direction and replacing in the other, which is why this is a second entry point rather than
+    /// another call to <see cref="SetKit"/>.</para>
+    ///
+    /// <para>Replaces rather than merges its OWN half, for the reason <see cref="SetKit"/> gives:
+    /// a kit re-read must produce the kit as it is now, not the union of every reading.</para>
+    /// </summary>
+    public static void SetPCellParts(string? workspaceRoot, string kitName, IEnumerable<PdkKitPart> parts)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(kitName);
+        ArgumentNullException.ThrowIfNull(parts);
+
+        string scopeKey = WorkspaceRootFinder.Normalize(workspaceRoot);
+        var fresh = parts.ToList();
+
+        lock (_gate)
+        {
+            var scope = ScopeLocked(scopeKey, create: true)!;
+
+            foreach (var stale in scope.Generated
+                         .Where(k => TryParse(k, out string kit, out _)
+                                  && string.Equals(kit, kitName, StringComparison.OrdinalIgnoreCase))
+                         .ToList())
+            {
+                scope.Parts.Remove(stale);
+                scope.Generated.Remove(stale);
+            }
+
+            foreach (var p in fresh)
+            {
+                string reference = RefFor(kitName, p.PartId);
+                if (scope.Parts.ContainsKey(reference)) continue;   // the kit's own part wins
+                scope.Parts[reference] = p;
+                scope.Generated.Add(reference);
+            }
+
+            // The kit is MOUNTED once it has parts, whichever half produced them. Without this a
+            // placement would be refused with "the kit is not loaded" while holding the part it was
+            // asking for.
+            if (fresh.Count > 0 && !scope.Kits.Contains(kitName, StringComparer.OrdinalIgnoreCase))
+                scope.Kits.Add(kitName);
         }
     }
 
@@ -337,13 +410,14 @@ public static class PdkKitRegistry
         return all;
     }
 
-    private static void RemoveKitLocked(KitScope scope, string kitName)
+    private static void RemoveKitLocked(KitScope scope, string kitName, bool includeGenerated = true)
     {
         var stale = scope.Parts.Keys
             .Where(k => TryParse(k, out string kit, out _)
-                     && string.Equals(kit, kitName, StringComparison.OrdinalIgnoreCase))
+                     && string.Equals(kit, kitName, StringComparison.OrdinalIgnoreCase)
+                     && (includeGenerated || !scope.Generated.Contains(k)))
             .ToList();
-        foreach (var k in stale) scope.Parts.Remove(k);
+        foreach (var k in stale) { scope.Parts.Remove(k); scope.Generated.Remove(k); }
         scope.Kits.RemoveAll(k => string.Equals(k, kitName, StringComparison.OrdinalIgnoreCase));
         scope.Osdi.Remove(kitName);
     }

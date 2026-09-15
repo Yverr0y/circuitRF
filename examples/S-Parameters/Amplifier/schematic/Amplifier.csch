@@ -23,7 +23,7 @@
         },
         {
           "Name": "File",
-          "Expression": "potentially_unstable_amp.s2p",
+          "Expression": "Amplifier/schematic/potentially_unstable_amp.s2p",
           "Unit": "",
           "ShowOnSchematic": true,
           "Dimension": "None"

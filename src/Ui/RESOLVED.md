@@ -1,5 +1,52 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## A cell's EM setup had no row in the project tree (2026-09-15)
+
+Owner, twice, on the shipped Patch Antenna example: the `.cem` is not there. Checked against the
+repository and the build output it plainly WAS there, which is the answer I gave first and it was the
+wrong question — **shipping a file and showing it are different things, and only the first had a
+gate.**
+
+`WorkspaceScanner.BuildCellNode` walks the three `ViewType` sub-folders — `schematic/`, `symbol/`,
+`layout/` — and then returns. A cell folder holding anything else was rendered as if it did not.
+Dumped against the shipped examples, before:
+
+```
+[Cell] patch
+  [CellViewFolder] layout
+    [ViewFile] patch.clay
+```
+
+`patch/em/patch-5p8GHz.cem` is on disk, is committed, is carried by `WorkspaceCopy` into every
+installed copy, and opens by path, through `circuitrf em` and through the run service. It had no row
+anywhere in the window. **Nothing reported it because nothing failed**: a folder the scanner never
+opens cannot be found to be missing, so every symptom is somebody saying the example has no EM setup.
+
+Both shipped EM examples were in that shape, and so is `testdata/antenna`.
+
+### Why it survived this long
+
+**circuitRF's own New EM Setup writes to `<workspace>/em/`** — the workspace root, not the cell
+(`WorkspaceViewModel`, the `emDir` two commands share). That is an ordinary user folder, and
+`BuildUserFolderNode` has always rendered its files by extension, `.cem` included. So the arrangement
+the application PRODUCES was never the arrangement that was broken, and every workspace anyone made
+by clicking looked right. Only a cell-local `em/` — which the resolver, the CLI verb and the run
+service all support, and which two shipped examples and a testdata fixture use — fell through.
+
+### The fix
+
+A cell renders its non-view sub-folders exactly as the workspace root renders its own: a cell folder
+is a folder with a `.ccell` in it, and nothing about being a cell makes a document inside it less
+real. `IsViewSubFolder` skips the three the loop above owns, asked by NAME rather than by "did I emit
+a node" — an EMPTY view folder produces no node by design (§3.1) and must not then be re-rendered as
+a user folder underneath itself.
+
+Gate: `ExampleWorkspacesTests.EveryDocumentAnExampleShipsHasARowInTheProjectTree`, which scans each
+shipped example and asserts every `.csch`/`.csym`/`.clay`/`.cem`/`.ctech`/`.cdd`/`.charm` it carries
+has a node. Reverted against the old scanner it names the Taper's `.cem` and fails, which is the
+check the three earlier gates could not make: the file was committed, it shipped, it was copied, and
+it still could not be clicked.
+
 ## The PDK PCells example shipped cells nobody could adjust, 2026-09-15
 
 Owner, on the shipped `examples/PDK PCells` workspace: the spiral inductor is not using generated

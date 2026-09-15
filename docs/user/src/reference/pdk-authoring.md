@@ -20,6 +20,7 @@ This chapter is about **producing** a kit. If you are consuming one, read
 <li><a href="#handles">Parameter handles</a></li>
 <li><a href="#spiral">A second example: a spiral inductor</a></li>
 <li><a href="#declaring">Declaring your generators to circuitRF</a></li>
+<li><a href="#schematic-symbol">Giving a generated cell a schematic side</a></li>
 <li><a href="#traps">Traps worth a callout</a></li>
 </ol>
 </nav>
@@ -302,6 +303,51 @@ A `pcell-generators.json` beside the kit — run-time data, never a list inside 
 
 It deliberately does **not** list the generators the kit offers. The `describe` call is the only source
 of that, and a second one would be a cache that can silently disagree with the script.
+
+## Giving a generated cell a schematic side {#schematic-symbol}
+
+A kit may ship artwork and nothing else, and until it has a **symbol** that is exactly what it is: the
+cell can be placed in a layout and nowhere else. Dropping its palette tile on a schematic lands a blank
+box with no pins, and **Update Schematic from Layout places nothing at all** — there is no part for it
+to place.
+
+Ship a `.csym` named after the generator and the cell gets a schematic side:
+
+```
+pcell-kit/
+  pcell-generators.json
+  pcells/main.py
+  KIT_SPIRAL.csym          <- the symbol for the KIT_SPIRAL generator
+  symbols/KIT_MLIN.csym    <- or in a symbols/ folder, for a kit with many cells
+```
+
+`.csym` is circuitRF's own symbol format, so you **draw the symbol in circuitRF's symbol editor** —
+File ▸ New ▸ Symbol, draw it, save it under the generator's name. There is no description language to
+learn, and nothing to declare: **the file's name is the declaration**, for the same reason
+`pcell-generators.json` lists no generators. A name that matches no generator is simply a file nothing
+reads.
+
+Three consequences worth knowing:
+
+- **The pins come from the symbol; the parameters come from the generator.** The symbol decides the
+  port count and where wires attach. The published parameter interface is the generator's own
+  declaration — the same list the generator reads, which is the one-list rule [above](#four-halves).
+  So your symbol never declares parameters, and cannot disagree with the cell about them.
+- **A length default is converted for the workspace it is placed in.** You declare it in SI metres;
+  a 10 µm width reaches an MMIC schematic as `10 µm` and a PCB one as `0.394 mil`. A parameter your
+  generator marks as *computed* is left off entirely — it is an output, and a field the generator
+  overwrites on every draw is not one anyone can edit.
+- **Every parameter is annotated on the sheet.** A parametric cell is its parameters, so they are
+  printed beside the glyph rather than hidden behind a click; anyone can untick `Show on schematic`
+  per instance. (An imported part's parameters default the other way — most of a vendor part's
+  interface is model plumbing, where a generator declares only what it draws from.)
+- **A part your kit ships on its schematic side always wins.** If your kit imports a symbol and a
+  parameter interface for the same cell, that is what circuitRF uses; the one built around a `.csym`
+  is only ever the answer for a cell your kit says nothing else about.
+
+The symbol buys the schematic side, not a model: a cell with artwork and a glyph still has no device
+equations, and a run says so. Supply those the way [The four things a part needs](#four-halves)
+describes.
 
 ## Traps worth a callout {#traps}
 

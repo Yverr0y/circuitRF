@@ -8,6 +8,8 @@ nothing to point at.
 pcell-kit/
   pcell-generators.json   what circuitRF reads to find the kit
   kit.py                  the generators themselves
+  KIT_MLIN.csym           their schematic symbols - see below
+  KIT_SPIRAL.csym
 ```
 
 `kit.py` declares two, and each is one decorated function:
@@ -21,6 +23,30 @@ generator declares its two legal values. Both cells also declare **parameter han
 drag the artwork instead and the drag edits the parameter that produced it. You never state how much
 the parameter changes per unit of travel: circuitRF measures it by perturbing the parameter and
 re-running the generator.
+
+## One tile, two views, because the kit ships a symbol
+
+A generator draws artwork; it says nothing about what the cell looks like on a **schematic**. So each
+of these two ships a `.csym` beside the manifest, named after the generator it belongs to — that name
+is the whole declaration, and the file is an ordinary circuitRF symbol drawn in circuitRF's symbol
+editor.
+
+That is what makes these cells whole parts rather than layout-only ones. Each appears as **one**
+palette tile carrying both views, and the drop target decides which is placed: drop on a layout and
+you get the artwork, drop on a schematic and you get the symbol. Open `SpiralInductor.clay` and run
+**Update Schematic from Layout** and the coil arrives in the schematic with `Width`, `Space`, `Inner`,
+`Turns` and `Metal` already set to what the artwork was drawn at — in µm, because that is how this
+technology displays lengths, even though `kit.py` declares them in SI metres.
+
+**The pins come from the symbol and the parameters come from the generator**, which is why the symbol
+declares none: one list, read by the cell that uses it. Every one of them arrives **annotated on the
+sheet**, because a parametric cell is its parameters — a spiral is three turns of 10 µm metal, and
+that should be readable without clicking the part. Untick `Show on schematic` on any you would rather
+not see.
+
+A symbol is not a model. These two cells have artwork and a glyph and no device equations, so a run
+says so rather than inventing an answer; the built-in MLIN in `MicrostripLine` is what the electrical
+half of a microstrip line looks like.
 
 circuitRF will ask once whether to run this kit's scripts. Scripts in a workspace are somebody
 else's code and are never started without being allowed.

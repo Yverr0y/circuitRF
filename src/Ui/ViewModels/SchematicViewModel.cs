@@ -3725,6 +3725,14 @@ public sealed partial class SchematicViewModel : ObservableObject
                     ShowOnSchematic = cp.ShowOnSchematic,
                 });
 
+        // A KIT part's Length defaults are stated in the fixed mm baseline, because the kit that
+        // declared them has no idea which workspace would place them — so they are rewritten here to
+        // the placing technology's own display unit, preserving the magnitude, exactly as a built-in
+        // microstrip's are. Asked only of a kit reference: a cell FOLDER's parameters are what its
+        // author typed, and rewriting those would change a design's own spelling on placement.
+        if (PdkKitRegistry.IsKitRef(cellRef))
+            MicrostripSubstrateInjection.ApplyTechnologyLengthUnit(comp.Parameters, EditModel.SchematicDirectory);
+
         Execute(new PlaceComponentCommand(EditModel, comp));
         SelectPlacedPart(comp.Id);
     }

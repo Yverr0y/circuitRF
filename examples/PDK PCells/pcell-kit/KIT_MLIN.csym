@@ -1,0 +1,104 @@
+{
+  "FormatVersion": 6,
+  "GridSize": 100,
+  "PortCount": 2,
+  "Primitives": [
+    {
+      "$type": "Line",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "X1": -200.0,
+      "Y1": 0.0,
+      "X2": -90.0,
+      "Y2": 0.0
+    },
+    {
+      "$type": "Line",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "X1": 90.0,
+      "Y1": 0.0,
+      "X2": 200.0,
+      "Y2": 0.0
+    },
+    {
+      "$type": "RoundedRect",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "Filled": false,
+      "Cx": 0.0,
+      "Cy": 0.0,
+      "W": 180.0,
+      "H": 60.0,
+      "Radius": 12.0
+    },
+    {
+      "$type": "Line",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "X1": -110.0,
+      "Y1": 68.0,
+      "X2": 110.0,
+      "Y2": 68.0
+    },
+    {
+      "$type": "Line",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Thin",
+      "X1": -92.0,
+      "Y1": 68.0,
+      "X2": -110.0,
+      "Y2": 86.0
+    },
+    {
+      "$type": "Line",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Thin",
+      "X1": -46.0,
+      "Y1": 68.0,
+      "X2": -64.0,
+      "Y2": 86.0
+    },
+    {
+      "$type": "Line",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Thin",
+      "X1": 0.0,
+      "Y1": 68.0,
+      "X2": -18.0,
+      "Y2": 86.0
+    },
+    {
+      "$type": "Line",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Thin",
+      "X1": 46.0,
+      "Y1": 68.0,
+      "X2": 28.0,
+      "Y2": 86.0
+    },
+    {
+      "$type": "Line",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Thin",
+      "X1": 92.0,
+      "Y1": 68.0,
+      "X2": 74.0,
+      "Y2": 86.0
+    }
+  ],
+  "Pins": [
+    {
+      "LocalX": -200.0,
+      "LocalY": 0.0,
+      "PortIndex": 0,
+      "Name": "1"
+    },
+    {
+      "LocalX": 200.0,
+      "LocalY": 0.0,
+      "PortIndex": 1,
+      "Name": "2"
+    }
+  ]
+}

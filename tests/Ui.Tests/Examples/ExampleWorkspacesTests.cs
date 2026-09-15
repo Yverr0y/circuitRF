@@ -16,11 +16,24 @@
 //   3. THE EXAMPLES RUN. Every one of them was authored against a real engine, and an example that
 //      silently stopped elaborating is worse than no example. Elaboration, not simulation — the
 //      loadpull and EM benches are minutes of work each and belong to nobody's routine gate.
+//
+//   4. EVERY FILE AN EXAMPLE NAMES RESOLVES AGAINST THE WORKSPACE ROOT. The S-Parameters example
+//      shipped its Touchstone reference spelled relative to the SCHEMATIC, which is not the base
+//      anything resolves against (SnpPathPolicy: the root, on all three sides). It ran headlessly,
+//      because a run verb used the schematic's own folder, and reported the file missing the moment
+//      anyone opened it — one design, two answers, and no way to tell from a green CLI run.
+//
+//   5. AND EVERY DOCUMENT IT SHIPS HAS A ROW IN THE TREE. The Patch Antenna example's `.cem` was
+//      committed, shipped, copied into the installed workspace and openable by path — and had no
+//      row anywhere, because WorkspaceScanner walked a cell's three view folders and returned. A
+//      file the scanner never looks at cannot be reported missing, so the only symptom was someone
+//      saying the example had no EM setup.
 // ================================================================
 
 using System.Text.Json;
 using CircuitRF.Design.Schematic;
 using CircuitRF.Design.Workspace;
+using CircuitRF.Ui.Layout.PCells;
 using CircuitRF.Ui.Schematic;
 using CircuitRF.Ui.ViewModels;
 using Xunit.Abstractions;
@@ -222,6 +235,90 @@ public sealed class ExampleWorkspacesTests(ITestOutputHelper output) : IDisposab
         Assert.Throws<InvalidOperationException>(() => ExampleWorkspaceInstall.Run(example, parent));
     }
 
+    /// <summary>
+    /// <b>Every file of every example arrives.</b> Not a count and not a spot check: the copy's file
+    /// set is compared to the source's, name for name, with only the exclusions
+    /// <c>WorkspaceArchiveScanner.IsSkipped</c> names deliberately.
+    ///
+    /// <para>The gate above installs example <c>[0]</c> and asserts that a <c>.cws</c> and some cell
+    /// folder exist — which is true of a copy that dropped an EM setup, a Touchstone file, a
+    /// technology or a kit's symbols. What someone actually notices is one FILE missing from one
+    /// example, and the four kinds this repository ships (<c>.cem</c>, <c>.s2p</c>, <c>.ctech</c>,
+    /// <c>.csym</c>) each reach the workspace by a different route. So every example is installed and
+    /// the whole set compared.</para>
+    ///
+    /// <para><b>Byte identity is deliberately NOT asserted</b> — <c>WorkspaceCopy</c> repairs the
+    /// copy's stored references against its new location, which is the whole reason an example can
+    /// ship a technology under <c>tech/</c> and still resolve wherever someone puts it. Any file that
+    /// was rewritten is REPORTED instead, because a rewrite inside an example is worth a look: a
+    /// reference that re-derives to the same spelling is not written at all.</para>
+    /// </summary>
+    [Fact]
+    public void EveryFileOfEveryExampleArrivesInTheInstalledCopy()
+    {
+        string parent = Path.Combine(_tmp, "all");
+        Directory.CreateDirectory(parent);
+
+        int examples = 0;
+
+        foreach (var example in ExampleWorkspaces.All(SourceExamplesRoot()))
+        {
+            var result = ExampleWorkspaceInstall.Run(example, parent);
+            Assert.Empty(result.Failures);
+
+            var expected = RelativeFilesOf(example.Directory);
+            var actual   = RelativeFilesOf(result.WorkspaceDir);
+
+            var missing = expected.Except(actual, StringComparer.Ordinal).OrderBy(x => x).ToList();
+            var extra   = actual.Except(expected, StringComparer.Ordinal).OrderBy(x => x).ToList();
+
+            Assert.True(missing.Count == 0,
+                $"'{example.Title}' installed WITHOUT: {string.Join(", ", missing)}");
+            Assert.True(extra.Count == 0,
+                $"'{example.Title}' installed with files the example does not have: "
+              + string.Join(", ", extra));
+
+            foreach (string rel in expected.OrderBy(x => x, StringComparer.Ordinal))
+            {
+                string from = Path.Combine(example.Directory, rel);
+                string to   = Path.Combine(result.WorkspaceDir, rel);
+                if (!File.ReadAllBytes(from).SequenceEqual(File.ReadAllBytes(to)))
+                    output.WriteLine($"  {example.Folder}/{rel}: references repaired on copy");
+            }
+
+            // Named rather than left to the count. An EM setup is the one artefact of an example
+            // that nothing else in the workspace points AT — a schematic names its Touchstone and a
+            // cell names its technology, so either going missing surfaces as a broken reference,
+            // while a dropped `.cem` just looks like an example that never had one.
+            foreach (string em in expected.Where(r => r.EndsWith(".cem", StringComparison.OrdinalIgnoreCase)))
+            {
+                Assert.True(File.Exists(Path.Combine(result.WorkspaceDir, em)),
+                    $"'{example.Title}' installed without its EM setup '{em}'.");
+                output.WriteLine($"  EM setup arrived: {em}");
+            }
+
+            output.WriteLine($"{example.Title}: {expected.Count} file(s) arrived");
+            examples++;
+        }
+
+        Assert.True(examples >= 6, $"only {examples} example(s) were installed");
+    }
+
+    /// <summary>Every file under <paramref name="root"/> that a copy is supposed to carry, named
+    /// relative to it with forward slashes — the same predicate <c>WorkspaceCopy</c> itself
+    /// consults, so the test cannot disagree with the thing it is testing about what is skipped.</summary>
+    private static HashSet<string> RelativeFilesOf(string root)
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string f in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        {
+            string rel = Path.GetRelativePath(root, f).Replace('\\', '/');
+            if (CircuitRF.Ui.Archive.WorkspaceArchiveScanner.IsSkipped(rel)) continue;
+            set.Add(rel);
+        }
+        return set;
+    }
+
     // ══ 4. They still work ══════════════════════════════════════════════════
 
     /// <summary>
@@ -299,6 +396,110 @@ public sealed class ExampleWorkspacesTests(ITestOutputHelper output) : IDisposab
                     runnable = true;
             }
             Assert.True(runnable, $"'{example.Title}' has nothing to run.");
+        }
+    }
+
+    // ══ 4b. Every named file resolves, against the base the window uses ══════
+
+    /// <summary>
+    /// Every <c>File</c> parameter an example's schematics carry — a Touchstone, a SPICE model, a
+    /// Verilog-A source — names a file that is really there, resolved <b>against the workspace
+    /// root</b>.
+    ///
+    /// <para><b>The base is the whole test.</b> Simulate writes <c>netlist.cnl</c> at the workspace
+    /// root and elaborates from there, and <c>SnpPathPolicy.ToStored</c> writes a picked path
+    /// relative to that root, so a stored reference means the root and nothing else. The
+    /// S-Parameters example stored <c>potentially_unstable_amp.s2p</c> — right beside the schematic,
+    /// and one directory level nothing resolves against. Every earlier gate passed: the file was
+    /// committed, it shipped, it was copied into the installed workspace, and the schematic
+    /// extracted cleanly. It failed on the one thing nothing asked, which is whether the string
+    /// resolves.</para>
+    /// </summary>
+    [Fact]
+    public void EveryFileAnExampleNamesResolvesAgainstItsWorkspaceRoot()
+    {
+        int checkedRefs = 0;
+
+        foreach (var example in ExampleWorkspaces.All(SourceExamplesRoot()))
+        foreach (string csch in Directory.EnumerateFiles(example.Directory, "*.csch",
+                                                         SearchOption.AllDirectories))
+        {
+            var (model, _, _) = SchematicPersistence.LoadFromFile(csch);
+
+            foreach (var comp in model.Components)
+            foreach (var p in comp.Parameters)
+            {
+                if (p.Name != "File" || string.IsNullOrWhiteSpace(p.Expression)) continue;
+
+                Assert.False(Path.IsPathRooted(p.Expression),
+                    $"{example.Folder}/{Path.GetFileName(csch)}: {comp.InstanceName}.File is an "
+                  + $"absolute path ('{p.Expression}') and means nothing on anyone else's machine.");
+
+                string? resolved = SnpPathPolicy.Resolve(p.Expression, example.Directory, null);
+                Assert.True(resolved is not null && File.Exists(resolved),
+                    $"{example.Folder}/{Path.GetFileName(csch)}: {comp.InstanceName}.File is "
+                  + $"'{p.Expression}', which resolves to '{resolved}' against the workspace root "
+                  + "and is not there. That is the base Simulate uses, so this design opens and "
+                  + "reports the file missing however well it runs headlessly.");
+
+                checkedRefs++;
+            }
+        }
+
+        Assert.True(checkedRefs >= 1, "no example named a file at all — this gate checked nothing.");
+        output.WriteLine($"{checkedRefs} file reference(s) resolved against their workspace root");
+    }
+
+    // ══ 5. Every document an example ships is REACHABLE ═════════════════════
+
+    /// <summary>
+    /// Every document in every example has a row in the project tree.
+    ///
+    /// <para><b>Shipping a file and showing it are different questions, and only the first had a
+    /// gate.</b> The Patch Antenna example's EM setup was committed, packaged, copied into the
+    /// installed workspace and openable by path, by <c>circuitrf em</c> and by the run service — and
+    /// the tree had no row for it, because <c>WorkspaceScanner.BuildCellNode</c> enumerated the
+    /// three <see cref="ViewType"/> sub-folders and returned. Nothing was reported, because nothing
+    /// failed: a folder the scanner never opens cannot be found to be missing.</para>
+    ///
+    /// <para>Asserted over the DOCUMENT kinds circuitRF opens rather than every file — a
+    /// <c>.gitignore</c> is deliberately hidden (<c>IsHiddenTreeFile</c>) and a README is a loose
+    /// file whose row is incidental. What is not negotiable is that a design document someone
+    /// shipped can be clicked.</para>
+    /// </summary>
+    [Fact]
+    public void EveryDocumentAnExampleShipsHasARowInTheProjectTree()
+    {
+        string[] documentExtensions = [".csch", ".csym", ".clay", ".cem", ".ctech", ".cdd", ".charm"];
+        int rows = 0;
+
+        foreach (var example in ExampleWorkspaces.All(SourceExamplesRoot()))
+        {
+            var inTree = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            Collect(WorkspaceScanner.Scan(example.Directory), inTree);
+
+            foreach (string doc in Directory.EnumerateFiles(example.Directory, "*",
+                                                            SearchOption.AllDirectories))
+            {
+                if (!documentExtensions.Contains(Path.GetExtension(doc), StringComparer.OrdinalIgnoreCase))
+                    continue;
+                // The PCell cache is rebuildable and deliberately not in the tree.
+                if (doc.Contains(GeneratedCellStore.ReservedFolderName, StringComparison.Ordinal)) continue;
+
+                Assert.True(inTree.Contains(Path.GetFullPath(doc)),
+                    $"'{example.Title}' ships {Path.GetRelativePath(example.Directory, doc)} and the "
+                  + "project tree has no row for it, so nobody can open it from the window.");
+                rows++;
+            }
+        }
+
+        Assert.True(rows >= 10, $"only {rows} document(s) were checked");
+        output.WriteLine($"{rows} shipped document(s) have a row in the tree");
+
+        static void Collect(ProjectTreeNode n, HashSet<string> into)
+        {
+            if (!string.IsNullOrEmpty(n.AbsolutePath)) into.Add(Path.GetFullPath(n.AbsolutePath));
+            foreach (var c in n.Children) Collect(c, into);
         }
     }
 

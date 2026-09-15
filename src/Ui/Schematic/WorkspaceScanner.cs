@@ -285,7 +285,45 @@ public static class WorkspaceScanner
             cellNode.AddChild(viewFolder);
         }
 
+        // Everything ELSE the cell folder holds — rendered exactly as the workspace root renders its
+        // own sub-folders, because a cell folder is a folder with a `.ccell` in it and nothing about
+        // being a cell makes a document inside it less real.
+        //
+        // <para><b>This was missing, and an EM setup was the casualty</b> (owner, 2026-09-15, on the
+        // shipped Patch Antenna example: the `.cem` was not there). It WAS there — copied, on disk,
+        // and openable by path, by `circuitrf em`, and by the run service. The loop above walks the
+        // three <see cref="ViewType"/> sub-folders and the method then RETURNED, so a `.cem` under
+        // `&lt;cell&gt;/em/` had no row in the tree at all. Nothing reported it, because nothing had
+        // gone wrong: a file the scanner never looks at cannot be missing.</para>
+        //
+        // <para>Both shipped EM examples are in exactly that shape, and so is `testdata/antenna`.
+        // circuitRF's own New EM Setup writes to `&lt;workspace&gt;/em/`, which is an ordinary user
+        // folder and has always rendered — which is precisely why the gap survived: the arrangement
+        // the application produces was never the arrangement that was broken.</para>
+        foreach (string subDir in SubDirsSorted(cellDir))
+        {
+            if (IsViewSubFolder(subDir)) continue;   // already rendered above, on its own terms
+            cellNode.AddChild(File.Exists(Path.Combine(subDir, CellFolder.CcellFileName))
+                ? BuildCellNode(subDir, workspaceRoot)
+                : BuildUserFolderNode(subDir, workspaceRoot));
+        }
+
         return cellNode;
+    }
+
+    /// <summary>
+    /// True for <c>schematic/</c>, <c>symbol/</c> or <c>layout/</c> — the three the loop above owns.
+    /// Asked by NAME against <see cref="CellFolder.SubFolderName"/> rather than by "did I just emit a
+    /// node for it", so a view folder that is EMPTY (which produces no node, by §3.1) is still not
+    /// re-rendered as a user folder underneath it.
+    /// </summary>
+    private static bool IsViewSubFolder(string subDir)
+    {
+        string name = Path.GetFileName(subDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        foreach (ViewType vt in Enum.GetValues<ViewType>())
+            if (string.Equals(name, CellFolder.SubFolderName(vt), StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
     }
 
     // ── User folder ───────────────────────────────────────────────────────────

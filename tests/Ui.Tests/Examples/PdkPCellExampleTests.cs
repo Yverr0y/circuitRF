@@ -19,6 +19,12 @@
 //      folder is content-addressed and git-ignored, so the .clay in the repository names a folder
 //      that does not exist until a generator runs. If the name it rebuilds to differs, every
 //      instance is repointed and the committed file is rewritten on first open.
+//
+//   4. A KIT THAT SHIPS ONLY ARTWORK HAD NO SCHEMATIC SIDE AT ALL. Update Schematic from Layout on
+//      the spiral created a schematic and placed NOTHING in it, reporting that the kit "is not
+//      loaded" — it was; what it had no part for was the cell. The kit now ships a .csym per
+//      generator and circuitRF mounts a part around it, carrying the generator's own declared
+//      parameters. See PCellKitSchematicParts.
 // ================================================================
 
 using System;
@@ -26,8 +32,12 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using CircuitRF.Core;
+using CircuitRF.Design.Cells;
 using CircuitRF.Design.Layout;
+using CircuitRF.Design.Layout.PCells;
+using CircuitRF.Design.Schematic;
 using CircuitRF.Ui.Layout;
+using CircuitRF.Ui.Schematic;
 using CircuitRF.Ui.Layout.PCells;
 using CircuitRF.Ui.Layout.PCells.Wire;
 using CircuitRF.Ui.Tests.Layout.PCells;
@@ -567,5 +577,205 @@ public sealed class PdkPCellExampleTests(ITestOutputHelper output) : IDisposable
             Path.Combine(ExampleRoot(), "MicrostripLine", "schematic", "MicrostripLine.csch"));
         Assert.Contains("\"SignalLayer\"", csch, StringComparison.Ordinal);
         Assert.Contains("\"Metal1\"", csch, StringComparison.Ordinal);
+    }
+
+    // ══ 5. The kit has a schematic side, because it ships a symbol ═══════════
+
+    /// <summary>
+    /// The example ships one <c>.csym</c> per generator, beside its manifest, and that file's NAME
+    /// is the whole declaration — nothing lists it. Both are readable, and both declare the two pins
+    /// their generator declares, which is what decides the placed component's port count.
+    /// </summary>
+    [Theory]
+    [InlineData(Mlin)]
+    [InlineData(Spiral)]
+    public void TheKitShipsASchematicSymbolForEveryGenerator(string generatorId)
+    {
+        string kitDir = Path.Combine(ExampleRoot(), "pcell-kit");
+
+        string path = PCellKitSchematicParts.FindSymbolFile(kitDir, generatorId)
+            ?? throw new Xunit.Sdk.XunitException(
+                $"'{generatorId}' has no shipped symbol under '{kitDir}'.");
+
+        var part = PCellKitSchematicParts.TryBuild("pcell-kit", generatorId, kitDir,
+                                                   declaredParameters: null, out string? problem);
+        Assert.Null(problem);
+        Assert.NotNull(part);
+        Assert.Equal(2, part!.Symbol.Pins.Count);
+        Assert.Equal(2, part.Ccell.NumPorts);
+        output.WriteLine($"{generatorId}: {path} — {part.Symbol.Primitives.Count} primitive(s)");
+    }
+
+    /// <summary>
+    /// The published parameter interface is the GENERATOR's declaration, not the symbol's — the
+    /// one-list rule the PDK authoring reference states. A length default arrives in SI metres and
+    /// is written in the mm baseline a placement then rewrites to the workspace's own unit; a count
+    /// is left exactly as declared, because circuitRF scales a length and never a count.
+    /// </summary>
+    [Fact]
+    public void TheSchematicPartPublishesTheGeneratorsOwnParameters()
+    {
+        string workspace = ExampleRoot();
+        using var provider = StartKit(workspace);
+        var declared = provider.DeclaredParameters(Spiral)
+            ?? throw new InvalidOperationException($"'{Spiral}' declared no parameters.");
+
+        var part = PCellKitSchematicParts.TryBuild(
+            "pcell-kit", Spiral, Path.Combine(workspace, "pcell-kit"), declared, out string? problem);
+        Assert.Null(problem);
+        Assert.NotNull(part);
+
+        var names = part!.Ccell.Parameters.Select(p => p.Name).ToList();
+        Assert.Equal(["Width", "Space", "Inner", "Turns", "Metal"], names);
+
+        // 10 um, stated by the generator in SI metres, reaches the schematic as 0.01 mm — the same
+        // physical width. Writing the SI number verbatim would put 1E-05 in a field with no unit.
+        var width = part.Ccell.Parameters.Single(p => p.Name == "Width");
+        Assert.Equal(UnitDimension.Length, width.Dimension);
+        Assert.Equal("mm", width.Unit);
+        Assert.Equal(0.01, double.Parse(width.DefaultExpression, System.Globalization.CultureInfo.InvariantCulture), 12);
+
+        // A count is dimensionless. Scaled as a length it would come out a billion turns.
+        var turns = part.Ccell.Parameters.Single(p => p.Name == "Turns");
+        Assert.Equal(UnitDimension.None, turns.Dimension);
+        Assert.Equal("", turns.Unit);
+        Assert.Equal(3.0, double.Parse(turns.DefaultExpression, System.Globalization.CultureInfo.InvariantCulture), 12);
+
+        // The dropdown the generator declares survives onto the schematic side as a closed set.
+        var metal = part.Ccell.Parameters.Single(p => p.Name == "Metal");
+        Assert.Equal(["Metal1", "Metal2"], metal.Choices);
+        Assert.Equal("Metal1", metal.DefaultExpression);
+
+        // Every one of them is ANNOTATED. A parametric cell is its parameters — a spiral is three
+        // turns of 10 um metal — and a sheet that hides all five makes the reader click each part to
+        // find out what the design is.
+        Assert.All(part.Ccell.Parameters, p => Assert.True(p.ShowOnSchematic, $"'{p.Name}' is hidden"));
+    }
+
+    /// <summary>
+    /// <b>The reported bug, end to end.</b> Open <c>SpiralInductor.clay</c>, run Update Schematic
+    /// from Layout, and a component appears — with the coil's own parameters on it, in the
+    /// technology's own unit.
+    ///
+    /// <para>Before the kit had a schematic side this placed NOTHING: the generator matched no part,
+    /// so <c>PdkKitRegistry.Find</c> answered null and the run reported that the kit was not loaded.
+    /// The schematic was created and left empty, which is exactly what was reported.</para>
+    /// </summary>
+    [Fact]
+    public void UpdateSchematicFromLayout_PlacesTheCoil_WithItsParameters()
+    {
+        string copy = Path.Combine(Path.GetTempPath(), "crf-pcell-sch-" + Guid.NewGuid().ToString("N")[..8]);
+        _scratch.Add(copy);
+        CopyDirectory(ExampleRoot(), copy);
+        try { Directory.Delete(Path.Combine(copy, GeneratedCellStore.ReservedFolderName), true); }
+        catch (DirectoryNotFoundException) { /* already absent, which is a fresh clone's own state */ }
+
+        PdkKitRegistry.ResetAllForTests();
+        KitLayoutGenerators.ResetAllForTests();
+        PCellRegistry.ClearResolvers();
+        using var resolver = new PCellWorkerResolver(
+            copy,
+            findInterpreter: (_, _) => new PythonInterpreter(PythonRunner.Interpreter!, [], "test", "supplied by the test"),
+            report: output.WriteLine);
+        PCellRegistry.AddResolver(resolver);
+        GeneratedCellsLifecycle.RegenerateAll(copy, _ => null, output.WriteLine);
+
+        // What the workspace does on open: mount the schematic side of every parametric cell whose
+        // kit ships a symbol, then publish the palette so the generator and the part are one tile.
+        var kitNames = resolver.KitNameByGeneratorId;
+        var kitDirs  = resolver.KitDirectoryByGeneratorId;
+        var parts    = new List<PdkKitPart>();
+        var tiles    = new List<PaletteItem>();
+        foreach (var (gid, kitName) in kitNames)
+        {
+            var built = PCellKitSchematicParts.TryBuild(
+                kitName, gid, kitDirs.GetValueOrDefault(gid), resolver.DeclaredParameters(gid), out _);
+            if (built is null) continue;
+            parts.Add(built);
+            tiles.Add(PCellKitSchematicParts.PaletteItemFor(kitName, built));
+        }
+        Assert.Equal(2, parts.Count);
+
+        string kit = kitNames[Spiral];
+        PdkKitRegistry.SetPCellParts(copy, kit, parts);
+        KitLayoutGenerators.Publish(copy, KitPaletteMerge.Compose(
+            tiles, kitNames.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase)));
+
+        var layout = LayoutPersistence.LoadFromFile(
+            Path.Combine(copy, "SpiralInductor", "layout", "SpiralInductor.clay"));
+        string layoutDir = Path.Combine(copy, "SpiralInductor", "layout");
+
+        var schematic = new SchematicEditModel
+        {
+            SchematicDirectory = Path.Combine(copy, "SpiralInductor", "schematic"),
+        };
+        Directory.CreateDirectory(schematic.SchematicDirectory);
+
+        var result = LayoutToSchematicGenerator.Run(layout, schematic, layoutDir, Tech());
+        foreach (var l in result.Lines) output.WriteLine($"{l.Severity}: {l.Text}");
+
+        Assert.Equal(1, result.CreatedCount);
+        Assert.NotNull(result.Command);
+        result.Command!.Execute();
+
+        var placed = Assert.Single(schematic.Components);
+        Assert.Equal(PdkKitRegistry.RefFor(kit, Spiral), placed.CellRef);
+
+        // The symbol the kit ships is what this instance renders as — two pins, not a blank box.
+        var symbol = CellSymbolResolver.Resolve(placed.CellRef!, schematic.SchematicDirectory);
+        Assert.Equal(CellSymbolState.Resolved, symbol.State);
+        Assert.Equal(2, symbol.Symbol!.Pins.Count);
+
+        // …and the parameters are the coil's own, in the technology's display unit. The .clay holds
+        // Width = 1E-05 m; this workspace displays lengths in micrometres, so the schematic says 10.
+        Assert.Equal(["Width", "Space", "Inner", "Turns", "Metal"],
+                     placed.Parameters.Select(p => p.Name).ToList());
+        var width = placed.Parameters.Single(p => p.Name == "Width");
+        Assert.Equal("\u00b5m", width.Unit);   // the MMIC technology's own display unit
+        Assert.Equal(10.0, double.Parse(width.Expression, System.Globalization.CultureInfo.InvariantCulture), 9);
+        Assert.Equal("3", placed.Parameters.Single(p => p.Name == "Turns").Expression);
+        Assert.Equal("Metal1", placed.Parameters.Single(p => p.Name == "Metal").Expression);
+        Assert.All(placed.Parameters, p => Assert.True(p.ShowOnSchematic, $"'{p.Name}' is hidden"));
+    }
+
+    /// <summary>
+    /// The two halves of a kit are replaced on different occasions and must not replace each other:
+    /// a kit re-import rebuilds its own parts while its interpreters keep running, and a kit's
+    /// scripts are re-read while its imported parts sit untouched. A part the kit ITSELF ships wins,
+    /// because the kit has stated what that part is.
+    /// </summary>
+    [Fact]
+    public void AnImportedPartWins_AndNeitherHalfDiscardsTheOther()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "crf-pcell-mount-" + Guid.NewGuid().ToString("N")[..8]);
+        _scratch.Add(root);
+        Directory.CreateDirectory(root);
+
+        PdkKitRegistry.ResetAllForTests();
+        string kitDir = Path.Combine(ExampleRoot(), "pcell-kit");
+
+        var spiral = PCellKitSchematicParts.TryBuild("k", Spiral, kitDir, null, out _)!;
+        var mlin   = PCellKitSchematicParts.TryBuild("k", Mlin,   kitDir, null, out _)!;
+        PdkKitRegistry.SetPCellParts(root, "k", [spiral, mlin]);
+        Assert.True(PdkKitRegistry.HasKit(root, "k"));
+        Assert.NotNull(PdkKitRegistry.Find(PdkKitRegistry.RefFor("k", Spiral), root));
+
+        // The kit's own import lands, naming one of the same cells. Its part replaces the
+        // synthesised one; the other synthesised part is untouched.
+        var imported = new PdkKitPart(
+            Spiral,
+            new CircuitRF.Design.Symbol.Symbol([], [new CircuitRF.Design.Symbol.SymbolPin(0, 0, 0, "p")], 1),
+            new CcellFile { NumPorts = 1 }, IconPath: null);
+        PdkKitRegistry.SetKit(root, "k", [imported]);
+
+        Assert.Equal(1, PdkKitRegistry.Find(PdkKitRegistry.RefFor("k", Spiral), root)!.Symbol.Pins.Count);
+        Assert.Equal(2, PdkKitRegistry.Find(PdkKitRegistry.RefFor("k", Mlin),   root)!.Symbol.Pins.Count);
+
+        // …and a later re-reading of the kit's scripts does not take the imported part back off.
+        PdkKitRegistry.SetPCellParts(root, "k", [spiral, mlin]);
+        Assert.Equal(1, PdkKitRegistry.Find(PdkKitRegistry.RefFor("k", Spiral), root)!.Symbol.Pins.Count);
+        Assert.Equal(2, PdkKitRegistry.Find(PdkKitRegistry.RefFor("k", Mlin),   root)!.Symbol.Pins.Count);
+
+        PdkKitRegistry.ResetAllForTests();
     }
 }

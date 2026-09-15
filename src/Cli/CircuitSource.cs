@@ -2,6 +2,7 @@ using CircuitRF.Core.Design;
 using CircuitRF.Core.Netlist;
 using CircuitRF.Design.Cells;
 using CircuitRF.Design.Schematic;
+using CircuitRF.Design.Workspace;
 
 namespace CircuitRF.Cli;
 
@@ -80,7 +81,29 @@ internal static class CircuitSource
     {
         var (model, _, _) = SchematicPersistence.LoadFromFile(cschPath);
         return FromSchematic(model, Path.GetFileNameWithoutExtension(cschPath),
-                             Path.GetDirectoryName(Path.GetFullPath(cschPath)));
+                             ReferenceBaseOf(cschPath));
+    }
+
+    /// <summary>
+    /// What a relative file reference inside a document resolves against: <b>the workspace root</b>,
+    /// and the document's own folder only when it belongs to no workspace.
+    ///
+    /// <para><b>This is the GUI's base, not a headless one</b> (<c>SnpPathPolicy</c> states the rule
+    /// and <c>MoveRefRegistry</c> repairs against it). Simulate writes <c>netlist.cnl</c> at the
+    /// workspace root and elaborates from there, so an SnP's <c>File</c> is stored relative to the
+    /// root — and a run verb that used the schematic's own folder instead answered differently about
+    /// the same design. The shipped S-Parameters example is where that surfaced: it ran headlessly
+    /// and, opened, reported its Touchstone file missing at the workspace root. Which of the two was
+    /// wrong was not the interesting part — that they disagreed at all is what made a verb's answer
+    /// stop meaning anything about the window.</para>
+    ///
+    /// <para>The no-workspace fallback is the document's own folder, which is the only base a loose
+    /// <c>.csch</c> can reasonably have, and the same fallback <c>SnpPathPolicy.Resolve</c> takes.</para>
+    /// </summary>
+    internal static string? ReferenceBaseOf(string documentPath)
+    {
+        string? own = Path.GetDirectoryName(Path.GetFullPath(documentPath));
+        return WorkspaceRootFinder.WorkspaceDirOf(own) ?? own;
     }
 
     /// <inheritdoc cref="FromSchematic(string)"/>

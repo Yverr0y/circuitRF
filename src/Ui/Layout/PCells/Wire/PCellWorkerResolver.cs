@@ -202,6 +202,8 @@ public sealed class PCellWorkerResolver : IPCellGeneratorResolver, IDisposable
             _providers.Clear();
             _byGeneratorId = null;
             _contentKeyByGeneratorId.Clear();
+            _kitNameByGeneratorId.Clear();
+            _kitDirectoryByGeneratorId.Clear();
         }
 
         foreach (var provider in providers)
@@ -290,6 +292,8 @@ public sealed class PCellWorkerResolver : IPCellGeneratorResolver, IDisposable
 
     private readonly Dictionary<string, string> _kitNameByGeneratorId = new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly Dictionary<string, string> _kitDirectoryByGeneratorId = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
     /// Which kit each generator came from, so a kit's cells can be listed under that kit's own name
     /// exactly as its schematic parts already are.
@@ -305,6 +309,26 @@ public sealed class PCellWorkerResolver : IPCellGeneratorResolver, IDisposable
             {
                 EnsureStartedLocked();
                 return new Dictionary<string, string>(_kitNameByGeneratorId, StringComparer.OrdinalIgnoreCase);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Which kit FOLDER each generator came from — the manifest's own directory, which is where a
+    /// kit's schematic symbol for that cell would be (see <c>PCellKitSchematicParts</c>).
+    ///
+    /// <para>Kept beside <see cref="KitNameByGeneratorId"/> rather than derived from it: a kit's
+    /// name is its folder's name, so two kits in two workspaces can share one and the name would
+    /// then resolve to whichever folder was asked about last.</para>
+    /// </summary>
+    public IReadOnlyDictionary<string, string> KitDirectoryByGeneratorId
+    {
+        get
+        {
+            lock (_gate)
+            {
+                EnsureStartedLocked();
+                return new Dictionary<string, string>(_kitDirectoryByGeneratorId, StringComparer.OrdinalIgnoreCase);
             }
         }
     }
@@ -444,6 +468,11 @@ public sealed class PCellWorkerResolver : IPCellGeneratorResolver, IDisposable
                             // generator list so that listing kits (for the trust prompt) starts
                             // nothing.
                             _kitNameByGeneratorId[id] = kitName;
+                            // …and WHERE that kit is, which is the only thing that can answer
+                            // "does this kit ship a schematic symbol for this cell". The name
+                            // cannot: two workspaces may hold kits of one name, and a name is not
+                            // a path.
+                            _kitDirectoryByGeneratorId[id] = dir;
                         }
                         else
                             // Two kits offering one id: neither is obviously right, so the first wins

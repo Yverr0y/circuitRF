@@ -1,5 +1,125 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## A relative file reference means the WORKSPACE ROOT, and a run verb thought otherwise (2026-09-15)
+
+Owner, on the shipped S-Parameters example after copying it out of Tools ▸ Examples:
+
+```
+Running 'Amplifier.csch'  'SP1': SnP 'S1': Touchstone file not found:
+'…/S-Parameters/potentially_unstable_amp.s2p'.
+```
+
+Reported as the file not having been copied. **It was copied** — it was in the repository, in the
+build output, and in the installed workspace, beside the schematic that names it. What was wrong was
+the STRING.
+
+### One design, two answers
+
+`SnpPathPolicy` states the rule and gives its reasons: a stored `File` is relative to the
+**workspace root**, on all three sides — `ToStored` writes it that way when you browse to a file,
+`Elaborator.ResolveSnpFilePath` resolves it that way at Run, and `MoveRefRegistry` repairs it that
+way when the workspace moves. The example stored `potentially_unstable_amp.s2p`, which is the
+SCHEMATIC-relative spelling, and `Amplifier.csch` sits two directories down.
+
+Every gate that existed passed. The file was committed, the packaging item group shipped it,
+`WorkspaceCopy` copied it, the schematic extracted cleanly, and every part reached the netlist.
+Nothing asked the one question that mattered — **does the string resolve** — so
+`EveryFileAnExampleNamesResolvesAgainstItsWorkspaceRoot` now does, for every `File` parameter of
+every shipped example, against the workspace root and nothing else.
+
+### Why it ran perfectly headlessly, which is the part worth keeping
+
+`circuitrf sparam Amplifier.csch` produced 161 correct points. The base directory is not the
+Elaborator's here: `CnlReader` resolves an SnP `File` against the `.cnl`'s own folder, and
+`CircuitSource.FromSchematic` was handing it **the schematic's** folder. Simulate writes
+`netlist.cnl` at the workspace ROOT and hands the same root to the Elaborator, so the two agreed
+only for a schematic sitting at the workspace root — the usual layout, and why nothing reported it.
+
+That divergence is worse than either answer being wrong, because it is what makes a green CLI run
+stop meaning anything about the window; `docs/design/cli.md`'s own rule is that a design which runs
+headless runs when opened. `CircuitSource.ReferenceBaseOf` is now the one answer: the nearest
+ancestor workspace root, falling back to the document's own folder when it belongs to no workspace —
+which is the same fallback `SnpPathPolicy.Resolve` takes, and the only base a loose `.csch` can
+reasonably have.
+
+## A kit that shipped only artwork had no schematic side at all (2026-09-15)
+
+Owner, on `examples/PDK PCells`: with `SpiralInductor.clay` open, **Update Schematic from Layout
+creates a schematic and puts nothing in it**; `KIT_SPIRAL` needs a better-looking glyph; and neither
+it nor `KIT_MLIN` has any parameters on the schematic.
+
+The three are one gap. A complete kit part is four artefacts (`Reference ▸ PDK Authoring`
+§four-halves) and this kit ships the last one only — the Python generators. Nothing else in the
+workspace declared a schematic part for those cells, so `PdkKitRegistry` held none.
+
+### What each symptom actually was
+
+`LayoutToSchematicGenerator.Run` walks the layout's instances, works out which part each generator
+belongs to (`KitLayoutGenerators.PartRefFor`, which DID answer — the palette publishes a reference
+for a layout-only generator too), and then asks `PdkKitRegistry.Find` for the part. It got null, and
+took the "kit is not loaded" branch:
+
+```
+"KIT_SPIRAL" was left alone — the kit "pcell-kit" is not loaded in this
+workspace, so there is no part to create.
+```
+
+**The kit was loaded.** What it had no part for was the cell, and the sentence names the wrong thing
+— which is why the report read as a kit problem and the schematic came out empty.
+
+The other two follow from the same absence. A palette tile for a layout-only generator carries
+`Kind: Generic, PortCount: 0` and **no `CellDir`**, so `SchematicCanvas.OnPaletteDrop` takes its
+`CommitPlacement` branch rather than `CommitCellPlacementAsync`: a bare generic box, no pins, no
+parameters. There was never a worse glyph to improve — there was no symbol at all.
+
+### The fix: the kit ships the symbol, and the file's NAME is the declaration
+
+`PCellKitSchematicParts` builds a `PdkKitPart` around a `<generator-id>.csym` found beside
+`pcell-generators.json` (or in a `symbols/` folder beside it). Three choices in it are worth the
+words:
+
+* **Nothing lists the symbols**, for the reason `PCellGeneratorManifest` lists no generators: a
+  second list is a cache that can silently disagree with the thing it describes. A `.csym` matching
+  no generator is a file nothing reads; a generator with no `.csym` is a layout-only cell, which is
+  the state every such kit was in before.
+* **circuitRF draws nothing on the kit's behalf.** Generating a box with the right pin count was the
+  alternative — `AutoSymbolGenerator` already does exactly that for a cell folder — and a spiral
+  inductor drawn as a rectangle reads as a part nobody recognises. The kit author knows what the
+  part is, and `.csym` is circuitRF's own format, so they draw it in circuitRF's symbol editor.
+* **Pins from the symbol, parameters from the GENERATOR.** The symbol decides the port count and
+  where wires attach; the published interface is `resolver.DeclaredParameters(id)`, the same list the
+  generator reads. So a symbol cannot disagree with its cell about a parameter name — the defect
+  whose only symptom is wrong artwork.
+
+### Two traps found while wiring it
+
+**A length default is in SI metres and a schematic field is not.** Written verbatim, a 10 µm width
+becomes `1E-05` in a box with no unit beside it. It is written in the fixed `mm` baseline instead —
+the one `MicrostripSubstrateInjection.ApplyTechnologyLengthUnit` rewrites to the placing technology's
+own display unit — so the same declaration reaches an MMIC schematic as `10 µm` and a PCB one as
+`0.394 mil`. That rewrite had no production caller for cell placement, so
+`CommitCellPlacementAsync` now makes it, **gated on the reference being a kit ref**: a cell FOLDER's
+parameters are what its author typed, and rewriting those on placement would change a design's own
+spelling.
+
+**`SetKit` replaces everything held for one kit name, and the two halves of a kit are replaced on
+different occasions.** A kit re-import rebuilds its schematic parts while its interpreters keep
+running; a kit's scripts are re-read while its imported parts sit untouched. Either would have wiped
+the other. `KitScope.Generated` records which entries circuitRF synthesised, `SetKit` no longer
+removes those, and `SetPCellParts` never overwrites an entry the kit itself supplied — the import is
+the kit's own statement about that part, and the synthesised one exists only for a cell the kit says
+nothing about. All readers (`Find`, `PartsOf`, `FindRefByPartId`) keep asking one dictionary and
+getting the whole kit.
+
+A symbol buys the schematic side and not a model. These two cells still have no device equations, and
+a run says so rather than inventing one — which is why the synthesised `.ccell` deliberately does
+**not** set `ExternalProvider`: claiming the part can be evaluated would turn "this cell has no
+electrical model" into a device the worker resolver goes looking for and reports as missing, a
+different sentence about a different thing.
+
+Gate: `tests/Ui.Tests/Examples/PdkPCellExampleTests.cs` §5 — the owner's exact gesture, run against a
+clone of the shipped example with the generated-cell cache deleted.
+
 ## A port's TYPE moved from the `.cem` to the `.clay`, and silence stopped meaning "edge port" (2026-09-14)
 
 Owner bug report: place a port in the middle of a 50 Ω trace with geometry snapping OFF. The ghost

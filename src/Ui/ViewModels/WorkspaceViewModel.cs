@@ -5894,8 +5894,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
 
         _ = Task.Run(() =>
         {
-            if (CollectPCellGeneratorInfo(resolver, out var byKit, out var models, out var declared,
-                                          out string? problem) is false)
+            if (CollectPCellGeneratorInfo(resolver, out var reading, out string? problem) is false)
             {
                 if (problem is not null)
                     Dispatcher.UIThread.Post(() => Messages.Warning(problem));
@@ -5905,7 +5904,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             Dispatcher.UIThread.Post(() =>
             {
                 if (generation != _pcellRefreshGeneration) return;
-                ApplyPCellGeneratorInfo(byKit, models, declared);
+                ApplyPCellGeneratorInfo(reading!);
             });
         });
     }
@@ -5914,27 +5913,55 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     private int _pcellRefreshGeneration;
 
     /// <summary>
+    /// One reading of what this workspace's kits offer on the layout side — everything the palette,
+    /// the generator map and the synthesised schematic parts are built from, taken once.
+    ///
+    /// <para>A record rather than five out-parameters because the reading is taken on a background
+    /// thread and handed across to the UI one: what travels is the whole answer, and nothing that
+    /// reads it can accidentally be given half of one.</para>
+    /// </summary>
+    /// <param name="KitNames">Generator id → the kit it came from.</param>
+    /// <param name="KitDirectories">Generator id → that kit's folder, which is where a shipped
+    /// schematic symbol for the cell would be.</param>
+    /// <param name="Models">Generator id → the device model it declares, when it declares one.</param>
+    /// <param name="ParameterNames">Generator id → the names it accepts (KitPaletteMerge's fourth step).</param>
+    /// <param name="Parameters">Generator id → its full declaration, which is the published parameter
+    /// interface a synthesised schematic part carries.</param>
+    private sealed record PCellKitReading(
+        IReadOnlyDictionary<string, string> KitNames,
+        IReadOnlyDictionary<string, string> KitDirectories,
+        IReadOnlyDictionary<string, string> Models,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> ParameterNames,
+        IReadOnlyDictionary<string, IReadOnlyList<PCellParameterInfo>> Parameters);
+
+    /// <summary>
     /// Asks <paramref name="resolver"/> what its kits offer. Does no UI work of its own, so the same
     /// reading serves the background refresh and the synchronous fallback below.
     /// </summary>
     private static bool CollectPCellGeneratorInfo(
         CircuitRF.Ui.Layout.PCells.Wire.PCellWorkerResolver resolver,
-        out IReadOnlyDictionary<string, string> byKit,
-        out Dictionary<string, string> models,
-        out Dictionary<string, IReadOnlyList<string>> declaredParams,
+        out PCellKitReading? reading,
         out string? problem)
     {
-        models         = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        declaredParams = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
-        problem        = null;
+        reading = null;
+        problem = null;
 
-        try { byKit = resolver.KitNameByGeneratorId; }
+        IReadOnlyDictionary<string, string> byKit;
+        IReadOnlyDictionary<string, string> byDir;
+        try
+        {
+            byKit = resolver.KitNameByGeneratorId;
+            byDir = resolver.KitDirectoryByGeneratorId;
+        }
         catch (Exception ex)
         {
-            byKit   = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             problem = $"A kit's parametric cells could not be listed for the palette: {ex.Message}";
             return false;
         }
+
+        var models         = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var declaredParams = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        var declaredInfo   = new Dictionary<string, IReadOnlyList<PCellParameterInfo>>(StringComparer.OrdinalIgnoreCase);
 
         var builtIn = new HashSet<string>(
             CircuitRF.Ui.Layout.PCells.PCellRegistry.KnownGeneratorIds, StringComparer.OrdinalIgnoreCase);
@@ -5946,6 +5973,12 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             if (builtIn.Contains(gid)) continue;
             try
             {
+                // The FULL declaration, which is what a synthesised schematic part publishes as its
+                // parameter interface — kind, dimension, choices and all, not just the names. Read
+                // first and separately from the defaults below, because a parameter declared with no
+                // default is still a parameter the cell accepts.
+                if (resolver.DeclaredParameters(gid) is { Count: > 0 } info) declaredInfo[gid] = info;
+
                 if (resolver.DeclaredDefaults(gid) is not { } d) continue;
 
                 // What each cell ACCEPTS — read from the SAME declaration, so it costs nothing
@@ -5965,14 +5998,12 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             catch { /* one generator that will not describe itself must not cost the others */ }
         }
 
+        reading = new PCellKitReading(byKit, byDir, models, declaredParams, declaredInfo);
         return true;
     }
 
     /// <summary>Records what a reading found and republishes. UI thread.</summary>
-    private void ApplyPCellGeneratorInfo(
-        IReadOnlyDictionary<string, string> byKit,
-        IReadOnlyDictionary<string, string> models,
-        IReadOnlyDictionary<string, IReadOnlyList<string>> declaredParams)
+    private void ApplyPCellGeneratorInfo(PCellKitReading reading)
     {
         var builtIn = new HashSet<string>(
             CircuitRF.Ui.Layout.PCells.PCellRegistry.KnownGeneratorIds, StringComparer.OrdinalIgnoreCase);
@@ -5980,16 +6011,69 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         _pcellGeneratorKits.Clear();
         _pcellGeneratorModels.Clear();
         _pcellGeneratorParameters.Clear();
-        foreach (var kv in byKit)
+        foreach (var kv in reading.KitNames)
             if (!builtIn.Contains(kv.Key))
                 _pcellGeneratorKits[kv.Key] = kv.Value;
-        foreach (var kv in models)
+        foreach (var kv in reading.Models)
             _pcellGeneratorModels[kv.Key] = kv.Value;
-        foreach (var kv in declaredParams)
+        foreach (var kv in reading.ParameterNames)
             _pcellGeneratorParameters[kv.Key] = kv.Value;
 
+        MountPCellSchematicParts(reading);
         PublishKitPaletteItems();
     }
+
+    /// <summary>
+    /// Mounts the schematic side of every parametric cell whose kit ships a symbol for it, and
+    /// records the palette tiles those parts contribute.
+    ///
+    /// <para><b>What this fixes, and why nothing said so before.</b> A kit that ships generators and
+    /// no schematic parts left <c>PdkKitRegistry</c> with nothing for those cells. Dropping such a
+    /// tile on a schematic therefore placed a bare Generic box — the tile named a generator, and a
+    /// generator is not something a schematic can place — and <b>Update Schematic from Layout placed
+    /// nothing at all</b>, reporting that the kit was not loaded. It was; what it had no part for was
+    /// the cell. See <see cref="PCellKitSchematicParts"/> for the symbol convention.</para>
+    ///
+    /// <para>Mounted through <see cref="PdkKitRegistry.SetPCellParts"/> rather than
+    /// <c>SetKit</c>, so a kit's OWN schematic part for a cell always wins and neither half's
+    /// re-reading discards the other's.</para>
+    /// </summary>
+    private void MountPCellSchematicParts(PCellKitReading reading)
+    {
+        _pcellKitPaletteItems.Clear();
+
+        var byKitName = new Dictionary<string, List<PdkKitPart>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (generatorId, kitName) in _pcellGeneratorKits)
+        {
+            string? kitDir = reading.KitDirectories.GetValueOrDefault(generatorId);
+            var declared   = reading.Parameters.GetValueOrDefault(generatorId);
+
+            var part = PCellKitSchematicParts.TryBuild(kitName, generatorId, kitDir, declared,
+                                                       out string? problem);
+            if (problem is not null) Messages.Warning(problem);
+            if (part is null) continue;
+
+            if (!byKitName.TryGetValue(kitName, out var list)) byKitName[kitName] = list = [];
+            list.Add(part);
+            _pcellKitPaletteItems.Add(PCellKitSchematicParts.PaletteItemFor(kitName, part));
+        }
+
+        // Every kit the reading names is told what its synthesised half is now, INCLUDING the kits
+        // that produced none: a symbol deleted from a kit has to unmount the part it produced, and
+        // only an empty publish for that kit says so.
+        foreach (string kitName in _pcellGeneratorKits.Values.Distinct(StringComparer.OrdinalIgnoreCase))
+            PdkKitRegistry.SetPCellParts(CurrentWorkspaceRoot, kitName,
+                                         byKitName.GetValueOrDefault(kitName) ?? []);
+    }
+
+    /// <summary>
+    /// Palette tiles for the parts synthesised from a kit's parametric cells. Held apart from
+    /// <see cref="_pdkPaletteItems"/> for the reason <see cref="_pcellGeneratorKits"/> is: the two
+    /// halves are rebuilt on different occasions, and merging them at publish time is what keeps one
+    /// rebuild from discarding the other.
+    /// </summary>
+    private readonly List<PaletteItem> _pcellKitPaletteItems = [];
 
     /// <summary>
     /// The last-resort reading, taken on the thread that asked. Installed as
@@ -6006,14 +6090,13 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         if (_pcellGeneratorKits.Count > 0) return false;
         if (_pcellResolver is not { } resolver) return false;
 
-        if (!CollectPCellGeneratorInfo(resolver, out var byKit, out var models, out var declared, out _))
-            return false;
-        if (byKit.Count == 0) return false;
+        if (!CollectPCellGeneratorInfo(resolver, out var reading, out _)) return false;
+        if (reading!.KitNames.Count == 0) return false;
 
         // Counts as a refresh, so a background pass started BEFORE this one is discarded when it
         // lands rather than replacing a newer reading with an older one.
         _pcellRefreshGeneration++;
-        ApplyPCellGeneratorInfo(byKit, models, declared);
+        ApplyPCellGeneratorInfo(reading);
         return true;
     }
 
@@ -6022,8 +6105,21 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     /// framework-free and therefore testable on its own.</summary>
     private void PublishKitPaletteItems()
     {
+        // The kit's OWN parts first, then the ones synthesised from its parametric cells — and only
+        // for a cell no imported part already claims, which is the same precedence
+        // PdkKitRegistry.SetPCellParts applies to the parts themselves. Two tiles for one part would
+        // make a user choose between things that mean the same, which is the defect KitPaletteMerge
+        // exists to avoid.
+        var claimed = new HashSet<(string Kit, string Part)>(
+            _pdkPaletteItems.Where(i => i.Pdk is not null)
+                            .Select(i => (i.Pdk!.KitName, i.Pdk.PartId)));
+        IReadOnlyList<PaletteItem> parts = _pcellKitPaletteItems.Count == 0
+            ? _pdkPaletteItems
+            : [.. _pdkPaletteItems,
+               .. _pcellKitPaletteItems.Where(i => !claimed.Contains((i.Pdk!.KitName, i.Pdk.PartId)))];
+
         var composed = KitPaletteMerge.Compose(
-            _pdkPaletteItems, _pcellGeneratorKits, _pcellGeneratorModels, _pcellGeneratorParameters);
+            parts, _pcellGeneratorKits, _pcellGeneratorModels, _pcellGeneratorParameters);
         // The same answer, published for Update-Layout-from-Schematic, so a part that places one view
         // from its tile places the other from the design.
         KitLayoutGenerators.Publish(CurrentWorkspaceRoot, composed);

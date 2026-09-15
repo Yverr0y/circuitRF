@@ -1,0 +1,130 @@
+{
+  "FormatVersion": 6,
+  "GridSize": 100,
+  "PortCount": 2,
+  "Primitives": [
+    {
+      "$type": "Polyline",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "Points": [
+        [
+          -120.0,
+          0.0
+        ],
+        [
+          -120.0,
+          -120.0
+        ],
+        [
+          120.0,
+          -120.0
+        ],
+        [
+          120.0,
+          120.0
+        ],
+        [
+          -80.0,
+          120.0
+        ],
+        [
+          -80.0,
+          -80.0
+        ],
+        [
+          80.0,
+          -80.0
+        ],
+        [
+          80.0,
+          80.0
+        ],
+        [
+          -40.0,
+          80.0
+        ],
+        [
+          -40.0,
+          -40.0
+        ],
+        [
+          40.0,
+          -40.0
+        ],
+        [
+          40.0,
+          40.0
+        ]
+      ]
+    },
+    {
+      "$type": "Line",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "X1": -120.0,
+      "Y1": 0.0,
+      "X2": -300.0,
+      "Y2": 0.0
+    },
+    {
+      "$type": "Line",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "X1": 40.0,
+      "Y1": 40.0,
+      "X2": 160.0,
+      "Y2": 40.0
+    },
+    {
+      "$type": "Line",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "X1": 160.0,
+      "Y1": 40.0,
+      "X2": 160.0,
+      "Y2": 0.0
+    },
+    {
+      "$type": "Line",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "X1": 160.0,
+      "Y1": 0.0,
+      "X2": 300.0,
+      "Y2": 0.0
+    },
+    {
+      "$type": "Circle",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "Filled": true,
+      "Cx": 40.0,
+      "Cy": 40.0,
+      "R": 9.0
+    },
+    {
+      "$type": "Circle",
+      "ColorRole": "SymbolLine",
+      "StrokeTier": "Normal",
+      "Filled": true,
+      "Cx": 160.0,
+      "Cy": 40.0,
+      "R": 9.0
+    }
+  ],
+  "Pins": [
+    {
+      "LocalX": -300.0,
+      "LocalY": 0.0,
+      "PortIndex": 0,
+      "Name": "1"
+    },
+    {
+      "LocalX": 300.0,
+      "LocalY": 0.0,
+      "PortIndex": 1,
+      "Name": "2"
+    }
+  ]
+}
