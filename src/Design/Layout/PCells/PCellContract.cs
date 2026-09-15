@@ -293,6 +293,28 @@ public sealed record PCellResult(
     IReadOnlyList<string>? UnreadParameters = null);
 
 /// <summary>
+/// A parameter's PHYSICAL dimension, as the generator declared it — the same three the wire carries,
+/// because they are the only three that change what crosses it (a length is converted to database
+/// units, an angle to degrees, and everything else is sent as it stands).
+///
+/// <para><b>Why it is on the contract and not only on the wire.</b> It is what decides the unit a
+/// parameter is SHOWN and TYPED in. A built-in PCell gets that from the component that declares it
+/// (<c>ComponentTypeRegistry.DefaultParameters</c>, where a length is spelled "mm"); a script-backed
+/// one has no such component, so without this the parameter editor has nothing to go on and falls
+/// back to a bare SI number — a 10 µm turn width rendered as "0.00001", in a field that then refuses
+/// "10 um" because there is no unit for it to strip.</para>
+/// </summary>
+public enum PCellDimension
+{
+    /// <summary>A count, a ratio, an impedance, a model name — anything circuitRF does not scale.</summary>
+    None,
+    /// <summary>A width, a length, a radius. SI metres on this side of the wire.</summary>
+    Length,
+    /// <summary>Degrees, on both sides.</summary>
+    Angle,
+}
+
+/// <summary>
 /// What a generator says about ONE of its parameters, beyond its name and its value — everything
 /// the parameter editor needs to put the right control on screen instead of the same free-text box
 /// for all of them.
@@ -305,7 +327,9 @@ public sealed record PCellResult(
 ///
 /// <para>Every field past <paramref name="Kind"/> is optional and null means "nothing stated",
 /// which is what a generator written before any of this existed says — and it renders exactly as it
-/// always did.</para>
+/// always did. <paramref name="Dimension"/> is the one exception to "optional means display-only":
+/// it decides the UNIT the parameter is shown and typed in, and its <see cref="PCellDimension.None"/>
+/// default is a real answer, not an absent one.</para>
 /// </summary>
 public sealed record PCellParameterInfo(
     string Name,
@@ -315,7 +339,8 @@ public sealed record PCellParameterInfo(
     IReadOnlyList<PCellValue>? Choices = null,
     double? Minimum = null,
     double? Maximum = null,
-    bool Computed = false)
+    bool Computed = false,
+    PCellDimension Dimension = PCellDimension.None)
 {
     /// <summary>What to show beside the field — the generator's own label when it gave one that says
     /// more than the name already does, else the name.</summary>

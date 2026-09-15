@@ -148,7 +148,7 @@ public sealed partial class PCellParamRowViewModel : ObservableObject
             ? [.. info!.Choices!.Select(FormatChoice)]
             : [];
 
-        Tip = BuildTip(info, Editor, name, unread);
+        Tip = BuildTip(owner, unit, info, Editor, name, unread);
         RefreshFromInstance();
     }
 
@@ -163,7 +163,19 @@ public sealed partial class PCellParamRowViewModel : ObservableObject
         _                     => choice.AsReal().ToString(System.Globalization.CultureInfo.InvariantCulture),
     };
 
-    private static string? BuildTip(PCellParameterInfo? info, PCellParamEditor editor, string name,
+    /// <summary>
+    /// A declared bound as the row itself would show the value — through the layout's own display
+    /// unit for a length, so "at least 4" sits beside a field reading "10" on a layout in µm.
+    ///
+    /// <para>Raw was the alternative and it is the same defect the row's own <c>Unit</c> fixed: a
+    /// generator declares its bounds in SI, and "at least 4E-06" beside a µm field is a number the
+    /// reader has to convert before it means anything.</para>
+    /// </summary>
+    private static string FormatBound(LayoutShapePropertiesViewModel owner, string unit, double bound)
+        => owner.FormatDeclaredBound(unit, bound);
+
+    private static string? BuildTip(LayoutShapePropertiesViewModel owner, string unit,
+                                    PCellParameterInfo? info, PCellParamEditor editor, string name,
                                     bool unread)
     {
         var parts = new List<string>();
@@ -179,9 +191,12 @@ public sealed partial class PCellParamRowViewModel : ObservableObject
         else if (unread)
             parts.Add("The generator did not read this on the run that drew the current artwork, " +
                       "so changing it will not change the geometry.");
-        if (info is { Minimum: { } lo, Maximum: { } hi }) parts.Add($"{lo} to {hi}");
-        else if (info is { Minimum: { } only }) parts.Add($"at least {only}");
-        else if (info is { Maximum: { } cap }) parts.Add($"at most {cap}");
+        if (info is { Minimum: { } lo, Maximum: { } hi })
+            parts.Add($"{FormatBound(owner, unit, lo)} to {FormatBound(owner, unit, hi)}");
+        else if (info is { Minimum: { } only })
+            parts.Add($"at least {FormatBound(owner, unit, only)}");
+        else if (info is { Maximum: { } cap })
+            parts.Add($"at most {FormatBound(owner, unit, cap)}");
         return parts.Count > 0 ? string.Join(" — ", parts) : null;
     }
 

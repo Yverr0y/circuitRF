@@ -76,8 +76,18 @@ class Parameter:
     dimension: str = NONE
     #: What this parameter is when circuitRF sends nothing for it. ``None`` states none.
     #:
-    #: **A length default is stated in DATABASE UNITS**, like every other length on this wire — the
-    #: host does not convert it, because there is nothing to convert from (schema §1: no metres).
+    #: **Declaring one is what makes a cell PLACEABLE rather than merely drawable.** A parameter with
+    #: no default is not sent to the generator and is not put on the placed instance at all: the cell
+    #: still draws, from whatever fallback the generator's own accessor supplies, so the artwork looks
+    #: right — while there is nothing in the parameter list to edit and every :class:`Handle` naming
+    #: that parameter is reported as naming something the cell does not have.
+    #:
+    #: **A length default is stated in SI METRES**, unlike every length VALUE on this wire. The
+    #: distinction is not a wart: a value has already been through circuitRF's metres-to-DBU
+    #: conversion by the time it reaches you, whereas a default is a value circuitRF HOLDS — it lands
+    #: on the instance, is shown in the parameter editor, and goes through that same conversion on
+    #: its way back here. So ``Parameter.length("W", 10e-6)`` is 10 µm; ``Parameter.length("W",
+    #: 10_000)`` is ten kilometres, and it draws.
     default: Any = None
 
     #: What to CALL this parameter on screen, when its name is not what a human would call it. The
@@ -108,7 +118,10 @@ class Parameter:
 
     @staticmethod
     def length(name: str, default: Any = None) -> "Parameter":
-        """A width, a length, a radius — arrives in DATABASE UNITS, already converted."""
+        """A width, a length, a radius — arrives in DATABASE UNITS, already converted.
+
+        The ``default``, unlike the value, is in SI METRES — see :attr:`Parameter.default`.
+        """
         return Parameter(name, "real", LENGTH, default)
 
     @staticmethod

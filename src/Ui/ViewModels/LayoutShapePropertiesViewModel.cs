@@ -1614,23 +1614,51 @@ public sealed partial class LayoutShapePropertiesViewModel : ObservableObject
         if (IsMklopfTarget && MklopfPseudoParamUnit(name) is { } pseudoUnit)
             return new PCellParamRowViewModel(this, name, pseudoUnit);
 
-        var comp = ResolveSelectedInstancePCellComponentName(); // just for the DefaultParameters unit lookup
-        string unit = "";
-        if (comp is { } kind)
-        {
-            var dps = ComponentTypeRegistry.DefaultParameters(kind, 0);
-            foreach (var dp in dps)
-                if (dp.Name == name) { unit = dp.Unit; break; }
-        }
-
         // What the GENERATOR says about this parameter, from its two independent sources: the
-        // declaration (labels, enumerations, bounds — asked of the script) and the run that produced
-        // this cell (which parameters it turned out to derive — recorded with the cell). Both are
-        // optional and both are absent for a built-in, which is why a built-in's rows are unchanged.
-        return new PCellParamRowViewModel(this, name, unit,
-                                          DeclaredParamInfo(name),
+        // declaration (labels, enumerations, bounds, the DIMENSION — asked of the script) and the run
+        // that produced this cell (which parameters it turned out to derive — recorded with the
+        // cell). Both are optional and both are absent for a built-in, which is why a built-in's rows
+        // are unchanged.
+        var info = DeclaredParamInfo(name);
+
+        return new PCellParamRowViewModel(this, name, UnitForPCellParam(name, info),
+                                          info,
                                           SelectedInstanceComputes(name),
                                           SelectedInstanceDoesNotRead(name));
+    }
+
+    /// <summary>
+    /// The unit a PCell parameter is shown and typed in — <b>the one string the whole read/write
+    /// path is keyed on</b>. "mm" routes through the LAYOUT's own display unit (R-L5f-8), so a
+    /// length reads "10 µm" on this MMIC and "0.4 mil" on a board and parses back the same way;
+    /// "deg" is degrees; "" is a bare number.
+    ///
+    /// <para><b>Two sources, in this order, and the second is not a fallback for a missing first.</b>
+    /// A BUILT-IN PCell's unit belongs to the component that declares it, and that is the only place
+    /// that knows a Klopfenstein <c>Z1</c> is ohms or an <c>F3db</c> is gigahertz — a dimension
+    /// cannot say either. A SCRIPT-BACKED one has no such component at all
+    /// (<c>LayoutToSchematicGenerator.TryGetSymbolKind</c> maps built-in ids only), so its unit can
+    /// only come from what the generator DECLARED.</para>
+    ///
+    /// <para><b>OWNER REPORT, 2026-09-15.</b> That second source did not exist: every script-backed
+    /// parameter got "", which made a 10 µm turn width read as <c>0.00001</c> next to a layout whose
+    /// every other dimension was in µm — and made the field uneditable in any unit, because with no
+    /// unit to strip <c>"10 um"</c> does not parse and a bare <c>10</c> commits ten METRES. A kit
+    /// declares its dimensions already (it is what makes the host's metre-to-DBU conversion possible
+    /// at all); nothing was carrying them this far.</para>
+    /// </summary>
+    private string UnitForPCellParam(string name, PCellParameterInfo? info)
+    {
+        if (ResolveSelectedInstancePCellComponentName() is { } kind)
+            foreach (var dp in ComponentTypeRegistry.DefaultParameters(kind, 0))
+                if (dp.Name == name) return dp.Unit;
+
+        return info?.Dimension switch
+        {
+            PCellDimension.Length => "mm",
+            PCellDimension.Angle  => "deg",
+            _                     => "",
+        };
     }
 
     /// <summary>The generator's declaration for one parameter of the selected instance's cell, or
@@ -1811,6 +1839,13 @@ public sealed partial class LayoutShapePropertiesViewModel : ObservableObject
     /// shows its own text, because there is no unit to convert a model name or a flag through and
     /// formatting one as a number would show a confident <c>0</c> where the real value is a word.
     /// </summary>
+    /// <summary>A generator's declared bound, formatted exactly as a VALUE in the same row would be
+    /// — see <c>PCellParamRowViewModel.FormatBound</c>. Separate only because a bound is a bare
+    /// double and a value is a <see cref="PCellValue"/>.</summary>
+    internal string FormatDeclaredBound(string unit, double bound)
+        => _vm is null ? bound.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                       : FormatPCellParamValue(unit, bound);
+
     private string FormatPCellParamValue(string unit, PCellValue value)
         => value.Kind == PCellValueKind.Real ? FormatPCellParamValue(unit, value.AsReal()) : value.AsText();
 

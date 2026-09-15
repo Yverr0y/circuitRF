@@ -366,10 +366,15 @@ class Handle:
     * **Several handles may name one parameter.** A centred width declares a grip on each edge; both
       drive the same value and both move when either is dragged. Nothing special is needed.
 
-    ``min``/``max`` are optional bounds in the parameter's own units (on this side, that means
-    database units for a length, like everything else). They are a convenience — a generator that
-    clamps internally needs neither, because circuitRF redraws the grip wherever your cell actually
-    put it.
+    ``min``/``max`` are optional bounds, **in SI metres for a length** — not in database units like
+    the four coordinates beside them. A bound is a parameter VALUE, and a parameter value on
+    circuitRF's side of the wire is SI whatever units it arrived here in; the drag solver clamps
+    against it there, before the conversion that hands your generator DBU.
+
+    **Declare a ``min`` on anything that has a floor**, even if you also guard inside the generator.
+    They answer different questions: the bound steers the GESTURE, so a grip dragged past zero stops
+    rather than inverting every rectangle in the cell and handing the clipper a self-intersecting
+    mess, while a guard inside refuses a value someone TYPED, which no bound on a handle ever sees.
     """
 
     parameter: str

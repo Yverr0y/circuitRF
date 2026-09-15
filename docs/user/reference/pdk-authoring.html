@@ -158,7 +158,7 @@ silently, putting geometry on a plausible but wrong layer. They can be <code>Non
 technology still generates geometry — so have a fallback.</p>
 <p><code>diagnostics</code> is <strong>not</strong> an error channel. It is for a generator that <em>did</em> produce geometry and has a
 caveat about it. To refuse outright, raise.</p>
-<h3 id="five-things-worth-knowing-before-writing-a-real-cell">Five things worth knowing before writing a real cell</h3>
+<h3 id="six-things-worth-knowing-before-writing-a-real-cell">Six things worth knowing before writing a real cell</h3>
 <p><strong>1. There are no metres.</strong> Every length arrives in <strong>database units</strong>, converted by circuitRF with its
 own single rounding rule before it was sent. The resolution is deliberately not on the wire, so a script
 <em>cannot</em> do its own conversion — there is nothing to do it with. That is what keeps one rounding rule
@@ -175,7 +175,14 @@ omitted and the most expensive to add later, which is why the constructor will n
 convert <code>W</code> from metres. A length you forget to declare arrives unconverted and your geometry is off by
 nine orders of magnitude; a non-length you declare as one is silently scaled. <strong>This is the one
 declaration worth checking twice.</strong></p>
-<p><strong>5. A generator must be deterministic given its declared inputs.</strong> No clock, no ambient or global
+<p><strong>5. Give every parameter a default, and state a length default in METRES.</strong> A parameter with no
+declared default is not placed: your generator still draws, from its own accessor fallback, but the
+parameter is not on the instance — nothing in the Properties Inspector to edit, and any drag handle
+naming it is reported as naming a parameter the cell does not have. The artwork looks entirely
+correct throughout. A length <em>value</em> reaches you already converted to database units; a length
+<em>default</em> is a value circuitRF holds and converts like any other, so <code>Parameter.length(&quot;W&quot;, 10e-6)</code>
+is 10 µm and <code>Parameter.length(&quot;W&quot;, 10_000)</code> is ten kilometres.</p>
+<p><strong>6. A generator must be deterministic given its declared inputs.</strong> No clock, no ambient or global
 state, no randomness, no set-iteration order, no accumulation whose order varies between runs. Two users
 on different machines must get identical geometry — when they do not, what they see is a design that
 changed by itself, and the cache keyed on those inputs is quietly poisoned. Reading a file is fine

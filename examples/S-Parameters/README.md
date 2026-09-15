@@ -14,6 +14,14 @@ point of the measurement blocks:
 | `MeasGain` | `S11_dB`, `S21_dB`, `S12_dB`, `S22_dB`, `VSWR_in` |
 | `MeasStability` | `Delta`, Rollett `K`, `MU`, and `MSG_dB` |
 
+**None of those stability numbers has to be written out.** `K`, μ, μ′, |Δ| and MAG/MSG are
+**built into circuitRF**: add a trace in a Data Display, pick the SP1 network as its source, and
+choose the metric from the list under the S-parameter elements — no measurement block, no
+expression, and the equation each one uses is written out in *Reference ▸ Derived Metrics*. They are
+spelled out here anyway because this is the example that shows you **how to write a custom
+equation**, and a formula you can check against a built-in answer is the one worth learning on.
+Delete `MeasStability` and the testbench still plots every one of them.
+
 Three things in those expressions are worth copying:
 
 - **`SP1.S(2,1)` is S21.** The `i` and `j` arguments are 1-based **port numbers**, not array

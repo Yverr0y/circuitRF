@@ -83,10 +83,22 @@ public sealed class PCellWorkerProvider : IDisposable
             declared.Add(new PCellParameterInfo(
                 p.Name, p.Kind, p.Default, p.Label,
                 p.Choices is { Count: > 0 } ? p.Choices : null,
-                p.Minimum, p.Maximum, p.Computed));
+                p.Minimum, p.Maximum, p.Computed, DimensionOf(p.Dimension)));
         }
         return declared;
     }
+
+    /// <summary>The wire's dimension as the CONTRACT spells it. Two enums rather than one because
+    /// they answer to different owners: the wire's is the serialized vocabulary and may only change
+    /// with a wire version, the contract's is what the parameter editor reads. An unrecognised wire
+    /// value maps to <see cref="PCellDimension.None"/> — the same answer a generator that declares
+    /// nothing gives, which shows a number unscaled rather than scaling it by a guess.</summary>
+    private static PCellDimension DimensionOf(PCellWireDimension dimension) => dimension switch
+    {
+        PCellWireDimension.Length => PCellDimension.Length,
+        PCellWireDimension.Angle  => PCellDimension.Angle,
+        _                         => PCellDimension.None,
+    };
 
     public bool TryGetGenerator(string generatorId, out PCellGenerator generator)
     {

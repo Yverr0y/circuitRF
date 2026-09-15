@@ -1,5 +1,197 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## The PDK PCells example shipped cells nobody could adjust, 2026-09-15
+
+Owner, on the shipped `examples/PDK PCells` workspace: the spiral inductor is not using generated
+artwork; there are no parameters on `KIT_SPIRAL` or `KIT_MLIN` that change the geometry; placing
+`KIT_MLIN` reports *"declares a drag handle for 'L', which is not one of its parameters"*; and both
+cells draw on **Metal2**, which in that technology has **air directly beneath it** — so the parts
+are floating.
+
+All four are one root cause plus one technology reading, and every one of them was silent.
+
+### A parameter with no declared DEFAULT is not placed at all
+
+`kit.py` declared `Parameter.length("W")` with no default. `PCellWorkerProvider.DeclaredDefaults`
+keeps only the parameters that declare one — deliberately: "a placed cell never carries a value its
+generator never sanctioned" — so the placement path
+(`LayoutEditorViewModel.PaletteDrag.CommitPCellDrop`) handed `GetOrCreate` an **empty dictionary**.
+Three consequences follow, and none of them points back at the declaration:
+
+* The generator still draws, because its own accessor call supplies a fallback
+  (`params.length("W", 10_000)`). **The artwork is correct.** Nothing looks wrong.
+* `LayoutShapePropertiesViewModel.OrderedParamNames` builds the parameter rows from
+  `origin.Parameters`, which is that empty dictionary — so the Properties Inspector shows **no
+  parameters**, and the cell reads as not parameterised rather than as misdeclared.
+* `PCellHandleSolver.Validate` is asked about the same dictionary, so **every drag handle** is
+  rejected as `UnknownParameter`. That message is the only one the user ever sees, and it names the
+  handle rather than the missing default.
+
+**A length default is declared in SI METRES, not DBU**, and the shipped Python package said the
+opposite in `Parameter.default`'s own docstring ("*stated in DATABASE UNITS … the host does not
+convert it*"). It is wrong: a length VALUE has already been through `PCellWireCodec.EncodeGenerate`'s
+metres-to-DBU conversion by the time a generator sees it, but a DEFAULT is a host-side parameter
+value that lands on the instance and goes through that same conversion on the way back out. So
+`Parameter.length("W", 10_000)` is ten kilometres, and it draws. No shipped kit had caught this: the
+`cni` vendor bridge declares every kit parameter as dimensionless on purpose, precisely to keep
+circuitRF out of its unit conversions. Fixed in `tools/pcell-python/circuitrf_pcell/host.py` and
+written up as rule 5 in `docs/user/src/reference/pdk-authoring.md`.
+
+### The default signal layer is the topmost conductor, which on this stackup is the air bridge
+
+`mmic-GaAs_2LM_100um.ctech` is internally consistent and correct: Metal2 is a 3 µm conductor with
+2.55 µm of **Air** under it, a MIM film, then Metal1 lying on the GaAs. That is an **air bridge**,
+and the `Metal1-Metal2 Post` via in the same file is its post. What is wrong is only that
+`SubstrateResolver.FindSignalConductor`'s R-pc-9 default — "the topmost conductor" — lands on it.
+
+The electrical half showed it plainly: `circuitrf netlist` on `MicrostripLine.csch` extracted
+`H=0.00010275 Er=12.59` — 100 µm of GaAs plus the air and the nitride above it, averaged — for a
+testbench whose entire point is an ordinary GaAs microstrip. `TL1` now carries the per-instance
+`SignalLayer = Metal1` parameter every microstrip component already has
+(`ComponentTypeRegistry.SignalGroundLayerParams`, read by `NetExtractor`), and extracts
+`H=0.0001 Er=12.9 T=3e-06`. **The technology was not changed** — it is also shipped at
+`src/Design/resources/technologies/` and is the New Workspace MMIC starter.
+
+Both generators now take a **`Metal`** parameter (a declared `choices` pair, so the Properties
+Inspector renders a dropdown) defaulting to `Metal1`, and resolve it by NAME rather than asking for
+`tech.signal_layer`. They also carry their own name→layer fallback table, because
+`tech.layer_named` answers nothing when no technology resolves and the whole cell would otherwise
+collapse onto one layer — which draws perfectly and shorts the air bridge to the coil it crosses.
+`KIT_SPIRAL` now routes its inner terminal out the way a real one does: a via post, a span on the
+OTHER metal clearing every turn, a post back down, and a landing pad, so both pins are on the coil's
+own layer. Setting `Metal` to `Metal2` inverts the whole arrangement into an underpass.
+
+### The shipped SpiralInductor.clay is a live instance now, and that has one trap
+
+It holds one `KIT_SPIRAL` instance plus its `PCellSnapshots` entry; the geometry is rebuilt by
+running the kit. **The snapshot deliberately records no `TechIdentity`.** That field is an absolute
+filesystem path — `GeneratedCellStore.RecordSnapshot` stores `ResolvedTechPath` verbatim and
+`WorkspaceViewModel`'s `ResolveTech` does `File.Exists` on it — so committing one would put a home
+directory in a public repository AND resolve nowhere else, silently rebuilding every other machine's
+copy against no technology at all. The generators' own fallback table is what makes the answer the
+same either way.
+
+**A generated cell's folder name also hashes circuitRF's own shipped Python package**
+(`PCellWorkerResolver.ContentKeyOf` appends `PCellPythonPackage.ContentKey`), so editing a COMMENT in
+`tools/pcell-python` moves it and `GeneratedCellsLifecycle.Regenerate` repoints the instance. That is
+the designed response and not a defect — it is also why `PdkPCellExampleTests` asserts that the clone
+REBUILDS and resolves, rather than asserting a stable folder name, which would turn an ordinary edit
+to the package into a failing example-workspace test.
+
+### A script-backed length parameter had no unit, so it read in bare SI metres
+
+Owner, on the fixed example: the turn width shows `0.00001` beside a layout whose every other
+dimension is in µm. **This is not specific to the example — it is every script-backed kit.**
+
+The Properties Inspector's whole read/write path for a PCell parameter is keyed on one string, the
+row's `Unit`, and `LayoutShapePropertiesViewModel` built it from `ComponentTypeRegistry
+.DefaultParameters` alone. That table is keyed by `SymbolKind`, reached through
+`LayoutToSchematicGenerator.TryGetSymbolKind`, **which maps built-in generator ids only** — so a
+kit's cell got `""` every time. `"mm"` is the spelling that routes a length through the layout's own
+display unit (`FormatPCellParamValue`/`TryParsePCellParamValue` both special-case it); with `""` the
+value falls through as a raw double. The write half is worse than the read half and was invisible
+until you go to use it: with no unit to strip, `"10 um"` does not parse at all, and a bare `"10"`
+commits **ten metres**.
+
+The dimension was on the wire the whole time — it is what makes the host's metre-to-DBU conversion
+possible at all (`PCellWireCodec.EncodeGenerate` reads `PCellWireDimension.Length` to decide what to
+convert) — but `PCellParameterInfo`, the contract type the parameter editor actually reads, did not
+carry it. It does now (`PCellDimension`, a contract-side enum mapped from the wire one in
+`PCellWorkerProvider.DeclaredParameters`), and `UnitForPCellParam` consults the component table
+first and the declaration second.
+
+**Second, not as a fallback for a missing first.** A built-in's unit belongs to the component that
+declares it and is the only thing that knows a Klopfenstein `Z1` is ohms or an `F3db` is gigahertz;
+a dimension can say neither. Gate: two tests in
+`tests/Ui.Tests/PCellPropertiesInspectorParameterListTests.cs`, driven through a resolver that
+declares dimensions the way a kit does — both go red with the lookup removed.
+
+### The coil is emitted as the regions it forms, not the rectangles it was drawn from
+
+Owner: the spiral is built from many segments; can the PCell union them. It can, and the kit now
+does — `clip("or", rings)` over the boolean channel (wire schema §8), which is a host round trip
+made in the middle of a `generate`. **circuitRF performs the boolean**, over the same Clipper2 the
+layout editor's Boolean commands use, for the reason `services.py`'s own header gives: a second
+clipper in the script would be two implementations of one rule, disagreeing by a database unit and
+rendering perfectly.
+
+Sixteen rectangles become two polygons: the coil with its outer lead, and the landing pad — a
+separate island on purpose, joined through a via rather than through metal. Overlapping rectangles
+already LOOK solid, which is why this is easy to leave undone; they are one picture and not one
+figure, and every consumer downstream sees the seams (a DRC width check measures each rectangle
+rather than the conductor, an EM extraction meshes internal edges carrying no current, an export
+carries the overlaps onward). `KIT_MLIN` is one rectangle and stays one: a union that turns a
+rectangle into a polygon buys nothing.
+
+Outside a host `clip` raises `HostUnavailable` rather than substituting a different answer, and the
+kit returns the rectangles as they stand — the same region in more pieces, which is honest, unlike
+computing a union nobody can reconcile with circuitRF's.
+
+### The winding carried a dead-ended stub, and `Turns` could not be fractional
+
+Owner: for any turn count there is a trace that runs off to the right, bends twice and ends — what is
+it? And 3.5 turns should put the second terminal somewhere else.
+
+Both come from the same construction. The spiral was drawn as a stack of nearly-closed concentric
+RINGS, each with a gap on one side, joined by a step inward — which makes a continuous winding, but
+one whose free end is the outermost ring's gap, at the top-left. The outer lead was attached at the
+MIDDLE of the outermost bottom side instead. So metal ran from the lead in **both** directions: one
+way spiralling inward, the other right along the bottom, up the right side and back along the top,
+dead-ending at the ring's real free end — three-quarters of a lap of open stub, in the same metal as
+the coil, with nothing in the picture to tell them apart. An inductor with one of those on it is a
+different part. A ring stack also cannot express three and a half turns at all; `Turns` was declared
+`Parameter.integer`, and an integer parameter correctly refuses "3.5" in the Properties Inspector, so
+the declaration was the bug rather than the editor.
+
+Rebuilt as a **walk**: go straight, turn ninety degrees, every side one pitch longer than the side two
+before it (Ulam's rule, which is what holds the inter-turn gap at exactly `Space`). The walk has a
+definite start and a definite end, so the lead extends the LAST side in the direction it was already
+travelling and there is no free end anywhere else. `turns × 4` gives quarter laps; the whole ones are
+walked in full and the remainder is walked as a partial side, so 3.25 / 3.5 / 3.75 bring pin 1 out on
+the next side each time with nothing special-cased. `Turns` is now `Parameter.real`. The winding is
+re-centred on its own bounding box afterwards, so growing it does not drift the cell off its
+placement.
+
+**The gate is AREA against a closed form, because that is what a stub changes** and no amount of
+looking at the outline will tell you. A rectilinear path of constant width w and centre-line length L,
+mitred square, covers exactly `L·w + w²`; a square spiral's centre line is an arithmetic series (two
+sides of every length, each pair one pitch longer) summing to `8na + 2pn(2n−1)` for n whole turns.
+Both are written out in the test rather than asked of the generator. Measured exact at 2, 3 and 5
+turns — the failure injected to check the gate reported precisely the 60 µm of extra lead that caused
+it. The old stub was some 30% of the winding against a 1% tolerance.
+
+### A grip with no floor drags the cell inside out
+
+Owner: the grip handles need a minimum value or the geometry goes crazy. It does — a width or an
+inner opening dragged through zero goes negative, every rectangle in the winding inverts, and the
+clipper is handed a self-intersecting region that still renders.
+
+`PCellHandleSolver.Propose` already clamps each proposal to `PCellHandle.Min`/`Max`; the kit simply
+declared neither. It does now, at this process's 4 µm minimum feature — which the kit states on its
+own account, because a generator is not handed its technology's DRC rules (`tech` carries layers and
+a stackup and nothing else), and this kit already states the same technology's layer numbers for its
+no-technology fallback.
+
+**Both halves are needed and they are not redundant.** The handle bound steers the GESTURE and is
+never consulted for a value someone TYPED — the Properties Inspector writes straight through to the
+generator — so the generator refuses the same values itself, naming the parameter and the floor in
+micrometres. The gate drives the REAL solver at a target far past the anchor rather than reading the
+declaration back, because a bound that is declared and not honoured looks identical from outside.
+
+**A bound is in SI metres**, like a default and unlike the four handle coordinates beside it — and
+`Handle`'s own docstring said "database units for a length", the third place the shipped Python
+package stated the script side's units for a host-side value. Fixed with the other two.
+
+Also fixed while there: a declared bound was rendered into the row's hover tip as a raw double, so a
+4 µm floor read "at least 4E-06" beside a field showing "10". It goes through the row's own unit now
+(`LayoutShapePropertiesViewModel.FormatDeclaredBound`), which is the same formatter the value uses.
+
+`KIT_MLIN` had the same gap and got the same treatment — its own width dragged through zero inverts
+its one rectangle exactly as the winding's turns invert — so the gate runs over both generators.
+
+Gate: `tests/Ui.Tests/Examples/PdkPCellExampleTests.cs` — 16 tests, each of which was checked to fail
+when the corresponding defect is put back.
+
 ## A workspace's README opens instead of the Welcome tab, 2026-09-15
 
 Owner: an example workspace copied out of **Tools ▸ Examples** should open on its own `README.md`,

@@ -1,5 +1,6 @@
 using CircuitRF.Ui.Layout;
 using CircuitRF.Ui.Layout.PCells;
+using CircuitRF.Ui.Layout.PCells.Wire;
 using CircuitRF.Ui.Schematic;
 using CircuitRF.Ui.ViewModels;
 using Xunit;
@@ -144,6 +145,115 @@ public sealed class PCellPropertiesInspectorParameterListTests : IDisposable
         var row = RowNamed(props, "Fingers");
         row.Commit("6.5");
         Assert.False(string.IsNullOrEmpty(row.Error));
+    }
+
+    // ── A script-backed cell's units (owner report, 2026-09-15) ──────────────
+
+    /// <summary>
+    /// <b>A script-backed length parameter is shown in the LAYOUT's display unit, like every other
+    /// dimension in the panel — not as a bare SI number.</b>
+    ///
+    /// <para>OWNER REPORT: a 10 µm turn width read as <c>0.00001</c> in a layout whose every other
+    /// length was in µm. The unit the whole read/write path is keyed on came only from
+    /// <c>ComponentTypeRegistry.DefaultParameters</c>, which is keyed by <c>SymbolKind</c> — and a
+    /// kit's generator has no SymbolKind at all, so the unit was always "". The dimension was on the
+    /// wire the whole time; nothing carried it as far as the row.</para>
+    /// </summary>
+    [Fact]
+    public void AScriptBackedLengthParameter_ReadsInTheLayoutsDisplayUnit()
+    {
+        var (vm, props) = Setup("Doc5");
+        vm.Model.DisplayUnit = LayoutUnit.Um;
+
+        PCellRegistry.ClearResolvers();
+        PCellRegistry.AddResolver(new DeclaringResolver());
+        try
+        {
+            var parameters = new Dictionary<string, PCellValue>
+            {
+                ["Width"] = PCellValue.Real(10e-6),   // 10 µm, stored in SI like every other length
+                ["Turns"] = PCellValue.Int(3),
+            };
+            string cellDir = GeneratedCellStore.GetOrCreate(
+                _root, DeclaringResolver.Id, parameters, null, null, PCellLayerSelection.Default);
+            vm.Model.Instances.Add(new LayoutInstance
+                { CellRef = Path.GetRelativePath(vm.InstanceBaseDir, cellDir), X = 0, Y = 0, Mag = 1.0 });
+
+            vm.OnPointerPressed(5_000, 0, Avalonia.Input.KeyModifiers.None);
+
+            var width = RowNamed(props, "Width");
+            Assert.Equal("mm", width.Unit);      // the registry's own spelling for "a length"
+            Assert.Equal("10", width.ValueText); // …rendered through the layout's µm, not 1E-05
+
+            // A count is not a length and must not be scaled into one.
+            Assert.Equal("", RowNamed(props, "Turns").Unit);
+            Assert.Equal("3", RowNamed(props, "Turns").ValueText);
+        }
+        finally { PCellRegistry.ClearResolvers(); }
+    }
+
+    /// <summary>
+    /// And it is TYPED in that unit too. The same empty unit made the field uneditable in any
+    /// sensible one: with nothing to strip, "12 um" does not parse at all, and a bare "12" commits
+    /// twelve METRES — an edit that looks like it worked and moves the artwork by six orders of
+    /// magnitude.
+    /// </summary>
+    [Fact]
+    public void AScriptBackedLengthParameter_IsTypedInThatUnitToo()
+    {
+        var (vm, props) = Setup("Doc6");
+        vm.Model.DisplayUnit = LayoutUnit.Um;
+
+        PCellRegistry.ClearResolvers();
+        PCellRegistry.AddResolver(new DeclaringResolver());
+        try
+        {
+            var parameters = new Dictionary<string, PCellValue> { ["Width"] = PCellValue.Real(10e-6) };
+            string cellDir = GeneratedCellStore.GetOrCreate(
+                _root, DeclaringResolver.Id, parameters, null, null, PCellLayerSelection.Default);
+            vm.Model.Instances.Add(new LayoutInstance
+                { CellRef = Path.GetRelativePath(vm.InstanceBaseDir, cellDir), X = 0, Y = 0, Mag = 1.0 });
+
+            vm.OnPointerPressed(5_000, 0, Avalonia.Input.KeyModifiers.None);
+            RowNamed(props, "Width").Commit("12");
+
+            var edited = CellLayoutResolver
+                .Resolve(vm.Model.Instances[0].CellRef, vm.InstanceBaseDir).View!.PCellOrigin!.Parameters["Width"];
+            Assert.Equal(12e-6, edited.AsReal(), 12);
+        }
+        finally { PCellRegistry.ClearResolvers(); }
+    }
+
+    /// <summary>A resolver standing in for a kit: it declares the DIMENSIONS a real one declares on
+    /// the wire, and draws one rectangle whose width is the parameter, so the geometry moves with the
+    /// value the way a real cell's does.</summary>
+    private sealed class DeclaringResolver : IPCellGeneratorResolver
+    {
+        public const string Id = "TEST_KIT_CELL";
+
+        public PCellGenerator? Resolve(string generatorId) => generatorId == Id
+            ? (parameters, _, _) =>
+              {
+                  long half = PCellUnits.MetresToDbu(parameters.Real("Width", 10e-6), 1000) / 2;
+                  return new PCellResult([new RectShape { Layer = new LayerKey(1, 0), X1 = 0, Y1 = -half, X2 = 100_000, Y2 = half }], []);
+              }
+            : null;
+
+        public IReadOnlyCollection<string> KnownGeneratorIds => [Id];
+        public string Describe() => "the declaring test resolver";
+        public string? ContentKeyFor(string generatorId) => generatorId == Id ? "v1" : null;
+
+        public IReadOnlyDictionary<string, PCellValue>? DeclaredDefaults(string generatorId)
+            => generatorId == Id
+                ? new Dictionary<string, PCellValue> { ["Width"] = PCellValue.Real(10e-6), ["Turns"] = PCellValue.Int(3) }
+                : null;
+
+        public IReadOnlyList<PCellParameterInfo>? DeclaredParameters(string generatorId)
+            => generatorId == Id
+                ? [new PCellParameterInfo("Width", PCellValueKind.Real, PCellValue.Real(10e-6),
+                                          Dimension: PCellDimension.Length),
+                   new PCellParameterInfo("Turns", PCellValueKind.Int, PCellValue.Int(3))]
+                : null;
     }
 
     private static PCellParamRowViewModel RowNamed(LayoutShapePropertiesViewModel props, string name)

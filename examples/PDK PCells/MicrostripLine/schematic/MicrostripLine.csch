@@ -52,6 +52,13 @@
           "Unit": "um",
           "ShowOnSchematic": true,
           "Dimension": "Length"
+        },
+        {
+          "Name": "SignalLayer",
+          "Expression": "Metal1",
+          "Unit": "",
+          "ShowOnSchematic": false,
+          "Dimension": "None"
         }
       ]
     },

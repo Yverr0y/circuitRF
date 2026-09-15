@@ -97,7 +97,7 @@ technology still generates geometry — so have a fallback.
 `diagnostics` is **not** an error channel. It is for a generator that *did* produce geometry and has a
 caveat about it. To refuse outright, raise.
 
-### Five things worth knowing before writing a real cell
+### Six things worth knowing before writing a real cell
 
 **1. There are no metres.** Every length arrives in **database units**, converted by circuitRF with its
 own single rounding rule before it was sent. The resolution is deliberately not on the wire, so a script
@@ -119,7 +119,15 @@ convert `W` from metres. A length you forget to declare arrives unconverted and 
 nine orders of magnitude; a non-length you declare as one is silently scaled. **This is the one
 declaration worth checking twice.**
 
-**5. A generator must be deterministic given its declared inputs.** No clock, no ambient or global
+**5. Give every parameter a default, and state a length default in METRES.** A parameter with no
+declared default is not placed: your generator still draws, from its own accessor fallback, but the
+parameter is not on the instance — nothing in the Properties Inspector to edit, and any drag handle
+naming it is reported as naming a parameter the cell does not have. The artwork looks entirely
+correct throughout. A length *value* reaches you already converted to database units; a length
+*default* is a value circuitRF holds and converts like any other, so `Parameter.length("W", 10e-6)`
+is 10 µm and `Parameter.length("W", 10_000)` is ten kilometres.
+
+**6. A generator must be deterministic given its declared inputs.** No clock, no ambient or global
 state, no randomness, no set-iteration order, no accumulation whose order varies between runs. Two users
 on different machines must get identical geometry — when they do not, what they see is a design that
 changed by itself, and the cache keyed on those inputs is quietly poisoned. Reading a file is fine
