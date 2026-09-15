@@ -878,6 +878,10 @@ public partial class WorkspaceViewModel
                 case "layout":      await OpenOrActivateLayoutAsync(docPath); break;
                 case "tech":        OpenOrActivateTech(docPath); break;
                 case "emsetup":     OpenOrActivateEmSetup(docPath); break;
+                // A README the restore rewrote. Nothing is dirty and nothing is being
+                // discarded — the document holds the text it parsed, so the only way to show
+                // the restored file is to read it again.
+                case "markdown":    OpenOrActivateMarkdown(docPath); break;
                 default: continue;
             }
 

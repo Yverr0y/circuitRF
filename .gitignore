@@ -77,3 +77,9 @@ release-key*
 # NOTE: the line above is why packaging/signing-status.sh is not called release-key.sh. A helper
 # named to match it is silently untracked, and the two build scripts that source it then fail on a
 # fresh clone with nothing to explain why. Keep the pattern broad; name files around it.
+
+# Results produced by running the shipped example workspaces in place. Each example workspace
+# carries circuitRF's own .gitignore, which covers *.npy and friends; a Touchstone file written by
+# an EM run is not covered by that one and is not a thing to commit either — an example ships its
+# design and its EM SETUP, and the user generates the rest.
+examples/*/results/

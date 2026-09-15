@@ -112,10 +112,13 @@ public partial class WorkspaceViewModel
     /// rather than showing it disabled — the Reveal item's own convention: an entry that does not
     /// apply is not an entry that is temporarily unavailable.
     ///
-    /// <para>Two kinds answer false and both are deliberate. <c>StubDocument</c> is the Welcome tab
-    /// and has no file, ever. <c>CellParameterEditorDocument</c> writes its <c>.ccell</c> on every
+    /// <para>Three kinds answer false and all three are deliberate. <c>StubDocument</c> is the Welcome
+    /// tab and has no file, ever. <c>CellParameterEditorDocument</c> writes its <c>.ccell</c> on every
     /// command it executes (<c>CellParameterEditModel.Save</c>), so it is never dirty and there is
-    /// nothing a Save could do.</para>
+    /// nothing a Save could do. <c>MarkdownDocument</c> is a README shown read-only: it holds the
+    /// PARSED lines and not the source text, so there is nothing an edit could be applied to and
+    /// nothing a Save could write — circuitRF is not a Markdown editor, and the user's own editor is
+    /// where that file is changed.</para>
     /// </summary>
     internal static bool HasSaveRoute(IDockable? dockable) => dockable is
         SchematicDocument or SymbolEditorDocument or LayoutDocument or TechDocument or

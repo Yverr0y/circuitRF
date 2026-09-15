@@ -1,10 +1,20 @@
-namespace CircuitRF.Ui.Schematic;
+using CircuitRF.Design.Cells;
+using CircuitRF.Design.Workspace;
+
+namespace CircuitRF.Design.Schematic;
 
 /// <summary>
 /// Framework-free helper that resolves whether a cell-reference component has a navigable
 /// primary schematic.  Extracted so tests can call it without constructing WorkspaceViewModel.
+///
+/// <para><b>It lives below the UI firewall because the headless side needs the same descent</b>
+/// (2026-09-15). <see cref="DiskCellResolver"/> is built on it, and without that the CLI's
+/// extraction ran with no <see cref="ICellResolver"/> at all — which <see cref="NetExtractor"/>
+/// treats as "flat caller" and answers by SKIPPING every cell instance, silently. A hierarchical
+/// design therefore netlisted and simulated as the parts around the hole where its device used to
+/// be. Nothing in this file changed on the way over; only the namespace and the accessibility.</para>
 /// </summary>
-internal static class HierarchyResolver
+public static class HierarchyResolver
 {
     /// <summary>
     /// Returns <c>true</c> when the component is a cell instance with a resolvable primary

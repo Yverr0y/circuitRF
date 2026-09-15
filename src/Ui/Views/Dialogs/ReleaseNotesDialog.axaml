@@ -17,7 +17,7 @@
     The notes are ONE SelectableTextBlock, not a list of per-line controls: the owner's requirement is
     that a user can drag a selection across many lines and copy it in one go, and a selection cannot
     cross two controls. Bold, italics, bullets and indentation are therefore inlines within it
-    (ReleaseNotesMarkdown produces the runs; the code-behind turns them into Inlines), and the
+    (SmallMarkdown produces the runs; the code-behind turns them into Inlines), and the
     indentation is non-breaking spaces for the same reason — there is nowhere else to put a margin.
 
     That rule is what decides the SHAPE of the skipped-versions list too: several releases' notes go

@@ -1,5 +1,64 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## A workspace's README opens instead of the Welcome tab, 2026-09-15
+
+Owner: an example workspace copied out of **Tools ▸ Examples** should open on its own `README.md`,
+read-only, rather than on "Welcome to circuitRF" — and it should reuse the small Markdown renderer
+already written for the auto-updater's Release Notes.
+
+**What was built.** `MarkdownDocument` (`src/Ui/Markdown/`) is an ordinary dock document holding the
+PARSED lines and nothing else; `MarkdownDocumentView` draws them into one `SelectableTextBlock`.
+Read-only is therefore structural rather than enforced — there is no editing surface, and the source
+text is not kept, so there is nothing an edit could be applied to and nothing a Save could write. It
+is absent from `HasSaveRoute`/`HasSaveAsRoute` for the reason the Welcome stub is.
+`OpenWorkspaceReadmeIfNothingElseIs` runs at the end of the open, right after
+`RestoreOpenDocumentsAsync`, and fires only when `_openDocsByPath` is still empty: it REPLACES the
+Welcome tab, and never competes with the user's own documents. It is not restricted to examples and
+must not be — circuitRF cannot tell a copy of an example from any other folder, which is the whole
+point of the copy being an ordinary workspace.
+
+**It is persisted like any other document** (kind `markdown` in the `.cws` open list), so closing it
+is a decision that sticks for a workspace that still has other tabs. That cost three switches, not
+one: `DocumentPathAndKind`, `RestoreOpenDocumentsAsync` and `ReloadChangedDocuments` — a kind known to
+one and not the others is a tab that is recorded and never reopened, and
+`WorkspaceSessionPersistedOnLeaveTests` gates all three against each other.
+
+**The renderer is now shared and renamed.** `ReleaseNotesMarkdown` → `SmallMarkdown`
+(`ReleaseNoteLine`/`ReleaseNoteRun` → `MarkdownLine`/`MarkdownRun`), and the dialog's
+parsed-lines-to-`Inlines` loop moved out to `MarkdownInlines`. A class named after release notes
+parsing a workspace README is the kind of name that stops being true quietly.
+
+### Three things a README needs that a release body does not
+
+None of these were optional; each of them is a visible defect in the shipped examples without it.
+
+- **Soft wraps must be JOINED — and only for a document.** The two callers want opposite answers and
+  that is why `Parse` takes `joinSoftWraps` rather than deciding. A release body is typed into
+  GitHub's web form, where a newline is a line the author put there. A `README.md` in a repository is
+  hard-wrapped at the author's editor column, and honouring those breaks puts a ragged edge down the
+  middle of every paragraph at a width that has nothing to do with the window: the symptom is a
+  sentence that stops at 100 characters and resumes on the next row, twice per paragraph.
+- **Fenced code blocks.** Two examples document a command line and a directory tree inside one.
+  Without fence support the ``` markers reach the screen AND — far worse — soft-wrap joining runs the
+  block's lines together into one sentence. Inside a fence nothing is markup (a leading `#` is a
+  comment, a `-` is a flag), the leading spaces are content, and the face is monospace, which is the
+  one place in this vocabulary where the shape of the text carries meaning.
+- **Tables, flattened.** A table is two-dimensional and this renderer has one dimension: everything
+  is inlines in a single block, where a column cannot be held to a width. So the header row goes bold
+  and each body row becomes a bullet leading with its first cell. The alternative was not a smaller
+  decision — it was the same decision, made worse, with `|---|---|` on screen.
+
+### Why one block and not a control per line
+
+Inherited from the Release Notes dialog, and it is load-bearing in both: a selection cannot cross two
+controls, and somebody reading an example's README wants to copy a measurement expression out of it.
+That is also why indentation is non-breaking spaces (an inline has nowhere to put a margin) and why a
+bullet is a glyph in the text rather than a marker beside it.
+
+`.md` also opens from a double-click in the project tree and from `OpenDocumentByPath`, so the README
+can be reopened after it is closed. Gate: `tests/Ui.Tests/Markdown/MarkdownDocumentTests.cs`.
+
+
 ## Add Analysis opens prefilled from the schematic, 2026-09-14
 
 Owner: a Loadpull added to a schematic that already has one tuner of each side, or an existing
@@ -27321,3 +27380,46 @@ type's static registration is not thread-safe and xUnit runs classes in parallel
 `StackupDeleteKeyTests` passed alone and failed beside `StackupContextMenuTests`. The fix is that ONE
 class builds menus: the keystroke-vs-menu equivalence test lives in `StackupContextMenuTests`, and
 `StackupDeleteKeyTests` compares the keystroke against the card's ✕ only.
+
+
+## Tools ▸ Examples, and three things found while authoring the examples (2026-09-15)
+
+Six shipped reference workspaces, copied to a folder the user picks and opened
+(`WorkspaceViewModel.Examples.cs`, `ExampleWorkspaceInstall`, `ExampleWorkspaces` in `src/Design`).
+
+**They are FILES, not an embedded resource, and that is the requirement rather than a shortcut.**
+`examples/` holds real workspaces the owner opens in circuitRF and edits in place, in the
+repository; what ships is that same tree, copied into the app output by an ordinary
+`None`/`CopyToOutputDirectory` item group, the way `docs/user` and `tools/pcell-python` already are.
+An embedded resource would have to be unpacked before it could be opened at all, so the copy the
+application carries and the copy anyone edits would be two artifacts with nothing keeping them in
+step.
+
+**The copy owns no copying.** `ExampleWorkspaceInstall` is `WorkspaceCopy.Run` — the same function
+`File ▸ Save Workspace As…` calls — plus a refusal and a destination name. That is what makes an
+example able to ship with a technology under `tech/` and a Touchstone file beside a schematic and
+still resolve wherever it lands: `WorkspaceCopy` REPOINTS stored references against the new root,
+and it skips what must not travel (the rebuildable PCell cache, the `.crf-` session bookkeeping, the
+advisory lock). Installing twice into one folder is a refusal naming the folder — never an
+overwrite, because the whole point of handing someone an editable copy is that their edits survive,
+and never a silent rename to `… 2`, because that puts a folder somewhere nobody named.
+
+### Three traps the examples themselves turned up
+
+**A `Term` is INERT in harmonic balance, by design, and an output terminated with one has no load at
+all.** `ports-pins-and-terms.md` says so explicitly ("in other analyses a Term should be inert
+(open) … keep Terms in S-param testbenches only"), but the symptom is not an error: the bench
+converges on every point and reports about −72 dB of gain, because every milliamp of drain current
+goes into the drain shunt capacitance. The examples use a `Resistor` (or a `ZPort`) as the RF load,
+and the `Term` only in the S-parameter benches. Same pin geometry, so it is a one-component swap.
+
+**`abs()` does not broadcast over a result cube; `mag()` does.** The broadcasting set is `conj`,
+`real`, `imag`, `mag`, `phase`, `dB`, `dB10`, `dBm`, `log10`, `ln`, and the four arithmetic
+operators. `x^2` fails the same way — `x*x` is the spelling that works. The failure IS reported
+("Value is Cube, not Complex") on the CLI, but a measurement that fails is a run note rather than a
+run failure, so in the window it is simply a trace that never appears.
+
+**A unit written inside a VAR's expression is a parse error, and the variable then does not exist.**
+`RFfreq = "2 GHz"` as an EXPRESSION with an empty unit field produced no variable at all — the unit
+belongs in the row's own unit column. Nothing reports it at the point it was typed. (Already known
+from the sweep-scale work; it was still sitting in a demo bench.)

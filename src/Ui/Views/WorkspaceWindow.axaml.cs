@@ -203,6 +203,58 @@ public partial class WorkspaceWindow : Window
             _vm.SaveScopeChanged        += UpdateNativeSaveHeader;
             _vm.DockersCollapsedChanged += UpdateNativeDockersHeader;
             RebuildNativeRecentMenu();
+            RebuildNativeExamplesMenu();
+        }
+    }
+
+    /// <summary>
+    /// Fills in the macOS Tools ▸ Examples submenu, or removes the item when this build ships none.
+    ///
+    /// <para><b>Removed rather than disabled.</b> Avalonia does not reliably sync
+    /// <c>IsEnabled = false</c> back to AppKit once a menu has been shown, which is why
+    /// <see cref="RebuildNativeRecentMenu"/> uses a disabled PLACEHOLDER ROW instead of disabling its
+    /// parent. There is no equivalent here worth showing: "Open Recent" with nothing in it still says
+    /// something true, while an Examples submenu holding one greyed apology says only that the
+    /// installer went wrong.</para>
+    ///
+    /// <para>Built once, on the first DataContext: unlike the recent list, what a build ships cannot
+    /// change while it is running. The rows come from the same <c>WorkspaceViewModel.Examples</c>
+    /// enumeration the in-window mirror is built from — a NativeMenuItem is an AvaloniaObject with no
+    /// DataContext, so the collection itself cannot be shared, but the source of it is.</para>
+    /// </summary>
+    private void RebuildNativeExamplesMenu()
+    {
+        if (_vm is null) return;
+        if (NativeMenu.GetMenu(this) is not { } rootMenu) return;
+
+        foreach (var top in rootMenu.Items)
+        {
+            if (top is not NativeMenuItem toolsItem || toolsItem.Header != "Tools") continue;
+            if (toolsItem.Menu is null) return;
+
+            NativeMenuItem? examplesItem = null;
+            foreach (var sub in toolsItem.Menu.Items)
+                if (sub is NativeMenuItem ni && ni.Header == "Examples") { examplesItem = ni; break; }
+            if (examplesItem?.Menu is not { } menu) return;
+
+            if (WorkspaceViewModel.Examples.Count == 0)
+            {
+                // The separator above it goes too, or the Tools menu keeps a rule with nothing under it.
+                int at = toolsItem.Menu.Items.IndexOf(examplesItem);
+                toolsItem.Menu.Items.Remove(examplesItem);
+                if (at > 0 && toolsItem.Menu.Items[at - 1] is NativeMenuItemSeparator sep)
+                    toolsItem.Menu.Items.Remove(sep);
+                return;
+            }
+
+            menu.Items.Clear();
+            foreach (var example in WorkspaceViewModel.Examples)
+                menu.Items.Add(new NativeMenuItem(example.Title)
+                {
+                    Command          = _vm.OpenExampleCommand,
+                    CommandParameter = example.Folder,
+                });
+            return;
         }
     }
 

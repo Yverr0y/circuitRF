@@ -9,6 +9,7 @@ using CommunityToolkit.Mvvm.Input;
 using CircuitRF.Ui.DataDisplay;
 using CircuitRF.Ui.Docking;
 using CircuitRF.Ui.Layout;
+using CircuitRF.Ui.Markdown;
 using CircuitRF.Ui.Schematic;
 using CircuitRF.Ui.ViewModels.Dock;
 using Dock.Model.Controls;
@@ -1368,6 +1369,7 @@ public partial class WorkspaceViewModel
             DataDisplayDocument dd          => dd.FilePath,
             LayoutDocument lad              => lad.FilePath,
             TechDocument td                 => td.FilePath,
+            MarkdownDocument mdd            => mdd.FilePath,
             _                               => null,
         };
 

@@ -2097,3 +2097,48 @@ of them and `N carrying activity to passivate` was the resistor count plus the a
 overrides `ActivityFor`, which is that hook's stated purpose, and answers `Passive` for `R ≥ 0`;
 a negative resistor is still §8's negative resistance and still `ActiveExact`. Nothing numerical
 moves — see `src/Core/RESOLVED.md`. The same fixture now reads 3.
+
+
+## Every run verb silently dropped hierarchical cell instances (2026-09-15)
+
+Found while authoring the shipped example workspaces, which is the first time anything headless ran
+a design somebody had actually drawn WITH A SUB-CELL IN IT.
+
+**`NetExtractor.Extract` takes its `ICellResolver` as an OPTIONAL argument, and treats a null one as
+"flat caller — skip silently".** That is the right answer for a caller extracting a single schematic
+that cannot contain a cell instance, and the wrong one for everything else. Both CLI extraction
+sites passed null: `CircuitSource.CnlTextOf` (which every run verb and `netlist` go through) and
+`Check.cs`.
+
+**Nothing failed.** A design whose device lives in a sub-cell extracted to the passive network
+around the hole where the device used to be, and then ran:
+
+```
+  Converged: yes (31 solve(s))     Residual: 9.4e-07 (worst)
+  Gt_dB:     -72.16 ... -84.06     over a 0 -> 30 dBm drive sweep
+```
+
+A power amplifier reporting −72 dB of gain, converging on every point, with no message anywhere.
+`circuitrf check` called the same design clean, because it extracts the same way — so the one tool
+whose job is to say "is this sound" was blind to it too. The root `CLAUDE.md`'s promise that *a
+`.cnl` that works headless works when opened* was false in the direction nobody looks: the window
+has always passed its own resolver, so the two disagreed about what the design **was**.
+
+**The fix is `DiskCellResolver` (`src/Design/Schematic/`), and both sites now pass it, never null.**
+It is built on `HierarchyResolver`, which moved below the firewall for this — see
+`src/Design/RESOLVED.md`. It is the window's own descent minus the one thing a process that exits
+cannot have: memory-else-disk, so an unsaved tab is what a GUI run sees.
+
+**Three things worth keeping:**
+
+- **The diagnostic exists and was never reached.** `NetExtractor` has a conflict note for an
+  instance it cannot resolve — *"Cell instance 'X1' (cell '../../FET') has no primary schematic;
+  skipped"* — but the null-resolver path returns before any of them. An optional argument whose
+  absence means "silently do less" is the shape to be suspicious of.
+- **`circuitrf explain --ref ../../FET` resolved the cell correctly the whole time.** Resolution and
+  extraction are different code paths, so the one diagnostic a user would reach for said the
+  reference was fine while the extraction was dropping it.
+- **A structural gate would not have caught this.** Exit code 0, a written `.cnl`, a converged run
+  and a well-formed `.npy` were all true. `tests/Ui.Tests/Cli/CliHierarchyExtractionTests.cs`
+  asserts on the GAIN for that reason, plus a byte-for-byte comparison of the headless netlist
+  against the window's own resolver.

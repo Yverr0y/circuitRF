@@ -107,7 +107,12 @@ internal static class CircuitSource
     /// </summary>
     public static string CnlTextOf(SchematicEditModel model, string testBenchName)
     {
-        var extracted = NetExtractor.Extract(model, testBenchName);
+        // DiskCellResolver, never null. A null resolver tells NetExtractor the caller is flat, and it
+        // answers by SKIPPING every cell instance with no conflict note — so a design whose device
+        // lives in a sub-cell extracted to the passive network around the hole, ran, converged on
+        // every point, and reported nothing. The window has always passed its own resolver; this is
+        // that same descent, reading the cell folder rather than an open session.
+        var extracted = NetExtractor.Extract(model, testBenchName, DiskCellResolver.Instance);
         return CnlWriter.Write(extracted.TestBench, extracted.Library,
                                $"extracted from {testBenchName}");
     }

@@ -1,0 +1,22 @@
+{
+  "FormatVersion": 1,
+  "Parameters": [
+    {
+      "Name": "W",
+      "DefaultExpression": "60",
+      "Unit": "um",
+      "Dimension": "Length",
+      "ShowOnSchematic": true
+    },
+    {
+      "Name": "L",
+      "DefaultExpression": "800",
+      "Unit": "um",
+      "Dimension": "Length",
+      "ShowOnSchematic": true
+    }
+  ],
+  "PrimarySchematic": "MicrostripLine.csch",
+  "IsTestBench": true,
+  "NumPorts": 0
+}

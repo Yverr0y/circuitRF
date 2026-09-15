@@ -1142,4 +1142,46 @@ public class PackagingScriptTests
         Assert.Contains("--clobber", sign);
     }
 
+    /// <summary>
+    /// <b>The example workspaces reach all three packaged builds, dotfiles and all.</b>
+    ///
+    /// <para>Every platform packages the PUBLISH TREE, so the item group in
+    /// <c>src/Ui/CircuitRF.Ui.csproj</c> is what puts them there and
+    /// <c>ExampleWorkspacesTests</c> gates that. What this gates is the three packagers not
+    /// dropping them on the way: macOS copies the tree wholesale, the Debian package maps it to
+    /// <c>/opt/circuitrf/</c>, and Windows HARVESTS it into <c>Files.wxs</c> — the one route that
+    /// walks the tree itself and can therefore leave something out.</para>
+    ///
+    /// <para><b>The Windows harvest needs <c>-Force</c> and this is the test that says why.</b> A
+    /// workspace's manifest is a dotfile named literally <c>.cws</c>, as is the <c>.ccell</c> beside
+    /// every cell. Windows does not infer the hidden ATTRIBUTE from a leading dot, but any tool that
+    /// does leaves it set, and <c>Get-ChildItem</c> without <c>-Force</c> then skips those files in
+    /// silence. The installer would ship every example's cells and none of its manifests — and the
+    /// symptom is an empty Tools ▸ Examples menu on the installed copy only, with nothing anywhere
+    /// saying why. That is the same shape of failure as <c>tools/pcell-python</c> shipping without
+    /// its package, one layer further out.</para>
+    /// </summary>
+    [Fact]
+    public void EveryPackagerCarriesTheExampleWorkspaces()
+    {
+        string win = File.ReadAllText(RepoFile("packaging", "windows", "build-windows.ps1"));
+
+        // The harvester's two enumerations, both forced. Asserted on the harvester specifically,
+        // because a -Force anywhere else in the script would satisfy a looser check.
+        int at = win.IndexOf("function Add-Directory", StringComparison.Ordinal);
+        Assert.True(at >= 0, "build-windows.ps1 no longer harvests the publish tree into Files.wxs.");
+        string harvester = win[at..win.IndexOf("function Get-PeMachine", at, StringComparison.Ordinal)];
+        Assert.Contains("-File -Force", harvester, StringComparison.Ordinal);
+        Assert.Contains("-Directory -Force", harvester, StringComparison.Ordinal);
+
+        // macOS: the whole publish tree into Contents/MacOS, which is also where the app looks.
+        foreach (string bundle in new[] { "bundleForMacOS.sh", "bundleForHarmonicaMacOS.sh", "bundleForWBondMacOS.sh" })
+            Assert.Contains("${PUBLISH_DIR}/.", File.ReadAllText(RepoFile("src", "Ui", bundle)),
+                            StringComparison.Ordinal);
+
+        // Linux: the .deb maps the publish root, the tarball copies it.
+        string linux = File.ReadAllText(RepoFile("packaging", "linux", "build-linux.sh"));
+        Assert.Contains("\"${PUBLISH}/=/opt/circuitrf/\"", linux, StringComparison.Ordinal);
+        Assert.Contains("cp -a \"${PUBLISH}/.\"", linux, StringComparison.Ordinal);
+    }
 }

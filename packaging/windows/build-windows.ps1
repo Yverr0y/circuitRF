@@ -185,8 +185,16 @@ if ($LASTEXITCODE -ne 0) { throw 'Icon generation failed.' }
 # changes - the app ships its user documentation as loose files, and the native SkiaSharp/HarfBuzz
 # DLLs come and go with the single-file settings.
 
+# -Force on BOTH enumerations below, and it is not belt-and-braces. A workspace's manifest is a
+# dotfile named literally `.cws`, and so is `.ccell` beside every cell - Windows does not infer the
+# hidden ATTRIBUTE from a leading dot, but anything that has ever touched these files with a tool
+# that does (a git checkout under some shells, an extracted archive, a synced folder) leaves it set,
+# and without -Force those files are skipped in silence. The installer would then carry the example
+# workspaces' cells and none of their manifests, and Tools > Examples would be empty on the
+# installed copy with nothing anywhere saying why. The examples are the reason it is here; every
+# other published file is unaffected.
 function Add-Directory($path, $parentId) {
-    foreach ($file in Get-ChildItem -LiteralPath $path -File | Sort-Object Name) {
+    foreach ($file in Get-ChildItem -LiteralPath $path -File -Force | Sort-Object Name) {
         if ($script:skipExe -and $file.Name -eq $script:exeName) { continue }
         $script:compId++
         [void]$script:components.AppendLine(
@@ -195,7 +203,7 @@ function Add-Directory($path, $parentId) {
             "        <File Id=`"fil$($script:compId)`" Source=`"$($file.FullName)`" KeyPath=`"yes`" />")
         [void]$script:components.AppendLine('      </Component>')
     }
-    foreach ($sub in Get-ChildItem -LiteralPath $path -Directory | Sort-Object Name) {
+    foreach ($sub in Get-ChildItem -LiteralPath $path -Directory -Force | Sort-Object Name) {
         $script:dirId++
         $id = "dir$($script:dirId)"
         [void]$script:sb.AppendLine("      <Directory Id=`"$id`" Name=`"$($sub.Name)`">")

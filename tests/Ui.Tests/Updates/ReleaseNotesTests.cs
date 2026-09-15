@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using CircuitRF.Ui;
 using CircuitRF.Ui.Theming;
+using CircuitRF.Ui.Markdown;
 using CircuitRF.Ui.Updates;
 using Xunit;
 
@@ -523,24 +524,24 @@ public class ReleaseNotesBacklogTests
 }
 
 /// <summary>The four constructs the parser supports, and the ways real release bodies break a naive one.</summary>
-public class ReleaseNotesMarkdownTests
+public class SmallMarkdownTests
 {
-    private static string Flat(ReleaseNoteLine line)
+    private static string Flat(MarkdownLine line)
         => string.Concat(line.Runs.Select(r => r.Text));
 
-    private static IReadOnlyList<ReleaseNoteLine> Parse(string md) => ReleaseNotesMarkdown.Parse(md);
+    private static IReadOnlyList<MarkdownLine> Parse(string md) => SmallMarkdown.Parse(md);
 
     [Fact]
     public void NullAndEmpty_ParseToNothing()
     {
         Assert.Empty(Parse(""));
-        Assert.Empty(ReleaseNotesMarkdown.Parse(null));
+        Assert.Empty(SmallMarkdown.Parse(null));
     }
 
     [Fact]
     public void BoldAndItalic_LoseTheirDelimiters_AndKeepTheirWeight()
     {
-        IReadOnlyList<ReleaseNoteRun> runs = ReleaseNotesMarkdown.ParseInline("a **b** c *d* e");
+        IReadOnlyList<MarkdownRun> runs = SmallMarkdown.ParseInline("a **b** c *d* e");
 
         Assert.Equal("a b c d e", string.Concat(runs.Select(r => r.Text)));
         Assert.Contains(runs, r => r.Text == "b" && r.Bold && !r.Italic);
@@ -551,7 +552,7 @@ public class ReleaseNotesMarkdownTests
     [Fact]
     public void TripleDelimiters_AreBoldAndItalic()
     {
-        IReadOnlyList<ReleaseNoteRun> runs = ReleaseNotesMarkdown.ParseInline("***both*** after");
+        IReadOnlyList<MarkdownRun> runs = SmallMarkdown.ParseInline("***both*** after");
 
         Assert.Equal("both after", string.Concat(runs.Select(r => r.Text)));
         Assert.Contains(runs, r => r.Text == "both" && r is { Bold: true, Italic: true });
@@ -565,7 +566,7 @@ public class ReleaseNotesMarkdownTests
     [Fact]
     public void UnderscoresInsideAWord_AreText()
     {
-        IReadOnlyList<ReleaseNoteRun> runs = ReleaseNotesMarkdown.ParseInline("set last_check_utc now");
+        IReadOnlyList<MarkdownRun> runs = SmallMarkdown.ParseInline("set last_check_utc now");
 
         Assert.Equal("set last_check_utc now", string.Concat(runs.Select(r => r.Text)));
         Assert.All(runs, r => Assert.False(r.Italic));
@@ -574,7 +575,7 @@ public class ReleaseNotesMarkdownTests
     /// <summary>...but a bounded pair still italicises.</summary>
     [Fact]
     public void UnderscoresAroundAWord_AreItalic()
-        => Assert.Contains(ReleaseNotesMarkdown.ParseInline("an _emphasis_ here"),
+        => Assert.Contains(SmallMarkdown.ParseInline("an _emphasis_ here"),
                            r => r.Text == "emphasis" && r.Italic);
 
     /// <summary>
@@ -584,7 +585,7 @@ public class ReleaseNotesMarkdownTests
     [Fact]
     public void AnUnmatchedDelimiter_IsPrinted()
     {
-        IReadOnlyList<ReleaseNoteRun> runs = ReleaseNotesMarkdown.ParseInline("2 * 3 = 6");
+        IReadOnlyList<MarkdownRun> runs = SmallMarkdown.ParseInline("2 * 3 = 6");
 
         Assert.Equal("2 * 3 = 6", string.Concat(runs.Select(r => r.Text)));
         Assert.All(runs, r => Assert.False(r.Italic));
@@ -593,33 +594,33 @@ public class ReleaseNotesMarkdownTests
     [Fact]
     public void AnEscapedDelimiter_IsPrinted()
         => Assert.Equal("a *b* c", string.Concat(
-               ReleaseNotesMarkdown.ParseInline(@"a \*b\* c").Select(r => r.Text)));
+               SmallMarkdown.ParseInline(@"a \*b\* c").Select(r => r.Text)));
 
     [Fact]
     public void InlineCode_LosesItsBackticks()
         => Assert.Equal("edit the .clay file", string.Concat(
-               ReleaseNotesMarkdown.ParseInline("edit the `.clay` file").Select(r => r.Text)));
+               SmallMarkdown.ParseInline("edit the `.clay` file").Select(r => r.Text)));
 
     /// <summary>A link keeps its text and drops its target: nothing here can follow a URL.</summary>
     [Fact]
     public void ALink_KeepsItsLabel()
         => Assert.Equal("see the docs today", string.Concat(
-               ReleaseNotesMarkdown.ParseInline("see [the docs](https://example.test) today")
+               SmallMarkdown.ParseInline("see [the docs](https://example.test) today")
                                    .Select(r => r.Text)));
 
     /// <summary>An image reduces to its alt text — with the leading '!' consumed, not left behind.</summary>
     [Fact]
     public void AnImage_ReducesToItsAltText()
         => Assert.Equal("a screenshot here", string.Concat(
-               ReleaseNotesMarkdown.ParseInline("a ![screenshot](x.png) here").Select(r => r.Text)));
+               SmallMarkdown.ParseInline("a ![screenshot](x.png) here").Select(r => r.Text)));
 
     [Fact]
     public void BulletsAreMarked_AndNested_ByIndentation()
     {
-        IReadOnlyList<ReleaseNoteLine> lines = Parse("- top\n  - nested\n    - deeper");
+        IReadOnlyList<MarkdownLine> lines = Parse("- top\n  - nested\n    - deeper");
 
         Assert.Equal(3, lines.Count);
-        Assert.All(lines, l => Assert.Equal(ReleaseNotesMarkdown.Bullet, l.Bullet));
+        Assert.All(lines, l => Assert.Equal(SmallMarkdown.Bullet, l.Bullet));
         Assert.Equal([0, 1, 2], lines.Select(l => l.Indent));
         Assert.Equal(["top", "nested", "deeper"], lines.Select(Flat));
     }
@@ -633,8 +634,8 @@ public class ReleaseNotesMarkdownTests
     [InlineData("2) a")]
     public void EveryListSpelling_BecomesABullet(string source)
     {
-        ReleaseNoteLine line = Assert.Single(Parse(source));
-        Assert.Equal(ReleaseNotesMarkdown.Bullet, line.Bullet);
+        MarkdownLine line = Assert.Single(Parse(source));
+        Assert.Equal(SmallMarkdown.Bullet, line.Bullet);
         Assert.Equal("a", Flat(line));
     }
 
@@ -642,7 +643,7 @@ public class ReleaseNotesMarkdownTests
     [Fact]
     public void AHeading_BecomesABoldLine()
     {
-        ReleaseNoteLine line = Assert.Single(Parse("### Layout Editor"));
+        MarkdownLine line = Assert.Single(Parse("### Layout Editor"));
 
         Assert.Null(line.Bullet);
         Assert.Equal(0, line.Indent);
@@ -666,7 +667,7 @@ public class ReleaseNotesMarkdownTests
     [Fact]
     public void ABoldLeadIn_IsNotAHeading()
     {
-        ReleaseNoteLine line = Assert.Single(Parse("**Rulers.** New ruler measures the artwork."));
+        MarkdownLine line = Assert.Single(Parse("**Rulers.** New ruler measures the artwork."));
 
         Assert.Equal(0, line.HeadingLevel);
         Assert.True(line.Runs[0].Bold);
@@ -684,7 +685,7 @@ public class ReleaseNotesMarkdownTests
     [Fact]
     public void BlankLines_CollapseAndAreTrimmed()
     {
-        IReadOnlyList<ReleaseNoteLine> lines = Parse("\n\n\nfirst\n\n\n\nsecond\n\n\n");
+        IReadOnlyList<MarkdownLine> lines = Parse("\n\n\nfirst\n\n\n\nsecond\n\n\n");
 
         Assert.Equal(3, lines.Count);
         Assert.Equal("first", Flat(lines[0]));
@@ -696,7 +697,7 @@ public class ReleaseNotesMarkdownTests
     [Fact]
     public void AThematicBreak_BecomesAGap()
     {
-        IReadOnlyList<ReleaseNoteLine> lines = Parse("one\n\n---\n\ntwo");
+        IReadOnlyList<MarkdownLine> lines = Parse("one\n\n---\n\ntwo");
 
         Assert.Equal(3, lines.Count);
         Assert.True(lines[1].IsBlank);
@@ -719,7 +720,7 @@ public class ReleaseNotesMarkdownTests
     /// <summary>Indentation is capped rather than unbounded: a deeply nested list still fits the width.</summary>
     [Fact]
     public void IndentIsCapped()
-        => Assert.Equal(ReleaseNotesMarkdown.MaxIndent,
+        => Assert.Equal(SmallMarkdown.MaxIndent,
                         Assert.Single(Parse(new string(' ', 200) + "- far")).Indent);
 
     /// <summary>
@@ -740,7 +741,7 @@ public class ReleaseNotesMarkdownTests
               - in both editors
             """;
 
-        IReadOnlyList<ReleaseNoteLine> lines = Parse(body);
+        IReadOnlyList<MarkdownLine> lines = Parse(body);
         string rendered = string.Join("\n", lines.Select(Flat));
 
         Assert.DoesNotContain("**", rendered, StringComparison.Ordinal);

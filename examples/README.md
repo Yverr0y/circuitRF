@@ -1,0 +1,33 @@
+# Example workspaces
+
+These are **real circuitRF workspaces**, not templates and not an archive to unpack. Open any of
+them here, in this folder, and edit it — that is the point of them being files.
+
+They also ship with the application. `src/Ui/CircuitRF.Ui.csproj` copies this whole tree into the
+build output, and **Tools ▸ Examples** in the running application copies one to a folder the user
+picks and opens it there. The user's copy is theirs; nothing writes back into this one.
+
+## Adding an example
+
+1. Make the workspace in here, as a folder with a `.cws` in it.
+2. Add a row to `examples.json` — the folder name, the title the menu shows, and one sentence.
+   The order of that file is the order of the menu. A folder that is not in the index is offered
+   by nothing; an index row whose folder is missing is skipped rather than shown as a menu item
+   that fails when pressed.
+3. Write a `README.md` beside the `.cws` saying what the example teaches. **It is what the user
+   sees first**: a workspace whose open restores no documents of its own opens on its README,
+   read-only, instead of the Welcome tab. Headings, bold, italics, bullets, fenced code blocks
+   and two-column tables all render; anything else degrades to plain text (`src/Ui/Markdown/`).
+
+`tests/Ui.Tests/Examples/ExampleWorkspacesTests.cs` holds the rest shut: the index and the disk
+agree both ways, every schematic still extracts with its device in it, nothing names anybody's home
+directory, and the tree reaches the build output.
+
+## What is deliberately not here
+
+**Results.** An example ships its design and its EM setup; the user runs them. The antenna's own
+sweep is 52 MB, and a committed result is a claim about an engine version that will stop being
+true. `examples/*/results/` is git-ignored at the repo root and excluded from the packaged build.
+
+**Anything a user could not have drawn.** These are teaching documents, so every one of them is
+authored out of the ordinary component library and the ordinary analyses.

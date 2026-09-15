@@ -1251,3 +1251,27 @@ and the version is the piece the reader cannot otherwise see.
 **Still true, and not a bug:** a machine whose only Python is Apple's 3.9 stub cannot generate this
 kit's artwork. circuitRF bundles no interpreter and installs no packages. What changed is that the
 message now says so.
+
+
+## The Windows harvest must run with `-Force`, or dotfiles do not install (2026-09-15)
+
+`build-windows.ps1`'s `Add-Directory` walks the publish tree into `Files.wxs`. Both of its
+`Get-ChildItem` calls now pass `-Force`.
+
+A workspace's manifest is a dotfile named literally `.cws`, and so is the `.ccell` beside every
+cell. Windows does not infer the HIDDEN ATTRIBUTE from a leading dot, so in the ordinary case those
+files harvest fine — but anything that has ever touched them with a tool that does set it (some git
+shells, an extracted archive, a synced folder) leaves the attribute on, and `Get-ChildItem` without
+`-Force` then skips them in silence. The installer would ship every example workspace's cells and
+none of its manifests, and Tools ▸ Examples would be empty on the installed copy only, with nothing
+anywhere saying why.
+
+That is the same shape as `tools/pcell-python` shipping without its package: correct under
+`dotnet run`, absent from every packaged build, and the symptom an entire install later. Held by
+`PackagingScriptTests.EveryPackagerCarriesTheExampleWorkspaces`, which also pins the other two
+platforms — macOS copies `${PUBLISH_DIR}/.` wholesale into `Contents/MacOS`, and the Debian package
+maps `${PUBLISH}/` to `/opt/circuitrf/` — so all three carry the examples without listing them.
+
+Checked rather than assumed: `dotnet publish -r osx-arm64` puts 62 example files in the publish
+tree, and the harvester's generated ids are counters (`dir3`, `cmp17`), not derived from the folder
+name, so the spaces in "Harmonic Balance" and "Patch Antenna" are not a WiX identifier problem.

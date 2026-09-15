@@ -35,6 +35,7 @@ using CircuitRF.Ui.Harmonica;
 using CircuitRF.Ui.WBond;
 using CircuitRF.WBond;
 using CircuitRF.Ui.Layout;
+using CircuitRF.Ui.Markdown;
 using CircuitRF.Ui.Layout.Em;
 using CircuitRF.Ui.Layout.PCells;
 using CircuitRF.Ui.Layout.TechImport;
@@ -2371,6 +2372,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             await RegenerateAllGeneratedCellsAsync(cwsPath);
 
             await RestoreOpenDocumentsAsync(cws, workspaceDir, dockLayoutRead.Layout);
+            OpenWorkspaceReadmeIfNothingElseIs(workspaceDir);
             // SL2 R-sl2-11: an unwritable workspace OPENS — it is never refused — and says so once,
             // here, where it reads as part of the open rather than as an interruption later.
             ReportWorkspaceReadOnlyIfNeeded(cwsPath);
@@ -2509,6 +2511,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         LayoutDocument       { FilePath: { } p }                      => (p, "layout"),
         TechDocument         techDoc                                  => (techDoc.FilePath, "tech"),
         EmSetupDocument      emDoc                                    => (emDoc.FilePath, "emsetup"),
+        MarkdownDocument     mdDoc                                    => (mdDoc.FilePath, "markdown"),
         _                                                             => (null, null),
     };
 
@@ -2610,6 +2613,9 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
                 case "emsetup" when File.Exists(absPath):
                     OpenOrActivateEmSetup(absPath);
                     break;
+                case "markdown" when File.Exists(absPath):
+                    OpenOrActivateMarkdown(absPath);
+                    break;
             }
         }
 
@@ -2633,6 +2639,41 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             if (_openDocsByPath.TryGetValue(absActive, out var activeDoc))
                 _factory.SetActiveDockable(activeDoc);
         }
+    }
+
+    /// <summary>
+    /// Opens the workspace's own <c>README.md</c> — <b>instead of the Welcome tab</b> — when the open
+    /// has produced no documents of its own.
+    ///
+    /// <para>This is what a shipped example workspace is for. Someone who has just used
+    /// <b>Tools ▸ Examples</b> has a folder they did not author in front of them, and the first thing
+    /// they need is the sentence saying what it teaches; a Welcome tab tells them nothing they did not
+    /// know one second ago. The README is the file every example already ships
+    /// (<c>examples/README.md</c> §Adding an example), so there is nothing new for an example to
+    /// carry.</para>
+    ///
+    /// <para><b>Only when nothing else opened</b>, which is the same condition the Welcome tab itself
+    /// appears under — it is replacing that tab, not competing with the user's own documents. A
+    /// workspace someone has been working in restores what they had open and never sees this at all,
+    /// including on the second open of an example they have since drawn in. The README then reopens
+    /// only if it was still open when they left, like any other document: it IS persisted in the
+    /// <c>.cws</c> open list (kind <c>markdown</c>), so closing it is a decision that sticks.</para>
+    ///
+    /// <para>It is not restricted to example workspaces and must not be: circuitRF cannot tell a copy
+    /// of an example from any other folder — that is the whole point of the copy being an ordinary
+    /// workspace — and a README somebody wrote for their own project is exactly as worth showing.</para>
+    /// </summary>
+    private void OpenWorkspaceReadmeIfNothingElseIs(string workspaceDir)
+    {
+        // _openDocsByPath is authoritative here and the dock is not: the restore has run but the
+        // saved arrangement has not been applied yet, so a document may not be in the primary
+        // document dock at all. Every restored document registered itself above.
+        if (_openDocsByPath.Count > 0) return;
+
+        if (MarkdownDocument.FindWorkspaceReadme(workspaceDir) is not { } readme) return;
+
+        _factory.RemoveWelcomeStub();
+        OpenOrActivateMarkdown(readme);
     }
 
     /// <summary>
@@ -2947,6 +2988,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
                 HarmonicaDocument had            => had.FilePath,
                 TechDocument td                  => td.FilePath,
                 EmSetupDocument emd           => emd.FilePath,
+                MarkdownDocument mdd             => mdd.FilePath,
                 CellParameterEditorDocument cpd  => Path.GetDirectoryName(cpd.ViewModel.EditModel.CcellPath),
                 _ => null,
             };
@@ -7077,6 +7119,31 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
     }
 
     /// <summary>
+    /// Opens (or focuses) a Markdown file as a <b>read-only</b> document. Nothing is editable and
+    /// nothing is written — see <see cref="MarkdownDocument"/> for why that is structural rather than
+    /// enforced.
+    ///
+    /// <para>Loaded on the calling thread like every other opener here. A README is a few kilobytes;
+    /// the documents that earned an async open are the ones that parse artwork.</para>
+    /// </summary>
+    public void OpenOrActivateMarkdown(string absolutePath)
+    {
+        if (ActivateIfOpen(absolutePath)) return;
+
+        try
+        {
+            var doc = MarkdownDocument.Load(absolutePath);
+            _factory.OpenDocument(doc);
+            _openDocsByPath[absolutePath] = doc;
+            Messages.Info("Opened", absolutePath);
+        }
+        catch (Exception ex)
+        {
+            Messages.Error($"Failed to open '{Path.GetFileName(absolutePath)}': {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Opens (or focuses) a <c>.cem</c> EM setup as an ordinary editor document. Mirrors
     /// <see cref="OpenOrActivateTech"/> exactly — R-em-9: a <c>.cem</c> is workspace-scoped and
     /// never scratch, so there is no materialize path.
@@ -9448,6 +9515,9 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             case ".cdd":   OpenOrActivateDataDisplay(abs); return true;
             case ".ctech": OpenOrActivateTech(abs);        return true;
             case ".cem":   OpenOrActivateEmSetup(abs);     return true;
+            // A workspace's README and anything else written beside it. Read-only, so "opened" here
+            // means shown — there is nothing this can do to the file.
+            case MarkdownDocument.Extension: OpenOrActivateMarkdown(abs); return true;
             case ".charm": OpenHarmonicaPath(abs);         return true;
             case ".wbond": OpenWBondPath(abs);             return true;
             // RC-2: a cell's PARAMETERS are a document like any other here, and the edit routed to
@@ -9474,7 +9544,9 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         {
             if (node.IsDirectory) return;                       // a folder bookmark opens nothing
             kind = WorkspaceScanner.ClassifyFile(node.AbsolutePath);
-            if (kind is NodeKind.OtherFile or NodeKind.ColorThemeFile) return;  // no editor for it
+            // A bookmarked .md is openable; every other OtherFile still is not.
+            if (kind is NodeKind.ColorThemeFile) return;                       // no editor for it
+            if (kind is NodeKind.OtherFile && !MarkdownDocument.IsMarkdown(node.AbsolutePath)) return;
             if (!File.Exists(node.AbsolutePath))
             {
                 Messages.Error($"'{node.AbsolutePath}' is no longer there.");
@@ -9517,6 +9589,13 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
 
             case NodeKind.EmSetupFile:
                 OpenOrActivateEmSetup(node.AbsolutePath);
+                return;
+
+            // A README (or any other .md) beside the workspace's documents. It scans as OtherFile —
+            // there is no NodeKind for it and there should not be, since what makes it openable is
+            // that circuitRF can SHOW it, not that it is part of the design.
+            case NodeKind.OtherFile when MarkdownDocument.IsMarkdown(node.AbsolutePath):
+                OpenOrActivateMarkdown(node.AbsolutePath);
                 return;
 
             default:

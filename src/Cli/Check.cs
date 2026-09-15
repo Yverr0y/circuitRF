@@ -409,8 +409,13 @@ internal static class Check
 
         // Extraction is the schematic's own "does this make a netlist?" It reports naming conflicts
         // — two different labels on one physical net — which nothing else in the tree reports.
+        //
+        // DiskCellResolver, never null: a null resolver is how NetExtractor is told the caller is
+        // flat, and it answers by skipping every cell instance WITHOUT a conflict note. `check` then
+        // reported a hierarchical design as clean while the thing it was checking had its device
+        // silently removed — and every run verb agreed with it, because they extracted the same way.
         NetExtractor.ExtractionResult extracted;
-        try { extracted = NetExtractor.Extract(model, Path.GetFileNameWithoutExtension(path)); }
+        try { extracted = NetExtractor.Extract(model, Path.GetFileNameWithoutExtension(path), DiskCellResolver.Instance); }
         catch (Exception ex) { f.Add(CliDiagnostics.CheckUnreadable(path, ex.Message)); return; }
 
         foreach (var conflict in extracted.Conflicts)

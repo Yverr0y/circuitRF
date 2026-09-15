@@ -140,7 +140,7 @@ public sealed class WorkspaceSessionPersistedOnLeaveTests : IDisposable
         var reload  = MethodBody(revision, "ReloadChangedDocuments");
 
         Assert.Equal(
-            new[] { "cell", "datadisplay", "emsetup", "layout", "schematic", "symbol", "tech" },
+            new[] { "cell", "datadisplay", "emsetup", "layout", "markdown", "schematic", "symbol", "tech" },
             kinds.Order().ToArray());
 
         foreach (var kind in kinds)

@@ -9,6 +9,7 @@
              xmlns:propv="using:CircuitRF.Ui.Views.Properties"
              xmlns:cv="using:CircuitRF.Ui.Views.Content"
              xmlns:schemDoc="using:CircuitRF.Ui.Schematic"
+             xmlns:md="using:CircuitRF.Ui.Markdown"
              xmlns:mv="using:CircuitRF.Ui.Views.Messages"
              xmlns:drcv="using:CircuitRF.Ui.Views.Drc"
              xmlns:revv="using:CircuitRF.Ui.Views.Revision"
@@ -82,6 +83,12 @@
         </DataTemplate>
         <DataTemplate DataType="{x:Type dockVm:StubDocument}">
             <cv:StubContentView/>
+        </DataTemplate>
+        <!-- A workspace's README.md, read-only. Opened instead of the Welcome tab when a workspace
+             has one and nothing else is being restored — which is what an example workspace, freshly
+             copied out of Tools ▸ Examples, always is. -->
+        <DataTemplate DataType="{x:Type md:MarkdownDocument}">
+            <cv:MarkdownDocumentView/>
         </DataTemplate>
         <DataTemplate DataType="{x:Type schemDoc:SchematicDocument}">
             <cv:SchematicView/>

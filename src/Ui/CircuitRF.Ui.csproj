@@ -332,6 +332,36 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!--
+      The example workspaces (Tools > Examples), beside the executable.
+
+      THEY ARE COPIED, NOT EMBEDDED, and that is the point. `examples/` holds REAL workspaces: the
+      owner opens them in circuitRF and edits them in place, in the repository, and what ships is
+      that same tree. An embedded resource would have to be unpacked before it could be opened at
+      all, so the copy the application carries and the copy anyone edits would be two artifacts with
+      nothing keeping them in step - which is the drift `ShippedSchematicTemplates` avoids by going
+      the other way, because a template is not a thing anybody opens as a document.
+
+      ExampleWorkspaces.ResolveRoot looks BESIDE THE EXECUTABLE first and only then walks up for the
+      source tree, exactly as DocLauncher does for docs/user - so a development build finds this
+      folder either way and a mistake here is invisible until someone runs an installed copy. That
+      is precisely how tools/pcell-python shipped broken once: CHECK THE PUBLISHED OUTPUT, not just
+      `dotnet run`. ExamplesShippedTests asserts the item group reaches both.
+
+      `**/*.*` and not `**/*`: MSBuild's `*.*` does match a name with no stem, so `.cws`, `.ccell`,
+      `.gitignore` and `.gitattributes` are all taken - which matters, because a workspace whose
+      `.cws` did not travel is not a workspace. What is deliberately NOT here is any RESULT: an
+      example ships its design and its EM setup, and the user runs them. `results/**` is excluded
+      for that reason, and because the antenna's own run is 52 MB.
+    -->
+    <None Include="../../examples/**/*.*"
+          Exclude="../../examples/**/results/**/*.*;../../examples/**/.DS_Store">
+      <Link>examples/%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Avalonia UI framework (match splotRF versions) -->
     <PackageReference Include="Avalonia" Version="12.0.3" />
     <PackageReference Include="Avalonia.Controls.ColorPicker" Version="12.0.3" />

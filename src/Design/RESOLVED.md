@@ -6027,3 +6027,27 @@ invariant rather than a side effect of this tier.
 Gates: `GitSubstrateTests.AGitInstalledWhereALauncherCannotSeeItIsStillFound` — whose stub is named
 something `PATH` cannot resolve, so it exercises the directory tier even on a machine with a real
 git on `PATH` — and `NoCandidateNameMeansNoUnpromptedGitSearchAtAll`.
+
+
+## `HierarchyResolver` crossed the firewall, and `DiskCellResolver` is why (2026-09-15)
+
+`HierarchyResolver` was 55 lines in `src/Ui/Schematic/`, and its own doc comment already said
+"framework-free helper … extracted so tests can call it without constructing WorkspaceViewModel". It
+is now `src/Design/Schematic/HierarchyResolver.cs`, `public` instead of `internal`, with two
+`using` lines added and nothing else changed.
+
+The reason is `DiskCellResolver`, beside it: the headless half of hierarchy, and the fix for a
+defect where every CLI run verb dropped cell instances in silence (the full story is in
+`src/Cli/RESOLVED.md`). `src/Cli` cannot reference `src/Ui`, so the descent had to come down with
+it.
+
+**The move cost nothing at the call sites** — `src/Ui/GlobalUsings.cs` already carries
+`global using CircuitRF.Design.Schematic;`, which is what `NetExtractor` and `SchematicPersistence`
+arrive through, so every existing user of `HierarchyResolver` in `src/Ui` and `tests/Ui.Tests`
+compiled untouched. Only the accessibility had to change: `internal` in `CircuitRF.Design` is not
+visible to `CircuitRF.Ui`.
+
+**`DiskCellResolver` is deliberately stateless.** A cell instantiated twenty times is read from disk
+twenty times; `NetExtractor`'s own `CellScope` is what stops the elaborated library gaining twenty
+copies of it. A cache here would need invalidating by something, and a one-shot process has nothing
+to invalidate it with.
