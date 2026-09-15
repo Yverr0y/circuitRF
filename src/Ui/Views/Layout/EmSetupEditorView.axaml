@@ -30,7 +30,17 @@
     </UserControl.KeyBindings>
 
     <UserControl.Styles>
+        <!-- BOTH text elements, because a Selector names a TYPE and SelectableTextBlock is not a
+             TextBlock. The layout reference became selectable on 2026-09-15 and silently stopped
+             matching this rule: it kept its Classes="colhdr" and rendered at the control default —
+             12 px, full opacity, beside 10 px at 0.6 on every label around it. A class that is
+             applied and does nothing is worse than one that was forgotten, because the markup says
+             it is styled. -->
         <Style Selector="TextBlock.colhdr">
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="Foreground" Value="{DynamicResource SystemBaseMediumColor}"/>
+        </Style>
+        <Style Selector="SelectableTextBlock.colhdr">
             <Setter Property="FontSize" Value="10"/>
             <Setter Property="Foreground" Value="{DynamicResource SystemBaseMediumColor}"/>
         </Style>
@@ -228,11 +238,32 @@
                           HorizontalAlignment="Left">
                         <TextBlock Grid.Column="0"
                                    Text="Layout:" Classes="colhdr" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Column="1"
+                        <!-- SELECTABLE, and with a way into the layout itself (owner request,
+                             2026-09-15). Selectable for the reason every other reported string in
+                             this panel is: this row is the reference, and a reference that cannot be
+                             copied cannot be pasted into a bug report. The context menu is the other
+                             half — the row NAMES a document, and naming one without being able to
+                             open it is the same gap the EM button had. Both items are gated on the
+                             reference having RESOLVED: "Open" on a path that resolves to nothing is
+                             an item that can only fail. -->
+                        <SelectableTextBlock Grid.Column="1" Name="LayoutRefText"
                                    Text="{Binding ViewModel.LayoutStatus}" Classes="colhdr"
                                    VerticalAlignment="Center"
                                    TextTrimming="CharacterEllipsis" MaxWidth="420"
-                                   ToolTip.Tip="{Binding ViewModel.LayoutStatus}"/>
+                                   ToolTip.Tip="{Binding ViewModel.LayoutStatus}">
+                            <SelectableTextBlock.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Open…"
+                                              Command="{Binding ViewModel.OpenLayoutCommand}"
+                                              IsEnabled="{Binding ViewModel.CanOpenLayout}"
+                                              ToolTip.Tip="Show this layout — focusing it if it is already open, opening it in the workspace otherwise."/>
+                                    <MenuItem Header="Open in New Window…"
+                                              Command="{Binding ViewModel.OpenLayoutInNewWindowCommand}"
+                                              IsEnabled="{Binding ViewModel.CanOpenLayout}"
+                                              ToolTip.Tip="Show this layout in a window of its own. A layout that is already in its own window is brought forward rather than moved again."/>
+                                </ContextMenu>
+                            </SelectableTextBlock.ContextMenu>
+                        </SelectableTextBlock>
                         <Button Grid.Column="2" Name="ChangeLayoutButton" Classes="ellipsis" Content="…"
                                 ToolTip.Tip="Point this EM setup at a different .clay. The cross-section, ports and mesh all re-derive against the new artwork, and the change is undoable."/>
                     </Grid>
@@ -361,7 +392,12 @@
         <Border DockPanel.Dock="Top" Padding="8,6"
                 Background="{DynamicResource CrfWarningBrush}"
                 IsVisible="{Binding ViewModel.BlockingReason, Converter={x:Static ObjectConverters.IsNotNull}}">
-            <TextBlock Text="{Binding ViewModel.BlockingReason}" TextWrapping="Wrap" FontSize="11"/>
+            <!-- SELECTABLE (owner request, 2026-09-15): this is where the mesher's unknown-count
+                 refusal lands, and it is a paragraph naming measured numbers and the settings that
+                 move them. A message a user cannot copy is a message they have to retype into a bug
+                 report — and the numbers in it are the whole content. Same change, same reason, for
+                 every warning-coloured string in this panel. -->
+            <SelectableTextBlock Text="{Binding ViewModel.BlockingReason}" TextWrapping="Wrap" FontSize="11"/>
         </Border>
 
         <!-- Named so the code-behind can restore its offset across a window activation — see
@@ -649,7 +685,7 @@
                     <TextBox   Grid.Row="0" Grid.Column="1" Classes="num" Tag="Port1Z0"
                                Text="{Binding ViewModel.Port1Z0Text}"
                                LostFocus="OnFieldLostFocus" KeyDown="OnFieldKeyDown"/>
-                    <TextBlock Grid.Row="1" Grid.Column="1" FontSize="10"
+                    <SelectableTextBlock Grid.Row="1" Grid.Column="1" FontSize="10"
                                Foreground="{DynamicResource CrfWarningBrush}"
                                Text="{Binding ViewModel.Port1Z0Error}"
                                IsVisible="{Binding ViewModel.Port1Z0Error, Converter={x:Static ObjectConverters.IsNotNull}}"/>
@@ -658,7 +694,7 @@
                     <TextBox   Grid.Row="2" Grid.Column="1" Classes="num" Tag="Port2Z0"
                                Text="{Binding ViewModel.Port2Z0Text}"
                                LostFocus="OnFieldLostFocus" KeyDown="OnFieldKeyDown"/>
-                    <TextBlock Grid.Row="3" Grid.Column="1" FontSize="10"
+                    <SelectableTextBlock Grid.Row="3" Grid.Column="1" FontSize="10"
                                Foreground="{DynamicResource CrfWarningBrush}"
                                Text="{Binding ViewModel.Port2Z0Error}"
                                IsVisible="{Binding ViewModel.Port2Z0Error, Converter={x:Static ObjectConverters.IsNotNull}}"/>
@@ -718,7 +754,7 @@
                                             </DataTemplate>
                                         </ComboBox.ItemTemplate>
                                     </ComboBox>
-                                    <TextBlock Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" FontSize="10"
+                                    <SelectableTextBlock Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" FontSize="10"
                                                Foreground="{DynamicResource CrfWarningBrush}"
                                                Text="{Binding Error}"
                                                IsVisible="{Binding HasError}"/>
@@ -728,7 +764,7 @@
                                          than not listing it. Spans all three columns and wraps: these
                                          are the extractor's own sentences, which name the port, its
                                          coordinate and the remedy. -->
-                                    <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3"
+                                    <SelectableTextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3"
                                                FontSize="10" TextWrapping="Wrap" Margin="0,2,0,4"
                                                Foreground="{DynamicResource CrfWarningBrush}"
                                                Text="{Binding Problem}"
@@ -773,7 +809,7 @@
                                Text="{Binding ViewModel.TruncationTailCellsText}"
                                LostFocus="OnFieldLostFocus" KeyDown="OnFieldKeyDown"/>
                 </Grid>
-                <TextBlock FontSize="10" TextWrapping="Wrap"
+                <SelectableTextBlock FontSize="10" TextWrapping="Wrap"
                            Foreground="{DynamicResource CrfWarningBrush}"
                            Text="{Binding ViewModel.MeshFieldError}"
                            IsVisible="{Binding ViewModel.MeshFieldError, Converter={x:Static ObjectConverters.IsNotNull}}"/>
@@ -899,7 +935,7 @@
                                    Text="{Binding ViewModel.MeshFrequencyUnit}"/>
                     </StackPanel>
                 </Grid>
-                <TextBlock FontSize="10" TextWrapping="Wrap"
+                <SelectableTextBlock FontSize="10" TextWrapping="Wrap"
                            Foreground="{DynamicResource CrfWarningBrush}"
                            Text="{Binding ViewModel.PlanarMeshFieldError}"
                            IsVisible="{Binding ViewModel.PlanarMeshFieldError, Converter={x:Static ObjectConverters.IsNotNull}}"/>

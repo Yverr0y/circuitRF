@@ -1,5 +1,97 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## The EM button made a SECOND setup for a layout that already had one (2026-09-15)
+
+Owner, on the shipped Patch Antenna example: *the `.cem` is there but it is not configured
+properly — compute the radiation pattern is turned off.*
+
+**The example is correct and always was.** `patch/em/patch-5p8GHz.cem` asks for the radiation
+pattern, the radiating-sheet mesh, staircase boundary cells, adaptive sampling and the resonance
+search, over 5.3–6.3 GHz at 21 points; `AntennaExampleTests` has gated all six since the example
+landed, and they pass. The mesh is the shipped default and meshes to **N = 1,611**, the number
+`reference/antennas.html` quotes.
+
+**What the owner had open was a different file.** The installed copy of the example held two EM
+setups — the example's own, and a `em/patch.cem` written six hours later carrying the defaults of a
+brand-new setup: 1–20 GHz / 101 points, no `AnalysisKind` (so Auto), no `PlanarMesh`, no
+`ResonanceSearch`, no `RadiationPattern`. That is what `WorkspaceViewModel.OpenOrCreateEmSetupForLayout`
+— the Layout Editor's **EM** toolbar button — produces, and it produced it because it asked only one
+question:
+
+```csharp
+var path = Path.Combine(workspaceDir, "em", stem + ".cem");
+if (File.Exists(path)) { OpenOrActivateEmSetup(path); return; }
+// …otherwise CREATE one
+```
+
+`<workspace>/em/<layout stem>.cem` is where *we* write a setup. **It is not a rule the format
+carries**: a `.cem` resolves its layout through `EmSetupResolver.ResolveLayoutPath` and may sit
+anywhere, and **both shipped EM examples sit somewhere else** — in the CELL's own `em/` folder, named
+after the frequency rather than after the layout. So on the example's own artwork the button found
+nothing, created a default setup, and opened it. Nothing was reported, because from the button's point
+of view nothing had gone wrong.
+
+**This is the same shape as the project-tree gap recorded above, and it is the other half of it.**
+Both come from the arrangement the application PRODUCES never being the arrangement that was broken:
+`<workspace>/em/` renders in the tree and is found by the button, so neither defect could appear on a
+workspace circuitRF had made itself.
+
+### The fix
+
+`EmSetupResolver.FindSetupsForLayout(cwsPath, clayPath)` — every `.cem` under the workspace whose
+reference **resolves** to that layout, asked through `ResolveLayoutPath` so it is the same rule the
+run uses rather than a name comparison. The button opens one when there is one and creates only when
+there is genuinely none; more than one is a legitimate arrangement (a coarse sweep and a fine one over
+one piece of artwork) so it opens the best and **says in Messages that the others exist**, since the
+one that opened was chosen by an ordering rule the user did not write. Ordering puts the conventional
+path first, which keeps the previous behaviour exactly where it already applied.
+
+Dot-folders are not walked, an unreadable `.cem` is skipped rather than thrown on, and the scan runs
+only when the conventional path misses.
+
+Gate: `tests/Ui.Tests/Em/EmSetupForLayoutLookupTests.cs`, including the report itself — the shipped
+Patch Antenna layout resolves to `patch/em/patch-5p8GHz.cem`, that file asks for the pattern, and
+`examples/Patch Antenna/em/patch.cem` does not exist.
+
+**Not done, deliberately:** nothing moves or deletes an `em/<stem>.cem` a user already has. A workspace
+that collected one before this fix keeps it, and now gets told it is there.
+
+## EM Setup: the layout reference opens, and every warning can be copied (2026-09-15)
+
+Two owner requests against the `.cem` panel, both about text that names something and could not be
+acted on.
+
+**The Layout row is a `SelectableTextBlock` with a context menu** — *Open…* and *Open in New
+Window…*, both gated on `EmSetupEditorViewModel.CanOpenLayout` (the reference having RESOLVED), because
+an Open that can only fail is an item that should not be enabled.
+
+The panel's whole contribution is **a resolved absolute path and a flag**. `ResolvedLayoutPath` is
+taken from the resolution itself rather than re-derived from `LayoutRef`: that rule is a walk-up with
+an absolute-path case, and a second reading of it here could name a different file from the one being
+analysed. Which window the document lands in is the shell's question and had one answer each already —
+`OpenOrActivateLayoutAsync` (focuses an open one, including one torn off or open in another WORKSPACE
+window; opens it otherwise) and `OpenDocumentInOwnWindow` (the drag tear-off path). `ShowEmLayoutAsync`
+calls both, in that order.
+
+**A layout already in its own window stays there.** `OpenDocumentInOwnWindow` declines a dockable the
+shell's document dock does not own, which is exactly that case — and the activate above it has already
+brought that window forward, which is what was asked. Floating it again would answer a question nobody
+asked.
+
+**Every warning-coloured string in the panel is selectable**, so it can be pasted into a bug report.
+Seven of them, the load-bearing one being `BlockingReason` — where the mesher's unknown-count refusal
+lands, a paragraph naming the count, the ceiling and the settings that move each, reported verbatim.
+The gate asks about the **foreground brush** rather than about a list of known names, so a warning
+added later is covered by the same assertion instead of quietly falling outside it.
+
+Gate: `tests/Ui.Tests/Em/EmSetupLayoutRowTests.cs`.
+
+**One unrelated test moved with it.** `EmSetupHeaderShrinksTests.RowCarrying` matched `TextBlock` by
+element name, so the layout reference changing kind turned five passing tests red while saying nothing
+about the overflow that file exists to hold shut. It now accepts either kind; every structural claim
+in it is about the ROW — star column, trimming, tooltip, no horizontal StackPanel — and none of them
+depends on which text element is in it.
+
 ## A cell's EM setup had no row in the project tree (2026-09-15)
 
 Owner, twice, on the shipped Patch Antenna example: the `.cem` is not there. Checked against the

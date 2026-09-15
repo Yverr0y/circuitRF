@@ -155,14 +155,21 @@ public sealed class EmSetupHeaderShrinksTests
 
     // ── Reading the view ────────────────────────────────────────────────────────────────────
 
-    /// <summary>The Grid holding the TextBlock whose Text is <paramref name="binding"/>, and that
-    /// TextBlock.</summary>
+    /// <summary>The Grid holding the text element whose Text is <paramref name="binding"/>, and that
+    /// element.
+    ///
+    /// <para><b>Either kind of text element counts.</b> The layout reference became a
+    /// <c>SelectableTextBlock</c> on 2026-09-15 (it names a file, so it has to be copyable and it
+    /// carries a context menu into that file), and every structural claim below is about the ROW —
+    /// star column, trimming, tooltip, no horizontal StackPanel — none of which the element's kind
+    /// changes. Matching on <c>TextBlock</c> alone would have turned that unrelated change into five
+    /// red tests saying nothing about the overflow this file exists to hold shut.</para></summary>
     private static (XElement Row, XElement Text) RowCarrying(string binding)
     {
         var doc = XDocument.Load(Path.Combine(RepoRoot(), View));
 
         var text = doc.Descendants()
-            .Where(e => e.Name.LocalName == "TextBlock")
+            .Where(e => e.Name.LocalName is "TextBlock" or "SelectableTextBlock")
             .SingleOrDefault(e => e.Attribute("Text")?.Value == binding);
         Assert.NotNull(text);
 

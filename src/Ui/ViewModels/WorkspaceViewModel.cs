@@ -6697,18 +6697,23 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
 
     /// <summary>
     /// The Layout Editor's own EM button (owner request, 2026-08-09): <b>one gesture from a layout to
-    /// its EM setup.</b> The <c>.cem</c> is named after the layout file — <c>Amp.clay</c> → <c>Amp.cem</c>
-    /// — and if that setup already exists it is opened and focused rather than a second one being
-    /// created. This is the only EM entry point outside the <c>.cem</c> editor itself; before it, a
-    /// user had to know that File ▸ New ▸ EM Setup… existed at all.
+    /// its EM setup.</b> An EM setup that already analyses this layout is opened and focused rather
+    /// than a second one being created — <b>asked of every <c>.cem</c> in the workspace, not only of
+    /// the name we would have written ourselves</b>; see the block comment in the body for the report
+    /// that made that distinction matter. A new setup is created only when the layout genuinely has
+    /// none, and it is named after the layout file — <c>Amp.clay</c> → <c>Amp.cem</c>. This is the
+    /// only EM entry point outside the <c>.cem</c> editor itself; before it, a user had to know that
+    /// File ▸ New ▸ EM Setup… existed at all.
     ///
-    /// <para><b>Why <c>&lt;workspace&gt;/em/</c> and not beside the <c>.clay</c>.</b> The owner's
-    /// naming rule ("remove .clay, add .cem") is about the FILE NAME; the directory is ours to pick,
-    /// and beside the layout is the one place it must not go: a cell's <c>layout/</c> sub-folder is
-    /// enumerated by <c>WorkspaceScanner.BuildCellNode</c> with <c>"*" + ViewExtension(vt)</c>, i.e.
-    /// <c>*.clay</c> only — a <c>.cem</c> written there is INVISIBLE in the project tree. <c>em/</c>
-    /// is an ordinary user folder, listed by extension, and is where File ▸ New ▸ EM Setup… already
-    /// puts them, so both doors agree.</para>
+    /// <para><b>Why a NEW one goes in <c>&lt;workspace&gt;/em/</c> and not beside the <c>.clay</c>.</b>
+    /// The owner's naming rule ("remove .clay, add .cem") is about the FILE NAME; the directory is
+    /// ours to pick, and beside the layout is the one place it must not go: a cell's <c>layout/</c>
+    /// sub-folder is enumerated by <c>WorkspaceScanner.BuildCellNode</c> with
+    /// <c>"*" + ViewExtension(vt)</c>, i.e. <c>*.clay</c> only, so a <c>.cem</c> written there has no
+    /// row. <c>em/</c> is an ordinary user folder, listed by extension, and is where
+    /// File ▸ New ▸ EM Setup… already puts them, so both doors agree. A <c>.cem</c> in a cell's own
+    /// <c>em/</c> folder is a different case and does render — that gap was closed on 2026-09-15 —
+    /// which is where both shipped EM examples keep theirs.</para>
     /// </summary>
     public void OpenOrCreateEmSetupForLayout(string clayPath)
     {
@@ -6733,6 +6738,37 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         if (File.Exists(path))
         {
             OpenOrActivateEmSetup(path);
+            return;
+        }
+
+        // ── A setup that is NOT at the conventional path is still this layout's setup ────────────
+        //
+        // Owner report, 2026-09-15, on the shipped Patch Antenna example: pressing EM on the
+        // example's own layout produced a FRESH default setup — 1-20 GHz, Auto kernel, no radiation
+        // pattern, no sheet mesh — beside `patch/em/patch-5p8GHz.cem`, which is the correct one and
+        // is what reference/antennas.html tells the reader to open. Nothing was wrong with the
+        // example: `<workspace>/em/<stem>.cem` is where WE write a setup, and this door knew only
+        // that spelling, so a `.cem` a human (or an example) had put anywhere else was invisible to
+        // it. A second, wrongly-configured setup arriving silently is worse than no button at all,
+        // because the answer it gives is plausible.
+        //
+        // EmSetupResolver.FindSetupsForLayout asks the question the RUN asks — "does this .cem
+        // resolve to that .clay?" — rather than comparing file names, so it is the same rule at both
+        // ends. Creating stays the behaviour when there is genuinely nothing here.
+        var existing = EmSetupResolver.FindSetupsForLayout(CurrentWorkspacePath, clayPath);
+        if (existing.Count > 0)
+        {
+            OpenOrActivateEmSetup(existing[0]);
+            // More than one is a legitimate arrangement (a coarse sweep and a fine one over the same
+            // artwork), so it is reported rather than refused — but it is reported, because the one
+            // that opened was chosen by an ordering rule the user did not write.
+            if (existing.Count > 1)
+                Messages.Info(
+                    $"{Path.GetFileName(clayPath)} has {existing.Count} EM setups in this workspace. " +
+                    $"Opened '{Path.GetRelativePath(workspaceDir, existing[0])}'; the others are " +
+                    string.Join(", ", existing.Skip(1)
+                        .Select(p => $"'{Path.GetRelativePath(workspaceDir, p)}'")) + ".",
+                    existing[0]);
             return;
         }
 
@@ -7262,6 +7298,10 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
                 // nobody is saving, which is a change the user would lose without being told.
                 SetPortKind = (label, kind) => SetLayoutPortKind(absolutePath, label, kind),
                 MakeLayoutRef = abs => MakeEmLayoutRef(absolutePath, abs),
+                // Layout row ▸ Open… / Open in New Window… (owner request, 2026-09-15). The panel
+                // names a path; which window it lands in is the shell's question and is answered
+                // once, here.
+                OpenLayoutRequested = (clay, ownWindow) => _ = ShowEmLayoutAsync(clay, ownWindow),
                 RunRequested  = RunEmSetupAsync,
                 MeshRequested = MeshEmSetupAsync,
                 ResultsRootProvider = () => GetResultsRoot(),
@@ -7422,6 +7462,44 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
 
         Messages.Error($"{Path.GetFileName(clayPath)} could not be opened, so port '{label.Text}' " +
                        "kept its type. A port's type is stored on its label in the layout.", clayPath);
+    }
+
+    /// <summary>
+    /// <b>EM Setup ▸ the Layout row's context menu</b> (owner request, 2026-09-15): show the
+    /// <c>.clay</c> this setup analyses, optionally in a window of its own.
+    ///
+    /// <para>Both halves are existing doors, called rather than re-implemented.
+    /// <see cref="OpenOrActivateLayoutAsync"/> is the one that already knows the whole answer to
+    /// "show me this layout": it focuses an open one — including one torn off into another window, or
+    /// open in another WORKSPACE window — and opens it otherwise, reporting a read failure in its own
+    /// words. <see cref="OpenDocumentInOwnWindow"/> is the drag tear-off path, so a layout sent to a
+    /// new window behaves exactly like one the user dragged there.</para>
+    ///
+    /// <para><b>Open first, float second, in that order, and a layout that is already floating stays
+    /// where it is.</b> <c>OpenDocumentInOwnWindow</c> declines a dockable the shell's document dock
+    /// does not own, which is precisely the already-torn-off case — and the activate above has
+    /// already brought that window forward, which is what the user asked for. Undocking it again into
+    /// a second window would answer a question nobody asked.</para>
+    ///
+    /// <para>A reference that no longer resolves is reported here rather than silently doing nothing:
+    /// the menu is reached from a row whose text IS the reference, so "that file is gone" is the
+    /// answer to the gesture.</para>
+    /// </summary>
+    private async Task ShowEmLayoutAsync(string absoluteClayPath, bool inOwnWindow)
+    {
+        if (!File.Exists(absoluteClayPath) && FindOpenDocument(absoluteClayPath) is null)
+        {
+            Messages.Error(
+                $"'{Path.GetFileName(absoluteClayPath)}' could not be opened — this EM setup " +
+                "references its layout by path, and nothing is at that path now.", absoluteClayPath);
+            return;
+        }
+
+        await OpenOrActivateLayoutAsync(absoluteClayPath);
+        if (!inOwnWindow) return;
+
+        if (FindOpenDocument(absoluteClayPath) is { } document)
+            OpenDocumentInOwnWindow(document);
     }
 
     private EmLayoutSource? ResolveEmLayout(string cemPath, string layoutRef)

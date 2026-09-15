@@ -72,6 +72,19 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     /// </summary>
     public Func<string, string>? MakeLayoutRef { get; set; }
 
+    /// <summary>
+    /// Wired by the workspace: show the <c>.clay</c> this setup analyses, given its ABSOLUTE path and
+    /// whether the user asked for a window of its own. Unset (a headless view model, a test) simply
+    /// means the two context-menu items do nothing, which is why
+    /// <see cref="CanOpenLayout"/> gates them on the reference having resolved rather than on this.
+    ///
+    /// <para>The panel hands over a path and nothing else. Whether that layout is already open, which
+    /// window it is in, and what "a new window" means in a docking layout are all the shell's
+    /// questions, and they have one answer each already — a second one here would be the copy that
+    /// drifts.</para>
+    /// </summary>
+    public Action<string, bool>? OpenLayoutRequested { get; set; }
+
     /// <summary>What <see cref="EmGeometry.Flatten"/> had to say about the last refresh's geometry —
     /// carried on a field because <c>RefreshPlanar</c> builds its own note list and both paths must
     /// report the same thing about the same artwork.</summary>
@@ -276,6 +289,34 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     }
     [ObservableProperty] private ObservableCollection<EmStackupRow> _stackupRows = [];
     [ObservableProperty] private string _layoutStatus = "";
+
+    /// <summary>
+    /// The absolute <c>.clay</c> the reference resolved to on the last refresh, or null when it
+    /// resolved to nothing. <b>Set from the resolution itself</b> rather than re-derived from
+    /// <see cref="EmSetup.LayoutRef"/>: the reference rule is a walk-up with an absolute-path case,
+    /// and a second reading of it here could name a different file from the one being analysed.
+    /// </summary>
+    [ObservableProperty] private string? _resolvedLayoutPath;
+
+    partial void OnResolvedLayoutPathChanged(string? value)
+        => OnPropertyChanged(nameof(CanOpenLayout));
+
+    /// <summary>Whether there is a layout to show — what the Layout row's context menu is gated on.</summary>
+    public bool CanOpenLayout => ResolvedLayoutPath is { Length: > 0 };
+
+    /// <summary>Layout row ▸ Open… — show the <c>.clay</c> this setup analyses.</summary>
+    [RelayCommand]
+    private void OpenLayout()
+    {
+        if (ResolvedLayoutPath is { Length: > 0 } p) OpenLayoutRequested?.Invoke(p, false);
+    }
+
+    /// <summary>Layout row ▸ Open in New Window… — the same layout, in a window of its own.</summary>
+    [RelayCommand]
+    private void OpenLayoutInNewWindow()
+    {
+        if (ResolvedLayoutPath is { Length: > 0 } p) OpenLayoutRequested?.Invoke(p, true);
+    }
     [ObservableProperty] private string _technologyName = "";
 
     /// <summary>The mesh, when the Mesh button has been pressed and nothing has invalidated it
@@ -1543,6 +1584,8 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         TechnologyName     = "";
         DispersionDisabledReason = "The cross-section has not resolved yet.";
 
+        ResolvedLayoutPath = null;
+
         if (Working.LayoutRef is not { Length: > 0 })
         {
             LayoutStatus = "No layout selected. Pick the layout this EM setup analyses.";
@@ -1560,7 +1603,8 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
             return;
         }
 
-        LayoutStatus = Working.LayoutRef;
+        LayoutStatus       = Working.LayoutRef;
+        ResolvedLayoutPath = source.AbsolutePath;
 
         // Asked of the ARTWORK, and asked HERE rather than in the planar half — the whole point of
         // InternalPortOnTheWrongKernel is to fire when the CROSS-SECTION kernel has been chosen, and

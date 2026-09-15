@@ -109,6 +109,23 @@ every fan at the source and can be made one-way-coarsening. That is the brief.
 
 ## §EFAN — the edge fan now obeys the control that sets mesh density (2026-09-15)
 
+> **Asked afterwards (2026-09-15): did this change the antenna mesh?** No — measured, not argued.
+> The floor binds only when `1/(MinCellsAcross · 10) > 3%`, i.e. at **3 cells across and below**, and
+> the shipped patch antenna runs at the default 4. Meshed through `PlanarKernel.Mesh` on
+> `testdata/antenna/`, at HEAD:
+>
+> | Cells across | 8 | 6 | **4 (shipped)** | 3 | 2 | 1 |
+> |---|---|---|---|---|---|---|
+> | N | 2,619 | 1,944 | **1,611** | 1,250 | 1,029 | 680 |
+> | finest edge cell | 50.4 µm | 50.4 µm | **50.4 µm** | 56 µm | 84 µm | 168 µm |
+> | realised fraction | 3% | 3% | **3%** | 3.33% | 5% | 10% |
+>
+> **N = 1,611 is the number `reference/antennas.html` quotes**, so nothing an antenna run at 4 or above
+> does has moved to the bit, and `AntennaExampleTests.TheExampleMeshesToTheUnknownCountThePageQuotes`
+> is the standing gate on it. Below 4 the edge cell is coarsened — which is the point, it is what the
+> user asked for by lowering the control, and the run now names the control that did it. The commit
+> before this one (`0e4127bb`) touched only a brief and this file: **no code, so no mesh.**
+
 The action half of the section above, and its first correction: the climb the graded fan makes is
 `1/(EdgeFractionOfReference · MinCellsAcrossConductor)` on any geometry-limited mesh, so the user's
 own density control made the fan LONGER the coarser they asked for.

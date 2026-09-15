@@ -84,60 +84,6 @@
       "ShowInstanceName": false
     },
     {
-      "InstanceName": "VAR1",
-      "Symbol": "Var",
-      "X": -2000,
-      "Y": -500,
-      "Rotation": "R0",
-      "MirrorX": false,
-      "Disable": "None",
-      "Parameters": [
-        {
-          "Name": "Pin",
-          "Expression": "0",
-          "Unit": "",
-          "ShowOnSchematic": true,
-          "Dimension": "None"
-        },
-        {
-          "Name": "RFfreq",
-          "Expression": "2",
-          "Unit": "GHz",
-          "ShowOnSchematic": true,
-          "Dimension": "None"
-        },
-        {
-          "Name": "VDD",
-          "Expression": "48",
-          "Unit": "",
-          "ShowOnSchematic": true,
-          "Dimension": "None"
-        }
-      ],
-      "LabelOffsets": [
-        [
-          80,
-          -95
-        ],
-        [
-          80,
-          -95
-        ],
-        [
-          80,
-          -95
-        ],
-        [
-          80,
-          -95
-        ],
-        [
-          80,
-          -95
-        ]
-      ]
-    },
-    {
       "InstanceName": "GND2",
       "Symbol": "Ground",
       "X": -1400,
@@ -324,7 +270,7 @@
         {
           "Name": "R",
           "Expression": "10",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": true,
           "Dimension": "Resistance"
         }
@@ -386,7 +332,7 @@
         {
           "Name": "Z",
           "Expression": "50",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": true,
           "Dimension": "Resistance"
         },
@@ -407,14 +353,14 @@
         {
           "Name": "Z[0]",
           "Expression": "1",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": true,
           "Dimension": "Resistance"
         },
         {
           "Name": "Z[2]",
           "Expression": "1e-6",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": true,
           "Dimension": "Resistance"
         }
@@ -432,7 +378,7 @@
         {
           "Name": "R",
           "Expression": "50",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": true,
           "Dimension": "Resistance"
         }
@@ -441,8 +387,8 @@
     {
       "InstanceName": "MeasInput",
       "Symbol": "Meas",
-      "X": -1800,
-      "Y": 2400,
+      "X": -2000,
+      "Y": 1400,
       "Rotation": "R0",
       "MirrorX": false,
       "Disable": "None",
@@ -456,7 +402,7 @@
         },
         {
           "Name": "Pin_deliv_W",
-          "Expression": "real(0.5*HB1.V(\"Vin\",1)*conj(HB1.I(\"Iin\",1)))",
+          "Expression": "real(0.5*HB1.V(\u0022Vin\u0022,1)*conj(HB1.I(\u0022Iin\u0022,1)))",
           "Unit": "",
           "ShowOnSchematic": true,
           "Dimension": "None"
@@ -480,15 +426,15 @@
     {
       "InstanceName": "MeasOutput",
       "Symbol": "Meas",
-      "X": 300,
-      "Y": 2400,
+      "X": -2000,
+      "Y": 2300,
       "Rotation": "R0",
       "MirrorX": false,
       "Disable": "None",
       "Parameters": [
         {
           "Name": "Pout_W",
-          "Expression": "real(0.5*HB1.V(\"Vout\",1)*conj(HB1.I(\"Iout\",1)))  ; V and I at the FUNDAMENTAL",
+          "Expression": "real(0.5*HB1.V(\u0022Vout\u0022,1)*conj(HB1.I(\u0022Iout\u0022,1)))  ; V and I at the FUNDAMENTAL",
           "Unit": "",
           "ShowOnSchematic": true,
           "Dimension": "None"
@@ -519,7 +465,7 @@
     {
       "InstanceName": "MeasEfficiency",
       "Symbol": "Meas",
-      "X": 2400,
+      "X": 1700,
       "Y": 2400,
       "Rotation": "R0",
       "MirrorX": false,
@@ -527,7 +473,7 @@
       "Parameters": [
         {
           "Name": "PDC_W",
-          "Expression": "real(HB1.V(\"VDD\",0)*HB1.I(\"IDC\",0))           ; harmonic 0 is DC",
+          "Expression": "real(HB1.V(\u0022VDD\u0022,0)*HB1.I(\u0022IDC\u0022,0))           ; harmonic 0 is DC",
           "Unit": "",
           "ShowOnSchematic": true,
           "Dimension": "None"
@@ -551,36 +497,68 @@
     {
       "InstanceName": "MeasHarmonics",
       "Symbol": "Meas",
-      "X": 4200,
-      "Y": 2400,
+      "X": 1700,
+      "Y": 1500,
       "Rotation": "R0",
       "MirrorX": false,
       "Disable": "None",
       "Parameters": [
         {
           "Name": "Vout_2f0_dBc",
-          "Expression": "dB(HB1.V(\"Vout\",2)/HB1.V(\"Vout\",1))   ; dB() broadcasts over a cube; abs() does NOT",
+          "Expression": "dB(HB1.V(\u0022Vout\u0022,2)/HB1.V(\u0022Vout\u0022,1))   ; dB() broadcasts over a cube; abs() does NOT",
           "Unit": "",
           "ShowOnSchematic": true,
           "Dimension": "None"
         },
         {
           "Name": "Vout_3f0_dBc",
-          "Expression": "dB(HB1.V(\"Vout\",3)/HB1.V(\"Vout\",1))",
+          "Expression": "dB(HB1.V(\u0022Vout\u0022,3)/HB1.V(\u0022Vout\u0022,1))",
           "Unit": "",
           "ShowOnSchematic": true,
           "Dimension": "None"
         },
         {
           "Name": "Vout_pk",
-          "Expression": "mag(HB1.V(\"Vout\",1))                       ; mag(), not abs()",
+          "Expression": "mag(HB1.V(\u0022Vout\u0022,1))                       ; mag(), not abs()",
           "Unit": "",
           "ShowOnSchematic": true,
           "Dimension": "None"
         },
         {
           "Name": "Zin",
-          "Expression": "HB1.V(\"Vin\",1)/HB1.I(\"Iin\",1)                  ; complex - plots on a Smith chart",
+          "Expression": "HB1.V(\u0022Vin\u0022,1)/HB1.I(\u0022Iin\u0022,1)                  ; complex - plots on a Smith chart",
+          "Unit": "",
+          "ShowOnSchematic": true,
+          "Dimension": "None"
+        }
+      ]
+    },
+    {
+      "InstanceName": "VAR1",
+      "Symbol": "Var",
+      "X": -2200,
+      "Y": -200,
+      "Rotation": "R0",
+      "MirrorX": false,
+      "Disable": "None",
+      "Parameters": [
+        {
+          "Name": "Pin",
+          "Expression": "0",
+          "Unit": "",
+          "ShowOnSchematic": true,
+          "Dimension": "None"
+        },
+        {
+          "Name": "RFfreq",
+          "Expression": "2",
+          "Unit": "GHz",
+          "ShowOnSchematic": true,
+          "Dimension": "None"
+        },
+        {
+          "Name": "VDD",
+          "Expression": "48",
           "Unit": "",
           "ShowOnSchematic": true,
           "Dimension": "None"

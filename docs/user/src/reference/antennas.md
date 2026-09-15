@@ -379,12 +379,26 @@ physical, and it is ideally non-zero.</p>
 
 ## Worked example: a 5.8 GHz inset-fed patch {#example}
 
-The workspace is `testdata/antenna/` in the circuitRF source tree: one inset-fed patch on the shipped
-**PCB 2-Layer RO4350B (30 mil, 1 oz)** technology — ε<sub>r</sub> 3.66, tanδ 0.0037, 762 µm to the
-ground plane. It is a test as well as an example, so every number below is re-derivable.
+**Tools ▸ Examples ▸ Patch Antenna** installs this workspace wherever you choose it, ready to open —
+one inset-fed patch on the shipped **PCB 2-Layer RO4350B (30 mil, 1 oz)** technology, ε<sub>r</sub>
+3.66, tanδ 0.0037, 762 µm to the ground plane. Open `patch/em/patch-5p8GHz.cem` and press
+**Simulate**; it arrives with the radiation pattern, the radiating-sheet mesh and the resonance search
+already on, which is what makes every number below re-derivable. It is a test as well as an example —
+the same workspace is `testdata/antenna/` in the circuitRF source tree, where the suite runs it.
+
+<div class="callout note">
+<span class="label">Open the setup that is in the cell, not a new one</span>
+<p>This example keeps its EM setup at <code>patch/em/patch-5p8GHz.cem</code> — inside the cell folder,
+beside the layout's own — because it is <i>this patch's</i> setup. Open it from the project tree.
+The layout editor's <b>EM</b> button finds it too; before 2026-09-15 it did not, and made a second,
+default setup instead — if you have one of those from an earlier build, it is the one at
+<code>em/patch.cem</code> and it is not the run this page describes.</p>
+</div>
+
+Headless, on either copy:
 
 ```
-circuitrf em testdata/antenna/patch/em/patch-5p8GHz.cem
+circuitrf em <workspace>/patch/em/patch-5p8GHz.cem
 ```
 
 {{ui: antenna-patch-feed}}

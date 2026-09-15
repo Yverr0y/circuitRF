@@ -237,8 +237,23 @@ What remains:
 The expression surface (the evaluator is the source of truth) includes qualified cube accessors such
 as `HB1.V("n_drain", 1, All)`, `HB1.I("M1:d", 1, All)`, element-wise cube arithmetic that broadcasts
 over `DataCube`s, and the element-wise helpers `conj`, `real`, `imag`, `mag`, `phase`, `dB`, `dB10`,
-`dBm`, `log10`, `ln`. Cubes are referenced by either the name-keyed accessor or the positional bracket
-index — see **Referencing analysis cubes (two notations)** above for both forms and when to use each.
+`dBm`, `log10`, `ln`, `sqrt`. Cubes are referenced by either the name-keyed accessor or the positional
+bracket index — see **Referencing analysis cubes (two notations)** above for both forms and when to
+use each.
+
+**The rest of the scalar maths library is scalar only**, and that is a real boundary rather than an
+oversight waiting to be tidied: `sin`, `exp`, `pow`, `^` and the rounding family all take a scalar and
+raise *"Value is Cube, not Complex"* on a swept quantity. `sqrt` joined the cube-aware list on
+2026-09-15 (`src/Core/RESOLVED.md`) because it was the one with **no workaround at all** — `x^0.5`,
+`pow(x, 0.5)` and `exp(0.5*log(x))` each fail on the same rule — and a per-frequency square root is an
+ordinary thing to want: a coupling factor k = M/√(L₁L₂), an RMS, a |Z| taken from Z². On a Real cube
+it stays Real unless an element is negative, which promotes the cube to Complex, matching `Value.Pow`'s
+own rule for a negative base so the two spellings cannot disagree.
+
+**There is no accessor for a cube's own axis VALUES** — nothing yields the `freq` vector — so a
+measurement that needs ω (an inductance in henries from a reactance in ohms, say) cannot be written.
+Quantities whose ω cancels are unaffected, which covers most figures of merit; the shipped
+`CoupledInductors` example publishes reactances and says to divide.
 
 **Branch-current accessor** (`brief-unify-i-cube-engine`, 2026-06-18) — `HB1.I("branchName", ...)` pins
 the `branch` axis of the single `I` cube, exactly mirroring `HB1.V("nodeName", ...)` for the `node`

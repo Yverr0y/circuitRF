@@ -24,7 +24,7 @@
         {
           "Name": "Z",
           "Expression": "50",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": true,
           "Dimension": "Resistance"
         }
@@ -49,7 +49,7 @@
         {
           "Name": "Z",
           "Expression": "50",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": true,
           "Dimension": "Resistance"
         }
@@ -150,14 +150,14 @@
       "Parameters": [
         {
           "Name": "Inductor1",
-          "Expression": "\"L1\"",
+          "Expression": "\u0022L1\u0022",
           "Unit": "",
           "ShowOnSchematic": true,
           "Dimension": "None"
         },
         {
           "Name": "Inductor2",
-          "Expression": "\"L2\"",
+          "Expression": "\u0022L2\u0022",
           "Unit": "",
           "ShowOnSchematic": true,
           "Dimension": "None"
@@ -196,8 +196,8 @@
     {
       "InstanceName": "MeasCoupling",
       "Symbol": "Meas",
-      "X": -1200,
-      "Y": 900,
+      "X": -1400,
+      "Y": 1200,
       "Rotation": "R0",
       "MirrorX": false,
       "Disable": "None",
@@ -224,8 +224,36 @@
           "Dimension": "None"
         },
         {
-          "Name": "k_implied",
-          "Expression": "mag(SP1.S(2,1))     ; rises with M at fixed L",
+          "Name": "Zden",
+          "Expression": "(1-SP1.S(1,1))*(1-SP1.S(2,2)) - SP1.S(1,2)*SP1.S(2,1)   ; S-\u003EZ denominator",
+          "Unit": "",
+          "ShowOnSchematic": true,
+          "Dimension": "None"
+        },
+        {
+          "Name": "wL1",
+          "Expression": "50*imag(((1\u002BSP1.S(1,1))*(1-SP1.S(2,2)) \u002B SP1.S(1,2)*SP1.S(2,1))/Zden)   ; Im(Z11) = 2*pi*f*L1, ohms",
+          "Unit": "",
+          "ShowOnSchematic": true,
+          "Dimension": "None"
+        },
+        {
+          "Name": "wL2",
+          "Expression": "50*imag(((1-SP1.S(1,1))*(1\u002BSP1.S(2,2)) \u002B SP1.S(1,2)*SP1.S(2,1))/Zden)   ; Im(Z22) = 2*pi*f*L2, ohms",
+          "Unit": "",
+          "ShowOnSchematic": true,
+          "Dimension": "None"
+        },
+        {
+          "Name": "wM",
+          "Expression": "50*imag(2*SP1.S(2,1)/Zden)   ; Im(Z21) = 2*pi*f*M, ohms",
+          "Unit": "",
+          "ShowOnSchematic": true,
+          "Dimension": "None"
+        },
+        {
+          "Name": "k",
+          "Expression": "wM/sqrt(wL1*wL2)   ; M/sqrt(L1*L2) - flat at 0.5, and 2*pi*f cancels",
           "Unit": "",
           "ShowOnSchematic": true,
           "Dimension": "None"

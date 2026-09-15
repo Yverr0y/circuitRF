@@ -6,60 +6,6 @@
   "AuthorGridDivisor": 20,
   "Components": [
     {
-      "InstanceName": "VAR1",
-      "Symbol": "Var",
-      "X": -1100,
-      "Y": -500,
-      "Rotation": "R0",
-      "MirrorX": false,
-      "Disable": "None",
-      "Parameters": [
-        {
-          "Name": "VGS",
-          "Expression": "-3.05",
-          "Unit": "",
-          "ShowOnSchematic": true,
-          "Dimension": "None"
-        },
-        {
-          "Name": "VDS",
-          "Expression": "48",
-          "Unit": "",
-          "ShowOnSchematic": true,
-          "Dimension": "None"
-        },
-        {
-          "Name": "RFfreq",
-          "Expression": "2",
-          "Unit": "GHz",
-          "ShowOnSchematic": true,
-          "Dimension": "Frequency"
-        }
-      ],
-      "LabelOffsets": [
-        [
-          85,
-          -100
-        ],
-        [
-          85,
-          -100
-        ],
-        [
-          85,
-          -100
-        ],
-        [
-          85,
-          -100
-        ],
-        [
-          85,
-          -100
-        ]
-      ]
-    },
-    {
       "InstanceName": "SourceTuner1",
       "Symbol": "SourceTuner",
       "X": -800,
@@ -71,14 +17,14 @@
         {
           "Name": "Zdefault",
           "Expression": "1e-6",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": false,
           "Dimension": "Resistance"
         },
         {
           "Name": "Z0",
           "Expression": "50",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": false,
           "Dimension": "Resistance"
         },
@@ -106,21 +52,21 @@
         {
           "Name": "Z[1]",
           "Expression": "50",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": true,
           "Dimension": "Resistance"
         },
         {
           "Name": "Z[2]",
           "Expression": "1e-6",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": true,
           "Dimension": "Resistance"
         },
         {
           "Name": "Z[3]",
           "Expression": "1e-6",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": true,
           "Dimension": "Resistance"
         }
@@ -221,7 +167,7 @@
         },
         {
           "Name": "I[2,0]",
-          "Expression": "Periphery_mm*(B*TC*tanh(_v2*a*(tanh(g*(TV0 - _v1 + _v2*th + Sc*ln(exp(-(Sv - _v1)/Sc) + 1)))+1))*ln(exp(-(2*TV0 - 2*_v1 +2*_v2*th + 2*Sc*ln(exp(-(Sv - _v1)/Sc) + 1))/TC) + 1) * (_v2*lam + 1))/2",
+          "Expression": "Periphery_mm*(B*TC*tanh(_v2*a*(tanh(g*(TV0 - _v1 \u002B _v2*th \u002B Sc*ln(exp(-(Sv - _v1)/Sc) \u002B 1)))\u002B1))*ln(exp(-(2*TV0 - 2*_v1 \u002B2*_v2*th \u002B 2*Sc*ln(exp(-(Sv - _v1)/Sc) \u002B 1))/TC) \u002B 1) * (_v2*lam \u002B 1))/2",
           "Unit": "",
           "ShowOnSchematic": true,
           "Dimension": "None"
@@ -264,14 +210,14 @@
         {
           "Name": "Zdefault",
           "Expression": "1e-6",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": false,
           "Dimension": "Resistance"
         },
         {
           "Name": "Z0",
           "Expression": "50",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": false,
           "Dimension": "Resistance"
         },
@@ -299,21 +245,21 @@
         {
           "Name": "Z[1]",
           "Expression": "50",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": true,
           "Dimension": "Resistance"
         },
         {
           "Name": "Z[2]",
           "Expression": "1e-6",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": true,
           "Dimension": "Resistance"
         },
         {
           "Name": "Z[3]",
           "Expression": "1e-6",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": true,
           "Dimension": "Resistance"
         }
@@ -322,22 +268,22 @@
     {
       "InstanceName": "MeasLoadpull",
       "Symbol": "Meas",
-      "X": -600,
-      "Y": 1400,
+      "X": -1400,
+      "Y": 2100,
       "Rotation": "R0",
       "MirrorX": false,
       "Disable": "None",
       "Parameters": [
         {
           "Name": "Vd_pk",
-          "Expression": "mag(LP1.V(\"n2\",1))                ; drain swing at each grid point",
-          "Unit": "",
+          "Expression": "mag(LP1.V(\u0022Vout\u0022,1))                ; drain swing at each grid",
+          "Unit": "point",
           "ShowOnSchematic": true,
           "Dimension": "None"
         },
         {
           "Name": "Vg_pk",
-          "Expression": "mag(LP1.V(\"n1\",1))",
+          "Expression": "mag(LP1.V(\u0022Vin\u0022,1))",
           "Unit": "",
           "ShowOnSchematic": true,
           "Dimension": "None"
@@ -346,6 +292,38 @@
           "Name": "Ratio",
           "Expression": "Vd_pk/Vg_pk                       ; a measure may combine earlier ones",
           "Unit": "",
+          "ShowOnSchematic": true,
+          "Dimension": "None"
+        }
+      ]
+    },
+    {
+      "InstanceName": "VAR1",
+      "Symbol": "Var",
+      "X": -1100,
+      "Y": 1200,
+      "Rotation": "R0",
+      "MirrorX": false,
+      "Disable": "None",
+      "Parameters": [
+        {
+          "Name": "VGS",
+          "Expression": "-3.05",
+          "Unit": "",
+          "ShowOnSchematic": true,
+          "Dimension": "None"
+        },
+        {
+          "Name": "VDS",
+          "Expression": "48",
+          "Unit": "",
+          "ShowOnSchematic": true,
+          "Dimension": "None"
+        },
+        {
+          "Name": "RFfreq",
+          "Expression": "2",
+          "Unit": "GHz",
           "ShowOnSchematic": true,
           "Dimension": "None"
         }
@@ -378,7 +356,28 @@
       ]
     }
   ],
-  "NetLabels": [],
+  "NetLabels": [
+    {
+      "X": -403.34713799959127,
+      "Y": 280,
+      "Name": "Vin",
+      "OwnerWireIndex": 0,
+      "SegmentIndex": 0,
+      "AlongT": 0.6778237933319708,
+      "OffsetX": 0,
+      "OffsetY": -20
+    },
+    {
+      "X": 434.54607211104167,
+      "Y": 280,
+      "Name": "Vout",
+      "OwnerWireIndex": 1,
+      "SegmentIndex": 0,
+      "AlongT": 0.39091012018506943,
+      "OffsetX": 0,
+      "OffsetY": -20
+    }
+  ],
   "Dots": [],
   "CanvasObjects": [],
   "View": {

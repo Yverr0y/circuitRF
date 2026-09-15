@@ -243,7 +243,7 @@ public sealed partial class Evaluator
             "log"   => EvalLog(cl, scope),         // natural log, cube-aware
             "ln"    => EvalLog(cl, scope),          // alias
             "log10" => EvalLog10(cl, scope),        // cube-aware
-            "sqrt"  => UnaryMath(cl, scope, SafeSqrt, Complex.Sqrt),
+            "sqrt"  => EvalSqrt(cl, scope),         // cube-aware
             "pow"   => BinaryMath(cl, scope, Math.Pow,  Complex.Pow),
             // Rounding family. Applied componentwise for Complex, which is the conventional
             // extension and keeps them total rather than throwing on a complex argument.
@@ -709,6 +709,30 @@ public sealed partial class Evaluator
         var v = EvalExpr(cl.Args[0], scope);
         if (v.Kind == ValueKind.Cube) return new Value(v.AsCube().Real());
         return v.Kind == ValueKind.Real ? v : new Value(v.AsComplex().Real);
+    }
+
+    /// <summary>
+    /// <c>sqrt</c>, cube-aware — unlike the rest of the <see cref="UnaryMath"/> family, which takes a
+    /// scalar only.
+    ///
+    /// <para><b>It is cube-aware because there is no other way to write one.</b> A per-frequency
+    /// square root has no spelling otherwise: <c>pow</c> and <c>^</c> both route through
+    /// <see cref="Value.Pow"/>, which is scalar too, and <c>exp(0.5*log(x))</c> fails on <c>exp</c>
+    /// for the same reason. A coupling factor k = M/√(L₁L₂) read out of a swept two-port is the case
+    /// that found it (the shipped CoupledInductors example) and it is not an unusual shape — an RMS,
+    /// a |Z| taken from Z², a geometric mean of two swept quantities all want the same thing.</para>
+    ///
+    /// <para>The Real/Complex branches are <see cref="SafeSqrt"/> and <see cref="Complex.Sqrt"/>
+    /// exactly as before, so a scalar argument behaves identically; only the Cube case is new.</para>
+    /// </summary>
+    private Value EvalSqrt(CallExpr cl, Scope scope)
+    {
+        if (cl.Args.Length != 1) throw new ArityException("sqrt", 1, cl.Args.Length);
+        var v = EvalExpr(cl.Args[0], scope);
+        if (v.Kind == ValueKind.Cube) return new Value(v.AsCube().Sqrt());
+        return v.Kind == ValueKind.Real
+            ? new Value(SafeSqrt(v.AsReal()))
+            : new Value(Complex.Sqrt(v.AsComplex()));
     }
 
     private Value EvalImag(CallExpr cl, Scope scope)

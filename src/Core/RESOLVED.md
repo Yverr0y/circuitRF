@@ -5,6 +5,55 @@ Going forward, a completed brief's detail lands here instead — one `##` sectio
 only for findings that are still true, still surprising, and would cost someone real time to
 rediscover. Mirrors `src/Ui/DataDisplay/RESOLVED.md`'s own pattern.
 
+## `sqrt` over a swept cube, and the coupling factor that needed it (2026-09-15)
+
+Owner, on the shipped `CoupledInductors` example: `k_implied = mag(SP1.S(2,1))` is not a coupling
+factor — make it a real one, extracted from the s-parameters.
+
+**The arithmetic is short and needs nothing new.** Each winding is grounded at one end, so the
+two-port impedances ARE the windings: Z₁₁ = jωL₁, Z₂₂ = jωL₂, Z₂₁ = jωM. Converting S → Z and forming
+k = Z₂₁/√(Z₁₁Z₂₂) = M/√(L₁L₂) makes **both Z₀ and ω cancel**, so the answer is exact and flat —
+measured 0.500000000 at all 99 points of a 0.1–5 GHz sweep, against `mag(S21)`'s 0.013 → 0.436 over
+the same band.
+
+**What was missing was the square root.** Every spelling of one over a frequency-swept cube failed
+with `Value is Cube, not Complex`:
+
+| spelling | why it failed |
+|---|---|
+| `sqrt(x)` | `UnaryMath`, scalar only — despite the table comment above it saying "cube-aware variants handle DataCube args" |
+| `x^0.5`, `pow(x, 0.5)` | both route through `Value.Pow`, scalar too |
+| `exp(0.5*log(x))` | `log` IS cube-aware; `exp` is not |
+
+So there was no way to write a per-frequency square root at all. `sqrt` is now cube-aware
+(`Evaluator.EvalSqrt` → `DataCube.Sqrt`), and the rest of the `UnaryMath` family is deliberately left
+alone: this is the one with no workaround, and widening the others is a behaviour change with no case
+behind it.
+
+**A Real cube with a negative element promotes to Complex** rather than going NaN — the rule
+`Value.Pow` already applies to a negative base with a fractional exponent, so `sqrt(x)` and `x^0.5`
+cannot disagree about it. Promotion is whole-cube because a cube is single-kind by construction. A
+Real cube that is non-negative throughout stays Real, which is what keeps the ordinary case plottable
+on a real axis. **The scalar path is untouched**, including its `DomainException` on a negative real.
+
+Gates: `tests/Core.Tests/Expressions/SqrtOnACubeTests.cs` and
+`tests/Ui.Tests/Em/CoupledInductorsExampleTests.cs` (the example RUN, not just parsed).
+
+### Two traps found on the way, both worth knowing
+
+**A measurement's `; comment` is stripped by `CnlReader`, not by the expression evaluator.** A test
+harness that called `NetExtractor.Extract` directly reported every measurement in that example as
+`Parse error at position 20: Unexpected character ';'` — five failures the application does not have.
+Both the GUI's `SchematicRunService` and every CLI run verb go through the `.cnl`
+(`CircuitSource.FromSchematic`), so that is the only route a test of a schematic's measurements may
+take. This is the same rule `CLAUDE.md` already states for the elaborator, reaching further than it
+appeared to: it is not only about bare words.
+
+**There is no frequency accessor in a measurement expression.** Nothing exposes a cube's own `freq`
+axis values, so a quantity that needs ω — an inductance in henries from a reactance — cannot be
+written. It is why the example publishes `wL1`, `wL2` and `wM` as reactances in ohms and tells the
+reader to divide. Not fixed here; recorded because it is the second thing a user will try.
+
 
 ## A dead worker's last words were lost to the THREAD POOL, not to the pipe (2026-09-10)
 

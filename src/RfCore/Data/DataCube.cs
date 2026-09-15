@@ -380,6 +380,41 @@ namespace RfCore.Data
         /// <summary>Alias for DB10() — power dB of whatever the cube holds.</summary>
         public DataCube DB() => DB10();
 
+        /// <summary>
+        /// Element-wise square root, principal branch.
+        ///
+        /// <para><b>A Real cube with a negative element PROMOTES to Complex</b> rather than
+        /// producing NaN — the same rule <c>Value.Pow</c> already applies to a negative base with a
+        /// fractional exponent, so the two spellings of a square root (<c>sqrt(x)</c> and
+        /// <c>x^0.5</c>) agree. A Real cube that is non-negative throughout stays Real, which is what
+        /// keeps the common case (a reactance ratio, an RMS) plottable on a real axis.</para>
+        /// </summary>
+        public DataCube Sqrt()
+        {
+            if (DataKind == DataKind.Complex)
+            {
+                var cbuf = new Complex[_complexData!.Length];
+                for (int i = 0; i < cbuf.Length; i++) cbuf[i] = Complex.Sqrt(_complexData[i]);
+                return new DataCube(AxesArray(), cbuf, noCopy: true);
+            }
+
+            bool anyNegative = false;
+            for (int i = 0; i < _realData!.Length; i++)
+                if (_realData[i] < 0) { anyNegative = true; break; }
+
+            if (anyNegative)
+            {
+                var cbuf = new Complex[_realData.Length];
+                for (int i = 0; i < cbuf.Length; i++)
+                    cbuf[i] = Complex.Sqrt(new Complex(_realData[i], 0));
+                return new DataCube(AxesArray(), cbuf, noCopy: true);
+            }
+
+            var buf = new double[_realData.Length];
+            for (int i = 0; i < buf.Length; i++) buf[i] = Math.Sqrt(_realData[i]);
+            return new DataCube(AxesArray(), buf, noCopy: true);
+        }
+
         public DataCube Conj()
         {
             RequireComplex("Conj");

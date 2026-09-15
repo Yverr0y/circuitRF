@@ -127,4 +127,90 @@ public static class EmSetupResolver
             new EmLayoutSource(abs, view, tech.Tech, view.DbuPerMicron),
             abs, tech.ResolvedPath, tech.Diagnostics);
     }
+
+    /// <summary>
+    /// <b>Every <c>.cem</c> in a workspace that already analyses <paramref name="absoluteClayPath"/>,
+    /// wherever in the tree it lives.</b>
+    ///
+    /// <para>The application's own EM entry points name a setup by CONVENTION —
+    /// <c>&lt;workspace&gt;/em/&lt;layout stem&gt;.cem</c> — and a convention is not a rule the format
+    /// carries: a <c>.cem</c> resolves its layout through <see cref="ResolveLayoutPath"/> and may sit
+    /// anywhere. Both shipped EM examples are in exactly that shape (<c>&lt;cell&gt;/em/</c>, named
+    /// after the frequency rather than the layout), so a door that only knows the convention concludes
+    /// the layout has no setup and offers to make one — which is how a user following the antenna
+    /// documentation ends up in a fresh, default setup with no radiation pattern, no sheet mesh and a
+    /// 1-20 GHz sweep, beside a correct one it never looked at.</para>
+    ///
+    /// <para>Asked through <see cref="ResolveLayoutPath"/> rather than by comparing stored strings,
+    /// because that is the one place the reference rule lives — a relative reference, an absolute one
+    /// and one that climbs out of the workspace all have to answer the same question the run answers.
+    /// A <c>.cem</c> that cannot be read is skipped rather than reported: this is a lookup on the way
+    /// to a user's own gesture, and the file it could not read is not the one they asked about.</para>
+    ///
+    /// <para>Ordered so the answer is stable: the conventional path first when it is among them, then
+    /// by workspace-relative path.</para>
+    /// </summary>
+    /// <param name="workspaceCwsPath">The workspace's <c>.cws</c>. Its directory is the tree walked
+    /// AND the base every reference resolves against.</param>
+    /// <param name="absoluteClayPath">The layout in question.</param>
+    public static IReadOnlyList<string> FindSetupsForLayout(
+        string workspaceCwsPath, string absoluteClayPath)
+    {
+        string root;
+        string wanted;
+        try
+        {
+            root   = Path.GetDirectoryName(Path.GetFullPath(workspaceCwsPath)) ?? "";
+            wanted = Path.GetFullPath(absoluteClayPath);
+        }
+        catch { return []; }
+        if (root.Length == 0 || !Directory.Exists(root)) return [];
+
+        var hits = new List<string>();
+        foreach (string cem in EnumerateDocuments(root, "*" + EmSetupPersistence.Extension))
+        {
+            EmSetup setup;
+            try { setup = EmSetupPersistence.LoadFromFile(cem); }
+            catch { continue; }
+
+            if (ResolveLayoutPath(cem, setup.LayoutRef, workspaceCwsPath) is not { } resolved) continue;
+            if (string.Equals(resolved, wanted, StringComparison.OrdinalIgnoreCase)) hits.Add(cem);
+        }
+
+        string conventional = Path.Combine(
+            root, "em",
+            Path.GetFileNameWithoutExtension(wanted) + EmSetupPersistence.Extension);
+
+        return [.. hits
+            .OrderBy(p => string.Equals(p, conventional, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(p => Path.GetRelativePath(root, p), StringComparer.OrdinalIgnoreCase)];
+    }
+
+    /// <summary>
+    /// Every matching file under <paramref name="root"/>, skipping dot-folders — a workspace's own
+    /// <c>.crf-</c> bookkeeping, a <c>.git</c>, a build output someone parked in the tree. Iterative
+    /// and exception-tolerant: one unreadable directory must not lose the rest of the walk.
+    /// </summary>
+    private static IEnumerable<string> EnumerateDocuments(string root, string pattern)
+    {
+        var stack = new Stack<string>();
+        stack.Push(root);
+
+        while (stack.Count > 0)
+        {
+            string dir = stack.Pop();
+
+            string[] files;
+            try { files = Directory.GetFiles(dir, pattern); }
+            catch { continue; }
+            foreach (string f in files) yield return f;
+
+            string[] subs;
+            try { subs = Directory.GetDirectories(dir); }
+            catch { continue; }
+            foreach (string sub in subs)
+                if (Path.GetFileName(sub) is { Length: > 0 } n && n[0] != '.')
+                    stack.Push(sub);
+        }
+    }
 }

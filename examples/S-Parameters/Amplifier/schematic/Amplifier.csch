@@ -96,7 +96,7 @@
         {
           "Name": "Z",
           "Expression": "50",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": true,
           "Dimension": "Resistance"
         }
@@ -145,7 +145,7 @@
         {
           "Name": "Z",
           "Expression": "50",
-          "Unit": "Ω",
+          "Unit": "\u03A9",
           "ShowOnSchematic": true,
           "Dimension": "Resistance"
         }
@@ -154,8 +154,8 @@
     {
       "InstanceName": "MeasGain",
       "Symbol": "Meas",
-      "X": -1900,
-      "Y": 900,
+      "X": -2100,
+      "Y": 1400,
       "Rotation": "R0",
       "MirrorX": false,
       "Disable": "None",
@@ -190,7 +190,7 @@
         },
         {
           "Name": "VSWR_in",
-          "Expression": "(1+mag(SP1.S(1,1)))/(1-mag(SP1.S(1,1)))",
+          "Expression": "(1\u002Bmag(SP1.S(1,1)))/(1-mag(SP1.S(1,1)))",
           "Unit": "",
           "ShowOnSchematic": true,
           "Dimension": "None"
@@ -200,8 +200,8 @@
     {
       "InstanceName": "MeasStability",
       "Symbol": "Meas",
-      "X": -600,
-      "Y": 900,
+      "X": -2100,
+      "Y": 700,
       "Rotation": "R0",
       "MirrorX": false,
       "Disable": "None",
@@ -215,14 +215,14 @@
         },
         {
           "Name": "K",
-          "Expression": "(1 - mag(SP1.S(1,1))*mag(SP1.S(1,1)) - mag(SP1.S(2,2))*mag(SP1.S(2,2)) + mag(Delta)*mag(Delta)) / (2*mag(SP1.S(1,2)*SP1.S(2,1)))   ; Rollett K. x*x, not x^2: only + - * / broadcast over a cube",
+          "Expression": "(1 - mag(SP1.S(1,1))*mag(SP1.S(1,1)) - mag(SP1.S(2,2))*mag(SP1.S(2,2)) \u002B mag(Delta)*mag(Delta)) / (2*mag(SP1.S(1,2)*SP1.S(2,1)))   ; Rollett K. x*x, not x^2: only \u002B - * / broadcast over a cube",
           "Unit": "",
           "ShowOnSchematic": true,
           "Dimension": "None"
         },
         {
           "Name": "MU",
-          "Expression": "(1 - mag(SP1.S(1,1))*mag(SP1.S(1,1))) / (mag(SP1.S(2,2) - Delta*conj(SP1.S(1,1))) + mag(SP1.S(1,2)*SP1.S(2,1)))   ; mu > 1 is unconditionally stable",
+          "Expression": "(1 - mag(SP1.S(1,1))*mag(SP1.S(1,1))) / (mag(SP1.S(2,2) - Delta*conj(SP1.S(1,1))) \u002B mag(SP1.S(1,2)*SP1.S(2,1)))   ; mu \u003E 1 is unconditionally stable",
           "Unit": "",
           "ShowOnSchematic": true,
           "Dimension": "None"
