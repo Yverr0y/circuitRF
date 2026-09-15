@@ -3,6 +3,102 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## Why the edge mesh is unaffordable on a MMIC spiral, measured (2026-09-15)
+
+Owner, on the PDK PCells example: the default mesh on a `KIT_SPIRAL` has far too many cells, edge
+mesh has to be switched off to get it down, and the extra cells appear "in seemingly random
+locations". Measured in a scratch harness on the shipped coil — 3 turns, 10 µm metal, 8 µm space,
+120 µm opening, 270 × 250 µm envelope, Metal1 + Metal2 over 100 µm GaAs, 20 GHz. **Investigation
+only; nothing in the mesher was changed.** The action half is
+`docs/sonnet-briefs/brief-edge-mesh-cost.md`.
+
+### The edge fan's cost GROWS as the user coarsens the mesh
+
+| `MinCellsAcrossConductor` | edge ON | edge OFF | ratio | bulk ÷ c₀ |
+|---|---|---|---|---|
+| 4 (default) | **23,195** | 6,456 | 3.59× | 8.5× |
+| 3 | 17,001 | 3,456 | 4.92× | 11.3× |
+| 2 | 12,160 | 1,380 | **8.81×** | 17× |
+| 1 | 10,392 | 228 | **45.6×** | 34.6× |
+
+`c₀ = 3 % of the local conductor WIDTH`; the bulk pitch is `width ÷ MinCellsAcrossConductor`. So the
+climb is `1 / (0.03 · MinCellsAcross)` — 8.3 / 11.1 / 16.7 / 33.3 at 4 / 3 / 2 / 1, measured as
+8.5 / 11.3 / 17 / 34.6. **The edge cell ignores the control that sets the mesh density, so asking for
+a coarser mesh lengthens the fan.**
+
+Consequence: **`MinCellsAcrossConductor` barely works while the edge mesh is on.** 4 → 1 falls
+23,195 → 10,392 (2.2×) with the fan on and 6,456 → 228 (**28×**) with it off. The mesher's own note
+states the outcome and always has: `Narrowest conductor dimension 10 µm, meshed 9 cell(s) across
+(target 4)` — nine where four were asked; seven where two were asked at `MinCellsAcross = 2`.
+
+The dense ceiling is 5,000, and a two-level problem (`RequiresGeneralKernel`) cannot use the
+accelerator's 12,000 — so the shipped default is **4.6× past a ceiling that does not move.**
+
+### The λ knobs are structurally inert here, and the mesher says so
+
+λ_g/20 is 209 µm at 20 GHz on this stackup and the **whole part is 250 µm across**. Every cell is set
+by `narrowest / MinCellsAcrossConductor` = 10/4 = 2.5 µm. `CellsPerWavelength` and `MeshFrequencyHz`
+move nothing at any value — 10, 20 and 40 GHz all give the same count, and the refusal says so in
+capitals. `TransmissionLine` gives 1.4× and `Sheet` 1.2×; both act on the ALONG pitch only, so they
+compose with anything done to the across fan.
+
+### `EdgeCells` cannot change the finest cell — by design, and it is gated
+
+23,195 / 18,861 / 18,861 / 6,456 at `EdgeCells` 3 / 2 / 1 / 0. **Only 0 does anything, and 0 is
+`EdgeMesh = false` spelt differently (6,456 either way, bit for bit).** `GrowthRatioFor` clamps
+`r = (h/c₀)^(1/n)` to `MaxGrowthRatio = 3`, so a climb of 8.5 takes two graded cells at `EdgeCells`
+1 and 2 alike. **`EdgeCells` is a FLOOR on the fan's length, not a cap on its fineness** —
+`SurfaceMesherEdgeCellsTests.RaisingEdgeCells_DoesNotSharpenTheFinestCell_ItWidensTheGradedBand`
+gates precisely that, and `AnUnhonourableEdgeCellCount_IsReportedInTheMeshNotes` reports it. It is
+undocumented in the tooltip, which is the actual gap.
+
+**An arithmetic correction, recorded because it was stated once and is wrong:** the fan is *not*
+longer than the trace. With the derived `r = 2.04` (not the nominal `EdgeGrowthRatio = 1.7`) the
+three graded cells are 0.29 / 0.60 / 1.22 µm — 2.1 µm a side, so a 10 µm trace comes out
+`0.29 0.60 1.21 2.44 | 2.45 | 1.56 0.78 0.38 0.29` — four fan cells each side and one bulk cell in
+the middle. **Nine across, not "all fan".** The cost is real; the reason is the count, not
+saturation.
+
+### The "random locations" are the tensor product, and they are not random
+
+One grid is shared by every layer (D8), so an x-attractor refines a column over the part's full
+height:
+
+```
+edge ON : 188 x-lines × 160 y-lines = 29,733 rectangles, 12,294 on metal, N = 23,195
+edge OFF: 113 × 105                 = 11,648 rectangles,  3,696 on metal, N =  6,456
+x lines: -155 -154.7 -154.1 -152.88 -150.41 -147.93 -145.46 -142.99 -140.51 -138.04 -136.46 -135.68 -135.3 -135 …
+```
+
+A spiral has metal edges at ~14 distinct x and ~14 distinct y. The fan belonging to a VERTICAL turn's
+edge lands in the middle of every HORIZONTAL run, refining it along the axis where nothing varies.
+`PlanarEdgeReference`'s own doc already says this cannot be localised without T-junctions the rooftop
+basis does not admit. **Not a defect to fix; a property to work within.**
+
+### The detail floor is correctly inert on a part this small, and correctly explains itself
+
+`detailFloor = min(λ_g/divisor, CapMinFractionOfExtent × min extent)`. The cap is 2 % of the smallest
+extent = **5 µm on a 250 µm coil**, under the 10 µm trace, so nothing is floored and
+`ShapesBelowDetailFloor` stays 0 at every divisor; λ_g/200 and λ_g/20 give identical meshes. **This is
+right and is not a second defect** — there is no import detail on a drawn spiral to floor, the cap's
+own comment gives the reason (a floor coarser than one cell "is declining to mesh the part"), and the
+run says so unprompted:
+
+> Detail floor 5 µm — λ_g/200 would be 20.87 µm, but this artwork is only 250 µm across, so the floor
+> is held at 2% of that: nothing on this artwork is narrower than that, so it changed nothing here.
+
+Worth knowing as a general fact: **`DetailFloorDivisor` cannot act on any part whose metal is wider
+than 2 % of its own envelope**, which is most MMIC passives. Out of scope for the brief.
+
+### There is no mesh-reduction pass, and that is the accurate answer
+
+Everything that removes cells is pre-grid: the detail floor (inert here) and
+`PlanarEdgeReference.LocalConductorWidth`'s per-attractor `c₀` (also inert here — every edge has the
+same 10 µm width, so the local reference equals the global one). Sliver merging is conformal-only and
+merges cut cells, not gridlines. **Nothing walks a finished grid and removes a line**, and adding
+such a pass is not the cheap route — flooring `c₀` against the bulk pitch is, because it shortens
+every fan at the source and can be made one-way-coarsening. That is the brief.
+
 ## DCFLOAT — the DC point could not drive a port that is not referenced to the plane (2026-09-14)
 
 Owner report. A 50 Ω trace on the 0.6 mm laminate starter stack, simulated twice — once as a 2-port
