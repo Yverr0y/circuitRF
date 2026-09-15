@@ -45,10 +45,12 @@ public static class VerilogACompilerDiscovery
     /// user configures a path by hand before their first compile.</para>
     ///
     /// <para>Settable, so an unusual toolchain is reachable without a code change and so a test can
-    /// point the whole mechanism at a stub. Setting it to an empty list disables PATH discovery
-    /// entirely, which leaves the preference and the environment variable as the only routes.</para>
+    /// point the whole mechanism at a stub. Setting it to an empty list disables every unprompted
+    /// search — PATH and the well-known install directories alike, since those are derived from
+    /// these same names — which leaves the preference and the environment variable as the only
+    /// routes.</para>
     /// </summary>
-    public static IReadOnlyList<string> CandidateCommands { get; set; } = ["openvaf"];
+    public static IReadOnlyList<string> CandidateCommands { get; set; } = ["openvaf", "openvaf-r"];
 
     /// <summary>
     /// Names a compiler for one process, outranking PATH and beaten only by the user's own
@@ -111,7 +113,67 @@ public static class VerilogACompilerDiscovery
             notes.Add($"'{command}' on PATH: {why}");
         }
 
+        foreach (string path in WellKnownInstallPaths())
+        {
+            if (TryProbe(path, $"found at {path}", out var found, out string? why)) return found;
+            notes.Add($"'{path}': {why}");
+        }
+
         return null;
+    }
+
+    /// <summary>
+    /// The directories searched after PATH, on the platforms where an application cannot rely on
+    /// PATH at all.
+    ///
+    /// <para><b>A bundled macOS application does not inherit the user's PATH</b>, and that is the
+    /// whole reason this exists. Launched from the Finder it gets
+    /// <c>/usr/bin:/bin:/usr/sbin:/sbin</c> from launchd and nothing of the login shell — measured
+    /// on a running installed build, not inferred. So a compiler the user installed into
+    /// <c>~/.local/bin</c> and can run by typing its name is invisible to the application, and the
+    /// same machine finds it perfectly when circuitRF is started from a terminal. The user's
+    /// conclusion is that circuitRF cannot find a compiler that is plainly installed, and they are
+    /// right. The PCell interpreter discovery in the UI carries the same note for the same reason.</para>
+    ///
+    /// <para><b>Derived from <see cref="CandidateCommands"/>, deliberately</b> — so it names no
+    /// compiler of its own, and so emptying that list still disables every unprompted search, which
+    /// is what it is documented to do and what a test relies on.</para>
+    ///
+    /// <para>Windows is excluded: a GUI process there inherits the user's own PATH, so the premise
+    /// does not hold and a directory list would only add candidates nobody installs into. Each
+    /// entry is checked with <see cref="File.Exists(string)"/> before it is probed, so a miss costs
+    /// no process launch.</para>
+    ///
+    /// <para>Settable for the same reasons <see cref="CandidateCommands"/> is.</para>
+    /// </summary>
+    public static IReadOnlyList<string> SearchDirectories { get; set; } = DefaultSearchDirectories();
+
+    /// <summary>Where a user-installed compiler actually lands on a Unix-like machine. Empty on
+    /// Windows, where the premise above does not hold.</summary>
+    private static string[] DefaultSearchDirectories()
+    {
+        if (OperatingSystem.IsWindows()) return [];
+
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return home.Length > 0
+            ? [Path.Combine(home, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin"]
+            : ["/opt/homebrew/bin", "/usr/local/bin"];
+    }
+
+    private static IEnumerable<string> WellKnownInstallPaths()
+    {
+        foreach (string command in CandidateCommands)
+        {
+            if (string.IsNullOrWhiteSpace(command)) continue;
+            if (Path.IsPathRooted(command)) continue;   // already tried, as itself
+
+            foreach (string directory in SearchDirectories)
+            {
+                if (string.IsNullOrWhiteSpace(directory)) continue;
+                string path = Path.Combine(directory, command.Trim());
+                if (File.Exists(path)) yield return path;
+            }
+        }
     }
 
     /// <summary>

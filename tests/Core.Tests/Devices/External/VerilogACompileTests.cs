@@ -32,6 +32,7 @@ public sealed class VerilogACompileTests : IDisposable
 
     private readonly string _dir;
     private readonly IReadOnlyList<string> _savedCandidates;
+    private readonly IReadOnlyList<string> _savedDirectories;
     private readonly Func<string?>? _savedPreference;
     private readonly string _savedCache;
     private readonly string? _savedEnv;
@@ -43,6 +44,7 @@ public sealed class VerilogACompileTests : IDisposable
         Directory.CreateDirectory(_dir);
 
         _savedCandidates = VerilogACompilerDiscovery.CandidateCommands;
+        _savedDirectories = VerilogACompilerDiscovery.SearchDirectories;
         _savedPreference = VerilogACompilerDiscovery.PreferredCommand;
         _savedCache      = VerilogASourceCompiler.CacheDirectory;
         _savedEnv        = Environment.GetEnvironmentVariable(
@@ -60,6 +62,7 @@ public sealed class VerilogACompileTests : IDisposable
     public void Dispose()
     {
         VerilogACompilerDiscovery.CandidateCommands = _savedCandidates;
+        VerilogACompilerDiscovery.SearchDirectories = _savedDirectories;
         VerilogACompilerDiscovery.PreferredCommand = _savedPreference;
         VerilogASourceCompiler.CacheDirectory      = _savedCache;
         Environment.SetEnvironmentVariable(
@@ -348,6 +351,55 @@ public sealed class VerilogACompileTests : IDisposable
 
         Assert.Null(found);
         Assert.Contains(rejected, r => r.Contains("set in Settings", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ACompilerInstalledWhereTheFinderCannotSeeItIsStillFound()
+    {
+        // A bundled macOS application inherits /usr/bin:/bin:/usr/sbin:/sbin from launchd and none
+        // of the user's login shell, so a compiler in ~/.local/bin is invisible to it while the
+        // same machine finds it instantly from a terminal. Reported as "no compiler was found" on a
+        // machine that plainly had one, 2026-09-14.
+        string directory = Path.Combine(_dir, "bin");
+        Directory.CreateDirectory(directory);
+        // A name PATH cannot possibly resolve, so this tests the directory tier on every machine
+        // — including one that really does have a compiler on its PATH, which PATH would win on.
+        const string Name = "crf-stub-va-compiler";
+        string installed = Path.Combine(directory, Name);
+        File.Copy(WriteStubCompiler(identity: "installed, but not on PATH"), installed);
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            File.SetUnixFileMode(installed,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+        VerilogACompilerDiscovery.PreferredCommand  = null;   // nothing named
+        VerilogACompilerDiscovery.CandidateCommands = [Name];
+        VerilogACompilerDiscovery.SearchDirectories = [directory];
+
+        var found = VerilogACompilerDiscovery.Find(out _);
+
+        Assert.NotNull(found);
+        Assert.Equal("installed, but not on PATH", found!.Identity);
+        // Which one ran, and where it came from: "found on PATH" would be a lie here, and the
+        // difference is the whole content of the answer for a user whose PATH does not hold it.
+        Assert.Equal(installed, found.Command);
+        Assert.Contains(directory, found.HowFound, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NoCandidateNameMeansNoUnpromptedSearchAtAll()
+    {
+        // The directory search is derived from the candidate names, so emptying that list still
+        // disables every unprompted route — which is what it is documented to do, and what every
+        // other test in this file relies on to stay independent of the machine it runs on.
+        string directory = Path.Combine(_dir, "bin2");
+        Directory.CreateDirectory(directory);
+        File.Copy(WriteStubCompiler(), Path.Combine(directory, "crf-stub-va-compiler"));
+
+        VerilogACompilerDiscovery.PreferredCommand  = null;
+        VerilogACompilerDiscovery.CandidateCommands = [];
+        VerilogACompilerDiscovery.SearchDirectories = [directory];
+
+        Assert.Null(VerilogACompilerDiscovery.Find(out _));
     }
 
     [Fact]

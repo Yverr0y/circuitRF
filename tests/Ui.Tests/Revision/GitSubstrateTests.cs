@@ -145,6 +145,61 @@ public class GitSubstrateTests
     public void SomethingThatIsNotGitDoesNotParseAsAVersion()
         => Assert.Null(GitDiscovery.ParseVersion("Python 3.13.1"));
 
+    /// <summary>
+    /// An application started from a launcher does not inherit the user's <c>PATH</c>: a Finder-launched
+    /// macOS bundle gets <c>/usr/bin:/bin:/usr/sbin:/sbin</c> from launchd and a Linux desktop entry is
+    /// no better. So a git the user installed into <c>~/.local/bin</c> — which is where a user-local
+    /// install puts it — is invisible to the application while the same machine finds it instantly from
+    /// a terminal. macOS is saved by <c>/usr/bin/git</c> being present anyway; Linux is not.
+    ///
+    /// <para>The stub is named something <c>PATH</c> cannot resolve, so this tests the directory tier
+    /// on every machine — including one that really does have a git on its <c>PATH</c>, which would
+    /// otherwise win and make the test prove nothing.</para>
+    /// </summary>
+    [Fact]
+    public void AGitInstalledWhereALauncherCannotSeeItIsStillFound()
+    {
+        if (OperatingSystem.IsWindows()) return;   // a GUI process there inherits the user's own PATH
+
+        using var ws = new GitWorkspace();
+        string directory = Path.Combine(ws.Root, "user-local-bin");
+        Directory.CreateDirectory(directory);
+        string installed = FakeGit.Write(directory, "2.99.0", name: "crf-stub-git");
+
+        using var scope = new DiscoveryScope(candidates: ["crf-stub-git"], preferred: null);
+        GitDiscovery.SearchDirectories = [directory];
+        GitDiscovery.InvalidateCache();
+
+        var found = GitDiscovery.Find(out _);
+
+        Assert.NotNull(found);
+        Assert.Equal(installed, found!.Path);
+        // "found on PATH" would be a lie here, and where it came from is the whole content of the
+        // answer for a user whose PATH does not hold it.
+        Assert.Contains(directory, found.HowFound, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The directory tier is derived from the candidate names, so emptying that list still disables
+    /// every unprompted route — which is what it is documented to do.
+    /// </summary>
+    [Fact]
+    public void NoCandidateNameMeansNoUnpromptedGitSearchAtAll()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        using var ws = new GitWorkspace();
+        string directory = Path.Combine(ws.Root, "user-local-bin-2");
+        Directory.CreateDirectory(directory);
+        FakeGit.Write(directory, "2.99.0", name: "crf-stub-git");
+
+        using var scope = new DiscoveryScope(candidates: [], preferred: null);
+        GitDiscovery.SearchDirectories = [directory];
+        GitDiscovery.InvalidateCache();
+
+        Assert.Null(GitDiscovery.Find(out _));
+    }
+
     // ── Gate 20: macOS discovery never invokes the shim ───────────────────────────────────────────
 
     /// <summary>
@@ -1167,6 +1222,7 @@ public class GitSubstrateTests
         private readonly IReadOnlyList<string> _candidates;
         private readonly Func<string?>?        _preferred;
         private readonly Func<bool>?           _tools;
+        private readonly IReadOnlyList<string> _directories;
         private readonly string?               _env;
 
         public DiscoveryScope(IReadOnlyList<string> candidates, string? preferred, Func<bool>? developerTools = null)
@@ -1174,6 +1230,7 @@ public class GitSubstrateTests
             _candidates = GitDiscovery.CandidateCommands;
             _preferred  = GitDiscovery.PreferredPath;
             _tools      = GitDiscovery.DeveloperToolsPresent;
+            _directories = GitDiscovery.SearchDirectories;
             _env        = Environment.GetEnvironmentVariable(GitDiscovery.EnvironmentVariable);
 
             Environment.SetEnvironmentVariable(GitDiscovery.EnvironmentVariable, null);
@@ -1188,6 +1245,7 @@ public class GitSubstrateTests
             GitDiscovery.CandidateCommands     = _candidates;
             GitDiscovery.PreferredPath         = _preferred;
             GitDiscovery.DeveloperToolsPresent = _tools;
+            GitDiscovery.SearchDirectories      = _directories;
             Environment.SetEnvironmentVariable(GitDiscovery.EnvironmentVariable, _env);
             GitDiscovery.InvalidateCache();
         }

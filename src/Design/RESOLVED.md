@@ -5999,3 +5999,31 @@ level (the same two callbacks `EmRunService` itself passes), the panel writing t
 layout numbered 2 and 3, the render marks addressed the same way, a round-trip proving contiguous
 setups are unchanged, and the two drag sweeps with their snapping-off non-vacuity guard. Six of the
 thirteen fail against the positional behaviour; the drag sweeps pass either way, which is the point.
+
+## Git discovery had the same launcher-PATH gap (2026-09-14)
+
+Found while fixing the Verilog-A compiler's discovery, which had it too and had no saving grace —
+`src/Core/RESOLVED.md` carries the measurement: a Finder-launched `.app` gets
+`PATH=/usr/bin:/bin:/usr/sbin:/sbin` from launchd and nothing of the login shell.
+
+`GitDiscovery.Locate` searched `PATH` and stopped. On macOS that is harmless in practice, because
+`/usr/bin/git` is present whether or not anyone installed git — which is exactly why the gap went
+unnoticed. **On Linux it is not harmless**: a user-local install puts git in `~/.local/bin`, an
+application started from a desktop entry never sees it, and revision control reports no git on a
+machine where typing `git` works.
+
+`WellKnownInstallPaths` now runs after the `PATH` loop over the same `CandidateCommands`, through a
+settable `SearchDirectories` (`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`; empty on
+Windows, where a GUI process does inherit the user's own `PATH`). `HowFound` says `found at <path>`,
+because `found on PATH` would be false there.
+
+**It sits BELOW the macOS shim gate, deliberately.** With the developer tools absent the search
+still stops dead before starting anything, so R-rc3-2a and gate 20 are untouched — even though none
+of these directories could hold the shim. That leaves a real and deliberate gap: a Mac with no
+Command Line Tools but a working git in `/opt/homebrew/bin` still reports none. Closing it means
+changing what gate 20 asserts (no process is started at all), which is a decision about that
+invariant rather than a side effect of this tier.
+
+Gates: `GitSubstrateTests.AGitInstalledWhereALauncherCannotSeeItIsStillFound` — whose stub is named
+something `PATH` cannot resolve, so it exercises the directory tier even on a machine with a real
+git on `PATH` — and `NoCandidateNameMeansNoUnpromptedGitSearchAtAll`.

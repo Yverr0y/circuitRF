@@ -2933,3 +2933,45 @@ negative-resistance passivation actually happened.
 The sign test multiplies by `_temperatureFactor` because `StampConductance` branches on that same
 product, not on the stated resistance. Gate:
 `NdfTests.H2_APositiveResistorIsPassiveAtTheInstance_ANegativeOneIsNot`.
+
+## A bundled application cannot find a compiler the user installed (2026-09-14)
+
+**Reported from the installed macOS build**: Settings ▸ Security & Permissions ▸ Verilog-A Compiler
+▸ **Test** answered "No Verilog-A compiler was found" on a machine with a working compiler in
+`~/.local/bin` that the same build found instantly when started from a terminal.
+
+**Measured, not inferred.** `ps eww` on the running `/Applications/circuitRF.app` process:
+
+```
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+```
+
+That is launchd's default, and `launchctl getenv PATH` is unset, so there is nothing of the user's
+login shell in it. `VerilogACompilerDiscovery.Find` searched only `PATH`, so on a bundled
+application it could only ever have found a compiler installed into one of those four system
+directories — which is not where anybody installs one. The zero-configuration case the discovery
+exists for was therefore dead on exactly the build a user runs, and alive only in a development
+build started from a shell. The same premise is already documented for the PCell interpreter in
+`PythonInterpreterDiscovery` (a Finder-launched app resolves `python3` to Apple's 3.9 stub); this is
+the same root cause reaching a second subsystem.
+
+**Fix**: after `PATH` fails, the candidate names are looked for in `SearchDirectories` —
+`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, and nothing on Windows, where a GUI process
+does inherit the user's own `PATH`. Ordering is unchanged: preference, environment variable, `PATH`,
+then these. `HowFound` reports `found at <path>` rather than `found on PATH`, because on this
+machine the latter is false and the difference is the whole content of the answer.
+
+**The directory list is derived from `CandidateCommands`, deliberately.** It names no compiler of
+its own, and emptying that list still disables every unprompted route — which is what it is
+documented to do, and what the whole `VerilogACompileTests` fixture relies on to stay independent of
+the machine it runs on. A directory search with its own hard-coded names would have made every other
+test in that file pass or fail according to what was installed on the box.
+
+**A second candidate name was added**, for the fork that installs under a suffixed binary name: a
+user who did not also create the shorter symlink had no zero-configuration path at all. It goes in
+`CandidateCommands` beside the first, which stays the only place in circuitRF that names a compiler.
+
+Gates: `VerilogACompileTests.ACompilerInstalledWhereTheFinderCannotSeeItIsStillFound` (which uses a
+stub named something `PATH` cannot resolve, so it tests the directory tier even on a machine that
+really does have a compiler on `PATH` — the first draft did not, and was won by the real one) and
+`NoCandidateNameMeansNoUnpromptedSearchAtAll`.

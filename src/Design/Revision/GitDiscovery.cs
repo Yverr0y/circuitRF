@@ -92,7 +92,8 @@ public static class GitDiscovery
     /// </summary>
     public const string EnvironmentVariable = "CRF_GIT";
 
-    /// <summary>The bare names searched on <c>PATH</c>. A list so a test can empty it.</summary>
+    /// <summary>The bare names searched on <c>PATH</c>, and then in <see cref="SearchDirectories"/>.
+    /// A list so a test can empty it, which disables both.</summary>
     public static IReadOnlyList<string> CandidateCommands { get; set; } = ["git"];
 
     /// <summary>
@@ -195,7 +196,71 @@ public static class GitDiscovery
             }
         }
 
+        foreach (string candidate in WellKnownInstallPaths())
+        {
+            if (TryProbe(candidate, $"found at {candidate}", out var chosen, out string? why)) return chosen;
+            notes.Add($"'{candidate}': {why}");
+        }
+
         return null;
+    }
+
+    /// <summary>
+    /// Where a user-installed git is looked for once <c>PATH</c> has failed — <c>~/.local/bin</c>,
+    /// <c>/opt/homebrew/bin</c>, <c>/usr/local/bin</c>. Empty on Windows.
+    ///
+    /// <para><b>An application started from a launcher does not inherit the user's <c>PATH</c>.</b> A
+    /// Finder-launched macOS bundle gets <c>/usr/bin:/bin:/usr/sbin:/sbin</c> from launchd and nothing
+    /// of the login shell; a Linux desktop entry is no better. So "on <c>PATH</c>" means the user's
+    /// SHELL, and a search that stops there can only find what is installed in the system
+    /// directories — which on Linux is not where a user-local git lives. macOS is saved from this by
+    /// <c>/usr/bin/git</c> being there anyway, so it is Linux the tier actually rescues; it is added
+    /// on both because the premise is the same and the cost is a <see cref="File.Exists(string)"/>
+    /// per entry. Found the same week as the identical gap in the Verilog-A compiler's discovery,
+    /// which had no such saving grace — see <c>src/Core/RESOLVED.md</c>.</para>
+    ///
+    /// <para><b>Below the macOS shim gate, deliberately</b>, so it changes nothing about R-rc3-2a:
+    /// with the developer tools absent the search still stops dead before anything is started, even
+    /// though none of these directories could hold the shim. Lifting that is a decision about gate
+    /// 20's own invariant, not a side effect of this tier.</para>
+    ///
+    /// <para>Derived from <see cref="CandidateCommands"/>, so emptying that list still disables every
+    /// unprompted route, which is what it is documented to do. Settable for the same reason that list
+    /// is — so a test can point the mechanism somewhere it controls.</para>
+    /// </summary>
+    public static IReadOnlyList<string> SearchDirectories { get; set; } = DefaultSearchDirectories();
+
+    private static string[] DefaultSearchDirectories()
+    {
+        if (OperatingSystem.IsWindows()) return [];
+
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return home.Length > 0
+            ? [Path.Combine(home, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin"]
+            : ["/opt/homebrew/bin", "/usr/local/bin"];
+    }
+
+    private static IEnumerable<string> WellKnownInstallPaths()
+    {
+        foreach (string command in CandidateCommands)
+        {
+            if (string.IsNullOrWhiteSpace(command)) continue;
+            // A command carrying a separator was already resolved as itself by ResolveOnPath.
+            if (command.Contains(Path.DirectorySeparatorChar)
+                || command.Contains(Path.AltDirectorySeparatorChar)) continue;
+
+            foreach (string directory in SearchDirectories)
+            {
+                if (string.IsNullOrWhiteSpace(directory)) continue;
+                string candidate;
+                try { candidate = Path.Combine(directory, command.Trim()); }
+                catch (ArgumentException) { continue; }
+                bool exists;
+                try { exists = File.Exists(candidate); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
+                if (exists) yield return candidate;
+            }
+        }
     }
 
     /// <summary>

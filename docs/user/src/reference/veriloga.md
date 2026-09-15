@@ -55,7 +55,12 @@ configure — or name it explicitly:
 
 Leave the box blank to use whatever is on `PATH`. Fill it in when you have more than one, or when
 yours lives somewhere `PATH` does not reach. **A compiler you name wins over `PATH`** — that is the
-whole point of naming one. Press **Test** and circuitRF will run it and report what it says it is,
+whole point of naming one.
+
+Blank also looks in the places a compiler is usually installed — `~/.local/bin`, `/opt/homebrew/bin`
+and `/usr/local/bin` — because an application started from the Finder or a desktop launcher does not
+inherit the `PATH` your terminal has. So a compiler you can run by typing its name is found here
+too, without your having to name it. Press **Test** and circuitRF will run it and report what it says it is,
 which is the fastest way to confirm the setting before you need it.
 
 For a headless run — a script, CI, a batch job — set `CRF_VERILOGA_COMPILER` to the compiler's path.
