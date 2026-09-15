@@ -71,6 +71,18 @@ public class LocalEdgeReferenceTests(ITestOutputHelper output)
                     Assert.True(local.CellCount <= global.CellCount,
                         $"cells/λ={cpw} across={across}: local {local.CellCount} > global {global.CellCount}");
 
+                    // EFAN (2026-09-15) — this sweep now runs with MaxEdgeRefinement's floor in
+                    // force, because that is what every caller gets, and BOTH references carry it.
+                    // The relation above is therefore asserted on the shipped field rather than on
+                    // a field nothing builds; the floor's OWN one-way gate is
+                    // EdgeRefinementFloorTests, which compares each reference against itself with
+                    // the floor lifted.
+                    var unfloored = SurfaceMesher.Mesh(problem, s, PlanarEdgeReference.LocalConductorWidth,
+                                                       edgeRefinementCap: double.PositiveInfinity);
+                    Assert.True(local.CellCount <= unfloored.CellCount,
+                        $"cells/λ={cpw} across={across}: the floor raised the count, " +
+                        $"{unfloored.CellCount} -> {local.CellCount}");
+
                     // The COUNT is the invariant. The finest CELL is not, and the difference is
                     // worth stating rather than tightening away: a pointwise coarser field does not
                     // give pointwise coarser cells, because PartitionGraded rescales each interval

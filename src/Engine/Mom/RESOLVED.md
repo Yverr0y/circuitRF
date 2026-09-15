@@ -99,6 +99,183 @@ merges cut cells, not gridlines. **Nothing walks a finished grid and removes a l
 such a pass is not the cheap route — flooring `c₀` against the bulk pitch is, because it shortens
 every fan at the source and can be made one-way-coarsening. That is the brief.
 
+> **SUPERSEDED, 2026-09-15 — the floor was built, and the paragraph above named the wrong bulk.**
+> Flooring `c₀` against *the axis's own bulk pitch* is what this section proposed and it is not what
+> shipped: on any part whose ALONG pitch is set by λ rather than by the metal it makes `c₀` depend on
+> Cells per wavelength — the coupling ANT-2's own "lever 2" was built with and removed for — and it
+> coarsens the fan at a port's END FACE, which is measurably the wrong fan to touch. What shipped
+> floors the edge FRACTION against `MinCellsAcrossConductor` instead. See **§EFAN** below for the
+> measurement, the shipped rule, and the two things this paragraph got wrong.
+
+## §EFAN — the edge fan now obeys the control that sets mesh density (2026-09-15)
+
+The action half of the section above, and its first correction: the climb the graded fan makes is
+`1/(EdgeFractionOfReference · MinCellsAcrossConductor)` on any geometry-limited mesh, so the user's
+own density control made the fan LONGER the coarser they asked for.
+`PlanarMeshSettings.MaxEdgeRefinement` caps it. **`PlanarMeshSettings` gains no field and the `.cem`
+gains no key** — it is a resolution, and `MinCellsAcrossConductor` is already the control.
+
+### 1. M1 — what the fan buys, against an oracle that is not this kernel
+
+The instrument is `MeshFrequencyAccuracyTests`' shape with the swept quantity changed: force the edge
+fraction so the climb `h/c₀` takes a stated value, solve the line de-embedded, and compare **Z_c,
+ε_eff and the whole de-embedded S** against kernel A's own cross-section extraction of the SAME line
+— `RlgcExtractor` over `BoundaryMesher`, at t = 1 µm for `PlanarGammaTests.KernelAEeff`'s own measured
+reason. The S oracle is an ideal `R, L, G, C` line written out in the harness rather than taken from
+`RlgcToSparams`, so it shares no code with what it judges.
+
+**Both bands sit below their stack's quasi-static crossover on purpose** — FR-4 1–3 GHz against a
+3.048 GHz crossover, GaAs 5–20 GHz against 26.07 GHz — because above it kernel A is not authoritative
+and the comparison measures dispersion instead. Taking the FR-4 band at 2–10 GHz first is what made
+its baseline read 3.0% against the 0.14% below; that is real dispersion, not mesh error.
+
+| h/c₀ | 96 | 68 | 48 | 34 | 24 | 17 | 12 | 8.5 | 6 | 4 | 2 | 1 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **GaAs** N | 402 | 346 | 325 | 294 | 246 | 246 | 229 | 212 | 187 | 149 | 94 | 66 |
+| Z_c vs A | +0.52% | +0.47% | +0.53% | +0.56% | +0.53% | +0.59% | +0.68% | +0.71% | +0.83% | +1.06% | +1.64% | +2.87% |
+| ε_eff vs A | +1.06% | +0.95% | +1.02% | +1.04% | +0.92% | +0.96% | +1.01% | +0.91% | +0.90% | +0.93% | +0.75% | +0.64% |
+| \|ΔS\| vs A | .0195 | .0188 | .0151 | **.0133** | **.0133** | **.0132** | .0174 | .0352 | .0587 | .100 | .223 | .456 |
+| **FR-4** N | 356 | 325 | 304 | 275 | 229 | 212 | 212 | 195 | 172 | 136 | 85 | 59 |
+| Z_c vs A | −0.24% | −0.17% | −0.13% | −0.19% | −0.09% | −0.01% | −0.04% | +0.13% | +0.31% | +0.60% | +1.35% | +2.90% |
+| ε_eff vs A | −0.41% | −0.35% | −0.32% | −0.44% | −0.38% | −0.35% | −0.49% | −0.43% | −0.42% | −0.41% | −0.60% | −0.70% |
+| \|ΔS\| vs A | .0161 | **.0139** | **.0138** | .0152 | .0153 | .0245 | .0351 | .0558 | .081 | .124 | .248 | .489 |
+
+GaAs hero, 72 µm × 2 mm on 100 µm GaAs, 4 across; FR-4 hero, 2.9 × 20 mm on 1.6 mm FR-4, 4 across.
+Sweeps at 2 and 1 across have the same shape and are not reproduced.
+
+**The three questions the brief asked, answered:**
+
+1. **Where does the curve flatten?** Z_c and ε_eff are flat from about **h/c₀ = 8.5** upward — the
+   whole 8.5…96 range spans 0.24 percentage points on GaAs and 0.37 on FR-4 — and degrade steeply
+   below 4. The de-embedded S is flat from about **12**.
+2. **Is it the same on both stacks?** Yes. Both flatten in the same window and both knee between 8
+   and 12, despite an 8× difference in substrate height and a 3× difference in εᵣ.
+3. **Does 8.5 already sit on the flat part?** For the cross-section quantities the edge singularity
+   actually sets — yes, just. For the de-embedded S — no: 8.5 reads 2.7× its own floor.
+
+**Refining past ~34 makes the de-embedded answer WORSE, and that is not noise.** On GaAs the finest
+rung is 0.0195 against 0.0132 at 17. The mechanism is already in this directory's own record: the
+port's reference plane is one cell in from the drawn metal and the half-cell beyond is error box, so
+the OUTERMOST cell sets `a₂₁`, and the diagonal of D6's error box divides by `a₂₁²`. Shrinking that
+cell raises the amplification. **So the fan does two different jobs and they want different
+refinements** — at a long rim it resolves the 1/√d transverse singularity (flat past ~8), at a port's
+end face it sets the de-embedding's own conditioning (flat past ~17) — and nothing in the mesher
+distinguishes them, because a port is not a mesh concept.
+
+### 2. M2 — what shipped, and why it is NOT the brief's own formula
+
+The brief asked for `c0_i = max(0.03·w_i, bulkAt(i)/MaxEdgeRefinement)` with `bulkAt(i)` the
+attractor's own axis bulk. **That was measured and not taken.** What ships caps the FRACTION instead:
+
+```
+realised fraction = max( EdgeFractionOfReference, 1 / (MinCellsAcrossConductor · MaxEdgeRefinement) )
+c0_i              = realised fraction · w_i          (one scale on c0, every reference alike)
+```
+
+The two coincide wherever the axis's bulk IS `w/MinCellsAcross`, which is the geometry-limited case
+the brief's own derivation is written for. They differ where the bulk is set by λ, and there the
+per-axis form goes wrong twice:
+
+- **It makes `c₀` depend on Cells per wavelength.** That is exactly the coupling ANT-2's "lever 2"
+  was built with and removed for — it broke the transmission-line mesh's own orthogonality gate, a
+  50 mm line's y gridline count moving 9 → 8 when cells/λ went 20 → 5. Re-introducing it here would
+  have re-broken the same gate for the same reason, one phase later.
+- **It coarsens the end-cap fan, which §1 measured as the wrong one to touch.** On the FR-4 hero the
+  along climb is 27.3 and the across climb 8.3; a per-axis floor at 10 leaves the rim alone and takes
+  the port cell from 87 µm to 238 µm, for \|ΔS\| 0.0131 → ~0.05.
+
+The shipped form has no λ in it at all, so neither happens: it is a statement about the metal and the
+density asked of it, and the λ-bound end-cap fan is untouched at every setting.
+
+**The rate is left at the one derived from the UNFLOORED c₀**, which is what makes the field
+pointwise ≥ its old self. Re-deriving it against the raised c₀ gentles the ramp, so the fan reaches
+the bulk further out and the field is FINER than today's over the band between the two fans' ends —
+the invariant would be lost in the one place nobody looks.
+
+**10 is the constant.** It sits on §1's flat part and is the largest round number that leaves the
+shipped default bit-identical: the floor binds only when `1/(MinCellsAcross·10) > 3%`, i.e. at 3
+cells across and below, so every number in `HISTORY.md` — all taken at 4 — is untouched to the bit.
+
+### 3. The invariant is exact under the per-axis rule and has a measured residue under a pitch field
+
+| | worst count rise, floored vs unfloored |
+|---|---|
+| `CurrentModel.None` (the shipped default) | **1.0000** — exact, over 5 fixtures × cells/λ {5,20,40} × 1…8 across |
+| `Sheet` | 1.0329 cells / 1.0342 unknowns / 1.0122 gridlines (FR-4 taper, cells/λ 5, 3 across) |
+| `TransmissionLine` | 1.0102 cells / 1.0118 unknowns / 1.0000 gridlines (the coil, cells/λ 20, 3 across) |
+
+**The residue is the enforcement pass, not the floor.** `BuildGridLines` finishes by splitting any
+cell longer than the cap, and with a field it reads that cap at the cell's own MIDPOINT — the only
+place a single number can honestly describe a cell. Midpoint sampling of a varying field is not
+monotone in the partition: a coarser cell whose midpoint lands in a FINER part of the field is split
+into more pieces than the two finer cells it replaced were, because those two had their midpoints in
+coarser parts and were let through. **The coarser partition is the one being CORRECTED more**, not
+the one being meshed worse.
+
+**The detail floor — the other one-way relaxation of this same field — is exactly monotone under a
+field** (measured, 1.0000 on all three modes), because it coarsens the measured WIDTHS and therefore
+the CAP as well as the fan. So this residue is specific to a change that moves the partition while
+leaving the cap where it was, and it is not a general property of the field path.
+
+`EdgeRefinementFloorTests` gates both halves separately: the per-axis rule exactly, in the routine
+gate at 0.5 s, and the field modes at a stated 5% margin, `Category=Benchmark` at 27 s because a
+pitch field is built per mesh and there are 720 of them.
+
+### 4. M4 — the reported coil, end to end
+
+The shipped `KIT_SPIRAL` at its defaults on the GaAs starter technology, 20 GHz, two levels, now a
+permanent fixture (`MmicCoilFixture`). Unknowns, edge mesh ON, before → after:
+
+| Cells across | per-axis rule | `Sheet` | `TransmissionLine` | edge mesh OFF (per-axis) |
+|---|---|---|---|---|
+| 4 (default) | 23,357 → **23,357** | 19,438 → 19,438 | 16,988 → 16,988 | 6,488 |
+| 3 | 17,129 → 17,129 | 15,081 → 14,835 | 13,161 → 13,316 | 3,474 |
+| 2 | 12,258 → **9,316** | 10,945 → 8,205 | 10,451 → 7,787 | 1,388 |
+| 1 | 10,490 → **5,246** | 10,022 → 4,814 | 9,632 → 4,706 | 230 |
+
+**The default is still 4.7× past the 5,000-unknown ceiling, and that is the honest result.** The
+floor is inert there by construction. What changed is that the controls now do what they say: taking
+Cells across 4 → 1 buys **4.5×** with the edge mesh on where it bought 2.2×, against 28× with it off
+— the gap between the two is 6.3× rather than 12.7×.
+
+**The residual gap is a COUNT and this constant governs a SIZE, so no value of it closes the rest.**
+What is left is the fan's length in cells — two or three gridlines per attractor, times 28 rims,
+each one a gridline across the whole tensor grid — and that does not scale with the bulk pitch at
+all. `EdgeCells` is the control over the count and it is a FLOOR on the fan's length, which is true
+today, was undocumented today, and is now in its tooltip.
+
+The modes compose as expected, because they act on different things: the current model sets the ALONG
+pitch and this floor the ACROSS fan. `TransmissionLine` + 1 across + edge mesh on is 4,706, under the
+ceiling and with the edge mesh still doing its job; the same with the edge mesh off is 158.
+
+**The two-via count is the difference from the investigation's own table.** That harness had no vias;
+the two Metal1–Metal2 posts contribute exactly 162 vertical unknowns at the default mesh and nothing
+else, so 23,357 here is 23,195 there. `MmicCoilFixture.Coil(withVias: false)` reproduces the older
+numbers exactly, including the 188 × 160 and 113 × 105 gridline counts.
+
+### 5. The traps
+
+- **A self-comparison can only show convergence, not correctness, and here the two disagree.**
+  Against the finest mesh the de-embedded S moves monotonically; against kernel A it has a MINIMUM at
+  h/c₀ ≈ 17–34 and the finest mesh is on the wrong side of it. A brief that gated on \|ΔS\| against
+  the finest rung alone would have concluded "always refine more".
+- **`MaxCellEdge / MinCellEdge` is not the climb, on anything anisotropic.** It reads 96 on the GaAs
+  hero, which is the ALONG bulk over the ACROSS edge cell — two different axes. The climb is per
+  axis, and the two differ by 12× on that fixture.
+- **The FR-4 hero is λ-bound across at 10 GHz and above**: λ_g/20 is 715 µm against 2.9 mm/4 = 725 µm,
+  so `MinCellsAcrossConductor` changes nothing there at 4, 2 or 1 — three identical meshes, which
+  reads as a broken control rather than a fixture that cannot exercise it. Take that band down to
+  1–3 GHz and it binds.
+- **The cell and unknown counts do not follow the gridline count.** A cell exists where a grid
+  rectangle's CENTRE lands on metal, so removing one gridline moves every centre: on the coil the
+  transmission-line mesh at 3 across loses a gridline and GAINS 71 cells. Assert a mesh invariant on
+  the quantity it is actually a statement about.
+- **Nothing about the detail floor was in scope and nothing about it changed.** `CapMinFractionOfExtent`
+  holds it at 2% of the smallest extent — 5 µm on a 250 µm coil, under the 10 µm trace — so it is
+  correctly inert on this class of part and correctly says so. It is not a second defect, and the
+  general fact is worth knowing: **`DetailFloorDivisor` cannot act on any part whose metal is wider
+  than 2% of its own envelope**, which is most MMIC passives.
+
 ## DCFLOAT — the DC point could not drive a port that is not referenced to the plane (2026-09-14)
 
 Owner report. A 50 Ω trace on the 0.6 mm laminate starter stack, simulated twice — once as a 2-port

@@ -256,6 +256,17 @@ public static class SurfaceMesher
     /// Green's function.
     /// </summary>
     /// <param name="edgeReference">R-msh-5's measurement seam — leave at the default.</param>
+    /// <param name="edgeRefinementCap">
+    /// <b>EFAN's measurement seam — leave at the default.</b> How many times finer than the bulk
+    /// pitch an edge cell is allowed to be; <see cref="double.NaN"/> (the default) is
+    /// <see cref="PlanarMeshSettings.MaxEdgeRefinement"/>, the measured shipping constant, and
+    /// <see cref="double.PositiveInfinity"/> is the un-floored field every mesh had before that
+    /// constant existed. It is <b>not</b> a tenth user control and must not become one — it is a
+    /// RESOLUTION, and <see cref="PlanarMeshSettings.MinCellsAcrossConductor"/> is already the
+    /// control for how finely this metal is meshed; the whole point of the floor is that the edge
+    /// fan should OBEY that control rather than ignore it. Same kind of seam, for the same reason,
+    /// as <paramref name="edgeReference"/> and <paramref name="rimGrading"/>.
+    /// </param>
     /// <param name="control">Progress and cancellation, or null for neither.
     ///
     /// <para><b>The mesher reports through the STAGE counter only — never the outer one.</b> It runs
@@ -306,10 +317,14 @@ public static class SurfaceMesher
         ConformalDiagnostics? diagnostics = null,
         bool                accelerated   = false,
         PlanarLengthFormat? lengthFormat  = null,
-        IReadOnlyList<PlanarPort>? ports  = null)
+        IReadOnlyList<PlanarPort>? ports  = null,
+        double              edgeRefinementCap = double.NaN)
     {
         ArgumentNullException.ThrowIfNull(problem);
         var s = (settings ?? PlanarMeshSettings.Default).Resolved;
+        double edgeCap = double.IsNaN(edgeRefinementCap)
+            ? PlanarMeshSettings.MaxEdgeRefinement
+            : edgeRefinementCap;
         bool accel = accelerated && !problem.RequiresGeneralKernel;
         int  ceiling = accel ? AcceleratedUnknownCeiling : UnknownCeiling;
         var  fmt = lengthFormat ?? DefaultLengthFormat;
@@ -455,6 +470,28 @@ public static class SurfaceMesher
         double c0      = s.EdgeMesh && s.EdgeCells > 0
             ? PlanarMeshSettings.EdgeFractionOfReference * edgeRef
             : 0.0;
+
+        // ── EFAN — how much of the 3% survives, once the user's own density control is read ─────
+        //
+        // The edge cell may be at most MaxEdgeRefinement times finer than the pitch the metal's own
+        // WIDTH asks for — which is that width ÷ MinCellsAcrossConductor — so the realised fraction
+        // is max(3%, 1/(MinCellsAcross · MaxEdgeRefinement)). One scale factor, ≥ 1, applied to
+        // every attractor's c0 alike, so it is the same statement whichever edge reference is in
+        // use and it cannot depend on where the attractor sits.
+        //
+        // IT IS DELIBERATELY NOT FLOORED AGAINST THE AXIS'S OWN BULK PITCH, and that is a measured
+        // decision rather than a simplification (RESOLVED.md §EFAN). Two things go wrong with the
+        // per-axis bulk. (1) On any part whose ALONG pitch is set by λ rather than by the metal,
+        // the climb is λ_g/(N·c0) and a floor against it makes c0 depend on Cells per wavelength —
+        // which is exactly the coupling ANT-2's own "lever 2" was BUILT with and REMOVED for,
+        // because it broke the transmission-line mesh's orthogonality gate. (2) That long climb
+        // belongs to the fan at a conductor's END FACE, and the outermost cell there is what the
+        // port's error box is solved on: 1/a₂₁² amplification means coarsening it is measurably
+        // WORSE, while the rim fan the singularity actually needs is flat well above the default.
+        double edgeFloorFraction = edgeCap > 0 && !double.IsPositiveInfinity(edgeCap)
+            ? 1.0 / (s.MinCellsAcrossConductor * edgeCap)
+            : 0.0;
+        double c0Scale = Math.Max(1.0, edgeFloorFraction / PlanarMeshSettings.EdgeFractionOfReference);
 
         // The growth ratio is DERIVED from the requested cell count rather than fixed, so that the
         // geometric run c₀, c₀r, c₀r², … reaches the bulk cell size in exactly EdgeCells cells.
@@ -610,6 +647,29 @@ public static class SurfaceMesher
                 double bulk = bulkAt is null ? hMaxAxis : Math.Min(hMaxAxis, bulkAt(a.Coord));
                 double ri = GrowthRatioFor(c0i, bulk, s.EdgeCells);
                 double gi = Math.Max(ri > 1.0 ? ri - 1.0 : 0.0, globalGrowth);
+
+                // ── EFAN — AND THE FLOOR THAT TIES c0 TO THE DENSITY THE USER ASKED FOR ────────
+                //
+                // Everything above sizes c0 as a fraction of the METAL and says nothing about the
+                // mesh that metal is being meshed at. The bulk pitch across a conductor is that
+                // same metal divided by MinCellsAcrossConductor, so the climb the fan has to make
+                // is h/c0 = 1/(EdgeFractionOfReference · MinCellsAcross) — 8.3 at the default and
+                // 33.3 at 1 across. THE USER'S OWN DENSITY CONTROL MAKES THE FAN LONGER THE COARSER
+                // THEY ASK FOR, which is backwards, and it is why MinCellsAcrossConductor bought
+                // 2.2x on the reported coil with the edge mesh on where it bought 28x with it off.
+                // `c0Scale` caps that climb at PlanarMeshSettings.MaxEdgeRefinement; see the
+                // constant for the measurement, and RESOLVED.md §EFAN for the full sweep.
+                //
+                // THE RATE IS LEFT AT THE ONE DERIVED FROM THE UNFLOORED c0, and that is what makes
+                // this safe rather than merely cheap: h(x) = min_i [c0_i + g_i·|x − a_i|] is monotone
+                // non-decreasing in c0_i, so with g_i untouched the field is pointwise ≥ today's and
+                // the cell count is bounded above by today's. Re-deriving the rate against the
+                // RAISED c0 would GENTLE it — a shallower ramp reaches the bulk further out — and
+                // the field would then be FINER than today's over the band between the two fans'
+                // ends, which is the whole invariant this floor rests on. Same argument, and the
+                // same reason, as PlanarEdgeReference.LocalConductorWidth's own c0 floor.
+                c0i *= c0Scale;
+
                 outList.Add(new GradedAttractor(a.Coord, c0i, gi));
             }
             return outList;
@@ -886,12 +946,17 @@ public static class SurfaceMesher
                        $"{fmt(narrowest)} at the narrowest. The field spans {fmt(Math.Min(hx, hy))}–" +
                        $"{fmt(Math.Max(pitch.MaxPitchX, pitch.MaxPitchY))}, so BOTH knobs move this mesh, " +
                        "each in its own direction.")
+                  // EFAN/M3 — the same sentence BuildRefusal now carries, for the mesh that solves.
+                  // The refusal fires only past the ceiling, so without this a user whose mesh is
+                  // merely expensive is still sent round the two knobs this note has just called
+                  // dead and never told which one is alive.
                   : $"Cells per wavelength and Mesh frequency do NOT set this mesh. The λ_g/" +
                     $"{s.CellsPerWavelength} cap is {fmt(hWave)}; the narrowest metal ({fmt(narrowest)}, " +
                     $"{s.MinCellsAcrossConductor} across) forces {fmt(Math.Min(hx, hy))} — " +
                     $"{hWave / Math.Min(hx, hy):G3}× finer, everywhere. To coarsen: " +
+                    (s.MinCellsAcrossConductor > 1 ? "lower Cells across a conductor, " : "") +
                     (s.EdgeMesh && s.EdgeCells > 0
-                        ? "turn the edge mesh off, or narrow the range of widths, or analyse less."
+                        ? "turn the edge mesh off, narrow the range of widths, or analyse less."
                         : "narrow the range of widths, or analyse less."));
 
             // The second note quantifies the trade in the unit the user set, and fires ONLY below the
@@ -982,13 +1047,30 @@ public static class SurfaceMesher
 
         if (s.EdgeMesh && s.EdgeCells > 0)
         {
-            notes.Add(edgeReference == PlanarEdgeReference.LocalConductorWidth && c0Coarsest > c0
+            // EFAN — the note quotes the fraction that was REALISED, never the 3% that was asked
+            // for. A finest cell the floor has just coarsened, reported beside a literal "3%", is
+            // the same class of statement as a cap that did not bind being reported as one.
+            double c0Realised = c0 * c0Scale;
+            string ofWhat = $"{PlanarMeshSettings.EdgeFractionOfReference * c0Scale * 100:0.##}%";
+
+            notes.Add(edgeReference == PlanarEdgeReference.LocalConductorWidth && c0Coarsest > c0Realised
                 ? $"Edge mesh on: {s.EdgeCells} graded cell(s) per conductor edge, finest cell " +
-                  $"{fmt(c0)}–{fmt(c0Coarsest)} (3% of the metal AT each edge), growing {ratioX:G3}× " +
-                  "across, {0}× along.".Replace("{0}", $"{ratioY:G3}")
+                  $"{fmt(c0Realised)}–{fmt(c0Coarsest)} ({ofWhat} of the metal AT each edge), growing " +
+                  "{r}× across, {0}× along.".Replace("{r}", $"{ratioX:G3}").Replace("{0}", $"{ratioY:G3}")
                 : $"Edge mesh on: {s.EdgeCells} graded cell(s) per conductor edge, finest cell " +
-                  $"{fmt(c0)} (3% of {fmt(edgeRef)}, {DescribeReference(edgeReference)}), growing " +
-                  $"{ratioX:G3}× across, {ratioY:G3}× along.");
+                  $"{fmt(c0Realised)} ({ofWhat} of {fmt(edgeRef)}, {DescribeReference(edgeReference)}), " +
+                  $"growing {ratioX:G3}× across, {ratioY:G3}× along.");
+
+            // …and when the floor is what set that fraction, SAY WHICH CONTROL DID IT. The edge cell
+            // is the one quantity in this mesh a user cannot see and cannot set, so a number that
+            // moved because they lowered Cells across has to name Cells across.
+            if (c0Scale > 1.0)
+                notes.Add($"The edge cell is held at {ofWhat} of the metal rather than " +
+                          $"{PlanarMeshSettings.EdgeFractionOfReference:P0}, because Cells across a " +
+                          $"conductor is {s.MinCellsAcrossConductor}: an edge cell is never more than " +
+                          $"{PlanarMeshSettings.MaxEdgeRefinement:G3}× finer than the pitch that " +
+                          "setting asks for, so coarsening the mesh shortens the edge fan instead of " +
+                          "lengthening it.");
 
             // ── M2 — THE FAN'S LENGTH, WHICH IS THE QUANTITY THAT ACTUALLY COSTS ────────────────
             //
@@ -1047,11 +1129,20 @@ public static class SurfaceMesher
             // hx/hy. Those are the finest pitches the mesh contains, not the bulk any fan climbs to,
             // so with the pitch field on this note used to state a number no fan on the artwork had.
             // The OVER-run half moved into the fan-length note above, where the number already is.
+            //
+            // EFAN — AND WHEN THE FLOOR IS WHAT SHORTENED IT, THE CLAMP IS THE WRONG REASON. A fan
+            // that runs short because c0 was held against Cells across a conductor is not a fan the
+            // growth ratio could not express, and telling the user to look at Edge cells' bounds
+            // sends them to a control that is not what moved.
             if (fanCells > 0 && fanCells < s.EdgeCells)
-                notes.Add($"Edge cells: {fanCells} used, not the {s.EdgeCells} requested — the grading " +
-                          $"ratio is bounded to {MinGrowthRatio:G3}–{MaxGrowthRatio:G3}×, so any value " +
-                          $"above ~{fanCells} meshes the same here. " +
-                          "It sets how far the refinement reaches, never how fine the finest cell is.");
+                notes.Add($"Edge cells: {fanCells} used, not the {s.EdgeCells} requested — " +
+                          (c0Scale > 1.0
+                              ? $"the edge cell is held at {ofWhat} of the metal because Cells across " +
+                                $"a conductor is {s.MinCellsAcrossConductor}, so the climb from it to " +
+                                "the bulk pitch takes fewer steps than that."
+                              : $"the grading ratio is bounded to {MinGrowthRatio:G3}–{MaxGrowthRatio:G3}×, " +
+                                $"so any value above ~{fanCells} meshes the same here.") +
+                          " It sets how far the refinement reaches, never how fine the finest cell is.");
         }
         else
         {
@@ -1136,6 +1227,7 @@ public static class SurfaceMesher
         string? refusal = null;
         if (verdict == PlanarBudgetVerdict.Refused)
             refusal = BuildRefusal(n, cells.Count, s, narrowX, narrowY, hx, hy, hWave, x1 - x0, y1 - y0,
+                                   cellsAcrossRealised: across,
                                    accelerated: accel,
                                    acceleratedWouldFit: !accel && n <= AcceleratedUnknownCeiling
                                                       && !problem.RequiresGeneralKernel,
@@ -1228,7 +1320,8 @@ public static class SurfaceMesher
     private static string BuildRefusal(
         int n, int cellCount, PlanarMeshSettings s,
         double narrowX, double narrowY, double hx, double hy, double hWave,
-        double extentX, double extentY, bool accelerated, bool acceleratedWouldFit,
+        double extentX, double extentY, int cellsAcrossRealised,
+        bool accelerated, bool acceleratedWouldFit,
         PlanarLengthFormat fmt, double coarsestPitch = 0)
     {
         double pitch     = Math.Min(hx, hy);
@@ -1269,6 +1362,24 @@ public static class SurfaceMesher
               $"tensor product over the whole layout, so the narrow end is paid for everywhere. The " +
               $"λ_g/{s.CellsPerWavelength} cap is {fmt(hWave)}, {hWave / pitch:G3}× coarser, so " +
               "LOWERING CELLS PER WAVELENGTH OR MESH FREQUENCY WILL NOT REDUCE THIS COUNT." +
+              // ── M3/EFAN — NAME THE SETTING THE SENTENCE ABOVE HAS JUST DESCRIBED ──────────────
+              //
+              // "meshing it 4 cells across" reads as a property of the mesher. It is a NUMBER THE
+              // USER TYPED, it is the largest lever on a part like this, and the refusal never said
+              // so — which is the shape memory `em-refusal-must-name-a-binding-remedy` is about: a
+              // remedy list that omits the binding constraint sends the user round the inert ones.
+              // The second half is the other thing only the mesher knows: the graded edge fan puts
+              // MORE cells across that metal than were asked for, so the number the user typed is
+              // not the number they got. Both are already computed — the realised count is the
+              // mesh's own R-msh-4 metric — so this costs no second mesh and no estimate.
+              $" That {s.MinCellsAcrossConductor} is a SETTING — Cells across a conductor — and it " +
+              "is the largest lever on this part: the pitch above is the narrowest metal divided by " +
+              "it, so every step down coarsens the whole grid." +
+              (cellsAcrossRealised > s.MinCellsAcrossConductor && s.EdgeMesh && s.EdgeCells > 0
+                  ? $" (The mesh actually puts {cellsAcrossRealised} cells across that metal rather " +
+                    $"than {s.MinCellsAcrossConductor}: the graded edge fan is the rest, which is " +
+                    "what turning the edge mesh off removes.)"
+                  : "") +
               (s.CurrentModel != PlanarCurrentModel.None
                   ? $" (The {ModelName(s.CurrentModel)} is on but DECLINED on this artwork — see the " +
                     "notes beside this message for why — so the per-axis rule is what meshed it.)"
@@ -1293,6 +1404,9 @@ public static class SurfaceMesher
         }
         if (!waveBinds)
         {
+            // FIRST of this branch's remedies, because it is the one that acts on the binding
+            // quantity directly and the only one that is a number the user already typed.
+            if (s.MinCellsAcrossConductor > 1) acts.Add("lower Cells across a conductor");
             acts.Add("narrow the range of widths in the analysed region");
             acts.Add("coarsen the Detail floor — a SMALLER divisor — if the narrowest metal here " +
                      "is import detail rather than a conductor");

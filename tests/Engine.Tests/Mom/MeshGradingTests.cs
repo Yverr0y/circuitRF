@@ -123,6 +123,11 @@ public class MeshGradingTests
     // ══════════════════════════════════════════════════════════════════════════════════════════
 
     [Fact]
+    /// <remarks>This is the SIGN of the effect. Its STRENGTH — that lowering the control moves an
+    /// edge-meshed mesh nearly as much as a bare one, rather than 13× less — is EFAN's own gate,
+    /// <c>EdgeRefinementFloorTests.LoweringCellsAcross_NowActsOnAnEdgeMeshedMeshAndNotOnlyOnABareOne</c>.
+    /// The two are separate because a control can be monotone and still be worth almost nothing, and
+    /// for a year this one was.</remarks>
     public void LoweringCellsAcrossTheConductor_NeverRaisesTheCellCount()
     {
         // MinCellsAcrossConductor shipped as a control on 2026-09-09 with a NOTE saying its cell

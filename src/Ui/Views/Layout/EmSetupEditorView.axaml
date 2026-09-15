@@ -823,15 +823,20 @@
                     <TextBox   Grid.Row="1" Grid.Column="1" Classes="num" Tag="PlanarMinCellsAcross"
                                Text="{Binding ViewModel.PlanarMinCellsAcrossText}"
                                LostFocus="OnFieldLostFocus" KeyDown="OnFieldKeyDown"
-                               ToolTip.Tip="Cells across the narrowest conductor — the transverse cell size. With Transmission line off, the mesh uses whichever is smaller, this or the wavelength cap, in BOTH directions, so on artwork with fine features this is the only setting that can change the cell count. With it on, this sets the pitch across the current and Cells per wavelength sets it along. Lowering it always coarsens the mesh. 1 means no transverse current variation is representable at all."/>
+                               ToolTip.Tip="Cells across the narrowest conductor — the transverse cell size. With Transmission line off, the mesh uses whichever is smaller, this or the wavelength cap, in BOTH directions, so on artwork with fine features this is the only setting that can change the cell count. With it on, this sets the pitch across the current and Cells per wavelength sets it along. Lowering it always coarsens the mesh, and it now coarsens the EDGE MESH with it: the graded edge cell is never more than ten times finer than the pitch this setting asks for, so the fan gets shorter as the mesh gets coarser rather than longer. 1 means no transverse current variation is representable at all."/>
                     <TextBlock Grid.Row="2" Grid.Column="0" Classes="colhdr" Text="Edge mesh" VerticalAlignment="Center"/>
                     <CheckBox  Grid.Row="2" Grid.Column="1" Name="PlanarEdgeMeshCheck" FontSize="11"
                                Content="Refine at conductor edges"
                                IsChecked="{Binding ViewModel.PlanarEdgeMesh}"/>
+                    <!-- It had no tooltip at all, which is how the owner came to report in 2026-08-09
+                         that setting it to 10 changed nothing: it is a FLOOR on how far the graded
+                         fan reaches, not a control over how fine the edge cell is, and nothing said
+                         so anywhere a user would look. -->
                     <TextBlock Grid.Row="3" Grid.Column="0" Classes="colhdr" Text="Edge cells" VerticalAlignment="Center"/>
                     <TextBox   Grid.Row="3" Grid.Column="1" Classes="num" Tag="PlanarEdgeCells"
                                Text="{Binding ViewModel.PlanarEdgeCellsText}"
-                               LostFocus="OnFieldLostFocus" KeyDown="OnFieldKeyDown"/>
+                               LostFocus="OnFieldLostFocus" KeyDown="OnFieldKeyDown"
+                               ToolTip.Tip="How far the refinement at a conductor edge reaches inward, in cells — a FLOOR on the fan's length, never a control over how fine the edge cell is. That cell is a fixed fraction of the metal at each edge, capped against Cells across a conductor; raising this number widens the graded band and lowers the growth ratio, and past a point the ratio's own bounds stop it doing anything at all. The mesh report says which count was actually used and why."/>
                     <!-- The fourth control. Labelled for what it DOES, not for its implementation:
                          a user picks "follow the metal", not "cut cells". -->
                     <TextBlock Grid.Row="4" Grid.Column="0" Classes="colhdr" Text="Boundary cells" VerticalAlignment="Center"/>

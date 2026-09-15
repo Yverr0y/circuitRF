@@ -330,6 +330,53 @@ public sealed record PlanarMeshSettings(
     /// <summary>Geometric growth ratio inward from an edge — §10.5's "~1.5–2".</summary>
     public const double EdgeGrowthRatio = 1.7;
 
+    /// <summary>
+    /// <b>EFAN — how many times finer than the bulk pitch an edge cell may be, and it is a MEASURED
+    /// resolution rather than a tenth user control.</b>
+    ///
+    /// <para><b>What it is for.</b> <see cref="EdgeFractionOfReference"/> is 3% of the METAL and says
+    /// nothing about the mesh that metal is being meshed at; the across pitch is the same metal
+    /// divided by <see cref="MinCellsAcrossConductor"/>. So the climb the graded fan has to make is
+    /// <c>1/(0.03·MinCellsAcross)</c> — <b>8.3 at the default and 33.3 at 1 across</b> — and the
+    /// user's own density control makes the fan LONGER the coarser they ask for. Measured on the
+    /// shipped 3-turn MMIC coil: taking Cells across 4 → 1 fell 23,195 → 10,392 unknowns with the
+    /// edge mesh on (2.2×) against 6,456 → 228 with it off (28×). The realised edge fraction is
+    /// therefore <c>max(3%, 1/(MinCellsAcross · MaxEdgeRefinement))</c>, so the climb is capped at
+    /// this number however coarse the mesh is asked to be.
+    ///
+    /// <para><b>10 is measured, on an oracle that is not this kernel.</b> The sweep is in
+    /// <c>RESOLVED.md</c> §EFAN: the edge fraction was forced over h/c₀ = 1…96 on the FR-4 and GaAs
+    /// heroes, and each rung's Z_c, ε_eff and de-embedded S compared against kernel A's own
+    /// cross-section extraction of the SAME line — a comparison a self-convergence study cannot
+    /// make. Both stacks flatten in the same place:</para>
+    ///
+    /// <code>
+    /// h/c₀        96     48     24     17     12    8.5      6      4      2      1
+    /// GaAs  Z_c  +0.52  +0.53  +0.53  +0.59  +0.68  +0.71  +0.83  +1.06  +1.64  +2.87   % vs kernel A
+    ///       |ΔS| .0195  .0151  .0133  .0132  .0174  .0352  .0587  .100   .223   .456
+    /// FR-4  Z_c  −0.24  −0.13  −0.09  −0.01  −0.04  +0.13  +0.31  +0.60  +1.35  +2.90
+    ///       |ΔS| .0161  .0138  .0153  .0245  .0351  .0558  .081   .124   .248   .489
+    /// </code>
+    ///
+    /// <para>Nothing improves above ~17 — <b>on GaAs the finest rung is measurably WORSE than 17
+    /// or 34</b>, because shrinking the outermost cell at a port's end face raises the error box's
+    /// own 1/a₂₁² amplification — and the knee is at 8–12. <b>10 sits on the flat part and is also
+    /// the largest round number that leaves the SHIPPED DEFAULT bit-identical</b>: the floor binds
+    /// only when <c>1/(MinCellsAcross·10) &gt; 3%</c>, i.e. at 3 cells across and below, so every
+    /// number in this directory's <c>HISTORY.md</c> — all taken at 4 — is untouched to the bit.</para>
+    ///
+    /// <para><b>It FLOORS, it never refines</b>, and the rate is left at the one derived from the
+    /// UNFLOORED c₀, so <c>h(x) = min_i[c₀_i + g_i·|x − a_i|]</c> is pointwise ≥ what it was and the
+    /// cell count is bounded above by today's — the same one-way invariant
+    /// <see cref="PlanarEdgeReference.LocalConductorWidth"/> and <c>DetailFloorDivisor</c> already
+    /// carry. <b>It is NOT a setting and must not become one</b>:
+    /// <see cref="MinCellsAcrossConductor"/> is already the control for how finely this metal is
+    /// meshed, and the whole point of this constant is that the edge fan should OBEY that control
+    /// instead of ignoring it. D3's test — a control earns its place by being a modelling or
+    /// responsibility decision — makes this a resolution, and resolutions are derived.</para>
+    /// </summary>
+    public const double MaxEdgeRefinement = 10.0;
+
     public static readonly PlanarMeshSettings Default = new();
 
     /// <summary>

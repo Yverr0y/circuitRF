@@ -106,6 +106,12 @@ public class SurfaceMesherEdgeCellsTests
         var few = new PlanarKernel().Mesh(problem, new PlanarMeshSettings(Auto: false, EdgeMesh: true, EdgeCells: 3));
         var many = new PlanarKernel().Mesh(problem, new PlanarMeshSettings(Auto: false, EdgeMesh: true, EdgeCells: 10));
 
+        // RE-MEASURED UNDER EFAN (2026-09-15) AND THE BAND DID NOT MOVE. That phase caps the climb
+        // from the edge cell to the bulk pitch, which shortens the fan — so the band was expected to
+        // shift and was checked rather than assumed. It does not, because the cap is inert at this
+        // fixture's settings: the floor binds only at 3 cells across and below, and this runs at the
+        // default 4. The statement being made here is about the fan's FINENESS, which no part of
+        // EFAN changes at any setting.
         double ratio = few.MinCellEdgeM / many.MinCellEdgeM;
         Assert.InRange(ratio, 0.9, 1.1);
 
