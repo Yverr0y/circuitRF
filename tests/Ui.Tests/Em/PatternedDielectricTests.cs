@@ -445,6 +445,44 @@ public class PatternedDielectricTests
     }
 
     /// <summary>
+    /// <b>A plate drawn with no mask over it is a capacitor solved with AIR between its plates, and
+    /// it is a WARNING</b> — the same outcome the conductor tie's own excluded-plate branch already
+    /// treats as one.
+    ///
+    /// <para>The mask branch first read as though a layout with no mask on it had no capacitor in
+    /// it. That holds for artwork a mask-drawing generator produced and not for the three ways a
+    /// plate reaches a layout without one: a generator that predates the mask (which is every
+    /// capacitor the shipped kit drew before MIM-11), an import whose nitride layer was not mapped,
+    /// and hand-drawn artwork. The run is then silently a factor of εᵣ out on the one quantity the
+    /// capacitor exists for, which is not a note among thirty.</para>
+    /// </summary>
+    [Fact]
+    public void APlateDrawnWithNoMaskOverIt_IsAWarningRatherThanANote()
+    {
+        var tech = ProbeTech();
+        tech.Stackup.Layers.Single(l => l.Name == "Film").PresentWithLayer = "Mask";
+        var levels = new EmExtractionSettings(AnalysisLevelNames: ["Lower", "Plate"]);
+
+        // Plate artwork, no mask artwork — a capacitor drawn before the mask existed.
+        var r = PlanarExtractor.Extract(WithAPlate(), tech, Dbu, 20e9, levels);
+        Assert.True(r.Ok, r.Refusal);
+        Assert.DoesNotContain(r.Problem!.EffectiveStack.Layers,
+                              l => Math.Abs(l.Material.EpsR - 7.0) < 1e-9);
+
+        var warn = Assert.Single(r.Findings,
+            f => f.Text.Contains("is a patterned thin film", StringComparison.Ordinal));
+        Assert.Equal(CircuitRF.Engine.Mom.EmSeverity.Warning, warn.Severity);
+        Assert.Contains("'Plate'", warn.Text, StringComparison.Ordinal);
+        Assert.Contains("7x low", warn.Text, StringComparison.Ordinal);
+
+        // And with no plate either it stays a NOTE, because then there really is no capacitor.
+        var quiet = PlanarExtractor.Extract(LowerLineOnly(), tech, Dbu, 20e9, levels);
+        Assert.True(quiet.Ok, quiet.Refusal);
+        Assert.Equal(CircuitRF.Engine.Mom.EmSeverity.Note, Assert.Single(quiet.Findings,
+            f => f.Text.Contains("is a patterned thin film", StringComparison.Ordinal)).Severity);
+    }
+
+    /// <summary>
     /// <b>MIM-11 item 3 — a run that CARRIES a patterned film says two things nothing said before:
     /// that the film is modelled across the whole plane, with the fraction of the layout its own
     /// artwork covers; and that the conductor beneath it is therefore modelled 3 µm higher than the

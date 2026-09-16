@@ -238,19 +238,46 @@ internal static class PatternedDielectric
             // The sentence splits on ONE question and the extractor knows the answer to it. Both
             // halves state the same mechanism; what differs is whether it is the right outcome.
             //
-            // MIM-11 — a MASK tie takes neither half, and that is not an omission. Both of those
-            // sentences end by naming an analysis level to add, which is the remedy for a tie to a
-            // CONDUCTOR; a mask tie's question is whether the mask is DRAWN, so a level list cannot
-            // answer it and the "plate drawn but excluded" state cannot arise — with no mask artwork
-            // there is no capacitor in the layout at all. The excluded-plate case is still reported,
-            // by the extractor's own dropped-artwork warning, which is about the metal rather than
-            // about the film.
+            // MIM-11 — a MASK tie does not take the CONDUCTOR halves below, and that is not an
+            // omission: both of those sentences end by naming an analysis level to add, which is
+            // the remedy for a tie to a conductor, while a mask tie's question is whether the mask
+            // is DRAWN and a level list cannot answer it.
+            //
+            // ── BUT "no mask artwork means no capacitor" IS NOT ALWAYS TRUE, AND THAT IS THE
+            //    DANGEROUS HALF ────────────────────────────────────────────────────────────────
+            //
+            // This branch first read as though a layout with no mask on it had no capacitor in it,
+            // which holds for artwork drawn by a generator that draws the mask. It does not hold
+            // for the three ways a plate reaches a layout without one: a generator that PREDATES
+            // the mask (every capacitor KIT_MIMCAP drew before MIM-11), artwork imported from a
+            // GDSII whose nitride layer was not mapped, and a capacitor drawn by hand. In all
+            // three the plate metal IS in the layout, the film is silently air, and a plate pair
+            // reads its capacitance by a factor of εᵣ low — the same outcome the CONDUCTOR tie's
+            // own branch below already treats as a WARNING, so this one does too rather than
+            // leaving it as one note among thirty. The plate is the conductor directly ABOVE the
+            // film, which is what StackupLayer.PresentWithLayer's documentation tells an author to
+            // name.
+            string? plateAbove = Above(layers, i) is { Kind: StackupKind.Conductor } pa ? pa.Name : null;
+            bool plateIsDrawn = tiedToMask && plateAbove is not null &&
+                                plateHasArtwork is not null && plateHasArtwork(plateAbove);
+
             notes.Add(tiedToMask
-                ? $"'{film.Name}' is a patterned thin film defined by the '{plate}' mask, and this " +
-                  $"layout draws nothing on '{plate}' — so it enters the medium as AIR at its stated " +
-                  $"thickness{reverted}. The film exists only where the mask opens it, so a layout " +
-                  "that draws none is modelled exactly as it would be on a technology with no " +
-                  $"capacitor module at all. Draw the '{plate}' mask to put the film in the run."
+                ? plateIsDrawn
+                  ? EmFinding.Warn(
+                      $"'{film.Name}' is a patterned thin film defined by the '{plate}' mask, this " +
+                      $"layout draws nothing on '{plate}', and it DOES draw '{plateAbove}' — the " +
+                      "plate this film sits under. So the film enters the medium as AIR at its " +
+                      $"stated thickness{reverted}, and the capacitor you drew is solved with air " +
+                      $"between its plates: a plate pair on it reads about {film.Epsr:G3}x low. " +
+                      $"Draw the '{plate}' mask over the plate. A layout reaches this state when " +
+                      "its artwork predates the mask, when it was imported without that layer " +
+                      "mapped, or when the capacitor was drawn by hand.")
+                  : $"'{film.Name}' is a patterned thin film defined by the '{plate}' mask, and " +
+                    $"this layout draws nothing on '{plate}' — so it enters the medium as AIR at " +
+                    $"its stated thickness{reverted}. The film exists only where the mask opens " +
+                    "it, so a layout that draws none is modelled exactly as it would be on a " +
+                    $"technology with no capacitor module at all. Draw the '{plate}' mask to put " +
+                    "the film in the run."
                 : plateHasArtwork is not null && plateHasArtwork(plate)
                 ? EmFinding.Warn(
                     $"'{film.Name}' is a patterned thin film tied to '{plate}', '{plate}' CARRIES " +
@@ -278,6 +305,17 @@ internal static class PatternedDielectric
     private static StackupLayer? Beneath(List<StackupLayer> layers, int i)
     {
         for (int j = i + 1; j < layers.Count; j++)
+            if (layers[j].Kind != StackupKind.Via)
+                return layers[j];
+        return null;
+    }
+
+    /// <summary>The entry directly ABOVE <paramref name="i"/> that has a z band at all — the mirror
+    /// of <see cref="Beneath"/>, and for a patterned film that entry is the PLATE it is deposited
+    /// under (<c>StackupLayer.PresentWithLayer</c>'s own recommendation to an author).</summary>
+    private static StackupLayer? Above(List<StackupLayer> layers, int i)
+    {
+        for (int j = i - 1; j >= 0; j--)
             if (layers[j].Kind != StackupKind.Via)
                 return layers[j];
         return null;

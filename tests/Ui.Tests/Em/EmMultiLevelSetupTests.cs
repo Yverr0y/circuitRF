@@ -164,6 +164,11 @@ public sealed class EmMultiLevelSetupTests
     /// topmost analysis level is MIM Metal and the Air above it is discarded from the medium — a
     /// real and correctly-classed warning about a different thing, which would make this test pass
     /// or fail on something it is not about.</para>
+    ///
+    /// <para><b>And the NITRIDE is drawn, since MIM-11.</b> The shipped technology ties its MIM
+    /// Dielectric to that mask rather than to the plate conductor, so a plate with no mask over it
+    /// is a capacitor solved with AIR between its plates — which warns, correctly. A complete
+    /// capacitor is its two plates AND its mask, which is what <c>KIT_MIMCAP</c> draws.</para>
     /// </summary>
     [Fact]
     public void WithNothingLeftOut_TheWarningBlockIsEmpty()
@@ -172,6 +177,7 @@ public sealed class EmMultiLevelSetupTests
         var view = new LayoutView { DbuPerMicron = Dbu };
         view.Shapes.Add(Rect(new LayerKey(1, 0), 0,  0, 40, 10));
         view.Shapes.Add(Rect(new LayerKey(9, 0), 5,  2, 35,  8));
+        view.Shapes.Add(Rect(new LayerKey(6, 0), 5,  2, 35,  8));   // Nitride, the film's own mask
         view.Shapes.Add(Rect(new LayerKey(2, 0), 10, 3, 30,  7));
 
         var vm = Editor(tech, view, ["Metal1", "MIM Metal", "Metal2"]);

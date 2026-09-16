@@ -131,6 +131,14 @@ rests on is already taken** and is tabulated in MIM-12; nothing before it needs 
 13. **The unknown budget.** Ceilings are 5,000 dense and 12,000 accelerated; the edge fan is
     expensive on a spiral for a reason the engine already prints; the cell count should be on screen
     before the solve, not after the refusal. Independent; take it whenever. → **MIM-13.**
+14. **The floor is a stale measurement now, and it is refusing a design that may already work.**
+    12a repaired the kernel and did NOT re-run the de-embedded ladder, because the replacement fixture
+    measures its own ports (6-10× low at cell/separation 2, where no film is involved, and halving with
+    every refinement). So `FullWaveCellOverSeparation` is still 40, from a kernel that no longer
+    exists, and the resonator this round started from is refused at 66.7. Build the fixture, re-run the
+    ladder, re-point the one constant — and if the new number leaves that design still outside, give
+    the mesh a per-LEVEL refinement so a plate can be resolved without refining a spiral.
+    **Depends on MIM-12a.** → **MIM-14.**
 
 **One convention added by this round.** *Never gate a full-wave capability on an electrostatic
 measurement.* MIM-8's instrument is excellent and its 1 % is true; it is simply not a statement about

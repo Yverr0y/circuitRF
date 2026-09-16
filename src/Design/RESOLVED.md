@@ -1,5 +1,47 @@
 # src/Design — resolved findings (detail, off the CLAUDE.md growth path)
 
+## A plate drawn with no mask over it lost its film SILENTLY when the shipped tie moved (2026-09-16)
+
+Found reviewing `brief-em-mim-11-nitride-mask-and-patterned-film.md`, and it was reproducing in this
+repository's own fixtures: `EmMultiLevelSetupTests.WithNothingLeftOut_TheWarningBlockIsEmpty` draws
+Metal1 + MIM Metal + Metal2, ticks all three, and asserted that a complete structure warns about
+nothing. It passed — while the capacitor in it was being solved with **air** between its plates.
+
+### What happened
+
+MIM-11 re-pointed the shipped MMIC technology's `MIM Dielectric` from `PresentWithLayer: "MIM Metal"`
+(a conductor) to `"Nitride"` (the mask), which is the true statement of where the film is. The mask
+branch of `PatternedDielectric.Deactivate` then reasoned that *"with no mask artwork there is no
+capacitor in the layout at all"*, so a film switched off by a missing mask was reported as an
+ordinary NOTE — one among thirty — rather than as the warning the conductor tie's own branch already
+raises for the same outcome.
+
+**That premise is true only of artwork drawn by a generator that draws the mask.** A plate reaches a
+layout without one in three ordinary ways, and all three are real:
+
+- artwork from a generator that PREDATES the mask — every capacitor `KIT_MIMCAP` drew before MIM-11;
+- an import whose nitride layer was not mapped;
+- a capacitor drawn by hand.
+
+In each of them the plate metal is in the layout, the plate level is usually in the run, and the film
+is air: εᵣ 6.8 → 1, so the part reads its capacitance about **6.8× low**, and the paired MIM-6 rule
+also puts Metal1's sheet back on the BOTTOM of its band. Nothing said so above note severity.
+
+### The fix
+
+The mask branch asks the question the conductor branch already asks — *does the plate carry
+artwork?* — and warns when it does. The plate is the conductor directly ABOVE the film, which is what
+`StackupLayer.PresentWithLayer`'s own documentation tells an author to name, so `Above` is the mirror
+of the `Beneath` this file already had. The call site needed nothing: `PlanarExtractor` was already
+passing `drawnOn.Contains`, which is every conductor level the LAYOUT draws on (not the run's level
+list). `CrossSectionExtractor` passes null there and still gets the note, correctly — that kernel
+refuses multi-level geometry, so a plate and a line cannot both be in one of its runs.
+
+Gate: `PatternedDielectricTests.APlateDrawnWithNoMaskOverIt_IsAWarningRatherThanANote`, which asserts
+both halves — the warning with the plate drawn, and the plain note without it, because with no plate
+there really is no capacitor and the old sentence is right.
+
+
 ## The `.s2p` now says which drawn label became which port number (2026-09-16)
 
 `brief-em-mim-10-lc-resonator-without-the-capacitor.md`; the full write-up and every measurement are
