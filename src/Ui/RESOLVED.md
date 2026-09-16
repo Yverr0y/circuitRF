@@ -1,5 +1,149 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## The menu bar kept only "circuitRF" after the About dialog, and the menu was never missing (2026-09-15)
+
+Owner, on macOS 27: the native menu bar loses File / Edit / … more often than it used to, and there
+is now a repeatable way to see it — open **circuitRF ▸ About circuitRF…**, close it, and the bar
+stays bare until the user switches to another application and back.
+
+**The menu is not missing. The bar is not being repainted.** Captured with `CRF_MENU_DIAG`
+(`MenuBarProbe`), two reproductions one minute apart in one session:
+
+| | dialog closed with | what `NSApp.mainMenu` held afterwards | what was on screen |
+|---|---|---|---|
+| 1 | the window's own ✕ | 9 items — the whole bar — within one 500 ms sample, and for the 8 s the user then sat looking at it | the application menu only |
+| 2 | the dialog's OK button | the same 9 items | the whole bar |
+
+So the model was right both times and only the drawing differed, and the difference was **how the
+dialog was dismissed**. That also explains the one thing that always fixes it: switching away and
+back runs `-[AvnWindow becomeKeyWindow]`, which installs the menu again, and *that* install repaints.
+
+**Three earlier theories are dead, each by measurement, and none of them should be revisited without
+new evidence.** The install/teardown asymmetry is real and is read from `libAvaloniaNative.dylib`'s
+own disassembly rather than assumed —
+
+```
+-[AvnWindow becomeKeyWindow]     -> showWindowMenuWithAppMenu   // NSWindow override, synchronous
+-[AvnWindow windowDidResignKey:] -> showAppMenuOnly             // delegate notification, UNCONDITIONAL
+WindowBaseImpl::SetMainMenu(m)   -> applyMenu:, then the install ONLY if [w isKeyWindow]
+```
+
+— and because circuitRF binds its menu in `WorkspaceWindow`'s XAML, i.e. in the constructor before the
+window is shown, that `isKeyWindow` branch is always false and the bar rides entirely on a later
+`becomeKeyWindow`. All of which is true, and **none of it is this bug**: the log shows the install DID
+run and the window WAS key (`key=AvnWindow:circuitRF`) while the bar was bare. Also measured and
+dismissed: a late `windowDidResignKey:` from the dialog arriving after the parent's install (the parent
+reads key, not the dialog), and the modal session — `[NSApp modalWindow]` is nil throughout, because
+this `ShowDialog` never begins one, it only disables the parent.
+
+**It does not reproduce under automation, and it was worth knowing why.** Four instrumented runs of the
+real application at 60 ms sampling — opening the dialog from the managed handler, and dispatching the
+real `NSMenuItem` action through `-[NSMenu performActionForItemAtIndex:]` — plus a standalone Avalonia
+12.0.3 application of the same shape, all restored `mainMenu[9]` within a sample. They were never going
+to catch it: **every one of them was reading the model, which is the half that was already correct.**
+Nothing in process can see what is painted, so the capture had to come from someone looking at the
+screen.
+
+**The first fix was a no-op, and the reason is the rule.** It took the application-menu item out of
+the bar, put it straight back at index 0 and set the menu on `NSApp` again — the same move-and-re-insert
+Avalonia's `showWindowMenuWithAppMenu` performs on every activation. Nothing changed on screen.
+`setMainMenu:` is an ordinary property setter and **returns without doing anything when handed the menu
+it already holds**, so a mutation of the menu's CONTENTS never reaches the bar. What makes the working
+path work is that the menu OBJECT changes: Avalonia keeps two, and `showAppMenuOnly` and
+`showWindowMenuWithAppMenu` swap between them.
+
+**So the repair swaps through the real application-only menu** — the one AppKit was last showing, not a
+menu of our own. `MacOsAppMenu.RedrawMenuBar` sets it on `NSApp` and immediately sets the window menu
+back, both in one run-loop pass, so there is no intermediate bar to see. It refuses to act on a
+one-item bar: that is the correct state whenever no menu-bearing window is key, and repainting it on
+every activation would trade a display fault for a flicker.
+
+**Getting that menu is the other half, and it has to be captured rather than built.** It is Avalonia's,
+constructed in native code, and no managed API hands it over; the one moment it is observable is while
+it is installed. `MacOsAppMenu.RememberBareMenuBar` therefore runs from `WorkspaceWindow`'s
+**`Deactivated`** handler, which is exactly the event a dialog taking focus raises — so the menu is
+always seen before the repair that swaps through it wants it. A menu of our own stands in if it somehow
+has not been. Both hooks post at Background priority, after the bar has actually changed.
+
+**And it must run SYNCHRONOUSLY from `Activated`, which the first working version did not.** Posted at
+Background priority it fixed the bar but the owner could watch it happen: the menus were missing for
+something like half a second after the dialog closed, and again on some switches back into the
+application. Nothing needs to happen before the repair —
+`-[AvnWindow becomeKeyWindow]` installs the window's menu synchronously, and `windowDidBecomeKey:` then
+calls into managed code synchronously as well (both read from the disassembly), so the menu AppKit
+failed to draw is already on `NSApp` by the time `Activated` is raised. Calling it directly puts the
+repair in the same run-loop pass as the install that needed it, which is before anything is drawn.
+`RedrawMenuBar` returns false if the menu is somehow not installed yet, and only that case is retried
+on the Background pass that renames Quit. **The Quit rename stays posted** — that one really does need
+the export to have happened.
+
+**Where the call sits in `Activated` is the rest of the latency, and it belongs FIRST.** With the
+repaint synchronous but fifth in the handler, the owner still saw an intermittent half-second of bare
+bar coming back from another application. Measured over eight real application switches — driven from
+inside the process with `activateIgnoringOtherApps:` against another application activated from the
+shell, because a synthetic `[NSApp deactivate]` never resigns the key window and exercises none of this
+— the repair ran **13-16 ms** after the activation request, every time, and never once reported the
+menu as not yet installed. So it was never late on its own account; everything ahead of it in the
+handler was simply added to it. It now runs before any of them, which it can, because it
+depends on none of them — but **that was correctness, not the fix: the owner sees the same delay
+after it, and the handler's remaining work measures 0.3-0.6 ms.** The handler logs that figure when
+`CRF_MENU_DIAG` is set, which is the number that says whether a future report of a slow menu bar is
+this handler or something else.
+
+**The app-switch delay is still open, and three things it is NOT.** It is not the repair (13-16 ms,
+every switch). It is not this handler (0.3-0.6 ms). It is not the process being throttled in the
+background: macOS does nice the process to 5 while it is not frontmost (`ps` shows `NI 5`, `STAT RN`),
+but a 250 ms dispatcher timer ran for a full minute in the background with **zero** gaps over 400 ms,
+so the run loop is not being slowed. What has not been separated is whether the bar is bare because
+AppKit has not drawn an installed menu, or because no window has become key yet — both look identical
+and, until this was written, the probe sampled at 500 ms, which is the same order as the delay itself.
+It samples at 100 ms now, and at that resolution the bar comes back **40-90 ms** after activation on an
+empty workspace with the menu object's pointer unchanged — so nothing is re-exporting the bar there,
+and the difference has to be something a real session has. **The owner confirmed TextEdit, Claude and
+GitHub Desktop are all instant on the same switch, so it is circuitRF's.**
+
+**One wasteful thing was found and fixed on the way, which is a candidate for it.**
+`RebuildNativeWindowMenu` ran on every activation and **cleared and refilled a live `NativeMenu`** —
+on macOS that is the NSMenu the menu bar is displaying, so every activation handed Avalonia's exporter
+a menu to re-export whether or not one entry differed. Switching applications does not usually open or
+close a window, so the common case is an identical list. It now rebuilds only when the entry list
+actually changed, compared against what it was last built from. Whether that is the half-second is
+unverified: it cannot be reproduced on a one-window workspace, where the rebuild is small enough not to
+show.
+
+**A floating-panel theory was raised and killed by the owner: there are none.** `RaiseFloatingToolWindows`
+returns on `tools.Count == 0`, so on the reporting machine it never ran. The session is the default one
+— a single docked workspace window, On Launch New Schematic, Window Layout Project Tree & Library,
+which is very close to the one every measurement above was taken on.
+
+**The limit worth naming, because it is the same one that made this bug hard in the first place: every
+number in this entry is a reading of `NSApp.mainMenu`, and this bug is that the MODEL can be right
+while the SCREEN is wrong.** "The bar is back in 40-90 ms" means the model is right in 40-90 ms and
+nothing more. No in-process probe can see what is painted, and neither screen-recording nor
+assistive-access permission is available to the agent. So the app-switch delay is not measurable from
+here at all — only its cause can be, and only if the cause leaves a mark on the model. The one capture
+that would decide it is a slow switch at 100 ms sampling: if `mainMenu` dips to `[1]` and stays there
+for the half second, something is tearing the bar down after the install and there is a target; if it
+reads `[9]` throughout, AppKit is holding a correct menu and not drawing it, and the only lever left is
+asking again a few frames later.
+
+**`CRF_MENU_FIX=2` selects the other candidate** — toggling `+[NSMenu setMenuBarVisible:]` off and on,
+which asks AppKit to rebuild the bar rather than to notice a new menu. It is not the default because it
+acts on the whole bar including the parts that are not ours, which is also why its restore sits in a
+`finally`.
+
+**Avalonia has the same shape open upstream** — [AvaloniaUI/Avalonia#18780](https://github.com/AvaloniaUI/Avalonia/issues/18780), file
+pickers making `NativeMenuItem` root menus disappear, filed May 2025, no comments, no fix — and `libAvaloniaNative.dylib` 12.1.0's menu code
+is unchanged from 12.0.3's in every one of these methods, so there is no version to upgrade into.
+
+**Three fields in the probe are what made this readable, and two were added for it.** `MenuBarProbe`
+now logs `key=` and `main=` — the NSWindow AppKit itself calls key, which is not always the window
+Avalonia reports as active. Read with `applied=` (the window's own `AvnWindow._menu`) they separate
+four different faults that all look identical to a user: the menu never reached the native side
+(`applied=NIL`), the bar was torn down with no key window to reinstall from (`key=none`), the install
+never ran over a key window that has a menu, and — this one — the install ran, the model is right, and
+the screen disagrees.
+
 ## The EM button made a SECOND setup for a layout that already had one (2026-09-15)
 
 Owner, on the shipped Patch Antenna example: *the `.cem` is there but it is not configured

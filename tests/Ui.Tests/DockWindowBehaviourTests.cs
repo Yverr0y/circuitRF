@@ -187,10 +187,16 @@ public sealed class DockWindowBehaviourTests
         // by the exact lambda text: that handler became a block lambda on 2026-07-30 when the Window
         // menu started refreshing there too, and pinning the one-liner made this test fail for a
         // change that did not affect what it guards.
-        var activatedIdx = src.IndexOf("Activated +=", StringComparison.Ordinal);
+        //
+        // COMMENTS ARE STRIPPED FIRST, and the window is generous. Twice now this has failed for a
+        // handler that still does exactly what is guarded here — once for new code and once, on
+        // 2026-09-15, for a paragraph of comment explaining a macOS menu-bar repaint. A character
+        // budget measured against commented source is a test of how much a handler is explained.
+        var code = StripComments(src);
+        var activatedIdx = code.IndexOf("Activated +=", StringComparison.Ordinal);
         Assert.True(activatedIdx > 0, "the shell must subscribe to Activated");
 
-        var handlerRegion = src[activatedIdx..Math.Min(src.Length, activatedIdx + 600)];
+        var handlerRegion = code[activatedIdx..Math.Min(code.Length, activatedIdx + 1200)];
         Assert.Contains("RaiseFloatingToolWindows();", handlerRegion);
 
         var i    = src.IndexOf("private void RaiseFloatingToolWindows()");
@@ -890,5 +896,12 @@ public sealed class DockWindowBehaviourTests
         var full = Path.Combine(dir!.FullName, relativePath);
         Assert.True(File.Exists(full), $"expected repo file not found: {relativePath}");
         return File.ReadAllText(full);
+    }
+
+    private static string StripComments(string src)
+    {
+        src = System.Text.RegularExpressions.Regex.Replace(
+            src, @"/\*.*?\*/", "", System.Text.RegularExpressions.RegexOptions.Singleline);
+        return System.Text.RegularExpressions.Regex.Replace(src, @"//[^\n]*", "");
     }
 }

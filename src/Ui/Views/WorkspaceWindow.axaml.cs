@@ -67,6 +67,26 @@ public partial class WorkspaceWindow : Window
         // OnActivated to override, so this is the event.
         Activated += (_, _) =>
         {
+            // FIRST, before any of the work below, because it depends on none of it: becomeKeyWindow
+            // has already installed the menu synchronously and this only asks AppKit to draw it. See
+            // MacOsAppMenu.RedrawMenuBar. False means the menu is somehow not installed yet, which is
+            // the one case worth a second try.
+            //
+            // Being first is correctness, not a fix, and the measurement says so: the handler's
+            // remaining work is 0.3-0.6 ms, and moving the call here changed nothing about the
+            // intermittent half-second of bare menu bar the owner still sees coming back from another
+            // application. That delay is not this handler and it is not the repair either — over
+            // eight real application switches the repair ran 13-16 ms after the activation request,
+            // every time, never once reporting the menu as not yet installed. Leave it first anyway:
+            // a repaint queued behind window raising and menu rebuilding is a latency waiting to
+            // happen on a larger workspace.
+            bool repainted = MacOsAppMenu.RedrawMenuBar();
+
+            // What the menu bar would have waited behind if the call above were anywhere else. Free
+            // unless CRF_MENU_DIAG is set, and the one number that says whether a report of a slow
+            // menu bar is this handler or AppKit itself.
+            var sinceRepaint = System.Diagnostics.Stopwatch.StartNew();
+
             RaiseFloatingToolWindows();
             // Cheap (a handful of windows) and idempotent; RaiseFloatingToolWindows re-entering
             // Activated simply rebuilds again, which is harmless.
@@ -78,16 +98,32 @@ public partial class WorkspaceWindow : Window
             AttachNativeMenuAtApplicationScope();
             // The re-export replaces the menu bar, so the Quit item is back to its plain title —
             // rename it again, at Background priority so the export has happened first. A no-op when
-            // the title is already right, which is the common case (see MacOsAppMenu).
+            // the title is already right, which is the common case (see MacOsAppMenu). The repaint
+            // above is deliberately NOT posted with it.
             Avalonia.Threading.Dispatcher.UIThread.Post(
-                () => MacOsAppMenu.NameQuitItem("circuitRF"),
+                () =>
+                {
+                    if (!repainted) MacOsAppMenu.RedrawMenuBar();
+                    MacOsAppMenu.NameQuitItem("circuitRF");
+                },
                 Avalonia.Threading.DispatcherPriority.Background);
             // Settings ▸ Revision Control writes preferences directly and tells no window about it, so
             // coming back to the workspace is where the toolbar's two history buttons find out that
             // git was named, or that "keep a history" was switched. Cheap by construction — see
             // WorkspaceHistoryService.KeepingHistoryHere, which runs no git.
             _vm?.RefreshRevisionButtonAvailability();
+
+            Diagnostics.MenuBarProbe.Note(
+                $"Activated: {sinceRepaint.Elapsed.TotalMilliseconds:F1} ms of handler ran AFTER the menu repaint");
         };
+        // The other half of the menu-bar repair above: while this window is NOT active the bar holds
+        // the application-only menu, and that is the only moment it can be got hold of — it is
+        // Avalonia's own, built in native code, with no managed API that hands it over. A dialog
+        // taking focus is exactly this event, so the menu is always captured before the repair that
+        // swaps through it needs it. Background priority so the bar has actually changed first.
+        Deactivated += (_, _) => Avalonia.Threading.Dispatcher.UIThread.Post(
+            MacOsAppMenu.RememberBareMenuBar,
+            Avalonia.Threading.DispatcherPriority.Background);
     }
 
     /// <summary>
@@ -632,14 +668,32 @@ public partial class WorkspaceWindow : Window
     /// <c>NativeMenuItem</c> is an <c>AvaloniaObject</c> with no DataContext, so entries are built
     /// in code and their actions attached directly, exactly as "Open Recent" already does.
     /// </summary>
+    // What the native Window menu was last built from. See RebuildNativeWindowMenu.
+    private (string Header, Window Target, bool Separator)[]? _nativeWindowMenuBuiltFrom;
+
     private void RebuildNativeWindowMenu()
     {
         if (_vm is null) return;
         EnsureWindowNativeItem();
         if (_windowNativeItem?.Menu is not { } target) return;
 
+        // Rebuild only when the ANSWER changed, not every time the question is asked. This runs on
+        // every activation, and it clears and refills a live NativeMenu — which on macOS is a native
+        // NSMenu the menu bar is displaying, so every call hands Avalonia's exporter a menu to
+        // re-export whether or not a single entry differs. Switching to another application and back
+        // does not usually open or close a window, so the common case is an identical list, and the
+        // common case should cost nothing.
+        var entries  = _vm.EnumerateWindowEntries();
+        var builtFrom = entries.Select(e => (e.Header, e.Target, e.SeparatorBefore)).ToArray();
+        if (_nativeWindowMenuBuiltFrom is { } previous
+            && previous.Length == builtFrom.Length
+            && previous.SequenceEqual(builtFrom))
+            return;
+
+        _nativeWindowMenuBuiltFrom = builtFrom;
+
         target.Items.Clear();
-        foreach (var entry in _vm.EnumerateWindowEntries())
+        foreach (var entry in entries)
         {
             if (entry.SeparatorBefore)
                 target.Items.Add(new NativeMenuItemSeparator());

@@ -53,6 +53,15 @@ internal static class MacOsAppMenu
     private static extern nint SendStr(nint receiver, nint sel,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string arg);
 
+    [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
+    private static extern nint SendPtrIdx(nint receiver, nint sel, nint arg, long index);
+
+    [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_retain")]
+    private static extern nint Retain(nint obj);
+
+    [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_release")]
+    private static extern void Release(nint obj);
+
     /// <summary>
     /// Renames the application menu's Quit item to "Quit <paramref name="appName"/>". Safe to call
     /// at any time, from any of the three applications this assembly ships, and as often as wanted.
@@ -93,6 +102,157 @@ internal static class MacOsAppMenu
             }
         }
         catch { /* a menu title is never worth a crash */ }
+    }
+
+
+    /// <summary>
+    /// The application-only menu AppKit was last seen showing — Avalonia's own
+    /// <c>showAppMenuOnly</c> menu, captured rather than constructed, and retained because the
+    /// application drops its reference the moment a window menu goes back on.
+    /// <see cref="RedrawMenuBar"/> swaps through it. Never released: there is exactly one for the
+    /// life of the process.
+    /// </summary>
+    private static nint _appOnlyMenu;
+
+    /// <summary>
+    /// Makes macOS re-draw the menu bar it is already holding. Call after the menu bar has been
+    /// re-installed; on a one-item bar it records that menu and returns.
+    ///
+    /// <para><b>The bar can be right and still be drawn wrong.</b> Owner-reported on macOS 27
+    /// (2026-09-15) and captured with <c>CRF_MENU_DIAG</c>: closing the About dialog with the
+    /// window's own ✕ leaves only "circuitRF" on the bar until the user switches away and back,
+    /// while <c>NSApp.mainMenu</c> reads all nine items — File, Edit, Design, Simulate, Tools, View,
+    /// Window, Help — one 500 ms sample after the dialog closed and for the whole eight seconds the
+    /// user sat looking at a bar that did not have them. Closing the SAME dialog with its OK button,
+    /// in the same session a minute later, drew correctly. So nothing is missing from the menu;
+    /// AppKit did not repaint. Avalonia has the same shape open against file pickers since May 2025
+    /// (AvaloniaUI/Avalonia#18780) and 12.1's native menu code is unchanged here, so there is no
+    /// upstream fix to take.</para>
+    ///
+    /// <para><b>Two attempts, and the first one taught the rule.</b> Re-inserting the
+    /// application-menu item and setting the SAME menu back changed nothing on screen:
+    /// <c>setMainMenu:</c> is an ordinary property setter and returns without doing anything when
+    /// handed the menu it already holds, so a mutation of the menu's CONTENTS never reaches the
+    /// bar. What repaints is a different menu OBJECT — which is exactly what app-switching does,
+    /// because <c>showAppMenuOnly</c> and <c>showWindowMenuWithAppMenu</c> swap between two menus
+    /// (read from <c>libAvaloniaNative.dylib</c>'s disassembly). So this swaps through the real
+    /// application-only menu, the one AppKit was last showing, kept from the last time this was
+    /// called over a bare bar. A window menu is always preceded by a bare bar — the dialog that
+    /// caused the trouble put one there — so by the time it is wanted it has been seen. A menu of
+    /// our own stands in only if it somehow has not.</para>
+    ///
+    /// <para><b>Both sets happen in one run-loop pass</b>, before anything is drawn, so there is no
+    /// intermediate bar to see.</para>
+    ///
+    /// <para><b>It refuses to repaint a one-item bar</b>, and says so by returning false. That is
+    /// the CORRECT state whenever no window with a menu is key — a dialog is up, or the application
+    /// is in the background — and forcing it is how a display fault becomes a flicker on every
+    /// activation. The caller uses the answer to decide whether to try again later.</para>
+    ///
+    /// <para><b>Call this SYNCHRONOUSLY from the activation handler.</b> It was posted at Background
+    /// priority at first and the owner could see the result: the bar stayed bare for something like
+    /// half a second after the dialog closed, and again on some switches back into the application,
+    /// before the menus appeared. Nothing needs to happen before this runs —
+    /// <c>-[AvnWindow becomeKeyWindow]</c> installs the window's menu synchronously and
+    /// <c>windowDidBecomeKey:</c> then calls into managed code synchronously too (both read from the
+    /// disassembly), so by the time <c>Activated</c> is raised the menu AppKit failed to draw is
+    /// already on <c>NSApp</c>. Running here puts the repair in the same run-loop pass as the install
+    /// that needed it, which is before anything is drawn at all.</para>
+    ///
+    /// <para><b><c>CRF_MENU_FIX=2</c> picks the other candidate</b>: toggling
+    /// <c>+[NSMenu setMenuBarVisible:]</c> off and on, which asks AppKit to tear the bar down and
+    /// build it again rather than asking it to notice a new menu. It is second because it acts on
+    /// the whole bar, including the parts that are not ours, and the restore is in a
+    /// <c>finally</c> for that reason. Unset, the swap above is what runs.</para>
+    /// </summary>
+    internal static bool RedrawMenuBar()
+    {
+        if (!OperatingSystem.IsMacOS()) return true;
+
+        try
+        {
+            nint app = Send(GetClass("NSApplication"), Sel("sharedApplication"));
+            if (app == 0) return false;
+
+            nint mainMenu = Send(app, Sel("mainMenu"));
+            long n = mainMenu == 0 ? 0 : SendLong(mainMenu, Sel("numberOfItems"));
+            if (n < 2)
+            {
+                Diagnostics.MenuBarProbe.Note($"RedrawMenuBar: nothing to repaint yet, mainMenu[{n}]");
+                return false;
+            }
+
+            if (Environment.GetEnvironmentVariable("CRF_MENU_FIX") == "2") { ToggleMenuBar(); return true; }
+
+            // Held across the swap: the application's own reference goes the moment the other menu is
+            // installed, and this is the menu every window on screen is sharing.
+            nint held = Retain(mainMenu);
+            nint stand = 0;
+            try
+            {
+                nint other = _appOnlyMenu;
+                if (other == 0 || other == mainMenu)
+                    other = stand = Send(Send(GetClass("NSMenu"), Sel("alloc")), Sel("init"));
+                if (other == 0) return false;
+
+                SendPtr(app, Sel("setMainMenu:"), other);
+                SendPtr(app, Sel("setMainMenu:"), held);
+                Diagnostics.MenuBarProbe.Note(
+                    $"RedrawMenuBar: swapped via {(stand != 0 ? "a stand-in" : "the app-only menu")}, " +
+                    $"mainMenu[{SendLong(Send(app, Sel("mainMenu")), Sel("numberOfItems"))}]");
+                return true;
+            }
+            finally
+            {
+                if (stand != 0) Release(stand);
+                Release(held);
+            }
+        }
+        catch (Exception e) { Diagnostics.MenuBarProbe.Note("RedrawMenuBar: threw " + e.Message); }
+        return false;
+    }
+
+    /// <summary>
+    /// Records the application-only menu while it is on the bar, for <see cref="RedrawMenuBar"/> to
+    /// swap through later. Call when a window has just STOPPED being active — that is when the bare
+    /// bar is up and the menu can be had.
+    ///
+    /// <para><b>The capture has to happen here because the repair cannot make its own.</b> By the
+    /// time the bar needs repainting a window menu is on it, and the application-only menu is
+    /// Avalonia's, built in native code and reachable through no managed API. The one moment it is
+    /// observable is while it is installed — which is precisely the moment the dialog that causes
+    /// the trouble creates, so it is always seen before it is wanted.</para>
+    /// </summary>
+    internal static void RememberBareMenuBar()
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+
+        try
+        {
+            nint app = Send(GetClass("NSApplication"), Sel("sharedApplication"));
+            if (app == 0) return;
+
+            nint mainMenu = Send(app, Sel("mainMenu"));
+            if (mainMenu == 0 || SendLong(mainMenu, Sel("numberOfItems")) > 1) return;   // not the bare bar
+            if (mainMenu == _appOnlyMenu) return;                                        // already have it
+
+            _appOnlyMenu = Retain(mainMenu);
+            Diagnostics.MenuBarProbe.Note("RememberBareMenuBar: captured the application-only menu");
+        }
+        catch { /* the repair falls back to a stand-in menu */ }
+    }
+
+    /// <summary>
+    /// Hides the menu bar and shows it again, which makes AppKit build it afresh. The restore is in a
+    /// <c>finally</c> because this one is not confined to circuitRF's own menus: leaving it hidden
+    /// would take the bar away from everything until the user switched applications.
+    /// </summary>
+    private static void ToggleMenuBar()
+    {
+        nint nsMenu = GetClass("NSMenu");
+        try { SendPtr(nsMenu, Sel("setMenuBarVisible:"), 0); }
+        finally { SendPtr(nsMenu, Sel("setMenuBarVisible:"), 1); }
+        Diagnostics.MenuBarProbe.Note("RedrawMenuBar: menu bar hidden and shown again (CRF_MENU_FIX=2)");
     }
 
     private static nint NsFromString(string s) =>
