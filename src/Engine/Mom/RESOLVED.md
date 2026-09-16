@@ -3,6 +3,165 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## MIM-12a — the thin region's own reflections are a closed form, and the fit was extrapolating them (2026-09-16)
+
+`brief-em-mim-12a-transmitted-image-peel.md`. **MIM-12 step 0's finding 6 is built.** The kernel is
+repaired; the electrostatic plate capacitance is now one number across the band and across two meshes;
+the de-embedded full-wave ladder is NOT re-run and the refusal that rests on it has not moved.
+
+### The verdict, in one paragraph
+
+A thin region is a Fabry-Perot cavity. Its multiple reflections are a geometric series of images at
+depths that are multiples of the film thickness, and **the DCIM sampling path never reached them** —
+the series decays like `e^{−k_ρ d}` with d = 0.2 µm, i.e. it is structure out to k_ρ ≈ 5e6 m⁻¹, while
+the widest path this repository walks (`CalibratedPathProduct` = 20 on a 106 µm stack) stops at
+1.9e5. The fit therefore extrapolated the film's entire contribution, and a plate capacitance is a
+`d/cell` difference of two such fits. `LayeredSpectralGreens.ThinRegionImagesAtHeights` derives the
+series from the same generalised-reflection cascade `AsymptoticAtHeights` already takes,
+`Dcim.FitAtHeights` peels it out of its samples before Prony runs, and `ShallowImageCore` integrates
+it back over a cell pair in closed form — **MIM-8's own machinery, with exact images in it instead of
+fitted ones.** The cross-level kernel goes from 2.7e-2 wrong at 1 GHz to **1.4e-6**, and MIM-8's
+electrostatic instrument from **−0.54 / 1.34 / 1.60 / 1.00** at 1 / 2 / 3 / 10 GHz to **1.006 at all
+four, on two meshes.** Every table is in `HISTORY.md` §MIM-12a.
+
+### Findings
+
+**1. The brief's premise is right about the crossing and wrong about the face, and the face is half
+the error.** The brief's case is "one side of the difference has its leading term exact and the other
+has none of it" — the same-level pairing's `2/(ε₁+ε₂)` being what `AsymptoticAtHeights` already
+returns there. The LEADING term is exact; **the cavity's round trips are not.** A source on the floor
+of the film sees `R_top e^{−2k_ρ d}` come back, which is the same unresolved structure one interface
+over. Measured with the crossing alone peeled, the shipped capacitor's ladder read **0.843 at 1 GHz**
+— still 16 % short — and the residual was the same-level block at 2e-3 … 2e-2 over the whole cell
+range. **Both cases are built**, they share one derivation and one cavity, and `T3` is the
+measurement that demanded the second.
+
+**2. The vector half does not have this defect, and the reason is structural rather than a
+tolerance.** The brief leaves `G_A` "unmeasured here, not excluded". Measured: on a non-magnetic stack
+`R^h = 0` at every interface, so the TE cavity's round-trip factor `q` is **zero** — the series is ONE
+exponential across the film and nothing at all on a face, and one exponential is exactly what a Prony
+fit represents. The fitted `G_A^xx` is **4.7e-6** wrong at 1 GHz on the same pairing where `G_q` is
+**3.7e-1**. **The defect is the geometric SERIES, not the crossing**, and MIM-8's decision not to build
+the vector block's closed-form cell-pair integral stands. `T5`.
+
+**3. The brief's own A_eff gate contradicts its own remainder measurement and cannot be met.** It asks
+that the assembled series reproduce `A_eff` → 0.164856 to 1e-4, one paragraph after measuring the
+peeled remainder at 1.1e-3 **of the kernel**. `A_eff` is the kernel times `4πR`, so the series alone
+must miss it by exactly that: measured 0.165043 against 0.164856, **1.14e-3**. Reaching 1e-4 would
+mean the remainder was not there, and the remainder being there is what the fit is still for. `T2b`
+pins it at the achievable figure with that reasoning attached.
+
+**4. The conditioning got WORSE while the answer got right, which is the sharpest available refutation
+of MIM-12's own diagnosis.** MIM-12 could only say there was nothing for iterative refinement to
+recover, because the answer was already wrong before the solve. The same 32-cell electrostatic system,
+at the same order of conditioning, now produces the right answer — and the treated matrix is about
+**10× worse conditioned** than the untreated one, because its cross-level entries now carry the
+near-cancelling structure that IS the capacitor. The full-wave numbers moved the same way:
+`cond(Z)` 1.443e9 → 1.96e9 and `min/max eig(Re Z)` 1.407e-11 → 9.8e-12. **An answer that improves by
+two orders while its matrix gets harder is not a dynamic-range failure.** `T3` in
+`Mim12KernelFitTests`.
+
+**5. `DirectScalarKernel` now works, which is the brief's own completeness test.** The brief says so
+in as many words: *"This phase should make that path work too, and if it does not, that is evidence the
+peel is incomplete."* It read 0.75 at 1, 2 and 3 GHz and was 24 % low, because the images it subtracted
+were the FIT's and the remainder it tabulated still ran 2.3e4 → 87 over the mesh's own ρ range. Those
+images are now the derived series, and the two routes — one fitted, one integrated directly — agree to
+**under 2 %** (1.006 against 1.015). `T5b` asserts the agreement rather than each number, because it is
+the agreement that says the peel is complete.
+
+**6. Everything outside the derivation is declined by name, and one of the declines is a real case.**
+Scope is ONE thin region, with the pairing either across it or on one of its faces. Declined: a pairing
+more than one region apart, a point in the INTERIOR of a region, a semi-infinite region (which is every
+ordinary single-level run, and therefore the case that must cost nothing), the two VERTICAL components,
+and **a face with a thin region on BOTH sides** — two coupled cavities, whose series is not the product
+of theirs. The last one is reachable on a real stack: the shipped MIM technology's upper plate sits at
+the bottom of a 2.8 µm region with the 0.2 µm film below it, so on a coarse enough mesh both are "thin"
+and that pairing is declined. Its measured cost is confined to ρ ≲ 1 µm and it does not move the
+ladder. `T4`.
+
+### What was built
+
+**`LayeredSpectralGreens.ThinRegionImagesAtHeights` + `ThinRegionImageSeries`** — the derivation, from
+the cascade rather than transcribed. The standard four-term form of the equivalent line's voltage for a
+source in region c collapses, at the cavity's two faces, to `(Z_c/2)(1+R_dn)(1+R_up)e^{−jk_z d}/(1 − g
+e^{−2jk_z d})` with `g = R_dn R_up`; at k_ρ → ∞ every generalised reflection becomes the local Fresnel
+coefficient, for exactly the reason the same-region branch gives, and the denominator expands to the
+series. `LocalFresnel` is factored out of `AsymptoticAtHeights` so the two cannot drift; that refactor
+is bit-identical (the wall branch's `m == 1 && IsWall(0)` is `IsWall(m−1)` by construction).
+
+**`Dcim.FitAtHeights(…, transmitted)`** — the peel goes into the NUMERATOR, in the same units as the
+two asymptotes, and into the far-field sum rule with them. **The fit is what had to change**, and that
+is a finding rather than a design choice: subtracting an exact series from an inaccurate fit leaves the
+fit's error standing on a remainder a thousandth its size, which is worse than useless.
+`DcimModel.TransmittedImages` carries what was peeled, and `EvaluateAtHeights` adds it back — so the
+model is always the WHOLE kernel and what the peel changes is which part of it is exact.
+
+**`PlanarKernelTerms.FromDcimAtHeightsMinusShallowImages`** removes them unconditionally. A fitted
+image might or might not be resolved by the mesh and `shallowDepthM` is that question; a peeled cavity
+series is not a candidate for it.
+
+**`PlanarKernelSet.Model(kernel, zA, zB, thinnerThanM)` and `GetWhole`.** The peeled fit is cached
+under the threshold; with no peel both hand back the existing shared objects, which is what keeps every
+other run bit-identical. `GetWhole` exists because the far view used to be `Get` — the same object, and
+therefore free — and with a peel it is not: taking it from `Get` would pay for a second
+`Dcim.FitAtHeights` AND quietly hand the far cell pairs the less accurate of two representations of one
+kernel. A peeled pairing still costs **one** fit (`T6`).
+
+### Bit-identity, and it is wider than the brief scoped it
+
+The brief scopes the trigger to "a pairing that crosses a region AND whose crossed thickness the mesh
+does not resolve", and finding 1 widened it to a face of such a region. The trigger is still MIM-8's
+own — the cell against the separation, `PlanarFillSettings.ShallowImageCells`, one number for one
+question — so **`ShallowImageCells = 0` is still exactly the pre-MIM-8 arithmetic** and MIM-8's
+airbridge rows at cell/separation 1 are still bit-for-bit identical. What DID move, and is re-taken
+rather than argued away, is `MimThinLayerTests.T1`'s cell/separation-20 digest: that row is the thin
+cross-level block and changing it is the phase. **The whole of `Engine.Tests` was otherwise unchanged**
+— every L8/L9 gate, the via physics, AIM, the loadpull tiers — and the only other failures were
+MIM-12's own T1/T2/T3/T5b literals, which this phase is expected to replace and which are re-pointed
+with the old numbers kept beside the new.
+
+### What was NOT done — M4, the de-embedded ladder, and the floor does not move
+
+**`PlanarLevels.FullWaveCellOverSeparation` is still 40 and the refusal still fires.** The brief's M4
+asks for MIM-12's own de-embedded two-port ladder to be re-run and the constant re-pointed. It has not
+been, and the reason is a measurement rather than a shortage of time:
+
+- **MIM-12's harness is not in the tree.** Its ladder was a scratch measurement; `HISTORY.md` §MIM-12
+  records the numbers and not the fixture.
+- **A fresh equivalent fixture cannot grade anything yet.** Two overlapping 80 × 80 µm plates with edge
+  ports on the two levels, de-embedded: its series capacitance read from `−1/Y₂₁` is **6-10× below the
+  electrostatic mutual capacitance of the same mesh** — and it is that low at **d = 20 µm,
+  cell/separation 2**, where no film is involved and which this floor already admits. It also HALVES
+  with every mesh refinement (0.0068 → 0.0045 → 0.0027 → 0.0014 pF over four meshes while the
+  electrostatic value holds at 0.026-0.028 pF), and a plain single-level through line on the same
+  port setup comes back 8 % non-passive. So the reading is governed by the port/de-embed fixture, not
+  by the film, and building one that is not is fixture design rather than this brief's work.
+- **This is on the record elsewhere already.** §MIM-3 finding 4 measured that a raw S reading in this
+  engine is the PORT and not the structure (a matched 50 Ω line reads |S21| = 0.0706), and its own
+  de-embedded instrument had to truncate the stack to get a port at all. MIM-8's gate is electrostatic
+  for the same reason, in its own comment.
+
+**So the floor stays where the last measurement put it, and it is now CONSERVATIVE rather than
+current**: the kernel defect its rungs measured is gone, and how far a de-embedded two-port reaches on
+the repaired kernel is unmeasured rather than known. MIM-9's instruction — leave the refusal standing,
+a fix that removes it instead of moving it is how the next regime becomes silent — is followed. Every
+run-visible sentence that quoted the old ladder now says that it predates the repair and has not been
+re-run, and every one that quoted the electrostatic 1 % "AT 10 GHz only" now quotes 1.006 across the
+band. The shipped spiral-plus-capacitor `.cem` was likewise not run.
+
+### Gates
+
+`Mim12aThinRegionPeelTests` — T1 (the derived coefficients against the quasi-static hand formula to
+1e-6), T2 (the peeled remainder flat to 1 % over ρ ∈ [1 nm, 15 µm] at 1 and 10 GHz, against direct
+Sommerfeld), T2b (the brief's own A_eff gate, at the figure that is achievable and why), T3 (the
+same-level cavity, and the measurement that made it necessary), T4 (six declines, each naming itself),
+T5 (the vector block has no series), T6 (the whole-kernel view is the same kernel and the same fit),
+T7 (the accelerated path's removed list is the derived series). 9 tests, ~1 s.
+`Mim12KernelFitTests` T1/T2/T3/T5b re-pointed; `MimThinLayerTests` T1's thin row re-taken and T9
+strengthened to assert the new regime. Direct Sommerfeld integration is the acceptance instrument
+throughout — `DcimModel.FitResidual` is blind to all of this and reports its own remainder as eight
+decades smaller than it is.
+
 ## MIM-12 step 0 — the capacitor's digits are lost in the KERNEL FIT, not in the solve (2026-09-16)
 
 `brief-em-mim-12-full-wave-thin-film-readback.md` §"The correction", step 0: *"The measurements above
@@ -45,8 +204,8 @@ broken before the factorisation.
 only at 10 GHz, and this is the part worth carrying forward.** MIM-8's ladder is sound; its fixture
 simply fits the kernel at the problem's own `MaxFrequencyHz` and never calls
 `Dcim.ForStackAtFrequency`, which is what `PlanarFrequencyKernel.Fit` — i.e. every run — calls. On the
-same 60 µm capacitor with the same instrument, `C/(ε₀εᵣA/d)` reads 0.9995 at 10 GHz and
-**1.60 / 1.34 / −0.54 at 3 / 2 / 1 GHz**. The general shape of it: **a gate that constructs its own
+same 60 µm capacitor with the same instrument, `C/(ε₀εᵣA/d)` read 0.9995 at 10 GHz and
+**1.60 / 1.34 / −0.54 at 3 / 2 / 1 GHz**. (Since §MIM-12a: 1.006 at all four.) The general shape of it: **a gate that constructs its own
 kernel is a gate that can stop measuring what the application does**, and here the divergence is a
 whole sign. `ValidatedCellOverSeparation`'s documentation now carries that condition, and so do the
 three run-visible arms of `LevelSeparationNotes` that quoted its 1 % at a reader in the MMIC band.

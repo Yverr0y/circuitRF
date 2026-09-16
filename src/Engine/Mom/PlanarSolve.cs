@@ -4471,7 +4471,8 @@ public static class PlanarSolve
         // Asked first because it is a property of the STRUCTURE and dominates whatever else is true
         // of the sweep. PlanarSolve.Run cannot reach this arm today — LevelSeparationVerdict refuses
         // such a run before a matrix is filled — and it is here rather than deleted because
-        // FullWaveCellOverSeparation is a measurement's name and MIM-12 will raise it. When it does,
+        // FullWaveCellOverSeparation is a measurement's name. MIM-12a repaired the kernel defect its
+        // rungs measured and did NOT re-run the ladder, so it still names MIM-12's number. When it moves,
         // the band between the old floor and the new one becomes runnable and this is the sentence
         // those runs need. It is reached today through this function's own gate, and through any
         // caller that measures a sweep it did not solve.
@@ -4971,10 +4972,13 @@ public static class PlanarSolve
             $"and the largest cell straddling them is {fmt(pair.CellM)}, i.e. cell/separation = " +
             $"{pair.CellOverSeparation:G3}, past this solve's measured full-wave floor of " +
             $"{PlanarLevels.FullWaveCellOverSeparation}. Below that floor the de-embedded two-port " +
-            $"of a pair this close is measured correct; by 80 the series element it publishes has " +
-            $"the wrong SIGN — a capacitor reads as an inductor — and at 200 it is noise. MIM-12's " +
+            $"of a pair this close is measured correct; by 80 the series element it publishes had " +
+            $"the wrong SIGN — a capacitor reads as an inductor — and at 200 it was noise. MIM-12's " +
             $"ladder, one plate pair with only the film thickness moving: C/(ε₀εᵣA/d) = 1.13 at " +
-            $"cell/separation 20 and 1.05 at 40, then −1.02 at 80 and −1.52 at 200. Approximating " +
+            $"cell/separation 20 and 1.05 at 40, then −1.02 at 80 and −1.52 at 200. That ladder was " +
+            $"taken BEFORE the kernel defect behind it was repaired (MIM-12a, 2026-09-16) and has " +
+            $"not been re-run, so this floor is where the last measurement put it rather than where " +
+            $"the engine now reaches — it is conservative, not current. Approximating " +
             $"it would give a plausible wrong capacitance rather than an obvious failure, which is " +
             $"why it is refused. What acts on this: thicken the film between these two levels in " +
             $"the technology, or take the upper level out of the EM run and model the part it " +
@@ -5071,9 +5075,10 @@ public static class PlanarSolve
                 $"13% of ε₀εᵣA/d at cell/separation 20 and 40, and passive) and well inside the " +
                 $"{PlanarLevels.ValidatedCellOverSeparation} MIM-8 measured the cross-level fill " +
                 $"over (≤ 1.7e-4 against forced-high quadrature; the extracted ELECTROSTATIC plate " +
-                $"capacitance within 1% of ε₀εᵣA/d AT 10 GHz — MIM-12 measured the same instrument " +
-                $"at 1.60 / 1.34 / −0.54 at 3 / 2 / 1 GHz, so that 1% is not a claim about the " +
-                $"bottom of a MMIC band).");
+                $"capacitance within 1% of ε₀εᵣA/d, and since MIM-12a at EVERY frequency in the " +
+                $"band — 1.006 at 1, 2, 3 and 10 GHz on two meshes, where MIM-12 measured the same " +
+                $"instrument at −0.54 / 1.34 / 1.60 at 1 / 2 / 3 GHz before the film's own image " +
+                $"series was taken out of the kernel fit).");
             return notes;
         }
 
@@ -5083,12 +5088,14 @@ public static class PlanarSolve
                 $"CELL/SEPARATION = {worstRatio:G3} at {where}. The cross-level FILL is measured " +
                 $"over this range (≤ 1.7e-4 against forced-high quadrature, out to " +
                 $"{PlanarLevels.ValidatedCellOverSeparation}) and so is the ELECTROSTATIC plate " +
-                $"capacitance (within 1% of ε₀εᵣA/d — but AT 10 GHz only; MIM-12 measured the same " +
-                $"instrument at 1.60 / 1.34 / −0.54 at 3 / 2 / 1 GHz). NEITHER OF THOSE IS A DE-EMBEDDED " +
+                $"capacitance (within 1% of ε₀εᵣA/d, and since MIM-12a at every frequency in the " +
+                $"band — 1.006 at 1, 2, 3 and 10 GHz, where MIM-12 measured 1.60 / 1.34 / −0.54 at " +
+                $"3 / 2 / 1 GHz). NEITHER OF THOSE IS A DE-EMBEDDED " +
                 $"S-PARAMETER. The full-wave two-port for a pair this close is measured accurate " +
                 $"only to cell/separation {PlanarLevels.FullWaveCellOverSeparation}; past that the " +
-                $"published series element loses its magnitude and then its sign (MIM-12's ladder: " +
-                $"C/(ε₀εᵣA/d) = 1.05 at 40, −1.02 at 80, −1.52 at 200). That is why a full-wave " +
+                $"published series element lost its magnitude and then its sign (MIM-12's ladder: " +
+                $"C/(ε₀εᵣA/d) = 1.05 at 40, −1.02 at 80, −1.52 at 200 — taken before MIM-12a " +
+                $"repaired the kernel and not re-run since). That is why a full-wave " +
                 $"solve on this structure is refused rather than published — see the refusal for " +
                 $"the remedies that act."));
             return notes;
@@ -5118,11 +5125,13 @@ public static class PlanarSolve
             $"cross-level matrix block at 2.4e-11 / 7.9e-8 / 2.1e-6 / 1.7e-4 against forced-high " +
             $"quadrature for cell/separation of 5 / 20 / 50 / 200, and the ELECTROSTATIC " +
             $"capacitance extracted from a plate pair — no port in it — within 1% of ε₀εᵣA/d over " +
-            $"the whole of it AT 10 GHz: 1.003 at cell/separation " +
+            $"the whole of it: 1.003 at cell/separation " +
             $"75 and 0.996 at 300, where before it read −0.046 and −0.003. MIM-12 measured that " +
-            $"same instrument down the band and it does NOT hold there — 1.60 / 1.34 / −0.54 at " +
-            $"3 / 2 / 1 GHz on the same capacitor, because the kernel FIT carries 2.7e-2 at 1 GHz " +
-            $"against 8.3e-5 at 10 and a plate capacitance divides that by d/cell. Past " +
+            $"same instrument down the band and it did NOT hold there — 1.60 / 1.34 / −0.54 at " +
+            $"3 / 2 / 1 GHz on the same capacitor, because the kernel FIT carried 2.7e-2 at 1 GHz " +
+            $"against 8.3e-5 at 10 and a plate capacitance divides that by d/cell; MIM-12a peels " +
+            $"the film's own image series out of that fit and it now reads 1.006 across the band. " +
+            $"Past " +
             $"{PlanarLevels.ValidatedCellOverSeparation} the FILL was not measured, and that half " +
             $"is unmeasured rather than known wrong. The FULL-WAVE answer is the other half and it " +
             $"is measured: past {PlanarLevels.FullWaveCellOverSeparation} the series element " +

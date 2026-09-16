@@ -152,13 +152,17 @@ public sealed record PlanarLevels(IReadOnlyList<double> Z, double GroundZ = 0.0)
     /// 1.086 / 4.470 / −0.261 / −0.046 before and <b>1.003 at every one of them</b> after. The
     /// answer stopped depending on the mesh, which is what the constant is about.</para>
     ///
-    /// <para><b>BOTH LADDERS WERE MEASURED AT 10 GHz, and MIM-12 found that this is a condition
-    /// rather than a detail.</b> The fixtures here fit their kernel at the problem's own
-    /// <c>MaxFrequencyHz</c> of 10 GHz and never apply <see cref="Dcim.ForStackAtFrequency"/>, which
-    /// is what a RUN applies. On the very same 60 µm capacitor the same 1 V / 0 V instrument reads
-    /// <c>C/(ε₀εᵣA/d)</c> = 0.9995 at 10 GHz and <b>1.60 / 1.34 / −0.54 at 3 / 2 / 1 GHz</b> — the
-    /// shipped MMIC band. Nothing below is wrong; every figure in it is a statement about 10 GHz,
-    /// and the 1% is not carried down the band. <c>Mim12KernelFitTests.T2</c> holds that.</para>
+    /// <para><b>BOTH LADDERS WERE MEASURED AT 10 GHz. MIM-12 found that this was a condition rather
+    /// than a detail; MIM-12a made it a detail again.</b> The fixtures here fit their kernel at the
+    /// problem's own <c>MaxFrequencyHz</c> of 10 GHz and never apply
+    /// <see cref="Dcim.ForStackAtFrequency"/>, which is what a RUN applies. On the very same 60 µm
+    /// capacitor the same 1 V / 0 V instrument read <c>C/(ε₀εᵣA/d)</c> = 0.9995 at 10 GHz and
+    /// <b>1.60 / 1.34 / −0.54 at 3 / 2 / 1 GHz</b> — the shipped MMIC band, with the sign inverted at
+    /// the bottom of it. <b>Since MIM-12a it reads 1.006 at 1, 2, 3 and 10 GHz alike, on two
+    /// meshes</b>, because the thin region's own image series is peeled out of the kernel fit and
+    /// carried in closed form instead of being extrapolated. The 1 % IS now carried down the band.
+    /// <c>Mim12KernelFitTests.T2</c> holds that, and its old literals are on the record beside the
+    /// new ones.</para>
     ///
     /// <para><b>200 is where both ladders are measured and both hold</b>, MIM-3's own rule for
     /// drawing it. Past that they part company and the evidence gets confounded: ladder 2's 600 and
@@ -193,10 +197,12 @@ public sealed record PlanarLevels(IReadOnlyList<double> Z, double GroundZ = 0.0)
     /// someone reading the second is the defect MIM-9 exists to fix: a run whose published capacitor
     /// had the wrong SIGN was being told its capacitance was within 1 %.</para>
     ///
-    /// <para><b>The ladder, measured 2026-09-16</b> (MIM-12). One 60 × 60 µm plate pair, one set of
-    /// feeds, one set of ports, the straddling cell pinned at 40 µm on every rung, and only the film
-    /// thickness moving — so cell/separation is the only axis. <c>C</c> is the series arm read back
-    /// from the de-embedded two-port as <c>−1/Y₂₁</c>, against ε₀εᵣA/d:</para>
+    /// <para><b>The ladder, measured 2026-09-16</b> (MIM-12), <b>on the kernel as it was BEFORE
+    /// MIM-12a repaired it, and not re-run since</b> — see the MIM-12a paragraph below. One
+    /// 60 × 60 µm plate pair, one set of feeds, one set of ports, the straddling cell pinned at
+    /// 40 µm on every rung, and only the film thickness moving — so cell/separation is the only
+    /// axis. <c>C</c> is the series arm read back from the de-embedded two-port as <c>−1/Y₂₁</c>,
+    /// against ε₀εᵣA/d:</para>
     ///
     /// <list type="table">
     ///   <item><term>cell/sep 20 (d = 2 µm)</term><description>σ_max 0.998, C = 1.12 / 1.13 / 1.15 at 1 / 2 / 3 GHz — correct, the excess is plate fringing</description></item>
@@ -214,25 +220,33 @@ public sealed record PlanarLevels(IReadOnlyList<double> Z, double GroundZ = 0.0)
     /// own argument, in its own words: approximating it would give a plausible wrong inductance
     /// rather than an obvious failure, which is why it is refused.</para>
     ///
-    /// <para><b>MIM-12 WILL MOVE THIS NUMBER, and moving it is the expected outcome rather than a
-    /// rework.</b> Re-point this one constant at whatever that brief reaches and leave the refusal
-    /// standing; a fix that REMOVES the refusal instead of moving it is how the next regime becomes
-    /// silent.</para>
-    ///
-    /// <para><b>THE CAUSE IS THE KERNEL FIT, NOT THE CONDITIONING — measured 2026-09-16, and the
+    /// <para><b>THE CAUSE WAS THE KERNEL FIT, NOT THE CONDITIONING — measured 2026-09-16, and the
     /// sentence that stood here said otherwise.</b> It read "the cause is a dynamic-range failure",
     /// from cond(Z) = 1.4e9 and a loss term 11 decades below the matrix on the 60 µm pair at
-    /// 0.5 GHz. Both numbers are real and reproduce exactly, and neither is the cause: the
-    /// ELECTROSTATIC instrument — <c>ScalarPotentialMatrix</c> over 32 cells, conditioned at 575 —
-    /// is ALREADY sign-inverted at 1 GHz. A factorisation that loses nine digits cannot be what
-    /// breaks an answer that is broken before the factorisation.</para>
+    /// 0.5 GHz. Both numbers are real and reproduce to their order, and neither is the cause: the
+    /// ELECTROSTATIC instrument — <c>ScalarPotentialMatrix</c> over 32 cells, conditioned in the
+    /// HUNDREDS — was ALREADY sign-inverted at 1 GHz. A factorisation that loses nine digits cannot
+    /// be what breaks an answer that is broken before the factorisation.</para>
     ///
-    /// <para>What breaks it is that a plate pair's capacitance is a <c>d/cell</c> difference of two
-    /// INDEPENDENT DCIM fits, so it inherits <c>cell/d</c> times whatever relative error they carry.
-    /// The exact kernel does not move with frequency at all here (5.656193e3 at 1 GHz against
-    /// 5.655920e3 at 10 GHz, direct Sommerfeld), while the FIT carries 8.3e-5 at 10 GHz and 2.7e-2
-    /// at 1 GHz — and 2.7e-2 × 75 is 200%, which is the sign inversion. See
-    /// <c>Mim12KernelFitTests</c> and <c>RESOLVED.md</c> §MIM-12.</para>
+    /// <para>What broke it is that a plate pair's capacitance is a <c>d/cell</c> difference of two
+    /// INDEPENDENT DCIM fits, so it inherited <c>cell/d</c> times whatever relative error they
+    /// carried. The exact kernel does not move with frequency at all here (5.656193e3 at 1 GHz
+    /// against 5.655920e3 at 10 GHz, direct Sommerfeld), while the FIT carried 8.3e-5 at 10 GHz and
+    /// 2.7e-2 at 1 GHz — and 2.7e-2 × 75 is 200%, which is the sign inversion.</para>
+    ///
+    /// <para><b>MIM-12a FIXED THAT KERNEL AND THIS NUMBER DID NOT MOVE, which is a deliberate state
+    /// and not an oversight.</b> The thin region's own image series is now peeled out of the fit's
+    /// samples and carried in closed form, so the cross-level kernel reads 1.4e-6 at 1 GHz instead
+    /// of 2.7e-2 and the electrostatic ladder reads 1.006 at every frequency in the band. <b>The
+    /// DE-EMBEDDED ladder below was NOT re-run</b> — MIM-12 measured it with a harness that is not
+    /// in the tree, and a fresh two-port fixture built to replace it reads its series capacitance
+    /// 6-10× below the electrostatic mutual capacitance of the SAME mesh at cell/separation 1-4,
+    /// i.e. in a regime this floor already admits and where no thin film is involved at all. Until
+    /// that is settled the ladder cannot grade anything, so the floor stays where MIM-12 put it and
+    /// is now CONSERVATIVE: the kernel defect its rungs measured is gone, and how far the two-port
+    /// reaches on the repaired kernel is unmeasured rather than known. Leaving the refusal standing
+    /// is MIM-9's own instruction — a fix that REMOVES it instead of moving it is how the next
+    /// regime becomes silent. See <c>RESOLVED.md</c> §MIM-12 and §MIM-12a.</para>
     /// </summary>
     public const double FullWaveCellOverSeparation = 40.0;
 
@@ -353,6 +367,10 @@ public sealed class PlanarKernelSet
         /// rest wait for it. Building outside the shared lock (which is right — a table is seconds
         /// and must not block every other fit) otherwise lets N threads each build the SAME table.</summary>
         public readonly Dictionary<((GreensKernel, double, double), double, int), object> DirectGates = new();
+        /// <summary>MIM-12a — the same pairing FITTED WITH the transmitted chain peeled out, keyed by
+        /// the threshold that decided the peel. A separate dictionary rather than a wider key on
+        /// <see cref="Models"/>, so an unpeeled lookup cannot accidentally find a peeled fit.</summary>
+        public readonly Dictionary<(GreensKernel, double, double, double), DcimModel> Peeled = new();
         public readonly object Gate = new();
         public int Count;
     }
@@ -365,6 +383,11 @@ public sealed class PlanarKernelSet
     private readonly Dictionary<(GreensKernel, double, double), PlanarKernelTerms> _terms = new();
     private readonly Dictionary<(GreensKernel, double, double), PlanarKernelTerms> _reduced = new();
     private readonly Dictionary<(GreensKernel, double, double, double), ShallowImageSplit> _shallow = new();
+    /// <summary>MIM-12a — the SAME pairing with nothing subtracted, taken from whichever model
+    /// <see cref="GetMinusShallowImages"/> used. Keyed by the threshold for the same reason that one
+    /// is: the threshold decides whether the fit was peeled, and a peeled fit is a different (and
+    /// more accurate) representation of the same kernel.</summary>
+    private readonly Dictionary<(GreensKernel, double, double, double), PlanarKernelTerms> _whole = new();
     /// <summary>MIM-12 — the same split with the fit replaced by direct Sommerfeld integration.
     /// Keyed by the table's extent and sample count as well, because those are what it IS.</summary>
     private readonly Dictionary<(GreensKernel, double, double, double, double, int), ShallowImageSplit>
@@ -462,7 +485,7 @@ public sealed class PlanarKernelSet
             if (_shallow.TryGetValue(key, out var hit)) return hit;
 
         var split = PlanarKernelTerms.FromDcimAtHeightsMinusShallowImages(
-            Model(kernel, zA, zB), shallowDepthM, _order, _rhoFloor);
+            Model(kernel, zA, zB, shallowDepthM), shallowDepthM, _order, _rhoFloor);
 
         // Nothing shallow ⇒ hand back the SHARED ordinary terms rather than an equal copy, so a run
         // with no thin film in it reaches the fill with the very object it reached it with before.
@@ -487,11 +510,18 @@ public sealed class PlanarKernelSet
     /// plate pair's capacitance is what is left after the same-level and cross-level potential
     /// coefficients nearly cancel — on the shipped 0.2 µm film under a 15 µm cell the difference is
     /// about 2% of either. The two pairings are two INDEPENDENT Prony fits whose own relative
-    /// accuracy is 1e-5 to 1e-2 and whose errors are uncorrelated, so the capacitance inherits
-    /// 200× whatever they carry. Measured (60 × 60 µm plate pair, d = 0.2 µm, four meshes), the
-    /// extracted <c>C/(ε₀εᵣA/d)</c> moves from 1.00 to −0.55 between two path extents that differ
-    /// only in which one the low-frequency widening happens to pick. The fitted kernel is the whole
-    /// error; nothing downstream of it can put the digits back.</para>
+    /// accuracy was 1e-5 to 1e-2 and whose errors are uncorrelated, so the capacitance inherited
+    /// 200× whatever they carried. Measured (60 × 60 µm plate pair, d = 0.2 µm, four meshes), the
+    /// extracted <c>C/(ε₀εᵣA/d)</c> moved from 1.00 to −0.55 between two path extents that differ
+    /// only in which one the low-frequency widening happens to pick.</para>
+    ///
+    /// <para><b>MIM-12a repaired the fit itself, and this path became a CROSS-CHECK on it rather
+    /// than a remedy.</b> The fitted route now reads 1.006 where this one reads 1.015 — within 2 %,
+    /// on a kernel the two reach by entirely different means. It matters that this arm improved as
+    /// well: the images it subtracts come from the same split, so before MIM-12a they were the fit's
+    /// own and the remainder it tabulated still carried the film's whole structure (2.3e4 → 87 over
+    /// ρ = 0.02 … 0.93 µm, which no linear table at the mesh's spacing can hold). They are now the
+    /// derived series, the remainder is small and smooth, and the 24 % shortfall is gone.</para>
     /// </summary>
     /// <param name="shallowDepthM">MIM-8's threshold, the mesh's own cell against the pairing.</param>
     /// <param name="rhoMaxM">The mesh's radial extent — the table must reach the widest pair.</param>
@@ -661,6 +691,66 @@ public sealed class PlanarKernelSet
             }
             return model;
         }
+    }
+
+    /// <summary>
+    /// <b>MIM-12a — the same model, with the cross-region transmitted chain peeled out of the
+    /// samples before the fit ran</b>, for a pairing that crosses a region the mesh cannot resolve.
+    ///
+    /// <para><b>Identical to <see cref="Model(GreensKernel, double, double)"/> — the very same
+    /// object — whenever no series applies</b>, which is every same-region pairing, every cross-region
+    /// pairing across a thickness the mesh DOES resolve, and every component but the two horizontal
+    /// ones. That identity is what keeps an ordinary run bit-for-bit unchanged, and it is why the
+    /// threshold is a parameter rather than a stack property: the trigger is MIM-8's own cell-against-
+    /// separation test, not "a film is present".</para>
+    /// </summary>
+    public DcimModel Model(GreensKernel kernel, double zA, double zB, double thinnerThanM)
+    {
+        var k = Key(kernel, zA, zB);
+        var series = _greens.ThinRegionImagesAtHeights(kernel, k.Hi, k.Lo, thinnerThanM);
+        if (series.Images.Count == 0) return Model(kernel, zA, zB);
+
+        var key = (k.Kernel, k.Lo, k.Hi, thinnerThanM);
+        lock (_fits.Gate)
+        {
+            if (!_fits.Peeled.TryGetValue(key, out var model))
+            {
+                model = Dcim.FitAtHeights(_greens, kernel, k.Hi, k.Lo, _dcim, series.Images);
+                _fits.Peeled[key] = model;
+                _fits.Count++;
+            }
+            return model;
+        }
+    }
+
+    /// <summary>
+    /// <b>MIM-12a — the WHOLE kernel of a pairing, from whichever fit
+    /// <see cref="GetMinusShallowImages"/> used at the same threshold.</b> This is the view a cell
+    /// pair whose own ρ range never reaches the peak takes, and the one an AIM grid table must be
+    /// sampled from.
+    ///
+    /// <para><b>It exists so that the far view costs no second fit and is no less accurate than the
+    /// near one.</b> Before MIM-12a the far view was <see cref="Get"/> — the unpeeled fit — which was
+    /// the same object and therefore free. With a peel it is not the same object, and asking
+    /// <see cref="Get"/> for it would both pay for a second <c>Dcim.FitAtHeights</c> and quietly hand
+    /// the far pairs the less accurate of two representations of one kernel.</para>
+    ///
+    /// <para>With no peel it returns <see cref="Get"/>'s own cached object, so a run with no thin
+    /// cross-region pairing reaches the fill with the very terms it always did.</para>
+    /// </summary>
+    public PlanarKernelTerms GetWhole(GreensKernel kernel, double zA, double zB, double thinnerThanM)
+    {
+        var model = Model(kernel, zA, zB, thinnerThanM);
+        if (model.TransmittedImages.Count == 0) return Get(kernel, zA, zB);
+
+        var k = Key(kernel, zA, zB);
+        var key = (k.Kernel, k.Lo, k.Hi, thinnerThanM);
+        lock (_whole)
+            if (_whole.TryGetValue(key, out var hit)) return hit;
+
+        var terms = PlanarKernelTerms.FromDcimAtHeights(model, _order, _rhoFloor);
+        lock (_whole) _whole[key] = terms;
+        return terms;
     }
 
     /// <summary>The k_ρ → ∞ asymptote of one component at one height pair. <b>Costs no fit</b> — it is

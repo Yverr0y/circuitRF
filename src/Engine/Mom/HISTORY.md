@@ -8622,6 +8622,135 @@ here is a statement about the run's mesh, not about the process.**
 | `examples/PDK PCells/README.md` | the LC-resonator page, and the correction of the section that said the full-wave path reads this capacitance back. It does not; the electrostatic fill does |
 | `tests/Ui.Tests/Em/MimResonatorCompositionTests.cs` | the two gates |
 
+# MIM-12a — the thin region's own reflections, peeled (brief-em-mim-12a-…, 2026-09-16)
+
+The verdict, the two brief corrections and the M4 non-result are `RESOLVED.md` §MIM-12a. These are the
+tables. **Fixture throughout: MIM-12's own** — the shipped 60 × 60 µm MIM capacitor on `MimStack`,
+0.2 µm of εᵣ = 6.8 between two coincident plates at z = 103 and 103.2 µm, read by MIM-8's 1 V / 0 V
+instrument with the run's own fit (`Dcim.ForStackAtFrequency`). `C` is over ε₀εᵣA/d = 1.0838 pF.
+Direct Sommerfeld integration (`SommerfeldIntegral.EvaluateInterior`, tail asserted converged) is the
+oracle in every kernel table; `DcimModel.FitResidual` is blind to all of it.
+
+## Table 1 — the derived series against the quasi-static hand formula
+
+`A = 2/(ε₁+ε₂) · 2ε₂/(ε₂+ε₃) = 0.177014`, `q = R₁₂R₂₃ = −0.230249`, depths (2n+1)d. What ships is the
+k_ρ → ∞ limit of the generalised-reflection cascade, taken per component; the hand formula is the
+acceptance target because it was derived independently.
+
+| | derived | hand formula |
+|---|---|---|
+| A | 0.17701413 | 0.177014 |
+| q | −0.23024860 | −0.230249 |
+
+Amplitudes `A qⁿ` at depths (2n+1)·0.2 µm: 0.177014, −0.040757, 0.009384, −0.002161, 0.000498,
+−0.000115, 0.0000264. Seven images, the default tolerance stopping at |q|ⁿ < 1e-4 — i.e. at q⁶ = 1.5e-4,
+which is where the remainder below stops moving.
+
+## Table 2 — the peel, term by term, against the exact kernel
+
+`G_q` on the cross-level pairing at 1 GHz. Each column is the remainder after peeling that many terms.
+**The remainder after six is a constant to 0.5 % over four decades of ρ, and it is 1.1e-3 of the
+kernel.** Identical at 10 GHz to three figures.
+
+| ρ | 1 nm | 0.2 µm | 1 µm | 5 µm | 15 µm | 40 µm | 85 µm |
+|---|---|---|---|---|---|---|---|
+| exact `G_q` | 6.5593e4 | 4.5229e4 | 1.1401e4 | 2.2160e3 | 6.8914e2 | 2.1352e2 | 6.730e1 |
+| peel 1 | −4.838e3 | −4.574e3 | −2.411e3 | −5.991e2 | −2.499e2 | −1.386e2 | −9.84e1 |
+| peel 2 | 5.680e2 | 5.546e2 | 3.697e2 | 4.500e1 | −3.381e1 | −5.756e1 | −6.027e1 |
+| peel 4 | −5.593e1 | −5.605e1 | −5.837e1 | −6.834e1 | −7.207e1 | −7.193e1 | −6.703e1 |
+| peel 6 | **−73.78** | **−73.78** | **−73.83** | **−74.12** | **−74.09** | **−72.69** | −67.39 |
+| peel 8 | −74.43 | −74.43 | −74.43 | −74.41 | −74.20 | −72.73 | −67.41 |
+
+`A_eff(ρ) = 4π√(ρ²+d²)·G_cross(ρ)`, exact, is 0.164856 / 0.164854 / 0.164843 / 0.164803 / 0.164528 at
+ρ/d = 0.005 / 0.02 / 0.05 / 0.1 / 0.25, and identical at 1 and 10 GHz to six figures. **The assembled
+series gives 0.165043, which is 1.14e-3 high — exactly the remainder**, so the brief's own 1e-4 gate on
+this quantity contradicts its own 1.1e-3 remainder measurement and cannot be met by anything that
+leaves the remainder in place.
+
+## Table 3 — the kernel a RUN fills from, before and after
+
+Worst relative error over the cell's own ρ range, against direct Sommerfeld integration, with
+`Dcim.ForStackAtFrequency` applied (which is what `PlanarFrequencyKernel.Fit` applies and what MIM-8's
+own fixture does not).
+
+| pairing | f | unpeeled | peeled |
+|---|---|---|---|
+| cross-level (103 → 103.2 µm) | 1 GHz | **2.7e-2 … 3.7e-1** | **3.6e-9 … 1.4e-6** |
+| cross-level | 10 GHz | 8.3e-5 … 4.4e-2 | 1.9e-7 … 1.5e-6 |
+| same-level (103 → 103 µm) | 1 GHz | 2.6e-3 … 2.2e-2 | < 1e-4 |
+| same-level | 10 GHz | 8.4e-6 … 4.7e-3 | < 1e-4 |
+| `G_A^xx` cross-level | 1 GHz | 4.7e-6 | *not peeled — see below* |
+| `G_A^xx` cross-level | 10 GHz | 9.1e-6 | *not peeled* |
+
+**The vector row is why the vector block is not peeled.** On a non-magnetic stack `R^h = 0` at every
+interface, so the TE cavity's round-trip factor is zero, the series is one exponential, and one
+exponential is what a Prony fit represents exactly. The defect is the geometric SERIES, not the
+crossing.
+
+## Table 4 — MIM-8's electrostatic instrument, down the band and across two meshes
+
+| f | 4 cells across, before | after | 6 cells across, after | direct-Sommerfeld kernel, after |
+|---|---|---|---|---|
+| 1 GHz | **−0.5449** | **1.0057** | 1.0057 | 1.0151 |
+| 2 GHz | **1.3413** | **1.0058** | 1.0057 | 1.0160 |
+| 3 GHz | **1.5953** | **1.0057** | 1.0057 | 1.0157 |
+| 10 GHz | 0.9995 | **1.0058** | 1.0058 | 1.0154 |
+
+Frequency-independent to 1e-4 and mesh-independent to 1e-4. The residual 0.6 % is the mesh's own
+discretisation — MIM-8 measured 1.0032 for this capacitor at this mesh with no low-frequency widening
+at all. **The last column is the completeness test the brief asked for**: `DirectScalarKernel` used to
+read 0.75 below 5 GHz and be 24 % low, because the images it subtracted were the FIT's; they are now
+the derived series and the two routes agree to under 2 %.
+
+## Table 5 — peeling the crossing ALONE is not enough
+
+Measured on the way, and it is what made the same-level case necessary.
+
+| peeled | 1 GHz | 2 GHz | 3 GHz | 10 GHz |
+|---|---|---|---|---|
+| nothing | −0.5449 | 1.3413 | 1.5953 | 0.9995 |
+| the crossing only | **0.8429** | 0.9454 | 0.9649 | 1.0061 |
+| the crossing and the face | **1.0057** | 1.0058 | 1.0057 | 1.0058 |
+
+The brief's premise — that the same-level pairing's leading term is already exact and the crossing's is
+not — is right about the leading term and misses the cavity's round trips, which are the same
+unresolved structure one interface over.
+
+## Table 6 — the conditioning moved the WRONG way, and the answer improved anyway
+
+| instrument | N | cond, before | cond, after | answer before | answer after |
+|---|---|---|---|---|---|
+| electrostatic P, 1 GHz | 32 | 2.71e1 | 2.62e2 | −0.096 | **1.006** |
+| full-wave Z, 0.5 GHz | 120 | 1.443e9 | 1.96e9 | — | — |
+
+`min/max eig(Re Z)` at 0.5 GHz: 1.407e-11 before, 9.84e-12 after. (The electrostatic "before" column is
+`ShallowImageCells = 0`, i.e. the pre-MIM-8 arithmetic, which is the only A/B available in one tree.)
+**The treated matrix is ~10× worse conditioned because its cross-level entries now carry the
+near-cancelling structure that IS the capacitor.** An answer that improves by two orders while its
+matrix gets harder is not a dynamic-range failure, which is the sharpest refutation available of
+MIM-12's own diagnosis.
+
+## Table 7 — the de-embedded ladder was NOT re-run, and this is why
+
+MIM-12's harness is not in the tree. A fresh equivalent — two overlapping 80 × 80 µm plates, edge ports
+on the two levels, de-embedded, series capacitance from `−1/Y₂₁` — is governed by its own port fixture
+and not by the film. At **d = 20 µm, cell/separation 1-4**, where no film is involved and which the
+present floor of 40 already admits:
+
+| max cell | electrostatic C₁₂ | de-embedded `−1/Y₂₁` |
+|---|---|---|
+| 80 µm | 0.0260 pF | 0.0068 pF |
+| 40 µm | 0.0271 pF | 0.0045 pF |
+| 26.7 µm | 0.0276 pF | 0.0027 pF |
+| 13.3 µm | 0.0282 pF | 0.0014 pF |
+
+The full-wave reading **halves with every refinement** while the electrostatic one converges, i.e. it
+tracks the cell size rather than the overlap; and a plain single-level through line on the same port
+setup comes back 8 % non-passive (|S11|² + |S21|² = 1.086). §MIM-3 finding 4 and MIM-8's own gate
+comment both already record that a de-embedded MIM two-port is a fixture problem in its own right.
+**`PlanarLevels.FullWaveCellOverSeparation` therefore stays at 40**, and every run-visible sentence
+quoting MIM-12's ladder now says the ladder predates the kernel repair and has not been re-run.
+
 # MIM-12 step 0 — where the capacitor's digits are lost (brief-em-mim-12-…, 2026-09-16)
 
 The verdict, and the three claims it retires, are `RESOLVED.md` §MIM-12. These are the tables.
@@ -8733,6 +8862,8 @@ GaAs run below ~30 GHz needs it, because the default extent reaches a product of
 
 **The frequency dependence is gone and so is the mesh dependence** — 0.75 at 1, 2 and 3 GHz on both
 meshes, against −0.54 … +1.60. It is 24 % low, and the residual is diagnosed rather than a tolerance.
+**§MIM-12a Table 4 is the same measurement after the peel: 1.015 at every frequency, and the diagnosis
+below is exactly what it fixed.**
 After MIM-8's shallow images are subtracted, the cross-level remainder at 1 GHz still runs
 
 | ρ | 0.02 µm | 0.09 µm | 0.2 µm | 0.43 µm | 0.93 µm | 2 µm |

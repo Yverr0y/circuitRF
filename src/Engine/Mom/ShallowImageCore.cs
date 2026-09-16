@@ -7,11 +7,20 @@
 // §MIM-3 measured the cross-level block of the multi-level fill losing four decades between
 // cell/separation 1 and 20, and named the mechanism: at d ≪ cell the kernel carries a peak of width
 // d inside a cell of width h, and a rule that treats the pair as smooth integrates straight over it.
-// §MIM-8 located the peak exactly. It is not the kernel and it is not the extracted asymptotes — a
-// cross-REGION pair has none (LayeredSpectralGreens.AsymptoticAtHeights returns zero coefficients for
-// one, by design) — it is a FITTED IMAGE whose depth is of the order of the film thickness. On the
-// shipped MMIC stack, with a 0.2 µm capacitor dielectric, the scalar kernel's cross-level fit puts an
-// image of amplitude 0.144 at a depth of 0.128 µm, i.e. 0.05 of a 2.5 µm cell.
+// §MIM-8 located the peak exactly. It is not the kernel and it is not the two extracted asymptotes —
+// a cross-REGION pair has none of those (LayeredSpectralGreens.AsymptoticAtHeights returns zero
+// coefficients for one, by design) — it is an IMAGE whose depth is of the order of the film
+// thickness. On the shipped MMIC stack, with a 0.2 µm capacitor dielectric, the scalar kernel's
+// cross-level fit put an image of amplitude 0.144 at a depth of 0.128 µm, i.e. 0.05 of a 2.5 µm cell.
+//
+// MIM-12a — AND THAT IMAGE IS NO LONGER A FITTED ONE. A thin region is a Fabry-Perot cavity whose
+// multiple reflections are a closed-form geometric series (LayeredSpectralGreens.
+// ThinRegionImagesAtHeights), and the fit was extrapolating all of it: the series decays like
+// e^{-k_rho d} with d = 0.2 um, i.e. it is structure out to 5e6 m^-1, against a sampling path that
+// stops at 1.9e5. Dcim.FitAtHeights now peels that series out of its samples and the list this file
+// integrates holds the EXACT images instead. Nothing here changed — the closed form of a static
+// image over a cell pair does not care where the image came from — which is the point of MIM-8's
+// machinery having been built as a list.
 //
 // FromDcimAtHeights treats every image as smooth and moves only its value at ρ = 0 into the constant.
 // That is right while the depth is large against a cell — R-fil-8 says so in as many words, and

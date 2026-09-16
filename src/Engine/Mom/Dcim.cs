@@ -687,8 +687,20 @@ public static class Dcim
         return EmSuitability.Yes;
     }
 
+    /// <param name="transmitted">
+    /// <b>MIM-12a — the cross-region transmitted chain, peeled from the samples before the fit sees
+    /// them</b> (<see cref="LayeredSpectralGreens.ThinRegionImagesAtHeights"/>). Null or empty — the
+    /// default, and every pairing but a thin cross-region one — leaves this fit bit-identical.
+    ///
+    /// <para><b>The fit has to be the thing that changes, and that is the finding rather than a
+    /// design choice.</b> Subtracting an exact series from an INACCURATE fit leaves the fit's error
+    /// standing on a remainder 1e-3 its size, which is worse than useless. The samples are what the
+    /// series has to come out of, and then the Prony fit is asked only for what is left — a quantity
+    /// whose whole structure is on the long scale the sampling path does reach.</para>
+    /// </param>
     public static DcimModel FitAtHeights(LayeredSpectralGreens g, GreensKernel kernel,
-                                         double z, double zp, DcimSettings? settings = null)
+                                         double z, double zp, DcimSettings? settings = null,
+                                         IReadOnlyList<ComplexImage>? transmitted = null)
     {
         var s = settings ?? DcimSettings.Default;
         // CL5 — the STRUCTURAL precondition, not the direct integrator's. This fit integrates
@@ -700,6 +712,7 @@ public static class Dcim
         if (!ok.Ok) throw new ArgumentException(ok.Reason);
 
         var a  = g.AsymptoticAtHeights(kernel, z, zp);
+        var peel = transmitted ?? [];
         Complex km = a.ReferenceWavenumber;
         Complex kmSq = km * km;
         double regulator = a.IsMixedForm ? 1.0 / Complex.Abs(km) : 0.0;
@@ -730,10 +743,17 @@ public static class Dcim
                        / (2.0 * Complex.ImaginaryOne * w);
                 return 2.0 * Complex.ImaginaryOne * kzm * k - PoleSum(poles, kmSq, kzm);
             }
-            return 2.0 * Complex.ImaginaryOne * kzm * k
-                 - a.DirectCoefficient * Complex.Exp(-Complex.ImaginaryOne * kzm * a.DirectDepth)
-                 - a.ImageCoefficient  * Complex.Exp(-Complex.ImaginaryOne * kzm * a.ImageDepth)
-                 - PoleSum(poles, kmSq, kzm);
+            Complex v = 2.0 * Complex.ImaginaryOne * kzm * k
+                      - a.DirectCoefficient * Complex.Exp(-Complex.ImaginaryOne * kzm * a.DirectDepth)
+                      - a.ImageCoefficient  * Complex.Exp(-Complex.ImaginaryOne * kzm * a.ImageDepth)
+                      - PoleSum(poles, kmSq, kzm);
+            // MIM-12a — the transmitted chain, in NUMERATOR units exactly as the two asymptotes are.
+            // Each image is one more C e^{−jk_zm b}, which is the same shape the fit itself produces,
+            // so peeling them costs the fit nothing and hands it a function whose remaining structure
+            // is on the scale of the regions BEYOND the film rather than of the film.
+            foreach (var im in peel)
+                v -= im.Amplitude * Complex.Exp(-Complex.ImaginaryOne * kzm * im.Depth);
+            return v;
         }
 
         // ---- the same two-level path L8a's M3 measured into existence, in k_m rather than k₀.
@@ -781,6 +801,11 @@ public static class Dcim
         // M(0) and PoleSum(0) are zero, so the constraint is ΣA_i = −(C_dir + C_img) — or ΣA_i = 0
         // for the mixed component, whose two extracted pieces are the same closed form.
         Complex nAtZero = a.IsMixedForm ? Complex.Zero : -(a.DirectCoefficient + a.ImageCoefficient);
+        // MIM-12a — and the peeled images are extracted pieces like any other, so they belong in the
+        // constraint for the same reason: at k_zm = 0 every e^{−jk_zm b} is 1, so N(0) is minus the
+        // SUM of everything extracted. Leaving them out would pin ΣA_i to the wrong value and put
+        // the difference straight into a spurious 1/ρ far field.
+        foreach (var im in peel) nAtZero -= im.Amplitude;
         Complex[] taylor = [nAtZero, Complex.Zero, Complex.Zero];
 
         // AN AMPLITUDE-CONDITIONING CAP WAS BUILT HERE AND THEN REMOVED, and the negative result is
@@ -801,7 +826,8 @@ public static class Dcim
             bestResidual = res; images = im; sumRule = rule;
         }
 
-        return new DcimModel(g, km, kernel, a, regulator, z, zp, poles, images, bestResidual, sumRule, s);
+        return new DcimModel(g, km, kernel, a, regulator, z, zp, poles, images, bestResidual, sumRule, s,
+                             peel);
     }
 
     /// <summary><see cref="SamplePath"/> with a COMPLEX reference wavenumber. Kept separate rather
@@ -1520,12 +1546,30 @@ public sealed class DcimModel
     private readonly LayeredSpectralGreens.InteriorAsymptote _asym;
     private readonly double _regulator;
 
+    /// <summary>
+    /// <b>MIM-12a — the EXACT transmitted images this fit had peeled out of its samples before it
+    /// ran</b>, empty for every pairing but a thin cross-region one.
+    ///
+    /// <para>They are not fitted and they are not <see cref="Images"/>: they are the k_ρ → ∞ closed
+    /// form of the chain across the crossed region (<see
+    /// cref="LayeredSpectralGreens.ThinRegionImagesAtHeights"/>), and they carry essentially the
+    /// whole of the kernel's near field there. <see cref="EvaluateAtHeights"/> adds them back, so
+    /// <b>this model is the WHOLE kernel whether or not anything was peeled</b> — what the peel
+    /// changes is which part of it is exact. <c>PlanarKernelTerms.FromDcimAtHeightsMinusShallowImages</c>
+    /// then always moves them into the removed list, because a peak of width d inside a cell of width
+    /// 75 d is exactly what a quadrature cannot see and what <c>ShallowImageCore</c> integrates in
+    /// closed form.</para>
+    /// </summary>
+    public IReadOnlyList<ComplexImage> TransmittedImages { get; } = [];
+
     internal DcimModel(LayeredSpectralGreens layered, Complex km, GreensKernel kernel,
                        LayeredSpectralGreens.InteriorAsymptote asym, double regulator,
                        double z, double zp,
                        IReadOnlyList<SurfaceWaveTerm> surfaceWaves, IReadOnlyList<ComplexImage> images,
-                       double fitResidual, Complex sumRuleResidual, DcimSettings settings)
+                       double fitResidual, Complex sumRuleResidual, DcimSettings settings,
+                       IReadOnlyList<ComplexImage>? transmitted = null)
     {
+        TransmittedImages = transmitted ?? [];
         LayeredGreens = layered; K0 = layered.K0; ReferenceK = km;
         TopKSquared = layered.TopWavenumberSquared;
         ReferenceHeightM = layered.Stack.TopZ;
@@ -1602,6 +1646,13 @@ public sealed class DcimModel
             if (r.Real < 0) r = -r;
             value += im.Amplitude * RadialDerivative(ReferenceK, r, rhoM);
         }
+
+        foreach (var im in TransmittedImages)                       // MIM-12a, the peeled chain
+        {
+            Complex r = Complex.Sqrt(rhoM * rhoM + im.Depth * im.Depth);
+            if (r.Real < 0) r = -r;
+            value += im.Amplitude * RadialDerivative(ReferenceK, r, rhoM);
+        }
         return value;
     }
 
@@ -1653,6 +1704,15 @@ public sealed class DcimModel
             value += p.Residue * (-0.25 * Complex.ImaginaryOne) * Bessel.H02(p.KRho * rhoM);
 
         foreach (var im in Images)
+        {
+            Complex r = Complex.Sqrt(rhoM * rhoM + im.Depth * im.Depth);
+            if (r.Real < 0) r = -r;
+            value += im.Amplitude * SommerfeldIntegral.FreeSpace(ReferenceK, r);
+        }
+
+        // MIM-12a — the peeled chain, put back. Same closed form as any image; the Sommerfeld
+        // identity does not care that these amplitudes were derived rather than fitted.
+        foreach (var im in TransmittedImages)
         {
             Complex r = Complex.Sqrt(rhoM * rhoM + im.Depth * im.Depth);
             if (r.Real < 0) r = -r;

@@ -148,8 +148,14 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
                 0.27535759464851667, -318.6400677788218)]
     [InlineData(1.0,  0.0, "917BBCA5D70341ADB227CADC723A5B6311103FBA48C2418398921DAA1B890D76",
                 0.27535759464851667, -318.6400677788218)]
-    [InlineData(20.0, 0.5, "2907FAA12FDED8125A68C4F120C52F60DEAD7A95DB960140C17CF69E4BD4EC44",
-                0.0074591547241312185, -13.469069776385286)]
+    // MIM-12a RE-TOOK THIS ROW, and nothing about the row above it moved. The treatment at
+    // cell/separation 20 now subtracts the thin region's EXACT image series rather than the fit's
+    // images, and the fit itself is asked only for what is left — so the cross-level block is a
+    // different (and, measured against direct Sommerfeld integration, a 4-decade better) set of
+    // numbers. The rows at cell/separation 1 and the rows at ShallowImageCells 0 are untouched,
+    // which is the whole of the bit-identity claim: the treatment does not happen there.
+    [InlineData(20.0, 0.5, "1F223750094BCDD5072B392CED51C8BCFA1E7097C58A4C7574361C3EBA8E8B1B",
+                0.0077787711848579955, -13.456455402723147)]
     [InlineData(20.0, 0.0, "12CB6DECE52B3234793855736C205D671717EB9AD48789A8892CA94285549081",
                 0.007459157175535663, -13.46907400956937)]
     public void T1_TheCrossLevelBlockIsHeldStill_OnAFixedInput(
@@ -165,7 +171,8 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
 
         var probe = z[0, z.ColCount - 1];
         _out.WriteLine($"cell/separation {cellOverD:G3}, ShallowImageCells {shallowCells:G3}: " +
-                       $"[0,{z.ColCount - 1}] = {probe.Real:R} {probe.Imaginary:R}");
+                       $"[0,{z.ColCount - 1}] = {probe.Real:R} {probe.Imaginary:R}, " +
+                       $"digest {DigestCross(z, lay)}");
         Assert.Equal(lastReal, probe.Real,      12);
         Assert.Equal(lastImag, probe.Imaginary, 9);
         Assert.Equal(digest, DigestCross(z, lay));
@@ -560,6 +567,25 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
 
         // The fixture must be IN the regime, or the comparison proves nothing.
         Assert.True(anyShallow, "no image was shallow here, so this fixture cannot see the defect");
+
+        // MIM-12a — and in the regime as it is NOW: the subtracted list must hold the thin region's
+        // own DERIVED series, not a fitted image that happens to be shallow. A branch whose off-state
+        // is the identity is a branch no existing test exercises, and the images in that list changed
+        // under this test without its arithmetic changing at all.
+        var greens = new LayeredSpectralGreens(p.EffectiveStack, p.MaxFrequencyHz);
+        double cell = 0;
+        foreach (var c in mesh.Cells) cell = Math.Max(cell, Math.Max(c.Width, c.Height));
+        var derived = greens.ThinRegionImagesAtHeights(
+            GreensKernel.ScalarPotential, levels.Of(1), levels.Of(0),
+            PlanarFillSettings.Default.ShallowImageCells * cell);
+        Assert.Null(derived.NotApplicable);
+        Assert.True(derived.Crosses);
+        var crossRemoved = pr.ShallowQ[0, 1];
+        _out.WriteLine($"cross-level removed list: {crossRemoved.Count} images, " +
+                       $"{derived.Images.Count} of them the derived series (A = {derived.Amplitude.Real:F6}, " +
+                       $"q = {derived.Ratio.Real:F6})");
+        for (int i = 0; i < derived.Images.Count; i++)
+            Assert.Equal(derived.Images[i].Depth.Real, crossRemoved[i].Depth.Real, 15);
 
         double worst = 0, scale = 0;
         int m = mesh.Cells.Count;

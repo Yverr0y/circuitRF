@@ -312,6 +312,18 @@ public sealed class PlanarKernelTerms
             smallestDepth = Math.Min(smallestDepth, r0.Magnitude);
         }
 
+        // ── MIM-12a's peeled chain — smooth at ρ = 0 like any image, and DELIBERATELY not part of
+        // smallestDepth. That number is R-fil-8's question "is there an image the quadrature cannot
+        // resolve"; these are images the quadrature never sees, because
+        // FromDcimAtHeightsMinusShallowImages always hands them to the closed form. Counting them
+        // would report a defect that this decomposition exists to have already removed.
+        foreach (var im in model.TransmittedImages)
+        {
+            Complex r0 = Complex.Sqrt(im.Depth * im.Depth);
+            if (r0.Real < 0) r0 = -r0;
+            constant += im.Amplitude * SommerfeldIntegral.FreeSpace(km, r0);
+        }
+
         return new PlanarKernelTerms(model.EvaluateAtHeights, inverse, log, constant, linear,
                                      order, rhoFloor, smallestDepth, model.DerivativeAtHeights);
     }
@@ -389,31 +401,53 @@ public sealed class PlanarKernelTerms
     /// <para><b>When nothing is shallow the returned terms are the ordinary ones</b> — same
     /// coefficients, same evaluator — so a run with no thin film in it is untouched, which is the
     /// property <c>MimThinLayerTests</c> gates byte for byte.</para>
+    ///
+    /// <para><b>MIM-12a — <see cref="DcimModel.TransmittedImages"/> comes out unconditionally.</b>
+    /// A fitted image might or might not be resolved by the mesh and <paramref name="shallowDepthM"/>
+    /// is the question; a peeled transmitted chain is not a candidate for that question. It is the
+    /// exact closed form of the peak, the fit was asked for a remainder precisely because this part
+    /// is carried separately, and leaving it in the terms would hand a quadrature the one feature it
+    /// provably cannot see. The list is empty for every pairing but a thin cross-region one, so
+    /// nothing else moves.</para>
     /// </summary>
-    /// <param name="shallowDepthM">The depth below which an image's peak is taken to be unresolved;
-    /// the fill derives it from the cells on the two levels concerned. Zero or negative removes
-    /// nothing.</param>
+    /// <param name="shallowDepthM">The depth below which a FITTED image's peak is taken to be
+    /// unresolved; the fill derives it from the cells on the two levels concerned. Zero or negative
+    /// removes no fitted image — it does not suppress MIM-12a's peeled chain, which was already
+    /// removed from the fit itself and has nowhere else to go.</param>
     public static ShallowImageSplit FromDcimAtHeightsMinusShallowImages(
         DcimModel model, double shallowDepthM,
         PlanarExtractionOrder order = PlanarExtractionOrder.Constant, double rhoFloor = 0.0)
     {
         ArgumentNullException.ThrowIfNull(model);
         var full = FromDcimAtHeights(model, order, rhoFloor);
-        if (!(shallowDepthM > 0)) return new ShallowImageSplit(full, []);
+        if (!(shallowDepthM > 0) && model.TransmittedImages.Count == 0)
+            return new ShallowImageSplit(full, []);
 
         List<ComplexImage>? shallow = null;
         Complex constant = full.Constant;
-        foreach (var im in model.Images)
-        {
-            // The DEPTH as the evaluator uses it: √(b²) on the branch with positive real part, which
-            // is the same choice DcimModel.EvaluateAtHeights makes for R at ρ = 0.
-            Complex b = Complex.Sqrt(im.Depth * im.Depth);
-            if (b.Real < 0) b = -b;
-            if (b.Magnitude >= shallowDepthM) continue;
 
-            (shallow ??= []).Add(new ComplexImage(im.Amplitude, b));
-            constant -= im.Amplitude / (4.0 * Math.PI * b);
+        // ── MIM-12a — the peeled transmitted chain comes out UNCONDITIONALLY, whatever the
+        // threshold says. It is not a fitted image that might or might not be resolved: it IS the
+        // peak, its shallowest depth is the crossed thickness itself, and the only reason the fit
+        // was asked for a remainder at all is that this part is carried in closed form.
+        foreach (var im in model.TransmittedImages)
+        {
+            (shallow ??= []).Add(im);
+            constant -= im.Amplitude / (4.0 * Math.PI * im.Depth);
         }
+
+        if (shallowDepthM > 0)
+            foreach (var im in model.Images)
+            {
+                // The DEPTH as the evaluator uses it: √(b²) on the branch with positive real part,
+                // which is the same choice DcimModel.EvaluateAtHeights makes for R at ρ = 0.
+                Complex b = Complex.Sqrt(im.Depth * im.Depth);
+                if (b.Real < 0) b = -b;
+                if (b.Magnitude >= shallowDepthM) continue;
+
+                (shallow ??= []).Add(new ComplexImage(im.Amplitude, b));
+                constant -= im.Amplitude / (4.0 * Math.PI * b);
+            }
         if (shallow is null) return new ShallowImageSplit(full, []);
 
         var removed = shallow.ToArray();

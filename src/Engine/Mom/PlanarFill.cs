@@ -257,12 +257,19 @@ public sealed record PlanarFillSettings(
     int                   MaxTableSamples         = 1 << 15,
     bool                  DirectVerticalKernel    = false,
     int                   VerticalTableSamples    = 256,
-    // MIM-12 — the SCALAR block's own DirectVerticalKernel. A thin cross-level pairing's kernel
-    // comes entirely from fitted images (its k_ρ → ∞ asymptote is zero by design, MIM-8 finding 1)
-    // and a plate capacitance divides that pairing's error by d/cell, so the fit's 2.7e-2 at 1 GHz
-    // arrives as a 200% error with the wrong sign. This replaces the fitted part with direct
-    // Sommerfeld integration on a radial table. OFF: it removes the frequency and mesh dependence
-    // and is still 24% low, and RESOLVED.md §MIM-12 finding 6 says where the rest of it is.
+    // MIM-12 — the SCALAR block's own DirectVerticalKernel. A thin cross-level pairing's kernel came
+    // entirely from fitted images (its k_ρ → ∞ asymptote is zero by design, MIM-8 finding 1) and a
+    // plate capacitance divides that pairing's error by d/cell, so the fit's 2.7e-2 at 1 GHz arrived
+    // as a 200% error with the wrong sign. This replaces the fitted part with direct Sommerfeld
+    // integration on a radial table.
+    //
+    // MIM-12a — THE 24% IS GONE AND THIS IS NOW A CROSS-CHECK RATHER THAN A DIAGNOSIS. It used to
+    // read 0.75 at 1, 2 and 3 GHz: frequency- and mesh-independent, and 24% low, because the images
+    // it subtracted were the FIT's and what was left still ran 2.3e4 → 87 over the mesh's own rho
+    // range. Those images are now the thin region's EXACT series, so the tabulated remainder is
+    // small and smooth and this path reads 1.015, within 2% of the fitted one. Still OFF — one
+    // EvaluateInterior point is 40-50 ms — and worth turning on as an independent check of the fit,
+    // which is what Mim12KernelFitTests.T5b now uses it for.
     bool                  DirectScalarKernel      = false,
     int                   ScalarTableSamples      = 256,
     int                   ViaZNodes               = 2,
@@ -292,6 +299,15 @@ public sealed record PlanarFillSettings(
     /// treating it as smooth and integrates its static part in closed form instead.</b> Zero turns
     /// the treatment off entirely and is the pre-MIM-8 arithmetic, kept as the oracle the ladder
     /// below is stated against.
+    ///
+    /// <para><b>MIM-12a — the same number is also the THIN-REGION threshold, and deliberately so.</b>
+    /// A region whose thickness is under this is a cavity the fit's own sampling path cannot reach,
+    /// so <see cref="LayeredSpectralGreens.ThinRegionImagesAtHeights"/> derives its multiple
+    /// reflections in closed form, <c>Dcim.FitAtHeights</c> peels them out of the samples before
+    /// Prony runs, and they join the list this threshold already governs. One number rather than two
+    /// because it is one question — does the mesh resolve the structure this pairing carries — and
+    /// two knobs answering it would be free to disagree. Zero therefore still means "the pre-MIM-8
+    /// arithmetic", exactly and bit for bit.</para>
     ///
     /// <para><b>The quantity is the one R-fil-8 already names.</b>
     /// <see cref="PlanarKernelTerms.SmallestImageDepth"/> exists because "the fitted images are
@@ -2549,7 +2565,11 @@ public static class PlanarFill
                     }
                     else
                     {
-                        var plain = set.Get(GreensKernel.ScalarPotential, za, zb);
+                        // MIM-12a — GetWhole, not Get: with a peeled cross-region fit the untreated
+                        // view has to come from the SAME model, or the far pairs silently take a
+                        // second, less accurate fit of one kernel and pay for it as well. With no
+                        // peel it IS Get's own cached object and nothing moves.
+                        var plain = set.GetWhole(GreensKernel.ScalarPotential, za, zb, shallow);
                         r.TermsQFar[la, lb] = r.TermsQFar[lb, la] = plain.With(st.Order, cores.RhoFloorM);
                         r.RemQFar[la, lb]   = r.RemQFar[lb, la]   = Remainder(plain, cores);
                     }

@@ -1574,33 +1574,7 @@ public sealed class LayeredSpectralGreens
         // The k_ρ → ∞ limit of the generalised reflection looking DOWN from the source's region: the
         // local Fresnel coefficient there, because every round trip below it has died.
         Complex re = Complex.Zero, rh = Complex.Zero;
-        if (hasFloor)
-        {
-            if (m == 1 && Stack.IsWall(0))
-            {
-                // CL4 — the two polarisations part company at a CONDUCTING floor, and only here.
-                // Γ^e → −1 (the electrostatic image) but Γ^h → +1, because Z_line^h → 0 while Z_s
-                // stays finite; WallReflection's own summary derives both and says why the fitted
-                // top-referenced route never sees it. A PEC keeps −1/−1 and a PMC +1/+1 exactly.
-                if (Stack.Bottom.Kind == TerminationKind.SurfaceImpedance &&
-                    Stack.Bottom.SurfaceImpedanceAt(Omega) != Complex.Zero)
-                {
-                    re = -Complex.One;
-                    rh =  Complex.One;
-                }
-                else
-                {
-                    re = rh = Stack.Bottom.Kind == TerminationKind.Pmc ? Complex.One : -Complex.One;
-                }
-            }
-            else
-            {
-                Complex ea = _eps[m], eb = _eps[m - 1];
-                Complex ma = _mu[m],  mb = _mu[m - 1];
-                re = (ea - eb) / (ea + eb);
-                rh = (mb - ma) / (mb + ma);
-            }
-        }
+        if (hasFloor) (re, rh) = LocalFresnel(m, m - 1);
 
         Complex muRel = _mu[m];
         (Complex dir, Complex img) = kernel switch
@@ -1613,6 +1587,228 @@ public sealed class LayeredSpectralGreens
         };
 
         return new InteriorAsymptote(dir, img, km, delta, hasFloor ? sigma : 0.0, mixed);
+    }
+
+    /// <summary>
+    /// <b>The k_ρ → ∞ limit of the generalised reflection across ONE interface, which is the local
+    /// Fresnel coefficient there</b> — every round trip on the far side carries
+    /// <c>e^{−2k_ρ t}</c> and has died. Written once because <see cref="AsymptoticAtHeights"/> and
+    /// <see cref="ThinRegionImagesAtHeights"/> need the SAME coefficient at the same interface, and
+    /// two transcriptions of it would be free to drift.
+    /// </summary>
+    /// <param name="inside">The region the wave is in.</param>
+    /// <param name="outside">The region on the other side of the interface — <c>inside ± 1</c>.</param>
+    private (Complex Re, Complex Rh) LocalFresnel(int inside, int outside)
+    {
+        if (Stack.IsWall(outside))
+        {
+            // CL4 — the two polarisations part company at a CONDUCTING wall, and only there.
+            // Γ^e → −1 (the electrostatic image) but Γ^h → +1, because Z_line^h → 0 while Z_s stays
+            // finite; WallReflection's own summary derives both and says why the fitted
+            // top-referenced route never sees it. A PEC keeps −1/−1 and a PMC +1/+1 exactly.
+            var wall = outside == 0 ? Stack.Bottom : Stack.Top;
+            if (wall.Kind == TerminationKind.SurfaceImpedance &&
+                wall.SurfaceImpedanceAt(Omega) != Complex.Zero)
+                return (-Complex.One, Complex.One);
+            return wall.Kind == TerminationKind.Pmc
+                 ? (Complex.One, Complex.One)
+                 : (-Complex.One, -Complex.One);
+        }
+
+        Complex ea = _eps[inside], eb = _eps[outside];
+        Complex ma = _mu[inside],  mb = _mu[outside];
+        return ((ea - eb) / (ea + eb), (mb - ma) / (mb + ma));
+    }
+
+    /// <summary>
+    /// <b>MIM-12a — a THIN REGION's own multiple reflections, as an exact image series.</b>
+    /// <para><see cref="AsymptoticAtHeights"/> extracts the terms that do not decay at all, and its
+    /// reason for extracting no more is correct as far as it goes: anything that crosses a region
+    /// carries <c>e^{−jk_z t}</c> for that thickness, so it decays. <b>Decaying is not the same as
+    /// small.</b> Across a 0.2 µm capacitor dielectric the decay length is 0.2 µm, i.e. the term is
+    /// structure out to k_ρ ≈ 5e6 m⁻¹, and the widest DCIM sampling path this repository ever walks
+    /// reaches 1.9e5 — short by 26× at every frequency in the band. The fit therefore EXTRAPOLATES
+    /// the film's whole contribution, and a plate pair's capacitance is a <c>d/cell</c> difference of
+    /// two such fits, so it inherits <c>cell/d</c> times their error. §MIM-12 measured that as a whole
+    /// sign at 1 GHz.</para>
+    ///
+    /// <para><b>ONE cavity, and both of a capacitor's pairings see it.</b> The thin region is a
+    /// Fabry-Perot cavity of round-trip factor <c>g = R_up R_dn</c> (both Fresnel coefficients taken
+    /// from INSIDE it), and every geometric series below is that one cavity's:</para>
+    /// <list type="bullet">
+    ///   <item><b>Across it</b> — the two plates of a capacitor. The line's four-term form at
+    ///     <c>z′ = z_b, z = z_t</c> has all four exponents equal to d and collapses to
+    ///     <c>(Z_c/2)(1+R_dn)(1+R_up) e^{−jk_z d}/(1 − g e^{−2jk_z d})</c>, i.e. images at depths
+    ///     <c>(2n+1)d</c> with amplitudes <c>A gⁿ</c>, <c>A = (1+R_dn)(1+R_up)/ε_c</c>.</item>
+    ///   <item><b>On one of its faces</b> — one plate against itself. There the same algebra gives
+    ///     <c>(Z_c/2)(1+R_dn)(1 + R_far e^{−2jk_z t})/(1 − g e^{−2jk_z t})</c>, whose n = 0 term is
+    ///     exactly what <see cref="AsymptoticAtHeights"/> already returns (its direct and its image
+    ///     both sit at depth zero and sum to <c>(1+R_dn)/ε_c</c>) and whose REST is a series at
+    ///     depths <c>2nt</c> with amplitudes <c>C₀ g^{n−1}(g + R_far)</c>.</item>
+    /// </list>
+    /// <para>The second case is not in this brief's text and was measured into it: with the crossing
+    /// peeled, the shipped capacitor's remaining error was the SAME-level block, at 2e-3 … 2e-2 over
+    /// the whole cell range at 1 GHz — which <c>cell/d</c> = 75 turns into the 16 % the ladder was
+    /// still short by. The two are one defect seen from two sides, and fixing one of them is not
+    /// fixing it.</para>
+    ///
+    /// <para>Per component, with the cavity's two reflections and its own ε or µ:</para>
+    /// <code>
+    ///   G_q  :  C₀ = (1+R_dn^e)/ε_c   A = (1+R_dn^e)(1+R_up^e)/ε_c   g = R_dn^e R_up^e   ← TM
+    ///   G_A^x:  C₀ = µ_c(1+R_dn^h)    A = µ_c(1+R_dn^h)(1+R_up^h)    g = R_dn^h R_up^h   ← TE
+    /// </code>
+    /// <para>The algebraic check is that the crossing's A reduces to the face's C₀ when the far
+    /// reflection vanishes, and that both reduce to <see cref="AsymptoticAtHeights"/>'s own
+    /// <c>(DirectCoefficient + ImageCoefficient)</c>.</para>
+    ///
+    /// <para><b>What the remainder then is.</b> The generalised reflections differ from the local ones
+    /// by terms carrying <c>e^{−2k_ρ t}</c> for the thickness of the regions BEYOND the cavity —
+    /// 103 µm here — so the remainder lives entirely on the long scale the sampling path does reach.
+    /// Measured on the shipped film it is a constant to 0.5 % over four decades of ρ and is 1.1e-3 of
+    /// the kernel, at 1 GHz and at 10 GHz alike. That is the shape a DCIM decomposition is built to
+    /// carry, and with it peeled the fitted cross-level kernel goes from 2.7e-2 wrong at 1 GHz to
+    /// 1.4e-6.</para>
+    ///
+    /// <para><b>Scope, stated rather than assumed (R-mom-17).</b> ONE thin region, with the pairing
+    /// either across it or on one of its faces — which is where metal goes. Declined by name: a
+    /// pairing more than one region apart, a point in the INTERIOR of a region, and a face with a thin
+    /// region on BOTH sides (two coupled cavities, whose series is not the product of theirs). The two
+    /// VERTICAL components are declined too — <c>G_A^zz</c> is built from both equivalent lines and
+    /// the mixed component's asymptote is a <c>1/k_ρ²</c> logarithm rather than an exponential, so
+    /// neither is this closed form and neither was measured on a thin film.</para>
+    ///
+    /// <para><b>And the horizontal VECTOR kernel is derivable here but is not needed</b>, which was
+    /// measured rather than assumed: on a non-magnetic stack <c>R^h = 0</c> at every interface, so
+    /// g = 0, the series is one exponential across and nothing at all on a face — and one exponential
+    /// is precisely what a Prony fit represents exactly. Measured on the shipped film, <c>G_A^xx</c>'s
+    /// fitted error is 4.7e-6 at 1 GHz where <c>G_q</c>'s is 3.7e-1. <b>The defect is the geometric
+    /// SERIES, not the crossing.</b> MIM-8 declined to build the vector block's closed-form cell-pair
+    /// integral on the same evidence, and that decision stands.</para>
+    /// </summary>
+    /// <param name="thinnerThanM">Peel only when the cavity is thinner than this — MIM-8's own
+    /// <c>ShallowImageCells</c> threshold, the mesh's own cell against the pairing. Zero or negative
+    /// peels nothing, which is what keeps every pairing a mesh DOES resolve bit-identical.</param>
+    /// <param name="relativeTolerance">Stop once the amplitude falls this far below the first. The
+    /// default is 1e-4: each image costs one closed-form cell-pair integral per near pair, and the
+    /// measured remainder stops moving at <c>g⁶</c> = 1.5e-4 on the shipped film.</param>
+    /// <param name="maxImages">A ceiling for a near-unity |g| (two walls facing each other).</param>
+    public ThinRegionImageSeries ThinRegionImagesAtHeights(
+        GreensKernel kernel, double z, double zp, double thinnerThanM,
+        double relativeTolerance = 1e-4, int maxImages = 32)
+    {
+        int m = RegionOfOrThrow(zp, "source");
+        int n = RegionOfOrThrow(z,  "observer");
+
+        if (Math.Abs(m - n) > 1)
+            return ThinRegionImageSeries.No(
+                $"the source is in region {m} and the observer in region {n}, which is {Math.Abs(m - n)} " +
+                "regions apart. The series peeled here is ONE thin region's own multiple reflections; " +
+                "a longer chain has a different one and is not this closed form.");
+
+        bool crosses = m != n;
+        // The cavity: the crossed region when the pairing crosses one, the source's own region when
+        // both points sit on its floor. RegionOf puts an interface point in the region ABOVE it, so
+        // "on a face" always means "at the bottom of its own region".
+        int c = crosses ? Math.Min(m, n) : m;
+        double zb = Stack.RegionBottomZ(c), zt = Stack.RegionTopZ(c);
+        if (double.IsInfinity(zb) || double.IsInfinity(zt))
+            return ThinRegionImageSeries.No(
+                $"region {c} is semi-infinite, so there is no cavity and nothing decays on a short scale.");
+
+        double t = zt - zb;
+        double lo = Math.Min(z, zp), hi = Math.Max(z, zp);
+        double onInterface = 1e-6 * t;
+        bool placed = crosses
+            ? Math.Abs(lo - zb) <= onInterface && Math.Abs(hi - zt) <= onInterface
+            : Math.Abs(lo - zb) <= onInterface && Math.Abs(hi - zb) <= onInterface;
+        if (!placed)
+            return ThinRegionImageSeries.No(
+                $"the two heights are {lo:E6} and {hi:E6} m and region {c} spans {zb:E6} to {zt:E6} m, " +
+                "so at least one of them is in the INTERIOR of a region. The series peeled here is " +
+                "between a cavity's bounding interfaces; an interior point sees a different one.");
+
+        if (!(t < thinnerThanM))
+            return ThinRegionImageSeries.No(
+                $"region {c} is {t:E3} m thick and the mesh resolves anything down to {thinnerThanM:E3} m, " +
+                "so the fit's own sampling path reaches this cavity's structure and there is nothing " +
+                "here it has to extrapolate.");
+
+        // A face with a thin region on BOTH sides is two coupled cavities. Declined rather than
+        // approximated: the generalised reflection looking the other way is then itself a series, and
+        // the product of the two is not the series either of them has.
+        if (!crosses && c >= 2)
+        {
+            double below = Stack.RegionTopZ(c - 1) - Stack.RegionBottomZ(c - 1);
+            if (below < thinnerThanM)
+                return ThinRegionImageSeries.No(
+                    $"region {c} is {t:E3} m thick and region {c - 1} below it is {below:E3} m, both " +
+                    $"under {thinnerThanM:E3} m. That is TWO coupled cavities and their series is not " +
+                    "the product of the two taken separately, so it is declined rather than " +
+                    "approximated.");
+        }
+
+        var (reDn, rhDn) = LocalFresnel(c, c - 1);
+        var (reUp, rhUp) = LocalFresnel(c, c + 1);
+
+        Complex c0, far, g;
+        switch (kernel)
+        {
+            case GreensKernel.ScalarPotential:
+                c0  = (Complex.One + reDn) / _eps[c];
+                far = reUp;
+                g   = reDn * reUp;
+                break;
+            case GreensKernel.VectorPotential:
+                c0  = _mu[c] * (Complex.One + rhDn);
+                far = rhUp;
+                g   = rhDn * rhUp;
+                break;
+            default:
+                return ThinRegionImageSeries.No(
+                    $"{kernel} is not extracted across a thin region. G_A^zz is built from BOTH " +
+                    "equivalent lines and the mixed component's asymptote is a 1/k_ρ² logarithm rather " +
+                    "than an exponential, so neither is the image series derived here, and neither was " +
+                    "measured on a thin film. Extracting one is a derivation, not a widening.");
+        }
+
+        // Across the cavity the whole series is new; on a face the n = 0 term is already extracted by
+        // AsymptoticAtHeights and only the round trips are.
+        Complex a0 = crosses ? c0 * (Complex.One + far) : c0 * (g + far);
+        var images = new List<ComplexImage>(Math.Min(maxImages, 8));
+        Complex amp = a0;
+        for (int i = 0; i < maxImages && a0 != Complex.Zero; i++)
+        {
+            images.Add(new ComplexImage(amp, crosses ? (2 * i + 1) * t : (2 * i + 2) * t));
+            amp *= g;
+            if ((amp / a0).Magnitude < relativeTolerance) break;
+        }
+        return new ThinRegionImageSeries(images, a0, g, t, crosses, null);
+    }
+
+    /// <summary>
+    /// <b>MIM-12a — one thin region's multiple reflections, as exact images.</b> Produced by
+    /// <see cref="ThinRegionImagesAtHeights"/>; see there for the derivation and the scope.
+    ///
+    /// <para><see cref="Images"/> is EMPTY when no series applies, and <see cref="NotApplicable"/>
+    /// then says why in a sentence. The two travel together for the reason <c>ShallowImageSplit</c>'s
+    /// two halves do: "no images" and "this pairing is out of scope" are different facts and a caller
+    /// that cannot tell them apart will report the wrong one.</para>
+    /// </summary>
+    /// <param name="Images">The series — amplitudes <c>A gⁿ</c>, at depths <c>(2n+1)t</c> across the
+    /// cavity and <c>(2n+2)t</c> on one of its faces.</param>
+    /// <param name="Amplitude">A — the first image's, which is NOT the same quantity in the two cases;
+    /// see <see cref="Crosses"/>.</param>
+    /// <param name="Ratio">g — the cavity's round-trip reflection product.</param>
+    /// <param name="ThicknessM">t — the cavity's thickness.</param>
+    /// <param name="Crosses">True when the pairing crosses the cavity, false when both points sit on
+    /// one of its faces.</param>
+    /// <param name="NotApplicable">Why there is no series, or null when there is one.</param>
+    public readonly record struct ThinRegionImageSeries(
+        IReadOnlyList<ComplexImage> Images,
+        Complex Amplitude, Complex Ratio, double ThicknessM, bool Crosses, string? NotApplicable)
+    {
+        internal static ThinRegionImageSeries No(string why) =>
+            new([], Complex.Zero, Complex.Zero, 0.0, false, why);
     }
 
     public Complex MixedKernel(Complex w, double z, double zp)
