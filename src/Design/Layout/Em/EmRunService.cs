@@ -876,7 +876,12 @@ public static class EmRunService
         try
         {
             WritePlanarSnp(solved.Data, ResolveSnpBasePath(resultsRoot, setup),
-                           problem, setup, ports.Ports, solved.Solve);
+                           problem, setup, ports.Ports, solved.Solve,
+                           // MIM-10 — the port map goes on the FILE, built from the extraction's own
+                           // index-aligned labels rather than re-derived from the numbers.
+                           EmSnpProvenance.PortMap([.. problem.Layers.Select(l => l.Name)],
+                                                   ports.Ports, ports.SourceLabels,
+                                                   source.DbuPerMicron, source.View.DisplayUnit));
         }
         catch (Exception ex)
         {
@@ -894,7 +899,8 @@ public static class EmRunService
     /// <summary>The same exporter, the same options, the planar provenance stamp (D9).</summary>
     private static void WritePlanarSnp(
         DataSet data, string snpBasePath, PlanarProblem problem, EmSetup setup,
-        IReadOnlyList<PlanarPort> ports, PlanarSolveResult? solve = null)
+        IReadOnlyList<PlanarPort> ports, PlanarSolveResult? solve = null,
+        IReadOnlyList<string>? portMap = null)
     {
         string? group = null;
         foreach (var g in data.Groups)
@@ -915,7 +921,8 @@ public static class EmRunService
                 // file outlives the notes. Empty on every run that did not de-embed outside the
                 // calibration's validity, so an ordinary .sNp is byte-identical to one written
                 // before this existed.
-                EmSnpProvenance.ValidityCaveats(solve)));
+                EmSnpProvenance.ValidityCaveats(solve),
+                portMap));
 
         Directory.CreateDirectory(Path.GetDirectoryName(snpBasePath)!);
 

@@ -759,6 +759,13 @@ public class MimCapacitorTests(ITestOutputHelper output)
         //    spiral is carried at its STATED inductance because the spiral was never the part that
         //    failed, and 5% in frequency is 10% in C — the same gate, in the quantity that was
         //    reported. |S21| of L and C in series between 50 Ω ports.
+        //
+        //    MIM-10 (2026-09-16) MEASURED that spiral rather than stating it, and the real resonance
+        //    is 2.75 GHz — the coil has no single inductance (5.8 / 3.5 / 3.1 nH at 1 / 2 / 3 GHz)
+        //    and 3.8 nH is its value nowhere near the answer. That does not weaken this gate, whose
+        //    subject is C: the 3.8 nH here is a CONSTANT chosen so a 10% error in C shows as 5% in
+        //    frequency. It is not circuitRF's answer for that resonator —
+        //    MimResonatorCompositionTests is.
         const double l = 3.8e-9;
         double best = 0, atF = 0;
         for (double f = 1.5e9; f <= 3.5e9; f += 5e6)

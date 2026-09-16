@@ -8518,3 +8518,106 @@ measured quantity; and below cell/separation ~1.5 it does not act at all. The ga
 | `tests/Engine.Tests/Mom/RectangleIntegralTests.cs` | `T1_12` (reduces to the real form on the real axis) and `T1_13`/`T1_14` (against adaptive quadrature; the nearly-imaginary case is where the QUADRATURE fails and refinement is what says so) |
 | `tests/Engine.Tests/Mom/MimThinLayerTests.cs` | `T1` pins both arithmetics, MIM-3's own literals on the off-rows; `T7` re-pointed to the pair of claims; `T8`/`T8b`/`T8c`/`T8d` are the capacitance ladder, including the wrong-sign one |
 | `tests/Ui.Tests/Em/MimCapacitorTests.cs` | the three `MIM8_` gates — the shipped-size capacitor, the resonance, and the fill-level bit identity |
+
+---
+
+# MIM-10 — the LC resonator closed without the capacitor in the EM (brief-em-mim-10-…, 2026-09-16)
+
+The narrative, the findings and the two things this does NOT do are `RESOLVED.md` §MIM-10. These are
+the measurements.
+
+**The structure.** A three-turn square spiral, 10 µm metal on 8 µm spaces around a 120 µm opening,
+with its inner terminal brought out on a Metal2 underpass; a 60 × 60 µm series MIM capacitor at the
+end of it. The shipped MMIC technology, 100 µm of εᵣ = 12.9 over backside metal, Metal1 at 100 µm,
+Metal2 at 106 µm, a 0.2 µm εᵣ = 6.8 film wherever `MIM Metal` is drawn. Two edge ports, 50 Ω.
+
+**The two meshes below.** *User* is the setup that produced the report — `CurrentModel:
+TransmissionLine`, `DetailFloorDivisor: 10`, `MinCellsAcrossConductor: 2`, `EdgeCells: 1`, edge mesh
+off, 20 cells per wavelength, levels pinned to Metal1 + Metal2. *Default* is the example workspace's
+own `.cem`, which pins no levels and leaves the mesh controls alone.
+
+## Table 1 — the coil alone, capacitor instance removed, edge port on the landing pad
+
+The user's mesh. σ_max(S) is off the published, de-embedded S; `−1/Y₂₁` is the series arm.
+
+| f (GHz) | σ_max(S) | `−1/Y₂₁` (Ω) | L from it (nH) |
+|---|---|---|---|
+| 0.50 | **1.01596** | −0.99 + 47.56j | 15.14 |
+| 0.75 | **1.00175** | −0.12 + 39.20j | 8.32 |
+| 1.00 | 0.99775 | 0.21 + 37.11j | 5.91 |
+| 1.50 | 0.99770 | 0.47 + 39.33j | 4.17 |
+| 2.00 | 0.99764 | 0.57 + 44.77j | 3.56 |
+| 3.00 | 0.99748 | 0.69 + 58.91j | 3.13 |
+| 4.00 | 0.99727 | 0.77 + 74.65j | 2.97 |
+| 6.00 | 0.99672 | 0.92 + 107.62j | 2.86 |
+
+The first three rows of the 1/2/3 GHz block reproduce the brief's step-0 table **to every printed
+digit**, from the REAL layout rather than from the reconstruction it was measured on.
+
+**The two bold rows are the finding the brief did not have.** Below 1 GHz this result is not passive
+and its series resistance is negative; the run says so by name and writes it onto the file. On the
+DEFAULT mesh the same sweep is non-passive at 500 MHz only (σ_max 1.01344) — and the two meshes get
+DIFFERENT attributions from `PlanarSolve.NonPassivityCause`, both correct: the default mesh's peel
+error floor (0.0884) is large enough to be the whole of its 0.0134 excess, the user mesh's (0.0154)
+is not large enough to be the whole of its 0.0160, so that one comes back *not attributed*.
+
+## Table 2 — the same coil on the two meshes, and what it costs to be wrong about L
+
+| | user mesh | default mesh |
+|---|---|---|
+| σ_max at 1 / 2 / 3 GHz | 0.99775 / 0.99764 / 0.99748 | 0.99775 / 0.99764 / 0.99748 |
+| L at 1 / 2 / 3 GHz (nH) | 5.91 / 3.56 / 3.13 | 5.82 / 3.54 / 3.11 |
+| 23-point 0.5–6 GHz sweep (Release, 10 cores) | 28 s | 37 s |
+
+The coil does **not** have one inductance. Reading L off the default-mesh sweep at 1, 2 or 3 GHz and
+resonating it with 1.0838 pF gives **2.01, 2.57 or 2.74 GHz** — which is why MIM-10's own gate is the
+composed response and not an extracted L.
+
+## Table 3 — the composed resonator, `.s2p` + 1.0838 pF through an ordinary `.cnl`
+
+```
+Port:P1 in  0 Num=1 Z=50 Ohm
+Port:P2 out 0 Num=2 Z=50 Ohm
+SnP:L1  in  mid NumPorts=2 File="results/SpiralInductor.s2p"
+C:C1    mid out C=1.0838 pF
+analysis SP1 type=sparam start=1 stop=4 npts=121 Unit=GHz
+```
+
+| EM sweep composed | peak \|S₂₁\| | at | \|S₁₁\| there |
+|---|---|---|---|
+| user mesh, 23 points 0.5–6 GHz | −0.083 dB | 2.750 GHz | −29.63 dB |
+| user mesh, 7 points 1–4 GHz | −0.083 dB | 2.750 GHz | −29.63 dB |
+| default mesh, 23 points 0.5–6 GHz | −0.083 dB | 2.750 GHz | −29.62 dB |
+
+**Three decimals, across two meshes and a 3× change in point count.** The 7-point row matters for a
+second reason: it is what the gate runs, and it says the SnP component's own interpolation is not
+what is holding the answer up.
+
+For contrast, the all-EM run of the same resonator — 50 points, 0–3.5 GHz, the run that produced the
+report — puts **15 of its 50 rows at |S₁₁| above 0 dB** and its deepest match at −15.26 dB at
+2.24 GHz: a plausible curve, 19 % low in frequency, and wrong.
+
+## Table 4 — what a user drawing that resonator gets TODAY
+
+| | |
+|---|---|
+| verdict | **refused**, before a matrix is filled |
+| wall clock to the refusal | 0.47 s |
+| levels | 0 and 1, 0.2 µm apart |
+| largest straddling cell | 33.992 µm |
+| cell/separation | **170**, past the full-wave floor of 40 |
+| `DetailFloorDivisor` = 200 | the same 33.992 µm — **measured, and it is not the cause** |
+
+MIM-9's own table gives 3.667 µm / 18.3 for a 60 µm plate with a MIM via and a Metal2 strap, and
+that capacitor runs. It is the same capacitor: the difference is the layout it is IN, because the
+tensor grid is shared and is sized on a 500 µm-wide artwork at 20 cells per wavelength. **A refusal
+here is a statement about the run's mesh, not about the process.**
+
+## What changed in the code
+
+| file | change |
+|---|---|
+| `src/Design/Layout/Em/EmSnpProvenance.cs` | `PortMap` — one ASCII line per port naming the drawn label, its level, its anchor in the layout's own display unit and its reference impedance, plus one sentence under the list saying what the order is for. Emitted from the planar `BuildHeader` overload, additive and omitted when absent. Takes level NAMES rather than the `PlanarProblem`, which is all it reads, so its gate needs no sweep. Also: the header's first line is now ASCII — the em dash in `Generated by circuitRF — EM:` had been arriving as `?` in every `.sNp` ever written |
+| `src/Design/Layout/Em/EmRunService.cs` | passes it, built from `EmPortExtractionResult.SourceLabels` — index-aligned with the ports, never re-derived |
+| `examples/PDK PCells/README.md` | the LC-resonator page, and the correction of the section that said the full-wave path reads this capacitance back. It does not; the electrostatic fill does |
+| `tests/Ui.Tests/Em/MimResonatorCompositionTests.cs` | the two gates |

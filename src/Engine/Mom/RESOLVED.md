@@ -124,6 +124,129 @@ both fire**, as an equality rather than two separate claims, so the two can neve
 `Authoring.cs`' terms: comment-stripped, over all of `src/`, exactly one file may carry the
 attribution prose.
 
+## MIM-10 — the LC resonator, closed without the capacitor in the EM (2026-09-16)
+
+`brief-em-mim-10-lc-resonator-without-the-capacitor.md`. **The brief sized itself as documentation
+and a kit change, and that sizing survived** — the one code change here is a reporting change on the
+`.s2p`, and everything else is measurement and a page in the example workspace's `README.md`.
+
+The recipe: EM everything except the 0.2 µm gap and put the closed-form capacitance in the circuit
+beside the result. It is not a workaround invented because MIM-12 is weeks away — it is what a MMIC
+designer does anyway, and it is now the second remedy MIM-9's own refusal names.
+
+### The two gates, both measured, both reproduced from the REAL layout
+
+The brief's step 0 was measured on a RECONSTRUCTION — the capacitor deleted and a port placed where
+it had attached — and said so, asking that it be reproduced from the owner's own file before being
+quoted. It was: the owner's `SpiralInductor.clay` with the `KIT_MIMCAP` instance removed, its feed
+rect removed and port 2 reseated on the landing pad the capacitor was abutting reproduces the
+brief's table **to every digit it printed** (σ_max 0.99775 / 0.99764 / 0.99748 at 1 / 2 / 3 GHz,
+`−1/Y₂₁` 0.21 + 37.11j / 0.57 + 44.77j / 0.69 + 58.91j Ω). The reconstruction was right.
+
+Composed with the kit's own 1.0838 pF through an ordinary `.cnl` — an `SnP` component, a `C`, two
+ports and a `sparam` — that is a series resonance at **2.750 GHz, |S21| = −0.083 dB,
+|S11| = −29.6 dB**. Tables in `HISTORY.md` §MIM-10.
+
+### Three findings the measurement added
+
+**1. The answer does not depend on the mesh, and the failure it replaces did.** The composed
+resonance is 2.750 GHz / −0.083 dB / −29.6 dB on the mesh the user ran (transmission-line current
+model, detail floor divisor 10, 2 cells across) and on the shipped example's defaults alike —
+identical to three decimals, from EM sweeps whose own `−1/Y₂₁` differs by 1.5 %. A number that
+survives its own mesh controls is what a designer can design against.
+
+**2. The coil alone is NOT passive at the bottom of the band, and the brief's "passive at every
+point" holds only from 1 GHz up.** A 0.5–6 GHz sweep returns σ_max = 1.016 at 500 MHz and 1.002 at
+750 MHz on the user's mesh (1.013 at 500 MHz on the example's defaults), with NEGATIVE series
+resistance at both. Everything from 1 GHz is clean and monotone. This is not new and not MIM-10's to
+fix — it is the spiral's own bottom-of-band de-embedding conditioning — but a recipe that hands an
+`.s2p` to an interpolating SnP component has to say so, because the interpolant reads every row it
+is given and not only the ones near the answer. The README says to move the sweep's lower edge
+rather than to ignore the rows.
+
+**3. MIM-9's cell/separation table is a statement about a FIXTURE, not about a part.** Its second
+row — a 60 µm plate with its MIM via and Metal2 strap, straddling cell 3.667 µm, cell/separation
+18.3, runs — is true of that capacitor drawn on its own. The SAME capacitor at the end of this
+spiral is meshed at 33.992 µm, i.e. **170**, and is refused. The straddling cell belongs to the
+WHOLE run: one shared tensor grid, sized on a layout 500 µm across at 20 cells per wavelength.
+**`DetailFloorDivisor` was the obvious explanation and is measured NOT to be it** — 10 and 200 give
+33.992 µm alike. Which control does reach it was not chased here; it is MIM-13's subject, and the
+refusal already names the knobs measured inert.
+
+So the user's own resonator, which produced this round, is a **refusal** today rather than a wrong
+answer — in 0.5 s, before a matrix is filled — and the refusal's remedy is this brief.
+
+**And one trap the recipe walks straight into: an SnP's `File` must be QUOTED.** `CnlReader` resolves
+a relative Touchstone path against the `.cnl`'s own folder only inside its `pexpr[0] == '"'` branch;
+unquoted, the string reaches the model verbatim and is looked for relative to the process working
+directory, so the same file "is not found" from one folder and loads from another. This is already
+known and already handled where circuitRF writes the file — `CnlWriter.FormatParam` quotes it
+unconditionally and says why — but a hand-authored `.cnl` is exactly what this recipe asks a user to
+write, so the README states it beside the snippet and the gate's own `.cnl` is quoted.
+
+### The code change: the port map goes on the `.s2p`
+
+`EmSnpProvenance.PortMap`, written into the header beside the hashes:
+
+```
+! circuitRF-EM port 1: '1' on 'Metal1' at (-110, -125 um), edge, de-embedded, 50 Ohm
+! circuitRF-EM port 2: '2' on 'Metal1' at (-155, -46 um), edge, de-embedded, 50 Ohm
+! circuitRF-EM: port N of this file is the label named on the 'port N' line above. …
+```
+
+**MIM-9's own finding, one case further on.** The run already says all of this in its notes; MIM-10's
+whole recipe is that the result is read by a NETLIST rather than by the person who ran it, often on
+another machine and months later, where the notes are gone. Two ports of a reciprocal part swapped
+— and a spiral and a capacitor are both reciprocal — gives a curve that is smooth, passive and
+wrong, with no symptom to notice. The reference impedance rides the same line because Touchstone
+states ONE `R` for the whole file, so a run whose ports differ has already lost that in the format.
+
+Three things worth knowing about it:
+
+- **The label names come from the extraction, index-aligned, never re-derived.**
+  `EmPortExtractionResult.SourceLabels`' own note says why: a label whose text names no number is
+  auto-numbered in document order, and a second copy of that ordering is free to drift.
+- **It takes level NAMES rather than the `PlanarProblem`**, which is all it reads — so the gate
+  drives the function directly with two ports and two labels, in 7 ms, instead of through a sweep.
+- **ASCII, asserted rather than assumed.** And the same measurement caught a pre-existing one: every
+  `.sNp` this application has ever written opened with `Generated by circuitRF ? EM:`, because the
+  em dash in that line does not survive the encoding Touchstone is written in. Fixed in the same
+  place, for the same reason MIM-9 fixed it on the caveat line.
+
+Additive, and omitted when absent, so kernel A's files gain no byte.
+
+### What this does NOT do, recorded rather than dropped
+
+**The plate-level cut is still open, and the brief's reason for it being open is wrong.** MIM-10
+lists it as blocked on internal ports; internal ports EXIST (`PlanarPortKind.Internal`,
+`InternalDeltaGap`, and RP-2a/RP-2b's second cut in a named return conductor). What actually blocks
+it is MIM-12: cutting at the PLATES rather than at the part puts both plate levels back in the
+matrix, which is exactly the regime whose de-embedded series element loses its sign. Nothing about
+ports is in the way. So the cut that keeps the capacitor's own parasitics — the bottom plate's
+0.113 pF to the backside metal, the MIM via's inductance, the Metal2 strap — waits on MIM-12 and on
+nothing else.
+
+**The kit does not offer a schematic side with `C` as a capacitor's value, and that is not a kit
+change.** `KIT_MIMCAP` ships a `.csym`, and `PCellKitSchematicParts` mounts a part around it that
+deliberately carries no model and deliberately drops COMPUTED parameters — a value the generator
+overwrites on every draw has no business in a field on a sheet, and the generator does not run for a
+schematic instance. For the kit's number to BE the capacitor, a kit would have to ship a schematic
+IMPLEMENTATION for a generator (a `<generator-id>.csch` beside the `.csym`) and the cell resolver
+would have to descend into an in-memory kit part instead of a folder on disk. That is a capability
+and a sizeable one, not the days this brief is. Today the number reaches the circuit the way the
+README shows: it is in the capacitor's own parameter list, and it is typed into one line of the
+`.cnl`.
+
+### Gates
+
+`MimResonatorCompositionTests`. Two tests, one claim each:
+`MIM10_TheCoilAloneIsPassive_AndComposesWithTheKitsCapacitanceToASeriesResonance` (Benchmark — a
+de-embedded full-wave sweep, 59 s) runs the real `EmRunService.Run` on the shipped example's own
+artwork with the user's mesh controls written out where they can be read, and composes through
+`CnlReader` → `Elaborator` → `SParameterEngine` rather than through arithmetic, because the brief's
+own gate is the composed response and not an extracted L.
+`ThePortMapNamesEachLabel_ItsLevel_ItsAnchorAndItsZ0_InAscii` is the routine one.
+
 ## PCAL7/LFP review — the band walk started one cell out on a high-side port (2026-09-15)
 
 A review of the two briefs above, reading the code against what they say it does. One defect, two

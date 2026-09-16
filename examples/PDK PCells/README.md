@@ -322,18 +322,92 @@ allowed to: `tech.dbu_per_micron` is handed over for exactly that — a constant
 holds, with no other way of becoming a number. Length *parameters* are still converted by circuitRF
 and never here.
 
-### And an EM run of this cell returns that capacitance — which it did not until 2026-09-15
+### The readout is right; a full-wave run cannot yet read that capacitance back
 
-Worth saying because the readout and the EM run are two independent statements about the same plate,
-and for a while they disagreed. A 0.2 µm dielectric between two meshed levels is a hundredth of the
-cell a 60 µm plate is meshed at, and the cross-level part of the matrix fill was integrating across a
-peak that narrow instead of resolving it: the same capacitor whose parameter list said 1.084 pF
-extracted as an OPEN, with the wrong sign, and nothing in the run report said so — the answer was
-still reciprocal and still passive. It now extracts at 1.089 pF, and in series with a 3.8 nH spiral
-it resonates where the design intends rather than reading as a break in the circuit.
+Worth saying because the readout and an EM run are two independent statements about the same plate,
+and they do not agree.
 
-**What to watch, if you draw something unusual.** The condition is the CELL against the LEVEL
-SEPARATION, and the run reports it by name. It is measured out to cell/separation 200; this kit's own
-60 µm capacitor on the default mesh sits at 75, and the smaller ones further inside still. Past 200 a
-note fires and says what it means — that nothing was measured up there, not that the answer is
-known to be wrong. `src/Engine/Mom/HISTORY.md` §MIM-8 has the ladders.
+**The fill is right, and was measured to be.** The electrostatic plate capacitance the cross-level
+matrix produces is within 1 % of ε₀εᵣA/d on this kit's own capacitor, and `KIT_MIMCAP`'s 1.0838 pF is
+independently confirmed to 0.3 %. It was not always: until 2026-09-15 the cross-level fill integrated
+across a peak a hundredth of a cell wide instead of resolving it, and the same plate extracted as an
+OPEN with the wrong sign.
+
+**What is not right is the de-embedded two-port** a full-wave sweep publishes for a pair of levels
+that close. Measured on one plate pair with only the film thickness moving, `C/(ε₀εᵣA/d)` reads 1.13
+at cell/separation 20 and 1.05 at 40, then **−1.02 at 80 and −1.52 at 200** — the capacitor comes back
+as an inductor. Nothing in the answer looks wrong: it is complete, smooth, reciprocal and converged,
+and refining the mesh moves it the wrong way. So past 40 the run is **refused** rather than published,
+and the refusal names the two things that act on it. One of them is the recipe in the next section.
+
+**What decides it is the mesh against the film, not the technology** — and the mesh belongs to the
+whole run, not to the part. This kit's 60 µm capacitor in a fixture of its own is meshed at 3.7 µm
+across the plate, i.e. cell/separation 18, and runs. The SAME capacitor at the end of the spiral in
+this workspace is meshed at 34 µm, i.e. 170, and is refused: the shared tensor grid is sized on a
+layout 500 µm across at 20 cells per wavelength. So a refusal here is not a statement about the
+process, and `Cells per wavelength` is not the knob that answers it — the run says which knobs it
+measured to be inert. `src/Engine/Mom/HISTORY.md` has the ladders.
+
+## How to simulate an LC resonator today
+
+**EM everything except the 0.2 µm gap, and put the capacitance in the circuit beside the result.**
+That is not a workaround for the paragraph above — it is what a MMIC designer does anyway. A MIM
+capacitor on a known process is `ε₀εᵣA/d` to a fraction of a per cent and nobody spends unknowns
+solving a parallel plate; what earns an EM run is the coil, the crossover, the ground return and the
+coupling, and every one of those is on Metal1 and Metal2 and is nowhere near the film.
+
+The four steps, on this workspace's own spiral:
+
+1. **Take the capacitor instance out of the layout** and put an edge port on the landing pad it was
+   abutting. `SpiralInductor.clay` as it ships is exactly that: port 2 is on the coil's inner
+   terminal, where a series `KIT_MIMCAP` attaches.
+2. **Run the EM setup, over a band that starts above about 1 GHz.** With no plate level in the run
+   the capacitor dielectric enters the medium as air — it is declared `PresentWithLayer: MIM Metal`,
+   and that layer is not there — so the structure is ordinary Metal1/Metal2 interconnect, two levels
+   6 µm apart. The run reports it: cell/separation of order 3, nowhere near the 40 the refusal is at.
+   The lower edge matters and is the second bound below.
+3. **Read the port order off the file.** The `.s2p` header names it — `circuitRF-EM port 1: '1' on
+   'Metal1' at (-110, -125 um), edge, de-embedded, 50 Ohm` — because two ports of a reciprocal part
+   swapped gives a plausible curve of a different structure and there is no symptom to notice.
+4. **Compose it with the kit's own number**, which the capacitor's parameter list reports:
+
+   ```
+   Port:P1 in  0 Num=1 Z=50 Ohm
+   Port:P2 out 0 Num=2 Z=50 Ohm
+   SnP:L1  in  mid NumPorts=2 File="results/SpiralInductor.s2p"
+   C:C1    mid out C=1.0838 pF
+   analysis SP1 type=sparam start=1 stop=4 npts=121 Unit=GHz
+   ```
+
+   Put that beside the `.cws` and run `circuitrf sparam Resonator.cnl` — or build the same two
+   parts and a wire on a schematic. **Quote the path.** An SnP's `File` is resolved relative to the
+   `.cnl` only inside the reader's quoted branch; unquoted, it reaches the model verbatim and is
+   looked for relative to whatever directory the command was run from. `circuitrf netlist` always
+   writes it quoted, for this reason.
+
+**What that gives on this coil:** a series resonance at **2.75 GHz**, |S21| = −0.08 dB and
+|S11| = −29.6 dB. The same answer to three decimals whether the EM ran on the default mesh or on a
+finer one, which is what you want of a number you are going to design against.
+
+For contrast, the all-EM run of this resonator — the one that is a refusal now — put 15 of its 50
+rows at |S11| above 0 dB and its deepest match at −15.3 dB at 2.24 GHz: a plausible curve, 19 % low,
+and wrong.
+
+**Do not reduce the coil to one inductance.** It is a distributed structure with a Metal2 underpass,
+and `−1/Y₂₁` reads 5.82 / 3.54 / 3.11 nH at 1 / 2 / 3 GHz — falling. Which of those you picked would
+put the resonance at 2.01, 2.57 or 2.74 GHz. Composing the `.s2p` needs no such choice, which is why
+the gate on this recipe is the composed response and not an extracted L.
+
+**Two honest bounds.**
+
+- **Below about 1 GHz this coil's own result is not usable**, and the run says so — on the file as
+  well as in its notes. A 0.5–6 GHz sweep of the setup that ships here comes back with σ_max(S) =
+  1.013 at its bottom point: not a passive network, and the series resistance there is negative. It
+  is worth moving the sweep's lower edge rather than ignoring the rows, because the SnP component
+  interpolates through every row it is given.
+- **The capacitor's own parasitics are not in this answer.** Cutting at the part rather than at the
+  plates leaves out the bottom plate's capacitance to the backside metal through 100 µm of εᵣ = 12.9,
+  the MIM via's inductance and the Metal2 strap. On this structure the shunt arm reads a very stable
+  0.113 pF, and 0.11 pF beside a 1 pF series element is a different resonator from an ideal one. The
+  cut that keeps them — a port on each plate face, with only the closed-form capacitance taken out —
+  needs the full-wave path to read a plate pair back, which is what the refusal above is waiting for.
